@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dividir o cubo 3D em partes (2026-10-03). Chaves shape3d_split_*. -->
+<resources>
+    <string name="shape3d_split_title">Split into parts</string>
+    <string name="shape3d_split_axis">Cut axis</string>
+    <string name="shape3d_split_axis_desc">Cut along the %1$s axis</string>
+    <string name="shape3d_split_count">Parts</string>
+    <string name="shape3d_split_count_desc">%1$d parts</string>
+    <string name="shape3d_split_less">Fewer parts</string>
+    <string name="shape3d_split_more">More parts</string>
+    <string name="shape3d_split_apply">Split</string>
+    <string name="shape3d_split_hint">Cuts the cube into equal slices. The image continues from one slice to the next; each part becomes a layer you can move, rotate or delete, and the group keeps the cube\'s motion.</string>
+    <string name="shape3d_split_done">Cube split into %1$d parts. Tap a part to edit only it.</string>
+    <string name="shape3d_split_failed">Couldn\'t split the shape.</string>
+</resources>

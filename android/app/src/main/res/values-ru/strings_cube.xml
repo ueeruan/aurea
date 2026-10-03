@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dividir o cubo 3D em partes (2026-10-03). Chaves shape3d_split_*. -->
+<resources>
+    <string name="shape3d_split_title">Разделить на части</string>
+    <string name="shape3d_split_axis">Ось разреза</string>
+    <string name="shape3d_split_axis_desc">Разрезать по оси %1$s</string>
+    <string name="shape3d_split_count">Части</string>
+    <string name="shape3d_split_count_desc">Частей: %1$d</string>
+    <string name="shape3d_split_less">Меньше частей</string>
+    <string name="shape3d_split_more">Больше частей</string>
+    <string name="shape3d_split_apply">Разделить</string>
+    <string name="shape3d_split_hint">Разрезает куб на равные ломтики. Изображение продолжается с одного ломтика на другой; каждая часть становится слоем, который можно двигать, вращать или удалить, а группа сохраняет движение куба.</string>
+    <string name="shape3d_split_done">Куб разделён на части: %1$d. Коснитесь части, чтобы изменить только её.</string>
+    <string name="shape3d_split_failed">Не удалось разделить фигуру.</string>
+</resources>

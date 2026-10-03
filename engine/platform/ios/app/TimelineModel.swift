@@ -722,43 +722,59 @@ struct TimelineLaneGroupKey: Hashable {
     let track: TimelineTrack
 }
 
+// Nomes das trilhas no idioma do app (as mesmas chaves tl_* do Android).
+private func timelineAxisName(_ property: Int) -> String? {
+    let bases = ["tl_position", "tl_scale", "tl_rotation", "tl_anchor"], axes = ["X", "Y", "Z"]
+    switch property {
+    case 0...11: return AureaText.t(bases[property / 3]) + " " + axes[property % 3]
+    case 12: return AureaText.t("tl_opacity")
+    case 13, 14: return AureaText.t("tl_skew") + " " + axes[property - 13]
+    default: return nil
+    }
+}
+
+private func timelinePartAxisName(_ param: Int) -> String? {
+    let bases = ["tl_position", "tl_rotation", "tl_scale"], axes = ["X", "Y", "Z"]
+    guard param >= 0, param / 3 < bases.count else { return nil }
+    return AureaText.t(bases[param / 3]) + " " + axes[param % 3]
+}
+
 private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) -> String {
+    let effect = Int(UInt64(track.effect) &+ 1), param = Int(track.param)
     if track.group {
         switch track.property {
-        case 0: return "Position"
-        case 3: return "Scale"
-        case 6: return "Rotation"
-        case 9: return "Anchor"
-        case 13: return "Skew"
+        case 0: return AureaText.t("tl_position")
+        case 3: return AureaText.t("tl_scale")
+        case 6: return AureaText.t("tl_rotation")
+        case 9: return AureaText.t("tl_anchor")
+        case 13: return AureaText.t("tl_skew")
         case 42:
-            let parts = ["Position", "Rotation", "Scale"]
-            let i = Int(track.param / 3)
-            return "Part \(UInt64(track.effect) &+ 1) · \(i < parts.count ? parts[i] : String(track.param))"
-        default: return "3D · \(track.property)"
+            let parts = ["tl_position", "tl_rotation", "tl_scale"]
+            let i = param / 3
+            return AureaText.t("tl_part", effect, i < parts.count ? AureaText.t(parts[i]) : String(track.param))
+        default: return AureaText.t("tl_3d", track.property)
         }
     }
-    let names = ["Position X", "Position Y", "Position Z", "Scale X", "Scale Y", "Scale Z", "Rotation X", "Rotation Y", "Rotation Z", "Anchor X", "Anchor Y", "Anchor Z", "Opacity", "Skew X", "Skew Y"]
-    if names.indices.contains(track.property) { return names[track.property] }
+    if let axis = timelineAxisName(track.property) { return axis }
     switch track.property {
-    case 30: return "Time remap"
-    case 39: return "Speed"
-    case 40: return "Animator \(UInt64(track.effect) &+ 1) · \(UInt64(track.param) + 1)"
-    case 31: return (effects.first { $0.effectId == track.effect }?.name ?? "Effect") + " · \(UInt64(track.param) + 1)"
-    case 32: return "Audio · \(UInt64(track.param) + 1)"
-    case 33: return "Text animation \(UInt64(track.effect) &+ 1) · \(UInt64(track.param) + 1)"
+    case 30: return AureaText.t("tl_time_remap")
+    case 39: return AureaText.t("tl_speed")
+    case 40: return AureaText.t("tl_animator", effect, param + 1)
+    case 31: return (effects.first { $0.effectId == track.effect }?.name ?? AureaText.t("tl_effect")) + " · \(UInt64(track.param) + 1)"
+    case 32: return AureaText.t("tl_audio", param + 1)
+    case 33: return AureaText.t("tl_text_anim", effect, param + 1)
     case 43:
-        let labels = ["Feather", "Expansion", "Opacity"]
-        return "Mask \(UInt64(track.effect) &+ 1) · \(Int(track.param) < labels.count ? labels[Int(track.param)] : String(track.param))"
-    case 34: return "Vector · \(UInt64(track.param) + 1)"
-    case 35: return "Shape · \(UInt64(track.param) + 1)"
-    case 36: return "Particles · \(UInt64(track.param) + 1)"
+        let labels = ["tl_feather", "tl_expansion", "tl_opacity"]
+        return AureaText.t("tl_mask", effect, param < labels.count ? AureaText.t(labels[param]) : String(track.param))
+    case 34: return AureaText.t("tl_vector", param + 1)
+    case 35: return AureaText.t("tl_shape", param + 1)
+    case 36: return AureaText.t("tl_particles", param + 1)
     case 37:
-        let labels = ["R", "G", "B", "Alpha", "Metallic", "Roughness"]
-        return "Material \(UInt64(track.effect) &+ 1) · \(Int(track.param) < labels.count ? labels[Int(track.param)] : String(track.param))"
+        let labels = ["R", "G", "B", AureaText.t("tl_alpha"), AureaText.t("tl_metallic"), AureaText.t("tl_roughness")]
+        return AureaText.t("tl_material", effect, param < labels.count ? labels[param] : String(track.param))
     case 42:
-        let axes = ["Position X", "Position Y", "Position Z", "Rotation X", "Rotation Y", "Rotation Z", "Scale X", "Scale Y", "Scale Z"]
-        return "Part \(UInt64(track.effect) &+ 1) · \(Int(track.param) < axes.count ? axes[Int(track.param)] : String(track.param))"
-    default: return "3D · \(track.property)"
+        return AureaText.t("tl_part", effect, timelinePartAxisName(param) ?? String(track.param))
+    default: return AureaText.t("tl_3d", track.property)
     }
 }
 

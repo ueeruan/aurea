@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Motivo da falha do export (aurea::ExportFailure, engine/include/aurea/export/ExportRules.hpp).
+     Encaixa em app_export_failed: minúscula, sem ponto final. -->
+<resources>
+    <string name="expfail_encoder">encoder video ponsel tidak menerima video; coba resolusi lain</string>
+    <string name="expfail_encoder_stalled">encoder video berhenti merespons; tutup aplikasi lain lalu coba lagi</string>
+    <string name="expfail_render">GPU ponsel tidak dapat merender video; coba resolusi yang lebih rendah</string>
+    <string name="expfail_memory">memori tidak cukup untuk resolusi ini; coba yang lebih rendah</string>
+    <string name="expfail_media">salah satu file media proyek tidak dapat dibaca</string>
+    <string name="expfail_file">file video tidak dapat disimpan</string>
+    <string name="expfail_unsupported">ponsel ini tidak dapat mengekspor dengan resolusi atau format ini</string>
+</resources>

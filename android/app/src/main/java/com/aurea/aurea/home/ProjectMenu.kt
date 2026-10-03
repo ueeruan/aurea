@@ -201,7 +201,11 @@ internal fun NewProjectSheetFor(store: EditorStore, vm: HomeViewModel, all: List
         defaultAspectKey = vm.defaultAspectKey,
         defaultResolution = vm.defaultResolution,
         defaultFps = vm.defaultFps,
-        onCreate = { spec -> vm.afterEngine(store) { store.newProject(spec.width, spec.height, spec.fps.toFloat(), spec.title) } },
+        onCreate = { spec ->
+            // fps livre e fundo escolhidos na folha vão direto para o motor (fora do histórico).
+            val background = floatArrayOf(spec.background[0], spec.background[1], spec.background[2], 1f)
+            vm.afterEngine(store) { store.newProject(spec.width, spec.height, spec.fps, spec.title, background) }
+        },
         onDismiss = onDismiss,
         device = store.deviceReport,
     )

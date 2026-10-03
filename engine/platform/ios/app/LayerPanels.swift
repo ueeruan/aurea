@@ -324,6 +324,81 @@ extension PanelPresetEntry {
     }
 }
 
+/// PRESETS DE TEXTO na barra de adicionar (par do `TextPresetPicker` do
+/// Android): ao lado do "Texto", que segue criando o texto direto. Escolher 2D
+/// ou 3D e tocar num cartão cria o texto já com o preset (motor:
+/// `applyTextPreset` nos nativos, `applyPreset` nos salvos/baixados da
+/// comunidade) e toca a prévia, sem abrir o teclado.
+struct TextPresetPicker: View {
+    @EnvironmentObject private var model: AureaModel
+    var onAdded: () -> Void
+    @State private var threeD = false
+    @State private var presets: [PanelPresetEntry] = []
+    @State private var favorites = Set<String>()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                chip("sh_add_tab_text", on: !threeD) { threeD = false }
+                chip("sh_add_text_3d", on: threeD) { threeD = true }
+            }.frame(height: 46)
+            Text(AureaText.t("tp_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.bottom, 8)
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
+                    ForEach(presets) { entry in
+                        PresetCardView(entry: entry, showKind: false, favorite: favorites.contains(entry.id),
+                                       compositionWidth: Float(max(1, model.compositionWidth)),
+                                       onApply: { add(entry) }, onFavorite: { toggleFavorite(entry) }, onDelete: nil,
+                                       applyLabel: AureaText.t("tp_add_named", entry.name))
+                    }
+                }.padding(.bottom, 12)
+            }.accessibilityIdentifier("textPresets.grid")
+        }
+        .padding(.horizontal, 12)
+        .foregroundStyle(AureaColors.text)
+        .onAppear(perform: load)
+        .onChange(of: model.language) { _ in load() }
+    }
+
+    private func chip(_ key: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(AureaText.t(key)).font(.aurea(size: 12.5, weight: on ? .bold : .medium))
+                .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+                .padding(.horizontal, 12).frame(height: 34)
+                .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
+        }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(on ? .isSelected : [])
+    }
+    private func load() {
+        favorites = Set(UserDefaults.standard.stringArray(forKey: "presetFavorites") ?? [])
+        presets = PanelPresetEntry.loadAll().filter { $0.kind == .text }
+    }
+    private func toggleFavorite(_ entry: PanelPresetEntry) {
+        if favorites.contains(entry.id) { favorites.remove(entry.id) } else { favorites.insert(entry.id) }
+        UserDefaults.standard.set(Array(favorites), forKey: "presetFavorites")
+    }
+    private func add(_ entry: PanelPresetEntry) {
+        if model.status.playing != 0 { model.playPause() }
+        let id = threeD ? model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25, openEditor: false) : model.addText(openEditor: false)
+        guard id >= 0 else { return }
+        if let native = entry.textPreset {
+            guard model.engine.applyTextPreset(id, preset: native) else {
+                model.toast = AureaText.t("msg_animacao_de_texto_so_vale_para"); model.refreshModel(force: true); onAdded(); return
+            }
+        } else {
+            guard let source = entry.source else { model.toast = AureaText.t("msg_arquivo_do_preset_nao_encontrado"); onAdded(); return }
+            let error = model.engine.applyPreset(id, json: source, duration: 0)
+            if !error.isEmpty { model.toast = AureaText.t("msg_preset_nao_aplicado", AureaEngineText.reason(error)); model.refreshModel(force: true); onAdded(); return }
+        }
+        var recents = UserDefaults.standard.stringArray(forKey: "presetRecents") ?? []
+        recents.removeAll { $0 == entry.id }; recents.insert(entry.id, at: 0)
+        UserDefaults.standard.set(Array(recents.prefix(10)), forKey: "presetRecents")
+        model.refreshModel(force: true)
+        model.toast = AureaText.t("msg_aplicado", entry.name)
+        onAdded()
+        model.playPause()
+    }
+}
+
 struct PresetsPanel: View {
     @EnvironmentObject private var model: AureaModel
     @State private var picked = "animacao"
@@ -335,12 +410,17 @@ struct PresetsPanel: View {
     @FocusState private var searching: Bool
 
     private var layerId: Int64 { model.primarySelection ?? 0 }
+    /// Texto 2D/3D: o painel é o de PRESETS DE TEXTO (ficha "Presets" da doca do
+    /// texto) — só a aba de texto e os favoritos/recentes de texto. Os presets de
+    /// vídeo/imagem saíram da interface (2026-10-02) e continuam fora.
+    private var isText: Bool { model.selectedLayer?.kind == 4 || model.engine.text3D(forLayer: layerId) != nil }
     private var tabs: [String] {
-        (["favoritos", "recentes", "animacao", "efeitos", "texto", "legenda", "curva"])
-            .filter { $0 != "texto" || model.selectedLayer?.kind == 4 || model.engine.text3D(forLayer: layerId) != nil }
+        if isText { return ["texto", "favoritos", "recentes"] }
+        return (["favoritos", "recentes", "animacao", "efeitos", "texto", "legenda", "curva"])
+            .filter { $0 != "texto" || isText }
             .filter { $0 != "legenda" || [1, 3, 4].contains(model.selectedLayer?.kind ?? 0) }
     }
-    private var tab: String { tabs.contains(picked) ? picked : "animacao" }
+    private var tab: String { tabs.contains(picked) ? picked : (tabs.first ?? "animacao") }
     private var kind: PanelPresetKind? { PanelPresetKind(rawValue: tab) }
     private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var entries: [PanelPresetEntry] {
@@ -348,7 +428,7 @@ struct PresetsPanel: View {
         if tab == "favoritos" { values = presets.filter { favorites.contains($0.id) } }
         else if tab == "recentes" { values = recents.compactMap { id in presets.first { $0.id == id } } }
         else { values = presets.filter { $0.kind == kind } }
-        return values.filter { query.isEmpty || $0.name.range(of: query, options: .caseInsensitive) != nil }
+        return values.filter { (!isText || $0.kind == .text) && (query.isEmpty || $0.name.range(of: query, options: .caseInsensitive) != nil) }
     }
 
     var body: some View {
@@ -488,7 +568,7 @@ struct PresetsPanel: View {
             let words = model.engine.captionCount(layerId) > 0 ? CaptionTranscriber.load(model.engine.layerMediaPath(layerId)) : []
             if !words.isEmpty {
                 let error = model.engine.createCaptions(layerId, words: words.map(\.native), options: options)
-                if !error.isEmpty { model.toast = error; return }
+                if !error.isEmpty { model.toast = AureaEngineText.sentence(error); return }
                 model.refreshModel(force: true); model.toast = AureaText.t("msg_legendas_refeitas_com", entry.name)
             } else { model.toast = AureaText.t("msg_estilo_de_legenda_escolhido", entry.name) }
             markUsed(entry); return
@@ -507,7 +587,7 @@ struct PresetsPanel: View {
                 duration = max(1, end - from - 1)
             }
             let error = model.engine.applyPreset(layerId, json: source, duration: duration)
-            if !error.isEmpty { model.toast = AureaText.t("msg_preset_nao_aplicado", error); return }
+            if !error.isEmpty { model.toast = AureaText.t("msg_preset_nao_aplicado", AureaEngineText.reason(error)); return }
         }
         model.refreshModel(force: true); markUsed(entry); model.toast = AureaText.t("msg_aplicado", entry.name)
     }
@@ -628,6 +708,8 @@ private struct PresetCardView: View {
     let onApply: () -> Void
     let onFavorite: () -> Void
     let onDelete: (() -> Void)?
+    /// Rótulo de acessibilidade do toque (padrão: "Aplicar <nome>").
+    var applyLabel: String? = nil
     var body: some View {
         Button(action: onApply) {
             VStack(alignment: .leading, spacing: 0) {
@@ -639,7 +721,7 @@ private struct PresetCardView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading).frame(height: 30, alignment: .topLeading)
                 if showKind { Text(entry.kind.label).font(.aurea(size: 10)).foregroundStyle(AureaColors.muted).lineLimit(1) }
             }.padding(6).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("ios_apply_named", entry.name))
+        }.buttonStyle(AureaPressStyle()).accessibilityLabel(applyLabel ?? AureaText.t("ios_apply_named", entry.name))
             .overlay(alignment: .topTrailing) {
                 Button(action: onFavorite) {
                     CupertinoGlyph.text(favorite ? CupertinoGlyph.StarFill : CupertinoGlyph.Star, size: 15,
@@ -981,7 +1063,7 @@ struct ClipEditPanel: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: "Slip · Roll · Slide") { model.panel = .none }
+            PanelHeader(title: AureaText.t("i18n_clip_modes")) { model.panel = .none }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if let row = model.selectedLayer {
@@ -990,7 +1072,7 @@ struct ClipEditPanel: View {
                     }
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
                         ForEach(2..<6) { value in
-                            let title = ["Slip", AureaText.t("ios_clip_roll_in"), AureaText.t("ios_clip_roll_out"), "Slide"][value - 2]
+                            let title = [AureaText.t("i18n_clip_slip"), AureaText.t("ios_clip_roll_in"), AureaText.t("ios_clip_roll_out"), AureaText.t("i18n_clip_slide")][value - 2]
                             Button { mode = UInt32(value) } label: {
                                 Text(mode == UInt32(value) ? "✓ " + title : title).frame(maxWidth: .infinity, minHeight: 48)
                             }.accessibilityLabel(title).accessibilityIdentifier("clipEdit.mode.\(value)").foregroundStyle(mode == UInt32(value) ? AureaColors.accent : AureaColors.text)
@@ -1147,7 +1229,7 @@ struct AudioPanel: View {
             else { core.insertKeyframe(forLayer: id, property: 32, time: model.localPlayhead, value: scalar("audioVolume", 1)) }
         }
     }
-    private func openExpression() { model.expressionSheet = ExpressionRequest(layer: id, label: "Volume", tracks: [ExpressionTrack(property: 32)], scale: 100, unit: "%") }
+    private func openExpression() { model.expressionSheet = ExpressionRequest(layer: id, label: AureaText.t("panel_volume"), tracks: [ExpressionTrack(property: 32)], scale: 100, unit: "%") }
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_som")) { model.panel = .none }
@@ -1184,7 +1266,7 @@ struct AudioPanel: View {
                             Button {
                                 let added = model.engine.extractAudio(fromLayer: id)
                                 if added > 0 { model.refreshModel(force: true); model.select(layerId: added, additive: false) }
-                                else { model.toast = model.engine.lastImportError }
+                                else { model.toast = AureaEngineText.sentence(model.engine.lastImportError) }
                             } label: {
                                 HStack(spacing: 8) {
                                     CupertinoGlyph.text(CupertinoGlyph.MusicNote2, size: 16, color: AureaColors.accent)
@@ -1790,7 +1872,7 @@ struct TextAnimationSection: View {
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
             .alert(AureaText.t("ios_text_anim_title"), isPresented: $animationError) {
-                Button("OK", role: .cancel) {}
+                Button(AureaText.t("pn_ok"), role: .cancel) {}
             } message: {
                 Text(AureaText.t("ios_text_anim_failed"))
             }
@@ -1989,7 +2071,7 @@ struct LayerAnimatorSection: View {
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
             .alert(AureaText.t("la_animators"), isPresented: $failed) {
-                Button("OK", role: .cancel) {}
+                Button(AureaText.t("pn_ok"), role: .cancel) {}
             } message: {
                 Text(AureaText.t("app_layer_anim_add_failed"))
             }

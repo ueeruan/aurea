@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 // =============================================================================
@@ -54,9 +55,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // versionCode 2136: efeitos novos, export leve, zoom 3D e Detectar movimento. Um número maior é
+        // versionCode 2137: motion blur 3D na cena, ajuste com mistura/máscara, export PowerVR, modelos pesados, es/ru/id, cubo dividido, datamosh. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2136
+        versionCode = 2137
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -189,9 +190,10 @@ android {
         // A identidade da marca é referenciada por nome de recurso em vários
         // pontos; o encolhimento por nome de arquivo quebraria a splash.
         noCompress += listOf("aurea")
-        // Fase 8.1: por enquanto só pt-BR (padrão) e inglês. Os catálogos
-        // parciais dos outros idiomas ficam no repositório, fora do APK.
-        localeFilters += listOf("en", "pt")
+        // pt-BR (padrão), inglês, espanhol, russo e indonésio ("in" é o código
+        // antigo que o Android ainda usa para o indonésio). Hindi e árabe
+        // ficam no repositório, fora do APK, até a fase deles.
+        localeFilters += listOf("en", "pt", "es", "ru", "id", "in")
     }
 
     lint {
@@ -237,4 +239,37 @@ dependencies {
     // lança "Stub!": sem isto, qualquer teste que leia um JSON do contrato
     // falharia por motivo que não tem nada a ver com o código testado.
     testImplementation(libs.json)
+}
+
+// =============================================================================
+//  Indonésio: o catálogo vive em res/values-id (código BCP-47), mas o Android
+//  ainda resolve o indonésio pelo código ANTIGO "in" (Locale("id").language ==
+//  "in"): só values-id e o app caía no português. Uma cópia gerada em
+//  values-in, a cada build, faz o aparelho (e o idioma escolhido em Ajustes)
+//  achar as traduções. Edite SEMPRE values-id; a cópia não vai para o git.
+// =============================================================================
+abstract class AureaIndonesianLegacyRes : DefaultTask() {
+    @get:InputDirectory
+    abstract val source: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val out = outputDir.get().asFile
+        out.deleteRecursively()
+        val target = File(out, "values-in").apply { mkdirs() }
+        source.get().asFile.listFiles { f -> f.isFile && f.name.endsWith(".xml") }?.forEach { it.copyTo(File(target, it.name), overwrite = true) }
+    }
+}
+
+val aureaIndonesianLegacyRes = tasks.register<AureaIndonesianLegacyRes>("aureaIndonesianLegacyRes") {
+    source.set(layout.projectDirectory.dir("src/main/res/values-id"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.res?.addGeneratedSourceDirectory(aureaIndonesianLegacyRes, AureaIndonesianLegacyRes::outputDir)
+    }
 }

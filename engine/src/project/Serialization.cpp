@@ -213,7 +213,7 @@ void read_track(ByteReader& r, Track& t) {
         Keyframe k;
         k.time = FrameIndex{r.i64v()};
         k.value = r.f32v();
-        k.interp = checked_enum(r.u8v(), Interpolation::Steps, Interpolation::Linear);
+        k.interp = checked_enum(r.u8v(), kLastInterpolation, Interpolation::Linear);
         k.bx1 = r.f32v(); k.by1 = r.f32v(); k.bx2 = r.f32v(); k.by2 = r.f32v();
         k.tangentIn = r.f32v(); k.tangentOut = r.f32v();
         k.easingPreset = r.u16v();
@@ -2016,6 +2016,45 @@ void apply_assets_section(const u8* data, usize size, Project& p) {
     }
 }
 
+/// Seção Scene3D (v1): o "Otimizar modelo" de cada asset, na MESMA ordem da
+/// seção Assets (os ids são remapeados na leitura; a ordem não). Seção à parte
+/// de propósito: a Assets (v1) tem layout fixo e um leitor antigo pula seção
+/// desconhecida sem perder nada; o novo, sem esta seção, abre tudo Original.
+///   u32 quantos · por asset: u8 qualidade · u32 triângulos do arquivo
+std::vector<u8> build_scene3d_section(const Project& p) {
+    ByteWriter w;
+    u32 count = 0;
+    p.for_each_asset([&](AssetId, const Asset&) { ++count; });
+    w.u32v(count);
+    p.for_each_asset([&w](AssetId, const Asset& a) {
+        w.u8v(a.model.importQuality);
+        w.u32v(a.model.sourceTriangles);
+    });
+    return std::vector<u8>(w.bytes().begin(), w.bytes().end());
+}
+
+bool project_has_optimized_models(const Project& p) {
+    bool any = false;
+    p.for_each_asset([&](AssetId, const Asset& a) { any = any || a.model.importQuality != 0 || a.model.sourceTriangles != 0; });
+    return any;
+}
+
+void apply_scene3d_section(const u8* data, usize size, Project& p) {
+    ByteReader r(data, size);
+    const u32 count = r.u32v();
+    u32 assets = 0;
+    p.for_each_asset([&](AssetId, const Asset&) { ++assets; });
+    if (!r.good() || count != assets) return;   // outra lista de assets: não adivinha
+    p.for_each_asset([&](AssetId, Asset& a) {
+        if (!r.good()) return;
+        const u8 q = r.u8v();
+        const u32 tris = r.u32v();
+        if (!r.good() || a.kind != AssetKind::Model3D) return;
+        a.model.importQuality = q <= 2 ? q : 0;
+        a.model.sourceTriangles = tris;
+    });
+}
+
 // -----------------------------------------------------------------------------
 // Migrações registradas. A E/S de arquivo mora em FileIO (escrita atômica com
 // fsync checado, .bak e injeção de falha para os testes de disco cheio).
@@ -2112,6 +2151,9 @@ Status ProjectSerializer::encode(const Project& project, const SaveOptions& opti
     sections.push_back(PendingSection{SectionKind::Project, 1, build_project_section(project)});
     sections.push_back(PendingSection{SectionKind::Timeline, kTimelineSectionVersion, build_timeline_section(project)});
     sections.push_back(PendingSection{SectionKind::Assets, 1, build_assets_section(project)});
+    // Só quando algum modelo foi otimizado: projeto sem 3D fica byte a byte igual.
+    if (project_has_optimized_models(project))
+        sections.push_back(PendingSection{SectionKind::Scene3D, 1, build_scene3d_section(project)});
 
     // As seções Animations, Effects, Scene3D, Particles, Fonts e Thumbnails
     // existem no enum e no índice, mas ainda não são gravadas separadamente:
@@ -2350,6 +2392,9 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
             }
             case SectionKind::Assets:
                 apply_assets_section(effective, effectiveSize, out);
+                break;
+            case SectionKind::Scene3D:
+                apply_scene3d_section(effective, effectiveSize, out);
                 break;
             default:
                 // Seções que esta versão não grava ainda. Se aparecerem, foram

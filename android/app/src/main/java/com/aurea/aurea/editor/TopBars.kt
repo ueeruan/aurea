@@ -147,7 +147,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             width = 44.dp,
             tint = if (StagePrefs.hideSelectionBox) AureaColors.Accent else AureaColors.Text,
         )
-        ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
+        ChromeButton(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
         ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp, width = 44.dp)
         ChromeVectorButton(Icons.Filled.MoreHoriz, stringResource(R.string.editor_mais_acoes_camada), onClick = { openSheet(store, ui, ShellSheet.LayerMenu) }, size = 22.dp, width = 44.dp)
     }
@@ -222,7 +222,7 @@ internal fun LinkMenu(store: EditorStore, ids: List<Long>, onDismiss: () -> Unit
                 val type = LayerType.of(row.kind)
                 LinkRow(
                     thumb = { LayerThumb(store, row) },
-                    label = row.name.ifBlank { type.label },
+                    label = row.name.ifBlank { stringResource(type.labelRes) },
                     on = current == row.id,
                 ) { pick(row.id) }
             }
@@ -493,7 +493,7 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
         )
         // Ficar com UMA só: a lista troca o lote por ela num toque.
         ChromeButton(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), onClick = { openSheet(store, ui, ShellSheet.SearchLayers) }, size = 19.dp, width = 40.dp, tint = ink)
-        ChromeButton(CupertinoGlyph.Search, "Buscar ferramentas", onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp, tint = ink)
+        ChromeButton(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp, tint = ink)
         Box {
             ChromeButton(CupertinoGlyph.Link, stringResource(R.string.editor_vincular_escolhidas_camada), onClick = {
                 if (store.playing) store.pause()

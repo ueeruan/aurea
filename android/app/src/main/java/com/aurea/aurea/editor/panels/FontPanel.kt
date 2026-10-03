@@ -160,6 +160,6 @@ private fun FontRow(name: String, path: String?, on: Boolean, imported: Boolean 
             style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, color = if (on) AureaColors.Accent else AureaColors.Text,
                 fontFamily = path?.let { previewFamily(it) } ?: FontFamily.Default, fontWeight = FontWeight.Normal)),
         )
-        if (imported) Text("importada", style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
+        if (imported) Text(stringResource(R.string.i18n_font_imported), style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
     }
 }

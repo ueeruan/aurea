@@ -167,6 +167,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     ))
     put("aurea.stylize.crt_emulator", EffectMeta(R.string.fx_desc_stylize_crt_emulator, AllTargets, "crt tv tubo retro varredura fosforo"))
     put("aurea.glitch.dissolve_shake", EffectMeta(R.string.fx_desc_glitch_dissolve_shake, AllTargets, "tremor dissolver fragmentos quebrar"))
+    put("aurea.glitch.datamosh", EffectMeta(R.string.fx_desc_glitch_datamosh, AllTargets, "datamosh compressao blocos arrastar derreter codec"))
     put("aurea.distort.displacement_map", EffectMeta(R.string.fx_desc_distort_displacement_map, AllTargets, "mapa deslocamento camada distorcer"))
     put("aurea.control.slider", EffectMeta(R.string.fx_desc_control_slider, AllTargets))
     put("aurea.control.angle", EffectMeta(R.string.fx_desc_control_angle, AllTargets))
@@ -343,6 +344,10 @@ fun effectCategoryLabel(category: String): String = when (normalizeSearch(catego
     "controles de expressao" -> stringResource(R.string.cat_expr)
     "pattern" -> stringResource(R.string.cat_pattern)
     "audio" -> stringResource(R.string.cat_audio)
+    // Ferramentas que viraram efeito (EffectTool): categoria em pt fixa.
+    "texto" -> stringResource(R.string.panel_texto)
+    "rastreio" -> stringResource(R.string.panel_rastreio)
+    "mascara" -> stringResource(R.string.sh_dock_mask)
     else -> category
 }
 

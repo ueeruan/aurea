@@ -16,9 +16,13 @@ struct ExportView: View {
     @State private var sharing = false
     @State private var viewing = false
     @State private var advancedOpen = false
+    /// Teclado do fps livre quando a tela está em tela cheia (fullScreenCover
+    /// fica acima do overlay do ContentView).
+    @State private var fpsKeypad: KeypadRequest?
     /// Lado menor → rótulo da ficha (o mesmo do Android).
     private static let standardResolutions: [(UInt32, String)] = [(480, "480p"), (720, "720p"), (1080, "1080p"), (1440, "2K"), (2160, "4K")]
-    private static let frameRates: [Double] = [24, 25, 30, 50, 60]
+    /// Atalhos; "Personalizado…" digita qualquer taxa de 1 a 240 (o teto dos encoders).
+    private static let frameRates: [Double] = [24, 25, 30, 50, 60, 120]
     /// Mbps manuais do Avançado (0 = automático pela qualidade).
     private static let customBitrates: [UInt32] = [5, 10, 15, 25, 40, 60]
     private var resolutions: [UInt32] {
@@ -71,6 +75,7 @@ struct ExportView: View {
         }
         .background(AureaColors.background.ignoresSafeArea()).foregroundStyle(AureaColors.text)
         .preferredColorScheme(.dark).interactiveDismissDisabled(model.exporting)
+        .overlay { if let request = fpsKeypad { NumericKeypadSheet(request: request) { fpsKeypad = nil }.id(request.id) } }
         .sheet(isPresented: $sharing) { if let url = model.exportedURL { ExportShareSheet(url: url) } }
         .sheet(isPresented: $viewing) {
             if let url = model.exportedURL {
@@ -244,9 +249,27 @@ struct ExportView: View {
     }
     private var frameRateOptions: some View {
         let projectFps = AureaText.t("sh_export_fps_from_project", format(model.compositionFps))
-        return chips([projectFps] + Self.frameRates.filter { abs($0 - model.compositionFps) > 0.01 }.map(format), selected: model.exportOptions.fps == 0 ? projectFps : format(model.exportOptions.fps)) {
-            model.exportOptions.fps = $0 == projectFps ? 0 : Double($0.replacingOccurrences(of: ",", with: ".")) ?? model.compositionFps
+        let customLabel = AureaText.t("project_fps_custom")
+        let presets = Self.frameRates.filter { abs($0 - model.compositionFps) > 0.01 }
+        // ExportScreen.kt: a taxa digitada fora dos atalhos ganha a própria
+        // ficha (escolhida) e "Personalizado…" continua ao lado.
+        let chosen = model.exportOptions.fps
+        let typed: [String] = chosen > 0 && !presets.contains { abs($0 - chosen) < 0.01 } ? [format(chosen)] : []
+        return VStack(alignment: .leading, spacing: 0) {
+            chips([projectFps] + presets.map(format) + typed + [customLabel], selected: chosen == 0 ? projectFps : format(chosen)) { picked in
+                if picked == projectFps { model.exportOptions.fps = 0 }
+                else if picked == customLabel { openFpsKeypad() }
+                else { model.exportOptions.fps = Double(picked.replacingOccurrences(of: ",", with: ".")) ?? model.compositionFps }
+            }
+            if fps > 60.01 {
+                Text(AureaText.t("export_fps_high_note")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 8)
+            }
         }
+    }
+    private func openFpsKeypad() {
+        let request = KeypadRequest(title: AureaText.t("project_fps_custom_title"), value: Float(fps), unit: "fps",
+                                    min: 1, max: 240, decimals: 3, onValue: { model.exportOptions.fps = Double($0) })
+        if model.showExport { fpsKeypad = request } else { model.numericKeypad = request }
     }
     private var qualityOptions: some View {
         let labels = [AureaText.t("exp2_quality_low"), AureaText.t("exp2_quality_normal"), AureaText.t("exp2_quality_high")]
@@ -415,10 +438,17 @@ struct ExportView: View {
                 .background(filled ? AureaColors.accent : AureaColors.chip, in: RoundedRectangle(cornerRadius: 14))
         }.buttonStyle(.plain)
     }
+    /// ESPELHO de export_frame_size (ExportRules.hpp) e do VideoExportRules.kt:
+    /// lado maior em múltiplo de 16, menor par, quadrado fica
+    /// quadrado ("480p" 16:9 = 848×480; 854 derrubava o encoder MediaTek).
     private func sizeFor(_ side: UInt32) -> (UInt32, UInt32) {
-        let shortest = Double(max(1, min(model.compositionWidth, model.compositionHeight)))
-        return (UInt32((Double(model.compositionWidth) * Double(side) / shortest / 2).rounded()) * 2,
-                UInt32((Double(model.compositionHeight) * Double(side) / shortest / 2).rounded()) * 2)
+        let w = Double(model.compositionWidth), h = Double(model.compositionHeight)
+        guard w > 0, h > 0 else { return (0, 0) }
+        let shortest = min(w, h)
+        let k = Double(side > 0 ? side : UInt32(shortest)) / shortest
+        func align(_ v: Double, _ a: Double) -> UInt32 { UInt32(max(a, (v / a + 0.5).rounded(.down) * a)) }
+        if w == h { let s = align(w * k, 2); return (s, s) }
+        return w > h ? (align(w * k, 16), align(h * k, 2)) : (align(w * k, 2), align(h * k, 16))
     }
     private func fits(_ size: (UInt32, UInt32)) -> Bool {
         let cap = (model.composition["sizeCap"] as? [NSNumber] ?? []).map(\.uint32Value)
@@ -450,14 +480,20 @@ struct ExportView: View {
         if model.exportCancelled || cancelled { return AureaText.t("ios_export_cancelled") }
         let result = (model.exportProgress["result"] as? NSNumber)?.intValue ?? 0
         if result == 28 { return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco") }
-        if result != 0 { return AureaText.t("ios_export_failed_detail", model.exportProgress["message"] as? String ?? AureaText.t("ios_error_code", "\(result)")) }
+        if result != 0 {
+            // O motivo do motor (ExportRules.hpp) no idioma do app; a frase crua
+            // do motor só em português (é diagnóstico, não texto de tela).
+            if let reason = AureaModel.exportFailureReason(model.exportProgress) { return AureaText.t("ios_export_failed_detail", reason) }
+            let raw = model.exportProgress["message"] as? String ?? ""
+            return AureaText.t("ios_export_failed_detail", raw.isEmpty || AureaText.language.resolved != .pt ? AureaText.t("ios_error_code", "\(result)") : raw)
+        }
         return model.exportMessage
     }
     private var progressNotice: String {
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
         if model.exportOptions.aiUpscale > 0, let message = model.exportProgress["message"] as? String, message.hasPrefix("IA:") {
-            notices.append(message)
+            notices.append(AureaEngineText.aiProgress(message))
         }
         if flags & AureaExportFlag.softwareEncoder.rawValue != 0 {
             notices.append(AureaText.t("ios_export_software_encoder", codec))

@@ -415,6 +415,22 @@ enum class LayerType(val kind: Int, val color: Color, val glyph: Char, val label
     Particles(11, Color(0xFFB0417A), CupertinoGlyph.Sparkles, "Partículas"),
     Group(12, Color(0xFF4C5566), CupertinoGlyph.FolderFill, "Grupo");
 
+    /** Rótulo no catálogo (o [label] em pt continua para quem já usa). */
+    val labelRes: Int get() = when (this) {
+        Video -> com.aurea.aurea.R.string.target_video
+        Image -> com.aurea.aurea.R.string.target_image
+        Audio -> com.aurea.aurea.R.string.target_audio
+        Text -> com.aurea.aurea.R.string.target_text
+        Shape -> com.aurea.aurea.R.string.target_shape
+        Null -> com.aurea.aurea.R.string.sh_add_null
+        Adjustment -> com.aurea.aurea.R.string.app_layer_type_adjust
+        Camera -> com.aurea.aurea.R.string.app_layer_type_camera
+        Light -> com.aurea.aurea.R.string.cat_light
+        Model3D -> com.aurea.aurea.R.string.app_layer_type_model
+        Particles -> com.aurea.aurea.R.string.panel_particulas
+        Group -> com.aurea.aurea.R.string.editor_grupo
+    }
+
     companion object {
         fun of(kind: Int): LayerType = entries.firstOrNull { it.kind == kind } ?: Null
     }

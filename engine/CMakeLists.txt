@@ -108,6 +108,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/MotionTileEffect.cpp
     src/effects/builtin/MotionDetectEffect.cpp
     src/effects/builtin/RetroDisplaceEffects.cpp
+    src/effects/builtin/DatamoshEffect.cpp
     src/effects/builtin/KeyingEffects.cpp
     src/effects/builtin/ExpressionControls.cpp
     src/effects/builtin/EchoEffect.cpp
@@ -171,6 +172,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineLayerAnim.cpp
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp
+    src/scene3d/ModelBudget.cpp
     src/scene3d/SceneRenderer.cpp
     src/scene3d/Environment.cpp
     src/scene3d/StudioEnvironment.cpp

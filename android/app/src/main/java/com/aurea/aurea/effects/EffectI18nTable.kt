@@ -1132,6 +1132,13 @@ internal object EffectI18nTable {
         m.put("aurea.distort.displacement_map", 6, /* edge_behavior */ intArrayOf(R.string.fx_bordas, R.string.fx3o_repetir_pixels, R.string.fx3o_envolver))
         m.put("aurea.distort.displacement_map", 7, /* expand_output */ intArrayOf(R.string.fx3_expandir_saida))
         m.put("aurea.distort.displacement_map", 8, /* mix */ intArrayOf(R.string.fx_mistura))
+        m.put("aurea.glitch.datamosh", 0, /* amount */ intArrayOf(R.string.fx_intensidade))
+        m.put("aurea.glitch.datamosh", 1, /* block_size */ intArrayOf(R.string.fx_tamanho_bloco))
+        m.put("aurea.glitch.datamosh", 2, /* hold_frames */ intArrayOf(R.string.fx_datamosh_hold_frames))
+        m.put("aurea.glitch.datamosh", 3, /* drag */ intArrayOf(R.string.fx_datamosh_drag))
+        m.put("aurea.glitch.datamosh", 4, /* corruption */ intArrayOf(R.string.fx_datamosh_corruption))
+        m.put("aurea.glitch.datamosh", 5, /* color_bleed */ intArrayOf(R.string.fx_datamosh_color_bleed))
+        m.put("aurea.glitch.datamosh", 6, /* seed */ intArrayOf(R.string.fx_semente))
     }
 
     private fun HashMap<Long, IntArray>.put(key: String, index: Int, ids: IntArray) {

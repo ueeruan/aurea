@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Otimizar modelo" (import 3D com orçamento de memória do aparelho). -->
+<resources>
+    <string name="model3d_heavy_title">Model berat</string>
+    <string name="model3d_heavy_body">Model ini memiliki %1$s segitiga. Jika dibuka apa adanya, perangkat bisa macet. Optimasi mengurangi geometri dan tekstur sebelum dibuka.</string>
+    <string name="model3d_quality_original">Asli</string>
+    <string name="model3d_quality_balanced">Seimbang</string>
+    <string name="model3d_quality_light">Ringan</string>
+    <string name="model3d_quality_original_hint">Tanpa pengurangan</string>
+    <string name="model3d_quality_balanced_hint">Hingga %1$s segitiga, tekstur hingga %2$d px</string>
+    <string name="model3d_quality_light_hint">Hingga %1$s segitiga, tekstur hingga %2$d px · lebih lancar</string>
+    <string name="model3d_recommended">disarankan</string>
+    <string name="model3d_optimize_import">Optimalkan dan impor</string>
+    <string name="model3d_import">Impor</string>
+    <string name="model3d_too_heavy">Model ini terlalu berat untuk memori perangkat ini, bahkan setelah dioptimalkan. Gunakan versi dengan poligon lebih sedikit atau tekstur lebih kecil.</string>
+    <string name="model3d_too_heavy_after">Model melebihi memori perangkat ini dan ditolak agar aplikasi tidak tertutup. Impor lagi dan pilih Ringan, atau gunakan versi yang lebih sederhana.</string>
+    <string name="model3d_stage_simplifying">Menyederhanakan</string>
+    <string name="model3d_optimized_toast">Model dioptimalkan: %1$s → %2$s segitiga</string>
+    <string name="model3d_thousand">rb</string>
+    <string name="model3d_million">jt</string>
+</resources>

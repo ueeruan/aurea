@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Otimizar modelo" (import 3D com orçamento de memória do aparelho). -->
+<resources>
+    <string name="model3d_heavy_title">نموذج ثقيل</string>
+    <string name="model3d_heavy_body">يحتوي هذا النموذج على %1$s مثلث. بحالته الحالية قد يُجمّد الجهاز. التحسين يقلّل الهندسة والخامات قبل فتحه.</string>
+    <string name="model3d_quality_original">الأصلي</string>
+    <string name="model3d_quality_balanced">متوازن</string>
+    <string name="model3d_quality_light">خفيف</string>
+    <string name="model3d_quality_original_hint">بدون تقليل</string>
+    <string name="model3d_quality_balanced_hint">حتى %1$s مثلث، وخامات حتى %2$d px</string>
+    <string name="model3d_quality_light_hint">حتى %1$s مثلث، وخامات حتى %2$d px · أكثر سلاسة</string>
+    <string name="model3d_recommended">موصى به</string>
+    <string name="model3d_optimize_import">تحسين واستيراد</string>
+    <string name="model3d_import">استيراد</string>
+    <string name="model3d_too_heavy">هذا النموذج ثقيل جدًا على ذاكرة هذا الجهاز حتى بعد التحسين. استخدم نسخة بمضلعات أقل أو خامات أصغر.</string>
+    <string name="model3d_too_heavy_after">تجاوز النموذج ذاكرة هذا الجهاز ورُفض حتى لا يُغلق التطبيق. استورده مرة أخرى واختر خفيف، أو استخدم نسخة أبسط.</string>
+    <string name="model3d_stage_simplifying">جارٍ التبسيط</string>
+    <string name="model3d_optimized_toast">تم تحسين النموذج: %1$s ← %2$s مثلث</string>
+    <string name="model3d_thousand">ألف</string>
+    <string name="model3d_million">مليون</string>
+</resources>

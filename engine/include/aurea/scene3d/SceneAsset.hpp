@@ -42,6 +42,10 @@ enum class ImportError : u8 {
     UnsupportedFeature,     ///< extensão obrigatória que o motor não tem
     NoGeometry,             ///< nada renderizável no arquivo
     Cancelled,
+    /// Passa do orçamento de memória deste aparelho (ModelBudget.hpp) mesmo
+    /// com os limites pedidos: recusado ANTES de alocar, em vez de o sistema
+    /// matar o app. No fim: o número não muda o dos outros.
+    TooHeavy,
 };
 
 [[nodiscard]] constexpr const char* to_string(ImportError e) noexcept {
@@ -57,6 +61,7 @@ enum class ImportError : u8 {
         case ImportError::UnsupportedFeature:     return "recurso obrigatorio nao suportado";
         case ImportError::NoGeometry:             return "o arquivo nao tem geometria";
         case ImportError::Cancelled:              return "cancelado";
+        case ImportError::TooHeavy:               return "modelo pesado demais para este aparelho";
     }
     return "?";
 }
@@ -301,6 +306,10 @@ struct ImportStats {
     u32 materials = 0, images = 0, animations = 0, skins = 0, morphTargets = 0;
     u64 geometryBytes = 0, imageBytes = 0;
     f32 parseMs = 0, geometryMs = 0, imagesMs = 0, optimizeMs = 0;
+    /// Orçamento (ModelBudget.hpp): triângulos do arquivo antes da
+    /// simplificação e texturas reduzidas/puladas no decode.
+    u32 sourceTriangles = 0;
+    u32 texturesReduced = 0, texturesSkipped = 0;
 };
 
 struct SceneAsset {

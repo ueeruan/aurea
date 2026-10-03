@@ -127,21 +127,32 @@ struct UfbxBuild {
     std::vector<std::string> warnings;
     FolderIndex* folder = nullptr;
     std::vector<std::string> missing;   ///< nomes (sem pasta) das texturas não achadas
+    u64 imageBytes = 0;                 ///< pixels guardados até agora (orçamento)
+    u64 heldBytes = 0;                  ///< a cena lida pela ufbx (orçamento)
 
-    /// Decodifica uma imagem (PNG/JPG/TGA/BMP/PSD…) da memória para o asset.
+    /// Decodifica uma imagem (PNG/JPG/TGA/BMP/PSD…) da memória para o asset,
+    /// já reduzida ao teto. Com orçamento, a imagem cujo decode (ou a soma
+    /// guardada) passaria do teto é pulada com aviso — o modelo entra sem ela.
     i32 decode_image(const ufbx_texture* t, const u8* data, usize size) {
         if (!data || size == 0 || size > static_cast<usize>(INT32_MAX)) return -1;
-        int w = 0, h = 0, comp = 0;
-        stbi_uc* px = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
-        if (!px) return -1;
+        const u64 budget = options->memoryBudget;
         Image img;
+        u32 w0 = 0, h0 = 0;
+        const bool full = budget && imageBytes * 7 / 3 > budget / 2;
+        const Decode d = full ? Decode::TooBig
+                              : decode_capped(data, size, options->maxTextureSize, decode_room(budget, heldBytes + imageBytes),
+                                              img, w0, h0);
+        if (d == Decode::Failed) return -1;
+        if (d == Decode::TooBig) {
+            ++A->stats.texturesSkipped;
+            const std::string w = "textura '" + std::string(t->name.data, t->name.length) +
+                                  "' grande demais para a memoria deste aparelho: ignorada";
+            if (std::find(warnings.begin(), warnings.end(), w) == warnings.end()) warnings.push_back(w);
+            return -2;   // achada, mas fora do orçamento (não é "ausente")
+        }
+        if (img.width != w0 || img.height != h0) ++A->stats.texturesReduced;
+        imageBytes += img.rgba.size();
         img.name = std::string(t->name.data, t->name.length);
-        img.width = static_cast<u32>(w);
-        img.height = static_cast<u32>(h);
-        img.rgba.assign(px, px + static_cast<usize>(w) * h * 4);
-        img.hasAlpha = comp == 2 || comp == 4;
-        stbi_image_free(px);
-        if (options->maxTextureSize) downscale_to(img, options->maxTextureSize);
         const i32 index = static_cast<i32>(A->images.size());
         A->images.push_back(std::move(img));
         ++imagesUsed;
@@ -166,14 +177,14 @@ struct UfbxBuild {
                                      src->has_file && src->file_index < scene->texture_files.count
                                          ? &scene->texture_files.data[src->file_index].content : nullptr};
         for (const ufbx_blob* b : blobs) {
-            if (index >= 0) break;
+            if (index >= 0 || index == -2) break;
             if (b && b->size > 0) index = decode_image(t, static_cast<const u8*>(b->data), b->size);
         }
         t = src;
         std::vector<u8> bytes;
         const u8* data = nullptr;
         usize size = 0;
-        if (index < 0) {
+        if (index == -1) {
             // Arquivo ao lado do modelo: o nome relativo primeiro, depois só o
             // nome do arquivo (caminho absoluto de outra máquina não existe aqui).
             std::vector<std::string> tries;
@@ -211,7 +222,9 @@ struct UfbxBuild {
             size = bytes.size();
             index = decode_image(t, data, size);
         }
-        if (index < 0) {
+        if (index == -2) {
+            index = -1;   // fora do orçamento: o aviso já foi dado
+        } else if (index < 0) {
             const std::string w = "textura ausente: " + std::string(t->relative_filename.length ? t->relative_filename.data : t->name.data);
             if (std::find(warnings.begin(), warnings.end(), w) == warnings.end()) warnings.push_back(w);
         }
@@ -274,6 +287,24 @@ struct UfbxBuild {
     }
 };
 
+/// Progresso da leitura do arquivo pela ufbx (bytes lidos) e cancelamento.
+ufbx_progress_result ufbx_progress_fn_aurea(void* user, const ufbx_progress* p) {
+    auto* progress = static_cast<ImportProgress*>(user);
+    if (!progress) return UFBX_PROGRESS_CONTINUE;
+    if (p && p->bytes_total > 0)
+        set_fraction(progress, static_cast<f32>(static_cast<f64>(p->bytes_read) / static_cast<f64>(p->bytes_total)));
+    return cancelled(progress) ? UFBX_PROGRESS_CANCEL : UFBX_PROGRESS_CONTINUE;
+}
+
+/// Uma parte de material maior que isto é lida em pedaços: os cantos de um
+/// pedaço (60 bytes cada) são soldados e simplificados antes do próximo. É o
+/// "renderizar por partes" — o pico fica em ~50 MB, não no modelo inteiro.
+constexpr usize kUfbxChunkTriangles = 262144;
+
+/// Bytes por triângulo do pico de um pedaço: 3 cantos achatados + remapa +
+/// os vértices soldados.
+constexpr u32 kUfbxPartBytesPerTriangle = static_cast<u32>(3 * sizeof(FlatVertex) + 3 * 4 + 2 * sizeof(FlatVertex));
+
 } // namespace
 
 ImportResult import_ufbx_file(const std::string& path, const ImportOptions& options, ImportProgress* progress) {
@@ -303,10 +334,24 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
     opener.folder = &folder;
     opts.open_file_cb.fn = &ExternalOpener::open;
     opts.open_file_cb.user = &opener;
+    opts.progress_cb.fn = &ufbx_progress_fn_aurea;
+    opts.progress_cb.user = progress;
+    if (options.memoryBudget) {
+        // A ufbx respeita teto de memória: passou, devolve erro em vez de o
+        // sistema matar o app no meio da leitura.
+        const u64 cap = std::min<u64>(options.memoryBudget, static_cast<u64>(SIZE_MAX / 2));
+        opts.result_allocator.memory_limit = static_cast<size_t>(cap * 7 / 10);
+        opts.temp_allocator.memory_limit = static_cast<size_t>(cap / 2);
+    }
     ufbx_error err{};
     ufbx_scene* scene = ufbx_load_file(path.c_str(), &opts, &err);
     if (!scene) {
         std::string why(err.description.data, err.description.length);
+        if (err.type == UFBX_ERROR_CANCELLED) return fail_result(ImportError::Cancelled, "cancelado");
+        if (err.type == UFBX_ERROR_MEMORY_LIMIT || err.type == UFBX_ERROR_OUT_OF_MEMORY || err.type == UFBX_ERROR_ALLOCATION_LIMIT) {
+            return fail_result(ImportError::TooHeavy, "a leitura do arquivo passou de " + mb_text(options.memoryBudget) +
+                                                          " (o que este aparelho aguenta)");
+        }
         return fail_result(err.type == UFBX_ERROR_FILE_NOT_FOUND ? ImportError::FileNotFound : ImportError::InvalidFormat,
                            "arquivo FBX/OBJ ilegivel: " + why);
     }
@@ -322,6 +367,7 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
     b.folder = &folder;
     b.options = &options;
     b.A = &A;
+    b.heldBytes = scene->metadata.result_memory_used;
 
     // --- Materiais --------------------------------------------------------------
     const u64 tImg = monotonic_ns();
@@ -351,9 +397,47 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
         if (!n->parent) A.roots.push_back(static_cast<i32>(i));
     }
 
+    // --- Orçamento: contagens exatas da cena lida, antes de montar as malhas -------
+    u64 totalTris = 0, totalVerts = 0, largestPart = 0, totalFaces = 0;
+    for (usize mi = 0; mi < scene->meshes.count; ++mi) {
+        const ufbx_mesh* m = scene->meshes.data[mi];
+        totalTris += m->num_triangles;
+        totalVerts += m->num_vertices;
+        for (usize pi = 0; pi < m->material_parts.count; ++pi) {
+            largestPart = std::max<u64>(largestPart, std::min<u64>(m->material_parts.data[pi].num_triangles, kUfbxChunkTriangles));
+            totalFaces += m->material_parts.data[pi].face_indices.count;
+        }
+    }
+    A.stats.sourceTriangles = static_cast<u32>(std::min<u64>(totalTris, UINT32_MAX));
+    f32 keep = 1.0f;
+    if (options.maxTriangles && totalTris > options.maxTriangles)
+        keep = static_cast<f32>(static_cast<f64>(options.maxTriangles) / static_cast<f64>(totalTris));
+    if (options.memoryBudget) {
+        ModelCost c;
+        c.valid = true;
+        c.parseBytes = scene->metadata.result_memory_used;
+        c.triangles = totalTris;
+        c.vertices = totalVerts;
+        c.largestPartTriangles = largestPart;
+        c.partBytesPerTriangle = kUfbxPartBytesPerTriangle;
+        c.textures = static_cast<u32>(A.images.size());
+        c.texturePixels = b.imageBytes / 4;   // já decodificadas (e reduzidas) acima
+        ModelBudget mb;
+        mb.memoryBytes = options.memoryBudget;
+        mb.maxTriangles = options.maxTriangles;
+        mb.maxTextureSize = options.maxTextureSize;
+        const u64 peak = estimate_import_peak(c, mb);
+        if (peak > options.memoryBudget) {
+            return fail_result(ImportError::TooHeavy, std::to_string(totalTris) + " triangulos precisam de ~" + mb_text(peak) +
+                                                          "; este aparelho aguenta " + mb_text(options.memoryBudget));
+        }
+    }
+
     // --- Malhas -------------------------------------------------------------------
     const u64 tGeo = monotonic_ns();
-    set_phase(progress, ImportPhase::Geometry);
+    set_phase(progress, keep < 1.0f ? ImportPhase::Simplifying : ImportPhase::Geometry);
+    u64 facesDone = 0;
+    bool stop = false;
     std::unordered_map<const ufbx_mesh*, i32> meshIndex;
     std::unordered_map<const ufbx_mesh*, i32> skinOfMesh;
     std::vector<u32> tri;
@@ -404,12 +488,61 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
         }
         Mesh mesh;
         mesh.name = std::string(m->name.data, m->name.length);
-        for (usize pi = 0; pi < m->material_parts.count; ++pi) {
+        for (usize pi = 0; pi < m->material_parts.count && !stop; ++pi) {
             const ufbx_mesh_part& part = m->material_parts.data[pi];
             if (part.num_triangles == 0) continue;
+            // Parte enorme: lida em pedaços (borda travada na simplificação
+            // para os pedaços continuarem colados).
+            const bool chunked = part.num_triangles > kUfbxChunkTriangles;
             std::vector<FlatVertex> corners;
-            corners.reserve(part.num_triangles * 3);
+            corners.reserve(std::min<usize>(part.num_triangles, kUfbxChunkTriangles) * 3);
+            auto flush = [&]() {
+                if (corners.empty()) return;
+                // Solda cantos idênticos (FBX guarda por canto; o GPU quer indexado).
+                std::vector<u32> remap(corners.size());
+                const usize unique = meshopt_generateVertexRemap(remap.data(), nullptr, corners.size(), corners.data(),
+                                                                 corners.size(), sizeof(FlatVertex));
+                std::vector<FlatVertex> verts(unique);
+                meshopt_remapVertexBuffer(verts.data(), corners.data(), corners.size(), sizeof(FlatVertex), remap.data());
+                corners.clear();
+                Primitive p;
+                p.indices.assign(remap.begin(), remap.end());
+                std::vector<u32>().swap(remap);
+                p.positions.reserve(unique);
+                const bool hasNormals = m->vertex_normal.exists;
+                for (const FlatVertex& v : verts) {
+                    p.positions.push_back(v.p);
+                    if (hasNormals) p.normals.push_back(v.n);
+                    p.uv0.push_back(v.uv);
+                    if (m->vertex_color.exists) p.colors.push_back(v.color);
+                    if (skin) {
+                        for (int c = 0; c < 4; ++c) p.joints.push_back(v.joints[c]);
+                        p.weights.push_back(Vec4{v.weights[0], v.weights[1], v.weights[2], v.weights[3]});
+                    }
+                }
+                std::vector<FlatVertex>().swap(verts);
+                // Orçamento: simplifica o pedaço antes do próximo, antes das
+                // normais planas e das tangentes (que crescem com os vértices).
+                if (keep < 1.0f && p.indices.size() >= 3 * 64) simplify_primitive(p, keep, options.simplifyError, true, chunked);
+                for (const Vec3& v : p.positions) p.bounds.add(v);
+                if (!hasNormals) flat_normals(p);
+                const i32 matIndex = part.index < m->materials.count && m->materials.data[part.index]
+                                   ? static_cast<i32>(m->materials.data[part.index]->typed_id) : -1;
+                p.material = matIndex;
+                p.materialSlot = static_cast<i32>(part.index);
+                // Any instance may bind a normal map to this shared geometry.
+                if (m->vertex_uv.exists) {
+                    generate_tangents(p, p.uv0);
+                }
+                mesh.bounds.add(p.bounds.min);
+                mesh.bounds.add(p.bounds.max);
+                mesh.primitives.push_back(std::move(p));
+            };
             for (usize fi = 0; fi < part.face_indices.count; ++fi) {
+                if ((++facesDone & 4095u) == 0) {
+                    if (cancelled(progress)) { stop = true; break; }
+                    set_fraction(progress, static_cast<f32>(static_cast<f64>(facesDone) / static_cast<f64>(std::max<u64>(1, totalFaces))));
+                }
                 const ufbx_face face = m->faces.data[part.face_indices.data[fi]];
                 const u32 nt = ufbx_triangulate_face(tri.data(), tri.size(), m, face);
                 for (u32 k = 0; k < nt * 3; ++k) {
@@ -455,42 +588,11 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
                     }
                     corners.push_back(v);
                 }
+                if (corners.size() >= kUfbxChunkTriangles * 3) flush();
             }
-            if (corners.empty()) continue;
-            // Solda cantos idênticos (FBX guarda por canto; o GPU quer indexado).
-            std::vector<u32> remap(corners.size());
-            const usize unique = meshopt_generateVertexRemap(remap.data(), nullptr, corners.size(), corners.data(),
-                                                             corners.size(), sizeof(FlatVertex));
-            std::vector<FlatVertex> verts(unique);
-            meshopt_remapVertexBuffer(verts.data(), corners.data(), corners.size(), sizeof(FlatVertex), remap.data());
-            Primitive p;
-            p.indices.assign(remap.begin(), remap.end());
-            p.positions.reserve(unique);
-            bool hasNormals = m->vertex_normal.exists;
-            for (const FlatVertex& v : verts) {
-                p.positions.push_back(v.p);
-                if (hasNormals) p.normals.push_back(v.n);
-                p.uv0.push_back(v.uv);
-                if (m->vertex_color.exists) p.colors.push_back(v.color);
-                if (skin) {
-                    for (int c = 0; c < 4; ++c) p.joints.push_back(v.joints[c]);
-                    p.weights.push_back(Vec4{v.weights[0], v.weights[1], v.weights[2], v.weights[3]});
-                }
-                p.bounds.add(v.p);
-            }
-            if (!hasNormals) flat_normals(p);
-            const i32 matIndex = part.index < m->materials.count && m->materials.data[part.index]
-                               ? static_cast<i32>(m->materials.data[part.index]->typed_id) : -1;
-            p.material = matIndex;
-            p.materialSlot = static_cast<i32>(part.index);
-            // Any instance may bind a normal map to this shared geometry.
-            if (m->vertex_uv.exists) {
-                generate_tangents(p, p.uv0);
-            }
-            mesh.bounds.add(p.bounds.min);
-            mesh.bounds.add(p.bounds.max);
-            mesh.primitives.push_back(std::move(p));
+            if (!stop) flush();
         }
+        if (stop) return fail_result(ImportError::Cancelled, "cancelado");
         if (mesh.primitives.empty()) continue;
         meshIndex[m] = static_cast<i32>(A.meshes.size());
         A.meshes.push_back(std::move(mesh));

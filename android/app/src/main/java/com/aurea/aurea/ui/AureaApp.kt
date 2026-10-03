@@ -85,6 +85,8 @@ fun AureaApp(store: EditorStore, conta: ContaViewModel) {
                     onDismiss = { store.dismissModelTextures() },
                 )
             }
+            // "Otimizar modelo": o modelo pesado demais para o aparelho como está.
+            store.modelOptimize?.let { req -> ModelOptimizeDialog(store, req) }
             store.errorMessage?.let { msg ->
                 AureaAlert(
                     title = "Aurea",

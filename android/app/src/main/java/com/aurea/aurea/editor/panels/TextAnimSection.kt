@@ -143,7 +143,7 @@ private fun AnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
             AureaToggle(checked = v[0] > 0.5f, onCheckedChange = { store.setTextAnimatorValues(index, mapOf(0 to if (it) 1f else 0f)) })
         }
         ChipRow(stringResource(R.string.panel_anima_cada), listOf(stringResource(R.string.panel_letra), stringResource(R.string.panel_palavra), stringResource(R.string.panel_linha)), v[2].toInt()) { store.setTextAnimatorValues(index, mapOf(2 to it.toFloat())) }
-        ChipRow(stringResource(R.string.panel_escolhe), listOf(stringResource(R.string.panel_ordem), stringResource(R.string.panel_sorteado), "Intervalo AE"), v[3].toInt()) { store.setTextAnimatorValues(index, mapOf(3 to it.toFloat())) }
+        ChipRow(stringResource(R.string.panel_escolhe), listOf(stringResource(R.string.panel_ordem), stringResource(R.string.panel_sorteado), stringResource(R.string.ios_range_ae)), v[3].toInt()) { store.setTextAnimatorValues(index, mapOf(3 to it.toFloat())) }
         if (v[3].toInt() != 1) {
             ChipRow(stringResource(R.string.panel_passagem), listOf(stringResource(R.string.panel_seco), stringResource(R.string.panel_sobe), stringResource(R.string.panel_desce), stringResource(R.string.panel_triangulo), stringResource(R.string.panel_redondo), stringResource(R.string.panel_suave)), v[4].toInt()) {
                 store.setTextAnimatorValues(index, mapOf(4 to it.toFloat()))

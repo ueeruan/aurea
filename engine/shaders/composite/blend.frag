@@ -145,10 +145,22 @@ vec3 blend(int mode, vec3 b, vec3 s) {
 void main() {
     const vec4 dst = texelFetch(u_dst, ivec2(gl_FragCoord.xy), 0);
     const int mode = int(pc.params.y + 0.5);
-    if (mode == kAdjustMix) {
+    if (mode >= kAdjustMix) {
         // `u_src` é o próprio fundo com os efeitos da camada de ajuste: a
-        // opacidade é o peso entre o fundo e ele (não um "over").
-        o_color = mix(dst, texture(u_src, v_uv), pc.params.x);
+        // opacidade é o peso entre o fundo e ele (não um "over"). 100 + modo:
+        // o ajustado entra sobre o fundo pelo modo de mistura da camada.
+        // Com máscara (params.z) o ajustado chega recortado: entra "sobre" o
+        // fundo, que fica intacto fora da máscara (antes recortava a imagem).
+        const int m = mode - kAdjustMix;
+        const vec4 fx = texture(u_src, v_uv);
+        vec4 adj = fx;
+        if (m != 0 || pc.params.z > 0.5) {
+            const vec3 fs = fx.a > 1e-6 ? fx.rgb / fx.a : vec3(0.0);
+            const vec3 fb = dst.a > 1e-6 ? dst.rgb / dst.a : vec3(0.0);
+            adj = vec4(fx.rgb * (1.0 - dst.a) + fx.a * dst.a * blend(m, fb, fs) + dst.rgb * (1.0 - fx.a),
+                       fx.a + dst.a * (1.0 - fx.a));
+        }
+        o_color = mix(dst, adj, pc.params.x);
         return;
     }
     const vec4 src = texture(u_src, v_uv) * pc.params.x;

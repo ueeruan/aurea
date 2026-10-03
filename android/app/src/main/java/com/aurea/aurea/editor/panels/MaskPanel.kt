@@ -261,7 +261,7 @@ private fun TrackMatteTab(store: EditorStore) {
     } else {
         ChipRow {
             candidates.forEach { r ->
-                KitChip(r.name.ifEmpty { LayerType.of(r.kind).label }, matte == r.id) { store.setTrackMatte(r.id, if (mode == 0) 1 else mode) }
+                KitChip(r.name.ifEmpty { stringResource(LayerType.of(r.kind).labelRes) }, matte == r.id) { store.setTrackMatte(r.id, if (mode == 0) 1 else mode) }
             }
         }
     }

@@ -120,7 +120,8 @@ struct ProjectSettingsPanel: View {
     @State private var pickingBackground = false
     private let aspects: [(String, Float)] = [("16:9", 16 / 9), ("9:16", 9 / 16), ("4:5", 4 / 5), ("1:1", 1), ("4:3", 4 / 3)]
     private let resolutions: [(Int, String)] = [(480, "480p (SD)"), (720, "720p (HD)"), (1080, "1080p (FHD)"), (1440, "1440p (QHD)"), (2160, "2160p (4K)")]
-    private let frameRates = [24, 25, 30, 50, 60]
+    /// Atalhos; qualquer outra taxa (1–240, 23,976, 29,97…) vem de "Personalizado…".
+    private let frameRates = [24, 25, 30, 50, 60, 90, 120, 144, 240]
     private var id: UInt64 { (model.composition["id"] as? NSNumber)?.uint64Value ?? 0 }
     private var width: Int { Int(model.compositionWidth) }
     private var height: Int { Int(model.compositionHeight) }
@@ -275,11 +276,14 @@ struct ProjectSettingsPanel: View {
             }
         }
         if key == "fps" {
+            let custom = !frameRates.contains { abs(model.compositionFps - Double($0)) < 0.01 }
             return frameRates.map { fps in
-                MenuItem(label: "\(fps) fps", checked: abs(model.compositionFps - Double(fps)) < 0.01) {
-                    model.mutate { $0.setComposition(id, fps: Double(fps)) }; model.refreshModel(force: true)
-                }
-            }
+                MenuItem(label: "\(fps) fps", checked: abs(model.compositionFps - Double(fps)) < 0.01) { setFps(Double(fps)) }
+            } + [MenuItem(label: AureaText.t("project_fps_custom"), checked: custom) {
+                // fps livre: o teclado limita a 1–240 e aceita decimais (29,97).
+                model.numericKeypad = KeypadRequest(title: AureaText.t("project_fps_custom_title"), value: Float(model.compositionFps),
+                                                    unit: "fps", min: 1, max: 240, decimals: 3, onValue: { setFps(Double($0)) })
+            }]
         }
         return [
             MenuItem(label: AureaText.t("sh_bg_black"), checked: backgroundName == AureaText.t("sh_bg_black")) { setBackground([0, 0, 0, 1]) },
@@ -322,6 +326,9 @@ struct ProjectSettingsPanel: View {
         let w = even(Float(width)), h = even(Float(height))
         guard fits(w, h) else { model.toast = AureaText.t("sh_device_exports_up_to", String(cap.0), String(cap.1)); return }
         model.mutate { $0.setComposition(id, width: UInt32(w), height: UInt32(h)) }; model.refreshModel(force: true)
+    }
+    private func setFps(_ fps: Double) {
+        model.mutate { $0.setComposition(id, fps: fps) }; model.refreshModel(force: true)
     }
     private func setBackground(_ values: [Float]) {
         guard values.count >= 3 else { return }

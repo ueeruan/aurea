@@ -32,6 +32,7 @@
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/export/ImageEncode.hpp"
 #include "aurea/scene3d/Importer.hpp"
+#include "aurea/scene3d/ModelBudget.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/text/FontManager.hpp"
@@ -220,6 +221,20 @@ struct EngineConfig {
 struct ModelImport {
     std::string path;
     std::string displayName;
+    /// "Otimizar modelo" (ModelBudget.hpp): a qualidade escolhida fica no asset
+    /// e vale de novo ao reabrir o projeto.
+    scene3d::ModelQuality quality = scene3d::ModelQuality::Original;
+    /// Memória medida pela plataforma na hora do import (zeros = a do início).
+    scene3d::DeviceMemoryHint memory{};
+};
+
+/// O que o último import de modelo fez (a UI mostra "otimizado: A → B").
+struct ModelImportReport {
+    u32 sourceTriangles = 0;
+    u32 triangles = 0;
+    u32 texturesReduced = 0;
+    u32 texturesSkipped = 0;
+    scene3d::ModelQuality quality = scene3d::ModelQuality::Original;
 };
 
 /// Pedido de importação de vídeo.
@@ -290,8 +305,12 @@ public:
     // =========================================================================
     // Projeto
     // =========================================================================
+    /// `backgroundRgba` (opcional, 4 floats sRGB alfa reto): a cor de fundo
+    /// com que a composição principal nasce — fora do histórico (não é uma
+    /// edição a desfazer). Nulo = preto, como sempre.
     [[nodiscard]] Status new_project(u32 width = 1920, u32 height = 1080,
-                                     f64 fps = 30.0, const char* title = nullptr) noexcept;
+                                     f64 fps = 30.0, const char* title = nullptr,
+                                     const f32* backgroundRgba = nullptr) noexcept;
     /// Abre o projeto. Principal ilegível (truncado, CRC, lixo) → tenta o
     /// `.tmp` (gravação interrompida antes do rename) e o `.bak` (versão
     /// anterior) e guarda o principal ruim em `.corrompido`; nada válido →
@@ -1153,6 +1172,13 @@ public:
     /// (`detail` preenchido), nunca "importado" com a tela preta.
     [[nodiscard]] Result<u64> import_model(const ModelImport& request, scene3d::ImportProgress* progress = nullptr,
                                            std::string* detail = nullptr) noexcept;
+    /// Antes do import: custo do arquivo (só cabeçalhos/contagens) e o que
+    /// cabe neste aparelho por qualidade. A UI oferece "Otimizar modelo"
+    /// quando `heavy`, e recusa sem tentar quando `tooHeavy`.
+    [[nodiscard]] scene3d::ModelPlan inspect_model(const std::string& path,
+                                                   const scene3d::DeviceMemoryHint& memory = {}) const noexcept;
+    /// O último `import_model` bem-sucedido (triângulos antes/depois).
+    [[nodiscard]] ModelImportReport last_model_import() const noexcept;
     /// Asset 3D carregado (nulo = ausente/ilegível). Compartilhado: a layer
     /// apagada não invalida quem ainda desenha.
     [[nodiscard]] std::shared_ptr<const scene3d::SceneAsset> model_asset(u64 assetId) const noexcept;
@@ -1213,6 +1239,17 @@ public:
     /// mundo no eixo (0..2 mundo, 3..5 os da parte). Só calcula; grava-se com
     /// `set_shape3d_part`.
     bool shape3d_part_move(u64 layerId, u32 part, u32 axis, f32 amount, f32* outXYZ) noexcept;
+    /// DIVIDIR o cubo (ou uma fatia dele) em `count` fatias iguais
+    /// (kShape3DSplitMin..Max) ao longo do eixo `axis` (0 X, 1 Y, 2 Z da
+    /// forma). A camada vira um NULO 3D (mesmo id, nome, tempo, pai e todo o
+    /// transform/keyframes dela: mover o grupo continua igual) e cada fatia é
+    /// uma camada de forma 3D filha dele, com a fatia da imagem de cada face,
+    /// o pivô no próprio centro (girar uma fatia gira em volta dela) e a
+    /// opacidade/efeitos/animadores/trilhas das faces da camada original.
+    /// O quadro fica idêntico até alguém mexer numa fatia. Um passo de
+    /// desfazer. Devolve o id do nulo; `slices` (opcional) recebe as fatias na
+    /// ordem do eixo.
+    [[nodiscard]] Result<u64> split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<u64>* slices = nullptr) noexcept;
 
     // =========================================================================
     // A fronteira
@@ -1405,6 +1442,10 @@ public:
         f32   audioMs = 0.0f;        ///< mixar + write_audio
         u32   flags = 0;             ///< ExportFlag
         u32   pipelineDepth = 0;     ///< quadros em voo (1 = serial)
+        /// Motivo da falha (aurea::ExportFailure, export/ExportRules.hpp): o
+        /// código que as telas traduzem; `message` fica para o log. Na bridge
+        /// vai nos bits 24..31 de `flags` (kExportFailureShift).
+        u32   failure = 0;
     };
     /// Bits de `ExportProgress::flags` (o mesmo valor vai para a UI).
     enum ExportFlag : u32 {
@@ -1469,6 +1510,17 @@ private:
     /// Maior lado de textura aceito ao importar modelo 3D — e o MESMO ao
     /// reabrir, senão o quadro muda entre importar e reabrir o projeto.
     [[nodiscard]] u32 model_texture_cap() const noexcept;
+    /// A memória da plataforma completada com a medida no início (DeviceCapabilities).
+    [[nodiscard]] scene3d::DeviceMemoryHint model_memory_hint(const scene3d::DeviceMemoryHint& fromPlatform) const noexcept;
+    /// Opções de import de um modelo com o orçamento do aparelho. `quality` é
+    /// a pedida; com `escalate`, sobe para a mais leve que couber (reabrir um
+    /// projeto feito num aparelho maior). Devolve a usada em `used`.
+    /// `triangleCeiling` (os triângulos guardados no asset): reabrir nunca sai
+    /// mais pesado do que o import otimizado saiu, mesmo num aparelho maior.
+    [[nodiscard]] scene3d::ImportOptions model_import_options(const std::string& path, scene3d::ModelQuality quality,
+                                                              const scene3d::DeviceMemoryHint& memory, bool escalate,
+                                                              scene3d::ModelQuality* used = nullptr,
+                                                              u32 triangleCeiling = 0) const noexcept;
     /// Snapshot "antes" no histórico, se o comando altera a composição.
     void record_history_locked(CommandType type) noexcept;
     [[nodiscard]] static bool mutates_model(CommandType type) noexcept;
@@ -1587,6 +1639,7 @@ private:
     // --- Sincronização --------------------------------------------------------
     /// Protege projeto, timeline, playback, seleção e imagens.
     mutable std::mutex modelMutex_;
+    ModelImportReport lastModelImport_{};   ///< sob modelMutex_
     std::mutex commandSubmitMutex_; ///< publication vs session replacement; never waits for rendering
     /// Protege backend e renderer (GPU). Nunca adquirido com o do modelo já
     /// preso por outra thread que espere o de render — a ordem é sempre

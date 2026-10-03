@@ -270,7 +270,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
 
         if (type == LayerType.Video || type == LayerType.Audio) {
             MenuSection(stringResource(R.string.editor_tempo))
-            MenuItemRow(CupertinoGlyph.Scissors, "Slip · Roll · Slide", act { openPanel(store, ui, EditorPanel.ClipEdit) })
+            MenuItemRow(CupertinoGlyph.Scissors, stringResource(R.string.i18n_clip_modes), act { openPanel(store, ui, EditorPanel.ClipEdit) })
         }
         if (type == LayerType.Video) {
             MenuItemRow(ShellGlyph.Snow, stringResource(R.string.sh_menu_freeze_frame), if (inside) act { store.freezeFrame(id) } else null)
@@ -496,7 +496,7 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
 
         MenuSection(stringResource(R.string.editor_edicao))
         MenuItemRow(
-            CupertinoGlyph.Link, "Snapping",
+            CupertinoGlyph.Link, stringResource(R.string.i18n_snapping),
             act { store.snapping = !store.snapping },
             checked = store.snapping,
         )

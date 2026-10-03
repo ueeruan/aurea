@@ -299,6 +299,8 @@ struct Shape3DPanelSection: View {
     @State private var picking = false
     @State private var pendingColor: DispatchWorkItem?
     @State private var gestureOpen = false
+    @State private var splitAxis = 0
+    @State private var splitCount = 3
 
     var body: some View {
         let _ = model.status.modelRevision
@@ -347,6 +349,8 @@ struct Shape3DPanelSection: View {
                     partControls(part, v)
                 } else {
                     hint("shape3d_whole_hint")
+                    // Só o cubo (e as fatias dele) divide em partes.
+                    if info.kind == 0 { splitControls() }
                 }
             }
             .padding(.bottom, 14)
@@ -393,6 +397,42 @@ struct Shape3DPanelSection: View {
             model.setShapePart(layerId, part: part, values: (0..<9).map { $0 >= 6 ? value : 0 }, mask: 0b111 << 6, inGesture: true)
         }
         hint("shape3d_part_hint")
+    }
+
+    /// "Dividir em partes" do cubo (Shape3DSection.kt SplitCubeBox): eixo, quantas
+    /// partes (2..16, padrão 3) e o botão. Quem divide é o motor (Engine::split_shape3d).
+    @ViewBuilder private func splitControls() -> some View {
+        Text(AureaText.t("shape3d_split_title"))
+            .font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 14).padding(.bottom, 6)
+        HStack(spacing: 6) {
+            Text(AureaText.t("shape3d_split_axis")).font(.aurea(size: 13))
+            Spacer()
+            ForEach(0..<3, id: \.self) { a in
+                let name = ["X", "Y", "Z"][a]
+                chip(name, on: splitAxis == a) { splitAxis = a }
+                    .accessibilityLabel(AureaText.t("shape3d_split_axis_desc", name))
+                    .accessibilityAddTraits(splitAxis == a ? .isSelected : [])
+                    .accessibilityIdentifier("shape3d.split.axis.\(a)")
+            }
+        }.frame(height: 44)
+        HStack(spacing: 6) {
+            Text(AureaText.t("shape3d_split_count")).font(.aurea(size: 13))
+            Spacer()
+            chip("−", on: false) { splitCount = max(2, splitCount - 1) }
+                .accessibilityLabel(AureaText.t("shape3d_split_less"))
+                .accessibilityIdentifier("shape3d.split.less")
+            Text("\(splitCount)").font(.aurea(size: 14, weight: .bold)).frame(width: 36)
+                .accessibilityLabel(AureaText.t("shape3d_split_count_desc", splitCount))
+            chip("+", on: false) { splitCount = min(16, splitCount + 1) }
+                .accessibilityLabel(AureaText.t("shape3d_split_more"))
+                .accessibilityIdentifier("shape3d.split.more")
+        }.frame(height: 44)
+        chip(AureaText.t("shape3d_split_apply"), on: true) {
+            model.splitShape3D(layerId, axis: splitAxis, count: splitCount)
+        }
+        .accessibilityIdentifier("shape3d.split.apply")
+        .padding(.vertical, 4)
+        hint("shape3d_split_hint")
     }
 
     private func choose(_ p: Int) {

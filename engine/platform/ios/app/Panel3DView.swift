@@ -462,9 +462,9 @@ struct Panel3DView: View {
             let index = UInt32(material[0])
             Menu {
                 ForEach(importedMaterials.indices, id: \.self) { row in
-                    Button("Material \(Int(importedMaterials[row][0]) + 1)") { selectedMaterial = UInt32(importedMaterials[row][0]) }
+                    Button(AureaText.t("i18n_material_n", Int(importedMaterials[row][0]) + 1)) { selectedMaterial = UInt32(importedMaterials[row][0]) }
                 }
-            } label: { Text("Material \(index + 1)").font(.aurea(size: 14)).frame(minHeight: 44) }
+            } label: { Text(AureaText.t("i18n_material_n", Int(index) + 1)).font(.aurea(size: 14)).frame(minHeight: 44) }
             ForEach(0..<6, id: \.self) { param in
                 materialControl(material, index: index, param: param)
             }
@@ -472,7 +472,7 @@ struct Panel3DView: View {
     }
 
     private func materialControl(_ material: [Float], index: UInt32, param: Int) -> some View {
-        let labels = ["R", "G", "B", "Alpha", AureaText.t("pn_t3d_metallic"), AureaText.t("pn_t3d_roughness")]
+        let labels = ["R", "G", "B", AureaText.t("tl_alpha"), AureaText.t("pn_t3d_metallic"), AureaText.t("pn_t3d_roughness")]
         let value = min(1, max(0, material[param + 2]))
         let keys = (model.keyframes[layerId] ?? []).filter { $0.property == 37 && $0.effectIndex == index && $0.paramIndex == UInt32(param) }
         let here = keys.first { $0.time == model.localPlayhead }

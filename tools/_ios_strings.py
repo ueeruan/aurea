@@ -186,7 +186,9 @@ lines += ['        }', '    }', '    static var systemDefault: AureaLanguage { .
           '        for language in Locale.preferredLanguages {']
 for code, raw, label, folder in languages:
     lines.append(f'            if language.hasPrefix("{code}") {{ return .{code} }}')
-lines += ['            if language.hasPrefix("in") { return .id }', '        }', '        return .pt', '    }', '}', '',
+# Idioma do sistema fora dos sete: inglês (como o Android, AppLanguage.wrap),
+# não português.
+lines += ['            if language.hasPrefix("in") { return .id }', '        }', '        return .en', '    }', '}', '',
           'enum AureaText {', '    static var language: AureaLanguage = .system',
           '    static func english(_ key: String) -> String { en[key] ?? pt[key] ?? key }',
           '    static func t(_ key: String) -> String {', '        let table: [String: String]',
@@ -210,6 +212,7 @@ lines += ['    static func plural(_ key: String, _ count: Int, _ args: CVarArg..
           '        let format = forms[quantity] ?? forms["other"] ?? key',
           '        return String(format: format, arguments: args.isEmpty ? [count] : args)', '    }']
 plurals = {}
+en_table = load(EN)
 for code, raw, label, folder in languages:
     path = Path(ROOT) / 'android/app/src/main/res' / folder / 'strings.xml'
     if not path.exists() and code == 'id':
@@ -217,8 +220,11 @@ for code, raw, label, folder in languages:
     table = load(path)
     plurals[raw] = {node.get('name'): {item.get('quantity'): to_swift_format(''.join(item.itertext()).replace("\\'", "'").replace('\\"', '"').replace('\\n', '\n')) for item in node.findall('item')} for node in ET.parse(path).getroot().findall('plurals')}
     lines.append(f'    private static let {code}: [String: String] = [')
+    # Chave que falta num idioma: fora do português cai no INGLÊS (nunca pt
+    # no meio de uma tela em russo ou árabe).
+    fallback = pt if code == 'pt' else {**pt, **en_table}
     for key in KEYS:
-        lines.append('        "%s": %s,' % (key, swift_literal(to_swift_format(table.get(key, pt[key])))))
+        lines.append('        "%s": %s,' % (key, swift_literal(to_swift_format(table.get(key, fallback[key])))))
     lines.append('    ]')
 lines.append('    private static let plurals: [String: [String: [String: String]]] = [')
 for language, table in plurals.items():

@@ -54,6 +54,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -87,6 +89,40 @@ internal object Interp {
     const val BOUNCE = 7
     const val ELASTIC = 8
     const val STEPS = 9
+    /** "back": passa do valor final e volta (`Interpolation::Overshoot`). */
+    const val OVERSHOOT = 10
+}
+
+/**
+ * Curvas com parâmetros (`kEaseParamMarker`, core/Math.hpp): com y2 = −10 o
+ * Quique, o Elástico e o Overshoot leem os parâmetros em x1 (A), y1 (B) e x2
+ * (sentido: < 0,5 = invertida). Sem o marcador, os padrões de sempre.
+ */
+internal const val EASE_PARAM_MARKER = -10f
+/** Overshoot padrão: s = 1,70158 (≈ 10 % além do fim) em 0..1 → s 0..5. */
+internal const val OVERSHOOT_DEFAULT_AMOUNT = 1.70158f / 5f
+internal const val ELASTIC_DEFAULT_CYCLES = 3
+internal const val ELASTIC_DEFAULT_DAMPING = .25f
+
+/** `overshoot_ease` (core/Math.hpp), mesma conta em f32. */
+internal fun overshootCurve(t: Float, amount: Float, reverse: Boolean): Float {
+    if (t <= 0f) return 0f
+    if (t >= 1f) return 1f
+    val s = amount.coerceIn(0f, 1f) * 5f
+    val u = (if (reverse) 1f - t else t) - 1f
+    val v = 1f + (s + 1f) * u * u * u + s * u * u
+    return if (reverse) 1f - v else v
+}
+
+/** `elastic_ease` (core/Math.hpp): ciclos inteiros (1..8), amortecimento k = 2 + 16·B. */
+internal fun elasticCurve(t: Float, cycles01: Float, damping01: Float, reverse: Boolean): Float {
+    if (t <= 0f) return 0f
+    if (t >= 1f) return 1f
+    val n = kotlin.math.round(cycles01 * 8f).toInt().coerceIn(1, 8).toFloat()
+    val k = 2f + 16f * damping01.coerceIn(0f, 1f)
+    val time = if (reverse) 1f - t else t
+    val v = (1f - kotlin.math.exp(-k * time) * kotlin.math.cos(2f * Math.PI.toFloat() * n * time)) / (1f - kotlin.math.exp(-k))
+    return if (reverse) 1f - v else v
 }
 
 /**
@@ -100,7 +136,20 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
 
     /** Tem alças arrastáveis (bézier ou reta, que vira bézier ao ser puxada). */
     val hasHandles get() = isBezier || interp == Interp.LINEAR || interp == Interp.EASE_IN || interp == Interp.EASE_OUT || interp == Interp.EASE_IN_OUT
-    val supportsInversion get() = interp in Interp.LINEAR..Interp.CUSTOM || interp == Interp.BOUNCE
+    val supportsInversion get() = interp in Interp.LINEAR..Interp.CUSTOM || interp == Interp.BOUNCE ||
+        interp == Interp.OVERSHOOT || (interp == Interp.ELASTIC && y2 == EASE_PARAM_MARKER)
+    /** Família com parâmetros (Quique, Elástico, Overshoot): x1..y2 são os parâmetros. */
+    val isParametric get() = interp == Interp.BOUNCE || interp == Interp.ELASTIC || interp == Interp.OVERSHOOT
+    private val marked get() = y2 == EASE_PARAM_MARKER
+
+    val overshootAmount get() = if (interp == Interp.OVERSHOOT && marked) x1.coerceIn(0f, 1f) else OVERSHOOT_DEFAULT_AMOUNT
+    fun overshoot(amount: Float = overshootAmount) =
+        Ease(Interp.OVERSHOOT, amount.coerceIn(0f, 1f), 0f, if (interp == Interp.OVERSHOOT && marked) x2 else 1f, EASE_PARAM_MARKER)
+
+    val elasticCycles get() = if (interp == Interp.ELASTIC && marked) kotlin.math.round(x1 * 8).toInt().coerceIn(1, 8) else ELASTIC_DEFAULT_CYCLES
+    val elasticDamping get() = if (interp == Interp.ELASTIC && marked) y1.coerceIn(0f, 1f) else ELASTIC_DEFAULT_DAMPING
+    fun elastic(cycles: Int = elasticCycles, damping: Float = elasticDamping) =
+        Ease(Interp.ELASTIC, cycles.coerceIn(1, 8) / 8f, damping.coerceIn(0f, 1f), if (interp == Interp.ELASTIC && marked) x2 else 1f, EASE_PARAM_MARKER)
 
     val bounceCount get() = if (y2 == -10f) kotlin.math.round(x1 * 8).toInt().coerceIn(1, 8) else 3
     val bounceStrength get() = if (y2 == -10f) y1.coerceIn(.1f, .9f) else .5f
@@ -145,8 +194,9 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
                 1f-4f*height*p*(1f-p)
             }
         }
-        Interp.ELASTIC -> if (t <= 0f) 0f else if (t >= 1f) 1f else ((1-kotlin.math.exp(-6.0*t)*kotlin.math.cos(6*Math.PI*t))/(1-kotlin.math.exp(-6.0))).toFloat()
+        Interp.ELASTIC -> if (marked) elasticCurve(t, x1, y1, x2 < .5f) else if (t <= 0f) 0f else if (t >= 1f) 1f else ((1-kotlin.math.exp(-6.0*t)*kotlin.math.cos(6*Math.PI*t))/(1-kotlin.math.exp(-6.0))).toFloat()
         Interp.STEPS -> kotlin.math.floor(t.coerceIn(0f,1f)*4f)/4f
+        Interp.OVERSHOOT -> if (marked) overshootCurve(t, x1, x2 < .5f) else overshootCurve(t, OVERSHOOT_DEFAULT_AMOUNT, false)
         // `keyframe_ease` (Curve.hpp): a força repete a MESMA bézier sobre o resultado.
         else -> {
             var u = cubicBezier(x1, y1, x2, y2, t)
@@ -171,6 +221,8 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
     /** Alças espelhadas; nulo significa simétrica ou família sem inversão disponível. */
     fun inverted(): Ease? = when (interp) {
         Interp.BOUNCE -> bounce().copy(x2 = if (y2 == -10f && x2 < .5f) 1f else 0f)
+        Interp.OVERSHOOT -> overshoot().copy(x2 = if (marked && x2 < .5f) 1f else 0f)
+        Interp.ELASTIC -> if (marked) copy(x2 = if (x2 < .5f) 1f else 0f) else null
         Interp.EASE_IN -> copy(interp = Interp.EASE_OUT)
         Interp.EASE_OUT -> copy(interp = Interp.EASE_IN)
         Interp.BEZIER, Interp.CUSTOM -> {
@@ -182,7 +234,7 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
 
     fun same(o: Ease): Boolean {
         if (interp != o.interp) return false
-        if (!isBezier && interp != Interp.BOUNCE) return true
+        if (!isBezier && !isParametric) return true
         return power == o.power && abs(x1 - o.x1) < 0.01f && abs(y1 - o.y1) < 0.01f && abs(x2 - o.x2) < 0.01f && abs(y2 - o.y2) < 0.01f
     }
 }
@@ -245,6 +297,8 @@ private fun nameOf(e: Ease): Int {
     for (f in Families) for (p in f.presets) if (e.same(p.ease) && p.name != null) return p.name
     return when (e.interp) {
         Interp.BOUNCE -> R.string.pn_textpreset_bounce
+        Interp.ELASTIC -> R.string.pn_textpreset_elastic
+        Interp.OVERSHOOT -> R.string.curve_type_overshoot
         Interp.EASE_IN -> R.string.pn_ease_in
         Interp.EASE_OUT -> R.string.pn_ease_out
         Interp.EASE_IN_OUT -> R.string.pn_ease_in_out
@@ -375,6 +429,8 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     }
     val (layer, start, end) = seg
     val ease = remember(layer, start, store.curveRevision) { easeOf(store, layer, start) }
+    // A curva que se desenha é a do MOTOR (a mesma conta que anima o projeto).
+    val samples = remember(ease) { engineEaseSamples(ease) }
     val graphMode = store.curveGraphMode
     var menu by remember { mutableStateOf(false) }
     var savePrompt by remember { mutableStateOf(false) }
@@ -460,11 +516,30 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     TrackGraph(store, layer, (store.keyframes[layer] ?: emptyList()).track(start), graphMode == 2)
                 } else CurveGraph(
                     ease = ease,
+                    samples = samples,
                     progress = progress,
                     onBegin = { store.beginGesture("curva") },
                     onChange = { applyEase(store, layer, start, it) },
                     onEnd = { store.endGesture() },
                 )
+            }
+            // Parâmetros das curvas que passam do ponto / balançam (um desfazer por arrasto).
+            if (graphMode == 0 && ease.interp == Interp.OVERSHOOT) {
+                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CurveParamSlider(stringResource(R.string.curve_param_amount), ease.overshootAmount, 0f..1f, 0, "curve.overshoot.amount", null, store,
+                        "overshoot") { applyEase(store, layer, start, ease.overshoot(amount = it)) }
+                }
+            }
+            if (graphMode == 0 && ease.interp == Interp.ELASTIC) {
+                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CurveParamSlider(stringResource(R.string.curve_param_oscillations), ease.elasticCycles.toFloat(), 1f..8f, 6, "curve.elastic.cycles",
+                        stringResource(R.string.curve_param_oscillations_value, ease.elasticCycles), store, "elastic") {
+                        val n = kotlin.math.round(it).toInt().coerceIn(1, 8)
+                        if (n != ease.elasticCycles) applyEase(store, layer, start, ease.elastic(cycles = n))
+                    }
+                    CurveParamSlider(stringResource(R.string.curve_param_damping), ease.elasticDamping, 0f..1f, 0, "curve.elastic.damping", null, store,
+                        "elastic") { applyEase(store, layer, start, ease.elastic(damping = it)) }
+                }
             }
             if (graphMode == 0 && ease.interp == Interp.BOUNCE) {
                 Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -474,12 +549,13 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     Text(stringResource(R.string.fx_amplitude), modifier = Modifier.padding(start = 8.dp),
                         style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = Color.White)))
                     var changing by remember { mutableStateOf(false) }
+                    val bounceLabel = stringResource(R.string.pn_textpreset_bounce)
                     androidx.compose.material3.Slider(value = ease.bounceStrength, valueRange = .1f.. .9f,
                         onValueChange = { if (!changing) { changing = true; store.beginGesture("bounce") }; applyEase(store, layer, start, ease.bounce(strength = it)) },
                         onValueChangeFinished = { if (changing) { changing = false; store.endGesture() } },
                         colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = CurveGreen,
                             activeTrackColor = CurveGreen, inactiveTrackColor = CurveRailFill),
-                        modifier = Modifier.weight(1f).testTag("curve.bounce.strength").semantics { contentDescription = "Bounce" })
+                        modifier = Modifier.weight(1f).testTag("curve.bounce.strength").semantics { contentDescription = bounceLabel })
                 }
             }
             // Presets prontos (menu), salvar a curva e as curvas salvas numa
@@ -530,34 +606,13 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                 Box(Modifier.size(48.dp).tocavel { jump(1) }, contentAlignment = Alignment.Center) {
                     CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, Color.White)
                 }
-                // O único preset pronto que fica: Bounce (a bézier se faz nas
-                // alças). Tocar de novo volta a uma bézier suave, com alças.
-                if (graphMode == 0) {
-                    val bouncing = ease.interp == Interp.BOUNCE
-                    val bounceName = stringResource(R.string.pn_textpreset_bounce)
-                    Box(
-                        Modifier.padding(start = 4.dp, end = 8.dp).height(48.dp)
-                            .testTag("curve.preset.bounce")
-                            .semantics { contentDescription = bounceName }
-                            .tocavel {
-                                store.beginGesture("curva")
-                                applyEase(store, layer, start, if (bouncing) bez(0.42f, 0f, 0.58f, 1f) else Ease(Interp.BOUNCE, .375f, .5f, 1f, -10f))
-                                store.endGesture()
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            bounceName, maxLines = 1,
-                            modifier = Modifier.clip(RoundedCornerShape(14.dp))
-                                .background(if (bouncing) CurveGreen.copy(alpha = .18f) else CurveRailFill)
-                                .border(1.dp, if (bouncing) CurveGreen else Color.White.copy(alpha = .18f), RoundedCornerShape(14.dp))
-                                .padding(horizontal = 14.dp, vertical = 7.dp),
-                            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600,
-                                color = if (bouncing) CurveGreen else Color.White)),
-                        )
-                    }
-                }
             }
+        }
+        // Os tipos de curva ao lado do gráfico (como no pedido do beta): cada
+        // botão mostra a curva que aplica, desenhada pelo motor.
+        if (graphMode == 0) CurveTypeRail(ease) { type ->
+            val next = quickTypeEase(type, ease)
+            if (!next.same(ease) || next.interp != ease.interp) setCurve("tipo de curva", next)
         }
     }
     }
@@ -624,6 +679,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
 @Composable
 private fun CurveGraph(
     ease: Ease,
+    samples: FloatArray?,
     progress: () -> Float?,
     onBegin: () -> Unit,
     onChange: (Ease) -> Unit,
@@ -633,7 +689,8 @@ private fun CurveGraph(
     /** A alça no dedo (0 saída, 1 chegada, −1 nenhuma): ganha o halo. */
     var activeHandle by remember { mutableIntStateOf(-1) }
     // Faixa vertical ajustada à curva e às alças; parada enquanto o dedo arrasta.
-    val fitted = remember(ease) { easeRange(ease) }
+    // A faixa cresce para mostrar o overshoot e as oscilações inteiras.
+    val fitted = remember(ease, samples) { easeRange(ease, samples) }
     val yMin = activeRange?.first ?: fitted.first
     val yMax = activeRange?.second ?: fitted.second
     val current by rememberUpdatedState(ease)
@@ -708,7 +765,7 @@ private fun CurveGraph(
             val area = Path().apply { moveTo(0f, base) }
             for (i in 0..256) {
                 val t = i / 256f
-                val q = pt(t, ease.transform(t))
+                val q = pt(t, samples?.getOrNull(i) ?: ease.transform(t))
                 if (i == 0) curve.moveTo(q.x, q.y) else curve.lineTo(q.x, q.y)
                 area.lineTo(q.x, q.y)
             }
@@ -753,12 +810,113 @@ private fun CurveGraph(
         Canvas(Modifier.fillMaxSize()) {
             val f = progress() ?: return@Canvas
             val inset = CURVE_INSET.toPx()
-            val p = Offset(inset + f * max(1f, size.width - 2 * inset), size.height - (ease.transform(f) - yMin) / (yMax - yMin) * size.height)
+            val v = samples?.let { easeSampleAt(it, f) } ?: ease.transform(f)
+            val p = Offset(inset + f * max(1f, size.width - 2 * inset), size.height - (v - yMin) / (yMax - yMin) * size.height)
             drawLine(Color.White.copy(alpha = 0.4f), Offset(p.x, 0f), Offset(p.x, size.height),
                 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 4.dp.toPx())))
             drawCircle(Color.White, 4.dp.toPx(), p)
         }
     }
+}
+
+/**
+ * A curva do trecho amostrada pelo MOTOR (`sample_keyframe_ease`): o gráfico
+ * desenha exatamente o que anima o projeto. Nulo (sem a biblioteca nativa, nos
+ * testes JVM) = a mesma conta em Kotlin ([Ease.transform]).
+ */
+internal fun engineEaseSamples(e: Ease, count: Int = CURVE_SAMPLES): FloatArray? = try {
+    val out = FloatArray(count)
+    if (com.aurea.aurea.engine.AureaEngine.nativeSampleEase(e.interp, e.x1, e.y1, e.x2, e.y2, e.power, out) == count) out else null
+} catch (_: Throwable) { null }
+
+/** Nome, rótulo de acessibilidade e alvo de teste de cada tipo rápido. */
+@StringRes
+private fun quickTypeName(t: CurveQuickType): Int = when (t) {
+    CurveQuickType.Linear -> R.string.panel_linear
+    CurveQuickType.Ease -> R.string.curve_type_ease
+    CurveQuickType.Overshoot -> R.string.curve_type_overshoot
+    CurveQuickType.Elastic -> R.string.pn_textpreset_elastic
+    CurveQuickType.Bounce -> R.string.pn_textpreset_bounce
+}
+
+private fun quickTypeTag(t: CurveQuickType): String = when (t) {
+    // O Quique mantém o alvo antigo do botão (testes instrumentados).
+    CurveQuickType.Bounce -> "curve.preset.bounce"
+    else -> "curve.type." + t.name.lowercase()
+}
+
+/**
+ * Os tipos de curva ao lado do gráfico: Linear, Suave, Passar do ponto,
+ * Elástico e Quique. Cada botão desenha a curva padrão do tipo (amostrada pelo
+ * motor); o tipo do trecho fica destacado. Rola se o painel for baixo.
+ */
+@Composable
+private fun CurveTypeRail(ease: Ease, onPick: (CurveQuickType) -> Unit) {
+    val current = quickTypeOf(ease)
+    val railLabel = stringResource(R.string.curve_types_label)
+    Column(
+        Modifier.width(52.dp).fillMaxHeight().background(CurveRailFill)
+            .verticalScroll(rememberScrollState()).padding(vertical = 4.dp)
+            .semantics { contentDescription = railLabel },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        CurveQuickType.entries.forEach { type ->
+            val active = type == current
+            val name = stringResource(quickTypeName(type))
+            val preview = remember(type) { quickTypeEase(type, Ease(Interp.HOLD, 0f, 0f, 1f, 1f)) }
+            val points = remember(preview) { engineEaseSamples(preview, 49) ?: FloatArray(49) { preview.transform(it / 48f) } }
+            Box(
+                Modifier.size(48.dp).testTag(quickTypeTag(type))
+                    .semantics { contentDescription = name; selected = active }
+                    .tocavel { onPick(type) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(
+                    Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                        .background(if (active) CurveGreen.copy(alpha = .18f) else Color.Transparent)
+                        .border(1.dp, if (active) CurveGreen else Color.White.copy(alpha = .14f), RoundedCornerShape(10.dp)),
+                ) {
+                    val (lo, hi) = easeRange(preview, points)
+                    val pad = 6.dp.toPx()
+                    val w = size.width - 2 * pad
+                    val h = size.height - 2 * pad
+                    val path = Path()
+                    points.forEachIndexed { i, v ->
+                        val x = pad + w * i / (points.size - 1)
+                        val y = pad + h - (v - lo) / (hi - lo) * h
+                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    drawPath(path, if (active) CurveGreen else Color.White, style = Stroke(1.8.dp.toPx(), cap = StrokeCap.Round))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Um parâmetro da curva (Quantidade, Oscilações, Amortecimento): rótulo curto e
+ * slider; um arrasto inteiro é UM passo de desfazer. [steps] > 0 = valores
+ * inteiros; [state] = o valor falado pelo leitor de tela.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.CurveParamSlider(
+    label: String, value: Float, range: ClosedFloatingPointRange<Float>, steps: Int, tag: String,
+    state: String?, store: EditorStore, gesture: String, onChange: (Float) -> Unit,
+) {
+    Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp).widthIn(max = 96.dp),
+        style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = Color.White)))
+    var changing by remember { mutableStateOf(false) }
+    val change by rememberUpdatedState(onChange)
+    androidx.compose.material3.Slider(value = value.coerceIn(range.start, range.endInclusive), valueRange = range, steps = steps,
+        onValueChange = { if (!changing) { changing = true; store.beginGesture(gesture) }; change(it) },
+        onValueChangeFinished = { if (changing) { changing = false; store.endGesture() } },
+        colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = CurveGreen,
+            activeTrackColor = CurveGreen, inactiveTrackColor = CurveRailFill),
+        modifier = Modifier.weight(1f).testTag(tag).semantics {
+            contentDescription = label
+            if (state != null) stateDescription = state
+        })
 }
 
 /** Pastilha da fileira de presets (mesmo desenho do botão Bounce), alvo de 40 dp. */

@@ -440,7 +440,7 @@ final class AureaModel: ObservableObject {
         let preset = envelope?["preset"] as? String ?? ""
         let mapped = (envelope?["mapped"] as? NSNumber)?.intValue ?? 0
         guard envelope != nil, error.isEmpty, !preset.isEmpty, mapped > 0 else {
-            toast = AureaText.t("am_import_failed", error.isEmpty ? AureaText.t("am_import_nothing") : error); return
+            toast = AureaText.t("am_import_failed", error.isEmpty ? AureaText.t("am_import_nothing") : AureaEngineText.reason(error)); return
         }
         let skipped = (envelope?["skipped"] as? [Any])?.count ?? 0
         let warnings = (envelope?["warnings"] as? [Any])?.count ?? 0
@@ -453,7 +453,7 @@ final class AureaModel: ObservableObject {
         }
         if let layer = primarySelection {
             let failure = engine.applyPreset(layer, json: preset, duration: 0)
-            if !failure.isEmpty { toast = failure; return }
+            if !failure.isEmpty { toast = AureaText.t("msg_preset_nao_aplicado", AureaEngineText.reason(failure)); return }
             refreshModel(force: true)
         }
         toast = skipped > 0 ? AureaText.t("am_import_done_skipped", mapped, skipped, saved) : AureaText.t("am_import_done", mapped, saved)
@@ -1165,7 +1165,7 @@ final class AureaModel: ObservableObject {
             observeMemoryWarnings()
         } else {
             started = false
-            startError = (error as String?) ?? AureaText.t("ios_engine_not_started")
+            startError = (error as String?).map { AureaEngineText.sentence($0) } ?? AureaText.t("ios_engine_not_started")
         }
     }
 
@@ -1639,7 +1639,7 @@ final class AureaModel: ObservableObject {
 
     func ungroup(_ layerId: Int64) {
         let why = engine.ungroupPrecomp(layerId)
-        if !why.isEmpty { toast = why }
+        if !why.isEmpty { toast = AureaText.t("msg_nao_da_para_desagrupar_o_resultado", AureaEngineText.reason(why)) }
         refreshModel(force: true)
     }
 
@@ -1869,15 +1869,25 @@ final class AureaModel: ObservableObject {
         return newProject(width: width, height: height, fps: fps, title: title)
     }
 
+    /// `fps` livre (1–240; o núcleo encaixa 29,97 → 30000/1001). `background`
+    /// (RGB sRGB) é o fundo com que a composição nasce, fora do histórico;
+    /// nil = preto, como sempre (`home/ProjectMenu.kt`).
     @discardableResult
-    func newProject(width: UInt32, height: UInt32, fps: Double, title: String) -> Bool {
+    func newProject(width: UInt32, height: UInt32, fps: Double, title: String, background: [Float]? = nil) -> Bool {
         guard started else {
             toast = startError ?? AureaText.t("engine_not_ready")
             return false
         }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = trimmed.isEmpty ? AureaText.t("project_new", projects.count + 1) : trimmed
-        guard engine.newProjectWidth(width, height: height, fps: fps, title: name) else {
+        let created: Bool
+        if let bg = background, bg.count >= 3 {
+            created = engine.newProjectWidth(width, height: height, fps: fps, title: name,
+                                             backgroundR: bg[0], g: bg[1], b: bg[2], a: 1)
+        } else {
+            created = engine.newProjectWidth(width, height: height, fps: fps, title: name)
+        }
+        guard created else {
             toast = AureaText.t("msg_nao_foi_possivel_criar_o_projeto")
             return false
         }
@@ -2069,6 +2079,8 @@ final class AureaModel: ObservableObject {
     /// `atPlayhead`: o clipe entra no cabeçote (o vídeo gerado pela IA), não no zero.
     func importMedia(url: URL, kind: ImportKind, objectHDRI: Int64? = nil, atPlayhead: Bool = false) {
         guard !importingMedia else { return }
+        // Modelo 3D: o fluxo com orçamento de memória ("Otimizar modelo").
+        if kind == .model { importModelFiles(urls: [url]); return }
         let performanceStart = ProcessInfo.processInfo.systemUptime
         IPhonePerformanceTest.shared.event("import_start", values: ["kind": String(describing: kind)])
         operationMessage = AureaText.t("ios_importing_media")
@@ -2094,8 +2106,9 @@ final class AureaModel: ObservableObject {
                     else { result = importer.importHdri(destination.path) }
                 }
                 if result < 0 {
-                    failure = importer.lastImportError
-                    if failure.isEmpty { failure = AureaText.t("ios_import_failed_code", String(-result)) }
+                    // A frase do motor sai no idioma do app (AureaEngineText).
+                    let raw = importer.lastImportError
+                    failure = raw.isEmpty ? AureaText.t("ios_import_failed_code", String(-result)) : AureaEngineText.sentence(raw, code: Int(-result))
                     try? FileManager.default.removeItem(at: destination)
                 }
             } catch { failure = AureaText.t("ios_import_copy_failed", error.localizedDescription) }
@@ -2105,7 +2118,7 @@ final class AureaModel: ObservableObject {
                 self.importingMedia = false
                 IPhonePerformanceTest.shared.event("import_end", values: ["kind": String(describing: kind), "milliseconds": (ProcessInfo.processInfo.systemUptime - performanceStart) * 1000, "success": importFailure.isEmpty])
                 if !importFailure.isEmpty { self.toast = importFailure; return }
-                if kind == .hdri { self.toast = "Ambiente importado" }
+                if kind == .hdri { self.toast = AureaText.t("eng_environment_imported") }
                 else { self.engine.selectLayers([NSNumber(value: importedId)]); self.selection = [importedId] }
                 self.refreshModel(force: true)
                 if atPlayhead && kind != .hdri { self.moveToPlayhead(importedId) }
@@ -2169,11 +2182,27 @@ final class AureaModel: ObservableObject {
                     } else if modelExts.contains(target.pathExtension.lowercased()) { candidates.append(target) }
                 }
                 if let modelURL = candidates.first {
-                    result = importer.importModel(modelURL.path, name: modelURL.deletingPathExtension().lastPathComponent)
-                    if result < 0 {
-                        failure = importer.lastImportError
-                        if failure.isEmpty { failure = AureaText.t("ios_import_failed_code", String(-result)) }
-                    } else { missing = importer.modelMissingTextures(result) }
+                    // Plano do motor ANTES do import (só cabeçalhos e contagens):
+                    // o que cabe neste aparelho. Pesado = pergunta; pesado demais = recusa.
+                    let plan = ModelPlanInfo(importer.inspectModel(modelURL.path))
+                    let modelName = modelURL.deletingPathExtension().lastPathComponent
+                    if plan.tooHeavy {
+                        failure = AureaText.t("model3d_too_heavy")
+                    } else if plan.heavy {
+                        let request = ModelOptimizeRequest(path: modelURL.path, name: modelName, folder: folder, plan: plan)
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self else { return }
+                            self.importingMedia = false
+                            self.modelOptimizeQuality = plan.recommended == 0 ? 1 : plan.recommended
+                            self.modelOptimize = request
+                        }
+                        return
+                    } else {
+                        result = self?.runModelImport(importer, path: modelURL.path, name: modelName, quality: 0) ?? -1
+                        if result < 0 {
+                            failure = Self.modelImportFailure(importer, code: result)
+                        } else { missing = importer.modelMissingTextures(result) }
+                    }
                 } else { failure = AureaText.t("msg_esse_arquivo_nao_e_um_modelo") }
             } catch { failure = AureaText.t("ios_import_copy_failed", error.localizedDescription) }
             if result < 0 { try? fm.removeItem(at: folder) }
@@ -2186,6 +2215,112 @@ final class AureaModel: ObservableObject {
                 self.engine.selectLayers([NSNumber(value: importedId)]); self.selection = [importedId]
                 self.refreshModel(force: true)
                 if !stillMissing.isEmpty { self.promptModelTextures(layer: importedId, names: stillMissing) }
+                _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    // MARK: "Otimizar modelo" (orçamento de memória do import 3D)
+
+    /// O plano que o motor devolve antes do import (Engine::inspect_model).
+    /// Layout em AureaEngine.h (`inspectModel:`); a conta é toda do motor.
+    struct ModelPlanInfo {
+        let values: [Int64]
+        init(_ raw: [NSNumber]) { values = raw.map { $0.int64Value } }
+        private func at(_ i: Int) -> Int64 { i < values.count ? values[i] : 0 }
+        var valid: Bool { at(0) != 0 }
+        var exact: Bool { at(1) != 0 }
+        var heavy: Bool { valid && at(2) != 0 }
+        var tooHeavy: Bool { valid && at(3) != 0 }
+        var recommended: Int { Int(max(0, min(2, at(4)))) }
+        var triangles: Int64 { at(5) }
+        func fits(_ q: Int) -> Bool { at(10 + max(0, min(2, q))) != 0 }
+        func keptTriangles(_ q: Int) -> Int64 { at(16 + max(0, min(2, q))) }
+        func textureCap(_ q: Int) -> Int { Int(at(19 + max(0, min(2, q)))) }
+        /// Da mais fiel à mais leve; o Original só quando cabe.
+        var offered: [Int] { (fits(0) ? [0] : []) + [1, 2] }
+    }
+
+    struct ModelOptimizeRequest: Identifiable {
+        let id = UUID()
+        let path: String
+        let name: String
+        let folder: URL
+        let plan: ModelPlanInfo
+    }
+    @Published var modelOptimize: ModelOptimizeRequest?
+    @Published var modelOptimizeQuality = 1
+
+    /// "1,2 mi" / "850 mil" — triângulos curtos para o alerta e o aviso.
+    static func modelCount(_ n: Int64) -> String {
+        if n >= 1_000_000 { return String(format: "%.1f %@", Double(n) / 1_000_000, AureaText.t("model3d_million")) }
+        if n >= 1_000 { return "\(n / 1_000) \(AureaText.t("model3d_thousand"))" }
+        return "\(n)"
+    }
+
+    /// Erro do import em texto: −9 (BudgetExceeded) é o "pesado demais" localizado.
+    static func modelImportFailure(_ importer: AureaEngine, code: Int64) -> String {
+        if code == -9 { return AureaText.t("model3d_too_heavy_after") }
+        let detail = importer.lastImportError
+        return detail.isEmpty ? AureaText.t("ios_import_failed_code", String(-code)) : AureaEngineText.sentence(detail, code: Int(-code))
+    }
+
+    /// O import de verdade (bloqueia: fila de mídia), com as etapas do motor
+    /// localizadas no aviso de progresso enquanto roda.
+    func runModelImport(_ importer: AureaEngine, path: String, name: String, quality: Int) -> Int64 {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.15, repeating: 0.15)
+        timer.setEventHandler { [weak self] in
+            let p = Int(importer.importModelProgress())
+            let stage: String
+            switch p / 1000 {
+            case 1: stage = AureaText.t("msg_lendo_o_arquivo")
+            case 2: stage = AureaText.t("msg_geometria")
+            case 3: stage = AureaText.t("msg_texturas")
+            case 4: stage = AureaText.t("msg_otimizando")
+            case 5, 6: stage = AureaText.t("msg_preparando")
+            case 7: stage = AureaText.t("model3d_stage_simplifying")
+            default: stage = AureaText.t("msg_importando")
+            }
+            self?.setOperationMessage("\(stage)… \((p % 1000) / 10)%")
+        }
+        timer.resume()
+        let result = importer.importModel(path, name: name, quality: Int32(quality))
+        timer.cancel()
+        return result
+    }
+
+    private func setOperationMessage(_ text: String) { operationMessage = text }
+
+    func dismissModelOptimize(_ request: ModelOptimizeRequest) {
+        modelOptimize = nil
+        try? FileManager.default.removeItem(at: request.folder)
+    }
+
+    /// O botão do alerta: importa com a qualidade escolhida.
+    func confirmModelOptimize(_ request: ModelOptimizeRequest, quality: Int) {
+        modelOptimize = nil
+        guard !importingMedia else { return }
+        operationMessage = AureaText.t("ios_importing_media")
+        importingMedia = true
+        if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            guard let self else { return }
+            let result = self.runModelImport(importer, path: request.path, name: request.name, quality: quality)
+            let failure = result < 0 ? Self.modelImportFailure(importer, code: result) : ""
+            let missing = result < 0 ? [] : importer.modelMissingTextures(result)
+            let report = importer.lastModelImport().map { $0.int64Value }
+            if result < 0 { try? FileManager.default.removeItem(at: request.folder) }
+            DispatchQueue.main.async {
+                self.importingMedia = false
+                if !failure.isEmpty { self.toast = failure; return }
+                self.engine.selectLayers([NSNumber(value: result)]); self.selection = [result]
+                self.refreshModel(force: true)
+                if !missing.isEmpty { self.promptModelTextures(layer: result, names: missing) }
+                else if quality != 0, report.count >= 2, report[0] > report[1] {
+                    self.toast = AureaText.t("model3d_optimized_toast", Self.modelCount(report[0]), Self.modelCount(report[1]))
+                }
                 _ = self.saveProject(writeThumbnail: false)
             }
         }
@@ -2232,7 +2367,7 @@ final class AureaModel: ObservableObject {
                 try? FileManager.default.copyItem(at: url, to: target)
             }
             let left = importer.reloadModelTextures(req.layer)
-            let failure = left < 0 ? importer.lastImportError : ""
+            let failure = left < 0 ? AureaEngineText.sentence(importer.lastImportError, code: Int(-left)) : ""
             let still = left > 0 ? importer.modelMissingTextures(req.layer) : []
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -2259,7 +2394,7 @@ final class AureaModel: ObservableObject {
                 guard let self else { return }
                 self.importingMedia = false
                 self.refreshModel(force: true)
-                if !error.isEmpty { self.toast = error }
+                if !error.isEmpty { self.toast = AureaEngineText.sentence(error) }
                 else { _ = self.saveProject(writeThumbnail: false) }
             }
         }
@@ -2328,7 +2463,7 @@ final class AureaModel: ObservableObject {
     }
     func createTrackedObject(_ kind: UInt32) {
         let error = engine.createCameraTrackObject(kind)
-        if !error.isEmpty { toast = error }
+        if !error.isEmpty { toast = AureaEngineText.sentence(error) }
         cameraContextMenu = false
         refreshModel(force: true)
         refreshCameraTrackPoints()
@@ -2405,7 +2540,7 @@ final class AureaModel: ObservableObject {
             self.motionAutoApply = -1
             let state = (self.motionStatus["state"] as? NSNumber)?.intValue ?? 0
             guard state == 2 else {
-                if auto >= 0, state == 3, let message = self.motionStatus["message"] as? String, !message.isEmpty { self.toast = message }
+                if auto >= 0, state == 3, let message = self.motionStatus["message"] as? String, !message.isEmpty { self.toast = AureaEngineText.sentence(message) }
                 return
             }
             if auto == 3 { self.applyMotion(3, lock: true, smooth: 0.5, maxScale: 1, crop: 0) }
@@ -2417,7 +2552,7 @@ final class AureaModel: ObservableObject {
     }
     func applyMotion(_ apply: UInt32, lock: Bool = false, smooth: Float = 0.5, maxScale: Float = 1.15, crop: UInt32 = 1, target: Int64? = nil) {
         let error = engine.applyMotionTrack(target ?? primarySelection ?? 0, apply: apply, lock: lock, smooth: smooth, maxScale: maxScale, crop: crop)
-        toast = error.isEmpty ? AureaText.t("ios_motion_applied") : error
+        toast = error.isEmpty ? AureaText.t("ios_motion_applied") : AureaEngineText.sentence(error)
         refreshModel(force: true); motionStatus = engine.motionTrackStatus()
     }
 
@@ -2564,12 +2699,16 @@ final class AureaModel: ObservableObject {
         syncAfterEdit()
     }
 
-    func addText() {
+    /// Botão "Texto": camada nova já escolhida e o teclado aberto (salvo `openEditor: false`,
+    /// usado pelos presets de texto da barra de adicionar). Devolve o id (negativo = falhou).
+    @discardableResult
+    func addText(openEditor: Bool = true) -> Int64 {
         let id = engine.addText(AureaText.t("pn_text3d_placeholder"))
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
         showAddLayer = false
         syncAfterEdit()
-        if id >= 0 { openTextContentEditor(selectAll: true) }
+        if id >= 0 && openEditor { openTextContentEditor(selectAll: true) }
+        return Int64(id)
     }
 
     func addVector(_ preset: UInt32, freehand: Bool = false) {
@@ -2802,12 +2941,14 @@ final class AureaModel: ObservableObject {
         syncAfterEdit()
     }
 
-    func addText3D(content: String, depth: Float) {
+    @discardableResult
+    func addText3D(content: String, depth: Float, openEditor: Bool = true) -> Int64 {
         let id = engine.addText3D(content, depth: depth, alignment: 1, r: 1, g: 1, b: 1)
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
         showAddLayer = false
         syncAfterEdit()
-        if id >= 0 { openTextContentEditor(selectAll: true) }
+        if id >= 0 && openEditor { openTextContentEditor(selectAll: true) }
+        return Int64(id)
     }
 
     func addParticles(_ preset: UInt32) {
@@ -2897,6 +3038,24 @@ final class AureaModel: ObservableObject {
 
     private var exportTimer: Timer?
 
+    /// Texto do motivo da falha (aurea::ExportFailure, export/ExportRules.hpp)
+    /// no idioma do app — os MESMOS códigos e chaves do Exporter.kt. nil = o
+    /// motor não deu motivo.
+    static func exportFailureReason(_ progress: [String: Any]) -> String? {
+        let code = (progress[AureaExportFailure] as? NSNumber)?.intValue ?? 0
+        switch code {
+        case 1: return AureaText.t("expfail_encoder")
+        case 2: return AureaText.t("expfail_encoder_stalled")
+        case 3: return AureaText.t("expfail_render")
+        case 4: return AureaText.t("expfail_memory")
+        case 5: return AureaText.t("expfail_media")
+        case 6: return AureaText.t("expfail_file")
+        case 7: return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
+        case 8: return AureaText.t("expfail_unsupported")
+        default: return nil
+        }
+    }
+
     private func startExportPolling() {
         exportTimer?.invalidate()
         let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
@@ -2918,8 +3077,12 @@ final class AureaModel: ObservableObject {
                         self.exporting = false
                         if !self.exportCancelled {
                             let message = self.exportProgress["message"] as? String ?? ""
+                            // O motivo (código estável do motor) vira texto do
+                            // catálogo; a frase crua do motor (português) não
+                            // vai para a tela.
                             self.exportMessage = result == 28 ? AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
-                                : message.isEmpty ? AureaText.t("ios_export_failed") : message
+                                : Self.exportFailureReason(self.exportProgress).map { AureaText.t("ios_export_failed_detail", $0) }
+                                ?? (message.isEmpty || AureaText.language.resolved != .pt ? AureaText.t("ios_export_failed") : message)
                             self.toast = self.exportMessage
                         }
                     }
@@ -3810,7 +3973,8 @@ extension AureaModel {
                 result = video ? importer.replaceLayer(layer, withVideo: destination.path, name: name)
                                : importer.replaceLayer(layer, withImageFile: destination.path, name: name)
                 if result < 0 {
-                    failure = importer.lastImportError
+                    let raw = importer.lastImportError
+                    failure = raw.isEmpty ? "" : AureaEngineText.reason(raw, code: Int(-result))
                     try? FileManager.default.removeItem(at: destination)
                 }
             } catch { failure = error.localizedDescription }
@@ -4015,6 +4179,24 @@ extension AureaModel {
     }
 
     func shape3DInfo(_ id: Int64) -> Shape3DInfo? { Shape3DInfo(engine.shape3D(id).map(\.floatValue)) }
+
+    /// Divide o cubo em `count` fatias no eixo `axis` (0 X, 1 Y, 2 Z) — Engine::split_shape3d.
+    /// A camada vira um nulo 3D (mesmo id, mesmo movimento) com as fatias filhas; cada
+    /// fatia é uma camada normal. A seleção fica no grupo. Um passo de desfazer.
+    @discardableResult func splitShape3D(_ id: Int64, axis: Int, count: Int) -> Bool {
+        let group = engine.splitShape3D(id, axis: UInt32(max(0, min(2, axis))), count: UInt32(max(0, count)))
+        guard group >= 0 else {
+            toast = AureaText.t("shape3d_split_failed")
+            return false
+        }
+        Shape3DState.shared.part = -1
+        Shape3DState.shared.revision += 1
+        selection = [group]
+        engine.selectLayers([NSNumber(value: group)])
+        refreshModel(force: true)
+        toast = AureaText.t("shape3d_split_done", count)
+        return true
+    }
 
     /// Os 9 canais da parte no cabeçote (posição, rotação °, escala) + bits de keyframe.
     func shapePartValues(_ id: Int64, part: Int) -> [Float]? {

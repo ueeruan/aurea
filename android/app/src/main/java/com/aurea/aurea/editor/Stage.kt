@@ -139,17 +139,18 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         if (store.cameraContextMenu) {
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { store.cameraContextMenu = false },
-                title = { androidx.compose.material3.Text("3D Camera Tracker") },
+                title = { androidx.compose.material3.Text(stringResource(R.string.cam_tracker_title)) },
                 text = {
                     androidx.compose.foundation.layout.Column {
-                        listOf("Create Camera", "Create Null", "Create Shape", "Create Text", "Create Solid").forEachIndexed { index, title ->
+                        listOf(R.string.panel_criar_camera, R.string.trk_create_null, R.string.cam_create_shape, R.string.cam_create_text, R.string.cam_create_solid)
+                            .map { stringResource(it) }.forEachIndexed { index, title ->
                             androidx.compose.material3.TextButton(onClick = { store.createCameraTrackObject(index) }, enabled = index == 0 || store.cameraSelectedCount > 0) {
                                 androidx.compose.material3.Text(title)
                             }
                         }
                     }
                 },
-                confirmButton = { androidx.compose.material3.TextButton(onClick = { store.cameraContextMenu = false }) { androidx.compose.material3.Text("Close") } },
+                confirmButton = { androidx.compose.material3.TextButton(onClick = { store.cameraContextMenu = false }) { androidx.compose.material3.Text(stringResource(R.string.common_close)) } },
                 containerColor = AureaColors.EditorTopBar,
                 titleContentColor = AureaColors.Text,
                 textContentColor = AureaColors.Text,
@@ -185,11 +186,13 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                     }
                 }
                 // Mundo/Local vale para mover; girar e escala usam os eixos da camada.
+                val spaceDescription = stringResource(if (store.gizmoLocalSpace) R.string.i18n_local_xyz else R.string.i18n_world_xyz)
+                val autoKeyDescription = stringResource(if (store.autoKeyTransforms) R.string.i18n_autokey_on else R.string.i18n_autokey_off)
                 if (store.gizmo != null && store.gizmoTool == GIZMO_MOVE) androidx.compose.material3.TextButton(
                     onClick = store::toggleGizmoSpace,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     modifier = Modifier.width(48.dp).heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
-                        .testTag("gizmo.space").semantics { contentDescription = if (store.gizmoLocalSpace) "Local XYZ" else "World XYZ" },
+                        .testTag("gizmo.space").semantics { contentDescription = spaceDescription },
                 ) { CupertinoIcon(if (store.gizmoLocalSpace) CupertinoGlyph.CubeFill else CupertinoGlyph.Cube, size = 22.dp, tint = AureaColors.Text) }
                 if (!store.sceneEditor) androidx.compose.material3.TextButton(
                     onClick = {
@@ -198,7 +201,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                     },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     modifier = Modifier.width(48.dp).heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
-                        .testTag("stage.autokey").semantics { contentDescription = if (store.autoKeyTransforms) "Auto-Key: On" else "Auto-Key: Off" },
+                        .testTag("stage.autokey").semantics { contentDescription = autoKeyDescription },
                 ) { CupertinoIcon(if (store.autoKeyTransforms) CupertinoGlyph.SuitDiamondFill else CupertinoGlyph.SuitDiamond, size = 22.dp, tint = if (store.autoKeyTransforms) AureaColors.Accent else AureaColors.Text) }
             }
         }
@@ -1804,7 +1807,7 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
     if (ui.fullscreen || store.sceneEditor) return
     var open by remember { mutableStateOf(false) }
     val label = if (store.rawPlayback) "RAW" else when (val l = store.preview.scaleLabel) {
-        "FULL" -> "Full"
+        "FULL" -> stringResource(R.string.i18n_preview_full)
         else -> l
     }
     val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
@@ -1825,7 +1828,7 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
                 items = listOf(
                     PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() },
                     PopupItem("AUTO", current == "AUTO") { store.setPreviewScale(true) },
-                    PopupItem("Full", current == "FULL") { store.setPreviewScale(false, 1, 1) },
+                    PopupItem(stringResource(R.string.i18n_preview_full), current == "FULL") { store.setPreviewScale(false, 1, 1) },
                     PopupItem("1/2", current == "1/2") { store.setPreviewScale(false, 1, 2) },
                     PopupItem("1/4", current == "1/4") { store.setPreviewScale(false, 1, 4) },
                     PopupItem("1/8", current == "1/8") { store.setPreviewScale(false, 1, 8) },

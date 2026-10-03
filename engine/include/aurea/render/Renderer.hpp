@@ -617,6 +617,7 @@ private:
     const EffectRegistry* effects_ = nullptr;
     EffectTypeId posterizeType_ = 0, echoType_ = 0, rgbTimeType_ = 0;
     EffectTypeId motionDetectType_ = 0;   ///< Detectar movimento: a fonte em t − atraso
+    EffectTypeId datamoshType_ = 0;       ///< Datamosh: a fonte presa por "Quadros segurados"
     ShaderLibrary shaders_;
     scene3d::SceneRenderer scene3d_;
     ModelLookup modelLookup_ = nullptr;
@@ -736,6 +737,7 @@ private:
     void trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept;
     /// Planos de cada grupo 3D do snapshot sendo composto (camadas 2D na cena).
     std::vector<std::vector<scene3d::ScenePlane>> groupPlanes_;
+    std::vector<scene3d::ScenePlane> blurPlanes_;   ///< planos de um sub-quadro do desfoque 3D
     bool flowCacheEnabled_ = true;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)
     [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
                                        u64 frameNumber) noexcept;

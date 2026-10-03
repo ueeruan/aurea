@@ -23,6 +23,7 @@
 #include "aurea/ai/Upscaler.hpp"
 #include "aurea/ai/TemporalStabilizer.hpp"
 #include "aurea/export/BitratePolicy.hpp"
+#include "aurea/export/ExportRules.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
@@ -452,6 +453,44 @@ u32 Engine::model_texture_cap() const noexcept {
     return gpu ? std::min(kModelTextureCap, gpu) : kModelTextureCap;
 }
 
+scene3d::DeviceMemoryHint Engine::model_memory_hint(const scene3d::DeviceMemoryHint& fromPlatform) const noexcept {
+    // A plataforma mede AGORA (memória livre muda a cada minuto); o que faltar
+    // vem da sondagem do início. Host sem nada: o piso conservador do orçamento.
+    scene3d::DeviceMemoryHint h = fromPlatform;
+    if (!h.totalBytes) h.totalBytes = caps_.cpu().totalMemoryBytes;
+    if (!h.availableBytes) h.availableBytes = caps_.cpu().availableMemoryBytes;
+    if (!h.gpuMaxTexture) h.gpuMaxTexture = caps_.max_texture_dimension();
+    return h;
+}
+
+scene3d::ImportOptions Engine::model_import_options(const std::string& path, scene3d::ModelQuality quality,
+                                                    const scene3d::DeviceMemoryHint& memory, bool escalate,
+                                                    scene3d::ModelQuality* used, u32 triangleCeiling) const noexcept {
+    const scene3d::DeviceMemoryHint hint = model_memory_hint(memory);
+    scene3d::ModelQuality q = quality;
+    if (escalate) q = scene3d::effective_quality(scene3d::plan_model_import(scene3d::estimate_model_cost(path), hint,
+                                                                           model_texture_cap()), quality);
+    const scene3d::ModelBudget b = scene3d::model_budget(hint, q, model_texture_cap());
+    scene3d::ImportOptions o;
+    o.maxTextureSize = b.maxTextureSize;
+    o.memoryBudget = b.memoryBytes;
+    o.maxTriangles = b.maxTriangles;
+    o.simplifyError = b.simplifyError;
+    if (q != scene3d::ModelQuality::Original && triangleCeiling > 0)
+        o.maxTriangles = o.maxTriangles ? std::min(o.maxTriangles, triangleCeiling) : triangleCeiling;
+    if (used) *used = q;
+    return o;
+}
+
+scene3d::ModelPlan Engine::inspect_model(const std::string& path, const scene3d::DeviceMemoryHint& memory) const noexcept {
+    return scene3d::plan_model_import(scene3d::estimate_model_cost(path), model_memory_hint(memory), model_texture_cap());
+}
+
+ModelImportReport Engine::last_model_import() const noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    return lastModelImport_;
+}
+
 void Engine::apply_memory_budgets() noexcept {
     // Uma tabela só (kBudgetShare, em MemoryManager.hpp): cada consumidor com o
     // seu pedaço do orçamento medido do aparelho. Ver PHASE_8_REPORT §8B.
@@ -752,10 +791,18 @@ void Engine::render_thread_main() noexcept {
 // =============================================================================
 // Projeto
 // =============================================================================
-Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title) noexcept {
+Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, const f32* backgroundRgba) noexcept {
     auto result = Project::create_new(width, height, fps,
                                       title ? std::string(title) : std::string("Projeto sem titulo"));
     if (!result.ok()) { lastError_ = result.code(); return result.status(); }
+    if (backgroundRgba) {
+        // Cor escolhida na folha "Novo projeto": vale só para a principal.
+        const auto unit = [](f32 v) { return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f; };
+        if (Composition* root = result->timeline().composition(result->timeline().root())) {
+            root->set_background(Color{unit(backgroundRgba[0]), unit(backgroundRgba[1]),
+                                       unit(backgroundRgba[2]), unit(backgroundRgba[3])});
+        }
+    }
 
     join_camera_track();
     join_motion_track();
@@ -1133,6 +1180,7 @@ Status Engine::load_project(const char* path) noexcept {
     // "modelo 3D ausente" para religar.
     {
         std::vector<std::pair<u64, std::string>> pending;
+        std::unordered_map<u64, std::pair<u8, u32>> pendingQuality;   // "Otimizar modelo" + triângulos guardados
         std::vector<u64> letterAssets;
         {
             std::lock_guard<std::mutex> lock(modelMutex_);
@@ -1145,13 +1193,18 @@ Status Engine::load_project(const char* path) noexcept {
                 }
             });
             project_->for_each_asset([&](AssetId id, const Asset& a) {
-                if (a.kind == AssetKind::Model3D && !a.sourcePath.empty()) pending.emplace_back(id.pack(), a.sourcePath);
+                if (a.kind == AssetKind::Model3D && !a.sourcePath.empty()) {
+                    pending.emplace_back(id.pack(), a.sourcePath);
+                    pendingQuality[id.pack()] = {a.model.importQuality, a.model.triangleCount};
+                }
             });
         }
         u32 missing = 0;
         for (const auto& [key, src] : pending) {
             scene3d::ImportOptions o;
             o.maxTextureSize = model_texture_cap();
+            const u64 modelKey = key;            // o lambda abaixo não captura o binding estruturado
+            const std::string& modelSrc = src;
             // Texto 3D: a origem é a receita; a malha é gerada de novo.
             scene3d::Text3DSpec spec;
             const auto font = scene3d::decode_text3d(src, spec) ? scene3d::text3d_font(spec) : nullptr;
@@ -1163,7 +1216,21 @@ Status Engine::load_project(const char* path) noexcept {
             scene3d::ImportResult r = font ? scene3d::build_text3d(*font, spec)
                                     : isShape ? scene3d::build_shape3d(shape, [this](const std::string& s) { return resolve_asset_path(s); },
                                                                        o.maxTextureSize)
-                                              : scene3d::import_scene_file(resolve_asset_path(src), o);
+                                              : [&] {
+                                                    // Arquivo importado: a mesma otimização do import, e
+                                                    // nunca menos do que ESTE aparelho aguenta.
+                                                    const std::string file = resolve_asset_path(modelSrc);
+                                                    const auto qi = pendingQuality.find(modelKey);
+                                                    const u8 q = qi == pendingQuality.end() ? u8{0} : qi->second.first;
+                                                    const u32 ceiling = qi == pendingQuality.end() ? 0u : qi->second.second;
+                                                    const auto wanted = static_cast<scene3d::ModelQuality>(std::min<u8>(q, 2));
+                                                    scene3d::ModelQuality usedQuality = wanted;
+                                                    const scene3d::ImportOptions mo = model_import_options(file, wanted, {}, true, &usedQuality, ceiling);
+                                                    if (usedQuality != wanted)
+                                                        AUREA_LOG_WARN("modelo 3D do projeto reaberto mais leve (qualidade %u -> %u) para caber neste aparelho",
+                                                                       static_cast<u32>(wanted), static_cast<u32>(usedQuality));
+                                                    return scene3d::import_scene_file(file, mo);
+                                                }();
             if (!r.ok() && repairLetters) {
                 // An older project can exceed the per-letter geometry limit.
                 // Preserve its visible text if the repair cannot be built.
@@ -4179,7 +4246,7 @@ i32 Engine::edit_time_remap_key(u64 layerId, i32 index, i64 localFrame, f32 sour
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || !l->timeRemapEnabled || interp > static_cast<i32>(Interpolation::Steps)) return -1;
+    if (!l || !l->timeRemapEnabled || interp > static_cast<i32>(kLastInterpolation)) return -1;
     Track& t = l->timeRemap;
     const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
     const f64 last = source_last_frame(*project_, *l, fps);
@@ -4229,10 +4296,14 @@ bool Engine::remove_time_remap_key(u64 layerId, u32 index) noexcept {
 namespace {
 /// O easing do trecho visto de trás para a frente: g(u) = 1 − f(1 − u). Exato
 /// para linear, entrada/saída e bézier (inclusive a força, que é composição e
-/// comuta com o espelho); Segurar/Quique/Elástico/Degraus ficam como estão.
+/// comuta com o espelho) e para as curvas com parâmetros; Segurar, Degraus e o
+/// Quique antigo ficam como estão.
 void mirror_remap_ease(Keyframe& k) noexcept {
     switch (k.interp) {
-        case Interpolation::Bounce: if (k.by2 == -10.f) k.bx2 = k.bx2 < .5f ? 1.f : 0.f; break;
+        // Quique configurável, Elástico e Overshoot: o espelho exato pelos parâmetros.
+        case Interpolation::Bounce:
+        case Interpolation::Elastic:
+        case Interpolation::Overshoot: mirror_parametric_ease(k); break;
         case Interpolation::EaseIn: k.interp = Interpolation::EaseOut; break;
         case Interpolation::EaseOut: k.interp = Interpolation::EaseIn; break;
         case Interpolation::Bezier:
@@ -6945,13 +7016,15 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
         if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     }
     // Parse, validação e otimização FORA do lock: o preview continua rodando.
-    scene3d::ImportOptions options;
-    options.maxTextureSize = model_texture_cap();
+    // Orçamento do aparelho (ModelBudget.hpp): texturas reduzidas no decode,
+    // malhas simplificadas por partes, e recusa com motivo antes de passar.
+    const scene3d::ImportOptions options = model_import_options(request.path, request.quality, request.memory, false);
     scene3d::ImportResult r = scene3d::import_scene_file(request.path, options, progress);
     if (!r.ok()) {
         if (detail) *detail = r.detail;
         const Errc code = r.error == scene3d::ImportError::Cancelled ? Errc::Cancelled
                         : r.error == scene3d::ImportError::FileNotFound ? Errc::NotFound
+                        : r.error == scene3d::ImportError::TooHeavy ? Errc::BudgetExceeded
                         : r.error == scene3d::ImportError::OutOfMemory ? Errc::OutOfMemory
                         : r.error == scene3d::ImportError::UnsupportedCompression
                           || r.error == scene3d::ImportError::UnsupportedFeature ? Errc::UnsupportedFeature
@@ -6990,6 +7063,10 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     asset.model.hasSkeleton = scene->stats.skins > 0;
     asset.model.hasMorphTargets = scene->stats.morphTargets > 0;
     for (const scene3d::Animation& a : scene->animations) asset.model.animationNames.push_back(a.name);
+    asset.model.importQuality = static_cast<u8>(request.quality);
+    asset.model.sourceTriangles = scene->stats.sourceTriangles;
+    lastModelImport_ = ModelImportReport{scene->stats.sourceTriangles, scene->stats.triangles, scene->stats.texturesReduced,
+                                         scene->stats.texturesSkipped, request.quality};
     const AssetId assetId = project_->add_asset(std::move(asset));
     models_[assetId.pack()] = scene;
 
@@ -7947,13 +8024,16 @@ Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noex
         old = l->model.scene;
         copy = *a;
     }
-    // Parse e texturas FORA do lock, como no import.
-    scene3d::ImportOptions options;
-    options.maxTextureSize = model_texture_cap();
-    scene3d::ImportResult r = scene3d::import_scene_file(resolve_asset_path(copy.sourcePath), options);
+    // Parse e texturas FORA do lock, como no import (mesma otimização).
+    const std::string file = resolve_asset_path(copy.sourcePath);
+    const scene3d::ImportOptions options = model_import_options(
+        file, static_cast<scene3d::ModelQuality>(std::min<u8>(copy.model.importQuality, 2)), {}, true, nullptr,
+        copy.model.triangleCount);
+    scene3d::ImportResult r = scene3d::import_scene_file(file, options);
     if (!r.ok()) {
         if (detail) *detail = r.detail;
-        return Status{r.error == scene3d::ImportError::FileNotFound ? Errc::NotFound : Errc::AssetCorrupted,
+        return Status{r.error == scene3d::ImportError::FileNotFound ? Errc::NotFound
+                      : r.error == scene3d::ImportError::TooHeavy ? Errc::BudgetExceeded : Errc::AssetCorrupted,
                       scene3d::to_string(r.error)};
     }
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
@@ -8526,6 +8606,10 @@ Status Engine::capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, 
     d.width = width;
     d.height = height;
     d.format = SurfaceFormat::RGBA16F;
+    // O renderer importa o alvo como "composicao" AMOSTRÁVEL (como no export):
+    // sem o uso de amostragem na imagem, um passe que lê o fundo (modos de
+    // mistura, 3D com fundo) era indefinido — PowerVR devolvia preto.
+    d.sampled = true;
     d.renderTarget = true;
     d.transferSrc = true;
     d.debugName = "captura-do-projeto";
@@ -9167,6 +9251,37 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
             out.corners[i * 2 + 1] = v.y / v.w;
         }
         if (ok) out.geomFlags = bridge::kGeomCornersValid | (persp ? bridge::kGeomPerspective : 0u);
+    } else if (l->kind == LayerKind::Model3D) {
+        // Modelo 3D: a caixa do modelo (8 cantos) pela câmera, com a cadeia de
+        // pais — o retângulo que ela ocupa na tela. Sem isto a UI montava a
+        // caixa só com a posição da camada e, num filho de nulo (as partes de
+        // um cubo dividido), ela aparecia longe do objeto.
+        const auto found = models_.find(l->model.scene.pack());
+        const scene3d::SceneAsset* asset = found != models_.end() && found->second ? found->second.get() : nullptr;
+        if (asset && asset->bounds.valid()) {
+            Mat4 flip;
+            flip.col[1] = Vec4{0, -1, 0, 0};
+            flip.col[2] = Vec4{0, 0, -1, 0};
+            const Mat4 fromModel = flip * Mat4::scale(Vec3{l->model.unitScale, l->model.unitScale, l->model.unitScale})
+                                 * Mat4::translation(-l->model.pivot);
+            const Mat4 view = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
+                                                   : comp_view_projection(*comp, now);
+            const Mat4 m = view * layer_world_3d(*comp, *l, now) * fromModel;
+            f32 x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+            bool ok = true;
+            for (int i = 0; i < 8 && ok; ++i) {
+                const scene3d::Aabb& b = asset->bounds;
+                const Vec4 v = m * Vec4{(i & 1) ? b.max.x : b.min.x, (i & 2) ? b.max.y : b.min.y, (i & 4) ? b.max.z : b.min.z, 1};
+                if (!(v.w > 1e-6f)) { ok = false; break; }   // atravessa a câmera: a UI usa o caminho antigo
+                x0 = std::min(x0, v.x / v.w); x1 = std::max(x1, v.x / v.w);
+                y0 = std::min(y0, v.y / v.w); y1 = std::max(y1, v.y / v.w);
+            }
+            if (ok && std::isfinite(x0) && std::isfinite(x1) && std::isfinite(y0) && std::isfinite(y1)) {
+                const f32 xs[4] = {x0, x1, x1, x0}, ys[4] = {y0, y0, y1, y1};
+                for (int i = 0; i < 4; ++i) { out.corners[i * 2] = xs[i]; out.corners[i * 2 + 1] = ys[i]; }
+                out.geomFlags = bridge::kGeomCornersValid;
+            }
+        }
     }
     return true;
 }
@@ -9611,16 +9726,21 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
         ctx->compFps = comp->fps();
-        ctx->fps = settings.fps > 0.0 ? settings.fps : comp->fps();
+        // Taxa de saída livre até o teto dos encoders; acima, o motor recusa
+        // com o motivo (as telas já limitam o teclado). Abaixo de 1 fps fica
+        // como pedido (lapso de tempo); de 1 para cima, razão NTSC exata.
+        if (settings.fps > kMaxCompositionFps + 1e-9)
+            return Status{Errc::NotSupported, "taxa de quadros acima do que o encoder aceita (maximo 240 fps)"};
+        ctx->fps = settings.fps > 0.0 ? (settings.fps >= kMinCompositionFps ? normalize_fps(settings.fps) : settings.fps)
+                                      : comp->fps();
         // Lado menor pedido; a largura vem da proporção da composição (o
         // renderer preenche o alvo inteiro — outra proporção esticaria).
-        const u32 cw = comp->width(), ch = comp->height();
-        const u32 compShort = std::min(cw, ch);
-        const u32 wantShort = settings.height > 0 ? settings.height : compShort;
-        const f64 k = static_cast<f64>(wantShort) / static_cast<f64>(compShort);
-        auto even = [](f64 v) { return std::max<u32>(2u, static_cast<u32>(std::llround(v / 2.0)) * 2u); };
-        ctx->width = even(cw * k);
-        ctx->height = even(ch * k);
+        // Lado maior em múltiplo de 16 e menor par
+        // (export/ExportRules.hpp): 854×480 virava "buffer do encoder menor
+        // que o quadro" no encoder MediaTek; 848×480 cabe em todo encoder.
+        const ExportFrameSize size = export_frame_size(comp->width(), comp->height(), settings.height);
+        ctx->width = size.width;
+        ctx->height = size.height;
         const f64 seconds = static_cast<f64>(comp->export_duration(settings.trimToContent).value) / comp->fps();
         ctx->frames = std::max<u32>(1u, static_cast<u32>(std::ceil(seconds * ctx->fps - 1e-6)));
         ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
@@ -10126,12 +10246,21 @@ void Engine::export_thread_main() noexcept {
     }
     ctx.qCv.notify_all();
     ctx.encoder.join();
+    // Onde falhou decide o texto da tela (ExportRules: código estável, não a
+    // mensagem do sink). Erro que veio do encoder é do encoder, mesmo que o
+    // produtor o tenha visto primeiro.
+    ExportStage stage = ExportStage::Render;
+    {
+        std::lock_guard<std::mutex> ql(ctx.qMutex);
+        if (ctx.encoderFailed && (result.ok() || result.code() == ctx.encoderStatus.code())) stage = ExportStage::Encode;
+    }
     if (result.ok() && ctx.encoderFailed) result = ctx.encoderStatus;
     // Cancelado enquanto o encoder esvaziava a fila: faltam quadros — nada de
     // finalizar um arquivo incompleto como se estivesse pronto.
     if (result.ok() && cancelled()) result = Errc::Cancelled;
 
     if (result.ok()) {
+        stage = ExportStage::Finish;
         result = ctx.sink->finish();
     } else {
         ctx.sink->abort();
@@ -10156,13 +10285,15 @@ void Engine::export_thread_main() noexcept {
         ctx.progress.running = false;
         ctx.progress.finished = true;
         ctx.progress.result = result.code();
+        ctx.progress.failure = static_cast<u32>(export_failure_reason(stage, result.code()));
         if (result.ok()) ctx.set_message("concluido");
         else if (result.code() == Errc::Cancelled) ctx.set_message("cancelado");
         else ctx.set_message(result.detail().empty() ? result.message().data() : result.detail().data());
     }
     if (!result.ok() && result.code() != Errc::Cancelled) {
-        AUREA_LOG_ERROR("export falhou [%d]: %s; %s", result.raw(), result.message().data(),
-                       result.detail().empty() ? "" : result.detail().data());
+        AUREA_LOG_ERROR("export falhou [%d, motivo %u]: %s; %s", result.raw(),
+                        static_cast<u32>(export_failure_reason(stage, result.code())), result.message().data(),
+                        result.detail().empty() ? "" : result.detail().data());
     }
     exportActive_.store(false, std::memory_order_release);
     media_.proxies().set_pause_reason(PreviewProxyService::Export, false);
@@ -10267,6 +10398,15 @@ void Engine::export_encoder_main() noexcept {
         }
         ctx.qCv.notify_all();
         if (!s.ok()) return;
+        if (i == 0) {
+            // O sink pode trocar de encoder no primeiro quadro (buffer de
+            // entrada inútil no de hardware → software): o aviso acompanha.
+            const ExportSink::EncoderInfo enc = ctx.sink->encoder_info();
+            if (enc.acceleration == ExportSink::Acceleration::Software) {
+                std::lock_guard<std::mutex> pl(ctx.mutex);
+                ctx.progress.flags = (ctx.progress.flags & ~kExportHardwareEncoder) | kExportSoftwareEncoder;
+            }
+        }
 
         const u32 done = i + 1;
         const f64 k = 1e-6 / static_cast<f64>(done);
@@ -10554,6 +10694,9 @@ void Engine::image_export_thread_main() noexcept {
         ctx.progress.running = false;
         ctx.progress.finished = true;
         ctx.progress.result = result.code();
+        // Imagem: sem encoder da plataforma — falha de arquivo ou de render.
+        ctx.progress.failure = static_cast<u32>(export_failure_reason(
+            result.code() == Errc::IoError ? ExportStage::Finish : ExportStage::Render, result.code()));
         if (result.ok()) ctx.set_message("concluido");
         else if (result.code() == Errc::Cancelled) ctx.set_message("cancelado");
         else ctx.set_message(result.detail().empty() ? result.message().data() : result.detail().data());
@@ -10671,7 +10814,7 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::KeyframeSetEasing: {
             const KeyframeInterpPayload& k = c.keyframe_interp;
             return track_ok(k.track) && frame_ok(k.time)
-                && static_cast<u8>(k.interp) <= static_cast<u8>(Interpolation::Steps)
+                && static_cast<u8>(k.interp) <= static_cast<u8>(kLastInterpolation)
                 && k.power <= 3
                 && finite_all({k.bx1, k.by1, k.bx2, k.by2});
         }
@@ -11761,11 +11904,15 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::CompositionSetFps: {
             Composition* c = timeline.composition(cmd.comp_fps.comp);
             if (!c) return Errc::NotFound;
-            if (cmd.comp_fps.fps <= 0.0 || cmd.comp_fps.fps > 240.0) return Errc::InvalidArgument;
-            const f64 k = cmd.comp_fps.fps / c->fps();
-            c->retime(cmd.comp_fps.fps);
+            // fps livre: qualquer valor real em [1, 240] (23,976, 29,97, 144…);
+            // a taxa NTSC digitada vira a razão exata (normalize_fps).
+            if (!(cmd.comp_fps.fps >= kMinCompositionFps - 1e-9) || cmd.comp_fps.fps > kMaxCompositionFps + 1e-9)
+                return Errc::InvalidArgument;
+            const f64 newFps = normalize_fps(cmd.comp_fps.fps);
+            const f64 k = newFps / c->fps();
+            c->retime(newFps);
             if (c == comp) {
-                timeline.clock().set_fps(cmd.comp_fps.fps);
+                timeline.clock().set_fps(newFps);
                 // O cabeçote fica no mesmo SEGUNDO.
                 const FrameIndex at{static_cast<i64>(std::llround(static_cast<f64>(playback_.current().value) * k))};
                 playback_.configure(c->fps(), c->duration());
@@ -12019,7 +12166,9 @@ void Engine::fill_export_progress(bridge::ExportProgressPOD& out) const noexcept
     out.framesDone = p.framesDone;
     out.fps = p.fps;
     out.etaSeconds = p.etaSeconds;
-    out.flags = p.flags;
+    // Motivo da falha nos bits altos de `flags` (o POD é contrato de ABI de
+    // 128 bytes; os bits 0..23 continuam sendo os ExportFlag).
+    out.flags = (p.flags & ((1u << kExportFailureShift) - 1u)) | ((p.failure & 0xFFu) << kExportFailureShift);
     std::snprintf(out.message, sizeof(out.message), "%s", p.message);
 }
 

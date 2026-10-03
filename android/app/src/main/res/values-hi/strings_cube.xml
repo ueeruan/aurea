@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dividir o cubo 3D em partes (2026-10-03). Chaves shape3d_split_*. -->
+<resources>
+    <string name="shape3d_split_title">हिस्सों में बाँटें</string>
+    <string name="shape3d_split_axis">कट की धुरी</string>
+    <string name="shape3d_split_axis_desc">%1$s धुरी पर काटें</string>
+    <string name="shape3d_split_count">हिस्से</string>
+    <string name="shape3d_split_count_desc">%1$d हिस्से</string>
+    <string name="shape3d_split_less">कम हिस्से</string>
+    <string name="shape3d_split_more">ज़्यादा हिस्से</string>
+    <string name="shape3d_split_apply">बाँटें</string>
+    <string name="shape3d_split_hint">क्यूब को बराबर टुकड़ों में काटता है। इमेज एक टुकड़े से अगले टुकड़े तक जारी रहती है; हर हिस्सा एक लेयर बन जाता है जिसे आप हिला, घुमा या हटा सकते हैं, और समूह क्यूब की गति बनाए रखता है।</string>
+    <string name="shape3d_split_done">क्यूब %1$d हिस्सों में बँट गया। सिर्फ़ उसी को बदलने के लिए किसी हिस्से पर टैप करें।</string>
+    <string name="shape3d_split_failed">आकृति को बाँटा नहीं जा सका।</string>
+</resources>

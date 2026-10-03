@@ -14,6 +14,11 @@ import org.json.JSONArray
 internal val ExtraTextPresetNames = listOf("Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
     "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa")
 
+/** Nomes 0..7 de [ExtraTextPresetNames] no catálogo (o texto em pt acima é só referência). */
+internal val ExtraTextPresetLabels = listOf(R.string.app_text_preset_bounce, R.string.app_text_preset_soft_in, R.string.app_text_preset_reveal,
+    R.string.app_text_preset_slide, R.string.app_text_preset_fast_in, R.string.app_text_preset_elastic, R.string.app_text_preset_word_jump,
+    R.string.app_text_preset_smooth)
+
 internal val PackTextPresetLabels = listOf(R.string.pack_text_0, R.string.pack_text_1, R.string.pack_text_2, R.string.pack_text_3, R.string.pack_text_4, R.string.pack_text_5)
 
 internal val TextPresetNames = listOf(
@@ -47,7 +52,7 @@ class BuiltinPresets(private val context: Context) {
         val list = TextPresetNames.mapIndexed { i, id ->
             PresetEntry("b:texto:$i", PresetKind.Text, res.getString(id), builtin = true, textPreset = i)
         } + ExtraTextPresetNames.mapIndexed { i, name ->
-            PresetEntry("b:texto:${i + 11}", PresetKind.Text, if (i >= 8) AppText.get(context, PackTextPresetLabels[i - 8]) else name, builtin = true, textPreset = i + 11)
+            PresetEntry("b:texto:${i + 11}", PresetKind.Text, if (i >= 8) AppText.get(context, PackTextPresetLabels[i - 8]) else ExtraTextPresetLabels.getOrNull(i)?.let { res.getString(it) } ?: name, builtin = true, textPreset = i + 11)
         }
         text = res to list
         return list

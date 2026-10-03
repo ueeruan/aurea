@@ -175,29 +175,29 @@ struct PerformanceTestPanel: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Teste no seu iPhone") {
-                    Text("Abra um projeto com vídeo. O relatório mede prévia, CPU/GPU, decodificação, memória, áudio e pausas da interface. Nenhum vídeo é enviado para um servidor.")
+                Section(AureaText.t("perf_section_test")) {
+                    Text(AureaText.t("perf_intro"))
                     if test.running {
                         Text("\(test.phase) · \(test.elapsed)s")
-                        Button("Marcar: travou aqui") { test.event("user_reported_stall", values:["frame":model.status.playhead]) }
-                        Button("Parar e salvar relatório", role:.destructive) { test.stop() }
+                        Button(AureaText.t("perf_mark_stall")) { test.event("user_reported_stall", values:["frame":model.status.playhead]) }
+                        Button(AureaText.t("perf_stop_save"), role:.destructive) { test.stop() }
                     } else {
-                        Button("Gravar enquanto eu edito · até 5 min") { test.start(model,stress:false); dismiss() }.disabled(model.screen != .editor)
-                        Button("Forçar prévia e timeline · 3 min") { test.start(model,stress:true); dismiss() }.disabled(model.screen != .editor || model.importingMedia)
-                        Text("O teste automático reproduz em qualidade automática, depois total, e faz saltos pela timeline. Ao terminar, restaura a qualidade e a posição. Para se houver pressão de memória ou calor crítico.").font(.footnote)
-                        Button("Importar vídeo e medir") { pickingVideo = true }.disabled(model.screen != .editor || model.importingMedia)
+                        Button(AureaText.t("perf_record")) { test.start(model,stress:false); dismiss() }.disabled(model.screen != .editor)
+                        Button(AureaText.t("perf_stress")) { test.start(model,stress:true); dismiss() }.disabled(model.screen != .editor || model.importingMedia)
+                        Text(AureaText.t("perf_stress_note")).font(.footnote)
+                        Button(AureaText.t("perf_import_measure")) { pickingVideo = true }.disabled(model.screen != .editor || model.importingMedia)
                     }
                 }
-                Section("Relatório") {
+                Section(AureaText.t("perf_section_report")) {
                     if !test.summary.isEmpty { Text(test.summary) }
                     if let report = test.report, !test.running {
-                        ShareLink(item:report) { Label("Compartilhar último relatório",systemImage:"square.and.arrow.up") }
-                        Text("Se o app fechar durante o teste, abra esta tela novamente. O arquivo mantém as amostras já gravadas; pode estar incompleto. Envie o arquivo .jsonl nesta conversa.").font(.footnote)
+                        ShareLink(item:report) { Label(AureaText.t("perf_share_last"),systemImage:"square.and.arrow.up") }
+                        Text(AureaText.t("perf_crash_note")).font(.footnote)
                     }
                 }
             }
-            .navigationTitle("Desempenho no iPhone")
-            .toolbar { ToolbarItem(placement:.confirmationAction) { Button("Fechar") { dismiss() } } }
+            .navigationTitle(AureaText.t("perf_title"))
+            .toolbar { ToolbarItem(placement:.confirmationAction) { Button(AureaText.t("common_close")) { dismiss() } } }
             .fileImporter(isPresented:$pickingVideo,allowedContentTypes:[.movie,.video]) { result in
                 if case .success(let url) = result { test.start(model,stress:false); model.importMedia(url:url,kind:.video); dismiss() }
             }
@@ -211,9 +211,9 @@ struct PerformanceTestBadge: View {
     var body: some View {
         if test.running {
             HStack {
-                Button("Teste · \(test.elapsed)s") { details = true }
-                Button("Travou aqui") { test.event("user_reported_stall") }
-                Button("Parar") { test.stop() }
+                Button(AureaText.t("perf_badge", test.elapsed)) { details = true }
+                Button(AureaText.t("perf_badge_stall")) { test.event("user_reported_stall") }
+                Button(AureaText.t("perf_badge_stop")) { test.stop() }
             }.font(.caption.bold()).padding(10).background(.ultraThinMaterial,in:Capsule())
                 .sheet(isPresented:$details) { PerformanceTestPanel() }
         }

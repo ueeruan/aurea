@@ -210,6 +210,7 @@ struct ScenePlane {
     Vec4 region{};                 ///< px da camada
     f32  opacity = 1.0f;
     f32  viewDepth = 0.0f;         ///< w do centro (ordem do mais longe para o mais perto)
+    u32  sourceLayer = ~0u;        ///< índice da camada no snapshot (desfoque por sub-quadro)
 };
 
 /// Pós do grupo 3D vindo da composição (PostProcessSettings): o que a pessoa
@@ -444,6 +445,11 @@ private:
     bool passMrt_ = false;
     bool passA2C_ = false;
     u32  postMsaa_ = 4;
+    /// Teto de amostras APRENDIDO no aparelho: o driver não criou o pipeline
+    /// PBR com mais que isso (PowerVR/GLES antigos com MSAA 4× + MRT). Vale
+    /// para preview, captura e export — o export não pode perder o 3D por
+    /// pedir mais AA que o preview.
+    u32  msaaCap_ = 8;
     bool postFxaa_ = false;
     bool antialias_ = true;
     u32  bloomDiv_ = 2;

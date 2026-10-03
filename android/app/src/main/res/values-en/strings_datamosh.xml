@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeito Datamosh (2026-10-03). Chaves fx_*datamosh*. -->
+<resources>
+    <string name="fx_name_datamosh">Datamosh</string>
+    <string name="fx_desc_glitch_datamosh">Compression glitch: the old frame keeps getting dragged in blocks by the video motion, with smeared colors and corrupted blocks. On images, the blocks melt on their own.</string>
+    <string name="fx_datamosh_hold_frames">Frames held</string>
+    <string name="fx_datamosh_drag">Drag</string>
+    <string name="fx_datamosh_corruption">Corruption</string>
+    <string name="fx_datamosh_color_bleed">Color bleed</string>
+</resources>

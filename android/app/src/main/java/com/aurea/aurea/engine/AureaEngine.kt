@@ -128,6 +128,13 @@ class AureaEngine private constructor() {
         @JvmStatic external fun gestureScale3D(kind: Int, x: Float, y: Float, z: Float, axis: Int, factor: Float): FloatArray
         @JvmStatic external fun previewGestureValue(basis: FloatArray, dx: Float, dy: Float, rotate: Boolean): FloatArray
         @JvmStatic external fun nativeDestroy(handle: Long)
+
+        /**
+         * O trecho de curva amostrado pelo MOTOR (`sample_keyframe_ease`,
+         * animation/Curve.hpp): [out] recebe valores em t = i/(n−1). É o que o
+         * editor de curva desenha. Devolve quantos escreveu (0 = inválido).
+         */
+        @JvmStatic external fun nativeSampleEase(interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int, out: FloatArray): Int
         /** Taxa de vídeo (bps) que o export usaria: a regra do motor (BitratePolicy). `quality` 0/1/2. */
         @JvmStatic external fun nativeExportBitrateBps(width: Int, height: Int, fps: Double, codec: Int, quality: Int, customMbps: Int): Long
     }
@@ -535,6 +542,11 @@ class AureaEngine private constructor() {
         nativeQueryShape3dPartGizmo(nativeHandle, layer, part, length, out, localSpace)
     fun shape3dPartMove(layer: Long, part: Int, axis: Int, amount: Float, out: FloatArray): Boolean =
         nativeShape3dPartMove(nativeHandle, layer, part, axis, amount, out)
+    /**
+     * Divide o cubo em [count] fatias (2..16) no eixo [axis] (0 X, 1 Y, 2 Z): a camada vira
+     * um nulo 3D com as fatias filhas (Engine::split_shape3d). Id do nulo, ou −Errc.
+     */
+    fun splitShape3d(layer: Long, axis: Int, count: Int): Long = nativeSplitShape3d(nativeHandle, layer, axis, count)
     fun applyParticlePreset(layer: Long, preset: Int): Boolean = nativeApplyParticlePreset(nativeHandle, layer, preset)
     fun setParticleParam(layer: Long, param: Int, value: Float): Boolean = nativeSetParticleParam(nativeHandle, layer, param, value)
     fun queryParticles(layer: Long, out: FloatArray): Boolean = nativeQueryParticles(nativeHandle, layer, out)
@@ -828,7 +840,14 @@ class AureaEngine private constructor() {
         nativeImportImage(nativeHandle, rgba, width, height, name, source)
 
     fun newProject(width: Int, height: Int, fps: Float, title: String): Boolean =
-        nativeNewProject(nativeHandle, width, height, fps, title)
+        newProject(width, height, fps.toDouble(), title, null)
+
+    /**
+     * fps livre (1–240, decimais como 29,97; o motor encaixa a razão NTSC) e,
+     * opcional, o fundo da composição em RGBA sRGB (nulo = preto).
+     */
+    fun newProject(width: Int, height: Int, fps: Double, title: String, background: FloatArray?): Boolean =
+        nativeNewProject(nativeHandle, width, height, fps, title, background)
 
     fun loadProject(path: String): Int = nativeLoadProject(nativeHandle, path)
     fun saveProject(path: String): Int = nativeSaveProject(nativeHandle, path)
@@ -874,8 +893,23 @@ class AureaEngine private constructor() {
      * UI. Devolve o id da layer, ou −código de erro; `detail[0]` recebe o
      * motivo (falha) ou os avisos do import (sucesso).
      */
-    fun importModel(path: String, name: String, detail: Array<String?>): Long =
-        nativeImportModel(nativeHandle, path, name, detail)
+    fun importModel(
+        path: String,
+        name: String,
+        detail: Array<String?>,
+        quality: Int = MODEL_QUALITY_ORIGINAL,
+        memory: LongArray? = null,
+    ): Long = nativeImportModel(nativeHandle, path, name, detail, quality, memory)
+
+    /**
+     * "Otimizar modelo": custo do arquivo (só cabeçalhos/contagens) e o que cabe
+     * neste aparelho por qualidade, ANTES do import. `memory` = [totalMem,
+     * availMem, isLowRamDevice] medidos agora (ver [ModelPlan.memoryNow]).
+     */
+    fun inspectModel(path: String, memory: LongArray?): ModelPlan = ModelPlan(nativeInspectModel(nativeHandle, path, memory))
+
+    /** O último import de modelo: triângulos do arquivo → os que ficaram. */
+    fun lastModelImport(): LongArray = nativeLastModelImport(nativeHandle)
     /** Etapa × 1000 + fração × 1000 (ImportPhase do motor). */
     fun importModelProgress(): Int = nativeImportModelProgress(nativeHandle)
     /** Texturas (e o .mtl do OBJ) que o modelo 3D da layer referencia e não achou: só o nome do arquivo. */
@@ -1080,6 +1114,7 @@ class AureaEngine private constructor() {
     private external fun nativeResetShape3dPart(handle: Long, layer: Long, part: Int): Boolean
     private external fun nativeQueryShape3dPartGizmo(handle: Long, layer: Long, part: Int, length: Float, out: FloatArray, localSpace: Boolean): Boolean
     private external fun nativeShape3dPartMove(handle: Long, layer: Long, part: Int, axis: Int, amount: Float, out: FloatArray): Boolean
+    private external fun nativeSplitShape3d(handle: Long, layer: Long, axis: Int, count: Int): Long
     private external fun nativeSetTransition(handle: Long, layer: Long, out: Boolean, type: Int, frames: Int): Boolean
     private external fun nativeSetEcho(handle: Long, layer: Long, count: Int, delay: Float, decay: Float): Boolean
     private external fun nativeAddMask(handle: Long, layer: Long, pts: FloatArray?, count: Int, closed: Boolean): Int
@@ -1170,7 +1205,7 @@ class AureaEngine private constructor() {
     private external fun nativeImportImage(
         handle: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
     ): Long
-    private external fun nativeNewProject(handle: Long, width: Int, height: Int, fps: Float, title: String): Boolean
+    private external fun nativeNewProject(handle: Long, width: Int, height: Int, fps: Double, title: String, background: FloatArray?): Boolean
     private external fun nativeLoadProject(handle: Long, path: String): Int
     private external fun nativeSaveProject(handle: Long, path: String?): Int
     private external fun nativeSaveProjectIfDirty(handle: Long): Int
@@ -1182,7 +1217,9 @@ class AureaEngine private constructor() {
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeStartImageExport(handle: Long, outputPath: String, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): Int
     private external fun nativeImageExportPlan(handle: Long, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): LongArray?
-    private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>): Long
+    private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>, quality: Int, memory: LongArray?): Long
+    private external fun nativeInspectModel(handle: Long, path: String, memory: LongArray?): LongArray
+    private external fun nativeLastModelImport(handle: Long): LongArray
     private external fun nativeImportModelProgress(handle: Long): Int
     private external fun nativeModelMissingTextures(handle: Long, layer: Long): String
     private external fun nativeModelFolder(handle: Long, layer: Long): String

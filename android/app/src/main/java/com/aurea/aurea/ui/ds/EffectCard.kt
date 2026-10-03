@@ -162,7 +162,7 @@ fun EffectTile(
                         .background(Color.Black.copy(alpha = 0.55f))
                         .padding(horizontal = 5.dp, vertical = 2.dp),
                 ) {
-                    Text("custo $cost", style = AureaType.Base.merge(TextStyle(fontSize = 9.sp, color = Color.White)))
+                    Text(androidx.compose.ui.res.stringResource(com.aurea.aurea.R.string.app_effect_cost, cost), style = AureaType.Base.merge(TextStyle(fontSize = 9.sp, color = Color.White)))
                 }
             }
             Box(

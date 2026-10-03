@@ -170,7 +170,7 @@ internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String =
     EditorPanel.Curve -> stringResource(R.string.panel_easing_curve)
     EditorPanel.Appearance -> stringResource(R.string.panel_mistura_opacidade)
     EditorPanel.Speed -> stringResource(R.string.panel_tempo_velocidade)
-    EditorPanel.ClipEdit -> "Slip · Roll · Slide"
+    EditorPanel.ClipEdit -> stringResource(R.string.i18n_clip_modes)
     EditorPanel.Audio -> stringResource(R.string.panel_som)
     EditorPanel.Shape -> stringResource(R.string.panel_cor_preenchimento)
     EditorPanel.Text -> stringResource(R.string.text_options)

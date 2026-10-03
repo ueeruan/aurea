@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ajustes do projeto: fps livre e cor de fundo (2026-10-03). Chaves project_* e export_fps_*. -->
+<resources>
+    <string name="project_fps_custom">Kustom…</string>
+    <string name="project_fps_custom_title">Frame per detik (1 sampai 240)</string>
+    <string name="export_fps_high_note">Di atas 60 fps, tidak semua perangkat atau media sosial memutar video dengan laju penuh.</string>
+    <string name="project_bg_color_desc">Warna latar: %1$s</string>
+</resources>

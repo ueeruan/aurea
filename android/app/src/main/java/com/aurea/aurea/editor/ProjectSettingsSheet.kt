@@ -59,7 +59,8 @@ private val Aspects = listOf("16:9" to 16f / 9f, "9:16" to 9f / 16f, "4:5" to 4f
 
 /** Resolução = o lado MENOR (o "1080p" vale para 16:9 e para 9:16). */
 private val Resolutions = listOf(480 to "480p (SD)", 720 to "720p (HD)", 1080 to "1080p (FHD)", 1440 to "1440p (QHD)", 2160 to "2160p (4K)")
-private val FpsOptions = listOf(24, 25, 30, 50, 60)
+/** Atalhos de taxa; qualquer outra (1–240, 23,976, 29,97…) vem de "Personalizado…". */
+private val FpsOptions = listOf(24, 25, 30, 50, 60, 90, 120, 144, 240)
 
 /** Cores de fundo de um toque; "Outra cor…" abre o seletor. */
 private val Backgrounds = listOf(R.string.sh_bg_black to floatArrayOf(0f, 0f, 0f), R.string.sh_bg_white to floatArrayOf(1f, 1f, 1f))
@@ -88,6 +89,8 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
     val widthLabel = stringResource(R.string.editor_largura)
     val heightLabel = stringResource(R.string.editor_altura)
     val durationLabel = stringResource(R.string.editor_duracao)
+    val customFpsLabel = stringResource(R.string.project_fps_custom)
+    val customFpsTitle = stringResource(R.string.project_fps_custom_title)
 
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var pickingBackground by remember { mutableStateOf(false) }
@@ -175,6 +178,11 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
                 onDismiss = { menu = null },
                 items = FpsOptions.map { f ->
                     PopupItem("$f fps", abs(fpsValue - f) < 0.01) { store.setCompositionFps(f.toDouble()) }
+                } + PopupItem(customFpsLabel, FpsOptions.none { abs(fpsValue - it) < 0.01 }) {
+                    // fps livre: o teclado limita a 1–240 e aceita decimais (29,97).
+                    keypad = KeypadRequest(customFpsTitle, fpsValue.toFloat(), "fps", 1f, 240f, 3) { v ->
+                        store.setCompositionFps(v.toDouble())
+                    }
                 },
             )
         }

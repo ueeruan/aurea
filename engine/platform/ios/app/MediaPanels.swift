@@ -117,49 +117,49 @@ struct TrackingPanel: View {
             Text(kind + (flag("cached") ? AureaText.t("panel_analise_guardada") : ""))
                 .font(.aurea(size: 13, weight: .semibold))
             Spacer().frame(height: 4)
-            let quality = number("solved") != number("frames") || number("error") > 2 ? "Poor" : number("error") > 1 ? "Fair" : number("error") > 0.5 ? "Good" : "Excellent"
-            note("Solve quality: \(quality) · \(model.cameraSelectedCount) selected")
-            Toggle("Multi-select", isOn: $model.cameraMultiSelect).font(.aurea(size: 13)).tint(AureaColors.accent)
-            Toggle("Good points", isOn: $model.cameraGoodPointsOnly).font(.aurea(size: 13)).tint(AureaColors.accent)
-            Toggle("Drag surface target", isOn: $model.cameraTargetMode).font(.aurea(size: 13)).tint(AureaColors.accent)
-            HStack { Text("Point size").font(.aurea(size: 12)); Slider(value: $model.cameraPointSize, in: 2...8).tint(AureaColors.accent) }
+            let quality = AureaText.t(number("solved") != number("frames") || number("error") > 2 ? "cam_quality_poor" : number("error") > 1 ? "cam_quality_fair" : number("error") > 0.5 ? "cam_quality_good" : "cam_quality_excellent")
+            note(AureaText.t("cam_solve_quality", quality, model.cameraSelectedCount))
+            Toggle(AureaText.t("cam_multi_select"), isOn: $model.cameraMultiSelect).font(.aurea(size: 13)).tint(AureaColors.accent)
+            Toggle(AureaText.t("cam_good_points"), isOn: $model.cameraGoodPointsOnly).font(.aurea(size: 13)).tint(AureaColors.accent)
+            Toggle(AureaText.t("cam_drag_surface_toggle"), isOn: $model.cameraTargetMode).font(.aurea(size: 13)).tint(AureaColors.accent)
+            HStack { Text(AureaText.t("fx_tamanho_ponto")).font(.aurea(size: 12)); Slider(value: $model.cameraPointSize, in: 2...8).tint(AureaColors.accent) }
             Spacer().frame(height: 8)
-            action("Create Camera", "Reuse the solved camera when it already exists") { model.createTrackedObject(0); reload() }
+            action("panel_criar_camera", "cam_create_camera_desc") { model.createTrackedObject(0); reload() }
             if model.cameraSelectedCount > 0 {
-                Button("Set Origin") { model.calibrateCamera(0) }.padding(.vertical, 12)
-                if model.cameraSelectedCount >= 3 { Button("Set Ground Plane + Origin") { model.calibrateCamera(1) }.padding(.vertical, 12) }
+                Button(AureaText.t("cam_set_origin")) { model.calibrateCamera(0) }.padding(.vertical, 12)
+                if model.cameraSelectedCount >= 3 { Button(AureaText.t("cam_set_ground")) { model.calibrateCamera(1) }.padding(.vertical, 12) }
                 if model.cameraSelectedCount == 2 {
-                    TextField("Distance (scene units)", text: $distanceText).keyboardType(.decimalPad).textFieldStyle(.roundedBorder)
-                    Button("Set Scale") { if let value = Float(distanceText.replacingOccurrences(of: ",", with: ".")) { model.calibrateCamera(2, distance: value) } }.padding(.vertical, 12)
+                    TextField(AureaText.t("cam_distance"), text: $distanceText).keyboardType(.decimalPad).textFieldStyle(.roundedBorder)
+                    Button(AureaText.t("cam_set_scale")) { if let value = Float(distanceText.replacingOccurrences(of: ",", with: ".")) { model.calibrateCamera(2, distance: value) } }.padding(.vertical, 12)
                 }
                 ForEach(model.layers.filter { $0.kind == 10 }) { layer in
-                    Button("Place 3D: \(layer.name)") { model.placeTrackedModel(layer.id) }.padding(.vertical, 12)
+                    Button(AureaText.t("cam_place_3d", layer.name)) { model.placeTrackedModel(layer.id) }.padding(.vertical, 12)
                 }
             }
             if !flag("rotationOnly") && model.cameraSelectedCount > 0 {
-                ForEach(Array(["Create Null / Anchor", "Create Camera + Shape", "Create Camera + Text", "Create Camera + Solid"].enumerated()), id: \.offset) { index, title in
+                ForEach(Array(["cam_create_null_anchor", "cam_create_camera_shape", "cam_create_camera_text", "cam_create_camera_solid"].enumerated()), id: \.offset) { index, title in
                     Spacer().frame(height: 8)
-                    action(title, "Place on the selected 3D points") { model.createTrackedObject(UInt32(index + 1)); reload() }
+                    action(title, "cam_place_on_points") { model.createTrackedObject(UInt32(index + 1)); reload() }
                 }
             } else if !flag("rotationOnly") {
-                note("Tap a point or drag a selection box on the video.")
+                note(AureaText.t("cam_tap_hint"))
             }
-            Button(advanced ? "Hide advanced" : "Advanced") { advanced.toggle() }.padding(.vertical, 12)
-            if advanced { note("\(Int(number("solved")))/\(Int(number("frames"))) frames · RMS \(String(format: "%.2f", number("error"))) px · FOV \(Int(number("fovDeg").rounded()))°") }
+            Button(AureaText.t(advanced ? "cam_hide_advanced" : "panel_avancado")) { advanced.toggle() }.padding(.vertical, 12)
+            if advanced { note(AureaText.t("cam_stats_short", Int(number("solved")), Int(number("frames")), String(format: "%.2f", number("error")), Int(number("fovDeg").rounded()))) }
             if advanced {
-                Picker("Camera", selection: $cameraMotion) { Text("Auto").tag(UInt32(0)); Text("Free camera").tag(UInt32(1)); Text("Tripod").tag(UInt32(2)) }
-                Button(knownFov == 0 ? "FOV: Auto" : "FOV: \(Int(knownFov))°") { knownFov = knownFov == 0 ? Float(number("fovDeg")).clamped(to: 10...120) : 0 }
+                Picker(AureaText.t("cam_camera"), selection: $cameraMotion) { Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("cam_free")).tag(UInt32(1)); Text(AureaText.t("cam_tripod")).tag(UInt32(2)) }
+                Button(knownFov == 0 ? AureaText.t("cam_fov_auto") : AureaText.t("cam_fov_value", Int(knownFov))) { knownFov = knownFov == 0 ? Float(number("fovDeg")).clamped(to: 10...120) : 0 }
                 if knownFov > 0 { Slider(value: $knownFov, in: 10...120).tint(AureaColors.accent) }
-                action("Re-solve", "Reuse observations with these camera constraints") { _ = model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov); reload() }
+                action("cam_resolve", "cam_resolve_desc") { _ = model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov); reload() }
                 if model.cameraSelectedCount > 0 {
-                    action("Delete selected points + Re-solve", "Remove unwanted motion from this analysis") { _ = model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov); model.cameraSelectedCount = 0; reload() }
+                    action("cam_delete_resolve", "cam_delete_resolve_desc") { _ = model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov); model.cameraSelectedCount = 0; reload() }
                 }
             }
             Spacer().frame(height: 8)
             action("panel_analisar_novo", "panel_modo_escolhido_acima", run: analyze)
         } else {
             if state == 3 || state == 4 {
-                note(state == 4 ? AureaText.t("panel_analise_cancelada") : AureaText.t("ios_camera_solve_failed", status["message"] as? String ?? ""))
+                note(state == 4 ? AureaText.t("panel_analise_cancelada") : AureaText.t("ios_camera_solve_failed", AureaEngineText.reason(status["message"] as? String)))
                 Spacer().frame(height: 8)
             }
             action("panel_analisar_camera", "panel_acha_movimento_camera_video_roda_segundo", run: analyze)
@@ -206,47 +206,47 @@ private struct MotionTrackingSection: View {
     private func n(_ key: String) -> Double { (model.motionStatus[key] as? NSNumber)?.doubleValue ?? 0 }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Motion Tracking").font(.aurea(size: 14, weight: .bold))
+            Text(AureaText.t("trk_title")).font(.aurea(size: 14, weight: .bold))
             if n("state") != 1 && model.pointPick == nil {
-                ForEach(Array(["Point", "Two Points", "Planar", "Corner Pin", "Stabilizer"].enumerated()), id: \.offset) { i, name in
+                ForEach(Array(["trk_tool_point", "trk_tool_two_points", "trk_tool_planar", "trk_tool_corner_pin", "trk_tool_stabilizer"].map { AureaText.t($0) }.enumerated()), id: \.offset) { i, name in
                     button(name) { model.beginMotionPick(UInt32(i)) }
                 }
-                Toggle("Backward", isOn: $model.motionBackward)
-                Picker("Motion", selection: $model.motionModel) {
-                    Text("Auto").tag(UInt32(0)); Text("Position").tag(UInt32(1))
-                    Text("Position / Rotation / Scale").tag(UInt32(2)); Text("Perspective").tag(UInt32(3))
+                Toggle(AureaText.t("trk_backward"), isOn: $model.motionBackward)
+                Picker(AureaText.t("trk_motion"), selection: $model.motionModel) {
+                    Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("trk_motion_position")).tag(UInt32(1))
+                    Text(AureaText.t("trk_motion_prs")).tag(UInt32(2)); Text(AureaText.t("trk_motion_perspective")).tag(UInt32(3))
                 }
-                Text("Feature radius: \(Int(model.motionFeature)) px")
+                Text(AureaText.t("trk_feature_radius", Int(model.motionFeature)))
                 Slider(value: $model.motionFeature, in: 6...48)
-                Text("Search radius: \(Int(model.motionSearch)) px")
+                Text(AureaText.t("trk_search_radius", Int(model.motionSearch)))
                 Slider(value: $model.motionSearch, in: 16...192)
-                button("Restore saved analysis") { model.restoreMotion() }
+                button(AureaText.t("trk_restore")) { model.restoreMotion() }
             }
             if model.pointPick != nil {
                 Text(AureaText.t("ios_motion_points_selected", model.motionPicked))
-                button("Cancel selection") { model.cancelMotionPick() }
+                button(AureaText.t("editor_cancelar_selecao")) { model.cancelMotionPick() }
             }
             if n("state") == 1 {
                 ProgressView(value: n("progress"))
                 Text(AureaText.t("ios_analyzing_pct", Int(n("progress") * 100)))
-                button("Cancel") { model.engine.cancelMotionTrack() }
+                button(AureaText.t("common_cancel")) { model.engine.cancelMotionTrack() }
             }
-            if let message = model.motionStatus["message"] as? String, !message.isEmpty { Text(message).foregroundStyle(AureaColors.muted) }
+            if let message = model.motionStatus["message"] as? String, !message.isEmpty { Text(AureaEngineText.sentence(message)).foregroundStyle(AureaColors.muted) }
             if n("state") == 2 {
-                Text("\(Int(n("validFrames")))/\(Int(n("frames"))) frames · confidence \(Int(n("confidence") * 100))% · RMS \(String(format: "%.2f", n("error"))) px")
+                Text(AureaText.t("trk_stats", Int(n("validFrames")), Int(n("frames")), Int(n("confidence") * 100), String(format: "%.2f", n("error"))))
                 // Quadros perdidos não escondem mais as ações: ficam sem key (interpolados).
                 if n("lost") > 0 { Text(AureaText.t("track_lost_frames_note", Int(n("lost")))).foregroundStyle(AureaColors.muted) }
                 if n("frames") > 0 {
                     if n("tool") == 4 {
-                        Toggle("Lock camera", isOn: $lock)
-                        Text("Smoothness: \(String(format: "%.1f", smooth)) s")
+                        Toggle(AureaText.t("trk_lock_camera"), isOn: $lock)
+                        Text(AureaText.t("trk_smoothness", String(format: "%.1f", smooth)))
                         Slider(value: $smooth, in: 0.1...2)
-                        Text("Maximum zoom: \(Int((zoom - 1) * 100))%")
+                        Text(AureaText.t("trk_max_zoom", Int((zoom - 1) * 100)))
                         Slider(value: $zoom, in: 1...1.5)
-                        Picker("Crop", selection: $crop) { Text("None").tag(UInt32(0)); Text("Static").tag(UInt32(1)); Text("Dynamic").tag(UInt32(2)) }
-                        button("Apply stabilization") { model.applyMotion(3, lock: lock, smooth: smooth, maxScale: zoom, crop: crop) }
+                        Picker(AureaText.t("trk_crop"), selection: $crop) { Text(AureaText.t("trk_crop_none")).tag(UInt32(0)); Text(AureaText.t("trk_crop_static")).tag(UInt32(1)); Text(AureaText.t("trk_crop_dynamic")).tag(UInt32(2)) }
+                        button(AureaText.t("trk_apply_stabilization")) { model.applyMotion(3, lock: lock, smooth: smooth, maxScale: zoom, crop: crop) }
                     } else {
-                        button("Create Null") { model.applyMotion(0) }
+                        button(AureaText.t("trk_create_null")) { model.applyMotion(0) }
                         // Alvo escolhido aqui: a camada que recebe o rastreio não tem
                         // este painel (é do vídeo), então "a selecionada" era o próprio vídeo.
                         let targets = model.layers.filter { $0.id != model.primarySelection && !$0.threeD && $0.parentIndex < 0 && !$0.adjustment && [1, 2, 4, 5, 6, 11, 12].contains($0.kind) }
@@ -541,7 +541,7 @@ struct CaptionsPanel: View {
         loading = Task {
             let cached = await Task.detached(priority: .userInitiated) { CaptionTranscriber.load(source) }.value
             guard !Task.isCancelled, model.primarySelection == sourceId, words.isEmpty else { return }
-            setWords(cached, from: cached.isEmpty ? nil : "cache")
+            setWords(cached, from: cached.isEmpty ? nil : AureaText.t("i18n_caption_source_cache"))
         }
     }
     private func setWords(_ value: [CaptionWord], from source: String?) {
@@ -612,7 +612,7 @@ struct CaptionsPanel: View {
                 } onCancel: { _ = engine.captionProgress(true) }
                 try Task.checkCancellation()
                 guard model.primarySelection == sourceId else { busy = nil; return }
-                setWords(result, from: "Whisper local"); busy = nil; persist(); apply()
+                setWords(result, from: AureaText.t("i18n_caption_source_whisper")); busy = nil; persist(); apply()
             } catch { if !Task.isCancelled { self.error = error.localizedDescription }; busy = nil }
         }
     }
@@ -629,7 +629,7 @@ struct CaptionsPanel: View {
             }.value
             model.refreshModel(force: true)
             guard model.primarySelection == sourceId else { return }
-            busy = nil; error = result.isEmpty ? nil : result; captionCount = Int(engine.captionCount(sourceId))
+            busy = nil; error = result.isEmpty ? nil : AureaEngineText.sentence(result); captionCount = Int(engine.captionCount(sourceId))
         }
     }
     private var options: [String: NSNumber] {

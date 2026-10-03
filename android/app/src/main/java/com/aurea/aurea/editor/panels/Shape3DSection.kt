@@ -21,12 +21,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -109,6 +117,8 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
     }
     if (part < 0) {
         ShapeHint(stringResource(R.string.shape3d_whole_hint))
+        // Só o cubo (e as fatias dele) divide em partes.
+        if (info.kind == 0) SplitCubeBox(store)
         Spacer(Modifier.height(14.dp))
         return
     }
@@ -140,6 +150,48 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
     }
     ShapeHint(stringResource(R.string.shape3d_part_hint))
     Spacer(Modifier.height(14.dp))
+}
+
+/**
+ * "Dividir em partes" do cubo: eixo do corte (X/Y/Z), quantas partes (2..16,
+ * padrão 3) e o botão. Quem divide é o motor (Engine::split_shape3d).
+ */
+@Composable
+private fun SplitCubeBox(store: EditorStore) {
+    var axis by rememberSaveable { mutableIntStateOf(0) }
+    var count by rememberSaveable { mutableIntStateOf(3) }
+    Spacer(Modifier.height(14.dp))
+    ShapeTitle(stringResource(R.string.shape3d_split_title))
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.shape3d_split_axis), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        for (a in 0..2) {
+            val name = "XYZ"[a].toString()
+            val desc = stringResource(R.string.shape3d_split_axis_desc, name)
+            ShapeChip(name, on = axis == a, modifier = Modifier.testTag("shape3d.split.axis.$a")
+                .semantics { contentDescription = desc; selected = axis == a }) { axis = a }
+            if (a < 2) Spacer(Modifier.width(6.dp))
+        }
+    }
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.shape3d_split_count), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        val less = stringResource(R.string.shape3d_split_less)
+        val more = stringResource(R.string.shape3d_split_more)
+        val countDesc = stringResource(R.string.shape3d_split_count_desc, count)
+        ShapeChip("−", on = false, modifier = Modifier.testTag("shape3d.split.less").semantics { contentDescription = less }) {
+            count = (count - 1).coerceAtLeast(2)
+        }
+        Text("$count", modifier = Modifier.width(36.dp).semantics { contentDescription = countDesc }, textAlign = TextAlign.Center,
+            style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W700)))
+        ShapeChip("+", on = false, modifier = Modifier.testTag("shape3d.split.more").semantics { contentDescription = more }) {
+            count = (count + 1).coerceAtMost(16)
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        ShapeChip(stringResource(R.string.shape3d_split_apply), on = true, modifier = Modifier.testTag("shape3d.split.apply")) {
+            store.splitShape3D(axis, count)
+        }
+    }
+    ShapeHint(stringResource(R.string.shape3d_split_hint))
 }
 
 @Composable

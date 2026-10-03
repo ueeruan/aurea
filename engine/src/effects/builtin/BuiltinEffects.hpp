@@ -56,6 +56,8 @@ void register_shape3d_layout_effect(EffectRegistry& r);
 void register_motion_detect_effect(EffectRegistry& r);
 /// Emulador CRT, Tremor dissolvente e Mapa de deslocamento (RetroDisplaceEffects.cpp).
 void register_retro_displace_effects(EffectRegistry& r);
+/// Datamosh (DatamoshEffect.cpp). Sempre no fim.
+void register_datamosh_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

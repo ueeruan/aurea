@@ -2132,3 +2132,55 @@ AUREA_TEST(Engine, NullParentKeepsChildInPlaceAndDragsItForEveryNull) {
         }
     }
 }
+
+// Curvas com parâmetros pela fila de comandos (o caminho das duas UIs): o
+// motor aceita o tipo novo, grava os parâmetros e um desfazer volta a curva.
+AUREA_TEST(Engine, ParametricEasingCommandIsValidatedAndUndoable) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    const auto added = e.add_shape(0);
+    AUREA_CHECK(added.ok());
+    const auto layer = LayerId::unpack(*added);
+    Command insert;
+    insert.type = CommandType::KeyframeInsert;
+    insert.keyframe.track = TrackRef{layer, TrackProperty::Opacity, kInvalidIndex, 0};
+    insert.keyframe.time = FrameIndex{0}; insert.keyframe.value = 0.0f;
+    AUREA_CHECK(e.apply_command(insert).ok());
+    insert.keyframe.time = FrameIndex{30}; insert.keyframe.value = 1.0f;
+    AUREA_CHECK(e.apply_command(insert).ok());
+    auto ease = [&](Interpolation kind, f32 a, f32 b) {
+        Command c;
+        c.type = CommandType::KeyframeSetInterpolation;
+        c.keyframe_interp.track = insert.keyframe.track;
+        c.keyframe_interp.time = FrameIndex{0};
+        c.keyframe_interp.interp = kind;
+        c.keyframe_interp.bx1 = a; c.keyframe_interp.by1 = b;
+        c.keyframe_interp.bx2 = 1.0f; c.keyframe_interp.by2 = kEaseParamMarker;
+        return e.apply_command(c);
+    };
+    AUREA_CHECK(ease(Interpolation::Overshoot, 0.6f, 0.0f).ok());
+    float h[4]{}; u8 power = 0;
+    AUREA_CHECK(e.query_keyframe_easing(*added, static_cast<u32>(TrackProperty::Opacity), kInvalidIndex, 0, 0, h, &power));
+    AUREA_CHECK_EQ(h[0], 0.6f);
+    AUREA_CHECK_EQ(h[3], kEaseParamMarker);
+    AUREA_CHECK(ease(Interpolation::Elastic, 0.5f, 0.75f).ok());
+    AUREA_CHECK(e.query_keyframe_easing(*added, static_cast<u32>(TrackProperty::Opacity), kInvalidIndex, 0, 0, h, &power));
+    AUREA_CHECK_EQ(h[0], 0.5f);
+    AUREA_CHECK_EQ(h[1], 0.75f);
+    // Um tipo além do último conhecido é recusado (não vira índice de tabela).
+    AUREA_CHECK(!ease(static_cast<Interpolation>(static_cast<u8>(kLastInterpolation) + 1), 0.5f, 0.5f).ok());
+    // Desfazer volta ao Overshoot, desfazer de novo à reta original.
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.query_keyframe_easing(*added, static_cast<u32>(TrackProperty::Opacity), kInvalidIndex, 0, 0, h, &power));
+    AUREA_CHECK_EQ(h[0], 0.6f);
+    const Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const Track* tr = comp ? comp->layer(layer)->tracks.find(TrackProperty::Opacity) : nullptr;
+    AUREA_CHECK(tr && tr->keys[0].interp == Interpolation::Overshoot);
+    AUREA_CHECK(e.apply_command(undo).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    tr = comp ? comp->layer(layer)->tracks.find(TrackProperty::Opacity) : nullptr;
+    AUREA_CHECK(tr && tr->keys[0].interp == Interpolation::Linear);
+    e.shutdown();
+}

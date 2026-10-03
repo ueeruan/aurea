@@ -1,6 +1,8 @@
 #include "aurea/timeline/Timeline.hpp"
 #include "aurea/core/Log.hpp"
 
+#include <cmath>
+
 namespace aurea {
 
 CompositionId Timeline::create_composition(std::string name,
@@ -12,7 +14,8 @@ CompositionId Timeline::create_composition(std::string name,
     Composition comp(std::move(name));
     comp.set_size(width, height);
     comp.set_fps(fps);
-    comp.set_duration(FrameIndex{static_cast<i64>(fps * 10.0)});   // 10 s iniciais
+    // 10 s iniciais, na taxa já normalizada (29,97 → 300 quadros, não 299).
+    comp.set_duration(FrameIndex{static_cast<i64>(std::llround(comp.fps() * 10.0))});
 
     const CompositionId id = compositions_.create(std::move(comp));
     if (Composition* c = compositions_.get(id)) c->set_id(id);
@@ -20,7 +23,7 @@ CompositionId Timeline::create_composition(std::string name,
     if (!root_.valid()) root_ = id;
     if (!current_.valid()) {
         current_ = id;
-        clock_.set_fps(fps);
+        clock_.set_fps(normalize_fps(fps));
     }
     return id;
 }

@@ -7,6 +7,7 @@
 // =============================================================================
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/Environment.hpp"
+#include "aurea/scene3d/ModelBudget.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -241,6 +242,8 @@ void generate_tangents(Primitive& p, const std::vector<Vec2>& uv) {
     p.generatedTangents = true;
 }
 
+void compact_vertices(Primitive& p);
+
 /// Reordena índices (cache de vértices, overdraw) e vértices (localidade de
 /// leitura). Não muda a aparência: os mesmos triângulos, em outra ordem.
 void optimize_primitive(Primitive& p) {
@@ -250,33 +253,7 @@ void optimize_primitive(Primitive& p) {
     std::vector<u32> tmp(p.indices.size());
     meshopt_optimizeVertexCache(tmp.data(), p.indices.data(), p.indices.size(), vc);
     meshopt_optimizeOverdraw(p.indices.data(), tmp.data(), tmp.size(), &p.positions[0].x, vc, sizeof(Vec3), 1.05f);
-    std::vector<u32> remap(vc);
-    const usize unique = meshopt_optimizeVertexFetchRemap(remap.data(), p.indices.data(), p.indices.size(), vc);
-    meshopt_remapIndexBuffer(p.indices.data(), p.indices.data(), p.indices.size(), remap.data());
-    auto apply = [&](auto& v) {
-        using T = typename std::decay_t<decltype(v)>::value_type;
-        if (v.empty()) return;
-        std::vector<T> out(unique);
-        meshopt_remapVertexBuffer(out.data(), v.data(), vc, sizeof(T), remap.data());
-        v.swap(out);
-    };
-    apply(p.positions);
-    apply(p.normals);
-    apply(p.tangents);
-    apply(p.uv0);
-    apply(p.uv1);
-    apply(p.colors);
-    apply(p.weights);
-    if (!p.joints.empty()) {
-        std::vector<u16> out(unique * 4);
-        meshopt_remapVertexBuffer(out.data(), p.joints.data(), vc, sizeof(u16) * 4, remap.data());
-        p.joints.swap(out);
-    }
-    for (MorphTarget& t : p.morphTargets) {
-        apply(t.positions);
-        apply(t.normals);
-        apply(t.tangents);
-    }
+    compact_vertices(p);
 }
 
 u32 pack_rgba8(Vec4 c) noexcept {
@@ -285,7 +262,7 @@ u32 pack_rgba8(Vec4 c) noexcept {
 }
 
 bool build_primitive(const cgltf_primitive& src, const cgltf_data* data, Primitive& out, Failure& fail,
-                     std::vector<std::string>& warnings) {
+                     std::vector<std::string>& warnings, f32 keep = 1.0f, f32 simplifyError = 0.01f) {
     if (src.has_draco_mesh_compression) {
         fail = {ImportError::UnsupportedCompression, "geometria comprimida com Draco (ainda nao suportado)"};
         return false;
@@ -414,6 +391,10 @@ bool build_primitive(const cgltf_primitive& src, const cgltf_data* data, Primiti
     }
 
     out.material = src.material ? static_cast<i32>(src.material - data->materials) : -1;
+    // Orçamento: simplifica AQUI, parte por parte, antes de a próxima ser
+    // desempacotada — o pico é uma parte cheia, não o modelo inteiro. E antes
+    // das normais planas (que triplicam os vértices e soltam as arestas).
+    if (keep < 1.0f && out.indices.size() >= 3 * 64) simplify_primitive(out, keep, simplifyError, true);
     if (out.normals.empty() && !out.indices.empty()) flat_normals(out);
     for (Vec3& n : out.normals) {
         const f32 l = n.length();
@@ -452,7 +433,183 @@ void downscale_to(Image& img, u32 maxSize) {
     }
 }
 
+/// Fator (potência de 2) que leva w × h para dentro de `maxSide` — o mesmo
+/// número de metades que `downscale_to` faria.
+u32 reduce_factor(u32 w, u32 h, u32 maxSide) noexcept {
+    u32 f = 1;
+    while (maxSide > 0 && (w / f > maxSide || h / f > maxSide) && w / f > 1 && h / f > 1 && f < (1u << 15)) f *= 2;
+    return f;
+}
+
+/// Pixels RGBA8 do decodificador → Image JÁ no teto, numa passada (caixa
+/// f × f). Antes a imagem inteira era copiada em resolução cheia e só depois
+/// reduzida: uma 8K custava 256 MB do stb + 256 MB da cópia ao mesmo tempo.
+void adopt_pixels(const u8* px, u32 w, u32 h, u32 maxSide, Image& out) {
+    const u32 f = reduce_factor(w, h, maxSide);
+    if (f == 1) {
+        out.rgba.assign(px, px + static_cast<usize>(w) * h * 4);
+        out.width = w;
+        out.height = h;
+        return;
+    }
+    const u32 ow = std::max(1u, w / f), oh = std::max(1u, h / f);
+    out.rgba.assign(static_cast<usize>(ow) * oh * 4, 0);
+    for (u32 y = 0; y < oh; ++y) {
+        for (u32 x = 0; x < ow; ++x) {
+            u32 s[4] = {0, 0, 0, 0};
+            u32 n = 0;
+            for (u32 dy = 0; dy < f; ++dy) {
+                const u32 sy = std::min(h - 1, y * f + dy);
+                const u8* row = px + static_cast<usize>(sy) * w * 4;
+                for (u32 dx = 0; dx < f; ++dx) {
+                    const u8* p = row + static_cast<usize>(std::min(w - 1, x * f + dx)) * 4;
+                    s[0] += p[0]; s[1] += p[1]; s[2] += p[2]; s[3] += p[3];
+                    ++n;
+                }
+            }
+            u8* o = &out.rgba[(static_cast<usize>(y) * ow + x) * 4];
+            for (u32 c = 0; c < 4; ++c) o[c] = static_cast<u8>((s[c] + n / 2) / n);
+        }
+    }
+    out.width = ow;
+    out.height = oh;
+}
+
+/// Pico transitório de decodificar uma imagem w × h: a saída RGBA8 mais os
+/// planos internos do decodificador (JPEG guarda os componentes; PNG de 16
+/// bits guarda o dobro). 8 bytes por pixel cobre os dois.
+constexpr u64 kDecodeBytesPerPixel = 8;
+
+enum class Decode : u8 { Ok, Failed, TooBig };
+
+/// Decodifica PNG/JPEG/TGA/BMP/PSD já reduzido ao teto. `transientLimit`
+/// (0 = sem limite): a imagem cujo decode passaria disso nem começa — o
+/// modelo entra sem aquele mapa, com aviso, em vez de derrubar o app.
+Decode decode_capped(const u8* data, usize size, u32 maxSide, u64 transientLimit, Image& out, u32& w0, u32& h0) {
+    if (!data || size == 0 || size > static_cast<usize>(INT32_MAX)) return Decode::Failed;
+    int w = 0, h = 0, comp = 0;
+    if (!stbi_info_from_memory(data, static_cast<int>(size), &w, &h, &comp) || w <= 0 || h <= 0) return Decode::Failed;
+    w0 = static_cast<u32>(w);
+    h0 = static_cast<u32>(h);
+    if (transientLimit != ~0ull && static_cast<u64>(w) * static_cast<u64>(h) * kDecodeBytesPerPixel > transientLimit) return Decode::TooBig;
+    stbi_uc* px = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
+    if (!px) return Decode::Failed;
+    adopt_pixels(px, static_cast<u32>(w), static_cast<u32>(h), maxSide, out);
+    stbi_image_free(px);
+    out.hasAlpha = comp == 2 || comp == 4;
+    return Decode::Ok;
+}
+
+/// Mantém só os vértices que os índices usam, na ordem de leitura
+/// (meshoptimizer), com TODOS os atributos — skin e morph juntos.
+void compact_vertices(Primitive& p) {
+    const usize vc = p.positions.size();
+    if (vc == 0 || p.indices.empty()) return;
+    std::vector<u32> remap(vc);
+    const usize unique = meshopt_optimizeVertexFetchRemap(remap.data(), p.indices.data(), p.indices.size(), vc);
+    meshopt_remapIndexBuffer(p.indices.data(), p.indices.data(), p.indices.size(), remap.data());
+    auto apply = [&](auto& v) {
+        using T = typename std::decay_t<decltype(v)>::value_type;
+        if (v.size() != vc) return;
+        std::vector<T> out(unique);
+        meshopt_remapVertexBuffer(out.data(), v.data(), vc, sizeof(T), remap.data());
+        v.swap(out);
+    };
+    apply(p.positions);
+    apply(p.normals);
+    apply(p.tangents);
+    apply(p.uv0);
+    apply(p.uv1);
+    apply(p.colors);
+    apply(p.weights);
+    if (p.joints.size() == vc * 4) {
+        std::vector<u16> out(unique * 4);
+        meshopt_remapVertexBuffer(out.data(), p.joints.data(), vc, sizeof(u16) * 4, remap.data());
+        p.joints.swap(out);
+    }
+    for (MorphTarget& t : p.morphTargets) {
+        apply(t.positions);
+        apply(t.normals);
+        apply(t.tangents);
+    }
+}
+
+std::string mb_text(u64 bytes) { return std::to_string((bytes + (1u << 19)) >> 20) + " MB"; }
+
+/// Bytes que uma primitiva segura na CPU (orçamento do import).
+u64 primitive_bytes(const Primitive& p) {
+    u64 n = p.positions.size() * sizeof(Vec3) + p.normals.size() * sizeof(Vec3) + p.tangents.size() * sizeof(Vec4)
+          + (p.uv0.size() + p.uv1.size()) * sizeof(Vec2) + p.colors.size() * 4 + p.joints.size() * 2
+          + p.weights.size() * sizeof(Vec4) + p.indices.size() * 4;
+    for (const auto& l : p.lods) n += l.size() * 4;
+    for (const MorphTarget& t : p.morphTargets)
+        n += (t.positions.size() + t.normals.size() + t.tangents.size()) * sizeof(Vec3);
+    return n;
+}
+
+/// Teto do decode de UMA imagem agora: o que sobra do orçamento depois do que
+/// o import já segura (no máximo ¾ dele). 0 = não cabe nenhuma (pular).
+/// Sem orçamento: sem limite (~0).
+u64 decode_room(u64 budget, u64 held) {
+    if (budget == 0) return ~0ull;
+    const u64 room = budget > held ? budget - held : 0;
+    return std::min(room, budget * 3 / 4);
+}
+
 } // namespace
+
+void downscale_image(Image& img, u32 maxSide) { downscale_to(img, maxSide); }
+
+u32 simplify_primitive(Primitive& p, f32 ratio, f32 error, bool sloppy, bool lockBorder) {
+    const usize ic = p.indices.size(), vc = p.positions.size();
+    if (ic < 3 || vc == 0 || !(ratio < 1.0f)) return static_cast<u32>(ic / 3);
+    const usize target = std::max<usize>(1, static_cast<usize>(static_cast<f64>(ic / 3) * std::max(0.0f, ratio))) * 3;
+    // Normais e UV pesam no erro: a costura de UV e as quinas duras ficam.
+    const bool hasN = p.normals.size() == vc, hasUV = p.uv0.size() == vc;
+    const usize ac = (hasN ? 3 : 0) + (hasUV ? 2 : 0);
+    std::vector<f32> attrs(ac * vc);
+    f32 weights[5] = {};
+    if (ac) {
+        usize k = 0;
+        if (hasN) { weights[k++] = 0.5f; weights[k++] = 0.5f; weights[k++] = 0.5f; }
+        if (hasUV) { weights[k++] = 1.0f; weights[k++] = 1.0f; }
+        for (usize v = 0; v < vc; ++v) {
+            f32* a = &attrs[v * ac];
+            if (hasN) { *a++ = p.normals[v].x; *a++ = p.normals[v].y; *a++ = p.normals[v].z; }
+            if (hasUV) { *a++ = p.uv0[v].x; *a++ = p.uv0[v].y; }
+        }
+    }
+    const unsigned options = lockBorder ? meshopt_SimplifyLockBorder : 0u;
+    std::vector<u32> out(ic);
+    auto run = [&](f32 err) {
+        f32 got = 0.0f;
+        return ac ? meshopt_simplifyWithAttributes(out.data(), p.indices.data(), ic, &p.positions[0].x, vc, sizeof(Vec3),
+                                                   attrs.data(), ac * sizeof(f32), weights, ac, nullptr, target, err,
+                                                   options, &got)
+                  : meshopt_simplify(out.data(), p.indices.data(), ic, &p.positions[0].x, vc, sizeof(Vec3), target, err,
+                                     options, &got);
+    };
+    usize n = run(std::max(error, 1e-4f));
+    // O erro pedido segurou longe do alvo: solta o erro (a topologia vira o limite).
+    if (n > target * 3 / 2) n = run(1.0f);
+    // Ainda longe (malha toda em pedaços soltos, sopa de triângulos): o modo
+    // que ignora topologia. Não nas partes de um modelo lido em pedaços — ele
+    // não respeita a borda travada e abriria frestas entre os pedaços.
+    if (sloppy && !lockBorder && n > target * 3 / 2) {
+        f32 got = 0.0f;
+        const usize s = meshopt_simplifySloppy(out.data(), p.indices.data(), ic, &p.positions[0].x, vc, sizeof(Vec3),
+                                               target, 1.0f, &got);
+        if (s >= 3) n = s;
+    }
+    if (n < 3) return static_cast<u32>(ic / 3);   // nunca apaga a malha
+    out.resize(n);
+    p.indices.swap(out);
+    p.lods.clear();
+    compact_vertices(p);
+    p.bounds = Aabb{};
+    for (const Vec3& v : p.positions) p.bounds.add(v);
+    return static_cast<u32>(n / 3);
+}
 
 bool is_ktx2(const u8* data, usize size) noexcept {
     static const u8 id[12] = {0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};   // identificador do KTX2
@@ -481,7 +638,8 @@ bool decode_ktx2(const u8* data, usize size, Image& out) {
 namespace {
 
 bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::string& baseDir, Image& out,
-                  Failure& fail) {
+                  Failure& fail, u32 maxSide = 0, u64 transientLimit = ~0ull, u32* w0 = nullptr, u32* h0 = nullptr,
+                  bool* skipped = nullptr) {
     out.name = src.name ? src.name : "";
     std::vector<u8> bytes;
     const u8* data = nullptr;
@@ -531,24 +689,35 @@ bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::
         const bool ok = decode_ktx2(data, size, out);
         if (b64) std::free(b64);
         if (!ok) fail = {ImportError::TextureDecodeFailed, "textura KTX2 '" + (out.uri.empty() ? out.name : out.uri) + "' ilegivel"};
+        if (ok) {
+            if (w0) *w0 = out.width;
+            if (h0) *h0 = out.height;
+            if (maxSide) downscale_to(out, maxSide);
+        }
         return ok;
     }
-    int w = 0, h = 0, comp = 0;
-    stbi_uc* px = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
+    u32 ow = 0, oh = 0;
+    const Decode d = decode_capped(data, size, maxSide, transientLimit, out, ow, oh);
     if (b64) std::free(b64);
-    if (!px) {
+    if (w0) *w0 = ow;
+    if (h0) *h0 = oh;
+    if (d == Decode::TooBig) {
+        // Grande demais para decodificar neste aparelho: o modelo entra sem
+        // este mapa (aviso), em vez de o decode derrubar o app.
+        if (skipped) *skipped = true;
+        out.rgba.clear();
+        out.width = out.height = 0;
+        return true;
+    }
+    if (d != Decode::Ok) {
         const char* mime = src.mime_type ? src.mime_type : "";
         const bool ktx = std::strstr(mime, "ktx2") != nullptr;
+        const char* why = stbi_failure_reason();
         fail = {ktx ? ImportError::UnsupportedFeature : ImportError::TextureDecodeFailed,
                 std::string("textura '") + (out.uri.empty() ? out.name : out.uri) + "': " +
-                (ktx ? "KTX2 sem alternativa PNG/JPEG" : stbi_failure_reason())};
+                (ktx ? "KTX2 sem alternativa PNG/JPEG" : (why ? why : "formato ilegivel"))};
         return false;
     }
-    out.width = static_cast<u32>(w);
-    out.height = static_cast<u32>(h);
-    out.rgba.assign(px, px + static_cast<usize>(w) * h * 4);
-    stbi_image_free(px);
-    out.hasAlpha = comp == 2 || comp == 4;
     return true;
 }
 
@@ -661,6 +830,45 @@ void decompose(const f32 m[16], Vec3& t, Quat& r, Vec3& s) {
     r = r.normalized();
 }
 
+/// Contagens de um glTF pelo JSON (acessores), sem tocar nos buffers.
+struct GltfCounts {
+    u64 triangles = 0, vertices = 0, largestPart = 0;
+};
+
+GltfCounts count_gltf(const cgltf_data* data) {
+    GltfCounts c;
+    for (cgltf_size m = 0; m < data->meshes_count; ++m) {
+        for (cgltf_size p = 0; p < data->meshes[m].primitives_count; ++p) {
+            const cgltf_primitive& prim = data->meshes[m].primitives[p];
+            const cgltf_accessor* pos = nullptr;
+            for (cgltf_size a = 0; a < prim.attributes_count; ++a)
+                if (prim.attributes[a].type == cgltf_attribute_type_position) pos = prim.attributes[a].data;
+            const u64 verts = pos ? pos->count : 0;
+            const u64 n = prim.indices ? prim.indices->count : verts;
+            u64 tris = 0;
+            if (prim.type == cgltf_primitive_type_triangles) tris = n / 3;
+            else if (prim.type == cgltf_primitive_type_triangle_strip || prim.type == cgltf_primitive_type_triangle_fan) tris = n >= 3 ? n - 2 : 0;
+            c.triangles += tris;
+            c.vertices += verts;
+            c.largestPart = std::max(c.largestPart, tris);
+        }
+    }
+    return c;
+}
+
+/// Custo da geometria de um glTF: a maior primitiva desempacotada inteira
+/// (índices crus + triangulados + atributos em float) antes de simplificar.
+ModelCost cost_from_counts(const GltfCounts& g) {
+    ModelCost c;
+    c.valid = true;
+    c.triangles = g.triangles;
+    c.vertices = g.vertices;
+    c.largestPartTriangles = g.largestPart;
+    const f64 vpt = g.triangles ? std::clamp(static_cast<f64>(g.vertices) / static_cast<f64>(g.triangles), 0.3, 3.0) : 1.0;
+    c.partBytesPerTriangle = static_cast<u32>(24.0 + vpt * 84.0);
+    return c;
+}
+
 ImportResult fail_result(ImportError e, std::string detail) {
     ImportResult r;
     r.error = e;
@@ -749,6 +957,24 @@ ImportResult finalize_asset(std::unique_ptr<SceneAsset> asset, const ImportOptio
     }
     if (A.stats.triangles == 0 || !A.bounds.valid()) {
         return fail_result(ImportError::NoGeometry, "nenhuma malha visivel na cena");
+    }
+    if (A.stats.sourceTriangles == 0) A.stats.sourceTriangles = A.stats.triangles;
+    // Conferência final do orçamento com o que de fato ficou (a estimativa de
+    // antes era pelas contagens do arquivo): o que passar não vai para a GPU.
+    if (options.memoryBudget) {
+        ModelCost kept;
+        kept.valid = true;
+        kept.triangles = A.stats.triangles;
+        kept.vertices = A.stats.vertices;
+        u64 imageBytes = 0;
+        for (const Image& img : A.images) imageBytes += img.pixels().size();
+        kept.texturePixels = imageBytes / 4;
+        kept.textures = static_cast<u32>(A.images.size());
+        const u64 resident = estimate_import_peak(kept, ModelBudget{});
+        if (resident > options.memoryBudget) {
+            return fail_result(ImportError::TooHeavy, "o modelo otimizado ainda precisa de ~" + mb_text(resident) +
+                                                          "; este aparelho aguenta " + mb_text(options.memoryBudget));
+        }
     }
     A.stats.nodes = static_cast<u32>(A.nodes.size());
     A.stats.meshes = static_cast<u32>(A.meshes.size());
@@ -866,9 +1092,37 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         for (i32 i = 0; i < static_cast<i32>(A.nodes.size()); ++i) if (A.nodes[i].parent < 0) A.roots.push_back(i);
     }
 
+    // --- Orçamento: contagens do JSON, antes de desempacotar nada -----------------
+    const GltfCounts counts = count_gltf(data);
+    u64 heldBytes = size;   // o arquivo lido + buffers externos (cópias próprias)
+    for (cgltf_size i = 0; i < data->buffers_count; ++i)
+        if (data->buffers[i].uri) heldBytes += data->buffers[i].size;
+    A.stats.sourceTriangles = static_cast<u32>(std::min<u64>(counts.triangles, UINT32_MAX));
+    f32 keep = 1.0f;
+    if (options.maxTriangles && counts.triangles > options.maxTriangles)
+        keep = static_cast<f32>(static_cast<f64>(options.maxTriangles) / static_cast<f64>(counts.triangles));
+    if (options.memoryBudget) {
+        ModelCost c = cost_from_counts(counts);
+        c.parseBytes = heldBytes;
+        c.fileBytes = c.parseBytes;
+        // Texturas: no máximo o teto cada (o decode confere uma por uma).
+        c.textures = static_cast<u32>(data->images_count);
+        c.texturePixels = static_cast<u64>(c.textures) * options.maxTextureSize * options.maxTextureSize;
+        ModelBudget b;
+        b.memoryBytes = options.memoryBudget;
+        b.maxTriangles = options.maxTriangles;
+        b.maxTextureSize = options.maxTextureSize;
+        const u64 peak = estimate_import_peak(c, b);
+        if (peak > options.memoryBudget) {
+            return fail_result(ImportError::TooHeavy, std::to_string(counts.triangles) + " triangulos precisam de ~" +
+                                                          mb_text(peak) + "; este aparelho aguenta " +
+                                                          mb_text(options.memoryBudget));
+        }
+    }
+
     // --- Geometria -----------------------------------------------------------
     const u64 tGeo = monotonic_ns();
-    set_phase(progress, ImportPhase::Geometry);
+    set_phase(progress, keep < 1.0f ? ImportPhase::Simplifying : ImportPhase::Geometry);
     Failure fail;
     A.meshes.resize(data->meshes_count);
     usize primTotal = 0, primDone = 0;
@@ -881,7 +1135,7 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         for (cgltf_size p = 0; p < src.primitives_count; ++p) {
             if (cancelled(progress)) return fail_result(ImportError::Cancelled, "cancelado");
             Primitive prim;
-            if (!build_primitive(src.primitives[p], data, prim, fail, A.warnings)) {
+            if (!build_primitive(src.primitives[p], data, prim, fail, A.warnings, keep, options.simplifyError)) {
                 return fail_result(fail.error, (mesh.name.empty() ? std::string("malha ") + std::to_string(m) : mesh.name)
                                                    + ": " + fail.detail);
             }
@@ -932,10 +1186,28 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
             A.images[i].name = data->images[i].name ? data->images[i].name : "";
             continue;
         }
-        if (!decode_image(data->images[i], opts, baseDir, A.images[i], fail)) return fail_result(fail.error, fail.detail);
-        if (options.maxTextureSize && (A.images[i].width > options.maxTextureSize || A.images[i].height > options.maxTextureSize)) {
-            const u32 w0 = A.images[i].width, h0 = A.images[i].height;
-            downscale_to(A.images[i], options.maxTextureSize);
+        // Uma imagem por vez, já reduzida no decode; com orçamento, a que
+        // passaria do teto (decode ou soma guardada) é pulada com aviso.
+        u32 w0 = 0, h0 = 0;
+        bool skipped = false;
+        // O que sobra do teto com o arquivo, a geometria e as texturas já guardadas.
+        u64 held = heldBytes + A.stats.imageBytes;
+        for (const Mesh& m : A.meshes) for (const Primitive& p : m.primitives) held += primitive_bytes(p);
+        const u64 transient = decode_room(options.memoryBudget, held);
+        if (options.memoryBudget && A.stats.imageBytes * 7 / 3 > options.memoryBudget / 2) {
+            skipped = true;
+        } else if (!decode_image(data->images[i], opts, baseDir, A.images[i], fail, options.maxTextureSize, transient,
+                                 &w0, &h0, &skipped)) {
+            return fail_result(fail.error, fail.detail);
+        }
+        if (skipped) {
+            A.images[i].rgba.clear();
+            A.images[i].width = A.images[i].height = 0;
+            ++A.stats.texturesSkipped;
+            A.warnings.push_back("textura " + (w0 ? std::to_string(w0) + "x" + std::to_string(h0) + " " : std::string()) +
+                                 "grande demais para a memoria deste aparelho: ignorada");
+        } else if (w0 && (A.images[i].width != w0 || A.images[i].height != h0)) {
+            ++A.stats.texturesReduced;
             A.warnings.push_back("textura " + std::to_string(w0) + "x" + std::to_string(h0) + " reduzida para " +
                                  std::to_string(A.images[i].width) + "x" + std::to_string(A.images[i].height));
         }
@@ -1123,5 +1395,243 @@ std::shared_ptr<HdriPixels> decode_hdri(const u8* bytes, usize size, f32 ldrGain
 }
 
 #include "UfbxImport.inl"
+
+// =============================================================================
+// Custo antes de importar (ModelBudget.hpp): só cabeçalhos e contagens.
+// =============================================================================
+namespace {
+
+std::string lower_extension(const std::string& path) {
+    const usize dot = path.find_last_of('.');
+    const usize slash = path.find_last_of("/\\");
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) return {};
+    return lower_ascii(path.substr(dot + 1));
+}
+
+u64 file_bytes(const std::string& path) {
+    std::error_code ec;
+    const auto n = std::filesystem::file_size(std::filesystem::u8path(path), ec);
+    return ec ? 0 : static_cast<u64>(n);
+}
+
+/// Até `max` bytes a partir de `offset` (o cabeçalho de uma imagem cabe nos
+/// primeiros 256 KB, mesmo um JPEG com EXIF grande).
+bool read_range(const std::string& path, u64 offset, usize max, std::vector<u8>& out) {
+    out.clear();
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return false;
+#if defined(_MSC_VER)
+    const bool sought = _fseeki64(f, static_cast<__int64>(offset), SEEK_SET) == 0;
+#else
+    const bool sought = fseeko(f, static_cast<off_t>(offset), SEEK_SET) == 0;
+#endif
+    if (!sought) { std::fclose(f); return false; }
+    out.resize(max);
+    const usize n = std::fread(out.data(), 1, max, f);
+    std::fclose(f);
+    out.resize(n);
+    return n > 0;
+}
+
+constexpr usize kImageHead = 256 * 1024;
+
+void add_texture(ModelCost& c, u32 w, u32 h) {
+    const u64 px = static_cast<u64>(w) * h;
+    ++c.textures;
+    c.texturePixels += px;
+    c.largestTexturePixels = std::max(c.largestTexturePixels, px);
+    c.largestTextureSide = std::max({c.largestTextureSide, w, h});
+}
+
+bool header_dims(const std::vector<u8>& head, u32& w, u32& h) {
+    int x = 0, y = 0, comp = 0;
+    if (head.empty() || !stbi_info_from_memory(head.data(), static_cast<int>(head.size()), &x, &y, &comp) || x <= 0 || y <= 0) return false;
+    w = static_cast<u32>(x);
+    h = static_cast<u32>(y);
+    return true;
+}
+
+/// Sem cabeçalho legível (base64, KTX2): conta como uma 2K, o tamanho comum.
+void add_unknown_texture(ModelCost& c) { add_texture(c, 2048, 2048); }
+
+/// Imagens soltas na pasta do modelo (FBX/OBJ: as texturas vão juntas para a
+/// pasta dele). Limite superior: entra até a que o modelo não usa.
+void scan_folder_images(const std::string& dir, ModelCost& c) {
+    if (dir.empty()) return;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::vector<u8> head;
+    for (fs::directory_iterator it(fs::u8path(dir), ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        const auto u8 = it->path().u8string();
+        const std::string full(u8.begin(), u8.end());
+        const std::string ext = lower_extension(full);
+        if (ext != "png" && ext != "jpg" && ext != "jpeg" && ext != "tga" && ext != "bmp" && ext != "psd") continue;
+        u32 w = 0, h = 0;
+        if (read_range(full, 0, kImageHead, head) && header_dims(head, w, h)) add_texture(c, w, h);
+    }
+}
+
+/// Imagens que algum material usa (as outras nem são decodificadas).
+std::vector<u8> gltf_used_images(const cgltf_data* data) {
+    std::vector<u8> used(data->images_count, 0);
+    auto mark = [&](const cgltf_texture_view& v) {
+        if (!v.texture) return;
+        const cgltf_image* img = v.texture->image ? v.texture->image : (v.texture->has_basisu ? v.texture->basisu_image : nullptr);
+        if (img) used[static_cast<usize>(img - data->images)] = 1;
+    };
+    for (cgltf_size i = 0; i < data->materials_count; ++i) {
+        const cgltf_material& m = data->materials[i];
+        mark(m.pbr_metallic_roughness.base_color_texture);
+        mark(m.pbr_metallic_roughness.metallic_roughness_texture);
+        mark(m.pbr_specular_glossiness.diffuse_texture);
+        mark(m.normal_texture);
+        mark(m.occlusion_texture);
+        mark(m.emissive_texture);
+    }
+    return used;
+}
+
+ModelCost estimate_gltf_cost(const std::string& path, bool glb) {
+    ModelCost c;
+    const u64 size = file_bytes(path);
+    if (size < 12) return c;
+    std::vector<u8> json;
+    u64 binOffset = 0;   // início dos dados do chunk BIN no arquivo (GLB)
+    if (glb) {
+        std::vector<u8> head;
+        if (!read_range(path, 0, 20, head) || head.size() < 20 || std::memcmp(head.data(), "glTF", 4) != 0) return c;
+        u32 jsonLen = 0;
+        std::memcpy(&jsonLen, head.data() + 12, 4);
+        if (jsonLen == 0 || jsonLen > size || jsonLen > (256u << 20)) return c;
+        if (!read_range(path, 20, jsonLen, json) || json.size() != jsonLen) return c;
+        binOffset = 20ull + jsonLen + 8ull;
+    } else {
+        if (size > (256u << 20) || !read_file(path, json)) return c;
+    }
+    cgltf_options opts{};
+    cgltf_data* data = nullptr;
+    if (cgltf_parse(&opts, json.data(), json.size(), &data) != cgltf_result_success || !data) return c;
+    struct Guard { cgltf_data* d; ~Guard() { cgltf_free(d); } } guard{data};
+    c = cost_from_counts(count_gltf(data));
+    c.fileBytes = size;
+    c.parseBytes = glb ? size : size;
+    const std::string baseDir = dir_of(path);
+    for (cgltf_size i = 0; i < data->buffers_count; ++i) {
+        const cgltf_buffer& b = data->buffers[i];
+        if (!glb || b.uri) { c.parseBytes += b.size; c.fileBytes += b.size; }
+    }
+    const std::vector<u8> used = gltf_used_images(data);
+    std::vector<u8> head;
+    for (cgltf_size i = 0; i < data->images_count; ++i) {
+        if (!used[i]) continue;
+        const cgltf_image& img = data->images[i];
+        u32 w = 0, h = 0;
+        bool known = false;
+        if (img.buffer_view && img.buffer_view->buffer) {
+            const cgltf_buffer& b = *img.buffer_view->buffer;
+            if (!b.uri && glb) {
+                known = read_range(path, binOffset + img.buffer_view->offset, std::min<usize>(kImageHead, img.buffer_view->size), head)
+                     && header_dims(head, w, h);
+            } else if (b.uri && std::strncmp(b.uri, "data:", 5) != 0) {
+                known = read_range(baseDir + uri_decode(b.uri), img.buffer_view->offset,
+                                   std::min<usize>(kImageHead, img.buffer_view->size), head) && header_dims(head, w, h);
+            }
+        } else if (img.uri && std::strncmp(img.uri, "data:", 5) != 0) {
+            known = read_range(baseDir + uri_decode(img.uri), 0, kImageHead, head) && header_dims(head, w, h);
+        }
+        if (known) add_texture(c, w, h); else add_unknown_texture(c);
+    }
+    c.exact = true;
+    return c;
+}
+
+/// OBJ: contagem das linhas (v / vt / vn / f), em blocos de 1 MB.
+ModelCost estimate_obj_cost(const std::string& path) {
+    ModelCost c;
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return c;
+    u64 v = 0, vt = 0, vn = 0, tris = 0, corners = 0, faces = 0, part = 0, largest = 0;
+    std::vector<char> buf(1 << 20);
+    std::string line;
+    auto finish_line = [&]() {
+        usize i = 0;
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+        if (i + 1 < line.size() && line[i] == 'v') {
+            const char n = line[i + 1];
+            if (n == ' ' || n == '\t') ++v;
+            else if (n == 't') ++vt;
+            else if (n == 'n') ++vn;
+        } else if (i + 1 < line.size() && line[i] == 'f' && (line[i + 1] == ' ' || line[i + 1] == '\t')) {
+            u64 tokens = 0;
+            bool in = false;
+            for (usize k = i + 1; k < line.size(); ++k) {
+                const bool ws = line[k] == ' ' || line[k] == '\t' || line[k] == '\r';
+                if (!ws && !in) ++tokens;
+                in = !ws;
+            }
+            if (tokens >= 3) { tris += tokens - 2; part += tokens - 2; corners += tokens; ++faces; }
+        } else if (line.compare(i, 6, "usemtl") == 0 || (i + 1 < line.size() && (line[i] == 'o' || line[i] == 'g') && line[i + 1] == ' ')) {
+            largest = std::max(largest, part);
+            part = 0;
+        }
+        line.clear();
+    };
+    usize n = 0;
+    while ((n = std::fread(buf.data(), 1, buf.size(), f)) > 0) {
+        for (usize k = 0; k < n; ++k) {
+            if (buf[k] == '\n') finish_line();
+            else if (line.size() < 4096) line.push_back(buf[k]);
+        }
+    }
+    std::fclose(f);
+    finish_line();
+    largest = std::max(largest, part);
+    c.valid = tris > 0;
+    c.exact = true;
+    c.fileBytes = file_bytes(path);
+    c.triangles = tris;
+    c.vertices = std::max(v, vt);
+    c.largestPartTriangles = std::min<u64>(largest, kUfbxChunkTriangles);
+    c.partBytesPerTriangle = kUfbxPartBytesPerTriangle;
+    // A ufbx guarda posições/UV/normais em double e um índice por canto.
+    c.parseBytes = v * 24 + vt * 16 + vn * 24 + corners * 16 + faces * 8;
+    scan_folder_images(dir_of(path), c);
+    return c;
+}
+
+/// FBX: as contagens só existem depois de ler e descomprimir a geometria —
+/// justamente o que pode não caber. Estimativa pelo tamanho (binário guarda
+/// ~48 bytes por triângulo comprimido; ASCII ~150), marcada como inexata.
+ModelCost estimate_fbx_cost(const std::string& path) {
+    ModelCost c;
+    const u64 size = file_bytes(path);
+    if (size == 0) return c;
+    std::vector<u8> head;
+    const bool binary = read_range(path, 0, 21, head) && head.size() >= 18 && std::memcmp(head.data(), "Kaydara FBX Binary", 18) == 0;
+    c.valid = true;
+    c.exact = false;
+    c.fileBytes = size;
+    c.triangles = size / (binary ? 48 : 150);
+    c.vertices = c.triangles * 6 / 10;
+    c.largestPartTriangles = std::min<u64>(c.triangles, kUfbxChunkTriangles);
+    c.partBytesPerTriangle = kUfbxPartBytesPerTriangle;
+    c.parseBytes = binary ? size * 3 : size + size / 4;
+    scan_folder_images(dir_of(path), c);
+    return c;
+}
+
+} // namespace
+
+ModelCost estimate_model_cost(const std::string& path) noexcept {
+    // Só cabeçalhos: o JSON de um glTF (até 256 MB) e 256 KB por imagem.
+    const std::string ext = lower_extension(path);
+    if (ext == "obj") return estimate_obj_cost(path);
+    if (ext == "fbx") return estimate_fbx_cost(path);
+    // glTF/GLB (e arquivo sem extensão: o import também tenta glTF).
+    std::vector<u8> magic;
+    const bool glb = read_range(path, 0, 4, magic) && magic.size() == 4 && std::memcmp(magic.data(), "glTF", 4) == 0;
+    return estimate_gltf_cost(path, glb);
+}
 
 } // namespace aurea::scene3d

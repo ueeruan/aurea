@@ -953,7 +953,7 @@
     <string name="am_import_done_skipped">تم استيراد %1$d، وتُرك %2$d بلا مقابل (“%3$s”)</string>
     <string name="am_import_failed">تعذّر الاستيراد: %1$s</string>
     <string name="am_import_nothing">لا يوجد تأثير له مقابل في Aurea</string>
-    <string name="world_box_lights">Luzes flutuantes</string>
+    <string name="world_box_lights">أضواء عائمة</string>
     <string name="gizmo_tool_move">تحريك</string>
     <string name="gizmo_tool_rotate">تدوير</string>
     <string name="gizmo_tool_scale">تحجيم</string>
@@ -3454,4 +3454,51 @@
     <string name="lut_imported">تم استيراد LUT</string>
     <string name="lut_invalid">تعذر الاستيراد. استخدم ملف .cube حتى 32 ميغابايت مع LUT أحادي البعد أو ثلاثي الأبعاد حتى 65 نقطة لكل محور.</string>
     <string name="scene_flare3d">وهج ثلاثي الأبعاد</string>
+    <string name="fxo_ease_in">ناعم في البداية</string>
+    <string name="fxo_ease_out">ناعم في النهاية</string>
+    <string name="fxl_bend">انحناء</string>
+    <string name="psd_import">استيراد PSD بطبقاته</string>
+    <string name="psd_importing">جارٍ استيراد طبقات PSD…</string>
+    <string name="psd_failed">تعذّر الاستيراد. استخدم PSD بنظام RGB أو تدرج رمادي 8/16 بت، حتى 128 ميغابايت.</string>
+    <string name="psd_imported">تم استيراد PSD. افتح التكوين المسبق لتحريك كل طبقة. يتحول النص إلى صورة وتُدمج الأقنعة في البكسلات. قد تختلف أنماط Photoshop وتعديلاته وقصاصاته.</string>
+    <string name="grid_builder">منشئ الشبكة</string>
+    <string name="grid_pick_layers">اختر طبقات مرئية غير مقفلة وبلا أصل لإنشاء الشبكة. اضبط المتحكم في التأثيرات.</string>
+    <string name="roto_preparing">جارٍ تجهيز Rotobrush المحلي…</string>
+    <string name="roto_downloading">جارٍ تنزيل نموذج القص: %1$d%%</string>
+    <string name="roto_download_failed">تعذّر تجهيز النموذج. تحقق من الاتصال والمساحة الفارغة ثم أضف التأثير مجددًا.</string>
+    <string name="roto_note">قص تلقائي للمقدمة. يُنزَّل نموذج محلي بحجم 2.3 ميغابايت عند أول استخدام. اضبط الحافة وحسّنها بأقنعة الطبقة.</string>
+    <string name="roto_select_media">اختر طبقات صور أو فيديو لـ Rotobrush بالذكاء الاصطناعي.</string>
+    <string name="roto_prepare">تجهيز الذكاء الاصطناعي المحلي</string>
+    <plurals name="pn_caption_transcript">
+        <item quantity="zero">%1$d كلمة مُفرَّغة</item>
+        <item quantity="one">كلمة واحدة مُفرَّغة</item>
+        <item quantity="two">كلمتان مُفرَّغتان</item>
+        <item quantity="few">%1$d كلمات مُفرَّغة</item>
+        <item quantity="many">%1$d كلمة مُفرَّغة</item>
+        <item quantity="other">%1$d كلمة مُفرَّغة</item>
+    </plurals>
+    <plurals name="pn_caption_transcript_source">
+        <item quantity="zero">%1$s · %2$d كلمة</item>
+        <item quantity="one">%1$s · %2$d كلمة</item>
+        <item quantity="two">%1$s · %2$d كلمة</item>
+        <item quantity="few">%1$s · %2$d كلمات</item>
+        <item quantity="many">%1$s · %2$d كلمة</item>
+        <item quantity="other">%1$s · %2$d كلمة</item>
+    </plurals>
+    <plurals name="pn_mask_points_so_far">
+        <item quantity="zero">%1$d نقطة</item>
+        <item quantity="one">%1$d نقطة</item>
+        <item quantity="two">%1$d نقطة</item>
+        <item quantity="few">%1$d نقاط</item>
+        <item quantity="many">%1$d نقطة</item>
+        <item quantity="other">%1$d نقطة</item>
+    </plurals>
+    <plurals name="pn_keyframes_edit_at_playhead">
+        <item quantity="zero">%1$d إطار مفتاحي — حرّر عند رأس التشغيل</item>
+        <item quantity="one">%1$d إطار مفتاحي — حرّر عند رأس التشغيل</item>
+        <item quantity="two">%1$d إطار مفتاحي — حرّر عند رأس التشغيل</item>
+        <item quantity="few">%1$d إطارات مفتاحية — حرّر عند رأس التشغيل</item>
+        <item quantity="many">%1$d إطارًا مفتاحيًا — حرّر عند رأس التشغيل</item>
+        <item quantity="other">%1$d إطار مفتاحي — حرّر عند رأس التشغيل</item>
+    </plurals>
 </resources>

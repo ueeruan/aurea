@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Presets de texto de volta (2026-10-03): barra de adicionar e doca do texto. Chaves tp_*. -->
+<resources>
+    <string name="tp_add_tab">Preset</string>
+    <string name="tp_title">Preset teks</string>
+    <string name="tp_hint">Ketuk preset: teks langsung masuk dengan animasi.</string>
+    <string name="tp_add_named">Tambah teks dengan %1$s</string>
+</resources>

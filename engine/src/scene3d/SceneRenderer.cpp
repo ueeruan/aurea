@@ -823,7 +823,7 @@ PipelineKey SceneRenderer::plane_key(bool translucent) const noexcept {
 }
 
 u32 SceneRenderer::pass_samples() const noexcept {
-    return gpu_ && antialias_ ? gpu_->capabilities().msaa_samples(postMsaa_) : 1u;
+    return gpu_ && antialias_ ? gpu_->capabilities().msaa_samples(std::min(postMsaa_, msaaCap_)) : 1u;
 }
 
 void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
@@ -918,6 +918,20 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const bool dofOn = passMrt_ && dofTaps_ > 0 && dof_lens(frame.camera, height).active();
     if (dofOn && passSamples_ > 1 && !gpu_->capabilities().depthResolveSampleZero) passSamples_ = 1;
     passA2C_ = passSamples_ > 1 && gpu_->capabilities().alphaToOne;
+    // O pipeline PBR do passe TEM de existir nesta contagem de amostras: sem
+    // ele cada desenho era pulado em silêncio e o 3D sumia — no export e na
+    // captura (que pedem 4×) mas não no preview do aparelho de entrada (2×).
+    // Driver que recusa: desce a contagem (até 1 + FXAA) e lembra.
+    if (!skyOnly) {
+        while (passSamples_ > 1 && !shaders_->pipeline(key_for(AlphaMode::Opaque, false, false)).ok()) {
+            const u32 next = passSamples_ / 2;
+            AUREA_LOG_WARN("3D: pipeline PBR com MSAA %ux nao foi criado neste aparelho; usando %ux", passSamples_,
+                           next);
+            msaaCap_ = std::max(1u, next);
+            passSamples_ = pass_samples();
+            passA2C_ = passSamples_ > 1 && gpu_->capabilities().alphaToOne;
+        }
+    }
     const bool msaa = passSamples_ > 1;
     TextureDesc cd;
     cd.width = width;
@@ -1324,7 +1338,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const u32 shadowTier = std::min(shadowFilter_, 3u);
     const u32 pcfTaps = std::clamp(std::max(kPcfTaps[shadowTier], frame.shadow.pcfSamples), 1u, 32u);
     const u32 blockerTaps = kBlockerTaps[shadowTier] ? kBlockerTaps[shadowTier] : (frame.shadow.softShadows ? 8u : 0u);
-    const u32 mapSize = std::clamp(std::max(shadowSize_, std::min(frame.shadow.mapResolution, 4096u)), 256u, 4096u);
+    // O export pede 4096; a GPU manda no teto (maxImageDimension2D) — um
+    // mapa maior que ela não é criado e o quadro do export sairia sem 3D.
+    const u32 mapCap = std::clamp(gpu_->capabilities().maxTexture2D, 256u, 4096u);
+    const u32 mapSize = std::clamp(std::max(shadowSize_, std::min(frame.shadow.mapResolution, 4096u)), 256u, mapCap);
     Vec4 shadowParams2{};
     f32 shadowBiasDepth = 0.0f;
     if (shadowLight >= 0) {

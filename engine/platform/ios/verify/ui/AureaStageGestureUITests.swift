@@ -555,6 +555,19 @@ import XCTest
         attach("After undo added shape", stage.value as? String ?? "missing")
     }
 
+    /// Presets de texto de volta (2026-10-03): a categoria ao lado do Texto
+    /// abre a grade e o toque num cartão cria UM texto já animado.
+    func testTextPresetFromTheAddBarAddsOneAnimatedText() throws {
+        let before = try launch("layer-dock")
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
+        let category = app.buttons["aurea.add.category.8"].firstMatch
+        XCTAssertTrue(category.waitForExistence(timeout: 5)); category.tap()
+        let card = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Add text with")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5)); card.tap()
+        _ = try awaitSnapshot("Text preset adds one layer") { $0.layerCount == before.layerCount + 1 }
+        XCTAssertFalse(card.exists)
+    }
+
     func testShortTapDoesNotMoveScaleOrRotateLayer() throws {
         let before = try launch("transform")
         coordinate(bodyCenter(before)).tap()

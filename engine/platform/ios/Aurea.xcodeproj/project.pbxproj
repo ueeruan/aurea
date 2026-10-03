@@ -31,6 +31,7 @@
 		AE00000000000000000001F1 /* StageZoom.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000001F0 /* StageZoom.swift */; };
 		AE0000000000000000000201 /* RigStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000200 /* RigStage.swift */; };
 		AE0000000000000000000211 /* Shape3DViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000210 /* Shape3DViews.swift */; };
+		AE00000000000000000018A1 /* AureaEngineText.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000018A0 /* AureaEngineText.swift */; };
 		AE0000000000000000000040 /* EffectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000008 /* EffectsView.swift */; };
 		AE0000000000000000000041 /* TransformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000009 /* TransformView.swift */; };
 		AE0000000000000000000042 /* Panel3DView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000A /* Panel3DView.swift */; };
@@ -130,6 +131,7 @@
 		AE00000000000000000001F0 /* StageZoom.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageZoom.swift; sourceTree = "<group>"; };
 		AE0000000000000000000200 /* RigStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RigStage.swift; sourceTree = "<group>"; };
 		AE0000000000000000000210 /* Shape3DViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shape3DViews.swift; sourceTree = "<group>"; };
+		AE00000000000000000018A0 /* AureaEngineText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaEngineText.swift; sourceTree = "<group>"; };
 		AE0000000000000000000008 /* EffectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectsView.swift; sourceTree = "<group>"; };
 		AE0000000000000000000009 /* TransformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformView.swift; sourceTree = "<group>"; };
 		AE000000000000000000000A /* Panel3DView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panel3DView.swift; sourceTree = "<group>"; };
@@ -260,6 +262,7 @@
 				AE00000000000000000001F0 /* StageZoom.swift */,
 				AE0000000000000000000200 /* RigStage.swift */,
 				AE0000000000000000000210 /* Shape3DViews.swift */,
+				AE00000000000000000018A0 /* AureaEngineText.swift */,
 				AE0000000000000000000008 /* EffectsView.swift */,
 				AE0000000000000000000009 /* TransformView.swift */,
 				AE0000000000000000000082 /* LayerPanels.swift */,
@@ -526,6 +529,7 @@
 				AE00000000000000000001F1 /* StageZoom.swift in Sources */,
 				AE0000000000000000000201 /* RigStage.swift in Sources */,
 				AE0000000000000000000211 /* Shape3DViews.swift in Sources */,
+				AE00000000000000000018A1 /* AureaEngineText.swift in Sources */,
 				AE0000000000000000000040 /* EffectsView.swift in Sources */,
 				AE0000000000000000000041 /* TransformView.swift in Sources */,
 				AE0000000000000000000083 /* LayerPanels.swift in Sources */,
@@ -634,7 +638,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 2136;
+                CURRENT_PROJECT_VERSION = 2137;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -689,7 +693,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 2136;
+                CURRENT_PROJECT_VERSION = 2137;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",

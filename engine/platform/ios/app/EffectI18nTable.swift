@@ -1104,5 +1104,12 @@ enum EffectI18nTable {
     aurea.distort.displacement_map|6|edge_behavior|fx_bordas|fx3o_repetir_pixels,fx3o_envolver
     aurea.distort.displacement_map|7|expand_output|fx3_expandir_saida|
     aurea.distort.displacement_map|8|mix|fx_mistura|
+    aurea.glitch.datamosh|0|amount|fx_intensidade|
+    aurea.glitch.datamosh|1|block_size|fx_tamanho_bloco|
+    aurea.glitch.datamosh|2|hold_frames|fx_datamosh_hold_frames|
+    aurea.glitch.datamosh|3|drag|fx_datamosh_drag|
+    aurea.glitch.datamosh|4|corruption|fx_datamosh_corruption|
+    aurea.glitch.datamosh|5|color_bleed|fx_datamosh_color_bleed|
+    aurea.glitch.datamosh|6|seed|fx_semente|
     """
 }

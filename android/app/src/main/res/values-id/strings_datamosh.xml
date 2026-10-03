@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeito Datamosh (2026-10-03). Chaves fx_*datamosh*. -->
+<resources>
+    <string name="fx_name_datamosh">Datamosh</string>
+    <string name="fx_desc_glitch_datamosh">Glitch kompresi: frame lama terus terseret dalam blok oleh gerakan video, dengan warna yang meleleh dan blok yang rusak. Pada gambar, blok meleleh dengan sendirinya.</string>
+    <string name="fx_datamosh_hold_frames">Frame ditahan</string>
+    <string name="fx_datamosh_drag">Seretan</string>
+    <string name="fx_datamosh_corruption">Kerusakan</string>
+    <string name="fx_datamosh_color_bleed">Luberan warna</string>
+</resources>

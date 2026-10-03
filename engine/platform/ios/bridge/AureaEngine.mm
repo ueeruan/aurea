@@ -37,6 +37,7 @@
 #include <string>
 #include <vector>
 #include <mach/mach.h>
+#include <os/proc.h>
 
 using aurea::Command;
 using aurea::CommandType;
@@ -167,6 +168,7 @@ NSString* const AureaExportFramesDone  = @"framesDone";
 NSString* const AureaExportFps         = @"fps";
 NSString* const AureaExportEtaSeconds  = @"etaSeconds";
 NSString* const AureaExportFlags       = @"flags";
+NSString* const AureaExportFailure     = @"failure";
 NSString* const AureaExportMessage     = @"message";
 
 // =============================================================================
@@ -296,6 +298,7 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     NSString* _cacheDirectory;
     NSString* _documentsDirectory;
     NSString* _lastImportError;
+    aurea::scene3d::ImportProgress _importProgress;   ///< o import 3D em curso (um por vez)
 #if DEBUG
     NSDictionary<NSString*, id>* _lastCaptureDiagnostics;
 #endif
@@ -665,6 +668,7 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         AureaExportFps:         @(p.fps),
         AureaExportEtaSeconds:  @(p.etaSeconds),
         AureaExportFlags:       @(p.flags),
+        AureaExportFailure:     @(p.failure),
         AureaExportMessage:     to_ns(std::string(p.message)),
     };
 }
@@ -677,6 +681,15 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     if (!e) return NO;
     const std::string t = to_std(title);
     return e->new_project(width, height, fps, t.empty() ? nullptr : t.c_str()).ok() ? YES : NO;
+}
+
+- (BOOL)newProjectWidth:(uint32_t)width height:(uint32_t)height fps:(double)fps title:(NSString*)title
+            backgroundR:(float)r g:(float)g b:(float)b a:(float)a {
+    auto* e = self.engine;
+    if (!e) return NO;
+    const std::string t = to_std(title);
+    const float background[4] = {r, g, b, a};
+    return e->new_project(width, height, fps, t.empty() ? nullptr : t.c_str(), background).ok() ? YES : NO;
 }
 
 - (BOOL)loadProject:(NSString*)path {
@@ -1791,20 +1804,83 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return static_cast<long long>(*r);
 }
 
+/// Memória do aparelho AGORA: total (physicalMemory) e o que o processo ainda
+/// pode usar antes do jetsam (os_proc_available_memory). iOS não tem
+/// "isLowRamDevice": até 2 GB conta como aparelho de pouca memória.
+static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
+    aurea::scene3d::DeviceMemoryHint h;
+    h.totalBytes = static_cast<aurea::u64>(NSProcessInfo.processInfo.physicalMemory);
+    const size_t available = os_proc_available_memory();
+    h.availableBytes = available > 0 ? static_cast<aurea::u64>(available) : 0;
+    h.lowRam = h.totalBytes > 0 && h.totalBytes <= (2ull << 30) + (256ull << 20);
+    return h;
+}
+
 - (long long)importModel:(NSString*)path name:(NSString*)name {
+    return [self importModel:path name:name quality:0];
+}
+
+- (long long)importModel:(NSString*)path name:(NSString*)name quality:(int)quality {
     auto* e = self.engine;
     if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
     aurea::ModelImport request;
     request.path = to_std(path);
     request.displayName = to_std(name);
+    request.quality = static_cast<aurea::scene3d::ModelQuality>(std::clamp(quality, 0, 2));
+    request.memory = ios_memory_hint();
+    _importProgress.cancel.store(false);
+    _importProgress.phase.store(aurea::scene3d::ImportPhase::Queued);
+    _importProgress.fraction.store(0.0f);
     std::string detail;
-    const aurea::Result<aurea::u64> r = e->import_model(request, nullptr, &detail);
+    const aurea::Result<aurea::u64> r = e->import_model(request, &_importProgress, &detail);
     if (!r.ok()) {
         _lastImportError = to_ns(detail.empty() ? std::string(r.status().message()) : detail);
         return -static_cast<long long>(r.status().code());
     }
     _lastImportError = @"";
     return static_cast<long long>(*r);
+}
+
+- (NSArray<NSNumber*>*)inspectModel:(NSString*)path {
+    auto* e = self.engine;
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:22];
+    for (int i = 0; i < 22; ++i) [out addObject:@0];
+    if (!e) return out;
+    const aurea::scene3d::ModelPlan plan = e->inspect_model(to_std(path), ios_memory_hint());
+    out[0] = @(plan.cost.valid ? 1 : 0);
+    out[1] = @(plan.cost.exact ? 1 : 0);
+    out[2] = @(plan.heavy ? 1 : 0);
+    out[3] = @(plan.tooHeavy ? 1 : 0);
+    out[4] = @(static_cast<int>(plan.recommended));
+    out[5] = @(static_cast<long long>(plan.cost.triangles));
+    out[6] = @(static_cast<long long>(plan.cost.vertices));
+    out[7] = @(plan.cost.textures);
+    out[8] = @(plan.cost.largestTextureSide);
+    out[9] = @(static_cast<long long>(plan.budget[0].memoryBytes));
+    for (aurea::u32 q = 0; q < aurea::scene3d::kModelQualityCount; ++q) {
+        out[10 + q] = @(plan.fits[q] ? 1 : 0);
+        out[13 + q] = @(static_cast<long long>(plan.peakBytes[q]));
+        out[16 + q] = @(static_cast<long long>(plan.keptTriangles[q]));
+        out[19 + q] = @(plan.budget[q].maxTextureSize);
+    }
+    return out;
+}
+
+- (int)importModelProgress {
+    const auto phase = static_cast<int>(_importProgress.phase.load());
+    const float f = std::clamp(_importProgress.fraction.load(), 0.0f, 0.999f);
+    return phase * 1000 + static_cast<int>(f * 1000.0f);
+}
+
+- (void)cancelModelImport {
+    _importProgress.cancel.store(true);
+}
+
+- (NSArray<NSNumber*>*)lastModelImport {
+    auto* e = self.engine;
+    if (!e) return @[@0, @0, @0, @0, @0];
+    const aurea::ModelImportReport r = e->last_model_import();
+    return @[@(r.sourceTriangles), @(r.triangles), @(r.texturesReduced), @(r.texturesSkipped), @(static_cast<int>(r.quality))];
 }
 
 - (NSArray<NSString*>*)modelMissingTextures:(long long)layerId {
@@ -2442,9 +2518,23 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     // 4 alças (x1, y1, x2, y2) e, opcional, a força da bézier (1..3).
     if (handles.count != 4 && handles.count != 5) return @"";
     for (NSNumber* n in handles) if (!std::isfinite(n.floatValue)) return @"";
-    const auto interp = static_cast<aurea::Interpolation>(std::min<uint32_t>(interpolation, static_cast<uint32_t>(aurea::Interpolation::Steps)));
+    const auto interp = static_cast<aurea::Interpolation>(std::min<uint32_t>(interpolation, static_cast<uint32_t>(aurea::kLastInterpolation)));
     const uint32_t power = handles.count == 5 ? static_cast<uint32_t>(std::clamp(handles[4].floatValue, 1.f, 3.f) + 0.5f) : 1u;
-    return to_ns(aurea::presets::make_curve_preset(to_std(name), interp, std::clamp(handles[0].floatValue, 0.f, 1.f), std::clamp(handles[1].floatValue, -2.f, 3.f), std::clamp(handles[2].floatValue, 0.f, 1.f), std::clamp(handles[3].floatValue, -2.f, 3.f), power));
+    // Curva com parâmetros: o marcador em y2 atravessa (Math.hpp, kEaseParamMarker).
+    const float y2 = aurea::ease_has_params(interp) && handles[3].floatValue == aurea::kEaseParamMarker
+        ? aurea::kEaseParamMarker : std::clamp(handles[3].floatValue, -2.f, 3.f);
+    return to_ns(aurea::presets::make_curve_preset(to_std(name), interp, std::clamp(handles[0].floatValue, 0.f, 1.f), std::clamp(handles[1].floatValue, -2.f, 3.f), std::clamp(handles[2].floatValue, 0.f, 1.f), y2, power));
+}
+- (NSArray<NSNumber*>*)sampleEase:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles count:(uint32_t)count {
+    // O trecho amostrado pelo MOTOR (`sample_keyframe_ease`): o gráfico desenha estes números.
+    if (interpolation > static_cast<uint32_t>(aurea::kLastInterpolation) || handles.count < 4 || count < 2 || count > 1025) return @[];
+    aurea::Keyframe k;
+    k.interp = static_cast<aurea::Interpolation>(interpolation);
+    k.bx1 = handles[0].floatValue; k.by1 = handles[1].floatValue; k.bx2 = handles[2].floatValue; k.by2 = handles[3].floatValue;
+    k.easePower = aurea::clamp_ease_power(handles.count >= 5 ? static_cast<aurea::u32>(std::max(0, handles[4].intValue)) : 1u);
+    float values[1025];
+    const auto n = aurea::sample_keyframe_ease(k, values, count);
+    return floats_to_array(values, n);
 }
 - (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize {
     auto* e = self.engine; if (!e) return @"Motor indisponível";
@@ -3013,6 +3103,12 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (NSArray<NSNumber*>*)shape3DPartMove:(long long)layerId part:(int32_t)part axis:(uint32_t)axis amount:(float)amount {
     float xyz[3]{}; auto* e = self.engine;
     return e && part >= 0 && e->shape3d_part_move(layerId, static_cast<aurea::u32>(part), axis, amount, xyz) ? floats_to_array(xyz, 3) : @[];
+}
+- (long long)splitShape3D:(long long)layerId axis:(uint32_t)axis count:(uint32_t)count {
+    auto* e = self.engine;
+    if (!e) return -1;
+    const aurea::Result<aurea::u64> r = e->split_shape3d(layerId, axis, count);
+    return r.ok() ? static_cast<long long>(*r) : -1;
 }
 - (NSArray<NSNumber*>*)textAnimators:(long long)layerId {
     auto* e = self.engine;

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Editor de curva: tipos rápidos (Overshoot, Elástico, Quique) e os parâmetros (2026-10-03). -->
+<resources>
+    <string name="curve_type_ease">Плавно</string>
+    <string name="curve_type_overshoot">Перелёт</string>
+    <string name="curve_types_label">Тип кривой</string>
+    <string name="curve_param_amount">Сила</string>
+    <string name="curve_param_oscillations">Колебания</string>
+    <string name="curve_param_damping">Затухание</string>
+    <string name="curve_param_oscillations_value">Колебания: %1$d</string>
+</resources>

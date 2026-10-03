@@ -129,7 +129,7 @@ class CaptionsState(
             if (path != null) {
                 scope.launch {
                     val cached = withContext(Dispatchers.IO) { mediaKey(path)?.let { cache.load(it) } }
-                    if (layer == layerId && cached != null && words.isEmpty()) setWords(cached, "cache")
+                    if (layer == layerId && cached != null && words.isEmpty()) setWords(cached, AppText.get(app, R.string.i18n_caption_source_cache))
                 }
             }
         }
@@ -183,7 +183,7 @@ class CaptionsState(
             if (layer != id) return@launch
             result.onSuccess { list ->
                 if (list.isEmpty()) error = AppText.get(app, R.string.app_caption_no_speech)
-                else { setWords(list, "Whisper local"); persist(); if (thenGenerate) generate() }
+                else { setWords(list, AppText.get(app, R.string.i18n_caption_source_whisper)); persist(); if (thenGenerate) generate() }
             }.onFailure { error = it.message ?: AppText.get(app, R.string.app_caption_transcription_failed) }
         }
     }

@@ -306,8 +306,8 @@ struct ExportProgressPOD {
     u32 framesDone  = 0;      // +16
     f32 fps         = 0.0f;   // +20
     u32 etaSeconds  = 0;      // +24
-    u32 flags       = 0;      // +28  Engine::ExportFlag (encoder hw/sw, calor)
-    char message[96]{};       // +32
+    u32 flags       = 0;      // +28  Engine::ExportFlag (bits 0..23) + ExportFailure (bits 24..31)
+    char message[96]{};       // +32  diagnóstico (log); o texto da tela vem do motivo
 };
 
 static_assert(sizeof(ExportProgressPOD) == 128, "ExportProgressPOD e contrato de ABI");

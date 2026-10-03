@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
+import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.TrackGraph
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
@@ -91,12 +92,12 @@ class GraphGesturesTest {
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 1 }
         compose.runOnIdle { store.seek(15) }
         compose.waitUntil(5000) { store.playhead == 15 }
-        compose.onNodeWithText("Auto-Key: On").performClick()
+        compose.onNodeWithText(text(R.string.i18n_autokey_on)).performClick()
         compose.runOnIdle { store.setTransform(6, 30f) }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().singleOrNull()?.value == 30f }
         compose.runOnIdle { assertEquals(0, store.keyframes[id].orEmpty().single().time); store.undo() }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().singleOrNull()?.value == 0f }
-        compose.onNodeWithText("Auto-Key: Off").performClick()
+        compose.onNodeWithText(text(R.string.i18n_autokey_off)).performClick()
         compose.runOnIdle { store.setTransform(6, 45f) }
         // Camada 3D: o grupo XYZ da rotação ganha keyframe junto no cabeçote
         // (decisão do build 2125, igual ao iOS); só o eixo editado muda de valor
@@ -180,7 +181,7 @@ class GraphGesturesTest {
         catch (error: Throwable) { throw AssertionError("One undo must restore both coordinates. Before=$before After=${store.keyframes[id]}", error) }
 
         compose.onNodeWithTag("curve.multi").performClick()
-        compose.onNodeWithText("All").performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.common_all)).performScrollTo().performClick()
         compose.onNodeWithTag("curve.trackGraph").performTouchInput {
             swipe(Offset(width / 2f, height / 2f), Offset(width * .62f, height / 2f), 350)
         }
@@ -192,24 +193,25 @@ class GraphGesturesTest {
             store.undo()
         }
         compose.waitUntil(5000) { store.keyframes[id] == before }
-        compose.onNodeWithText("All").performScrollTo().performClick()
-        compose.onNodeWithText("Copy").performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.common_all)).performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.common_copy)).performScrollTo().performClick()
         compose.runOnIdle { store.seek(90) }
         compose.waitUntil(5000) { store.playhead == 90 }
-        compose.onNodeWithText("Paste").performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.common_paste)).performScrollTo().performClick()
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 6 }
         compose.runOnIdle {
             assertEquals(listOf(0, 30, 60, 90, 120, 150), store.keyframes[id].orEmpty().filter { it.property == 0 }.map { it.time }.sorted())
         }
-        compose.onNodeWithText("All").performScrollTo().performClick()
-        compose.onNodeWithText("Duplicate").performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.common_all)).performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.common_duplicate)).performScrollTo().performClick()
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 12 }
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 6 }
-        compose.onNodeWithText("All").performScrollTo().performClick()
-        compose.onNodeWithText("Delete").performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.common_all)).performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.common_delete)).performScrollTo().performClick()
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().none { it.property == 0 } }
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property == 0 } == 6 }
     }
+    private fun text(id: Int): String = InstrumentationRegistry.getInstrumentation().targetContext.getString(id)
 }

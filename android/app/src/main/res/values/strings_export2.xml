@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Motivo da falha do export (aurea::ExportFailure, engine/include/aurea/export/ExportRules.hpp).
+     Encaixa em app_export_failed: minúscula, sem ponto final. -->
+<resources>
+    <string name="expfail_encoder">o codificador de vídeo do aparelho não aceitou o vídeo; tente outra resolução</string>
+    <string name="expfail_encoder_stalled">o codificador de vídeo parou de responder; feche outros apps e tente de novo</string>
+    <string name="expfail_render">a GPU do aparelho não conseguiu renderizar o vídeo; tente uma resolução menor</string>
+    <string name="expfail_memory">falta memória para esta resolução; tente uma menor</string>
+    <string name="expfail_media">uma mídia do projeto não pôde ser lida</string>
+    <string name="expfail_file">o arquivo de vídeo não pôde ser gravado</string>
+    <string name="expfail_unsupported">este aparelho não exporta nesta resolução ou formato</string>
+</resources>

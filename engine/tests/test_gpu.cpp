@@ -7532,6 +7532,110 @@ AUREA_TEST(Gpu, MotionDetectShowsOnlyWhatMovedSinceTheDelayedFrame) {
     AUREA_CHECK_MSG(diff < 0.01f, "mistura 0 devia ser o quadro original");
 }
 
+// -----------------------------------------------------------------------------
+// Datamosh: o quadro de referência (a fonte presa por "Quadros segurados")
+// arrastado pelos vetores por bloco. Determinístico (o mesmo quadro dá a mesma
+// imagem, no preview e no export), e visível também numa imagem parada.
+// Com AUREA_DATAMOSH_PNG=<pasta>, grava os quadros para olhar.
+// -----------------------------------------------------------------------------
+namespace {
+f32 max_diff(const FloatImage& a, const FloatImage& b) {
+    f32 d = 0.0f;
+    for (usize k = 0; k < a.px.size() && k < b.px.size(); ++k) d = std::fmax(d, std::fabs(a.px[k] - b.px[k]));
+    return d;
+}
+f32 mean_diff(const FloatImage& a, const FloatImage& b) {
+    f64 d = 0.0;
+    const usize n = std::min(a.px.size(), b.px.size());
+    for (usize k = 0; k < n; ++k) d += std::fabs(a.px[k] - b.px[k]);
+    return n ? static_cast<f32>(d / static_cast<f64>(n)) : 0.0f;
+}
+void dump_mosh(const char* tag, const FloatImage& img) {
+    const char* dir = std::getenv("AUREA_DATAMOSH_PNG");
+    if (dir && *dir) (void)write_png(std::string(dir) + "/datamosh_" + tag + ".png", img.encoded());
+}
+} // namespace
+
+AUREA_TEST(Gpu, DatamoshDragsTheHeldFrameAndIsDeterministic) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 72, 30.0);
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 72;
+    cfg.pattern = SyntheticPattern::FastSquare;   // quadrado xadrez andando 8 px/quadro (volta a cada 7)
+    cfg.frameCount = 120;
+    const LayerId id = s.video(cfg, 48, 36);
+    const FloatImage plain16 = s.render(FrameIndex{16});
+    const FloatImage plain18 = s.render(FrameIndex{18});
+    dump_mosh("video_original_18", plain18);
+
+    EffectInstance& e = s.add_effect(id, effect_keys::kDatamosh);
+    e.params[1].constant = ParamValue::scalar(8.0f);    // blocos de 8 px
+    e.params[2].constant = ParamValue::scalar(8.0f);    // referência presa por 8 quadros
+    e.params[3].constant = ParamValue::scalar(1.0f);    // arraste 1 = o vetor do codec
+    e.params[4].constant = ParamValue::scalar(0.0f);    // sem corrupção
+    e.params[5].constant = ParamValue::scalar(0.0f);    // sem sangria
+    const FloatImage a18 = s.render(FrameIndex{18});
+    const FloatImage b18 = s.render(FrameIndex{18});
+    dump_mosh("video_18", a18);
+    AUREA_CHECK_MSG(max_diff(a18, b18) < 1e-4f, "o mesmo quadro devia dar a mesma imagem");
+    // Quadro 18: fase 2 de 8, a referência é o quadro 15 (o quadrado andou 24 px,
+    // além da busca de ±2 blocos). Quadro 16: fase 0, a referência acabou de
+    // renovar (o quadro 15, 8 px atrás). (O FastSquare volta a cada 7 quadros:
+    // 16 e 23 são a mesma imagem.)
+    const FloatImage a16 = s.render(FrameIndex{16});
+    dump_mosh("video_16", a16);
+    const f32 err18 = mean_diff(a18, plain18), err16 = mean_diff(a16, plain16);
+    std::printf("    datamosh: desvio do quadro limpo %.4f (fase 2) vs %.4f (fase 0)\n", err18, err16);
+    AUREA_CHECK_MSG(err18 > 0.002f, "o datamosh devia mudar o quadro");
+    AUREA_CHECK_MSG(err18 > err16, "longe da renovacao o quadro devia estar mais quebrado");
+    // Arraste > 1 exagera o vetor (bloom): o quadro muda.
+    e.params[3].constant = ParamValue::scalar(2.0f);
+    const FloatImage bloom = s.render(FrameIndex{16});
+    dump_mosh("video_16_arraste2", bloom);
+    AUREA_CHECK_MSG(mean_diff(bloom, a16) > 0.001f, "o arraste devia exagerar o movimento");
+    e.params[3].constant = ParamValue::scalar(1.0f);
+
+    // O export (qualidade final) espera a referência e dá o mesmo quadro.
+    const FloatImage exported = s.render(FrameIndex{18}, 1, true);
+    AUREA_CHECK_MSG(max_diff(exported, a18) < 0.02f, "o export devia ver o mesmo datamosh");
+
+    // Corrupção e sangria de cor mudam o quadro; intensidade 0 devolve o original.
+    e.params[4].constant = ParamValue::scalar(100.0f);
+    e.params[5].constant = ParamValue::scalar(100.0f);
+    const FloatImage wild = s.render(FrameIndex{18});
+    dump_mosh("video_18_corrompido", wild);
+    AUREA_CHECK_MSG(mean_diff(wild, a18) > 0.002f, "corrupcao e sangria deviam aparecer");
+    e.params[0].constant = ParamValue::scalar(0.0f);
+    AUREA_CHECK_MSG(max_diff(s.render(FrameIndex{18}), plain18) < 0.01f, "intensidade 0 devia ser o quadro original");
+}
+
+AUREA_TEST(Gpu, DatamoshMeltsAStillImageToo) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 96);
+    const LayerId id = s.image(reference_image(96, 96), 48, 48);
+    const FloatImage plain = s.render();
+    dump_mosh("foto_original", plain);
+    EffectInstance& e = s.add_effect(id, effect_keys::kDatamosh);
+    e.params[4].constant = ParamValue::scalar(0.0f);   // só o arraste
+    const FloatImage f0 = s.render(FrameIndex{0});
+    const FloatImage f0b = s.render(FrameIndex{0});
+    const FloatImage f9 = s.render(FrameIndex{9});
+    dump_mosh("foto_0", f0);
+    dump_mosh("foto_9", f9);
+    u32 changed = 0;
+    for (usize k = 0; k < f9.px.size(); ++k) changed += std::fabs(f9.px[k] - plain.px[k]) > 0.004f ? 1u : 0u;
+    std::printf("    datamosh na foto: %.1f%% dos canais mudaram\n", 100.0 * changed / static_cast<f64>(f9.px.size()));
+    AUREA_CHECK_MSG(changed > f9.px.size() / 10, "sem passado o datamosh devia derreter a imagem pelo ruido");
+    AUREA_CHECK_MSG(max_diff(f0, f0b) < 1e-4f, "imagem parada: o mesmo quadro devia dar a mesma imagem");
+    // O arraste cresce ao longo dos quadros segurados (padrão 12).
+    AUREA_CHECK_MSG(mean_diff(f9, plain) > mean_diff(f0, plain), "o arraste devia crescer com os quadros segurados");
+    e.params[4].constant = ParamValue::scalar(100.0f);
+    const FloatImage corrupt = s.render(FrameIndex{9});
+    dump_mosh("foto_9_corrompida", corrupt);
+    AUREA_CHECK_MSG(mean_diff(corrupt, f9) > 0.002f, "corrupcao devia aparecer na imagem parada");
+}
+
 // =============================================================================
 // O catálogo INTEIRO: todo efeito monta, compila e desenha
 //
@@ -11883,4 +11987,89 @@ AUREA_TEST(Gpu, DisplacementMapUsesAnotherLayerWithSignAndMagnitude) {
     e.params[0].constant.ref = 0;
     const FloatImage own = s.render();
     AUREA_CHECK(changed_pixels(own, ramp) < 128u * 32u / 8u);
+}
+
+// "3D null movement overlaps once u turn on motion blur" (beta 2137): faces de
+// um cubo feito de camadas 2D em 3D, filhas de um nulo 3D que anda. Com o
+// desfoque ligado elas saíam da cena 3D e eram desenhadas na ordem da PILHA —
+// a face de trás aparecia por cima da da frente. Agora ficam na cena (com
+// profundidade) e cada sub-quadro do obturador leva o plano na matriz dele.
+AUREA_TEST(Regression2137Gpu, BlurredPlanesIn3DKeepDepthOrderUnderAMovingNull) {
+    AUREA_REQUIRE_GPU();
+    struct Shot { Image8 img; f32 cover = 0.0f; };
+    auto shot = [](bool blur) {
+        Scene3DRig rig(256, 256);
+        Composition* comp = current_comp(rig.e);
+        const LayerId nul = comp->add_layer(LayerKind::Null, "nulo 3D");
+        Layer* n = comp->layer(nul);
+        n->threeD = true;
+        const f32 x0 = n->transform.position.x;
+        auto& track = n->tracks.get_or_create(TrackProperty::PositionX);
+        track.set(FrameIndex{0}, x0 - 60.0f, Interpolation::Linear);
+        track.set(FrameIndex{20}, x0 + 60.0f, Interpolation::Linear);
+        // Frente (vermelha, perto da câmera) EMBAIXO na pilha; fundo (azul) em cima.
+        auto add = [&](Vec4 color, f32 z) {
+            auto id = rig.e.add_shape(10);
+            AUREA_CHECK(id.ok());
+            Layer* l = current_comp(rig.e)->layer(LayerId::unpack(*id));
+            l->shape.fillColor = color;
+            l->threeD = true;
+            l->transform.position.z = z;
+            l->parent = nul;
+            if (blur) AUREA_CHECK(rig.e.set_motion_blur(*id, true));
+        };
+        add(Vec4{1, 0, 0, 1}, -150.0f);
+        add(Vec4{0, 0, 1, 1}, 150.0f);
+        comp->motion_blur().shutterAngle = 180.0f;
+        seek_frame(rig.e, 10);
+        Shot s;
+        s.img = rig.capture(256);
+        s.cover = coverage(s.img);
+        return s;
+    };
+    const Shot off = shot(false), on = shot(true);
+    const u8* a = off.img.at(128, 128);
+    const u8* b = on.img.at(128, 128);
+    std::printf("    planos 3D com desfoque: centro sem (%u,%u,%u) com (%u,%u,%u), cobertura %.3f/%.3f\n",
+                a[0], a[1], a[2], b[0], b[1], b[2], off.cover, on.cover);
+    AUREA_CHECK(a[0] > 200 && a[2] < 40);   // a frente na frente, sem desfoque
+    AUREA_CHECK(b[0] > 200 && b[2] < 40);   // ...e com desfoque (antes: azul por cima)
+    AUREA_CHECK(on.cover > off.cover);      // o rastro alarga a área pintada
+    AUREA_CHECK(shot(true).img.rgba == on.img.rgba);   // determinístico
+}
+
+// "Adjustment layer blending not working" + "masking just cuts out the layer"
+// (beta 2137): o modo de mistura da camada de ajuste era ignorado (sempre
+// Normal) e a máscara dela não limitava a área do efeito.
+AUREA_TEST(Regression2137Gpu, AdjustmentLayerHonoursBlendModeAndMask) {
+    AUREA_REQUIRE_GPU();
+    const Vec3 a = lin3(0.3f, 0.2f, 0.1f);
+    auto run = [&](BlendMode mode, bool masked) {
+        Scene s(64, 64);
+        s.solid(64, 64, Vec4{0.3f, 0.2f, 0.1f, 1}, 32, 32);
+        const LayerId adj = s.solid(64, 64, Vec4{1, 0, 1, 1}, 32, 32);
+        Layer* l = s.comp->layer(adj);
+        l->adjustment = true;
+        l->blendMode = mode;
+        if (masked) {
+            Mask m;
+            m.id = 1;
+            for (Vec2 p : {Vec2{0, 0}, Vec2{32, 0}, Vec2{32, 64}, Vec2{0, 64}}) m.points.push_back(MaskPoint{p, {}, {}});
+            l->masks.push_back(std::move(m));
+        }
+        s.add_effect(adj, effect_keys::kExposure).params[0].constant.v[0] = 1.0f;   // ×2 linear
+        return s.render();
+    };
+    const FloatImage normal = run(BlendMode::Normal, false);
+    const FloatImage darken = run(BlendMode::Darken, false);
+    const FloatImage lighten = run(BlendMode::Lighten, false);
+    const FloatImage masked = run(BlendMode::Normal, true);
+    std::printf("    ajuste: normal %.4f escurecer %.4f clarear %.4f | máscara dentro %.4f fora %.4f a=%.3f (esperado %.4f / %.4f)\n",
+                normal.v(32, 32).x, darken.v(32, 32).x, lighten.v(32, 32).x, masked.v(8, 32).x, masked.v(56, 32).x,
+                masked.v(56, 32).w, a.x * 2, a.x);
+    AUREA_CHECK(near4(normal.v(32, 32), Vec4{a.x * 2, a.y * 2, a.z * 2, 1}, 0.006f));
+    AUREA_CHECK(near4(darken.v(32, 32), Vec4{a.x, a.y, a.z, 1}, 0.006f));        // min(fundo, 2×fundo) = fundo
+    AUREA_CHECK(near4(lighten.v(32, 32), Vec4{a.x * 2, a.y * 2, a.z * 2, 1}, 0.006f));
+    AUREA_CHECK(near4(masked.v(8, 32), Vec4{a.x * 2, a.y * 2, a.z * 2, 1}, 0.006f));   // dentro: efeito
+    AUREA_CHECK(near4(masked.v(56, 32), Vec4{a.x, a.y, a.z, 1}, 0.006f));             // fora: fundo intacto (não recortado)
 }

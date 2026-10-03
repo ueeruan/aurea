@@ -84,6 +84,37 @@ static_assert(sizeof(Keyframe) == 48, "easePower cabe no preenchimento");
     return u;
 }
 
+/// O trecho amostrado para o gráfico da UI: `count` valores de `keyframe_ease`
+/// em t = i/(count−1), com a ponta final em 1 (o trecho chega no próximo
+/// keyframe; o "manter" pula ali). As telas desenham ESTES números — a mesma
+/// conta que avalia o projeto, não uma cópia dela. Devolve quantos escreveu.
+[[nodiscard]] inline u32 sample_keyframe_ease(const Keyframe& a, f32* out, u32 count) noexcept {
+    if (!out || count < 2) return 0;
+    for (u32 i = 0; i + 1 < count; ++i) {
+        out[i] = keyframe_ease(a, static_cast<f32>(i) / static_cast<f32>(count - 1));
+    }
+    out[count - 1] = 1.0f;
+    return count;
+}
+
+/// O mesmo trecho visto de trás para a frente, g(u) = 1 − f(1 − u), para as
+/// curvas com parâmetros: Elástico e Overshoot (com ou sem parâmetros gravados)
+/// e o Quique configurável. Falso = a curva não tem essa forma de espelhar (o
+/// Quique antigo fica como está).
+inline bool mirror_parametric_ease(Keyframe& k) noexcept {
+    if (!ease_has_params(k.interp)) return false;
+    if (k.by2 != kEaseParamMarker) {
+        if (k.interp == Interpolation::Bounce) return false;
+        // Sem parâmetros gravados: os padrões, que são a curva que já se via.
+        k.bx1 = k.interp == Interpolation::Elastic ? kElasticDefaultCycles : kOvershootDefaultAmount;
+        k.by1 = k.interp == Interpolation::Elastic ? kElasticDefaultDamping : 0.0f;
+        k.bx2 = 1.0f;
+        k.by2 = kEaseParamMarker;
+    }
+    k.bx2 = k.bx2 < 0.5f ? 1.0f : 0.0f;
+    return true;
+}
+
 /// Uma propriedade animável de uma layer — ou uma propriedade estática, se
 /// tiver zero ou um keyframe.
 ///

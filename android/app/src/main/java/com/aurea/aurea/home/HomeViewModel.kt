@@ -207,7 +207,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val video = cr.getType(uri)?.startsWith("video/") == true
         val display = cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-        val name = display?.substringBeforeLast('.')?.takeIf { it.isNotBlank() } ?: "Mídia Importada"
+        val name = display?.substringBeforeLast('.')?.takeIf { it.isNotBlank() } ?: com.aurea.aurea.ui.i18n.AppText.get(getApplication<Application>(), R.string.app_imported_media)
         if (video) {
             val r = MediaMetadataRetriever()
             try {

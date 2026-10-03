@@ -87,7 +87,7 @@ internal fun ClipEditPanel(env: PanelEnv) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(row.name, color = AureaColors.Text, fontSize = 15.sp)
         Text(stringResource(R.string.edt_clip_range, row.startFrame, row.endFrame, row.durationFrames), color = AureaColors.Muted, fontSize = 12.sp)
-        listOf(2 to "Slip", 3 to stringResource(R.string.edt_clip_roll_start), 4 to stringResource(R.string.edt_clip_roll_end), 5 to "Slide").chunked(2).forEach { choices ->
+        listOf(2 to stringResource(R.string.i18n_clip_slip), 3 to stringResource(R.string.edt_clip_roll_start), 4 to stringResource(R.string.edt_clip_roll_end), 5 to stringResource(R.string.i18n_clip_slide)).chunked(2).forEach { choices ->
             Row(Modifier.fillMaxWidth()) {
                 choices.forEach { (value, name) ->
                     TextButton(onClick = { mode = value }, modifier = Modifier.weight(1f).height(48.dp)) {
@@ -310,9 +310,10 @@ internal fun AudioPanel(env: PanelEnv) {
             else -> KeyframeLook.None
         }
         val volumeKeys = listOf(com.aurea.aurea.engine.TrackKey(TrackProperty.AUDIO_VOLUME))
+        val volumeLabel = stringResource(R.string.panel_volume)
         AudioRuler(
             label = stringResource(R.string.panel_volume), keyframe = keyLook, onKeyframe = { store.toggleVolumeKeyframe() },
-            expression = store.expressionLook(volumeKeys), onExpression = { store.openExpression("Volume", volumeKeys, 100f, "%") },
+            expression = store.expressionLook(volumeKeys), onExpression = { store.openExpression(volumeLabel, volumeKeys, 100f, "%") },
             value = { store.detail?.audioVolume?.times(100f) ?: 100f }, text = "${(detail.audioVolume * 100f).roundToInt()}%",
             unitsPerDp = 0.5f, min = 0f, max = 200f, gesture = "volume", store = store,
         ) { store.setAudioVolume(it / 100f) }
@@ -557,12 +558,15 @@ internal fun TimeRemapEffectEditor(env: PanelEnv, effectId: Int) {
     }
 }
 
-/** Timecode da fonte, H:MM:SS:QQ (quadros na taxa do projeto). */
+/**
+ * Timecode da fonte, H:MM:SS:QQ (quadros na taxa do projeto). Taxa livre
+ * (29,97, 144…): os segundos são os REAIS — arredondar a taxa para inteiro
+ * deixava 29,97 fps 3,6 s adiantado por hora. Mesma conta do relógio da timeline.
+ */
 internal fun timecode(frames: Int, fps: Float): String {
-    val rate = max(1, fps.roundToInt())
-    val f = max(0, frames)
-    val totalSec = f / rate
-    return String.format(java.util.Locale.ROOT, "%d:%02d:%02d:%02d", totalSec / 3600, (totalSec / 60) % 60, totalSec % 60, f % rate)
+    val p = IntArray(4)
+    com.aurea.aurea.editor.timeline.Timecode.split(max(0, frames), fps, p)
+    return String.format(java.util.Locale.ROOT, if (fps > 100f) "%d:%02d:%02d:%03d" else "%d:%02d:%02d:%02d", p[0], p[1], p[2], p[3])
 }
 
 /**

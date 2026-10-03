@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dividir o cubo 3D em partes (2026-10-03). Chaves shape3d_split_*. -->
+<resources>
+    <string name="shape3d_split_title">Bagi menjadi bagian</string>
+    <string name="shape3d_split_axis">Sumbu potong</string>
+    <string name="shape3d_split_axis_desc">Potong pada sumbu %1$s</string>
+    <string name="shape3d_split_count">Bagian</string>
+    <string name="shape3d_split_count_desc">%1$d bagian</string>
+    <string name="shape3d_split_less">Lebih sedikit bagian</string>
+    <string name="shape3d_split_more">Lebih banyak bagian</string>
+    <string name="shape3d_split_apply">Bagi</string>
+    <string name="shape3d_split_hint">Memotong kubus menjadi irisan yang sama. Gambar berlanjut dari satu irisan ke irisan berikutnya; setiap bagian menjadi lapisan yang bisa kamu pindahkan, putar, atau hapus, dan grupnya tetap mengikuti gerakan kubus.</string>
+    <string name="shape3d_split_done">Kubus dibagi menjadi %1$d bagian. Ketuk satu bagian untuk mengedit bagian itu saja.</string>
+    <string name="shape3d_split_failed">Tidak dapat membagi bentuk.</string>
+</resources>

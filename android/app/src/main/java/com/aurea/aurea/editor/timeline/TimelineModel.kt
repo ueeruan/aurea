@@ -1,5 +1,9 @@
 package com.aurea.aurea.editor.timeline
 
+import android.content.Context
+import androidx.annotation.StringRes
+import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.engine.LayerRow
 import com.aurea.aurea.engine.TrackKey
@@ -440,33 +444,77 @@ internal fun trackGroup(t: TimelineTrack): TimelineTrack? = when {
 /** Um grupo de eixos aberto (▾) numa camada: as trilhas por eixo aparecem embaixo dele. */
 internal data class LaneGroupKey(val layer: Long, val track: TimelineTrack)
 
-private val AXIS_NAMES = listOf("Position X", "Position Y", "Position Z", "Scale X", "Scale Y", "Scale Z", "Rotation X", "Rotation Y", "Rotation Z", "Anchor X", "Anchor Y", "Anchor Z", "Opacity", "Skew X", "Skew Y")
-private val PART_AXES = listOf("Position X", "Position Y", "Position Z", "Rotation X", "Rotation Y", "Rotation Z", "Scale X", "Scale Y", "Scale Z")
+/**
+ * Nomes das trilhas no idioma do app. O controlador entrega o Application
+ * ([TimelineController]); sem ele (testes de JVM) os nomes saem em inglês.
+ */
+internal object LaneNames {
+    @Volatile var app: Context? = null
+    private val english = mapOf(
+        R.string.tl_position to "Position", R.string.tl_scale to "Scale", R.string.tl_rotation to "Rotation",
+        R.string.tl_anchor to "Anchor", R.string.tl_skew to "Skew", R.string.tl_opacity to "Opacity",
+        R.string.tl_part to "Part %1\$d · %2\$s", R.string.tl_time_remap to "Time remap", R.string.tl_effect to "Effect",
+        R.string.tl_audio to "Audio · %1\$d", R.string.tl_text_anim to "Text animation %1\$d · %2\$d",
+        R.string.tl_mask to "Mask %1\$d · %2\$s", R.string.tl_feather to "Feather", R.string.tl_expansion to "Expansion",
+        R.string.tl_vector to "Vector · %1\$d", R.string.tl_shape to "Shape · %1\$d", R.string.tl_particles to "Particles · %1\$d",
+        R.string.tl_speed to "Speed", R.string.tl_animator to "Animator %1\$d · %2\$d", R.string.tl_material to "Material %1\$d · %2\$s",
+        R.string.tl_alpha to "Alpha", R.string.tl_metallic to "Metallic", R.string.tl_roughness to "Roughness",
+        R.string.tl_transform to "Transform", R.string.tl_3d to "3D · %1\$d",
+    )
+    fun get(@StringRes id: Int, vararg args: Any): String {
+        val context = app
+        return if (context != null) AppText.get(context, id, *args) else String.format(english.getValue(id), *args)
+    }
+}
+
+private val AXIS_BASES = listOf(R.string.tl_position, R.string.tl_scale, R.string.tl_rotation, R.string.tl_anchor)
+private val AXIS_LETTERS = listOf("X", "Y", "Z")
+
+/** Eixo da transformação (0..14): "Posição X", ..., "Opacidade", "Inclinação X/Y". */
+private fun axisName(property: Int): String? = when (property) {
+    in 0..11 -> LaneNames.get(AXIS_BASES[property / 3]) + " " + AXIS_LETTERS[property % 3]
+    12 -> LaneNames.get(R.string.tl_opacity)
+    13, 14 -> LaneNames.get(R.string.tl_skew) + " " + AXIS_LETTERS[property - 13]
+    else -> null
+}
+
+/** Eixos de uma PARTE de forma 3D: posição, rotação, escala (nessa ordem). */
+private fun partAxisName(param: Int): String? {
+    val base = listOf(R.string.tl_position, R.string.tl_rotation, R.string.tl_scale).getOrNull(param / 3) ?: return null
+    return LaneNames.get(base) + " " + AXIS_LETTERS[param % 3]
+}
 
 private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): String {
     if (track.group) return when (track.property) {
-        0 -> "Position"
-        3 -> "Scale"
-        6 -> "Rotation"
-        9 -> "Anchor"
-        13 -> "Skew"
-        42 -> "Part ${track.effect + 1} · ${listOf("Position", "Rotation", "Scale").getOrNull(track.param / 3) ?: track.param}"
-        else -> "3D · ${track.property}"
+        0 -> LaneNames.get(R.string.tl_position)
+        3 -> LaneNames.get(R.string.tl_scale)
+        6 -> LaneNames.get(R.string.tl_rotation)
+        9 -> LaneNames.get(R.string.tl_anchor)
+        13 -> LaneNames.get(R.string.tl_skew)
+        42 -> LaneNames.get(R.string.tl_part, track.effect + 1,
+            listOf(R.string.tl_position, R.string.tl_rotation, R.string.tl_scale).getOrNull(track.param / 3)?.let { LaneNames.get(it) } ?: track.param.toString())
+        else -> LaneNames.get(R.string.tl_3d, track.property)
     }
-    return AXIS_NAMES.getOrNull(track.property) ?: when (track.property) {
-        30 -> "Time remap"
-        31 -> (effects.firstOrNull { it.first == track.effect }?.second ?: "Effect") + " · ${track.param + 1}"
-        32 -> "Audio · ${track.param + 1}"
-        33 -> "Text animation ${track.effect + 1} · ${track.param + 1}"
-        43 -> "Mask ${track.effect + 1} · ${listOf("Feather", "Expansion", "Opacity").getOrNull(track.param) ?: track.param}"
-        34 -> "Vector · ${track.param + 1}"
-        35 -> "Shape · ${track.param + 1}"
-        36 -> "Particles · ${track.param + 1}"
-        39 -> "Speed"
-        40 -> "Animator ${track.effect + 1} · ${track.param + 1}"
-        37 -> "Material ${track.effect + 1} · ${listOf("R", "G", "B", "Alpha", "Metallic", "Roughness").getOrNull(track.param) ?: track.param}"
-        42 -> "Part ${track.effect + 1} · ${PART_AXES.getOrNull(track.param) ?: track.param}"
-        else -> "3D · ${track.property}"
+    return axisName(track.property) ?: when (track.property) {
+        30 -> LaneNames.get(R.string.tl_time_remap)
+        31 -> (effects.firstOrNull { it.first == track.effect }?.second ?: LaneNames.get(R.string.tl_effect)) + " · ${track.param + 1}"
+        32 -> LaneNames.get(R.string.tl_audio, track.param + 1)
+        33 -> LaneNames.get(R.string.tl_text_anim, track.effect + 1, track.param + 1)
+        43 -> LaneNames.get(R.string.tl_mask, track.effect + 1,
+            listOf(R.string.tl_feather, R.string.tl_expansion, R.string.tl_opacity).getOrNull(track.param)?.let { LaneNames.get(it) } ?: track.param.toString())
+        34 -> LaneNames.get(R.string.tl_vector, track.param + 1)
+        35 -> LaneNames.get(R.string.tl_shape, track.param + 1)
+        36 -> LaneNames.get(R.string.tl_particles, track.param + 1)
+        39 -> LaneNames.get(R.string.tl_speed)
+        40 -> LaneNames.get(R.string.tl_animator, track.effect + 1, track.param + 1)
+        37 -> LaneNames.get(R.string.tl_material, track.effect + 1,
+            when (track.param) {
+                0 -> "R"; 1 -> "G"; 2 -> "B"
+                3 -> LaneNames.get(R.string.tl_alpha); 4 -> LaneNames.get(R.string.tl_metallic); 5 -> LaneNames.get(R.string.tl_roughness)
+                else -> track.param.toString()
+            })
+        42 -> LaneNames.get(R.string.tl_part, track.effect + 1, partAxisName(track.param) ?: track.param.toString())
+        else -> LaneNames.get(R.string.tl_3d, track.property)
     }
 }
 
@@ -504,7 +552,7 @@ internal fun expandedRows(
                     owner.magnetic, values.isNotEmpty(), name, owner.label,
                     groups.keys.map { Keyframes.toTimeline(it, owner.start, owner.offset) }.toIntArray(), groups.values.toTypedArray(), track)
             }
-            lane(TimelineTrack(-1), "  Transform")
+            lane(TimelineTrack(-1), "  " + LaneNames.get(R.string.tl_transform))
             fx.forEach { (id, name) -> lane(TimelineTrack(31, id, -1), "  $name") }
             val ordered = tracks.keys.sortedWith(compareBy({ it.property }, { it.effect }, { it.param }))
             // Os eixos animados de cada grupo (só 2+ vira trilha de grupo).

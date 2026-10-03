@@ -66,6 +66,11 @@ fun EffectStackCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(10.dp)
+    val toggleDescription = stringResource(if (expanded) R.string.app_a11y_close else R.string.app_a11y_open, name)
+    val menuDescription = stringResource(R.string.app_a11y_more_options, name)
+    val removeDescription = stringResource(R.string.app_a11y_remove, name)
+    val enableDescription = stringResource(if (enabled) R.string.app_a11y_turn_off else R.string.app_a11y_turn_on, name)
+    val dragDescription = stringResource(R.string.ds_arrastar_reordenar)
     Column(
         modifier
             .fillMaxWidth()
@@ -80,7 +85,7 @@ fun EffectStackCard(
                 Modifier
                     .weight(1f)
                     .height(50.dp)
-                    .semantics { contentDescription = if (expanded) "Fechar $name" else "Abrir $name" }
+                    .semantics { contentDescription = toggleDescription }
                     .tocavel(shrink = 1f, onClick = onToggleExpanded)
                     .padding(start = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -100,19 +105,19 @@ fun EffectStackCard(
                 )
             }
             if (expanded) {
-                CardButton(CupertinoGlyph.Ellipsis, "Mais opções de $name", AureaColors.Text, onMenu)
-                CardButton(CupertinoGlyph.Trash, "Remover $name", AureaColors.Text, onRemove)
+                CardButton(CupertinoGlyph.Ellipsis, menuDescription, AureaColors.Text, onMenu)
+                CardButton(CupertinoGlyph.Trash, removeDescription, AureaColors.Text, onRemove)
             } else {
                 CardButton(
                     if (enabled) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash,
-                    if (enabled) "Desligar $name" else "Ligar $name",
+                    enableDescription,
                     if (enabled) AureaColors.Text else AureaColors.Muted,
                     onToggleEnabled,
                 )
                 Box(
                     dragHandle
                         .size(40.dp)
-                        .semantics { contentDescription = "Arrastar para reordenar" },
+                        .semantics { contentDescription = dragDescription },
                     contentAlignment = Alignment.Center,
                 ) {
                     CupertinoIcon(CupertinoGlyph.LineHorizontal3, 20.dp, if (lifted) AureaColors.Accent else AureaColors.Muted)

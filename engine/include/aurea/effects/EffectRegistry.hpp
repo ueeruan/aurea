@@ -205,10 +205,18 @@ namespace effect_keys {
     inline constexpr const char* kDissolveShake         = "aurea.glitch.dissolve_shake";
     /// Lê OUTRA camada como mapa (Effect::input_layer_param / layer_input).
     inline constexpr const char* kDisplacementMap       = "aurea.distort.displacement_map";
+
+    // --- Datamosh (Glitch): o quadro antigo arrastado pelo movimento do atual ---
+    // Lê a fonte num instante anterior como o Detectar movimento (ver DatamoshEffect.cpp).
+    inline constexpr const char* kDatamosh              = "aurea.glitch.datamosh";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a
 /// fonte nesse instante; o parâmetro 0 do efeito é o atraso.
 inline constexpr i32 kMotionDetectMaxDelay = 30;
+
+/// Teto dos "Quadros segurados" do Datamosh: o quadro de referência fica preso
+/// por até isto antes de renovar (o renderer busca a fonte em t − fase).
+inline constexpr i32 kDatamoshMaxHold = 30;
 
 } // namespace aurea

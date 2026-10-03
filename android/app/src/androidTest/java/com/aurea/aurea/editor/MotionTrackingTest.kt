@@ -40,7 +40,7 @@ class MotionTrackingTest {
         // O rastreio saiu da doca: o painel abre pelo ⋯ do topo da camada.
         compose.onNodeWithContentDescription(context.getString(R.string.editor_mais_acoes_camada)).performClick()
         compose.onNodeWithText(context.getString(R.string.dock2_tracking_tools)).performScrollTo().performClick()
-        compose.onNodeWithText("Stabilizer").performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.trk_tool_stabilizer)).performScrollTo().performClick()
         compose.waitUntil(90000) { store.motionStatus[0].toInt() != 1 }
         compose.runOnIdle {
             assertEquals(store.motionMessage, 2, store.motionStatus[0].toInt())
@@ -48,7 +48,7 @@ class MotionTrackingTest {
             assertEquals(0, store.motionStatus[5].toInt())
             store.seek(20)
         }
-        compose.onNodeWithText("Apply stabilization").performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.trk_apply_stabilization)).performScrollTo().performClick()
         compose.waitUntil(10000) { store.effects.isNotEmpty() }
         compose.runOnIdle { assertEquals(1, store.effects.size); store.undo() }
         compose.waitUntil(10000) { store.effects.isEmpty() }

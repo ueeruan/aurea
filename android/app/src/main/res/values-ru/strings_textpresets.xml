@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Presets de texto de volta (2026-10-03): barra de adicionar e doca do texto. Chaves tp_*. -->
+<resources>
+    <string name="tp_add_tab">Пресеты</string>
+    <string name="tp_title">Пресеты текста</string>
+    <string name="tp_hint">Нажмите на пресет: текст появится уже с анимацией.</string>
+    <string name="tp_add_named">Добавить текст: %1$s</string>
+</resources>

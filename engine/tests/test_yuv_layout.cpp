@@ -15,7 +15,10 @@
 
 #include "aurea/media/YuvLayout.hpp"
 #include "aurea/media/DecodedPlaneBounds.hpp"
+#include "aurea/export/ExportRules.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -420,4 +423,145 @@ AUREA_TEST(YuvLayout, ExportReadbackPitchMatchesThePlan) {
     AUREA_CHECK_EQ(std::memcmp(lido.data(), y.data(), y.size()), 0);
     std::printf("    %ux%u passo %u: %zu bytes no buffer do codec (%zu da imagem)\n", width, height, stride,
                 plan.totalBytes, y.size() + uv.size());
+}
+
+// =============================================================================
+//  Vivo Y30 (Helio P35, encoder MediaTek): "buffer do encoder menor que o
+//  quadro" num export 854×480. O encoder declara passo alinhado em 16 (864) e
+//  entrega um buffer calculado com a largura crua (854·480·3/2). A regra do
+//  tamanho (export/ExportRules.hpp) tira o 854 do caminho; o plano aceita
+//  buffer sem a folga da última linha; o resto o sink resolve trocando de
+//  encoder.
+// =============================================================================
+namespace {
+u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
+} // namespace
+
+AUREA_TEST(ExportRules, FrameSizeAlignsLongSideTo16AndKeepsShortSideEven) {
+    struct Caso { u32 cw, ch, want, w, h; };
+    const Caso casos[] = {
+        {1920, 1080, 480, 848, 480},     // o do Vivo Y30: era 854×480
+        {1920, 1080, 720, 1280, 720},
+        {1920, 1080, 1080, 1920, 1080},  // 1080 continua 1080
+        {1920, 1080, 1440, 2560, 1440},
+        {1920, 1080, 2160, 3840, 2160},
+        {1080, 1920, 480, 480, 848},     // retrato: o lado MAIOR é a altura
+        {1080, 1920, 1080, 1080, 1920},
+        {1080, 1080, 1080, 1080, 1080},  // quadrado fica quadrado
+        {1080, 1080, 480, 480, 480},
+        {1080, 1350, 1080, 1080, 1344},  // 4:5
+        {1280, 720, 0, 1280, 720},       // 0 = lado da composição
+        {1000, 700, 0, 1008, 700},       // tamanho livre
+        {64, 36, 36, 64, 36},            // o teste de export do GPU (64×36)
+        {1080, 1920, 720, 720, 1280}
+    };
+    for (const Caso& c : casos) {
+        const ExportFrameSize s = export_frame_size(c.cw, c.ch, c.want);
+        AUREA_CHECK_EQ(s.width, c.w);
+        AUREA_CHECK_EQ(s.height, c.h);
+        const u32 lo = std::min(s.width, s.height), hi = std::max(s.width, s.height);
+        AUREA_CHECK_EQ(lo % kExportShortSideAlign, 0u);
+        if (s.width != s.height) AUREA_CHECK_EQ(hi % kExportLongSideAlign, 0u);
+        // A proporção muda no máximo meio bloco: < 1%.
+        const f64 want = static_cast<f64>(c.cw) / c.ch, got = static_cast<f64>(s.width) / s.height;
+        AUREA_CHECK(std::fabs(got / want - 1.0) < 0.01);
+    }
+    AUREA_CHECK_EQ(export_frame_size(0, 1080, 480).width, 0u);
+    // Composição minúscula: nunca abaixo de um bloco.
+    const ExportFrameSize tiny = export_frame_size(4, 2, 2);
+    AUREA_CHECK_EQ(tiny.width, kExportLongSideAlign);
+    AUREA_CHECK_EQ(tiny.height, 2u);
+}
+
+AUREA_TEST(ExportRules, MediaTekStrideBugIsGoneWithAlignedWidth) {
+    // O encoder do Y30: passo = ALIGN(largura, 16), fatia = altura, buffer =
+    // largura crua · altura · 3/2.
+    auto mtk = [](u32 w, u32 h) {
+        YuvInputLayout in;
+        in.width = w;
+        in.height = h;
+        in.stride = align_up(w, 16);
+        in.sliceHeight = h;
+        in.chroma = ChromaLayout::SemiPlanar;
+        in.capacity = export_yuv420_bytes(w, h);
+        in.fromCodec = true;
+        return in;
+    };
+    YuvCopyPlan plan;
+    const char* why = nullptr;
+    // 854×480 (a regra antiga): o quadro com passo 864 não cabe — a falha do relato.
+    AUREA_CHECK(!plan_yuv_copy(mtk(854, 480), plan, &why));
+    AUREA_CHECK(why != nullptr && std::strstr(why, "menor que o quadro") != nullptr);
+    // 848×480 (a regra nova): passo = largura, cabe exatamente.
+    const ExportFrameSize s = export_frame_size(1920, 1080, 480);
+    AUREA_CHECK(plan_yuv_copy(mtk(s.width, s.height), plan, &why));
+    AUREA_CHECK_EQ(plan.yPitch, static_cast<usize>(848));
+    AUREA_CHECK_EQ(plan.totalBytes, export_yuv420_bytes(848, 480));
+    // Toda resolução da tela, nas duas orientações: com o lado maior em
+    // múltiplo de 16 o passo do encoder MediaTek é a própria largura (paisagem)
+    // e o quadro cabe no buffer cru; em retrato a largura (480/720/1080/1440/
+    // 2160) cabe no codec que aloca pelo passo.
+    for (u32 side : {480u, 720u, 1080u, 1440u, 2160u}) {
+        const ExportFrameSize f = export_frame_size(1920, 1080, side);
+        AUREA_CHECK(plan_yuv_copy(mtk(f.width, f.height), plan, &why));
+        AUREA_CHECK_EQ(plan.yPitch, static_cast<usize>(f.width));
+        const ExportFrameSize r = export_frame_size(1080, 1920, side);
+        YuvInputLayout in = mtk(r.width, r.height);
+        in.capacity = static_cast<usize>(in.stride) * in.height * 3 / 2;   // codec que aloca pelo passo
+        AUREA_CHECK(plan_yuv_copy(in, plan, &why));
+    }
+}
+
+AUREA_TEST(ExportRules, BufferWithoutLastRowPaddingIsAcceptedButNeverOverrun) {
+    // 1080×1920, passo 1152: o codec aloca até o ÚLTIMO byte da croma, sem a
+    // folga do fim da última linha.
+    for (ChromaLayout chroma : {ChromaLayout::SemiPlanar, ChromaLayout::Planar}) {
+        YuvInputLayout in;
+        in.width = 1080;
+        in.height = 1920;
+        in.stride = 1152;
+        in.sliceHeight = 1920;
+        in.chroma = chroma;
+        YuvCopyPlan full;
+        const char* why = nullptr;
+        AUREA_CHECK(plan_yuv_copy(in, full, &why));
+        const usize needed = chroma == ChromaLayout::SemiPlanar
+            ? full.cOffset + static_cast<usize>(full.cRows - 1) * full.cPitch + full.cRowBytes
+            : full.cOffset + full.cSecondOffset + static_cast<usize>(full.cRows - 1) * full.cSecondPitch + full.cRowBytes;
+        AUREA_CHECK(needed < full.totalBytes);
+        in.capacity = needed;
+        YuvCopyPlan plan;
+        AUREA_CHECK(plan_yuv_copy(in, plan, &why));
+        AUREA_CHECK_EQ(plan.totalBytes, needed);   // declara a capacidade, nunca além
+        AUREA_CHECK_EQ(plan.yPitch, full.yPitch);
+        AUREA_CHECK_EQ(plan.cOffset, full.cOffset);
+        // Escrever pelo plano cabe no buffer do tamanho exato (o vector
+        // dimensionado em `needed` acusaria estouro no ASan/checagem).
+        std::vector<u8> y, uv;
+        quadro(in.width, in.height, y, uv);
+        std::vector<u8> dst(needed, 0);
+        escreve(plan, y, uv, in.width, dst);
+        AUREA_CHECK_EQ(dst[0], y[0]);
+        in.capacity = needed - 1;
+        AUREA_CHECK(!plan_yuv_copy(in, plan, &why));
+        AUREA_CHECK(!plan.valid());
+    }
+}
+
+AUREA_TEST(ExportRules, FailureReasonIsAStableCodeNotTheSinkText) {
+    AUREA_CHECK(export_failure_reason(ExportStage::Encode, Errc::InvalidState) == ExportFailure::Encoder);
+    AUREA_CHECK(export_failure_reason(ExportStage::Encode, Errc::IoError) == ExportFailure::Encoder);
+    AUREA_CHECK(export_failure_reason(ExportStage::Encode, Errc::Timeout) == ExportFailure::EncoderStalled);
+    AUREA_CHECK(export_failure_reason(ExportStage::Encode, Errc::StorageFull) == ExportFailure::Storage);
+    AUREA_CHECK(export_failure_reason(ExportStage::Render, Errc::InvalidState) == ExportFailure::Render);
+    AUREA_CHECK(export_failure_reason(ExportStage::Render, Errc::OutOfDeviceMemory) == ExportFailure::GpuMemory);
+    AUREA_CHECK(export_failure_reason(ExportStage::Render, Errc::DecodeFailed) == ExportFailure::Media);
+    AUREA_CHECK(export_failure_reason(ExportStage::Finish, Errc::IoError) == ExportFailure::File);
+    AUREA_CHECK(export_failure_reason(ExportStage::Finish, Errc::Timeout) == ExportFailure::EncoderStalled);
+    AUREA_CHECK(export_failure_reason(ExportStage::Open, Errc::NotSupported) == ExportFailure::Unsupported);
+    AUREA_CHECK(export_failure_reason(ExportStage::Encode, Errc::Cancelled) == ExportFailure::None);
+    AUREA_CHECK(export_failure_reason(ExportStage::Finish, Errc::Ok) == ExportFailure::None);
+    // Cabe nos 8 bits altos de `flags` sem tocar nos ExportFlag (bits 0..23).
+    AUREA_CHECK(static_cast<u32>(ExportFailure::Other) <= 0xFFu);
+    AUREA_CHECK_EQ(kExportFailureShift, 24u);
 }

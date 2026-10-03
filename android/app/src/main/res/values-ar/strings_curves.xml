@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Editor de curva: tipos rápidos (Overshoot, Elástico, Quique) e os parâmetros (2026-10-03). -->
+<resources>
+    <string name="curve_type_ease">ناعم</string>
+    <string name="curve_type_overshoot">تجاوز</string>
+    <string name="curve_types_label">نوع المنحنى</string>
+    <string name="curve_param_amount">المقدار</string>
+    <string name="curve_param_oscillations">التذبذبات</string>
+    <string name="curve_param_damping">التخميد</string>
+    <string name="curve_param_oscillations_value">التذبذبات: %1$d</string>
+</resources>

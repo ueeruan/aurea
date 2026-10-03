@@ -85,6 +85,8 @@ internal enum class AddTab(@StringRes val label: Int, val glyph: Char) {
     Media(R.string.sh_add_tab_media, CupertinoGlyph.PhotoOnRectangle),
     Audio(R.string.sh_add_tab_audio, CupertinoGlyph.MusicNote2),
     Text(R.string.sh_add_tab_text, CupertinoGlyph.Textformat),
+    // Ao lado do Texto (que cria o texto direto): a grade dos presets de texto.
+    TextPresets(R.string.tp_add_tab, CupertinoGlyph.WandStars),
     Element(R.string.sh_add_tab_element, ShellGlyph.CircleGridHex),
     Model3D(R.string.sh_add_tab_3d, CupertinoGlyph.Cube),
     Draw(R.string.sh_add_tab_draw, ShellGlyph.Scribble),
@@ -102,7 +104,8 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
     val close = { ui.adding = false }
     Column(Modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(ui.addTab.label), modifier = Modifier.weight(1f).padding(start = 16.dp), color = AureaColors.Text)
+            val title = if (ui.addTab == AddTab.TextPresets) R.string.tp_title else ui.addTab.label
+            Text(stringResource(title), modifier = Modifier.weight(1f).padding(start = 16.dp), color = AureaColors.Text)
             ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar_adicionar), onClick = close)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -111,6 +114,7 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
                 AddTab.Media -> MediaTab(store, ui, close)
                 AddTab.Audio -> AudioTab(store, close)
                 AddTab.Text -> TextTab(store, ui)
+                AddTab.TextPresets -> com.aurea.aurea.editor.panels.TextPresetPicker(store) { ui.adding = false; ui.panel = null }
                 AddTab.Element -> ElementTab(store, close)
                 AddTab.Model3D -> Model3DTab(store, close)
                 AddTab.Draw -> DrawTab(store, ui)

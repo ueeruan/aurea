@@ -397,6 +397,8 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_motion_detect_effect(registry);
     // Emulador CRT, Tremor dissolvente e Mapa de deslocamento. Sempre no FIM.
     builtin::register_retro_displace_effects(registry);
+    // Datamosh (Glitch). Sempre no FIM.
+    builtin::register_datamosh_effect(registry);
 }
 
 } // namespace aurea

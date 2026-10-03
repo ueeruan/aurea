@@ -34,6 +34,27 @@ struct CurveEase: Equatable {
         default: return [x1, y1, x2, y2]
         }
     }
+    /// Curvas com parâmetros (`kEaseParamMarker`, core/Math.hpp): com y2 = −10 o
+    /// Quique, o Elástico e o Overshoot (10) leem x1 (A), y1 (B) e x2 (sentido:
+    /// < 0,5 = invertida). Sem o marcador, os padrões de sempre.
+    static let paramMarker: Float = -10
+    static let overshootDefaultAmount: Float = 1.70158 / 5
+    static let elasticDefaultCycles = 3
+    static let elasticDefaultDamping: Float = 0.25
+    private var marked: Bool { y2 == CurveEase.paramMarker }
+    var isParametric: Bool { interpolation == 7 || interpolation == 8 || interpolation == 10 }
+    var supportsInversion: Bool { (1...7).contains(interpolation) || interpolation == 10 || (interpolation == 8 && marked) }
+    var overshootAmount: Float { interpolation == 10 && marked ? min(1, max(0, x1)) : CurveEase.overshootDefaultAmount }
+    func overshoot(amount: Float? = nil) -> CurveEase {
+        CurveEase(interpolation: 10, x1: min(1, max(0, amount ?? overshootAmount)), y1: 0,
+                  x2: interpolation == 10 && marked ? x2 : 1, y2: CurveEase.paramMarker)
+    }
+    var elasticCycles: Int { interpolation == 8 && marked ? min(8, max(1, Int((x1 * 8).rounded()))) : CurveEase.elasticDefaultCycles }
+    var elasticDamping: Float { interpolation == 8 && marked ? min(1, max(0, y1)) : CurveEase.elasticDefaultDamping }
+    func elastic(cycles: Int? = nil, damping: Float? = nil) -> CurveEase {
+        CurveEase(interpolation: 8, x1: Float(min(8, max(1, cycles ?? elasticCycles))) / 8, y1: min(1, max(0, damping ?? elasticDamping)),
+                  x2: interpolation == 8 && marked ? x2 : 1, y2: CurveEase.paramMarker)
+    }
     var bounceCount: Int { y2 == -10 ? min(8,max(1,Int((x1*8).rounded()))) : 3 }
     var bounceStrength: Float { y2 == -10 ? min(0.9,max(0.1,y1)) : 0.5 }
     func bounce(count: Int? = nil, strength: Float? = nil) -> CurveEase {
@@ -74,9 +95,11 @@ struct CurveEase: Equatable {
             let p = (u-segment.0)/segment.1
             return 1-4*segment.2*p*(1-p)
         case 8:
+            if marked { return curveElastic(t, cycles: x1, damping: y1, reverse: x2 < 0.5) }
             if t <= 0 { return 0 }; if t >= 1 { return 1 }
             return Float((1-exp(-6*Double(t))*cos(6*Double.pi*Double(t)))/(1-exp(-6)))
         case 9: return floor(min(1,max(0,t))*4)/4
+        case 10: return marked ? curveOvershoot(t, amount: x1, reverse: x2 < 0.5) : curveOvershoot(t, amount: CurveEase.overshootDefaultAmount, reverse: false)
         default:
             // `keyframe_ease` (Curve.hpp): a força repete a MESMA bézier sobre o resultado.
             var u = bezierOnce(t)
@@ -108,12 +131,16 @@ struct CurveEase: Equatable {
             return Float(bezier(y1, y2, parameter))
     }
     func same(_ other: CurveEase) -> Bool {
-        interpolation == other.interpolation && ((!isBezier && interpolation != 7) || (power == other.power &&
+        interpolation == other.interpolation && ((!isBezier && !isParametric) || (power == other.power &&
             abs(x1 - other.x1) < 0.01 && abs(y1 - other.y1) < 0.01 && abs(x2 - other.x2) < 0.01 && abs(y2 - other.y2) < 0.01))
     }
     var inverted: CurveEase? {
         switch interpolation {
         case 7: var result = bounce(); result.x2 = y2 == -10 && x2 < 0.5 ? 1 : 0; return result
+        case 10: var result = overshoot(); result.x2 = marked && x2 < 0.5 ? 1 : 0; return result
+        case 8:
+            guard marked else { return nil }
+            var result = self; result.x2 = x2 < 0.5 ? 1 : 0; return result
         case 3: var result = self; result.interpolation = 4; return result
         case 4: var result = self; result.interpolation = 3; return result
         case 2, 6:
@@ -134,6 +161,7 @@ struct CurveEase: Equatable {
         case 7: key = "pn_textpreset_bounce"
         case 8: key = "pn_textpreset_elastic"
         case 9: key = "pn_curve_steps4"
+        case 10: key = "curve_type_overshoot"
         default: key = "pn_ease_bezier_custom"
         }
         return AureaText.t(key)
@@ -154,7 +182,7 @@ private struct CurvePresetItem: Identifiable {
     }
     static func read(_ object: [String: Any], id: String) -> CurvePresetItem? {
         guard object["kind"] as? String == "curve", let curve = object["curve"] as? [String: NSNumber],
-              let interpolation = curve["interp"]?.uint32Value, interpolation <= 9 else { return nil }
+              let interpolation = curve["interp"]?.uint32Value, interpolation <= 10 else { return nil }
         let h: [Float] = [curve["x1"]?.floatValue ?? 0.33, curve["y1"]?.floatValue ?? 0,
                  curve["x2"]?.floatValue ?? 0.67, curve["y2"]?.floatValue ?? 1]
         guard h.allSatisfy({ $0.isFinite }) else { return nil }
@@ -181,7 +209,7 @@ func curvePresetValues(_ ease: CurveEase) -> [Float] {
 
 /// O inverso (PresetsPanel.kt `curvePresetEase`); preset antigo sem força = ×1.
 func curvePresetEase(_ values: [Float]) -> CurveEase? {
-    guard values.count >= 5, values.allSatisfy({ $0.isFinite }), values[0] >= 0, values[0] <= 9 else { return nil }
+    guard values.count >= 5, values.allSatisfy({ $0.isFinite }), values[0] >= 0, values[0] <= 10 else { return nil }
     let power = values.count >= 6 ? min(3, max(1, Int(values[5]))) : 1
     return CurveEase(interpolation: UInt32(values[0]), x1: values[1], y1: values[2], x2: values[3], y2: values[4], power: power)
 }
@@ -246,12 +274,14 @@ let curveEaseYMin: Float = -2
 let curveEaseYMax: Float = 3
 
 /// Faixa vertical do gráfico (CurveMath.kt `easeRange`): curva e alças, contendo 0..1, com 8 % de folga.
-func curveEaseRange(_ ease: CurveEase) -> (Float, Float) {
+/// `samples` = a curva amostrada pelo motor (o que se desenha); sem ela, 257 pontos
+/// da mesma conta — 41 perdiam os picos do elástico e a curva saía do gráfico.
+func curveEaseRange(_ ease: CurveEase, samples: [Float]? = nil) -> (Float, Float) {
     var lo: Float = 0, hi: Float = 1
-    for index in 0...40 {
-        let v = ease.transform(Float(index) / 40)
-        if v.isFinite { lo = min(lo, v); hi = max(hi, v) }
-    }
+    let values: [Float]
+    if let samples, samples.count >= 2 { values = samples }
+    else { values = (0..<curveSampleCount).map { ease.transform(Float($0) / Float(curveSampleCount - 1)) } }
+    for v in values where v.isFinite { lo = min(lo, v); hi = max(hi, v) }
     if ease.hasHandles {
         let h = ease.handles
         lo = min(lo, min(h[1], h[3])); hi = max(hi, max(h[1], h[3]))
@@ -304,6 +334,93 @@ func curveNextPower(_ ease: CurveEase) -> CurveEase {
     return CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3], power: ease.isBezier ? ease.power % 3 + 1 : 2)
 }
 
+/// `overshoot_ease` (core/Math.hpp; CurvePanel.kt `overshootCurve`), mesma conta em Float.
+func curveOvershoot(_ t: Float, amount: Float, reverse: Bool) -> Float {
+    if t <= 0 { return 0 }; if t >= 1 { return 1 }
+    let s = min(1, max(0, amount)) * 5
+    let u = (reverse ? 1 - t : t) - 1
+    let v = 1 + (s + 1) * u * u * u + s * u * u
+    return reverse ? 1 - v : v
+}
+
+/// `elastic_ease` (core/Math.hpp; CurvePanel.kt `elasticCurve`): ciclos inteiros 1..8, k = 2 + 16·B.
+func curveElastic(_ t: Float, cycles: Float, damping: Float, reverse: Bool) -> Float {
+    if t <= 0 { return 0 }; if t >= 1 { return 1 }
+    let n = Float(min(8, max(1, Int((cycles * 8).rounded()))))
+    let k: Float = 2 + 16 * min(1, max(0, damping))
+    let time: Float = reverse ? 1 - t : t
+    let wave: Float = exp(-k * time) * cos(2 * Float.pi * n * time)
+    let v: Float = (1 - wave) / (1 - exp(-k))
+    return reverse ? 1 - v : v
+}
+
+/// Pontos da curva do trecho no gráfico (t = i/256): o motor amostra este tanto.
+let curveSampleCount = 257
+
+/// O valor da curva amostrada em `t` (CurveMath.kt `easeSampleAt`): a reta entre
+/// os vizinhos — o ponto do cabeçote fica EM CIMA do traço desenhado.
+func curveSampleAt(_ samples: [Float], _ t: Float) -> Float {
+    guard let first = samples.first else { return t }
+    if samples.count == 1 || t <= 0 { return first }
+    if t >= 1 { return samples[samples.count - 1] }
+    let x = t * Float(samples.count - 1)
+    let i = min(samples.count - 2, max(0, Int(x)))
+    let f = x - Float(i)
+    return samples[i] + (samples[i + 1] - samples[i]) * f
+}
+
+/// Os tipos rápidos ao lado do gráfico (CurveMath.kt `CurveQuickType`).
+enum CurveQuickType: CaseIterable {
+    case linear, ease, overshoot, elastic, bounce
+    var nameKey: String {
+        switch self {
+        case .linear: return "panel_linear"
+        case .ease: return "curve_type_ease"
+        case .overshoot: return "curve_type_overshoot"
+        case .elastic: return "pn_textpreset_elastic"
+        case .bounce: return "pn_textpreset_bounce"
+        }
+    }
+    /// O Quique mantém o identificador antigo do botão (testes de UI).
+    var identifier: String {
+        switch self {
+        case .linear: return "curve.type.linear"
+        case .ease: return "curve.type.ease"
+        case .overshoot: return "curve.type.overshoot"
+        case .elastic: return "curve.type.elastic"
+        case .bounce: return "curve.preset.bounce"
+        }
+    }
+}
+
+/// Quique padrão (3 saltos, força 0,5) com os parâmetros gravados.
+let curveDefaultBounce = CurveEase(interpolation: 7, x1: 0.375, y1: 0.5, x2: 1, y2: CurveEase.paramMarker)
+
+/// O tipo rápido da curva do trecho (CurveMath.kt `quickTypeOf`); nil = Manter/Degraus.
+func curveQuickTypeOf(_ e: CurveEase) -> CurveQuickType? {
+    switch e.interpolation {
+    case 1: return .linear
+    case 2, 3, 4, 5, 6: return .ease
+    case 10: return .overshoot
+    case 8: return .elastic
+    case 7: return .bounce
+    default: return nil
+    }
+}
+
+/// O easing que o botão aplica (CurveMath.kt `quickTypeEase`): o padrão do tipo;
+/// tocar no tipo já escolhido mantém os parâmetros.
+func curveQuickTypeEase(_ type: CurveQuickType, current: CurveEase) -> CurveEase {
+    let same = curveQuickTypeOf(current) == type
+    switch type {
+    case .linear: return .linear
+    case .ease: return same ? current : CurveEase(interpolation: 2, x1: 0.42, y1: 0, x2: 0.58, y2: 1)
+    case .overshoot: return same ? current.overshoot() : CurveEase(interpolation: 10, x1: 0, y1: 0, x2: 1, y2: 1).overshoot()
+    case .elastic: return same ? current.elastic() : CurveEase(interpolation: 8, x1: 0, y1: 0, x2: 1, y2: 1).elastic()
+    case .bounce: return same ? current : curveDefaultBounce
+    }
+}
+
 private let curveInset: CGFloat = 28
 /// Raio do halo da alça no dedo.
 private let curveHandleHit: CGFloat = 28
@@ -314,6 +431,8 @@ private let curveHandleSnap: CGFloat = 10
 
 private struct NativeCurveGraph: View {
     let ease: CurveEase
+    /// A curva amostrada pelo MOTOR (`sample_keyframe_ease`); nil = a mesma conta em Swift.
+    let samples: [Float]?
     let progress: Float?
     let onBegin: () -> Void
     let onChange: (CurveEase) -> Void
@@ -327,9 +446,10 @@ private struct NativeCurveGraph: View {
         var ease: CurveEase
         var began = false
     }
-    // Faixa vertical ajustada à curva e às alças; parada enquanto o dedo arrasta.
-    private var low: Float { drag?.low ?? curveEaseRange(ease).0 }
-    private var high: Float { drag?.high ?? curveEaseRange(ease).1 }
+    // Faixa vertical ajustada à curva e às alças (cresce com o overshoot e as
+    // oscilações); parada enquanto o dedo arrasta.
+    private var low: Float { drag?.low ?? curveEaseRange(ease, samples: samples).0 }
+    private var high: Float { drag?.high ?? curveEaseRange(ease, samples: samples).1 }
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -337,7 +457,8 @@ private struct NativeCurveGraph: View {
                 Canvas { context, size in
                     if let progress {
                         // A linha do cabeçote e o ponto onde ele está NA curva.
-                        let p = plot(progress, ease.transform(progress), size, low, high)
+                        let value = samples.map { curveSampleAt($0, progress) } ?? ease.transform(progress)
+                        let p = plot(progress, value, size, low, high)
                         var line = Path(); line.move(to: CGPoint(x: p.x, y: 0)); line.addLine(to: CGPoint(x: p.x, y: size.height))
                         context.stroke(line, with: .color(.white.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                         context.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(.white))
@@ -372,7 +493,8 @@ private struct NativeCurveGraph: View {
         let base = point(0, 0).y
         var curve = Path(), area = Path(); area.move(to: CGPoint(x: 0, y: base))
         for index in 0...256 {
-            let t = Float(index) / 256, p = point(t, ease.transform(t))
+            let t = Float(index) / 256
+            let p = point(t, samples.flatMap { index < $0.count ? $0[index] : nil } ?? ease.transform(t))
             if index == 0 { curve.move(to: p) } else { curve.addLine(to: p) }
             area.addLine(to: p)
         }
@@ -424,6 +546,30 @@ private struct NativeCurveGraph: View {
     }
 }
 
+/// Miniatura de um tipo de curva (botões ao lado do gráfico): a curva padrão do
+/// tipo, amostrada pelo motor, com a faixa vertical que cabe o overshoot.
+private struct CurveTypeThumbnail: View {
+    let points: [Float]
+    let active: Bool
+    var body: some View {
+        Canvas { context, size in
+            guard points.count >= 2 else { return }
+            let range = curveEaseRange(CurveEase(interpolation: 0, x1: 0, y1: 0, x2: 1, y2: 1), samples: points)
+            let pad: CGFloat = 6, w = size.width - 2 * pad, h = size.height - 2 * pad
+            var path = Path()
+            for (index, v) in points.enumerated() {
+                let p = CGPoint(x: pad + w * CGFloat(index) / CGFloat(points.count - 1),
+                                y: pad + h - CGFloat((v - range.0) / (range.1 - range.0)) * h)
+                if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
+            }
+            context.stroke(path, with: .color(active ? curveGreen : .white), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+        }
+        .frame(width: 40, height: 40)
+        .background(active ? curveGreen.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? curveGreen : Color.white.opacity(0.14), lineWidth: 1))
+    }
+}
+
 @MainActor
 struct NativeCurvePanel: View {
     @EnvironmentObject private var model: AureaModel
@@ -431,6 +577,10 @@ struct NativeCurvePanel: View {
     var expanded = false
     @State private var fullscreen = false
     @State private var ease = CurveEase.linear
+    /// A curva do trecho amostrada pelo motor (o que o gráfico desenha).
+    @State private var samples: [Float]?
+    /// As miniaturas dos botões de tipo, amostradas pelo motor uma vez.
+    @State private var thumbnails: [CurveQuickType: [Float]] = [:]
     /// As curvas que a pessoa salvou (Presets › Curva).
     @State private var saved: [(name: String, ease: CurveEase)] = []
     private var graphMode: Int { model.curveGraphMode }
@@ -476,7 +626,7 @@ struct NativeCurvePanel: View {
                     leftRail(segment)
                     VStack(spacing: 0) {
                         if graphMode == 0 {
-                            NativeCurveGraph(ease: ease, progress: progress(segment),
+                            NativeCurveGraph(ease: ease, samples: samples, progress: progress(segment),
                                 onBegin: { model.beginGesture("curva") },
                                 onChange: { apply($0, to: segment.start); model.refreshModel(force: true) },
                                 onEnd: { model.endGesture() })
@@ -485,9 +635,13 @@ struct NativeCurvePanel: View {
                             NativeTrackGraph(layer: layer, keys: track, speed: graphMode == 2)
                         }
                         if graphMode == 0 && ease.interpolation == 7 { bounceControls(segment) }
+                        if graphMode == 0 && ease.interpolation == 10 { overshootControls(segment) }
+                        if graphMode == 0 && ease.interpolation == 8 { elasticControls(segment) }
                         if graphMode == 0 { presetRow(segment) }
                         segmentNavigation(segment)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Os tipos de curva ao lado do gráfico: cada botão mostra a curva que aplica.
+                    if graphMode == 0 { typeRail(segment) }
                 }.frame(maxHeight: .infinity)
             } else {
                 VStack(spacing: 12) {
@@ -522,7 +676,8 @@ struct NativeCurvePanel: View {
             }
         }
         .fullScreenCover(isPresented: $fullscreen) { NativeCurvePanel(expanded: true).environmentObject(model).interactiveDismissDisabled() }
-        .onAppear { load(); loadSaved() }
+        .onAppear { load(); loadSaved(); loadThumbnails() }
+        .onChange(of: ease) { value in samples = engineSamples(value) }
         .onChange(of: model.status.modelRevision) { _ in load() }
         .onChange(of: segment?.id) { _ in load() }
         .onChange(of: layer) { _ in load() }
@@ -563,6 +718,23 @@ struct NativeCurvePanel: View {
         ease = CurveEase(interpolation: key.interpolation, x1: h.count >= 4 ? h[0] : 0.33,
             y1: h.count >= 4 ? h[1] : 0, x2: h.count >= 4 ? h[2] : 0.67, y2: h.count >= 4 ? h[3] : 1,
             power: h.count >= 5 ? min(3, max(1, Int(h[4]))) : 1)
+        samples = engineSamples(ease)
+    }
+    /// A curva amostrada pelo MOTOR (`sample_keyframe_ease`): a mesma conta que anima o projeto.
+    private func engineSamples(_ e: CurveEase, count: Int = curveSampleCount) -> [Float]? {
+        let handles = [e.x1, e.y1, e.x2, e.y2, Float(e.power)].map { NSNumber(value: $0) }
+        let values = model.engine.sampleEase(e.interpolation, handles: handles, count: UInt32(count)).map(\.floatValue)
+        return values.count == count ? values : nil
+    }
+    private func loadThumbnails() {
+        guard thumbnails.isEmpty else { return }
+        let none = CurveEase(interpolation: 0, x1: 0, y1: 0, x2: 1, y2: 1)
+        var out: [CurveQuickType: [Float]] = [:]
+        for type in CurveQuickType.allCases {
+            let e = curveQuickTypeEase(type, current: none)
+            out[type] = engineSamples(e, count: 49) ?? (0..<49).map { e.transform(Float($0) / 48) }
+        }
+        thumbnails = out
     }
     private func apply(_ value: CurveEase, to key: KeyframeItem) {
         // 3D transform axes share easing; effect components remain independent.
@@ -585,8 +757,8 @@ struct NativeCurvePanel: View {
             glyphButton(CupertinoGlyph.ArrowRightArrowLeft, size: 20, target: 44, label: AureaText.t("panel_inverter_curva")) {
                 if let inverted = ease.inverted { set(inverted, to: segment.start, label: "inverter curva") }
                 else { model.toast = AureaText.t("pn_curve_symmetric") }
-            }.disabled(!(1...7).contains(ease.interpolation))
-                .opacity((1...7).contains(ease.interpolation) ? 1 : 0.35)
+            }.disabled(!ease.supportsInversion)
+                .opacity(ease.supportsInversion ? 1 : 0.35)
             Spacer().frame(height: 4)
             RailMoreButton(active: false) { showMenu(segment) }
             Spacer().frame(height: 8)
@@ -610,11 +782,9 @@ struct NativeCurvePanel: View {
                 .onTapGesture { if graphMode == 0 && ease.hasHandles { set(curveNextPower(ease), to: segment.start, label: "força da curva") } }
                 .accessibilityIdentifier("curve.power")
             glyphButton(CupertinoGlyph.ChevronRight, size: 16, target: 44, label: AureaText.t("panel_proximo_keyframe")) { jump(1) }
-            if graphMode == 0 { bounceButton(segment) }
         }.frame(maxWidth: .infinity).frame(height: 44)
     }
-    /// O único preset pronto que fica: Bounce (a bézier se faz nas alças).
-    /// Tocar de novo volta a uma bézier suave, com alças.
+    /// Quique: saltos (×1..×8) e força (um desfazer por arrasto).
     private func bounceControls(_ segment: Segment) -> some View {
         HStack(spacing: 8) {
             Button(AureaText.t("curve_bounce_count") + " ×\(ease.bounceCount)") {
@@ -626,20 +796,55 @@ struct NativeCurvePanel: View {
                 .accessibilityLabel(AureaText.t("fx_amplitude")).accessibilityIdentifier("curve.bounce.strength")
         }.font(.aurea(size: 12)).tint(curveGreen).padding(.horizontal, 8).frame(height: 48)
     }
-    private func bounceButton(_ segment: Segment) -> some View {
-        let bouncing = ease.interpolation == 7
-        return Button {
-            set(bouncing ? CurveEase(interpolation: 2, x1: 0.42, y1: 0, x2: 0.58, y2: 1)
-                         : CurveEase(interpolation: 7, x1: 0.375, y1: 0.5, x2: 1, y2: -10), to: segment.start)
-        } label: {
-            Text(AureaText.t("pn_textpreset_bounce")).font(.aurea(size: 12, weight: .semibold)).lineLimit(1)
-                .foregroundStyle(bouncing ? curveGreen : .white)
-                .padding(.horizontal, 14).padding(.vertical, 7)
-                .background(bouncing ? curveGreen.opacity(0.18) : curveRailFill, in: Capsule())
-                .overlay(Capsule().stroke(bouncing ? curveGreen : .white.opacity(0.18), lineWidth: 1))
-                .frame(minHeight: 44).contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 1)).padding(.leading, 4).padding(.trailing, 8)
-            .accessibilityLabel(AureaText.t("pn_textpreset_bounce")).accessibilityIdentifier("curve.preset.bounce")
+    /// Os tipos de curva ao lado do gráfico (CurvePanel.kt `CurveTypeRail`):
+    /// Linear, Suave, Passar do ponto, Elástico e Quique. O tipo do trecho fica
+    /// destacado; tocar no mesmo tipo não muda nada. Rola se o painel for baixo.
+    private func typeRail(_ segment: Segment) -> some View {
+        let current = curveQuickTypeOf(ease)
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 2) {
+                ForEach(CurveQuickType.allCases, id: \.self) { type in
+                    let active = type == current
+                    Button {
+                        let next = curveQuickTypeEase(type, current: ease)
+                        if !(next.same(ease) && next.interpolation == ease.interpolation) { set(next, to: segment.start, label: "tipo de curva") }
+                    } label: {
+                        CurveTypeThumbnail(points: thumbnails[type] ?? [], active: active)
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                    }.buttonStyle(AureaPressStyle(shrink: 1))
+                        .accessibilityLabel(AureaText.t(type.nameKey))
+                        .accessibilityAddTraits(active ? .isSelected : [])
+                        .accessibilityIdentifier(type.identifier)
+                }
+            }.padding(.vertical, 4)
+        }.frame(width: 48).frame(maxHeight: .infinity).background(curveRailFill, ignoresSafeAreaEdges: [])
+            .accessibilityElement(children: .contain).accessibilityLabel(AureaText.t("curve_types_label"))
+    }
+    /// Overshoot: quanto passa do valor final (um desfazer por arrasto).
+    private func overshootControls(_ segment: Segment) -> some View {
+        HStack(spacing: 8) {
+            Text(AureaText.t("curve_param_amount")).font(.aurea(size: 10)).lineLimit(1)
+            Slider(value: Binding(get: { ease.overshootAmount }, set: { apply(ease.overshoot(amount: $0), to: segment.start) }),
+                in: 0...1, onEditingChanged: { if $0 { model.beginGesture("overshoot") } else { model.endGesture() } })
+                .accessibilityLabel(AureaText.t("curve_param_amount")).accessibilityIdentifier("curve.overshoot.amount")
+        }.font(.aurea(size: 12)).tint(curveGreen).padding(.horizontal, 8).frame(height: 48)
+    }
+    /// Elástico: oscilações (1..8) e amortecimento (um desfazer por arrasto).
+    private func elasticControls(_ segment: Segment) -> some View {
+        HStack(spacing: 8) {
+            Text(AureaText.t("curve_param_oscillations")).font(.aurea(size: 10)).lineLimit(1)
+            Slider(value: Binding(get: { Float(ease.elasticCycles) }, set: { value in
+                    let cycles = min(8, max(1, Int(value.rounded())))
+                    if cycles != ease.elasticCycles { apply(ease.elastic(cycles: cycles), to: segment.start) }
+                }), in: 1...8, step: 1, onEditingChanged: { if $0 { model.beginGesture("elastic") } else { model.endGesture() } })
+                .accessibilityLabel(AureaText.t("curve_param_oscillations"))
+                .accessibilityValue(AureaText.t("curve_param_oscillations_value", ease.elasticCycles))
+                .accessibilityIdentifier("curve.elastic.cycles")
+            Text(AureaText.t("curve_param_damping")).font(.aurea(size: 10)).lineLimit(1)
+            Slider(value: Binding(get: { ease.elasticDamping }, set: { apply(ease.elastic(damping: $0), to: segment.start) }),
+                in: 0...1, onEditingChanged: { if $0 { model.beginGesture("elastic") } else { model.endGesture() } })
+                .accessibilityLabel(AureaText.t("curve_param_damping")).accessibilityIdentifier("curve.elastic.damping")
+        }.font(.aurea(size: 12)).tint(curveGreen).padding(.horizontal, 8).frame(height: 48)
     }
     private func jump(_ direction: Int) {
         guard let segment else { return }
@@ -876,11 +1081,11 @@ struct TimeRemapEffectEditor: View {
     }
 
     /// Timecode da fonte, H:MM:SS:QQ (quadros na taxa do projeto).
+    /// SpeedAudioPanels.kt `timecode`: taxa livre (29,97, 144…) com os segundos
+    /// REAIS — a mesma conta do relógio da timeline (`Timecode.split`).
     static func timecode(_ frames: Int, fps: Float) -> String {
-        let rate = max(1, Int(fps.rounded()))
-        let f = max(0, frames)
-        let total = f / rate
-        return String(format: "%d:%02d:%02d:%02d", total / 3600, (total / 60) % 60, total % 60, f % rate)
+        let p = Timecode.split(Int32(clamping: max(0, frames)), fps)
+        return String(format: fps > 100 ? "%d:%02d:%02d:%03d" : "%d:%02d:%02d:%02d", p.hours, p.minutes, p.seconds, p.frames)
     }
 
     private func finishDrag() {
@@ -1059,7 +1264,7 @@ struct TimeRemapEditor: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
                 if points.indices.contains(selected) {
                     HStack(spacing: 6) {
-                        Text("Ponto \(selected + 1)").font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                        Text(AureaText.t("i18n_point_n", selected + 1)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                         interpolationChip(1, "panel_linear")
                         interpolationChip(5, "panel_suave")
                         interpolationChip(0, "panel_congelar")
@@ -1733,7 +1938,7 @@ private struct NativeTrackGraph: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 if !speed {
-                    Button(multi ? "Done (\(picked.count))" : "Select") { multi.toggle(); if !multi { picked.removeAll() } }
+                    Button(multi ? AureaText.t("i18n_done_n", picked.count) : AureaText.t("panel_selecionar")) { multi.toggle(); if !multi { picked.removeAll() } }
                         .font(.aurea(size: 11)).frame(minHeight: 44).accessibilityIdentifier("curve.multi")
                 }
                 Text(String(format: "%.3g%@", viewport.high, speed ? " /s" : ""))
@@ -1746,10 +1951,10 @@ private struct NativeTrackGraph: View {
             }.foregroundStyle(AureaColors.accent)
             if multi && !speed {
                 ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 16) {
-                    Button("All") { picked = Set(keys.map(\.time)) }
+                    Button(AureaText.t("common_all")) { picked = Set(keys.map(\.time)) }
                     Spacer(minLength: 0)
-                    Button("Copy") { _ = model.engine.keyframeSelection(layer, references: references(keys.filter { picked.contains($0.time) }), action: 0, delta: 0) }.disabled(picked.isEmpty)
-                    Button("Duplicate") {
+                    Button(AureaText.t("common_copy")) { _ = model.engine.keyframeSelection(layer, references: references(keys.filter { picked.contains($0.time) }), action: 0, delta: 0) }.disabled(picked.isEmpty)
+                    Button(AureaText.t("common_duplicate")) {
                         guard let row = model.layers.first(where: { $0.id == layer }), let last = keys.last else { return }
                         let target = Int64(last.time) + 1 + Int64(row.startFrame) - Int64(row.offsetFrames)
                         guard target >= Int64(Int32.min), target <= Int64(Int32.max) else { return }
@@ -1758,9 +1963,9 @@ private struct NativeTrackGraph: View {
                         }
                     }.disabled(picked.isEmpty)
                     Spacer(minLength: 0)
-                    Button("Paste") { model.engine.pasteKeyframes([NSNumber(value: layer)], atFrame: Int32(clamping: model.status.playhead)); model.refreshModel(force: true) }
+                    Button(AureaText.t("common_paste")) { model.engine.pasteKeyframes([NSNumber(value: layer)], atFrame: Int32(clamping: model.status.playhead)); model.refreshModel(force: true) }
                     Spacer(minLength: 0)
-                    Button("Delete") {
+                    Button(AureaText.t("common_delete")) {
                         if model.engine.keyframeSelection(layer, references: references(keys.filter { picked.contains($0.time) }), action: 2, delta: 0) > 0 {
                             picked.removeAll(); model.refreshModel(force: true)
                         }

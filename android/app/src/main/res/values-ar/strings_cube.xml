@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dividir o cubo 3D em partes (2026-10-03). Chaves shape3d_split_*. -->
+<resources>
+    <string name="shape3d_split_title">تقسيم إلى أجزاء</string>
+    <string name="shape3d_split_axis">محور القطع</string>
+    <string name="shape3d_split_axis_desc">القطع على المحور %1$s</string>
+    <string name="shape3d_split_count">الأجزاء</string>
+    <string name="shape3d_split_count_desc">%1$d أجزاء</string>
+    <string name="shape3d_split_less">أجزاء أقل</string>
+    <string name="shape3d_split_more">أجزاء أكثر</string>
+    <string name="shape3d_split_apply">تقسيم</string>
+    <string name="shape3d_split_hint">يقطع المكعب إلى شرائح متساوية. تستمر الصورة من شريحة إلى التالية؛ ويصبح كل جزء طبقة يمكنك تحريكها أو تدويرها أو حذفها، وتحتفظ المجموعة بحركة المكعب.</string>
+    <string name="shape3d_split_done">تم تقسيم المكعب إلى %1$d أجزاء. اضغط على جزء لتعديله وحده.</string>
+    <string name="shape3d_split_failed">تعذّر تقسيم الشكل.</string>
+</resources>

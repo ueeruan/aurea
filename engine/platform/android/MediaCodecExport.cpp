@@ -132,13 +132,20 @@ public:
         size_t cap = 0;
         u8* dst = AMediaCodec_getInputBuffer(video__.codec, static_cast<size_t>(idx), &cap);
         if (!dst) return Status{Errc::InvalidState, "encoder nao entregou buffer de entrada"};
-        if (!layoutReady_ && !resolve_layout(static_cast<std::size_t>(idx), cap)) {
-            return Status{Errc::InvalidState, layoutWhy_};
+        const bool layoutOk = layoutReady_ || resolve_layout(static_cast<std::size_t>(idx), cap);
+        if (!layoutOk || !plan_.valid() || cap < plan_.totalBytes) {
+            const char* why = !layoutOk ? layoutWhy_ : "buffer do encoder menor que o quadro";
+            // Vivo Y30 (Helio P35): o encoder MediaTek declarou um passo que o
+            // buffer dele não comporta. Antes do primeiro quadro nada foi
+            // gravado: troca para o encoder de SOFTWARE do sistema (layout
+            // contíguo e conhecido) e escreve ESTE quadro nele — mais lento,
+            // mesma resolução e taxa — em vez de falhar o export.
+            if (videoQueued_ == 0 && reopen_software_video(why)) {
+                return write_video(y, yStride, uv, uvStride, ptsUs);
+            }
+            return Status{Errc::InvalidState, why};
         }
         const media::YuvCopyPlan& p = plan_;
-        if (!p.valid() || cap < p.totalBytes) {
-            return Status{Errc::InvalidState, "buffer do encoder menor que o quadro"};
-        }
         for (u32 r = 0; r < p.yRows; ++r) {
             std::memcpy(dst + p.yOffset + static_cast<usize>(r) * p.yPitch,
                         y + static_cast<usize>(r) * yStride, p.yRowBytes);
@@ -166,6 +173,7 @@ public:
         const media_status_t ms = AMediaCodec_queueInputBuffer(video__.codec, static_cast<size_t>(idx), 0,
                                                                p.totalBytes, static_cast<u64>(ptsUs), 0);
         if (ms != AMEDIA_OK) return codec_error("encoder recusou o quadro", ms);
+        ++videoQueued_;
         lastVideoPts_ = ptsUs;
         return drain(video__, false);
     }
@@ -362,6 +370,59 @@ private:
         return false;
     }
 
+    /// O encoder de SOFTWARE do sistema (Codec2 e, antes dele, OMX.google) com
+    /// a MESMA receita. Configurado, ainda não iniciado.
+    bool open_software_video(const char* mime, const char* hwName, const char* motivo) noexcept {
+        const bool hevc = video_.codec == ExportCodec::HEVC;
+        const char* const avc[] = {"c2.android.avc.encoder", "OMX.google.h264.encoder"};
+        const char* const hvc[] = {"c2.android.hevc.encoder", "OMX.google.hevc.encoder"};
+        const char* const* names = hevc ? hvc : avc;
+        for (int k = 0; k < 2; ++k) {
+            const char* name = names[k];
+            AMediaCodec* sw = AMediaCodec_createCodecByName(name);
+            if (!sw) continue;
+            if (configure_video(sw, mime)) {
+                video__.codec = sw;
+                std::snprintf(info_.name, sizeof(info_.name), "%s", name);
+                info_.acceleration = Acceleration::Software;
+                AUREA_LOG_WARN("export: encoder de hardware %s %s (%ux%u @%.2f); usando o de SOFTWARE %s "
+                               "(mais lento, mesma resolucao e taxa)",
+                               hwName, motivo, video_.width, video_.height, video_.fps, name);
+                return true;
+            }
+            AMediaCodec_delete(sw);
+        }
+        return false;
+    }
+
+    /// O encoder de hardware abriu, mas o buffer de entrada dele não serve
+    /// (passo/fatia declarados maiores que o buffer). Só antes do primeiro
+    /// quadro e antes de a trilha de vídeo entrar no muxer: troca pelo de
+    /// software, que tem layout contíguo.
+    bool reopen_software_video(const char* why) noexcept {
+        if (triedSoftwareReopen_ || info_.acceleration == Acceleration::Software || video__.formatKnown) return false;
+        triedSoftwareReopen_ = true;
+        char hwName[64];
+        std::snprintf(hwName, sizeof(hwName), "%s", info_.name[0] ? info_.name : "?");
+        AUREA_LOG_WARN("export: %s no encoder %s (%ux%u); tentando o encoder de software", why, hwName,
+                       video_.width, video_.height);
+        if (video__.codec) {
+            AMediaCodec_stop(video__.codec);
+            AMediaCodec_delete(video__.codec);
+            video__.codec = nullptr;
+        }
+        layoutReady_ = false;
+        plan_ = media::YuvCopyPlan{};
+        const char* mime = video_.codec == ExportCodec::HEVC ? "video/hevc" : "video/avc";
+        if (!open_software_video(mime, hwName, "entregou buffer de entrada menor que o quadro")) return false;
+        if (AMediaCodec_start(video__.codec) != AMEDIA_OK) {
+            AMediaCodec_delete(video__.codec);
+            video__.codec = nullptr;
+            return false;
+        }
+        return true;
+    }
+
     void note_codec(AMediaCodec* codec) noexcept {
         if (codec_name(codec, info_.name, sizeof(info_.name))) {
             info_.acceleration = software_codec_name(info_.name) ? Acceleration::Software : Acceleration::Hardware;
@@ -389,25 +450,7 @@ private:
             std::snprintf(hwName, sizeof(hwName), "%s", info_.name[0] ? info_.name : "?");
             AMediaCodec_delete(video__.codec);
             video__.codec = nullptr;
-            const char* const avc[] = {"c2.android.avc.encoder", "OMX.google.h264.encoder"};
-            const char* const hvc[] = {"c2.android.hevc.encoder", "OMX.google.hevc.encoder"};
-            const char* const* names = hevc ? hvc : avc;
-            for (int k = 0; k < 2; ++k) {
-                const char* name = names[k];
-                AMediaCodec* sw = AMediaCodec_createCodecByName(name);
-                if (!sw) continue;
-                if (configure_video(sw, mime)) {
-                    video__.codec = sw;
-                    std::snprintf(info_.name, sizeof(info_.name), "%s", name);
-                    info_.acceleration = Acceleration::Software;
-                    configured = true;
-                    AUREA_LOG_WARN("export: encoder de hardware %s recusou %ux%u @%.2f; usando o de SOFTWARE %s "
-                                   "(mais lento, mesma resolucao e taxa)",
-                                   hwName, video_.width, video_.height, video_.fps, name);
-                    break;
-                }
-                AMediaCodec_delete(sw);
-            }
+            configured = open_software_video(mime, hwName, "recusou a configuracao");
         }
         if (!configured) return fail(Errc::NotSupported, "encoder nao aceita essa resolucao/formato");
         // O passo/fatia REAIS do buffer de entrada sao descobertos no primeiro
@@ -591,6 +634,10 @@ private:
     media::YuvCopyPlan plan_{};
     bool layoutReady_ = false;
     const char* layoutWhy_ = "";
+    /// Quadros de vídeo já entregues ao encoder (a troca para software só vale
+    /// antes do primeiro).
+    u32 videoQueued_ = 0;
+    bool triedSoftwareReopen_ = false;
     i64 lastVideoPts_ = 0;
     i64 lastAudioPts_ = 0;
     std::vector<Pending> pending_;

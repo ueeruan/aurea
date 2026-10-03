@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Otimizar modelo" (import 3D com orçamento de memória do aparelho). -->
+<resources>
+    <string name="model3d_heavy_title">भारी मॉडल</string>
+    <string name="model3d_heavy_body">इस मॉडल में %1$s त्रिकोण हैं। ऐसे ही खोलने पर डिवाइस अटक सकता है। ऑप्टिमाइज़ करने से खोलने से पहले ज्योमेट्री और टेक्सचर छोटे हो जाते हैं।</string>
+    <string name="model3d_quality_original">मूल</string>
+    <string name="model3d_quality_balanced">संतुलित</string>
+    <string name="model3d_quality_light">हल्का</string>
+    <string name="model3d_quality_original_hint">कोई कमी नहीं</string>
+    <string name="model3d_quality_balanced_hint">%1$s त्रिकोण तक, टेक्सचर %2$d px तक</string>
+    <string name="model3d_quality_light_hint">%1$s त्रिकोण तक, टेक्सचर %2$d px तक · ज़्यादा स्मूद</string>
+    <string name="model3d_recommended">सुझाया गया</string>
+    <string name="model3d_optimize_import">ऑप्टिमाइज़ करके इंपोर्ट करें</string>
+    <string name="model3d_import">इंपोर्ट करें</string>
+    <string name="model3d_too_heavy">यह मॉडल ऑप्टिमाइज़ करने के बाद भी इस डिवाइस की मेमोरी के लिए बहुत भारी है। कम पॉलीगॉन या छोटे टेक्सचर वाला वर्ज़न इस्तेमाल करें।</string>
+    <string name="model3d_too_heavy_after">मॉडल इस डिवाइस की मेमोरी से ज़्यादा हो गया और ऐप बंद न हो, इसलिए उसे रोक दिया गया। फिर से इंपोर्ट करें और हल्का चुनें, या आसान वर्ज़न इस्तेमाल करें।</string>
+    <string name="model3d_stage_simplifying">सरल किया जा रहा है</string>
+    <string name="model3d_optimized_toast">मॉडल ऑप्टिमाइज़ हुआ: %1$s → %2$s त्रिकोण</string>
+    <string name="model3d_thousand">हज़ार</string>
+    <string name="model3d_million">मिलियन</string>
+</resources>

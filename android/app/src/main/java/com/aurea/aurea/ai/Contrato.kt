@@ -37,6 +37,15 @@ fun AureaAiEstado.rotulo(): String = when (this) {
     AureaAiEstado.Error -> "Offline"
 }
 
+/** O mesmo rótulo, no catálogo (é o que a tela mostra). */
+@androidx.annotation.StringRes
+fun AureaAiEstado.rotuloRes(): Int = when (this) {
+    AureaAiEstado.Checking -> com.aurea.aurea.R.string.ai_state_searching
+    AureaAiEstado.Connected, AureaAiEstado.Generating -> com.aurea.aurea.R.string.ai_state_online
+    AureaAiEstado.Reconnecting -> com.aurea.aurea.R.string.ai_state_reconnecting
+    AureaAiEstado.Disconnected, AureaAiEstado.Error -> com.aurea.aurea.R.string.ai_state_offline
+}
+
 /** `true` só nos estados em que dá para pedir uma geração agora. */
 fun AureaAiEstado.podeGerar(): Boolean =
     this == AureaAiEstado.Connected || this == AureaAiEstado.Generating

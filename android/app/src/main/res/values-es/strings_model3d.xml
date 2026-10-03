@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Otimizar modelo" (import 3D com orçamento de memória do aparelho). -->
+<resources>
+    <string name="model3d_heavy_title">Modelo pesado</string>
+    <string name="model3d_heavy_body">Este modelo tiene %1$s triángulos. Tal como está, puede bloquear el dispositivo. Optimizar reduce la geometría y las texturas antes de abrirlo.</string>
+    <string name="model3d_quality_original">Original</string>
+    <string name="model3d_quality_balanced">Equilibrado</string>
+    <string name="model3d_quality_light">Ligero</string>
+    <string name="model3d_quality_original_hint">Sin reducción</string>
+    <string name="model3d_quality_balanced_hint">Hasta %1$s triángulos, texturas de hasta %2$d px</string>
+    <string name="model3d_quality_light_hint">Hasta %1$s triángulos, texturas de hasta %2$d px · más fluido</string>
+    <string name="model3d_recommended">recomendado</string>
+    <string name="model3d_optimize_import">Optimizar e importar</string>
+    <string name="model3d_import">Importar</string>
+    <string name="model3d_too_heavy">Este modelo es demasiado pesado para la memoria de este dispositivo, incluso optimizado. Usa una versión con menos polígonos o texturas más pequeñas.</string>
+    <string name="model3d_too_heavy_after">El modelo superó la memoria de este dispositivo y se rechazó para que la app no se cerrara. Impórtalo de nuevo y elige Ligero, o usa una versión más simple.</string>
+    <string name="model3d_stage_simplifying">Simplificando</string>
+    <string name="model3d_optimized_toast">Modelo optimizado: %1$s → %2$s triángulos</string>
+    <string name="model3d_thousand">mil</string>
+    <string name="model3d_million">M</string>
+</resources>

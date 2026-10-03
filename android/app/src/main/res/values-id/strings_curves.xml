@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Editor de curva: tipos rápidos (Overshoot, Elástico, Quique) e os parâmetros (2026-10-03). -->
+<resources>
+    <string name="curve_type_ease">Halus</string>
+    <string name="curve_type_overshoot">Melampaui</string>
+    <string name="curve_types_label">Jenis kurva</string>
+    <string name="curve_param_amount">Jumlah</string>
+    <string name="curve_param_oscillations">Osilasi</string>
+    <string name="curve_param_damping">Redaman</string>
+    <string name="curve_param_oscillations_value">Osilasi: %1$d</string>
+</resources>

@@ -1317,3 +1317,49 @@ AUREA_TEST(Serialization, BounceElasticAndStepsSurviveProjectReload) {
     }
     std::remove(path.c_str());
 }
+
+// Overshoot (tipo novo, valor 10) e Elástico/Quique com parâmetros: o projeto
+// relido avalia igual, quadro a quadro; o formato do arquivo é o mesmo (os
+// parâmetros vão nos floats da bézier com o marcador em by2).
+AUREA_TEST(Serialization, ParametricEasingsSurviveProjectReload) {
+    const std::string path = temp_path("easing_params");
+    Project original = make_project();
+    auto* comp = original.timeline().composition(original.timeline().root());
+    const LayerId id = comp->add_layer(LayerKind::Shape, "Easing params");
+    struct Case { Interpolation kind; f32 a, b, dir; };
+    const Case cases[] = {{Interpolation::Overshoot, 0.7f, 0.0f, 1.0f}, {Interpolation::Overshoot, 0.3f, 0.0f, 0.0f},
+                          {Interpolation::Elastic, 5.0f / 8, 0.6f, 1.0f}, {Interpolation::Bounce, 4.0f / 8, 0.8f, 0.0f}};
+    u32 index = 0;
+    for (const Case& c : cases) {
+        auto& track = comp->layer(id)->tracks.get_or_create(static_cast<TrackProperty>(index++));
+        track.set(FrameIndex{0}, -20.f); track.set(FrameIndex{100}, 80.f);
+        track.set_interpolation(FrameIndex{0}, c.kind, c.a, c.b, c.dir, kEaseParamMarker);
+    }
+    AUREA_CHECK(ProjectSerializer::save(original, path, SaveOptions{}).ok());
+    Project restored;
+    AUREA_CHECK(ProjectSerializer::load(restored, path, LoadOptions{}).ok());
+    auto* loadedComp = restored.timeline().composition(restored.timeline().root());
+    const Layer* loaded = nullptr;
+    for (u32 i = 0; i < loadedComp->order().size(); ++i)
+        if (loadedComp->layer(loadedComp->order().at(i))->name == "Easing params") loaded = loadedComp->layer(loadedComp->order().at(i));
+    AUREA_CHECK(loaded != nullptr);
+    bool outside = false;
+    if (loaded) for (u32 i = 0; i < 4; ++i) {
+        const auto* before = comp->layer(id)->tracks.find(static_cast<TrackProperty>(i));
+        const auto* after = loaded->tracks.find(static_cast<TrackProperty>(i));
+        AUREA_CHECK(before && after);
+        if (!before || !after) continue;
+        AUREA_CHECK(after->keys[0].interp == cases[i].kind);
+        AUREA_CHECK_EQ(after->keys[0].bx1, cases[i].a);
+        AUREA_CHECK_EQ(after->keys[0].by1, cases[i].b);
+        AUREA_CHECK_EQ(after->keys[0].bx2, cases[i].dir);
+        AUREA_CHECK_EQ(after->keys[0].by2, kEaseParamMarker);
+        for (int frame = 0; frame <= 100; ++frame) {
+            AUREA_CHECK_EQ(before->sample(FrameIndex{frame}), after->sample(FrameIndex{frame}));
+            const f32 v = after->sample(FrameIndex{frame});
+            outside = outside || v > 80.f || v < -20.f;
+        }
+    }
+    AUREA_CHECK(outside);   // as curvas que passam do ponto passam mesmo depois de relidas
+    std::remove(path.c_str());
+}

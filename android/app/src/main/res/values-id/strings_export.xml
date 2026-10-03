@@ -8,7 +8,7 @@
     <string name="exp2_format_note">MP4 bisa diputar di perangkat, pemutar, dan media sosial apa pun.</string>
     <string name="exp2_advanced">Lanjutan</string>
     <string name="exp2_codec">Kodek</string>
-    <string name="exp2_bitrate">Bitrate (Mbps)</string>
+    <string name="exp2_bitrate">Laju bit (Mbps)</string>
     <string name="exp2_bitrate_auto">Otomatis</string>
     <string name="exp2_range">Rentang</string>
     <string name="exp2_rendering">Merender videomu</string>

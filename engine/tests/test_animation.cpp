@@ -6,6 +6,10 @@
 #include "TestFramework.hpp"
 #include "aurea/animation/Curve.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
 using namespace aurea;
 
 AUREA_TEST(Track, EmptyTrackReturnsStatic) {
@@ -301,4 +305,191 @@ AUREA_TEST(Track, BezierPowerRepeatsTheSameCurveOnItsOwnResult) {
     t.set_interpolation(FrameIndex{0}, Interpolation::EaseIn, 0.f, 0.f, 1.f, 1.f);
     AUREA_CHECK_NEAR(t.sample(FrameIndex{50}), 50.f, 1e-4);
     static_assert(sizeof(Keyframe) == 48);
+}
+
+
+// -----------------------------------------------------------------------------
+// Curvas com parâmetros (pedido de beta: "aquele tipo de curva que passa do
+// ponto e balança"): Overshoot, Elástico configurável e Quique. Os parâmetros
+// vão nos floats da bézier com o marcador kEaseParamMarker em by2.
+// -----------------------------------------------------------------------------
+namespace {
+Keyframe param_key(Interpolation kind, f32 a, f32 b, bool reverse = false) {
+    Keyframe k;
+    k.interp = kind;
+    k.bx1 = a; k.by1 = b; k.bx2 = reverse ? 0.0f : 1.0f; k.by2 = kEaseParamMarker;
+    return k;
+}
+} // namespace
+
+AUREA_TEST(Easing, OvershootPassesTheEndAndLandsExactly) {
+    static_assert(static_cast<u8>(Interpolation::Overshoot) == 10, "valor gravado no projeto");
+    static_assert(kLastInterpolation == Interpolation::Overshoot);
+    for (f32 amount : {0.0f, 0.1f, kOvershootDefaultAmount, 0.6f, 1.0f}) {
+        const Keyframe k = param_key(Interpolation::Overshoot, amount, 0.0f);
+        AUREA_CHECK_EQ(keyframe_ease(k, 0.0f), 0.0f);
+        AUREA_CHECK_EQ(keyframe_ease(k, 1.0f), 1.0f);
+        f32 peak = 0.0f, low = 1.0f;
+        for (int i = 0; i <= 1000; ++i) {
+            const f32 v = keyframe_ease(k, i / 1000.0f);
+            AUREA_CHECK(std::isfinite(v));
+            peak = std::max(peak, v); low = std::min(low, v);
+        }
+        AUREA_CHECK(low >= 0.0f);                 // o overshoot "de saída" não recua no começo
+        if (amount == 0.0f) AUREA_CHECK(peak <= 1.0f + 1e-6f);   // s = 0: cúbica sem passar
+        else AUREA_CHECK(peak > 1.0f);            // passa do fim — é a graça
+    }
+    // O padrão é o clássico s = 1,70158: ≈ 10 % além do fim.
+    f32 peak = 0.0f;
+    for (int i = 0; i <= 4000; ++i) peak = std::max(peak, keyframe_ease(param_key(Interpolation::Overshoot, kOvershootDefaultAmount, 0), i / 4000.0f));
+    AUREA_CHECK_NEAR(peak, 1.1f, 0.002f);
+    // Mais quantidade, mais longe.
+    f32 small = 0, big = 0;
+    for (int i = 0; i <= 1000; ++i) {
+        small = std::max(small, keyframe_ease(param_key(Interpolation::Overshoot, 0.2f, 0), i / 1000.0f));
+        big = std::max(big, keyframe_ease(param_key(Interpolation::Overshoot, 0.8f, 0), i / 1000.0f));
+    }
+    AUREA_CHECK(big > small);
+    // Sem o marcador (escolhida por um caminho que não grava parâmetros): o padrão.
+    Keyframe plain; plain.interp = Interpolation::Overshoot;
+    AUREA_CHECK_EQ(keyframe_ease(plain, 0.4f), keyframe_ease(param_key(Interpolation::Overshoot, kOvershootDefaultAmount, 0), 0.4f));
+    // Invertida = antecipação: recua abaixo de 0 antes de partir, espelho exato.
+    const Keyframe in = param_key(Interpolation::Overshoot, 0.5f, 0, true);
+    const Keyframe out = param_key(Interpolation::Overshoot, 0.5f, 0, false);
+    f32 dip = 1.0f;
+    for (int i = 0; i <= 1000; ++i) {
+        const f32 t = i / 1000.0f;
+        AUREA_CHECK_NEAR(keyframe_ease(in, t), 1.0f - keyframe_ease(out, 1.0f - t), 1e-5);
+        dip = std::min(dip, keyframe_ease(in, t));
+    }
+    AUREA_CHECK(dip < 0.0f);
+}
+
+AUREA_TEST(Easing, ElasticOscillatesDampsAndSettlesOnTheEnd) {
+    // O padrão com parâmetros é a curva elástica de sempre (3 ciclos, k 6).
+    Keyframe legacy; legacy.interp = Interpolation::Elastic;
+    const Keyframe def = param_key(Interpolation::Elastic, kElasticDefaultCycles, kElasticDefaultDamping);
+    for (int i = 0; i <= 200; ++i) AUREA_CHECK_NEAR(keyframe_ease(def, i / 200.0f), keyframe_ease(legacy, i / 200.0f), 1e-5);
+    for (int cycles = 1; cycles <= 8; ++cycles) {
+        for (f32 damping : {0.0f, 0.25f, 0.6f, 1.0f}) {
+            const Keyframe k = param_key(Interpolation::Elastic, cycles / 8.0f, damping);
+            AUREA_CHECK_EQ(keyframe_ease(k, 0.0f), 0.0f);
+            AUREA_CHECK_EQ(keyframe_ease(k, 1.0f), 1.0f);
+            // Passa do valor final e volta várias vezes; cada ida além de 1 é
+            // menor que a anterior além de 1, e cada volta aquém, menor que a
+            // anterior aquém: a mola perde energia (o lado de cima e o de baixo
+            // não são simétricos com pouco amortecimento — o pouso é forçado em 1).
+            int crossings = 0;
+            f32 prev = -1.0f, extreme = 0.0f, lastAbove = 1e9f, lastBelow = 1e9f;
+            bool decreasing = true;
+            for (int i = 1; i < 8000; ++i) {
+                const f32 d = keyframe_ease(k, i / 8000.0f) - 1.0f;
+                AUREA_CHECK(std::isfinite(d));
+                if ((prev < 0.0f && d >= 0.0f) || (prev > 0.0f && d <= 0.0f)) {
+                    if (crossings > 0) {
+                        f32& last = prev > 0.0f ? lastAbove : lastBelow;
+                        if (extreme > last + 1e-5f) decreasing = false;
+                        last = extreme;
+                    }
+                    ++crossings;
+                    extreme = 0.0f;
+                }
+                extreme = std::max(extreme, std::fabs(d));
+                prev = d;
+            }
+            AUREA_CHECK(crossings >= cycles);
+            AUREA_CHECK(decreasing);
+        }
+    }
+    // Passa do fim (é a mola) e, no padrão, assenta: perto do fim já está em 1.
+    f32 peak = 0.0f;
+    for (int i = 0; i <= 1000; ++i) peak = std::max(peak, keyframe_ease(def, i / 1000.0f));
+    AUREA_CHECK(peak > 1.2f);
+    for (int i = 900; i <= 1000; ++i) AUREA_CHECK(std::fabs(keyframe_ease(def, i / 1000.0f) - 1.0f) < 0.01f);
+    // Mais amortecimento = assenta antes.
+    auto tail = [](f32 damping) {
+        f32 m = 0.0f;
+        for (int i = 500; i <= 1000; ++i) m = std::max(m, std::fabs(keyframe_ease(param_key(Interpolation::Elastic, 0.5f, damping), i / 1000.0f) - 1.0f));
+        return m;
+    };
+    AUREA_CHECK(tail(0.8f) < tail(0.1f));
+    // Invertida: o espelho exato.
+    const Keyframe rev = param_key(Interpolation::Elastic, 0.5f, 0.3f, true);
+    const Keyframe fwd = param_key(Interpolation::Elastic, 0.5f, 0.3f, false);
+    for (int i = 0; i <= 500; ++i) AUREA_CHECK_NEAR(keyframe_ease(rev, i / 500.0f), 1.0f - keyframe_ease(fwd, 1.0f - i / 500.0f), 1e-5);
+}
+
+AUREA_TEST(Easing, BounceNeverPassesTheEnd) {
+    Keyframe legacy; legacy.interp = Interpolation::Bounce;
+    for (int count = 1; count <= 8; ++count) for (f32 r : {0.1f, 0.5f, 0.9f}) for (bool reverse : {false, true}) {
+        const Keyframe k = param_key(Interpolation::Bounce, count / 8.0f, r, reverse);
+        AUREA_CHECK_EQ(keyframe_ease(k, 0.0f), 0.0f);
+        AUREA_CHECK_EQ(keyframe_ease(k, 1.0f), 1.0f);
+        for (int i = 0; i <= 2000; ++i) {
+            const f32 v = keyframe_ease(k, i / 2000.0f);
+            AUREA_CHECK(v <= 1.0f + 1e-6f && v >= -1e-6f);
+        }
+    }
+    for (int i = 0; i <= 2000; ++i) AUREA_CHECK(keyframe_ease(legacy, i / 2000.0f) <= 1.0f + 1e-6f);
+}
+
+AUREA_TEST(Easing, ParametricCurvesAreDeterministicForAnyFractionalTime) {
+    const Keyframe kinds[] = {param_key(Interpolation::Overshoot, 0.7f, 0), param_key(Interpolation::Elastic, 0.6f, 0.4f),
+                              param_key(Interpolation::Bounce, 0.5f, 0.6f)};
+    for (const Keyframe& k : kinds) {
+        for (int i = 0; i <= 997; ++i) {
+            const f32 t = i / 997.0f;            // frações quaisquer, não só frames inteiros
+            const f32 a = keyframe_ease(k, t), b = keyframe_ease(k, t);
+            AUREA_CHECK(std::memcmp(&a, &b, sizeof a) == 0);
+        }
+        // Fora de 0..1 (tempo antes/depois do trecho) as pontas valem.
+        AUREA_CHECK_EQ(keyframe_ease(k, -0.5f), 0.0f);
+        AUREA_CHECK_EQ(keyframe_ease(k, 1.5f), 1.0f);
+    }
+    // Na track: o valor sai da faixa [início, fim] entre as marcas e as pontas são exatas.
+    Track t; t.set(FrameIndex{0}, 100.f); t.set(FrameIndex{60}, 200.f);
+    t.set_interpolation(FrameIndex{0}, Interpolation::Overshoot, 0.6f, 0.0f, 1.0f, kEaseParamMarker);
+    AUREA_CHECK(t.keys[0].interp == Interpolation::Overshoot && t.keys[0].by2 == kEaseParamMarker && t.keys[0].bx1 == 0.6f);
+    AUREA_CHECK_EQ(t.sample(FrameIndex{0}), 100.f);
+    AUREA_CHECK_EQ(t.sample(FrameIndex{60}), 200.f);
+    f32 top = 0.f;
+    for (int f = 0; f <= 60; ++f) top = std::max(top, t.sample(FrameIndex{f}));
+    AUREA_CHECK(top > 200.f);
+    t.set_interpolation(FrameIndex{0}, Interpolation::Elastic, 0.5f, 0.1f, 1.0f, kEaseParamMarker);
+    AUREA_CHECK(t.keys[0].bx1 == 0.5f && t.keys[0].by1 == 0.1f);   // os parâmetros são gravados
+}
+
+AUREA_TEST(Easing, EngineSamplesAreTheEvaluatedCurve) {
+    // O gráfico da UI desenha `sample_keyframe_ease`: igual ao avaliador, ponto a ponto.
+    const Keyframe kinds[] = {param_key(Interpolation::Overshoot, 0.4f, 0), param_key(Interpolation::Elastic, 0.3f, 0.2f),
+                              param_key(Interpolation::Bounce, 0.375f, 0.5f)};
+    f32 samples[257];
+    for (const Keyframe& k : kinds) {
+        AUREA_CHECK_EQ(sample_keyframe_ease(k, samples, 257), 257u);
+        for (u32 i = 0; i < 257; ++i) AUREA_CHECK_EQ(samples[i], keyframe_ease(k, static_cast<f32>(i) / 256.0f));
+    }
+    Keyframe hold; hold.interp = Interpolation::Hold;
+    AUREA_CHECK_EQ(sample_keyframe_ease(hold, samples, 9), 9u);
+    AUREA_CHECK_EQ(samples[7], 0.0f);
+    AUREA_CHECK_EQ(samples[8], 1.0f);                 // chega no próximo keyframe
+    AUREA_CHECK_EQ(sample_keyframe_ease(hold, samples, 1), 0u);
+    AUREA_CHECK_EQ(sample_keyframe_ease(hold, nullptr, 9), 0u);
+}
+
+AUREA_TEST(Easing, MirrorIsExactForParametricCurves) {
+    for (Interpolation kind : {Interpolation::Overshoot, Interpolation::Elastic}) {
+        Keyframe plain; plain.interp = kind;          // sem parâmetros gravados
+        Keyframe mirrored = plain;
+        AUREA_CHECK(mirror_parametric_ease(mirrored));
+        for (int i = 0; i <= 400; ++i) {
+            const f32 t = i / 400.0f;
+            AUREA_CHECK_NEAR(keyframe_ease(mirrored, t), 1.0f - keyframe_ease(plain, 1.0f - t), 1e-5);
+        }
+        AUREA_CHECK(mirror_parametric_ease(mirrored));  // espelhar duas vezes volta
+        for (int i = 0; i <= 400; ++i) AUREA_CHECK_NEAR(keyframe_ease(mirrored, i / 400.0f), keyframe_ease(plain, i / 400.0f), 1e-5);
+    }
+    Keyframe oldBounce; oldBounce.interp = Interpolation::Bounce;
+    AUREA_CHECK(!mirror_parametric_ease(oldBounce));
+    Keyframe bez; bez.interp = Interpolation::Bezier;
+    AUREA_CHECK(!mirror_parametric_ease(bez));
 }

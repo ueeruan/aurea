@@ -1873,7 +1873,7 @@ private struct TimelineGestureSurface: UIViewRepresentable {
         if ProcessInfo.processInfo.environment["AUREA_UI_TEST_PROBE"] == "1" {
             view.isAccessibilityElement = true
             view.accessibilityIdentifier = "aurea.parity.timeline"
-            view.accessibilityLabel = "Aurea timeline gesture surface"
+            view.accessibilityLabel = AureaText.t("i18n_timeline_surface")
         }
         #endif
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped(_:)))

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeito Datamosh (2026-10-03). Chaves fx_*datamosh*. -->
+<resources>
+    <string name="fx_name_datamosh">Datamosh</string>
+    <string name="fx_desc_glitch_datamosh">Glitch de compresión: el fotograma antiguo sigue siendo arrastrado en bloques por el movimiento del video, con colores corridos y bloques corruptos. En imágenes, los bloques se derriten solos.</string>
+    <string name="fx_datamosh_hold_frames">Fotogramas retenidos</string>
+    <string name="fx_datamosh_drag">Arrastre</string>
+    <string name="fx_datamosh_corruption">Corrupción</string>
+    <string name="fx_datamosh_color_bleed">Sangrado de color</string>
+</resources>

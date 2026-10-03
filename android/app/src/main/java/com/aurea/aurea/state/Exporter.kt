@@ -21,6 +21,7 @@ import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.engine.directBuffer
 import com.aurea.aurea.ui.i18n.AppText
+import com.aurea.aurea.ui.i18n.EngineText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -301,7 +302,7 @@ class Exporter internal constructor(
                     framesTotal = progress.framesTotal,
                     fps = progress.fps,
                     etaSeconds = progress.etaSeconds,
-                    notice = if (options.aiUpscale > 0 && progress.message.startsWith("IA:")) progress.message else noticeFor(progress, options),
+                    notice = if (options.aiUpscale > 0 && progress.message.startsWith("IA:")) EngineText.aiProgress(app, progress.message) else noticeFor(progress, options),
                 )
                 if (!progress.finished) continue
                 when (progress.result) {
@@ -310,7 +311,10 @@ class Exporter internal constructor(
                     STORAGE_FULL -> state = state.copy(phase = ExportPhase.Failed, message = text(R.string.msg_sem_espaco_no_aparelho_libere_espaco))
                     else -> state = state.copy(
                         phase = ExportPhase.Failed,
-                        message = text(R.string.app_export_failed, progress.message.ifBlank { text(R.string.app_error_code, progress.result) }),
+                        // O MOTIVO (código estável do motor) manda; a frase crua
+                        // do motor só é consultada quando o motor não deu motivo.
+                        message = text(R.string.app_export_failed,
+                            failureReason(progress.failure) ?: EngineText.reason(app, progress.message, progress.result)),
                     )
                 }
                 // Temporário com dono (Fase 8B §52): falhou ou cancelou, o
@@ -440,6 +444,23 @@ class Exporter internal constructor(
      * O que o motor avisou sobre ESTE export. Nenhum dos dois muda o vídeo:
      * resolução, fps e qualidade continuam os pedidos — muda só o tempo.
      */
+    /**
+     * Texto do motivo da falha (aurea::ExportFailure, ExportRules.hpp) no idioma
+     * do app; null = sem motivo (cai na frase do motor). Encaixa em
+     * app_export_failed.
+     */
+    private fun failureReason(failure: Int): String? = when (failure) {
+        ExportProgress.FAILURE_ENCODER -> text(R.string.expfail_encoder)
+        ExportProgress.FAILURE_ENCODER_STALLED -> text(R.string.expfail_encoder_stalled)
+        ExportProgress.FAILURE_RENDER -> text(R.string.expfail_render)
+        ExportProgress.FAILURE_GPU_MEMORY -> text(R.string.expfail_memory)
+        ExportProgress.FAILURE_MEDIA -> text(R.string.expfail_media)
+        ExportProgress.FAILURE_FILE -> text(R.string.expfail_file)
+        ExportProgress.FAILURE_STORAGE -> text(R.string.msg_sem_espaco_no_aparelho_libere_espaco).trimEnd('.', ' ')
+        ExportProgress.FAILURE_UNSUPPORTED -> text(R.string.expfail_unsupported)
+        else -> null
+    }
+
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
         val lines = ArrayList<String>(2)
         if (p.softwareEncoder) {

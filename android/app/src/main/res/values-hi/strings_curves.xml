@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Editor de curva: tipos rápidos (Overshoot, Elástico, Quique) e os parâmetros (2026-10-03). -->
+<resources>
+    <string name="curve_type_ease">सहज</string>
+    <string name="curve_type_overshoot">ओवरशूट</string>
+    <string name="curve_types_label">कर्व का प्रकार</string>
+    <string name="curve_param_amount">मात्रा</string>
+    <string name="curve_param_oscillations">दोलन</string>
+    <string name="curve_param_damping">अवमंदन</string>
+    <string name="curve_param_oscillations_value">दोलन: %1$d</string>
+</resources>

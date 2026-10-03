@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -109,7 +110,10 @@ internal fun PresetsPanel(env: PanelEnv) {
     val kind = store.detail?.kind
     val isText = kind == LayerType.Text.kind || store.text3d != null
     val speaks = kind == LayerType.Video.kind || kind == LayerType.Audio.kind || kind == LayerType.Text.kind
-    val tabs = PresetTab.entries.filter { t ->
+    // Texto (2D ou 3D): o painel é o de PRESETS DE TEXTO (a ficha "Presets" da
+    // doca do texto) — só a aba de texto e os favoritos/recentes de texto. Os
+    // presets de vídeo/imagem saíram da interface (2026-10-02) e continuam fora.
+    val tabs = if (isText) listOf(PresetTab.Text, PresetTab.Favorites, PresetTab.Recents) else PresetTab.entries.filter { t ->
         when (t.kind) {
             PresetKind.Text -> isText
             PresetKind.Caption -> speaks
@@ -122,7 +126,8 @@ internal fun PresetsPanel(env: PanelEnv) {
         store.presetsOpenKind?.let { k -> PresetTab.entries.firstOrNull { it.kind == k }?.let { picked = it } }
         store.presetsOpenKind = null
     }
-    val tab = if (picked in tabs) picked else PresetTab.Animation
+    val tab = if (picked in tabs) picked else tabs.first()
+    val onlyText: (PresetEntry) -> Boolean = { !isText || it.kind == PresetKind.Text }
     var query by rememberSaveable { mutableStateOf(store.presetsOpenSearch.orEmpty()) }
     LaunchedEffect(Unit) { store.presetsOpenSearch = null }
     var stretch by rememberSaveable { mutableStateOf(false) }
@@ -134,7 +139,7 @@ internal fun PresetsPanel(env: PanelEnv) {
         PresetTab.Favorites -> lib.all().filter { it.key in lib.favorites }
         PresetTab.Recents -> lib.recents.mapNotNull { lib.find(it) }
         else -> lib.entries(tab.kind!!)
-    }.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) }
+    }.filter { onlyText(it) && (q.isEmpty() || it.name.contains(q, ignoreCase = true)) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         Row(
@@ -224,6 +229,51 @@ internal fun PresetsPanel(env: PanelEnv) {
             onConfirm = { store.deletePreset(e) },
             onDismiss = { deleting = null },
         )
+    }
+}
+
+/**
+ * PRESETS DE TEXTO na barra de adicionar (ao lado do "Texto", que segue criando
+ * o texto direto): escolher 2D ou 3D e tocar num cartão cria o texto já com o
+ * preset ([EditorStore.addTextWithPreset]). Entram os 25 nativos do motor e os
+ * de texto salvos ou baixados da comunidade (a mesma [PresetLibrary]).
+ */
+@Composable
+internal fun TextPresetPicker(store: EditorStore, onAdded: () -> Unit) {
+    val lib = store.presets
+    var threeD by rememberSaveable { mutableStateOf(false) }
+    val list = lib.entries(PresetKind.Text)
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        Row(
+            Modifier.fillMaxWidth().height(46.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Chip(stringResource(R.string.sh_add_tab_text), !threeD) { threeD = false }
+            Chip(stringResource(R.string.sh_add_text_3d), threeD) { threeD = true }
+        }
+        Text(stringResource(R.string.tp_hint), modifier = Modifier.padding(bottom = 8.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(100.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f).testTag("textPresets.grid"),
+            contentPadding = PaddingValues(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(list, key = { it.key }) { e ->
+                PresetCard(
+                    store,
+                    e,
+                    showKind = false,
+                    favorite = e.key in lib.favorites,
+                    onApply = { if (store.addTextWithPreset(e, threeD) >= 0) onAdded() },
+                    onFavorite = { lib.toggleFavorite(e) },
+                    onDelete = null,
+                    applyDescription = stringResource(R.string.tp_add_named, e.name),
+                )
+            }
+        }
     }
 }
 
@@ -351,8 +401,9 @@ private fun PresetCard(
     onApply: () -> Unit,
     onFavorite: () -> Unit,
     onDelete: (() -> Unit)?,
+    applyDescription: String? = null,
 ) {
-    val applyLabel = stringResource(R.string.edt_apply_named, e.name)
+    val applyLabel = applyDescription ?: stringResource(R.string.edt_apply_named, e.name)
     val favoriteLabel = stringResource(R.string.panel_favoritar)
     val unfavoriteLabel = stringResource(R.string.panel_tirar_favoritos)
     val deleteLabel = stringResource(R.string.panel_apagar_preset)

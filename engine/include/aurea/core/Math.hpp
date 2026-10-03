@@ -417,6 +417,53 @@ struct Color {
     return static_cast<f32>(sample(t, y1, y2));
 }
 
+// -----------------------------------------------------------------------------
+// Curvas com parâmetros (Quique, Elástico, Overshoot).
+//
+// Os parâmetros moram nos quatro floats da bézier, que essas curvas não usam:
+// `by2 == kEaseParamMarker` liga a leitura de bx1 (parâmetro A, 0..1), by1
+// (parâmetro B, 0..1) e bx2 (sentido: < 0,5 = invertida, "entrada"). O marcador
+// fica fora da faixa editável da bézier (−2..3): um projeto gravado antes nunca
+// tem −10 ali e avalia exatamente como antes. O formato do arquivo não muda.
+// -----------------------------------------------------------------------------
+inline constexpr f32 kEaseParamMarker = -10.0f;
+
+/// Overshoot: A = quanto passa do fim (0..1 → s 0..5). O padrão é o clássico
+/// s = 1,70158 (≈ 10 % além do valor final).
+inline constexpr f32 kOvershootMaxStrength = 5.0f;
+inline constexpr f32 kOvershootDefaultAmount = 1.70158f / kOvershootMaxStrength;
+/// Elástico: A = oscilações (round(A·8) ciclos, 1..8), B = amortecimento
+/// (k = 2 + 16·B). O padrão (3 ciclos, k 6) é a curva elástica de sempre.
+inline constexpr f32 kElasticDefaultCycles = 3.0f / 8.0f;
+inline constexpr f32 kElasticDefaultDamping = 0.25f;
+
+[[nodiscard]] constexpr bool ease_has_params(Interpolation kind) noexcept {
+    return kind == Interpolation::Bounce || kind == Interpolation::Elastic || kind == Interpolation::Overshoot;
+}
+
+/// Overshoot ("back") saindo de 0 e chegando em 1, passando de 1 no caminho.
+/// Invertida = 1 − f(1 − t): recua abaixo de 0 antes de partir (antecipação).
+[[nodiscard]] inline f32 overshoot_ease(f32 t, f32 amount, bool reverse) noexcept {
+    if (t <= 0.0f) return 0.0f;
+    if (t >= 1.0f) return 1.0f;
+    const f32 s = clampf(amount, 0.0f, 1.0f) * kOvershootMaxStrength;
+    const f32 u = (reverse ? 1.0f - t : t) - 1.0f;
+    const f32 v = 1.0f + (s + 1.0f) * u * u * u + s * u * u;
+    return reverse ? 1.0f - v : v;
+}
+
+/// Elástico (mola amortecida) com ciclos inteiros: cos(2πn·1) = 1, então a
+/// normalização por 1 − e^{−k} faz a curva pousar EXATAMENTE em 1 no fim.
+[[nodiscard]] inline f32 elastic_ease(f32 t, f32 cycles01, f32 damping01, bool reverse) noexcept {
+    if (t <= 0.0f) return 0.0f;
+    if (t >= 1.0f) return 1.0f;
+    const f32 n = static_cast<f32>(std::clamp(static_cast<int>(std::round(cycles01 * 8.0f)), 1, 8));
+    const f32 k = 2.0f + 16.0f * clampf(damping01, 0.0f, 1.0f);
+    const f32 time = reverse ? 1.0f - t : t;
+    const f32 v = (1.0f - std::exp(-k * time) * std::cos(2.0f * kPi * n * time)) / (1.0f - std::exp(-k));
+    return reverse ? 1.0f - v : v;
+}
+
 /// Easing nomeado. `t` já vem normalizado em [0,1] (progresso entre dois
 /// keyframes). Devolve o fator de mistura.
 [[nodiscard]] inline f32 apply_easing(Interpolation kind, f32 t,
@@ -466,6 +513,7 @@ struct Color {
             return 1.f - 4.f*height*u*(1.f-u);
         }
         case Interpolation::Elastic: {
+            if (by2 == kEaseParamMarker) return elastic_ease(t, bx1, by1, bx2 < 0.5f);
             if (t <= 0.f) return 0.f;
             if (t >= 1.f) return 1.f;
             // Damped oscillator, normalized to land exactly on the endpoint.
@@ -473,6 +521,11 @@ struct Color {
         }
         case Interpolation::Steps:
             return std::floor(clampf(t, 0.f, 1.f)*4.f)*0.25f;
+        case Interpolation::Overshoot:
+            // Sem marcador (curva escolhida por um caminho que não grava os
+            // parâmetros): o overshoot padrão, no sentido normal.
+            return by2 == kEaseParamMarker ? overshoot_ease(t, bx1, bx2 < 0.5f)
+                                           : overshoot_ease(t, kOvershootDefaultAmount, false);
         case Interpolation::Bezier:
         case Interpolation::CustomCurve:
             return cubic_bezier(bx1, by1, bx2, by2, t);

@@ -453,8 +453,14 @@ class ExportProgress {
     var fps: Float = 0f
     var etaSeconds: Int = 0
     var message: String = ""
-    /** Bits de Engine::ExportFlag: encoder de hardware/software, calor. */
+    /** Bits de Engine::ExportFlag: encoder de hardware/software, calor (0..23). */
     var flags: Int = 0
+    /**
+     * Motivo da falha (aurea::ExportFailure, export/ExportRules.hpp), nos bits
+     * 24..31 de `flags`. A tela traduz o código; `message` é diagnóstico do
+     * motor (em português) e não vai para o usuário.
+     */
+    val failure: Int get() = (flags ushr FAILURE_SHIFT) and 0xFF
 
     val hardwareEncoder: Boolean get() = flags and FLAG_HARDWARE_ENCODER != 0
     val softwareEncoder: Boolean get() = flags and FLAG_SOFTWARE_ENCODER != 0
@@ -484,6 +490,17 @@ class ExportProgress {
         const val FLAG_SOFTWARE_ENCODER = 1 shl 1
         const val FLAG_THERMAL_REDUCED = 1 shl 2
         const val FLAG_FRAME_FALLBACK = 1 shl 3
+        // aurea::kExportFailureShift / ExportFailure (ExportRules.hpp).
+        const val FAILURE_SHIFT = 24
+        const val FAILURE_NONE = 0
+        const val FAILURE_ENCODER = 1
+        const val FAILURE_ENCODER_STALLED = 2
+        const val FAILURE_RENDER = 3
+        const val FAILURE_GPU_MEMORY = 4
+        const val FAILURE_MEDIA = 5
+        const val FAILURE_FILE = 6
+        const val FAILURE_STORAGE = 7
+        const val FAILURE_UNSUPPORTED = 8
     }
 }
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Presets de texto de volta (2026-10-03): barra de adicionar e doca do texto. Chaves tp_*. -->
+<resources>
+    <string name="tp_add_tab">प्रीसेट</string>
+    <string name="tp_title">टेक्स्ट प्रीसेट</string>
+    <string name="tp_hint">किसी प्रीसेट पर टैप करें: टेक्स्ट एनिमेशन के साथ जुड़ जाएगा।</string>
+    <string name="tp_add_named">%1$s के साथ टेक्स्ट जोड़ें</string>
+</resources>

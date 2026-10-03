@@ -802,7 +802,42 @@ AUREA_TEST(EffectGraph, RegistryRefusesDuplicateKeys) {
     // + o que entrou junto no mesmo lote (Rotobrush, layout em grade e os
     //   demais efeitos novos da árvore de trabalho): total medido 130.
     // + Emulador CRT, Tremor dissolvente e Mapa de deslocamento (3).
-    AUREA_CHECK_EQ(before, static_cast<u32>(133));
+    // + Datamosh (1).
+    AUREA_CHECK_EQ(before, static_cast<u32>(134));
+}
+
+AUREA_TEST(EffectGraph, DatamoshDeclaresItsParameters) {
+    EffectRegistry reg;
+    register_builtin_effects(reg);
+    const EffectTypeId id = reg.find_key(effect_keys::kDatamosh);
+    AUREA_CHECK(id != 0);
+    const Effect* fx = reg.find(id);
+    const ParameterRegistry* params = reg.params(id);
+    AUREA_CHECK(fx && params);
+    if (!fx || !params) return;
+    AUREA_CHECK_EQ(params->count(), 7u);
+    // O renderer lê os quadros segurados pelo id: o índice não pode sumir.
+    AUREA_CHECK_EQ(params->find("amount"), 0u);
+    AUREA_CHECK_EQ(params->find("block_size"), 1u);
+    AUREA_CHECK_EQ(params->find("hold_frames"), 2u);
+    AUREA_CHECK_EQ(params->find("drag"), 3u);
+    AUREA_CHECK_EQ(params->find("corruption"), 4u);
+    AUREA_CHECK_EQ(params->find("color_bleed"), 5u);
+    AUREA_CHECK_EQ(params->find("seed"), 6u);
+    AUREA_CHECK(params->at(2).type == ParamType::Int);
+    AUREA_CHECK_NEAR(params->at(2).maxValue, static_cast<f32>(kDatamoshMaxHold), 1e-6);
+    AUREA_CHECK(fx->wants_history());
+    AUREA_CHECK(std::string(fx->info().category) == "Glitch");
+    // Intensidade 0 sai da cadeia; o padrão não.
+    Layer l;
+    l.effects.push_back(make_effect(reg, effect_keys::kDatamosh, 1));
+    EffectPlan plan;
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, plan);
+    AUREA_CHECK(!plan.empty());
+    l.effects.back().params[0].constant.v[0] = 0.0f;
+    EffectPlan off;
+    EffectGraph::plan(l, reg, FrameIndex{0}, 1.0f, placement(), nullptr, off);
+    AUREA_CHECK(off.empty());
 }
 
 AUREA_TEST(EffectGraph, CurveIsMonotoneBetweenPoints) {

@@ -171,7 +171,7 @@ fun StressSheet(
                     Botao(stringResource(R.string.stress_compartilhar), modifier = Modifier.weight(1f)) {
                         val i = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "Aurea — teste de estresse")
+                            putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.app_stress_share_subject))
                             putExtra(Intent.EXTRA_TEXT, relatorio)
                         }
                         context.startActivity(Intent.createChooser(i, null))

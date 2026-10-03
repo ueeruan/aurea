@@ -37,7 +37,7 @@ struct TopBarView: View {
         case .layer3D: return AureaText.t("panel_material_ambiente")
         case .appearance: return AureaText.t("panel_mistura_opacidade")
         case .speed: return AureaText.t("panel_tempo_velocidade")
-        case .clipEdit: return "Slip · Roll · Slide"
+        case .clipEdit: return AureaText.t("i18n_clip_modes")
         case .audio: return AureaText.t("panel_som")
         case .shape: return AureaText.t("panel_cor_preenchimento")
         case .shapeEdit: return AureaText.t("panel_editar_forma")
@@ -544,7 +544,7 @@ private struct ShellMenuRow: View {
             Button(model.rawPlayback ? AureaText.t("ios_raw_back_to_compositor") : "AUREA RAW PLAYBACK TEST") {
                 shell.resolutionAnchor = nil; model.toggleRawPlayback()
             }.font(.aurea(size: 11)).padding(8).accessibilityIdentifier("rawPlaybackToggle")
-            ForEach(Array(["AUTO", "Full", "1/2", "1/4", "1/8"].enumerated()), id: \.offset) { index, name in
+            ForEach(Array(["AUTO", AureaText.t("i18n_preview_full"), "1/2", "1/4", "1/8"].enumerated()), id: \.offset) { index, name in
                 let denominator: UInt32 = [1, 1, 2, 4, 8][index]
                 let on = index == 0 ? model.status.previewAuto != 0 : model.status.previewAuto == 0 && model.status.previewDenominator == denominator
                 Button {
@@ -643,7 +643,7 @@ private struct ShellMenuRow: View {
                     ShellMenuRow(CupertinoGlyph.RectangleStack, "la_add_to_group", title: AureaText.t("la_add_to_group") + " · " + group.name) {
                         act {
                             let why = model.engine.addLayers([NSNumber(value: row.id)], toGroup: group.id)
-                            if !why.isEmpty { model.toast = AureaText.t("app_group_add_failed", why) }
+                            if !why.isEmpty { model.toast = AureaText.t("app_group_add_failed", AureaEngineText.reason(why)) }
                             model.refreshModel(force: true)
                         }
                     }
@@ -652,7 +652,7 @@ private struct ShellMenuRow: View {
                     ShellMenuRow(CupertinoGlyph.ArrowUturnLeft, "la_remove_from_group") {
                         act {
                             let why = model.engine.removeLayerFromGroup(row.id)
-                            if !why.isEmpty { model.toast = AureaText.t("app_group_remove_failed", why) }
+                            if !why.isEmpty { model.toast = AureaText.t("app_group_remove_failed", AureaEngineText.reason(why)) }
                             model.refreshModel(force: true)
                         }
                     }
@@ -683,7 +683,7 @@ private struct ShellMenuRow: View {
             }
             if row.kind == 1 || row.kind == 3 {
                 ShellMenuSection("editor_tempo")
-                ShellMenuRow(CupertinoGlyph.Scissors, "Slip · Roll · Slide") { act { model.openPanel(.clipEdit) } }
+                ShellMenuRow(CupertinoGlyph.Scissors, "i18n_clip_modes") { act { model.openPanel(.clipEdit) } }
             }
             if row.kind == 1 {
                 ShellMenuRow(ShellGlyph.Snow, "sh_menu_freeze_frame", enabled: inside) { act { let created = model.engine.freezeFrame(forLayer: row.id, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3))); model.refreshModel(force: true); if created >= 0 { model.select(layerId: created) } } }

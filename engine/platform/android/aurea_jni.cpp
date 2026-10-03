@@ -1607,6 +1607,16 @@ AUREA_JNI jboolean AUREA_FN(nativeShape3dPartMove)(JNIEnv* env, jclass, jlong ha
     return JNI_TRUE;
 }
 
+/// Divide o cubo em [count] fatias no eixo [axis] (0 X, 1 Y, 2 Z). Devolve o
+/// id do nulo do grupo (o mesmo da camada), ou −Errc.
+AUREA_JNI jlong AUREA_FN(nativeSplitShape3d)(JNIEnv*, jclass, jlong handle, jlong layer, jint axis, jint count) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || axis < 0 || count < 0) return -static_cast<jlong>(Errc::InvalidArgument);
+    const Result<u64> r = c->engine.split_shape3d(static_cast<u64>(layer), static_cast<u32>(axis), static_cast<u32>(count));
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddParticles)(JNIEnv*, jclass, jlong handle, jint preset) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);
@@ -2403,10 +2413,31 @@ AUREA_JNI jfloatArray AUREA_FN(nativeParseCaptionPreset)(JNIEnv* env, jclass, jb
 }
 
 AUREA_JNI jbyteArray AUREA_FN(nativeMakeCurvePreset)(JNIEnv* env, jclass, jbyteArray name, jint interp, jfloat x1, jfloat y1, jfloat x2, jfloat y2, jint power) {
-    const jint i = std::clamp(interp, 0, static_cast<jint>(Interpolation::Steps));
+    const jint i = std::clamp(interp, 0, static_cast<jint>(kLastInterpolation));
+    // Curva com parâmetros: o marcador em y2 atravessa (Math.hpp, kEaseParamMarker).
+    const bool params = ease_has_params(static_cast<Interpolation>(i)) && y2 == kEaseParamMarker;
     return bytes_of(env, presets::make_curve_preset(utf8_of(env, name), static_cast<Interpolation>(i), std::clamp(x1, 0.0f, 1.0f),
-                                                    std::clamp(y1, -2.0f, 3.0f), std::clamp(x2, 0.0f, 1.0f), std::clamp(y2, -2.0f, 3.0f),
+                                                    std::clamp(y1, -2.0f, 3.0f), std::clamp(x2, 0.0f, 1.0f),
+                                                    params ? kEaseParamMarker : std::clamp(y2, -2.0f, 3.0f),
                                                     static_cast<u32>(std::clamp(power, 1, 3))));
+}
+
+/// O trecho de curva amostrado pelo MOTOR (`sample_keyframe_ease`) para o
+/// gráfico do editor de curva: `out` recebe size valores em t = i/(size−1).
+/// Devolve quantos escreveu (0 = pedido inválido).
+AUREA_JNI jint AUREA_FN(nativeSampleEase)(JNIEnv* env, jclass, jint interp, jfloat x1, jfloat y1, jfloat x2, jfloat y2,
+                                          jint power, jfloatArray out) {
+    if (!out || interp < 0 || interp > static_cast<jint>(kLastInterpolation)) return 0;
+    const jsize n = std::min<jsize>(env->GetArrayLength(out), 1025);
+    if (n < 2) return 0;
+    Keyframe k;
+    k.interp = static_cast<Interpolation>(interp);
+    k.bx1 = x1; k.by1 = y1; k.bx2 = x2; k.by2 = y2;
+    k.easePower = clamp_ease_power(static_cast<u32>(std::max(power, 0)));
+    f32 values[1025];
+    const u32 count = sample_keyframe_ease(k, values, static_cast<u32>(n));
+    env->SetFloatArrayRegion(out, 0, static_cast<jsize>(count), values);
+    return env->ExceptionCheck() ? 0 : static_cast<jint>(count);
 }
 
 /// Lê um preset de curva: [interp, x1, y1, x2, y2, força]. Nulo = inválido.
@@ -2931,13 +2962,28 @@ AUREA_JNI jlong AUREA_FN(nativeImportImage)(JNIEnv* env, jclass, jlong handle, j
 // Modelo 3D (glTF/GLB). Chamado numa thread de fundo; progresso e cancelamento
 // pelas duas funções abaixo, de qualquer thread.
 // =============================================================================
+/// Memória medida pelo Kotlin AGORA (ActivityManager.MemoryInfo):
+/// [totalMem, availMem, isLowRamDevice (0/1)]. Ausente = a da sondagem do início.
+static scene3d::DeviceMemoryHint read_memory_hint(JNIEnv* env, jlongArray memory) {
+    scene3d::DeviceMemoryHint h;
+    if (!memory || env->GetArrayLength(memory) < 3) return h;
+    jlong v[3] = {0, 0, 0};
+    env->GetLongArrayRegion(memory, 0, 3, v);
+    h.totalBytes = v[0] > 0 ? static_cast<u64>(v[0]) : 0;
+    h.availableBytes = v[1] > 0 ? static_cast<u64>(v[1]) : 0;
+    h.lowRam = v[2] != 0;
+    return h;
+}
+
 AUREA_JNI jlong AUREA_FN(nativeImportModel)(JNIEnv* env, jclass, jlong handle, jstring path, jstring name,
-                                            jobjectArray detailOut) {
+                                            jobjectArray detailOut, jint quality, jlongArray memory) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);
     ModelImport req;
     req.path = to_string(env, path);
     req.displayName = to_string(env, name);
+    req.quality = static_cast<scene3d::ModelQuality>(std::clamp<jint>(quality, 0, 2));
+    req.memory = read_memory_hint(env, memory);
     c->importProgress.cancel.store(false);
     c->importProgress.phase.store(scene3d::ImportPhase::Queued);
     c->importProgress.fraction.store(0.0f);
@@ -2950,6 +2996,56 @@ AUREA_JNI jlong AUREA_FN(nativeImportModel)(JNIEnv* env, jclass, jlong handle, j
     }
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
+}
+
+/// "Otimizar modelo": custo do arquivo e o que cabe neste aparelho, ANTES do
+/// import. Layout (kModelPlanSlots), lido por AureaEngine.ModelPlan:
+///   0 válido · 1 exato · 2 pesado · 3 pesado demais · 4 recomendada
+///   5 triângulos · 6 vértices · 7 texturas · 8 maior lado de textura
+///   9 orçamento (bytes) · 10..12 cabe (Original, Equilibrado, Leve)
+///   13..15 pico estimado · 16..18 triângulos que ficam · 19..21 teto de textura
+AUREA_JNI jlongArray AUREA_FN(nativeInspectModel)(JNIEnv* env, jclass, jlong handle, jstring path, jlongArray memory) {
+    constexpr jsize kModelPlanSlots = 22;
+    jlong v[kModelPlanSlots] = {};
+    if (NativeContext* c = ctx_of(handle)) {
+        const scene3d::ModelPlan plan = c->engine.inspect_model(to_string(env, path), read_memory_hint(env, memory));
+        v[0] = plan.cost.valid;
+        v[1] = plan.cost.exact;
+        v[2] = plan.heavy;
+        v[3] = plan.tooHeavy;
+        v[4] = static_cast<jlong>(plan.recommended);
+        v[5] = static_cast<jlong>(plan.cost.triangles);
+        v[6] = static_cast<jlong>(plan.cost.vertices);
+        v[7] = plan.cost.textures;
+        v[8] = plan.cost.largestTextureSide;
+        v[9] = static_cast<jlong>(plan.budget[0].memoryBytes);
+        for (u32 q = 0; q < scene3d::kModelQualityCount; ++q) {
+            v[10 + q] = plan.fits[q];
+            v[13 + q] = static_cast<jlong>(plan.peakBytes[q]);
+            v[16 + q] = static_cast<jlong>(plan.keptTriangles[q]);
+            v[19 + q] = plan.budget[q].maxTextureSize;
+        }
+    }
+    jlongArray out = env->NewLongArray(kModelPlanSlots);
+    if (out) env->SetLongArrayRegion(out, 0, kModelPlanSlots, v);
+    return out;
+}
+
+/// O último import de modelo: [triângulos do arquivo, que ficaram, texturas
+/// reduzidas, texturas puladas, qualidade].
+AUREA_JNI jlongArray AUREA_FN(nativeLastModelImport)(JNIEnv* env, jclass, jlong handle) {
+    jlong v[5] = {};
+    if (NativeContext* c = ctx_of(handle)) {
+        const ModelImportReport r = c->engine.last_model_import();
+        v[0] = r.sourceTriangles;
+        v[1] = r.triangles;
+        v[2] = r.texturesReduced;
+        v[3] = r.texturesSkipped;
+        v[4] = static_cast<jlong>(r.quality);
+    }
+    jlongArray out = env->NewLongArray(5);
+    if (out) env->SetLongArrayRegion(out, 0, 5, v);
+    return out;
 }
 
 /// Texturas/.mtl que o modelo da layer referencia e não achou, uma por linha.
@@ -3001,12 +3097,16 @@ AUREA_JNI void AUREA_FN(nativeCancelModelImport)(JNIEnv*, jclass, jlong handle) 
 // Projeto
 // =============================================================================
 AUREA_JNI jboolean AUREA_FN(nativeNewProject)(JNIEnv* env, jclass, jlong handle, jint width, jint height,
-                                              jfloat fps, jstring title) {
+                                              jdouble fps, jstring title, jfloatArray background) {
     NativeContext* c = ctx_of(handle);
     if (!c) return JNI_FALSE;
     const std::string t = to_string(env, title);
+    // Fundo opcional (RGBA sRGB) da folha "Novo projeto"; nulo = preto.
+    f32 bg[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    const bool withBackground = background && env->GetArrayLength(background) >= 4;
+    if (withBackground) env->GetFloatArrayRegion(background, 0, 4, bg);
     return c->engine.new_project(static_cast<u32>(width), static_cast<u32>(height), static_cast<f64>(fps),
-                                 t.c_str()).ok() ? JNI_TRUE : JNI_FALSE;
+                                 t.c_str(), withBackground ? bg : nullptr).ok() ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jint AUREA_FN(nativeLoadProject)(JNIEnv* env, jclass, jlong handle, jstring path) {

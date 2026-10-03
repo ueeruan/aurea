@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Otimizar modelo" (import 3D com orçamento de memória do aparelho). -->
+<resources>
+    <string name="model3d_heavy_title">Heavy model</string>
+    <string name="model3d_heavy_body">This model has %1$s triangles. As it is, it may freeze your device. Optimizing reduces the geometry and textures before opening it.</string>
+    <string name="model3d_quality_original">Original</string>
+    <string name="model3d_quality_balanced">Balanced</string>
+    <string name="model3d_quality_light">Light</string>
+    <string name="model3d_quality_original_hint">No reduction</string>
+    <string name="model3d_quality_balanced_hint">Up to %1$s triangles, textures up to %2$d px</string>
+    <string name="model3d_quality_light_hint">Up to %1$s triangles, textures up to %2$d px · smoother</string>
+    <string name="model3d_recommended">recommended</string>
+    <string name="model3d_optimize_import">Optimize and import</string>
+    <string name="model3d_import">Import</string>
+    <string name="model3d_too_heavy">This model is too heavy for this device memory, even optimized. Use a version with fewer polygons or smaller textures.</string>
+    <string name="model3d_too_heavy_after">The model exceeded this device memory and was refused so the app would not close. Import it again and choose Light, or use a simpler version.</string>
+    <string name="model3d_stage_simplifying">Simplifying</string>
+    <string name="model3d_optimized_toast">Model optimized: %1$s → %2$s triangles</string>
+    <string name="model3d_thousand">K</string>
+    <string name="model3d_million">M</string>
+</resources>

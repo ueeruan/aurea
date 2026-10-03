@@ -20,7 +20,8 @@
 
 namespace aurea::scene3d {
 
-enum class ImportPhase : u8 { Queued = 0, Parsing, Geometry, Textures, Optimization, GpuUpload, Complete };
+/// O número atravessa a bridge (etapa × 1000 + fração): só se acrescenta no fim.
+enum class ImportPhase : u8 { Queued = 0, Parsing, Geometry, Textures, Optimization, GpuUpload, Complete, Simplifying };
 
 [[nodiscard]] constexpr const char* to_string(ImportPhase p) noexcept {
     switch (p) {
@@ -31,6 +32,7 @@ enum class ImportPhase : u8 { Queued = 0, Parsing, Geometry, Textures, Optimizat
         case ImportPhase::Optimization: return "otimizando";
         case ImportPhase::GpuUpload:    return "enviando para a GPU";
         case ImportPhase::Complete:     return "pronto";
+        case ImportPhase::Simplifying:  return "simplificando";
     }
     return "?";
 }
@@ -55,6 +57,13 @@ struct ImportOptions {
     /// Maior lado aceito para textura. Maior que isso é reduzido NO IMPORT
     /// (o celular não amostra 8K de qualquer forma). 0 = sem limite.
     u32 maxTextureSize = 4096;
+    /// Orçamento (ModelBudget.hpp). Teto do pico de memória do import: acima
+    /// dele o import recusa com ImportError::TooHeavy antes de alocar. 0 = sem teto.
+    u64 memoryBudget = 0;
+    /// Acima disto (soma do arquivo) as malhas são simplificadas por partes
+    /// (meshoptimizer), proporcionalmente. 0 = sem simplificação.
+    u32 maxTriangles = 0;
+    f32 simplifyError = 0.01f;
 };
 
 struct ImportResult {

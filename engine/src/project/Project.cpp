@@ -45,7 +45,9 @@ Result<Project> Project::create_new(u32 width, u32 height, f64 fps,
     p.timeline_.set_current(root);
     p.export_.width = width;
     p.export_.height = height;
-    p.export_.fps = fps;
+    // A taxa já normalizada pela composição (29,97 digitado → 30000/1001).
+    const Composition* rootComp = p.timeline_.composition(root);
+    p.export_.fps = rootComp ? rootComp->fps() : fps;
 
     return p;
 }

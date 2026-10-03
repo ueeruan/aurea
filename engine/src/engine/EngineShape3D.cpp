@@ -360,4 +360,127 @@ bool Engine::shape3d_part_move(u64 layerId, u32 part, u32 axis, f32 amount, f32*
     return true;
 }
 
+namespace {
+
+/// Trilhas do TRANSFORM da camada (ficam no nulo do grupo ao dividir).
+/// Opacidade não: o nulo não desenha, então ela vai para as fatias.
+bool group_transform_track(TrackProperty p) noexcept {
+    switch (p) {
+        case TrackProperty::PositionX: case TrackProperty::PositionY: case TrackProperty::PositionZ:
+        case TrackProperty::ScaleX: case TrackProperty::ScaleY: case TrackProperty::ScaleZ:
+        case TrackProperty::RotationX: case TrackProperty::RotationY: case TrackProperty::RotationZ:
+        case TrackProperty::AnchorX: case TrackProperty::AnchorY: case TrackProperty::AnchorZ:
+        case TrackProperty::SkewX: case TrackProperty::SkewY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+} // namespace
+
+Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<u64>* slices) noexcept {
+    if (slices) slices->clear();
+    if (axis > 2 || count < scene3d::kShape3DSplitMin || count > scene3d::kShape3DSplitMax)
+        return Status{Errc::InvalidArgument, "eixo ou numero de partes invalido"};
+    scene3d::Shape3DSpec spec;
+    if (!query_shape3d(layerId, spec)) return Status{Errc::InvalidArgument, "selecione uma forma 3D"};
+    if (spec.kind != scene3d::Shape3DKind::Cube) return Status{Errc::InvalidArgument, "so o cubo divide em partes"};
+    const std::vector<scene3d::Shape3DSpec> parts = scene3d::split_shape3d_spec(spec, axis, count);
+    if (parts.size() != count) return Status{Errc::InvalidArgument, "fatia fina demais"};
+    // Malhas e imagens FORA do lock (como em set_shape3d).
+    std::vector<std::shared_ptr<const scene3d::SceneAsset>> scenes;
+    scenes.reserve(count);
+    for (const scene3d::Shape3DSpec& s : parts) {
+        scene3d::ImportResult r = scene3d::build_shape3d(s, [this](const std::string& p) { return resolve_asset_path(p); },
+                                                         model_texture_cap());
+        if (!r.ok()) return Status{Errc::InvalidArgument, "forma 3D sem geometria"};
+        scenes.emplace_back(std::move(r.asset));
+    }
+
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    // A fila vem ANTES (como em add_null): um desfazer ainda na fila rodaria
+    // depois deste passo e desmancharia o grupo pela metade.
+    drain_commands_locked();
+    Composition* comp = current_composition();
+    const LayerId groupId = LayerId::unpack(layerId);
+    Layer* orig = shape_layer(comp, layerId);
+    if (!orig) return Status{Errc::InvalidArgument, "selecione uma forma 3D"};
+    if (orig->locked) return Status{Errc::InvalidState, "camada bloqueada"};
+    const Asset* oldAsset = project_->asset(orig->model.scene);
+    scene3d::Shape3DSpec now;
+    if (!oldAsset || !scene3d::decode_shape3d(oldAsset->sourcePath, now) || scene3d::encode_shape3d(now) != scene3d::encode_shape3d(spec))
+        return Status{Errc::InvalidState, "a forma mudou; tente de novo"};
+    if (comp->layers().count() + count > kMaxLayerCount) return Status{Errc::OutOfMemory, "limite de camadas"};
+
+    history_.before_mutation(*comp, project_->timeline().current(), "dividir forma 3D");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+
+    // Cópia do original ANTES de criar camadas (a tabela pode realocar).
+    const Layer source = *orig;
+    const std::string assetName = oldAsset->name;
+    // Nulo com caixa de 100 px centrada no pivô (as alças do palco ficam em
+    // cima do cubo). Sem keyframe de âncora, a âncora anda (50, 50) e as
+    // fatias andam o mesmo: T(−a′)·T(a′ − a) = T(−a), o quadro não muda.
+    const bool anchorKeyed = source.tracks.find(TrackProperty::AnchorX) || source.tracks.find(TrackProperty::AnchorY)
+                          || source.tracks.find(TrackProperty::AnchorZ);
+    const Vec3 anchorShift = anchorKeyed ? Vec3{0.0f, 0.0f, 0.0f} : Vec3{50.0f, 50.0f, 0.0f};
+
+    // Fatias de trás para a frente: cada cópia entra logo acima do original,
+    // então a ordem final fica nulo, fatia 1, fatia 2, ...
+    std::vector<u64> ids(count, 0);
+    for (u32 k = count; k-- > 0;) {
+        const LayerId sid = comp->duplicate_layer(groupId, source.start);
+        Layer* s = comp->layer(sid);
+        if (!s) return Status{Errc::OutOfMemory, "camada nao criada"};
+        const scene3d::SceneAsset& scene = *scenes[k];
+        const AssetId assetId = add_shape_asset(*project_, scene, assetName, scene3d::encode_shape3d(parts[k]));
+        models_[assetId.pack()] = scenes[k];
+        s->name = source.name + " " + std::to_string(k + 1);
+        s->start = source.start;
+        s->end = source.end;
+        s->parent = groupId;
+        s->parentBasis = Mat4::identity();
+        s->hasParentBasis = false;
+        s->threeD = true;
+        s->locked = false;
+        s->model.scene = assetId;
+        s->model.animationClip = -1;
+        s->model.pivot = scene.bounds.center();
+        // Transform próprio da fatia: só o lugar dela dentro do grupo, no
+        // espaço da camada original (px, Y e Z da composição — o mesmo
+        // layer_from_model do renderer). Girar/escalar parte do zero.
+        const Vec3 d = (s->model.pivot - source.model.pivot) * source.model.unitScale;
+        s->transform.position = Vec3{d.x, -d.y, -d.z} + anchorShift;
+        s->transform.rotation = Vec3{0.0f, 0.0f, 0.0f};
+        s->transform.scale = Vec3{1.0f, 1.0f, 1.0f};
+        s->transform.anchor = Vec3{0.0f, 0.0f, 0.0f};
+        s->transform.skewX = s->transform.skewY = 0.0f;
+        s->tracks.remove_if([](const Track& t) { return group_transform_track(t.property); });
+        ids[k] = sid.pack();
+    }
+
+    // O original vira o nulo do grupo: mesmo id (quem era filho/alvo dele
+    // continua ligado), com o transform e as trilhas de transform.
+    Layer* g = comp->layer(groupId);
+    if (!g) return Status{Errc::InvalidState, "grupo sumiu"};
+    g->kind = LayerKind::Null;
+    g->threeD = true;
+    g->model = Model3DData{};
+    g->effects.clear();
+    g->masks.clear();
+    g->layerAnimators.clear();
+    g->matteSource = LayerId{};
+    g->matteMode = MatteMode::None;
+    g->transform.opacity = 1.0f;
+    g->transform.anchor = g->transform.anchor + anchorShift;
+    g->tracks.remove_if([](const Track& t) { return !group_transform_track(t.property); });
+    comp->rebuild_draw_order();
+    project_->mark_dirty();
+    request_render();
+    if (slices) *slices = ids;
+    return groupId.pack();
+}
+
 } // namespace aurea

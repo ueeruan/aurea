@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeito Datamosh (2026-10-03). Chaves fx_*datamosh*. -->
+<resources>
+    <string name="fx_name_datamosh">Датамош</string>
+    <string name="fx_desc_glitch_datamosh">Глитч сжатия: старый кадр продолжает растаскиваться блоками по движению видео, с размазанными цветами и испорченными блоками. На изображениях блоки плавятся сами.</string>
+    <string name="fx_datamosh_hold_frames">Удержание кадров</string>
+    <string name="fx_datamosh_drag">Протягивание</string>
+    <string name="fx_datamosh_corruption">Повреждение</string>
+    <string name="fx_datamosh_color_bleed">Растекание цвета</string>
+</resources>

@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +43,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalContext
@@ -49,12 +54,33 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.ui.ds.AureaModalSheet
+import com.aurea.aurea.ui.ds.ColorPickerSheet
+import com.aurea.aurea.ui.ds.KeypadRequest
+import com.aurea.aurea.ui.ds.NumericKeypadSheet
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaDims
 import com.aurea.aurea.ui.theme.AureaType
 
-/** O que a folha devolve ao criar. */
-internal data class NewProjectSpec(val width: Int, val height: Int, val fps: Int, val title: String)
+/**
+ * O que a folha devolve ao criar. `fps` é livre (1–240, decimais como 29,97);
+ * `background` é o fundo da composição em RGB sRGB (preto = o de sempre).
+ */
+internal data class NewProjectSpec(
+    val width: Int,
+    val height: Int,
+    val fps: Double,
+    val title: String,
+    val background: FloatArray = floatArrayOf(0f, 0f, 0f),
+)
+
+/** Segmento "Personalizado…" da fileira de fps (nunca é uma taxa de verdade). */
+private const val CustomFps = -1.0
+
+/** Fundos de um toque na folha; o terceiro quadrado abre o seletor de cor. */
+private val NewProjectBackgrounds = listOf(
+    R.string.sh_bg_black to floatArrayOf(0f, 0f, 0f),
+    R.string.sh_bg_white to floatArrayOf(1f, 1f, 1f),
+)
 
 private val EaseOutCubic = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)
 
@@ -80,7 +106,10 @@ internal fun NewProjectSheet(
     var aspectKey by rememberSaveable { mutableStateOf(defaultAspectKey) }
     var free by rememberSaveable { mutableStateOf(false) }
     var resolution by rememberSaveable { mutableIntStateOf(defaultResolution) }
-    var fps by rememberSaveable { mutableIntStateOf(defaultFps) }
+    var fps by rememberSaveable { mutableDoubleStateOf(defaultFps.toDouble()) }
+    var background by rememberSaveable { mutableStateOf(floatArrayOf(0f, 0f, 0f)) }
+    var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
+    var pickingBackground by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var freeWidth by rememberSaveable { mutableStateOf("1080") }
     var freeHeight by rememberSaveable { mutableStateOf("1350") }
@@ -98,7 +127,7 @@ internal fun NewProjectSheet(
     fun create() {
         val title = name.trim().ifEmpty { suggestedName.ifEmpty { untitled } }
         onDismiss()
-        onCreate(NewProjectSpec(frame.width, frame.height, fps, title))
+        onCreate(NewProjectSpec(frame.width, frame.height, fps, title, background.copyOf()))
     }
 
     AureaModalSheet(onDismiss = onDismiss, topRadius = AureaDims.RadiusXl) {
@@ -111,7 +140,7 @@ internal fun NewProjectSheet(
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(stringResource(R.string.new_project_title), style = AureaType.TitleLarge, modifier = Modifier.weight(1f))
                 // A ficha, viva: muda com cada escolha.
-                Text("${frame.width} × ${frame.height} · $fps fps", style = AureaType.SheetSpec)
+                Text("${frame.width} × ${frame.height} · ${formatFps(fps.toFloat())} fps", style = AureaType.SheetSpec)
             }
             Spacer(Modifier.height(16.dp))
             AspectPreviewFrame(
@@ -186,10 +215,26 @@ internal fun NewProjectSheet(
             Spacer(Modifier.height(18.dp))
             CapsLabel(stringResource(R.string.settings_fps))
             Spacer(Modifier.height(8.dp))
+            // Atalhos + "Personalizado…" (fps livre 1–240 pelo teclado; o
+            // segmento mostra a taxa digitada quando ela não é um atalho).
+            val presets = ProjectPresets.fpsOptions.map { it.toDouble() }
+            val customLabel = stringResource(R.string.project_fps_custom)
+            val customTitle = stringResource(R.string.project_fps_custom_title)
+            val isCustom = presets.none { kotlin.math.abs(it - fps) < 0.001 }
             AureaSegmented(
-                ProjectPresets.fpsOptions, fps, { "$it fps" }, { fps = it },
+                presets + CustomFps,
+                if (isCustom) CustomFps else presets.first { kotlin.math.abs(it - fps) < 0.001 },
+                { v -> if (v != CustomFps) "${formatFps(v.toFloat())} fps" else if (isCustom) "${formatFps(fps.toFloat())} fps" else customLabel },
+                { v ->
+                    if (v != CustomFps) fps = v
+                    else keypad = KeypadRequest(customTitle, fps.toFloat(), "fps", 1f, 240f, 3) { typed -> fps = typed.toDouble() }
+                },
                 AureaColors.SurfaceHigh, AureaColors.Background, 7.dp,
             )
+            Spacer(Modifier.height(18.dp))
+            CapsLabel(stringResource(R.string.editor_plano_fundo))
+            Spacer(Modifier.height(8.dp))
+            BackgroundChoices(background, onPick = { background = it }, onCustom = { pickingBackground = true })
             Spacer(Modifier.height(24.dp))
             Box(
                 Modifier
@@ -204,6 +249,62 @@ internal fun NewProjectSheet(
             }
         }
     }
+    keypad?.let { r -> NumericKeypadSheet(r, onDismiss = { keypad = null }) }
+    if (pickingBackground) {
+        val initial = remember { floatArrayOf(background[0], background[1], background[2], 1f) }
+        ColorPickerSheet(
+            initial = initial,
+            withAlpha = false,
+            onChange = { r, g, b, _ -> background = floatArrayOf(r, g, b) },
+            onDone = { pickingBackground = false },
+        )
+    }
+}
+
+/**
+ * Fundo da composição: preto, branco e "outra cor" (o quadrado colorido abre
+ * o seletor do app; com uma cor escolhida, ele mostra a cor).
+ */
+@Composable
+private fun BackgroundChoices(current: FloatArray, onPick: (FloatArray) -> Unit, onCustom: () -> Unit) {
+    val preset = NewProjectBackgrounds.firstOrNull { (_, c) -> (0..2).all { kotlin.math.abs(c[it] - current[it]) < 0.01f } }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        NewProjectBackgrounds.forEach { (res, c) ->
+            val name = stringResource(res)
+            BackgroundSwatch(
+                Modifier.background(Color(c[0], c[1], c[2])),
+                selected = preset?.first == res,
+                description = stringResource(R.string.project_bg_color_desc, name),
+            ) { onPick(c.copyOf()) }
+        }
+        val custom = preset == null
+        BackgroundSwatch(
+            if (custom) Modifier.background(Color(current[0], current[1], current[2]))
+            else Modifier.background(Brush.sweepGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red))),
+            selected = custom,
+            description = stringResource(R.string.editor_outra_cor),
+            onClick = onCustom,
+        )
+    }
+}
+
+@Composable
+private fun BackgroundSwatch(fill: Modifier, selected: Boolean, description: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .border(if (selected) 2.dp else 1.dp, if (selected) AureaColors.Accent else AureaColors.Muted, RoundedCornerShape(10.dp))
+            .padding(if (selected) 4.dp else 0.dp)
+            .clip(RoundedCornerShape(if (selected) 7.dp else 10.dp))
+            .then(fill)
+            .semantics {
+                contentDescription = description
+                this.selected = selected
+                role = Role.RadioButton
+            }
+            .clickable(onClick = onClick),
+    )
 }
 
 /**

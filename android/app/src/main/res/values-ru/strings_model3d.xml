@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Otimizar modelo" (import 3D com orçamento de memória do aparelho). -->
+<resources>
+    <string name="model3d_heavy_title">Тяжёлая модель</string>
+    <string name="model3d_heavy_body">В этой модели %1$s треугольников. В таком виде она может подвесить устройство. Оптимизация уменьшит геометрию и текстуры перед открытием.</string>
+    <string name="model3d_quality_original">Оригинал</string>
+    <string name="model3d_quality_balanced">Баланс</string>
+    <string name="model3d_quality_light">Лёгкая</string>
+    <string name="model3d_quality_original_hint">Без уменьшения</string>
+    <string name="model3d_quality_balanced_hint">До %1$s треугольников, текстуры до %2$d px</string>
+    <string name="model3d_quality_light_hint">До %1$s треугольников, текстуры до %2$d px · плавнее</string>
+    <string name="model3d_recommended">рекомендуется</string>
+    <string name="model3d_optimize_import">Оптимизировать и импортировать</string>
+    <string name="model3d_import">Импортировать</string>
+    <string name="model3d_too_heavy">Эта модель слишком тяжёлая для памяти этого устройства даже после оптимизации. Используйте версию с меньшим числом полигонов или меньшими текстурами.</string>
+    <string name="model3d_too_heavy_after">Модель превысила память этого устройства и была отклонена, чтобы приложение не закрылось. Импортируйте её снова и выберите «Лёгкая» или используйте более простую версию.</string>
+    <string name="model3d_stage_simplifying">Упрощение</string>
+    <string name="model3d_optimized_toast">Модель оптимизирована: %1$s → %2$s треугольников</string>
+    <string name="model3d_thousand">тыс.</string>
+    <string name="model3d_million">млн</string>
+</resources>

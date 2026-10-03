@@ -27,7 +27,7 @@
     <string name="exp2_fun_10">Contando fotogramas con los dedos…</string>
     <string name="exp2_frames">Fotograma %1$s de %2$s · %3$s fps</string>
     <!-- Export como imagem (PNG, sequência .zip, GIF) - 2026-10-02 -->
-    <string name="exp2_format_video">Video (MP4)</string>
+    <string name="exp2_format_video">Vídeo (MP4)</string>
     <string name="exp2_format_frame">Fotograma actual (PNG)</string>
     <string name="exp2_format_sequence">Secuencia PNG (.zip)</string>
     <string name="exp2_format_gif">GIF</string>

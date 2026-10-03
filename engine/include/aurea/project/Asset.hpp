@@ -117,6 +117,10 @@ struct Asset {
         bool hasMorphTargets = false;
         std::vector<std::string> animationNames;
         std::vector<u32> lodTriangleCounts;
+        /// "Otimizar modelo" (scene3d::ModelQuality): 0 Original, 1 Equilibrado,
+        /// 2 Leve. Gravado na seção Scene3D do projeto; reabrir aplica de novo.
+        u8 importQuality = 0;
+        u32 sourceTriangles = 0;   ///< do arquivo, antes da simplificação
     } model;
 
     [[nodiscard]] bool is_visual() const noexcept {

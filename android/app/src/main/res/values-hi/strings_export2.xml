@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Motivo da falha do export (aurea::ExportFailure, engine/include/aurea/export/ExportRules.hpp).
+     Encaixa em app_export_failed: minúscula, sem ponto final. -->
+<resources>
+    <string name="expfail_encoder">फ़ोन के वीडियो एनकोडर ने वीडियो स्वीकार नहीं किया; कोई दूसरा रिज़ॉल्यूशन आज़माएँ</string>
+    <string name="expfail_encoder_stalled">वीडियो एनकोडर ने जवाब देना बंद कर दिया; दूसरे ऐप बंद करके फिर से कोशिश करें</string>
+    <string name="expfail_render">फ़ोन का GPU वीडियो रेंडर नहीं कर सका; कम रिज़ॉल्यूशन आज़माएँ</string>
+    <string name="expfail_memory">इस रिज़ॉल्यूशन के लिए पर्याप्त मेमोरी नहीं है; कम रिज़ॉल्यूशन आज़माएँ</string>
+    <string name="expfail_media">प्रोजेक्ट की एक मीडिया फ़ाइल पढ़ी नहीं जा सकी</string>
+    <string name="expfail_file">वीडियो फ़ाइल सेव नहीं की जा सकी</string>
+    <string name="expfail_unsupported">यह फ़ोन इस रिज़ॉल्यूशन या फ़ॉर्मैट में एक्सपोर्ट नहीं कर सकता</string>
+</resources>

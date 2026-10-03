@@ -540,3 +540,21 @@ AUREA_TEST(Presets, CaptionAndCurvePresetsRoundTrip) {
     AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"x1":4}})", bad));
     AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"caption","caption":{"style":99}})", bad));
 }
+
+// Preset de curva com parâmetros (Overshoot/Elástico/Quique): o marcador em
+// y2 volta do arquivo; numa bézier, −10 continua fora da faixa (recusado).
+AUREA_TEST(Presets, ParametricCurvePresetKeepsItsParameters) {
+    const std::string js = presets::make_curve_preset("Mola", Interpolation::Elastic, 0.625f, 0.4f, 1.0f, kEaseParamMarker);
+    presets::Preset p;
+    AUREA_CHECK(presets::parse(js, p));
+    AUREA_CHECK(p.curveInterp == Interpolation::Elastic);
+    AUREA_CHECK(p.x1 == 0.625f && p.y1 == 0.4f && p.x2 == 1.0f && p.y2 == kEaseParamMarker);
+    const std::string os = presets::make_curve_preset("Passa", Interpolation::Overshoot, 0.5f, 0.0f, 0.0f, kEaseParamMarker);
+    presets::Preset q;
+    AUREA_CHECK(presets::parse(os, q));
+    AUREA_CHECK(q.curveInterp == Interpolation::Overshoot && q.y2 == kEaseParamMarker && q.x2 == 0.0f);
+    presets::Preset bad;
+    AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"interp":2,"y2":-10}})", bad));
+    AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"interp":8,"y2":-5}})", bad));
+    AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"interp":11}})", bad));
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Efeito Datamosh (2026-10-03). Chaves fx_*datamosh*. -->
+<resources>
+    <string name="fx_name_datamosh">डेटामॉश</string>
+    <string name="fx_desc_glitch_datamosh">कम्प्रेशन ग्लिच: पुराना फ़्रेम वीडियो की गति से ब्लॉकों में खिंचता रहता है, रंग फैलते हैं और ब्लॉक खराब हो जाते हैं। इमेज पर ब्लॉक अपने-आप पिघलते हैं।</string>
+    <string name="fx_datamosh_hold_frames">रोके गए फ़्रेम</string>
+    <string name="fx_datamosh_drag">खिंचाव</string>
+    <string name="fx_datamosh_corruption">विकृति</string>
+    <string name="fx_datamosh_color_bleed">रंग का फैलाव</string>
+</resources>

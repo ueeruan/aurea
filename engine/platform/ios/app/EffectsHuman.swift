@@ -629,6 +629,19 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             9: FxParamHuman(label: "fx_semente", decimals: 0),
             10: FxParamHuman(label: "fx_mistura", decimals: 0),
         ])),
+    ("aurea.glitch.datamosh", FxEffectHuman(
+        name: "fx_name_datamosh",
+        keywords: "datamosh data mosh glitch compressao codec blocos macrobloco arrastar derreter i-frame p-frame pixel bleed",
+        principal: [0, 1, 2, 3, 4, 5, 6],
+        params: [
+            0: FxParamHuman(label: "fx_intensidade", decimals: 0),
+            1: FxParamHuman(label: "fx_tamanho_bloco", suffix: "px", decimals: 0),
+            2: FxParamHuman(label: "fx_datamosh_hold_frames", decimals: 0),
+            3: FxParamHuman(label: "fx_datamosh_drag", decimals: 2),
+            4: FxParamHuman(label: "fx_datamosh_corruption", decimals: 0),
+            5: FxParamHuman(label: "fx_datamosh_color_bleed", decimals: 0),
+            6: FxParamHuman(label: "fx_semente", decimals: 0),
+        ])),
     ("aurea.distort.displacement_map", FxEffectHuman(
         name: "fx_name_displacement_map",
         keywords: "displacement map mapa de deslocamento deslocar camada mapa distorcer canal",
@@ -1422,6 +1435,10 @@ func fxEffectCategoryLabel(_ category: String) -> String {
     case "controles de expressao": return AureaText.t("cat_expr")
     case "pattern": return AureaText.t("cat_pattern")
     case "audio": return AureaText.t("cat_audio")
+    // Ferramentas que viraram efeito: categoria em pt fixa (como no Android).
+    case "texto": return AureaText.t("panel_texto")
+    case "rastreio": return AureaText.t("panel_rastreio")
+    case "mascara": return AureaText.t("sh_dock_mask")
     default: return category
     }
 }
@@ -1519,6 +1536,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")
     put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")
     put("aurea.glitch.dissolve_shake", "fx_desc_glitch_dissolve_shake", FxAllTargets, "tremor dissolver fragmentos quebrar")
+    put("aurea.glitch.datamosh", "fx_desc_glitch_datamosh", FxAllTargets, "datamosh compressao blocos arrastar derreter codec")
     put("aurea.distort.displacement_map", "fx_desc_distort_displacement_map", FxAllTargets, "mapa deslocamento camada distorcer")
     put("aurea.control.slider", "fx_desc_control_slider")
     put("aurea.control.angle", "fx_desc_control_angle")

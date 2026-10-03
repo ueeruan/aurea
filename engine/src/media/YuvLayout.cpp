@@ -3,6 +3,8 @@
 // =============================================================================
 #include "aurea/media/YuvLayout.hpp"
 
+#include <algorithm>
+
 namespace aurea::media {
 namespace {
 
@@ -59,15 +61,28 @@ bool plan_yuv_copy(const YuvInputLayout& in, YuvCopyPlan& out, const char** why)
         out.totalBytes = ySize + 2 * cs * (in.sliceHeight / 2);
     }
 
-    if (in.capacity != 0 && out.totalBytes > in.capacity) {
-        if (why) *why = "buffer do encoder menor que o quadro";
-        out = YuvCopyPlan{};
-        return false;
-    }
     if (out.cRowBytes == 0 || out.cRows == 0) {
         if (why) *why = "croma de tamanho zero";
         out = YuvCopyPlan{};
         return false;
+    }
+    if (in.capacity != 0 && out.totalBytes > in.capacity) {
+        // Há codec que declara a fatia/passo com alinhamento e aloca sem a
+        // folga da ÚLTIMA linha (ou da última fatia de croma). O que importa é
+        // o último byte que a cópia escreve caber; o tamanho declarado no
+        // queueInputBuffer passa a ser a capacidade (nunca além dela).
+        const std::size_t lastY = out.yOffset + static_cast<std::size_t>(out.yRows - 1) * out.yPitch + out.yRowBytes;
+        const std::size_t firstC = out.cOffset + static_cast<std::size_t>(out.cRows - 1) * out.cPitch + out.cRowBytes;
+        const std::size_t lastC = out.cSecondOffset == 0
+            ? firstC
+            : out.cOffset + out.cSecondOffset + static_cast<std::size_t>(out.cRows - 1) * out.cSecondPitch + out.cRowBytes;
+        const std::size_t needed = std::max({lastY, firstC, lastC});
+        if (needed > in.capacity) {
+            if (why) *why = "buffer do encoder menor que o quadro";
+            out = YuvCopyPlan{};
+            return false;
+        }
+        out.totalBytes = in.capacity;
     }
     return true;
 }

@@ -797,6 +797,23 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         ),
     )
     put(
+        "aurea.glitch.datamosh",
+        EffectHuman(
+            name = R.string.fx_name_datamosh,
+            keywords = "datamosh data mosh glitch compressao codec blocos macrobloco arrastar derreter i-frame p-frame pixel bleed",
+            principal = listOf(0, 1, 2, 3, 4, 5, 6),
+            params = mapOf(
+                0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
+                1 to ParamHuman(label = R.string.fx_tamanho_bloco, suffix = "px", decimals = 0),
+                2 to ParamHuman(label = R.string.fx_datamosh_hold_frames, decimals = 0),
+                3 to ParamHuman(label = R.string.fx_datamosh_drag, decimals = 2),
+                4 to ParamHuman(label = R.string.fx_datamosh_corruption, decimals = 0),
+                5 to ParamHuman(label = R.string.fx_datamosh_color_bleed, decimals = 0),
+                6 to ParamHuman(label = R.string.fx_semente, decimals = 0),
+            ),
+        ),
+    )
+    put(
         "aurea.distort.displacement_map",
         EffectHuman(
             name = R.string.fx_name_displacement_map,

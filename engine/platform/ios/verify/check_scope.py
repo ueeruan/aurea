@@ -24,7 +24,7 @@ ROOT = os.path.normpath(os.path.join(IOS, "..", ".."))          # engine/
 REPO = os.path.normpath(os.path.join(ROOT, ".."))
 
 APPLE_IMPORTS = {
-    "SwiftUI", "PhotosUI", "Photos", "AVKit", "Foundation", "UIKit", "Metal", "MetalKit", "QuartzCore", "CoreGraphics", "CoreText",
+    "SwiftUI", "PhotosUI", "Photos", "AVKit", "QuickLook", "Foundation", "UIKit", "Metal", "MetalKit", "QuartzCore", "CoreGraphics", "CoreText",
     "CoreVideo", "CoreMedia", "CoreImage", "VideoToolbox", "AVFoundation", "AudioToolbox", "CoreAudio",
     "ImageIO", "UniformTypeIdentifiers", "simd", "Combine", "Dispatch", "os", "Swift",
     "Accelerate", "CoreFoundation", "IOSurface", "AVFAudio", "os.log", "CryptoKit", "Security", "Darwin", "MetricKit",

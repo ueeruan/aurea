@@ -381,7 +381,7 @@ private fun ImportedMaterialSection(store: EditorStore) {
     ChipRow {
         materials.forEach { material ->
             val id = material[0].toInt()
-            KitChip("Material ${id + 1}", on = id == index) { selected = id }
+            KitChip(stringResource(R.string.i18n_material_n, id + 1), on = id == index) { selected = id }
         }
     }
     val labels = listOf("R", "G", "B", "Alpha", stringResource(R.string.pn_t3d_metallic), stringResource(R.string.pn_t3d_roughness))

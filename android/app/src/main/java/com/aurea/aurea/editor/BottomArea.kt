@@ -88,7 +88,7 @@ internal fun StageHint() {
 // =============================================================================
 
 /** O que a doca precisa da camada (data class: recompõe só quando muda). */
-private data class DockLayer(
+internal data class DockLayer(
     val id: Long,
     val kind: Int,
     val locked: Boolean,
@@ -106,7 +106,7 @@ private data class DockLayer(
  * As fichas da grade: ícone grande + nome curto, cada uma abre UM painel que
  * existe de verdade. Ficha sem painel não entra (nada de "em breve").
  */
-private enum class DockSection(val glyph: Char, @StringRes val label: Int, val panel: EditorPanel) {
+internal enum class DockSection(val glyph: Char, @StringRes val label: Int, val panel: EditorPanel) {
     ColorFill(CupertinoGlyph.Paintbrush, R.string.sh_dock_color_fill, EditorPanel.Shape),
     EditShape(ShellGlyph.SliderHorizontalBelowRectangle, R.string.sh_dock_edit_shape, EditorPanel.Shape),
     EditVector(CupertinoGlyph.PencilOutline, R.string.sh_dock_edit_vector, EditorPanel.Vector),
@@ -118,8 +118,11 @@ private enum class DockSection(val glyph: Char, @StringRes val label: Int, val p
     Blend(CupertinoGlyph.CircleLefthalfFill, R.string.sh_dock_opacity_blend, EditorPanel.Appearance),
     Environment(CupertinoGlyph.Lightbulb, R.string.sh_dock_environment, EditorPanel.Element3D),
     // Máscara, rastreio de câmera e legendas automáticas viraram EFEITOS (moram
-    // no seletor de efeitos); os presets saíram (ninguém usava). Nada disso tem
+    // no seletor de efeitos); os presets de vídeo/imagem saíram. Nada disso tem
     // ficha própria na doca.
+    // Presets de TEXTO voltaram (2026-10-03): só no texto 2D/3D, abre o painel
+    // de presets na aba de texto (cartões animados, salvos e da comunidade).
+    Presets(CupertinoGlyph.WandStars, R.string.sh_dock_presets, EditorPanel.Presets),
     Effects(CupertinoGlyph.Sparkles, R.string.sh_dock_effects, EditorPanel.Effects),
     // Rig 2D: não abre painel — o palco vira o esqueleto (RigStage.kt).
     Rig(CupertinoGlyph.PersonCropCircle, R.string.rig_dock, EditorPanel.Transform),
@@ -133,7 +136,7 @@ private enum class DockSection(val glyph: Char, @StringRes val label: Int, val p
  * moram na fileira rápida; o raro (duplicar, estilo, grupo, rastrear ponto…)
  * mora no ⋯ do topo — nada aparece duas vezes.
  */
-private fun sectionsFor(l: DockLayer): List<DockSection> {
+internal fun sectionsFor(l: DockLayer): List<DockSection> {
     val type = LayerType.of(l.kind)
     if (l.adjustment || type == LayerType.Adjustment) {
         // Camada de ajuste não tem conteúdo: só os efeitos que ela aplica abaixo e a mistura.
@@ -145,11 +148,12 @@ private fun sectionsFor(l: DockLayer): List<DockSection> {
     return when (type) {
         LayerType.Shape -> if (l.vector) listOf(DockSection.Blend, DockSection.Move, DockSection.EditVector, DockSection.Effects)
             else listOf(DockSection.ColorFill, DockSection.Blend, DockSection.Move, DockSection.EditShape, DockSection.Effects)
-        LayerType.Text -> listOf(DockSection.EditText, DockSection.TextOptions) + common
+        // Texto: editar, opções e presets em cima; mistura, mover e efeitos embaixo (6 → 3 + 3).
+        LayerType.Text -> listOf(DockSection.EditText, DockSection.TextOptions, DockSection.Presets) + common
         LayerType.Video -> if (l.hasAudio) listOf(DockSection.Blend, DockSection.Move, DockSection.Audio, DockSection.Effects) else common
         LayerType.Image -> common + DockSection.Rig
         LayerType.Audio -> listOf(DockSection.Audio, DockSection.Effects)
-        LayerType.Model3D -> if (l.text3D) listOf(DockSection.EditText, DockSection.TextOptions) + common
+        LayerType.Model3D -> if (l.text3D) listOf(DockSection.EditText, DockSection.TextOptions, DockSection.Presets) + common
             else listOf(DockSection.Move, DockSection.Environment, DockSection.Effects, DockSection.Blend)
         LayerType.Particles -> listOf(DockSection.Particles) + common
         LayerType.Group -> common

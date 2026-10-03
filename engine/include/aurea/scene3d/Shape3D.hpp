@@ -58,7 +58,32 @@ struct Shape3DSpec {
     f32 metallic = 0.0f;
     f32 roughness = 0.45f;
     std::vector<Shape3DPart> parts;   ///< sempre shape3d_part_count(kind) depois de decode/normalize
+    /// FATIA do cubo (só Cube): o pedaço [boxMin, boxMax] do cubo inteiro
+    /// (−0,5..0,5 em cada eixo). As faces ficam na caixa da fatia e a UV de
+    /// cada face é a do cubo inteiro projetada no plano dela — a imagem segue
+    /// contínua de uma fatia para a outra, e a face nova do corte mostra a
+    /// imagem da face de fora com a mesma direção. Padrão = o cubo inteiro
+    /// (projetos antigos não têm a chave "b" e abrem iguais).
+    Vec3 boxMin{-0.5f, -0.5f, -0.5f};
+    Vec3 boxMax{0.5f, 0.5f, 0.5f};
 };
+
+/// Menor espessura de uma fatia (unidades do cubo): abaixo disso a receita
+/// recusa o corte (faces degeneradas).
+inline constexpr f32 kShape3DMinSlice = 1.0f / 256.0f;
+/// Faixa de partes do "dividir em partes".
+inline constexpr u32 kShape3DSplitMin = 2;
+inline constexpr u32 kShape3DSplitMax = 16;
+
+/// A receita é o cubo inteiro (sem fatia)?
+[[nodiscard]] bool shape3d_full_box(const Shape3DSpec& spec) noexcept;
+
+/// Divide a receita (cubo ou fatia de cubo) em `count` fatias iguais ao longo
+/// do eixo `axis` (0 X, 1 Y, 2 Z), na ordem do eixo (do menor ao maior).
+/// Cada fatia leva a mesma cor/imagem por face; juntas, as caixas cobrem a
+/// caixa original sem buraco. Vazio = não dá (não é cubo, eixo/contagem fora
+/// da faixa ou fatia fina demais).
+[[nodiscard]] std::vector<Shape3DSpec> split_shape3d_spec(const Shape3DSpec& spec, u32 axis, u32 count);
 
 [[nodiscard]] u32 shape3d_part_count(Shape3DKind kind) noexcept;
 /// Nome estável (inglês, minúsculo) da forma e da parte: chave da UI e nome

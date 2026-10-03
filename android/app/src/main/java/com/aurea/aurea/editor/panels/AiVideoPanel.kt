@@ -55,6 +55,7 @@ import com.aurea.aurea.ai.lerImagemParaEnvio
 import com.aurea.aurea.ai.podeGerar
 import com.aurea.aurea.ai.recursoDoModo
 import com.aurea.aurea.ai.rotulo
+import com.aurea.aurea.ai.rotuloRes
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
@@ -449,7 +450,7 @@ private fun Etiqueta(estado: AureaAiEstado, modelo: String, gpu: String) {
         Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(bola, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = cor)))
             Text(
-                "  Aurea AI • ${estado.rotulo()}",
+                "  Aurea AI • ${stringResource(estado.rotuloRes())}",
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600, color = cor)),
             )
         }

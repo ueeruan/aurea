@@ -38,6 +38,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.aurea.aurea.ui.ds.KeypadRequest
+import com.aurea.aurea.ui.ds.NumericKeypadSheet
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +69,7 @@ import com.aurea.aurea.state.ExportFormat
 import com.aurea.aurea.state.ExportOptions
 import com.aurea.aurea.state.ExportPhase
 import com.aurea.aurea.state.ImageExportRules
+import com.aurea.aurea.state.VideoExportRules
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
@@ -80,7 +83,8 @@ import kotlin.math.roundToInt
 
 /** Lado menor → rótulo da ficha (o mesmo do iOS). */
 private val Resolutions = listOf(480 to "480p", 720 to "720p", 1080 to "1080p", 1440 to "2K", 2160 to "4K")
-private val FrameRates = listOf(24.0, 25.0, 30.0, 50.0, 60.0)
+/** Atalhos de taxa do vídeo; "Personalizado…" digita qualquer uma de 1 a 240 (o teto dos encoders). */
+private val FrameRates = listOf(24.0, 25.0, 30.0, 50.0, 60.0, 120.0)
 /** Mbps manuais do Avançado (0 = automático pela qualidade). */
 private val CustomBitrates = listOf(5, 10, 15, 25, 40, 60)
 
@@ -232,11 +236,8 @@ private fun Options(
 ) {
     val comp = store.composition
     val short = max(1, min(compW, compH))
-    fun sizeFor(side: Int): Pair<Int, Int> {
-        val w = ((compW.toDouble() * side / short) / 2).roundToInt() * 2
-        val h = ((compH.toDouble() * side / short) / 2).roundToInt() * 2
-        return w to h
-    }
+    // A regra do motor (ExportRules.hpp): lado maior em múltiplo de 16.
+    fun sizeFor(side: Int): Pair<Int, Int> = VideoExportRules.frameSize(compW, compH, side)
     // Tudo aparece (§109): o que o aparelho não exporta fica marcado e
     // desligado, com a frase do porquê embaixo — o motor recusaria, e o
     // usuário não descobre só depois de tocar.
@@ -274,7 +275,7 @@ private fun Options(
         }
         if (blocked.isNotEmpty()) {
             Text(
-                device?.exportLimitReason() ?: stringResource(R.string.sh_export_above_device, blocked.joinToString()),
+                device?.exportLimitReason(androidx.compose.ui.platform.LocalContext.current) ?: stringResource(R.string.sh_export_above_device, blocked.joinToString()),
                 style = muted, modifier = Modifier.padding(top = 8.dp),
             )
         }
@@ -283,10 +284,25 @@ private fun Options(
     Group(stringResource(R.string.editor_quadros_segundo)) {
         // A ficha "do projeto" é achada pelo texto inteiro (traduzido), não pelo começo.
         val fromProject = stringResource(R.string.sh_export_fps_from_project, fmt(compFps))
-        Chips(listOf(fromProject) + FrameRates.filter { kotlin.math.abs(it - compFps) > 0.01 }.map { fmt(it) },
+        val customLabel = stringResource(R.string.project_fps_custom)
+        val customTitle = stringResource(R.string.project_fps_custom_title)
+        var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
+        val presets = FrameRates.filter { kotlin.math.abs(it - compFps) > 0.01 }
+        // Taxa digitada fora dos atalhos: ganha a própria ficha (escolhida) e
+        // "Personalizado…" continua ao lado para digitar outra.
+        val typed = options.fps.takeIf { it > 0.0 && presets.none { p -> kotlin.math.abs(p - it) < 0.01 } }
+        Chips(listOf(fromProject) + presets.map { fmt(it) } + listOfNotNull(typed?.let { fmt(it) }) + customLabel,
               if (options.fps == 0.0) fromProject else fmt(options.fps)) { label ->
-            onChange(options.copy(fps = if (label == fromProject) 0.0 else label.replace(',', '.').toDouble()))
+            when (label) {
+                fromProject -> onChange(options.copy(fps = 0.0))
+                customLabel -> keypad = KeypadRequest(customTitle, fps.toFloat(), "fps", 1f, 240f, 3) { v ->
+                    onChange(options.copy(fps = v.toDouble()))
+                }
+                else -> onChange(options.copy(fps = label.replace(',', '.').toDouble()))
+            }
         }
+        if (fps > 60.01) Text(stringResource(R.string.export_fps_high_note), style = muted, modifier = Modifier.padding(top = 8.dp))
+        keypad?.let { r -> NumericKeypadSheet(r, onDismiss = { keypad = null }) }
     }
 
     Group(stringResource(R.string.editor_qualidade)) {
@@ -312,7 +328,7 @@ private fun Options(
             onChange(options.copy(hevc = it == "HEVC"))
         }
         Text(
-            if (!hevcOk) device?.hevcExportReason() ?: ""
+            if (!hevcOk) device?.hevcExportReason(androidx.compose.ui.platform.LocalContext.current) ?: ""
             else if (options.hevc) stringResource(R.string.editor_hevc_arquivo_menor_mesma_qualidade_alguns)
             else stringResource(R.string.editor_h_264_abre_qualquer_aparelho_rede),
             style = muted, modifier = Modifier.padding(top = 6.dp),

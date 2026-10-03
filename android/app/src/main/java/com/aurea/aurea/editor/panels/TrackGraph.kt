@@ -92,7 +92,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!speed) TextButton(onClick = { multi = !multi; if (!multi) picked = emptySet() }, modifier = Modifier.testTag("curve.multi")) {
-                Text(if (multi) "Done (${picked.size})" else "Select", fontSize = 11.sp)
+                Text(if (multi) stringResource(R.string.i18n_done_n, picked.size) else stringResource(R.string.panel_selecionar), fontSize = 11.sp)
             }
             Text(if (speed) "${"%.3g".format(view.high)} /s" else "%.3g".format(view.high), fontSize = 10.sp, color = AureaColors.Muted, modifier = Modifier.weight(1f))
             Text("−", Modifier.size(48.dp).tocavel { view = view.transform(1 / 1.5f, 0f, 0f) }.wrapContentSize(), color = Color.White)
@@ -100,17 +100,17 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             Text(stringResource(R.string.panel_ajustar), Modifier.heightIn(min = 48.dp).tocavel { view = fit() }.wrapContentHeight().padding(horizontal = 12.dp), fontSize = 11.sp, color = AureaColors.Accent)
         }
         if (multi && !speed) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
-            TextButton(onClick = { picked = track.map { it.time }.toSet() }) { Text("All", fontSize = 11.sp) }
-            TextButton(onClick = { store.copySelectedKeys(layer, track.filter { it.time in picked }) }, enabled = picked.isNotEmpty()) { Text("Copy", fontSize = 11.sp) }
+            TextButton(onClick = { picked = track.map { it.time }.toSet() }) { Text(stringResource(R.string.common_all), fontSize = 11.sp) }
+            TextButton(onClick = { store.copySelectedKeys(layer, track.filter { it.time in picked }) }, enabled = picked.isNotEmpty()) { Text(stringResource(R.string.common_copy), fontSize = 11.sp) }
             TextButton(onClick = {
                 val row = store.layers.firstOrNull { it.id == layer }
                 val target = track.maxOf { it.time }.toLong() + 1 + (row?.startFrame ?: 0) - (row?.offsetFrames ?: 0)
                 if (target in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() && store.copySelectedKeys(layer, track.filter { it.time in picked })) {
                     store.pasteSelectedKeysAt(layer, target.toInt())
                 }
-            }, enabled = picked.isNotEmpty()) { Text("Duplicate", fontSize = 11.sp) }
-            TextButton(onClick = { store.pasteKeyframes(listOf(layer)) }) { Text("Paste", fontSize = 11.sp) }
-            TextButton(onClick = { if (store.editSelectedKeys(layer, track.filter { it.time in picked }, 0, true)) picked = emptySet() }, enabled = picked.isNotEmpty()) { Text("Delete", fontSize = 11.sp) }
+            }, enabled = picked.isNotEmpty()) { Text(stringResource(R.string.common_duplicate), fontSize = 11.sp) }
+            TextButton(onClick = { store.pasteKeyframes(listOf(layer)) }) { Text(stringResource(R.string.common_paste), fontSize = 11.sp) }
+            TextButton(onClick = { if (store.editSelectedKeys(layer, track.filter { it.time in picked }, 0, true)) picked = emptySet() }, enabled = picked.isNotEmpty()) { Text(stringResource(R.string.common_delete), fontSize = 11.sp) }
         }
         Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged { widthPx = it.width }.testTag("curve.trackGraph").pointerInput(layer, first.property, first.effectIndex, first.paramIndex, speed) {
             awaitEachGesture {

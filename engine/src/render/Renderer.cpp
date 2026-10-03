@@ -365,6 +365,16 @@ Mat4 world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept
 
 /// Modelo 3D no instante (fracionário): mundo com a cadeia de pais e pose da
 /// animação no relógio da TIMELINE (tempo local × velocidade do clipe).
+/// Amostras do desfoque 3D no PREVIEW: cada uma é a cena inteira de novo
+/// (sombra, MSAA, pós). Com o orçamento cheio, as do preview (= export com as
+/// mesmas amostras); com o aparelho apertado, de 4 a 8. Menos de 4 vira cópias
+/// sobrepostas; 16 cenas por quadro travavam o celular tocando.
+u32 scene_blur_preview_samples(const MotionBlurSettings& mb, const RenderSettings& settings) noexcept {
+    const f32 h = std::clamp(settings.heavyScale, 0.1f, 1.0f);
+    const u32 k = static_cast<u32>(static_cast<f32>(mb.previewSamples) * h);
+    return std::clamp<u32>(k, 4u, h >= 0.999f ? 64u : 8u);
+}
+
 void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAsset& asset, f64 time,
                  scene3d::SceneInstance& inst) {
     inst.world = world_3d_frac(comp, l, time) * layer_from_model(l.model);
@@ -768,6 +778,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     echoType_ = effects.find_key(effect_keys::kEchoTrail);
     rgbTimeType_ = effects.find_key(effect_keys::kTimeWarpRgb);
     motionDetectType_ = effects.find_key(effect_keys::kMotionDetect);
+    datamoshType_ = effects.find_key(effect_keys::kDatamosh);
     if (const Status s = shaders_.initialize(backend); !s.ok()) {
         shaders_.shutdown();
         backend_ = nullptr;
@@ -1404,7 +1415,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             rl.source.height = out.compHeight;
             rl.compFromLayer = Mat4::identity();
             rl.texelScale = previewFactor;
-            rl.blend = BlendMode::Normal;   // a mistura dela é o peso da opacidade
+            // Modo de mistura da camada de ajuste: o resultado dos efeitos é
+            // misturado ao fundo por ele (Tela, Clarear...) e depois pesado pela
+            // opacidade. Normal = o de sempre (o resultado substitui o fundo).
+            rl.blend = l->blendMode;
+            // Máscaras da camada de ajuste: limitam ONDE os efeitos valem. Fora
+            // delas o fundo fica intacto (antes eram ignoradas).
+            if (!l->masks.empty()) {
+                rl.maskFirst = static_cast<u32>(out.maskData.size());
+                rl.maskCount = mask::build_block(*l, static_cast<f64>(local.value), Vec2{0.0f, 0.0f},
+                                                 0.2f / std::max(rl.texelScale, 1e-3f), out.maskData, rl.maskStart, rl.maskKey);
+            }
             if (out.plans.size() <= used) out.plans.emplace_back();
             LayerPlacement pl;
             pl.compFromLayer = Mat4::identity();
@@ -1415,6 +1436,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             EffectGraph::plan(*l, *effects_, local, rl.texelScale, pl, this, out.plans[used], fps);
             if (out.plans[used].empty()) {   // nenhum efeito vivo: não muda nada
                 out.plans[used].clear();
+                if (rl.maskCount > 0) out.maskData.resize(rl.maskFirst);
                 continue;
             }
             groupOpen = false;   // fecha o grupo 3D: o que vem acima vê o ajuste
@@ -2116,9 +2138,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         if (l->motionBlur && comp.motion_blur().enabled && !cameraThrough) {
             const bool in3d = wants_3d(comp, *l, time);
             const MotionBlurSettings& mb = comp.motion_blur();
-            const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples
-                                                               : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
-                                          2u, 64u);
+            // Preview: no mínimo 6 amostras. Com o AUTO apertado sobravam 2 e a
+            // camada aparecia em DUAS cópias sobrepostas em vez de um rastro
+            // (cada amostra é só mais um desenho do mesmo quadrilátero).
+            // Plano na cena 3D: as MESMAS K amostras da cena (ver o desfoque 3D
+            // no fim do prepare), uma matriz por sub-quadro da cena.
+            const u32 k = settings.finalQuality ? std::clamp<u32>(mb.samples, 2u, 64u)
+                        : inScene3d ? scene_blur_preview_samples(mb, settings)
+                        : std::clamp<u32>(static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)), 6u, 64u);
             // Comprimento do rastro desta camada (× o obturador da composição).
             const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0
                            * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
@@ -2215,9 +2242,20 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // fonte nesse instante é buscada no bloco de vídeo (o decoder); a
         // comparação acontece na cadeia de efeitos (EffectGraph::build).
         i64 motionDelay = 0;
-        if (effects_ && motionDetectType_ && l->kind == LayerKind::Video) {
+        if (effects_ && (motionDetectType_ || datamoshType_) && l->kind == LayerKind::Video) {
             const ParameterRegistry* mp = effects_->params(motionDetectType_);
+            const ParameterRegistry* dp = datamoshType_ ? effects_->params(datamoshType_) : nullptr;
+            const u32 holdIndex = dp ? dp->find("hold_frames") : kInvalidIndex;
             for (const EffectInstance& inst : l->effects) {
+                // DATAMOSH: a referência fica presa por Q quadros e renova — no
+                // quadro local n, a fonte em n − ((n mod Q) + 1). Um quadro de
+                // histórico por camada: vale o primeiro efeito que pede.
+                if (inst.enabled && datamoshType_ && inst.type == datamoshType_ && dp && holdIndex < dp->count()) {
+                    const f32 q = evaluate_param(l->tracks, inst, holdIndex, dp->at(holdIndex), local).v[0];
+                    const i64 hold = std::isfinite(q) ? std::clamp<i64>(std::llround(q), 1, kDatamoshMaxHold) : 12;
+                    motionDelay = ((local.value % hold) + hold) % hold + 1;
+                    break;
+                }
                 if (!inst.enabled || inst.type != motionDetectType_ || !mp || mp->count() < 1) continue;
                 const f32 d = evaluate_param(l->tracks, inst, 0, mp->at(0), local).v[0];
                 motionDelay = std::isfinite(d) ? std::clamp<i64>(std::llround(d), 1, kMotionDetectMaxDelay) : 1;
@@ -2567,12 +2605,15 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
 
         // Camada 2D no espaço 3D: entra na cena (profundidade de verdade com os
-        // modelos e as outras camadas 3D vizinhas na pilha). Com desfoque/eco
-        // ou modo de mistura ela continua na composição, como antes.
+        // modelos e as outras camadas 3D vizinhas na pilha). Com eco ou modo de
+        // mistura ela continua na composição, como antes. Com DESFOQUE ela fica
+        // na cena: a cena vira K sub-quadros e o plano vai em cada um na matriz
+        // do sub-quadro. Fora da cena as faces de um cubo de camadas perdiam a
+        // profundidade e se desenhavam na ordem da pilha (as de trás por cima).
         // Partículas 3D entram no grupo como billboards (ParticleScene), não
         // como plano.
         const bool particles = rl.source.kind == LayerSource::Kind::Particles;
-        const bool asPlane = inScene3d && rl.blurMatrices.empty() && rl.temporal.empty() && rl.blend == BlendMode::Normal
+        const bool asPlane = inScene3d && rl.temporal.empty() && rl.blend == BlendMode::Normal
                           && (!particles || rl.particle.inScene) && !out.plans[used].hasFold
                           && rl.matteMode == MatteMode::None && !rl.matteOnly;
         if (asPlane) {
@@ -2656,12 +2697,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     }
     if (!out.scenes.empty()) fill_scene_context(comp, time, out, cam3d);
     // Desfoque de movimento 3D: cada grupo com modelo que pede desfoque vira
-    // K cenas no obturador (câmera, mundo e pose no sub-quadro).
+    // K cenas no obturador (câmera, mundo e pose no sub-quadro). No preview
+    // cada amostra é a cena INTEIRA de novo (sombra, MSAA, pós): até 8, senão
+    // o celular travava ao tocar com o desfoque ligado. O export usa todas.
     if (!out.scenes.empty() && comp.motion_blur().enabled && comp.motion_blur().shutterAngle > 0.0f) {
         const MotionBlurSettings& mb = comp.motion_blur();
-        const u32 k = std::clamp<u32>(settings.finalQuality ? mb.samples
-                                                           : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
-                                      2u, 64u);
+        const u32 k = settings.finalQuality
+            ? std::clamp<u32>(mb.samples, 2u, 64u)
+            : scene_blur_preview_samples(mb, settings);
         const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
         auto differs = [](const Mat4& a, const Mat4& b) {
             for (int c = 0; c < 4; ++c) {
@@ -2678,8 +2721,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             bool particleBlur = false;
             for (u32 pi : f.particleLayers) particleBlur |= pi < out.layers.size() && out.layers[pi].particle.blur;
             any |= particleBlur;
+            // Planos (camadas 2D no 3D) com desfoque: as matrizes do obturador
+            // só existem quando a camada se mexe nele (ver acima).
+            bool planeBlur = false;
+            for (u32 pi : f.planeLayers) planeBlur |= pi < out.layers.size() && !out.layers[pi].blurMatrices.empty();
+            any |= planeBlur;
             if (!any) continue;
-            bool moves = particleBlur;
+            bool moves = particleBlur || planeBlur;
             f.blurFrames.resize(k);
             for (u32 s = 0; s < k; ++s) {
                 const f64 ts = static_cast<f64>(time.value) + ((static_cast<f64>(s) + 0.5) / static_cast<f64>(k) - 0.5) * open;
@@ -3297,10 +3345,34 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             tex = graph_.create_texture("3d-desfoque", ad);
             // Consume each sample before building the next one. Keeping all K
             // outputs alive until a final pass used >1 GB at 1080p/64 samples.
+            // Planos com desfoque: cada sub-quadro leva o plano na matriz do
+            // mesmo instante do obturador (a cena copia a lista no build).
+            bool planeBlur = false;
+            if (planes && currentSnap_) {
+                for (const scene3d::ScenePlane& p : *planes) {
+                    planeBlur |= p.sourceLayer < currentSnap_->layers.size() && !currentSnap_->layers[p.sourceLayer].blurMatrices.empty();
+                }
+            }
+            const Mat4 clipComp = clip_from_comp(static_cast<f32>(currentSnap_ ? currentSnap_->compWidth : layer.source.width),
+                                                 static_cast<f32>(currentSnap_ ? currentSnap_->compHeight : layer.source.height));
             for (u32 s = 0; s < k; ++s) {
                 FGTexture sample;
+                const std::vector<scene3d::ScenePlane>* samplePlanes = planes;
+                if (planeBlur) {
+                    blurPlanes_.assign(planes->begin(), planes->end());
+                    for (scene3d::ScenePlane& p : blurPlanes_) {
+                        if (p.sourceLayer >= currentSnap_->layers.size()) continue;
+                        const std::vector<Mat4>& bm = currentSnap_->layers[p.sourceLayer].blurMatrices;
+                        if (bm.empty()) continue;
+                        const usize si = std::min<usize>(bm.size() - 1, static_cast<usize>(s) * bm.size() / k);
+                        p.clipFromLayer = clipComp * bm[si];
+                        const Vec4 c = p.clipFromLayer * Vec4{p.region.x + p.region.z * 0.5f, p.region.y + p.region.w * 0.5f, 0, 1};
+                        p.viewDepth = c.w;
+                    }
+                    samplePlanes = &blurPlanes_;
+                }
                 const u32 np = scene_particle_draws(group, group.blurFrames[s], parts);
-                if (!scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, sample, planes,
+                if (!scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, sample, samplePlanes,
                                     parts, np)) continue;
                 struct Cap {
                     FGTexture sample; const u32* count; PipelineHandle p; u64 sampler; f32 w; f32 h;
@@ -4037,6 +4109,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         p.opacity = layer.opacity;
         const Vec4 c = p.clipFromLayer * Vec4{fin.region.x + fin.region.w * 0.5f, fin.region.y + fin.region.h * 0.5f, 0, 1};
         p.viewDepth = c.w;
+        p.sourceLayer = i;
         groupPlanes_[static_cast<usize>(layer.planeGroup)].push_back(p);
     }
     const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);
@@ -4188,6 +4261,8 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 const EffectPlan& plan = snap.plans[i];
                 (void)EffectGraph::build(plan, ctx, in, fin);
                 if (!fin.valid()) return;
+                const bool masked = layer.maskCount > 0;
+                if (masked) apply_masks(layer, fin, frameNumber);
                 CompositeDraw orig;
                 orig.texture = lc;
                 orig.region = Rect{0.0f, 0.0f, compW, compH};
@@ -4199,7 +4274,13 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 fx.region = fin.region;
                 if (plan.hasFold) fx.compFromLayer = plan.foldMatrix;
                 const f32 op = std::clamp(layer.opacity * (plan.hasFold ? plan.foldOpacity : 1.0f), 0.0f, 1.0f);
-                if (op >= 0.999f) {
+                if (masked) {
+                    // Com máscara: o original inteiro e, por cima, o ajustado
+                    // recortado (transparente fora da máscara) na opacidade.
+                    fx.opacity = op;
+                    draws[at] = orig;
+                    draws.insert(draws.begin() + static_cast<std::ptrdiff_t>(at) + 1, fx);
+                } else if (op >= 0.999f) {
                     draws[at] = fx;
                 } else {
                     orig.opacity = 1.0f - op;
@@ -4224,6 +4305,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             // Camada de ajuste: montada na composição, sobre o fundo acumulado.
             draw.adjustPlan = i;
             draw.opacity = layer.opacity;
+            draw.blend = layer.blend;
             draws.push_back(draw);
             continue;
         }
@@ -4348,6 +4430,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         Mat4 compFromLayer = Mat4::identity();
         Vec4 region{};
         f32 opacity = 1.0f, mode = 0.0f, compW = 0.0f, compH = 0.0f;
+        f32 masked = 0.0f;   ///< ajuste com máscara: fora dela o fundo fica
         bool drawSrc = false;
     };
     for (u32 i = 0; readsBackdrop && i < count; ++i) {
@@ -4376,13 +4459,18 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             LayerImage fin = in;
             const EffectPlan& plan = snap.plans[d.adjustPlan];
             (void)EffectGraph::build(plan, ctx, in, fin);
+            if (d.adjustPlan < snap.layers.size() && snap.layers[d.adjustPlan].maskCount > 0 && fin.valid() && !(fin.texture == cur)) {
+                apply_masks(snap.layers[d.adjustPlan], fin, frameNumber_);
+                rc->masked = 1.0f;
+            }
             rc->drawSrc = fin.valid() && !(fin.texture == cur) ;
             rc->src = fin.texture;
             rc->region = Vec4{fin.region.x, fin.region.y, fin.region.w, fin.region.h};
             rc->compFromLayer = plan.hasFold ? plan.foldMatrix : Mat4::identity();
             rc->opacity = d.opacity * (plan.hasFold ? plan.foldOpacity : 1.0f);
             rc->srcSampler = shaders_.sampler(CommonSampler::LinearClamp).id;
-            rc->mode = 100.0f;
+            // 100 + modo: a mistura da camada de ajuste com o modo dela.
+            rc->mode = 100.0f + static_cast<f32>(static_cast<u16>(d.blend));
             if (plan.hasFold && !rc->drawSrc) {
                 // Só o Transform (dobrado na matriz): o fundo movido é a fonte.
                 rc->drawSrc = true;
@@ -4416,7 +4504,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             pc.cmds.bind_pipeline(rc->blend);
             push.clipFromLayer = clip * rc->compFromLayer;
             push.region = rc->region;
-            push.params = Vec4{rc->opacity, rc->mode, 0.0f, 0.0f};
+            push.params = Vec4{rc->opacity, rc->mode, rc->masked, 0.0f};
             pc.cmds.bind_texture(0, pc.texture(rc->src), SamplerHandle{rc->srcSampler});
             pc.cmds.bind_texture(1, pc.texture(rc->backdrop), SamplerHandle{rc->copySampler});
             pc.cmds.push_constants(&push, sizeof(push));

@@ -3,6 +3,7 @@ package com.aurea.aurea.state
 import com.aurea.aurea.effects.localizeEffectParams
 import android.app.Application
 import com.aurea.aurea.ui.i18n.AppText
+import com.aurea.aurea.ui.i18n.EngineText
 import com.aurea.aurea.R
 import androidx.annotation.StringRes
 import android.content.Intent
@@ -1807,6 +1808,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return id
     }
 
+    /**
+     * Divide o cubo da camada principal em [count] fatias no eixo [axis] (0 X, 1 Y, 2 Z).
+     * O motor transforma a camada num nulo 3D (mesmo id, mesmo movimento) com as fatias
+     * filhas; cada fatia vira uma camada normal (timeline, toque no palco, apagar).
+     * A seleção fica no grupo, para mover tudo junto logo depois. Um passo de desfazer.
+     */
+    fun splitShape3D(axis: Int, count: Int): Boolean {
+        val id = primary ?: return false
+        val group = engine.splitShape3d(id, axis.coerceIn(0, 2), count)
+        if (group < 0) {
+            errorMessage = appText(R.string.shape3d_split_failed)
+            return false
+        }
+        shapePart = -1
+        refreshNow()
+        select(group)
+        showToast(appText(R.string.shape3d_split_done, count))
+        return true
+    }
+
     /** Os 9 canais da parte no cabeçote (posição, rotação °, escala). */
     fun shapePartValues(part: Int): FloatArray? {
         val p = shapeParts ?: return null
@@ -1974,7 +1995,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         null
     }
 
-    fun addText3D(): Long {
+    fun addText3D(openEditor: Boolean = true): Long {
         val label = appText(R.string.target_text)
         val id = engine.addText3d(label, Text3DInfo(label, 0.25f, 1, floatArrayOf(1f, 1f, 1f, 1f)).toFields())
         if (id < 0) {
@@ -1983,7 +2004,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         refreshNow()
         select(id)
-        openTextContentEditor(selectAll = true)
+        if (openEditor) openTextContentEditor(selectAll = true)
         return id
     }
 
@@ -3093,8 +3114,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Texto ------------------------------------------------------------------
-    /** Botão "Texto": camada nova no centro, já escolhida. */
-    fun addText(): Long {
+    /** Botão "Texto": camada nova no centro, já escolhida (e o teclado aberto, salvo `openEditor = false`). */
+    fun addText(openEditor: Boolean = true): Long {
         val id = engine.addText(appText(R.string.target_text))
         if (id < 0) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_texto_2, -id)
@@ -3102,7 +3123,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         refreshNow()
         select(id)
-        openTextContentEditor(selectAll = true)
+        if (openEditor) openTextContentEditor(selectAll = true)
+        return id
+    }
+
+    /**
+     * "Presets de texto" da barra de adicionar: texto novo (2D ou 3D) já com o
+     * preset aplicado pelo caminho de sempre ([applyPreset] → motor). Sem
+     * teclado: a pessoa escolheu um estilo e quer vê-lo andar, então a prévia
+     * toca a partir do começo da camada.
+     */
+    fun addTextWithPreset(e: com.aurea.aurea.presets.PresetEntry, threeD: Boolean): Long {
+        if (e.kind != com.aurea.aurea.presets.PresetKind.Text) return -1
+        if (playing) pause()
+        val id = if (threeD) addText3D(openEditor = false) else addText(openEditor = false)
+        if (id < 0) return id
+        if (!applyPreset(e)) return id
+        play()
         return id
     }
 
@@ -3468,7 +3505,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun ungroupPrecomp(layer: Long) {
         val why = engine.ungroupPrecomp(layer)
         if (why != null) {
-            errorMessage = appText(R.string.msg_nao_da_para_desagrupar_o_resultado, why)
+            errorMessage = appText(R.string.msg_nao_da_para_desagrupar_o_resultado, EngineText.reason(storeApp, why))
             return
         }
         selection = LinkedHashSet()
@@ -3569,7 +3606,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
     fun refreshMotionStatus() {
-        val values = FloatArray(12); motionMessage = engine.motionTrackStatus(values); motionStatus = values
+        // A frase do motor (pt/en) sai no idioma do app.
+        val values = FloatArray(12); motionMessage = engine.motionTrackStatus(values).let { if (it.isBlank()) "" else EngineText.sentence(storeApp, it) }; motionStatus = values
         tracking = values[0].toInt() == 1
     }
     fun restoreMotion() { primary?.let { if (engine.restoreMotionTrack(it)) { motionSource = it; refreshMotionStatus() } } }
@@ -4343,7 +4381,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val preset = envelope?.optString("preset").orEmpty()
         val mapped = envelope?.optInt("mapped") ?: 0
         if (envelope == null || error.isNotEmpty() || preset.isEmpty() || mapped == 0) {
-            showToast(appText(R.string.am_import_failed, error.ifEmpty { appText(R.string.am_import_nothing) }))
+            showToast(appText(R.string.am_import_failed, if (error.isEmpty()) appText(R.string.am_import_nothing) else EngineText.reason(storeApp, error)))
             return
         }
         val skipped = envelope.optJSONArray("skipped")?.length() ?: 0
@@ -4422,7 +4460,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                     val err = engine.applyPreset(id, json, duration)
                     if (err != null) {
-                        showToast(appText(R.string.msg_preset_nao_aplicado, err))
+                        showToast(appText(R.string.msg_preset_nao_aplicado, EngineText.reason(storeApp, err)))
                         return false
                     }
                 }
@@ -4613,7 +4651,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (ids.isEmpty()) return
         val why = engine.addLayersToGroup(ids.toLongArray(), group)
         if (why != null) {
-            errorMessage = appText(R.string.app_group_add_failed, why)
+            errorMessage = appText(R.string.app_group_add_failed, EngineText.reason(storeApp, why))
             return
         }
         selection = LinkedHashSet()
@@ -4625,7 +4663,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun removeFromGroup(layer: Long) {
         val why = engine.removeLayerFromGroup(layer)
         if (why != null) {
-            errorMessage = appText(R.string.app_group_remove_failed, why)
+            errorMessage = appText(R.string.app_group_remove_failed, EngineText.reason(storeApp, why))
             return
         }
         selection = LinkedHashSet()
@@ -5521,6 +5559,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** "Importar texturas": a layer do modelo e os arquivos que ele referencia e não achou (só o nome). */
     data class MissingModelTextures(val layer: Long, val names: List<String>)
 
+    /** Errc::BudgetExceeded (Result.hpp): o modelo passou do orçamento de memória do aparelho. */
+    private val budgetExceeded = 9L
+
     /** Não nulo = o pedido "Importar texturas" está aberto (AureaApp mostra). */
     var missingModelTextures by mutableStateOf<MissingModelTextures?>(null)
         private set
@@ -5531,6 +5572,30 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun promptModelTextures(req: MissingModelTextures) {
         texturesTarget = req
         missingModelTextures = req
+    }
+
+    /**
+     * "Otimizar modelo": o arquivo já copiado, o plano do motor (o que cabe neste
+     * aparelho) e a qualidade escolhida no diálogo. Aparece só quando o Original
+     * não cabe ou é denso demais para o preview — modelo leve entra direto.
+     */
+    data class ModelOptimizeRequest(
+        val path: String,
+        val name: String,
+        val plan: com.aurea.aurea.engine.ModelPlan,
+        val memory: LongArray?,
+    )
+
+    var modelOptimize by mutableStateOf<ModelOptimizeRequest?>(null)
+        private set
+    var modelOptimizeQuality by mutableStateOf(com.aurea.aurea.engine.MODEL_QUALITY_BALANCED)
+
+    fun dismissModelOptimize() { modelOptimize = null }
+
+    /** O botão do diálogo: importa com a qualidade escolhida (o diálogo já fechou). */
+    fun confirmModelOptimize(req: ModelOptimizeRequest) {
+        modelOptimize = null
+        runModelImport(req.path, req.name, modelOptimizeQuality, req.memory)
     }
 
     /**
@@ -5564,6 +5629,39 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             busyMessage = appText(R.string.app_importing_model)
+            // Cópia para o sandbox e o plano do motor (só cabeçalhos e contagens):
+            // o que cabe NESTE aparelho, com a memória medida agora.
+            val memory = com.aurea.aurea.engine.ModelPlan.memoryNow(getApplication())
+            var stagedPath: String? = null
+            var stagedName = ""
+            val plan = withContext(Dispatchers.IO) {
+                val staged = stageModel(picks) ?: return@withContext null
+                val file = staged.first ?: return@withContext null
+                stagedPath = file.absolutePath
+                stagedName = staged.second
+                engine.inspectModel(file.absolutePath, memory)
+            }
+            busyMessage = null
+            val path = stagedPath
+            when {
+                plan == null && path == null -> errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                plan == null || path == null -> errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
+                // Nem o Leve cabe: recusa com o motivo, sem arriscar o app (e o launcher) no import.
+                plan.tooHeavy -> errorMessage = appText(R.string.model3d_too_heavy)
+                plan.heavy -> {
+                    modelOptimizeQuality = plan.recommended.takeIf { it != com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL }
+                        ?: com.aurea.aurea.engine.MODEL_QUALITY_BALANCED
+                    modelOptimize = ModelOptimizeRequest(path, stagedName, plan, memory)
+                }
+                else -> runModelImport(path, stagedName, com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL, memory)
+            }
+        }
+    }
+
+    /** Import de verdade (motor), com as etapas localizadas no aviso de progresso. */
+    private fun runModelImport(path: String, name: String, quality: Int, memory: LongArray?) {
+        viewModelScope.launch {
+            busyMessage = appText(R.string.app_importing_model)
             val poll = launch {
                 while (true) {
                     kotlinx.coroutines.delay(150)
@@ -5574,34 +5672,43 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         3 -> appText(R.string.msg_texturas)
                         4 -> appText(R.string.msg_otimizando)
                         5, 6 -> appText(R.string.msg_preparando)
+                        7 -> appText(R.string.model3d_stage_simplifying)
                         else -> appText(R.string.msg_importando)
                     }
                     busyMessage = "$phase… ${(p % 1000) / 10}%"
                 }
             }
             val detail = arrayOfNulls<String>(1)
-            val id = withContext(Dispatchers.IO) {
-                val staged = stageModel(picks) ?: return@withContext -1_000L
-                if (staged.first == null) return@withContext -1_001L
-                engine.importModel(staged.first!!.absolutePath, staged.second, detail)
-            }
+            val id = withContext(Dispatchers.IO) { engine.importModel(path, name, detail, quality, memory) }
             poll.cancel()
             busyMessage = null
             when {
-                id == -1_000L -> errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
-                id == -1_001L -> errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
-                id < 0 -> errorMessage = appText(R.string.msg_model_import_failed, detail[0]?.trim()?.ifBlank { null } ?: humanError((-id).toInt()))
+                // Passou do orçamento no meio (a estimativa errou para baixo): recusado, nunca morto.
+                id == -budgetExceeded -> errorMessage = appText(R.string.model3d_too_heavy_after)
+                id < 0 -> errorMessage = appText(R.string.msg_model_import_failed, EngineText.reason(storeApp, detail[0], (-id).toInt()))
                 else -> {
                     refreshNow()
                     select(id)
                     val missing = engine.modelMissingTextures(id)
                     val warnings = detail[0]?.lines()?.filter { it.isNotBlank() }.orEmpty()
+                    val report = engine.lastModelImport()
+                    val before = report.getOrElse(0) { 0L }
+                    val after = report.getOrElse(1) { 0L }
                     if (missing.isNotEmpty() && engine.modelFolder(id).isNotEmpty()) promptModelTextures(MissingModelTextures(id, missing))
-                    else if (warnings.isNotEmpty()) showToast(appText(R.string.msg_modelo_importado_aviso_s, warnings.size, warnings.first()))
+                    else if (quality != com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL && before > after) {
+                        showToast(appText(R.string.model3d_optimized_toast, modelCount(before), modelCount(after)))
+                    } else if (warnings.isNotEmpty()) showToast(
+                        // O aviso do motor é texto em português: fora do pt só a contagem.
+                        if (EngineText.isPortuguese(storeApp)) appText(R.string.msg_modelo_importado_aviso_s, warnings.size, warnings.first())
+                        else appText(R.string.eng_model_imported_warnings, warnings.size),
+                    )
                 }
             }
         }
     }
+
+    private fun modelCount(n: Long): String =
+        com.aurea.aurea.engine.ModelPlan.shortCount(n, appText(R.string.model3d_thousand), appText(R.string.model3d_million))
 
     /** Abre "Importar texturas" para o modelo selecionado (o painel do objeto 3D oferece quando falta algo). */
     fun askModelTextures() {
@@ -5648,7 +5755,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             busyMessage = null
             when {
                 left == -1_000 -> errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
-                left < 0 -> errorMessage = appText(R.string.msg_model_import_failed, detail[0]?.trim()?.ifBlank { null } ?: humanError(-left))
+                left < 0 -> errorMessage = appText(R.string.msg_model_import_failed, EngineText.reason(storeApp, detail[0], -left))
                 else -> {
                     refreshNow()
                     val still = engine.modelMissingTextures(req.layer)
@@ -5728,7 +5835,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
             }
             val hash = digest.digest().joinToString("") { "%02x".format(it) }
-            val name = model.first.substringBeforeLast('.').ifBlank { "Modelo 3D" }
+            val name = model.first.substringBeforeLast('.').ifBlank { appText(R.string.sh_add_model_3d) }
             if (ext != "fbx" && ext != "obj") {
                 val dst = File(root, "$hash.$ext")
                 if (dst.exists()) tmp.delete() else tmp.renameTo(dst)
@@ -5883,9 +5990,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     // Projetos
     // =========================================================================
-    fun newProject(width: Int, height: Int, fps: Float, title: String) {
+    fun newProject(width: Int, height: Int, fps: Float, title: String) =
+        newProject(width, height, fps.toDouble(), title, null)
+
+    /** fps livre (1–240) e, opcional, o fundo inicial em RGBA sRGB (nulo = preto). */
+    fun newProject(width: Int, height: Int, fps: Double, title: String, background: FloatArray?) {
         viewModelScope.launch {
-            val ok = withContext(Dispatchers.Default) { engine.newProject(width, height, fps, title) }
+            val ok = withContext(Dispatchers.Default) { engine.newProject(width, height, fps, title, background) }
             if (!ok) {
                 errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_projeto)
                 return@launch
@@ -5897,7 +6008,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 errorMessage = appText(R.string.msg_nao_foi_possivel_salvar, humanError(saved))
                 return@launch
             }
-            project = ProjectState(title = title, path = path, width = width, height = height, fps = fps)
+            project = ProjectState(title = title, path = path, width = width, height = height, fps = fps.toFloat())
             enterEditor()
         }
     }
@@ -6157,7 +6268,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Nome sugerido para o documento do "Exportar arquivo do projeto". */
     fun projectFileName(path: String): String {
         val title = readMeta(File(path))?.title ?: File(path).nameWithoutExtension
-        val base = title.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifEmpty { "Projeto" }
+        val base = title.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifEmpty { appText(R.string.editor_projeto_cbe9) }
         return "$base.${ProjectFile.EXTENSION}"
     }
 

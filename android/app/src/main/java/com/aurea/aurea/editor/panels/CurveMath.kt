@@ -88,13 +88,16 @@ internal fun grabHandle(x: Float, y: Float, shown: FloatArray): Int {
 
 /**
  * Faixa vertical do gráfico: a curva inteira (com a força) e as alças, sempre
- * contendo 0..1, com 8 % de folga em cima e embaixo.
+ * contendo 0..1, com 8 % de folga em cima e embaixo. [samples] = a curva
+ * amostrada pelo motor (o que se desenha); sem ela, 257 pontos da mesma conta
+ * — 41 perdiam os picos do elástico de 8 oscilações e a curva saía do gráfico.
  */
-internal fun easeRange(ease: Ease): Pair<Float, Float> {
+internal fun easeRange(ease: Ease, samples: FloatArray? = null): Pair<Float, Float> {
     var lo = 0f
     var hi = 1f
-    for (i in 0..40) {
-        val v = ease.transform(i / 40f)
+    val n = samples?.size?.takeIf { it >= 2 } ?: CURVE_SAMPLES
+    for (i in 0 until n) {
+        val v = samples?.get(i) ?: ease.transform(i / (n - 1f))
         if (v.isFinite()) { lo = min(lo, v); hi = max(hi, v) }
     }
     if (ease.hasHandles) {
@@ -139,4 +142,55 @@ internal fun nextPower(e: Ease): Ease {
     val h = e.handles()
     val next = if (e.isBezier) e.power % 3 + 1 else 2
     return Ease(Interp.BEZIER, h[0], h[1], h[2], h[3], next)
+}
+
+/** Pontos da curva do trecho no gráfico (t = i/256): o motor amostra este tanto. */
+internal const val CURVE_SAMPLES = 257
+
+/**
+ * O valor da curva amostrada [samples] (t = i/(n−1)) em [t]: a reta entre os
+ * dois pontos vizinhos — o ponto do cabeçote fica EM CIMA do traço desenhado.
+ */
+internal fun easeSampleAt(samples: FloatArray, t: Float): Float {
+    if (samples.isEmpty()) return t
+    if (samples.size == 1 || t <= 0f) return samples[0]
+    if (t >= 1f) return samples.last()
+    val x = t * (samples.size - 1)
+    val i = x.toInt().coerceIn(0, samples.size - 2)
+    val f = x - i
+    return samples[i] + (samples[i + 1] - samples[i]) * f
+}
+
+// --- Tipos rápidos do editor de curva ----------------------------------------
+// Os botões ao lado do gráfico: Linear, Suave, Passar do ponto (Overshoot),
+// Elástico e Quique. Os três últimos têm parâmetros (sliders sob o gráfico).
+
+internal enum class CurveQuickType { Linear, Ease, Overshoot, Elastic, Bounce }
+
+/** O tipo rápido em que a curva do trecho se encaixa (nulo = Manter/Degraus). */
+internal fun quickTypeOf(e: Ease): CurveQuickType? = when (e.interp) {
+    Interp.LINEAR -> CurveQuickType.Linear
+    Interp.BEZIER, Interp.CUSTOM, Interp.EASE_IN, Interp.EASE_OUT, Interp.EASE_IN_OUT -> CurveQuickType.Ease
+    Interp.OVERSHOOT -> CurveQuickType.Overshoot
+    Interp.ELASTIC -> CurveQuickType.Elastic
+    Interp.BOUNCE -> CurveQuickType.Bounce
+    else -> null
+}
+
+/** Quique padrão (3 saltos, força 0,5) com os parâmetros gravados. */
+internal val DefaultBounce = Ease(Interp.BOUNCE, .375f, .5f, 1f, EASE_PARAM_MARKER)
+
+/**
+ * O easing que o botão [type] aplica sobre a curva [current]: o padrão do tipo;
+ * tocar no tipo que já está escolhido mantém os parâmetros (nada muda).
+ */
+internal fun quickTypeEase(type: CurveQuickType, current: Ease): Ease {
+    val same = quickTypeOf(current) == type
+    return when (type) {
+        CurveQuickType.Linear -> Ease(Interp.LINEAR, 0f, 0f, 1f, 1f)
+        CurveQuickType.Ease -> if (same) current else Ease(Interp.BEZIER, .42f, 0f, .58f, 1f)
+        CurveQuickType.Overshoot -> if (same) current.overshoot() else Ease(Interp.OVERSHOOT, 0f, 0f, 1f, 1f).overshoot()
+        CurveQuickType.Elastic -> if (same) current.elastic() else Ease(Interp.ELASTIC, 0f, 0f, 1f, 1f).elastic()
+        CurveQuickType.Bounce -> if (same) current else DefaultBounce
+    }
 }

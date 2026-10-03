@@ -156,7 +156,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
     fun fmt(v: Float) = comUnidade(numeroPtBr(v, request.decimals), request.unit)
     val hint = when {
         text.isNotEmpty() && result == null -> stringResource(R.string.ds_conta_incompleta)
-        result != null && clamped != null && clamped.toDouble() != result -> "Fica em ${fmt(clamped)}"
+        result != null && clamped != null && clamped.toDouble() != result -> stringResource(R.string.app_keypad_clamped, fmt(clamped))
         result != null && !selectedAll && ValueExpression.hasOperation(text) -> "= ${fmt(result.toFloat())}"
         else -> ""
     }
@@ -195,7 +195,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
     AureaAdjustSheet(onDismiss = onDismiss, topRadius = 13.5.dp) { sheet ->
         Column(Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 12.dp)) {
             Text(
-                request.title.ifEmpty { "Valor exato (${request.unit})" },
+                request.title.ifEmpty { stringResource(R.string.i18n_keypad_exact, request.unit) },
                 style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W700)),
             )
             Spacer(Modifier.height(10.dp))

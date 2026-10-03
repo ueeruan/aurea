@@ -55,6 +55,8 @@ internal class TimelineController(
     private val scope: CoroutineScope,
 ) {
     var metrics = TimelineMetrics(1f)
+
+    init { LaneNames.app = store.getApplication<Application>() }
     var onEmptyTap: () -> Unit = {}
     var onKeyframeTap: (Long, KeyframeRow) -> Unit = { _, _ -> }
     var onTrackTap: (Long, Int, Int, Int) -> Unit = { _, _, _, _ -> }

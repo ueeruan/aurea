@@ -235,14 +235,30 @@ void flat_tri(PartMesh& m, Vec3 left, Vec3 right, Vec3 apex, bool apexUp = true)
 
 // --- As formas ---------------------------------------------------------------
 
-void build_cube(std::vector<PartMesh>& parts) {
-    const f32 h = 0.5f;
-    flat_rect(parts[0], Vec3{0, 0, h}, Vec3{h, 0, 0}, Vec3{0, h, 0});     // frente
-    flat_rect(parts[1], Vec3{0, 0, -h}, Vec3{-h, 0, 0}, Vec3{0, h, 0});   // trás
-    flat_rect(parts[2], Vec3{h, 0, 0}, Vec3{0, 0, -h}, Vec3{0, h, 0});    // direita
-    flat_rect(parts[3], Vec3{-h, 0, 0}, Vec3{0, 0, h}, Vec3{0, h, 0});    // esquerda
-    flat_rect(parts[4], Vec3{0, h, 0}, Vec3{h, 0, 0}, Vec3{0, 0, -h});    // topo
-    flat_rect(parts[5], Vec3{0, -h, 0}, Vec3{h, 0, 0}, Vec3{0, 0, h});    // base
+/// Face do cubo (ou da fatia) no plano de normal `normal`, cobrindo a caixa
+/// [lo, hi] nos eixos "direita" R e "cima" U vistos de fora. A UV é a do
+/// cubo INTEIRO (u = p·R + 0,5, v = 0,5 − p·U): numa fatia, cada face pega só
+/// o pedaço da imagem que cabe nela, e a imagem continua na fatia vizinha.
+void box_face(PartMesh& m, Vec3 lo, Vec3 hi, Vec3 normal, Vec3 R, Vec3 U) {
+    auto pick = [&](Vec3 axis, f32 sign) {   // canto da caixa no lado `sign` do eixo
+        return Vec3{axis.x != 0 ? ((axis.x * sign > 0) ? hi.x : lo.x) : 0.0f,
+                    axis.y != 0 ? ((axis.y * sign > 0) ? hi.y : lo.y) : 0.0f,
+                    axis.z != 0 ? ((axis.z * sign > 0) ? hi.z : lo.z) : 0.0f};
+    };
+    const Vec3 plane = pick(normal, 1.0f);
+    auto corner = [&](f32 r, f32 u) { return plane + pick(R, r) + pick(U, u); };
+    auto uv = [&](Vec3 p) { return Vec2{p.dot(R) + 0.5f, 0.5f - p.dot(U)}; };
+    const Vec3 a = corner(-1, 1), b = corner(1, 1), c = corner(1, -1), d = corner(-1, -1);
+    flat_poly(m, {a, b, c, d}, {uv(a), uv(b), uv(c), uv(d)}, normal);
+}
+
+void build_cube(std::vector<PartMesh>& parts, Vec3 lo, Vec3 hi) {
+    box_face(parts[0], lo, hi, Vec3{0, 0, 1}, Vec3{1, 0, 0}, Vec3{0, 1, 0});     // frente
+    box_face(parts[1], lo, hi, Vec3{0, 0, -1}, Vec3{-1, 0, 0}, Vec3{0, 1, 0});   // trás
+    box_face(parts[2], lo, hi, Vec3{1, 0, 0}, Vec3{0, 0, -1}, Vec3{0, 1, 0});    // direita
+    box_face(parts[3], lo, hi, Vec3{-1, 0, 0}, Vec3{0, 0, 1}, Vec3{0, 1, 0});    // esquerda
+    box_face(parts[4], lo, hi, Vec3{0, 1, 0}, Vec3{1, 0, 0}, Vec3{0, 0, -1});    // topo
+    box_face(parts[5], lo, hi, Vec3{0, -1, 0}, Vec3{1, 0, 0}, Vec3{0, 0, 1});    // base
 }
 
 void build_sphere(std::vector<PartMesh>& parts) {
@@ -433,6 +449,44 @@ void normalize_shape3d(Shape3DSpec& spec) {
         for (f32* c : {&p.color.x, &p.color.y, &p.color.z, &p.color.w})
             *c = std::isfinite(*c) ? std::clamp(*c, 0.0f, 1.0f) : 1.0f;
     }
+    // Fatia: só o cubo tem; caixa dentro do cubo, com espessura mínima em
+    // cada eixo (valor inválido = o eixo inteiro).
+    for (int a = 0; a < 3; ++a) {
+        f32& lo = a == 0 ? spec.boxMin.x : a == 1 ? spec.boxMin.y : spec.boxMin.z;
+        f32& hi = a == 0 ? spec.boxMax.x : a == 1 ? spec.boxMax.y : spec.boxMax.z;
+        if (spec.kind != Shape3DKind::Cube || !std::isfinite(lo) || !std::isfinite(hi)) { lo = -0.5f; hi = 0.5f; }
+        lo = std::clamp(lo, -0.5f, 0.5f);
+        hi = std::clamp(hi, -0.5f, 0.5f);
+        if (hi - lo < kShape3DMinSlice) { lo = -0.5f; hi = 0.5f; }
+    }
+}
+
+bool shape3d_full_box(const Shape3DSpec& s) noexcept {
+    constexpr f32 e = 1e-6f;
+    return std::fabs(s.boxMin.x + 0.5f) < e && std::fabs(s.boxMin.y + 0.5f) < e && std::fabs(s.boxMin.z + 0.5f) < e
+        && std::fabs(s.boxMax.x - 0.5f) < e && std::fabs(s.boxMax.y - 0.5f) < e && std::fabs(s.boxMax.z - 0.5f) < e;
+}
+
+std::vector<Shape3DSpec> split_shape3d_spec(const Shape3DSpec& in, u32 axis, u32 count) {
+    std::vector<Shape3DSpec> out;
+    if (in.kind != Shape3DKind::Cube || axis > 2 || count < kShape3DSplitMin || count > kShape3DSplitMax) return out;
+    Shape3DSpec base = in;
+    normalize_shape3d(base);
+    auto lo_of = [axis](Shape3DSpec& s) -> f32& { return axis == 0 ? s.boxMin.x : axis == 1 ? s.boxMin.y : s.boxMin.z; };
+    auto hi_of = [axis](Shape3DSpec& s) -> f32& { return axis == 0 ? s.boxMax.x : axis == 1 ? s.boxMax.y : s.boxMax.z; };
+    const f32 lo = lo_of(base), hi = hi_of(base);
+    const f32 step = (hi - lo) / static_cast<f32>(count);
+    if (!(step >= kShape3DMinSlice)) return out;
+    out.reserve(count);
+    for (u32 i = 0; i < count; ++i) {
+        Shape3DSpec s = base;
+        // Bordas pela mesma conta dos dois lados: a fatia i termina
+        // exatamente onde a i+1 começa (sem fresta de arredondamento).
+        lo_of(s) = i == 0 ? lo : lo + step * static_cast<f32>(i);
+        hi_of(s) = i + 1 == count ? hi : lo + step * static_cast<f32>(i + 1);
+        out.push_back(std::move(s));
+    }
+    return out;
 }
 
 std::string encode_shape3d(const Shape3DSpec& in) {
@@ -457,6 +511,15 @@ std::string encode_shape3d(const Shape3DSpec& in) {
             out += ';';
         }
     }
+    if (s.kind == Shape3DKind::Cube && !shape3d_full_box(s)) {
+        // Fatia do cubo. Chave nova no FIM: versões antigas ignoram chave
+        // desconhecida e abrem o cubo inteiro, sem quebrar o projeto.
+        char b[128];
+        std::snprintf(b, sizeof(b), "b=%.6f/%.6f/%.6f/%.6f/%.6f/%.6f;", static_cast<double>(s.boxMin.x), static_cast<double>(s.boxMin.y),
+                      static_cast<double>(s.boxMin.z), static_cast<double>(s.boxMax.x), static_cast<double>(s.boxMax.y),
+                      static_cast<double>(s.boxMax.z));
+        out += b;
+    }
     return out;
 }
 
@@ -464,7 +527,7 @@ bool decode_shape3d(const std::string& src, Shape3DSpec& out) {
     const std::string scheme = kShape3DScheme;
     if (src.rfind(scheme, 0) != 0) return false;
     Shape3DSpec s;
-    bool haveKind = false;
+    bool haveKind = false, haveBox = false;
     std::vector<std::pair<u32, Vec4>> colors;
     std::vector<std::pair<u32, std::string>> images;
     usize i = scheme.size();
@@ -481,6 +544,13 @@ bool decode_shape3d(const std::string& src, Shape3DSpec& out) {
             if (k >= kShape3DKindCount) return false;
             s.kind = static_cast<Shape3DKind>(k);
             haveKind = true;
+        } else if (key == "b") {
+            float v[6]{};
+            if (std::sscanf(value.c_str(), "%f/%f/%f/%f/%f/%f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6) {
+                s.boxMin = Vec3{v[0], v[1], v[2]};
+                s.boxMax = Vec3{v[3], v[4], v[5]};
+                haveBox = true;
+            }
         } else if (key == "m") {
             float metal = 0.0f, rough = 0.45f;
             if (std::sscanf(value.c_str(), "%f/%f", &metal, &rough) == 2) { s.metallic = metal; s.roughness = rough; }
@@ -513,6 +583,7 @@ bool decode_shape3d(const std::string& src, Shape3DSpec& out) {
     d.roughness = s.roughness;
     for (auto& [part, c] : colors) if (part < d.parts.size()) d.parts[part].color = c;
     for (auto& [part, path] : images) if (part < d.parts.size()) d.parts[part].image = std::move(path);
+    if (haveBox) { d.boxMin = s.boxMin; d.boxMax = s.boxMax; }
     normalize_shape3d(d);
     out = std::move(d);
     return true;
@@ -589,7 +660,7 @@ ImportResult build_shape3d(const Shape3DSpec& in, const Shape3DPathResolver& res
     const u32 count = shape3d_part_count(spec.kind);
     std::vector<PartMesh> parts(count);
     switch (spec.kind) {
-        case Shape3DKind::Cube:     build_cube(parts); break;
+        case Shape3DKind::Cube:     build_cube(parts, spec.boxMin, spec.boxMax); break;
         case Shape3DKind::Sphere:   build_sphere(parts); break;
         case Shape3DKind::Cylinder: build_cylinder(parts); break;
         case Shape3DKind::Cone:     build_cone(parts); break;

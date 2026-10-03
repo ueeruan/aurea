@@ -31,6 +31,7 @@ add_executable(aurea_tests
     test_yuv_layout.cpp
     test_gpu.cpp
     test_scene3d.cpp
+    test_model_budget.cpp
     test_text3d.cpp
     test_text3d_anim.cpp
     test_text3d_shared.cpp
@@ -63,6 +64,7 @@ add_executable(aurea_tests
     test_editing_tools.cpp
     test_export.cpp
     test_image_export.cpp
+    test_project_settings.cpp
     test_perf.cpp
     test_timeline_scale.cpp
     test_stability.cpp
@@ -77,6 +79,7 @@ add_executable(aurea_tests
     test_layer_anim.cpp
     test_rig.cpp
     test_shape3d.cpp
+    test_shape3d_split.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE

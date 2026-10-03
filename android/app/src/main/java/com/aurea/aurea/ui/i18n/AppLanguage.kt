@@ -20,15 +20,19 @@ import java.util.Locale
 enum class AppLanguage(val tag: String?, val display: String) {
     SYSTEM(null, ""),          // rótulo vem do catálogo (settings_language_system)
     PT_BR("pt-BR", "Português"),
-    EN("en", "English");
-    // es, ru, hi, id e ar: catálogos parciais guardados em res/values-*, fora
-    // do APK por enquanto (androidResources.localeFilters). Voltam numa fase
-    // própria de idiomas.
+    EN("en", "English"),
+    ES("es", "Español"),
+    RU("ru", "Русский"),
+    ID("id", "Bahasa Indonesia");
+    // hi e ar: catálogos parciais guardados em res/values-*, fora do APK por
+    // enquanto (androidResources.localeFilters). Voltam numa fase própria.
 
     companion object {
         private const val PREFS = "aurea.settings"
         private const val KEY = "idioma"
         private const val CHOSEN = "language_chosen"
+        /** Idiomas do sistema que o APK traz completos (o resto vira inglês). */
+        private val SYSTEM_FOLLOWED = setOf("pt", "en", "es", "ru", "id", "in")
 
         fun needsChoice(context: Context): Boolean = !prefs(context).getBoolean(CHOSEN, false)
 
@@ -61,12 +65,13 @@ enum class AppLanguage(val tag: String?, val display: String) {
          */
         fun wrap(base: Context): Context {
             val chosen = current(base)
-            // Sistema: português segue o sistema; QUALQUER outro idioma cai no
-            // inglês — e em LTR. Sem isso, um aparelho em árabe abriria com os
-            // textos em português (o padrão) e o layout espelhado em RTL.
+            // Sistema: os idiomas do APK (pt, en, es, ru, id — "in" é o código
+            // antigo do indonésio no Java) seguem o sistema; QUALQUER outro cai
+            // no inglês — e em LTR. Sem isso, um aparelho em árabe abriria com
+            // os textos em português (o padrão) e o layout espelhado em RTL.
             val tag = chosen.tag ?: run {
                 val sys = base.resources.configuration.locales[0]
-                if (sys.language == "pt" || sys.language == "en") return base
+                if (sys.language in SYSTEM_FOLLOWED) return base
                 "en"
             }
             val locale = Locale.forLanguageTag(tag)

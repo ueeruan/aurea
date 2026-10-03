@@ -127,6 +127,7 @@ struct EditorView: View {
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
         .modifier(ModelTexturesPrompt(shell: shell))
+        .modifier(ModelOptimizePrompt())
         .modifier(AddLayerPickers(shell: shell))
     }
 }
@@ -269,6 +270,51 @@ private struct ModelTexturesPrompt: ViewModifier {
     }
 }
 
+/// "Modelo pesado": o motor mediu o arquivo e o Original não cabe neste
+/// aparelho (ou é denso demais para o preview). Uma escolha por qualidade, a
+/// recomendada marcada; o Original só aparece quando cabe. A conta é do motor.
+private struct ModelOptimizePrompt: ViewModifier {
+    @EnvironmentObject private var model: AureaModel
+    private func label(_ q: Int, _ plan: AureaModel.ModelPlanInfo) -> String {
+        let name: String
+        switch q {
+        case 0: name = AureaText.t("model3d_quality_original")
+        case 1: name = AureaText.t("model3d_quality_balanced")
+        default: name = AureaText.t("model3d_quality_light")
+        }
+        return q == plan.recommended ? "\(name) · \(AureaText.t("model3d_recommended"))" : name
+    }
+    private func hint(_ q: Int, _ plan: AureaModel.ModelPlanInfo) -> String {
+        let kept = AureaModel.modelCount(plan.keptTriangles(q))
+        switch q {
+        case 0: return AureaText.t("model3d_quality_original_hint")
+        case 1: return AureaText.t("model3d_quality_balanced_hint", kept, plan.textureCap(q))
+        default: return AureaText.t("model3d_quality_light_hint", kept, plan.textureCap(q))
+        }
+    }
+    func body(content: Content) -> some View {
+        content
+            .alert(AureaText.t("model3d_heavy_title"), isPresented: Binding(
+                get: { model.modelOptimize != nil },
+                // Fechar só limpa o pedido: a pasta copiada sai no Cancelar (o botão
+                // de importar pode rodar depois do fechamento e ainda precisa dela).
+                set: { if !$0 { model.modelOptimize = nil } })) {
+                if let req = model.modelOptimize {
+                    ForEach(req.plan.offered, id: \.self) { q in
+                        Button(label(q, req.plan)) { model.confirmModelOptimize(req, quality: q) }
+                    }
+                    Button(AureaText.t("common_cancel"), role: .cancel) { model.dismissModelOptimize(req) }
+                }
+            } message: {
+                if let req = model.modelOptimize {
+                    let tris = AureaModel.modelCount(req.plan.triangles)
+                    let lines = req.plan.offered.map { "\(label($0, req.plan)): \(hint($0, req.plan))" }
+                    Text(AureaText.t("model3d_heavy_body", req.plan.exact ? tris : "~" + tris) + "\n\n" + lines.joined(separator: "\n"))
+                }
+            }
+    }
+}
+
 // =============================================================================
 // O palco: o preview do motor e os gestos
 // =============================================================================
@@ -353,7 +399,7 @@ private struct ModelTexturesPrompt: ViewModifier {
         if model.rawPlayback { return "RAW" }
         if model.status.previewAuto != 0 { return "AUTO" }
         let n = max(1, model.status.previewNumerator), d = max(1, model.status.previewDenominator)
-        return n >= d ? "Full" : "1/\(d / n)"
+        return n >= d ? AureaText.t("i18n_preview_full") : "1/\(d / n)"
     }
     private var vectorHint: String {
         if model.vectorFreehand { return AureaText.t("editor_mao_livre_desenhe_dedo") }
@@ -860,8 +906,9 @@ private struct DockView: View {
 
     fileprivate enum Section: String {
         // Máscara, rastreio de câmera e legendas automáticas viraram EFEITOS
-        // (seletor de efeitos); os presets saíram. Nada disso tem ficha aqui.
-        case color, shape, vector, editText, text, text3DOptions, particles, audio, move, rig, blend, environment, effects
+        // (seletor de efeitos); os presets de vídeo/imagem saíram. Os presets de
+        // TEXTO voltaram (2026-10-03): ficha só no texto 2D/3D.
+        case color, shape, vector, editText, text, text3DOptions, particles, audio, move, rig, blend, environment, presets, effects
         var label: String {
             switch self {
             case .color: return "sh_dock_color_fill"
@@ -875,6 +922,7 @@ private struct DockView: View {
             case .rig: return "rig_dock"
             case .blend: return "sh_dock_opacity_blend"
             case .environment: return "sh_dock_environment"
+            case .presets: return "sh_dock_presets"
             case .effects: return "sh_dock_effects"
             }
         }
@@ -891,6 +939,7 @@ private struct DockView: View {
             case .rig: return CupertinoGlyph.PersonCropCircle
             case .blend: return CupertinoGlyph.CircleLefthalfFill
             case .environment: return CupertinoGlyph.Lightbulb
+            case .presets: return CupertinoGlyph.WandStars
             }
         }
         var panel: AureaModel.PanelKind {
@@ -905,6 +954,7 @@ private struct DockView: View {
             case .move, .rig: return .transform   // rig: não abre painel (RigStage.swift)
             case .blend: return .appearance
             case .environment: return .layer3D
+            case .presets: return .presets
             case .effects: return .effects
             }
         }
@@ -925,14 +975,15 @@ private struct DockView: View {
         let common: [Section] = [.blend, .move, .effects]
         switch layer.kind {
         case 5: return model.isVectorLayer ? [.blend, .move, .vector, .effects] : [.color, .blend, .move, .shape, .effects]
-        case 4: return [Section.editText, Section.text] + common
+        // Texto: editar, opções e presets em cima; mistura, mover e efeitos embaixo (6 → 3 + 3).
+        case 4: return [Section.editText, Section.text, Section.presets] + common
         case 1: return hasAudio ? [.blend, .move, .audio, .effects] : common
         case 2: return common + [Section.rig]
         case 12: return common
         case 3: return [.audio, .effects]
         case 10: return (model.engine.text3D(forLayer: layer.id) ?? [:]).isEmpty
             ? [.move, .environment, .effects, .blend]
-            : [Section.editText, Section.text3DOptions] + common
+            : [Section.editText, Section.text3DOptions, Section.presets] + common
         case 8: return [.move, .environment]
         case 11: return [Section.particles] + common
         case 9: return layer.effectCount > 0 ? common : [.move]
@@ -1217,7 +1268,7 @@ private struct TextPanelView: View {
             HStack {
                 Text(name).font(previewFont(font, size: 17)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 if fonts.contains(where: { $0["family"] as? String == name && ($0["path"] as? String ?? "").hasPrefix(AureaPaths.documents.path) }) {
-                    Text("importada").font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+                    Text(AureaText.t("i18n_font_imported")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
                 }
             }.foregroundStyle(selected ? AureaColors.accent : AureaColors.text).padding(.horizontal, 10).frame(height: 46)
                 .background(selected ? AureaColors.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 10))
@@ -1375,7 +1426,9 @@ private struct AddLayerSheet: View {
         ("sh_add_tab_shape", ShellGlyph.SquareOnCircle), ("sh_add_tab_media", CupertinoGlyph.PhotoOnRectangle),
         ("sh_add_tab_audio", CupertinoGlyph.MusicNote2), ("sh_add_tab_text", CupertinoGlyph.Textformat),
         ("sh_add_tab_element", ShellGlyph.CircleGridHex), ("sh_add_tab_3d", CupertinoGlyph.Cube),
-        ("sh_add_tab_draw", ShellGlyph.Scribble), ("sh_add_tab_vector", CupertinoGlyph.PencilOutline)
+        ("sh_add_tab_draw", ShellGlyph.Scribble), ("sh_add_tab_vector", CupertinoGlyph.PencilOutline),
+        // 8: presets de texto (fim da lista para não mudar os índices; na barra fica ao lado do Texto).
+        ("tp_add_tab", CupertinoGlyph.WandStars)
     ]
     private let shapes: [(Int, String)] = [
         (0, "sh_shape_circle"), (10, "sh_shape_square"), (1, "sh_shape_rounded"), (12, "sh_shape_capsule"),
@@ -1388,7 +1441,7 @@ private struct AddLayerSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(AureaText.t(categories[tab].0)).font(.aurea(size: 16, weight: .semibold))
+                Text(AureaText.t(tab == ShellAddCategories.textPresets ? "tp_title" : categories[tab].0)).font(.aurea(size: 16, weight: .semibold))
                 Spacer()
                 ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_fechar_adicionar"), action: close)
             }.padding(.leading, 16).frame(height: 48)
@@ -1398,6 +1451,8 @@ private struct AddLayerSheet: View {
                 EditorMediaGallery(openFiles: { photos($0 ? .video : .photo) }, openAI: { model.openPanel(.aiVideo) }) { url, video in
                     model.importMedia(url: url, kind: video ? .video : .image); close()
                 }
+            } else if tab == ShellAddCategories.textPresets {
+                TextPresetPicker(onAdded: close)
             } else { cards }
         }
         .background(AureaColors.editorPanel)
@@ -1863,11 +1918,17 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
 /// As categorias de adicionar (as mesmas `AddTab` do Android, mesma ordem,
 /// glifos e nomes). O índice é o `tab` do `AddLayerSheet`.
 enum ShellAddCategories {
+    /// Índice da categoria "Presets de texto" (par do `AddTab.TextPresets` do Android).
+    static let textPresets = 8
+    /// Ordem na barra: a do Android, com os presets de texto logo depois do Texto.
+    static let order = [0, 1, 2, 3, textPresets, 4, 5, 6, 7]
     static let all: [(String, Character)] = [
         ("sh_add_tab_shape", ShellGlyph.SquareOnCircle), ("sh_add_tab_media", CupertinoGlyph.PhotoOnRectangle),
         ("sh_add_tab_audio", CupertinoGlyph.MusicNote2), ("sh_add_tab_text", CupertinoGlyph.Textformat),
         ("sh_add_tab_element", ShellGlyph.CircleGridHex), ("sh_add_tab_3d", CupertinoGlyph.Cube),
-        ("sh_add_tab_draw", ShellGlyph.Scribble), ("sh_add_tab_vector", CupertinoGlyph.PencilOutline)
+        ("sh_add_tab_draw", ShellGlyph.Scribble), ("sh_add_tab_vector", CupertinoGlyph.PencilOutline),
+        // 8: presets de texto (fim da lista para não mudar os índices; na barra fica ao lado do Texto).
+        ("tp_add_tab", CupertinoGlyph.WandStars)
     ]
 }
 
@@ -1887,7 +1948,7 @@ enum ShellAddCategories {
             let side = min(StageDim.addBarItem, geometry.size.height)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(ShellAddCategories.all.indices, id: \.self) { index in
+                    ForEach(ShellAddCategories.order, id: \.self) { index in
                         item(index, slot: slot, side: side, height: geometry.size.height)
                     }
                 }.padding(.horizontal, fits ? 0 : StageDim.addBarItemInset)
@@ -1995,15 +2056,15 @@ private struct ShellAddCategoryDialog: View {
                     } else if !model.cameraTargetMode { model.finishCameraSelectionBox() }
                 })
                 .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in model.cameraContextMenu = true })
-                .confirmationDialog("3D Camera Tracker", isPresented: $model.cameraContextMenu) {
-                    Button("Create Camera") { model.createTrackedObject(0) }
+                .confirmationDialog(AureaText.t("cam_tracker_title"), isPresented: $model.cameraContextMenu) {
+                    Button(AureaText.t("panel_criar_camera")) { model.createTrackedObject(0) }
                     if model.cameraSelectedCount > 0 {
-                        Button("Create Null") { model.createTrackedObject(1) }
-                        Button("Create Shape") { model.createTrackedObject(2) }
-                        Button("Create Text") { model.createTrackedObject(3) }
-                        Button("Create Solid") { model.createTrackedObject(4) }
+                        Button(AureaText.t("trk_create_null")) { model.createTrackedObject(1) }
+                        Button(AureaText.t("cam_create_shape")) { model.createTrackedObject(2) }
+                        Button(AureaText.t("cam_create_text")) { model.createTrackedObject(3) }
+                        Button(AureaText.t("cam_create_solid")) { model.createTrackedObject(4) }
                     }
-                    Button("Close", role: .cancel) { }
+                    Button(AureaText.t("common_close"), role: .cancel) { }
                 }
         }.accessibilityIdentifier("aurea.tracking.points")
     }

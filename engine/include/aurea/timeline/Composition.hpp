@@ -111,6 +111,29 @@ struct Marker {
 inline constexpr u32 kMarkerManual = 0;
 inline constexpr u32 kMarkerBeat = 1;
 
+/// Faixa de taxa da composição. "fps livre" na prática: qualquer valor real
+/// nesta faixa (23,976, 29,97, 144…). O teto é o que os encoders de vídeo dos
+/// aparelhos aceitam; o piso evita quadros de mais de um segundo.
+inline constexpr f64 kMinCompositionFps = 1.0;
+inline constexpr f64 kMaxCompositionFps = 240.0;
+
+/// A taxa como o motor guarda: finita, dentro da faixa e, perto de uma taxa
+/// NTSC (n·1000/1001: 23,976, 29,97, 47,952, 59,94, 119,88, 239,76), a razão
+/// EXATA. As telas digitam "29,97" e o Android passa `float`; sem o encaixe,
+/// 29,97 ≠ 30000/1001 e um vídeo de 29,97 importado andaria meio quadro por
+/// minuto em relação à composição.
+[[nodiscard]] inline f64 normalize_fps(f64 fps) noexcept {
+    if (!(fps > 0.0) || fps != fps || fps > 1e9) return 30.0;
+    for (const f64 n : {24.0, 30.0, 48.0, 60.0, 120.0, 240.0}) {
+        const f64 ntsc = n * 1000.0 / 1001.0;
+        const f64 d = fps - ntsc;
+        if (d < 0.0015 && d > -0.0015) return ntsc;
+    }
+    const f64 whole = static_cast<f64>(static_cast<i64>(fps + 0.5));
+    if (fps - whole < 1e-4 && whole - fps < 1e-4) fps = whole;
+    return fps < kMinCompositionFps ? kMinCompositionFps : fps > kMaxCompositionFps ? kMaxCompositionFps : fps;
+}
+
 class Composition {
 public:
     using LayerTable = SlotTable<Layer, LayerTag>;
@@ -134,7 +157,8 @@ public:
         height_ = h ? h : 1;
         ++formatRevision_;
     }
-    void set_fps(f64 fps) noexcept { fps_ = fps > 0.0 ? fps : 30.0; ++formatRevision_; }
+    /// Qualquer taxa real; passa por `normalize_fps` (faixa + razão NTSC exata).
+    void set_fps(f64 fps) noexcept { fps_ = normalize_fps(fps); ++formatRevision_; }
 
     /// Resize the editing canvas and fit its existing content, keeping aspect
     /// ratio, hierarchy and animated transforms. set_size remains the raw loader API.

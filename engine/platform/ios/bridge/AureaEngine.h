@@ -187,6 +187,8 @@ extern NSString* const AureaExportFramesDone;
 extern NSString* const AureaExportFps;
 extern NSString* const AureaExportEtaSeconds;
 extern NSString* const AureaExportFlags;
+/// Motivo da falha (aurea::ExportFailure, export/ExportRules.hpp): 0 = nenhum.
+extern NSString* const AureaExportFailure;
 extern NSString* const AureaExportMessage;
 
 /// Códigos de export (Engine::ExportFlag).
@@ -309,6 +311,10 @@ NS_SWIFT_NAME(AureaEngine)
 
 // --- Projeto ----------------------------------------------------------------
 - (BOOL)newProjectWidth:(uint32_t)width height:(uint32_t)height fps:(double)fps title:(nullable NSString*)title;
+/// fps livre (1–240; o motor encaixa a razão NTSC) e o fundo inicial da
+/// composição em RGBA sRGB, fora do histórico.
+- (BOOL)newProjectWidth:(uint32_t)width height:(uint32_t)height fps:(double)fps title:(nullable NSString*)title
+            backgroundR:(float)r g:(float)g b:(float)b a:(float)a;
 - (BOOL)loadProject:(NSString*)path;
 - (BOOL)saveProject:(NSString*)path;
 /// Flush UI commands before dispatching. Safe to execute on an IO queue.
@@ -552,6 +558,21 @@ NS_SWIFT_NAME(AureaEngine)
 /// é necessário: use `-importImageFile:` para o caminho sem cópia de ida).
 - (long long)importImageFile:(NSString*)path name:(NSString*)name;
 - (long long)importModel:(NSString*)path name:(NSString*)name;
+/// "Otimizar modelo": `quality` = 0 Original, 1 Equilibrado, 2 Leve (scene3d::ModelQuality).
+/// A memória do aparelho (physicalMemory, os_proc_available_memory) é medida
+/// aqui na hora. Erro −9 (BudgetExceeded) = pesado demais: recusado, nunca morto.
+- (long long)importModel:(NSString*)path name:(NSString*)name quality:(int)quality;
+/// Antes do import: custo do arquivo e o que cabe neste aparelho. Mesmo layout
+/// do Android (aurea_jni.cpp, nativeInspectModel): 0 válido · 1 exato ·
+/// 2 pesado · 3 pesado demais · 4 recomendada · 5 triângulos · 6 vértices ·
+/// 7 texturas · 8 maior lado · 9 orçamento · 10..12 cabe · 13..15 pico ·
+/// 16..18 triângulos que ficam · 19..21 teto de textura (por qualidade).
+- (NSArray<NSNumber*>*)inspectModel:(NSString*)path;
+/// Etapa (ImportPhase) × 1000 + fração × 1000 do import em curso.
+- (int)importModelProgress;
+- (void)cancelModelImport;
+/// O último import: [triângulos do arquivo, que ficaram, texturas reduzidas, puladas, qualidade].
+- (NSArray<NSNumber*>*)lastModelImport;
 /// Texturas (e o .mtl do OBJ) que o modelo 3D da layer referencia e não achou: só o nome do arquivo.
 - (NSArray<NSString*>*)modelMissingTextures:(long long)layerId;
 /// Pasta absoluta do arquivo do modelo (com a barra no fim); vazio = não é modelo importado.
@@ -646,6 +667,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)resetShape3DPart:(long long)layerId part:(int32_t)part NS_SWIFT_NAME(resetShape3DPart(_:part:));
 - (NSArray<NSNumber*>*)shape3DPartGizmo:(long long)layerId part:(int32_t)part length:(float)length localSpace:(BOOL)localSpace NS_SWIFT_NAME(shape3DPartGizmo(_:part:length:localSpace:));
 - (NSArray<NSNumber*>*)shape3DPartMove:(long long)layerId part:(int32_t)part axis:(uint32_t)axis amount:(float)amount NS_SWIFT_NAME(shape3DPartMove(_:part:axis:amount:));
+// Divide o cubo em `count` fatias (2..16) no eixo `axis` (0 X, 1 Y, 2 Z): a camada vira um
+// nulo 3D com as fatias filhas (Engine::split_shape3d). Id do nulo, ou -1.
+- (long long)splitShape3D:(long long)layerId axis:(uint32_t)axis count:(uint32_t)count NS_SWIFT_NAME(splitShape3D(_:axis:count:));
 - (NSArray<NSNumber*>*)textAnimators:(long long)layerId;
 - (BOOL)setTextAnimator:(long long)layerId index:(uint32_t)index values:(NSArray<NSNumber*>*)values;
 - (NSArray<NSNumber*>*)textStyle:(long long)layerId;
@@ -669,6 +693,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)makeCaptionPreset:(NSString*)name options:(NSDictionary<NSString*, NSNumber*>*)options NS_SWIFT_NAME(makeCaptionPreset(_:options:));
 - (NSArray<NSNumber*>*)parseCurvePreset:(NSString*)json NS_SWIFT_NAME(parseCurvePreset(_:));
 - (NSString*)makeCurvePreset:(NSString*)name interpolation:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles NS_SWIFT_NAME(makeCurvePreset(_:interpolation:handles:));
+/// O trecho de curva amostrado pelo motor (`sample_keyframe_ease`): `count` valores em t = i/(count−1).
+/// handles = [x1, y1, x2, y2, força]; [] = pedido inválido.
+- (NSArray<NSNumber*>*)sampleEase:(uint32_t)interpolation handles:(NSArray<NSNumber*>*)handles count:(uint32_t)count NS_SWIFT_NAME(sampleEase(_:handles:count:));
 - (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration;
 - (NSString*)trackPoint:(long long)layerId x:(float)x y:(float)y stabilize:(BOOL)stabilize;
 - (NSDictionary<NSString*, id>*)cameraTrackingStatus;

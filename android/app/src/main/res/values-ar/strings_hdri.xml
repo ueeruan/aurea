@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ambiente 3D (HDRI): formatos aceitos e o motivo da falha (2026-10-03). Chaves msg_hdri_*. -->
+<resources>
+    <string name="msg_hdri_formats">استخدم ملف HDRI بصيغة ‎.hdr أو ‎.exr، أو صورة بانورامية JPG/PNG، أو ملف ‎.zip يحتوي على أحدها.</string>
+    <string name="msg_hdri_err_unreadable">تعذّر فتح هذا الملف. نزّله مرة أخرى أو انسخه إلى الجهاز وحاول من جديد.</string>
+    <string name="msg_hdri_err_format">لا يمكن استخدام هذه الصيغة كبيئة. استخدم ‎.hdr أو ‎.exr أو صورة بانورامية JPG/PNG أو ملف ‎.zip يحتوي على أحدها.</string>
+    <string name="msg_hdri_err_corrupt">يبدو أن ملف HDRI هذا غير مكتمل أو تالف. نزّله مرة أخرى وحاول من جديد.</string>
+    <string name="msg_hdri_err_too_large">ملف HDRI هذا كبير جدًا على هذا الجهاز. استخدم نسخة 4K أو أصغر (‎.hdr أخف من ‎.exr).</string>
+</resources>

@@ -244,6 +244,8 @@ internal class TimelineController(
     // =========================================================================
     private fun tick() = haptics?.performHapticFeedback(HapticFeedbackType.SegmentTick)
     private fun light() = haptics?.performHapticFeedback(HapticFeedbackType.VirtualKey)
+    /** Um tique por frame que o losango anda (o dedo sente o passo, como a alça de texto). */
+    private fun frameTick() = haptics?.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     private fun heavy() = haptics?.performHapticFeedback(HapticFeedbackType.LongPress)
 
     private fun pauseIfPlaying() {
@@ -997,6 +999,7 @@ internal class TimelineController(
         Keyframes.dragLimits(instants, instants.indexOf(r.instants[index]), r.start, r.end, limits)
         val targets = snapTargets(longArrayOf(r.id), own = r, ownEdges = true, ownKeys = false)
         var current = r.instants[index]
+        val origin = current
         val grab = current - frameAt(down.position.x)
         store.timelineKeyDragActive = true
         store.selectKeyframe(r.id, keys.first())
@@ -1004,8 +1007,11 @@ internal class TimelineController(
         state.dragKeyFrame = current
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = frameAt(p.x) + grab
-            val snapped = if (store.snapping) Snap.nearest(targets, desired, playheadFrame(), (metrics.snapKey / pxPerFrame()).toDouble()) else Snap.NONE
-            val t = (if (snapped != Snap.NONE) snapped else desired.toFrame()).coerceIn(limits[0], limits[1])
+            // O cabeçote no instante de origem (o toque no losango o levou até lá) não segura o arrasto.
+            val magnet = KeyDrag.playheadMagnet(playheadFrame(), origin)
+            val snapped = if (store.snapping) Snap.nearest(targets, desired, magnet, (metrics.snapKey / pxPerFrame()).toDouble()) else Snap.NONE
+            val t = (if (snapped != Snap.NONE) snapped else KeyDrag.quantize(desired, current, pxPerFrame(), metrics.keyDragHysteresis))
+                .coerceIn(limits[0], limits[1])
             if (t != current) {
                 openUndo("mover keyframe")
                 val from = r.toLocal(current)
@@ -1014,10 +1020,13 @@ internal class TimelineController(
                     current = t
                     store.selectKeyframe(r.id, keys.first().copy(time = to))
                     state.dragKeyFrame = t
+                    frameTick()
                 }
             }
             setGuide(if (snapped != Snap.NONE && snapped == current) snapped else Snap.NONE)
         }
+        // TalkBack: o arrasto só com gesto anuncia onde o keyframe ficou.
+        if (current != origin) announce?.invoke(Timecode.format(current, fps))
     }
 
     /**
@@ -1045,18 +1054,21 @@ internal class TimelineController(
         state.dragKeyFrame = grabbed
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = frameAt(p.x) + grab
-            val snapped = if (store.snapping) Snap.nearest(targets, desired, playheadFrame(), (metrics.snapKey / pxPerFrame()).toDouble()) else Snap.NONE
-            val t = if (snapped != Snap.NONE) snapped else desired.toFrame()
+            val magnet = KeyDrag.playheadMagnet(playheadFrame(), grabbed)
+            val snapped = if (store.snapping) Snap.nearest(targets, desired, magnet, (metrics.snapKey / pxPerFrame()).toDouble()) else Snap.NONE
+            val t = if (snapped != Snap.NONE) snapped else KeyDrag.quantize(desired, grabbed + applied, pxPerFrame(), metrics.keyDragHysteresis)
             val want = (t - grabbed).coerceIn(lo, hi)
             if (want != applied) {
                 openUndo("mover keyframes")
                 if (store.shiftTimelineKeys(want - applied)) {
                     applied = want
                     state.dragKeyFrame = grabbed + applied
+                    frameTick()
                 }
             }
             setGuide(if (snapped != Snap.NONE && snapped == grabbed + applied) snapped else Snap.NONE)
         }
+        if (applied != 0) announce?.invoke(Timecode.format(grabbed + applied, fps))
     }
 
     // --- Seleção por retângulo ---------------------------------------------------------------

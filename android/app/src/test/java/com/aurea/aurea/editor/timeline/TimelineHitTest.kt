@@ -98,7 +98,8 @@ class TimelineHitTest {
         assertEquals(HitKind.KEYFRAME, hit(260f, 20f, instants = mid))
         assertEquals(HitKind.NONE, hit(250f, 30f, instants = mid))       // abaixo da barra, ainda na linha
         assertEquals(HitKind.KEYFRAME, hit(250f, 8f, instants = mid))
-        assertEquals(HitKind.BODY, hit(270f, 20f, instants = mid))
+        assertEquals(HitKind.KEYFRAME, hit(270f, 20f, instants = mid))   // folga até 48 dp (KeyDragTest)
+        assertEquals(HitKind.BODY, hit(276f, 20f, instants = mid))
         assertEquals(HitKind.BODY, hit(250f, 20f, instants = mid, keys = false))  // lote: o toque é da camada
     }
 

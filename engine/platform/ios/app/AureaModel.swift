@@ -2108,7 +2108,8 @@ final class AureaModel: ObservableObject {
                 if result < 0 {
                     // A frase do motor sai no idioma do app (AureaEngineText).
                     let raw = importer.lastImportError
-                    failure = raw.isEmpty ? AureaText.t("ios_import_failed_code", String(-result)) : AureaEngineText.sentence(raw, code: Int(-result))
+                    if kind == .hdri, let reason = AureaModel.hdriFailure(code: -result) { failure = reason }
+                    else { failure = raw.isEmpty ? AureaText.t("ios_import_failed_code", String(-result)) : AureaEngineText.sentence(raw, code: Int(-result)) }
                     try? FileManager.default.removeItem(at: destination)
                 }
             } catch { failure = AureaText.t("ios_import_copy_failed", error.localizedDescription) }
@@ -2124,6 +2125,18 @@ final class AureaModel: ObservableObject {
                 if atPlayhead && kind != .hdri { self.moveToPlayhead(importedId) }
                 _ = self.saveProject(writeThumbnail: false)
             }
+        }
+    }
+
+    /// HDRI que não entrou: o código do motor (Errc) vira a frase do motivo —
+    /// a mesma tabela do EditorStore.hdriErrorText no Android.
+    static func hdriFailure(code: Int64) -> String? {
+        switch code {
+        case 3, 10: return AureaText.t("msg_hdri_err_unreadable")
+        case 6, 16, 17: return AureaText.t("msg_hdri_err_format")
+        case 11, 14: return AureaText.t("msg_hdri_err_corrupt")
+        case 8, 9: return AureaText.t("msg_hdri_err_too_large")
+        default: return nil
         }
     }
 

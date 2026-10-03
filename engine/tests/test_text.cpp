@@ -9,7 +9,9 @@
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/timeline/Layer.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -65,9 +67,12 @@ AUREA_TEST(Text, LigaturesKerningAndMixedDirection) {
     const auto aa = shape(*arial, "AA");
     const f32 kernedAdvance = av.size() == 2 ? av[1].x : 0.0f;
     const f32 plainAdvance = aa.size() == 2 ? aa[1].x : 0.0f;
-    // Misto: "abc " + hebraico "שלום" + " 123": parágrafo LTR, hebraico invertido no lugar.
+    // Misto: "abc " + hebraico "שלום" + " 123": parágrafo LTR, hebraico invertido.
     const auto mix = shape(*arial, "abc \xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D 123");
-    // Na tela, da esquerda para a direita: a b c ␠ ם ו ל ש ␠ 1 2 3 → clusters 0 1 2 3 7 6 5 4 8 9 10 11.
+    // UAX #9 (o mesmo do EditText/UITextView onde a pessoa digitou): o número
+    // depois do hebraico se prende ao trecho RTL (W7 não vale: o forte anterior
+    // é R; N1: o espaço entre R e número vira R). Na tela, da esquerda para a
+    // direita: a b c ␠ 1 2 3 ␠ ם ו ל ש → clusters 0 1 2 3 9 10 11 8 7 6 5 4.
     std::vector<u32> order;
     for (const auto& g : mix) order.push_back(g.cluster);
     std::string ord;
@@ -75,7 +80,7 @@ AUREA_TEST(Text, LigaturesKerningAndMixedDirection) {
     std::printf("    fi = %zu glifo(s); AV avanco %.1f x AA %.1f; misto: %s\n", fi.size(), kernedAdvance, plainAdvance, ord.c_str());
     AUREA_CHECK(fi.size() == 1);
     AUREA_CHECK(kernedAdvance > 0 && kernedAdvance < plainAdvance - 1.0f);
-    const std::vector<u32> want{0, 1, 2, 3, 7, 6, 5, 4, 8, 9, 10, 11};
+    const std::vector<u32> want{0, 1, 2, 3, 9, 10, 11, 8, 7, 6, 5, 4};
     AUREA_CHECK(order == want);
     (void)a;
 }
@@ -91,6 +96,109 @@ AUREA_TEST(Text, MissingGlyphsFallBackToAnotherFont) {
     std::printf("    reserva: %zu glifos, %u de outra fonte, %u vazios (.notdef)\n", g.size(), fallback, notdef);
     AUREA_CHECK(fallback >= 3);
     AUREA_CHECK(notdef == 0);
+}
+
+// -----------------------------------------------------------------------------
+// Árabe com a fonte EMBARCADA (Noto Naskh Arabic, OFL — engine/assets/fonts):
+// não depende das fontes do Windows, então roda igual em qualquer máquina.
+// -----------------------------------------------------------------------------
+namespace {
+std::string repo_font(const char* name) {
+    return (std::filesystem::path(__FILE__).parent_path().parent_path() / "assets/fonts" / name).string();
+}
+std::vector<u32> clusters_left_to_right(const std::vector<text::ShapedGlyph>& g) {
+    std::vector<text::ShapedGlyph> v = g;
+    std::stable_sort(v.begin(), v.end(), [](const text::ShapedGlyph& a, const text::ShapedGlyph& b) { return a.x < b.x; });
+    std::vector<u32> out;
+    for (const auto& x : v) if (out.empty() || out.back() != x.cluster) out.push_back(x.cluster);
+    return out;
+}
+std::string join(const std::vector<u32>& v) {
+    std::string s;
+    for (u32 c : v) s += std::to_string(c) + " ";
+    return s;
+}
+} // namespace
+
+// "مرحبا" na Noto Naskh embarcada: letras ligadas (glifo diferente do da letra
+// isolada), da direita para a esquerda, sem .notdef nem reserva.
+AUREA_TEST(Text, BundledArabicFontJoinsLettersRightToLeft) {
+    auto naskh = font_at(repo_font("NotoNaskhArabic-Regular.ttf").c_str());
+    AUREA_CHECK_MSG(naskh != nullptr, "engine/assets/fonts/NotoNaskhArabic-Regular.ttf nao abriu");
+    if (!naskh) return;
+    const std::string word = "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7";   // مرحبا
+    const char* letters[] = {"\xD9\x85", "\xD8\xB1", "\xD8\xAD", "\xD8\xA8", "\xD8\xA7"};
+    const auto g = shape(*naskh, word);
+    u32 differ = 0, notdef = 0, fallback = 0;
+    for (u32 i = 0; i < 5; ++i) {
+        const auto alone = shape(*naskh, letters[i]);
+        u32 inWord = 0;
+        for (const auto& x : g) if (x.cluster == i) inWord = x.glyph;
+        differ += (!alone.empty() && inWord != 0 && alone[0].glyph != inWord) ? 1u : 0u;
+    }
+    for (const auto& x : g) { notdef += x.glyph == 0 ? 1u : 0u; fallback += x.fallback ? 1u : 0u; }
+    const std::vector<u32> order = clusters_left_to_right(g);
+    std::printf("    naskh: %zu glifos, %u de 5 em forma de juncao, esquerda->direita: %s\n", g.size(), differ, join(order).c_str());
+    AUREA_CHECK_MSG(differ >= 4, "letras arabes sairam na forma isolada (sem shaping contextual)");
+    AUREA_CHECK(notdef == 0);
+    AUREA_CHECK(fallback == 0);
+    AUREA_CHECK(order == (std::vector<u32>{4, 3, 2, 1, 0}));
+}
+
+// Linha mista com a ordem do UAX #9: parágrafo RTL (começa em árabe) com
+// "Aurea 2026" — W7 cola o número no latim, o trecho LTR inteiro fica à
+// esquerda do árabe; parágrafo LTR com árabe no meio; timecode intacto (W4).
+// O latim vem do Roboto e o árabe da reserva embarcada (achada ao lado da
+// fonte padrão, como no app).
+AUREA_TEST(Text, MixedArabicAndLatinFollowBidiOrder) {
+    const std::string robotoPath = repo_font("Roboto-Regular.ttf");
+    auto roboto = font_at(robotoPath.c_str());
+    AUREA_CHECK(roboto != nullptr);
+    if (!roboto) return;
+    text::set_default_font_path(robotoPath);
+    const std::string marhaba = "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7";
+    // 0-4 árabe, 5 espaço, 6-10 Aurea, 11 espaço, 12-15 2026.
+    const auto rtl = shape(*roboto, marhaba + " Aurea 2026");
+    // 0-4 Aurea, 5 espaço, 6-10 árabe, 11 espaço, 12-15 2026.
+    const auto ltr = shape(*roboto, "Aurea " + marhaba + " 2026");
+    // 0-4 "الوقت" (ا ل و ق ت), 5 espaço, 6-13 "00:01:02".
+    const auto tc = shape(*roboto, "\xD8\xA7\xD9\x84\xD9\x88\xD9\x82\xD8\xAA 00:01:02");
+    u32 notdef = 0, fallback = 0;
+    for (const auto& x : rtl) { notdef += x.glyph == 0 ? 1u : 0u; fallback += x.fallback ? 1u : 0u; }
+    const auto o1 = clusters_left_to_right(rtl), o2 = clusters_left_to_right(ltr), o3 = clusters_left_to_right(tc);
+    std::printf("    RTL: %s\n    LTR: %s\n    timecode: %s\n    .notdef %u, reserva %u\n", join(o1).c_str(), join(o2).c_str(),
+                join(o3).c_str(), notdef, fallback);
+    AUREA_CHECK(notdef == 0);
+    AUREA_CHECK(fallback == 5);   // as 5 letras árabes vêm da Noto Naskh
+    AUREA_CHECK(o1 == (std::vector<u32>{6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 5, 4, 3, 2, 1, 0}));
+    AUREA_CHECK(o2 == (std::vector<u32>{0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 11, 10, 9, 8, 7, 6}));
+    AUREA_CHECK(o3 == (std::vector<u32>{6, 7, 8, 9, 10, 11, 12, 13, 5, 4, 3, 2, 1, 0}));
+    text::set_default_font_path("");   // devolve a busca da fonte padrão aos outros testes
+}
+
+// Uma camada de texto em árabe rasteriza (pixels de verdade, não caixinhas
+// vazias) e a tinta cobre a largura da frase.
+AUREA_TEST(Text, ArabicTextLayerRendersPixels) {
+    auto naskh = font_at(repo_font("NotoNaskhArabic-Regular.ttf").c_str());
+    AUREA_CHECK(naskh != nullptr);
+    if (!naskh) return;
+    TextData t;
+    t.content = "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7 \xD8\xA8\xD8\xA7\xD9\x84\xD8\xB9\xD8\xA7\xD9\x84\xD9\x85";   // مرحبا بالعالم
+    t.size = 64.0f;
+    t.color = Vec4{1, 1, 1, 1};
+    text::TextRaster r;
+    const bool ok = text::rasterize(*naskh, t, 1.0f, r);
+    u64 lit = 0;
+    u32 minX = r.width, maxX = 0;
+    for (u32 y = 0; y < r.height; ++y)
+        for (u32 x = 0; x < r.width; ++x)
+            if (r.rgba[(static_cast<usize>(y) * r.width + x) * 4 + 3] > 128) { ++lit; minX = std::min(minX, x); maxX = std::max(maxX, x); }
+    std::printf("    raster arabe: ok=%d %ux%u, %llu px acesos, tinta de x=%u a %u\n", ok ? 1 : 0, r.width, r.height,
+                static_cast<unsigned long long>(lit), minX, maxX);
+    AUREA_CHECK(ok);
+    AUREA_CHECK(r.width > 100 && r.height > 30);
+    AUREA_CHECK(lit > 400);
+    AUREA_CHECK(maxX > minX && maxX - minX > r.width / 2);
 }
 
 // -----------------------------------------------------------------------------

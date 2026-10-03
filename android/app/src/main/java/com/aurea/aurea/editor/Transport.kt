@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor
 
+import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -59,6 +60,13 @@ import kotlin.math.roundToInt
  */
 @Composable
 internal fun TransportBar(store: EditorStore, ui: EditorUi) {
+    // Transporte em LTR também em árabe: ⇤ à esquerda do ▶ e ⇥ à direita, no
+    // sentido do tempo da timeline logo abaixo (ver `KeepLtr`).
+    KeepLtr { TransportBarContent(store, ui) }
+}
+
+@Composable
+private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
     if (ui.manipulating) {
         InfoBar(store)
         return
@@ -215,6 +223,12 @@ private fun androidx.compose.foundation.layout.RowScope.InfoPair(label: String, 
  */
 @Composable
 internal fun FullscreenTimeBar(store: EditorStore) {
+    // A barra é tempo: o início à esquerda em qualquer idioma (ver `KeepLtr`).
+    KeepLtr { FullscreenTimeBarContent(store) }
+}
+
+@Composable
+private fun FullscreenTimeBarContent(store: EditorStore) {
     val haptic = LocalHapticFeedback.current
     var dragging by remember { mutableStateOf(false) }
     val style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600)).merge(AureaType.Tabular)

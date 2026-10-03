@@ -4922,18 +4922,33 @@ bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexc
 // Ambiente 3D (HDRI)
 // =============================================================================
 namespace {
-std::shared_ptr<scene3d::HdriPixels> read_hdri_file(const std::string& path) {
-    FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) return nullptr;
+scene3d::HdriDecode read_hdri_file(const std::string& path) {
+    using scene3d::HdriStatus;
+    FILE* f = path.empty() ? nullptr : fileio::open_file(path, "rb");
+    if (!f) return {nullptr, HdriStatus::Unreadable};
     std::fseek(f, 0, SEEK_END);
     const long n = std::ftell(f);
     std::fseek(f, 0, SEEK_SET);
-    if (n <= 0 || n > (512l << 20)) { std::fclose(f); return nullptr; }
+    if (n <= 0) { std::fclose(f); return {nullptr, HdriStatus::Unreadable}; }
+    // O arquivo inteiro vai para a RAM (o Radiance é reduzido linha a linha
+    // depois): um 8K .hdr tem ~150 MB; acima de 512 MB não vale tentar.
+    if (n > (512l << 20)) { std::fclose(f); return {nullptr, HdriStatus::TooLarge}; }
     std::vector<u8> bytes(static_cast<usize>(n));
     const usize got = std::fread(bytes.data(), 1, bytes.size(), f);
     std::fclose(f);
-    if (got != bytes.size()) return nullptr;
-    return scene3d::decode_hdri(bytes.data(), bytes.size());
+    if (got != bytes.size()) return {nullptr, HdriStatus::Unreadable};
+    return scene3d::decode_hdri_detailed(bytes.data(), bytes.size());
+}
+
+/// Motivo da falha → código que a UI traduz (EditorStore.kt / AureaModel.swift).
+Status hdri_failure(scene3d::HdriStatus s) {
+    using scene3d::HdriStatus;
+    switch (s) {
+        case HdriStatus::Unreadable: return Status{Errc::IoError, "ambiente: o arquivo nao abriu"};
+        case HdriStatus::Corrupt: return Status{Errc::CorruptData, "ambiente: arquivo incompleto ou danificado"};
+        case HdriStatus::TooLarge: return Status{Errc::BudgetExceeded, "ambiente: arquivo grande demais para este aparelho"};
+        default: return Status{Errc::UnsupportedFormat, "Ambiente nao lido: use HDR, EXR, JPG ou PNG panoramico (ou um .zip com um deles)"};
+    }
 }
 } // namespace
 
@@ -4944,16 +4959,22 @@ std::shared_ptr<const scene3d::HdriPixels> Engine::hdri_lookup(void* selfPtr, As
     if (auto it = self->hdris_.find(id.pack()); it != self->hdris_.end()) return it->second;
     const Asset* a = self->project_ ? self->project_->asset(id) : nullptr;
     if (!a || a->kind != AssetKind::Environment) return nullptr;
-    std::shared_ptr<const scene3d::HdriPixels> px = read_hdri_file(self->resolve_asset_path(a->sourcePath));
+    std::shared_ptr<const scene3d::HdriPixels> px = read_hdri_file(self->resolve_asset_path(a->sourcePath)).pixels;
     self->hdris_[id.pack()] = px;   // nulo também fica: não tenta de novo a cada quadro
     return px;
 }
 
 Result<u64> Engine::import_hdri(const char* path, u64 objectLayer) noexcept {
     if (!path || !*path) return Status{Errc::InvalidArgument, "sem arquivo"};
-    const std::string resolved = resolve_asset_path(path);
-    std::shared_ptr<scene3d::HdriPixels> px = read_hdri_file(resolved);
-    if (!px) return Status{Errc::UnsupportedFormat, "Ambiente nao lido: use HDR/HDRI Radiance ou JPG/PNG panoramico, ate 8 megapixels"};
+    std::string resolved = resolve_asset_path(path);
+    // O arquivo que a UI acabou de copiar existe no caminho dado: se o
+    // resolvedor de caminhos antigos não o achar, vale o caminho literal.
+    if (resolved.empty() || !fileio::exists(resolved)) {
+        if (fileio::exists(path) && std::string_view(path).rfind("docs:", 0) != 0) resolved = path;
+    }
+    scene3d::HdriDecode decoded = read_hdri_file(resolved);
+    if (!decoded.pixels) return hdri_failure(decoded.status);
+    std::shared_ptr<scene3d::HdriPixels> px = std::move(decoded.pixels);
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
@@ -7000,6 +7021,15 @@ std::string Engine::resolve_asset_path(const std::string& stored) const {
         if (docs.filename() == "projetos" && relative.rfind("modelos/", 0) == 0) {
             const auto legacy = document_asset_path(asset_path_utf8(docs.parent_path()), relative, true);
             if (!legacy.empty()) return legacy;
+        }
+        // O import atual do Android grava em files/projetos/modelos/: o
+        // caminho absoluto já traz a própria pasta de documentos ("projetos/…").
+        // Sem isto, o .hdr recém-copiado virava files/projetos/projetos/… e o
+        // HDRI falhava com "erro 17" só no app de produção (com.aurea.aurea).
+        if (const std::string own = asset_path_utf8(docs.filename()) + "/";
+            own.size() > 1 && relative.rfind(own, 0) == 0) {
+            const auto inside = document_asset_path(config_.documentsDirectory, relative.substr(own.size()), true);
+            if (!inside.empty()) return inside;
         }
         // No companion (or a symlink leaving Documents) stays missing; never
         // fall back to a different application's container or a basename scan.
@@ -9251,11 +9281,13 @@ bool Engine::query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexce
             out.corners[i * 2 + 1] = v.y / v.w;
         }
         if (ok) out.geomFlags = bridge::kGeomCornersValid | (persp ? bridge::kGeomPerspective : 0u);
-    } else if (l->kind == LayerKind::Model3D) {
-        // Modelo 3D: a caixa do modelo (8 cantos) pela câmera, com a cadeia de
-        // pais — o retângulo que ela ocupa na tela. Sem isto a UI montava a
-        // caixa só com a posição da camada e, num filho de nulo (as partes de
-        // um cubo dividido), ela aparecia longe do objeto.
+    } else if (l->kind == LayerKind::Model3D && (p || l->hasParentBasis)) {
+        // Modelo 3D FILHO (de nulo, de grupo): a caixa do modelo (8 cantos)
+        // pela câmera, com a cadeia de pais — o retângulo que ela ocupa na
+        // tela. Sem isto a UI montava a caixa só com a posição local da
+        // camada e, num filho de nulo (as partes de um cubo dividido), ela
+        // aparecia longe do objeto. Sem pai a UI continua com a silhueta
+        // (tamanho × escala em volta do pivô), que já cai no lugar certo.
         const auto found = models_.find(l->model.scene.pack());
         const scene3d::SceneAsset* asset = found != models_.end() && found->second ? found->second.get() : nullptr;
         if (asset && asset->bounds.valid()) {
@@ -10815,7 +10847,7 @@ bool command_valid(const Command& c) noexcept {
             const KeyframeInterpPayload& k = c.keyframe_interp;
             return track_ok(k.track) && frame_ok(k.time)
                 && static_cast<u8>(k.interp) <= static_cast<u8>(kLastInterpolation)
-                && k.power <= 3
+                && k.power <= 3 && k.linkAxes <= 1
                 && finite_all({k.bx1, k.by1, k.bx2, k.by2});
         }
         case CommandType::MaskSetOperation:
@@ -11473,12 +11505,24 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeSetEasing: {
             Layer* l = need_layer(cmd.keyframe_interp.track.layer);
             if (!l) return Errc::NotFound;
-            Track* track = command_track(*l, cmd.keyframe_interp.track, false);
+            const KeyframeInterpPayload& k = cmd.keyframe_interp;
+            Track* track = command_track(*l, k.track, false);
             if (!track) return Errc::NotFound;
-            track->set_interpolation(cmd.keyframe_interp.time, cmd.keyframe_interp.interp,
-                                     cmd.keyframe_interp.bx1, cmd.keyframe_interp.by1,
-                                     cmd.keyframe_interp.bx2, cmd.keyframe_interp.by2,
-                                     cmd.keyframe_interp.power);
+            track->set_interpolation(k.time, k.interp, k.bx1, k.by1, k.bx2, k.by2, k.power);
+            // Curva aplicada à PROPRIEDADE (painel de curva, presets): os eixos
+            // irmãos com keyframe no mesmo instante recebem a mesma curva. As
+            // alças são normalizadas (progresso 0..1 do trecho), então a mesma
+            // curva dá o mesmo tempo em X, Y e Z, seja qual for a distância ou
+            // o sentido de cada eixo (Y da tela para baixo não inverte nada).
+            if (k.linkAxes) {
+                TrackRef axes[3];
+                const u32 n = linked_axis_refs(k.track, axes);
+                for (u32 i = 0; i < n; ++i) {
+                    Track* sibling = command_track(*l, axes[i], false);
+                    if (!sibling || sibling == track || sibling->find_exact(k.time) == kInvalidIndex) continue;
+                    sibling->set_interpolation(k.time, k.interp, k.bx1, k.by1, k.bx2, k.by2, k.power);
+                }
+            }
             return OkStatus;
         }
 

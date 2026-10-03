@@ -35,6 +35,7 @@ add_executable(aurea_tests
     test_text3d.cpp
     test_text3d_anim.cpp
     test_text3d_shared.cpp
+    test_hdri.cpp
     test_cube_lut.cpp
     test_transform3d_keys.cpp
     test_scene_pick.cpp
@@ -44,6 +45,7 @@ add_executable(aurea_tests
     test_effect3d_sweep.cpp
     test_audio.cpp
     test_audio_fx.cpp
+    test_audio_transport.cpp
     test_captions.cpp
     test_cliptime.cpp
     test_beats.cpp

@@ -1,5 +1,6 @@
 package com.aurea.aurea.ui.ds
 
+import com.aurea.aurea.ui.theme.aureaTracking
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -208,9 +209,9 @@ fun AureaAlert(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(title, style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, letterSpacing = (-0.5).sp, textAlign = TextAlign.Center)))
+                Text(title, style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, letterSpacing = aureaTracking(-0.5f), textAlign = TextAlign.Center)))
                 message?.let {
-                    Text(it, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, letterSpacing = (-0.2).sp, textAlign = TextAlign.Center)))
+                    Text(it, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, letterSpacing = aureaTracking(-0.2f), textAlign = TextAlign.Center)))
                 }
                 extra?.invoke()
             }

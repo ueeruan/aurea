@@ -35,6 +35,7 @@ import kotlinx.coroutines.withContext
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.AureaApp
 import com.aurea.aurea.ui.i18n.AppLanguage
+import com.aurea.aurea.ui.i18n.KeepAppLanguage
 
 /**
  * A única Activity. O [EditorStore] é um ViewModel de verdade: sobrevive a
@@ -60,6 +61,25 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(AppLanguage.wrap(newBase))
     }
 
+    /**
+     * Rotação, uiMode, densidade… (`configChanges` do manifesto): a Activity não
+     * é recriada e o sistema entrega a configuração DELE, sem o idioma do app.
+     * Reaplica o idioma escolhido nos recursos da Activity antes de repassar;
+     * o Compose faz o mesmo na raiz (`KeepAppLanguage`).
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        val fixed = AppLanguage.override(this, newConfig)
+        if (fixed != null) {
+            // O sistema também volta o Locale padrão do processo para o dele:
+            // sem repor, "%.1f".format e o tracking do árabe (AureaType)
+            // mudariam no meio da sessão.
+            java.util.Locale.setDefault(fixed.locales[0])
+            @Suppress("DEPRECATION")
+            resources.updateConfiguration(fixed, resources.displayMetrics)
+        }
+        super.onConfigurationChanged(fixed ?: newConfig)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Antes de tudo: a pilha de um crash Java precisa ser gravada mesmo que
         // ele aconteça no primeiro quadro.
@@ -72,7 +92,7 @@ class MainActivity : ComponentActivity() {
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         com.aurea.aurea.home.HomeViewModel.loadTheme(this)
-        setContent { LanguageWelcome { CreatorWelcome { AureaApp(store, conta) } } }
+        setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store, conta) } } } }
 
         if (savedInstanceState == null) {
             // Número de cadastrados + revalidação da sessão (com rede; offline, segue dentro).

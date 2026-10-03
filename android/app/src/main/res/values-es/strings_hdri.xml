@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ambiente 3D (HDRI): formatos aceitos e o motivo da falha (2026-10-03). Chaves msg_hdri_*. -->
+<resources>
+    <string name="msg_hdri_formats">Usa un HDRI .hdr o .exr, un JPG/PNG panorámico o un .zip que contenga uno.</string>
+    <string name="msg_hdri_err_unreadable">No se pudo abrir este archivo. Descárgalo de nuevo o cópialo al dispositivo e inténtalo otra vez.</string>
+    <string name="msg_hdri_err_format">Este formato no sirve como entorno. Usa .hdr, .exr, un JPG/PNG panorámico o un .zip que contenga uno.</string>
+    <string name="msg_hdri_err_corrupt">Este HDRI parece incompleto o dañado. Descárgalo de nuevo e inténtalo otra vez.</string>
+    <string name="msg_hdri_err_too_large">Este HDRI es demasiado grande para este dispositivo. Usa la versión de 4K o menor (el .hdr pesa menos que el .exr).</string>
+</resources>

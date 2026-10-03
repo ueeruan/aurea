@@ -1,5 +1,6 @@
 package com.aurea.aurea.ui.ds
 
+import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -200,7 +201,9 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             // Visor: fundo `palco`, 26 sp w700 tabular à direita + unidade.
-            Row(
+            // Visor e teclas em LTR também em árabe (como a calculadora e o
+            // discador do sistema): o número cresce para a direita e ⌫ apaga ali.
+            KeepLtr { Row(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
@@ -224,7 +227,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                     Spacer(Modifier.width(6.dp))
                     Text(request.unit, style = AureaType.Base.merge(TextStyle(fontSize = 16.sp, color = AureaColors.Muted)))
                 }
-            }
+            } }
             Box(Modifier.fillMaxWidth().height(22.dp), contentAlignment = Alignment.CenterEnd) {
                 Text(hint, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             }
@@ -235,7 +238,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                 listOf(",", "0", "±", "−"),
                 listOf(":", "%", "=", "+"),
             )
-            rows.forEach { row ->
+            KeepLtr { rows.forEach { row ->
                 Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
                     row.forEach { k ->
                         val op = k == "÷" || k == "×" || k == "−" || k == "+" || k == "="
@@ -266,7 +269,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                         }
                     }
                 }
-            }
+            } }
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth()) {
                 Box(

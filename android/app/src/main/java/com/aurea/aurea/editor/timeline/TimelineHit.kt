@@ -58,15 +58,19 @@ internal object RowHit {
         // tipo (tocar abre/fecha as trilhas, segurar trava/reordena).
         if (x < m.headerColumn) return if (x < m.eyeHitRight) HitKind.HEADER_EYE else HitKind.HEADER
 
-        // Alvo de toque centrado no mesmo ponto usado pelo desenho.
+        // Alvo de toque centrado no mesmo ponto usado pelo desenho. Dois anéis
+        // (beta "difícil mover o keyframe"): o NÚCLEO de 28 ganha de tudo; a
+        // FOLGA até 48 dp (alvo mínimo de toque) ganha do corpo e do vazio, mas
+        // cede às alças, à tampa e às setas — elas continuam alcançáveis.
         var key = -1
+        var keyWide = -1
         val keyCy = if (compact) m.diamondCyCompact else m.diamondCyNormal
         if (keysEnabled && abs(y - keyCy) <= m.keyTouchHalf && instants.isNotEmpty()) {
             val i = Keyframes.nearestIndex(instants, TimeAxis.frameAt(x, view, pxPerFrame, centerX))
             val kx = TimeAxis.xOf(instants[i].toDouble(), view, pxPerFrame, centerX)
-            if (abs(kx - x) <= m.keyTouchHalf) {
-                key = i
-            }
+            val dx = abs(kx - x)
+            if (dx <= m.keyTouchHalf) key = i
+            else if (dx <= m.keyHitHalf) keyWide = i
         }
 
         // Zonas das alças: o desenho (dentro das pontas) + folga para fora; num clipe
@@ -89,20 +93,22 @@ internal object RowHit {
         if (inStart) return HitKind.TRIM_START
         if (inEnd) return HitKind.TRIM_END
         if (compact && overBar && x >= capLeft(m, x0) && x < x0) return HitKind.CAP_BACK
-        if (overBar && x >= x0 && x <= x1) {
-            if (compact) {
-                // Redesenho 2026-09-29: a tampa branca "‹" na ponta esquerda
-                // volta (sai da seção); as setas de trocar de camada ‹ › moram
-                // juntas na ponta direita (não disputam com a tampa).
-                val next = nextArrowLeft(m, x0, x1, width)
-                val prev = next - m.arrowSlot
-                if (prev >= max(x0, m.headerColumn)) {
-                    if (x >= next && x <= next + m.arrowSlot + m.arrowTouchPad) return HitKind.ARROW_NEXT
-                    if (x >= prev - m.arrowTouchPad && x < next) return HitKind.ARROW_PREV
-                }
+        if (overBar && x >= x0 && x <= x1 && compact) {
+            // Redesenho 2026-09-29: a tampa branca "‹" na ponta esquerda
+            // volta (sai da seção); as setas de trocar de camada ‹ › moram
+            // juntas na ponta direita (não disputam com a tampa).
+            val next = nextArrowLeft(m, x0, x1, width)
+            val prev = next - m.arrowSlot
+            if (prev >= max(x0, m.headerColumn)) {
+                if (x >= next && x <= next + m.arrowSlot + m.arrowTouchPad) return HitKind.ARROW_NEXT
+                if (x >= prev - m.arrowTouchPad && x < next) return HitKind.ARROW_PREV
             }
-            return HitKind.BODY
         }
+        if (keyWide >= 0) {
+            out[0] = keyWide
+            return HitKind.KEYFRAME
+        }
+        if (overBar && x >= x0 && x <= x1) return HitKind.BODY
         return HitKind.NONE
     }
 }

@@ -364,7 +364,7 @@ struct EffectsView: View {
                 cardButton(CupertinoGlyph.Trash) { confirmRemoveTool(tool) }
                     .accessibilityLabel(AureaText.t("fxui_a11y_remove", tool.label))
             }
-            CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.muted).frame(width: 36, height: 40)
+            CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.muted).mirrorsInRtl().frame(width: 36, height: 40)
                 .accessibilityHidden(true)
         }.padding(.trailing, 4).frame(height: 56)
             .background(ParamRowColors.card, in: RoundedRectangle(cornerRadius: 10))
@@ -1012,6 +1012,7 @@ struct FxEqResponseGraph: View {
             }
             .frame(height: 96)
             .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 8))
+            .keepLtr()   // frequência grave → aguda da esquerda para a direita, como todo EQ
         }
         .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)
     }

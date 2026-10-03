@@ -1815,7 +1815,7 @@ to edit the curve.</string>
     <string name="world_purple_crystals">Purple crystals</string>
     <string name="environment_texture">Environment Texture</string>
     <string name="environment_background">Show as 360° background</string>
-    <string name="environment_hint">Import Radiance HDR/HDRI or a 360° JPG/PNG panorama (2:1), up to 8 MP. The image surrounds the camera and lights the scene.</string>
+    <string name="environment_hint">Import an HDR/EXR, a 360° JPG/PNG panorama (2:1) or a .zip containing one. Large files (8K) are scaled down. The image surrounds the camera and lights the scene.</string>
     <string name="gizmo_tool_move">Move</string>
     <string name="gizmo_tool_rotate">Rotate</string>
     <string name="gizmo_tool_scale">Scale</string>

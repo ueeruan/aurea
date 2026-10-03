@@ -386,6 +386,9 @@ struct NumericKeypadSheet: View {
                         .background(selectedAll ? AureaColors.accentDim : .clear, in: RoundedRectangle(cornerRadius: 4))
                     if !request.unit.isEmpty { Text(request.unit).font(.aurea(size: 16)).foregroundStyle(AureaColors.muted) }
                 }.padding(.horizontal, 14).padding(.vertical, 12).background(AureaColors.stage, in: RoundedRectangle(cornerRadius: 12))
+                // Visor e teclas em LTR mesmo em árabe: a conta se lê da esquerda
+                // para a direita e o teclado é o 7-8-9 de sempre (como o do sistema).
+                .keepLtr()
                 Text(hint).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .trailing).frame(height: 22)
                 ForEach(rows.indices, id: \.self) { row in
                     HStack(spacing: 6) {
@@ -401,7 +404,7 @@ struct NumericKeypadSheet: View {
                                 if key == "⌫" { text = ""; selectedAll = false }
                             })
                         }
-                    }.padding(.horizontal, 3).padding(.bottom, 6)
+                    }.padding(.horizontal, 3).padding(.bottom, 6).keepLtr()
                 }
                 HStack(spacing: 10) {
                     Button(AureaText.t("ds_cancelar"), action: onDismiss)
@@ -696,6 +699,9 @@ struct ColorPickerSheet: View {
                     push()
                 })
         }.frame(height: 170)
+        // Quadro S×V: o gradiente (.leading → .trailing) e o ponto/gesto (x absoluto)
+        // precisam do mesmo eixo; em LTR fixo os dois concordam em qualquer idioma.
+        .keepLtr()
     }
     private var hueStrip: some View {
         ColorValueStrip(value: hue / 360, onValue: { hue = $0 * 360; push() }) {
@@ -799,5 +805,7 @@ private struct ColorValueStrip<Background: View>: View {
                     .position(x: min(max(7, CGFloat(value) * geometry.size.width), max(7, geometry.size.width - 7)), y: 15)
             }.contentShape(Rectangle()).gesture(DragGesture(minimumDistance: 0).onChanged { onValue(Float($0.location.x / max(1, geometry.size.width)).clamped(to: 0...1)) })
         }.frame(height: 30)
+        // Matiz/opacidade: gradiente e alça no mesmo eixo do x absoluto do gesto.
+        .keepLtr()
     }
 }

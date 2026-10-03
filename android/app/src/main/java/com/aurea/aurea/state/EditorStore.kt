@@ -746,6 +746,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                     check(pending.renameTo(font)) { "Could not install default font" }
                 }.onFailure { android.util.Log.w("AureaFonts", "Bundled fallback unavailable; using system fonts", it) }
+                // Reserva árabe embarcada (Noto Naskh Arabic, OFL): o motor a
+                // procura ao lado da fonte padrão. Sem ela, um título em árabe
+                // dependeria da fonte árabe que cada fabricante põe no sistema.
+                runCatching {
+                    val arabic = File(dirs.cache, "NotoNaskhArabic-Regular.ttf")
+                    val pending = File(dirs.cache, "NotoNaskhArabic-Regular.ttf.tmp")
+                    app.assets.open("NotoNaskhArabic-Regular.ttf").use { input ->
+                        pending.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    check(pending.renameTo(arabic)) { "Could not install Arabic fallback font" }
+                }.onFailure { android.util.Log.w("AureaFonts", "Bundled Arabic fallback unavailable; using system fonts", it) }
                 val debug = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 // Sondagem do aparelho: medida UMA vez (primeira abertura ou SO
                 // novo) e guardada; o motor decide orçamento, workers, teto de
@@ -1386,11 +1397,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
-        text3d = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
-            val f = FloatArray(Text3DInfo.FIELDS)
-            engine.queryText3d(id, f)?.let { novo -> Text3DInfo.of(novo, f, engine.queryText3dFont(id)).takeIf { !it.sameAs(text3d) } ?: text3d }
-        } else {
-            null
+        // Receita pendente de OUTRA camada (a seleção mudou no meio do arrasto):
+        // vai para a dona agora, antes de `text3d` passar a ser a da nova.
+        if (text3dPending && text3dPendingLayer != 0L && text3dPendingLayer != id) {
+            typingHandler.removeCallbacks(applyText3d)
+            text3dPending = false
+            text3d?.takeIf { it.content.isNotBlank() }?.let { engine.setText3d(text3dPendingLayer, it.content, it.toFields(), it.fontPath) }
+        }
+        text3d = text3dAfterRefresh(text3dPending, text3dPendingLayer, id, text3d) {
+            if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
+                val f = FloatArray(Text3DInfo.FIELDS)
+                engine.queryText3d(id, f)?.let { novo -> Text3DInfo.of(novo, f, engine.queryText3dFont(id)).takeIf { !it.sameAs(text3d) } ?: text3d }
+            } else {
+                null
+            }
         }
         refreshShape3d(id)
         modelShadows = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
@@ -2012,6 +2032,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setText3D(info: Text3DInfo, typing: Boolean = false, lazy: Boolean = false) {
         val id = primary ?: return
         text3d = info
+        if (lazy || typing) text3dPendingLayer = id
         if (lazy) {
             text3dPending = true
             // Arrasto (cor, profundidade): a malha acompanha em passos curtos.
@@ -2037,7 +2058,27 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private var text3dPending = false
-    private val applyText3d = Runnable { primary?.let { id -> text3d?.let { pushText3D(id, it) } } }
+    /** Camada dona da receita pendente (a seleção pode mudar antes dos 90/250 ms). */
+    private var text3dPendingLayer = 0L
+    private val applyText3d = Runnable {
+        val id = text3dPendingLayer.takeIf { text3dPending && it != 0L } ?: primary
+        if (id != null) text3d?.let { pushText3D(id, it) }
+    }
+
+    /**
+     * Beta 2026-10-03 ("profundidade e chanfro do texto 3D não mudam"): o fim do
+     * arrasto chamava refreshNow() ANTES de a receita pendente (90 ms) ir ao
+     * motor; o refresh relia a receita antiga para `text3d` e o envio atrasado
+     * mandava de volta o valor velho. Agora o fim do gesto envia a pendente
+     * primeiro (dentro do mesmo desfazer) e o refresh não a sobrescreve.
+     */
+    private fun flushText3D() {
+        if (!text3dPending) return
+        typingHandler.removeCallbacks(applyText3d)
+        val id = text3dPendingLayer.takeIf { it != 0L } ?: primary
+        val info = text3d
+        if (id != null && info != null) pushText3D(id, info) else text3dPending = false
+    }
 
     fun applyText3DPreset(preset: Text3DPreset) {
         val id = primary ?: return
@@ -2195,6 +2236,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         send { beginUndoGroup(label) }
     }
     fun endGesture() {
+        flushText3D()
         gestureDepth = max(0, gestureDepth - 1)
         if (gestureDepth == 0) shapeGestureSent = false
         send { endUndoGroup() }
@@ -2771,10 +2813,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return keyframes[layer].orEmpty().filter { it.effectIndex == NO_EFFECT && it.property in base..base + (if (threeD) 2 else 1) && it.time == key.time }.ifEmpty { listOf(key) }
     }
 
-    /** [power]: força da bézier 1..3; 0 = cada keyframe mantém a sua. */
-    fun setKeyframeEasing(layer: Long, key: KeyframeRow, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float, power: Int = 0) {
-        val peers = graphKeyGroup(layer, key)
-        group("curve XYZ") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2, power) } }
+    /**
+     * [power]: força da bézier 1..3; 0 = cada keyframe mantém a sua.
+     * [linkAxes]: a curva é da PROPRIEDADE (painel de curva, presets): o motor
+     * aplica a mesma curva aos eixos irmãos (Posição X/Y/Z, Escala...) com
+     * keyframe no mesmo instante, também numa camada 2D. Falso = o gráfico
+     * editando a trilha mostrada (só o grupo 3D/escala ligada acompanha).
+     */
+    fun setKeyframeEasing(layer: Long, key: KeyframeRow, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float, power: Int = 0, linkAxes: Boolean = false) {
+        val peers = if (linkAxes) listOf(key) else graphKeyGroup(layer, key)
+        group("curve XYZ") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2, power, linkAxes) } }
         refreshNow()
     }
 
@@ -2783,11 +2831,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * com os eixos do grupo): os comandos de [setKeyframeEasing] num lote só —
      * UM passo de desfazer.
      */
-    fun setKeyframesEasing(layer: Long, starts: List<KeyframeRow>, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float, power: Int = 0) {
+    fun setKeyframesEasing(layer: Long, starts: List<KeyframeRow>, interp: Int, bx1: Float, by1: Float, bx2: Float, by2: Float, power: Int = 0, linkAxes: Boolean = false) {
         if (starts.isEmpty()) return
-        val peers = starts.flatMap { graphKeyGroup(layer, it) }
+        val peers = (if (linkAxes) starts else starts.flatMap { graphKeyGroup(layer, it) })
             .distinctBy { listOf(it.property, it.effectIndex, it.paramIndex, it.time) }
-        group("curva na propriedade") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2, power) } }
+        group("curva na propriedade") { peers.forEach { setKeyframeInterpolation(layer, it.property, it.effectIndex, it.paramIndex, it.time, interp, bx1, by1, bx2, by2, power, linkAxes) } }
     }
 
     // --- Efeitos -------------------------------------------------------------
@@ -3397,20 +3445,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var environment by mutableStateOf(listOf(0f, 1f, 0f, 0f))
         private set
 
+    /** Extensão do panorama escolhido (o motor reconhece pelo conteúdo; a extensão só filtra). Nulo = não aceito. */
+    private fun hdriExtension(uri: Uri): String? = hdriExtensionOf(displayName(uri))
+
+    /** Código do motor (Errc) → frase: arquivo que não abre, formato, dados cortados, grande demais. */
+    private fun hdriErrorText(code: Long): String =
+        hdriErrorMessage(code)?.let { appText(it) } ?: appText(R.string.msg_hdri_unreadable_error, code)
+
     fun importHdri(uri: Uri) {
-        val name = displayName(uri) ?: "ambiente.hdr"
-        if (name.substringAfterLast(".", "").lowercase() !in setOf("hdr", "hdri", "jpg", "jpeg", "png")) {
-            errorMessage = appText(R.string.msg_use_um_hdri_hdr_radiance)
+        val ext = hdriExtension(uri) ?: run {
+            errorMessage = appText(R.string.msg_hdri_formats)
             return
         }
         busyMessage = appText(R.string.app_loading_hdri)
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
-                val file = copyModelToSandbox(uri, "hdr") ?: return@withContext -1_000L
+                val file = copyModelToSandbox(uri, ext) ?: return@withContext -1_000L
                 engine.importHdri(file.absolutePath)
             }
             busyMessage = null
-            if (id < 0) errorMessage = if (id == -1_000L) appText(R.string.msg_hdri_unreadable_file) else appText(R.string.msg_hdri_unreadable_error, -id)
+            if (id < 0) errorMessage = hdriErrorText(if (id == -1_000L) id else -id)
             else showToast(appText(R.string.msg_hdri_aplicado_aos_modelos_3d))
             refreshNow()
         }
@@ -3442,21 +3496,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      *  compartilha o mapa); o que muda é de quem é o estado. */
     fun importObjectHdri(uri: Uri) {
         val id = primary ?: return
-        val name = displayName(uri) ?: "ambiente.hdr"
-        if (name.substringAfterLast(".", "").lowercase() !in setOf("hdr", "hdri", "jpg", "jpeg", "png")) {
-            errorMessage = appText(R.string.msg_use_um_hdri_hdr_radiance)
+        val ext = hdriExtension(uri) ?: run {
+            errorMessage = appText(R.string.msg_hdri_formats)
             return
         }
         busyMessage = appText(R.string.app_loading_hdri)
         viewModelScope.launch {
             val asset = withContext(Dispatchers.IO) {
-                val file = copyModelToSandbox(uri, "hdr") ?: return@withContext -1_000L
+                val file = copyModelToSandbox(uri, ext) ?: return@withContext -1_000L
                 engine.importHdri(file.absolutePath)
             }
             busyMessage = null
             if (asset < 0) {
-                errorMessage = if (asset == -1_000L) appText(R.string.msg_hdri_unreadable_file)
-                               else appText(R.string.msg_hdri_unreadable_error, -asset)
+                errorMessage = hdriErrorText(if (asset == -1_000L) asset else -asset)
             } else {
                 engine.setObjectEnvironment(id, 1, asset, 1f, 0f, 1f)
                 refreshNow()

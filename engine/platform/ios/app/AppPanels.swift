@@ -67,7 +67,7 @@ struct LiveNoticeBanners: View {
                     HStack(spacing: 0) {
                         if let link = notice.link { Link(AureaText.t("notice_more"), destination: link).padding(.horizontal, 12).frame(minWidth: 64, minHeight: 48) }
                         Button(AureaText.t("notice_dismiss")) { notices.dismiss(notice.id) }.padding(.horizontal, 12).frame(minWidth: 64, minHeight: 48)
-                    }.font(.aurea(size: 14, weight: .medium)).tracking(0.1).buttonStyle(.plain).foregroundStyle(AureaColors.text)
+                    }.font(.aurea(size: 14, weight: .medium)).tracking(aureaTracking(0.1)).buttonStyle(.plain).foregroundStyle(AureaColors.text)
                 }.padding(.horizontal, 16).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading)
                     // Material Surface ends at the status-bar inset. SwiftUI's
                     // ShapeStyle background otherwise expands behind that bar.
@@ -97,7 +97,7 @@ struct LiveNoticePopup: View {
             Color.black.opacity(0.32).ignoresSafeArea().onTapGesture(perform: request.onClose)
             VStack(alignment: .leading, spacing: 0) {
                 Text(AureaText.t("notice_title")).font(.aurea(size: 24)).padding(.bottom, 16)
-                Text(request.notice.text).font(.aurea(size: 14)).tracking(0.25).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+                Text(request.notice.text).font(.aurea(size: 14)).tracking(aureaTracking(0.25)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     Spacer(minLength: 0)
                     if let link = request.notice.link {
@@ -165,7 +165,7 @@ struct ProjectSettingsPanel: View {
                                         Text("×").font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 10)
                                         sizeBox(height, title: "editor_altura") { setSize(width, Int($0.rounded())) }
                                         Text("px").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.leading, 8)
-                                    }
+                                    }.keepLtr()   // largura × altura px: a ordem do dado, em qualquer idioma
                                 }
                             }
                             settingLine("editor_resolucao") {

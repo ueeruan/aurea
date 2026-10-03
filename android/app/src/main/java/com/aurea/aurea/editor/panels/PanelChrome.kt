@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.ui.i18n.mirrorInRtl
 import com.aurea.aurea.engine.ExpressionLook
 import com.aurea.aurea.ui.ds.expressionColor
 import androidx.compose.foundation.background
@@ -118,7 +119,7 @@ internal fun PanelHeader(title: String, onBack: () -> Unit) {
                     .tocavel(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp))
+                Icon(Icons.Filled.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp).mirrorInRtl())
             }
             Text(
                 title,
@@ -155,15 +156,17 @@ internal fun LeftRail(
             .width(58.dp)
             .fillMaxHeight()
             .drawBehind {
+                // A divisa fica do lado do conteúdo: à direita em LTR, à esquerda em RTL.
                 val w = 1.dp.toPx()
-                drawRect(ParamRowColors.RailLine, topLeft = Offset(size.width - w, 0f), size = Size(w, size.height))
+                val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) 0f else size.width - w
+                drawRect(ParamRowColors.RailLine, topLeft = Offset(x, 0f), size = Size(w, size.height))
             }
             .padding(top = 8.dp, bottom = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         RailCell(onBack, stringResource(R.string.panel_voltar_ferramentas)) {
-            Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp))
+            Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp).mirrorInRtl())
         }
         RailCell(onKeyframe, if (keyframeLook == KeyframeLook.KeyHere) stringResource(R.string.panel_tirar_keyframe_daqui) else stringResource(R.string.panel_marcar_keyframe_aqui)) {
             KeyframeDiamondIcon(keyframeLook, enabled = onKeyframe != null, modifier = Modifier.size(24.dp))

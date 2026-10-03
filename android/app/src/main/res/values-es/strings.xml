@@ -2196,7 +2196,7 @@ para editar la curva.</string>
     <string name="world_purple_crystals">Cristales morados</string>
     <string name="environment_texture">Textura de entorno</string>
     <string name="environment_background">Mostrar como fondo 360°</string>
-    <string name="environment_hint">Importa un HDR/HDRI Radiance o un panorama JPG/PNG de 360° (2:1), hasta 8 MP. La imagen rodea la cámara e ilumina la escena.</string>
+    <string name="environment_hint">Importa un HDR/EXR, un panorama JPG/PNG de 360° (2:1) o un .zip que contenga uno. Los archivos grandes (8K) se reducen. La imagen rodea la cámara e ilumina la escena.</string>
     <string name="fxu_frames">fotogramas</string>
     <string name="fxu_px_per_frame">px/fotograma</string>
     <string name="fxu_octaves">octavas</string>

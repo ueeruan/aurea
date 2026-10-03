@@ -27,7 +27,10 @@ struct ContentView: View {
                         .transition(.offset(x: -pageWidth / 3)).zIndex(0)
                 case .editor:
                     EditorView()
-                        .transition(.offset(x: pageWidth)).zIndex(1)
+                        // Entra pela borda de "frente" da leitura: `.trailing` é a
+                        // direita no LTR e a esquerda em árabe, sem depender de o
+                        // `offset(x:)` ser espelhado ou não pelo RTL.
+                        .transition(.move(edge: .trailing)).zIndex(1)
                 }
             }
 

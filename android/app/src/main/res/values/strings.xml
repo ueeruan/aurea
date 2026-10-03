@@ -1848,7 +1848,7 @@
     <string name="world_purple_crystals">Cristais roxos</string>
     <string name="environment_texture">Environment Texture</string>
     <string name="environment_background">Mostrar como fundo 360°</string>
-    <string name="environment_hint">Importe HDR/HDRI Radiance ou panorama JPG/PNG de 360° (2:1), até 8 MP. A imagem envolve a câmera e ilumina a cena.</string>
+    <string name="environment_hint">Importe HDR/EXR, panorama JPG/PNG de 360° (2:1) ou um .zip com um deles. Arquivos grandes (8K) são reduzidos. A imagem envolve a câmera e ilumina a cena.</string>
     <string name="gizmo_tool_move">Mover</string>
     <string name="gizmo_tool_rotate">Girar</string>
     <string name="gizmo_tool_scale">Escala</string>

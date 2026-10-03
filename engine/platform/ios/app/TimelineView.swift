@@ -273,6 +273,10 @@ struct TimelineView: View {
             .onDisappear { finish(cancelled: true); finishPinch() }
             .clipped()
         }
+        // A timeline não espelha em árabe: quadro 0 à esquerda, o tempo anda
+        // para a direita, e as barras de ação por cima seguem o mesmo eixo
+        // (par do KeepLtr do TimelineHost). Os gestos (UIKit) já são absolutos.
+        .keepLtr()
     }
 
     // MARK: Barra de ações da seleção de keyframes (par do KeyActionBar do Android)
@@ -785,7 +789,7 @@ struct TimelineView: View {
         let avail = right - px
         if barWidth > m.nameMinBar && !row.name.isEmpty && avail > 8 {
             let name = fittedName(row.name, width: floor(avail / 12) * 12)
-            let resolved = context.resolve(Text(name).font(.aurea(size: 11, weight: .medium)).tracking(-0.1).foregroundColor(tone.text))
+            let resolved = context.resolve(Text(name).font(.aurea(size: 11, weight: .medium)).tracking(aureaTracking(-0.1)).foregroundColor(tone.text))
             context.draw(resolved, at: CGPoint(x: px, y: cy), anchor: .leading)
         }
         if barWidth > m.menuMinBar && menuRight <= width + m.menuGlyph {
@@ -1543,9 +1547,13 @@ struct TimelineView: View {
             guide = snapped
         case .key:
             guard let row = g.row, row.instants.indices.contains(g.keyIndex) else { return }
-            let desired = Double(row.instants[g.keyIndex]) + delta
-            let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapKey / ppf)) : Snap.none
-            let target = min(g.keyLimits.hi, max(g.keyLimits.lo, snapped == Snap.none ? timelineFrame(desired) : snapped))
+            let origin = row.instants[g.keyIndex]
+            let desired = Double(origin) + delta
+            // O cabeçote no instante de origem (o toque no losango o levou até lá) não segura o arrasto.
+            let magnet = KeyDrag.playheadMagnet(timelineFrame(viewFrame), origin: origin)
+            let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: magnet, tol: Double(m.snapKey / ppf)) : Snap.none
+            let quantized = KeyDrag.quantize(desired, current: g.keyFrame, pxPerFrame: ppf, hysteresisPx: m.keyDragHysteresis)
+            let target = min(g.keyLimits.hi, max(g.keyLimits.lo, snapped == Snap.none ? quantized : snapped))
             if target != g.keyFrame {
                 openUndo(&g)
                 let source = row.toLocal(g.keyFrame), destination = row.toLocal(target)
@@ -1556,6 +1564,7 @@ struct TimelineView: View {
                 // after acceptance. A refused collision must not lose the key.
                 guard model.engine.keyframeSelection(row.id, references: references, action: 1, delta: destination - source) > 0 else { guide = Snap.none; break }
                 g.keyFrame = target
+                haptics.tick() // um tique por frame que o losango anda
                 if let key = g.movingKeys.first { selectedKey = (row.id, target, TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
                 // Fora do modo de escolha, a seleção da barra acompanha o losango movido.
                 if !model.timelineKeySelectMode, model.timelineKeySelection != nil, let key = g.movingKeys.first {
@@ -1571,8 +1580,9 @@ struct TimelineView: View {
             // Cada passo manda ao motor só o INCREMENTO desde o último aceito;
             // colisão recusada deixa a seleção onde estava.
             let desired: Double = Double(g.grabFrame) + delta
-            let snapped: Int32 = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapKey / ppf)) : Snap.none
-            let target: Int32 = snapped == Snap.none ? timelineFrame(desired) : snapped
+            let magnet: Int32 = KeyDrag.playheadMagnet(timelineFrame(viewFrame), origin: g.grabFrame)
+            let snapped: Int32 = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: magnet, tol: Double(m.snapKey / ppf)) : Snap.none
+            let target: Int32 = snapped == Snap.none ? KeyDrag.quantize(desired, current: g.keyFrame, pxPerFrame: ppf, hysteresisPx: m.keyDragHysteresis) : snapped
             let raw: Int64 = Int64(target) - Int64(g.grabFrame)
             let want: Int32 = Int32(clamping: min(Int64(g.keyLimits.hi), max(Int64(g.keyLimits.lo), raw)))
             if want != g.sentDelta {
@@ -1588,6 +1598,7 @@ struct TimelineView: View {
                     }
                     g.sentDelta = want
                     g.keyFrame = Int32(clamping: Int64(g.grabFrame) + Int64(want))
+                    haptics.tick()
                 }
             }
             guide = snapped != Snap.none && snapped == g.keyFrame ? snapped : Snap.none
@@ -1635,6 +1646,13 @@ struct TimelineView: View {
             haptics.light()
             UIAccessibility.post(notification: .announcement,
                                  argument: AureaText.t(liftDrop.kind == .join ? "track2_row_joined" : "track2_row_moved"))
+        }
+        // VoiceOver: o arrasto só com gesto anuncia onde o keyframe ficou (par do Android).
+        if !cancelled, g.mode == .key || g.mode == .keys, let row = g.row {
+            let origin: Int32 = g.mode == .keys ? g.grabFrame : (row.instants.indices.contains(g.keyIndex) ? row.instants[g.keyIndex] : g.keyFrame)
+            if g.keyFrame != origin {
+                UIAccessibility.post(notification: .announcement, argument: Timecode.format(g.keyFrame, Float(model.compositionFps)))
+            }
         }
         if g.mode == .scrub { model.engine.run { $0.scrubEnd() } }
         if autoScrubbing {
@@ -1798,12 +1816,16 @@ private struct TimelineHit {
         // Pílula: x < 28 é o olho (mostra/esconde); o resto é o cabeçalho (tocar
         // abre/fecha as trilhas, segurar trava/reordena).
         if x < header { return TimelineHit(kind: x < eyeRight ? .eye : .header) }
-        var key = -1
+        // Dois anéis (par do TimelineHit.kt): o NÚCLEO de 28 ganha de tudo; a
+        // FOLGA até 48 pt ganha do corpo e do vazio, mas cede às alças, à tampa
+        // e às setas — beta "difícil mover o keyframe".
+        var key = -1, keyWide = -1
         let keyCy = compact ? m.diamondCyCompact : m.diamondCyNormal
         if abs(y - keyCy) <= m.keyTouchHalf && !instants.isEmpty {
             let i = Keyframes.nearestIndex(instants, TimeAxis.frameAt(x: x, view: view, pxPerFrame: ppf, centerX: width / 2))
             let px = TimeAxis.xOf(frame: Double(instants[i]), view: view, pxPerFrame: ppf, centerX: width / 2)
-            if abs(px - x) <= m.keyTouchHalf { key = i }
+            let dx = abs(px - x)
+            if dx <= m.keyTouchHalf { key = i } else if dx <= m.keyHitHalf { keyWide = i }
         }
         let over = y < m.bodyHitBottom, mid = (x0 + x1) / 2
         let start = handles && over && x0 >= header && x >= x0 - m.trimInsetStart - m.trimTouchOut && x < min(x0 - m.trimInsetStart + m.trimWidth, mid)
@@ -1812,19 +1834,18 @@ private struct TimelineHit {
         if start { return TimelineHit(kind: .trimStart) }
         if end { return TimelineHit(kind: .trimEnd) }
         if compact && over && x >= capLeft(m, x0) && x < x0 { return TimelineHit(kind: .back) }
-        if over && x >= x0 && x <= x1 {
-            if compact {
-                // Redesenho 2026-09-29: a tampa branca "‹" na ponta esquerda volta
-                // (sai da seção); as setas de trocar de camada ‹ › moram juntas na
-                // ponta direita (par do TimelineHit.kt).
-                let next = nextArrowLeft(m, x0, x1, width), prev = next - m.arrowSlot
-                if prev >= max(x0, m.headerColumn) {
-                    if x >= next && x <= next + m.arrowSlot + m.arrowTouchPad { return TimelineHit(kind: .next) }
-                    if x >= prev - m.arrowTouchPad && x < next { return TimelineHit(kind: .previous) }
-                }
+        if over && x >= x0 && x <= x1 && compact {
+            // Redesenho 2026-09-29: a tampa branca "‹" na ponta esquerda volta
+            // (sai da seção); as setas de trocar de camada ‹ › moram juntas na
+            // ponta direita (par do TimelineHit.kt).
+            let next = nextArrowLeft(m, x0, x1, width), prev = next - m.arrowSlot
+            if prev >= max(x0, m.headerColumn) {
+                if x >= next && x <= next + m.arrowSlot + m.arrowTouchPad { return TimelineHit(kind: .next) }
+                if x >= prev - m.arrowTouchPad && x < next { return TimelineHit(kind: .previous) }
             }
-            return TimelineHit(kind: .body)
         }
+        if keyWide >= 0 { return TimelineHit(kind: .key, key: keyWide) }
+        if over && x >= x0 && x <= x1 { return TimelineHit(kind: .body) }
         return TimelineHit(kind: .none)
     }
 }

@@ -24,7 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RES = os.path.join(ROOT, "android", "app", "src", "main", "res")
 REVIEWED = os.path.join(ROOT, "tools", "i18n_reviewed_identical.json")
 LANGS = ["en", "es", "ru", "id", "hi", "ar"]
-LANGS_REQUIRED = ["en", "es", "ru", "id"]
+LANGS_REQUIRED = ["en", "es", "ru", "id", "ar"]
 FMT = re.compile(r"%(\d+\$)?[-#+ 0,(]*\d*(\.\d+)?[sdfxXeEgGc%]")
 WORD = re.compile(r"[^\W\d_]{3,}")
 

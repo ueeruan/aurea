@@ -175,6 +175,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/ModelBudget.cpp
     src/scene3d/SceneRenderer.cpp
     src/scene3d/Environment.cpp
+    src/scene3d/HdriImage.cpp
     src/scene3d/StudioEnvironment.cpp
     src/scene3d/Animation.cpp
     src/scene3d/Text3D.cpp
@@ -193,7 +194,8 @@ file(GLOB AUREA_MESHOPT_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/th
 add_library(aurea_thirdparty STATIC ${AUREA_MESHOPT_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ufbx/ufbx.c
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/transcoder/basisu_transcoder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/zstd/zstddeclib.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/src/harfbuzz.cc)
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/src/harfbuzz.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/tinyexr.cc)
 # KTX2 (ETC1S e UASTC, com Zstd) transcodificado para RGBA no import; os
 # alvos de GPU que o motor não usa ficam fora (binário menor). PUBLIC: o
 # cabeçalho do transcoder precisa ver a mesma configuração.
@@ -206,6 +208,7 @@ target_include_directories(aurea_thirdparty PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/basisu/transcoder
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/harfbuzz/src)
 target_compile_options(aurea_thirdparty PRIVATE

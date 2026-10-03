@@ -551,7 +551,7 @@ struct PresetsPanel: View {
             for sibling in model.keyframes[layerId] ?? [] where sibling.time == key.time && curveSameTrack(sibling, key) {
                 model.engine.editTrackKey(layerId, property: sibling.property, effect: sibling.effectIndex, param: sibling.paramIndex,
                                           time: sibling.time, action: 3, value: sibling.value, targetTime: sibling.time,
-                                          interpolation: ease.interpolation, handles: [ease.x1, ease.y1, ease.x2, ease.y2].map { NSNumber(value: $0) })
+                                          interpolation: ease.interpolation, handles: [ease.x1, ease.y1, ease.x2, ease.y2, Float(ease.power), 1].map { NSNumber(value: $0) })
             }
             model.endGesture(); markUsed(entry)
             model.toast = AureaText.t("ios_curve_applied", entry.name); return
@@ -716,7 +716,7 @@ private struct PresetCardView: View {
                 PresetPreviewView(entry: entry, compositionWidth: compositionWidth).frame(height: 62)
                     .background(AureaColors.stage, in: RoundedRectangle(cornerRadius: 8)).clipShape(RoundedRectangle(cornerRadius: 8))
                 Color.clear.frame(height: 5)
-                Text(entry.name).font(.aurea(size: 11.5, weight: .semibold)).tracking(-0.1).lineLimit(2)
+                Text(entry.name).font(.aurea(size: 11.5, weight: .semibold)).tracking(aureaTracking(-0.1)).lineLimit(2)
                     .lineSpacing(max(0, 14 - UIFont.systemFont(ofSize: 11.5, weight: .semibold).lineHeight))
                     .frame(maxWidth: .infinity, alignment: .topLeading).frame(height: 30, alignment: .topLeading)
                 if showKind { Text(entry.kind.label).font(.aurea(size: 10)).foregroundStyle(AureaColors.muted).lineLimit(1) }
@@ -1007,6 +1007,7 @@ struct AppearancePanel: View {
             } label: {
                 HStack(spacing: 8) {
                     CupertinoGlyph.text(openCategories.contains(index) ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 13, color: AureaColors.muted)
+                        .mirrorsInRtl(!openCategories.contains(index))
                     Text(AureaText.t(Self.titles[index])).font(.aurea(size: 13.5, weight: .semibold))
                     Spacer(minLength: 0)
                     if Self.groups[index].contains(Int(mode)) {
@@ -1428,7 +1429,7 @@ struct ShapePanel: View {
             // Type 0 is a command; the animated shape API only accepts 1...6.
             model.mutate { $0.setShape(id, param: 0, value: Float(next)) }
             finishGesture(); load()
-        } label: { CupertinoGlyph.text(glyph, size: 18).frame(width: 44, height: 44) }
+        } label: { CupertinoGlyph.text(glyph, size: 18).mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph)).frame(width: 44, height: 44) }
             .buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(label)
     }
     private var shapeName: String {

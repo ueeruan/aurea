@@ -26,6 +26,11 @@ struct AudioBlockCache::Reader {
     i64 bufStart = 0;           ///< quadro da fonte de buf[0]
     bool bufValid = false;
     bool eos = false;
+    /// O decoder devolveu erro (seek ou leitura): o que ele entregar daqui em
+    /// diante não vale. MediaCodec recuperado pelo sistema, AVAssetReader
+    /// interrompido em segundo plano — nada disso volta sozinho; o cache
+    /// descarta o leitor e abre outro.
+    bool broken = false;
     u64 seeks = 0;
     std::vector<f32> raw, stereo;
 
@@ -40,7 +45,11 @@ struct AudioBlockCache::Reader {
             // Um pouco antes do alvo: o primeiro trecho decodificado pode
             // começar depois do ponto pedido.
             const i64 us = std::max<i64>(0, (from - rate / 50) * 1'000'000 / rate);
-            if (!dec->seek(us).ok()) AUREA_LOG_WARN("audio: seek falhou (%lld us)", static_cast<long long>(us));
+            if (!dec->seek(us).ok()) {
+                AUREA_LOG_WARN("audio: seek falhou (%lld us)", static_cast<long long>(us));
+                broken = true;
+                return;
+            }
             buf.clear();
             bufValid = false;
             eos = false;
@@ -61,7 +70,9 @@ struct AudioBlockCache::Reader {
             bool end = false;
             raw.clear();
             if (!dec->read(raw, pts, end).ok()) {
-                eos = true;
+                // Antes isto virava "fim do arquivo": os blocos seguintes saíam
+                // mudos E ficavam no cache — o trecho nunca mais soava.
+                broken = true;
                 break;
             }
             if (end) eos = true;
@@ -92,6 +103,10 @@ AudioBlockCache::AudioBlockCache(VideoSourceFactory* factory, u64 budgetBytes, b
     : factory_(factory), budget_(std::max<u64>(budgetBytes, 8ull * kBlockFrames * kMixChannels * sizeof(f32))),
       async_(async) {
     if (async_) {
+        // Só o preview usa `find_playable` (o export e as análises não).
+        auto mute = std::make_shared<AudioBlock>();
+        mute->pcm.assign(static_cast<usize>(kBlockFrames) * kMixChannels, 0.0f);
+        silence_ = std::move(mute);
         running_ = true;
         thread_ = std::thread([this] { thread_main(); });
     }
@@ -119,6 +134,7 @@ void AudioBlockCache::register_asset(u64 key, AudioAssetRef ref) {
     std::lock_guard<std::mutex> lock(mutex_);
     assets_[key] = std::move(ref);
     ++assetVersions_[key];
+    failed_.erase(key);   // caminho novo: tenta já
     for (auto b = blocks_.begin(); b != blocks_.end();) {
         if (b->first.asset == key) b = blocks_.erase(b); else ++b;
     }
@@ -139,11 +155,37 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::find(u64 key, i64 block) cons
     return it->second.block;
 }
 
+std::shared_ptr<const AudioBlock> AudioBlockCache::find_playable(u64 key, i64 block) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = blocks_.find(Key{key, block});
+    if (it != blocks_.end()) {
+        it->second.lastUse = ++useClock_;
+        return it->second.block;
+    }
+    // Decoder em falha: silêncio só desta fonte enquanto ele é reaberto; as
+    // outras camadas continuam soando.
+    if (silence_ && failed_.count(key)) return silence_;
+    return nullptr;
+}
+
+void AudioBlockCache::note_failure(u64 key, u64 revision) {
+    // Sob mutex_.
+    Failure& f = failed_[key];
+    if (f.revision != revision) f = Failure{};
+    f.revision = revision;
+    const u32 shift = std::min<u32>(f.streak, 4);
+    f.retryAtNs = monotonic_ns() + std::min<u64>(kRetryMinNs << shift, kRetryMaxNs);
+    ++f.streak;
+    ++stats_.failures;
+}
+
 void AudioBlockCache::want(u64 key, i64 block, i64 urgency) {
     if (!async_ || block < 0) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (blocks_.count(Key{key, block})) return;
+        // Em falha: só pede de novo quando der a hora da próxima tentativa.
+        if (auto f = failed_.find(key); f != failed_.end() && monotonic_ns() < f->second.retryAtNs) return;
         for (Want& w : wants_) {
             if (w.key == Key{key, block}) {
                 w.urgency = std::min(w.urgency, urgency);
@@ -182,30 +224,69 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 blo
     std::lock_guard<std::mutex> rl(readerMutex_);
     auto& slot = readers_[key];
     if (slot && slot->assetRevision != revision) slot.reset();
-    if (!slot) {
-        slot = std::make_unique<Reader>();
-        slot->assetRevision = revision;
-        if (factory_) slot->dec = factory_->open_audio(ref.path.c_str());
-        if (slot->dec) slot->info = slot->dec->info();
-        if (!slot->dec || slot->info.sampleRate == 0) {
-            AUREA_LOG_WARN("audio: trilha ilegivel em '%s'", ref.path.c_str());
-            slot->dec.reset();
-            std::lock_guard<std::mutex> lock(mutex_);
-            ++stats_.failures;
-        }
+    // Um decoder que falhou NÃO fica para sempre: antes, o leitor sem decoder
+    // devolvia nulo até reiniciar o app (e o mixer do preview esperava esse
+    // bloco para sempre, mudo). Agora ele é descartado e reaberto, com espera
+    // crescente entre as tentativas.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto f = failed_.find(key);
+        if (f != failed_.end() && f->second.revision == revision && monotonic_ns() < f->second.retryAtNs) return nullptr;
     }
-    Reader& r = *slot;
-    if (!r.dec) return nullptr;
-
+    if (slot && !slot->dec) slot.reset();
     const u64 t0 = monotonic_ns();
-    const u64 seeksBefore = r.seeks;
+    // Duas tentativas: um erro no meio da leitura (codec recuperado pelo
+    // sistema, leitor interrompido) costuma sumir com um decoder novo.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        if (!slot) {
+            slot = std::make_unique<Reader>();
+            slot->assetRevision = revision;
+            if (factory_) slot->dec = factory_->open_audio(ref.path.c_str());
+            if (slot->dec) slot->info = slot->dec->info();
+            if (!slot->dec || slot->info.sampleRate == 0) {
+                AUREA_LOG_WARN("audio: trilha ilegivel em '%s'", ref.path.c_str());
+                slot->dec.reset();
+                std::lock_guard<std::mutex> lock(mutex_);
+                note_failure(key, revision);
+                return nullptr;
+            }
+        }
+        Reader& r = *slot;
+        const u64 seeksBefore = r.seeks;
+        const f64 step = static_cast<f64>(r.info.sampleRate) / kMixRate;
+        const i64 mixStart = block * kBlockFrames;
+        const f64 srcPos = static_cast<f64>(mixStart) * step;
+        const i64 half = resample_half_width(step);
+        const i64 from = static_cast<i64>(std::floor(srcPos)) - half - 1;
+        const i64 to = static_cast<i64>(std::ceil(static_cast<f64>(mixStart + kBlockFrames) * step)) + half + 1;
+        r.ensure(std::max<i64>(0, from), to, half);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stats_.seeks += r.seeks - seeksBefore;
+        }
+        if (r.broken) {
+            // O que veio deste decoder não vai para o cache (seria silêncio
+            // permanente): descarta e tenta com um novo.
+            AUREA_LOG_WARN("audio: decoder falhou no bloco %lld de '%s'; reabrindo", static_cast<long long>(block),
+                           ref.path.c_str());
+            slot.reset();
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++stats_.reopened;
+            if (attempt == 1) {
+                note_failure(key, revision);
+                return nullptr;
+            }
+            continue;
+        }
+        return finish_block(r, key, block, revision, t0);
+    }
+    return nullptr;
+}
+
+std::shared_ptr<const AudioBlock> AudioBlockCache::finish_block(Reader& r, u64 key, i64 block, u64 revision, u64 t0) {
     const f64 step = static_cast<f64>(r.info.sampleRate) / kMixRate;
     const i64 mixStart = block * kBlockFrames;
     const f64 srcPos = static_cast<f64>(mixStart) * step;
-    const i64 half = resample_half_width(step);
-    const i64 from = static_cast<i64>(std::floor(srcPos)) - half - 1;
-    const i64 to = static_cast<i64>(std::ceil(static_cast<f64>(mixStart + kBlockFrames) * step)) + half + 1;
-    r.ensure(std::max<i64>(0, from), to, half);
 
     auto out = std::make_shared<AudioBlock>();
     out->assetRevision = revision;
@@ -223,8 +304,9 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 blo
     if (bad) AUREA_LOG_WARN("audio: %u amostras nao finitas zeradas no bloco %lld", bad, static_cast<long long>(block));
     const f64 ms = static_cast<f64>(monotonic_ns() - t0) / 1e6;
     std::lock_guard<std::mutex> lock(mutex_);
+    // Decodificou de novo: sai do estado de falha (a fonte volta a soar).
+    if (auto f = failed_.find(key); f != failed_.end() && f->second.revision == revision) failed_.erase(f);
     ++stats_.decoded;
-    stats_.seeks += r.seeks - seeksBefore;
     decodeMsTotal_ += ms;
     decodedSeconds_ += static_cast<f64>(kBlockFrames) / kMixRate;
     return out;

@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor
 
+import com.aurea.aurea.ui.i18n.ltrPlain
 import android.content.ActivityNotFoundException
 import android.graphics.Bitmap
 import android.provider.Settings
@@ -259,9 +260,11 @@ private fun Options(
         return
     }
 
-    // Linha-resumo logo abaixo da prévia: o que vai sair, de relance.
+    // Linha-resumo logo abaixo da prévia: o que vai sair, de relance. Cada
+    // peça isolada em LTR: em árabe a lista corre da direita, mas "30 fps" e
+    // "1080 × 1920" não se embaralham com os vizinhos.
     Text(
-        "$w × $h · ${fmt(fps)} fps · $codecName · ${fmtTime(seconds)}",
+        listOf("$w × $h", "${fmt(fps)} fps", codecName, fmtTime(seconds)).joinToString(" · ") { ltrPlain(it) },
         style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted, fontFeatureSettings = "tnum")),
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
@@ -362,7 +365,7 @@ private fun Options(
         }
 
         Spacer(Modifier.height(12.dp))
-        SummaryRow(stringResource(R.string.editor_video), "$w × $h · ${fmt(fps)} fps · $codecName")
+        SummaryRow(stringResource(R.string.editor_video), listOf("$w × $h", "${fmt(fps)} fps", codecName).joinToString(" · ") { ltrPlain(it) })
         SummaryRow(stringResource(R.string.editor_duracao), fmtTime(seconds))
         SummaryRow(stringResource(R.string.editor_tamanho_estimado), fmtSize(bytes))
         SummaryRow(stringResource(R.string.editor_cor), stringResource(R.string.editor_sdr_bt_709))
@@ -416,8 +419,9 @@ private fun ImageOptions(
     val seconds = if (plan.fps > 0) plan.frames / plan.fps else 0.0
     val framesText = stringResource(R.string.exp2_frames_count, plan.frames)
     Text(
-        if (format == ExportFormat.Frame) "${plan.width} × ${plan.height} · PNG"
-        else "${plan.width} × ${plan.height} · ${fmt(plan.fps)} fps · $framesText · ${fmtTime(seconds)}",
+        if (format == ExportFormat.Frame) "${ltrPlain("${plan.width} × ${plan.height}")} · PNG"
+        // A contagem de quadros é frase do idioma (FSI: segue a direção dela).
+        else listOf(ltrPlain("${plan.width} × ${plan.height}"), ltrPlain("${fmt(plan.fps)} fps"), "\u2068$framesText\u2069", ltrPlain(fmtTime(seconds))).joinToString(" · "),
         style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted, fontFeatureSettings = "tnum")),
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
@@ -438,7 +442,7 @@ private fun ImageOptions(
         Group(stringResource(R.string.editor_resolucao)) {
             // "Original" = a resolução cheia da composição (o padrão do PNG).
             val short = max(1, min(compW, compH))
-            val choices = listOf(0 to "${stringResource(R.string.exp2_resolution_original)} ($compW × $compH)") +
+            val choices = listOf(0 to "${stringResource(R.string.exp2_resolution_original)} (${ltrPlain("$compW × $compH")})") +
                 Resolutions.filter { it.first != short }
             Chips(choices.map { it.second }, (choices.firstOrNull { it.first == options.imageShortSide } ?: choices[0]).second) { label ->
                 onChange(options.copy(imageShortSide = choices.first { it.second == label }.first))

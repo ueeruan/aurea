@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.timeline
 
+import com.aurea.aurea.ui.i18n.LocaleDirection
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -36,7 +37,8 @@ internal fun MarkerEditor(store: EditorStore) {
         var name by remember(original, isNew) { mutableStateOf(if (isNew) "" else store.markerLabel(original)) }
         var frame by remember(original, isNew) { mutableStateOf(original.toString()) }
         var color by remember(original, isNew) { mutableStateOf(if (index >= 0) markers.colors[index] else markerPalette[0]) }
-        AlertDialog(onDismissRequest = { store.closeMarkerEditor(); failure = false },
+        // Aberto de dentro do palco (LTR): o diálogo volta à direção do idioma.
+        LocaleDirection { AlertDialog(onDismissRequest = { store.closeMarkerEditor(); failure = false },
             title = { Text(stringResource(R.string.marker_edit)) },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { if (it.length <= 200) name = it }, singleLine = true,
@@ -64,6 +66,6 @@ internal fun MarkerEditor(store: EditorStore) {
                 if (target != null && store.editMarker(if (isNew) -1 else original, target, color, name)) { store.closeMarkerEditor(); failure = false }
                 else failure = true
             }) { Text(stringResource(R.string.common_save)) } },
-            dismissButton = { TextButton(onClick = { store.closeMarkerEditor(); failure = false }) { Text(stringResource(R.string.common_cancel)) } })
+            dismissButton = { TextButton(onClick = { store.closeMarkerEditor(); failure = false }) { Text(stringResource(R.string.common_cancel)) } }) }
     }
 }

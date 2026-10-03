@@ -178,7 +178,7 @@ struct CommunityView: View {
         VStack(spacing: 0) {
             HStack {
                 if state.profile != nil && (!profileMode || state.profile?.id != state.me?.id) {
-                    Button { state.run { state.profile = profileMode ? state.me : nil; try await state.loadFeed() } } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("common_back"))
+                    Button { state.run { state.profile = profileMode ? state.me : nil; try await state.loadFeed() } } label: { Image(systemName: "chevron.left").mirrorsInRtl().frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("common_back"))
                 }
                 Text(AureaText.t(state.profile == nil ? "social_community" : "social_profile")).font(.title2.bold())
                 Spacer()

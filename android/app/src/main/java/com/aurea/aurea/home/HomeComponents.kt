@@ -1,5 +1,6 @@
 package com.aurea.aurea.home
 
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -154,9 +155,12 @@ internal fun <T> AureaSegmented(
             .drawBehind {
                 val w = size.width / count
                 val inset = 5.dp.toPx()
+                // Em RTL a Row põe o 1º item à direita; o polegar desenhado em
+                // coordenadas absolutas tem de ir para a mesma casa.
+                val at = if (layoutDirection == LayoutDirection.Rtl) count - 1 - pos else pos
                 for (i in 1 until count) {
                     // Some perto do polegar: distância até ele, presa em [0, 1].
-                    val alpha = min(abs(i - pos), abs(i - 1 - pos)).coerceIn(0f, 1f)
+                    val alpha = min(abs(i - at), abs(i - 1 - at)).coerceIn(0f, 1f)
                     if (alpha > 0f) {
                         drawRect(
                             AureaColors.SegmentSeparator.copy(alpha = AureaColors.SegmentSeparator.alpha * alpha),
@@ -167,7 +171,7 @@ internal fun <T> AureaSegmented(
                 }
                 drawRoundRect(
                     thumb,
-                    topLeft = Offset(w * pos, 0f),
+                    topLeft = Offset(w * at, 0f),
                     size = Size(w, size.height),
                     cornerRadius = CornerRadius(7.dp.toPx()),
                 )
@@ -209,7 +213,9 @@ internal fun AureaSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
             .drawBehind {
                 drawRoundRect(if (checked) AureaColors.Accent else AureaColors.SwitchOffTrack, cornerRadius = CornerRadius(size.height / 2))
                 val r = size.height / 2 - 2.dp.toPx()
-                val cx = size.height / 2 + (size.width - size.height) * t
+                // Ligado = polegar no fim da leitura: à direita em LTR, à esquerda em RTL.
+                val along = if (layoutDirection == LayoutDirection.Rtl) 1f - t else t
+                val cx = size.height / 2 + (size.width - size.height) * along
                 drawCircle(if (checked) AureaColors.OnAccent else AureaColors.OnImage, radius = r, center = Offset(cx, size.height / 2))
             },
     )

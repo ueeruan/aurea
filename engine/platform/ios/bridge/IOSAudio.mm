@@ -19,6 +19,17 @@
 //  está consumindo), convertida para a régua do MIXER (48 kHz) — um aparelho
 //  bluetooth pode estar a 44,1 kHz, e devolver quadros de outra régua faria o
 //  relógio derivar.
+//
+//  SAÍDA QUE SE CURA SOZINHA: interrupção (ligação, Siri, outro app) desativa
+//  a sessão, e nem sempre chega o aviso de fim; troca de rota / taxa reconfigura
+//  e PARA o AVAudioEngine; "media services reset" mata o grafo inteiro. Antes,
+//  qualquer um deles deixava o som mudo até reiniciar o app. Agora: o start
+//  reativa a sessão se ela caiu e, se o engine não sobe, refaz o grafo e tenta
+//  de novo; a mudança de configuração e o reset recriam/reiniciam o engine
+//  se tocava. E o motor (AudioEngine) vigia o callback: parou com o play
+//  pedido, ele fecha e reabre esta saída. Tudo que mexe no AVAudioEngine passa
+//  por @synchronized — o mixer do núcleo e as notificações chegam em threads
+//  diferentes.
 // =============================================================================
 #include "AureaBridge.h"
 
@@ -61,10 +72,14 @@ static const char* aurea_describe(NSError* error) {
 // O host ObjC: sessão, grafo e callbacks de sistema.
 // =============================================================================
 @interface AureaAudioHost : NSObject
-@property (nonatomic, strong, nullable) AVAudioEngine* engine;
-@property (nonatomic, strong, nullable) AVAudioSourceNode* source;
-@property (nonatomic, assign) BOOL wantPlaying;
-@property (nonatomic, assign) BOOL interrupted;
+@property (atomic, strong, nullable) AVAudioEngine* engine;
+@property (atomic, strong, nullable) AVAudioSourceNode* source;
+@property (atomic, assign) BOOL wantPlaying;
+@property (atomic, assign) BOOL interrupted;
+/// A sessão está ativa (setActive:YES deu certo e nada a derrubou desde então).
+@property (atomic, assign) BOOL sessionActive;
+/// A classe C++ fechou esta saída: nada de religar o engine (notificação atrasada).
+@property (atomic, assign) BOOL closed;
 
 // Declarados aqui porque a classe C++ (abaixo) e quem os chama — e o
 // `@implementation` sozinho nao basta para quem emite a mensagem.
@@ -79,12 +94,30 @@ static const char* aurea_describe(NSError* error) {
 
 @implementation AureaAudioHost {
     double _outputSampleRate;
+    void* _slot;   ///< o struct POD do bloco de render (para refazer o grafo)
+    /// As notificações do sistema só agendam aqui: nunca seguram o lock do
+    /// host dentro de uma fila interna do AVFoundation (evita deadlock com um
+    /// start/stop em andamento na thread do mixer).
+    dispatch_queue_t _queue;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
         _outputSampleRate = (double)aurea::audio::kMixRate;
+        _slot = nullptr;
+        _queue = dispatch_queue_create("aurea.audio.recover", DISPATCH_QUEUE_SERIAL);
+        // O AVAudioEngine para sozinho quando a configuração de E/S muda (rota,
+        // taxa do hardware): se tocava, sobe de novo.
+        [NSNotificationCenter.defaultCenter addObserver:self
+                                               selector:@selector(onConfigurationChange:)
+                                                   name:AVAudioEngineConfigurationChangeNotification
+                                                 object:nil];
+        // O servidor de mídia reiniciou: sessão e grafo antigos não valem mais.
+        [NSNotificationCenter.defaultCenter addObserver:self
+                                               selector:@selector(onMediaServicesReset:)
+                                                   name:AVAudioSessionMediaServicesWereResetNotification
+                                                 object:nil];
         // Interrupção (ligação telefônica, Siri): o sistema já parou o som; se
         // tocava, volta quando ele devolver o áudio.
         [NSNotificationCenter.defaultCenter addObserver:self
@@ -115,13 +148,24 @@ static const char* aurea_describe(NSError* error) {
     // sistema, que custaria CPU e latência sem necessidade.
     [session setPreferredSampleRate:(double)aurea::audio::kMixRate error:nil];
     [session setPreferredIOBufferDuration:0.005 error:nil];
-    return [session setActive:YES error:error];
+    const BOOL active = [session setActive:YES error:error];
+    self.sessionActive = active;
+    return active;
 }
 
 - (void)closeSession {
+    self.sessionActive = NO;
     [AVAudioSession.sharedInstance setActive:NO
                                  withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
                                        error:nil];
+}
+
+/// Reativa a sessão se algo a derrubou (interrupção sem aviso de fim, outro
+/// app tomou o áudio, reset do servidor de mídia). Categoria de novo também:
+/// depois de um reset ela volta ao padrão.
+- (BOOL)ensureSession:(NSError**)error {
+    if (self.sessionActive) return YES;
+    return [self openSession:error];
 }
 
 /// Monta o grafo: um nó de origem (o mixer do núcleo) ligado ao mixer principal.
@@ -172,9 +216,23 @@ static const char* aurea_describe(NSError* error) {
     [engine attachNode:source];
     [engine connect:source to:engine.mainMixerNode format:format];
     engine.mainMixerNode.outputVolume = 1.0f;
-    self.engine = engine;
-    self.source = source;
+    @synchronized(self) {
+        _slot = slot;
+        self.engine = engine;
+        self.source = source;
+    }
     return YES;
+}
+
+/// Desmonta e monta o grafo de novo (engine que não sobe, reset de mídia).
+- (BOOL)rebuildEngine:(NSError**)error {
+    void* slot = nullptr;
+    @synchronized(self) {
+        if (self.closed) return NO;
+        slot = _slot;
+        [self tearDown];
+    }
+    return slot ? [self buildEngineWithSlot:slot error:error] : NO;
 }
 
 /// A taxa do nó de saída (48 kHz em quase todo aparelho; 44,1 kHz em parte do
@@ -188,54 +246,101 @@ static const char* aurea_describe(NSError* error) {
 }
 
 - (BOOL)startEngine:(NSError**)error {
-    AVAudioEngine* engine = self.engine;
-    if (!engine) return NO;
-    if (engine.isRunning) return YES;
-    // `prepare` antes do `start`: abrir o hardware leva alguns ms, e sem ele
-    // eles caem no primeiro callback (um estalo).
-    [engine prepare];
-    return [engine startAndReturnError:error];
+    @synchronized(self) {
+        if (self.closed) return NO;
+        // Sessão derrubada (interrupção sem aviso de fim, reset): sem reativar,
+        // o start falha para sempre.
+        if (![self ensureSession:error]) return NO;
+        if (!self.engine && ![self rebuildEngine:error]) return NO;
+        AVAudioEngine* engine = self.engine;
+        if (engine.isRunning) return YES;
+        // `prepare` antes do `start`: abrir o hardware leva alguns ms, e sem ele
+        // eles caem no primeiro callback (um estalo).
+        [engine prepare];
+        if ([engine startAndReturnError:error]) return YES;
+        // Grafo preso numa configuração velha (rota/taxa mudou com ele parado):
+        // refaz o grafo e tenta uma vez mais, com a sessão reativada.
+        AUREA_LOG_WARN("audio: engine nao subiu (%s); refazendo o grafo", aurea_describe(error ? *error : nil));
+        self.sessionActive = NO;
+        if (![self ensureSession:error] || ![self rebuildEngine:error]) return NO;
+        engine = self.engine;
+        [engine prepare];
+        return [engine startAndReturnError:error];
+    }
 }
 
 - (void)stopEngine {
-    AVAudioEngine* engine = self.engine;
-    if (engine) [engine pause];
+    @synchronized(self) {
+        AVAudioEngine* engine = self.engine;
+        if (engine) [engine pause];
+    }
 }
 
 - (void)tearDown {
-    AVAudioEngine* engine = self.engine;
-    if (engine) {
-        [engine stop];
-        if (self.source) [engine detachNode:self.source];
+    @synchronized(self) {
+        AVAudioEngine* engine = self.engine;
+        if (engine) {
+            [engine stop];
+            if (self.source) [engine detachNode:self.source];
+        }
+        self.source = nil;
+        self.engine = nil;
     }
-    self.source = nil;
-    self.engine = nil;
+}
+
+/// Volta a tocar se o play está pedido (notificações do sistema). Assíncrono,
+/// na fila própria do host.
+- (void)resumeIfWanted:(const char*)why {
+    dispatch_async(_queue, ^{
+        if (!self.wantPlaying || self.interrupted) return;
+        AVAudioEngine* engine = self.engine;
+        if (engine && engine.isRunning) return;
+        NSError* error = nil;
+        if (![self startEngine:&error]) {
+            // O vigia do motor fecha e reabre a saída se o callback não voltar.
+            AUREA_LOG_WARN("audio: nao voltou depois de %s (%s)", why, aurea_describe(error));
+        }
+    });
 }
 
 - (void)onInterruption:(NSNotification*)note {
     const AVAudioSessionInterruptionType type =
         (AVAudioSessionInterruptionType)[note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
     if (type == AVAudioSessionInterruptionTypeBegan) {
+        // O sistema desativou a sessão: o próximo start reativa (o aviso de
+        // fim pode nunca chegar).
         self.interrupted = YES;
+        self.sessionActive = NO;
         return;
     }
     self.interrupted = NO;
-    if (!self.wantPlaying) return;
-    NSError* error = nil;
-    if (![self startEngine:&error]) {
-        AUREA_LOG_WARN("audio: nao voltou depois da interrupcao (%s)", aurea_describe(error));
-    }
+    self.sessionActive = NO;
+    [self resumeIfWanted:"a interrupcao"];
 }
 
 - (void)onRouteChange:(NSNotification*)note {
     (void)note;
-    if (!self.wantPlaying || self.interrupted) return;
-    AVAudioEngine* engine = self.engine;
-    if (!engine || engine.isRunning) return;
-    NSError* error = nil;
-    if (![self startEngine:&error]) {
-        AUREA_LOG_WARN("audio: nao voltou depois da troca de rota (%s)", aurea_describe(error));
-    }
+    [self resumeIfWanted:"a troca de rota"];
+}
+
+- (void)onConfigurationChange:(NSNotification*)note {
+    // Só o NOSSO engine (outros AVAudioEngine do app, se houver, não contam).
+    if (note.object != self.engine) return;
+    [self resumeIfWanted:"a mudanca de configuracao"];
+}
+
+- (void)onMediaServicesReset:(NSNotification*)note {
+    (void)note;
+    // Tudo o que existia morreu: sessão e grafo novos.
+    self.sessionActive = NO;
+    dispatch_async(_queue, ^{
+        NSError* error = nil;
+        if (![self rebuildEngine:&error]) {
+            AUREA_LOG_WARN("audio: grafo nao voltou depois do reset de midia (%s)", aurea_describe(error));
+            return;
+        }
+        [self resumeIfWanted:"o reset de midia"];
+    });
 }
 
 @end
@@ -287,6 +392,9 @@ public:
             AureaAudioHost* host = host_ref();
             if (!host) return Status{Errc::InvalidState, "saida de audio fechada"};
             host.wantPlaying = YES;
+            // Play do usuário: tenta mesmo que um aviso de fim de interrupção
+            // nunca tenha chegado (o start reativa a sessão).
+            host.interrupted = NO;
             NSError* error = nil;
             if (![host startEngine:&error]) {
                 AUREA_LOG_ERROR("audio: start recusado (%s)", aurea_describe(error));
@@ -313,6 +421,8 @@ public:
             if (!host_) return;
             AureaAudioHost* host = (__bridge_transfer AureaAudioHost*)host_;
             host_ = nullptr;
+            host.wantPlaying = NO;
+            host.closed = YES;
             [host tearDown];
             // Stop/join the render graph before changing the callback context.
             slot_.ctx = nullptr;

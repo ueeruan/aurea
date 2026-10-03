@@ -136,7 +136,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 }
             })
         }
-        if (store.cameraContextMenu) {
+        if (store.cameraContextMenu) com.aurea.aurea.ui.i18n.LocaleDirection {
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { store.cameraContextMenu = false },
                 title = { androidx.compose.material3.Text(stringResource(R.string.cam_tracker_title)) },
@@ -1822,7 +1822,7 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
         ) {
             Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
         }
-        if (open) {
+        if (open) com.aurea.aurea.ui.i18n.LocaleDirection {
             val current = store.preview.scaleLabel
             ShellPopupMenu(
                 items = listOf(

@@ -2134,7 +2134,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
 
         // Desfoque de movimento (transform 2D, com pais): K amostras no
-        // obturador centrado no quadro. Camada parada no intervalo = nada.
+        // obturador centrado no quadro — a regra do After Effects: o
+        // obturador fica aberto (ângulo / 360) de um quadro, centrado nele
+        // (fase = −ângulo/2). Camada parada no intervalo = nada.
+        std::vector<Mat4> blurSamples;
+        f64 blurOpen = 0.0;
         if (l->motionBlur && comp.motion_blur().enabled && !cameraThrough) {
             const bool in3d = wants_3d(comp, *l, time);
             const MotionBlurSettings& mb = comp.motion_blur();
@@ -2151,6 +2155,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                            * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
             if (open > 0.0) {
                 rl.blurMatrices.resize(k);
+                blurOpen = open;
                 bool moves = false;
                 for (u32 i = 0; i < k; ++i) {
                     const f64 u = (static_cast<f64>(i) + 0.5) / static_cast<f64>(k) - 0.5;
@@ -2163,6 +2168,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) moves = true;
                     }
                 }
+                blurSamples = rl.blurMatrices;   // o Transform (efeito) pode mexer mesmo com a camada parada
                 if (!moves) rl.blurMatrices.clear();
             }
         }
@@ -2309,6 +2315,48 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
             }
             EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used], fps, &comp);
+            // Transform (efeito) no fim da pilha vira a matriz "dobrada": ela
+            // também anda dentro do obturador. Cada amostra leva o Transform
+            // do SEU instante (interpolado entre os quadros inteiros vizinhos,
+            // onde os parâmetros são avaliados) — antes o rastro só via o
+            // movimento do transform da camada.
+            if (!blurSamples.empty() && out.plans[used].hasFold && !inScene3d && !particularSheet && rl.temporal.empty() && !rgbOn) {
+                const u32 k = static_cast<u32>(blurSamples.size());
+                const i64 first = static_cast<i64>(std::floor(static_cast<f64>(local.value) - blurOpen * 0.5));
+                const i64 last = static_cast<i64>(std::ceil(static_cast<f64>(local.value) + blurOpen * 0.5));
+                std::vector<Mat4> folds;
+                bool ok = last - first <= 16;
+                for (i64 f = first; ok && f <= last; ++f) {
+                    if (f == local.value) { folds.push_back(out.plans[used].foldMatrix); continue; }
+                    EffectPlan at;
+                    EffectGraph::plan(*l, *effects_, FrameIndex{f}, rl.texelScale, placement, this, at, fps, &comp);
+                    folds.push_back(at.hasFold ? at.foldMatrix : Mat4::identity());
+                }
+                if (ok && !folds.empty()) {
+                    auto lerpM = [](const Mat4& a, const Mat4& b, f32 t) {
+                        Mat4 r;
+                        for (int c = 0; c < 4; ++c) r.col[c] = a.col[c] + (b.col[c] - a.col[c]) * t;
+                        return r;
+                    };
+                    bool moves = false;
+                    rl.blurMatrices.resize(k);
+                    for (u32 i = 0; i < k; ++i) {
+                        const f64 u = (static_cast<f64>(i) + 0.5) / static_cast<f64>(k) - 0.5;
+                        const f64 lt = static_cast<f64>(local.value) + u * blurOpen;
+                        const f64 rel = std::clamp(lt - static_cast<f64>(first), 0.0, static_cast<f64>(folds.size() - 1));
+                        const usize a = std::min(static_cast<usize>(rel), folds.size() - 1);
+                        const usize b = std::min(a + 1, folds.size() - 1);
+                        const Mat4 fold = lerpM(folds[a], folds[b], static_cast<f32>(rel - static_cast<f64>(a)));
+                        rl.blurMatrices[i] = blurSamples[i] * fold;
+                        for (int c = 0; c < 4 && !moves; ++c) {
+                            const Vec4 d = rl.blurMatrices[i].col[c] - rl.blurMatrices[0].col[c];
+                            if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) moves = true;
+                        }
+                    }
+                    if (moves) rl.blurIncludesFold = true;
+                    else rl.blurMatrices.clear();
+                }
+            }
         }
         // FORA DA TELA: a caixa da camada (com o Transform dobrado) não toca a
         // composição e nada na pilha dela pode trazer pixel para dentro (só
@@ -4149,7 +4197,8 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             if (pAdd.ok()) {
                 const bool temporal = !layer.temporal.empty();
                 const u32 k = static_cast<u32>(temporal ? layer.temporal.size() : layer.blurMatrices.size());
-                const Mat4 fold = (i < snap.plans.size() && snap.plans[i].hasFold) ? snap.plans[i].foldMatrix : Mat4::identity();
+                const Mat4 fold = (i < snap.plans.size() && snap.plans[i].hasFold && !(layer.blurIncludesFold && layer.temporal.empty()))
+                                ? snap.plans[i].foldMatrix : Mat4::identity();
                 TextureDesc accDesc = compDesc;
                 accDesc.transferSrc = false;
                 const FGTexture acc = graph_.create_texture("desfoque de movimento", accDesc);

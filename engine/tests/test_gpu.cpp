@@ -12073,3 +12073,114 @@ AUREA_TEST(Regression2137Gpu, AdjustmentLayerHonoursBlendModeAndMask) {
     AUREA_CHECK(near4(masked.v(8, 32), Vec4{a.x * 2, a.y * 2, a.z * 2, 1}, 0.006f));   // dentro: efeito
     AUREA_CHECK(near4(masked.v(56, 32), Vec4{a.x, a.y, a.z, 1}, 0.006f));             // fora: fundo intacto (não recortado)
 }
+
+// "Arruma o blur de movimento — lógica do AE: (ângulo/360) × (1/fps)" (beta
+// 2137): o rastro tem o comprimento do obturador e também vale para o
+// movimento que vem do efeito Transform (dobrado na matriz). Antes só o
+// transform da camada entrava nas amostras; o Transform animado saía nítido.
+AUREA_TEST(Regression2137Gpu, MotionBlurFollowsTheTransformEffectWithTheAeShutter) {
+    AUREA_REQUIRE_GPU();
+    auto trail = [](bool viaEffect, bool blur, f32 angle) {
+        Scene s(96, 48);
+        const LayerId id = s.solid(8, 8, Vec4{1, 1, 1, 1}, 20, 24);
+        Layer* l = s.comp->layer(id);
+        if (viaEffect) {
+            auto& fx = s.add_effect(id, effect_keys::kTransform);
+            const f32 p0 = fx.params[1].constant.v[0];
+            Track& t = l->tracks.get_or_create(TrackProperty::EffectParam, fx.id, param_track_key(1, 0));
+            (void)t.set(FrameIndex{0}, p0);
+            (void)t.set(FrameIndex{10}, p0 + 7.5f);   // 7,5 × 8 px = 60 px: 6 px por quadro
+        } else {
+            Track& x = l->tracks.get_or_create(TrackProperty::PositionX);
+            (void)x.set(FrameIndex{0}, 20.0f);
+            (void)x.set(FrameIndex{10}, 80.0f);
+        }
+        l->motionBlur = blur;
+        MotionBlurSettings& mb = s.comp->motion_blur();
+        mb.enabled = true;
+        mb.shutterAngle = angle;
+        mb.samples = 32;
+        mb.previewSamples = 32;
+        const FloatImage img = s.render(FrameIndex{5}, 1, true);
+        u32 lit = 0;
+        for (u32 xx = 0; xx < img.width; ++xx) lit += img.v(xx, 24).x > 0.01f ? 1u : 0u;
+        return lit;
+    };
+    const u32 sharp = trail(true, false, 180), fx180 = trail(true, true, 180), fx360 = trail(true, true, 360);
+    const u32 tr180 = trail(false, true, 180);
+    std::printf("    rastro do Transform: nítido %u px, 180° %u px, 360° %u px (transform da camada 180° %u px)\n",
+                sharp, fx180, fx360, tr180);
+    AUREA_CHECK(sharp >= 7 && sharp <= 9);
+    // 180° a 6 px/quadro = 3 px de rastro; 360° = 6 px (AE: ângulo/360 do quadro).
+    AUREA_CHECK(fx180 >= sharp + 2 && fx180 <= sharp + 4);
+    AUREA_CHECK(fx360 >= sharp + 5 && fx360 <= sharp + 7);
+    AUREA_CHECK(fx180 + 1 >= tr180 && fx180 <= tr180 + 1);   // o mesmo rastro do transform da camada
+}
+
+// Beta 2026-10-03: "não consigo editar profundidade e chanfro do texto 3D".
+// O mesmo caminho das bridges (query_text3d → muda um campo → set_text3d)
+// tem de mudar a malha (Z, vértices) E a imagem, também com letras animadas.
+AUREA_TEST(Gpu, Text3DDepthAndBevelEditsReachTheFrame) {
+    Scene3DRig rig(320, 180);
+    scene3d::Text3DSpec spec;
+    spec.content = "AB";
+    spec.color = Vec4{0.85f, 0.85f, 0.88f, 1.0f};
+    const Result<u64> id = rig.e.add_text3d(spec);
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto mesh = [&]() {
+        Composition* c = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        const Layer* l = c->layer(LayerId::unpack(*id));
+        return rig.e.model_asset(l->model.scene.pack());
+    };
+    auto edit = [&](auto change) {
+        scene3d::Text3DSpec s;
+        AUREA_CHECK(rig.e.query_text3d(*id, s));
+        change(s);
+        AUREA_CHECK(rig.e.set_text3d(*id, s).ok());
+    };
+    auto vertices = [](const scene3d::SceneAsset& a) {
+        usize n = 0;
+        for (const auto& m : a.meshes) for (const auto& p : m.primitives) n += p.positions.size();
+        return n;
+    };
+    for (int pass = 0; pass < 2; ++pass) {
+        const Image8 base = rig.capture(320);
+        const auto before = mesh();
+        AUREA_CHECK(before != nullptr);
+        if (!before) return;
+        edit([](scene3d::Text3DSpec& s) { s.depth = 2.0f; });
+        const auto deep = mesh();
+        const Image8 deepImg = rig.capture(320);
+        edit([](scene3d::Text3DSpec& s) { s.bevel = true; s.bevelWidth = 0.06f; s.bevelDepth = 0.06f; });
+        const auto bevel = mesh();
+        const Image8 bevelImg = rig.capture(320);
+        std::printf("\n    passo %d: cobertura %.3f, z %.3f -> %.3f, vertices %zu -> %zu, dif imagem prof %u chanfro %u",
+                    pass, static_cast<double>(coverage(base)), static_cast<double>(before->bounds.extent().z), static_cast<double>(deep->bounds.extent().z),
+                    vertices(*deep), vertices(*bevel), max_diff(base, deepImg), max_diff(deepImg, bevelImg));
+        AUREA_CHECK(deep->bounds.extent().z > before->bounds.extent().z * 4.0f);
+        AUREA_CHECK(vertices(*bevel) > vertices(*deep));
+        AUREA_CHECK(max_diff(base, deepImg) > 20);
+        AUREA_CHECK(max_diff(deepImg, bevelImg) > 20);
+        // O chanfro PADRÃO (o que o "Ligar" do painel usa) também aparece de frente.
+        edit([](scene3d::Text3DSpec& s) { s.depth = 0.25f; s.bevel = false; });
+        const Image8 plain = rig.capture(320);
+        edit([](scene3d::Text3DSpec& s) { s.bevel = true; s.bevelWidth = 0.02f; s.bevelDepth = 0.02f; });
+        const Image8 defaultBevel = rig.capture(320);
+        u32 changed = 0;
+        for (usize i = 0; i + 3 < plain.rgba.size(); i += 4)
+            if (std::abs(int(plain.rgba[i]) - int(defaultBevel.rgba[i])) > 12) ++changed;
+        std::printf("\n    chanfro padrao de frente: dif %u, %u pixels mudaram", max_diff(plain, defaultBevel), changed);
+        AUREA_CHECK(max_diff(plain, defaultBevel) > 20);
+        // De volta ao padrão e de novo com as letras animadas (nós por letra).
+        edit([](scene3d::Text3DSpec& s) { s.depth = 0.25f; s.bevel = false; });
+        if (pass == 0) {
+            AUREA_CHECK(rig.e.apply_text3d_anim(*id, 0, 0, 0, 1.0f, 60.0f));
+            // Depois da entrada (1 s): as letras paradas e inteiras na tela.
+            Command seek;
+            seek.type = CommandType::PlaybackSeek;
+            seek.seek.time = tick_at(FrameIndex{60}, 30.0);
+            AUREA_CHECK(rig.e.apply_command(seek).ok());
+        }
+    }
+}

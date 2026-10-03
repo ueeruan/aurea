@@ -2196,7 +2196,7 @@
     <string name="world_purple_crystals">बैंगनी क्रिस्टल</string>
     <string name="environment_texture">एनवायरनमेंट टेक्सचर</string>
     <string name="environment_background">360° बैकग्राउंड के रूप में दिखाएँ</string>
-    <string name="environment_hint">Radiance HDR/HDRI या 360° JPG/PNG पैनोरमा (2:1), 8 MP तक इंपोर्ट करें। इमेज कैमरे को घेरती है और सीन को रोशन करती है।</string>
+    <string name="environment_hint">HDR/EXR, 360° JPG/PNG पैनोरमा (2:1) या इनमें से किसी एक वाली .zip इंपोर्ट करें। बड़ी फ़ाइलें (8K) छोटी कर दी जाती हैं। इमेज कैमरे को घेरती है और सीन को रोशन करती है।</string>
     <string name="fxu_frames">फ़्रेम</string>
     <string name="fxu_px_per_frame">px/फ़्रेम</string>
     <string name="fxu_octaves">सप्तक</string>

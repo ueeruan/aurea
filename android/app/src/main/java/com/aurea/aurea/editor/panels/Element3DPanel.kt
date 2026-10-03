@@ -445,7 +445,7 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
     ChipRow {
         KitChip(stringResource(R.string.panel_estudio_neutro), on = e[0] < 0.5f) { store.clearHdri() }
         KitChip(if (e[0] >= 0.5f) stringResource(R.string.panel_imagem_ambiente) else stringResource(R.string.panel_usar_imagem_ambiente_hdr), on = e[0] >= 0.5f) {
-            pick.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
+            pick.launch(arrayOf("image/vnd.radiance", "image/x-exr", "application/zip", "application/octet-stream", "*/*"))
         }
     }
     SceneRow(env, stringResource(R.string.panel_intensidade), e[1] * 100f, 1f, 0f, 2000f, "%", 100f, "ambiente") {
@@ -526,13 +526,13 @@ private fun ObjectEnvironmentSection(env: PanelEnv) {
         KitChip(stringResource(R.string.panel_do_projeto), on = !proprio) { store.setObjectEnvironment(0) }
         KitChip(stringResource(R.string.panel_proprio), on = proprio) {
             store.setObjectEnvironment(1)
-            if (objectEnv[1] <= 0f) escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*"))
+            if (objectEnv[1] <= 0f) escolher.launch(arrayOf("image/vnd.radiance", "image/x-exr", "application/zip", "application/octet-stream", "*/*"))
         }
         if (proprio) {
             KitChip(
                 if (objectEnv[1] > 0f) stringResource(R.string.panel_trocar_imagem) else stringResource(R.string.panel_usar_imagem_ambiente_hdr),
                 on = objectEnv[1] > 0f,
-            ) { escolher.launch(arrayOf("image/vnd.radiance", "application/octet-stream", "*/*")) }
+            ) { escolher.launch(arrayOf("image/vnd.radiance", "image/x-exr", "application/zip", "application/octet-stream", "*/*")) }
         }
     }
     if (proprio) {

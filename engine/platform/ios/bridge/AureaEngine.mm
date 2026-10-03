@@ -1912,7 +1912,8 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (long long)importObjectHDRI:(NSString*)path layer:(long long)layer {
     auto* e = self.engine; if (!e) return -1;
     const auto result = e->import_hdri(path.UTF8String, layer);
-    if (!result.ok()) { _lastImportError = to_ns(std::string(result.status().message())); return -1; }
+    // −código do motor (como importHdri): a UI diz o motivo (formato, arquivo cortado, grande demais).
+    if (!result.ok()) { _lastImportError = to_ns(std::string(result.status().message())); return -static_cast<long long>(result.status().code()); }
     _lastImportError = @""; return static_cast<long long>(*result);
 }
 - (long long)importHdri:(NSString*)path {
@@ -2784,6 +2785,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
             if (handles.count >= 4) { c->keyframe_interp.bx1 = handles[0].floatValue; c->keyframe_interp.by1 = handles[1].floatValue; c->keyframe_interp.bx2 = handles[2].floatValue; c->keyframe_interp.by2 = handles[3].floatValue; }
             // Quinto número = força da bézier (1..3); sem ele a força do keyframe fica.
             if (handles.count >= 5) c->keyframe_interp.power = static_cast<aurea::u8>(std::clamp(handles[4].intValue, 0, 3));
+            // Sexto = 1: a curva é da PROPRIEDADE; o motor leva a mesma curva aos
+            // eixos irmãos (X/Y/Z) com keyframe no mesmo instante (`linked_axis_refs`).
+            if (handles.count >= 6) c->keyframe_interp.linkAxes = handles[5].intValue != 0 ? 1 : 0;
         }
     }
     [self flush];

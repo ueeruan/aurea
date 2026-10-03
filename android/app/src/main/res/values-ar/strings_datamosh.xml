@@ -2,7 +2,7 @@
 <!-- Efeito Datamosh (2026-10-03). Chaves fx_*datamosh*. -->
 <resources>
     <string name="fx_name_datamosh">داتاموش</string>
-    <string name="fx_desc_glitch_datamosh">خلل الضغط: يظل الإطار القديم يُسحب على شكل كتل بحركة الفيديو، مع ألوان سائلة وكتل تالفة. في الصور تذوب الكتل من تلقاء نفسها.</string>
+    <string name="fx_desc_glitch_datamosh">خلل الضغط: يظل الإطار القديم يُسحب على شكل كتل مع حركة الفيديو، مع ألوان ملطّخة وكتل تالفة. في الصور، تذوب الكتل من تلقاء نفسها.</string>
     <string name="fx_datamosh_hold_frames">الإطارات المثبتة</string>
     <string name="fx_datamosh_drag">السحب</string>
     <string name="fx_datamosh_corruption">التلف</string>

@@ -33,7 +33,7 @@ struct CaptionBlockEditor: View {
                 HStack {
                     ForEach(track.segments) { block in
                         Button { if selected.contains(block.id) { selected.remove(block.id) } else { selected.insert(block.id) }; text = block.text; start = String(block.start); end = String(block.end) } label: {
-                            Text("\(block.start)–\(block.end)\n\(block.text)").lineLimit(2).padding(8).background(selected.contains(block.id) ? AureaColors.accent.opacity(0.5) : AureaColors.muted.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 8))
+                            Text("\(ltrIsolado("\(block.start)–\(block.end)"))\n\(block.text)").lineLimit(2).padding(8).background(selected.contains(block.id) ? AureaColors.accent.opacity(0.5) : AureaColors.muted.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 8))
                         }.buttonStyle(.plain)
                     }
                 }

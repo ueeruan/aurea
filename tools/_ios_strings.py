@@ -124,11 +124,19 @@ def load_one(path):
         name = node.get("name")
         if not name:
             continue
-        text = "".join(node.itertext())
-        # O catalogo do Android escapa com \' e \" dentro de <string>.
-        text = text.replace("\\'", "'").replace('\\"', '"').replace("\\n", "\n")
-        out[name] = text
+        out[name] = android_unescape("".join(node.itertext()))
     return out
+
+
+def android_unescape(text):
+    """Escapes do aapt dentro de <string>/<item>: \\' \\" \\n e \\uXXXX.
+
+    O \\uXXXX importa no árabe: um isolamento bidi (U+2066..U+2069) escrito
+    como escape no XML tem de virar o caractere invisível no Swift, não o texto
+    "\\u2068" na tela.
+    """
+    text = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), text)
+    return text.replace("\\'", "'").replace('\\"', '"').replace("\\n", "\n")
 
 
 def swift_literal(text):
@@ -218,7 +226,12 @@ for code, raw, label, folder in languages:
     if not path.exists() and code == 'id':
         path = Path(ROOT) / 'android/app/src/main/res/values-id/strings.xml'
     table = load(path)
-    plurals[raw] = {node.get('name'): {item.get('quantity'): to_swift_format(''.join(item.itertext()).replace("\\'", "'").replace('\\"', '"').replace('\\n', '\n')) for item in node.findall('item')} for node in ET.parse(path).getroot().findall('plurals')}
+    # <plurals> de strings.xml e de strings_<area>.xml (o Android lê todos).
+    plurals[raw] = {}
+    for part in [path] + sorted(path.parent.glob("strings_*.xml")):
+        for node in ET.parse(part).getroot().findall('plurals'):
+            plurals[raw][node.get('name')] = {item.get('quantity'): to_swift_format(android_unescape(''.join(item.itertext())))
+                                              for item in node.findall('item')}
     lines.append(f'    private static let {code}: [String: String] = [')
     # Chave que falta num idioma: fora do português cai no INGLÊS (nunca pt
     # no meio de uma tela em russo ou árabe).

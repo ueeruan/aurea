@@ -1,0 +1,8 @@
+{
+  "source": "Android API 35 /system/fonts/NotoNaskhArabic-Regular.ttf, Aurea_API35 reference AVD (notofonts/arabic)",
+  "license": "OFL-1.1",
+  "licenseFile": "LICENSE-NotoNaskhArabic.txt",
+  "sha256": "4a23dc5dea7f846fb274f7ebb256d25063bc432e2cb810fc9eeb964a3d7ae217",
+  "postScriptName": "NotoNaskhArabic",
+  "use": "Reserva de texto arabe do motor (camadas de texto); nao registrada em UIAppFonts"
+}

@@ -204,6 +204,7 @@ struct RenderLayer {
     /// Desfoque de movimento: composição ← camada em cada amostra do
     /// obturador. Vazio = sem desfoque (ou camada parada no intervalo).
     std::vector<Mat4> blurMatrices;
+    bool blurIncludesFold = false;   ///< as amostras já trazem o Transform dobrado de cada instante
     /// Amostras temporais genéricas (eco, RGB no tempo): matriz, peso e
     /// máscara de canal (0 = todos). Com elas, o desfoque fica de fora.
     struct TemporalSample { Mat4 m; f32 weight = 1.0f; Vec3 mask{0, 0, 0}; };

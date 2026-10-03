@@ -2200,7 +2200,7 @@
     <string name="world_purple_crystals">Фиолетовые кристаллы</string>
     <string name="environment_texture">Текстура окружения</string>
     <string name="environment_background">Показать как 360° фон</string>
-    <string name="environment_hint">Импортируйте Radiance HDR/HDRI или панораму 360° JPG/PNG (2:1) до 8 Мп. Изображение окружает камеру и освещает сцену.</string>
+    <string name="environment_hint">Импортируйте HDR/EXR, панораму 360° JPG/PNG (2:1) или .zip с одним из них. Большие файлы (8K) уменьшаются. Изображение окружает камеру и освещает сцену.</string>
     <string name="fxu_frames">кадры</string>
     <string name="fxu_px_per_frame">пикс./кадр</string>
     <string name="fxu_octaves">октавы</string>

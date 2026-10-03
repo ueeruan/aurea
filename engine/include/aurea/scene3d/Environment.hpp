@@ -45,6 +45,31 @@ struct HdriPixels {
 /// panorama LDR um pouco da energia que um HDR teria). Vazio = não lido.
 [[nodiscard]] std::shared_ptr<HdriPixels> decode_hdri(const u8* bytes, usize size, f32 ldrGain = 1.0f) noexcept;
 
+/// Por que um panorama não entrou — a UI mostra uma frase para cada caso.
+enum class HdriStatus : u8 {
+    Ok = 0,
+    Unreadable,          ///< arquivo não abriu / leitura cortada (E/S)
+    UnsupportedFormat,   ///< não é HDR/EXR/JPG/PNG (nem um .zip com um deles)
+    Corrupt,             ///< o formato é conhecido, mas os dados acabam/estão errados (download incompleto)
+    TooLarge,            ///< passaria do teto de memória mesmo reduzindo
+};
+
+/// Teto da SAÍDA: 4096×2048 (o ambiente não usa mais que W/4 por face). Um
+/// panorama maior é reduzido por média de caixa — não recusado.
+inline constexpr u32 kHdriMaxPixels = 4096u * 2048u;
+
+struct HdriDecode {
+    std::shared_ptr<HdriPixels> pixels;   ///< nulo quando `status != Ok`
+    HdriStatus status = HdriStatus::UnsupportedFormat;
+};
+
+/// O mesmo que `decode_hdri`, dizendo o motivo da falha. Aceita Radiance
+/// (`#?RADIANCE`/`#?RGBE`, RLE novo e antigo, qualquer orientação ±Y ±X, RGBE
+/// ou XYZE), OpenEXR (sem compressão, RLE, ZIP, ZIPS, PIZ, PXR24, B44; meia
+/// precisão ou float; linhas ou tiles), JPG/PNG e um .zip com um desses
+/// dentro. Valores não finitos/negativos viram 0.
+[[nodiscard]] HdriDecode decode_hdri_detailed(const u8* bytes, usize size, f32 ldrGain = 1.0f) noexcept;
+
 struct EnvironmentMaps {
     CubeData irradiance;      ///< 32², 1 mip
     /// base², mips até 4². Mip m ↔ rugosidade perceptual pela curva de

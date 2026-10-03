@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -319,13 +320,16 @@ internal fun easeOf(store: EditorStore, layer: Long, k: KeyframeRow): Ease {
 }
 
 /**
- * Write the outgoing segment; the store synchronizes grouped 3D axes.
- * Effects and planar tracks keep their independent curves.
+ * Grava o trecho que sai de [start]. A curva é da PROPRIEDADE: o motor leva a
+ * mesma curva a todos os eixos dela com keyframe no mesmo instante (Posição
+ * X/Y/Z, Escala, Rotação, Âncora — também numa camada 2D), para que X e Y
+ * cheguem juntos (beta: "o Y não acompanha o X"). Componentes de efeito
+ * continuam independentes (o motor não os liga).
  */
 internal fun applyEase(store: EditorStore, layer: Long, start: KeyframeRow, e: Ease) {
     val keys = store.keyframes[layer] ?: return
     keys.filter { it.time == start.time && it.sameTrack(start) }.forEach { k ->
-        store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2, e.power)
+        store.setKeyframeEasing(layer, k, e.interp, e.x1, e.y1, e.x2, e.y2, e.power, linkAxes = true)
     }
 }
 
@@ -337,7 +341,7 @@ internal fun applyEaseToProperty(store: EditorStore, layer: Long, start: Keyfram
     val keys = store.keyframes[layer] ?: return false
     val starts = propertySegmentStarts(keys, keys.track(start))
     if (starts.isEmpty()) return false
-    store.setKeyframesEasing(layer, starts, e.interp, e.x1, e.y1, e.x2, e.y2, e.power)
+    store.setKeyframesEasing(layer, starts, e.interp, e.x1, e.y1, e.x2, e.y2, e.power, linkAxes = true)
     return true
 }
 
@@ -511,7 +515,8 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             Spacer(Modifier.height(8.dp))
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            // O gráfico é tempo × valor: não espelha em árabe (ver `KeepLtr`).
+            KeepLtr { Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (graphMode != 0) {
                     TrackGraph(store, layer, (store.keyframes[layer] ?: emptyList()).track(start), graphMode == 2)
                 } else CurveGraph(
@@ -522,7 +527,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     onChange = { applyEase(store, layer, start, it) },
                     onEnd = { store.endGesture() },
                 )
-            }
+            } }
             // Parâmetros das curvas que passam do ponto / balançam (um desfazer por arrasto).
             if (graphMode == 0 && ease.interp == Interp.OVERSHOOT) {
                 Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -576,7 +581,8 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            // ‹ trecho anterior · próximo ›: no sentido do tempo, LTR como o gráfico.
+            KeepLtr { Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(48.dp).tocavel { jump(-1) }, contentAlignment = Alignment.Center) {
                     CupertinoIcon(CupertinoGlyph.ChevronLeft, 16.dp, Color.White)
                 }
@@ -606,7 +612,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                 Box(Modifier.size(48.dp).tocavel { jump(1) }, contentAlignment = Alignment.Center) {
                     CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, Color.White)
                 }
-            }
+            } }
         }
         // Os tipos de curva ao lado do gráfico (como no pedido do beta): cada
         // botão mostra a curva que aplica, desenhada pelo motor.

@@ -228,7 +228,41 @@ struct KeyframePayload {
 struct KeyframeMovePayload { TrackRef track; FrameIndex fromTime; FrameIndex toTime; };
 /// `power`: força da bézier (1..3); 0 = mantém a do keyframe. Ocupa o byte que
 /// já era preenchimento depois de `interp`: os floats não mudam de lugar.
-struct KeyframeInterpPayload { TrackRef track; FrameIndex time; Interpolation interp; u8 power; f32 bx1, by1, bx2, by2; };
+/// `linkAxes` (1): a MESMA curva vai para os eixos irmãos da propriedade
+/// (Posição X/Y/Z, Escala, Rotação, Âncora, Inclinação, Cor da luz, canais da
+/// parte 3D) que têm keyframe no mesmo instante — é o "aplicar curva" das UIs.
+/// 0 = só a trilha endereçada (o gráfico editando UMA dimensão de propósito).
+/// Também ocupa um byte de preenchimento: comandos antigos chegam com 0.
+struct KeyframeInterpPayload { TrackRef track; FrameIndex time; Interpolation interp; u8 power; u8 linkAxes; f32 bx1, by1, bx2, by2; };
+
+/// Os componentes de uma propriedade com várias dimensões, na ordem dos eixos
+/// (o próprio `ref` incluído). Grava até 3 em `out` e devolve quantos; 1 =
+/// propriedade escalar (nada a ligar). Efeitos e parâmetros de grupo ficam
+/// independentes de propósito: cada componente deles é um controle próprio.
+[[nodiscard]] constexpr u32 linked_axis_refs(const TrackRef& ref, TrackRef (&out)[3]) noexcept {
+    const u16 p = static_cast<u16>(ref.property);
+    out[0] = ref;
+    auto by_property = [&](TrackProperty first, u16 count) {
+        for (u16 i = 0; i < count; ++i) {
+            out[i] = ref;
+            out[i].property = static_cast<TrackProperty>(static_cast<u16>(first) + i);
+        }
+        return static_cast<u32>(count);
+    };
+    if (p <= static_cast<u16>(TrackProperty::AnchorZ)) // Posição, Escala, Rotação, Âncora: XYZ
+        return by_property(static_cast<TrackProperty>(p / 3 * 3), 3);
+    if (ref.property == TrackProperty::SkewX || ref.property == TrackProperty::SkewY)
+        return by_property(TrackProperty::SkewX, 2);
+    if (p >= static_cast<u16>(TrackProperty::LightColorR) && p <= static_cast<u16>(TrackProperty::LightColorB))
+        return by_property(TrackProperty::LightColorR, 3);
+    if (ref.property == TrackProperty::ShapePart && ref.effectParamIndex < 9) {
+        // Canais 0..8 da parte: posição XYZ, rotação XYZ, escala XYZ.
+        const u32 base = ref.effectParamIndex / 3 * 3;
+        for (u32 i = 0; i < 3; ++i) { out[i] = ref; out[i].effectParamIndex = base + i; }
+        return 3;
+    }
+    return 1;
+}
 struct MaskOpPayload { LayerId layer; MaskId mask; MaskOperation op; };
 struct MaskScalarPayload { LayerId layer; MaskId mask; f32 value; };
 struct MaskPointPayload { LayerId layer; MaskId mask; u32 pointIndex; f32 x, y; f32 inX, inY, outX, outY; };
@@ -535,8 +569,10 @@ static_assert(offsetof(Command, preview_scale.automatic) == cmd_layout::kPreview
 // deles crescer perto do teto da união, o próximo campo não caberia.
 static_assert(sizeof(Command::transform) <= cmd_layout::kMaxPayload);
 static_assert(sizeof(Command::keyframe_interp) <= cmd_layout::kMaxPayload);
-// CommandBatch.kt grava interp em time+8, a força em time+9 e as alças a partir de time+12.
+// CommandBatch.kt grava interp em time+8, a força em time+9, os eixos ligados
+// em time+10 e as alças a partir de time+12.
 static_assert(offsetof(KeyframeInterpPayload, power) == offsetof(KeyframeInterpPayload, time) + 9);
+static_assert(offsetof(KeyframeInterpPayload, linkAxes) == offsetof(KeyframeInterpPayload, time) + 10);
 static_assert(offsetof(KeyframeInterpPayload, bx1) == offsetof(KeyframeInterpPayload, time) + 12);
 
 /// Um bloco de comandos produzido pela UI em um frame.

@@ -1,5 +1,7 @@
 package com.aurea.aurea.ui
 
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.platform.LocalLayoutDirection
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,14 +43,17 @@ import com.aurea.aurea.ui.theme.AureaTheme
 fun AureaApp(store: EditorStore, conta: ContaViewModel) {
     AureaTheme {
         Box(Modifier.fillMaxSize().background(AureaColors.Background)) {
+            // A página nova entra pelo lado do fim da leitura: direita em LTR,
+            // esquerda em árabe (slideInHorizontally usa x absoluto).
+            val sign = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1 else 1
             // Conta obrigatória: sem sessão guardada, o app inteiro é a tela de conta.
             if (!conta.logado) ContaScreen(conta) else AnimatedContent(
                 targetState = store.screen,
                 transitionSpec = {
                     if (targetState == Screen.Editor) {
-                        slideInHorizontally(tween(500)) { it } togetherWith slideOutHorizontally(tween(500)) { -it / 3 }
+                        slideInHorizontally(tween(500)) { it * sign } togetherWith slideOutHorizontally(tween(500)) { -it / 3 * sign }
                     } else {
-                        slideInHorizontally(tween(500)) { -it / 3 } togetherWith slideOutHorizontally(tween(500)) { it }
+                        slideInHorizontally(tween(500)) { -it / 3 * sign } togetherWith slideOutHorizontally(tween(500)) { it * sign }
                     }
                 },
                 label = "tela",

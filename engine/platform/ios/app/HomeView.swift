@@ -817,6 +817,8 @@ struct NewProjectSheet: View {
                     Text("×").font(.aurea(size: 20)).foregroundStyle(AureaColors.muted).padding(.vertical, 10)
                     dimensionField("new_project_height", text: $freeHeight)
                 }.padding(.top, 12)
+                // Largura × altura: a ordem é a do dado (L antes de A), em qualquer idioma.
+                .keepLtr()
             }
             HomeCapsLabel(text: AureaText.t("new_project_name")).padding(.top, 20)
             TextField("", text: $name,
@@ -997,15 +999,19 @@ private struct HomeSegmented<Value: Hashable>: View {
         .background {
             GeometryReader { bounds in
                 let width = bounds.size.width / CGFloat(max(1, values.count))
+                // Recuo pelo `.leading` (não `offset(x:)`, que é absoluto): em árabe
+                // a fileira corre da direita e o destaque acompanha o mesmo lado.
                 ZStack(alignment: .leading) {
                     ForEach(1..<max(1, values.count), id: \.self) { separator in
                         if separator != index && separator != index + 1 {
                             Rectangle().fill(Color.white.opacity(0.12)).frame(width: 0.5)
-                                .padding(.vertical, 5).offset(x: width * CGFloat(separator))
+                                .padding(.vertical, 5).padding(.leading, width * CGFloat(separator))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         }
                     }
                     RoundedRectangle(cornerRadius: 7).fill(thumb)
-                        .frame(width: width).offset(x: width * CGFloat(index))
+                        .frame(width: width).padding(.leading, width * CGFloat(index))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .animation(.interpolatingSpring(stiffness: 500, damping: 45), value: index)
                 }
             }
@@ -1176,7 +1182,7 @@ struct HomeSettingsTab: View {
                     Text(AureaText.t(title)).aureaFont(.bodyLarge)
                     Text(subtitle).aureaFont(.bodySmall).foregroundStyle(AureaColors.muted)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 16, color: AureaColors.muted)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 16, color: AureaColors.muted).mirrorsInRtl()
             }.padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
         }.buttonStyle(.plain)
     }
@@ -1203,7 +1209,7 @@ struct HomeSettingsTab: View {
                     Text(AureaText.t("settings_beta_title", version)).aureaFont(.betaTitle)
                     Text(AureaText.t("settings_beta_body")).aureaFont(.betaBody)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: HomeColors.beta)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: HomeColors.beta).mirrorsInRtl()
             }.foregroundStyle(HomeColors.beta).padding(14)
                 .background(HomeColors.betaFill, in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(HomeColors.betaBorder, lineWidth: 1))

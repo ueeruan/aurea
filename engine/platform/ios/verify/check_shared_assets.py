@@ -12,6 +12,9 @@ def validate():
     app = root / 'engine/platform/ios/app'
     android = root / 'android/app/src/main'
     pairs = [(android / 'res/font/cupertino_icons.ttf', app / 'CupertinoIcons.ttf')]
+    # Reserva árabe do motor: a mesma Noto Naskh Arabic (OFL) nos dois apps.
+    pairs += [(root / f'engine/assets/fonts/{name}', app / f'Fonts/{name}')
+              for name in ('NotoNaskhArabic-Regular.ttf', 'LICENSE-NotoNaskhArabic.txt')]
     pairs.append((android / 'assets/previa_efeitos.jpg', app / 'previa_efeitos.jpg'))
     pairs += [(android / f'assets/presets/{name}.json', app / f'Resources/presets/{name}.json')
               for name in ('animacao', 'efeitos', 'curva', 'legenda')]

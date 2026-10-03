@@ -216,6 +216,9 @@ struct ShellBarButton: View {
     var body: some View {
         CupertinoGlyph.text(glyph, size: size, color: enabled ? (tint ?? AureaColors.text) : (disabledTint ?? AureaColors.disabled))
             .scaleEffect(x: mirror ? -1 : 1, y: 1)
+            // Voltar/chevrons/desfazer espelham em árabe; dentro de `keepLtr()`
+            // (transporte, timeline) o ambiente é LTR e nada vira.
+            .mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph))
             .frame(width: width, height: height)
             .contentShape(Rectangle())
             .onTapGesture { if enabled { action() } }

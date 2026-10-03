@@ -135,6 +135,10 @@ struct TimelineMetrics {
     var diamondCyNormal: CGFloat { bar / 2 }
     var diamondCyCompact: CGFloat { bar / 2 }
     var keyTouchHalf: CGFloat { dp(14) }
+    /// Folga do losango até o alvo mínimo de 48 pt; cede às alças, tampa e setas (par do Android).
+    var keyHitHalf: CGFloat { dp(24) }
+    /// Histerese do arrasto de losango: o frame só troca depois de meio frame + isto.
+    var keyDragHysteresis: CGFloat { dp(3) }
     var keyGlyphHalf: CGFloat { dp(7) }
     var keyTouchTop: CGFloat { 0 }
     var keyMergeGap: CGFloat { dp(4) }
@@ -1101,6 +1105,21 @@ enum KeyframeVisibility {
 /// clipe, aparar, arrastar losango, reordenar) exige eixo claro, 2:1 — o empate
 /// de 45° classificava uma rolagem um pouco torta como "mover clipe", e a camada
 /// era escolhida e ia junto com o dedo.
+/// Contas puras do arrasto de losango (par do `KeyDrag.kt`). Beta "é difícil
+/// mover o keyframe": o frame só troca depois de meio frame + uma histerese
+/// pequena (sem tremer na fronteira; some de longe, quando um px vale vários
+/// frames), e o cabeçote parado no instante de ORIGEM não é ímã — tocar no
+/// losango leva o cabeçote até ele, e o ímã o segurava nos primeiros 8 pt.
+enum KeyDrag {
+    static func quantize(_ desired: Double, current: Int32, pxPerFrame: CGFloat, hysteresisPx: CGFloat) -> Int32 {
+        guard desired.isFinite else { return current }
+        let extra: Double = pxPerFrame > 0 && pxPerFrame.isFinite ? min(0.25, Double(hysteresisPx / pxPerFrame)) : 0
+        if abs(desired - Double(current)) <= 0.5 + extra { return current }
+        return Int32(max(-2147483648.0, min(2147483647.0, (desired + 0.5).rounded(.down))))
+    }
+    static func playheadMagnet(_ playhead: Int32, origin: Int32) -> Int32 { playhead == origin ? Snap.none : playhead }
+}
+
 enum TimelinePress {
     static let editRatio: CGFloat = 2
     static func horizontal(_ dx: CGFloat, _ dy: CGFloat) -> Bool { abs(dx) >= abs(dy) }

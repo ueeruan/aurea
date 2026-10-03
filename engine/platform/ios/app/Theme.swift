@@ -541,14 +541,14 @@ extension View {
     func aureaText(_ spec: AureaTextSpec) -> some View {
         self.font(spec.font)
             .foregroundStyle(spec.color)
-            .tracking(spec.tracking)
+            .tracking(aureaTracking(spec.tracking))
             .lineSpacing(max(0, spec.lineHeight * spec.size - (UIFont(name: "Roboto-Regular", size: spec.size)?.lineHeight ?? spec.size)))
     }
     /// Same typography metrics without overriding a selected/disabled color.
     func aureaFont(_ spec: AureaTextSpec) -> some View {
         let fontHeight = UIFont(name: "Roboto-Regular", size: spec.size)?.lineHeight ?? spec.size
         let extra = max(0, spec.lineHeight * spec.size - fontHeight)
-        return self.font(spec.font).tracking(spec.tracking).lineSpacing(extra).padding(.vertical, extra / 2)
+        return self.font(spec.font).tracking(aureaTracking(spec.tracking)).lineSpacing(extra).padding(.vertical, extra / 2)
     }
 }
 
@@ -1456,6 +1456,7 @@ struct AureaNumberField: View {
         TextField("", text: $text)
             .keyboardType(.numbersAndPunctuation)
             .multilineTextAlignment(.center)
+            .keepLtr()   // número com sinal: o menos fica na frente também no árabe
             .font(AureaType.value)
             .foregroundStyle(AureaColors.text)
             .padding(.vertical, 6)
@@ -1507,5 +1508,8 @@ struct MaterialGlyph: View {
         Image("Material-" + name.replacingOccurrences(of: ".", with: "-"))
             .resizable().renderingMode(.template).scaledToFit()
             .frame(width: size, height: size).foregroundStyle(color)
+            // Os `automirrored` do Compose viram sozinhos em RTL; aqui é explícito.
+            // O chevron de voltar dos painéis também espelha (aponta para "trás").
+            .flipsForRightToLeftLayoutDirection(name.hasPrefix("automirrored.") || name.hasSuffix(".ChevronLeft"))
     }
 }

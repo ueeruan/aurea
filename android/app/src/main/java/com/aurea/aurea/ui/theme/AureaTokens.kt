@@ -1,5 +1,10 @@
 package com.aurea.aurea.ui.theme
 
+import kotlin.reflect.KProperty
+import kotlin.properties.ReadOnlyProperty
+import java.util.Locale
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.foundation.shape.CircleShape
@@ -437,6 +442,29 @@ enum class LayerType(val kind: Int, val color: Color, val glyph: Char, val label
 }
 
 /**
+ * Espaçamento entre letras (tracking) dos estilos do Aurea — ZERO em árabe.
+ *
+ * A escrita árabe é cursiva: o Android não aplica letter-spacing ao desenhar
+ * árabe, mas aplica ao MEDIR a largura intrínseca do texto. Com o tracking
+ * negativo do Aurea a medida saía menor que a linha real e o Compose quebrava
+ * a última letra do título para a linha de baixo ("المشاري / ع"). Tipografia
+ * árabe também não usa tracking. Lido a cada acesso: trocar de idioma no app
+ * (Activity recriada, processo o mesmo) já pega o valor novo.
+ */
+fun aureaTracking(sp: Float): TextUnit = if (Locale.getDefault().language == "ar") 0.sp else sp.sp
+
+/** Estilo guardado por estado de tracking (latino / árabe): monta uma vez cada. */
+private class TrackedStyle(private val make: () -> TextStyle) : ReadOnlyProperty<Any?, TextStyle> {
+    private var latin: TextStyle? = null
+    private var arabic: TextStyle? = null
+    override fun getValue(thisRef: Any?, property: KProperty<*>): TextStyle =
+        if (Locale.getDefault().language == "ar") arabic ?: make().also { arabic = it }
+        else latin ?: make().also { latin = it }
+}
+
+private fun styled(make: () -> TextStyle): ReadOnlyProperty<Any?, TextStyle> = TrackedStyle(make)
+
+/**
  * Tipografia. O Flutter do app antigo faz TODO texto herdar 15 sp, −0,1 de
  * espaçamento e altura de linha 1,35 (bodyMedium do M3). Sem essa base as
  * alturas dos componentes não batem com os prints.
@@ -445,16 +473,16 @@ enum class LayerType(val kind: Int, val color: Color, val glyph: Char, val label
  */
 object AureaType {
     /** A base de tudo (15 sp, −0,1, altura 1,35). */
-    val Base = TextStyle(
+    val Base by styled { TextStyle(
         fontFamily = FontFamily.Default,
         fontSize = 15.sp,
         fontWeight = FontWeight.Normal,
-        letterSpacing = (-0.1).sp,
+        letterSpacing = aureaTracking(-0.1f),
         lineHeight = 1.35.em,
         color = AureaColors.Text,
         platformStyle = PlatformTextStyle(includeFontPadding = false),
         lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
-    )
+    ) }
 
     /** Deriva um estilo da base (o `merge` que o Flutter herdava). */
     fun of(
@@ -467,78 +495,79 @@ object AureaType {
         TextStyle(
             fontSize = size.sp,
             fontWeight = weight,
-            letterSpacing = spacing.sp,
+            letterSpacing = aureaTracking(spacing),
             color = color,
             lineHeight = lineHeight?.em ?: 1.35.em,
         ),
     )
 
     // --- Escala --------------------------------------------------------------
-    val Display = of(30f, FontWeight.W800, -0.8f, lineHeight = 1.05f)
-    val HeadlineLarge = Base.merge(TextStyle(fontSize = 34.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.8).sp, lineHeight = 1.1.em))
+    val Display by styled { of(30f, FontWeight.W800, -0.8f, lineHeight = 1.05f) }
+    val HeadlineLarge by styled { Base.merge(TextStyle(fontSize = 34.sp, fontWeight = FontWeight.W700, letterSpacing = aureaTracking(-0.8f), lineHeight = 1.1.em)) }
     /** Título de tela dentro de uma aba (21–22 w700). */
-    val ScreenTitle = of(21f, FontWeight.W700, -0.4f)
+    val ScreenTitle by styled { of(21f, FontWeight.W700, -0.4f) }
     /** Cabeçalho de tela grande (28 w800): o título das abas da Home. */
-    val TitleLarge = Base.merge(TextStyle(fontSize = 22.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.5).sp, lineHeight = 1.27.em))
-    val TitleMedium = Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, letterSpacing = (-0.3).sp, lineHeight = 1.5.em))
-    val TitleSmall = of(17f, FontWeight.W700, -0.4f)
-    val BodyLarge = Base.merge(TextStyle(fontSize = 17.sp, letterSpacing = (-0.2).sp, lineHeight = 1.5.em))
-    val BodySmall = Base.merge(TextStyle(fontSize = 13.sp, letterSpacing = 0.sp, lineHeight = 1.33.em, color = AureaColors.Muted))
-    val LabelLarge = Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, letterSpacing = (-0.2).sp, lineHeight = 1.43.em))
+    val TitleLarge by styled { Base.merge(TextStyle(fontSize = 22.sp, fontWeight = FontWeight.W700, letterSpacing = aureaTracking(-0.5f), lineHeight = 1.27.em)) }
+    val TitleMedium by styled { Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, letterSpacing = aureaTracking(-0.3f), lineHeight = 1.5.em)) }
+    val TitleSmall by styled { of(17f, FontWeight.W700, -0.4f) }
+    val BodyLarge by styled { Base.merge(TextStyle(fontSize = 17.sp, letterSpacing = aureaTracking(-0.2f), lineHeight = 1.5.em)) }
+    val BodySmall by styled { Base.merge(TextStyle(fontSize = 13.sp, letterSpacing = aureaTracking(0f), lineHeight = 1.33.em, color = AureaColors.Muted)) }
+    val LabelLarge by styled { Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600, letterSpacing = aureaTracking(-0.2f), lineHeight = 1.43.em)) }
 
     // --- Home / telas fora do editor -----------------------------------------
-    val Greeting = of(13.5f, color = AureaColors.Muted)
-    val TabLabel = of(10.5f, FontWeight.W500, 0.1f)
-    val Button = of(17f, FontWeight.W600, -0.2f, AureaColors.OnAccent)
-    val ShortcutLabel = of(12f, FontWeight.W600)
-    val HeroKicker = of(11f, FontWeight.W700, 0.4f, AureaColors.Accent)
-    val HeroTitle = of(18f, FontWeight.W700, -0.2f, AureaColors.OnImage)
-    val HeroSpec = of(11f, color = AureaColors.OnImage70)
-    val HeroPill = of(12.5f, FontWeight.W700, color = AureaColors.OnAccent)
-    val ListCount = of(15f, FontWeight.W700)
-    val CardTitle = of(14f, FontWeight.W600, -0.1f)
-    val CardSpec = of(11f, color = AureaColors.Muted)
-    val LinkRow = of(14.5f)
-    val FeatureTitle = of(15f, FontWeight.W600)
-    val FeatureSubtitle = of(12.5f, color = AureaColors.Muted)
-    val Empty = of(13.5f, color = AureaColors.Muted)
-    val BatchCount = of(13f, color = AureaColors.Muted)
-    val BatchAction = of(13f)
-    val BatchDanger = of(13f, color = AureaColors.Danger)
-    val SearchText = of(17f)
-    val SearchPlaceholder = of(17f, color = AureaColors.FieldPlaceholder)
-    val Note = of(12.5f, color = AureaColors.Muted)
-    val Footer = of(11f, color = AureaColors.Subtle)
-    val Pill = of(12f, FontWeight.W600, color = AureaColors.Accent)
-    val ChipLabel = of(12f, FontWeight.W600)
-    val Segment = of(13f, FontWeight.W600, -0.1f)
-    val DialogField = of(15f)
-    val VersionPill = of(12f, FontWeight.W600, color = AureaColors.Accent)
-    val BetaTitle = of(13f, FontWeight.W700, color = AureaColors.Beta)
-    val BetaBody = of(11f, color = AureaColors.Muted)
+    val Greeting by styled { of(13.5f, color = AureaColors.Muted) }
+    val TabLabel by styled { of(10.5f, FontWeight.W500, 0.1f) }
+    val Button by styled { of(17f, FontWeight.W600, -0.2f, AureaColors.OnAccent) }
+    val ShortcutLabel by styled { of(12f, FontWeight.W600) }
+    val HeroKicker by styled { of(11f, FontWeight.W700, 0.4f, AureaColors.Accent) }
+    val HeroTitle by styled { of(18f, FontWeight.W700, -0.2f, AureaColors.OnImage) }
+    val HeroSpec by styled { of(11f, color = AureaColors.OnImage70) }
+    val HeroPill by styled { of(12.5f, FontWeight.W700, color = AureaColors.OnAccent) }
+    val ListCount by styled { of(15f, FontWeight.W700) }
+    val CardTitle by styled { of(14f, FontWeight.W600, -0.1f) }
+    val CardSpec by styled { of(11f, color = AureaColors.Muted) }
+    val LinkRow by styled { of(14.5f) }
+    val FeatureTitle by styled { of(15f, FontWeight.W600) }
+    val FeatureSubtitle by styled { of(12.5f, color = AureaColors.Muted) }
+    val Empty by styled { of(13.5f, color = AureaColors.Muted) }
+    val BatchCount by styled { of(13f, color = AureaColors.Muted) }
+    val BatchAction by styled { of(13f) }
+    val BatchDanger by styled { of(13f, color = AureaColors.Danger) }
+    val SearchText by styled { of(17f) }
+    val SearchPlaceholder by styled { of(17f, color = AureaColors.FieldPlaceholder) }
+    val Note by styled { of(12.5f, color = AureaColors.Muted) }
+    val Footer by styled { of(11f, color = AureaColors.Subtle) }
+    val Pill by styled { of(12f, FontWeight.W600, color = AureaColors.Accent) }
+    val ChipLabel by styled { of(12f, FontWeight.W600) }
+    val Segment by styled { of(13f, FontWeight.W600, -0.1f) }
+    val DialogField by styled { of(15f) }
+    val VersionPill by styled { of(12f, FontWeight.W600, color = AureaColors.Accent) }
+    val BetaTitle by styled { of(13f, FontWeight.W700, color = AureaColors.Beta) }
+    val BetaBody by styled { of(11f, color = AureaColors.Muted) }
 
     // --- Folha "Novo projeto" -------------------------------------------------
-    val SheetSpec = of(12.5f, color = AureaColors.Muted)
-    val FrameLabel = of(22f, FontWeight.W700, -0.3f)
-    val FrameHint = of(12f, color = AureaColors.Muted)
-    val FormatLabel = of(12.5f, FontWeight.W600, -0.1f)
-    val FormatHint = of(10f, color = AureaColors.Muted)
+    val SheetSpec by styled { of(12.5f, color = AureaColors.Muted) }
+    val FrameLabel by styled { of(22f, FontWeight.W700, -0.3f) }
+    val FrameHint by styled { of(12f, color = AureaColors.Muted) }
+    val FormatLabel by styled { of(12.5f, FontWeight.W600, -0.1f) }
+    val FormatHint by styled { of(10f, color = AureaColors.Muted) }
     /** Rótulo em caixa-alta de um campo ou seção. */
-    val Caps = of(12f, FontWeight.W500, 0.6f, AureaColors.Muted)
-    val NameField = of(17f, spacing = -0.2f)
-    val NamePlaceholder = of(17f, spacing = -0.2f, color = AureaColors.Muted)
-    val DimLabel = of(11f, color = AureaColors.Muted)
-    val DimField = of(16f)
-    val Times = of(16f)
+    val Caps by styled { of(12f, FontWeight.W500, 0.6f, AureaColors.Muted) }
+    val NameField by styled { of(17f, spacing = -0.2f) }
+    val NamePlaceholder by styled { of(17f, spacing = -0.2f, color = AureaColors.Muted) }
+    val DimLabel by styled { of(11f, color = AureaColors.Muted) }
+    val DimField by styled { of(16f) }
+    val Times by styled { of(16f) }
 
     // --- Editor (AureaEstilos) ------------------------------------------------
-    val EditorTitle = Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600))
-    val Property = Base.merge(TextStyle(fontSize = 12.5.sp, color = AureaColors.Muted))
-    val Value = Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W700, color = AureaColors.Keyframe, fontFeatureSettings = "tnum"))
-    val Label = Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.Muted))
-    val Section = Base.merge(TextStyle(fontSize = 11.sp, fontWeight = FontWeight.W600, letterSpacing = 0.3.sp, color = AureaColors.Muted))
-    val Body = Base.merge(TextStyle(fontSize = 13.sp))
-    val Tabular = TextStyle(fontFeatureSettings = "tnum")
+    val EditorTitle by styled { Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)) }
+    val Property by styled { Base.merge(TextStyle(fontSize = 12.5.sp, color = AureaColors.Muted)) }
+    val Value by styled { Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W700, color = AureaColors.Keyframe, fontFeatureSettings = "tnum", textDirection = TextDirection.Ltr)) }
+    val Label by styled { Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.Muted)) }
+    val Section by styled { Base.merge(TextStyle(fontSize = 11.sp, fontWeight = FontWeight.W600, letterSpacing = aureaTracking(0.3f), color = AureaColors.Muted)) }
+    val Body by styled { Base.merge(TextStyle(fontSize = 13.sp)) }
+    /** Números (tabulares e sempre LTR: em árabe "-1,5" não vira "1,5-"). */
+    val Tabular by styled { TextStyle(fontFeatureSettings = "tnum", textDirection = TextDirection.Ltr) }
 }
 
 /** Espaços, raios, alturas e ícones. */

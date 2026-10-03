@@ -55,9 +55,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // versionCode 2137: motion blur 3D na cena, ajuste com mistura/máscara, export PowerVR, modelos pesados, es/ru/id, cubo dividido, datamosh. Um número maior é
+        // versionCode 2138: árabe completo (RTL), HDRI/EXR, profundidade/chanfro do texto 3D, áudio que se recupera, curva em X/Y/Z, keyframes fáceis de arrastar, blur do Transform. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2137
+        versionCode = 2138
         versionName = "2.0.0-beta2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -190,10 +190,11 @@ android {
         // A identidade da marca é referenciada por nome de recurso em vários
         // pontos; o encolhimento por nome de arquivo quebraria a splash.
         noCompress += listOf("aurea")
-        // pt-BR (padrão), inglês, espanhol, russo e indonésio ("in" é o código
-        // antigo que o Android ainda usa para o indonésio). Hindi e árabe
-        // ficam no repositório, fora do APK, até a fase deles.
-        localeFilters += listOf("en", "pt", "es", "ru", "id", "in")
+        // pt-BR (padrão), inglês, espanhol, russo, indonésio ("in" é o código
+        // antigo que o Android ainda usa para o indonésio) e árabe (RTL; o que
+        // não espelha está em `ui/i18n/Ltr.kt`). O hindi fica no repositório,
+        // fora do APK, até a fase dele.
+        localeFilters += listOf("en", "pt", "es", "ru", "id", "in", "ar")
     }
 
     lint {

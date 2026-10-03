@@ -8,6 +8,6 @@
     <string name="core2_fxo_motion_all">الكل</string>
     <string name="core2_fxo_motion_brighter">أفتح</string>
     <string name="core2_fxo_motion_darker">أغمق</string>
-    <string name="core2_fx_cube_file">ملف .cube</string>
-    <string name="core2_fx_flare_ghosts">انعكاسات داخلية</string>
+    <string name="core2_fx_cube_file">ملف ⁨.cube⁩</string>
+    <string name="core2_fx_flare_ghosts">أشباح العدسة</string>
 </resources>

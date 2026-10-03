@@ -471,6 +471,8 @@ private struct NativeCurveGraph: View {
         }
         .onChange(of: touching) { active in if !active { finish() } }
         .onDisappear { finish() }
+        // Gráfico de curva: o tempo (0 → 1) corre para a direita em qualquer idioma.
+        .keepLtr()
     }
     private func plot(_ x: Float, _ y: Float, _ size: CGSize, _ lo: Float, _ hi: Float) -> CGPoint {
         CGPoint(x: curveInset + CGFloat(x) * max(1, size.width - 2 * curveInset), y: size.height - CGFloat((y - lo) / (hi - lo)) * size.height)
@@ -737,13 +739,14 @@ struct NativeCurvePanel: View {
         thumbnails = out
     }
     private func apply(_ value: CurveEase, to key: KeyframeItem) {
-        // 3D transform axes share easing; effect components remain independent.
-        for sibling in model.graphKeyGroup(layer, key) {
-            model.engine.editTrackKey(layer, property: sibling.property, effect: sibling.effectIndex, param: sibling.paramIndex,
-                time: sibling.time, action: 3, value: sibling.value, targetTime: sibling.time,
-                interpolation: value.interpolation,
-                handles: [value.x1, value.y1, value.x2, value.y2, Float(value.power)].map { NSNumber(value: $0) })
-        }
+        // A curva é da PROPRIEDADE (par do `applyEase` do Android): o sexto número
+        // pede ao motor a mesma curva em todos os eixos dela com keyframe no
+        // mesmo instante — Posição X/Y/Z também numa camada 2D, para X e Y
+        // chegarem juntos. Componentes de efeito continuam independentes.
+        model.engine.editTrackKey(layer, property: key.property, effect: key.effectIndex, param: key.paramIndex,
+            time: key.time, action: 3, value: key.value, targetTime: key.time,
+            interpolation: value.interpolation,
+            handles: [value.x1, value.y1, value.x2, value.y2, Float(value.power), 1].map { NSNumber(value: $0) })
         ease = value
     }
     private func set(_ value: CurveEase, to key: KeyframeItem, label: String = "curva") {
@@ -767,6 +770,7 @@ struct NativeCurvePanel: View {
     private func glyphButton(_ glyph: Character, size: CGFloat, target: CGFloat, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             CupertinoGlyph.text(glyph, size: size, color: .white)
+                .mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph))
                 .frame(width: target, height: target).contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(label)
     }
@@ -783,6 +787,8 @@ struct NativeCurvePanel: View {
                 .accessibilityIdentifier("curve.power")
             glyphButton(CupertinoGlyph.ChevronRight, size: 16, target: 44, label: AureaText.t("panel_proximo_keyframe")) { jump(1) }
         }.frame(maxWidth: .infinity).frame(height: 44)
+        // Keyframe anterior/próximo andam no tempo: anterior à esquerda, como no transporte.
+        .keepLtr()
     }
     /// Quique: saltos (×1..×8) e força (um desfazer por arrasto).
     private func bounceControls(_ segment: Segment) -> some View {
@@ -1161,7 +1167,7 @@ struct TimeRemapEffectEditor: View {
                         seekLocal(min(max(frameAt(value.location.x), lo), max(lo, hi - 1)))
                     }
                 })
-        }.frame(height: 32).accessibilityLabel(AureaText.t("remap_faixa_chaves"))
+        }.frame(height: 32).keepLtr().accessibilityLabel(AureaText.t("remap_faixa_chaves"))
     }
 
     private func toggleRow(_ key: String, checked: Bool, _ onChange: @escaping (Bool) -> Void) -> some View {
@@ -1260,6 +1266,8 @@ struct TimeRemapEditor: View {
                     }
                 }.frame(height: expanded ? expandedHeight : 240).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                    // Curva do remapeamento: o tempo corre para a direita em qualquer idioma.
+                    .keepLtr()
                 Text(speedLabel).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
                 if points.indices.contains(selected) {
@@ -1570,6 +1578,7 @@ struct ExpressionSheet: View {
             }.frame(width: 34)
             ExpressionTextInput(text: $source, selection: $selection, scroll: $codeScroll).padding(.trailing, 10)
         }.frame(height: height).background(Color(hex: 0x0B1016), in: RoundedRectangle(cornerRadius: 10)).clipped()
+        .keepLtr()   // código: números de linha à esquerda do texto, em qualquer idioma
     }
     private func sheetButton(_ label: String, color: Color, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -1613,6 +1622,9 @@ private struct ExpressionTextInput: UIViewRepresentable {
         view.autocorrectionType = .no; view.autocapitalizationType = .none; view.spellCheckingType = .no; view.keyboardType = .asciiCapable
         view.smartQuotesType = .no; view.smartDashesType = .no; view.isScrollEnabled = true
         let paragraph = NSMutableParagraphStyle(); paragraph.minimumLineHeight = 20; paragraph.maximumLineHeight = 20
+        // Expressão é código: sempre LTR, alinhada à esquerda, mesmo com o app em árabe.
+        paragraph.baseWritingDirection = .leftToRight; paragraph.alignment = .left
+        view.semanticContentAttribute = .forceLeftToRight; view.textAlignment = .left
         view.typingAttributes = [.font: UIFont.monospacedSystemFont(ofSize: 14, weight: .regular), .foregroundColor: UIColor(AureaColors.text), .paragraphStyle: paragraph]
         return view
     }
@@ -2034,11 +2046,14 @@ private struct NativeTrackGraph: View {
                 .onAppear { width = geometry.size.width }
                 .onChange(of: geometry.size.width) { value in width = value; reload() }
             }
+            // O gráfico das trilhas e a legenda de baixo (valor mínimo · faixa de
+            // quadros) ficam LTR: o eixo X é o tempo.
+            .keepLtr()
             HStack {
                 Text(String(format: "%.3g%@", viewport.low, speed ? " /s" : ""))
                 Spacer()
                 Text("\(start)–\(end) f")
-            }.font(.aurea(size: 10)).foregroundStyle(AureaColors.muted)
+            }.font(.aurea(size: 10)).foregroundStyle(AureaColors.muted).keepLtr()
         }
         .onAppear { fit() }
         .onChange(of: signature) { _ in finish(); multi = false; picked.removeAll(); fit() }

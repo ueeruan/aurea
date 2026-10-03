@@ -314,7 +314,9 @@ private class MenuPositionProvider(private val margin: Int, private val gap: Int
         layoutDirection: LayoutDirection,
         popupContentSize: IntSize,
     ): IntOffset {
-        val x = (anchorBounds.right - popupContentSize.width)
+        // Alinha pela borda de FIM da âncora: direita em LTR, esquerda em RTL.
+        val edge = if (layoutDirection == LayoutDirection.Rtl) anchorBounds.left else anchorBounds.right - popupContentSize.width
+        val x = edge
             .coerceIn(margin, (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin))
         var y = anchorBounds.bottom + gap
         if (y + popupContentSize.height > windowSize.height - margin) y = anchorBounds.top - gap - popupContentSize.height

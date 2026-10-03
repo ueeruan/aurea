@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor
 
+import com.aurea.aurea.ui.i18n.ltrPlain
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.media.MediaExtractor
@@ -179,7 +180,7 @@ internal fun MediaInfoSheet(store: EditorStore, layer: Long, onDismiss: () -> Un
             else -> {
                 InfoLine(stringResource(R.string.media_info_file), i.fileName)
                 if (i.sizeBytes > 0) InfoLine(stringResource(R.string.media_info_size), Formatter.formatFileSize(context, i.sizeBytes))
-                if (i.width > 0) InfoLine(stringResource(R.string.media_info_resolution), "${i.width} × ${i.height}")
+                if (i.width > 0) InfoLine(stringResource(R.string.media_info_resolution), ltrPlain("${i.width} × ${i.height}"))
                 if (i.fps > 0f) InfoLine(stringResource(R.string.media_info_fps), String.format(Locale.getDefault(), "%.3f", i.fps).trimEnd('0').trimEnd(',', '.'))
                 if (i.durationUs > 0) InfoLine(stringResource(R.string.media_info_duration), MediaInfoProbe.duration(i.durationUs))
                 if (i.videoCodec.isNotEmpty()) InfoLine(stringResource(R.string.media_info_video_codec), i.videoCodec)

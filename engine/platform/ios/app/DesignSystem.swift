@@ -453,7 +453,10 @@ struct ValueBox: View {
     private var tappable: Bool { onTap != nil && enabled }
 
     var body: some View {
+        // O número (timecode, "−12,0px", "100,0%") lê em LTR mesmo em árabe: sem
+        // isso o bidi joga o sinal de menos para o fim ("12,0−").
         Pill(text: text, width: width, tappable: tappable, enabled: enabled, tint: tint, onTap: onTap)
+            .keepLtr()
     }
 
     /// Uma peça só para a caixa não repetir a montagem nos dois inits.
@@ -619,6 +622,9 @@ struct ParamValueBox: View {
             .padding(.leading, 4)
             .padding(.trailing, 8)
             .frame(width: width, height: ParamRowDims.labelH, alignment: .trailing)
+            // Número em LTR e à direita da caixa em qualquer idioma (o sinal de
+            // menos não vai para o fim com o bidi do árabe).
+            .keepLtr()
             .background(ParamRowColors.valueBox, in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
             .contentShape(Rectangle())
             .aureaTappable(shrink: 1, enabled: onTap != nil && enabled) { onTap?() }
@@ -1263,4 +1269,73 @@ struct ColorWell: View {
                 .frame(width: 32, height: 24).frame(minWidth: 44, minHeight: 44)
         }.buttonStyle(.plain).accessibilityLabel(AureaText.t("panel_cor"))
     }
+}
+
+// =============================================================================
+// Árabe (RTL): o que espelha e o que NÃO espelha — par do `ui/i18n/Ltr.kt`
+// =============================================================================
+
+/// O locale da interface a partir do idioma ESCOLHIDO no app (não o do sistema).
+///
+/// Árabe usa algarismos ocidentais (0-9), não árabe-índicos (٠-٩): decisão de
+/// produto, a mesma do `AppLanguage.westernDigits` do Android — timecode,
+/// régua, valores de painel e coordenadas são sempre 0-9.
+extension AureaLanguage {
+    var uiLocale: Locale {
+        let idioma = resolved
+        if idioma == .ar { return Locale(identifier: "ar@numbers=latn") }
+        return Locale(identifier: idioma.rawValue)
+    }
+    /// Árabe corre da direita para a esquerda; os outros idiomas do app, não.
+    var layoutDirection: LayoutDirection { resolved == .ar ? .rightToLeft : .leftToRight }
+}
+
+extension View {
+    /// Força LTR de LAYOUT (HStack, leading/trailing, alinhamentos) neste ramo,
+    /// mesmo com o app em árabe. Vale para as superfícies onde o eixo X É o
+    /// dado: timeline, régua, playhead, curvas e gráficos, palco/preview,
+    /// gizmos, transporte, barras de tempo e teclado numérico. O tempo corre
+    /// para a direita em qualquer idioma — senão o quadro 0 iria para a direita
+    /// e arrastar para "avançar" andaria para trás. Par do `KeepLtr` do Kotlin.
+    ///
+    /// Dentro deste ramo `mirrorsInRtl()` não espelha nada (o ambiente é LTR).
+    func keepLtr() -> some View {
+        environment(\.layoutDirection, .leftToRight)
+    }
+
+    /// Espelha o ícone na horizontal quando o layout é RTL (voltar, chevrons de
+    /// lista, desfazer/refazer fora do transporte). Não usar em play/pausa,
+    /// controles de mídia, timeline nem logotipos. Num ramo `keepLtr()` não faz
+    /// nada — é o que mantém coerentes os ícones do transporte e da timeline.
+    func mirrorsInRtl(_ on: Bool = true) -> some View {
+        flipsForRightToLeftLayoutDirection(on)
+    }
+}
+
+/// Um trecho LTR dentro de texto que pode correr em RTL (par do `ltr()` do
+/// Kotlin). Timecode, coordenada, número com unidade ou nome de arquivo colados
+/// numa frase árabe são reordenados pelo algoritmo bidirecional ("00:02:03"
+/// pode virar "03:02:00"); o isolamento U+2066 (LRI) … U+2069 (PDI) prende o
+/// trecho no sentido dele. Em idiomas LTR não muda nada visível.
+func ltrIsolado(_ texto: String) -> String {
+    "\u{2066}" + texto + "\u{2069}"
+}
+
+extension CupertinoGlyph {
+    /// Glifos com sentido (apontam para "trás"/"frente" da leitura) que
+    /// espelham em RTL. Fora: play/pausa, início/fim do transporte e as setas
+    /// de alinhar/aparar (são posição na tela ou no tempo, não leitura).
+    static let espelhaEmRtl: Set<Character> = [
+        ChevronLeft, ChevronRight, ChevronBack, ArrowtriangleRightFill,
+        ArrowUturnLeft, ArrowUturnRight, DeleteLeft,
+    ]
+    static func mirrorsInRtl(_ glyph: Character) -> Bool { espelhaEmRtl.contains(glyph) }
+}
+
+/// Tracking (espaço entre letras) dos estilos do Aurea — ZERO em árabe. A
+/// escrita árabe é cursiva: espaçar as letras quebra a ligação entre elas, e a
+/// tipografia árabe não usa tracking. Par do `aureaTracking` do Kotlin
+/// (AureaTokens.kt). O logotipo "aurea" (latino) continua com o dele.
+func aureaTracking(_ value: CGFloat) -> CGFloat {
+    AureaText.language.resolved == .ar ? 0 : value
 }

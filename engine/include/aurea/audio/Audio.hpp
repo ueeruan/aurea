@@ -140,6 +140,13 @@ public:
 
     /// Bloco pronto, ou nulo (nunca bloqueia; o chamador pede com `want`).
     [[nodiscard]] std::shared_ptr<const AudioBlock> find(u64 key, i64 block) const;
+    /// Como `find`, para o PREVIEW: asset cujo decoder falhou (não abriu, ou
+    /// quebrou no meio — codec recuperado pelo sistema, leitor interrompido)
+    /// devolve um bloco de SILÊNCIO enquanto a reabertura é tentada em
+    /// segundo plano. Sem isso, um asset quebrado travava o mixer inteiro
+    /// esperando um bloco que nunca vinha: nenhuma camada soava até reiniciar
+    /// o app.
+    [[nodiscard]] std::shared_ptr<const AudioBlock> find_playable(u64 key, i64 block) const;
     /// Pede o bloco à thread de decode. `urgency` menor = antes.
     void want(u64 key, i64 block, i64 urgency);
     /// Descarta pedidos pendentes (seek: o que foi pedido para o instante
@@ -159,12 +166,25 @@ public:
         u64 decoded = 0;
         u64 seeks = 0;
         u64 failures = 0;
+        u64 reopened = 0;               ///< decoders descartados por erro e reabertos
         f32 decodeMsPerSecond = 0.0f;   ///< custo de decode por segundo de áudio
     };
     [[nodiscard]] Stats stats() const;
 
+    /// Espera mínima entre tentativas de reabrir um decoder que falhou
+    /// (dobra a cada falha seguida até `kRetryMaxNs`).
+    static constexpr u64 kRetryMinNs = 250'000'000ull;
+    static constexpr u64 kRetryMaxNs = 4'000'000'000ull;
+
 private:
     struct Reader;
+    /// Asset com decoder em falha: quando tentar de novo e quantas vezes falhou.
+    struct Failure {
+        u64 revision = 0;
+        u64 retryAtNs = 0;
+        u32 streak = 0;
+    };
+    void note_failure(u64 key, u64 revision);
     struct Key {
         u64 asset;
         i64 block;
@@ -179,6 +199,7 @@ private:
     };
 
     [[nodiscard]] std::shared_ptr<const AudioBlock> decode_block(u64 key, i64 block);
+    [[nodiscard]] std::shared_ptr<const AudioBlock> finish_block(Reader& r, u64 key, i64 block, u64 revision, u64 t0);
     void insert(const Key& k, std::shared_ptr<const AudioBlock> b);
     void thread_main();
 
@@ -197,6 +218,8 @@ private:
     std::unordered_map<Key, Entry, KeyHash> blocks_;
     std::unordered_map<u64, AudioAssetRef> assets_;
     std::unordered_map<u64, u64> assetVersions_;
+    std::unordered_map<u64, Failure> failed_;
+    std::shared_ptr<const AudioBlock> silence_;   ///< bloco mudo de `find_playable`
     std::vector<Want> wants_;
     Stats stats_{};
     f64 decodeMsTotal_ = 0.0, decodedSeconds_ = 0.0;
@@ -517,16 +540,27 @@ public:
         u32 queuedMs = 0;
         f32 peak = 0.0f;            ///< pico do último bloco mixado
         i32 lastSyncErrorUs = 0;
+        u64 outputRecoveries = 0;   ///< saídas fechadas e reabertas pelo vigia (start falhou / callback parou)
     };
     [[nodiscard]] Stats stats() const noexcept;
 
     /// Teste: roda a saída "na mão" (sem thread de áudio da plataforma).
     void debug_render(f32* out, u32 frames) noexcept { render(out, frames); }
 
+    /// Vigia da saída: tocando, se o callback da plataforma não roda por este
+    /// tempo (stream desconectado sem aviso, sessão perdida, start que "deu
+    /// certo" e não toca), a saída é fechada e reaberta. Padrão 1 s; os
+    /// testes encurtam.
+    void set_output_watchdog_ms(u32 ms) noexcept { watchdogNs_.store(static_cast<u64>(ms) * 1'000'000ull); }
+
 private:
     static void render_cb(void* ctx, f32* out, u32 frames) { static_cast<AudioEngine*>(ctx)->render(out, frames); }
     void render(f32* out, u32 frames) noexcept;
     void mixer_main();
+    /// Thread do mixer, com `lock` preso: abre/inicia/para/recupera a saída da
+    /// plataforma conforme o play. true = mexeu na saída (o laço recomeça).
+    bool service_output(std::unique_lock<std::mutex>& lock);
+    void output_down_locked(u64 nowNs, bool closeIt, std::unique_lock<std::mutex>& lock);
 
     // Anel SPSC de blocos mixados (produtor: thread do mixer; consumidor:
     // callback de áudio). Cada bloco carrega a geração: um seek troca a
@@ -546,8 +580,22 @@ private:
     bool needRebase_ = false;     ///< consumidor: houve buraco, re-ancorar o relógio
 
     AudioOutput* output_ = nullptr;
-    bool outputOpen_ = false;
+    /// A saída está aberta. Só a thread do mixer abre/fecha (depois do
+    /// `initialize`); o render e as estatísticas leem.
+    std::atomic<bool> outputOpen_{false};
     std::unique_ptr<AudioBlockCache> cache_;
+
+    // Estado da saída — só a thread do mixer (sob mutex_).
+    bool outputStarted_ = false;
+    u64 retryAtNs_ = 0;           ///< próxima tentativa de abrir/iniciar
+    u64 retryDelayNs_ = 0;        ///< espera atual (cresce a cada falha seguida)
+    i64 progressWritten_ = 0;     ///< written_ na última vez que o callback andou
+    u64 progressAtNs_ = 0;
+    bool downWhilePlaying_ = false;  ///< a saída caiu (ou não abriu) com o play pedido
+    u64 downSinceNs_ = 0;
+    i64 downPosNs_ = 0;           ///< posição da timeline quando caiu
+    std::atomic<u64> watchdogNs_{1'000'000'000ull};
+    std::atomic<u64> recoveries_{0};
 
     std::mutex mutex_;            ///< snapshot, geração, estado do mixer
     std::condition_variable wake_;

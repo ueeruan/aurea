@@ -7,6 +7,8 @@
 
 #include <aaudio/AAudio.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <thread>
 #include <time.h>
@@ -32,6 +34,8 @@ Status AAudioOutput::open(audio::AudioRenderFn fn, void* ctx) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     fn_ = fn;
     ctx_ = ctx;
+    closed_ = false;
+    if (stream_) return OkStatus;
     return open_stream_locked();
 }
 
@@ -67,6 +71,7 @@ Status AAudioOutput::open_stream_locked() noexcept {
     if (burst > 0) AAudioStream_setBufferSizeInFrames(s, burst * 2);
     streamBase_.store(delivered_.load());
     stream_ = reinterpret_cast<AAudioStreamStruct*>(s);
+    latency_.store(static_cast<u32>(std::max<int32_t>(0, AAudioStream_getBufferSizeInFrames(s))));
     AUREA_LOG_INFO("audio: AAudio %u Hz, burst %d, buffer %d quadros", sampleRate_, burst,
                    AAudioStream_getBufferSizeInFrames(s));
     return OkStatus;
@@ -78,16 +83,35 @@ void AAudioOutput::close_stream_locked() noexcept {
     AAudioStream_requestStop(s);
     AAudioStream_close(s);
     stream_ = nullptr;
+    latency_.store(0);
+}
+
+i32 AAudioOutput::reopen_locked(bool start) noexcept {
+    close_stream_locked();
+    if (const Status st = open_stream_locked(); !st.ok()) {
+        AUREA_LOG_WARN("audio: reabrir falhou: %s", st.message().data());
+        return AAUDIO_ERROR_UNAVAILABLE;
+    }
+    return start ? AAudioStream_requestStart(reinterpret_cast<AAudioStream*>(stream_)) : AAUDIO_OK;
 }
 
 Status AAudioOutput::start() noexcept {
     wantPlaying_.store(true);
     std::lock_guard<std::mutex> lock(mutex_);
+    if (closed_) return Status{Errc::InvalidState, "saida de audio fechada"};
     if (!stream_) {
         if (const Status st = open_stream_locked(); !st.ok()) return st;
     }
     auto* s = reinterpret_cast<AAudioStream*>(stream_);
-    const aaudio_result_t r = AAudioStream_requestStart(s);
+    aaudio_result_t r = AAUDIO_ERROR_DISCONNECTED;
+    // Desconectado na pausa: o callback de erro não veio (só vem tocando).
+    // Stream morto não volta — reabre já, em vez de devolver o erro para sempre.
+    if (AAudioStream_getState(s) != AAUDIO_STREAM_STATE_DISCONNECTED) r = AAudioStream_requestStart(s);
+    if (r != AAUDIO_OK) {
+        AUREA_LOG_WARN("audio: start recusado (%s, estado %d); reabrindo o stream", AAudio_convertResultToText(r),
+                       static_cast<int>(AAudioStream_getState(s)));
+        r = reopen_locked(true);
+    }
     return r == AAUDIO_OK ? OkStatus : Status{Errc::IoError, AAudio_convertResultToText(r)};
 }
 
@@ -98,16 +122,29 @@ void AAudioOutput::stop() noexcept {
     auto* s = reinterpret_cast<AAudioStream*>(stream_);
     // Pausa + descarta o que estava no buffer: o próximo play não começa com
     // um resto do instante antigo.
-    AAudioStream_requestPause(s);
+    if (AAudioStream_requestPause(s) != AAUDIO_OK) {
+        // Stream morto (desconectado) ou num estado que não pausa: fecha; o
+        // próximo start abre um novo.
+        AUREA_LOG_WARN("audio: pausa recusada (estado %d); stream descartado", static_cast<int>(AAudioStream_getState(s)));
+        close_stream_locked();
+        return;
+    }
     aaudio_stream_state_t next = AAUDIO_STREAM_STATE_UNINITIALIZED;
     AAudioStream_waitForStateChange(s, AAUDIO_STREAM_STATE_PAUSING, &next, 100'000'000);
-    AAudioStream_requestFlush(s);
+    // Flush só vale pausado; ainda em PAUSING ele falharia (sem estrago, mas
+    // o resto do buffer tocaria no próximo play).
+    if (AAudioStream_getState(s) == AAUDIO_STREAM_STATE_PAUSED) AAudioStream_requestFlush(s);
 }
 
 void AAudioOutput::close() noexcept {
     wantPlaying_.store(false);
-    std::lock_guard<std::mutex> lock(mutex_);
-    close_stream_locked();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        closed_ = true;
+        close_stream_locked();
+    }
+    // A thread de reabertura (callback de erro) usa `this`: espera ela sair.
+    for (int i = 0; i < 200 && reopening_.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
 bool AAudioOutput::presented(u64 nowNs, i64& frames) noexcept {
@@ -123,8 +160,8 @@ bool AAudioOutput::presented(u64 nowNs, i64& frames) noexcept {
 }
 
 u32 AAudioOutput::latency_frames() const noexcept {
-    auto* s = reinterpret_cast<AAudioStream*>(stream_);
-    return s ? static_cast<u32>(AAudioStream_getBufferSizeInFrames(s)) : 0;
+    // Sem tocar no stream: ele pode estar sendo fechado/reaberto agora.
+    return latency_.load(std::memory_order_relaxed);
 }
 
 void AAudioOutput::on_data(f32* out, i32 frames) noexcept {
@@ -142,10 +179,11 @@ void AAudioOutput::on_error() noexcept {
 void AAudioOutput::reopen() noexcept {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        close_stream_locked();
-        const Status s = open_stream_locked();
-        if (s.ok() && wantPlaying_.load()) AAudioStream_requestStart(reinterpret_cast<AAudioStream*>(stream_));
-        if (!s.ok()) AUREA_LOG_WARN("audio: reabrir falhou: %s", s.message().data());
+        // Fechado enquanto a thread nascia: não ressuscita o stream.
+        if (!closed_) {
+            const aaudio_result_t r = reopen_locked(wantPlaying_.load());
+            if (r != AAUDIO_OK) AUREA_LOG_WARN("audio: reabrir/start falhou: %s", AAudio_convertResultToText(r));
+        }
     }
     reopening_.store(false);
 }

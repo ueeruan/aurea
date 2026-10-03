@@ -2184,3 +2184,129 @@ AUREA_TEST(Engine, ParametricEasingCommandIsValidatedAndUndoable) {
     AUREA_CHECK(tr && tr->keys[0].interp == Interpolation::Linear);
     e.shutdown();
 }
+
+// Beta: "o Y não acompanha o X quando aplico o gráfico". Posição X 0→100 e
+// Y 0→300 nos MESMOS frames; a curva vai pelo comando que as duas UIs mandam
+// (KeyframeSetInterpolation com `linkAxes`) endereçado só ao X. O progresso
+// normalizado de X e Y tem de ser igual em todo frame, para toda família de
+// curva; sem `linkAxes` (o gráfico editando uma dimensão) só o X muda.
+AUREA_TEST(Engine, CurveOnPositionEasesEveryAxisWithTheSameTiming) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    const auto added = e.add_shape(0);
+    AUREA_CHECK(added.ok());
+    const auto layer = LayerId::unpack(*added);
+    auto key = [&](TrackProperty p, i64 t, f32 v, u32 param = 0) {
+        Command c;
+        c.type = CommandType::KeyframeInsert;
+        c.keyframe.track = TrackRef{layer, p, kInvalidIndex, param};
+        c.keyframe.time = FrameIndex{t}; c.keyframe.value = v;
+        return e.apply_command(c).ok();
+    };
+    // X 0→100 e Y 0→300 em 0..30; o Y também segue para 60 (o trecho seguinte não muda).
+    AUREA_CHECK(key(TrackProperty::PositionX, 0, 0.f) && key(TrackProperty::PositionX, 30, 100.f));
+    AUREA_CHECK(key(TrackProperty::PositionY, 0, 0.f) && key(TrackProperty::PositionY, 30, 300.f));
+    AUREA_CHECK(key(TrackProperty::PositionY, 60, 900.f));
+    AUREA_CHECK(key(TrackProperty::ScaleX, 0, 1.f) && key(TrackProperty::ScaleX, 30, 2.f));
+    AUREA_CHECK(key(TrackProperty::ScaleY, 0, 1.f) && key(TrackProperty::ScaleY, 30, 4.f));
+    AUREA_CHECK(key(TrackProperty::Opacity, 0, 0.f) && key(TrackProperty::Opacity, 30, 1.f));
+    auto curve = [&](TrackProperty p, Interpolation kind, f32 x1, f32 y1, f32 x2, f32 y2, bool link, u8 power = 0) {
+        Command c;
+        c.type = CommandType::KeyframeSetInterpolation;
+        c.keyframe_interp.track = TrackRef{layer, p, kInvalidIndex, 0};
+        c.keyframe_interp.time = FrameIndex{0};
+        c.keyframe_interp.interp = kind; c.keyframe_interp.power = power;
+        c.keyframe_interp.linkAxes = link ? 1 : 0;
+        c.keyframe_interp.bx1 = x1; c.keyframe_interp.by1 = y1; c.keyframe_interp.bx2 = x2; c.keyframe_interp.by2 = y2;
+        return e.apply_command(c).ok();
+    };
+    auto track = [&](TrackProperty p) -> const Track* {
+        const Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        return comp ? comp->layer(layer)->tracks.find(p) : nullptr;
+    };
+    // Progresso de X e Y no trecho 0..30, frame a frame (e em meio-frame).
+    auto same_timing = [&](TrackProperty a, f32 a0, f32 a1, TrackProperty b, f32 b0, f32 b1) {
+        const Track* ta = track(a); const Track* tb = track(b);
+        if (!ta || !tb) return false;
+        for (i64 t = 0; t <= 30; ++t) {
+            const f32 pa = (ta->sample(FrameIndex{t}) - a0) / (a1 - a0);
+            const f32 pb = (tb->sample(FrameIndex{t}) - b0) / (b1 - b0);
+            if (std::fabs(pa - pb) > 1e-5f) {
+                std::printf("    frame %lld: %s %.6f vs %.6f\n", static_cast<long long>(t), "progresso", pa, pb);
+                return false;
+            }
+        }
+        return true;
+    };
+    struct Family { Interpolation kind; f32 x1, y1, x2, y2; u8 power; };
+    const Family families[] = {
+        {Interpolation::Bezier, 0.42f, 0.0f, 0.58f, 1.0f, 2},
+        {Interpolation::Bezier, 0.34f, 1.56f, 0.64f, 1.0f, 1},      // overshoot por alças (sai de 0..1)
+        {Interpolation::EaseIn, 0.33f, 0.0f, 0.67f, 1.0f, 3},
+        {Interpolation::Overshoot, 0.6f, 0.0f, 1.0f, kEaseParamMarker, 0},
+        {Interpolation::Elastic, 0.5f, 0.75f, 1.0f, kEaseParamMarker, 0},
+        {Interpolation::Bounce, 0.375f, 0.5f, 1.0f, kEaseParamMarker, 0},
+    };
+    for (const Family& f : families) {
+        AUREA_CHECK(curve(TrackProperty::PositionX, f.kind, f.x1, f.y1, f.x2, f.y2, true, f.power));
+        AUREA_CHECK(track(TrackProperty::PositionY)->keys[0].interp == f.kind);
+        AUREA_CHECK(same_timing(TrackProperty::PositionX, 0.f, 100.f, TrackProperty::PositionY, 0.f, 300.f));
+        // O caminho: Y/X constante (3) em todo frame — o objeto anda na reta.
+        for (i64 t = 1; t <= 30; ++t) {
+            const f32 x = track(TrackProperty::PositionX)->sample(FrameIndex{t});
+            if (std::fabs(x) > 1e-3f) AUREA_CHECK_NEAR(track(TrackProperty::PositionY)->sample(FrameIndex{t}) / x, 3.0f, 1e-3f);
+        }
+    }
+    // Pelo Y também liga o X (qualquer eixo endereçado serve).
+    AUREA_CHECK(curve(TrackProperty::PositionY, Interpolation::EaseOut, 0.33f, 0.f, 0.67f, 1.f, true));
+    AUREA_CHECK(track(TrackProperty::PositionX)->keys[0].interp == Interpolation::EaseOut);
+    // O trecho seguinte do Y (30→60) e as outras propriedades não mudam.
+    AUREA_CHECK(track(TrackProperty::PositionY)->keys[1].interp == Interpolation::Linear);
+    AUREA_CHECK(track(TrackProperty::Opacity)->keys[0].interp == Interpolation::Linear);
+    AUREA_CHECK(track(TrackProperty::ScaleX)->keys[0].interp == Interpolation::Linear);
+    // Escala X/Y também ligada.
+    AUREA_CHECK(curve(TrackProperty::ScaleX, Interpolation::Bezier, 0.2f, 0.8f, 0.6f, 1.f, true));
+    AUREA_CHECK(same_timing(TrackProperty::ScaleX, 1.f, 2.f, TrackProperty::ScaleY, 1.f, 4.f));
+    // Uma dimensão de propósito (gráfico): sem `linkAxes`, só a trilha endereçada.
+    AUREA_CHECK(curve(TrackProperty::PositionX, Interpolation::Bezier, 0.9f, 0.1f, 0.9f, 0.2f, false));
+    AUREA_CHECK(track(TrackProperty::PositionX)->keys[0].bx1 == 0.9f);
+    AUREA_CHECK(track(TrackProperty::PositionY)->keys[0].interp == Interpolation::EaseOut);
+    // Um desfazer volta a curva dos DOIS eixos (era um comando só).
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());   // desfaz a edição só do X
+    AUREA_CHECK(e.apply_command(undo).ok());   // desfaz a escala
+    AUREA_CHECK(e.apply_command(undo).ok());   // desfaz o EaseOut ligado
+    AUREA_CHECK(track(TrackProperty::PositionX)->keys[0].interp == Interpolation::Bounce);
+    AUREA_CHECK(track(TrackProperty::PositionY)->keys[0].interp == Interpolation::Bounce);
+    // Valor fora do contrato é recusado.
+    Command bad;
+    bad.type = CommandType::KeyframeSetInterpolation;
+    bad.keyframe_interp.track = TrackRef{layer, TrackProperty::PositionX, kInvalidIndex, 0};
+    bad.keyframe_interp.time = FrameIndex{0};
+    bad.keyframe_interp.interp = Interpolation::Linear;
+    bad.keyframe_interp.linkAxes = 2;
+    AUREA_CHECK(!e.apply_command(bad).ok());
+    e.shutdown();
+}
+
+// Quais componentes andam juntos: o grupo é do motor (as duas UIs só mandam o pedido).
+AUREA_TEST(Engine, LinkedAxisGroupsCoverTransformLightAndShapeParts) {
+    TrackRef out[3];
+    const LayerId l{};
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::PositionY, kInvalidIndex, 0}, out), 3u);
+    AUREA_CHECK(out[0].property == TrackProperty::PositionX && out[2].property == TrackProperty::PositionZ);
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::AnchorZ, kInvalidIndex, 0}, out), 3u);
+    AUREA_CHECK(out[0].property == TrackProperty::AnchorX);
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::RotationX, kInvalidIndex, 0}, out), 3u);
+    AUREA_CHECK(out[2].property == TrackProperty::RotationZ);
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::SkewY, kInvalidIndex, 0}, out), 2u);
+    AUREA_CHECK(out[0].property == TrackProperty::SkewX);
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::LightColorG, kInvalidIndex, 0}, out), 3u);
+    AUREA_CHECK(out[0].property == TrackProperty::LightColorR);
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::ShapePart, 2, 7}, out), 3u);
+    AUREA_CHECK(out[0].effectParamIndex == 6 && out[2].effectParamIndex == 8 && out[1].effectIndex == 2);
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::Opacity, kInvalidIndex, 0}, out), 1u);
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::EffectParam, 0, 1}, out), 1u);
+    AUREA_CHECK_EQ(linked_axis_refs(TrackRef{l, TrackProperty::ShapePart, 0, 9}, out), 1u);
+}

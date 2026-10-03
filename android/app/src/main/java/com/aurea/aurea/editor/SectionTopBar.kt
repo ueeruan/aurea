@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor
 
+import com.aurea.aurea.ui.i18n.mirrorInRtl
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,7 +69,7 @@ internal fun SectionTopBar(store: EditorStore, panel: EditorPanel, onBack: () ->
                 .tocavel(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp))
+            Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp).mirrorInRtl())
         }
     }
 }

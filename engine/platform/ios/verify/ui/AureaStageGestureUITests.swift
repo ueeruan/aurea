@@ -37,7 +37,18 @@ import XCTest
         XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
         let start = app.buttons["Export"].firstMatch
         XCTAssertTrue(start.waitForExistence(timeout: 10)); start.tap()
-        XCTAssertTrue(app.staticTexts["Video ready"].waitForExistence(timeout: 300))
+        // Fim do render: o app pede "Adicionar a Fotos" (PHPhotoLibrary .addOnly,
+        // publishExportToPhotos) e só mostra "Vídeo pronto" depois da resposta.
+        // O alerta é do SpringBoard; esperar o texto não o dispensa (CI 2136/2137:
+        // render a 100% em ~10 s e o teste parado no alerta por 300 s).
+        let ready = app.staticTexts["Video ready"]
+        let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"].firstMatch
+        let deadline = Date().addingTimeInterval(300)
+        while !ready.exists && Date() < deadline {
+            if allow.exists { allow.tap() }
+            _ = ready.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(ready.exists, "The export never reached the done screen")
         XCTAssertTrue(app.buttons["Open"].isEnabled)
     }
 
@@ -816,24 +827,28 @@ import XCTest
     /// Os componentes que o gráfico edita juntos. Camada/nulo/câmera 3D: o grupo
     /// XYZ da propriedade (posição, escala, rotação, pivô) — decisão do build 2125
     /// ("Keyframes XYZ agrupados… o gráfico sincroniza curvas e arrastos do grupo
-    /// XYZ", `graphKeyGroup` no iOS e no EditorStore.kt). Nulo 2D: só o componente
+    /// XYZ", `graphKeyGroup` no iOS e no EditorStore.kt). Nulo 2D: no GRÁFICO, só o componente
     /// escolhido (Posição X e Y são trilhas independentes).
-    private func curveGroup(_ property: Int, threeD: Bool) -> Set<Int> {
-        guard threeD, property < 12 else { return [property] }
+    /// `linked`: curva aplicada à PROPRIEDADE pelo painel/preset — o motor leva a
+    /// mesma curva a todos os eixos com keyframe no instante, também no 2D (beta
+    /// "o Y não acompanha o X", `linked_axis_refs` em Command.hpp); a cena 2D só
+    /// tem X e Y.
+    private func curveGroup(_ property: Int, threeD: Bool, linked: Bool = false) -> Set<Int> {
+        guard threeD || linked, property < 12 else { return [property] }
         let base = property / 3 * 3
-        return [base, base + 1, base + 2]
+        return threeD ? [base, base + 1, base + 2] : [base, base + 1]
     }
     /// "curve-isolation": nulo 3D com X/Y/Z em 0/30/60; "curve-isolation-2d": nulo 2D com X/Y.
     private let curveScenes: [(scene: String, threeD: Bool)] = [("curve-isolation", true), ("curve-isolation-2d", false)]
 
-    func testCurvePresetChangesOnlySelectedComponentAndSegment() throws {
+    func testCurvePresetEasesEveryAxisOfOnlyTheSelectedSegment() throws {
         for (scene, threeD) in curveScenes {
             let before = try launch(scene)
             let open = app.buttons["Edit the property curve"].firstMatch
             XCTAssertTrue(open.waitForExistence(timeout: 5)); open.tap()
-            let selected = try awaitSnapshot("Independent component curve opens") { $0.sheet == "curve" }
-            let group: Set<Int> = curveGroup(Int(selected.curveProperty), threeD: threeD)
-            XCTAssertEqual(group.count, threeD ? 3 : 1)
+            let selected = try awaitSnapshot("Property curve opens") { $0.sheet == "curve" }
+            let group: Set<Int> = curveGroup(Int(selected.curveProperty), threeD: threeD, linked: true)
+            XCTAssertEqual(group.count, threeD ? 3 : 2)
             let preset = app.buttons["curve.preset.bounce"].firstMatch
             XCTAssertTrue(preset.waitForExistence(timeout: 5)); XCTAssertTrue(preset.isHittable); preset.tap()
             let count = app.buttons["curve.bounce.count"].firstMatch
@@ -842,7 +857,7 @@ import XCTest
             let strength = app.sliders["curve.bounce.strength"].firstMatch
             XCTAssertTrue(strength.waitForExistence(timeout: 5))
             strength.adjust(toNormalizedSliderPosition: 0.75)
-            // O segmento que SAI do keyframe 0: o componente (ou o grupo XYZ inteiro no 3D).
+            // O segmento que SAI do keyframe 0 em TODOS os eixos (X e Y no 2D, XYZ no 3D).
             let changed = try awaitSnapshot("Preset changes the selected outgoing segment (\(scene))") { state in
                 group.allSatisfy { property in
                     state.curveKeys.contains { $0.property == property && $0.time == 0 && $0.interpolation == 7 }
@@ -1323,9 +1338,19 @@ import XCTest
         try requireInsideStage(tip, end)
         coordinate(tip).press(forDuration: 0.05, thenDragTo: coordinate(end),
                              withVelocity: .slow, thenHoldForDuration: 0.1)
+        // Auto-Key (build 2130, Regression2130.AutoKeySkipsUnchangedAxes, as duas
+        // plataformas): a seta X grava SÓ a Posição X no cabeçote; Y e Z, que não
+        // mudaram, não ganham keyframe redundante.
         let keyed = try awaitSnapshot("Dragging the animated null in the scene keys frame 30") {
-            !$0.isManipulating && $0.curveKeys.filter { $0.property <= 2 && $0.time == 30 }.count == 3
+            !$0.isManipulating && $0.curveKeys.contains { $0.property == 0 && $0.time == 30 }
         }
+        let xKey = try XCTUnwrap(keyed.curveKeys.first { $0.property == 0 && $0.time == 30 })
+        XCTAssertEqual(xKey.value, keyed.detail.position[0], accuracy: 0.01)
+        XCTAssertNotEqual(xKey.value, first.first { $0.property == 0 }?.value ?? xKey.value)
+        XCTAssertTrue(keyed.curveKeys.filter { $0.property == 1 || $0.property == 2 }.allSatisfy { $0.time == 0 },
+                      "Auto-Key must not add Y/Z keys the X arrow did not change")
+        XCTAssertEqual(keyed.detail.position[1], before.detail.position[1], accuracy: 0.0001)
+        XCTAssertEqual(keyed.detail.position[2], before.detail.position[2], accuracy: 0.0001)
         XCTAssertEqual(keyed.curveKeys.filter { $0.time == 0 }, first, "The frame-0 pose must not move")
         try undo()
         _ = try awaitSnapshot("One undo removes the scene keyframe") { $0.curveKeys == before.curveKeys }

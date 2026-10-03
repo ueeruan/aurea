@@ -299,7 +299,12 @@ class TimelineGesturesTest {
         }
     }
 
-    @Test fun editingOneCurveLeavesCoincidentAxisKeysAndLaterSegmentsUnchanged() {
+    /**
+     * Beta "o Y não acompanha o X": a curva do painel é da PROPRIEDADE — os eixos
+     * com keyframe no mesmo instante ganham a mesma curva (também numa camada
+     * 2D); os trechos seguintes, valores e tempos não mudam; um desfazer volta tudo.
+     */
+    @Test fun editingOneCurveEasesCoincidentAxisKeysButLeavesLaterSegmentsUnchanged() {
         launch()
         val id = store.layers.single().id
         compose.runOnIdle { store.select(id, openOptions = false) }
@@ -316,10 +321,55 @@ class TimelineGesturesTest {
             applyEase(store, id, key, Ease(6, 0.2f, -0.5f, 0.8f, 1.5f))
             store.endGesture()
         }
-        compose.waitUntil(5000) { store.keyframes[id].orEmpty().single { it.property == 0 && it.time == 0 }.interpolation == 6 }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().filter { it.time == 0 && it.property in 0..2 }.all { it.interpolation == 6 } }
         compose.runOnIdle {
-            assertEquals(before.filterNot { it.property == 0 && it.time == 0 },
-                store.keyframes[id].orEmpty().filterNot { it.property == 0 && it.time == 0 })
+            val after = store.keyframes[id].orEmpty()
+            assertEquals(before.filterNot { it.time == 0 && it.property in 0..2 },
+                after.filterNot { it.time == 0 && it.property in 0..2 })
+            assertEquals(before.map { Triple(it.property, it.time, it.value) }, after.map { Triple(it.property, it.time, it.value) })
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.keyframes[id] == before }
+    }
+
+    /**
+     * Beta "é difícil mover o keyframe": o dedo pousa 18 dp ao lado do losango
+     * (fora do antigo alvo de 28, dentro do novo de 48) com o cabeçote parado
+     * NO keyframe e o ímã ligado; o arrasto pega na hora e um passo de 2 frames
+     * fica (o cabeçote da origem não puxa de volta). Um desfazer devolve.
+     */
+    @Test fun keyframeDragGrabsFromTheWideTargetAndThePlayheadAtItsOriginDoesNotHoldIt() {
+        launch()
+        val id = store.layers.single().id
+        compose.runOnIdle { store.select(id, openOptions = false); store.snapping = true }
+        for (frame in listOf(0, 30)) {
+            compose.runOnIdle { store.seek(frame) }
+            compose.waitUntil(5000) { store.playhead == frame }
+            compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(0)) }
+            compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == frame } }
+        }
+        compose.runOnIdle { store.clearSelection(); store.seek(30) }
+        compose.waitUntil(5000) { store.playhead == 30 }
+        val before = store.keyframes[id].orEmpty()
+        // Régua 44, camada 32 (44..76), trilhas de 16: Transform (76..92), Posição X (92..108).
+        val laneY = 100 * density
+        val dpPerFrame = 80f / 30f
+        fun keyX(width: Int, frame: Int) = width / 2f + (frame - 30) * dpPerFrame * density
+        timeline().performTouchInput { click(Offset(46 * density, 60 * density)) }   // glifo do tipo: abre as trilhas
+        compose.waitForIdle()
+        timeline().performTouchInput {
+            val start = Offset(keyX(width, 30) + 18 * density, laneY)
+            down(start)
+            moveTo(start + Offset(12 * density, 0f))                 // passa do slop: o arrasto começa
+            moveTo(start + Offset(2 * dpPerFrame * density, 0f))     // volta para +2 frames (dentro do antigo ímã de 8 dp)
+            up()
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().none { it.property == 0 && it.time == 30 } }
+        compose.runOnIdle {
+            val keys = store.keyframes[id].orEmpty()
+            assertTrue("The key should rest 2 frames later: $keys", keys.any { it.property == 0 && it.time == 32 })
+            assertTrue(keys.any { it.property == 0 && it.time == 0 })
+            assertEquals(before.size, keys.size)
             store.undo()
         }
         compose.waitUntil(5000) { store.keyframes[id] == before }
@@ -346,15 +396,16 @@ class TimelineGesturesTest {
         compose.waitUntil(5000) { store.playhead == 30 }
         val before = store.keyframes[id].orEmpty()
         assertEquals(4, before.size)
-        // Geometria da timeline (dp): régua 38, linha da camada 36, trilhas de 28 com o
-        // losango a 20 do topo. Abertas: Transform (74), Position X (102), Scale X (130).
-        val positionY = 122 * density
-        val scaleY = 150 * density
+        // Geometria da timeline (dp, redesenho 2026-09-29): régua 44, camada de 32
+        // (44..76), trilhas de 16 com o losango no meio. Abertas: Transform (76..92),
+        // Position X (92..108), Scale X (108..124).
+        val positionY = 100 * density
+        val scaleY = 116 * density
         // A vista É o cabeçote (30): 80 dp/s = 8/3 dp por frame a partir do centro.
         fun keyX(width: Int, frame: Int) = width / 2f + (frame - 30) * 80f / 30f * density
 
-        // Abrir as trilhas pelo glifo do tipo na calha da camada.
-        timeline().performTouchInput { click(Offset(14 * density, 50 * density)) }
+        // Abrir as trilhas pelo glifo do tipo na pílula da camada (x 38..58; o olho fica em x < 28).
+        timeline().performTouchInput { click(Offset(46 * density, 60 * density)) }
         compose.waitForIdle()
 
         fun selectPositionAndScale() {

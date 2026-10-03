@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.ui.platform.testTag
 
 import androidx.annotation.StringRes
@@ -916,7 +917,8 @@ private const val DEAD_ZONE_DP = 22f
  * (com a câmera da cena); Z gira no plano da tela.
  */
 @Composable
-private fun AxisRow(axis: Int, onAxis: (Int) -> Unit) {
+private fun AxisRow(axis: Int, onAxis: (Int) -> Unit) = KeepLtr {
+    // X · Y · Z nesta ordem em qualquer idioma (eixos não espelham).
     Row(
         Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
@@ -1035,7 +1037,7 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
         ) {
             Text(
                 text,
-                style = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Accent, fontFeatureSettings = "tnum")),
+                style = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Accent, fontFeatureSettings = "tnum", textDirection = androidx.compose.ui.text.style.TextDirection.Ltr)),
             )
         }
     }

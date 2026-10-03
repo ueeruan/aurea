@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.captions.CaptionsState
+import com.aurea.aurea.ui.i18n.ltrPlain
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -29,7 +30,7 @@ internal fun CaptionBlockEditor(state: CaptionsState, playhead: Int) {
             FilterChip(selected = block.id in selected, onClick = {
                 selected = if (block.id in selected) selected - block.id else selected + block.id
                 body = block.text; start = block.start.toString(); end = block.end.toString()
-            }, label = { Text("${block.start}–${block.end}\n${block.text}", maxLines = 2) })
+            }, label = { Text("${ltrPlain("${block.start}–${block.end}")}\n${block.text}", maxLines = 2) })
         }
     }
     if (selected.isNotEmpty()) {

@@ -1338,7 +1338,7 @@
   "ru": "Разброс скорости",
   "hi": "वेग में भिन्नता",
   "id": "Variasi kecepatan",
-  "ar": "تباين السرعة"
+  "ar": "تفاوت السرعة"
  },
  "Inclinação da direção": {
   "en": "Direction tilt",
@@ -1434,7 +1434,7 @@
   "ru": "Разброс жизни",
   "hi": "जीवनकाल में भिन्नता",
   "id": "Variasi umur",
-  "ar": "تباين العمر"
+  "ar": "تفاوت العمر"
  },
  "Variação do tamanho": {
   "en": "Size random",
@@ -1442,7 +1442,7 @@
   "ru": "Разброс размера",
   "hi": "आकार में भिन्नता",
   "id": "Variasi ukuran",
-  "ar": "تباين الحجم"
+  "ar": "تفاوت الحجم"
  },
  "Tamanho final": {
   "en": "End size",
@@ -1490,7 +1490,7 @@
   "ru": "Случайный цвет",
   "hi": "यादृच्छिक रंग",
   "id": "Warna acak",
-  "ar": "لون عشوائي"
+  "ar": "تفاوت اللون"
  },
  "Mistura aditiva": {
   "en": "Add mode",
@@ -1822,7 +1822,7 @@
   "ru": "Смягчение максимума",
   "hi": "अधिकतम नरमी",
   "id": "Haluskan maksimum",
-  "ar": "تنعيم الحد الأعلى"
+  "ar": "تسهيل الحد الأعلى"
  },
  "Substituir cor do preenchimento": {
   "en": "Override fill color",
@@ -1838,7 +1838,7 @@
   "ru": "Смягчение минимума",
   "hi": "न्यूनतम नरमी",
   "id": "Haluskan minimum",
-  "ar": "تنعيم الحد الأدنى"
+  "ar": "تسهيل الحد الأدنى"
  },
  "Semente": {
   "en": "Seed",
@@ -1886,7 +1886,7 @@
   "ru": "Масштаб",
   "hi": "स्केल",
   "id": "Skala",
-  "ar": "المقياس"
+  "ar": "الحجم"
  },
  "Deslocamento do seletor": {
   "en": "Selector offset",
@@ -1950,7 +1950,7 @@
   "ru": "Непрозрачность",
   "hi": "ओपेसिटी",
   "id": "Opasitas",
-  "ar": "العتامة"
+  "ar": "التعتيم"
  },
  "Desfoque": {
   "en": "Blur",
@@ -2030,7 +2030,7 @@
   "ru": "Выделение",
   "hi": "हाइलाइट",
   "id": "Sorotan",
-  "ar": "تمييز"
+  "ar": "الإضاءة"
  },
  "Sombras": {
   "en": "Shadows",
@@ -2094,7 +2094,7 @@
   "ru": "Bend",
   "hi": "Bend",
   "id": "Bend",
-  "ar": "Bend"
+  "ar": "انحناء"
  },
  "Sombra": {
   "en": "Shadow",
@@ -2406,7 +2406,7 @@
   "ru": "Прямоугольный",
   "hi": "आयताकार",
   "id": "Persegi panjang",
-  "ar": "مستطيل"
+  "ar": "مستطيلي"
  },
  "Caminho": {
   "en": "Path",
@@ -2510,7 +2510,7 @@
   "ru": "Масштаб элементов",
   "hi": "तत्वों का आकार",
   "id": "Skala elemen",
-  "ar": "مقياس العناصر"
+  "ar": "حجم العناصر"
  },
  "Rotação por elemento": {
   "en": "Rotation per element",
@@ -2574,7 +2574,7 @@
   "ru": "Масштаб вблизи",
   "hi": "नज़दीकी आकार",
   "id": "Skala terdekat",
-  "ar": "المقياس القريب"
+  "ar": "حجم العناصر القريبة"
  },
  "Rotação próxima": {
   "en": "Nearby rotation",
@@ -2582,7 +2582,7 @@
   "ru": "Поворот вблизи",
   "hi": "नज़दीकी घुमाव",
   "id": "Rotasi terdekat",
-  "ar": "الدوران القريب"
+  "ar": "دوران العناصر القريبة"
  },
  "Atrair / repelir": {
   "en": "Attract / repel",
@@ -2598,7 +2598,7 @@
   "ru": "Непрозрачность вблизи",
   "hi": "नज़दीकी अपारदर्शिता",
   "id": "Opasitas terdekat",
-  "ar": "العتامة القريبة"
+  "ar": "تعتيم العناصر القريبة"
  },
  "Camada de caminho": {
   "en": "Path layer",

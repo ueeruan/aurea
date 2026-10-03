@@ -85,7 +85,7 @@ struct Panel3DView: View {
         }
         .background(AureaColors.background)
         .fileImporter(isPresented: $pickingHdri,
-                      allowedContentTypes: [UTType(filenameExtension: "hdr") ?? .data, .image, .data]) { result in
+                      allowedContentTypes: [UTType(filenameExtension: "hdr") ?? .data, UTType(filenameExtension: "exr") ?? .data, .zip, .image, .data]) { result in
             if case .success(let url) = result {
                 if model.selectedLayer?.kind == 8 { _ = model.engine.setEnvironmentBackground(true) }
                 model.importMedia(url: url, kind: .hdri, objectHDRI: hdriTarget)

@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor
 
+import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -95,7 +96,8 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     }
     val selected = store.layers.firstOrNull { it.id == store.primary }
     Box(Modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
-        stage(Modifier.fillMaxSize())
+        // A cena 3D e os gizmos não espelham em árabe (ver `KeepLtr`).
+        KeepLtr { stage(Modifier.fillMaxSize()) }
         Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             SceneRoundButton(CupertinoGlyph.ChevronLeft, stringResource(R.string.editor_voltar_editor), store::exitSceneEditor)
@@ -199,6 +201,8 @@ private fun SceneNumberField(value: Float, label: String, identity: String, onEd
             draft = next
             next.text.toFloatOrNull()?.takeIf { it.isFinite() }?.let(onEdit)
         }, label = { Text(label) }, singleLine = true,
+            // Número sempre LTR: em RTL "-1.5" sairia "1.5-".
+            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             modifier = modifier
                 .pointerInput(Unit) {

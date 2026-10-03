@@ -1,5 +1,6 @@
 package com.aurea.aurea.ui.ds
 
+import androidx.compose.ui.text.style.TextDirection
 import com.aurea.aurea.engine.ExpressionLook
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -357,6 +358,8 @@ fun ValueBox(
                         textAlign = TextAlign.Center,
                         textDecoration = if (tappable) TextDecoration.Underline else TextDecoration.None,
                         fontFeatureSettings = "tnum",
+                        // Número com sinal/unidade sempre LTR: em RTL "-12,5" viraria "12,5-".
+                        textDirection = TextDirection.Ltr,
                     ),
                 ),
             )
@@ -493,6 +496,7 @@ fun ParamValueBox(
                     color = if (enabled) AureaColors.Text else AureaColors.Muted,
                     textAlign = TextAlign.End,
                     fontFeatureSettings = "tnum",
+                    textDirection = TextDirection.Ltr,
                 ),
             ),
         )

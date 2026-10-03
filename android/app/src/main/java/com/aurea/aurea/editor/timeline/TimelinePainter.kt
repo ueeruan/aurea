@@ -34,6 +34,7 @@ import com.aurea.aurea.ui.theme.ClipTone
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIconsFont
 import com.aurea.aurea.ui.theme.LayerType
+import com.aurea.aurea.ui.theme.aureaTracking
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -118,7 +119,7 @@ internal class TimelinePainter(
         color = Color.White,
         fontSize = 11.sp,
         fontWeight = FontWeight.W500,
-        letterSpacing = (-0.1).sp,
+        letterSpacing = aureaTracking(-0.1f),   // nome de camada em árabe: sem tracking
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
     /** Nome do clipe escolhido na fileira compacta: 13 sp semibold (Efeitos.dc.html). */

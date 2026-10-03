@@ -1,5 +1,6 @@
 package com.aurea.aurea.ui.ds
 
+import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -283,7 +284,8 @@ fun ColorPickerSheet(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // "# RRGGBB · H S V" é código: LTR também em árabe (o # antes do hex).
+            KeepLtr { Row(verticalAlignment = Alignment.CenterVertically) {
                 val c = current()
                 val hex = String.format(Locale.ROOT, "%02X%02X%02X", (c.red * 255).roundToInt(), (c.green * 255).roundToInt(), (c.blue * 255).roundToInt())
                 Text("#", style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
@@ -298,7 +300,7 @@ fun ColorPickerSheet(
                     "H ${h.roundToInt()}°  S ${(s * 100).roundToInt()}%  V ${(v * 100).roundToInt()}%",
                     style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
                 )
-            }
+            } }
             if (pickFromPreview != null) {
                 Spacer(Modifier.height(10.dp))
                 Row(

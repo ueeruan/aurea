@@ -392,6 +392,9 @@ private struct ModelOptimizePrompt: ViewModifier {
             // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
             if !model.rawPlayback { StageZoomCornerButton().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading) }
         }.frame(height: height).clipped()
+        // O palco não espelha em árabe: preview, gizmos, alças, rig e os
+        // botões/selos dos cantos ficam onde estão no LTR (par do KeepLtr do stage).
+        .keepLtr()
         .onAppear { StageViewZoom.shared.resetIfProjectChanged(model.projectURL, engine: model.engine) }
         .onChange(of: model.projectURL) { url in StageViewZoom.shared.resetIfProjectChanged(url, engine: model.engine) }
     }
@@ -1564,7 +1567,7 @@ private struct AddLayerSheet: View {
         }
     }
     private func card(_ label: String, glyph: Character, accent: Bool = false, color: Color? = nil, action: @escaping () -> Void) -> some View {
-        cardBody(label, action: action) { CupertinoGlyph.text(glyph, size: 28, color: color ?? (accent ? AureaColors.accent : StageInk.dockTileContent)).frame(width: 30, height: 30) }
+        cardBody(label, action: action) { CupertinoGlyph.text(glyph, size: 28, color: color ?? (accent ? AureaColors.accent : StageInk.dockTileContent)).mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph)).frame(width: 30, height: 30) }
     }
     private func drawnCard(_ label: String, kind: Int, action: @escaping () -> Void) -> some View {
         cardBody(label, action: action) {
@@ -1848,6 +1851,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
     private func roundButton(_ glyph: Character, _ key: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             CupertinoGlyph.text(glyph, size: 19).foregroundStyle(AureaColors.text)
+                .mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph))   // voltar e desfazer/refazer viram em árabe (HIG)
                 .frame(width: 40, height: 40).background(StageInk.floatingDark, in: Circle())
         }.buttonStyle(.plain).accessibilityLabel(AureaText.t(key))
     }
@@ -1905,6 +1909,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
     var body: some View {
         TextField("", text: $draft)
             .keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder)
+            .keepLtr()   // número com sinal: "-1.5" não vira "1.5-" no árabe
             .focused($focused)
             .onAppear { draft = String(value) }
             .onChange(of: value) { next in if !focused { draft = String(next) } }

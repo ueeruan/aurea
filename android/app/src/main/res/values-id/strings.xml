@@ -2194,7 +2194,7 @@ untuk mengedit kurvanya.</string>
     <string name="world_purple_crystals">Kristal ungu</string>
     <string name="environment_texture">Tekstur Lingkungan</string>
     <string name="environment_background">Tampilkan sebagai latar 360°</string>
-    <string name="environment_hint">Impor HDR/HDRI Radiance atau panorama JPG/PNG 360° (2:1), hingga 8 MP. Gambar mengelilingi kamera dan menerangi adegan.</string>
+    <string name="environment_hint">Impor HDR/EXR, panorama JPG/PNG 360° (2:1), atau .zip yang berisi salah satunya. File besar (8K) diperkecil. Gambar mengelilingi kamera dan menerangi adegan.</string>
     <string name="fxu_frames">frame</string>
     <string name="fxu_px_per_frame">px/frame</string>
     <string name="fxu_octaves">oktaf</string>

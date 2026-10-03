@@ -104,6 +104,7 @@ struct ExportView: View {
         HStack(spacing: 4) {
             Button { if !model.exporting { dismiss() } } label: {
                 CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 22, color: model.exporting ? AureaColors.disabled : AureaColors.text)
+                    .mirrorsInRtl()
                     .frame(width: 40, height: 44).contentShape(Rectangle())
             }.buttonStyle(.plain).disabled(model.exporting).accessibilityLabel(AureaText.t("editor_fechar"))
             Text(AureaText.t("editor_exportar")).font(.aurea(size: 17, weight: .semibold))
@@ -129,7 +130,8 @@ struct ExportView: View {
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 // Linha-resumo logo abaixo da prévia: o que vai sair, de relance.
-                Text("\(outputSize.0) × \(outputSize.1) · \(format(fps)) fps · \(codec) · \(formatTime(seconds))")
+                // Cada peça isolada em LTR (árabe: a lista corre da direita, os números não se embaralham).
+                Text(["\(outputSize.0) × \(outputSize.1)", "\(format(fps)) fps", codec, formatTime(seconds)].map(ltrIsolado).joined(separator: " · "))
                     .font(.aurea(size: 13).monospacedDigit()).foregroundStyle(AureaColors.muted)
                     .frame(maxWidth: .infinity).multilineTextAlignment(.center).padding(.bottom, 6)
                 formatGroup
@@ -186,7 +188,7 @@ struct ExportView: View {
         let framesText = AureaText.t("exp2_frames_count", frames)
         return VStack(alignment: .leading, spacing: 0) {
             Text(kind == .frame ? "\(width) × \(height) · PNG"
-                 : "\(width) × \(height) · \(format(planFps)) fps · \(framesText) · \(formatTime(duration))")
+                 : [ltrIsolado("\(width) × \(height)"), ltrIsolado("\(format(planFps)) fps"), "\u{2068}\(framesText)\u{2069}", ltrIsolado(formatTime(duration))].joined(separator: " · "))
                 .font(.aurea(size: 13).monospacedDigit()).foregroundStyle(AureaColors.muted)
                 .frame(maxWidth: .infinity).multilineTextAlignment(.center).padding(.bottom, 6)
             formatGroup
@@ -204,7 +206,8 @@ struct ExportView: View {
             } else {
                 group("editor_resolucao") {
                     let short = min(model.compositionWidth, model.compositionHeight)
-                    let original = "\(AureaText.t("exp2_resolution_original")) (\(model.compositionWidth) × \(model.compositionHeight))"
+                    // "L × A" isolado em LTR: numa frase árabe o bidi trocaria a ordem (1080 × 1920 → 1920 × 1080).
+                    let original = "\(AureaText.t("exp2_resolution_original")) (\(ltrIsolado("\(model.compositionWidth) × \(model.compositionHeight)")))"
                     let sides: [UInt32] = [0] + Self.standardResolutions.map(\.0).filter { $0 != short }
                     let label: (UInt32) -> String = { $0 == 0 ? original : resolutionLabel($0) }
                     chips(sides.map(label), selected: label(sides.contains(model.exportOptions.imageShortSide) ? model.exportOptions.imageShortSide : 0)) { picked in
@@ -343,7 +346,7 @@ struct ExportView: View {
     }
     private var exportSummary: some View {
         VStack(spacing: 0) {
-            summary("editor_video", "\(outputSize.0) × \(outputSize.1) · \(format(fps)) fps · \(codec)")
+            summary("editor_video", ["\(outputSize.0) × \(outputSize.1)", "\(format(fps)) fps", codec].map(ltrIsolado).joined(separator: " · "))
             summary("editor_duracao", formatTime(seconds))
             summary("editor_tamanho_estimado", estimatedSize)
             summary("editor_cor", AureaText.t("editor_sdr_bt_709"))
@@ -361,7 +364,7 @@ struct ExportView: View {
     /// Um grupo de escolhas: título pequeno e o conteúdo num cartão.
     private func group<Content: View>(_ key: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(AureaText.t(key).uppercased()).font(.aurea(size: 12, weight: .semibold)).tracking(0.6)
+            Text(AureaText.t(key).uppercased()).font(.aurea(size: 12, weight: .semibold)).tracking(aureaTracking(0.6))
                 .foregroundStyle(AureaColors.muted).padding(.top, 16).padding(.bottom, 8).padding(.leading, 2)
                 .accessibilityAddTraits(.isHeader)
             VStack(alignment: .leading, spacing: 0) { content() }

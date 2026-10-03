@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -195,7 +196,9 @@ internal fun SpeedPanel(env: PanelEnv) {
             onSelect = { store.toggleSpeedKeyframe() },
             keyframe = when { keyHere -> KeyframeLook.KeyHere; animated -> KeyframeLook.Animated; else -> KeyframeLook.None },
         ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Tartaruga · régua · lebre em LTR também em árabe: a régua desenha e arrasta em
+        // coordenadas absolutas (direita = mais rápido), então a lebre fica à direita.
+        KeepLtr { Row(verticalAlignment = Alignment.CenterVertically) {
             CupertinoIcon(CupertinoGlyph.Tortoise, 20.dp, AureaColors.Muted)
             Spacer(Modifier.width(6.dp))
             // Régua em log2 × 100: arrastar a mesma distância dobra ou divide.
@@ -220,7 +223,7 @@ internal fun SpeedPanel(env: PanelEnv) {
             CupertinoIcon(CupertinoGlyph.Hare, 20.dp, AureaColors.Muted)
             Spacer(Modifier.width(8.dp))
             ValueBox(speedLabel(speed), width = 64.dp, onTap = null)
-        }
+        } }
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -219,6 +219,10 @@ struct TransportView: View {
         Group {
             if model.stageManipulating { StageInfoBar() } else { buttons }
         }.frame(height: EditorLayout.transport).background(AureaColors.editorCanvas)
+        // Transporte em LTR mesmo em árabe (par do KeepLtr do Android): início
+        // à esquerda, fim à direita, e os ícones (desfazer/refazer inclusive)
+        // na mesma ordem e sentido da timeline logo abaixo.
+        .keepLtr()
     }
 
     private var buttons: some View {
@@ -357,6 +361,8 @@ struct FullscreenTimeBar: View {
             Text(ShellClock.tenths(model.compositionDuration, Float(model.compositionFps))).foregroundStyle(AureaColors.muted)
         }.font(.aurea(size: 12, weight: .semibold)).monospacedDigit().padding(.horizontal, 14).frame(height: StageDim.fullscreenTimeBar)
             .background(AureaColors.editorTopBar)
+            // Barra de tempo: o início à esquerda em qualquer idioma (o gesto lê x absoluto).
+            .keepLtr()
             .onDisappear { if dragging { model.engine.run { $0.scrubEnd() }; dragging = false; if wasPlaying { model.playPause() }; wasPlaying = false } }
     }
 }
@@ -425,7 +431,7 @@ private struct ShellMenuSection: View {
     let key: String
     init(_ key: String) { self.key = key }
     var body: some View {
-        Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).tracking(0.2).foregroundStyle(AureaColors.muted)
+        Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).tracking(aureaTracking(0.2)).foregroundStyle(AureaColors.muted)
             .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 4)
     }
 }
@@ -451,7 +457,7 @@ private struct ShellMenuRow: View {
                 if let symbol {
                     Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(color).frame(width: 20, height: 20)
                 } else {
-                    CupertinoGlyph.text(glyph, size: 20, color: color).frame(width: 20, height: 20)
+                    CupertinoGlyph.text(glyph, size: 20, color: color).mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph)).frame(width: 20, height: 20)
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     Text(title ?? AureaText.t(key)).font(.aurea(size: 15)).foregroundStyle(color)

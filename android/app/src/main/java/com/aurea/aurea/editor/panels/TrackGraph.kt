@@ -178,7 +178,8 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                             if (!began && kotlin.math.hypot(dx, dy) < 4.dp.toPx()) continue
                             if (!began) { store.beginGesture("editar keyframe no gráfico"); began = true }
                             if (multi && groupKeys.isNotEmpty()) {
-                                val delta = (dx / size.width * initial.duration).toInt()
+                                // Arredonda como o iOS (truncar pedia um frame inteiro antes do 1º passo).
+                                val delta = (dx / size.width * initial.duration).let { if (it.isFinite()) kotlin.math.round(it).coerceIn(-1e9f, 1e9f).toInt() else groupDelta }
                                 val step = delta.toLong() - groupDelta
                                 if (step in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() && step != 0L && store.editSelectedKeys(layer, groupKeys.map { it.copy(time = it.time + groupDelta) }, step.toInt())) {
                                     groupDelta = delta

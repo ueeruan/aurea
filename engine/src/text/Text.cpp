@@ -278,9 +278,17 @@ constexpr const char* kFallbackPaths[] = {
     "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf",                                // 7, 8 geral
     "C:/Windows/Fonts/msyh.ttc",                                                                 // 9 CJK (Windows)
     "C:/Windows/Fonts/seguisym.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",     // 10, 11 símbolos
+    "",   // 12 árabe EMBARCADA: NotoNaskhArabic-Regular.ttf ao lado da fonte padrão (ver bundled_arabic_path)
 };
 constexpr usize kFallbackCount = sizeof(kFallbackPaths) / sizeof(kFallbackPaths[0]);
+constexpr u8 kBundledArabic = 12;
+static_assert(kBundledArabic + 1 == kFallbackCount, "a reserva embarcada e a ultima");
 std::mutex g_fallbackMutex;
+/// O app traz a Noto Naskh Arabic (OFL 1.1) na MESMA pasta da fonte padrão:
+/// `Fonts/` do bundle no iOS (o iOS não deixa ler as fontes árabes do sistema
+/// por caminho) e o cache no Android (copiada dos assets). Assim um título em
+/// árabe desenha igual nos dois aparelhos, com ou sem fonte árabe do sistema.
+std::string g_bundledArabicPath;
 std::shared_ptr<const Font> g_fallbacks[kFallbackCount];
 bool g_fallbackTried[kFallbackCount] = {};
 u32 g_fallbackLoads = 0;
@@ -288,7 +296,7 @@ u64 g_fallbackBytes = 0;
 
 /// Ordem de busca pela escrita do caractere (índices de kFallbackPaths).
 void fallback_order(u32 cp, u8 (&order)[kFallbackCount], usize& n) {
-    static constexpr u8 kArabic[] = {0, 1}, kHebrew[] = {2}, kDeva[] = {3}, kThai[] = {4}, kCjk[] = {5, 9, 6},
+    static constexpr u8 kArabic[] = {kBundledArabic, 0, 1}, kHebrew[] = {2}, kDeva[] = {3}, kThai[] = {4}, kCjk[] = {5, 9, 6},
                         kGeneral[] = {7, 8, 10, 11, 6};
     const u8* first = kGeneral;
     usize nf = sizeof(kGeneral);
@@ -344,7 +352,8 @@ const Font::Impl* fallback_for(const u32* chars, usize count) {
         const u8 i = order[k];
         if (!g_fallbackTried[i]) {
             g_fallbackTried[i] = true;
-            g_fallbacks[i] = Font::load(kFallbackPaths[i]);
+            const std::string path = i == kBundledArabic ? g_bundledArabicPath : std::string(kFallbackPaths[i]);
+            if (!path.empty()) g_fallbacks[i] = Font::load(path);
             if (g_fallbacks[i]) {
                 ++g_fallbackLoads;
                 g_fallbackBytes += g_fallbacks[i]->memory_bytes();
@@ -366,6 +375,94 @@ int strong_dir(u32 cp) {
     if (cp == 0x00A0 || (cp >= 0x2000 && cp <= 0x206F) || (cp >= 0x3000 && cp <= 0x303F) || is_mark(cp)) return -1;
     if (cp >= 0x00A1 && cp <= 0x00BF) return -1;
     return 0;
+}
+
+/// Classe bidirecional simplificada (UAX #9, tabela 4) — só as que o texto de
+/// uma camada usa: sem embeddings/overrides/isolados explícitos.
+enum BidiClass : u8 { kBidiL, kBidiR, kBidiAL, kBidiEN, kBidiAN, kBidiES, kBidiET, kBidiCS, kBidiNSM, kBidiON };
+
+BidiClass bidi_class(u32 cp) {
+    if (cp >= '0' && cp <= '9') return kBidiEN;
+    if (cp >= 0x06F0 && cp <= 0x06F9) return kBidiEN;                              // dígitos persas
+    if ((cp >= 0x0660 && cp <= 0x0669) || cp == 0x066B || cp == 0x066C) return kBidiAN; // árabe-índicos
+    if (cp == '+' || cp == '-' || cp == 0x2212) return kBidiES;
+    if (cp == '#' || cp == '$' || cp == '%' || cp == 0x00B0 || (cp >= 0x00A2 && cp <= 0x00A5) || cp == 0x066A
+        || cp == 0x2030 || cp == 0x2031 || (cp >= 0x20A0 && cp <= 0x20CF)) return kBidiET;
+    if (cp == ',' || cp == '.' || cp == ':' || cp == '/' || cp == 0x00A0 || cp == 0x060C) return kBidiCS;
+    if (is_mark(cp)) return kBidiNSM;
+    const int d = strong_dir(cp);
+    if (d == 1) {
+        // Escrita árabe (e siríaca/thaana/n'ko) é AL; hebraico é R. A diferença
+        // importa em W2: "2026" depois de letra árabe vira número árabe (AN).
+        const bool al = (cp >= 0x0600 && cp <= 0x07BF) || (cp >= 0x0860 && cp <= 0x08FF)
+                     || (cp >= 0xFB50 && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF);
+        return al ? kBidiAL : kBidiR;
+    }
+    return d == 0 ? kBidiL : kBidiON;
+}
+
+/// Níveis de cps[a, b) num parágrafo de direção `para` (0 LTR, 1 RTL): regras
+/// W1–W7, N1–N2 e I1–I2 do UAX #9. É o que o EditText/UITextView fazem com o
+/// mesmo texto — a prévia tem de bater com o campo onde a pessoa digitou:
+/// "مرحبا Aurea 2026" sai «2026 Aurea» à esquerda do árabe, "abc שלום 123" sai
+/// com o 123 colado ao hebraico.
+std::vector<u8> bidi_levels(const std::vector<u32>& cps, usize a, usize b, int para) {
+    const usize n = b > a ? b - a : 0;
+    std::vector<u8> c(n);
+    for (usize i = 0; i < n; ++i) c[i] = bidi_class(cps[a + i]);
+    const u8 sos = para ? kBidiR : kBidiL;
+    // W1: marca combinante herda a classe de quem ela marca.
+    for (usize i = 0; i < n; ++i) if (c[i] == kBidiNSM) c[i] = i ? c[i - 1] : sos;
+    // W2: EN depois de AL (o forte anterior) vira AN. W3: AL vira R.
+    u8 lastStrong = sos;
+    for (usize i = 0; i < n; ++i) {
+        if (c[i] == kBidiL || c[i] == kBidiR || c[i] == kBidiAL) lastStrong = c[i];
+        else if (c[i] == kBidiEN && lastStrong == kBidiAL) c[i] = kBidiAN;
+    }
+    for (usize i = 0; i < n; ++i) if (c[i] == kBidiAL) c[i] = kBidiR;
+    // W4: um separador sozinho entre dois números do mesmo tipo ("1.5", "12:30").
+    for (usize i = 1; i + 1 < n; ++i) {
+        if (c[i] == kBidiES && c[i - 1] == kBidiEN && c[i + 1] == kBidiEN) c[i] = kBidiEN;
+        else if (c[i] == kBidiCS && c[i - 1] == c[i + 1] && (c[i - 1] == kBidiEN || c[i - 1] == kBidiAN)) c[i] = c[i - 1];
+    }
+    // W5: terminadores ("%", "$", "°") encostados num EN viram EN.
+    for (usize i = 0; i < n;) {
+        if (c[i] != kBidiET) { ++i; continue; }
+        usize j = i;
+        while (j < n && c[j] == kBidiET) ++j;
+        const bool touches = (i > 0 && c[i - 1] == kBidiEN) || (j < n && c[j] == kBidiEN);
+        if (touches) for (usize k = i; k < j; ++k) c[k] = kBidiEN;
+        i = j;
+    }
+    // W6: o que sobrou de separador/terminador é neutro.
+    for (usize i = 0; i < n; ++i) if (c[i] == kBidiES || c[i] == kBidiET || c[i] == kBidiCS) c[i] = kBidiON;
+    // W7: EN cujo forte anterior é L vira L ("Aurea 2026" é um trecho LTR só).
+    lastStrong = sos;
+    for (usize i = 0; i < n; ++i) {
+        if (c[i] == kBidiL || c[i] == kBidiR) lastStrong = c[i];
+        else if (c[i] == kBidiEN && lastStrong == kBidiL) c[i] = kBidiL;
+    }
+    // N1/N2: neutros entre dois lados da mesma direção (número conta como R)
+    // tomam essa direção; senão, a do parágrafo.
+    auto side = [](u8 k) -> int { return k == kBidiL ? 0 : (k == kBidiR || k == kBidiEN || k == kBidiAN) ? 1 : -1; };
+    for (usize i = 0; i < n;) {
+        if (c[i] != kBidiON) { ++i; continue; }
+        usize j = i;
+        while (j < n && c[j] == kBidiON) ++j;
+        const int before = i > 0 ? side(c[i - 1]) : para;
+        const int after = j < n ? side(c[j]) : para;
+        const u8 to = (before == after ? before : para) ? kBidiR : kBidiL;
+        for (usize k = i; k < j; ++k) c[k] = to;
+        i = j;
+    }
+    // I1/I2: nível final.
+    std::vector<u8> level(n);
+    for (usize i = 0; i < n; ++i) {
+        const bool num = c[i] == kBidiEN || c[i] == kBidiAN;
+        if (para == 0) level[i] = c[i] == kBidiR ? 1 : num ? 2 : 0;
+        else level[i] = c[i] == kBidiR ? 1 : 2;
+    }
+    return level;
 }
 
 struct Glyph {
@@ -391,50 +488,56 @@ struct CharAttr {
 
 /// Shaping de cps[a, b) (um trecho de parágrafo), com contexto do parágrafo.
 /// `para` = direção do parágrafo. Glifos em ordem visual, x a partir de 0.
-Line shape_span(const std::vector<u32>& cps, usize a, usize b, u32 globalBase, const std::vector<CharAttr>& attr, int para,
-                f32 pxSize, f32 trackingPx, hb_buffer_t* buf) {
+Line shape_span(const Font::Impl& primary, const std::vector<u32>& cps, usize a, usize b, u32 globalBase, const std::vector<CharAttr>& attr,
+                int para, f32 pxSize, f32 trackingPx, hb_buffer_t* buf) {
     Line L;
     if (b <= a) return L;
-    std::vector<int> dir(cps.size(), -1);
-    for (usize i = a; i < b; ++i) dir[i] = strong_dir(cps[i]);
-    for (usize i = a; i < b; ++i) {
-        if (dir[i] >= 0) continue;
-        int before = -1, after = -1;
-        for (usize k = i; k-- > a;) if (strong_dir(cps[k]) >= 0) { before = strong_dir(cps[k]); break; }
-        for (usize k = i + 1; k < b; ++k) if (strong_dir(cps[k]) >= 0) { after = strong_dir(cps[k]); break; }
-        const bool digit = (cps[i] >= '0' && cps[i] <= '9') || (cps[i] >= 0x0660 && cps[i] <= 0x0669);
-        dir[i] = digit ? 0 : (before >= 0 && before == after ? before : para);
-    }
-    struct Run { usize start, len; int dir; const Font::Impl* font; f32 scale; };
+    // Níveis bidi do trecho (UAX #9 sem embeddings explícitos): ver bidi_levels.
+    const std::vector<u8> level = bidi_levels(cps, a, b, para);
+    struct Run { usize start, len; u8 level; const Font::Impl* font; f32 scale; };
     std::vector<Run> runs;
     for (usize i = a; i < b; ++i) {
-        if (!runs.empty() && runs.back().dir == dir[i] && runs.back().font == attr[i].font && runs.back().scale == attr[i].scale) {
+        const u8 lv = level[i - a];
+        if (!runs.empty() && runs.back().level == lv && runs.back().font == attr[i].font && runs.back().scale == attr[i].scale) {
             ++runs.back().len;
             continue;
         }
-        runs.push_back({i, 1, dir[i], attr[i].font, attr[i].scale});
+        runs.push_back({i, 1, lv, attr[i].font, attr[i].scale});
     }
+    // L2: do maior nível até o menor nível ímpar, inverte toda sequência
+    // contígua de trechos com nível >= k. A ordem DENTRO de cada trecho fica
+    // com o HarfBuzz (direção do buffer = paridade do nível).
     std::vector<usize> order(runs.size());
     for (usize k = 0; k < runs.size(); ++k) order[k] = k;
-    if (para == 1) {
-        std::reverse(order.begin(), order.end());
+    u8 maxLevel = 0, minOdd = 255;
+    for (const Run& r : runs) {
+        maxLevel = std::max(maxLevel, r.level);
+        if (r.level & 1u) minOdd = std::min(minOdd, r.level);
+    }
+    for (int k = maxLevel; k >= static_cast<int>(minOdd) && k > 0; --k) {
         for (usize x = 0; x < order.size();) {
+            if (runs[order[x]].level < k) { ++x; continue; }
             usize y = x;
-            while (y < order.size() && runs[order[y]].dir == 0) ++y;
-            if (y - x > 1) std::reverse(order.begin() + static_cast<long>(x), order.begin() + static_cast<long>(y));
-            x = y == x ? x + 1 : y;
+            while (y < order.size() && runs[order[y]].level >= k) ++y;
+            std::reverse(order.begin() + static_cast<long>(x), order.begin() + static_cast<long>(y));
+            x = y;
         }
     }
     f32 pen = 0.0f;
     for (usize k : order) {
         const Run& r = runs[k];
         const Font::Impl& rf = *r.font;
-        const f32 fs = stbtt_ScaleForPixelHeight(&rf.info, pxSize * r.scale);
+        // Fonte de reserva no tamanho do EM da fonte da camada, não na altura
+        // ascendente+descendente dela: a Noto Naskh tem linha 1,70 em contra
+        // 1,17 do Roboto, e pela altura o árabe sairia com 69 % do tamanho do
+        // latim na mesma frase. É o casamento por em de qualquer motor de texto.
+        const f32 emPx = pxSize * r.scale * stbtt_ScaleForPixelHeight(&primary.info, 1.0f) / stbtt_ScaleForMappingEmToPixels(&primary.info, 1.0f);
+        const f32 fs = &rf == &primary ? stbtt_ScaleForPixelHeight(&rf.info, pxSize * r.scale) : stbtt_ScaleForMappingEmToPixels(&rf.info, emPx);
         L.scale = std::max(L.scale, r.scale);
         hb_buffer_clear_contents(buf);
         hb_buffer_add_codepoints(buf, cps.data(), static_cast<int>(cps.size()), static_cast<unsigned>(r.start), static_cast<int>(r.len));
         hb_buffer_guess_segment_properties(buf);
-        hb_buffer_set_direction(buf, r.dir == 1 ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+        hb_buffer_set_direction(buf, (r.level & 1u) ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
         hb_shape(rf.hb, buf, nullptr, 0);
         unsigned n = 0;
         const hb_glyph_info_t* info = hb_buffer_get_glyph_infos(buf, &n);
@@ -537,7 +640,7 @@ void place_once(const Font::Impl& f, const TextData& t, f32 pxScale, f32 factor,
         for (u32 cp : cps) if (strong_dir(cp) >= 0) { para = strong_dir(cp); break; }
         if (para < 0) para = 0;
         auto shapeRange = [&](usize a, usize b) {
-            Line L = shape_span(cps, a, b, 0, at, para, pxSize, trackingPx, buf);
+            Line L = shape_span(f, cps, a, b, 0, at, para, pxSize, trackingPx, buf);
             for (Glyph& g : L.glyphs) g.cluster = g.cluster < gidx.size() ? gidx[g.cluster] : static_cast<u32>(i);
             return L;
         };
@@ -638,11 +741,19 @@ void place(const Font::Impl& f, const TextData& t, f32 pxScale, Placed& out) {
 } // namespace
 
 void set_default_font_path(const std::string& path) {
-    std::lock_guard<std::mutex> lock(g_fontMutex);
-    if (path == g_fontPath) return;
-    g_fontPath = path;
-    g_font.reset();
-    g_fontTried = false;
+    {
+        std::lock_guard<std::mutex> lock(g_fontMutex);
+        if (path == g_fontPath) return;
+        g_fontPath = path;
+        g_font.reset();
+        g_fontTried = false;
+    }
+    const usize slash = path.find_last_of("/\\");
+    std::lock_guard<std::mutex> lock(g_fallbackMutex);
+    g_bundledArabicPath = slash == std::string::npos ? std::string() : path.substr(0, slash + 1) + "NotoNaskhArabic-Regular.ttf";
+    // Já carregada fica (glifos posicionados apontam para ela); só uma
+    // tentativa que falhou é refeita com o caminho novo.
+    if (!g_fallbacks[kBundledArabic]) g_fallbackTried[kBundledArabic] = false;
 }
 
 std::shared_ptr<const Font> default_font() {

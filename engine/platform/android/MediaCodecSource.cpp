@@ -1078,7 +1078,9 @@ public:
 
     Status seek(i64 us) noexcept override {
         AMediaExtractor_seekTo(ex_, std::max<i64>(0, us), AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
-        AMediaCodec_flush(codec_);
+        // Codec recuperado pelo sistema / em erro: o flush falha. Avisar o
+        // cache (que troca o decoder) em vez de seguir com um codec morto.
+        if (AMediaCodec_flush(codec_) != AMEDIA_OK) return Status{Errc::DecodeFailed, "flush do audio falhou"};
         inputEos_ = false;
         return OkStatus;
     }
@@ -1090,6 +1092,9 @@ public:
             // Alimenta o que couber (sem bloquear).
             while (!inputEos_) {
                 const ssize_t in = AMediaCodec_dequeueInputBuffer(codec_, 0);
+                if (in < AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
+                    return Status{Errc::DecodeFailed, "codec de audio em erro (entrada)"};
+                }
                 if (in < 0) break;
                 size_t cap = 0;
                 u8* buf = AMediaCodec_getInputBuffer(codec_, static_cast<size_t>(in), &cap);
@@ -1120,6 +1125,12 @@ public:
                 }
                 continue;
             }
+            // Erro de verdade (codec recuperado/morto): os códigos informativos
+            // são -1..-3; abaixo disso é media_status_t. Antes isso girava 2 s
+            // e virava "fim do arquivo" — e o trecho ficava mudo no cache.
+            if (idx < AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
+                return Status{Errc::DecodeFailed, "codec de audio em erro (saida)"};
+            }
             if (idx < 0) continue;   // TRY_AGAIN / BUFFERS_CHANGED
             size_t cap = 0;
             const u8* data = AMediaCodec_getOutputBuffer(codec_, static_cast<size_t>(idx), &cap);
@@ -1146,9 +1157,14 @@ public:
             if (end) eos = true;
             if (!out.empty() || end) return OkStatus;
         }
-        // Nada saiu em ~2 s: arquivo travado. Trata como fim (vira silêncio).
-        eos = true;
-        return OkStatus;
+        // Nada saiu em ~2 s. Com a entrada já no fim, é o fim (decoder que não
+        // marca EOS na saída). Antes do fim é codec travado: erro (o cache abre
+        // outro decoder), não "fim" — fim falso deixava o trecho mudo no cache.
+        if (inputEos_) {
+            eos = true;
+            return OkStatus;
+        }
+        return Status{Errc::DecodeFailed, "decoder de audio travado"};
     }
 
 private:

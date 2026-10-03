@@ -1,5 +1,6 @@
 package com.aurea.aurea.home
 
+import com.aurea.aurea.ui.i18n.ltrPlain
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -145,7 +146,7 @@ internal fun NewProjectSheet(
             Spacer(Modifier.height(16.dp))
             AspectPreviewFrame(
                 ratio = ratioOnScreen,
-                label = if (free) "$fw × $fh" else aspect.label,
+                label = if (free) ltrPlain("$fw × $fh") else aspect.label,
                 hint = if (free) stringResource(R.string.aspect_free) else stringResource(aspect.hint),
             )
             Spacer(Modifier.height(12.dp))

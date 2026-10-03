@@ -28,7 +28,14 @@ struct AureaApp: App {
                 .environmentObject(model)
                 .environmentObject(conta)
                 .environmentObject(model.playheadClock)
-                .environment(\.layoutDirection, model.language.resolved == .ar ? .rightToLeft : .leftToRight)
+                // Idioma do APP (não o do sistema): RTL em árabe e o locale com
+                // algarismos ocidentais (DesignSystem.swift, `uiLocale`). `model`
+                // é @StateObject e `language` é @Published: trocar nos Ajustes
+                // refaz este body e o ambiente desce na hora — folhas e capas
+                // apresentadas abaixo herdam. O que é dado no eixo X fica LTR
+                // por `keepLtr()` (timeline, palco, transporte, curvas).
+                .environment(\.layoutDirection, model.language.layoutDirection)
+                .environment(\.locale, model.language.uiLocale)
                 .preferredColorScheme(.dark)   // o Aurea é escuro em todas as telas
                 .onAppear {
                     model.start()

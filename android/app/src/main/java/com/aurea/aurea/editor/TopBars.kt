@@ -315,7 +315,9 @@ private class LinkMenuPosition(private val margin: Int) : PopupPositionProvider 
         layoutDirection: LayoutDirection,
         popupContentSize: IntSize,
     ): IntOffset {
-        val x = (anchorBounds.right - popupContentSize.width)
+        // Pela borda de fim do ícone: direita em LTR, esquerda em RTL.
+        val edge = if (layoutDirection == LayoutDirection.Rtl) anchorBounds.left else anchorBounds.right - popupContentSize.width
+        val x = edge
             .coerceIn(margin, (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin))
         val y = anchorBounds.bottom.coerceAtMost((windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin))
         return IntOffset(x, y)

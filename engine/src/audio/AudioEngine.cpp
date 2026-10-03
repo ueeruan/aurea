@@ -12,6 +12,14 @@
 //  (AAudioStream_getTimestamp); a diferença dá a amostra que está soando. O
 //  vídeo mostra o frame dessa amostra — sincronia de lábio medida no ouvido,
 //  não no buffer.
+//
+//  Saída que morre: só a thread do mixer abre/inicia/para/fecha a saída da
+//  plataforma (nada de start e stop correndo em threads diferentes). Se o
+//  open/start falha, ou se o callback para de rodar com o play pedido
+//  (stream desconectado sem aviso, sessão de áudio perdida), a saída é
+//  fechada e reaberta com espera crescente — antes ela ficava morta até
+//  reiniciar o app. Ao voltar, o som recomeça no ponto em que o transporte
+//  está (o relógio do sistema conduziu o vídeo enquanto a saída estava fora).
 // =============================================================================
 #include "aurea/audio/Audio.hpp"
 
@@ -35,7 +43,9 @@ public:
         for (auto& h : held_) {
             if (h.asset == asset && h.block == b) return h.ptr.get();
         }
-        auto p = cache_.find(asset, b);
+        // find_playable: decoder em falha vira silêncio só desta fonte (e é
+        // reaberto em segundo plano) em vez de travar o mixer inteiro.
+        auto p = cache_.find_playable(asset, b);
         if (!p) {
             cache_.want(asset, b, -1);   // atrasado: na frente de tudo
             return nullptr;
@@ -56,6 +66,8 @@ private:
 };
 
 constexpr u32 kLeadChunks = 24;   ///< ~128 ms mixados à frente
+constexpr u64 kOutputRetryFirstNs = 100'000'000ull;   ///< 1ª nova tentativa de abrir/iniciar a saída
+constexpr u64 kOutputRetryMaxNs = 2'000'000'000ull;
 
 } // namespace
 
@@ -69,11 +81,18 @@ void AudioEngine::initialize(VideoSourceFactory* factory, AudioOutput* output, u
     tail_.store(0);
     readOffset_ = 0;
     output_ = output;
-    outputOpen_ = false;
+    outputOpen_.store(false);
+    outputStarted_ = false;
+    retryAtNs_ = retryDelayNs_ = 0;
+    progressWritten_ = 0;
+    progressAtNs_ = 0;
+    downWhilePlaying_ = false;
     if (output_) {
         const Status s = output_->open(&AudioEngine::render_cb, this);
-        outputOpen_ = s.ok();
-        if (!outputOpen_) AUREA_LOG_WARN("audio: saida nao abriu: %s", s.message().data());
+        outputOpen_.store(s.ok());
+        // Não abriu agora (sessão ocupada, app ainda em segundo plano): o
+        // mixer tenta de novo no play.
+        if (!s.ok()) AUREA_LOG_WARN("audio: saida nao abriu: %s", s.message().data());
     }
     quit_ = false;
     mixer_ = std::thread([this] { mixer_main(); });
@@ -89,11 +108,12 @@ void AudioEngine::shutdown() {
         wake_.notify_all();
         mixer_.join();
     }
-    if (output_ && outputOpen_) {
+    if (output_ && outputOpen_.load()) {
         output_->stop();
         output_->close();
     }
-    outputOpen_ = false;
+    outputOpen_.store(false);
+    outputStarted_ = false;
     output_ = nullptr;
     cache_.reset();
     ring_.reset();
@@ -124,6 +144,11 @@ void AudioEngine::play(i64 ns, f64 rate) {
         playStartNs_.store(sample_to_ns(mixPos_), std::memory_order_release);
         playing_.store(true, std::memory_order_release);
         if (cache_) cache_->clear_wants();
+        if (downWhilePlaying_) {
+            // Seek com a saída fora: ao voltar, o som parte daqui.
+            downSinceNs_ = monotonic_ns();
+            downPosNs_ = playStartNs_.load(std::memory_order_relaxed);
+        }
     }
     wake_.notify_all();
 
@@ -153,7 +178,107 @@ void AudioEngine::prefetch(i64 ns) {
 }
 
 bool AudioEngine::available() const noexcept {
-    return outputOpen_ && playing_.load(std::memory_order_acquire);
+    return outputOpen_.load(std::memory_order_acquire) && playing_.load(std::memory_order_acquire);
+}
+
+void AudioEngine::output_down_locked(u64 nowNs, bool closeIt, std::unique_lock<std::mutex>& lock) {
+    if (playing_.load(std::memory_order_acquire) && !downWhilePlaying_) {
+        downWhilePlaying_ = true;
+        downSinceNs_ = nowNs;
+        downPosNs_ = position_ns();
+    }
+    outputStarted_ = false;
+    // Fechada, `available()` cai: o relógio do sistema conduz o vídeo até a
+    // saída voltar (em vez de o vídeo congelar esperando um som que não vem).
+    const bool wasOpen = outputOpen_.exchange(false, std::memory_order_acq_rel);
+    if (closeIt && wasOpen) {
+        lock.unlock();
+        output_->stop();
+        output_->close();
+        lock.lock();
+    }
+    retryDelayNs_ = retryDelayNs_ ? std::min(retryDelayNs_ * 2, kOutputRetryMaxNs) : kOutputRetryFirstNs;
+    retryAtNs_ = nowNs + retryDelayNs_;
+}
+
+bool AudioEngine::service_output(std::unique_lock<std::mutex>& lock) {
+    if (!output_) return false;
+    const bool want = playing_.load(std::memory_order_acquire);
+    const u64 now = monotonic_ns();
+    if (!want) {
+        downWhilePlaying_ = false;
+        retryAtNs_ = retryDelayNs_ = 0;   // o próximo play tenta já
+        if (!outputStarted_) return false;
+        // Platform start/stop may block. Only this worker calls them;
+        // UI/render and the real-time callback never wait for the device.
+        lock.unlock();
+        output_->stop();
+        lock.lock();
+        outputStarted_ = false;
+        return true;
+    }
+    if (!outputOpen_.load(std::memory_order_acquire)) {
+        if (!downWhilePlaying_) {
+            downWhilePlaying_ = true;
+            downSinceNs_ = now;
+            downPosNs_ = position_ns();
+        }
+        if (now < retryAtNs_) return false;
+        lock.unlock();
+        const Status s = output_->open(&AudioEngine::render_cb, this);
+        lock.lock();
+        if (!s.ok()) {
+            AUREA_LOG_WARN("audio: saida nao reabriu: %s", s.message().data());
+            output_down_locked(now, false, lock);
+            return true;
+        }
+        AUREA_LOG_INFO("audio: saida reaberta");
+        outputOpen_.store(true, std::memory_order_release);
+        return true;
+    }
+    if (!outputStarted_) {
+        if (now < retryAtNs_) return false;
+        lock.unlock();
+        const Status s = output_->start();
+        lock.lock();
+        if (!s.ok()) {
+            // Antes: o mixer marcava a saída como iniciada mesmo assim, e o som
+            // só voltava num play futuro — ou nunca (stream desconectado).
+            AUREA_LOG_WARN("audio: output start failed: %s", s.message().data());
+            recoveries_.fetch_add(1, std::memory_order_relaxed);
+            output_down_locked(now, true, lock);
+            return true;
+        }
+        outputStarted_ = true;
+        progressWritten_ = written_.load(std::memory_order_acquire);
+        progressAtNs_ = monotonic_ns();
+        if (downWhilePlaying_ && playing_.load(std::memory_order_acquire)) {
+            // A saída volta no ponto em que o transporte está agora: o que o
+            // anel guardava do instante em que ela caiu é descartado.
+            const f64 rate = playbackRate_.load(std::memory_order_acquire);
+            const i64 pos = downPosNs_ + static_cast<i64>(static_cast<f64>(progressAtNs_ - downSinceNs_) * rate);
+            mixGen_ = gen_.fetch_add(1, std::memory_order_acq_rel) + 1;
+            mixPos_ = static_cast<f64>(ns_to_sample(pos));
+            playStartNs_.store(sample_to_ns(ns_to_sample(pos)), std::memory_order_release);
+            if (cache_) cache_->clear_wants();
+        }
+        downWhilePlaying_ = false;
+        return true;
+    }
+    // Vigia: tocando, o callback da plataforma tem de andar.
+    const i64 w = written_.load(std::memory_order_acquire);
+    if (w != progressWritten_) {
+        progressWritten_ = w;
+        progressAtNs_ = now;
+        retryDelayNs_ = 0;
+        return false;
+    }
+    if (now - progressAtNs_ < watchdogNs_.load(std::memory_order_relaxed)) return false;
+    AUREA_LOG_WARN("audio: callback parado ha %llu ms com o play pedido; reabrindo a saida",
+                   static_cast<unsigned long long>((now - progressAtNs_) / 1'000'000ull));
+    recoveries_.fetch_add(1, std::memory_order_relaxed);
+    output_down_locked(now, true, lock);
+    return true;
 }
 
 i64 AudioEngine::position_ns() const noexcept {
@@ -246,21 +371,8 @@ void AudioEngine::mixer_main() {
     // processado; salto no tempo recomeça com pré-rolagem.
     MixState fx;
     std::unique_lock<std::mutex> lock(mutex_);
-    bool outputStarted = false;
     while (!quit_) {
-        const bool wantOutput = playing_.load(std::memory_order_acquire);
-        if (output_ && outputOpen_ && outputStarted != wantOutput) {
-            // Platform start/stop may block. Only this worker calls them;
-            // UI/render and the real-time callback never wait for the device.
-            lock.unlock();
-            if (wantOutput) {
-                const Status status = output_->start();
-                if (!status.ok()) AUREA_LOG_WARN("audio: output start failed: %s", status.message().data());
-            } else output_->stop();
-            lock.lock();
-            outputStarted = wantOutput;
-            continue;
-        }
+        if (service_output(lock)) continue;
         if (!playing_.load(std::memory_order_acquire)) {
             wake_.wait(lock, [this] { return quit_ || playing_.load(); });
             sincePrefetch = 1000;
@@ -323,8 +435,9 @@ void AudioEngine::mixer_main() {
 
 AudioEngine::Stats AudioEngine::stats() const noexcept {
     Stats s;
-    s.outputOpen = outputOpen_;
+    s.outputOpen = outputOpen_.load();
     s.playing = playing_.load();
+    s.outputRecoveries = recoveries_.load();
     s.underruns = underruns_.load();
     s.missingBlocks = missing_.load();
     const u32 q = head_.load() - tail_.load();

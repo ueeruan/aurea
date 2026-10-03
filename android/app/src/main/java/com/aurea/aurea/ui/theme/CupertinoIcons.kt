@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
+import com.aurea.aurea.ui.i18n.mirrorInRtl
 
 /**
  * Ícones da UI aprovada: a fonte `CupertinoIcons.ttf` (MIT, pacote
@@ -32,9 +33,12 @@ fun CupertinoIcon(
     size: Dp,
     tint: Color = AureaColors.Text,
     modifier: Modifier = Modifier,
+    /** Glifos de sentido de leitura (‹ › ↶ ↷ ▸) espelham em árabe; `false` desliga. */
+    autoMirror: Boolean = true,
 ) {
     val fontSize = with(LocalDensity.current) { size.toSp() }
-    Box(modifier.size(size), contentAlignment = Alignment.Center) {
+    val mirror = if (autoMirror && glyph in CupertinoGlyph.Directional) Modifier.mirrorInRtl() else Modifier
+    Box(modifier.size(size).then(mirror), contentAlignment = Alignment.Center) {
         Text(
             text = glyph.toString(),
             style = TextStyle(
@@ -203,4 +207,14 @@ object CupertinoGlyph {
     const val Scribble = '\uF7CB'
     const val Tortoise = '\uF86A'
     const val Hare = '\uF6B9'
+
+    /**
+     * Os que apontam o sentido da LEITURA (voltar, avançar, abrir, desfazer e
+     * refazer): em RTL o [CupertinoIcon] os espelha. Fora daqui ficam os do
+     * TEMPO e do palco (⇤ ⇥, play, alinhar à esquerda/direita da tela): o tempo
+     * e o canvas não espelham. Dentro de `KeepLtr` nada espelha.
+     */
+    val Directional: Set<Char> = setOf(
+        ChevronLeft, ChevronRight, ChevronBack, ArrowtriangleRightFill, ArrowUturnLeft, ArrowUturnRight,
+    )
 }

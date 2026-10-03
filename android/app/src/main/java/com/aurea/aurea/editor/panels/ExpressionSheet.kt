@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -193,7 +194,8 @@ internal fun ExpressionSheet(store: EditorStore, target: EditorStore.ExpressionT
 
 /** Texto com a coluna de números de linha; a linha do erro em vermelho. */
 @Composable
-private fun CodeEditor(value: TextFieldValue, errorLine: Int, onChange: (TextFieldValue) -> Unit) {
+private fun CodeEditor(value: TextFieldValue, errorLine: Int, onChange: (TextFieldValue) -> Unit) = KeepLtr {
+    // Código é LTR em qualquer idioma: números de linha à esquerda, texto da esquerda.
     val lines = value.text.count { it == '\n' } + 1
     val scroll = rememberScrollState()
     Row(
@@ -223,7 +225,7 @@ private fun CodeEditor(value: TextFieldValue, errorLine: Int, onChange: (TextFie
         BasicTextField(
             value = value,
             onValueChange = onChange,
-            textStyle = Mono.merge(TextStyle(color = AureaColors.Text)),
+            textStyle = Mono.merge(TextStyle(color = AureaColors.Text, textDirection = androidx.compose.ui.text.style.TextDirection.Ltr)),
             cursorBrush = SolidColor(AureaColors.Accent),
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.None,

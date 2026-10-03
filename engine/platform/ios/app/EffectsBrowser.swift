@@ -538,6 +538,7 @@ struct EffectAddSheet: View {
         HStack(spacing: 0) {
             Button { if inGroup { groupId = nil } else { close() } } label: {
                 CupertinoGlyph.text(inGroup ? CupertinoGlyph.ChevronBack : CupertinoGlyph.Xmark, size: AureaDims.iconLg)
+                    .mirrorsInRtl(inGroup)
                     .frame(width: AureaDims.minTap + AureaDims.s1, height: AureaDims.minTap).contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle(shrink: 1))
                 .accessibilityLabel(AureaText.t(inGroup ? "fxui_back_categories" : "common_close"))
@@ -555,7 +556,7 @@ struct EffectAddSheet: View {
     }
 
     private func sectionTitle(_ text: String) -> some View {
-        Text(text).font(AureaTextSpec.section.font).tracking(0.3).foregroundStyle(AureaColors.muted)
+        Text(text).font(AureaTextSpec.section.font).tracking(aureaTracking(0.3)).foregroundStyle(AureaColors.muted)
             .padding(.top, AureaDims.s3).padding(.bottom, AureaDims.s1)
             .accessibilityAddTraits(.isHeader)
     }
@@ -647,6 +648,7 @@ struct EffectPickerSearch: View {
             HStack(spacing: 0) {
                 Button(action: onDismiss) {
                     CupertinoGlyph.text(CupertinoGlyph.ChevronBack, size: AureaDims.iconLg)
+                        .mirrorsInRtl()
                         .frame(width: EffectPickerLayout.backTarget, height: AureaDims.minTap).contentShape(Rectangle())
                 }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("common_close"))
                 HStack(spacing: 0) {
@@ -720,7 +722,7 @@ private struct EffectPickerCard: View {
                             .background(.black.opacity(0.45), in: Circle()).padding(AureaDims.s1)
                     }
                 }
-            Text(name).font(.aurea(size: nameSize, weight: .semibold)).tracking(-0.1).lineLimit(2)
+            Text(name).font(.aurea(size: nameSize, weight: .semibold)).tracking(aureaTracking(-0.1)).lineLimit(2)
                 .frame(height: nameSize * 1.2 * 2, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -799,7 +801,7 @@ struct EffectAboutSheet: View {
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(fxEffectDisplayName(entry.typeId, entry.name)).font(.aurea(size: 22, weight: .bold))
-                            .tracking(-0.4).frame(minHeight: 22 * 1.35, alignment: .leading)
+                            .tracking(aureaTracking(-0.4)).frame(minHeight: 22 * 1.35, alignment: .leading)
                         cardSpec(fxEffectCostLine(entry.category, fxEffectCost(entry.effectClass)))
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     Button { prefs.toggleFavorite(entry.typeId) } label: {
@@ -810,7 +812,7 @@ struct EffectAboutSheet: View {
                         .accessibilityLabel(AureaText.t(favorite ? "effect_tirar_favoritos" : "effect_nos_favoritos"))
                 }
                 gap(AureaDims.s3)
-                Text(fxEffectDescription(entry.typeId, entry.category)).font(EffectPickerLayout.description).tracking(-0.1)
+                Text(fxEffectDescription(entry.typeId, entry.category)).font(EffectPickerLayout.description).tracking(aureaTracking(-0.1))
                     .lineSpacing(max(0, 14 * 1.45 - UIFont.systemFont(ofSize: 14).lineHeight))
                     .fixedSize(horizontal: false, vertical: true)
                 gap(AureaDims.s3)
@@ -818,11 +820,11 @@ struct EffectAboutSheet: View {
                 gap(AureaDims.s5)
                 if !specs.isEmpty {
                     Text(AureaText.t("effect_parameters")).font(.aurea(size: 11, weight: .semibold))
-                        .tracking(0.3).foregroundStyle(AureaColors.muted).frame(minHeight: 11 * 1.35)
+                        .tracking(aureaTracking(0.3)).foregroundStyle(AureaColors.muted).frame(minHeight: 11 * 1.35)
                     gap(AureaDims.s2)
                     ForEach(specs.indices, id: \.self) { index in
                         HStack(spacing: 0) {
-                            Text(specs[index]["label"] as? String ?? "").font(EffectPickerLayout.description).tracking(-0.1)
+                            Text(specs[index]["label"] as? String ?? "").font(EffectPickerLayout.description).tracking(aureaTracking(-0.1))
                                 .frame(maxWidth: .infinity, minHeight: 14 * 1.35, alignment: .leading)
                             cardSpec(summary(specs[index])).multilineTextAlignment(.trailing)
                         }.padding(.vertical, EffectPickerLayout.parameterPadding)
@@ -836,7 +838,7 @@ struct EffectAboutSheet: View {
 
     private func gap(_ height: CGFloat) -> some View { Color.clear.frame(height: height) }
     private func cardSpec(_ text: String) -> some View {
-        Text(text).font(.aurea(size: 11)).tracking(-0.1).foregroundStyle(AureaColors.muted)
+        Text(text).font(.aurea(size: 11)).tracking(aureaTracking(-0.1)).foregroundStyle(AureaColors.muted)
             .frame(minHeight: 11 * 1.35).fixedSize(horizontal: false, vertical: true)
     }
     private func summary(_ spec: [String: Any]) -> String {

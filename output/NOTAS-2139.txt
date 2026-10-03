@@ -1,0 +1,35 @@
+AUREA — Atualização 2139
+2.0.0-beta2 • 03/10/2026
+
+EFEITOS
+• Novos efeitos de animação: Blink, Flicker, Pulse Size, Random Displacement,
+  Random Jitter, Swing e Spin.
+• Keying e máscaras: Chroma Key básico e avançado, Color Luma Key, Luma Key,
+  Matte Choker e Solid Matte.
+• Transformações: Offset, Raster Transform, Stretch Axis e Scale Assist.
+• Repetições: Basic, Grid, Linear, Radial, Along Path e Scatter Repeat.
+• Distorções: Squeeze e Fish Eye.
+• Criação de efeitos personalizados nos modos normal e avançado, inclusive
+  em imagens, usando combinações e parâmetros dos efeitos disponíveis.
+
+EDIÇÃO E INTERFACE
+• Corrigidos os cortes à esquerda e à direita em clipes estendidos.
+• Corrigido o arraste de corte com edição magnética.
+• Timeline com botões de corte identificados e filtro de camadas.
+• Interface adaptada a telas menores, modo paisagem e fontes ampliadas.
+• Ajuste automático para encaixar ou preencher o vídeo no projeto.
+
+PREVIEW E TEXTO
+• Buffer antecipado de vídeo, inclusive com o preview pausado.
+• Corrigidos descartes e buscas repetidas de quadros durante o buffering.
+• Corrigida a perda do quadro pendente quando os buffers do Android estão ocupados.
+• Contornos de texto preservam o preenchimento das letras vizinhas.
+• Corrigidos blocos coloridos em letras pequenas e cortes no contorno animado.
+
+OBSERVAÇÕES
+• A atualização automática dentro do app ficou fora desta versão, conforme solicitado.
+• As mudanças foram implementadas no Android e no iOS.
+• Os testes de Android passaram no emulador; ainda é necessário validar as
+  piscadas e o desempenho nos celulares afetados.
+• Não foi comprovada equivalência visual exata com todos os efeitos do After Effects.
+• O IPA do pipeline do projeto é sem assinatura e precisa ser assinado para instalar.

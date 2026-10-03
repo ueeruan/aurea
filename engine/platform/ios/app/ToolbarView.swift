@@ -4,6 +4,7 @@ import UIKit
 import PhotosUI
 
 struct TopBarView: View {
+    var height: CGFloat = EditorLayout.topBar
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     private var layer: LayerItem? { model.selectedLayer }
@@ -19,7 +20,7 @@ struct TopBarView: View {
             else if let layer { layerBar(layer) }
             else { projectBar }
         }
-        .frame(height: EditorLayout.topBar)
+        .frame(height: height)
         .background(AureaColors.editorCanvas)
         // Abertos pelo menu da engrenagem (ShellOverlayHost) ou pela lupa das barras.
         .sheet(isPresented: $shell.performanceTest) { PerformanceTestPanel() }
@@ -226,23 +227,35 @@ struct TransportView: View {
     }
 
     private var buttons: some View {
+        GeometryReader { geometry in
+        let compact = geometry.size.width < 368
+        let tiny = geometry.size.width < 320
         HStack(spacing: 0) {
             undoButton
             Spacer(minLength: 0)
-            redoButton
-            Spacer(minLength: 0)
+            if !tiny { redoButton; Spacer(minLength: 0) }
             startButton
             Spacer(minLength: 0)
-            markerButton
-            Spacer(minLength: 0)
+            if !compact { markerButton; Spacer(minLength: 0) }
             playButton
             Spacer(minLength: 0)
             endButton
             Spacer(minLength: 0)
-            duplicateButton
+            if compact {
+                Menu {
+                    if tiny { Button(AureaText.t("editor_refazer")) { model.redo() }.disabled(model.status.canRedo == 0) }
+                    Button(AureaText.t("editor_dividir_cabecote")) { model.splitAtPlayhead(Array(model.selection)) }.disabled(model.selection.isEmpty)
+                    Button(AureaText.t("editor_marcar_ou_desmarcar_este_instante")) { model.toggleMarkerAt(model.status.playhead) }
+                    Button(AureaText.t("editor_duplicar_camada_segure_copiar")) {
+                        model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+                    }.disabled(model.selection.isEmpty)
+                } label: { CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 22, color: AureaColors.text).frame(width: 44, height: 44) }
+                .accessibilityLabel(AureaText.t("timeline_more"))
+            } else { duplicateButton }
             Spacer(minLength: 0)
             fullscreenButton
-        }.padding(.horizontal, 4)
+        }.padding(.horizontal, 4).frame(height: EditorLayout.transport)
+        }
     }
 
     private var undoButton: some View {

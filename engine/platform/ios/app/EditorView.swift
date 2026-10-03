@@ -27,13 +27,14 @@ struct EditorView: View {
     var body: some View {
         GeometryReader { geometry in
             let wide = !model.fullscreen && model.panel != .curve && EditorLayout.isWide(geometry.size.width, geometry.size.height)
-            let sideWidth = (geometry.size.width * 0.4).clamped(to: 280...380)
+            let sideWidth = EditorLayout.wideSheetWidth(geometry.size.width)
             let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
             // Fora da tela cheia o palco tem 8 pt de margem de cada lado.
             let sideMargin: CGFloat = model.fullscreen ? 0 : EditorLayout.previewSideMargin
             let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent, fullscreen: model.fullscreen,
                                              width: max(0, geometry.size.width - sideMargin * 2), aspect: aspect, preferred: CGFloat(previewPreference),
-                                             dockRows: model.sheetContent == .dock ? DockView.tileRows(model) : 2)
+                                             dockRows: model.sheetContent == .dock ? DockView.tileRows(model) : 2,
+                                             fontScale: UIFont.preferredFont(forTextStyle: .body).pointSize / 17)
             Group {
                 if model.sceneEditor {
                     SceneLayoutWorkspace(height: geometry.size.height)
@@ -56,7 +57,7 @@ struct EditorView: View {
                     }
                 } else {
                     VStack(spacing: 0) {
-                        if !model.fullscreen { TopBarView().frame(height: metrics.topBar) }
+                        if !model.fullscreen { TopBarView(height: metrics.topBar) }
                         PreviewStage(height: max(0, metrics.preview - (model.fullscreen ? StageDim.fullscreenTimeBar : 0)))
                             .padding(.horizontal, sideMargin)
                         if model.fullscreen {
@@ -1028,11 +1029,11 @@ private struct DockView: View {
                     }
                     // O tempo num bloco só, com os colchetes do AM: a parte tracejada é a que sai.
                     HStack(spacing: 0) {
-                        trimAction(.start, "editor_aparar_inicio_cabecote") { timeEdit(layer) { model.trimStart(layer.id, at: model.status.playhead) } }
+                        trimAction(.start, "editor_aparar_inicio_cabecote") { timeEdit(layer) { if !model.trimStart(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                         dockDivider
                         trimAction(.split, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
                         dockDivider
-                        trimAction(.end, "editor_aparar_fim_cabecote") { timeEdit(layer) { model.trimEnd(layer.id, at: model.status.playhead) } }
+                        trimAction(.end, "editor_aparar_fim_cabecote") { timeEdit(layer) { if !model.trimEnd(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
@@ -1110,6 +1111,7 @@ private struct DockView: View {
     /// mesma geometria do `DockTrimTool` do Android).
     private enum TrimGlyph { case start, split, end }
     private func trimAction(_ kind: TrimGlyph, _ key: String, action: @escaping () -> Void) -> some View {
+        VStack(spacing: 0) {
         Canvas { context, size in
             let u = size.width / 24
             let stroke = 1.8 * u
@@ -1126,9 +1128,13 @@ private struct DockView: View {
             mid.move(to: CGPoint(x: 12 * u, y: 3.5 * u)); mid.addLine(to: CGPoint(x: 12 * u, y: 20.5 * u))
             context.stroke(mid, with: .color(AureaColors.text), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
         }
-        .frame(width: 26, height: 26)
+        .frame(width: 22, height: 22)
+        Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
+            .font(.aurea(size: 10)).lineLimit(1)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         .onTapGesture(perform: action)
+        .accessibilityIdentifier(kind == .start ? "timeline.cut.start" : kind == .end ? "timeline.cut.end" : "timeline.cut.split")
         .accessibilityElement().accessibilityLabel(AureaText.t(key)).accessibilityAddTraits(.isButton)
     }
     /// Só o ícone, como na fileira de tempo do editor antigo; a descrição

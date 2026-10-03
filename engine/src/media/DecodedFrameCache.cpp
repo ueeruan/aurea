@@ -72,7 +72,11 @@ f64 DecodedFrameCache::cost_locked(i64 ptsUs, i64 durationUs) const noexcept {
     const i64 d = ptsUs - focusUs_;
     const f64 dist = static_cast<f64>(d < 0 ? -d : d);
     const bool behind = (direction_ > 0 && d < 0) || (direction_ < 0 && d > 0);
-    return behind ? dist * 3.0 : dist;
+    // Keep the contiguous prefetch window ahead of the playhead. A fixed
+    // weight of 3 retained yesterday's frame instead of the sixth frame
+    // ahead; the decoder consumed that rejected frame and had to seek back
+    // to decode it again on the next request.
+    return behind ? dist * std::max(3.0, static_cast<f64>(frame_limit_locked()) + 1.0) : dist;
 }
 
 bool DecodedFrameCache::required_locked(i64 pts, i64 duration) const noexcept {

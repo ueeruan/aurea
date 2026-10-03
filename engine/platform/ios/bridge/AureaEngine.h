@@ -250,6 +250,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (float)clampPinchFactor3D:(float)factor kind:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z NS_SWIFT_NAME(clampPinchFactor3D(_:kind:scaleX:scaleY:scaleZ:));
 /// Escala 3D de gesto já no formato gravado: axis 0..2 eixo, 3 uniforme, 4 ajustar (GestureMath.hpp).
 - (NSArray<NSNumber*>*)gestureScale3D:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z axis:(int)axis factor:(float)factor NS_SWIFT_NAME(gestureScale3D(_:scaleX:scaleY:scaleZ:axis:factor:));
+- (NSArray<NSNumber*>*)fitCanvas:(NSArray<NSNumber*>*)values fill:(BOOL)fill NS_SWIFT_NAME(fitCanvas(_:fill:));
 - (NSArray<NSNumber*>*)previewGestureBasis:(long long)layer;
 - (NSArray<NSNumber*>*)previewGestureValue:(NSArray<NSNumber*>*)basis dx:(float)dx dy:(float)dy rotate:(BOOL)rotate;
 

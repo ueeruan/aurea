@@ -49,17 +49,19 @@ u32 ParameterRegistry::add_float(const char* id, const char* label, f32 def, f32
     return add(s);
 }
 
-u32 ParameterRegistry::add_int(const char* id, const char* label, i32 def, i32 min, i32 max) {
+u32 ParameterRegistry::add_int(const char* id, const char* label, i32 def, i32 min, i32 max, u16 flags) {
     ParamSpec s;
     s.id = id; s.label = label; s.type = ParamType::Int;
+    s.flags = flags;
     s.defaultValue = ParamValue::scalar(static_cast<f32>(def));
     s.minValue = static_cast<f32>(min); s.maxValue = static_cast<f32>(max);
     return add(s);
 }
 
-u32 ParameterRegistry::add_bool(const char* id, const char* label, bool def) {
+u32 ParameterRegistry::add_bool(const char* id, const char* label, bool def, u16 flags) {
     ParamSpec s;
     s.id = id; s.label = label; s.type = ParamType::Bool;
+    s.flags = flags;
     s.defaultValue = ParamValue::boolean(def);
     s.minValue = 0.0f; s.maxValue = 1.0f;
     return add(s);

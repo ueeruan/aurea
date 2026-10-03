@@ -2535,14 +2535,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * borda anda (o deslocamento interno compensa). Vídeo não passa do começo
      * da mídia; nenhuma camada fica com menos de 1 frame.
      */
-    fun trimStart(layer: Long, newStart: Int) {
-        engine.editClipTime(layer, 0, newStart.toLong())
+    fun trimStart(layer: Long, newStart: Int): Boolean {
+        val changed = engine.editClipTime(layer, 0, newStart.toLong())
         refreshNow()
+        return changed
     }
 
-    fun trimEnd(layer: Long, newEnd: Int) {
-        engine.editClipTime(layer, 1, newEnd.toLong())
+    fun trimEnd(layer: Long, newEnd: Int): Boolean {
+        val changed = engine.editClipTime(layer, 1, newEnd.toLong())
         refreshNow()
+        return changed
     }
 
     fun editClipTime(operation: Int, amount: Int, previous: Long = 0, next: Long = 0) {

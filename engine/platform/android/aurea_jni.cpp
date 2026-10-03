@@ -212,11 +212,19 @@ void release_window_locked(NativeContext& c) noexcept {
 
 } // namespace
 
+#include "aurea/timeline/CanvasFit.hpp"
 #define AUREA_JNI extern "C" JNIEXPORT
 #define AUREA_FN(name) JNICALL Java_com_aurea_aurea_engine_AureaEngine_##name
 
 AUREA_JNI jfloat AUREA_FN(clampPinchFactor)(JNIEnv*, jclass, jfloat factor, jfloat x, jfloat y, jfloat z, jboolean threeD) {
     return aurea::clamp_pinch_factor(factor, x, y, z, threeD == JNI_TRUE);
+}
+
+AUREA_JNI jfloatArray AUREA_FN(fitCanvas)(JNIEnv* env,jclass,jfloatArray values,jboolean fill) {
+    if(!values||env->GetArrayLength(values)!=11)return env->NewFloatArray(0);
+    std::array<float,11> a{};env->GetFloatArrayRegion(values,0,11,a.data());
+    const auto fit=aurea::canvas_fit(a,fill==JNI_TRUE);
+    auto result=env->NewFloatArray(5);if(result)env->SetFloatArrayRegion(result,0,5,fit.data());return result;
 }
 
 // Escala 3D de gesto no formato gravado (GestureMath.hpp): o volume nunca estica.

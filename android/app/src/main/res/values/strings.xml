@@ -419,7 +419,7 @@
     <string name="panel_adicionar_mascara">+ Adicionar máscara</string>
     <string name="panel_adicionar_ponto">Adicionar ponto</string>
     <string name="panel_ainda_nao_editavel_app">Ainda não editável no app</string>
-    <string name="panel_ajustar">Ajustar</string>
+    <string name="panel_ajustar">Ajustar ao projeto</string>
     <string name="panel_alinhamento">Alinhamento</string>
     <string name="panel_alta_qualidade">Alta qualidade</string>
     <string name="panel_alternar_deixa_furos">Alternar (deixa furos)</string>
@@ -718,7 +718,7 @@
     <string name="panel_pontas">Pontas</string>
     <string name="panel_posicao_x">Posição X</string>
     <string name="panel_posicao_y">Posição Y</string>
-    <string name="panel_preencher">Preencher</string>
+    <string name="panel_preencher">Preencher projeto</string>
     <string name="panel_preencher_tudo">Preencher tudo</string>
     <string name="panel_preenchimento">Preenchimento</string>
     <string name="panel_preenchimento_6e8f">preenchimento</string>
@@ -3516,4 +3516,23 @@
     <string name="lut_imported">LUT importado</string>
     <string name="lut_invalid">Não foi possível importar. Use um .cube até 32 MB, com LUT 1D ou 3D de até 65 pontos por eixo.</string>
     <string name="scene_flare3d">Flare 3D</string>
+    <string name="fx_custom_create">Criar efeito</string>
+    <string name="fx_custom_library">Meus efeitos</string>
+    <string name="fx_custom_normal">Normal</string>
+    <string name="fx_custom_advanced">Avançado</string>
+    <string name="fx_custom_save">Salvar efeito</string>
+    <string name="fx_custom_name">Nome do efeito</string>
+    <string name="fx_custom_cancel">Cancelar</string>
+    <string name="fx_custom_normal_help">Adicione efeitos e ajuste os valores para combinar o resultado. Salvar guarda a pilha e os keyframes para usar também em fotos.</string>
+    <string name="fx_custom_advanced_help">Abra um efeito para editar todos os controles. No menu de cada parâmetro você pode usar expressões e keyframes. Salvar guarda o efeito aberto.</string>
+    <string name="fx_name_chroma_key_advanced">Chroma Key (Avançado)</string>
+    <string name="preview_buffer_note">Buffer automático: os próximos quadros são preparados enquanto a reprodução está pausada.</string>
+    <string name="timeline_cut_left">Esquerda</string>
+    <string name="timeline_cut_right">Direita</string>
+    <string name="timeline_more">Mais ações da timeline</string>
+    <string name="timeline_cut_failed">Não foi possível cortar. Confira os limites do clipe e se há camadas bloqueadas na faixa magnética.</string>
+    <string name="timeline_show_all">Ver todas</string>
+    <string name="timeline_selected_only">Só seleção</string>
+    <string name="timeline_all_short">Todas</string>
+    <string name="timeline_selection_short">Seleção</string>
 </resources>

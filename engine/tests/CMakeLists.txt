@@ -52,6 +52,7 @@ add_executable(aurea_tests
     test_edit.cpp
     test_tracking.cpp
     test_motion_geometry.cpp
+    test_motion_extras.cpp
     test_tracking_flow.cpp
     test_text.cpp
     test_presets.cpp

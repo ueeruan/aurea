@@ -5539,6 +5539,88 @@ AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
     AUREA_CHECK(whiteShadow * 10 > whitePlain * 8);   // a sombra fica ATRÁS do texto
 }
 
+AUREA_TEST(Gpu, TextOutlineKeepsNeighborFillsAndAnimatedMargins) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    auto id = rig.e.add_text("AVAVA");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    layer->text.size = 100;
+    layer->text.tracking = -80;
+    layer->text.color = {1, 1, 1, 1};
+    layer->text.strokeColor = {1, 0, 0, 1};
+    auto stroke = [&](f32 width) {
+        Command cmd; cmd.type = CommandType::TextSetStrokeWidth;
+        cmd.text_stroke_width.layer = LayerId::unpack(*id);
+        cmd.text_stroke_width.width = width;
+        AUREA_CHECK(rig.e.apply_command(cmd).ok());
+    };
+    stroke(0);
+    const Image8 plain = rig.capture(640);
+    stroke(18);
+    const Image8 outlined = rig.capture(640);
+    u32 white = 0, overwritten = 0;
+    for (usize p = 0; p + 3 < plain.rgba.size(); p += 4) {
+        if (plain.rgba[p + 1] < 250) continue;
+        ++white;
+        if (outlined.rgba[p + 1] < 240) ++overwritten;
+    }
+    std::printf("    outline: %u filled pixels, %u overwritten by adjacent stroke\n", white, overwritten);
+    AUREA_CHECK(white > 1000);
+    AUREA_CHECK(overwritten < white / 100);
+
+    // A uniform text animator must have the same margin as a static outline.
+    stroke(0);
+    TextAnimator animator;
+    animator.props = kTextPropStrokeWidth;
+    animator.strokeWidth = 18;
+    layer->text.animators.push_back(animator);
+    const Image8 animated = rig.capture(640);
+    AUREA_CHECK_MSG(max_diff(outlined, animated) <= 2, "animated outline clipped at the text layer bounds");
+    (void)write_png("build/text-outline-regression.png", outlined);
+}
+
+AUREA_TEST(Gpu, TextOutlineSmallSpanDoesNotBecomeSolidRectangle) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto id = rig.e.add_text("O");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    layer->text.size = 100;
+    TextSpan span; span.start = 0; span.end = 1; span.scale = .25f;
+    layer->text.spans.push_back(span);
+    layer->text.color = {1, 1, 1, 1};
+    layer->text.strokeColor = {1, 0, 0, 1};
+    Command stroke; stroke.type = CommandType::TextSetStrokeWidth;
+    stroke.text_stroke_width.layer = LayerId::unpack(*id);
+    stroke.text_stroke_width.width = 20;
+    AUREA_CHECK(rig.e.apply_command(stroke).ok());
+    const Image8 outlined = rig.capture(320);
+    int x0 = 320, y0 = 180, x1 = 0, y1 = 0;
+    for (u32 y = 0; y < outlined.height; ++y) for (u32 x = 0; x < outlined.width; ++x) {
+        if (outlined.at(x, y)[0] < 128) continue;
+        x0 = std::min(x0, int(x)); y0 = std::min(y0, int(y));
+        x1 = std::max(x1, int(x)); y1 = std::max(y1, int(y));
+    }
+    AUREA_CHECK(x1 > x0 && y1 > y0);
+    if (x1 > x0 && y1 > y0) {
+        u32 corners = 0;
+        for (int dy = 0; dy < 3; ++dy) for (int dx = 0; dx < 3; ++dx) {
+            corners += outlined.at(x0 + dx, y0 + dy)[0] > 128;
+            corners += outlined.at(x1 - dx, y0 + dy)[0] > 128;
+            corners += outlined.at(x0 + dx, y1 - dy)[0] > 128;
+            corners += outlined.at(x1 - dx, y1 - dy)[0] > 128;
+        }
+        std::printf("    outline: %u of 36 corner pixels filled\n", corners);
+        AUREA_CHECK(corners < 18);
+    }
+    (void)write_png("build/text-outline-small-span.png", outlined);
+}
+
 AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
     AUREA_REQUIRE_GPU();
     for (u32 preset : {10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u, 18u}) {
@@ -5589,9 +5671,15 @@ AUREA_TEST(Gpu, JuanPresetsRenderAndKeepExpressionsAfterReopen) {
             command.seek.time = tick_at(FrameIndex{frame}, 30.0);
             AUREA_CHECK(rig.e.apply_command(command).ok());
         };
-        seek(60);
+        // The pack presets (19+) include an exit shortly after their one-second
+        // entry. Sample the entry endpoint before checking the saved animation.
+        seek(preset >= 19 ? 30 : 60);
         const auto settled = rig.capture(640);
         AUREA_CHECK(coverage(settled) > .00001f);
+        if (preset == 20 || preset == 21 || preset == 24) {
+            seek(60);
+            AUREA_CHECK(coverage(rig.capture(640)) < .00001f);
+        }
         seek(12);
         const auto before = rig.capture(640);
         const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_juan_roundtrip.aurea";
@@ -12184,3 +12272,4 @@ AUREA_TEST(Gpu, Text3DDepthAndBevelEditsReachTheFrame) {
         }
     }
 }
+#include "MotionExtrasGpu.inl"

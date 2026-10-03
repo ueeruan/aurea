@@ -21,6 +21,7 @@ struct EffectsView: View {
     @State private var pendingPick: UInt32?
     @State private var importingAM = false
     @State private var importTask: Task<Void, Never>?
+    @State private var creatorMode = -1
     @State private var openId: UInt32?
     @State private var known: Set<UInt32> = []
     @State private var loadedLayer: Int64?
@@ -65,6 +66,7 @@ struct EffectsView: View {
                 ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
+                        if tabbed { customEffects }
                         if tabbed && ordered.isEmpty && tools.isEmpty { PanelNotice(AureaText.t("effects_applied_empty")) }
                         ForEach(tools, id: \.key) { tool in toolCard(tool).padding(.bottom, 8) }
                         ForEach(ordered) { effect in
@@ -304,7 +306,7 @@ struct EffectsView: View {
                             AdvancedToggle(open: advanced.contains(effect.effectId), count: groups.rest.count) {
                                 if advanced.contains(effect.effectId) { advanced.remove(effect.effectId) } else { advanced.insert(effect.effectId) }
                             }
-                            if advanced.contains(effect.effectId) { ForEach(groups.rest) { param in parameter(param, effect: effect.effectId) } }
+                            if creatorMode == 1 || advanced.contains(effect.effectId) { ForEach(groups.rest) { param in parameter(param, effect: effect.effectId) } }
                         }
                     }
                 }.padding(.horizontal, 6).opacity(effect.enabled ? 1 : 0.45)
@@ -701,6 +703,37 @@ struct EffectsView: View {
         model.addCatalogEffect(entry.typeId, layers: targets.map(\.id))
         model.refreshModel(force: true)
     }
+    private var customEffects: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    Button(AureaText.t("fx_custom_create")) { creatorMode = creatorMode < 0 ? 0 : -1 }.frame(minHeight: 44)
+                    Button(AureaText.t("fx_custom_library")) { model.presetsOpenKind = "efeitos"; model.openPanel(.presets) }.frame(minHeight: 44)
+                }
+            }
+            if creatorMode >= 0 {
+                Picker(AureaText.t("fx_custom_create"), selection: $creatorMode) {
+                    Text(AureaText.t("fx_custom_normal")).tag(0)
+                    Text(AureaText.t("fx_custom_advanced")).tag(1)
+                }.pickerStyle(.segmented)
+                Text(AureaText.t(creatorMode == 0 ? "fx_custom_normal_help" : "fx_custom_advanced_help"))
+                    .font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+                Button(AureaText.t("fx_custom_save")) {
+                    let mode = creatorMode, effect = openId, layer = model.primarySelection
+                    model.namePrompt = NamePromptRequest(title: AureaText.t("fx_custom_name"), initial: "") { name in
+                        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let layer, layer == model.primarySelection else { return }
+                        if mode == 1, let effect { model.saveEffectPreset(effectId: effect, name: name); return }
+                        let json = model.engine.savePreset(layer, kind: 0, name: name, parts: 3)
+                        guard !json.isEmpty, let saved = model.storeEffectPreset(name: name, json: json) else {
+                            model.toast = AureaText.t("msg_nao_foi_possivel_salvar_o_preset"); return
+                        }
+                        model.toast = AureaText.t("msg_preset_salvo", saved)
+                    }
+                }.frame(minHeight: 44).disabled(ordered.isEmpty || (creatorMode == 1 && openId == nil))
+            }
+        }.padding(.vertical, 8)
+    }
+
     private func listMenu() {
         // "Meus presets" saiu (pedido de 2026-10-01: ninguém usa); o motor
         // continua lendo os presets dos projetos antigos.

@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
  * passa por xOf: seu frame inteiro pode não coincidir com `view` durante um gesto.
  */
 internal object TimeAxis {
-    fun safeFps(fps: Float): Float = if (fps > 0f) fps else 30f
+    fun safeFps(fps: Float): Float = if (fps.isFinite() && fps in 1f..1000f) fps else 30f
 
     /** px por frame para um zoom em dp/s. */
     fun pxPerFrame(pps: Float, density: Float, fps: Float): Float = pps * density / safeFps(fps)
@@ -30,7 +30,8 @@ internal object TimeAxis {
         (centerX + (frame - view) * pxPerFrame).toFloat()
 
     fun frameAt(x: Float, view: Double, pxPerFrame: Float, centerX: Float): Double =
-        if (pxPerFrame == 0f) view else view + (x.toDouble() - centerX) / pxPerFrame
+        if (!pxPerFrame.isFinite() || pxPerFrame <= 0f || !x.isFinite() || !centerX.isFinite()) view
+        else view + (x.toDouble() - centerX) / pxPerFrame
 
     /**
      * A vista não vai para antes do zero, mas PODE passar do fim da composição
@@ -53,11 +54,11 @@ internal object Zoom {
     /** A.01 enquadra projetos longos (≥ 20 s) na largura ao abrir. */
     const val AUTO_FIT_MIN_SECONDS = 20f
 
-    fun clamp(pps: Float): Float = pps.coerceIn(MIN_PPS, MAX_PPS)
+    fun clamp(pps: Float): Float = if (pps.isFinite()) pps.coerceIn(MIN_PPS, MAX_PPS) else DEFAULT_PPS
 
     /** `clamp((largura − 32) / segundos, 4, 80)` da A.01. */
     fun autoFit(availableDp: Float, seconds: Float): Float =
-        if (seconds <= 0f) DEFAULT_PPS else (availableDp / seconds).coerceIn(4f, DEFAULT_PPS)
+        if (!seconds.isFinite() || !availableDp.isFinite() || seconds <= 0f) DEFAULT_PPS else (availableDp / seconds).coerceIn(4f, DEFAULT_PPS)
 
     /** Pinça: a vista que mantém `focusFrame` sob o ponto focal `focusX`. */
     fun anchoredView(focusFrame: Double, focusX: Float, centerX: Float, pxPerFrame: Float): Double =
@@ -120,7 +121,7 @@ internal object Timecode {
     fun format(frame: Int, fps: Float): String {
         val p = IntArray(4)
         split(frame, fps, p)
-        val base = String.format(Locale.ROOT, "%02d:%02d:%02d", p[1], p[2], p[3])
+        val base = String.format(Locale.ROOT, if (TimeAxis.safeFps(fps) > 100f) "%02d:%02d:%03d" else "%02d:%02d:%02d", p[1], p[2], p[3])
         return if (p[0] > 0) "${p[0]}:$base" else base
     }
 
@@ -180,7 +181,7 @@ internal object Snap {
         val db = if (b == NONE) Double.MAX_VALUE else abs(b.toLong() - end).toDouble()
         when {
             a != NONE && da <= db -> { out[0] = a; out[1] = a }
-            b != NONE -> { out[0] = b - length; out[1] = b }
+            b != NONE -> { out[0] = (b.toLong() - length).coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt(); out[1] = b }
             else -> { out[0] = start; out[1] = NONE }
         }
     }

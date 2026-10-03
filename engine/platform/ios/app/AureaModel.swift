@@ -3483,9 +3483,10 @@ final class AureaModel: ObservableObject {
     }
 
     /// Trim do INÍCIO para `frame`: o conteúdo fica parado e só a borda anda.
-    func trimStart(_ layerId: Int64, at frame: Int64) {
-        _ = engine.editClipTime(layerId, operation: 0, amount: frame, previous: 0, next: 0)
+    @discardableResult func trimStart(_ layerId: Int64, at frame: Int64) -> Bool {
+        let changed = engine.editClipTime(layerId, operation: 0, amount: frame, previous: 0, next: 0)
         refreshModel(force: true)
+        return changed
     }
 
     /// Puxa a camada INTEIRA para o cabeçote: o clipe anda, a duração não muda e
@@ -3505,9 +3506,10 @@ final class AureaModel: ObservableObject {
     }
 
     /// Trim do FIM para `frame`. O vídeo não passa do fim da mídia.
-    func trimEnd(_ layerId: Int64, at frame: Int64) {
-        _ = engine.editClipTime(layerId, operation: 1, amount: frame, previous: 0, next: 0)
+    @discardableResult func trimEnd(_ layerId: Int64, at frame: Int64) -> Bool {
+        let changed = engine.editClipTime(layerId, operation: 1, amount: frame, previous: 0, next: 0)
         refreshModel(force: true)
+        return changed
     }
 
     func editClipTime(_ operation: UInt32, amount: Int64, previous: Int64 = 0, next: Int64 = 0) {
@@ -4141,9 +4143,13 @@ extension AureaModel {
         guard cw > 0, ch > 0, !targets.isEmpty else { return }
         beginGesture(fill ? "preencher a tela" : "ajustar à tela")
         for (id, g) in targets {
-            let k = fill ? max(cw / g.w, ch / g.h) : min(cw / g.w, ch / g.h)
-            let sx = g.scale[0] < 0 ? -k : k, sy = g.scale[1] < 0 ? -k : k
-            let p = positionForCenter(g, sx: sx, sy: sy, cx: cw / 2, cy: ch / 2)
+            let values: [Float] = [cw, ch, g.w, g.h, g.scale[0], g.scale[1],
+                g.anchor[0] + (g.centered ? g.w / 2 : 0), g.anchor[1] + (g.centered ? g.h / 2 : 0),
+                // Match the layer renderer: stored skew does not affect placement.
+                g.rad * 180 / .pi, 0, 0]
+            let fit = engine.fitCanvas(values.map { NSNumber(value: $0) }, fill: fill).map(\.floatValue)
+            guard fit.count == 5, fit[4] > 0 else { continue }
+            let sx = fit[0], sy = fit[1], k = fit[4], p = (fit[2], fit[3])
             if g.threeD {
                 // A regra do motor: Z de conteúdo é relativo a X (o volume não estica).
                 gizmoSetComponents(id, base: 3, values: engine.gestureScale3D(g.kind, scaleX: g.scale[0], scaleY: g.scale[1],

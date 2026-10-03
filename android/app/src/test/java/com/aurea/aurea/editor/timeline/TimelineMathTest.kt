@@ -9,6 +9,16 @@ import kotlin.math.roundToLong
 
 class TimelineMathTest {
 
+    @Test fun invalidZoomAndFrameRatesCannotBreakTheTimeline() {
+        for (fps in listOf(Float.NaN, Float.POSITIVE_INFINITY, 0f, 1e-30f)) {
+            assertEquals(30f, TimeAxis.safeFps(fps), 0f)
+            assertEquals("00:01:00", Timecode.format(30, fps))
+        }
+        assertEquals(80f, Zoom.clamp(Float.NaN), 0f)
+        assertEquals(80f, Zoom.autoFit(320f, Float.NaN), 0f)
+        assertEquals(30.0, TimeAxis.frameAt(120f, 30.0, Float.NaN, 160f), 0.0)
+    }
+
     // --- Tempo ↔ px ---------------------------------------------------------------
     @Test
     fun `o frame sob o cabecote fica no centro e a conta ida e volta fecha`() {

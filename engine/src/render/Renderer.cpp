@@ -1056,6 +1056,47 @@ bool layer_sounds_at(const Layer& l, const Project& project, FrameIndex t) noexc
 
 } // namespace
 
+std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase) noexcept {
+    std::vector<Vec4> result;
+    if (!planComp_ || !host || count == 0) return result;
+    const auto& comp=*planComp_;
+    const auto& order=comp.order(); const Layer* guide=nullptr;
+    for(u32 i=1;i<order.size();++i) if(comp.layer(order.at(i))==host) { guide=comp.layer(order.at(i-1)); break; }
+    if(!guide) return result;
+    vector::Contour contour;
+    if(guide->kind==LayerKind::Shape) {
+        const auto& shape=guide->shape;
+        const Vec2 center{shape.bounds.x+shape.bounds.w*.5f,shape.bounds.y+shape.bounds.h*.5f};
+        const Vec2 size{shape.bounds.w,shape.bounds.h};
+        if(shape.shapeType==kShapeVector) {
+            if(!vector::guide_contour(shape.vector,guide->tracks,double(guide->local_time(planTime_).value),contour))return result;
+        } else if(shape.shapeType==0)vector::flatten(vector::make_rect(center,size,shape.cornerRadius),.25f,contour);
+        else if(shape.shapeType==1)vector::flatten(vector::make_ellipse(center,size),.25f,contour);
+        else if(shape.shapeType==2){contour.pts=shape.path;contour.closed=shape.filled;}
+    }
+    if(contour.pts.empty()&&!guide->masks.empty()) {
+        std::vector<MaskPoint> points;std::vector<Vec4> edges;
+        const auto& mask=guide->masks.front();
+        mask::evaluate_path(mask,double(guide->local_time(planTime_).value),points);
+        mask::flatten(points,mask.closed,.25f,{},edges);
+        contour.closed=mask.closed;
+        for(const auto& edge:edges)contour.pts.push_back({edge.x,edge.y});
+        if(!mask.closed&&!edges.empty())contour.pts.push_back({edges.back().z,edges.back().w});
+    }
+    auto affine=[](const Mat4& m){return vector::Affine2{m.col[0].x,m.col[0].y,m.col[1].x,m.col[1].y,m.col[3].x,m.col[3].y};};
+    const auto toHost=affine(layer_world_matrix(comp,*host,planTime_)).inverse()*affine(layer_world_matrix(comp,*guide,planTime_));
+    for(auto& point:contour.pts)point=toHost.apply(point);
+    const double length=vector::length_of(contour); if(length<1e-6)return result;
+    count=std::min(count,64u); result.reserve(count);
+    for(u32 i=0;i<count;++i) {
+        double unit=double(i)/double(contour.closed?count:std::max(1u,count-1))+phase;
+        unit=contour.closed?unit-std::floor(unit):std::clamp(unit,0.,1.);
+        Vec2 point,tangent; if(!vector::sample_at(contour,unit*length,point,tangent))return {};
+        result.push_back({point.x,point.y,std::atan2(tangent.y,tangent.x),0});
+    }
+    return result;
+}
+
 TextureHandle Renderer::audio_spectrum(const AudioSpectrumRequest& request) noexcept {
     if (!backend_ || !planComp_ || !planProject_ || !planMedia_) return TextureHandle{};
     VideoSourceFactory* factory = planMedia_->factory();
@@ -1700,6 +1741,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (a.props & kTextPropScale) extra += T.size * std::max(0.0f, std::max(maxAbs(ai, text::kScaleX, a.scale.x), maxAbs(ai, text::kScaleY, a.scale.y)) / 100.0f - 1.0f);
                         if (a.props & kTextPropRotation) extra += T.size * 0.5f;
                         if (a.props & kTextPropBlur) extra += maxAbs(ai, text::kBlur, a.blur) * 2.0f;
+                        if (a.props & kTextPropStrokeWidth) extra += std::min(std::max(0.0f, strokeMax), maxAbs(ai, text::kStrokeWidth, a.strokeWidth));
                         if (a.props & kTextPropTracking) extra += maxAbs(ai, text::kTracking, a.tracking) * static_cast<f32>(std::min<usize>(T.content.size(), 200));
                     }
                     pad += std::min(extra, 4000.0f);
@@ -1775,6 +1817,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                 }
                 auto pathM = [&](usize g) { return onPath.empty() ? Mat4::identity() : onPath[g]; };
+                // A span or a fit-to-box layout can make individual glyphs
+                // smaller than T.size. Their distance field shrinks too; a
+                // wider stroke would turn the entire atlas cell into a box.
+                auto glyphStroke = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
+                    return std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, text::kGlyphSpread * q.k - 1.0f));
+                };
+                const bool outlinePass = stroke > 0 || animatorEffect || std::any_of(T.animators.begin(), T.animators.end(),
+                    [](const TextAnimator& a) { return a.enabled && (a.props & kTextPropStrokeWidth); });
                 std::vector<text::GlyphAnim> anim;
                 const Vec4 emptyBounds{1e30f, 1e30f, -1e30f, -1e30f};
                 std::vector<Vec4> wordBounds(std::max(1u, L.words), emptyBounds), lineBounds(std::max(1u, L.lines), emptyBounds);
@@ -1834,11 +1884,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             gi.stroke.w *= a.opacity * w;
                             gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * pathM(g)
                                 * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
-                            gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
+                            gi.misc = Vec4{0, 0, q.k, glyphStroke(q, a)};
                             gi.extra = Vec4{std::max(0.0f, T.shadowBlur) * 0.5f + a.blur, 0, 0, 0};
                             out.glyphs.push_back(gi);
                         }
                     }
+                    const usize textGlyphStart = out.glyphs.size();
                     for (usize g = 0; g < L.quads.size(); ++g) {
                         const text::GlyphQuad& q = L.quads[g];
                         const text::GlyphAnim& a = anim[g];
@@ -1860,9 +1911,22 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         gi.fill = fill;
                         gi.stroke = sc;
                         gi.xform = pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
-                        gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
+                        gi.misc = Vec4{0, 0, q.k, glyphStroke(q, a)};
                         gi.extra = Vec4{a.blur, 0, 0, 0};
                         out.glyphs.push_back(gi);
+                    }
+                    if (outlinePass) {
+                        // Draw every outline behind every fill. Interleaving
+                        // fill+outline per letter let the next letter's thick
+                        // outline erase part of its neighbor (kerning/script).
+                        const usize end = out.glyphs.size();
+                        for (usize gi = textGlyphStart; gi < end; ++gi) {
+                            GlyphInstance fill = out.glyphs[gi];
+                            out.glyphs[gi].fill = Vec4{};
+                            fill.stroke = Vec4{};
+                            fill.misc.w = 0;
+                            out.glyphs.push_back(fill);
+                        }
                     }
                     if (si == 0) rl.source.glyphCount = static_cast<u32>(out.glyphs.size()) - rl.source.glyphFirst;
                 }

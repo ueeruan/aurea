@@ -399,6 +399,10 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_retro_displace_effects(registry);
     // Datamosh (Glitch). Sempre no FIM.
     builtin::register_datamosh_effect(registry);
+    builtin::register_motion_extras(registry);
+    builtin::register_repeat_extras(registry);
+    builtin::register_keying_extras(registry);
+    builtin::register_matte_choker(registry);
 }
 
 } // namespace aurea

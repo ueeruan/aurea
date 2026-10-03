@@ -266,7 +266,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DockTrimTool(TrimGlyph.Start, stringResource(R.string.editor_aparar_inicio_cabecote)) {
-                    timeEdit(store, l) { store.trimStart(l.id, store.playhead) }
+                    timeEdit(store, l) { if (!store.trimStart(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
                 }
                 DockDivider()
                 DockTrimTool(TrimGlyph.Split, stringResource(R.string.editor_dividir_cabecote)) {
@@ -274,7 +274,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                 }
                 DockDivider()
                 DockTrimTool(TrimGlyph.End, stringResource(R.string.editor_aparar_fim_cabecote)) {
-                    timeEdit(store, l) { store.trimEnd(l.id, store.playhead) }
+                    timeEdit(store, l) { if (!store.trimEnd(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
                 }
             }
             // Som: sempre no canto direito; apagado sem áudio. Toque liga/desliga; segurar abre o volume.
@@ -312,16 +312,18 @@ internal enum class TrimGlyph { Start, Split, End }
 
 @Composable
 private fun RowScope.DockTrimTool(kind: TrimGlyph, description: String, onClick: () -> Unit) {
-    Box(
+    Column(
         Modifier
             .weight(1f)
             .fillMaxHeight()
+            .testTag("timeline.cut.${kind.name.lowercase()}")
             .semantics { contentDescription = description }
             .tocavel(haptic = true, onClick = onClick),
-        contentAlignment = Alignment.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         val color = AureaColors.Text
-        androidx.compose.foundation.Canvas(Modifier.size(26.dp)) {
+        androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
             val u = size.width / 24f
             val stroke = 1.8f * u
             val dashed = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * u, 2.0f * u))
@@ -346,6 +348,11 @@ private fun RowScope.DockTrimTool(kind: TrimGlyph, description: String, onClick:
                 strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round,
             )
         }
+        Text(stringResource(when(kind) {
+            TrimGlyph.Start -> R.string.timeline_cut_left
+            TrimGlyph.Split -> R.string.dock_short_split
+            TrimGlyph.End -> R.string.timeline_cut_right
+        }), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = AureaColors.Text)
     }
 }
 

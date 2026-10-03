@@ -6358,6 +6358,14 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
         // must still work so it can be relinked later.
         if (maxSource < 0) return true;
         const auto inside = [&](f64 value) { return std::isfinite(value) && value >= -0.001 && value <= maxSource + 0.001; };
+        // Older projects and manually extended clips may hold the last source
+        // frame beyond the media's duration. Removing part of such a clip is
+        // still valid: no new source range is introduced by a shorter interval.
+        const bool onlyShortening = &item == &edited &&
+            ((operation == 0 && target >= start) || (operation == 1 && target <= end));
+        if (onlyShortening)
+            return std::isfinite(item.source_frame(item.start)) &&
+                   std::isfinite(item.source_frame(FrameIndex{item.end.value - 1}));
         if (!inside(item.source_frame(item.start)) || !inside(item.source_frame(FrameIndex{item.end.value - 1}))) return false;
         if (operation == 2) {
             const i64 lo = item.local_time(item.start).value, hi = item.local_time(FrameIndex{item.end.value - 1}).value;
@@ -8310,15 +8318,19 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         lastMediaGen_ = mediaGen;
 
         rs = current_render_settings();
-        const DecodeMode mode = playing ? DecodeMode::Playback
+        // Paused preview fills the same bounded decoder cache used by playback.
+        // Scrubbing still coalesces to the requested frame; no speculative seeks.
+        const bool buffering = !playing && playback_.mode() == PlaybackMode::Paused && !caps_.thermal().severe();
+        const DecodeMode mode = playing || buffering ? DecodeMode::Playback
                               : playback_.mode() == PlaybackMode::Scrubbing ? DecodeMode::Scrub
                                                                             : DecodeMode::Still;
+        const i32 decodeDirection = buffering ? (playback_.speed() < 0 ? -1 : 1) : playback_.direction();
         if (rs.rawPlayback && rawLayer && rawAsset) {
             renderer_.prepare_raw(rawPlaybackLayer_, *rawLayer, *rawAsset, playback_.current_ns() / 1000, media_, ++frameCounter_,
-                                  mode, playback_.direction(), playback_.speed(), rs.mediaGeneration, snapshot_);
+                                  mode, decodeDirection, playback_.speed(), rs.mediaGeneration, snapshot_);
         } else {
             renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
-                              playback_.direction(), mode, playback_.speed(), snapshot_);
+                              decodeDirection, mode, playback_.speed(), snapshot_);
         }
     }
     const u64 tPrepared = monotonic_ns();

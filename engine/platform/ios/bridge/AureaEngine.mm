@@ -28,6 +28,7 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
+#include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/vector/Vector.hpp"
 
@@ -1050,6 +1051,13 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         c->transform.opacity = opacity;
     }
     [self flush];
+}
+
+- (NSArray<NSNumber*>*)fitCanvas:(NSArray<NSNumber*>*)values fill:(BOOL)fill {
+    if(values.count!=11)return @[];
+    std::array<float,11> a{};for(NSUInteger i=0;i<11;++i)a[i]=values[i].floatValue;
+    const auto fit=aurea::canvas_fit(a,fill);
+    return @[@(fit[0]),@(fit[1]),@(fit[2]),@(fit[3]),@(fit[4])];
 }
 
 - (void)setPositionForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z {

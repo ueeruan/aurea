@@ -475,6 +475,7 @@ public:
     /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
     [[nodiscard]] TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept override;
+    [[nodiscard]] std::vector<Vec4> repeat_path(const Layer* host, u32 count, f32 phase) noexcept override;
     /// Mapa de profundidade da fonte da camada no instante do `prepare` em
     /// curso (render/RendererDepth.cpp). Imagem: síncrono, uma vez. Vídeo: o
     /// export espera o quadro; o preview agenda e mostra o último pronto.

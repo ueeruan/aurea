@@ -236,7 +236,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.key.chroma",
         EffectHuman(
-            name = R.string.fx_name_chroma_key,
+            name = R.string.fx_name_chroma_key_advanced,
             keywords = "chave de croma chroma key fundo verde green screen remover cor",
             principal = listOf(0, 1, 2),
             params = mapOf(

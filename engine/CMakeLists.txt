@@ -127,6 +127,9 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/PatternEffects.cpp
     src/effects/builtin/SampledBlurEffects.cpp
     src/effects/builtin/MotionBehaviorEffects.cpp
+    src/effects/builtin/MotionExtras.cpp
+    src/effects/builtin/RepeatExtras.cpp
+    src/effects/builtin/KeyingExtras.cpp
     src/effects/builtin/FinishingEffects.cpp
     src/effects/builtin/GenerateEffects.cpp
     src/effects/builtin/MatteEffects.cpp

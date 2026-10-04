@@ -54,7 +54,9 @@ public:
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
+    std::function<Status(const BufferDesc&)> beforeCreateBuffer;
     std::function<Status(u64, u64)> beforeWaitFrame;
+    std::function<Status(TextureHandle, const void*, u32)> beforeTextureUpload;
     std::atomic<u32> idleWaits{0};
     GPUCapabilities caps;
 
@@ -122,6 +124,10 @@ public:
         return TextureHandle{textures.size()};
     }
     Result<BufferHandle> create_buffer(const BufferDesc& desc) noexcept override {
+        if (beforeCreateBuffer) {
+            const Status status = beforeCreateBuffer(desc);
+            if (!status.ok()) return status;
+        }
         const BufferHandle handle{++ids_};
         if (mapBuffers) mappedBuffers[handle.id].resize(desc.bytes);
         return handle;
@@ -148,7 +154,9 @@ public:
     TextureDesc texture_desc(TextureHandle h) const noexcept override {
         return h.id && h.id <= textures.size() ? textures[h.id - 1] : TextureDesc{};
     }
-    Status upload_texture(TextureHandle, const void*, u32) noexcept override { return OkStatus; }
+    Status upload_texture(TextureHandle texture, const void* data, u32 stride) noexcept override {
+        return beforeTextureUpload ? beforeTextureUpload(texture, data, stride) : OkStatus;
+    }
     Status write_buffer(BufferHandle, usize, const void*, usize) noexcept override { return OkStatus; }
     Status map_buffer(BufferHandle handle, void*& out) noexcept override {
         const auto found = mappedBuffers.find(handle.id);

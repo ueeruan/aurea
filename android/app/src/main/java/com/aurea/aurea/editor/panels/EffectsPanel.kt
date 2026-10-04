@@ -12,6 +12,7 @@ import com.aurea.aurea.engine.ExpressionLook
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -252,6 +253,9 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     val layerId = store.primary
     val effects = store.effects.filter { focusedType == null || it.typeId == focusedType }
     val tabbed = focusedType == null
+    var creatorMode by remember(layerId) { mutableStateOf(-1) }
+    var saveCustom by remember(layerId) { mutableStateOf(false) }
+    var customName by remember(layerId) { mutableStateOf("") }
     // `detail` muda a cada quadro da reprodução; o painel só quer o TIPO.
     val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
 
@@ -444,6 +448,32 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 state = listState,
                 contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 6.dp, bottom = 16.dp),
             ) {
+                if (tabbed) item(key = "custom-effects") {
+                    Column {
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                            androidx.compose.material3.TextButton(onClick = { creatorMode = if (creatorMode < 0) 0 else -1 }) {
+                                Text(stringResource(R.string.fx_custom_create))
+                            }
+                            androidx.compose.material3.TextButton(onClick = {
+                                store.presetsOpenKind = com.aurea.aurea.presets.PresetKind.Effects
+                                env.onOpenPanel(EditorPanel.Presets)
+                            }) { Text(stringResource(R.string.fx_custom_library)) }
+                        }
+                        if (creatorMode >= 0) {
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                                listOf(R.string.fx_custom_normal, R.string.fx_custom_advanced).forEachIndexed { index, label ->
+                                    androidx.compose.material3.FilterChip(selected = creatorMode == index, onClick = { creatorMode = index },
+                                        label = { Text(stringResource(label)) }, modifier = Modifier.padding(end = 8.dp))
+                                }
+                                androidx.compose.material3.TextButton(onClick = { saveCustom = true }, enabled = effects.isNotEmpty() && (creatorMode == 0 || openId != null)) {
+                                    Text(stringResource(R.string.fx_custom_save))
+                                }
+                            }
+                            Text(stringResource(if (creatorMode == 0) R.string.fx_custom_normal_help else R.string.fx_custom_advanced_help),
+                                modifier = Modifier.padding(8.dp), color = AureaColors.Muted, fontSize = 13.sp)
+                        }
+                    }
+                }
                 if (tabbed && effects.isEmpty() && tools.isEmpty()) {
                     item(key = "vazio") { PanelNotice(stringResource(R.string.effects_applied_empty)) }
                 }
@@ -467,7 +497,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                         effect = e,
                         expanded = openId == e.effectId,
                         selected = selected?.takeIf { it.effectId == e.effectId },
-                        advanced = e.effectId in advancedOpen,
+                        advanced = creatorMode == 1 || e.effectId in advancedOpen,
                         lifted = dragged,
                         onToggle = { openId = if (openId == e.effectId) null else e.effectId },
                         onToggleAdvanced = {
@@ -493,6 +523,21 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 }
             }
         }
+    }
+
+    if (saveCustom) {
+        androidx.compose.material3.AlertDialog(onDismissRequest = { saveCustom = false },
+            title = { Text(stringResource(R.string.fx_custom_save)) },
+            text = { androidx.compose.material3.OutlinedTextField(value = customName, onValueChange = { customName = it.take(60) },
+                label = { Text(stringResource(R.string.fx_custom_name)) }, singleLine = true) },
+            confirmButton = { androidx.compose.material3.TextButton(enabled = customName.isNotBlank(), onClick = {
+                val name = customName.trim()
+                val ok = if (creatorMode == 1 && openId != null) store.saveEffectPreset(openId!!, name)
+                    else store.savePreset(com.aurea.aurea.presets.PresetKind.Effects, name,
+                        store.capturePreset(com.aurea.aurea.presets.PresetKind.Effects, name))
+                if (ok) saveCustom = false
+            }) { Text(stringResource(R.string.fx_custom_save)) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { saveCustom = false }) { Text(stringResource(R.string.fx_custom_cancel)) } })
     }
 
     if (railMenu) {

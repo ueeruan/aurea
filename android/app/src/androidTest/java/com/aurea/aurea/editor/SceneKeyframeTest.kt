@@ -66,7 +66,8 @@ class SceneKeyframeTest {
         // Losango de Posição no quadro 0: X, Y e Z ficam animados.
         compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(0, 1, 2)) }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.time == 0 } == 3 }
-        val first = store.keyframes[id]!!.single { it.property == 0 && it.time == 0 }.value
+        val first = store.keyframes[id]!!.filter { it.property in 0..2 && it.time == 0 }
+            .associate { it.property to it.value }
         seek(30)
         compose.runOnIdle { store.enterSceneEditor() }
         compose.waitUntil(5000) { store.sceneEditor && store.gizmo != null }
@@ -76,20 +77,36 @@ class SceneKeyframeTest {
         val before = store.detail!!.position
         compose.onNodeWithTag("scene.stage").performTouchInput {
             val o = origin()
-            down(o)
-            repeat(4) { moveBy(Offset(30f, 0f), 60) }
-            up()
+            // One finger rotates; two fingers with constant span translate the object.
+            down(0, o - Offset(0f, 40f)); down(1, o + Offset(0f, 40f))
+            repeat(4) { index ->
+                val center = o + Offset((index + 1) * 30f, 0f)
+                updatePointerTo(0, center - Offset(0f, 40f))
+                updatePointerTo(1, center + Offset(0f, 40f)); move(60)
+            }
+            up(0); up(1)
         }
         compose.waitUntil(5000) { store.detail!!.position != before }
-        // Track animada + Auto-Key ligado: o arrasto grava keyframe NO CABEÇOTE (quadro 30)…
+        // This horizontal camera-space drag changes X/Z. Auto-Key writes changed
+        // axes at frame 30; onlyIfChanged must not add a redundant Y key.
         try {
-            compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property in 0..2 && it.time == 30 } == 3 }
+            compose.waitUntil(5000) {
+                store.keyframes[id].orEmpty().filter { it.time == 30 }.map { it.property }.toSet() == setOf(0, 2)
+            }
         } catch (error: Throwable) {
             throw AssertionError("Arrastar o nulo animado na cena não marcou keyframe no quadro 30: ${store.keyframes[id]}", error)
         }
         // …e a pose do quadro 0 fica como estava (não é "deslocar a curva inteira").
         compose.runOnIdle {
-            assertEquals("A pose inicial não pode mudar", first, store.keyframes[id]!!.single { it.property == 0 && it.time == 0 }.value, 0.001f)
+            val keys = store.keyframes[id]!!
+            assertNotEquals("O arrasto deve mover X", before[0], store.detail!!.position[0], 0.01f)
+            assertNotEquals("O arrasto deve mover Z", before[2], store.detail!!.position[2], 0.01f)
+            assertEquals("O arrasto horizontal deve preservar Y", before[1], store.detail!!.position[1], 0.001f)
+            assertTrue("Y sem alteração não deve receber chave redundante", keys.none { it.property == 1 && it.time == 30 })
+            for (property in 0..2) {
+                assertEquals("A pose inicial não pode mudar no eixo $property", first.getValue(property),
+                    keys.single { it.property == property && it.time == 0 }.value, 0.001f)
+            }
         }
         // Um arrasto = um passo de desfazer.
         compose.runOnIdle { store.undo() }

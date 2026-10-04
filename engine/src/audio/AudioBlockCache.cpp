@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace aurea::audio {
 
@@ -33,6 +34,8 @@ struct AudioBlockCache::Reader {
     bool broken = false;
     u64 seeks = 0;
     std::vector<f32> raw, stereo;
+    bool chunkPending = false;
+    i64 pendingStart = 0;
 
     [[nodiscard]] i64 frames() const noexcept { return static_cast<i64>(buf.size() / 2); }
 
@@ -44,7 +47,9 @@ struct AudioBlockCache::Reader {
         if (far) {
             // Um pouco antes do alvo: o primeiro trecho decodificado pode
             // começar depois do ponto pedido.
-            const i64 us = std::max<i64>(0, (from - rate / 50) * 1'000'000 / rate);
+            const f64 seekUs = std::max<f64>(0, static_cast<f64>(from - rate / 50) * 1e6 / rate);
+            if (seekUs >= static_cast<f64>(std::numeric_limits<i64>::max())) { broken = true; return; }
+            const i64 us = static_cast<i64>(seekUs);
             if (!dec->seek(us).ok()) {
                 AUREA_LOG_WARN("audio: seek falhou (%lld us)", static_cast<long long>(us));
                 broken = true;
@@ -53,6 +58,7 @@ struct AudioBlockCache::Reader {
             buf.clear();
             bufValid = false;
             eos = false;
+            chunkPending = false;
             ++seeks;
         }
         // Descarta o que ficou para trás (com margem para o kernel).
@@ -65,7 +71,8 @@ struct AudioBlockCache::Reader {
             }
         }
         u32 guard = 0;
-        while ((!bufValid || bufStart + frames() < to) && !eos && guard++ < 100000) {
+        while ((!bufValid || bufStart + frames() < to) && (!eos || chunkPending) && guard++ < 100000) {
+            if (!chunkPending) {
             i64 pts = 0;
             bool end = false;
             raw.clear();
@@ -81,20 +88,38 @@ struct AudioBlockCache::Reader {
             if (n == 0) continue;
             stereo.resize(static_cast<usize>(n) * 2);
             for (i64 i = 0; i < n; ++i) to_stereo(raw.data() + i * ch, ch, stereo[2 * i], stereo[2 * i + 1]);
-            const i64 chunkStart = static_cast<i64>(std::llround(static_cast<f64>(pts) * rate / 1e6));
+            const f64 timestamp = static_cast<f64>(pts) * rate / 1e6;
+            if (!std::isfinite(timestamp) || std::abs(timestamp) >= static_cast<f64>(std::numeric_limits<i64>::max() / 4)) {
+                broken = true; break;
+            }
+            pendingStart = static_cast<i64>(std::llround(timestamp));
+            chunkPending = true;
+            }
+            const i64 chunkStart = pendingStart;
+            const i64 n = static_cast<i64>(stereo.size() / 2);
             i64 skip = 0;
             if (!bufValid) {
-                bufStart = chunkStart;
+                // Preserve exact first-PTS alignment for decoder preroll,
+                // without retaining an arbitrarily distant timestamp origin.
+                bufStart = std::clamp(chunkStart, std::max<i64>(0, from - margin - 1), from);
                 bufValid = true;
-            } else {
+            }
+            {
                 const i64 d = chunkStart - (bufStart + frames());
                 // Carimbos de AAC/MP3 tremem ±1 quadro no arredondamento: isso
                 // é contíguo. Buraco de verdade vira silêncio; sobreposição é
                 // cortada.
-                if (d > 2) buf.insert(buf.end(), static_cast<usize>(d) * 2, 0.0f);
+                if (d > 2) {
+                    // Sparse/broken timestamps can be hours apart. Retain the
+                    // decoded chunk, but allocate silence only for this block.
+                    const i64 fill = std::min(d, std::max<i64>(0, to - (bufStart + frames())));
+                    buf.insert(buf.end(), static_cast<usize>(fill) * 2, 0.0f);
+                    if (fill < d) break;
+                }
                 else if (d < -2) skip = std::min(-d, n);
             }
             buf.insert(buf.end(), stereo.begin() + skip * 2, stereo.end());
+            chunkPending = false;
         }
     }
 };
@@ -212,6 +237,7 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::fetch(u64 key, i64 block) {
 }
 
 std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 block) {
+    if (block < 0 || block > (std::numeric_limits<i64>::max() / 4) / kBlockFrames - 1) return nullptr;
     AudioAssetRef ref;
     u64 revision = 0;
     {
@@ -243,7 +269,8 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 blo
             slot->assetRevision = revision;
             if (factory_) slot->dec = factory_->open_audio(ref.path.c_str());
             if (slot->dec) slot->info = slot->dec->info();
-            if (!slot->dec || slot->info.sampleRate == 0) {
+            if (!slot->dec || slot->info.sampleRate == 0 || slot->info.sampleRate > 768000
+                || slot->info.channels == 0 || slot->info.channels > 32) {
                 AUREA_LOG_WARN("audio: trilha ilegivel em '%s'", ref.path.c_str());
                 slot->dec.reset();
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -256,6 +283,7 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 blo
         const f64 step = static_cast<f64>(r.info.sampleRate) / kMixRate;
         const i64 mixStart = block * kBlockFrames;
         const f64 srcPos = static_cast<f64>(mixStart) * step;
+        if (srcPos >= static_cast<f64>(std::numeric_limits<i64>::max() / 4) - kBlockFrames * step - 64) return nullptr;
         const i64 half = resample_half_width(step);
         const i64 from = static_cast<i64>(std::floor(srcPos)) - half - 1;
         const i64 to = static_cast<i64>(std::ceil(static_cast<f64>(mixStart + kBlockFrames) * step)) + half + 1;

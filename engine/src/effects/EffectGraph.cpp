@@ -218,6 +218,7 @@ void EffectPlan::clear() noexcept {
     hasFold = false;
     foldMatrix = Mat4::identity();
     foldOpacity = 1.0f;
+    foldEffectIndex = kInvalidIndex;
     droppedIdentity = 0;
     droppedUnknown = 0;
     fusedEffects = 0;
@@ -229,10 +230,16 @@ void EffectPlan::clear() noexcept {
 void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, FrameIndex localTime,
                        f32 texelScale, const LayerPlacement& placement,
                        EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition) {
+    plan_f(layer, registry, static_cast<f64>(localTime.value), texelScale, placement, resources, out, framesPerSecond, composition);
+}
+
+void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64 localTime,
+                         f32 texelScale, const LayerPlacement& placement,
+                         EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition) {
     out.clear();
     out.placement = placement;
 
-    struct Source { const Layer* owner; const EffectInstance* effect; FrameIndex time; };
+    struct Source { const Layer* owner; const EffectInstance* effect; f64 time; };
     // Memória de trabalho do planejamento, reaproveitada entre quadros (o
     // caminho quente não aloca: Perf8C.SteadyPlaybackOf50Layers...).
     static thread_local std::vector<Source> sources;
@@ -241,7 +248,8 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
     static thread_local std::vector<ParamValue> scratch;
     sources.clear();
     for (const auto& effect : layer.effects) sources.push_back({&layer, &effect, localTime});
-    const FrameIndex global{localTime.value + layer.start.value - layer.offset.value};
+    const f64 globalTime = localTime + layer.start.value - layer.offset.value;
+    const FrameIndex global{static_cast<i64>(std::floor(globalTime))};
     // A null has no pixels. Its Motion Tile controls the raster of each child;
     // sample the null's animation clock, not the child's trimmed/remapped clock.
     const Layer* parent = composition ? composition->layer(layer.parent) : nullptr;
@@ -249,7 +257,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         if (parent->kind == LayerKind::Null && parent->contains_time(global))
             for (const auto& effect : parent->effects)
                 if (effect.type == effect_type_id(effect_keys::kMotionTile))
-                    sources.push_back({parent, &effect, parent->local_time(global)});
+                    sources.push_back({parent, &effect, globalTime - parent->start.value + parent->offset.value});
         parent = composition->layer(parent->parent);
     }
     // 0. A geometria afim DEPOIS de cada efeito (de trás para a frente): o
@@ -273,14 +281,15 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
             if (!effect || !params || effect->effect_class() != EffectClass::Domain) continue;
             scratch.clear();
             for (u32 p = 0; p < params->count(); ++p)
-                scratch.push_back(evaluate_param(source.owner->tracks, inst, p, params->at(p), source.time));
+                scratch.push_back(evaluate_param_f(source.owner->tracks, inst, p, params->at(p), source.time));
             EffectEval e;
             e.effect = effect;
             e.instance = &inst;
             e.values = scratch.data();
             e.count = params->count();
             e.effectIndex = static_cast<u32>(i);
-            e.localTime = source.time;
+            e.localTime = FrameIndex{static_cast<i64>(std::floor(source.time))};
+            e.fractionalTime = source.time;
             e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
             e.texelScale = texelScale;
             e.placement = &out.placement;
@@ -312,7 +321,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
 
         const u32 offset = static_cast<u32>(out.values.size());
         for (u32 p = 0; p < params->count(); ++p) {
-            out.values.push_back(evaluate_param(source.owner->tracks, inst, p, params->at(p), source.time));
+            out.values.push_back(evaluate_param_f(source.owner->tracks, inst, p, params->at(p), source.time));
         }
 
         EffectEval e;
@@ -323,7 +332,8 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         e.valueOffset = offset;
         e.count = params->count();
         e.effectIndex = i;
-        e.localTime = source.time;
+        e.localTime = FrameIndex{static_cast<i64>(std::floor(source.time))};
+        e.fractionalTime = source.time;
         e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
         e.texelScale = texelScale;
         e.layer = &layer;
@@ -334,6 +344,9 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         e.placement = &stepPlacement;
 
         if (effect->is_identity(e)) {
+            Mat4 identityFold = Mat4::identity();
+            f32 identityOpacity = 1.f;
+            if (effect->fold_into_composite(e, identityFold, identityOpacity)) out.foldEffectIndex = i;
             ++out.droppedIdentity;
             out.values.resize(offset);
             continue;
@@ -349,6 +362,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         }
         // O que só existe sob o lock (espectro do som) entra no eval agora.
         effect->resolve_resources(e);
+        out.foldEffectIndex = kInvalidIndex;
         e.placement = &out.placement;
         out.evals.push_back(e);
         out.colorOps.push_back(op);
@@ -368,6 +382,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
             out.hasFold = true;
             out.foldMatrix = m;
             out.foldOpacity = opacity;
+            out.foldEffectIndex = last.effectIndex;
             out.evals.pop_back();
             out.colorOps.pop_back();
         }

@@ -606,6 +606,7 @@ enum TimelineRowOrder {
     }
 
     func get(_ model: AureaModel, layer: Int64, bucket: Int32, timelineFrame: Int32, heightPx: Int, generation: UInt32) -> UIImage? {
+        guard model.thumbnailWorkAllowed else { starved = true; return nil }
         let key = Key(layer: layer, bucket: bucket, height: heightPx)
         if let hit = hits[key] { return hit }
         if let missed = misses[key], missed == Int(generation) { return nil }

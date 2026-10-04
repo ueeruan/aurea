@@ -3467,4 +3467,23 @@
         <item quantity="one">%1$d कीफ़्रेम — प्लेहेड पर एडिट करें</item>
         <item quantity="other">%1$d कीफ़्रेम — प्लेहेड पर एडिट करें</item>
     </plurals>
+    <string name="fxl_visible_duration">दिखने की अवधि</string>
+    <string name="fxl_minimum_opacity">न्यूनतम अपारदर्शिता</string>
+    <string name="fxl_maximum_opacity">अधिकतम अपारदर्शिता</string>
+    <string name="fxl_grow">बढ़ाएँ</string>
+    <string name="fxl_vertical_scatter">ऊर्ध्वाधर फैलाव</string>
+    <string name="fxl_end_angle">अंतिम कोण</string>
+    <string name="fxl_axis">अक्ष</string>
+    <string name="fxl_spacing">अंतराल</string>
+    <string name="fxl_rotation_per_copy">प्रति कॉपी घुमाव</string>
+    <string name="fxl_scale_per_copy">प्रति कॉपी स्केल</string>
+    <string name="fxl_end_opacity">अंतिम अपारदर्शिता</string>
+    <string name="fxl_orient_copies">कॉपियों की दिशा सेट करें</string>
+    <string name="fxl_remove_color_fringe">रंगीन किनारा हटाएँ</string>
+    <string name="fxo_rgb">RGB</string>
+    <string name="fxl_choke_1">संकुचन 1</string>
+    <string name="fxl_softness_1">कोमलता 1</string>
+    <string name="fxl_choke_2">संकुचन 2</string>
+    <string name="fxl_softness_2">कोमलता 2</string>
+    <string name="fxl_iterations">पुनरावृत्तियाँ</string>
 </resources>

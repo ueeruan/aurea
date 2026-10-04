@@ -176,7 +176,7 @@ public:
         const f32 lifeRandom = pct(e, kLifeRandom, 0.0f, 100.0f);
         const f32 preRoll = std::clamp(finite_or(e.f(kPreRoll), 0.0f), 0.0f, 30000.0f) * 0.001f;
         const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
-        const f32 now = static_cast<f32>(static_cast<f64>(e.localTime.value) / fps) + preRoll;
+        const f32 now = static_cast<f32>(e.time_frames() / fps) + preRoll;
         const f32 span = std::max((lifeRandom + 1.0f) * lifeMs * 0.001f * 1.05f, 1e-3f);
         const f32 grid = std::min(kMaxRate, kMaxSlots / span);
         const u32 slots = static_cast<u32>(std::clamp(std::ceil(span * grid), 1.0f, kMaxSlots));
@@ -207,6 +207,9 @@ public:
         if (e.b(kMotionBlur)) shutterDeg = std::clamp(finite_or(e.f(kShutterAngle), 0.0f), 0.0f, 720.0f);
         else if (e.placement) shutterDeg = std::clamp(finite_or(e.placement->shutterAngle, 0.0f), 0.0f, 2880.0f);
         const f32 halfShutter = shutterDeg / 360.0f / static_cast<f32>(fps) * 0.5f;
+        if (!e.b(kMotionBlur) && e.placement && shutterDeg > 0.f)
+            u.clock.x += (finite_or(e.placement->shutterPhase, -shutterDeg * .5f) + shutterDeg * .5f)
+                / (360.f * static_cast<f32>(fps));
         u.motion = Vec4{pct(e, kAirDrag, 0.0f, 800.0f), std::clamp(finite_or(e.f(kTurbulence), 0.0f), 0.0f, 40000.0f),
                         pct(e, kTurbulenceSpeed, 0.0f, 1000.0f), halfShutter};
         u.lifeSize = Vec4{lifeMs, lifeRandom, std::clamp(finite_or(e.f(kSize), 0.0f), 0.0f, 20000.0f),

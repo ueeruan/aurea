@@ -47,6 +47,12 @@ f32 TrackSet::sample_or(TrackProperty p, FrameIndex t, f32 fallback,
     return track->sample(t);
 }
 
+f32 TrackSet::sample_or_f(TrackProperty p, f64 t, f32 fallback,
+                          u32 effectIndex, u32 effectParamIndex) const noexcept {
+    const Track* track = find(p, effectIndex, effectParamIndex);
+    return track ? track->sample_f(t) : fallback;
+}
+
 void TrackSet::set_static(TrackProperty p, f32 value, u32 effectIndex,
                           u32 effectParamIndex) noexcept {
     Track& t = get_or_create(p, effectIndex, effectParamIndex);

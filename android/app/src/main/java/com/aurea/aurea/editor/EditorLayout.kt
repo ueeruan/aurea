@@ -78,16 +78,19 @@ internal object EditorLayout {
         aspect: Float = 0f,
         preferred: Float = 0f,
         dockRows: Int = 2,
+        fontScale: Float = 1f,
     ): EditorMetrics {
         if (fullscreen) {
             return EditorMetrics(0f, max(0f, totalHeight - TRANSPORT), 0f, TRANSPORT, 0f, 0f)
         }
-        val ws = workspace(totalHeight)
+        val bar = if (totalHeight < 560f) 48f else TOP_BAR
+        val ws = max(0f, totalHeight - bar - TRANSPORT - STRIP)
+        val previewFloor = min(PREVIEW_MIN, ws * 0.25f)
         // Stable preview height while floating add controls open and close.
-        val natural = totalHeight * PREVIEW_NATURAL_FRACTION
+        val natural = min(420f, totalHeight * PREVIEW_NATURAL_FRACTION)
         val fitted = if (width > 0f && aspect > 0f && aspect.isFinite()) min(natural, width / aspect + PREVIEW_FIT_MARGIN) else natural
         var preview = (if (preferred > 0f && preferred.isFinite()) preferred else fitted)
-            .coerceIn(PREVIEW_MIN, maxPreview(totalHeight))
+            .coerceIn(previewFloor, max(previewFloor, ws - min(TIMELINE_MIN, ws * .2f)))
 
         val sheetFraction = when (content) {
             SheetContent.None -> 0f
@@ -102,17 +105,17 @@ internal object EditorLayout {
         var sheet = if (content != SheetContent.None) ws * sheetFraction.coerceIn(0f, 0.60f) else 0f
         // Camada escolhida ou painel: piso de 90 (uma linha de camada viva).
         // Nada escolhido: 120. Adicionando: o menu pode cobrir a timeline.
-        val floor = when (content) {
+        val floor = min(when (content) {
             SheetContent.Adding, SheetContent.Dock, SheetContent.Panel, SheetContent.Curve, SheetContent.Batch -> TIMELINE_MIN
             else -> 120f
-        }
+        }, if (totalHeight < 560f) 72f else 120f)
         // Editing controls get usable space first; only the overview keeps
         // the tall preview. Never shrink every button to preserve the preview.
         sheet = max(sheet, when (content) {
-            SheetContent.Panel -> 336f
+            SheetContent.Panel -> min(520f, 336f * fontScale.coerceIn(1f, 1.5f))
             else -> 0f
-        }).coerceAtMost(max(0f, ws - PREVIEW_MIN - floor))
-        preview = min(preview, max(PREVIEW_MIN, ws - sheet - floor))
+        }).coerceAtMost(max(0f, ws - previewFloor - floor))
+        preview = min(preview, max(previewFloor, ws - sheet - floor))
         var timeline = ws - preview - sheet
         if (timeline < floor) {
             sheet = max(0f, sheet - (floor - timeline))
@@ -131,7 +134,7 @@ internal object EditorLayout {
             sheet -= spare
             timeline += spare
         }
-        return EditorMetrics(TOP_BAR, preview, STRIP, TRANSPORT, max(0f, timeline), max(0f, sheet))
+        return EditorMetrics(bar, preview, STRIP, TRANSPORT, max(0f, timeline), max(0f, sheet))
     }
 
     /**
@@ -140,9 +143,9 @@ internal object EditorLayout {
      * "≥ 900 mesmo em pé" mandava tablet grande para o largo, com a coluna da
      * direita só com a dica — "a UI inteira sumiu" no tablet (par do iOS).
      */
-    fun isWide(width: Float, height: Float) = width >= 600f && width > height
+    fun isWide(width: Float, height: Float) = width >= 520f && width > height && height < 600f || width >= 900f && width > height
 
     fun wideTimeline(totalHeight: Float) = ((totalHeight - TOP_BAR - TRANSPORT - STRIP) * 0.34f).coerceIn(88f, 280f)
 
-    fun wideSheetWidth(width: Float) = (width * 0.4f).coerceIn(280f, 380f)
+    fun wideSheetWidth(width: Float) = (width * 0.4f).coerceIn(240f, 420f)
 }

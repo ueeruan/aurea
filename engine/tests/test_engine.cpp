@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <chrono>
 #include <future>
+#include <limits>
 
 using namespace aurea;
 
@@ -35,6 +36,224 @@ EngineConfig headless_config() {
 }
 
 } // namespace
+
+AUREA_TEST(MotionBlur, AtomicSettingsValidatePreserveUndoAndKeepPhaseIndependent) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(128, 128, 30., "shutter").ok());
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().root());
+    comp->motion_blur().vectorBlur = true;
+    comp->motion_blur().previewSamples = 9;
+    MotionBlurSettings state;
+    AUREA_CHECK(e.query_motion_blur_settings(state));
+    AUREA_CHECK_EQ(state.samples, 16u);
+    const auto depth = e.history().depth();
+    AUREA_CHECK(e.set_motion_blur_settings(true, 270, -40, 32, 160));
+    AUREA_CHECK_EQ(e.history().depth(), depth + 1);
+    AUREA_CHECK(e.set_motion_blur_settings(true, 270, -40, 32, 160));
+    AUREA_CHECK_EQ(e.history().depth(), depth + 1);
+    for (const f32 bad : {std::numeric_limits<f32>::quiet_NaN(), std::numeric_limits<f32>::infinity()}) {
+        AUREA_CHECK(!e.set_motion_blur_settings(true, bad, -40, 32, 160));
+        AUREA_CHECK(!e.set_motion_blur_settings(true, 270, bad, 32, 160));
+        AUREA_CHECK(!e.set_shutter_angle(bad));
+    }
+    AUREA_CHECK(!e.set_motion_blur_settings(true, 270, -40, 0, 160));
+    AUREA_CHECK(!e.set_motion_blur_settings(true, 270, -40, 65, 160));
+    AUREA_CHECK(!e.set_motion_blur_settings(true, 270, -40, 32, 16));
+    AUREA_CHECK(!e.set_motion_blur_settings(true, 270, -40, 32, 257));
+    AUREA_CHECK_EQ(e.history().depth(), depth + 1);
+    AUREA_CHECK(e.query_motion_blur_settings(state));
+    AUREA_CHECK_EQ(state.shutterPhase, -40.f);
+    AUREA_CHECK(state.vectorBlur);
+    AUREA_CHECK_EQ(state.previewSamples, 9u);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.query_motion_blur_settings(state));
+    AUREA_CHECK(!state.enabled);
+    AUREA_CHECK_EQ(state.shutterAngle, 180.f);
+    AUREA_CHECK_EQ(state.shutterPhase, -90.f);
+    AUREA_CHECK_EQ(state.samples, 16u);
+    AUREA_CHECK_EQ(state.adaptiveLimit, 128u);
+    AUREA_CHECK(e.set_motion_blur_settings(true, 900, -900, 64, 256));
+    AUREA_CHECK(e.set_shutter_angle(90));
+    AUREA_CHECK(e.set_composition_motion_blur(false));
+    AUREA_CHECK(e.query_motion_blur_settings(state));
+    AUREA_CHECK_EQ(state.shutterAngle, 90.f);
+    AUREA_CHECK_EQ(state.shutterPhase, -360.f);
+    AUREA_CHECK_EQ(state.samples, 64u);
+    AUREA_CHECK_EQ(state.adaptiveLimit, 256u);
+    AUREA_CHECK(state.vectorBlur);
+}
+
+AUREA_TEST(ImportStability, AggregateImageBudgetRejectsBeforeHistoryAndPreservesUndoSources) {
+    Engine e; auto cfg = headless_config(); cfg.memoryBudgetBytes = 3 * 100 * 1024;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30., "quota").ok());
+    std::vector<u8> pixels(128 * 128 * 4, 255);
+    const auto first = e.import_image(pixels.data(), 128, 128, "one");
+    AUREA_CHECK(first.ok());
+    const u32 depth = e.history().depth(), assets = e.project()->asset_count();
+    const auto second = e.import_image(pixels.data(), 128, 128, "two");
+    AUREA_CHECK(!second.ok() && second.status().code() == Errc::BudgetExceeded);
+    AUREA_CHECK_EQ(e.history().depth(), depth);
+    AUREA_CHECK_EQ(e.project()->asset_count(), assets);
+    const auto impossible = e.import_image(pixels.data(), ~0u, ~0u, "overflow");
+    AUREA_CHECK(!impossible.ok() && impossible.status().code() == Errc::BudgetExceeded);
+    if (first.ok()) {
+        const auto replace = e.replace_layer_image(*first, pixels.data(), 128, 128, "replace", nullptr);
+        AUREA_CHECK(!replace.ok() && replace.status().code() == Errc::BudgetExceeded);
+        AUREA_CHECK_EQ(e.history().depth(), depth);
+    }
+    AUREA_CHECK(e.new_project(64, 64, 30., "new").ok());
+    AUREA_CHECK(e.import_image(pixels.data(), 128, 128, "fits again").ok());
+}
+
+AUREA_TEST(ImportStability, ReopenBoundsAggregateImagesSkipsOrphansAndRejectsStaleLoader) {
+    const auto file = std::filesystem::temp_directory_path() / "aurea-image-source-quota.aurea";
+    auto cfg = headless_config();
+    std::vector<u8> pixels(128 * 128 * 4, 255);
+    {
+        Engine writer; AUREA_CHECK(writer.initialize(cfg).ok()); AUREA_CHECK(writer.new_project(64, 64, 30., "sources").ok());
+        AUREA_CHECK(writer.import_image(pixels.data(), 128, 128, "one", "one.png").ok());
+        AUREA_CHECK(writer.import_image(pixels.data(), 128, 128, "two", "two.png").ok());
+        Asset orphan; orphan.kind = AssetKind::Image; orphan.sourcePath = "unused.png";
+        (void)writer.project()->add_asset(std::move(orphan));
+        AUREA_CHECK(writer.save_project(file.string().c_str()).ok());
+    }
+    struct Loader { Engine* engine = nullptr; u32 calls = 0; bool replace = false; bool resize = false; } context;
+    cfg.memoryBudgetBytes = 3 * 100 * 1024;
+    cfg.imageLoaderContext = &context;
+    cfg.imageLoader = [](const char*, ImagePixels& out, void* opaque) {
+        auto& loader = *static_cast<Loader*>(opaque); ++loader.calls;
+        out.width = out.height = loader.resize ? 64 : 128;
+        out.rgba.assign(static_cast<usize>(out.width) * out.height * 4, 255);
+        if (loader.replace) (void)loader.engine->new_project(64, 64, 30., "replacement");
+        return true;
+    };
+    Engine reader; context.engine = &reader; AUREA_CHECK(reader.initialize(cfg).ok());
+    AUREA_CHECK(reader.load_project(file.string().c_str()).ok());
+    AUREA_CHECK_EQ(context.calls, 1u);
+    AUREA_CHECK_EQ(reader.last_load_missing_assets(), 1u);
+    context.calls = 0; context.resize = true;
+    AUREA_CHECK(reader.load_project(file.string().c_str()).ok());
+    AUREA_CHECK_EQ(context.calls, 2u);
+    AUREA_CHECK_EQ(reader.last_load_missing_assets(), 2u);
+    const auto* reopened = reader.project()->timeline().composition(reader.project()->timeline().root());
+    reopened->layers().for_each([&](LayerId, const Layer& layer) {
+        const auto* asset = reader.project()->asset(layer.source);
+        AUREA_CHECK(asset != nullptr);
+        if (asset) { AUREA_CHECK_EQ(asset->video.width, 128u); AUREA_CHECK_EQ(asset->video.height, 128u); }
+        AUREA_CHECK_NEAR(layer.transform.anchor.x, 64.f, .001f);
+        AUREA_CHECK_NEAR(layer.transform.anchor.y, 64.f, .001f);
+    });
+    context.resize = false;
+    context.calls = 0; context.replace = true;
+    AUREA_CHECK(reader.load_project(file.string().c_str()).code() == Errc::Cancelled);
+    AUREA_CHECK_EQ(reader.project()->asset_count(), 0u);
+    AUREA_CHECK(reader.import_image(pixels.data(), 128, 128, "quota clear").ok());
+    std::error_code error; std::filesystem::remove(file, error);
+}
+
+AUREA_TEST(PreviewBuffer, PreparesOffscreenWithoutAdvancingPlayheadAndPauseCancels) {
+    auto* mock = new aurea::test::MockBackend();
+    Engine e;
+    auto cfg = headless_config(); cfg.backend = mock;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30.0, "buffer").ok());
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().root());
+    comp->set_duration(FrameIndex{90});
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 64, 64).ok());
+    Command play; play.type = CommandType::PlaybackPlay;
+    AUREA_CHECK(e.apply_command(play).ok());
+    bridge::EngineStatusPOD status;
+    e.fill_status(status);
+    AUREA_CHECK(status.previewBufferStatus & 0x80000000u);
+    AUREA_CHECK_EQ(status.playing, 1u);
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK_EQ(mock->acquires, 0u);
+    AUREA_CHECK_EQ(e.read_status().playhead.value, 0ll);
+    Command pause; pause.type = CommandType::PlaybackPause;
+    AUREA_CHECK(e.apply_command(pause).ok());
+    e.fill_status(status);
+    AUREA_CHECK_EQ(status.previewBufferStatus, 0u);
+    AUREA_CHECK_EQ(status.playing, 0u);
+    AUREA_CHECK(e.apply_command(play).ok());
+    for (u32 i = 0; i < 32; ++i) {
+        AUREA_CHECK(e.render_frame().ok());
+        e.fill_status(status);
+        if (!(status.previewBufferStatus & 0x80000000u)) break;
+        AUREA_CHECK_EQ(status.playhead, 0ll);
+    }
+    AUREA_CHECK(!(status.previewBufferStatus & 0x80000000u));
+    AUREA_CHECK_EQ(status.playing, 1u);
+    AUREA_CHECK((status.previewBufferStatus & 255u) > 0);
+    AUREA_CHECK(mock->offscreenFrames > 0);
+    AUREA_CHECK_EQ(mock->acquires, 1u);
+    e.shutdown();
+}
+
+AUREA_TEST(PreviewBuffer, DetachedSurfaceDoesNotSpinPendingPlayback) {
+    auto* mock = new aurea::test::MockBackend();
+    Engine e; auto cfg = headless_config(); cfg.backend = mock;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30., "surface").ok());
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 64, 64).ok());
+    Command play; play.type = CommandType::PlaybackPlay;
+    AUREA_CHECK(e.apply_command(play).ok());
+    e.detach_surface();
+    e.start_render_thread();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const u64 before = e.render_wakeups();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    AUREA_CHECK(e.render_wakeups() - before <= 1);
+    e.stop_render_thread();
+    e.shutdown();
+}
+
+AUREA_TEST(PreviewBuffer, UiRangesInvalidateBeforeRenderingAndNeverWaitForTheRenderLock) {
+    auto* mock = new aurea::test::MockBackend();
+    Engine e; auto cfg = headless_config(); cfg.backend = mock;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30., "ranges").ok());
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 64, 64).ok());
+    AUREA_CHECK(e.render_frame().ok());
+    i64 ranges[60]{};
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 1u);
+    AUREA_CHECK_EQ(ranges[0], 0ll); AUREA_CHECK_EQ(ranges[1], 1ll);
+    const auto shape = e.add_shape(0);
+    AUREA_CHECK(shape.ok());
+    // The old cached texture still exists, but is no longer this model revision.
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 0u);
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 1u);
+    auto& timeline = e.project()->timeline();
+    const CompositionId original = timeline.current();
+    const CompositionId other = timeline.create_composition("other", 64, 64, 30.);
+    AUREA_CHECK(timeline.set_current(other));
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 0u);
+    AUREA_CHECK(timeline.set_current(original));
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 1u);
+
+    std::promise<void> entered, release;
+    auto enteredFuture = entered.get_future();
+    auto releaseFuture = release.get_future();
+    mock->beforeBeginFrame = [&] { entered.set_value(); releaseFuture.wait(); };
+    auto rendering = std::async(std::launch::async, [&] { return e.render_frame(); });
+    const bool rendererBlocked = enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready;
+    AUREA_CHECK(rendererBlocked);
+    auto query = std::async(std::launch::async, [&] { return e.copy_preview_buffer_ranges(ranges, 30); });
+    const bool queryReady = query.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
+    release.set_value(); // always release before asserting/joining, including failures
+    AUREA_CHECK(queryReady);
+    AUREA_CHECK_EQ(query.get(), 1u);
+    AUREA_CHECK(rendering.get().ok());
+    mock->beforeBeginFrame = {};
+    e.shutdown();
+    AUREA_CHECK_EQ(e.copy_preview_buffer_ranges(ranges, 30), 0u);
+}
 
 AUREA_TEST(Engine, DuplicateSelectsOnlyCopiesAndMovingThemPreservesOriginals) {
     Engine e;
@@ -1562,6 +1781,48 @@ AUREA_TEST(Engine, VideoImportPreservesChosenProjectResolutionAndFps) {
             AUREA_CHECK_NEAR(layer->transform.position.x,w*.5f,0.01);
             AUREA_CHECK_NEAR(layer->transform.position.y,h*.5f,0.01);
         }
+        e.shutdown();
+    }
+}
+
+namespace {
+class SwitchingProbeFactory final : public VideoSourceFactory {
+public:
+    std::function<void()> duringProbe;
+    bool probe(const char*, MediaProbe& out) override {
+        out.hasVideo = out.hasAudio = true;
+        out.video.codedWidth = 320; out.video.codedHeight = 180;
+        out.video.fps = 30.; out.video.durationUs = 2'000'000;
+        out.audioSampleRate = 48000; out.audioChannels = 2; out.audioDurationUs = 2'000'000;
+        if (duringProbe) duringProbe();
+        return true;
+    }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override { return nullptr; }
+};
+}
+
+AUREA_TEST(ImportStability, MediaProbeCannotCommitIntoAReplacedProjectOrComposition) {
+    for (bool audio : {false, true}) for (bool replaceProject : {false, true}) {
+        SwitchingProbeFactory factory;
+        Engine e; auto cfg = headless_config(); cfg.mediaFactory = &factory;
+        AUREA_CHECK(e.initialize(cfg).ok());
+        AUREA_CHECK(e.new_project(640, 360, 30., "original").ok());
+        factory.duringProbe = [&] {
+            if (replaceProject) {
+                AUREA_CHECK(e.new_project(800, 600, 24., "replacement").ok());
+            } else {
+                auto& timeline = e.project()->timeline();
+                const auto other = timeline.create_composition("other", 320, 240, 24.);
+                AUREA_CHECK(timeline.set_current(other));
+            }
+        };
+        VideoImport request; request.sourcePath = "slow-probe";
+        const auto result = audio ? e.import_audio(request) : e.import_video(request);
+        AUREA_CHECK(!result.ok());
+        AUREA_CHECK_EQ(result.status().code(), Errc::Cancelled);
+        AUREA_CHECK_EQ(e.project()->asset_count(), 0u);
+        AUREA_CHECK_EQ(e.read_status().layerCount, 0u);
+        AUREA_CHECK_EQ(e.read_status().undoDepth, 0u);
         e.shutdown();
     }
 }

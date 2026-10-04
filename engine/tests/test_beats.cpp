@@ -2,11 +2,15 @@
 //  Batidas: grade de cliques sintéticos com tempo e fase conhecidos.
 // =============================================================================
 #include "TestFramework.hpp"
+#include "SyntheticVideo.hpp"
 
 #include "aurea/audio/Beats.hpp"
+#include "aurea/Engine.hpp"
 
 #include <cmath>
 #include <cstdio>
+#include <functional>
+#include <limits>
 #include <vector>
 
 using namespace aurea;
@@ -86,4 +90,79 @@ AUREA_TEST(Beats, ToneBurstsEverySecond) {
     // O fim abrupto de cada rajada também é um transiente (espalha energia no
     // espectro); só a 1ª rajada, sem "antes", deixa o fim dela como ataque.
     for (f64 b : r.beats) if (b > 0.5) AUREA_CHECK(std::fabs(b - std::round(b)) < 0.02);
+}
+
+namespace {
+struct BeatFactory final : VideoSourceFactory {
+    test::SyntheticFactory source;
+    std::function<void()> onOpen;
+    explicit BeatFactory(f64 seconds) : source([&] {
+        test::SyntheticConfig c;
+        c.audioRate = 48000; c.audioSeconds = seconds; c.audioBpm = 120;
+        return c;
+    }()) {}
+    bool probe(const char* path, MediaProbe& out) override { return source.probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset, MediaPriority priority) override {
+        return source.open_video(asset, priority);
+    }
+    std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char* path) override {
+        if (onOpen) { auto callback = std::move(onOpen); callback(); }
+        return source.open_audio(path);
+    }
+};
+struct BeatEngineRig {
+    BeatFactory factory;
+    Engine engine;
+    u64 layer = 0;
+    explicit BeatEngineRig(f64 seconds) : factory(seconds) {
+        EngineConfig config;
+        config.workerCount = 1; config.memoryBudgetBytes = 64ull << 20;
+        config.disableAutosave = true; config.mediaFactory = &factory;
+        AUREA_CHECK(engine.initialize(config).ok());
+        AUREA_CHECK(engine.new_project(64, 36, 30, nullptr).ok());
+        VideoImport request; request.sourcePath = "synthetic-beats";
+        const auto imported = engine.import_audio(request);
+        AUREA_CHECK(imported.ok());
+        if (imported.ok()) layer = *imported;
+    }
+    ~BeatEngineRig() { engine.shutdown(); }
+    Composition* comp() { return engine.project()->timeline().composition(engine.project()->timeline().current()); }
+};
+}
+
+AUREA_TEST(Beats, LongAnalysisRefusesBeforeDecoderAndPreservesMarkers) {
+    BeatEngineRig rig(3600);
+    rig.comp()->put_marker(Marker{FrameIndex{15}, 0xffffffffu, kMarkerBeat, "existing"});
+    const auto historyDepth = rig.engine.history().depth();
+    f64 bpm = -1;
+    const auto result = rig.engine.detect_beats(rig.layer, &bpm);
+    AUREA_CHECK(!result.ok() && result.status().code() == Errc::OutOfMemory);
+    AUREA_CHECK_EQ(rig.factory.source.audioOpened, 0u);
+    AUREA_CHECK_EQ(rig.engine.history().depth(), historyDepth);
+    AUREA_CHECK_EQ(rig.comp()->markers().size(), 1u);
+    AUREA_CHECK_EQ(rig.comp()->markers().front().frame.value, 15);
+    AUREA_CHECK_EQ(bpm, -1.0);
+}
+
+AUREA_TEST(Beats, InvalidDurationRefusesBeforeIntegerOverflow) {
+    BeatEngineRig rig(10);
+    auto* asset = rig.engine.project()->asset(rig.comp()->layer(LayerId::unpack(rig.layer))->source);
+    asset->audio.sampleCount = FrameIndex{std::numeric_limits<i64>::max()};
+    asset->audio.sampleRate = 1;
+    const auto result = rig.engine.detect_beats(rig.layer);
+    AUREA_CHECK(!result.ok() && result.status().code() == Errc::InvalidArgument);
+    AUREA_CHECK_EQ(rig.factory.source.audioOpened, 0u);
+    AUREA_CHECK(rig.comp()->markers().empty());
+}
+
+AUREA_TEST(Beats, ProjectChangedDuringDecodeDoesNotReceiveOldMarkers) {
+    BeatEngineRig rig(10);
+    rig.factory.onOpen = [&] { AUREA_CHECK(rig.engine.new_project(80, 48, 30, nullptr).ok()); };
+    f64 bpm = -1;
+    const auto result = rig.engine.detect_beats(rig.layer, &bpm);
+    AUREA_CHECK(!result.ok() && result.status().code() == Errc::Cancelled);
+    AUREA_CHECK_EQ(rig.factory.source.audioOpened, 1u);
+    AUREA_CHECK(rig.comp()->markers().empty());
+    AUREA_CHECK_EQ(rig.comp()->width(), 80u);
+    AUREA_CHECK_EQ(bpm, -1.0);
 }

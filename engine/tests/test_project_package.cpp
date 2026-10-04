@@ -224,6 +224,97 @@ AUREA_TEST(ProjectPackage, ExportImportRelinksMediaAndNeverOverwrites) {
     AUREA_CHECK_EQ(in3.missing, 2u);
 }
 
+AUREA_TEST(ProjectPackage, RejectsMalformedDirectoryAndMismatchedLocalHeader) {
+    const fs::path dir = scratch("malformed_directory");
+    const auto project = s8(dir / "original.aurea");
+    { Rig r; AUREA_CHECK(r.e.save_project(project.c_str()).ok()); }
+    const auto path = s8(dir / "package.aureaproj");
+    AUREA_CHECK(package::write_package(project, path, "Test", "2.0", {}, nullptr).ok());
+    const auto original = read_text(path);
+    const std::string centralSignature("PK\1\2", 4);
+    const usize last = original.rfind(centralSignature);
+    AUREA_CHECK(last != std::string::npos && original.size() > 22);
+    if (last == std::string::npos || original.size() <= 22) return;
+    for (int mutation = 0; mutation < 5; ++mutation) {
+        auto bytes = original;
+        if (mutation == 0) { bytes[last + 30] = '\xff'; bytes[last + 31] = '\xff'; } // truncated extra
+        if (mutation == 1) bytes[last + 8] |= 1; // encrypted central entry
+        if (mutation == 2) bytes[30] ^= 1; // local name no longer matches directory
+        if (mutation == 3) bytes[bytes.size() - 22 + 4] = 1; // foreign disk
+        if (mutation == 4) { bytes[last + 32] = '\xff'; bytes[last + 33] = '\xff'; } // truncated comment
+        write_text(path, bytes);
+        const auto out = s8(dir / ("output" + std::to_string(mutation) + ".aurea"));
+        package::ImportResult result;
+        AUREA_CHECK(!package::read_package(path, out, s8(dir / "media"), result).ok());
+        AUREA_CHECK(!fs::exists(fs::u8path(out)));
+    }
+    // A legal ZIP comment can itself contain an EOCD-looking sequence.
+    auto bytes = original;
+    bytes[bytes.size() - 2] = 30;
+    bytes += std::string("PK\5\6", 4) + std::string(26, '\0');
+    write_text(path, bytes);
+    package::ImportResult result;
+    AUREA_CHECK(package::read_package(path, s8(dir / "comment.aurea"), s8(dir / "media"), result).ok());
+}
+
+AUREA_TEST(ProjectPackage, FailedReplacementPreservesExistingPackage) {
+    const fs::path dir = scratch("failed_replace");
+    const auto project = s8(dir / "original.aurea");
+    { Rig r; AUREA_CHECK(r.e.save_project(project.c_str()).ok()); }
+    const auto path = s8(dir / "package.aureaproj");
+    AUREA_CHECK(package::write_package(project, path, "Before", "2.0", {}, nullptr).ok());
+    const auto before = read_text(path);
+    fileio::FaultInjection fault;
+    fault.kind = fileio::Fault::RenameFails;
+    fault.pathContains = "failed_replace";
+    fileio::set_fault_injection(fault);
+    const Status failed = package::write_package(project, path, "After", "2.0", {}, nullptr);
+    const auto failures = fileio::injected_failures();
+    fileio::clear_fault_injection();
+    AUREA_CHECK(!failed.ok());
+    AUREA_CHECK_EQ(failures, 1u);
+    AUREA_CHECK(read_text(path) == before);
+    AUREA_CHECK(!fs::exists(fs::u8path(path + ".tmp")));
+    AUREA_CHECK(package::write_package(project, path, "After", "2.0", {}, nullptr).ok());
+    AUREA_CHECK(read_text(path) != before);
+    const auto directoryTarget = dir / "existing-directory";
+    fs::create_directory(directoryTarget);
+    AUREA_CHECK(!package::write_package(project, s8(directoryTarget), "After", "2.0", {}, nullptr).ok());
+    AUREA_CHECK(fs::is_directory(directoryTarget));
+}
+
+AUREA_TEST(ProjectPackage, DirectoryNamesHaveABoundedMemoryBudget) {
+    const fs::path dir = scratch("directory_budget");
+    for (bool aggregate : {false, true}) {
+        std::string bytes(30, '\0');
+        auto put = [](std::string& buffer, usize at, u32 value, usize size) {
+            for (usize i = 0; i < size; ++i) buffer[at + i] = static_cast<char>(value >> (8 * i));
+        };
+        put(bytes, 0, 0x04034b50u, 4);
+        const u32 count = aggregate ? 2049u : 1u;
+        for (u32 i = 0; i < count; ++i) {
+            const auto number = std::to_string(i);
+            const auto length = aggregate ? 4096u : 4097u;
+            const auto start = bytes.size();
+            bytes.resize(start + 46, '\0');
+            put(bytes, start, 0x02014b50u, 4);
+            put(bytes, start + 28, length, 2);
+            bytes += std::string(length - number.size(), 'n') + number;
+        }
+        const auto end = bytes.size();
+        bytes.resize(end + 22, '\0');
+        put(bytes, end, 0x06054b50u, 4);
+        put(bytes, end + 8, count, 2); put(bytes, end + 10, count, 2);
+        put(bytes, end + 12, static_cast<u32>(end - 30), 4); put(bytes, end + 16, 30, 4);
+        const auto path = s8(dir / "oversized.aureaproj");
+        write_text(path, bytes);
+        package::ImportResult result;
+        const auto out = s8(dir / "output.aurea");
+        AUREA_CHECK(package::read_package(path, out, s8(dir / "media"), result).code() == Errc::BudgetExceeded);
+        AUREA_CHECK(!fs::exists(fs::u8path(out)));
+    }
+}
+
 AUREA_TEST(ProjectPackage, RejectsForeignNewerAndCorruptFiles) {
     const fs::path dir = scratch("erros");
     const std::string junk = s8(dir / "lixo.aureaproj");

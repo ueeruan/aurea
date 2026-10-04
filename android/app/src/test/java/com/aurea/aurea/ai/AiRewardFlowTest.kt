@@ -75,6 +75,38 @@ class AiRewardFlowTest {
 
     private fun s(id: String) = flow.sessao(id)!!
 
+    @Test fun `ticket tardio de sessao substituida nao apresenta anuncio`() {
+        val tickets = mutableMapOf<String, (String) -> Unit>()
+        val published = mutableListOf<String>()
+        flow = AiRewardFlow(ad, { session, ok, _ -> tickets[session.generationId] = ok },
+            { srv.amarrados += it }, srv::gerar, { published += it.generationId })
+        flow.gerar(pedido, "old")
+        flow.gerar(pedido, "current")
+        val publications = published.size
+        tickets.getValue("old")("old-ticket")
+        assertEquals(0, ad.mostrados)
+        assertEquals(publications, published.size)
+        tickets.getValue("current")("current-ticket")
+        assertEquals(1, ad.mostrados)
+        assertEquals(listOf("current-ticket"), srv.amarrados)
+    }
+
+    @Test fun `recompensa e conclusao antigas nao substituem sessao atual`() {
+        val published = mutableListOf<String>()
+        flow = AiRewardFlow(ad, srv::ticket, { srv.amarrados += it }, srv::gerar, { published += it.generationId })
+        flow.gerar(pedido, "old")
+        val oldReward = ad.recompensa!!
+        oldReward()
+        flow.gerar(pedido, "current")
+        val publications = published.size
+        oldReward()
+        srv.fins.first()(video, null, false)
+        assertEquals(publications, published.size)
+        assertEquals(listOf("T1"), srv.geracoes)
+        assertEquals(SessaoStatus.AnuncioNaTela, s("current").status)
+        assertEquals("current", published.last())
+    }
+
     @Test
     fun `nada e gerado antes da recompensa`() {
         val id = flow.gerar(pedido).generationId
@@ -168,4 +200,18 @@ class AiRewardFlowTest {
         assertTrue(srv.geracoes.isEmpty())
         assertEquals(0, ad.mostrados)
     }
+    @Test fun `completion from previous retry cannot replace successful current attempt`() {
+        val id = flow.gerar(pedido).generationId
+        ad.recompensa!!()
+        val old = srv.fins.single()
+        old(null, "temporary", true)
+        flow.repetirSemAnuncio(id)
+        srv.fins.last()(video, null, false)
+        assertTrue(s(id).liberado)
+        old(null, "late old failure", true)
+        assertTrue(s(id).liberado)
+        assertNull(s(id).erro)
+        assertEquals(1, ad.mostrados)
+    }
+
 }

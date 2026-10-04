@@ -5,7 +5,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.widthIn
@@ -18,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
@@ -31,6 +35,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -89,6 +95,7 @@ fun Timeline(
     val state = remember { TimelineState() }
     val controller = remember(store) { TimelineController(store, state, scope) }
     val painter = remember(metrics, measurer) { TimelinePainter(metrics, measurer) }
+    val cachedFrames by remember(store) { derivedStateOf { store.previewBufferRanges.sumOf { it.endFrame - it.startFrame }.toInt() } }
     // Trilhas abertas de uma camada que ainda existe (só o booleano recompõe).
     val tracksOpen by remember(controller) {
         derivedStateOf {
@@ -97,7 +104,8 @@ fun Timeline(
         }
     }
     // Escolhendo keyframes ou várias camadas, a timeline fica inteira.
-    val shownCompact = timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode || store.layerSelectMode)
+    var showAllLayers by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val shownCompact = !showAllLayers && timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode || store.layerSelectMode)
 
     // Parâmetros entram depois da composição (o desenho e os gestos leem daqui).
     SideEffect {
@@ -133,10 +141,24 @@ fun Timeline(
                 .pointerInput(controller) { with(controller) { handleGestures() } }
                 .drawBehind { painter.draw(this, controller) },
         )
+        if (cachedFrames > 0) {
+            val bufferDescription = stringResource(R.string.preview_buffer_timeline, cachedFrames)
+            Box(Modifier.fillMaxWidth().height((metrics.rulerTicks / density.density).dp)
+                .testTag("timeline.preview.buffer").semantics { contentDescription = bufferDescription })
+        }
         // Irmã (não filha) da superfície de gestos: o toque num botão da barra
         // não chega à timeline embaixo dele.
         KeyActionBar(store, shownCompact, Modifier.align(if (shownCompact) Alignment.TopEnd else Alignment.BottomCenter))
         LayerPickBar(store, Modifier.align(Alignment.BottomCenter))
+        if (store.selection.isNotEmpty() && (compact || compactDock)) {
+            val filterDescription = stringResource(if (showAllLayers) R.string.timeline_selected_only else R.string.timeline_show_all)
+            androidx.compose.material3.TextButton(onClick = { showAllLayers = !showAllLayers },
+                modifier = Modifier.align(Alignment.TopStart).width(84.dp).height(44.dp)
+                    .semantics { contentDescription = filterDescription }.testTag("timeline.showAllLayers")) {
+                Text(stringResource(if (showAllLayers) R.string.timeline_selection_short else R.string.timeline_all_short),
+                    fontSize = 12.sp, maxLines = 1)
+            }
+        }
     }
 }
 

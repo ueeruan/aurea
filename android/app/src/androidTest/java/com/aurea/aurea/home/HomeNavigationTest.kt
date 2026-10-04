@@ -34,12 +34,12 @@ class HomeNavigationTest {
                 AureaTheme {
                     Box(Modifier.width(320.dp).testTag("dockBounds")) {
                         HomeDock(HomeViewModel.PROJECTS_TAB, { calls[1]++ }, { calls[3]++ },
-                            { calls[2]++ }, { calls[0]++ }, { calls[4]++ })
+                            { calls[2]++ }, { calls[0]++ }, {}, { calls[4]++ })
                     }
                 }
             }
         }
-        val tags = listOf("home.menu", "home.projects", "home.create", "home.community", "home.import")
+        val tags = listOf("home.menu", "home.projects", "home.create", "home.community", "home.profile")
         val bounds = tags.map {
             compose.onNodeWithTag(it).assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
             compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot
@@ -55,7 +55,7 @@ class HomeNavigationTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))
         context.getSharedPreferences("aurea.releaseNotes", android.content.Context.MODE_PRIVATE).edit()
-            .putString("read", "${com.aurea.aurea.BuildConfig.VERSION_CODE}:2112-1").commit()
+            .putString("read", "${com.aurea.aurea.BuildConfig.VERSION_CODE}:2123-1").commit()
         AureaDonations.launchPromptPending = false
         compose.setContent {
             val store: EditorStore = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))

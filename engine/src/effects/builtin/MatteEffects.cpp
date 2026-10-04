@@ -235,11 +235,46 @@ public:
     }
 };
 
+// Two rounds of choke and softness, matching the editable matte workflow.
+class MatteChoker final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.key.matte_choker","Matte Choker","Recorte",EffectClass::Neighborhood}; return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("choke1","Encolher 1",2,-50,50,kParamAnimatable|kParamPixels,"px");
+        p.add_float("softness1","Suavidade 1",1,0,100,kParamAnimatable|kParamPixels,"px");
+        p.add_float("choke2","Encolher 2",0,-50,50,kParamAnimatable|kParamPixels,"px");
+        p.add_float("softness2","Suavidade 2",0,0,100,kParamAnimatable|kParamPixels,"px");
+        p.add_int("iterations","Iterações",1,1,4);
+        p.add_bool("show_matte","Mostrar máscara",false);
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        return (std::abs(e.f(0))+std::abs(e.f(2))+1.5f*(e.f(1)+e.f(3)))*std::clamp(e.value(4).as_int(),1,4);
+    }
+    void pipelines(std::vector<PipelineKey>& out,SurfaceFormat f) const override { MatteRefine{}.pipelines(out,f); }
+    Status build(EffectBuildContext& ctx,const EffectEval& e,const LayerImage& input,f32 margin,LayerImage& out) const override {
+        LayerImage current=input;
+        for(int n=0;n<std::clamp(e.value(4).as_int(),1,4);++n) for(u32 step=0;step<2;++step) {
+            ParamValue values[]={e.value(step*2),e.value(step*2+1),ParamValue::scalar(0)};
+            EffectEval pass=e; pass.values=values; pass.count=3;
+            LayerImage next;
+            if(const Status s=MatteRefine{}.build(ctx,pass,current,margin,next);!s.ok())return s;
+            current=next;
+        }
+        if(e.b(5))return single_pass(ctx,ShaderId::effects_matte_view_frag,current,base_uniforms(current),"matte-choker-view",out);
+        out=current; return OkStatus;
+    }
+};
 } // namespace
 
 void register_matte_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<StrokeOutline>());
     (void)r.add(std::make_unique<MatteRefine>());
+}
+
+void register_matte_choker(EffectRegistry& r) {
+    (void)r.add(std::make_unique<MatteChoker>());
 }
 
 } // namespace aurea::builtin

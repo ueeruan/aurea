@@ -825,13 +825,13 @@ struct Owner {
 
 struct MemoKey {
     const Track* t;
-    i64          f;
+    f64          f;
     u64          textContext = 0;
     bool operator==(const MemoKey&) const noexcept = default;
 };
 struct MemoHash {
     usize operator()(const MemoKey& k) const noexcept {
-        return std::hash<const void*>()(k.t) ^ (std::hash<i64>()(k.f) * 0x9E3779B97F4A7C15ull)
+        return std::hash<const void*>()(k.t) ^ (std::hash<f64>()(k.f) * 0x9E3779B97F4A7C15ull)
              ^ (std::hash<u64>()(k.textContext) * 0x85EBCA77u);
     }
 };
@@ -1347,14 +1347,9 @@ struct Ctx {
         f64 base = static_base(d, c);
         if (own && c == env->component && env->fallback && tr && tr->keys.empty()) base = *env->fallback;
         if (!tr) return base * d.scale;
-        const f64 fl = std::floor(localF);
-        const f64 k = localF - fl;
-        auto at = [&](i64 f) -> f64 {
-            if (post && !own && tr->has_expression()) return tr->value_or(FrameIndex{f}, static_cast<f32>(base));
-            return tr->keys.empty() ? base : static_cast<f64>(tr->sample_keys(FrameIndex{f}));
-        };
-        const f64 a = at(static_cast<i64>(fl));
-        const f64 v = k > 1e-9 ? a + (at(static_cast<i64>(fl) + 1) - a) * k : a;
+        const f64 v = post && !own && tr->has_expression()
+            ? tr->value_or_f(localF, static_cast<f32>(base))
+            : (tr->keys.empty() ? base : static_cast<f64>(tr->sample_keys_f(localF)));
         return v * d.scale;
     }
 
@@ -2663,10 +2658,19 @@ void unregister_provider(void* ctx) {
 }
 
 f32 evaluate_track(const Track& track, FrameIndex t, const f32* fallback) noexcept {
+    return evaluate_track_f(track, static_cast<f64>(t.value), fallback);
+}
+
+f32 evaluate_track_f(const Track& track, f64 t, const f32* fallback) noexcept {
+    if (!std::isfinite(t)) return fallback ? *fallback : track.staticValue;
     const TrackExpression* te = track.expression.get();
     auto raw = [&]() -> f32 {
-        return track.keys.empty() ? (fallback ? *fallback : track.staticValue) : track.sample_keys(t);
+        return track.keys.empty() ? (fallback ? *fallback : track.staticValue) : track.sample_keys_f(t);
     };
+    // Beyond the exact-integer range of a double there is no subframe clock.
+    // Do not send hostile valueAtTime inputs into integer noise/random seeds.
+    constexpr f64 maxFrame = 9007199254740991.0;
+    if (std::fabs(t) > maxFrame) return raw();
     if (!te || !te->program) return raw();   // erro de sintaxe: vale o keyframe
 
     // Ciclo: a mesma track já está sendo avaliada nesta thread.
@@ -2726,7 +2730,7 @@ f32 evaluate_track(const Track& track, FrameIndex t, const f32* fallback) noexce
         return done(raw());
     }
     if (sd) {
-        const auto it = sd->memo.find(MemoKey{&track, t.value, g_textContext});
+        const auto it = sd->memo.find(MemoKey{&track, t, g_textContext});
         if (it != sd->memo.end()) return done(it->second);
     }
 
@@ -2739,8 +2743,9 @@ f32 evaluate_track(const Track& track, FrameIndex t, const f32* fallback) noexce
     env.fallback = fallback;
     env.fps = fps;
     env.self = desc_for_track(owner.layer, owner.id, track, fps, env.component);
-    env.localF = static_cast<f64>(t.value);
-    env.compF = env.localF + static_cast<f64>(owner.layer->start.value - owner.layer->offset.value);
+    env.localF = t;
+    env.compF = env.localF + static_cast<f64>(owner.layer->start.value) - static_cast<f64>(owner.layer->offset.value);
+    if (!std::isfinite(env.compF) || std::fabs(env.compF) > maxFrame) return done(raw());
     env.seedBase = hash_mix(hash_mix(owner.id.index * 2654435761u, static_cast<u32>(env.self.prop) | (env.self.kind << 16)),
                             hash_mix(env.self.effectIndex, env.self.key0));
 
@@ -2773,7 +2778,7 @@ f32 evaluate_track(const Track& track, FrameIndex t, const f32* fallback) noexce
                       : (env.component < result.n ? result.v[env.component] : rawDisplay);
     const f32 v = static_cast<f32>(display / env.self.scale);
     te->clear_runtime();
-    if (sd && sd->memo.size() < 262144) sd->memo.emplace(MemoKey{&track, t.value, g_textContext}, v);
+    if (sd && sd->memo.size() < 262144) sd->memo.emplace(MemoKey{&track, t, g_textContext}, v);
     return done(v);
 }
 

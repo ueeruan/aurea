@@ -908,6 +908,7 @@ enum AureaTimeline {
     /// Régua do redesenho: forte e fino.
     static let rulerMajor = Color(hex: 0x6E7A8C)
     static let rulerMinor = Color(hex: 0x4C5566)
+    static let previewBuffer = Color(hex: 0x4DA3FF)
 
     /// Tom da barra por tipo (redesenho 2026-09-29, par do Android): texto azul,
     /// forma âmbar, imagem/vídeo verde, áudio verde-água, 3D cobre, partículas
@@ -1024,17 +1025,19 @@ enum EditorLayout {
     /// altura escolhida arrastando a divisa palco/transporte (vale sobre as duas).
     /// Par do `EditorLayout.solve` do Android.
     static func solve(total: CGFloat, content: SheetContent, fullscreen: Bool,
-                      width: CGFloat = 0, aspect: CGFloat = 0, preferred: CGFloat = 0, dockRows: Int = 2) -> EditorMetrics {
+                      width: CGFloat = 0, aspect: CGFloat = 0, preferred: CGFloat = 0, dockRows: Int = 2, fontScale: CGFloat = 1) -> EditorMetrics {
         if fullscreen {
             return EditorMetrics(topBar: 0, preview: max(0, total - transport), strip: 0,
                                  transport: transport, timeline: 0, sheet: 0)
         }
-        let ws = workspace(total)
+        let bar: CGFloat = total < 560 ? 48 : topBar
+        let ws = max(0, total - bar - transport - strip)
+        let previewFloor = min(previewMin, ws * 0.25)
         // Palco natural ≈ 45 % da altura do editor (360 num 844 do protótipo).
-        let natural = total * naturalPreviewFraction
+        let natural = min(420, total * naturalPreviewFraction)
         let fitted = width > 0 && aspect > 0 && aspect.isFinite ? min(natural, width / aspect + previewFitMargin) : natural
         var preview = (preferred > 0 && preferred.isFinite ? preferred : fitted)
-            .clamped(to: previewMin...maxPreview(total))
+            .clamped(to: previewFloor...max(previewFloor, ws - min(timelineMin, ws * 0.2)))
 
         var sheetFraction: CGFloat = 0
         switch content {
@@ -1049,15 +1052,16 @@ enum EditorLayout {
         }
         var sheet = content == .none ? 0 : ws * min(max(sheetFraction, 0), 0.60)
 
-        let floor: CGFloat
+        var floor: CGFloat
         switch content {
         case .adding, .dock, .panel, .curve, .batch: floor = timelineMin
         default: floor = 120
         }
+        floor = min(floor, total < 560 ? 72 : 120)
         // Make room for editing controls instead of compressing their targets.
-        let requiredSheet: CGFloat = content == .panel ? 336 : 0
-        sheet = min(max(sheet, requiredSheet), max(0, ws - previewMin - floor))
-        preview = min(preview, max(previewMin, ws - sheet - floor))
+        let requiredSheet: CGFloat = content == .panel ? min(520, 336 * min(max(fontScale, 1), 1.5)) : 0
+        sheet = min(max(sheet, requiredSheet), max(0, ws - previewFloor - floor))
+        preview = min(preview, max(previewFloor, ws - sheet - floor))
         var timeline = ws - preview - sheet
         if timeline < floor {
             sheet = max(0, sheet - (floor - timeline))
@@ -1070,7 +1074,7 @@ enum EditorLayout {
             sheet -= spare
             timeline += spare
         }
-        return EditorMetrics(topBar: topBar, preview: preview, strip: strip,
+        return EditorMetrics(topBar: bar, preview: preview, strip: strip,
                              transport: transport, timeline: max(0, timeline), sheet: max(0, sheet))
     }
 
@@ -1080,7 +1084,7 @@ enum EditorLayout {
     /// com a coluna da direita só com a dica, a timeline baixa e o palco
     /// recriado a cada troca — "a UI inteira sumiu" no tablet.
     static func isWide(_ width: CGFloat, _ height: CGFloat) -> Bool {
-        width >= 600 && width > height
+        (width >= 520 && width > height && height < 600) || (width >= 900 && width > height)
     }
 
     static func wideTimeline(_ totalHeight: CGFloat) -> CGFloat {
@@ -1089,7 +1093,7 @@ enum EditorLayout {
 
     /// A largura da folha no layout largo (`wideSheetWidth`): 40 %, presa a 280–380.
     static func wideSheetWidth(_ width: CGFloat) -> CGFloat {
-        min(max(width * 0.4, 280), 380)
+        min(max(width * 0.4, 240), 420)
     }
 }
 

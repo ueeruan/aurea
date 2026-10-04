@@ -197,6 +197,7 @@ internal class TimelinePainter(
             }
         }
         drawRuler(w, view, ppf, cx, fps, st.pps)
+        drawPreviewBuffer(store.previewBufferRanges, w, view, ppf, cx)
         drawMarkers(store.markers, w, view, ppf, cx)
         drawTimecode(cx, store.playhead, fps)
         if (thumbs.starved) c.requestRedraw()
@@ -205,6 +206,17 @@ internal class TimelinePainter(
         // Fio de 1 dp interrompido apenas na faixa do relógio.
         drawRect(color, Offset(playheadX - m.playhead / 2f, m.playheadTop), Size(m.playhead, h - m.playheadTop))
         drawRect(color, Offset(playheadX - m.playhead / 2f, 0f), Size(m.playhead, m.rulerTicks))
+    }
+
+    /** Completed frames only, using the same temporal axis as clips, ticks and playhead. */
+    private fun DrawScope.drawPreviewBuffer(ranges: List<com.aurea.aurea.engine.PreviewBufferRange>, w: Float,
+                                           view: Double, ppf: Float, cx: Float) {
+        val height = 3f * m.density
+        for (range in ranges) {
+            val left = TimeAxis.xOf(range.startFrame.toDouble(), view, ppf, cx).coerceAtLeast(0f)
+            val right = TimeAxis.xOf(range.endFrame.toDouble(), view, ppf, cx).coerceAtMost(w)
+            if (right > left) drawRect(Color(0xFF4DA3FF), Offset(left, m.rulerTicks - height), Size(right - left, height))
+        }
     }
 
     // --- Linhas ---------------------------------------------------------------------------

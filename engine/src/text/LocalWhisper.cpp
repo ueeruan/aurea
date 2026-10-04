@@ -7,6 +7,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <limits>
 
 namespace aurea::text {
 Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
@@ -32,6 +33,8 @@ Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
         if (!ctx) return Status{Errc::CorruptData, "modelo Whisper indisponivel"};
         const double duration = info.durationUs / 1000000.0;
         const double stop = end > 0 ? std::min(end, duration) : duration;
+        if (stop * info.sampleRate >= static_cast<double>(std::numeric_limits<i64>::max() / 4))
+            return Status{Errc::InvalidArgument, "duracao de audio invalida"};
         if (stop <= start) return Status{Errc::InvalidArgument, "intervalo sem audio"};
         std::vector<CaptionWord> result;
         // Overlap gives the decoder context at boundaries; ownership by midpoint
@@ -52,7 +55,10 @@ Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
                 if (!read) return read;
                 if (block.empty()) { if (++emptyReads > 1000) return Status{Errc::DecodeFailed, "decoder sem progresso"}; continue; }
                 emptyReads = 0;
-                const i64 offset = static_cast<i64>(std::llround(pts * info.sampleRate / 1000000.0)) - first;
+                const double timestamp = static_cast<double>(pts) * info.sampleRate / 1000000.0;
+                if (std::abs(timestamp) >= static_cast<double>(std::numeric_limits<i64>::max() / 4))
+                    return Status{Errc::DecodeFailed, "tempo de audio invalido"};
+                const i64 offset = static_cast<i64>(std::llround(timestamp)) - first;
                 if (offset >= count) break;
                 for (usize i = 0; i < block.size() / info.channels; ++i) {
                     const i64 dst = offset + static_cast<i64>(i);

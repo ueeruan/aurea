@@ -180,11 +180,16 @@ void WaveformCache::request(u64 key, const AudioAssetRef& ref) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = entries_.find(key);
-        if (it != entries_.end() && it->second.ref.path == ref.path) return;
+        if (it != entries_.end() && it->second.ref.path == ref.path && it->second.ref.durationSamples == ref.durationSamples) return;
         if (it != entries_.end()) erase_locked(it);   // relink: o antigo não vale mais
+        // Bound the base level and its mip pyramid before allocation. Invalid
+        // metadata must not turn a timeline request into an unbounded resize.
+        const i64 total = ref.durationSamples / kBaseSamples + (ref.durationSamples % kBaseSamples > 0);
+        if (ref.durationSamples <= 0 || static_cast<u64>(total) > budget_locked() / 2) return;
         Entry e;
+        e.revision = ++nextRevision_;
         e.ref = ref;
-        e.total = std::max<i64>(1, (ref.durationSamples + kBaseSamples - 1) / kBaseSamples);
+        e.total = total;
         e.levels.emplace_back(static_cast<usize>(e.total), u8{0});
         e.lastQueryNs = monotonic_ns();   // pedida agora = está na tela
         auto [ins, ok] = entries_.emplace(key, std::move(e));
@@ -197,7 +202,9 @@ void WaveformCache::request(u64 key, const AudioAssetRef& ref) {
 }
 
 bool WaveformCache::query(u64 key, f64 srcStart, f64 samplesPerBucket, u32 count, u8* out) const {
+    if (!out || !count) return false;
     std::fill(out, out + count, u8{0});
+    if (!std::isfinite(srcStart) || !std::isfinite(samplesPerBucket) || samplesPerBucket <= 0) return false;
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entries_.find(key);
     if (it == entries_.end() || it->second.failed) { ++misses_; return false; }
@@ -219,10 +226,10 @@ bool WaveformCache::query(u64 key, f64 srcStart, f64 samplesPerBucket, u32 count
     for (u32 b = 0; b < count; ++b) {
         const f64 a = (srcStart + b * samplesPerBucket) / unit;
         const f64 z = (srcStart + (b + 1) * samplesPerBucket) / unit;
-        i64 i0 = static_cast<i64>(std::floor(a));
-        i64 i1 = std::max(i0 + 1, static_cast<i64>(std::ceil(z)));
-        i0 = std::max<i64>(0, i0);
-        i1 = std::min(i1, readyAt);
+        // Clamp in floating point before converting external timeline values.
+        const i64 i0 = static_cast<i64>(std::clamp(std::floor(a), 0.0, static_cast<f64>(readyAt)));
+        const i64 i1 = std::min(readyAt, std::max(i0 + 1,
+            static_cast<i64>(std::clamp(std::ceil(z), 0.0, static_cast<f64>(readyAt)))));
         u8 m = 0;
         for (i64 i = i0; i < i1; ++i) m = std::max(m, lv[static_cast<usize>(i)]);
         out[b] = m;
@@ -311,6 +318,7 @@ void WaveformCache::thread_main() {
         activeKey_ = key;
         activeValid_ = true;
         const u32 version = version_;
+        const u64 revision = it->second.revision;
         lock.unlock();
 
         const u64 t0 = monotonic_ns();
@@ -318,12 +326,15 @@ void WaveformCache::thread_main() {
         std::vector<u8> stored;
         if (!disk.empty() && load_disk(disk, total, stored)) {
             lock.lock();
+            activeValid_ = false;
             auto e = entries_.find(key);
-            if (e != entries_.end() && e->second.ref.path == ref.path && e->second.total == total) {
+            if (e != entries_.end() && version == version_ && revision == e->second.revision) {
                 e->second.levels.assign(1, std::move(stored));
                 build_levels(e->second.levels);
                 e->second.ready = e->second.total;
                 e->second.done = true;
+                account_locked(e->second);
+                enforce_budget_locked();
                 AUREA_LOG_INFO("waveform: %.1f s de audio lidos do cache em %.1f ms",
                                static_cast<f64>(total * kBaseSamples) / kMixRate,
                                static_cast<f64>(monotonic_ns() - t0) / 1e6);
@@ -358,7 +369,7 @@ void WaveformCache::thread_main() {
                 std::lock_guard<std::mutex> g(mutex_);
                 auto e = entries_.find(key);
                 // Projeto trocado (clear) ou asset relinkado no meio: para.
-                if (e == entries_.end() || quit_ || version != version_) break;
+                if (e == entries_.end() || quit_ || version != version_ || revision != e->second.revision) break;
                 std::copy(chunk.begin(), chunk.begin() + n, e->second.levels[0].begin() + done);
                 done += n;
                 e->second.ready = done;
@@ -368,12 +379,11 @@ void WaveformCache::thread_main() {
                 sinceBump = 0;
                 generation_.fetch_add(1, std::memory_order_acq_rel);
             }
-            if (quit_) break;
         }
         lock.lock();
         activeValid_ = false;
         auto e = entries_.find(key);
-        if (e != entries_.end() && version == version_) {
+        if (e != entries_.end() && version == version_ && revision == e->second.revision) {
             if (failed) {
                 e->second.failed = true;
                 AUREA_LOG_WARN("waveform: audio ilegivel");
@@ -382,7 +392,6 @@ void WaveformCache::thread_main() {
                 e->second.done = true;
                 e->second.ready = e->second.total;
                 account_locked(e->second);
-                enforce_budget_locked();
                 AUREA_LOG_INFO("waveform: %.1f s de audio em %.0f ms", static_cast<f64>(total * kBaseSamples) / kMixRate,
                                static_cast<f64>(monotonic_ns() - t0) / 1e6);
                 // Só o cálculo COMPLETO vai para o disco (parado no meio = recalcula).
@@ -392,6 +401,8 @@ void WaveformCache::thread_main() {
                     save_disk(disk, level0);
                     lock.lock();
                 }
+                // The entry may be evicted here; do not dereference e after it.
+                enforce_budget_locked();
             }
         }
         generation_.fetch_add(1, std::memory_order_acq_rel);

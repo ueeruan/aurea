@@ -465,6 +465,7 @@ private:
         bool done = false;
         bool failed = false;
         u64 bytes = 0;                          ///< contado no orçamento
+        u64 revision = 0;
         mutable u64 lastQueryNs = 0;
     };
     void thread_main();
@@ -492,6 +493,7 @@ private:
     mutable u64 hits_ = 0, misses_ = 0;
     u64 evictions_ = 0;
     u32 version_ = 0;
+    u64 nextRevision_ = 0;
     bool quit_ = false;
     std::thread thread_;
 };

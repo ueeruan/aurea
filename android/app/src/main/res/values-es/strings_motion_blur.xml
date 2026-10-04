@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mb_shutter_angle">Ángulo de obturación</string>
+    <string name="mb_shutter_phase">Fase de obturación</string>
+    <string name="mb_phase_hint">Desplaza la exposición respecto al fotograma. Centrar coloca la mitad de la exposición antes del fotograma.</string>
+    <string name="mb_center_exposure">Centrar exposición</string>
+    <string name="mb_samples_per_frame">Muestras por fotograma</string>
+    <string name="mb_adaptive_limit">Límite adaptativo</string>
+    <string name="mb_quality_hint">La vista previa puede usar menos muestras para responder mejor. La exportación usa la calidad elegida. Los valores altos tardan más.</string>
+    <string name="mb_advanced">Avanzado</string>
+    <string name="mb_comp_settings_hint">Ajustes de la composición: afectan a todas las capas con desenfoque activado.</string>
+</resources>

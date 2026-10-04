@@ -95,6 +95,7 @@ public:
     static constexpr u32 kIdleReleaseMs = 30'000;    ///< rede ociosa sai da memória
 
 private:
+    friend struct DepthMapCacheTestAccess;
     struct Job {
         u64 key = 0;
         Asset asset;          ///< cópia: o modelo pode mudar enquanto decodifica
@@ -114,6 +115,7 @@ private:
     [[nodiscard]] bool ensure_model_locked();
     void enqueue(Job job);
     void insert(u64 key, DepthMapPtr map);
+    void publish_latest(u64 sourceKey, u64 key, i64 targetUs, i64 frameUs);
     [[nodiscard]] DepthMapPtr find(u64 key);
 
     // Cache (mutex_): LRU por chave.

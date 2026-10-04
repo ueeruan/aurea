@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mb_shutter_angle">Угол затвора</string>
+    <string name="mb_shutter_phase">Фаза затвора</string>
+    <string name="mb_phase_hint">Смещает экспозицию относительно кадра. Центрирование размещает половину экспозиции перед кадром.</string>
+    <string name="mb_center_exposure">Центрировать экспозицию</string>
+    <string name="mb_samples_per_frame">Выборок на кадр</string>
+    <string name="mb_adaptive_limit">Адаптивный предел</string>
+    <string name="mb_quality_hint">Предпросмотр может использовать меньше выборок для быстрого отклика. Экспорт использует выбранное качество. Большие значения требуют больше времени.</string>
+    <string name="mb_advanced">Дополнительно</string>
+    <string name="mb_comp_settings_hint">Настройки композиции влияют на все слои с включённым размытием движения.</string>
+</resources>

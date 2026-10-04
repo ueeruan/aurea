@@ -341,6 +341,7 @@ public:
     i64 keyframe_interval_us() const noexcept override { return keyframeUs_; }
 
     Status seek_to_keyframe(i64 targetUs) noexcept override {
+        clear_rendered_image();
         pendingOutput_ = -1;
         pendingFrame_.reset();
         pendingEos_ = false;
@@ -457,6 +458,7 @@ public:
     Status next_raw_frame(FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept {
         endOfStream = false;
         out.reset();
+        if (renderedPending_) return finish_rendered_image(out, outPtsUs, endOfStream);
         if (!codec_) {
             if (const Status s = create_codec(); !s.ok()) return s;
         }
@@ -490,9 +492,9 @@ public:
                 if (AMediaCodec_releaseOutputBufferAtTime(codec_, static_cast<size_t>(idx), pts * 1000) != AMEDIA_OK) {
                     return Status{Errc::DecodeFailed, "releaseOutputBufferAtTime falhou"};
                 }
-                AImage* image = nullptr;
-                if (const Status s = acquire_image(pts, image); !s.ok()) return s;
-                return wrap(image, pts, out);
+                renderedPending_ = true;
+                renderedPts_ = pts; renderedDuration_ = 0; renderedEos_ = eos;
+                return finish_rendered_image(out, outPtsUs, endOfStream);
             }
             if (idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
                 update_output_format();
@@ -512,6 +514,7 @@ public:
     // Surface/ImageReader boundary or allocate/copy GPU/CPU image planes.
     Status next_timed_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs, bool& endOfStream) noexcept {
         out.reset(); endOfStream = false;
+        if (renderedPending_) return finish_rendered_image(out, outPtsUs, endOfStream);
         if (pendingOutput_ < 0) {
             if (const Status status = next_raw_buffer(pendingOutput_, pendingPts_, pendingEos_); !status.ok()) return status;
             if (pendingOutput_ < 0) { endOfStream = pendingEos_; outPtsUs = lastPts_; return OkStatus; }
@@ -541,19 +544,42 @@ public:
         pendingOutput_ = next; pendingPts_ = nextPts; pendingEos_ = eos;
         const i64 duration = next >= 0 ? nextPts - pts : info_.durationUs > pts ? info_.durationUs - pts
             : std::max<i64>(1, static_cast<i64>(1e6 / std::max(1.0, info_.fps)));
-        outPtsUs = pts; nextDeliveryUs_ = pts + duration;
+        outPtsUs = pts;
         endOfStream = eos && next < 0;
         if (pts < deliverFromUs && pts + duration <= deliverFromUs) {
+            nextDeliveryUs_ = pts + duration;
             return AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(current), false) == AMEDIA_OK
                 ? OkStatus : Status{Errc::DecodeFailed, "descarte de frame atrasado falhou"};
         }
         if (AMediaCodec_releaseOutputBufferAtTime(codec_, static_cast<size_t>(current), pts * 1000) != AMEDIA_OK)
             return Status{Errc::DecodeFailed, "releaseOutputBufferAtTime falhou"};
-        AImage* image = nullptr;
-        if (const Status status = acquire_image(pts, image); !status.ok()) return status;
-        const Status status = wrap(image, pts, out);
-        if (status.ok() && out) out->durationUs = duration;
-        return status;
+        renderedPending_ = true;
+        renderedPts_ = pts; renderedDuration_ = duration; renderedEos_ = endOfStream;
+        return finish_rendered_image(out, outPtsUs, endOfStream);
+    }
+
+    // A released codec output may still be waiting for an ImageReader slot or
+    // an RGBA target. Preserve it across backpressure; never decode past it.
+    Status finish_rendered_image(FrameRef& out, i64& pts, bool& eos) noexcept {
+        pts = renderedPts_; eos = renderedEos_;
+        if (!renderedImage_) {
+            if (const Status s = acquire_image(renderedPts_, renderedImage_); !s.ok()) return s;
+        }
+        const Status s = wrap(renderedImage_, renderedPts_, out);
+        if (s.code() == Errc::BudgetExceeded) return s; // wrap retains this AImage
+        renderedImage_ = nullptr; // wrap consumed it (success or permanent failure)
+        renderedPending_ = false;
+        if (s.ok() && out && renderedDuration_ > 0) {
+            out->durationUs = renderedDuration_;
+            nextDeliveryUs_ = renderedPts_ + renderedDuration_;
+        }
+        return s;
+    }
+
+    void clear_rendered_image() noexcept {
+        if (renderedImage_) AImage_delete(renderedImage_);
+        renderedImage_ = nullptr;
+        renderedPending_ = false;
     }
 
     Status next_raw_buffer(ssize_t& out, i64& outPtsUs, bool& endOfStream) noexcept {
@@ -693,6 +719,7 @@ private:
     }
 
     void destroy_codec() noexcept {
+        clear_rendered_image();
         pendingOutput_ = -1;
         pendingFrame_.reset();
         pendingEos_ = false;
@@ -830,7 +857,7 @@ private:
     }
 
     /// Caminho GL do driver: AImage PRIVATE → passe GL → alvo RGBA. O AImage
-    /// volta ao decoder aqui mesmo (em qualquer resultado).
+    /// volta ao decoder aqui, salvo pressão temporária: o caller guarda a imagem.
     Status wrap_driver_gl(AImage* image, i64 pts, FrameRef& out) {
         AHardwareBuffer* hb = nullptr;
         if (AImage_getHardwareBuffer(image, &hb) != AMEDIA_OK || !hb) {
@@ -851,6 +878,7 @@ private:
         }
         std::shared_ptr<const GlVideoBridge::Target> target;
         const Status s = bridge_->convert(hb, quad, target);
+        if (s.code() == Errc::BudgetExceeded) return s;
         AImage_delete(image);
         if (!s.ok()) return s;
         auto* f = new (std::nothrow) GlFrame();
@@ -980,6 +1008,10 @@ private:
     bool outputEos_ = false;
     i64 lastPts_ = 0;
     FrameRef pendingFrame_;
+    AImage* renderedImage_ = nullptr;
+    bool renderedPending_ = false;
+    bool renderedEos_ = false;
+    i64 renderedPts_ = 0, renderedDuration_ = 0;
     bool legacyLookahead_ = false;
     ssize_t pendingOutput_ = -1;
     i64 pendingPts_ = 0; // Actual PTS lookahead preserves long VFR presentation intervals.

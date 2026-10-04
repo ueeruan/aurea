@@ -165,6 +165,40 @@ AUREA_TEST(Ai, TemporalStaticDetailDoesNotTrailMotionCutsOrSeeks) {
 // =============================================================================
 #include "aurea/ai/DepthEstimator.hpp"
 #include "aurea/ai/DepthMapService.hpp"
+
+namespace aurea::ai {
+struct DepthMapCacheTestAccess {
+    static void put(DepthMapService& service, u64 source, u64 key, DepthMapPtr map) {
+        service.insert(key, std::move(map));
+        service.publish_latest(source, key, 0, 33333);
+    }
+    static void publish(DepthMapService& service, u64 source, u64 key) {
+        service.publish_latest(source, key, 0, 33333);
+    }
+};
+}
+
+AUREA_TEST(Ai, LatestVideoFallbackObeysLruAndCannotRepublishEvictedFrames) {
+    for (bool foreground : {false, true}) {
+        ai::DepthMapService service(foreground ? "unused-model" : "");
+        const usize capacity = foreground ? 16 : ai::DepthMapService::kMaxCached;
+        std::weak_ptr<const ai::DepthMap> evicted;
+        for (usize i = 0; i <= capacity; ++i) {
+            auto map = std::make_shared<ai::DepthMap>(); map->disparity.resize(4);
+            if (i == 0) evicted = map;
+            ai::DepthMapCacheTestAccess::put(service, i + 1, i + 100, std::move(map));
+        }
+        u64 key = 0; i64 target = 0, duration = 0;
+        AUREA_CHECK(evicted.expired());
+        AUREA_CHECK(!service.latest_video(1, key, target, duration));
+        ai::DepthMapCacheTestAccess::publish(service, 1, 100);
+        AUREA_CHECK(!service.latest_video(1, key, target, duration));
+        AUREA_CHECK(service.latest_video(capacity + 1, key, target, duration));
+        AUREA_CHECK_EQ(key, capacity + 100);
+        service.clear();
+        AUREA_CHECK(!service.latest_video(capacity + 1, key, target, duration));
+    }
+}
 #include <cmath>
 #include <cstdlib>
 #include <string>

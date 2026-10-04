@@ -169,7 +169,9 @@ internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> 
         .clip(RoundedCornerShape(28.dp)).background(AureaColors.Surface)
         .border(1.dp, AureaColors.Border, RoundedCornerShape(28.dp)).padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        DockUtility(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_tab_settings), "home.menu", onMenu)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            DockUtility(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_tab_settings), "home.menu", onMenu)
+        }
         DockTab(CupertinoGlyph.RectangleStack, stringResource(R.string.home_tab_projects), selected == HomeViewModel.PROJECTS_TAB,
             Modifier.weight(1f).testTag("home.projects"), onProjects)
         val createLabel = stringResource(R.string.home_new_project)

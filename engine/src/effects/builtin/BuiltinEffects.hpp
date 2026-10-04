@@ -8,6 +8,7 @@
 #include "aurea/effects/MotionTile.hpp"
 
 namespace aurea::builtin {
+void register_matte_choker(EffectRegistry& r);
 
 void register_color_effects(EffectRegistry& r);
 void register_blur_effects(EffectRegistry& r);
@@ -58,6 +59,9 @@ void register_motion_detect_effect(EffectRegistry& r);
 void register_retro_displace_effects(EffectRegistry& r);
 /// Datamosh (DatamoshEffect.cpp). Sempre no fim.
 void register_datamosh_effect(EffectRegistry& r);
+void register_motion_extras(EffectRegistry& r);
+void register_repeat_extras(EffectRegistry& r);
+void register_keying_extras(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

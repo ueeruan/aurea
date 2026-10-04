@@ -7,6 +7,7 @@
 #include "aurea/scene3d/ModelBudget.hpp"
 
 #include <algorithm>
+#include <type_traits>
 
 namespace aurea::scene3d {
 namespace {
@@ -35,6 +36,42 @@ f64 keep_ratio(const ModelCost& c, const ModelBudget& b) noexcept {
 }
 
 } // namespace
+
+u64 scene_asset_memory_bytes(const SceneAsset& s) noexcept {
+    u64 bytes = sizeof(s);
+    auto array = [&bytes](const auto& v) { bytes += static_cast<u64>(v.capacity()) * sizeof(typename std::decay_t<decltype(v)>::value_type); };
+    auto name = [&bytes](const std::string& v) { bytes += v.capacity() + 1; };
+    name(s.sourceName);
+    array(s.nodes); array(s.roots); array(s.meshes); array(s.materials); array(s.images);
+    array(s.samplers); array(s.cameras); array(s.lights); array(s.skins); array(s.animations);
+    array(s.textUnits); array(s.textLogicalUnits); array(s.warnings); array(s.missingTextures);
+    for (const auto& n : s.nodes) { name(n.name); array(n.children); array(n.materials); array(n.morphWeights); }
+    for (const auto& m : s.meshes) {
+        name(m.name); array(m.primitives); array(m.morphWeights);
+        for (const auto& p : m.primitives) {
+            array(p.positions); array(p.normals); array(p.tangents); array(p.uv0); array(p.uv1);
+            array(p.colors); array(p.joints); array(p.weights); array(p.indices); array(p.lods); array(p.morphTargets);
+            for (const auto& lod : p.lods) array(lod);
+            for (const auto& morph : p.morphTargets) { array(morph.positions); array(morph.normals); array(morph.tangents); }
+        }
+    }
+    for (const auto& m : s.materials) { name(m.name); array(m.ignoredExtensions); for (const auto& x : m.ignoredExtensions) name(x); }
+    for (usize n = 0; n < s.images.size(); ++n) {
+        const auto& i = s.images[n]; name(i.name); name(i.uri); array(i.rgba);
+        if (i.sharedRgba && std::none_of(s.images.begin(), s.images.begin() + n,
+            [&i](const Image& earlier) { return earlier.sharedRgba == i.sharedRgba; })) array(*i.sharedRgba);
+    }
+    for (const auto& c : s.cameras) name(c.name);
+    for (const auto& l : s.lights) name(l.name);
+    for (const auto& k : s.skins) { name(k.name); array(k.joints); array(k.inverseBind); }
+    for (const auto& a : s.animations) {
+        name(a.name); array(a.samplers); array(a.channels);
+        for (const auto& sampler : a.samplers) { array(sampler.times); array(sampler.values); }
+    }
+    for (const auto& w : s.warnings) name(w);
+    for (const auto& w : s.missingTextures) name(w);
+    return bytes;
+}
 
 u64 model_memory_budget(const DeviceMemoryHint& hint) noexcept {
     // Pico, não residente: o import segura o arquivo lido, a parte em
@@ -136,7 +173,8 @@ ModelPlan plan_model_import(const ModelCost& cost, const DeviceMemoryHint& hint,
     const u32 light = static_cast<u32>(ModelQuality::Light);
     // Pesado = o Original não cabe, ou tem o dobro dos triângulos que o
     // Equilibrado manteria (cabe na memória, mas o preview engasga).
-    plan.heavy = !plan.fits[orig] || cost.triangles > 2ull * plan.budget[bal].maxTriangles;
+    plan.heavy = !plan.fits[orig] || cost.triangles > 2ull * plan.budget[bal].maxTriangles
+        || (!cost.exact && cost.triangles == 0 && cost.fileBytes > 0);
     plan.recommended = !plan.heavy ? ModelQuality::Original
                      : plan.fits[bal] ? ModelQuality::Balanced : ModelQuality::Light;
     // Estimativa (FBX pelo tamanho) não recusa sozinha: o import tenta com o

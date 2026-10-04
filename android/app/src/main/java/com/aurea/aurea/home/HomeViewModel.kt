@@ -181,20 +181,30 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
      * fluxo mora aqui (sobrevive à Home saindo da tela) e espera o store
      * trocar para o editor antes de chamar `importVideo`/`importImage`.
      */
+    private var mediaCreation = 0L
     internal fun createFromMedia(store: EditorStore, uri: Uri) {
+        val request = ++mediaCreation
+        val destination = store.projectGeneration
         viewModelScope.launch {
             val media = withContext(Dispatchers.IO) { probeMedia(uri) }
             if (media == null) {
                 store.showToast(getApplication<Application>().getString(R.string.import_failed))
                 return@launch
             }
-            if (!awaitEngine(store)) return@launch
+            if (!awaitEngine(store) || request != mediaCreation || destination != store.projectGeneration) return@launch
+            val previousPath = store.project.path
             val ratio = if (media.width > 0 && media.height > 0) media.width.toFloat() / media.height else 9f / 16f
             val frame = frameFor(ratio, 1080)
             // Encoders de vídeo pedem medidas pares.
             store.newProject(frame.width and 1.inv(), frame.height and 1.inv(), 30f, media.name)
-            val opened = withTimeoutOrNull(ENGINE_WAIT_MS) { snapshotFlow { store.screen }.first { it == Screen.Editor } }
-            if (opened == null) return@launch   // a falha já foi avisada pelo store
+            val expectedGeneration = destination + 1
+            if (store.projectGeneration != expectedGeneration) return@launch
+            val opened = withTimeoutOrNull(ENGINE_WAIT_MS) {
+                snapshotFlow { Triple(store.project.path, store.screen, store.projectOperationBusy) }.first {
+                    it.first != previousPath && it.second == Screen.Editor && !it.third
+                }
+            }
+            if (opened == null || request != mediaCreation || store.projectGeneration != expectedGeneration) return@launch   // a falha já foi avisada pelo store
             if (media.video) store.importVideo(uri) else store.importImage(uri)
         }
     }
@@ -280,7 +290,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
  * dividiam uma imagem de 1280 px só — numa grade de 40 projetos isso eram
  * 40 bitmaps de 1280 px na RAM sem nenhum motivo.
  */
-internal class HomeThumbnails(private val resources: Resources) {
+internal class HomeThumbnails(private val resources: Resources) : com.aurea.aurea.engine.TrimmableImageCache {
+    init { com.aurea.aurea.engine.UiImageCaches.register(this) }
+    @Volatile private var trimEpoch = 0L
+    override fun releaseImages() { trimEpoch++; cache.evictAll() }
     private val cache = object : LruCache<String, ImageBitmap>(MAX_BYTES) {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
     }
@@ -289,27 +302,25 @@ internal class HomeThumbnails(private val resources: Resources) {
 
     suspend fun load(key: String, decode: () -> Bitmap?): ImageBitmap? {
         cache.get(key)?.let { return it }
+        val epoch = trimEpoch
         val bmp = withContext(Dispatchers.IO) { decode()?.asImageBitmap() } ?: return null
-        cache.put(key, bmp)
+        if (epoch == trimEpoch) cache.put(key, bmp)
         return bmp
     }
 
     fun decodeFile(path: String, widthPx: Int): Bitmap? = try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
-        BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sampleFor(bounds.outWidth, widthPx) })
+        val sample = com.aurea.aurea.engine.ImageMemoryPolicy.sampleSize(bounds.outWidth, bounds.outHeight,
+            widthPx.coerceIn(1, 1080) * 2,
+            minOf(widthPx.coerceIn(1, 1080).toLong() * widthPx.coerceIn(1, 1080) * 2,
+                com.aurea.aurea.engine.ImageMemoryPolicy.availablePixels()))
+        if (sample == null) null else BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
     } catch (_: Exception) {
         null
     } catch (_: OutOfMemoryError) {
         // Capa enorme/corrompida num aparelho de 4 GB: sem capa, nunca a Home fechando.
         null
-    }
-
-    /** Maior potência de 2 que ainda deixa a imagem com ≥ a largura pedida. */
-    private fun sampleFor(sourceWidth: Int, targetWidth: Int): Int {
-        var sample = 1
-        while (sourceWidth / (sample * 2) >= max(1, targetWidth)) sample *= 2
-        return sample
     }
 
     private companion object {

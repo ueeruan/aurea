@@ -12,7 +12,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -67,6 +66,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.expand
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -371,17 +374,16 @@ private fun androidx.compose.foundation.layout.ColumnScope.OpacityFace(env: Pane
 
 /**
  * DESFOQUE DE MOVIMENTO: liga na camada (e no projeto, se estava desligado lá —
- * o motor só borra com os dois ligados); a intensidade é a abertura do obturador
- * do projeto em % (180° = 50 %). Vídeo tem ainda o desfoque pelo movimento de
- * dentro do próprio vídeo.
+ * o motor só borra com os dois ligados). A composição controla ângulo e fase
+ * em graus, além das amostras. O rastro local e o fluxo óptico do vídeo são
+ * controles separados.
  */
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: PanelEnv) {
     val store = env.store
-    val blurStrengthLabel = stringResource(R.string.panel_intensidade_desfoque)
     val d = store.detail ?: return
     val on = d.motionBlur && store.compMotionBlur
-    val strength = store.shutterAngle / 3.6f
+    var advanced by rememberSaveable { mutableStateOf(false) }
     Column(
         Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp),
     ) {
@@ -394,24 +396,10 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
             }
         }
         if (on) {
-            com.aurea.aurea.ui.ds.PropertyRow(
-                label = stringResource(R.string.panel_intensidade),
-                value = strength,
-                unitsPerDp = 0.5f,
-                min = 0f,
-                max = 200f,
-                format = { "${numeroPtBr(it, 0)}%" },
-                selected = true,
-                onSelect = {},
-                onGestureStart = { store.beginGesture("intensidade do desfoque") },
-                onValue = { store.changeShutterAngle(it.coerceIn(0f, 200f) * 3.6f) },
-                onGestureEnd = { store.endGesture() },
-                onTapValue = {
-                    env.openKeypad(KeypadRequest(blurStrengthLabel, strength, "%", 0f, 200f, 0) { store.changeShutterAngle(it * 3.6f) })
-                },
-            )
+            MotionBlurSetting(env, stringResource(R.string.mb_shutter_angle), store.shutterAngle,
+                "°", 0f, 720f, 1, "motionblur.shutter", store::changeShutterAngle)
             Text(
-                stringResource(R.string.panel_intensidade_vale_todas_camadas_desfoque_neste),
+                stringResource(R.string.mb_comp_settings_hint),
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
             )
@@ -439,12 +427,55 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
             )
+            val advancedLabel = stringResource(R.string.mb_advanced)
+            com.aurea.aurea.ui.ds.AdvancedToggle(advanced, 3, { advanced = !advanced },
+                Modifier.heightIn(min = 48.dp).testTag("motionblur.advanced").semantics {
+                    contentDescription = advancedLabel
+                    if (advanced) collapse { advanced = false; true }
+                    else expand { advanced = true; true }
+                })
+            if (advanced) {
+                MotionBlurSetting(env, stringResource(R.string.mb_shutter_phase), store.shutterPhase,
+                    "°", -360f, 360f, 1, "motionblur.phase", store::changeShutterPhase)
+                androidx.compose.material3.TextButton(onClick = store::centerMotionBlurExposure,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("motionblur.center")) {
+                    Text(stringResource(R.string.mb_center_exposure))
+                }
+                Text(stringResource(R.string.mb_phase_hint), style = AureaType.BodySmall, color = AureaColors.Muted)
+                MotionBlurSetting(env, stringResource(R.string.mb_samples_per_frame), store.motionBlurSamples.toFloat(),
+                    "", 2f, minOf(64, store.motionBlurAdaptiveLimit).toFloat(), 0, "motionblur.samples") {
+                    store.changeMotionBlurSamples(it.roundToInt())
+                }
+                MotionBlurSetting(env, stringResource(R.string.mb_adaptive_limit), store.motionBlurAdaptiveLimit.toFloat(),
+                    "", maxOf(2, store.motionBlurSamples).toFloat(), 256f, 0, "motionblur.adaptive") {
+                    store.changeMotionBlurAdaptiveLimit(it.roundToInt())
+                }
+                Text(stringResource(R.string.mb_quality_hint), style = AureaType.BodySmall, color = AureaColors.Muted)
+            }
         }
         if (d.kind == LayerType.Video.kind) {
             Spacer(Modifier.height(8.dp))
             BlurToggleRow(stringResource(R.string.panel_desfoque_movimento_video), stringResource(R.string.panel_borra_mexe_dentro_video), d.vectorBlur) { store.setVectorBlur(d.id, it) }
         }
     }
+}
+
+@Composable
+private fun MotionBlurSetting(env: PanelEnv, label: String, value: Float, unit: String,
+                              min: Float, max: Float, decimals: Int, tag: String, onValue: (Float) -> Unit) {
+    val edit = { env.openKeypad(KeypadRequest(label, value, unit, min, max, decimals, onConfirm = onValue)) }
+    com.aurea.aurea.ui.ds.PropertyRow(
+        label = label, value = value, unitsPerDp = if (decimals == 0) .1f else .5f,
+        min = min, max = max, format = { "${numeroPtBr(it, decimals)}$unit" },
+        selected = false, onSelect = {}, modifier = Modifier.testTag(tag).semantics(mergeDescendants = true) {
+            contentDescription = label
+            stateDescription = "${numeroPtBr(value, decimals)}$unit"
+            onClick { edit(); true }
+        },
+        onGestureStart = { env.store.beginGesture(label) }, onValue = onValue,
+        onGestureEnd = { env.store.endGesture() },
+        onTapValue = edit,
+    )
 }
 
 /**
@@ -744,7 +775,18 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
             style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)),
         )
     }
+    val controlledTracks = when {
+        pivot -> listOf(TrackKey(TrackProperty.ANCHOR_X), TrackKey(TrackProperty.ANCHOR_Y), TrackKey(TrackProperty.POSITION_X), TrackKey(TrackProperty.POSITION_Y))
+        zMode -> listOf(TrackKey(TrackProperty.POSITION_Z))
+        else -> listOf(TrackKey(TrackProperty.POSITION_X), TrackKey(TrackProperty.POSITION_Y))
+    }
+    val driven = store.expressionLook(controlledTracks).let {
+        it == com.aurea.aurea.engine.ExpressionLook.On || it == com.aurea.aurea.engine.ExpressionLook.Error
+    }
+    val expressionNotice = stringResource(R.string.transform_expression_controlled)
+    val expressionNoticeNow by rememberUpdatedState(if (driven) expressionNotice else null)
     val hint = when {
+        driven -> expressionNotice
         pivot -> stringResource(R.string.panel_deslize_ponto_giro_botao_centro_devolve)
         zMode -> stringResource(R.string.panel_deslize_ajustar_profundidade_toque_z_voltar)
         depth -> stringResource(R.string.panel_deslize_mover_toque_z_profundidade)
@@ -758,15 +800,26 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
         Modifier
             .weight(1f)
             .fillMaxWidth()
-            .pointerInput(store, pivot, depth) {
+            .testTag(if (pivot) "transform.pivot.pad" else "transform.move.pad")
+            .pointerInput(store, store.primary, pivot, depth) {
                 var startX = 0f
                 var startY = 0f
                 var startZ = 0f
                 var acc = Offset.Zero
                 var gain = 1f
                 var pivotDrag: com.aurea.aurea.editor.PivotDragSession? = null
-                detectDragGestures(
+                var gestureOpen = false
+                fun finishGesture() {
+                    dragging = false
+                    if (gestureOpen) {
+                        gestureOpen = false
+                        store.endGesture()
+                    }
+                }
+                try { detectDragGestures(
                     onDragStart = {
+                        if (store.playing || store.preview.buffering) store.pause()
+                        expressionNoticeNow?.let(store::showToast)
                         val d = store.detail
                         if (d != null) {
                             startX = if (pivot) d.anchor[0] else d.position[0]
@@ -782,10 +835,11 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                         // O GANHO da A.01: 360 dp de dedo atravessam a largura da composição.
                         gain = max(1, store.project.width) / 360f * (if (fineNow) 0.25f else 1f)
                         dragging = true
+                        gestureOpen = true
                         store.beginGesture(if (pivot) "mover pivô" else "mover")
                     },
-                    onDragEnd = { dragging = false; store.endGesture() },
-                    onDragCancel = { dragging = false; store.endGesture() },
+                    onDragEnd = { finishGesture() },
+                    onDragCancel = { finishGesture() },
                 ) { change, delta ->
                     change.consume()
                     acc += Offset(delta.x / density, delta.y / density)
@@ -808,7 +862,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                     if (abs(tx - cx) < 5f * gain) tx = cx
                     if (abs(ty - cy) < 5f * gain) ty = cy
                     store.setTransform2(TrackProperty.POSITION_X, tx, TrackProperty.POSITION_Y, ty)
-                }
+                } } finally { finishGesture() }
             },
     ) {
         CornerMarks(Modifier.fillMaxSize())
@@ -822,7 +876,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                 .align(Alignment.Center)
                 .padding(top = if (pivot) 0.dp else 36.dp, start = 16.dp, end = 16.dp),
             // A instrução some enquanto o dedo arrasta (pela cor: nada é remedido).
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (dragging) Color.Transparent else AureaColors.Muted)),
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (driven) AureaColors.Text else if (dragging) Color.Transparent else AureaColors.Muted)),
         )
         if (!pivot) {
             Box(
@@ -947,7 +1001,7 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
     val prop = RotationProps[axis]
     val angle by remember(store, axis) { derivedStateOf { store.detail?.rotation?.get(axis) ?: 0f } }
     val current by rememberUpdatedState(angle)
-    BoxWithConstraints(
+    Box(
         Modifier
             .fillMaxSize()
             .pointerInput(store, axis) {

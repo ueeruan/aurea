@@ -1556,6 +1556,39 @@ AUREA_TEST(Stability, ThousandUndoRedoStepsAreConsistent) {
     e.shutdown();
 }
 
+AUREA_TEST(Stability, UndoBudgetIncludesImportedAnimationAndRigData) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless()).ok());
+    AUREA_CHECK(e.new_project(64, 36, 30.0, "history-data").ok());
+    auto id = e.add_text("animated");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    const u64 base = History::estimate_bytes(*comp);
+    layer->timeRemapLegacyTracks.resize(2);
+    for (auto& track : layer->timeRemapLegacyTracks) track.keys.resize(4096);
+    layer->rig.joints.resize(1000);
+    layer->model.materials.resize(1000);
+    layer->layerAnimators.resize(64);
+    for (auto& animator : layer->layerAnimators) animator.name.assign(100, 'a');
+    const u64 payload = 8192 * sizeof(Keyframe) + 1000 * sizeof(RigJoint) +
+                        1000 * sizeof(MaterialOverride) + 64 * (sizeof(LayerAnimator) + 100);
+    AUREA_CHECK(History::estimate_bytes(*comp) >= base + payload);
+    e.history().clear();
+    e.history().set_budget_bytes(base + payload / 2);
+    for (int i = 0; i < 5; ++i) {
+        Command c; c.type = CommandType::LayerSetOpacity;
+        c.opacity.layer = LayerId::unpack(*id); c.opacity.opacity = .1f * (i + 1);
+        AUREA_CHECK(e.apply_command(c).ok());
+    }
+    // The minimum of one undo survives, but several over-budget copies do not.
+    AUREA_CHECK_EQ(e.history().depth(), 1u);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    e.shutdown();
+}
+
 AUREA_TEST(Stability, UndoHistoryRespectsItsMemoryBudget) {
     Engine e;
     AUREA_CHECK(e.initialize(headless()).ok());

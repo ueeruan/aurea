@@ -43,10 +43,14 @@ class EffectPreviewStore(
     cacheDir: File,
     private val version: String,
     private val render: (typeId: Int, width: Int, height: Int) -> ImageBitmap?,
-) {
+) : com.aurea.aurea.engine.TrimmableImageCache {
+    init { com.aurea.aurea.engine.UiImageCaches.register(this) }
+    override fun releaseImages() = trimMemory()
+
     private val root = File(cacheDir, "previas")
     private val dir = File(root, version)
     @Volatile private var dirReady = false
+    @Volatile private var trimEpoch = 0L
 
     /** Em memória: por BYTES, não por número — 128 prévias de 256² são 32 MB. */
     private val memory = object : LruCache<String, ImageBitmap>(MAX_MEMORY_BYTES) {
@@ -63,13 +67,15 @@ class EffectPreviewStore(
     suspend fun load(typeId: Int, width: Int, height: Int): ImageBitmap? {
         val k = key(typeId, width, height)
         memory.get(k)?.let { return it }
+        val epoch = trimEpoch
         val file = File(dir, "$k.webp")
-        withContext(Disk) { readPng(file) }?.let { memory.put(k, it); return it }
+        withContext(Disk) { readPng(file) }?.let { if (epoch == trimEpoch) memory.put(k, it); return it }
         val bmp = withContext(Gpu) {
             // Outro cartão com o mesmo efeito pode ter gerado enquanto este esperava.
-            memory.get(k) ?: render(typeId, width, height)
+            if (epoch != trimEpoch) null else memory.get(k) ?: try { render(typeId, width, height) }
+                catch (_: OutOfMemoryError) { trimMemory(); null }
         } ?: return null
-        memory.put(k, bmp)
+        if (epoch == trimEpoch) memory.put(k, bmp)
         withContext(Disk) { writePng(file, bmp) }
         return bmp
     }
@@ -78,7 +84,7 @@ class EffectPreviewStore(
     fun residentCount(): Int = memory.size()
 
     /** Pressão de memória (Fase 8B): solta as prévias em memória; refeitas sob demanda. */
-    fun trimMemory() = memory.evictAll()
+    fun trimMemory() { trimEpoch++; memory.evictAll() }
 
     /** "Limpar cache" (main thread): renomeia na hora, apaga em segundo plano. */
     fun clear() {

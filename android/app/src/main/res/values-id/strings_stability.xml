@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model3d_risk_warning">Model 3D yang sangat berat dapat menghabiskan memori, membuat perangkat panas, memperlambat atau menutup aplikasi. Gunakan dengan risiko Anda sendiri.</string>
+    <string name="preview_buffer_preparing">Menyiapkan pratinjau · %1$d/%2$d frame</string>
+    <string name="preview_buffer_ready">Pratinjau dalam memori · %1$d frame</string>
+    <string name="preview_buffer_timeline">Pratinjau tersimpan: %1$d frame</string>
+    <string name="preview_buffer_limited">Sebagian pratinjau dalam memori · %1$d frame</string>
+    <string name="app_export_interrupted">Ekspor terhenti. Coba lagi.</string>
+    <string name="transform_expression_controlled">Transformasi ini dikendalikan oleh ekspresi. Ketuk = untuk mengedit atau menonaktifkan ekspresi.</string>
+    <string name="fx_custom_create">Buat efek</string>
+    <string name="fx_custom_library">Efek saya</string>
+    <string name="fx_custom_normal">Normal</string>
+    <string name="fx_custom_advanced">Lanjutan</string>
+    <string name="fx_custom_save">Simpan efek</string>
+    <string name="fx_custom_name">Nama efek</string>
+    <string name="fx_custom_cancel">Batal</string>
+    <string name="fx_custom_normal_help">Tambahkan efek dan sesuaikan nilainya untuk menggabungkan hasil. Menyimpan akan mempertahankan susunan efek dan keyframe untuk digunakan kembali, termasuk pada foto.</string>
+    <string name="fx_custom_advanced_help">Buka efek untuk mengedit semua kontrol. Menu setiap parameter menyediakan ekspresi dan keyframe. Menyimpan akan menyimpan efek yang sedang dibuka.</string>
+    <string name="fx_name_chroma_key_advanced">Chroma Key (Lanjutan)</string>
+    <string name="preview_buffer_note">Buffer otomatis: frame berikutnya disiapkan saat pemutaran dijeda.</string>
+    <string name="timeline_cut_left">Kiri</string>
+    <string name="timeline_cut_right">Kanan</string>
+    <string name="timeline_more">Tindakan linimasa lainnya</string>
+    <string name="timeline_cut_failed">Tidak dapat memangkas. Periksa batas klip dan lapisan yang terkunci di trek magnetis.</string>
+    <string name="timeline_show_all">Semua lapisan</string>
+    <string name="timeline_selected_only">Terpilih</string>
+    <string name="timeline_all_short">Semua</string>
+    <string name="timeline_selection_short">Terpilih</string>
+</resources>
+

@@ -1,4 +1,5 @@
 #include "aurea/Engine.hpp"
+#include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/text/LocalWhisper.hpp"
 #include "aurea/audio/Beats.hpp"
@@ -501,6 +502,7 @@ void Engine::apply_memory_budgets() noexcept {
     // half for reusable intermediate render targets instead of retaining every
     // preview/export resolution until the frame-age timeout.
     renderer_.set_transient_cache_budget(memory_.budget(MemoryClass::RenderedFrames) / 2);
+    renderer_.set_preview_cache_budget(memory_.budget(MemoryClass::RenderedFrames) / 4);
     // Aparelho de entrada (§107): cache de decode menor que o da tabela
     // (a fatia da tabela vale para o plano de sempre, 24 %).
     if (const u32 pct = caps_.policy().decodedFramesBudgetPercent; pct != 24) {
@@ -514,8 +516,10 @@ void Engine::apply_memory_budgets() noexcept {
 }
 
 void Engine::shutdown() noexcept {
+    std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     if (state_ == EngineState::Uninitialized || state_ == EngineState::ShuttingDown) return;
     state_ = EngineState::ShuttingDown;
+    captionCancelled.store(true);
 
     if (exportCtx_ && exportCtx_->thread.joinable()) {
         (void)cancel_export();   // marca e ACORDA as esperas do pipeline
@@ -554,7 +558,10 @@ void Engine::shutdown() noexcept {
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         project_.reset();
+        previewBuffering_ = false;
+        previewBufferStatus_.store(0, std::memory_order_release);
         ++projectSession_;
+        captionCancelled.store(true);
         images_.clear();
         models_.clear();
         hdris_.clear();
@@ -566,12 +573,24 @@ void Engine::shutdown() noexcept {
 EngineState Engine::state() const noexcept { return state_; }
 
 Status Engine::suspend() noexcept {
+    std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     const EngineState s = state_;
     if (s != EngineState::Ready && s != EngineState::Rendering) {
         return Status{Errc::InvalidState, "motor nao esta pronto"};
     }
+    // The export owns decoders and GPU submissions until its worker exits.
+    // Closing media first let the worker reopen codecs behind suspend_all and
+    // continue submitting while iOS/Android had already suspended the app.
+    // Join without model/render locks: the worker needs both to unwind.
+    state_ = EngineState::Suspended;
+    if (exportCtx_ && exportCtx_->thread.joinable()) {
+        (void)cancel_export();
+        exportCtx_->thread.join();
+    }
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        previewBuffering_ = false;
+        previewBufferStatus_.store(0, std::memory_order_release);
         playback_.pause(monotonic_ns());
         playingHint_ = false;
         audio_.stop();
@@ -599,10 +618,12 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     // próprio lock. O projeto (Persistent) não é registrável.
     (void)memory_.trim(upTo);
     const u8 st = static_cast<u8>(upTo);
-    // 4–6: o cache de render e os assets 3D são do renderer, sob o lock de
-    // render (entre quadros). Com export rodando, a GPU é dele: fica para o
-    // próximo aviso do sistema.
-    if (st >= static_cast<u8>(TrimStage::OldRenderCache) && !exportActive_.load(std::memory_order_acquire)) {
+    // Reusable render resources can be reclaimed during export too. Every
+    // producer GPU operation holds renderMutex_; waiting for submitted work
+    // makes the cache safe to drop between frames. Export targets and mapped
+    // encoder slots belong to ExportContext, not the renderer cache/pool.
+    // Skipping this during export ignored pressure precisely at its peak.
+    if (st >= static_cast<u8>(TrimStage::OldRenderCache)) {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_ && renderer_.ready()) {
             gpu_->wait_idle();   // fora do caminho quente: é um aviso do sistema
@@ -734,7 +755,19 @@ void Engine::render_thread_main() noexcept {
     while (renderRunning_) {
         {
             std::unique_lock<std::mutex> lock(wakeMutex_);
-            if (playingHint_.load() && !lastSkipped_) {
+            if (exportActive_.load(std::memory_order_acquire)) {
+                // The exporter owns the GPU. A stale refinement deadline or
+                // playback hint must not repeatedly enter render_frame's early
+                // return. UI/vsync/decode wakes cannot make preview work useful
+                // until export finishes; both completion paths request_render.
+                wakeCv_.wait(lock, [this] {
+                    return !renderRunning_ || !exportActive_.load(std::memory_order_acquire);
+                });
+            } else if (!surfaceAttached_ || state_ == EngineState::Suspended) {
+                // A pending play/buffer request must not spin when Android/iOS
+                // destroys its surface. Reattach/resume explicitly wakes us.
+                wakeCv_.wait(lock, [this] { return !renderRunning_ || wakeFlag_; });
+            } else if (playingHint_.load() && !lastSkipped_) {
                 // Acabou de apresentar: o próximo frame pode já estar devido
                 // (a aquisição FIFO do swapchain dá o ritmo do vsync).
             } else if (playingHint_.load()) {
@@ -746,13 +779,6 @@ void Engine::render_thread_main() noexcept {
                 wakeCv_.wait_for(lock, std::chrono::nanoseconds(waitNs), [this] {
                     return !renderRunning_ || wakeFlag_;
                 });
-            } else if (!surfaceAttached_ || state_ == EngineState::Suspended) {
-                // Sem onde desenhar (segundo plano, tela bloqueada, superfície
-                // ainda não chegou): nada para fazer até alguém acordar. Quem
-                // devolve a tela — attach_surface, resume — já chama
-                // request_render. Antes este caso também acordava a cada
-                // 500 ms só para ver que não havia superfície (§38).
-                wakeCv_.wait(lock, [this] { return !renderRunning_ || wakeFlag_; });
             } else if (refinePending_) {
                 // CADisplayLink wakes us every vsync on iOS. A relative wait
                 // restarted by each wake would prevent refinement forever.
@@ -818,6 +844,8 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
     rawPlaybackLayer_ = {};
+    previewBuffering_ = false;
+    previewBufferStatus_.store(0, std::memory_order_release);
     // Handles are reused by the new project. Edits queued for the previous
     // session must never be replayed against its layers.
     {
@@ -826,6 +854,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
         project_ = std::make_unique<Project>(std::move(*result));
     }
     ++projectSession_;
+    captionCancelled.store(true);
     compStack_.clear();
     images_.clear();
     models_.clear();
@@ -1067,6 +1096,7 @@ Status Engine::load_project(const char* path) noexcept {
         std::lock_guard<std::mutex> rl(renderMutex_);
         renderer_.release_project_resources();
     }
+    u64 loadedSession = 0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         rawPlaybackLayer_ = {};
@@ -1075,7 +1105,8 @@ Status Engine::load_project(const char* path) noexcept {
             commandQueue_->reset();
             project_ = std::make_unique<Project>(std::move(loaded));
         }
-        ++projectSession_;
+        loadedSession = ++projectSession_;
+        captionCancelled.store(true);
         // The saved current composition is only an editor view. Its navigation
         // stack is not serialized, so reopening it would strand the user in a
         // child and make the rest of the project appear lost after a crash.
@@ -1122,6 +1153,8 @@ Status Engine::load_project(const char* path) noexcept {
         if (Composition* c = current_composition()) {
             adapt().configure(c->width(), c->height(), static_cast<f32>(c->fps()));
             playback_ = PlaybackController{};
+            previewBuffering_ = false;
+            previewBufferStatus_.store(0, std::memory_order_release);
             playback_.configure(c->fps(), c->duration());
         }
         // Recuperado de cópia/parcial: está sujo (o principal ainda é o ruim).
@@ -1134,20 +1167,42 @@ Status Engine::load_project(const char* path) noexcept {
         std::vector<std::pair<u64, std::string>> pending;
         {
             std::lock_guard<std::mutex> lock(modelMutex_);
+            if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
+            const auto unused = project_->unreferenced_assets();
             project_->for_each_asset([&](AssetId id, const Asset& a) {
-                if (a.kind == AssetKind::Image && !a.sourcePath.empty()) pending.emplace_back(id.pack(), a.sourcePath);
+                if (a.kind == AssetKind::Image && !a.sourcePath.empty() && std::find(unused.begin(), unused.end(), id) == unused.end())
+                    pending.emplace_back(id.pack(), a.sourcePath);
             });
         }
         u32 missing = 0;
         for (const auto& [key, src] : pending) {
+            std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+            {
+                std::lock_guard<std::mutex> lock(modelMutex_);
+                if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
+                const Asset* a = project_->asset(AssetId::unpack(key));
+                if (!a || a->sourcePath != src) continue;
+                const u64 pixels = static_cast<u64>(a->video.width) * a->video.height;
+                if (a->video.width > 65536 || a->video.height > 65536 || pixels > source_asset_room_locked() / 4) { ++missing; continue; }
+            }
             ImagePixels px;
             const auto resolved=resolve_asset_path(src);
             if (!config_.imageLoader(resolved.c_str(), px, config_.imageLoaderContext) || px.width == 0 || px.height == 0
-                || px.rgba.size() != static_cast<usize>(px.width) * px.height * 4) {
+                || px.width > 65536 || px.height > 65536
+                || px.rgba.size() != static_cast<u64>(px.width) * px.height * 4) {
                 ++missing;
                 continue;
             }
             std::lock_guard<std::mutex> lock(modelMutex_);
+            if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
+            const Asset* a = project_->asset(AssetId::unpack(key));
+            if (!a || a->sourcePath != src) continue;
+            // Layer geometry, masks and rigs are authored in the saved pixel
+            // space. A replacement/downsampled file cannot silently resize
+            // that space on reopen; keep the saved project and report relink.
+            if ((a->video.width && px.width != a->video.width)
+                || (a->video.height && px.height != a->video.height)) { ++missing; continue; }
+            if (px.rgba.capacity() + sizeof(px) > source_asset_room_locked()) { ++missing; continue; }
             images_[key] = std::move(px);
         }
         if (missing) AUREA_LOG_WARN("%u imagem(ns) do projeto nao puderam ser abertas", missing);
@@ -1159,6 +1214,7 @@ Status Engine::load_project(const char* path) noexcept {
         std::vector<std::string> fonts;
         {
             std::lock_guard<std::mutex> lock(modelMutex_);
+            if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
             project_->timeline().for_each_composition([&](CompositionId, const Composition& c) {
                 for (u32 i = 0; i < c.order().size(); ++i) {
                     const Layer* l = c.layer(c.order().at(i));
@@ -1184,6 +1240,7 @@ Status Engine::load_project(const char* path) noexcept {
         std::vector<u64> letterAssets;
         {
             std::lock_guard<std::mutex> lock(modelMutex_);
+            if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
             project_->timeline().for_each_composition([&](CompositionId, const Composition& c) {
                 for (u32 i = 0; i < c.order().size(); ++i) {
                     const Layer* l = c.layer(c.order().at(i));
@@ -1192,8 +1249,9 @@ Status Engine::load_project(const char* path) noexcept {
                     })) letterAssets.push_back(l->model.scene.pack());
                 }
             });
+            const auto unused = project_->unreferenced_assets();
             project_->for_each_asset([&](AssetId id, const Asset& a) {
-                if (a.kind == AssetKind::Model3D && !a.sourcePath.empty()) {
+                if (a.kind == AssetKind::Model3D && !a.sourcePath.empty() && std::find(unused.begin(), unused.end(), id) == unused.end()) {
                     pending.emplace_back(id.pack(), a.sourcePath);
                     pendingQuality[id.pack()] = {a.model.importQuality, a.model.triangleCount};
                 }
@@ -1201,6 +1259,14 @@ Status Engine::load_project(const char* path) noexcept {
         }
         u32 missing = 0;
         for (const auto& [key, src] : pending) {
+            std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+            u64 room = 0;
+            {
+                std::lock_guard<std::mutex> lock(modelMutex_);
+                if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
+                room = source_asset_room_locked();
+            }
+            if (room < 4096) { ++missing; continue; }
             scene3d::ImportOptions o;
             o.maxTextureSize = model_texture_cap();
             const u64 modelKey = key;            // o lambda abaixo não captura o binding estruturado
@@ -1215,7 +1281,7 @@ Status Engine::load_project(const char* path) noexcept {
             const bool isShape = !font && scene3d::decode_shape3d(src, shape);
             scene3d::ImportResult r = font ? scene3d::build_text3d(*font, spec)
                                     : isShape ? scene3d::build_shape3d(shape, [this](const std::string& s) { return resolve_asset_path(s); },
-                                                                       o.maxTextureSize)
+                                                                       o.maxTextureSize, room)
                                               : [&] {
                                                     // Arquivo importado: a mesma otimização do import, e
                                                     // nunca menos do que ESTE aparelho aguenta.
@@ -1225,7 +1291,8 @@ Status Engine::load_project(const char* path) noexcept {
                                                     const u32 ceiling = qi == pendingQuality.end() ? 0u : qi->second.second;
                                                     const auto wanted = static_cast<scene3d::ModelQuality>(std::min<u8>(q, 2));
                                                     scene3d::ModelQuality usedQuality = wanted;
-                                                    const scene3d::ImportOptions mo = model_import_options(file, wanted, {}, true, &usedQuality, ceiling);
+                                                    scene3d::ImportOptions mo = model_import_options(file, wanted, {}, true, &usedQuality, ceiling);
+                                                    mo.memoryBudget = std::min(mo.memoryBudget, room);
                                                     if (usedQuality != wanted)
                                                         AUREA_LOG_WARN("modelo 3D do projeto reaberto mais leve (qualidade %u -> %u) para caber neste aparelho",
                                                                        static_cast<u32>(wanted), static_cast<u32>(usedQuality));
@@ -1243,6 +1310,10 @@ Status Engine::load_project(const char* path) noexcept {
                 continue;
             }
             std::lock_guard<std::mutex> lock(modelMutex_);
+            if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
+            const Asset* a = project_->asset(AssetId::unpack(key));
+            if (!a || a->sourcePath != src) continue;
+            if (scene3d::scene_asset_memory_bytes(*r.asset) > source_asset_room_locked()) { ++missing; continue; }
             models_[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(r.asset));
             if (repairLetters) {
                 // Older paste/preset paths saved the effect with a merged mesh.
@@ -1254,6 +1325,8 @@ Status Engine::load_project(const char* path) noexcept {
         if (missing) AUREA_LOG_WARN("%u modelo(s) 3D ausente(s) no projeto", missing);
         missingTotal += missing;
     }
+    std::lock_guard<std::mutex> loadedLock(modelMutex_);
+    if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
     if (missingTotal) notice |= kLoadMissingMedia;
     lastLoadMissing_.store(missingTotal, std::memory_order_relaxed);
     lastLoadNotice_.store(notice, std::memory_order_relaxed);
@@ -1392,6 +1465,13 @@ void Engine::discard_recovery() noexcept {
 Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     VideoSourceFactory* factory = config_.mediaFactory;
     if (!factory) return Status{Errc::NotSupported, "sem decodificador de video nesta plataforma"};
+    u64 session = 0;
+    CompositionId composition;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_ || !current_composition()) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+        session = projectSession_; composition = project_->timeline().current();
+    }
 
     // Sondagem FORA do lock: abrir o container custa alguns ms e a UI e o
     // render não podem esperar por isso.
@@ -1405,6 +1485,9 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     if (dispW == 0 || dispH == 0) return Status{Errc::AssetCorrupted, "video sem dimensoes"};
 
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()
+        || state_ == EngineState::ShuttingDown)
+        return Status{Errc::Cancelled, "projeto alterado durante a importacao"};
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
@@ -1474,6 +1557,13 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
 Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
     VideoSourceFactory* factory = config_.mediaFactory;
     if (!factory) return Status{Errc::NotSupported, "sem decodificador de audio nesta plataforma"};
+    u64 session = 0;
+    CompositionId composition;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_ || !current_composition()) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+        session = projectSession_; composition = project_->timeline().current();
+    }
     MediaProbe probe;
     if (!factory->probe(request.sourcePath.c_str(), probe) || !probe.hasAudio || probe.audioSampleRate == 0) {
         return Status{Errc::UnsupportedFormat, "arquivo sem trilha de audio decodificavel"};
@@ -1481,6 +1571,9 @@ Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
     if (probe.audioDurationUs <= 0) return Status{Errc::AssetCorrupted, "audio sem duracao"};
 
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()
+        || state_ == EngineState::ShuttingDown)
+        return Status{Errc::Cancelled, "projeto alterado durante a importacao"};
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
@@ -4471,6 +4564,7 @@ bool Engine::set_motion_blur(u64 layerId, bool on) noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return false;
+    if (l->motionBlur == on && (!on || comp->motion_blur().enabled)) return true;
     history_.before_mutation(*comp, project_->timeline().current(), on ? "ligar desfoque de movimento" : "desligar desfoque de movimento");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     l->motionBlur = on;
@@ -4613,13 +4707,16 @@ bool Engine::set_frame_blend(u64 layerId, u32 mode) noexcept {
 }
 
 bool Engine::set_vector_blur(u64 layerId, f32 amount) noexcept {
+    if (!std::isfinite(amount)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Video) return false;
+    amount = std::clamp(amount, 0.0f, 2.0f);
+    if (l->vectorBlur == amount) return true;
     history_.before_mutation(*comp, project_->timeline().current(), amount > 0.0f ? "desfoque do movimento do video" : "sem desfoque do video");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    l->vectorBlur = std::clamp(amount, 0.0f, 2.0f);
+    l->vectorBlur = amount;
     project_->mark_dirty();
     request_render();
     return true;
@@ -4629,12 +4726,9 @@ bool Engine::set_composition_motion_blur(bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
-    history_.before_mutation(*comp, project_->timeline().current(), "motion blur da composicao");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    comp->motion_blur().enabled = on;
-    project_->mark_dirty();
-    request_render();
-    return true;
+    auto settings = comp->motion_blur();
+    settings.enabled = on;
+    return apply_motion_blur_settings_locked(*comp, settings);
 }
 
 bool Engine::query_motion_blur(bool& on, f32& shutter) noexcept {
@@ -4647,12 +4741,51 @@ bool Engine::query_motion_blur(bool& on, f32& shutter) noexcept {
 }
 
 bool Engine::set_shutter_angle(f32 degrees) noexcept {
+    if (!std::isfinite(degrees)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return false;
-    history_.before_mutation(*comp, project_->timeline().current(), "obturador");
+    auto settings = comp->motion_blur();
+    settings.shutterAngle = std::clamp(degrees, 0.0f, 720.0f);
+    return apply_motion_blur_settings_locked(*comp, settings);
+}
+
+bool Engine::query_motion_blur_settings(MotionBlurSettings& out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const auto* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    out = comp->motion_blur();
+    return true;
+}
+
+bool Engine::set_motion_blur_settings(bool enabled, f32 angle, f32 phase,
+                                      u32 samples, u32 adaptiveLimit) noexcept {
+    if (!std::isfinite(angle) || !std::isfinite(phase) || samples < 2 || samples > 64
+        || adaptiveLimit < samples || adaptiveLimit > 256) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    auto* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    auto settings = comp->motion_blur();
+    settings.enabled = enabled;
+    settings.shutterAngle = std::clamp(angle, 0.0f, 720.0f);
+    settings.shutterPhase = std::clamp(phase, -360.0f, 360.0f);
+    settings.samples = samples;
+    settings.adaptiveLimit = adaptiveLimit;
+    return apply_motion_blur_settings_locked(*comp, settings);
+}
+
+bool Engine::apply_motion_blur_settings_locked(Composition& comp, const MotionBlurSettings& settings) noexcept {
+    const auto& previous = comp.motion_blur();
+    if (previous.enabled == settings.enabled && previous.shutterAngle == settings.shutterAngle
+        && previous.shutterPhase == settings.shutterPhase && previous.samples == settings.samples
+        && previous.adaptiveLimit == settings.adaptiveLimit) return true;
+    try {
+        history_.before_mutation(comp, project_->timeline().current(), "desfoque de movimento");
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    comp->motion_blur().shutterAngle = std::clamp(degrees, 0.0f, 720.0f);
+    comp.motion_blur() = settings;
     project_->mark_dirty();
     request_render();
     return true;
@@ -4922,7 +5055,7 @@ bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexc
 // Ambiente 3D (HDRI)
 // =============================================================================
 namespace {
-scene3d::HdriDecode read_hdri_file(const std::string& path) {
+scene3d::HdriDecode read_hdri_file(const std::string& path, u64 memoryBudget) {
     using scene3d::HdriStatus;
     FILE* f = path.empty() ? nullptr : fileio::open_file(path, "rb");
     if (!f) return {nullptr, HdriStatus::Unreadable};
@@ -4932,12 +5065,12 @@ scene3d::HdriDecode read_hdri_file(const std::string& path) {
     if (n <= 0) { std::fclose(f); return {nullptr, HdriStatus::Unreadable}; }
     // O arquivo inteiro vai para a RAM (o Radiance é reduzido linha a linha
     // depois): um 8K .hdr tem ~150 MB; acima de 512 MB não vale tentar.
-    if (n > (512l << 20)) { std::fclose(f); return {nullptr, HdriStatus::TooLarge}; }
+    if (n > (512l << 20) || static_cast<u64>(n) >= memoryBudget) { std::fclose(f); return {nullptr, HdriStatus::TooLarge}; }
     std::vector<u8> bytes(static_cast<usize>(n));
     const usize got = std::fread(bytes.data(), 1, bytes.size(), f);
     std::fclose(f);
     if (got != bytes.size()) return {nullptr, HdriStatus::Unreadable};
-    return scene3d::decode_hdri_detailed(bytes.data(), bytes.size());
+    return scene3d::decode_hdri_detailed(bytes.data(), bytes.size(), 1.0f, memoryBudget);
 }
 
 /// Motivo da falha → código que a UI traduz (EditorStore.kt / AureaModel.swift).
@@ -4959,25 +5092,43 @@ std::shared_ptr<const scene3d::HdriPixels> Engine::hdri_lookup(void* selfPtr, As
     if (auto it = self->hdris_.find(id.pack()); it != self->hdris_.end()) return it->second;
     const Asset* a = self->project_ ? self->project_->asset(id) : nullptr;
     if (!a || a->kind != AssetKind::Environment) return nullptr;
-    std::shared_ptr<const scene3d::HdriPixels> px = read_hdri_file(self->resolve_asset_path(a->sourcePath)).pixels;
+    // prepare already holds modelMutex_: never wait for a parser waiting to commit.
+    std::unique_lock<std::recursive_mutex> importing(self->sourceImportMutex_, std::try_to_lock);
+    if (!importing.owns_lock()) return nullptr;
+    std::shared_ptr<const scene3d::HdriPixels> px = read_hdri_file(self->resolve_asset_path(a->sourcePath), self->source_asset_room_locked()).pixels;
     self->hdris_[id.pack()] = px;   // nulo também fica: não tenta de novo a cada quadro
     return px;
 }
 
 Result<u64> Engine::import_hdri(const char* path, u64 objectLayer) noexcept {
     if (!path || !*path) return Status{Errc::InvalidArgument, "sem arquivo"};
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    u64 session = 0;
+    u64 room = 0;
+    CompositionId composition;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_ || !current_composition()) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+        session = projectSession_; composition = project_->timeline().current();
+        room = source_asset_room_locked();
+    }
     std::string resolved = resolve_asset_path(path);
     // O arquivo que a UI acabou de copiar existe no caminho dado: se o
     // resolvedor de caminhos antigos não o achar, vale o caminho literal.
     if (resolved.empty() || !fileio::exists(resolved)) {
         if (fileio::exists(path) && std::string_view(path).rfind("docs:", 0) != 0) resolved = path;
     }
-    scene3d::HdriDecode decoded = read_hdri_file(resolved);
+    scene3d::HdriDecode decoded = read_hdri_file(resolved, room);
     if (!decoded.pixels) return hdri_failure(decoded.status);
     std::shared_ptr<scene3d::HdriPixels> px = std::move(decoded.pixels);
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()
+        || state_ == EngineState::ShuttingDown)
+        return Status{Errc::Cancelled, "projeto alterado durante a importacao"};
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    if (px->rgb.capacity() * sizeof(f32) + sizeof(*px) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
     Layer* object = objectLayer ? comp->layer(LayerId::unpack(objectLayer)) : nullptr;
     if (objectLayer && (!object || !(object->threeD || object->kind == LayerKind::Model3D)))
         return Status{Errc::InvalidArgument, "objeto 3D nao encontrado"};
@@ -6358,6 +6509,14 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
         // must still work so it can be relinked later.
         if (maxSource < 0) return true;
         const auto inside = [&](f64 value) { return std::isfinite(value) && value >= -0.001 && value <= maxSource + 0.001; };
+        // Older projects and manually extended clips may hold the last source
+        // frame beyond the media's duration. Removing part of such a clip is
+        // still valid: no new source range is introduced by a shorter interval.
+        const bool onlyShortening = &item == &edited &&
+            ((operation == 0 && target >= start) || (operation == 1 && target <= end));
+        if (onlyShortening)
+            return std::isfinite(item.source_frame(item.start)) &&
+                   std::isfinite(item.source_frame(FrameIndex{item.end.value - 1}));
         if (!inside(item.source_frame(item.start)) || !inside(item.source_frame(FrameIndex{item.end.value - 1}))) return false;
         if (operation == 2) {
             const i64 lo = item.local_time(item.start).value, hi = item.local_time(FrameIndex{item.end.value - 1}).value;
@@ -6728,81 +6887,119 @@ u32 Engine::query_markers(i64* out, u32 capacity) noexcept {
 }
 
 Result<u32> Engine::detect_beats(u64 layerId, f64* bpmOut) noexcept {
-    // 1. O que decodificar (sob o lock, rápido).
-    u64 key = 0;
-    audio::AudioAssetRef ref;
-    f64 fps = 30.0, rate = 1.0, atStart = 0.0;
-    bool reversed = false;
-    i64 start = 0, end = 0;
-    {
+    try {
+        u64 key = 0, session = 0, revision = 0;
+        CompositionId composition{};
+        audio::AudioAssetRef ref;
+        f64 fps = 30.0, rate = 1.0, atStart = 0.0;
+        bool reversed = false;
+        i64 start = 0, end = 0;
+        {
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            const Composition* comp = project_ ? current_composition() : nullptr;
+            if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+            const Layer* layer = comp->layer(LayerId::unpack(layerId));
+            if (!layer || (layer->kind != LayerKind::Video && layer->kind != LayerKind::Audio))
+                return Status{Errc::InvalidArgument, "camada sem som"};
+            const Asset* asset = project_->asset(layer->source);
+            if (!asset || !asset->has_audio()) return Status{Errc::InvalidArgument, "camada sem som"};
+            if (!std::isfinite(layer->speed) || layer->speed <= 0.f || layer->end.value <= layer->start.value)
+                return Status{Errc::InvalidArgument, "duracao ou velocidade de audio invalida"};
+            if (layer->speed_track() || layer->timeRemapEnabled)
+                return Status{Errc::InvalidArgument, "detectar batidas requer velocidade constante"};
+            fps = comp->fps();
+            if (!std::isfinite(fps) || fps <= 0) return Status{Errc::InvalidArgument, "taxa de quadros invalida"};
+            key = layer->source.pack(); rate = layer->speed; reversed = layer->reversed;
+            atStart = layer->source_frame(layer->start);
+            start = layer->start.value; end = layer->end.value;
+            const f64 sourceFps = asset->timebaseFps > 0 ? asset->timebaseFps : fps;
+            const long double duration = asset->audio.sampleCount.value > 0 && asset->audio.sampleRate > 0
+                ? static_cast<long double>(asset->audio.sampleCount.value) * audio::kMixRate / asset->audio.sampleRate
+                : static_cast<long double>(asset->duration.value) * audio::kMixRate / sourceFps;
+            if (!std::isfinite(atStart) || !std::isfinite(duration) || duration <= 0
+                || duration >= static_cast<long double>(std::numeric_limits<i64>::max() / 2))
+                return Status{Errc::InvalidArgument, "duracao da fonte de audio invalida"};
+            ref = audio::AudioAssetRef{resolve_asset_path(asset->sourcePath), static_cast<i64>(duration)};
+            session = projectSession_; composition = project_->timeline().current();
+            revision = modelRevision_.load(std::memory_order_acquire);
+        }
+        VideoSourceFactory* factory = config_.mediaFactory;
+        if (!factory) return Status{Errc::InvalidState, "sem decodificador"};
+        const long double srcA = atStart;
+        const long double srcB = srcA + (reversed ? -1.L : 1.L)
+            * (static_cast<long double>(end) - start) * rate;
+        if (!std::isfinite(srcB)) return Status{Errc::InvalidArgument, "intervalo de audio invalido"};
+        auto sampleAt = [&](long double frame, bool upper) {
+            const long double samples = frame * audio::kMixRate / fps;
+            return static_cast<i64>(std::clamp(upper ? std::ceil(samples) : std::floor(samples),
+                0.L, static_cast<long double>(ref.durationSamples)));
+        };
+        const i64 s0 = sampleAt(std::min(srcA, srcB), false), s1 = sampleAt(std::max(srcA, srcB), true);
+        if (s1 <= s0 || s1 - s0 < static_cast<i64>(audio::kMixRate) * 3)
+            return Status{Errc::InvalidArgument, "trecho curto demais"};
+        const u64 sampleCount = static_cast<u64>(s1 - s0);
+        // Include mono PCM, onset/FFT/DP work, markers and the local decoder
+        // cache. Admission precedes decoder opening and every large allocation.
+        const u64 budget = std::min<u64>(32ull << 20, memory_.total_budget() / 8);
+        constexpr u64 fixedBytes = (2ull << 20) + (64ull << 10);
+        if (budget <= fixedBytes || sampleCount > (budget - fixedBytes) / sizeof(f32)
+            || sampleCount * sizeof(f32) + ((sampleCount + 479) / 480) * 64 + fixedBytes > budget
+            || sampleCount > std::numeric_limits<usize>::max() / sizeof(f32))
+            return Status{Errc::OutOfMemory, "trecho de audio grande demais para detectar batidas; reduza sua duracao"};
+        auto stale = [&] { return modelRevision_.load(std::memory_order_acquire) != revision; };
+        audio::BeatResult result;
+        {
+            audio::AudioBlockCache blocks(factory, 2ull << 20, false);
+            blocks.register_asset(key, ref);
+            std::vector<f32> mono(static_cast<usize>(sampleCount), 0.f);
+            for (i64 block = s0 / audio::kBlockFrames; block * audio::kBlockFrames < s1; ++block) {
+                if (stale()) return Status{Errc::Cancelled, "projeto alterado durante a deteccao de batidas"};
+                const auto pcm = blocks.fetch(key, block);
+                if (!pcm) return Status{Errc::IoError, "audio ilegivel"};
+                const i64 base = block * audio::kBlockFrames;
+                const i64 last = std::min(base + static_cast<i64>(audio::kBlockFrames), s1);
+                if (static_cast<u64>(last - base) * 2 > pcm->pcm.size())
+                    return Status{Errc::IoError, "bloco de audio incompleto"};
+                for (i64 i = std::max(base, s0); i < last; ++i) {
+                    const usize offset = static_cast<usize>(i - base) * 2;
+                    const f32 value = .5f * (pcm->pcm[offset] + pcm->pcm[offset + 1]);
+                    mono[static_cast<usize>(i - s0)] = std::isfinite(value) ? value : 0.f;
+                }
+            }
+            if (stale()) return Status{Errc::Cancelled, "projeto alterado durante a deteccao de batidas"};
+            result = audio::detect_beats(mono.data(), mono.size());
+        } // Free PCM and decoder before allocating the undo/staged composition.
         std::lock_guard<std::mutex> lock(modelMutex_);
         Composition* comp = project_ ? current_composition() : nullptr;
-        if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
-        const Layer* l = comp->layer(LayerId::unpack(layerId));
-        if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Audio)) return Status{Errc::InvalidArgument, "camada sem som"};
-        const Asset* a = project_->asset(l->source);
-        if (!a || !a->has_audio()) return Status{Errc::InvalidArgument, "camada sem som"};
-        if (l->speed <= 0.0f) return Status{Errc::InvalidArgument, "quadro congelado"};
-        key = l->source.pack();
-        fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
-        rate = l->speed;
-        reversed = l->reversed;
-        atStart = l->source_frame(l->start);
-        start = l->start.value;
-        end = l->end.value;
-        const i64 len = a->audio.sampleCount.value > 0 && a->audio.sampleRate > 0
-                      ? a->audio.sampleCount.value * static_cast<i64>(audio::kMixRate) / a->audio.sampleRate
-                      : audio::frame_to_sample(a->duration.value, a->timebaseFps > 0.0 ? a->timebaseFps : fps);
-        ref = audio::AudioAssetRef{resolve_asset_path(a->sourcePath), len};
-    }
-    VideoSourceFactory* factory = config_.mediaFactory;
-    if (!factory) return Status{Errc::InvalidState, "sem decodificador"};
-    // 2. Só o trecho da fonte que a camada usa, em mono.
-    const f64 srcA = atStart, srcB = atStart + (reversed ? -1.0 : 1.0) * static_cast<f64>(end - start) * rate;
-    const i64 s0 = std::max<i64>(0, static_cast<i64>(std::floor(std::min(srcA, srcB) * audio::kMixRate / fps)));
-    const i64 s1 = std::min<i64>(ref.durationSamples, static_cast<i64>(std::ceil(std::max(srcA, srcB) * audio::kMixRate / fps)));
-    if (s1 - s0 < static_cast<i64>(audio::kMixRate) * 3) return Status{Errc::InvalidArgument, "trecho curto demais"};
-    audio::AudioBlockCache blocks(factory, 2ull << 20, false);
-    blocks.register_asset(key, ref);
-    std::vector<f32> mono(static_cast<usize>(s1 - s0), 0.0f);
-    for (i64 b = s0 / audio::kBlockFrames; b * audio::kBlockFrames < s1; ++b) {
-        auto blk = blocks.fetch(key, b);
-        if (!blk) {
-            if (b == s0 / audio::kBlockFrames) return Status{Errc::IoError, "audio ilegivel"};
-            break;
+        const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!comp || session != projectSession_ || project_->timeline().current() != composition
+            || stale() || !layer || layer->source.pack() != key)
+            return Status{Errc::Cancelled, "projeto alterado durante a deteccao de batidas"};
+        auto staged = comp->clone();
+        if (!staged) return Status{Errc::OutOfMemory, "sem memoria para as marcas de batidas"};
+        staged->remove_markers(kMarkerBeat, FrameIndex{start}, FrameIndex{end});
+        u32 placed = 0;
+        for (f64 seconds : result.beats) {
+            if (!std::isfinite(seconds)) continue;
+            const long double source = (static_cast<long double>(s0) / audio::kMixRate + seconds) * fps;
+            const long double elapsed = reversed ? (atStart - source) / rate : (source - atStart) / rate;
+            const long double frame = start + std::round(elapsed);
+            if (!std::isfinite(frame) || frame < start || frame >= end) continue;
+            const i64 at = static_cast<i64>(frame);
+            if (std::any_of(staged->markers().begin(), staged->markers().end(), [at](const Marker& m) { return m.frame.value == at; })) continue;
+            staged->put_marker(Marker{FrameIndex{at}, 0xFF4DB7FFu, kMarkerBeat, {}});
+            ++placed;
         }
-        const i64 base = b * audio::kBlockFrames;
-        for (i64 i = std::max(base, s0); i < std::min(base + static_cast<i64>(audio::kBlockFrames), s1); ++i) {
-            const usize k = static_cast<usize>(i - base) * 2;
-            mono[static_cast<usize>(i - s0)] = 0.5f * (blk->pcm[k] + blk->pcm[k + 1]);
-        }
+        history_.before_mutation(*comp, composition, "detectar batidas");
+        *comp = std::move(*staged);
+        modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        project_->mark_dirty();
+        if (bpmOut) *bpmOut = result.bpm;
+        request_render();
+        return placed;
+    } catch (const std::bad_alloc&) {
+        return Status{Errc::OutOfMemory, "memoria insuficiente para detectar batidas"};
     }
-    const u64 t0 = monotonic_ns();
-    const audio::BeatResult br = audio::detect_beats(mono.data(), mono.size());
-    if (bpmOut) *bpmOut = br.bpm;
-    AUREA_LOG_INFO("batidas: %zu a %.1f BPM em %.1f s de audio (%.0f ms)", br.beats.size(), br.bpm,
-                   static_cast<f64>(mono.size()) / audio::kMixRate, static_cast<f64>(monotonic_ns() - t0) / 1e6);
-    // 3. Segundos da fonte → frames da timeline (mesma conta do vídeo/mixer).
-    std::lock_guard<std::mutex> lock(modelMutex_);
-    Composition* comp = project_ ? current_composition() : nullptr;
-    if (!comp) return Status{Errc::InvalidState, "projeto fechado"};
-    history_.before_mutation(*comp, project_->timeline().current(), "detectar batidas");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    comp->remove_markers(kMarkerBeat, FrameIndex{start}, FrameIndex{end});
-    u32 placed = 0;
-    for (f64 sec : br.beats) {
-        const f64 srcFrame = (static_cast<f64>(s0) / audio::kMixRate + sec) * fps;
-        const f64 elapsed = reversed ? (atStart - srcFrame) / rate : (srcFrame - atStart) / rate;
-        const i64 f = start + static_cast<i64>(std::llround(elapsed));
-        if (f < start || f >= end) continue;
-        const bool taken = std::any_of(comp->markers().begin(), comp->markers().end(),
-                                       [f](const Marker& m) { return m.frame.value == f; });
-        if (taken) continue;   // a marca da pessoa manda
-        comp->put_marker(Marker{FrameIndex{f}, 0xFF4DB7FFu, kMarkerBeat, {}});
-        ++placed;
-    }
-    project_->mark_dirty();
-    return placed;
 }
 
 Result<u64> Engine::add_shape(u32 preset) noexcept {
@@ -6860,13 +7057,32 @@ Result<u64> Engine::add_shape(u32 preset) noexcept {
     return lid.pack();
 }
 
+u64 Engine::source_asset_room_locked() const noexcept {
+    const u64 budget = DeviceCapabilities::process_budget_limit(
+        config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+    u64 room = std::min<u64>(budget / 3, 256ull << 20);
+    auto consume = [&room](u64 bytes) { room -= std::min(room, bytes); };
+    for (const auto& [key, image] : images_) consume(image.rgba.capacity() + sizeof(image));
+    for (const auto& [key, model] : models_) if (model) consume(scene3d::scene_asset_memory_bytes(*model));
+    for (const auto& [key, hdri] : hdris_) if (hdri) consume(hdri->rgb.capacity() * sizeof(f32) + sizeof(*hdri));
+    return room;
+}
+
 Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const char* name,
                                  const char* sourcePath) noexcept {
     if (!rgba || width == 0 || height == 0) return Status{Errc::InvalidArgument, "imagem vazia"};
+    if (width > 65536 || height > 65536) return Status{Errc::BudgetExceeded, "imagem grande demais"};
+    const u64 bytes = static_cast<u64>(width) * height * 4;
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    if (bytes + sizeof(ImagePixels) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    ImagePixels px; px.width = width; px.height = height;
+    try { px.rgba.assign(rgba, rgba + static_cast<usize>(bytes)); }
+    catch (const std::bad_alloc&) { return Status{Errc::OutOfMemory}; }
     history_.before_mutation(*comp, project_->timeline().current(), "importar imagem");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
 
@@ -6879,10 +7095,6 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
     asset.video.height = height;
     const AssetId assetId = project_->add_asset(std::move(asset));
 
-    ImagePixels px;
-    px.width = width;
-    px.height = height;
-    px.rgba.assign(rgba, rgba + static_cast<usize>(width) * height * 4);
     images_[assetId.pack()] = std::move(px);
 
     const LayerId lid = comp->add_layer(LayerKind::Image, name ? std::string(name) : std::string());
@@ -7041,14 +7253,22 @@ std::string Engine::resolve_asset_path(const std::string& stored) const {
 Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProgress* progress,
                                  std::string* detail) noexcept {
     if (request.path.empty()) return Status{Errc::InvalidArgument, "caminho vazio"};
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    u64 session = 0;
+    u64 room = 0;
+    CompositionId composition;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
-        if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+        if (!project_ || !current_composition()) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+        session = projectSession_; composition = project_->timeline().current();
+        room = source_asset_room_locked();
     }
     // Parse, validação e otimização FORA do lock: o preview continua rodando.
     // Orçamento do aparelho (ModelBudget.hpp): texturas reduzidas no decode,
     // malhas simplificadas por partes, e recusa com motivo antes de passar.
-    const scene3d::ImportOptions options = model_import_options(request.path, request.quality, request.memory, false);
+    if (room < 4096) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    scene3d::ImportOptions options = model_import_options(request.path, request.quality, request.memory, false);
+    options.memoryBudget = std::min(options.memoryBudget, room);
     scene3d::ImportResult r = scene3d::import_scene_file(request.path, options, progress);
     if (!r.ok()) {
         if (detail) *detail = r.detail;
@@ -7069,9 +7289,13 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     if (progress) progress->phase.store(scene3d::ImportPhase::Complete, std::memory_order_relaxed);
 
     std::lock_guard<std::mutex> lock(modelMutex_);
-    if (!project_) return Status{Errc::InvalidState, "projeto fechado durante o import"};
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()
+        || state_ == EngineState::ShuttingDown || (progress && progress->cancel.load(std::memory_order_relaxed)))
+        return Status{Errc::Cancelled, "projeto alterado ou importacao cancelada"};
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
     history_.before_mutation(*comp, project_->timeline().current(), "importar modelo 3D");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
 
@@ -7721,6 +7945,7 @@ bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
         comp->motion_blur().enabled = true;
         comp->motion_blur().shutterAngle = 180;
         comp->motion_blur().samples = std::max(32u, comp->motion_blur().samples);
+        comp->motion_blur().adaptiveLimit = std::max(comp->motion_blur().samples, comp->motion_blur().adaptiveLimit);
     }
     if (ok && begin > l->start.value) {
         // Applying at the playhead must not retroactively hide or transform
@@ -7767,11 +7992,40 @@ u32 drop_captions(Composition& comp, u64 src) {
 } // namespace
 
 Result<std::vector<text::CaptionWord>> Engine::transcribe_local(u64 layerId, const std::string& model, const std::string& language) noexcept {
-    const auto path = layer_media_path(layerId);
-    if (path.empty() || !config_.mediaFactory) return Status{Errc::InvalidArgument, "camada sem audio"};
-    captionCancelled.store(false); captionProgress.store(0);
-    return text::transcribe_local(*config_.mediaFactory, path, model, language, captionCancelled,
-        [this](int value) { captionProgress.store(value); });
+    // Acquire before resetting the shared cancellation flag. A rejected second
+    // request must not resurrect a transcription that the user just cancelled.
+    static std::mutex transcription;
+    std::unique_lock task(transcription, std::try_to_lock);
+    if (!task.owns_lock()) return Status{Errc::InvalidState, "transcricao em andamento"};
+    std::string path;
+    u64 session = 0; CompositionId composition; AssetId source;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        const Asset* asset = layer && (layer->kind == LayerKind::Video || layer->kind == LayerKind::Audio)
+            ? project_->asset(layer->source) : nullptr;
+        if (!asset || !config_.mediaFactory) return Status{Errc::InvalidArgument, "camada sem audio"};
+        path = resolve_asset_path(asset->sourcePath);
+        session = projectSession_; composition = project_->timeline().current(); source = layer->source;
+        captionCancelled.store(false); captionProgress.store(0);
+    }
+    auto current = [&] {
+        if (!project_ || session != projectSession_ || composition != project_->timeline().current()
+            || state_ == EngineState::ShuttingDown) return false;
+        const Layer* layer = current_composition()->layer(LayerId::unpack(layerId));
+        const Asset* asset = layer && layer->source == source ? project_->asset(source) : nullptr;
+        return asset && resolve_asset_path(asset->sourcePath) == path;
+    };
+    auto result = text::transcribe_local(*config_.mediaFactory, path, model, language, captionCancelled,
+        [&](int value) {
+            std::lock_guard<std::mutex> lock(modelMutex_);
+            if (current()) captionProgress.store(value);
+            else captionCancelled.store(true);
+        });
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!current() || captionCancelled.load()) return Status{Errc::Cancelled, "transcricao cancelada"};
+    return result;
 }
 
 Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::CaptionWord>& words,
@@ -7911,12 +8165,16 @@ Status Engine::ensure_text3d_layout(Layer& layer) noexcept {
     layer.text.size = 100.f;
     layer.text.alignment = spec.alignment;
     if (spec.separateGlyphs) return OkStatus;
+    std::unique_lock<std::recursive_mutex> importing(sourceImportMutex_, std::try_to_lock);
+    if (!importing.owns_lock()) return Status{Errc::InvalidState, "aguarde a importacao atual"};
     spec.separateGlyphs = true;
     const auto font = scene3d::text3d_font(spec);
     if (!font) return Errc::NotFound;
     auto result = scene3d::build_text3d(*font, spec);
     if (!result.ok()) return Status{Errc::InvalidArgument, "nao foi possivel separar as letras (limite de 256 glifos)"};
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(result.asset));
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
     const auto id = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
     models_[id.pack()] = scene;
     layer.model.scene = id;
@@ -7924,6 +8182,14 @@ Status Engine::ensure_text3d_layout(Layer& layer) noexcept {
 }
 
 Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    u64 session = 0; CompositionId composition;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return Status{Errc::InvalidState};
+        session = projectSession_; composition = project_->timeline().current();
+        if (source_asset_room_locked() < 4096) return Status{Errc::BudgetExceeded};
+    }
     const auto font = scene3d::text3d_font(spec);
     if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
     scene3d::ImportResult r = scene3d::build_text3d(*font, spec);
@@ -7932,6 +8198,8 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    if (session != projectSession_ || composition != project_->timeline().current()) return Status{Errc::Cancelled};
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Status{Errc::BudgetExceeded};
     history_.before_mutation(*comp, project_->timeline().current(), "texto 3D");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
@@ -7959,8 +8227,10 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
 }
 
 Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept {
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     scene3d::Text3DSpec edited = spec;
     AssetId previousScene;
+    u64 session = 0; CompositionId composition;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
@@ -7968,6 +8238,8 @@ Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Model3D || l->locked) return Errc::InvalidArgument;
         previousScene = l->model.scene;
+        session = projectSession_; composition = project_->timeline().current();
+        if (source_asset_room_locked() < 4096) return Errc::BudgetExceeded;
         // A stale panel snapshot must not merge the letters of a live effect.
         if (std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
             return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(text::kTransformEffect) || effect.type == effect_type_id(effect_keys::kText3DLayout);
@@ -7979,12 +8251,14 @@ Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept
     if (!r.ok()) return Status{Errc::InvalidArgument, "texto sem letras visiveis"};
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()) return Errc::Cancelled;
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Model3D || l->locked || l->model.scene != previousScene) return Errc::InvalidArgument;
     const Asset* old = project_->asset(l->model.scene);
     scene3d::Text3DSpec prev;
     if (!old || !scene3d::decode_text3d(old->sourcePath, prev)) return Errc::InvalidArgument;
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Errc::BudgetExceeded;
     history_.before_mutation(*comp, project_->timeline().current(), "editar texto 3D");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     // Asset novo (o antigo fica para o desfazer religar a malha anterior).
@@ -8040,8 +8314,10 @@ std::string Engine::model_folder(u64 layerId) noexcept {
 }
 
 Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noexcept {
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     AssetId old{};
     Asset copy;
+    u64 room = 0, session = 0; CompositionId composition;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         const Composition* comp = project_ ? current_composition() : nullptr;
@@ -8053,12 +8329,16 @@ Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noex
             return Status{Errc::InvalidArgument, "selecione um modelo 3D importado"};
         old = l->model.scene;
         copy = *a;
+        room = source_asset_room_locked();
+        session = projectSession_; composition = project_->timeline().current();
     }
+    if (room < 4096) return Status{Errc::BudgetExceeded};
     // Parse e texturas FORA do lock, como no import (mesma otimização).
     const std::string file = resolve_asset_path(copy.sourcePath);
-    const scene3d::ImportOptions options = model_import_options(
+    scene3d::ImportOptions options = model_import_options(
         file, static_cast<scene3d::ModelQuality>(std::min<u8>(copy.model.importQuality, 2)), {}, true, nullptr,
         copy.model.triangleCount);
+    options.memoryBudget = std::min(options.memoryBudget, room);
     scene3d::ImportResult r = scene3d::import_scene_file(file, options);
     if (!r.ok()) {
         if (detail) *detail = r.detail;
@@ -8072,8 +8352,12 @@ Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noex
         for (const std::string& w : scene->warnings) *detail += w + "\n";
     }
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()) return Status{Errc::Cancelled};
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "projeto fechado durante o import"};
+    const Layer* current = comp->layer(LayerId::unpack(layerId));
+    if (!current || current->model.scene != old) return Status{Errc::Cancelled};
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Status{Errc::BudgetExceeded};
     history_.before_mutation(*comp, project_->timeline().current(), "importar texturas");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     // Asset novo com o mesmo caminho guardado: a GPU guarda o modelo pelo id
@@ -8179,6 +8463,8 @@ void Engine::drain_commands_locked() noexcept {
 
 RenderSettings Engine::current_render_settings() noexcept {
     RenderSettings rs;
+    rs.previewCacheRevision = static_cast<u64>(modelRevision_.load(std::memory_order_acquire)) + 1;
+    if (project_) rs.previewCacheComposition = project_->timeline().current().pack();
     rs.sceneEditor = sceneEditor_;
     rs.mediaGeneration = playback_.media_epoch();
     if (rawPlaybackLayer_.valid()) {
@@ -8255,6 +8541,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     RenderSettings rs;
     FrameIndex t{0};
     bool playing = false;
+    bool warming = false, cachedPreview = false;
     f32 renderSpeed = 1.0f;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -8278,7 +8565,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         project_->timeline().set_playhead(t);
         playing = playback_.playing();
         renderSpeed = playback_.speed();
-        if (playingHint_.exchange(playing) != playing) media_.proxies().set_pause_reason(PreviewProxyService::Playback, playing);
+        const bool busyPreview = playing || previewBuffering_;
+        if (playingHint_.exchange(busyPreview) != busyPreview) media_.proxies().set_pause_reason(PreviewProxyService::Playback, busyPreview);
 
         if (!gpu_ || !renderer_.ready()) return OkStatus;   // sem GPU: só o modelo avança
         if (gpu_->is_device_lost()) {
@@ -8294,7 +8582,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         const u32 rev = modelRevision_.load(std::memory_order_acquire);
         const bool force = forceRender_.exchange(false, std::memory_order_acq_rel) || rev != lastRenderedRevision_;
         lastRenderedRevision_ = rev;
-        if (onlyIfChanged && !(rawAsset && playing) && !force && t.value == lastRenderedFrame_
+        if (onlyIfChanged && !previewBuffering_ && !(rawAsset && playing) && !force && t.value == lastRenderedFrame_
             && !(lastIncomplete_ && mediaGen != lastMediaGen_)) {
             lastSkipped_ = true;
             if (playing) {
@@ -8310,15 +8598,49 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         lastMediaGen_ = mediaGen;
 
         rs = current_render_settings();
-        const DecodeMode mode = playing ? DecodeMode::Playback
+        if (caps_.thermal().severe() || memory_.pressure() >= .85f) rs.previewCacheRevision = 0;
+        const u32 cacheCapacity = renderer_.configure_preview_cache(comp->width(), comp->height(), rs);
+        if (previewBuffering_) {
+            previewBufferTarget_ = preview_cache_target(comp->fps(), cacheCapacity, comp->duration().value - previewBufferStart_);
+            previewBufferReady_ = 0;
+            while (previewBufferReady_ < previewBufferTarget_
+                && renderer_.preview_cached(FrameIndex{previewBufferStart_ + previewBufferReady_})) ++previewBufferReady_;
+            const bool limited = frameStart - previewBufferSince_ >= 3'000'000'000ull || !cacheCapacity;
+            if (previewBufferReady_ >= previewBufferTarget_ || limited) {
+                previewBuffering_ = false;
+                playback_.play(frameStart);
+                sync_audio_locked(*comp);
+                project_->timeline().play();
+                playing = true;
+                previewBufferStatus_.store(preview_buffer_status(previewBufferReady_, previewBufferTarget_, false, limited));
+            } else {
+                warming = true;
+                t = FrameIndex{previewBufferStart_ + previewBufferReady_};
+                rs.previewCacheOnly = true; // keep the current picture throughout preparation
+                previewBufferStatus_.store(preview_buffer_status(previewBufferReady_, previewBufferTarget_, true));
+            }
+        } else {
+            const bool limited = (previewBufferStatus_.load() & 0x40000000u) != 0;
+            previewBufferStatus_.store(preview_buffer_status(renderer_.preview_cached_count(), cacheCapacity, false, limited));
+        }
+        cachedPreview = renderer_.preview_cached(t);
+        // Paused preview fills the same bounded decoder cache used by playback.
+        // Scrubbing still coalesces to the requested frame; no speculative seeks.
+        const bool buffering = !playing && playback_.mode() == PlaybackMode::Paused && !caps_.thermal().severe();
+        const DecodeMode mode = playing || buffering ? DecodeMode::Playback
                               : playback_.mode() == PlaybackMode::Scrubbing ? DecodeMode::Scrub
                                                                             : DecodeMode::Still;
-        if (rs.rawPlayback && rawLayer && rawAsset) {
+        const i32 decodeDirection = buffering ? (playback_.speed() < 0 ? -1 : 1) : playback_.direction();
+        if (cachedPreview && !rs.rawPlayback) {
+            snapshot_ = FrameSnapshot{};
+            snapshot_.compWidth = comp->width(); snapshot_.compHeight = comp->height(); snapshot_.time = t;
+            ++frameCounter_;
+        } else if (rs.rawPlayback && rawLayer && rawAsset) {
             renderer_.prepare_raw(rawPlaybackLayer_, *rawLayer, *rawAsset, playback_.current_ns() / 1000, media_, ++frameCounter_,
-                                  mode, playback_.direction(), playback_.speed(), rs.mediaGeneration, snapshot_);
+                                  mode, decodeDirection, playback_.speed(), rs.mediaGeneration, snapshot_);
         } else {
             renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
-                              playback_.direction(), mode, playback_.speed(), snapshot_);
+                              decodeDirection, mode, playback_.speed(), snapshot_);
         }
     }
     const u64 tPrepared = monotonic_ns();
@@ -8333,11 +8655,19 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     FrameStats stats;
     RenderTimings timings;
     timings.cpuPrepareMs = static_cast<f32>(static_cast<f64>(tPrepared - frameStart) * 1e-6);
+    if (warming && (snapshot_.missingVideoFrames || snapshot_.staleVideoFrames)) {
+        snapshot_.release_video_frames();
+        lastSkipped_ = true;
+        nextFrameDueNs_ = frameStart + 16'000'000ull;
+        forceRender_.store(true, std::memory_order_release);
+        media_.collect(frameCounter_);
+        return OkStatus;
+    }
     // Também TOCANDO: uma camada de vídeo sem quadro nenhum (decoder abrindo
     // no corte, primeiro quadro a caminho) segura a última imagem inteira em
     // vez de apresentar a composição sem ela — preto no meio do play. A
     // espera é limitada (PreviewRefill); o relógio segue, nada atrasa o som.
-    const bool refill = previewRefill_.hold(snapshot_.missingVideoFrames > 0,
+    const bool refill = previewRefill_.hold(!warming && !cachedPreview && snapshot_.missingVideoFrames > 0,
         !rs.rawPlayback && lastRenderedFrame_ >= 0, frameStart);
     if (refill) {
         snapshot_.release_video_frames();
@@ -8376,6 +8706,21 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         }
     }
     const Status s = renderer_.render(snapshot_, rs, nullptr, stats, timings);
+    if (warming) {
+        const bool incomplete = renderer_.take_incomplete();
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (previewBuffering_) {
+            if (s.ok() && !incomplete && renderer_.preview_cached(t)) ++previewBufferReady_;
+            previewBufferStatus_.store(preview_buffer_status(previewBufferReady_, previewBufferTarget_, true));
+        }
+        if (!rs.previewCacheOnly && s.ok()) lastRenderedFrame_ = t.value;
+        lastIncomplete_ = !s.ok() || incomplete || !renderer_.preview_cached(t);
+        lastSkipped_ = lastIncomplete_;
+        nextFrameDueNs_ = monotonic_ns() + 16'000'000ull;
+        forceRender_.store(true, std::memory_order_release);
+        media_.collect(frameCounter_);
+        return s;
+    }
     if (snapshot_.playbackPtsUs >= 0) {
         const auto& stream = snapshot_.playbackStream;
         const auto& decode = snapshot_.playbackDecode;
@@ -8445,7 +8790,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     stats.memoryPressure = memory_.pressure();
     // O refino não entra na média do AUTO: é um quadro avulso em outra
     // resolução, não o ritmo do preview.
-    if (!refineNow_ && !rs.rawPlayback) (void)adapt().update(stats, caps_.thermal());
+    if (!refineNow_ && !rs.rawPlayback && !renderer_.last_preview_cache_hit()) (void)adapt().update(stats, caps_.thermal());
     // A luz de ambiente termina em segundo plano. Mesmo parado, precisamos
     // apresentar outro quadro para que metais recebam os reflexos prontos.
     refinePending_ = !playing && ((!snapshot_.scenes.empty() && renderer_.environment_pending())
@@ -8845,6 +9190,15 @@ void Engine::fill_perf(bridge::PerfPOD& out) noexcept {
     out = perf_;
 }
 
+u32 Engine::copy_preview_buffer_ranges(i64* outPairs, u32 capacityRanges) noexcept {
+    if (!outPairs || !capacityRanges) return 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || !current_composition()) return 0;
+    return renderer_.copy_preview_buffer_ranges(
+        static_cast<u64>(modelRevision_.load(std::memory_order_acquire)) + 1,
+        project_->timeline().current().pack(), outPairs, capacityRanges);
+}
+
 EngineStatus Engine::read_status() noexcept {
     EngineStatus st;
     st.state = state_;
@@ -8873,7 +9227,7 @@ EngineStatus Engine::read_status() noexcept {
     st.previewAuto = adapt().auto_mode();
     if (project_) {
         st.playhead = playback_.current();
-        st.playing = playback_.playing();
+        st.playing = playback_.playing() || previewBuffering_;
         st.assetCount = project_->asset_count();
         st.dirty = project_->dirty();
         st.recoveryAvailable = project_->autosave().recoveryAvailable;
@@ -9732,7 +10086,12 @@ i64 Engine::query_export_duration(bool trimToContent) noexcept {
 }
 
 Status Engine::start_export(const ExportSettings& settings, const char* outputPath) noexcept {
+    std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
+    if (state_ != EngineState::Ready && state_ != EngineState::Rendering) return Errc::InvalidState;
     if (!project_) return Errc::InvalidState;
+    if (!std::isfinite(settings.fps) || settings.fps < 0.0 ||
+        static_cast<u32>(settings.videoCodec) > static_cast<u32>(ExportCodec::HEVC))
+        return Status{Errc::InvalidArgument, "configuracao de video invalida"};
     if (settings.aiUpscale != 0 && settings.aiUpscale != 2 && settings.aiUpscale != 4)
         return Status{Errc::InvalidArgument, "escala neural deve ser 2x ou 4x"};
     if (!outputPath || !*outputPath) return Errc::InvalidArgument;
@@ -9774,7 +10133,11 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         ctx->width = size.width;
         ctx->height = size.height;
         const f64 seconds = static_cast<f64>(comp->export_duration(settings.trimToContent).value) / comp->fps();
-        ctx->frames = std::max<u32>(1u, static_cast<u32>(std::ceil(seconds * ctx->fps - 1e-6)));
+        const f64 frames = std::ceil(seconds * ctx->fps - 1e-6);
+        if (!std::isfinite(frames) || frames > static_cast<f64>(std::numeric_limits<u32>::max()) ||
+            std::max(1.0, frames) / ctx->fps > static_cast<f64>(std::numeric_limits<i64>::max()) / 1e9)
+            return Status{Errc::NotSupported, "duracao ou taxa de quadros fora do limite de exportacao"};
+        ctx->frames = static_cast<u32>(std::max(1.0, frames));
         ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
         ctx->audioSnap = audio::build_snapshot(*comp, *project_, ctx->audioCache.get(), &Engine::audio_path_resolver, this);
     }
@@ -9811,6 +10174,7 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     media_.proxies().set_pause_reason(PreviewProxyService::Export, true);
     ctx->sink = config_.exportSinkFactory(config_.exportSinkContext);
     if (!ctx->sink) return Status{Errc::NotSupported, "encoder indisponivel"};
+    ctx->sink->set_cancel_flag(&ctx->cancelRequested);
 
     VideoStreamConfig vc;
     vc.width = ctx->outputWidth;
@@ -9857,7 +10221,13 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         }
         ctx->outputDir = dir;
     }
-    if (const Status s = ctx->sink->open(outputPath, vc, withAudio ? &ac : nullptr); !s.ok()) return s;
+    if (const Status s = ctx->sink->open(outputPath, vc, withAudio ? &ac : nullptr); !s.ok()) {
+        // Status borrows its diagnostic. Platform sinks keep it in their own
+        // storage, which is destroyed with this local context on return.
+        static thread_local char detail[256];
+        std::snprintf(detail, sizeof(detail), "%s", s.detail().empty() ? s.message().data() : s.detail().data());
+        return Status{s.code(), detail};
+    }
 
     // O encoder que o sink REALMENTE abriu. Quando o sink não sabe dizer (host,
     // plataforma sem essa consulta), vale a tabela do MediaCodecList.
@@ -9882,6 +10252,8 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     // Alvos de GPU da sessão: composição (linear), Y e CbCr.
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
+        renderer_.clear_preview_cache();
+        gpu_->wait_idle(); // Drain deferred cache destruction before export's allocation peak.
         TextureDesc cd;
         cd.width = ctx->width;
         cd.height = ctx->height;
@@ -9933,7 +10305,8 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
             auto bu = gpu_->create_buffer(bd);
             void* py = nullptr;
             void* pu = nullptr;
-            if (!by.ok() || !bu.ok() || !gpu_->map_buffer(*by, py).ok() || !gpu_->map_buffer(*bu, pu).ok()) {
+            if (!by.ok() || !bu.ok() || !gpu_->map_buffer(*by, py).ok() || !py ||
+                !gpu_->map_buffer(*bu, pu).ok() || !pu) {
                 if (by.ok()) gpu_->destroy_buffer(*by);
                 if (bu.ok()) gpu_->destroy_buffer(*bu);
                 break;
@@ -9962,11 +10335,13 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     ctx->set_message("exportando");
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        previewBuffering_ = false;
+        previewBufferStatus_.store(0, std::memory_order_release);
         playback_.pause(monotonic_ns());
         playingHint_ = false;
         audio_.stop();
     }
-    exportCtx_ = std::move(ctx);
+    { std::lock_guard<std::mutex> context(exportContextMutex_); exportCtx_ = std::move(ctx); }
     exportActive_.store(true, std::memory_order_release);
     media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     proxyPause.started = true;
@@ -10002,11 +10377,10 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // quadros por quadro de saída — e com GOP longo isso passa de 4 s sem que
     // nada esteja quebrado. Teto absoluto de 60 s por quadro.
     //
-    // Esgotado o prazo, o export NÃO aborta: grava com o quadro decodificado
-    // mais próximo (uma camada sem quadro nenhum fica de fora deste quadro),
-    // registra e segue. Um vídeo de horas não pode morrer por um quadro que o
-    // decoder do aparelho não entregou. Depois de um fallback a paciência cai
-    // para 1 s até um quadro exato voltar (fonte quebrada ≠ 4 s por quadro).
+    // A decoded approximation can still be exported with the fallback flag.
+    // A missing layer cannot: finishing an MP4 without its source video used
+    // to report success while silently exporting black/incomplete frames.
+    // After a fallback, patience drops to 1 s until an exact frame returns.
     const u64 patience = c.sourceDegraded ? 1'000'000'000ull : 4'000'000'000ull;
     u64 deadline = t0 + patience;
     u64 hardDeadline = t0 + 60'000'000'000ull;
@@ -10019,102 +10393,113 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         if (!project_) return Errc::InvalidState;
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
+        (void)renderer_.take_incomplete();
         renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
                           1, DecodeMode::Playback, 1.0f, snapshot_);
+        // Retire outgoing clips while waiting as well. On a one-decoder
+        // device the next clip cannot produce a frame until the previous
+        // codec closes; collecting only after a successful prepare deadlocked
+        // admission until the export timed out. Keep active invisible clips
+        // touched so fades do not repeatedly tear down their decoder.
+        comp->layers().for_each([&](LayerId id, const Layer& layer) {
+            if (layer.kind == LayerKind::Video && layer.contains_time(t)) media_.touch(id, frameCounter_);
+        });
+        media_.collect(frameCounter_, kExportIdleFrames);
         return OkStatus;
     };
+    u64 resourceDeadline = 0;
     for (;;) {
-        const u64 gen = mediaReadyGen_.load(std::memory_order_acquire);
-        rl.lock();
-        if (const Status s = prepare(); !s.ok()) return s;
-        if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) { c.sourceDegraded = false; break; }
-        const u64 now = monotonic_ns();
-        if (gen != lastGen) { lastGen = gen; deadline = std::min<u64>(now + patience, hardDeadline); }
-        if (now > deadline) {
-            const u32 missing = snapshot_.missingVideoFrames, stale = snapshot_.staleVideoFrames;
-            c.sourceDegraded = true;
-            if (c.fallbackFrames++ < 8 || c.fallbackFrames % 300 == 0) {
-                AUREA_LOG_WARN("export: quadro %lld sem o video exato apos %.1f s (%u sem quadro, %u aproximados); "
-                               "gravando o mais proximo decodificado (%llu ate agora)",
-                               static_cast<long long>(t.value), static_cast<f64>(now - t0) / 1e9, missing, stale,
-                               static_cast<unsigned long long>(c.fallbackFrames));
+        const u64 attemptStart = monotonic_ns();
+        for (;;) {
+            const u64 gen = mediaReadyGen_.load(std::memory_order_acquire);
+            rl.lock();
+            if (const Status s = prepare(); !s.ok()) return s;
+            if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) { c.sourceDegraded = false; break; }
+            const u64 now = monotonic_ns();
+            if (gen != lastGen) { lastGen = gen; deadline = std::min<u64>(now + patience, hardDeadline); }
+            if (now > deadline) {
+                const u32 missing = snapshot_.missingVideoFrames, stale = snapshot_.staleVideoFrames;
+                if (missing > 0) {
+                    snapshot_.release_video_frames();
+                    AUREA_LOG_ERROR("export: quadro %lld indisponivel em %u camada(s) de video apos %.1f s",
+                        static_cast<long long>(t.value), missing, static_cast<f64>(now - t0) / 1e9);
+                    return Status{Errc::DecodeFailed, "midia de video indisponivel para renderizar o quadro"};
+                }
+                c.sourceDegraded = true;
+                if (c.fallbackFrames++ < 8 || c.fallbackFrames % 300 == 0) {
+                    AUREA_LOG_WARN("export: quadro %lld sem o video exato apos %.1f s (%u sem quadro, %u aproximados); "
+                                   "gravando o mais proximo decodificado (%llu ate agora)",
+                                   static_cast<long long>(t.value), static_cast<f64>(now - t0) / 1e9, missing, stale,
+                                   static_cast<unsigned long long>(c.fallbackFrames));
+                }
+                if (c.fallbackFrames == 1) {
+                    std::lock_guard<std::mutex> pl(c.mutex);
+                    c.progress.flags |= kExportFrameFallback;
+                }
+                break;   // o snapshot já preparado vai para a GPU como está
             }
-            if (c.fallbackFrames == 1) {
-                std::lock_guard<std::mutex> pl(c.mutex);
-                c.progress.flags |= kExportFrameFallback;
+            snapshot_.release_video_frames();
+            // Waiting for decode must not pin completed external images behind GPU
+            // retirement callbacks that would otherwise run only on a new submission.
+            if (!drainedGpu) {
+                const u64 waitStart = monotonic_ns();
+                const Status ready = wait_export_gpu(gpu_->last_submitted_frame());
+                if (!ready.ok()) return ready;
+                // GPU work from the previous blurred frame is not decoder latency.
+                const u64 waited = monotonic_ns() - waitStart;
+                deadline += waited;
+                hardDeadline += waited;
+                drainedGpu = true;
             }
-            break;   // o snapshot já preparado vai para a GPU como está
-        }
-        snapshot_.release_video_frames();
-        // Waiting for decode must not pin completed external images behind GPU
-        // retirement callbacks that would otherwise run only on a new submission.
-        if (!drainedGpu) {
-            const u64 waitStart = monotonic_ns();
-            const Status ready = wait_export_gpu(gpu_->last_submitted_frame());
-            if (!ready.ok()) return ready;
-            // GPU work from the previous blurred frame is not decoder latency.
-            const u64 waited = monotonic_ns() - waitStart;
-            deadline += waited;
-            hardDeadline += waited;
-            drainedGpu = true;
-        }
-        rl.unlock();
-        if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
-        std::unique_lock<std::mutex> wl(exportWakeMutex_);
-        exportWakeCv_.wait_for(wl, std::chrono::milliseconds(5), [&] {
-            return mediaReadyGen_.load(std::memory_order_acquire) != gen
-                || c.cancelRequested.load(std::memory_order_acquire);
-        });
-    }
-    // Decoders de clipes que já passaram SAEM agora. Quem os aposentava era o
-    // preview (render_frame → collect), que não roda durante o export: numa
-    // timeline com vários clipes cada um deixava um codec de hardware aberto
-    // (buffers, ImageReader, cache) até o fim. O aparelho esgotava as
-    // instâncias de decoder, o clipe seguinte não abria e o export morria em
-    // "quadros de video indisponiveis". Quem está na tela neste quadro acabou
-    // de ser usado; só sai quem ficou 2 preparos sem aparecer.
-    //
-    // "Sem aparecer" não é "fora do trecho": o prepare pula a camada com
-    // opacidade 0 (fade, flash) ou fora da tela ANTES de pedir o decoder. Sem
-    // o toque abaixo, um fade de meio segundo fechava o codec no meio do clipe
-    // e o reabria na volta — seek do keyframe, espera de até 4 s por quadro
-    // (o "trava em 68%") e um fecha/abre de codec de hardware por fade, que é
-    // justamente o que decoders de aparelho de entrada aguentam pior. Camada
-    // de vídeo da composição principal ainda no seu trecho mantém o decoder.
-    {
-        std::lock_guard<std::mutex> lock(modelMutex_);
-        if (const Composition* comp = project_ ? current_composition() : nullptr) {
-            comp->layers().for_each([&](LayerId id, const Layer& l) {
-                if (l.kind == LayerKind::Video && l.contains_time(t)) media_.touch(id, frameCounter_);
+            rl.unlock();
+            if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+            std::unique_lock<std::mutex> wl(exportWakeMutex_);
+            exportWakeCv_.wait_for(wl, std::chrono::milliseconds(5), [&] {
+                return mediaReadyGen_.load(std::memory_order_acquire) != gen
+                    || c.cancelRequested.load(std::memory_order_acquire);
             });
         }
-    }
-    media_.collect(frameCounter_, kExportIdleFrames);
-    const u64 t1 = monotonic_ns();
-    FrameStats stats;
-    RenderTimings timings;
-    // Grava e submete: composição → NV12 → cópia para o slot, num frame só.
-    // A GPU NÃO é esperada aqui (o produtor espera o quadro anterior depois).
-    const Status s = renderer_.render(snapshot_, rs, &target, stats, timings);
-    gpuFrame = gpu_->last_submitted_frame();
-    if (rs.gpuTimers) {
-        // O 1º quadro separado: é onde caem o IBL final e os pipelines do export.
-        if (c.profiledFrames++ == 0) c.firstFrameMs = timings.cpuRecordMs;
-        else c.recordMs += timings.cpuRecordMs;
-        const GpuTiming* passes = nullptr;
-        const u32 n = renderer_.last_gpu_passes(passes);
-        if (n > 0) ++c.gpuFrames;
-        for (u32 i = 0; i < n; ++i) {
-            const char* label = passes[i].label ? passes[i].label : "?";
-            auto it = std::find_if(c.gpuPasses.begin(), c.gpuPasses.end(),
-                                   [&](const ExportContext::PassSum& p) { return std::strcmp(p.label, label) == 0; });
-            if (it == c.gpuPasses.end()) c.gpuPasses.push_back({label, passes[i].ms});
-            else it->ms += passes[i].ms;
+        const u64 t1 = monotonic_ns();
+        FrameStats stats;
+        RenderTimings timings;
+        // Grava e submete: composição → NV12 → cópia para o slot, num frame só.
+        // A GPU NÃO é esperada aqui (o produtor espera o quadro anterior depois).
+        const Status s = renderer_.render(snapshot_, rs, &target, stats, timings);
+        gpuFrame = gpu_->last_submitted_frame();
+        if (rs.gpuTimers) {
+            // O 1º quadro separado: é onde caem o IBL final e os pipelines do export.
+            if (c.profiledFrames++ == 0) c.firstFrameMs = timings.cpuRecordMs;
+            else c.recordMs += timings.cpuRecordMs;
+            const GpuTiming* passes = nullptr;
+            const u32 n = renderer_.last_gpu_passes(passes);
+            if (n > 0) ++c.gpuFrames;
+            for (u32 i = 0; i < n; ++i) {
+                const char* label = passes[i].label ? passes[i].label : "?";
+                auto it = std::find_if(c.gpuPasses.begin(), c.gpuPasses.end(),
+                                       [&](const ExportContext::PassSum& p) { return std::strcmp(p.label, label) == 0; });
+                if (it == c.gpuPasses.end()) c.gpuPasses.push_back({label, passes[i].ms});
+                else it->ms += passes[i].ms;
+            }
         }
+        c.decodeNs.fetch_add(t1 - attemptStart, std::memory_order_relaxed);
+        c.renderNs.fetch_add(monotonic_ns() - t1, std::memory_order_relaxed);
+        if (!s.ok() || !renderer_.take_incomplete()) return s;
+        // A submitted frame can still omit text/images/models when a GPU resource
+        // is temporarily unavailable. Never hand that incomplete frame to the
+        // encoder: wait its fence, rebuild the SAME frame, then retry boundedly.
+        snapshot_.release_video_frames();
+        if (const Status ready = wait_export_gpu(gpuFrame); !ready.ok()) return ready;
+        const u64 now = monotonic_ns();
+        if (!resourceDeadline) resourceDeadline = now + 4'000'000'000ull;
+        else if (now >= resourceDeadline)
+            return Status{Errc::InvalidState, "recursos de GPU indisponiveis para renderizar todas as camadas"};
+        rl.unlock();
+        if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+        std::unique_lock<std::mutex> wake(exportWakeMutex_);
+        exportWakeCv_.wait_for(wake, std::chrono::milliseconds(10), [&] {
+            return c.cancelRequested.load(std::memory_order_acquire);
+        });
     }
-    c.decodeNs.fetch_add(t1 - t0, std::memory_order_relaxed);
-    c.renderNs.fetch_add(monotonic_ns() - t1, std::memory_order_relaxed);
-    return s;
 }
 
 namespace {
@@ -10213,9 +10598,13 @@ void Engine::export_thread_main() noexcept {
             if (const Status s = wait_export_gpu(slot.gpuFrame); !s.ok()) return s;
             // Memória não coerente: invalida para a CPU ver o que a GPU
             // escreveu (o ponteiro é o mesmo; coerente = nada a fazer).
-            void* p = nullptr;
-            (void)gpu_->map_buffer(slot.y, p);
-            (void)gpu_->map_buffer(slot.uv, p);
+            void* py = nullptr;
+            void* pu = nullptr;
+            if (const Status s = gpu_->map_buffer(slot.y, py); !s.ok()) return s;
+            if (const Status s = gpu_->map_buffer(slot.uv, pu); !s.ok()) return s;
+            if (!py || !pu) return Status{Errc::OutOfMemory, "leitura do quadro da GPU indisponivel"};
+            slot.yPtr = static_cast<const u8*>(py);
+            slot.uvPtr = static_cast<const u8*>(pu);
         }
         ctx.readNs.fetch_add(monotonic_ns() - r0, std::memory_order_relaxed);
         inflight.pop_front();
@@ -10278,6 +10667,14 @@ void Engine::export_thread_main() noexcept {
     }
     ctx.qCv.notify_all();
     ctx.encoder.join();
+    // The context stays alive so the UI can read completion/progress. It must
+    // not retain decoded audio or per-clip delay/reverb histories until the
+    // next export (or app shutdown). No encoder can use them after the join.
+    ctx.audioSnap.reset();
+    ctx.audioCache.reset();
+    ctx.audioFx.clear();
+    std::vector<f32>().swap(ctx.audioMix);
+    std::vector<i16>().swap(ctx.audioPcm);
     // Onde falhou decide o texto da tela (ExportRules: código estável, não a
     // mensagem do sink). Erro que veio do encoder é do encoder, mesmo que o
     // produtor o tenha visto primeiro.
@@ -10291,10 +10688,22 @@ void Engine::export_thread_main() noexcept {
     // finalizar um arquivo incompleto como se estivesse pronto.
     if (result.ok() && cancelled()) result = Errc::Cancelled;
 
+    // Snapshot a borrowed platform diagnostic before abort/reset invalidates
+    // it. Never read a codec-owned buffer after destroying the sink.
+    char resultDetail[256]{};
+    auto retain_result = [&] {
+        if (!result.ok()) {
+            std::snprintf(resultDetail, sizeof(resultDetail), "%s",
+                          result.detail().empty() ? result.message().data() : result.detail().data());
+            result = Status{result.code(), resultDetail};
+        }
+    };
     if (result.ok()) {
         stage = ExportStage::Finish;
         result = ctx.sink->finish();
+        retain_result();
     } else {
+        retain_result();
         ctx.sink->abort();
     }
     ctx.sink.reset();
@@ -10310,6 +10719,12 @@ void Engine::export_thread_main() noexcept {
                 gpu_->destroy_buffer(s.uv);
                 s.yPtr = s.uvPtr = nullptr;
             }
+            // Successful exports already completed their fences: reclaim now.
+            // Cancellation/device failure must never turn into an unbounded
+            // wait for the queue we just stopped waiting on. Poll completed
+            // fences; still-busy resources retain their deferred destruction.
+            if (result.ok()) gpu_->wait_idle();
+            else (void)gpu_->wait_frame(gpu_->last_submitted_frame(), 0);
         }
     }
     {
@@ -10486,6 +10901,7 @@ void Engine::export_encoder_main() noexcept {
 }
 
 Status Engine::cancel_export() noexcept {
+    std::lock_guard<std::mutex> context(exportContextMutex_);
     if (!exportCtx_) return Errc::InvalidState;
     exportCtx_->cancelRequested.store(true, std::memory_order_release);
     // Acorda quem estiver esperando (slot livre, fila do encoder, decoder):
@@ -10502,6 +10918,7 @@ Status Engine::cancel_export() noexcept {
 }
 
 Engine::ExportProgress Engine::export_progress() const noexcept {
+    std::lock_guard<std::mutex> context(exportContextMutex_);
     if (!exportCtx_) return ExportProgress{};
     std::lock_guard<std::mutex> pl(exportCtx_->mutex);
     return exportCtx_->progress;
@@ -10523,6 +10940,8 @@ ImageExportPlan Engine::query_image_export_plan(const ImageExportSettings& setti
 }
 
 Status Engine::start_image_export(const ImageExportSettings& settings, const char* outputPath) noexcept {
+    std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
+    if (state_ != EngineState::Ready && state_ != EngineState::Rendering) return Errc::InvalidState;
     if (!project_) return Errc::InvalidState;
     if (!outputPath || !*outputPath) return Errc::InvalidArgument;
     if (static_cast<u32>(settings.format) > static_cast<u32>(ImageExportFormat::Gif)) return Errc::InvalidArgument;
@@ -10596,6 +11015,8 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         cd.renderTarget = true;
         cd.transferSrc = true;
         cd.debugName = "export-imagem";
+        renderer_.clear_preview_cache();
+        gpu_->wait_idle();
         auto c = gpu_->create_texture(cd);
         if (!c.ok()) return Status{Errc::OutOfMemory, "sem memoria de GPU para o export"};
         ctx->comp = *c;
@@ -10614,11 +11035,13 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
     ctx->set_message("exportando");
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        previewBuffering_ = false;
+        previewBufferStatus_.store(0, std::memory_order_release);
         playback_.pause(monotonic_ns());
         playingHint_ = false;
         audio_.stop();
     }
-    exportCtx_ = std::move(ctx);
+    { std::lock_guard<std::mutex> context(exportContextMutex_); exportCtx_ = std::move(ctx); }
     exportActive_.store(true, std::memory_order_release);
     media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     proxyPause.started = true;
@@ -10719,7 +11142,11 @@ void Engine::image_export_thread_main() noexcept {
     }
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (gpu_) gpu_->destroy_texture(ctx.comp);
+        if (gpu_) {
+            gpu_->destroy_texture(ctx.comp);
+            if (result.ok()) gpu_->wait_idle();
+            else (void)gpu_->wait_frame(gpu_->last_submitted_frame(), 0);
+        }
     }
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);
@@ -10920,6 +11347,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 t.scale.x, t.scale.y, t.scale.z, t.rotation.x, t.rotation.y, t.rotation.z,
                 t.anchor.x, t.anchor.y, t.anchor.z, t.opacity, t.skewX, t.skewY};
             const Track* track = layer->tracks.find(cmd.keyframe.track.property);
+            // Manual Auto-Key must not silently insert invisible keys under
+            // an active formula. Explicit keyframe edits remain available;
+            // a gesture requires the user to pause the expression first.
+            if (track && track->has_expression())
+                return Status{Errc::InvalidState, "propriedade controlada por expressao; pause a expressao para editar"};
             const f32 current = track ? track->value_or(cmd.keyframe.time, base[property]) : base[property];
             const f32 value = cmd.keyframe.value;
             const f32 tolerance = 4.0f * std::numeric_limits<f32>::epsilon() * std::max({1.0f, std::abs(current), std::abs(value)});
@@ -10949,7 +11381,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
     // O PlaybackController é a fonte da verdade; a timeline espelha o estado
     // para quem a consulta (serialização, estado da UI).
     auto sync_timeline = [&] {
-        const bool playing = playback_.playing();
+        const bool playing = playback_.playing() || previewBuffering_;
         if (playingHint_.exchange(playing) != playing) media_.proxies().set_pause_reason(PreviewProxyService::Playback, playing);
         if (playback_.playing()) timeline.play();
         else timeline.pause();
@@ -10958,8 +11390,31 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
 
     if (recordUndo) record_history_locked(cmd.type);
     if (mutates_model(cmd.type) || cmd.type == CommandType::Undo || cmd.type == CommandType::Redo) {
+        previewBuffering_ = false;
+        previewBufferStatus_.store(0);
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     }
+
+    auto cancelPreviewBuffer = [&] {
+        previewBuffering_ = false;
+        previewBufferStatus_.store(0);
+    };
+    auto playWithPreviewBuffer = [&] {
+        if (comp) playback_.configure(comp->fps(), comp->duration());
+        playback_.play(now); // applies normal end-of-timeline restart semantics
+        if (gpu_ && surfaceAttached_ && !rawPlaybackLayer_.valid() && comp
+            && playback_.speed() > 0 && !caps_.thermal().severe() && memory_.pressure() < .85f) {
+            playback_.pause(now);
+            previewBuffering_ = true;
+            previewBufferStart_ = playback_.current().value;
+            previewBufferSince_ = now;
+            previewBufferReady_ = previewBufferTarget_ = 0;
+            previewBufferStatus_.store(preview_buffer_status(0, 0, true));
+            refineNow_ = false;
+            refinePending_ = false;
+        }
+        sync_timeline();
+    };
 
     switch (cmd.type) {
         // ---------------------------------------------------------------------
@@ -12020,21 +12475,23 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         // Reprodução — tudo passa pelo PlaybackController.
         // ---------------------------------------------------------------------
         case CommandType::PlaybackPlay:
-            if (comp) playback_.configure(comp->fps(), comp->duration());
-            playback_.play(now);
-            sync_timeline();
+            if (!playback_.playing() && !previewBuffering_) playWithPreviewBuffer();
             return OkStatus;
         case CommandType::PlaybackPause:
+            cancelPreviewBuffer();
             playback_.pause(now);
             sync_timeline();
             return OkStatus;
         case CommandType::PlaybackToggle:
-            if (comp) playback_.configure(comp->fps(), comp->duration());
-            playback_.toggle(now);
-            sync_timeline();
+            if (previewBuffering_ || playback_.playing()) {
+                cancelPreviewBuffer();
+                playback_.pause(now);
+                sync_timeline();
+            } else playWithPreviewBuffer();
             return OkStatus;
         case CommandType::PlaybackSeek: {
             if (cmd.seek.time.value < 0) return Errc::InvalidArgument;
+            cancelPreviewBuffer();
             const f64 fps = comp ? comp->fps() : 30.0;
             if (comp) playback_.configure(comp->fps(), comp->duration());
             playback_.seek(frame_at(cmd.seek.time, fps), now);
@@ -12042,11 +12499,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             return OkStatus;
         }
         case CommandType::PlaybackScrubBegin:
+            cancelPreviewBuffer();
             playback_.begin_scrub(now);
             sync_timeline();
             return OkStatus;
         case CommandType::PlaybackScrub: {
             if (cmd.seek.time.value < 0) return Errc::InvalidArgument;
+            cancelPreviewBuffer();
             const f64 fps = comp ? comp->fps() : 30.0;
             if (comp) playback_.configure(comp->fps(), comp->duration());
             playback_.scrub(frame_at(cmd.seek.time, fps), now);
@@ -12058,6 +12517,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             sync_timeline();
             return OkStatus;
         case CommandType::PlaybackStep:
+            cancelPreviewBuffer();
             if (comp) playback_.configure(comp->fps(), comp->duration());
             playback_.step(cmd.step.frames, now);
             sync_timeline();
@@ -12149,6 +12609,7 @@ void Engine::fill_status(bridge::EngineStatusPOD& out) noexcept {
     out.compHeight = st.compHeight;
     out.thumbnailGeneration = thumbs_.generation() + (waveforms_ ? waveforms_->generation() : 0u);
     out.modelRevision = modelRevision_.load(std::memory_order_acquire);
+    out.previewBufferStatus = previewBufferStatus_.load(std::memory_order_acquire);
     out.layerCount = st.layerCount;
     out.selectedCount = st.selectedCount;
     out.canUndo = st.canUndo ? 1u : 0u;
@@ -12198,11 +12659,16 @@ void Engine::fill_telemetry(bridge::TelemetryPOD& out) noexcept {
 
 void Engine::fill_export_progress(bridge::ExportProgressPOD& out) const noexcept {
     out = bridge::ExportProgressPOD{};
-    if (!exportCtx_) {
-        out.result = static_cast<i32>(Errc::InvalidState);
-        return;
+    ExportProgress p;
+    {
+        std::lock_guard<std::mutex> context(exportContextMutex_);
+        if (!exportCtx_) {
+            out.result = static_cast<i32>(Errc::InvalidState);
+            return;
+        }
+        std::lock_guard<std::mutex> progress(exportCtx_->mutex);
+        p = exportCtx_->progress;
     }
-    const ExportProgress p = export_progress();
     out.running = p.running ? 1u : 0u;
     out.finished = p.finished ? 1u : 0u;
     out.result = static_cast<i32>(p.result);

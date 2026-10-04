@@ -36,7 +36,7 @@ import Foundation
  * passa por xOf: seu frame inteiro pode não coincidir com `view` durante um gesto.
  */
 enum TimeAxis {
-    static func safeFps(_ fps: Float) -> Float { fps > 0 ? fps : 30 }
+    static func safeFps(_ fps: Float) -> Float { fps.isFinite && fps >= 1 && fps <= 1000 ? fps : 30 }
 
     /// px por frame para um zoom em dp/s.
     static func pxPerFrame(pps: CGFloat, density: CGFloat, fps: Float) -> CGFloat {
@@ -48,7 +48,7 @@ enum TimeAxis {
     }
 
     static func frameAt(x: CGFloat, view: Double, pxPerFrame: CGFloat, centerX: CGFloat) -> Double {
-        guard pxPerFrame != 0 else { return view }
+        guard pxPerFrame.isFinite, pxPerFrame > 0, x.isFinite, centerX.isFinite else { return view }
         return view + Double((x - centerX) / pxPerFrame)
     }
 
@@ -63,6 +63,19 @@ enum TimeAxis {
     }
 }
 
+/// Real cached frames mapped to the same axis as clips; gaps remain gaps.
+enum TimelinePreviewBuffer {
+    static let height: CGFloat = 3
+
+    static func span(_ range: Range<Int64>, view: Double, pxPerFrame: CGFloat, width: CGFloat) -> ClosedRange<CGFloat>? {
+        guard !range.isEmpty, range.lowerBound >= 0, view.isFinite,
+              pxPerFrame.isFinite, pxPerFrame > 0, width.isFinite, width > 0 else { return nil }
+        let left = max(0, TimeAxis.xOf(frame: Double(range.lowerBound), view: view, pxPerFrame: pxPerFrame, centerX: width / 2))
+        let right = min(width, TimeAxis.xOf(frame: Double(range.upperBound), view: view, pxPerFrame: pxPerFrame, centerX: width / 2))
+        return right > left ? left...right : nil
+    }
+}
+
 /// Zoom em dp por segundo.
 enum Zoom {
     static let minPPS: CGFloat = 2
@@ -72,16 +85,16 @@ enum Zoom {
     /// A.01 enquadra projetos longos (≥ 20 s) na largura ao abrir.
     static let autoFitMinSeconds: CGFloat = 20
 
-    static func clamp(_ pps: CGFloat) -> CGFloat { min(max(pps, minPPS), maxPPS) }
+    static func clamp(_ pps: CGFloat) -> CGFloat { pps.isFinite ? min(max(pps, minPPS), maxPPS) : defaultPPS }
 
     /// `clamp((largura − 32) / segundos, 4, 80)` da A.01.
     static func autoFit(availableDp: CGFloat, seconds: CGFloat) -> CGFloat {
-        seconds <= 0 ? defaultPPS : min(max(availableDp / seconds, 4), defaultPPS)
+        !seconds.isFinite || !availableDp.isFinite || seconds <= 0 ? defaultPPS : min(max(availableDp / seconds, 4), defaultPPS)
     }
 
     /// Pinça: a vista que mantém `focusFrame` sob o ponto focal `focusX`.
     static func anchoredView(focusFrame: Double, focusX: CGFloat, centerX: CGFloat, pxPerFrame: CGFloat) -> Double {
-        guard pxPerFrame != 0 else { return focusFrame }
+        guard pxPerFrame.isFinite, pxPerFrame > 0, focusX.isFinite, centerX.isFinite else { return focusFrame }
         return focusFrame - Double((focusX - centerX) / pxPerFrame)
     }
 }
@@ -145,7 +158,7 @@ enum Timecode {
 
     static func format(_ frame: Int32, _ fps: Float) -> String {
         let p = split(frame, fps)
-        let base = String(format: fps > 100 ? "%02d:%02d:%03d" : "%02d:%02d:%02d", p.minutes, p.seconds, p.frames)
+        let base = String(format: TimeAxis.safeFps(fps) > 100 ? "%02d:%02d:%03d" : "%02d:%02d:%02d", p.minutes, p.seconds, p.frames)
         return p.hours > 0 ? "\(p.hours):\(base)" : base
     }
 

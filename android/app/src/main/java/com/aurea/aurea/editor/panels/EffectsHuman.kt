@@ -236,7 +236,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.key.chroma",
         EffectHuman(
-            name = R.string.fx_name_chroma_key,
+            name = R.string.fx_name_chroma_key_advanced,
             keywords = "chave de croma chroma key fundo verde green screen remover cor",
             principal = listOf(0, 1, 2),
             params = mapOf(
@@ -1401,8 +1401,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
 @Composable
 internal fun effectDisplayName(typeId: Int, engineName: String): String {
     val context = LocalContext.current
-    val english = remember(context) {
-        context.createConfigurationContext(Configuration(context.resources.configuration).apply { setLocale(Locale.ENGLISH) }).resources
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val english = remember(context, configuration) {
+        context.createConfigurationContext(Configuration(configuration).apply { setLocale(Locale.ENGLISH) }).resources
     }
     return englishEffectName(typeId, engineName, english)
 }

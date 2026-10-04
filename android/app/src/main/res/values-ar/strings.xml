@@ -3509,4 +3509,23 @@
         <item quantity="many">%1$d إطارًا مفتاحيًا — حرّر عند رأس التشغيل</item>
         <item quantity="other">%1$d إطار مفتاحي — حرّر عند رأس التشغيل</item>
     </plurals>
+    <string name="fxl_visible_duration">مدة الظهور</string>
+    <string name="fxl_minimum_opacity">العتامة الدنيا</string>
+    <string name="fxl_maximum_opacity">العتامة القصوى</string>
+    <string name="fxl_grow">تكبير</string>
+    <string name="fxl_vertical_scatter">التشتت الرأسي</string>
+    <string name="fxl_end_angle">الزاوية النهائية</string>
+    <string name="fxl_axis">المحور</string>
+    <string name="fxl_spacing">التباعد</string>
+    <string name="fxl_rotation_per_copy">دوران كل نسخة</string>
+    <string name="fxl_scale_per_copy">تحجيم كل نسخة</string>
+    <string name="fxl_end_opacity">العتامة النهائية</string>
+    <string name="fxl_orient_copies">توجيه النسخ</string>
+    <string name="fxl_remove_color_fringe">إزالة الحواف الملونة</string>
+    <string name="fxo_rgb">RGB</string>
+    <string name="fxl_choke_1">تقليص 1</string>
+    <string name="fxl_softness_1">نعومة 1</string>
+    <string name="fxl_choke_2">تقليص 2</string>
+    <string name="fxl_softness_2">نعومة 2</string>
+    <string name="fxl_iterations">التكرارات</string>
 </resources>

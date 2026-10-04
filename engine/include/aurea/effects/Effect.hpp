@@ -29,6 +29,9 @@
 #include "aurea/render/ShaderLibrary.hpp"
 
 #include <span>
+#include <memory>
+#include <limits>
+#include <cmath>
 
 #include <initializer_list>
 #include <vector>
@@ -117,6 +120,7 @@ struct LayerPlacement {
     /// chave da camada e o desfoque da composição ligados. O Particular usa
     /// para o rastro por partícula (a folha em si não se move).
     f32 shutterAngle = 0.0f;
+    f32 shutterPhase = 0.0f;
 };
 
 /// Retângulo, em pixels da layer, que o quadro inteiro da composição cobre
@@ -232,6 +236,8 @@ struct AudioAnalysisResult {
 class EffectResources {
 public:
     virtual ~EffectResources() = default;
+    // Equal-distance positions (xy) and tangent (z, radians), in host-layer pixels.
+    [[nodiscard]] virtual std::vector<Vec4> repeat_path(const Layer*, u32, f32) noexcept { return {}; }
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
     [[nodiscard]] virtual TextureHandle cube_lut(AssetId) noexcept { return {}; }
@@ -290,7 +296,12 @@ struct EffectEval {
     TextureHandle         aux{};
     Vec4                  auxInfo{};   ///< o que o efeito quiser anotar junto (nº de faixas...)
     i64                   foregroundSourceTimeUs = -1;
+    std::shared_ptr<const std::vector<Vec4>> pathSamples;
+    f64 fractionalTime = std::numeric_limits<f64>::quiet_NaN();
 
+    [[nodiscard]] f64 time_frames() const noexcept {
+        return std::isfinite(fractionalTime) ? fractionalTime : static_cast<f64>(localTime.value);
+    }
     [[nodiscard]] const ParamValue& value(u32 i) const noexcept { return values[i]; }
     [[nodiscard]] f32  f(u32 i) const noexcept { return values[i].v[0]; }
     [[nodiscard]] bool b(u32 i) const noexcept { return values[i].as_bool(); }

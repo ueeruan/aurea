@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mb_shutter_angle">Ângulo do obturador</string>
+    <string name="mb_shutter_phase">Fase do obturador</string>
+    <string name="mb_phase_hint">Desloca a exposição em relação ao quadro. Centralizar coloca metade da exposição antes do quadro.</string>
+    <string name="mb_center_exposure">Centralizar exposição</string>
+    <string name="mb_samples_per_frame">Amostras por quadro</string>
+    <string name="mb_adaptive_limit">Limite adaptativo</string>
+    <string name="mb_quality_hint">A prévia pode usar menos amostras para responder melhor. A exportação usa a qualidade definida. Valores altos levam mais tempo.</string>
+    <string name="mb_advanced">Avançado</string>
+    <string name="mb_comp_settings_hint">Configurações da composição: afetam todas as camadas com desfoque ligado.</string>
+</resources>

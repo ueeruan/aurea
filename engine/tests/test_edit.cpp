@@ -282,6 +282,20 @@ AUREA_TEST(ClipEdit, RippleTrimKeepsTheContentAtItsNewPosition) {
     }
 }
 
+AUREA_TEST(ClipEdit, CutLeftAndRightWorkOnClipsExtendedPastSourceEnd) {
+    for(u32 operation:{0u,1u})for(bool reverse:{false,true}) {
+        EditRig r;clip_source(r,r.b,1,reverse);
+        auto* layer=r.comp()->layer(LayerId::unpack(r.b));layer->end=FrameIndex{1000};
+        const Layer original=*layer;
+        AUREA_CHECK(r.e.edit_clip_time(r.b,operation,45));
+        AUREA_CHECK_EQ(r.L(r.b)->start.value,operation==0?45:30);
+        AUREA_CHECK_EQ(r.L(r.b)->end.value,operation==0?1000:45);
+        const i64 retained=operation==0?60:40;
+        AUREA_CHECK_NEAR(r.L(r.b)->source_frame(FrameIndex{retained}),original.source_frame(FrameIndex{retained}),.001);
+        r.undo();AUREA_CHECK(r.at(r.b,30,1000));
+    }
+}
+
 AUREA_TEST(ClipEdit, ExtendingAfterTrimDoesNotFreezeAtTheOldBoundary) {
     for(bool reverse : {false,true}) {
         EditRig r; clip_source(r,r.b,2,reverse); const Layer original=*r.L(r.b);

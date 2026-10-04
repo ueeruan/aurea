@@ -106,6 +106,19 @@ AUREA_TEST(LayerAnim, WholeLayerEntryFollowsProgressStrengthAndEase) {
     AUREA_CHECK_NEAR(layeranim::whole_offset(l, 0.0, 30.0).opacity, 1.0f, 0.0f);
 }
 
+AUREA_TEST(LayerAnim, ShutterSubframeDoesNotAnticipateHoldKey) {
+    LayerAnimator animator;
+    animator.ease = 0;
+    animator.fromPosX = -200;
+    auto l = shape_with_animator(animator);
+    auto& progress = l.tracks.get_or_create(TrackProperty::LayerAnimParam, 0, layeranim::kProgress);
+    progress.clear();
+    progress.set(FrameIndex{0}, 0, Interpolation::Hold);
+    progress.set(FrameIndex{1}, 100);
+    AUREA_CHECK_NEAR(layeranim::whole_offset(l, .999, 30).translate.x, -200, 1e-5);
+    AUREA_CHECK_NEAR(layeranim::whole_offset(l, 1., 30).translate.x, 0, 1e-5);
+}
+
 AUREA_TEST(LayerAnim, TextUnitsWaitTheirDelayAndExitReversesTheOrder) {
     LayerAnimator a;
     a.ease = 0;

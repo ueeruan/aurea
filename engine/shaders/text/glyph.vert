@@ -47,8 +47,11 @@ void main() {
     const float w = pc.params.w > 0.0 ? max(0.05, (pc.params.w + q3.z) / pc.params.w) : 1.0;
     const vec2 cxy = pc.params.yz;
     const vec2 q = cxy * w + (q3.xy - cxy);
-    // Sólido (fundo): uv = posição local em px, para o retângulo arredondado.
-    v_uv = gl.uv.x < 0.0 ? c * size : mix(gl.uv.xy, gl.uv.zw, expanded);
+    // Interpolate within the cell before adding its atlas origin. Absolute
+    // atlas UV loses precision at distant cells and changes distance gradients
+    // when an otherwise identical glyph is translated to another raster target.
+    // Backgrounds still use local pixels for their rounded rectangle.
+    v_uv = gl.uv.x < 0.0 ? c * size : expanded;
     v_index = idx;
     gl_Position = pc.clipFromLayer * vec4(q, 0.0, w);
 }

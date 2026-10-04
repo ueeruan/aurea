@@ -159,11 +159,7 @@ f32 clamp_param(u32 p, f32 v) noexcept {
 f32 param_at(const TrackSet& tracks, u32 animator, u32 param, f64 local, f32 fallback) noexcept {
     const Track* tr = tracks.find(TrackProperty::LayerAnimParam, animator, param);
     if (!tr || !tr->driven() || !std::isfinite(local)) return fallback;
-    const f64 f = std::floor(local);
-    const f32 a = tr->value_or(FrameIndex{static_cast<i64>(f)}, fallback);
-    const f32 k = static_cast<f32>(local - f);
-    if (k <= 0.0f) return a;
-    return a + (tr->value_or(FrameIndex{static_cast<i64>(f) + 1}, fallback) - a) * k;
+    return tr->value_or_f(local, fallback);
 }
 
 f32 wiggle_noise(u32 seed, u32 unit, u32 channel, f64 t, f32 hold) noexcept {

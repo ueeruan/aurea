@@ -10,6 +10,87 @@
 
 using namespace aurea;
 
+AUREA_TEST(TransformStability, AnimatedTextDragUpdatesTheDisplayedPositionAtFrame54) {
+    Engine e; EngineConfig config; config.workerCount = 1; config.disableAutosave = true;
+    AUREA_CHECK(e.initialize(config).ok());
+    AUREA_CHECK(e.new_project(1080, 1080, 30, nullptr).ok());
+    const auto text = e.add_text("Text"); AUREA_CHECK(text.ok()); if (!text.ok()) return;
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*text));
+    layer->start = FrameIndex{20}; layer->offset = FrameIndex{7}; layer->end = FrameIndex{120};
+    layer->transform.position = {540, 515, 0};
+    for (const auto property : {TrackProperty::PositionX, TrackProperty::PositionY}) {
+        auto& track = layer->tracks.get_or_create(property);
+        const f32 base = property == TrackProperty::PositionX ? 540.f : 515.f;
+        track.set(FrameIndex{7}, base); track.set(FrameIndex{61}, base);
+    }
+    Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{54}, 30);
+    AUREA_CHECK(e.apply_command(seek).ok());
+    const FrameIndex local = layer->local_time(FrameIndex{54});
+    AUREA_CHECK_EQ(local.value, i64{41});
+    Command drag[2];
+    for (u32 axis = 0; axis < 2; ++axis) {
+        drag[axis].type = CommandType::KeyframeInsert;
+        drag[axis].keyframe.track = {LayerId::unpack(*text), static_cast<TrackProperty>(axis), kInvalidIndex, 0};
+        drag[axis].keyframe.time = local;
+        drag[axis].keyframe.value = axis == 0 ? 640.f : 615.f;
+        drag[axis].keyframe.onlyIfChanged = true;
+    }
+    AUREA_CHECK_EQ(e.submit_commands(drag, 2, nullptr, 0), 2u);
+    AUREA_CHECK_EQ(e.commands().available(), 2u);
+    // The UI submits asynchronously; its next preview frame applies the batch.
+    AUREA_CHECK(e.render_frame().ok());
+    AUREA_CHECK_EQ(e.commands().available(), 0u);
+    bridge::LayerDetailPOD detail{}; AUREA_CHECK(e.query_layer_detail(*text, detail));
+    AUREA_CHECK_NEAR(detail.position[0], 640.f, 1e-4f);
+    AUREA_CHECK_NEAR(detail.position[1], 615.f, 1e-4f);
+    for (const auto property : {TrackProperty::PositionX, TrackProperty::PositionY}) {
+        const auto* track = layer->tracks.find(property);
+        AUREA_CHECK_EQ(track->keys.size(), usize{3});
+        AUREA_CHECK(track->find_exact(local) != kInvalidIndex);
+        AUREA_CHECK(track->find_exact(FrameIndex{54}) == kInvalidIndex);
+    }
+    e.shutdown();
+}
+
+AUREA_TEST(TransformStability, ManualDragReportsExpressionWithoutMutatingFormulaOrKeys) {
+    Engine e; EngineConfig config; config.workerCount = 1; config.disableAutosave = true;
+    AUREA_CHECK(e.initialize(config).ok());
+    AUREA_CHECK(e.new_project(1080, 1080, 30, nullptr).ok());
+    const auto text = e.add_text("Text"); AUREA_CHECK(text.ok()); if (!text.ok()) return;
+    constexpr auto property = TrackProperty::PositionX;
+    AUREA_CHECK(e.set_expression(*text, static_cast<u32>(property), kInvalidIndex, 0, "540").ok());
+    Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{54}, 30);
+    AUREA_CHECK(e.apply_command(seek).ok());
+    Command drag; drag.type = CommandType::KeyframeInsert;
+    drag.keyframe.track = {LayerId::unpack(*text), property, kInvalidIndex, 0};
+    drag.keyframe.time = FrameIndex{54}; drag.keyframe.value = 640; drag.keyframe.onlyIfChanged = true;
+    const auto history = e.read_status().undoDepth;
+    const auto blocked = e.apply_command(drag);
+    AUREA_CHECK_EQ(blocked.code(), Errc::InvalidState);
+    AUREA_CHECK(blocked.detail().find("expressao") != std::string_view::npos);
+    AUREA_CHECK_EQ(e.read_status().undoDepth, history);
+    const auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK(comp->layer(LayerId::unpack(*text))->tracks.find(property)->keys.empty());
+    Engine::ExpressionInfo expression;
+    AUREA_CHECK(e.query_expression(*text, static_cast<u32>(property), kInvalidIndex, 0, expression));
+    AUREA_CHECK(expression.exists && expression.enabled && expression.source == "540");
+    // Explicit edits can still edit the underlying animation intentionally.
+    drag.keyframe.onlyIfChanged = false;
+    AUREA_CHECK(e.apply_command(drag).ok());
+    bridge::LayerDetailPOD detail{}; AUREA_CHECK(e.query_layer_detail(*text, detail));
+    AUREA_CHECK_NEAR(detail.position[0], 540.f, 1e-4f);
+    // Only an explicit expression toggle returns the property to manual input.
+    AUREA_CHECK(e.set_expression_enabled(*text, static_cast<u32>(property), kInvalidIndex, 0, false));
+    drag.keyframe.onlyIfChanged = true; drag.keyframe.value = 650;
+    AUREA_CHECK(e.apply_command(drag).ok());
+    AUREA_CHECK(e.query_layer_detail(*text, detail));
+    AUREA_CHECK_NEAR(detail.position[0], 650.f, 1e-4f);
+    AUREA_CHECK(e.query_expression(*text, static_cast<u32>(property), kInvalidIndex, 0, expression));
+    AUREA_CHECK(expression.exists && !expression.enabled && expression.source == "540");
+    e.shutdown();
+}
+
 AUREA_TEST(Regression2130, AutoKeySkipsUnchangedAxesAndKeepsManualHoldKeys) {
     Engine e; EngineConfig config; config.workerCount=1; config.disableAutosave=true;
     AUREA_CHECK(e.initialize(config).ok());

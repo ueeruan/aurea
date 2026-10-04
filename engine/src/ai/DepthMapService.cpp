@@ -52,15 +52,26 @@ void DepthMapService::insert(u64 key, DepthMapPtr map) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (auto it = index_.find(key); it != index_.end()) {
         it->second->second = std::move(map);
+        for (auto& [source, latest] : latest_) if (latest.key == key) latest.map = it->second->second;
         lru_.splice(lru_.begin(), lru_, it->second);
         return;
     }
     lru_.emplace_front(key, std::move(map));
     index_[key] = lru_.begin();
     while (lru_.size() > (foregroundModel_.empty() ? kMaxCached : 16u)) {
-        index_.erase(lru_.back().first);
+        const u64 expired = lru_.back().first;
+        std::erase_if(latest_, [expired](const auto& item) { return item.second.key == expired; });
+        index_.erase(expired);
         lru_.pop_back();
     }
+}
+
+void DepthMapService::publish_latest(u64 sourceKey, u64 key, i64 targetUs, i64 frameUs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // An export/image request can evict this result between inference and
+    // publication. Only the bounded LRU owns maps retained for fallback.
+    const auto it = index_.find(key);
+    if (it != index_.end()) latest_[sourceKey] = Latest{key, targetUs, frameUs, it->second->second};
 }
 
 DepthMapService::Stats DepthMapService::stats() const {
@@ -299,8 +310,7 @@ void DepthMapService::thread_main() noexcept {
             if (!done) done = job.imageSize ? run_pixels_locked(job.key,job.pixels.data(),job.imageSize,job.imageSize,job.imageSize*4,4) : run_video_locked(job);
         }
         if (done && !job.imageSize) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            latest_[job.sourceKey] = Latest{job.key, job.targetUs, job.frameUs, done};
+            publish_latest(job.sourceKey, job.key, job.targetUs, job.frameUs);
         }
         void (*fn)(void*) = nullptr;
         void* ctx = nullptr;

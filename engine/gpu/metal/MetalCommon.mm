@@ -77,10 +77,14 @@ Status wait_command_buffer(id<MTLCommandBuffer> buffer, dispatch_semaphore_t com
         return Status{Errc::InvalidState, what};
     }
     if (state != MTLCommandBufferStatusCompleted) {
-        AUREA_LOG_ERROR("metal: %s: timeout, CB '%s' status=%ld, GPU=%s, erro=%s", what,
-                        buffer.label.UTF8String ?: "", static_cast<long>(state),
-                        buffer.commandQueue.device.name.UTF8String ?: "",
-                        buffer.error.localizedDescription.UTF8String ?: "nenhum");
+        // A zero-timeout poll is normal during cancellation cleanup, not a
+        // stalled GPU. Keep actionable timeout diagnostics for actual waits.
+        if (timeoutNs != 0) {
+            AUREA_LOG_ERROR("metal: %s: timeout, CB '%s' status=%ld, GPU=%s, erro=%s", what,
+                            buffer.label.UTF8String ?: "", static_cast<long>(state),
+                            buffer.commandQueue.device.name.UTF8String ?: "",
+                            buffer.error.localizedDescription.UTF8String ?: "nenhum");
+        }
         return Status{Errc::Timeout, what};
     }
     return OkStatus;

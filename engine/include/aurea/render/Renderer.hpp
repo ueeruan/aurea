@@ -36,7 +36,9 @@
 #include "aurea/timeline/Composition.hpp"
 
 #include <atomic>
+#include <array>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -204,6 +206,7 @@ struct RenderLayer {
     /// Desfoque de movimento: composição ← camada em cada amostra do
     /// obturador. Vazio = sem desfoque (ou camada parada no intervalo).
     std::vector<Mat4> blurMatrices;
+    Mat4 blurSourceTransform = Mat4::identity();
     bool blurIncludesFold = false;   ///< as amostras já trazem o Transform dobrado de cada instante
     /// Amostras temporais genéricas (eco, RGB no tempo): matriz, peso e
     /// máscara de canal (0 = todos). Com elas, o desfoque fica de fora.
@@ -290,6 +293,10 @@ struct SceneEditorView {
 [[nodiscard]] Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& view) noexcept;
 
 struct RenderSettings {
+    // Nonzero only for the editor's composed-frame cache. Final export ignores it.
+    u64 previewCacheRevision = 0;
+    u64 previewCacheComposition = 0;
+    bool previewCacheOnly = false; // prepare a future frame without presenting it
     bool rawPlayback = false;
     u64 mediaGeneration = 0;
     SceneEditorView sceneEditor{}; ///< transient preview observer; ignored by finalQuality/export
@@ -412,6 +419,17 @@ public:
     /// Descarta texturas de imagem e LUTs (projeto fechado).
     void release_project_resources() noexcept;
 
+    void set_preview_cache_budget(u64 bytes) noexcept;
+    void clear_preview_cache() noexcept;
+    [[nodiscard]] u32 configure_preview_cache(u32 width, u32 height, const RenderSettings& settings) noexcept;
+    [[nodiscard]] bool preview_cached(FrameIndex time) const noexcept;
+    [[nodiscard]] u32 preview_cached_count() const noexcept;
+    [[nodiscard]] bool last_preview_cache_hit() const noexcept { return previewCacheHit_; }
+    /// Thread-safe UI snapshot; no render lock, GPU wait or cache-vector access.
+    /// Writes at most 30 absolute [start, end) frame pairs and returns pairs written.
+    [[nodiscard]] u32 copy_preview_buffer_ranges(u64 revision, u64 composition,
+                                                 i64* outPairs, u32 capacityRanges) const noexcept;
+
     /// Pressão de memória do sistema (Fase 8 §13), com o lock de render do
     /// motor. `stage` segue aurea::TrimStage: ≥ 4 solta o cache de render que
     /// não entrou no último quadro (`frameNumber`) — planos de vídeo, flow,
@@ -475,6 +493,7 @@ public:
     /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
     [[nodiscard]] TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept override;
+    [[nodiscard]] std::vector<Vec4> repeat_path(const Layer* host, u32 count, f32 phase) noexcept override;
     /// Mapa de profundidade da fonte da camada no instante do `prepare` em
     /// curso (render/RendererDepth.cpp). Imagem: síncrono, uma vez. Vídeo: o
     /// export espera o quadro; o preview agenda e mostra o último pronto.
@@ -495,7 +514,7 @@ public:
     /// O serviço dos mapas (testes e HUD); nulo até o primeiro pedido.
     [[nodiscard]] ai::DepthMapService* depth_service() noexcept { return depth_.get(); }
     [[nodiscard]] ai::DepthMapService* foreground_service() noexcept { return foreground_.get(); }
-    void set_foreground_model_directory(std::string path) { foregroundModelDirectory_ = std::move(path); }
+    void set_foreground_model_directory(std::string path);
 
     // --- Consultas -------------------------------------------------------------
     [[nodiscard]] const FrameGraph::Stats& graph_stats() const noexcept { return graph_.stats(); }
@@ -593,14 +612,14 @@ private:
         u32 bytesPerRow = 0;
     };
 
-    void fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out, const scene3d::SceneCamera& camera) const noexcept;
+    void fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out, const scene3d::SceneCamera& camera) noexcept;
     /// Camadas do snapshot → alvo (fonte, efeitos, desfoque, composição). As
     /// pré-composições entram antes, cada uma no seu alvo (recursivo).
     void compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
                         std::vector<CompositeDraw>& draws, u32 depth) noexcept;
     [[nodiscard]] bool build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects,
                                     LayerImage& out, std::vector<FrameRef>& framesUsed,
-                                    u64 frameNumber) noexcept;
+                                    u64 frameNumber, u32 glyphSet = kInvalidIndex) noexcept;
     [[nodiscard]] bool build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
                                           FGTexture target, u64 frameNumber, DecodedFrame* frame) noexcept;
     [[nodiscard]] bool build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
@@ -808,12 +827,24 @@ private:
     std::vector<PendingUpload> uploads_;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
+    struct PreviewFrame { i64 time = -1; TextureHandle texture{}; bool complete = false; u64 used = 0, gpuFrame = 0; };
+    std::vector<PreviewFrame> previewFrames_;
+    u64 previewCacheBudget_ = 0, previewCacheKey_ = 0, previewCacheUse_ = 0;
+    u64 previewCacheRevision_ = 0, previewCacheComposition_ = 0;
+    u32 previewCacheCapacity_ = 0;
+    bool previewCacheHit_ = false;
+    void publish_preview_buffer_ranges() noexcept;
+    mutable std::mutex previewRangesMutex_;
+    std::array<i64, 60> previewRangePairs_{};
+    u32 previewRangeCount_ = 0;
+    u64 previewRangeRevision_ = 0, previewRangeComposition_ = 0;
     std::vector<GpuTiming> timingScratch_;
     u32 lastGpuPasses_ = 0;
 
     const std::vector<scene3d::SceneFrame>* currentScenes_ = nullptr;
     const FrameSnapshot* currentSnap_ = nullptr;   ///< dono das pré-composições da composição em curso
     u32 prepareDepth_ = 0;                          ///< aninhamento do prepare (guarda de recursão)
+    u64 exposureBytesRemaining_ = 0;                ///< one frame budget shared by text, 3D and nested prepares
     u32 nestSalt_ = 0;                              ///< ≠ 0 dentro de uma pré-composição (ids únicos)
     u32 compTargetW_ = 0, compTargetH_ = 0;
     u32 prewarmed_ = 0;

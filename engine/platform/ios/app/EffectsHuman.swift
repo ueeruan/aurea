@@ -185,7 +185,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             1: FxParamHuman(label: "fx_limite"),
         ])),
     ("aurea.key.chroma", FxEffectHuman(
-        name: "fx_name_chroma_key",
+        name: "fx_name_chroma_key_advanced",
         keywords: "chave de croma chroma key fundo verde green screen remover cor",
         principal: [0, 1, 2],
         params: [

@@ -94,10 +94,12 @@ struct PostProcessSettings {
 /// Motion blur da composição (o global; cada layer multiplica por seu próprio).
 struct MotionBlurSettings {
     bool enabled = false;
-    u32  samples = 64;        ///< export
+    u32  samples = 16;        ///< minimum samples while moving (export)
     u32  previewSamples = 16; ///< preview (adaptive budget can reduce this)
     f32  shutterAngle = 180.0f;
     bool vectorBlur = false;  ///< blur baseado em vetores de movimento
+    f32  shutterPhase = -90.0f; ///< exposure starts at frame + phase / 360
+    u32  adaptiveLimit = 128;  ///< bounded adaptive sample ceiling (export)
 };
 
 /// Marca na régua da composição. `kind` 0 = marca da pessoa, 1 = batida

@@ -9,6 +9,12 @@ import androidx.compose.runtime.setValue
 import com.aurea.aurea.R
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.ui.i18n.AppText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import com.aurea.aurea.state.readBounded
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -45,6 +51,18 @@ class CaptionsState(
     private val scope: CoroutineScope,
     private val onModelChanged: () -> Unit,
 ) {
+    private var generation = 0L
+    private var transcription: Job? = null
+    fun resetProject() {
+        generation++
+        transcription?.cancel()
+        transcription = null
+        layer = null
+        track = null
+        captionCount = 0
+        error = null
+        setWords(emptyList(), null)
+    }
     private val vault = KeyVault(app)
     private val cache = TranscriptCache(app)
     var track by mutableStateOf<CaptionTrack?>(null)
@@ -121,15 +139,18 @@ class CaptionsState(
         openSource(sourceId)
     }
     private fun openSource(layerId: Long) {
+        if (busy != null && layer != layerId) return
         if (layer != layerId) {
+            generation++
             layer = layerId
             error = null
             setWords(emptyList(), null)
             val path = engine.layerMediaPath(layerId)
             if (path != null) {
+                val request = generation
                 scope.launch {
-                    val cached = withContext(Dispatchers.IO) { mediaKey(path)?.let { cache.load(it) } }
-                    if (layer == layerId && cached != null && words.isEmpty()) setWords(cached, AppText.get(app, R.string.i18n_caption_source_cache))
+                    val cached = withContext(Dispatchers.IO) { runCatching { mediaKey(path)?.let { cache.load(it) } }.getOrNull() }
+                    if (generation == request && layer == layerId && cached != null && words.isEmpty()) setWords(cached, AppText.get(app, R.string.i18n_caption_source_cache))
                 }
             }
         }
@@ -155,22 +176,36 @@ class CaptionsState(
         val id = layer ?: return
         val path = engine.layerMediaPath(id) ?: return
         val snapshot = words
-        scope.launch(Dispatchers.IO) { mediaKey(path)?.let { cache.save(it, snapshot) } }
+        scope.launch(Dispatchers.IO) { runCatching { mediaKey(path)?.let { cache.save(it, snapshot) } } }
     }
 
     /** Whisper local: nenhum áudio é enviado à rede. */
-    fun cancelTranscription() { engine.captionProgress(true) }
+    fun cancelTranscription() {
+        transcription?.cancel()
+        engine.captionProgress(true)
+    }
     fun transcribe(language: String?, thenGenerate: Boolean = true) {
         if (busy != null) return
         val id = layer ?: return
         if (engine.layerMediaPath(id) == null) { error = AppText.get(app, R.string.app_caption_no_audio_layer); return }
+        val request = generation
         busy = AppText.get(app, R.string.app_caption_preparing_whisper); error = null
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val model = WhisperModels.prepare(app) { stage -> scope.launch(Dispatchers.Main) { busy = stage } }
-                    withContext(Dispatchers.Main) { busy = AppText.get(app, R.string.app_caption_transcribing) }
-                    val ticker = scope.launch { while (true) { kotlinx.coroutines.delay(400); busy = AppText.get(app, R.string.app_caption_whisper_progress, engine.captionProgress()) } }
+        transcription = scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val context = currentCoroutineContext()
+                    val model = WhisperModels.prepare(app) { stage ->
+                        context.ensureActive()
+                        scope.launch(Dispatchers.Main) { if (context.isActive && generation == request) busy = stage }
+                    }
+                    context.ensureActive()
+                    withContext(Dispatchers.Main) { if (generation == request) busy = AppText.get(app, R.string.app_caption_transcribing) }
+                    val ticker = scope.launch {
+                        while (true) {
+                            kotlinx.coroutines.delay(400)
+                            if (generation == request) busy = AppText.get(app, R.string.app_caption_whisper_progress, engine.captionProgress())
+                        }
+                    }
                     try {
                         engine.transcribeLocal(id, model.absolutePath, language.orEmpty()).lineSequence().mapNotNull { line ->
                             val fields = line.split('\t', limit = 3)
@@ -178,37 +213,41 @@ class CaptionsState(
                         }.toList()
                     } finally { ticker.cancel() }
                 }
+                if (generation != request || layer != id) return@launch
+                busy = null
+                if (result.isEmpty()) error = AppText.get(app, R.string.app_caption_no_speech)
+                else { setWords(result, AppText.get(app, R.string.i18n_caption_source_whisper)); persist(); if (thenGenerate) generate() }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                if (generation == request) error = AppText.get(app, R.string.app_caption_transcription_failed)
+            } finally {
+                // A new generation owns its own busy state after transcribe hands off.
+                if (generation == request && busy != AppText.get(app, R.string.app_caption_creating)) busy = null
             }
-            busy = null
-            if (layer != id) return@launch
-            result.onSuccess { list ->
-                if (list.isEmpty()) error = AppText.get(app, R.string.app_caption_no_speech)
-                else { setWords(list, AppText.get(app, R.string.i18n_caption_source_whisper)); persist(); if (thenGenerate) generate() }
-            }.onFailure { error = it.message ?: AppText.get(app, R.string.app_caption_transcription_failed) }
         }
     }
 
     /** Legendas de um arquivo SRT (sem internet, sem chave). */
     fun importSrt(uri: Uri) {
+        if (busy != null) return
+        val id = layer ?: return
+        val request = generation
+        busy = AppText.get(app, R.string.app_caption_creating)
         scope.launch {
-            val text = withContext(Dispatchers.IO) {
-                runCatching { app.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
-            }
-            val parsed = text?.let { engine.parseSrt(it) }
-                ?.lineSequence()
-                ?.mapNotNull { line ->
-                    val p = line.split('\t')
-                    if (p.size < 3) null else Word(p[2], p[0].toDoubleOrNull() ?: return@mapNotNull null, p[1].toDoubleOrNull() ?: return@mapNotNull null)
+            try {
+                val parsed = withContext(Dispatchers.IO) {
+                    val text = app.contentResolver.openInputStream(uri)?.use { it.readBounded(4 * 1024 * 1024).toString(Charsets.UTF_8) }
+                    text?.let { engine.parseSrt(it) }?.lineSequence()?.mapNotNull { line ->
+                        val p = line.split('\t', limit = 3)
+                        if (p.size < 3) null else Word(p[2], p[0].toDoubleOrNull() ?: return@mapNotNull null, p[1].toDoubleOrNull() ?: return@mapNotNull null)
+                    }?.toList().orEmpty()
                 }
-                ?.toList()
-                .orEmpty()
-            if (parsed.isEmpty()) {
-                error = AppText.get(app, R.string.app_caption_srt_unreadable)
-                return@launch
-            }
-            error = null
-            setWords(parsed, "SRT")
-            persist()
+                if (generation != request || layer != id) return@launch
+                if (parsed.isEmpty()) error = AppText.get(app, R.string.app_caption_srt_unreadable)
+                else { error = null; setWords(parsed, "SRT"); persist() }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { if (generation == request) error = AppText.get(app, R.string.app_caption_srt_unreadable) }
+            finally { busy = null }
         }
     }
 
@@ -234,6 +273,8 @@ class CaptionsState(
 
     /** Cria (ou refaz) as camadas de legenda — um passo de desfazer. */
     fun generate() {
+        if (busy != null) return
+        val request = generation
         val id = layer ?: return
         if (words.isEmpty()) return
         val s = settings
@@ -248,11 +289,15 @@ class CaptionsState(
         // uma a uma): fora da thread da UI, com aviso enquanto faz.
         busy = AppText.get(app, R.string.app_caption_creating)
         scope.launch {
-            val n = withContext(Dispatchers.Default) { engine.createCaptions(id, texts, times, ints, floats) }
-            busy = null
-            if (n < 0) error = AppText.get(app, R.string.app_caption_create_failed, -n) else error = null
-            captionCount = engine.captionCount(id)
-            onModelChanged()
+            try {
+                val n = withContext(Dispatchers.Default) { engine.createCaptions(id, texts, times, ints, floats) }
+                if (generation != request || layer != id) return@launch
+                if (n < 0) error = AppText.get(app, R.string.app_caption_create_failed, -n) else error = null
+                captionCount = engine.captionCount(id)
+                onModelChanged()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { if (generation == request) error = AppText.get(app, R.string.app_caption_create_failed, 10) }
+            finally { busy = null }
         }
     }
 

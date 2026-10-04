@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model3d_risk_warning">Очень тяжёлые 3D-модели могут исчерпать память, вызвать нагрев устройства, замедление или закрытие приложения. Используйте их на свой риск.</string>
+    <string name="preview_buffer_preparing">Подготовка предпросмотра · %1$d/%2$d кадров</string>
+    <string name="preview_buffer_ready">Предпросмотр в памяти · %1$d кадров</string>
+    <string name="preview_buffer_timeline">Кэш предпросмотра: %1$d кадров</string>
+    <string name="preview_buffer_limited">Частичный предпросмотр в памяти · %1$d кадров</string>
+    <string name="app_export_interrupted">Экспорт прерван. Повторите попытку.</string>
+    <string name="transform_expression_controlled">Этим преобразованием управляет выражение. Нажмите =, чтобы изменить или отключить его.</string>
+    <string name="fx_custom_create">Создать эффект</string>
+    <string name="fx_custom_library">Мои эффекты</string>
+    <string name="fx_custom_normal">Обычный</string>
+    <string name="fx_custom_advanced">Расширенный</string>
+    <string name="fx_custom_save">Сохранить эффект</string>
+    <string name="fx_custom_name">Название эффекта</string>
+    <string name="fx_custom_cancel">Отмена</string>
+    <string name="fx_custom_normal_help">Добавляйте эффекты и настраивайте их значения, чтобы объединить результат. Сохранение позволяет повторно использовать набор эффектов и ключевые кадры, в том числе на фотографиях.</string>
+    <string name="fx_custom_advanced_help">Откройте эффект, чтобы изменить все его настройки. В меню каждого параметра доступны выражения и ключевые кадры. Сохраняется открытый эффект.</string>
+    <string name="fx_name_chroma_key_advanced">Хромакей (расширенный)</string>
+    <string name="preview_buffer_note">Автоматический буфер: следующие кадры подготавливаются, пока воспроизведение приостановлено.</string>
+    <string name="timeline_cut_left">Слева</string>
+    <string name="timeline_cut_right">Справа</string>
+    <string name="timeline_more">Другие действия на шкале времени</string>
+    <string name="timeline_cut_failed">Не удалось обрезать. Проверьте границы клипа и заблокированные слои на магнитной дорожке.</string>
+    <string name="timeline_show_all">Все слои</string>
+    <string name="timeline_selected_only">Выбранные</string>
+    <string name="timeline_all_short">Все</string>
+    <string name="timeline_selection_short">Выбранные</string>
+</resources>
+

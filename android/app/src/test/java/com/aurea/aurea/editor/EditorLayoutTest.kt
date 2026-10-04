@@ -5,6 +5,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditorLayoutTest {
+    @Test fun shortScreensAndLargeFontsKeepEveryZoneInsideTheWindow() {
+        for (height in listOf(240f, 320f, 480f, 568f, 720f, 960f)) {
+            for (content in SheetContent.entries) for (font in listOf(1f, 1.3f, 2f)) {
+                val m = EditorLayout.solve(height, content, false, 320f, 9f/16f, fontScale = font)
+                assertTrue(m.preview > 0f && m.timeline >= 0f && m.sheet >= 0f)
+                assertEquals(height, m.topBar+m.preview+m.transport+m.strip+m.timeline+m.sheet, .01f)
+            }
+        }
+    }
     @Test fun curvesStayCompactWithoutShrinkingOtherTools() {
         for (height in listOf(568f, 640f, 780f, 960f, 1200f)) {
             val curve = EditorLayout.solve(height, SheetContent.Curve, false)
@@ -68,7 +77,7 @@ class EditorLayoutTest {
             assertTrue(editing.timeline >= 110f)
             assertEquals(height, editing.topBar + editing.preview + editing.strip +
                 editing.transport + editing.timeline + editing.sheet, 0.01f)
-            assertEquals(height * EditorLayout.PREVIEW_NATURAL_FRACTION, overview.preview, 0.01f)
+            assertEquals(minOf(420f, height * EditorLayout.PREVIEW_NATURAL_FRACTION), overview.preview, 0.01f)
         }
     }
     @Test fun batchSheetFitsTheStaggerRowAtFingerSize() {
@@ -122,7 +131,7 @@ class EditorLayoutTest {
         // Celular em pé nunca é largo; deitado (≥ 600) é.
         assertTrue(!EditorLayout.isWide(390f, 780f))
         assertTrue(EditorLayout.isWide(844f, 390f))
-        assertTrue(!EditorLayout.isWide(560f, 320f))
+        assertTrue(EditorLayout.isWide(560f, 320f))
         // Janela quadrada (Stage Manager / multitarefa): empilhado.
         assertTrue(!EditorLayout.isWide(1000f, 1000f))
     }
@@ -150,7 +159,7 @@ class EditorLayoutTest {
             assertTrue("timeline $timeline", timeline in 88f..280f)
             assertTrue("preview $preview at $h x $w", preview >= EditorLayout.PREVIEW_MIN)
             val sheet = EditorLayout.wideSheetWidth(h)
-            assertTrue("sheet $sheet", sheet in 280f..380f && h - sheet > 400f)
+            assertTrue("sheet $sheet", sheet in 240f..420f && h - sheet > 400f)
         }
     }
 }

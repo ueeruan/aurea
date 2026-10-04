@@ -803,6 +803,30 @@ AUREA_TEST(TextTransform, RangePhaseAndWordsSelectExactUnits) {
     AUREA_CHECK_NEAR(r.matrices[2].col[3].x, 0, .001);
 }
 
+AUREA_TEST(TextTransform, ShutterSubframePreservesHoldAndEvaluatesAnimatedAnchor) {
+    TransformRig r;
+    auto& offset = r.layer.tracks.get_or_create(TrackProperty::EffectParam, 17, param_track_key(kOffset, 0));
+    offset.set(FrameIndex{0}, 0, Interpolation::Hold);
+    offset.set(FrameIndex{1}, 60);
+    r.evaluate(.999);
+    AUREA_CHECK_NEAR(r.matrices[0].col[3].x, 0, 1e-5);
+    r.evaluate(1.);
+    AUREA_CHECK_NEAR(r.matrices[0].col[3].x, 60, 1e-5);
+    offset.clear();
+    auto& anchor = r.layer.tracks.get_or_create(TrackProperty::AnchorX);
+    anchor.set(FrameIndex{0}, 2);
+    anchor.set(FrameIndex{1}, 42);
+    r.at(kScale) = ParamValue::scalar(100);
+    r.evaluate(.5);
+    AUREA_CHECK_NEAR((r.matrices[0] * Vec4{10, 10, 0, 1}).x, 0, .001);
+    TrackSet tracks;
+    auto& position = tracks.get_or_create(TrackProperty::TextAnimParam, 0, text::kPosX);
+    position.set(FrameIndex{0}, 3, Interpolation::Hold);
+    position.set(FrameIndex{1}, 99);
+    AUREA_CHECK_EQ(text::anim_param(tracks, 0, text::kPosX, .999, 0), 3.f);
+    AUREA_CHECK_EQ(text::anim_param(tracks, 0, text::kPosX, 1., 0), 99.f);
+}
+
 AUREA_TEST(TextTransform, LayerAndComponentAnchorsHaveDifferentCenters) {
     TransformRig r; r.at(kScale) = ParamValue::scalar(100);
     r.evaluate();

@@ -18,6 +18,7 @@
 #pragma once
 
 #include <memory>
+#include <atomic>
 
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Types.hpp"
@@ -56,6 +57,11 @@ struct AudioStreamConfig {
 class ExportSink {
 public:
     virtual ~ExportSink() = default;
+
+    /// Optional session-owned cancellation flag. Native backpressure waits
+    /// poll it; it remains alive until the sink is destroyed. This permits
+    /// slower software encoders without blocking cancellation/suspension.
+    virtual void set_cancel_flag(const std::atomic<bool>* flag) noexcept { (void)flag; }
 
     /// Abre o arquivo e configura os encoders. `audio` nulo = vídeo sem som.
     [[nodiscard]] virtual Status open(const char* outputPath, const VideoStreamConfig& video,

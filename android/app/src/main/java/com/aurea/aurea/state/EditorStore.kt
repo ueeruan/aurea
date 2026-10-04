@@ -50,9 +50,12 @@ import com.aurea.aurea.engine.LayerRow
 import com.aurea.aurea.engine.ParamType
 import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.PodLayout
+import com.aurea.aurea.engine.PreviewBufferRange
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.engine.directBuffer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,7 +118,14 @@ data class PreviewState(
     val height: Int = 0,
     val scaleLabel: String = "AUTO",
     val fps: Float = 0f,
-)
+    /** Packed render-cache status from the shared engine; no independent UI buffering policy. */
+    val bufferStatus: Int = 0,
+) {
+    val buffering: Boolean get() = bufferStatus and Int.MIN_VALUE != 0
+    val bufferLimited: Boolean get() = bufferStatus and (1 shl 30) != 0
+    val bufferedFrames: Int get() = bufferStatus and 0xff
+    val bufferTarget: Int get() = (bufferStatus ushr 8) and 0xff
+}
 
 /**
  * O dono do motor do lado da UI — a ÚNICA fonte de estado das telas.
@@ -249,6 +259,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * como caminho absoluto: o motor le o arquivo direto.
      */
     private fun importarGerado(arquivo: java.io.File, titulo: String) {
+        if (!acceptsImport()) return
         if (!arquivo.isFile() || arquivo.length() == 0L) {
             // 3 = Errc::NotFound (core/Result.hpp); o arquivo sumiu entre o
             // download e o toque, ou veio vazio.
@@ -256,7 +267,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return
         }
         busyMessage = appText(R.string.app_importing_generated_video)
-        viewModelScope.launch {
+        launchImport launch@{
             val id = withContext(Dispatchers.IO) {
                 engine.importVideo(arquivo.absolutePath, titulo)
             }
@@ -332,6 +343,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var playing by mutableStateOf(false)
         private set
     var preview by mutableStateOf(PreviewState())
+        private set
+    var previewBufferRanges by mutableStateOf<List<PreviewBufferRange>>(emptyList())
         private set
 
     /** Camadas da frente para o fundo. */
@@ -704,14 +717,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private val lifecycleLock = Any()
     private val lifecycleThread = Executors.newSingleThreadExecutor { r -> Thread(r, "aurea-ciclo") }
     @Volatile private var ready = false
-    private var destroyed = false
+    @Volatile private var destroyed = false
     private var pendingSurface: Triple<Surface, Int, Int>? = null
     private var surfaceOwner: Surface? = null
     private var statusLoop: RenderLoop? = null
     var sceneSettingsRevision by mutableIntStateOf(0)
         private set
     private var lastRevision = -1
-    private var lastPlayhead = -1
+    private var lastDetailPlayhead = -1
     private var lastThumbGen = -1
     private var lastPerfNs = 0L
     private var uiFrames = 0
@@ -732,7 +745,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     init {
-        lifecycleThread.execute {
+        enqueueLifecycle {
             synchronized(lifecycleLock) {
                 if (destroyed) return@synchronized
                 val dirs = directories()
@@ -767,7 +780,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     displayRefreshRate(), dirs.cache.absolutePath, dirs.projects.absolutePath, debug,
                     probe?.memory, probe?.codecs,
                 )
-                ready = ok
+                ready = ok && !destroyed
                 // Fechou por crash nativo com vídeo aberto na sessão anterior:
                 // sem zero-copy daqui em diante neste aparelho (qualquer marca).
                 if (ok && ExitDiagnostics.safeVideoMode(app)) engine.useReadableVideoPlanes()
@@ -775,6 +788,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 if (ok) pendingSurface?.let { (s, w, h) -> engine.attachSurface(s, w, h) }
                 pendingSurface = null
                 main.post {
+                    if (destroyed) return@post
                     if (ok) {
                         deviceReport = engine.deviceReport()
                         deviceName = engine.deviceSummary()
@@ -820,10 +834,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val bmp = android.graphics.BitmapFactory.decodeStream(input, null,
                     android.graphics.BitmapFactory.Options().apply { inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888 })
                     ?: return
-                val buf = java.nio.ByteBuffer.allocate(bmp.byteCount)
-                bmp.copyPixelsToBuffer(buf)   // ARGB_8888 na memória = R, G, B, A
-                engine.setEffectPreviewSource(buf.array(), bmp.width, bmp.height)
-                bmp.recycle()
+                try {
+                    val buf = java.nio.ByteBuffer.allocate(bmp.byteCount)
+                    bmp.copyPixelsToBuffer(buf)   // ARGB_8888 na memória = R, G, B, A
+                    engine.setEffectPreviewSource(buf.array(), bmp.width, bmp.height)
+                } finally { bmp.recycle() }
             }
         }
     }
@@ -910,7 +925,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun onEnterForeground() {
-        lifecycleThread.execute { synchronized(lifecycleLock) { if (ready) engine.resume() } }
+        enqueueLifecycle { synchronized(lifecycleLock) { if (ready) engine.resume() } }
         if (ready) startStatusLoop()
     }
 
@@ -939,12 +954,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     private fun flushOnLeave(suspendAfter: Boolean) {
         val path = if (screen == Screen.Editor) project.path else null
-        lifecycleThread.execute {
+        enqueueLifecycle {
             if (path != null && ready) {
                 val t0 = System.nanoTime()
                 val code = saveOnLeave(path, forceCard = false)
                 Log.i(TAG, "gravacao ao sair (suspende=$suspendAfter): codigo $code, ${(System.nanoTime() - t0) / 1_000_000} ms fora da main")
-                if (code != 0) main.post { errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code)) }
+                if (code != 0) main.post { if (!destroyed) errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code)) }
             }
             if (suspendAfter) synchronized(lifecycleLock) { if (ready) engine.suspend() }
         }
@@ -964,6 +979,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * 0 = tudo certo; senão o código Errc (o arquivo anterior segue intacto).
      */
     private fun saveOnLeave(path: String, forceCard: Boolean): Int {
+        if (project.path != path) return 0
         val code = engine.saveProjectIfDirty()
         if (code != 0 && code != AureaEngine.SAVE_CLEAN) {
             Log.w(TAG, "gravar ao sair falhou: codigo $code (o arquivo anterior segue intacto)")
@@ -980,6 +996,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * histórico nunca entram — só cache que se refaz.
      */
     fun onTrimMemory(level: Int) {
+        if (destroyed) return
+        if (level >= TRIM_RUNNING_LOW) com.aurea.aurea.engine.UiImageCaches.trim()
         when {
             level >= TRIM_UI_HIDDEN || level == TRIM_RUNNING_CRITICAL -> {
                 thumbnails.clear()
@@ -987,22 +1005,76 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             level >= TRIM_RUNNING_LOW -> thumbnails.trimTo(0.5f)
         }
-        lifecycleThread.execute {
+        enqueueLifecycle {
             synchronized(lifecycleLock) {
                 if (!ready) return@synchronized
                 val freed = engine.trimMemory(level)
-                android.util.Log.i("Aurea", "onTrimMemory($level): motor liberou ${freed / 1024} KB")
+                if (freed > 0) android.util.Log.i("Aurea", "onTrimMemory($level): motor liberou ${freed / 1024} KB")
             }
         }
     }
 
+    private val memoryPressurePolicy = com.aurea.aurea.engine.MemoryPressurePolicy()
+    private val pressureInfo = android.app.ActivityManager.MemoryInfo()
+    private var pressureCheckInFlight = false
+    private var lastPressureCheckMs = 0L
+
+    /** Check outside the UI thread, at most once a second, even with the HUD closed. */
+    private fun checkMemoryPressure() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (destroyed || !ready || pressureCheckInFlight || now - lastPressureCheckMs < 1_000) return
+        lastPressureCheckMs = now
+        pressureCheckInFlight = true
+        viewModelScope.launch {
+            try {
+                val level = withContext(Dispatchers.Default) {
+                    val am = getApplication<Application>().getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                    am?.getMemoryInfo(pressureInfo)
+                    val runtime = Runtime.getRuntime()
+                    memoryPressurePolicy.nextTrim(now, pressureInfo.lowMemory,
+                        runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory()), runtime.maxMemory())
+                }
+                if (!destroyed && level != 0) onTrimMemory(level)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Some vendor services can be temporarily unavailable. */ }
+            finally { pressureCheckInFlight = false }
+        }
+    }
+
+    private fun enqueueLifecycle(work: () -> Unit) {
+        if (destroyed) return
+        try {
+            lifecycleThread.execute {
+                if (!destroyed) try { work() } catch (failure: Exception) {
+                    Log.w(TAG, "lifecycle operation failed", failure)
+                }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // An OS callback can race with ViewModel teardown.
+        }
+    }
+
     fun shutdown() {
+        if (destroyed) return
+        val path = project.path.takeIf { screen == Screen.Editor && ready }
+        destroyed = true
+        ready = false
+        engineReady = false
         stopStatusLoop()
-        synchronized(lifecycleLock) {
-            destroyed = true
-            ready = false
-            engine.shutdown()
-            engine.destroy()
+        stopThermalWatch()
+        main.removeCallbacksAndMessages(null)
+        typingHandler.removeCallbacksAndMessages(null)
+        trackHandler.removeCallbacksAndMessages(null)
+        beatHandler.removeCallbacksAndMessages(null)
+        // The activity must never wait for disk, codecs, model parsing or GPU teardown.
+        // This job follows pending lifecycle work; the native leases keep IO calls alive.
+        lifecycleThread.execute {
+            try {
+                if (path != null) runCatching { saveOnLeave(path, forceCard = false) }
+                    .onFailure { Log.w(TAG, "final project save failed", it) }
+            } finally {
+                try { engine.shutdown() } finally { engine.destroy() }
+            }
         }
         lifecycleThread.shutdown()
     }
@@ -1015,7 +1087,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return
         val pm = getApplication<Application>().getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager ?: return
         engine.setThermal(pm.currentThermalStatus)
-        val l = android.os.PowerManager.OnThermalStatusChangedListener { status -> engine.setThermal(status) }
+        val l = android.os.PowerManager.OnThermalStatusChangedListener { status -> if (!destroyed) engine.setThermal(status) }
         pm.addThermalStatusListener(l)
         thermalListener = l
     }
@@ -1029,10 +1101,6 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        stopThermalWatch()
-        // Pode haver um flushOnLeave na fila: espera ele (a mesma thread) antes de desligar.
-        runCatching { lifecycleThread.submit {}.get(5, java.util.concurrent.TimeUnit.SECONDS) }
-        saveIfDirty()
         shutdown()
         super.onCleared()
     }
@@ -1084,11 +1152,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun statusBusy(): Boolean = playing || scrubbing || gestureDepth > 0 || hudVisible || autosaving
 
     private fun startStatusLoop() {
-        if (statusLoop != null) return
+        if (destroyed || !ready || statusLoop != null) return
         statusSlow = false
         statusIdleFrames = 0
         statusLoop = RenderLoop { frameTimeNanos ->
             if (!ready) return@RenderLoop
+            checkMemoryPressure()
             engine.readStatus(statusBuffer)
             status.readFrom(statusBuffer)
             updateIdle()
@@ -1156,13 +1225,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         h = h * 31 + status.previewWidth * 7919 + status.previewHeight
         h = h * 31 + (if (status.dirty) 1 else 0) + (if (status.canUndo) 2 else 0) + (if (status.canRedo) 4 else 0)
         h = h * 31 + status.state + status.lastError * 17
+        h = h * 31 + status.previewBufferStatus
         return h
     }
 
     private fun updateIdle() {
         val loop = statusLoop ?: return
         val sig = statusSignature()
-        val busy = status.playing || scrubbing || gestureDepth > 0 || hudVisible || sig != lastSignature
+        val busy = status.playing || status.previewBufferStatus and Int.MIN_VALUE != 0 || scrubbing || gestureDepth > 0 || hudVisible || sig != lastSignature
         lastSignature = sig
         quietFrames = if (busy) 0 else quietFrames + 1
         if (busy) loop.wake() else if (quietFrames >= QUIET_FRAMES) loop.idleDelayMs = IDLE_POLL_MS
@@ -1178,6 +1248,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         statusLoop?.stop()
         statusLoop = null
         statusSlow = false
+    }
+
+    private val previewBufferPairs = LongArray(60)
+    private fun readPreviewBufferRanges(): List<PreviewBufferRange> {
+        val count = engine.previewBufferRanges(previewBufferPairs).coerceIn(0, previewBufferPairs.size / 2)
+        val previous = previewBufferRanges
+        if (previous.size == count && previous.indices.all {
+                previous[it].startFrame == previewBufferPairs[it * 2] && previous[it].endFrame == previewBufferPairs[it * 2 + 1]
+            }) return previous
+        return List(count) { PreviewBufferRange(previewBufferPairs[it * 2], previewBufferPairs[it * 2 + 1]) }
     }
 
     private fun publish() {
@@ -1203,7 +1283,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         // FPS diagnostics belong to PerfSnapshot. Updating this geometry state
         // for every floating-point FPS change invalidated the stage needlessly.
-        val pv = PreviewState(status.previewWidth, status.previewHeight, scale)
+        // Keep the changing cache ranges separate from stage geometry, so eviction only redraws the timeline.
+        previewBufferRanges = readPreviewBufferRanges()
+        val pv = PreviewState(status.previewWidth, status.previewHeight, scale, bufferStatus = status.previewBufferStatus)
         if (pv != preview) preview = pv
         if (status.thumbnailGeneration != lastThumbGen) {
             lastThumbGen = status.thumbnailGeneration
@@ -1213,10 +1295,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (status.modelRevision != lastRevision) {
             lastRevision = status.modelRevision
             sceneSettingsRevision++
-            lastPlayhead = playhead
+            lastDetailPlayhead = status.playhead.toInt()
             lastModelChangeNs = System.nanoTime()
             refreshModel()
-        } else if (playhead != lastPlayhead) {
+        } else if (status.playhead.toInt() != lastDetailPlayhead) {
             // Só o detalhe depende do playhead (valor animado, keyframe aqui).
             // Tocando, 10 leituras por segundo bastam para o inspetor: a cada
             // quadro eram ~15 consultas ao motor na main thread, cada uma no
@@ -1224,7 +1306,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             // (scrub, passo, pausa), lê na hora.
             val now = System.nanoTime()
             if (!playing || now - lastDetailNs >= DETAIL_PLAYBACK_NS) {
-                lastPlayhead = playhead
+                // Optimistic UI seeking can already show the target before the
+                // engine applies it. Track the native frame or the inspector
+                // can remain at the previous frame indefinitely after seeking.
+                lastDetailPlayhead = status.playhead.toInt()
                 lastDetailNs = now
                 refreshDetail()
                 refreshEffectParams()
@@ -1298,9 +1383,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             if (engine.queryEnvironment(out)) environment = out.toList()
         }
         compositionName = if (precompDepth > 0) engine.compositionName() else ""
-        val mb = engine.motionBlurState()
-        compMotionBlur = mb > 0f
-        shutterAngle = if (mb != 0f) kotlin.math.abs(mb) - 1f else 180f
+        engine.queryMotionBlurSettings()?.let { settings ->
+            compMotionBlur = settings.enabled
+            shutterAngle = settings.angle
+            shutterPhase = settings.phase
+            motionBlurSamples = settings.samples
+            motionBlurAdaptiveLimit = settings.adaptiveLimit
+            motionBlurPreviewSamples = settings.previewSamples
+        }
         selectCreatedAfter?.let { before ->
             val created = layers.map { it.id }.filter { it !in before }
             if (created.isNotEmpty()) {
@@ -1711,9 +1801,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun importPsd(uri: Uri) {
+        if (!acceptsImport()) return
         if (busyMessage != null) return
         busyMessage = appText(R.string.psd_importing)
-        viewModelScope.launch {
+        launchImport launch@{
             val id = withContext(Dispatchers.IO) {
                 val app = getApplication<Application>()
                 var temp: java.io.File? = null
@@ -1737,16 +1828,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** SVG pelo seletor de documentos do sistema. */
     fun importSvg(uri: Uri) {
-        viewModelScope.launch {
+        if (!acceptsImport()) return
+        launchImport launch@{
             val bytes = withContext(Dispatchers.IO) {
-                runCatching { getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+                runCatching { getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBounded(32 * 1024 * 1024) } }.getOrNull()
             }
             if (bytes == null || bytes.isEmpty()) {
                 errorMessage = appText(R.string.msg_nao_foi_possivel_ler_o_svg)
                 return@launch
             }
             val name = displayName(uri)?.substringBeforeLast('.') ?: "SVG"
-            val id = engine.importSvg(bytes, name)
+            val id = withContext(Dispatchers.IO) { engine.importSvg(bytes, name) }
             if (id < 0) {
                 errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) appText(R.string.msg_svg_sem_formas_suportadas) else appText(R.string.msg_nao_foi_possivel_importar_o_svg, -id)
                 return@launch
@@ -1970,9 +2062,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * relativo e a imagem viaja com ele.
      */
     fun setShapePartImage(part: Int, uri: Uri) {
+        if (!acceptsImport()) return
         val id = primary ?: return
         busyMessage = appText(R.string.app_importing_image)
-        viewModelScope.launch {
+        launchImport launch@{
             val ok = withContext(Dispatchers.IO) {
                 val file = saveShapeImage(uri) ?: return@withContext false
                 engine.setShape3dPartStyle(id, part, null, file.absolutePath)
@@ -1991,25 +2084,29 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun saveShapeImage(uri: Uri): File? = try {
         val app = getApplication<Application>()
-        var bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: throw IllegalStateException("imagem ilegivel")
-        val longest = maxOf(bmp.width, bmp.height)
-        if (longest > 2048) {
-            val k = 2048f / longest
-            val scaled = Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).toInt()), maxOf(1, (bmp.height * k).toInt()), true)
-            if (scaled !== bmp) bmp.recycle()
-            bmp = scaled
-        }
-        val alpha = bmp.hasAlpha()
-        val bytes = java.io.ByteArrayOutputStream().use { out ->
-            bmp.compress(if (alpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, 92, out)
-            out.toByteArray()
-        }
-        bmp.recycle()
-        val dir = File(File(app.filesDir, "projetos"), "formas3d").apply { mkdirs() }
-        val hash = java.security.MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }
-        val dst = File(dir, "$hash.${if (alpha) "png" else "jpg"}")
-        if (!dst.exists()) FileOutputStream(dst).use { it.write(bytes) }
-        dst
+        var bmp = AureaEngine.decodeBitmapRgba(app, uri, 2048) ?: throw IllegalStateException("imagem ilegivel")
+        var temporary: File? = null
+        try {
+            val longest = maxOf(bmp.width, bmp.height)
+            if (longest > 2048) {
+                val k = 2048f / longest
+                val scaled = Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).toInt()), maxOf(1, (bmp.height * k).toInt()), true)
+                if (scaled !== bmp) bmp.recycle()
+                bmp = scaled
+            }
+            val alpha = bmp.hasAlpha()
+            val dir = File(File(app.filesDir, "projetos"), "formas3d").apply { mkdirs() }
+            val temp = File.createTempFile("imagem-", ".tmp", dir).also { temporary = it }
+            val digest = java.security.MessageDigest.getInstance("SHA-1")
+            java.security.DigestOutputStream(FileOutputStream(temp), digest).use { out ->
+                if (!bmp.compress(if (alpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, 92, out))
+                    throw java.io.IOException("image encoding failed")
+            }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            val dst = File(dir, "$hash.${if (alpha) "png" else "jpg"}")
+            if (!dst.exists() && !temp.renameTo(dst)) throw java.io.IOException("image write failed")
+            dst
+        } finally { bmp.recycle(); temporary?.delete() }
     } catch (e: Exception) {
         Log.w(TAG, "imagem da forma 3D falhou: ${e.javaClass.simpleName}: ${e.message}")
         null
@@ -2073,6 +2170,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * primeiro (dentro do mesmo desfazer) e o refresh não a sobrescreve.
      */
     private fun flushText3D() {
+        if (destroyed || !ready) return
         if (!text3dPending) return
         typingHandler.removeCallbacks(applyText3d)
         val id = text3dPendingLayer.takeIf { it != 0L } ?: primary
@@ -2203,6 +2301,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Força a releitura na mesma volta (depois de um comando local). */
     private fun refreshNow() {
+        if (destroyed || !ready) return
         lastRevision = -1
         wakeStatusLoop()
         // Fase 8D: DENTRO de um gesto (arrasto, slider) a releitura fica para o
@@ -2221,6 +2320,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // Comandos
     // =========================================================================
     private inline fun send(block: CommandBatch.() -> Unit) {
+        if (destroyed || !ready) return
         engine.beginCommandBatch()
         batch.block()
         engine.submitCommands()
@@ -2232,13 +2332,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * começo do gesto e feche no fim; tudo que for enviado no meio desfaz junto.
      */
     fun beginGesture(label: String) {
+        if (destroyed || !ready) return
+        if (gestureDepth == 0) sceneDragSnapshot = null
         gestureDepth++
         send { beginUndoGroup(label) }
     }
     fun endGesture() {
+        if (destroyed || !ready) return
         flushText3D()
         gestureDepth = max(0, gestureDepth - 1)
-        if (gestureDepth == 0) shapeGestureSent = false
+        if (gestureDepth == 0) { shapeGestureSent = false; sceneDragSnapshot = null }
         send { endUndoGroup() }
         refreshNow()
     }
@@ -2248,6 +2351,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Várias ações como UM passo de desfazer (ex.: apagar 3 camadas). */
     private inline fun group(label: String, block: CommandBatch.() -> Unit) {
+        if (destroyed || !ready) return
         engine.beginCommandBatch()
         batch.beginUndoGroup(label)
         batch.block()
@@ -2535,14 +2639,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * borda anda (o deslocamento interno compensa). Vídeo não passa do começo
      * da mídia; nenhuma camada fica com menos de 1 frame.
      */
-    fun trimStart(layer: Long, newStart: Int) {
-        engine.editClipTime(layer, 0, newStart.toLong())
+    fun trimStart(layer: Long, newStart: Int): Boolean {
+        val changed = engine.editClipTime(layer, 0, newStart.toLong())
         refreshNow()
+        return changed
     }
 
-    fun trimEnd(layer: Long, newEnd: Int) {
-        engine.editClipTime(layer, 1, newEnd.toLong())
+    fun trimEnd(layer: Long, newEnd: Int): Boolean {
+        val changed = engine.editClipTime(layer, 1, newEnd.toLong())
         refreshNow()
+        return changed
     }
 
     fun editClipTime(operation: Int, amount: Int, previous: Long = 0, next: Long = 0) {
@@ -3080,11 +3186,58 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     // Importação
     // =========================================================================
+    private var activeImports = 0
+    private var projectWork by mutableStateOf(false)
+    internal val projectOperationBusy: Boolean get() = projectWork
+    internal var projectGeneration by androidx.compose.runtime.mutableLongStateOf(0L)
+        private set
+
+    private fun acceptsImport(): Boolean = !destroyed && ready && !projectWork && activeImports == 0 && !exporter.busy
+
+    private fun launchImport(work: suspend CoroutineScope.() -> Unit) {
+        checkMemoryPressure()
+        activeImports++
+        viewModelScope.launch {
+            try { work() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                Log.w(TAG, "media import failed", failure)
+                if (!destroyed) errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+            } catch (failure: OutOfMemoryError) {
+                Log.w(TAG, "media import exceeded available memory", failure)
+                if (!destroyed) errorMessage = appText(R.string.msg_memoria_insuficiente_feche_outros_apps_e)
+            } finally {
+                activeImports--
+                if (activeImports == 0) busyMessage = null
+            }
+        }
+    }
+
+    private fun acceptsProjectChange(): Boolean {
+        if (destroyed || !ready || projectWork) return false
+        if (exporter.busy) { showToast(appText(R.string.msg_aguarde_a_exportacao_terminar)); return false }
+        if (activeImports > 0 || busyMessage != null || captions.busy != null || tracking || maskTracking || detectingBeats) return false
+        return true
+    }
+
+    private fun launchProjectWork(work: suspend CoroutineScope.() -> Unit) {
+        projectWork = true
+        viewModelScope.launch {
+            try { work() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                Log.w(TAG, "project operation failed", failure)
+                if (!destroyed) errorMessage = appText(R.string.msg_nao_foi_possivel_abrir_o_projeto, humanError(ERRC_IO))
+            } finally { projectWork = false }
+        }
+    }
+
     /** Vídeo do seletor do sistema. O motor guarda a URI e abre descritores por ela. */
     fun importVideo(uri: Uri) {
+        if (!acceptsImport()) return
         val app = getApplication<Application>()
         busyMessage = appText(R.string.app_importing_video)
-        viewModelScope.launch {
+        launchImport launch@{
             try {
                 val id = withContext(Dispatchers.IO) {
                     ExitDiagnostics.mark(app, Phase.VIDEO_PERMISSION)
@@ -3120,10 +3273,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * erro diz isso — nada de camada muda fingindo que importou.
      */
     fun importAudio(uri: Uri) {
+        if (!acceptsImport()) return
         takePermission(uri)
         val name = displayName(uri)?.substringBeforeLast('.') ?: appText(R.string.target_audio)
         busyMessage = appText(R.string.app_importing_audio)
-        viewModelScope.launch {
+        launchImport launch@{
             val id = withContext(Dispatchers.IO) { engine.importAudio(uri.toString(), name) }
             busyMessage = null
             if (id < 0) {
@@ -3324,31 +3478,34 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun scenePick(cx: Float, cy: Float, radius: Float): Long? =
         engine.scenePick(cx, cy, radius).takeIf { it != 0L }
 
-    /**
-     * Arrasto livre do objeto 3D com o dedo: anda no plano dos dois eixos do
-     * mundo que a câmera de navegação vê mais de frente (de cima, o chão XZ;
-     * de frente, XY), com o objeto seguindo o dedo. [dx]/[dy] em px da composição.
-     */
+    private data class SceneDragSnapshot(
+        val layer: Long, val composition: Long, val project: Long, val frame: Int,
+        val basis: FloatArray, var dx: Float = 0f, var dy: Float = 0f,
+        var previous: List<Float>,
+    )
+    private var sceneDragSnapshot: SceneDragSnapshot? = null
+
+    /** Incremental composition-pixel deltas over one shared gesture basis, never the queued native pose. */
     fun sceneDragObject(dx: Float, dy: Float) {
+        if (destroyed || !ready || !dx.isFinite() || !dy.isFinite()) return
         val id = primary ?: return
         val d = detail ?: return
-        val g = gizmo ?: return
-        val ax = FloatArray(3) { g[(it + 1) * 2] - g[0] }
-        val ay = FloatArray(3) { g[(it + 1) * 2 + 1] - g[1] }
-        var u = 0; var v = 1; var area = -1f
-        for ((i, j) in arrayOf(0 to 1, 0 to 2, 1 to 2)) {
-            val a = kotlin.math.abs(ax[i] * ay[j] - ay[i] * ax[j])
-            if (a > area) { area = a; u = i; v = j }
+        if (d.locked) return
+        var snapshot = sceneDragSnapshot
+        if (gestureDepth == 0 || snapshot?.layer != id || snapshot.composition != (composition?.id ?: 0L) ||
+            snapshot.project != projectGeneration || snapshot.frame != playhead) {
+            val basis = engine.previewGestureBasis(id)
+            if (basis == null || basis.size != 13) { sceneDragSnapshot = null; return }
+            snapshot = SceneDragSnapshot(id, composition?.id ?: 0L, projectGeneration, playhead,
+                basis, previous = basis.take(3))
+            sceneDragSnapshot = snapshot
         }
-        if (area < 1f) return
-        val det = ax[u] * ay[v] - ay[u] * ax[v]
-        val a = (dx * ay[v] - dy * ax[v]) / det
-        val b = (ax[u] * dy - ay[u] * dx) / det
-        val base = FloatArray(3); val pu = FloatArray(3); val pv = FloatArray(3)
-        if (!engine.gizmoMoveLocal(id, u, 0f, base) || !engine.gizmoMoveLocal(id, u, a * GIZMO_LENGTH, pu) ||
-            !engine.gizmoMoveLocal(id, v, b * GIZMO_LENGTH, pv)) return
-        // A conversão mundo→local é afim: os dois passos somam sobre a base.
-        applyGizmoPosition(id, d, FloatArray(3) { pu[it] + pv[it] - base[it] })
+        val nextX = snapshot.dx + dx; val nextY = snapshot.dy + dy
+        if (!nextX.isFinite() || !nextY.isFinite()) return
+        snapshot.dx = nextX; snapshot.dy = nextY
+        val out = AureaEngine.previewGestureValue(snapshot.basis, nextX, nextY, false)
+        applyGizmoComponents(id, d, TrackProperty.POSITION_X, snapshot.previous, out)
+        snapshot.previous = out.toList()
     }
     fun sceneGuideLines(): FloatArray {
         val lines = FloatArray(1280)
@@ -3453,12 +3610,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         hdriErrorMessage(code)?.let { appText(it) } ?: appText(R.string.msg_hdri_unreadable_error, code)
 
     fun importHdri(uri: Uri) {
+        if (!acceptsImport()) return
         val ext = hdriExtension(uri) ?: run {
             errorMessage = appText(R.string.msg_hdri_formats)
             return
         }
         busyMessage = appText(R.string.app_loading_hdri)
-        viewModelScope.launch {
+        launchImport launch@{
             val id = withContext(Dispatchers.IO) {
                 val file = copyModelToSandbox(uri, ext) ?: return@withContext -1_000L
                 engine.importHdri(file.absolutePath)
@@ -3495,13 +3653,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** HDRI só para o objeto escolhido: o mesmo arquivo, o mesmo asset (a GPU
      *  compartilha o mapa); o que muda é de quem é o estado. */
     fun importObjectHdri(uri: Uri) {
+        if (!acceptsImport()) return
         val id = primary ?: return
         val ext = hdriExtension(uri) ?: run {
             errorMessage = appText(R.string.msg_hdri_formats)
             return
         }
         busyMessage = appText(R.string.app_loading_hdri)
-        viewModelScope.launch {
+        launchImport launch@{
             val asset = withContext(Dispatchers.IO) {
                 val file = copyModelToSandbox(uri, ext) ?: return@withContext -1_000L
                 engine.importHdri(file.absolutePath)
@@ -3880,9 +4039,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (maskTracking || tracking) return
         maskTracking = true
         showToast(appText(R.string.msg_rastreando_a_mascara))
-        lifecycleThread.execute {
+        enqueueLifecycle {
             val r = synchronized(lifecycleLock) { if (ready) engine.trackMask(id, mask, mode) else -1 }
             trackHandler.post {
+                if (destroyed) return@post
                 maskTracking = false
                 refreshNow()
                 if (r >= 0) showToast(appText(R.string.msg_mascara_rastreada_em_quadros, r))
@@ -4093,8 +4253,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     var shutterAngle by mutableStateOf(180f)
         private set
+    var shutterPhase by mutableStateOf(-90f)
+        private set
+    var motionBlurSamples by mutableStateOf(16)
+        private set
+    var motionBlurAdaptiveLimit by mutableStateOf(128)
+        private set
+    var motionBlurPreviewSamples by mutableStateOf(16)
+        private set
 
     fun setLayerMotionBlur(layer: Long, on: Boolean) {
+        if (!ready) return
         engine.setMotionBlur(layer, on)
         refreshNow()
         showToast(if (on) appText(R.string.msg_desfoque_de_movimento_ligado) else appText(R.string.msg_desfoque_de_movimento_desligado))
@@ -4839,6 +5008,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** TTF/OTF do seletor do sistema: copiado para o projeto, registrado e aplicado. */
     fun importFont(uri: Uri, forText3d: Boolean = false) {
+        if (!acceptsImport()) return
         val targetLayer = primary
         val name = displayName(uri) ?: "fonte.ttf"
         val ext = name.substringAfterLast('.', "ttf").lowercase()
@@ -4846,7 +5016,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf)
             return
         }
-        viewModelScope.launch {
+        launchImport launch@{
             val line = withContext(Dispatchers.IO) {
                 val file = copyToDir(uri, "fontes", ext) ?: return@withContext null
                 engine.importFont(file.absolutePath)
@@ -4868,12 +5038,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun colorLutName(layer: Long, effect: Int): String = engine.colorLutName(layer, effect)
 
     fun importColorLut(uri: Uri, layer: Long, effect: Int) {
+        if (!acceptsImport()) return
         val name = displayName(uri)?.substringAfterLast('/')?.substringAfterLast('\\') ?: "look.cube"
         if (!name.endsWith(".cube", ignoreCase = true)) {
             errorMessage = appText(R.string.lut_invalid)
             return
         }
-        viewModelScope.launch {
+        launchImport launch@{
             val ok = withContext(Dispatchers.IO) {
                 val directory = File(getApplication<Application>().filesDir, "projetos/luts/${java.util.UUID.randomUUID()}")
                 val file = File(directory, name.takeLast(160).replace(Regex("[^\\p{L}\\p{N}._ -]"), "_"))
@@ -4944,13 +5115,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun setCompositionMotionBlur(on: Boolean) {
-        engine.setCompositionMotionBlur(on)
-        refreshNow()
+        updateMotionBlurSettings { it.copy(enabled = on) }
     }
 
     fun changeShutterAngle(degrees: Float) {
-        engine.setShutterAngle(degrees)
-        refreshNow()
+        updateMotionBlurSettings { it.copy(angle = degrees) }
+    }
+
+    fun changeShutterPhase(degrees: Float) = updateMotionBlurSettings { it.copy(phase = degrees) }
+    fun centerMotionBlurExposure() = updateMotionBlurSettings { it.copy(phase = -it.angle / 2f) }
+    fun changeMotionBlurSamples(samples: Int) = updateMotionBlurSettings { it.copy(samples = samples) }
+    fun changeMotionBlurAdaptiveLimit(limit: Int) = updateMotionBlurSettings { it.copy(adaptiveLimit = limit) }
+
+    private fun updateMotionBlurSettings(change: (com.aurea.aurea.engine.MotionBlurSettings) -> com.aurea.aurea.engine.MotionBlurSettings) {
+        if (!ready) return
+        val current = engine.queryMotionBlurSettings() ?: return
+        val next = change(current)
+        if (next != current && engine.setMotionBlurSettings(next)) refreshNow()
     }
 
     // --- Copiar e colar ---------------------------------------------------------------
@@ -5244,6 +5425,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * UI (thread do ciclo de vida: o motor não fecha no meio).
      */
     fun detectBeats() {
+        if (!ready || destroyed || projectWork || exporter.busy) return
         val id = primary
         val row = layers.firstOrNull { it.id == id }
         if (id == null || row == null || (row.kind != com.aurea.aurea.ui.theme.LayerType.Audio.kind && row.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind)) {
@@ -5251,18 +5433,34 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return
         }
         if (detectingBeats) return
+        val session = projectGeneration
+        val compositionId = composition?.id
         detectingBeats = true
         showToast(appText(R.string.msg_detectando_batidas))
-        lifecycleThread.execute {
+        enqueueLifecycle {
             val bpm = DoubleArray(1)
-            val n = synchronized(lifecycleLock) { if (ready) engine.detectBeats(id, bpm) else -1L }
-            beatHandler.post {
-                detectingBeats = false
-                refreshNow()
-                when {
-                    n > 0 -> showToast(appText(R.string.msg_batidas_bpm, n, bpm[0].roundToInt()))
-                    n == 0L -> showToast(appText(R.string.msg_nenhuma_batida_clara_neste_som))
-                    else -> showToast(appText(R.string.msg_nao_foi_possivel_analisar_o_som, -n))
+            var result = -ERRC_IO.toLong()
+            try {
+                result = synchronized(lifecycleLock) { if (ready) engine.detectBeats(id, bpm) else -1L }
+            } catch (failure: Exception) {
+                Log.w(TAG, "beat analysis failed", failure)
+            } catch (failure: OutOfMemoryError) {
+                result = -8L // aurea::Errc::OutOfMemory
+                Log.w(TAG, "beat analysis exceeded available memory", failure)
+            } finally {
+                val n = result
+                beatHandler.post {
+                    if (destroyed) return@post
+                    detectingBeats = false
+                    if (!ready || projectGeneration != session || composition?.id != compositionId) return@post
+                    refreshNow()
+                    when {
+                        n > 0 && bpm[0].isFinite() && bpm[0] in 0.0..Int.MAX_VALUE.toDouble() ->
+                            showToast(appText(R.string.msg_batidas_bpm, n, bpm[0].roundToInt()))
+                        n == 0L -> showToast(appText(R.string.msg_nenhuma_batida_clara_neste_som))
+                        else -> showToast(appText(R.string.msg_nao_foi_possivel_analisar_o_som,
+                            if (n < 0) -n else ERRC_IO.toLong()))
+                    }
                 }
             }
         }
@@ -5669,8 +5867,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun importModel(uri: Uri) = importModel(listOf(uri))
 
     fun importModel(uris: List<Uri>) {
+        if (!acceptsImport()) return
         if (uris.isEmpty()) return
-        viewModelScope.launch {
+        launchImport launch@{
             // Nome sem extensão (WhatsApp, Drive, Telegram entregam "arquivo" ou
             // um número): o conteúdo diz o formato — antes virava "não é modelo".
             val picks = withContext(Dispatchers.IO) { uris.map { it to modelPickName(it) } }
@@ -5712,7 +5911,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Import de verdade (motor), com as etapas localizadas no aviso de progresso. */
     private fun runModelImport(path: String, name: String, quality: Int, memory: LongArray?) {
-        viewModelScope.launch {
+        launchImport launch@{
             busyMessage = appText(R.string.app_importing_model)
             val poll = launch {
                 while (true) {
@@ -5731,8 +5930,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
             }
             val detail = arrayOfNulls<String>(1)
-            val id = withContext(Dispatchers.IO) { engine.importModel(path, name, detail, quality, memory) }
-            poll.cancel()
+            val id = try {
+                withContext(Dispatchers.IO) { engine.importModel(path, name, detail, quality, memory) }
+            } finally { poll.cancel() }
             busyMessage = null
             when {
                 // Passou do orçamento no meio (a estimativa errou para baixo): recusado, nunca morto.
@@ -5781,12 +5981,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * reabre o pedido com a lista nova.
      */
     fun importModelTextures(uris: List<Uri>) {
+        if (!acceptsImport()) return
         val req = texturesTarget ?: return
         texturesTarget = null
         missingModelTextures = null
         if (uris.isEmpty()) return
         busyMessage = appText(R.string.msg_texturas) + "…"
-        viewModelScope.launch {
+        launchImport launch@{
             val detail = arrayOfNulls<String>(1)
             val left = withContext(Dispatchers.IO) {
                 val folder = engine.modelFolder(req.layer).takeIf { it.isNotEmpty() }?.let(::File) ?: return@withContext -1_000
@@ -5960,19 +6161,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Imagem do seletor do sistema: decodificada aqui (RGBA8) e entregue ao motor. */
     fun importImage(uri: Uri) {
+        if (!acceptsImport()) return
         takePermission(uri)
         val name = displayName(uri) ?: appText(R.string.target_image)
         busyMessage = appText(R.string.app_importing_image)
-        viewModelScope.launch {
+        launchImport launch@{
             val id = withContext(Dispatchers.IO) {
                 val bmp = AureaEngine.decodeBitmapRgba(getApplication(), uri) ?: return@withContext -1L
-                val buf = directBuffer(bmp.width * bmp.height * 4)
-                bmp.copyPixelsToBuffer(buf)
-                buf.rewind()
-                // A URI vai junto: ao reabrir o projeto o motor pede a imagem de novo.
-                val r = engine.importImage(buf, bmp.width, bmp.height, name, uri.toString())
-                bmp.recycle()
-                r
+                try {
+                    val buf = directBuffer(bmp.width * bmp.height * 4)
+                    bmp.copyPixelsToBuffer(buf)
+                    buf.rewind()
+                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString())
+                } finally { bmp.recycle() }
             }
             busyMessage = null
             if (id < 0) {
@@ -5990,21 +6191,24 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * fim). Um passo de desfazer, feito pelo motor.
      */
     fun replaceMedia(layer: Long, uri: Uri) {
+        if (!acceptsImport()) return
         takePermission(uri)
         val app = getApplication<Application>()
         val mime = runCatching { app.contentResolver.getType(uri) }.getOrNull().orEmpty()
         val name = displayName(uri) ?: appText(if (mime.startsWith("video/")) R.string.target_video else R.string.target_image)
         busyMessage = appText(R.string.layer_replacing_media)
-        viewModelScope.launch {
+        launchImport launch@{
             val id = withContext(Dispatchers.IO) {
                 if (mime.startsWith("video/")) {
                     engine.replaceLayerVideo(layer, uri.toString(), name)
                 } else {
                     val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -ERRC_UNSUPPORTED_FORMAT
-                    val buf = directBuffer(bmp.width * bmp.height * 4)
-                    bmp.copyPixelsToBuffer(buf)
-                    buf.rewind()
-                    engine.replaceLayerImage(layer, buf, bmp.width, bmp.height, name, uri.toString()).also { bmp.recycle() }
+                    try {
+                        val buf = directBuffer(bmp.width * bmp.height * 4)
+                        bmp.copyPixelsToBuffer(buf)
+                        buf.rewind()
+                        engine.replaceLayerImage(layer, buf, bmp.width, bmp.height, name, uri.toString())
+                    } finally { bmp.recycle() }
                 }
             }
             busyMessage = null
@@ -6047,29 +6251,33 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** fps livre (1–240) e, opcional, o fundo inicial em RGBA sRGB (nulo = preto). */
     fun newProject(width: Int, height: Int, fps: Double, title: String, background: FloatArray?) {
-        viewModelScope.launch {
+        if (!acceptsProjectChange()) return
+        projectGeneration++
+        launchProjectWork launch@{
             val ok = withContext(Dispatchers.Default) { engine.newProject(width, height, fps, title, background) }
             if (!ok) {
                 errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_projeto)
                 return@launch
             }
             val path = File(directories().projects, "${uniqueName(title)}.aurea").absolutePath
+            project = ProjectState(title = title, path = path, width = width, height = height, fps = fps.toFloat())
             // Establish the native path before the first autosave, including an empty project.
             val saved = withContext(Dispatchers.IO) { engine.saveProject(path) }
             if (saved != 0) {
                 errorMessage = appText(R.string.msg_nao_foi_possivel_salvar, humanError(saved))
                 return@launch
             }
-            project = ProjectState(title = title, path = path, width = width, height = height, fps = fps.toFloat())
             enterEditor()
         }
     }
 
     fun openProject(path: String) {
+        if (!acceptsProjectChange()) return
         // Projeto que já derrubou o app: só com a pessoa escolhendo "Recuperar".
         quarantined.firstOrNull { it.path == path }?.let { quarantinePrompt = it; return }
         val app = getApplication<Application>()
-        viewModelScope.launch {
+        projectGeneration++
+        launchProjectWork launch@{
             // Marcador ANTES de o motor tocar no projeto; sai alguns segundos
             // depois de abrir (os primeiros quadros também são "abrir").
             withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.OPEN, path) }
@@ -6082,7 +6290,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             viewModelScope.launch {
                 kotlinx.coroutines.delay(OPEN_GUARD_MS)
-                withContext(Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.OPEN) }
+                if (!destroyed && project.path == path) withContext(Dispatchers.IO) {
+                    runCatching { ProjectGuard.end(app, ProjectGuard.Stage.OPEN) }
+                }
             }
             val meta = readMeta(File(path))
             project = ProjectState(title = meta?.title ?: File(path).nameWithoutExtension, path = path)
@@ -6104,6 +6314,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun enterEditor() {
+        captions.resetProject()
         timelineOnlySelection = emptySet()
         layerSelectMode = false
         selection = emptySet()
@@ -6116,8 +6327,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveProject(onDone: (() -> Unit)? = null) {
+        if (!acceptsProjectChange()) return
         val path = project.path ?: return
-        viewModelScope.launch {
+        launchProjectWork launch@{
             val code = withContext(Dispatchers.IO) { saveBlocking(path) }
             if (code != 0) errorMessage = appText(R.string.msg_nao_foi_possivel_salvar, humanError(code))
             onDone?.invoke()
@@ -6136,6 +6348,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Miniatura + sidecar `.meta.json` que a Home lê (o `.aurea` já gravado). */
     private fun writeHomeCard(path: String, withThumbnail: Boolean): Int {
+        val metadata = project
+        if (metadata.path != path) return 0
         val file = File(path)
         val thumbFile = File(directories().thumbs, file.nameWithoutExtension + ".jpg")
         // Miniatura e sidecar são derivados: falhar neles (disco cheio) não
@@ -6143,11 +6357,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         try {
             if (withThumbnail || !thumbFile.exists()) writeThumbnail(thumbFile)
             val meta = JSONObject()
-                .put("title", project.title)
-                .put("width", project.width)
-                .put("height", project.height)
-                .put("fps", project.fps.toDouble())
-                .put("durationFrames", project.durationFrames)
+                .put("title", metadata.title)
+                .put("width", metadata.width)
+                .put("height", metadata.height)
+                .put("fps", metadata.fps.toDouble())
+                .put("durationFrames", metadata.durationFrames)
                 .put("thumbnail", thumbFile.absolutePath)
             writeTextAtomic(File(path + META_SUFFIX), meta.toString())
         } catch (e: java.io.IOException) {
@@ -6193,6 +6407,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Sai do editor: salva (se mudou) e volta à Home. */
     fun closeProject() {
+        if (!acceptsProjectChange()) return
         textContentRequest = null
         if (exporter.busy) {
             showToast(appText(R.string.msg_aguarde_a_exportacao_terminar))
@@ -6202,7 +6417,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val path = project.path
         stopScrubIfNeeded()
         if (playing) pause()
-        viewModelScope.launch {
+        projectGeneration++
+        launchProjectWork launch@{
             if (path != null) {
                 // Save also drains the final queued edit (status.dirty may lag).
                 // Deleting the last layer is a real edit that must survive closing.
@@ -6232,7 +6448,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         project = project.copy(title = title.trim())
         // O título mora no sidecar: grava já (sem a capa), senão só ao sair.
         val path = project.path ?: return
-        if (screen == Screen.Editor) lifecycleThread.execute { if (ready) writeHomeCard(path, withThumbnail = false) }
+        if (screen == Screen.Editor) enqueueLifecycle { if (ready) writeHomeCard(path, withThumbnail = false) }
     }
 
     /**
@@ -6335,9 +6551,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Grava o projeto (e, com `includeMedia`, a mídia) num arquivo só em `target`. */
     fun exportProjectFile(path: String, includeMedia: Boolean, target: Uri) {
+        if (!acceptsImport()) return
         val app = getApplication<Application>()
         busyMessage = appText(R.string.project_file_exporting)
-        viewModelScope.launch {
+        launchImport launch@{
             // O projeto aberto no editor sai como está agora.
             if (ready && project.path == path) withContext(Dispatchers.IO) { saveBlocking(path, withThumbnail = false) }
             val title = readMeta(File(path))?.title ?: File(path).nameWithoutExtension
@@ -6353,9 +6570,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Lê um arquivo do projeto (ou um `.aurea`) como projeto NOVO — nunca por cima de outro. */
     fun importProjectFile(uri: Uri) {
+        if (!acceptsImport()) return
         val app = getApplication<Application>()
         busyMessage = appText(R.string.project_file_importing)
-        viewModelScope.launch {
+        launchImport launch@{
             val fallback = (displayName(uri) ?: appText(R.string.project_file_imported_title))
                 .substringBeforeLast('.').ifBlank { appText(R.string.project_file_imported_title) }
             val r = withContext(Dispatchers.IO) {
@@ -6566,6 +6784,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
  * miniatura não chegou; a UI redesenha quando `thumbnailGeneration` muda.
  */
 class ThumbnailCache(private val engine: AureaEngine) {
+    internal var epoch = 0L
+        private set
     // Chave composta: o id da camada é `geração << 32 | índice`, e o antigo
     // `layer * 31 + frame` colidia entre camadas vizinhas (camada 0 no frame 31
     // = camada 1 no frame 0 → miniatura de outra camada).
@@ -6587,16 +6807,18 @@ class ThumbnailCache(private val engine: AureaEngine) {
         val bytes = engine.queryThumbnail(layer, timelineFrame, heightPx, buffer, width)
         if (bytes <= 0 || width[0] <= 0) return null
         buffer.rewind()
-        val bmp = Bitmap.createBitmap(width[0], heightPx, Bitmap.Config.ARGB_8888)
-        bmp.copyPixelsFromBuffer(buffer)
-        cache.put(key, bmp)
-        return bmp
+        return try {
+            val bmp = Bitmap.createBitmap(width[0], heightPx, Bitmap.Config.ARGB_8888)
+            try { bmp.copyPixelsFromBuffer(buffer) } catch (failure: Exception) { bmp.recycle(); throw failure }
+            cache.put(key, bmp)
+            bmp
+        } catch (_: OutOfMemoryError) { clear(); null }
     }
 
-    fun clear() = cache.evictAll()
+    fun clear() { epoch++; cache.evictAll() }
 
     /** Pressão de memória: fica só a fração mais recente (o que está na tela). */
-    fun trimTo(fraction: Float) = cache.trimToSize((cache.size() * fraction).toInt())
+    fun trimTo(fraction: Float) { epoch++; cache.trimToSize((cache.size() * fraction).toInt()) }
 
     fun bytes(): Long = cache.size().toLong()
 

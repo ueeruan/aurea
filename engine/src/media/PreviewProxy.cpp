@@ -271,7 +271,9 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
     }
     ec.clear();
     auto decoder = media_->open_video(request.asset, MediaPriority::Thumbnail);
-    if (!decoder || !decoder->seek_to_keyframe(0).ok() || cancelled(request.generation)) return {};
+    if (!decoder || !decoder->seek_to_keyframe(0).ok() || cancelled(request.generation)) {
+        AUREA_LOG_WARN("proxy: decoder indisponivel, seek falhou ou tarefa cancelada"); return {};
+    }
     auto result = std::make_shared<PreviewProxy>(); result->path = path; result->original = decoder->info();
     const std::string partial = path + ".partial.mp4";
     std::unique_ptr<ExportSink> sink;
@@ -291,21 +293,26 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
             wake_.wait_for(lock, std::max(work * 3, floor), [&] { return cancelled(request.generation); });
         };
         FrameRef frame; i64 pts = 0;
-        if (!decoder->next_frame(-1, frame, pts, eos).ok()) break;
+        if (!decoder->next_frame(-1, frame, pts, eos).ok()) { AUREA_LOG_WARN("proxy: falha ao decodificar quadro"); break; }
         if (!frame) { if (eos) { success = !result->times.empty(); break; } if (++empty > 500) break; pace(); continue; }
         empty = 0;
         if (!result->times.empty() && pts <= result->times.back()) break;
         if (!sink) {
             result->original.color = frame->color;
             const u32 vw = frame->visibleWidth ? frame->visibleWidth : frame->width, vh = frame->visibleHeight ? frame->visibleHeight : frame->height;
+            if (!vw || !vh || vw > 65536 || vh > 65536
+                || static_cast<u64>(frame->cropLeft) + vw > frame->width
+                || static_cast<u64>(frame->cropTop) + vh > frame->height) break;
             const bool rotated = frame->rotation == 90 || frame->rotation == 270;
             const u32 dw = rotated ? vh : vw, dh = rotated ? vw : vh;
             const f64 scale = std::min(1., static_cast<f64>(request.target) / std::min(dw, dh));
             result->width = std::max(2u, static_cast<u32>(dw * scale / 2) * 2);
             result->height = std::max(2u, static_cast<u32>(dh * scale / 2) * 2);
-            if (result->width > 4096 || result->height > 4096 || !std::isfinite(result->original.fps) || result->original.fps <= 0) break;
+            if (result->width > 4096 || result->height > 4096 || !std::isfinite(result->original.fps) || result->original.fps <= 0) {
+                AUREA_LOG_WARN("proxy: dimensoes/taxa invalidas %ux%u %.2f", result->width, result->height, result->original.fps); break;
+            }
             VideoStreamConfig config; config.width = result->width; config.height = result->height;
-            config.fps = result->original.fps; config.keyframeIntervalFrames = std::max(1u, static_cast<u32>(config.fps));
+            config.fps = result->original.fps; config.keyframeIntervalFrames = static_cast<u32>(std::clamp(config.fps, 1.0, 240.0));
             config.bitrateBps = std::clamp(static_cast<u32>(config.width * static_cast<f64>(config.height) * std::min(config.fps, 120.) * .16), 1'000'000u, 12'000'000u);
             const auto& color = frame->color;
             config.color.matrix = color.matrix == YCbCrMatrix::BT601 ? 6 : color.matrix == YCbCrMatrix::BT2020 ? 9 : 1;
@@ -313,7 +320,7 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
             config.color.transfer = color.transfer == TransferFunction::PQ ? 16 : color.transfer == TransferFunction::HLG ? 18 : color.transfer == TransferFunction::Linear ? 8 : 1;
             config.color.fullRange = color.fullRange;
             const u64 expected = static_cast<u64>(std::max<i64>(0, result->original.durationUs) / 1e6 * config.bitrateBps / 8 * 1.25) + (1ull << 20);
-            if (!make_room(expected, path)) break;
+            if (!make_room(expected, path)) { AUREA_LOG_WARN("proxy: cache sem espaco ou inacessivel (%llu bytes)", static_cast<unsigned long long>(expected)); break; }
             sink = sink_(context_);
             if (!sink || !sink->open(partial.c_str(), config, nullptr).ok()) break;
         }

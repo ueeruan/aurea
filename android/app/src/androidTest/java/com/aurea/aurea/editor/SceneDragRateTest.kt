@@ -22,12 +22,9 @@ import org.junit.Test
 import kotlin.math.sqrt
 
 /**
- * O arrasto na cena 3D manda um alvo ABSOLUTO a cada evento de toque, lido do
- * modelo do motor (`gizmoMoveLocal`) SEM os comandos ainda na fila. Dois
- * eventos no mesmo quadro do motor partem da mesma base e o segundo
- * sobrescreve o primeiro: o passo se perde. O mesmo arrasto (8 × 15 px) é
- * feito devagar (60 ms por evento: um por quadro do motor) e depressa (2 ms
- * por evento: vários por quadro). O deslocamento tem de ser o mesmo.
+ * Pan de dois dedos usa uma base capturada no início, independente de quantos
+ * eventos chegam antes do quadro do motor. A entrada incremental do store deve
+ * obedecer à mesma regra, inclusive se o gesto retorna à posição inicial.
  */
 class SceneDragRateTest {
     @get:Rule val compose = createComposeRule()
@@ -105,20 +102,33 @@ class SceneDragRateTest {
      */
     private fun dragOnePerFrame(steps: Int, stepPx: Float) {
         val stage = compose.onNodeWithTag("scene.stage")
-        stage.performTouchInput { down(origin()) }
-        repeat(steps) {
-            stage.performTouchInput { moveBy(Offset(stepPx, 0f)) }
+        var start = Offset.Zero
+        stage.performTouchInput {
+            start = origin()
+            down(0, start - Offset(0f, 40f)); down(1, start + Offset(0f, 40f))
+        }
+        repeat(steps) { index ->
+            stage.performTouchInput {
+                val center = start + Offset((index + 1) * stepPx, 0f)
+                updatePointerTo(0, center - Offset(0f, 40f))
+                updatePointerTo(1, center + Offset(0f, 40f)); move(16)
+            }
             Thread.sleep(500)
         }
-        stage.performTouchInput { up() }
+        stage.performTouchInput { up(0); up(1) }
     }
 
     /** Rajada: os eventos saem num bloco só, vários antes de o motor drenar a fila. */
     private fun dragBurst(steps: Int, stepPx: Float) {
         compose.onNodeWithTag("scene.stage").performTouchInput {
-            down(origin())
-            repeat(steps) { moveBy(Offset(stepPx, 0f), 8) }
-            up()
+            val start = origin()
+            down(0, start - Offset(0f, 40f)); down(1, start + Offset(0f, 40f))
+            repeat(steps) { index ->
+                val center = start + Offset((index + 1) * stepPx, 0f)
+                updatePointerTo(0, center - Offset(0f, 40f))
+                updatePointerTo(1, center + Offset(0f, 40f)); move(8)
+            }
+            up(0); up(1)
         }
     }
 
@@ -154,5 +164,15 @@ class SceneDragRateTest {
         Log.i("SceneDragRate", message)
         assertTrue("Passos lentos não moveram: $message", slow.length() > 1f)
         assertTrue("Passos na mesma volta se sobrescreveram: $message", fast.length() >= slow.length() * 0.85f)
+        for (axis in 0..2) assertEquals("Same accumulated delta on axis $axis", slow[axis], fast[axis], .01f)
+        undoDrag(id)
+        compose.runOnIdle {
+            store.beginGesture("mover e voltar na cena")
+            repeat(8) { store.sceneDragObject(4f, 0f) }
+            repeat(8) { store.sceneDragObject(-4f, 0f) }
+            store.endGesture()
+        }
+        val returned = settle(id)
+        assertEquals("A queued gesture must also return to its starting pose", 0f, returned.length(), .01f)
     }
 }

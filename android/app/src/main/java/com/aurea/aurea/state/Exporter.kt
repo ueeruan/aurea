@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.annotation.StringRes
+import androidx.core.content.FileProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -23,6 +24,7 @@ import com.aurea.aurea.engine.directBuffer
 import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ui.i18n.EngineText
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -148,7 +150,7 @@ data class ExportUiState(
     val notice: String = "",
     val format: ExportFormat = ExportFormat.Video,
 ) {
-    val fraction: Float get() = if (framesTotal > 0) framesDone.toFloat() / framesTotal else 0f
+    val fraction: Float get() = if (framesTotal > 0) (framesDone.toFloat() / framesTotal).coerceIn(0f, 1f) else 0f
 }
 
 /**
@@ -169,9 +171,10 @@ class Exporter internal constructor(
     private val progressBuffer = directBuffer(128)
     private val progress = ExportProgress()
     private var poll: Job? = null
+    private var sessionActive by mutableStateOf(false)
     @Volatile private var cancelPending = false
 
-    val busy: Boolean get() = state.phase == ExportPhase.Running || state.phase == ExportPhase.Publishing
+    val busy: Boolean get() = sessionActive || state.phase == ExportPhase.Running || state.phase == ExportPhase.Publishing
 
     init {
         // Temporário de um export que o sistema matou no meio (o app não teve
@@ -220,7 +223,7 @@ class Exporter internal constructor(
     fun start(title: String, compWidth: Int, compHeight: Int, compFps: Double, options: ExportOptions) {
         if (busy) return
         val dir = File(app.cacheDir, "export")
-        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ROOT).format(Date())
         val base = title.ifBlank { "Aurea" }.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifBlank { "Aurea" }
         val file = File(dir, "$base $stamp.${options.format.extension}")
         if (options.format != ExportFormat.Video) {
@@ -233,17 +236,15 @@ class Exporter internal constructor(
         val mbps = options.customMbps.coerceAtLeast(0)
 
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension)
+        sessionActive = true
         cancelPending = false
         poll?.cancel()
         val guarded = projectPath()
         poll = scope.launch {
             // Galaxy A32 "fecha em 70%": o marcador diz no próximo crash que foi
             // no export, e em que quadro (atualizado a cada 1% abaixo).
-            if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
-            try {
+            guardedExport(guarded) {
                 runExport(dir, file, options, mbps)
-            } finally {
-                if (guarded != null) withContext(NonCancellable + Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
             }
         }
     }
@@ -251,18 +252,42 @@ class Exporter internal constructor(
     /** PNG, sequência .zip ou GIF: o motor renderiza e codifica; aqui, só publicar. */
     private fun startImage(dir: File, file: File, options: ExportOptions) {
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension, format = options.format)
+        sessionActive = true
         cancelPending = false
         poll?.cancel()
         val guarded = projectPath()
         poll = scope.launch {
-            if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
-            try {
+            guardedExport(guarded) {
                 runEngineJob(dir, file, options) {
                     engine.startImageExport(file.absolutePath, options.format.engineCode, options.imageShortSide, options.gifWidth,
                         imageFps(options), options.trimToContent)
                 }
+            }
+        }
+    }
+
+    /** A failed IO/JNI call is a recoverable export error, never an uncaught UI coroutine. */
+    private suspend fun guardedExport(guarded: String?, job: suspend () -> Unit) {
+        try {
+            if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
+            job()
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { engine.cancelExport() } }
+            state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+            throw cancelled
+        } catch (error: Exception) {
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { engine.cancelExport() } }
+            android.util.Log.e("AureaExport", "Export operation failed", error)
+            state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_interrupted))
+        } finally {
+            try {
+                if (guarded != null) withContext(NonCancellable + Dispatchers.IO) {
+                    runCatching { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
+                        .onFailure { android.util.Log.w("AureaExport", "Export marker cleanup failed", it) }
+                }
             } finally {
-                if (guarded != null) withContext(NonCancellable + Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
+                // A new job cannot cancel this coroutine while its old guard cleanup is still pending.
+                sessionActive = false
             }
         }
     }
@@ -278,19 +303,20 @@ class Exporter internal constructor(
             // lento (e no emulador): na main thread isso dava "Aurea não está
             // respondendo" no toque de Exportar.
             val code = withContext(Dispatchers.IO) {
-                dir.mkdirs()
-                dir.listFiles()?.forEach { it.delete() }   // sobra de export interrompido
+                check(dir.isDirectory || dir.mkdirs()) { "Export directory unavailable" }
+                // Startup removes orphaned files. A previous failed job can still be
+                // unwinding its native writer here; never unlink that writer's output.
                 startJob()
             }
             if (code != 0) {
-                state = ExportUiState(ExportPhase.Failed, message = startError(code, options))
+                state = state.copy(phase = ExportPhase.Failed, message = startError(code, options))
                 return
             }
             if (cancelPending) engine.cancelExport()
             var markedPercent = -1
             while (true) {
                 delay(100)
-                if (!engine.exportProgress(progressBuffer)) continue
+                check(engine.exportProgress(progressBuffer)) { "Export engine unavailable" }
                 progress.readFrom(progressBuffer)
                 val percent = if (progress.framesTotal > 0) (progress.framesDone.toLong() * 100 / progress.framesTotal).toInt() else 0
                 if (percent != markedPercent) {
@@ -361,17 +387,18 @@ class Exporter internal constructor(
 
     private suspend fun publish(file: File, format: ExportFormat) {
         state = state.copy(phase = ExportPhase.Publishing)
-        val result = withContext(Dispatchers.IO) {
+        // Complete or roll back the MediaStore transaction even if the view model is cleared.
+        val result = withContext(NonCancellable + Dispatchers.IO) {
             runCatching { if (format == ExportFormat.Video) copyToGallery(file) else copyImageOut(file, format) }
         }
-        file.delete()
+        withContext(NonCancellable + Dispatchers.IO) { file.delete() }
         result.fold(
             onSuccess = { (uri, label) ->
                 val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri, message = label)
                 // Publication succeeded independently of the ad SDK. A late
                 // callback must never overwrite a newer export's state.
                 state = pronto
-                com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { }
+                runCatching { com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { } }
             },
             onFailure = { state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_gallery_failed)) },
         )
@@ -379,6 +406,7 @@ class Exporter internal constructor(
 
     /** Copia para Filmes/Aurea. Devolve a Uri e o texto de onde ficou. */
     private fun copyToGallery(file: File): Pair<Uri, String> {
+        check(file.isFile && file.length() > 0L) { "Export produced no file" }
         val resolver = app.contentResolver
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
@@ -390,10 +418,10 @@ class Exporter internal constructor(
             val uri = resolver.insert(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
                 ?: error("MediaStore recusou")
             try {
-                resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
-                resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                checkNotNull(resolver.openOutputStream(uri)).use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
+                check(resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null) > 0)
             } catch (e: Exception) {
-                resolver.delete(uri, null, null)
+                runCatching { resolver.delete(uri, null, null) }
                 throw e
             }
             return uri to text(R.string.app_saved_to_gallery)
@@ -402,7 +430,7 @@ class Exporter internal constructor(
         val dir = File(app.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Aurea").apply { mkdirs() }
         val dst = File(dir, file.name)
         file.copyTo(dst, overwrite = true)
-        return Uri.fromFile(dst) to text(R.string.app_saved_to_path, dst.absolutePath)
+        return FileProvider.getUriForFile(app, "${app.packageName}.exports", dst) to text(R.string.app_saved_to_path, dst.absolutePath)
     }
 
     /**
@@ -410,6 +438,7 @@ class Exporter internal constructor(
      * Downloads/Aurea (o app Arquivos abre e descompacta).
      */
     private fun copyImageOut(file: File, format: ExportFormat): Pair<Uri, String> {
+        check(file.isFile && file.length() > 0L) { "Export produced no file" }
         val resolver = app.contentResolver
         val zip = format == ExportFormat.Sequence
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -424,10 +453,10 @@ class Exporter internal constructor(
                 else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             val uri = resolver.insert(collection, values) ?: error("MediaStore recusou")
             try {
-                resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
-                resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                checkNotNull(resolver.openOutputStream(uri)).use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
+                check(resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) > 0)
             } catch (e: Exception) {
-                resolver.delete(uri, null, null)
+                runCatching { resolver.delete(uri, null, null) }
                 throw e
             }
             return uri to text(if (zip) R.string.exp2_saved_downloads else R.string.exp2_saved_pictures)
@@ -437,7 +466,7 @@ class Exporter internal constructor(
             .apply { mkdirs() }
         val dst = File(dir, file.name)
         file.copyTo(dst, overwrite = true)
-        return Uri.fromFile(dst) to text(R.string.app_saved_to_path, dst.absolutePath)
+        return FileProvider.getUriForFile(app, "${app.packageName}.exports", dst) to text(R.string.app_saved_to_path, dst.absolutePath)
     }
 
     /**
@@ -487,8 +516,8 @@ class Exporter internal constructor(
         try {
             val enc = codec.codecInfo.getCapabilitiesForType(mime).encoderCapabilities
             when {
-                enc.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR) -> 1
-                enc.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) -> 0
+                enc?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR) == true -> 1
+                enc?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) == true -> 0
                 else -> 1
             }
         } finally {

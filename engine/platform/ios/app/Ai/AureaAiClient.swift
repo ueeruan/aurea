@@ -589,17 +589,23 @@ final class AureaBackendVideoProvider: VideoGenerationProvider {
         do {
             (tmp, resp) = try await session.download(for: req)
         } catch {
+            try Task.checkCancellation()
             throw VideoFailure((error as? URLError)?.code == .timedOut ? "tempo_esgotado" : "download_interrompido")
         }
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try Task.checkCancellation()
         let http = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(http) else {
-            let data = (try? Data(contentsOf: tmp)) ?? Data()
+            let handle = try? FileHandle(forReadingFrom: tmp)
+            defer { try? handle?.close() }
+            let data = (try? handle?.read(upToCount: 16_384)) ?? Data()
             throw failure(http, data)
         }
         let expected = resp.expectedContentLength
         let size = (try? FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? NSNumber)?.int64Value ?? 0
         if expected > 0 && size != expected { throw VideoFailure("download_interrompido") }
         guard Self.isMp4(tmp) else { throw VideoFailure("resultado_nao_e_video") }
+        try Task.checkCancellation()
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: destination)
         try FileManager.default.moveItem(at: tmp, to: destination)
@@ -639,9 +645,11 @@ final class AureaBackendVideoProvider: VideoGenerationProvider {
         do {
             (data, resp) = try await ContaAPI.boundedData(for: req, limit: 1_048_576)
         } catch {
+            try Task.checkCancellation()
             let code = (error as? URLError)?.code
             throw VideoFailure(code == .timedOut ? "tempo_esgotado" : "sem_conexao")
         }
+        try Task.checkCancellation()
         let http = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(http) else { throw failure(http, data) }
         if data.isEmpty { return [:] }

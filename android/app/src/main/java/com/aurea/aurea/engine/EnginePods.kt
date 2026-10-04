@@ -96,6 +96,7 @@ internal object PodLayout {
     const val ST_OFF_LAST_ERROR = 4       // i32
     const val ST_OFF_ERROR_DETAIL = 8     // char[96]
     const val ST_OFF_MODEL_REVISION = 104 // u32
+    const val ST_OFF_PREVIEW_BUFFER = 108 // u32: active/limited flags + ready/target frames
     const val ST_OFF_COMP_FPS = 112       // f32
     const val ST_OFF_COMP_WIDTH = 116     // u32
     const val ST_OFF_COMP_HEIGHT = 120    // u32
@@ -328,6 +329,7 @@ class EngineStatus {
     var compWidth: Int = 0
     var compHeight: Int = 0
     var modelRevision: Int = 0
+    var previewBufferStatus: Int = 0
     var thumbnailGeneration: Int = 0
     var layerCount: Int = 0
     var selectedCount: Int = 0
@@ -365,6 +367,7 @@ class EngineStatus {
         compWidth = buffer.getInt(PodLayout.ST_OFF_COMP_WIDTH)
         compHeight = buffer.getInt(PodLayout.ST_OFF_COMP_HEIGHT)
         modelRevision = buffer.getInt(PodLayout.ST_OFF_MODEL_REVISION)
+        previewBufferStatus = buffer.getInt(PodLayout.ST_OFF_PREVIEW_BUFFER)
         thumbnailGeneration = buffer.getInt(PodLayout.ST_OFF_THUMB_GENERATION)
         layerCount = buffer.getInt(PodLayout.ST_OFF_LAYER_COUNT)
         selectedCount = buffer.getInt(PodLayout.ST_OFF_SELECTED_COUNT)

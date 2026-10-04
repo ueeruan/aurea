@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <filesystem>
 #include <thread>
 #include <vector>
 
@@ -215,6 +216,68 @@ AUREA_TEST(Audio, BlockCacheMatchesSourceAndReadsSequentiallyWithoutSeeks) {
     cm.register_asset(1, audio::AudioAssetRef{"m", 10 * 48000});
     auto b = cm.fetch(1, 1);
     AUREA_CHECK(b && b->pcm[2 * 500] == b->pcm[2 * 500 + 1] && std::fabs(b->pcm[2 * 500]) > 0.0f);
+}
+
+AUREA_TEST(Audio, SparseAudioTimestampsOnlyPadTheRequestedWindow) {
+    struct Decoder final : audio::AudioDecoderBackend {
+        audio::AudioStreamInfo stream{};
+        int packet = 0;
+        Decoder() { stream.sampleRate = 48000; stream.channels = 2; }
+        const audio::AudioStreamInfo& info() const noexcept override { return stream; }
+        Status seek(i64) noexcept override { packet = 0; return OkStatus; }
+        Status read(std::vector<f32>& out, i64& pts, bool& eos) noexcept override {
+            pts = packet ? 1'000'000'000'000LL : 0;
+            out.assign(1024 * 2, .25f);
+            eos = ++packet == 2;
+            return OkStatus;
+        }
+    };
+    struct Factory final : VideoSourceFactory {
+        bool probe(const char*, MediaProbe&) override { return false; }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override { return {}; }
+        std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char*) override { return std::make_unique<Decoder>(); }
+    } factory;
+    audio::AudioBlockCache cache(&factory, 1ull << 20, false);
+    cache.register_asset(1, {"sparse", 480000});
+    const auto start = std::chrono::steady_clock::now();
+    auto first = cache.fetch(1, 0), next = cache.fetch(1, 1);
+    AUREA_CHECK(first && next);
+    if (first && next) {
+        AUREA_CHECK_NEAR(first->pcm[200], .25f, 1e-6f);
+        AUREA_CHECK_NEAR(first->pcm[3000], 0.0f, 1e-6f);
+        for (f32 value : next->pcm) AUREA_CHECK_EQ(value, 0.0f);
+    }
+    AUREA_CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
+    AUREA_CHECK(!cache.fetch(1, std::numeric_limits<i64>::max()));
+}
+
+AUREA_TEST(Audio, DiskWaveformAccountsPyramidAndCanBeReclaimed) {
+    SyntheticConfig cfg = audio_cfg(48000); cfg.audioSeconds = .1;
+    SyntheticFactory factory(cfg);
+    const auto dir = std::filesystem::temp_directory_path() /
+        ("aurea-waveform-audit-" + std::to_string(monotonic_ns()));
+    const audio::AudioAssetRef ref{"waveform-audit", 4800};
+    {
+        audio::WaveformCache cache(&factory); cache.set_disk_directory(dir.generic_string());
+        cache.request(1, ref);
+        wait_until([&] { return cache.progress(1) == 1.f; });
+        AUREA_CHECK_EQ(cache.progress(1), 1.f);
+    }
+    const auto opens = factory.audioOpened;
+    {
+        audio::WaveformCache cache(&factory); cache.set_disk_directory(dir.generic_string());
+        cache.request(1, ref);
+        wait_until([&] { return cache.progress(1) == 1.f; });
+        AUREA_CHECK_EQ(cache.progress(1), 1.f);
+        AUREA_CHECK_EQ(factory.audioOpened, opens);
+        AUREA_CHECK(cache.bytes() >= 20u + 10u + 5u + 3u + 2u + 1u);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2050));
+        AUREA_CHECK(cache.reclaim(MemoryManager::kReclaimAll) > 0);
+        AUREA_CHECK_EQ(cache.entry_count(), 0u);
+        cache.request(2, {"invalid", std::numeric_limits<i64>::max()});
+        AUREA_CHECK_EQ(cache.entry_count(), 0u);
+    }
+    std::error_code ec; std::filesystem::remove_all(dir, ec);
 }
 
 AUREA_TEST(Audio, MixerPlacesClipsWithEqualPowerFadesAndBalance) {

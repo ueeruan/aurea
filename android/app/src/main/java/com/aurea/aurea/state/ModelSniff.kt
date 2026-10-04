@@ -10,7 +10,7 @@ internal fun sniffModelFormat(head: ByteArray): String? {
     val text = String(head, Charsets.ISO_8859_1)
     if (text.startsWith("Kaydara FBX Binary")) return "fbx"
     if (text.contains("FBXHeaderExtension") || text.trimStart().startsWith("; FBX")) return "fbx"
-    val trimmed = text.trimStart('﻿', ' ', '\t', '\r', '\n')
+    val trimmed = text.trimStart('\uFEFF', ' ', '\t', '\r', '\n')
     if (trimmed.startsWith("{") && text.contains("\"asset\"")) return "gltf"
     // OBJ: texto com linhas "v x y z" (ou mtllib/o/g antes delas).
     if (head.none { it == 0.toByte() }) {

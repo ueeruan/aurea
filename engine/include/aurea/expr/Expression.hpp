@@ -118,6 +118,7 @@ struct TrackExpression {
 /// `fallback` = valor parado que quem chama usaria sem keyframes (ex.: a
 /// posição do Transform da camada); nulo = a própria track decide.
 [[nodiscard]] f32 evaluate_track(const Track& track, FrameIndex t, const f32* fallback) noexcept;
+[[nodiscard]] f32 evaluate_track_f(const Track& track, f64 t, const f32* fallback) noexcept;
 
 /// Contexto de avaliação de um trecho (um quadro do renderer, a montagem do
 /// mix de áudio). Dá à expressão a timeline (para achar a camada dona, as

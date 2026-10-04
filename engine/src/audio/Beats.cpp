@@ -77,7 +77,7 @@ std::vector<f32> onset_envelope(const f32* x, usize n) {
 
 } // namespace
 
-BeatResult detect_beats(const f32* mono, usize count) noexcept {
+BeatResult detect_beats(const f32* mono, usize count) {
     BeatResult r;
     if (!mono || count < 48000 * 3) return r;
     const std::vector<f32> o = onset_envelope(mono, count);

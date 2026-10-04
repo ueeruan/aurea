@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model3d_risk_warning">Los modelos 3D extremadamente pesados pueden agotar la memoria, calentar el dispositivo, causar lentitud o cerrar la app. Úsalos bajo tu responsabilidad.</string>
+    <string name="preview_buffer_preparing">Preparando vista previa · %1$d/%2$d fotogramas</string>
+    <string name="preview_buffer_ready">Vista previa en memoria · %1$d fotogramas</string>
+    <string name="preview_buffer_timeline">Vista previa en caché: %1$d fotogramas</string>
+    <string name="preview_buffer_limited">Vista previa parcial en memoria · %1$d fotogramas</string>
+    <string name="app_export_interrupted">La exportación se interrumpió. Inténtalo de nuevo.</string>
+    <string name="transform_expression_controlled">Una expresión controla esta transformación. Toca = para editar o desactivar la expresión.</string>
+    <string name="fx_custom_create">Crear efecto</string>
+    <string name="fx_custom_library">Mis efectos</string>
+    <string name="fx_custom_normal">Normal</string>
+    <string name="fx_custom_advanced">Avanzado</string>
+    <string name="fx_custom_save">Guardar efecto</string>
+    <string name="fx_custom_name">Nombre del efecto</string>
+    <string name="fx_custom_cancel">Cancelar</string>
+    <string name="fx_custom_normal_help">Añade efectos y ajusta sus valores para combinar el resultado. Al guardar se conservan los efectos y fotogramas clave para reutilizarlos, también en fotos.</string>
+    <string name="fx_custom_advanced_help">Abre un efecto para editar todos sus controles. El menú de cada parámetro ofrece expresiones y fotogramas clave. Al guardar se almacena el efecto abierto.</string>
+    <string name="fx_name_chroma_key_advanced">Chroma Key (avanzado)</string>
+    <string name="preview_buffer_note">Búfer automático: los próximos fotogramas se preparan mientras la reproducción está en pausa.</string>
+    <string name="timeline_cut_left">Izquierda</string>
+    <string name="timeline_cut_right">Derecha</string>
+    <string name="timeline_more">Más acciones de la línea de tiempo</string>
+    <string name="timeline_cut_failed">No se pudo recortar. Comprueba los límites del clip y las capas bloqueadas de la pista magnética.</string>
+    <string name="timeline_show_all">Todas las capas</string>
+    <string name="timeline_selected_only">Seleccionadas</string>
+    <string name="timeline_all_short">Todas</string>
+    <string name="timeline_selection_short">Seleccionadas</string>
+</resources>
+

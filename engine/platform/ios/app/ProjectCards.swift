@@ -16,6 +16,7 @@
 //  fora da thread principal no tamanho em que ela aparece.
 // =============================================================================
 import SwiftUI
+import ImageIO
 
 // =============================================================================
 // A ficha de um projeto, como a Home precisa dela
@@ -301,14 +302,21 @@ func homeGridColumns() -> Int {
 final class HomeThumbCache {
     static let shared = HomeThumbCache()
     private let cache = NSCache<NSString, UIImage>()
+    private let lock = NSLock()
+    private var epoch: UInt64 = 0
+    var generation: UInt64 { lock.lock(); defer { lock.unlock() }; return epoch }
 
     init() { cache.totalCostLimit = 24 * 1024 * 1024 }
 
-    func clear() { cache.removeAllObjects() }
+    func clear() {
+        lock.lock(); epoch &+= 1; cache.removeAllObjects(); lock.unlock()
+    }
 
     func image(_ key: String) -> UIImage? { cache.object(forKey: key as NSString) }
 
-    func store(_ key: String, _ image: UIImage) {
+    func store(_ key: String, _ image: UIImage, generation: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        guard generation == epoch else { return }
         cache.setObject(image, forKey: key as NSString,
                         cost: Int(image.size.width * image.size.height * 4))
     }
@@ -316,12 +324,16 @@ final class HomeThumbCache {
 
 /// Decodifica no tamanho pedido (o `inSampleSize` do Android, pelo lado do iOS).
 func decodeHomeThumbnail(path: String, maxPx: CGFloat) -> UIImage? {
-    guard let full = UIImage(contentsOfFile: path) else { return nil }
-    let width = full.size.width, height = full.size.height
-    guard width > 0, height > 0 else { return full }
-    let scale = maxPx / max(width, height)
-    if scale >= 1 { return full }
-    return full.preparingThumbnail(of: CGSize(width: width * scale, height: height * scale))
+    guard maxPx.isFinite, maxPx > 0,
+          let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL,
+                                                  [kCGImageSourceShouldCache: false] as CFDictionary),
+          let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: min(maxPx, 2048),
+            kCGImageSourceShouldCacheImmediately: true
+          ] as CFDictionary) else { return nil }
+    return UIImage(cgImage: thumbnail)
 }
 
 /// A miniatura de um projeto. A chave leva o carimbo do arquivo: salvar
@@ -359,12 +371,15 @@ struct HomeThumbnail: View {
         .clipped()
         .onChange(of: image) { _ in backdrop?.invalidate() }
         .task(id: key) {
+            let requestKey = key
+            let generation = HomeThumbCache.shared.generation
             guard let path = url?.path else { image = nil; return }
-            if let hit = HomeThumbCache.shared.image(key) { image = hit; return }
+            if let hit = HomeThumbCache.shared.image(requestKey) { image = hit; return }
             let loaded = await Task.detached(priority: .userInitiated) {
                 decodeHomeThumbnail(path: path, maxPx: maxPx)
             }.value
-            if let loaded { HomeThumbCache.shared.store(key, loaded) }
+            guard !Task.isCancelled, key == requestKey, generation == HomeThumbCache.shared.generation else { return }
+            if let loaded { HomeThumbCache.shared.store(requestKey, loaded, generation: generation) }
             image = loaded
         }
     }

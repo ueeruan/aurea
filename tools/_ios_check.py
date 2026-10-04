@@ -24,7 +24,7 @@ IGNORAR = {"AureaStrings.swift"}
 
 
 def swift_files():
-    return sorted(p for p in APP.glob("*.swift") if p.name not in IGNORAR)
+    return sorted(p for p in APP.rglob("*.swift") if p.name not in IGNORAR)
 
 
 def catalogo():
@@ -44,7 +44,7 @@ def bloco_textos():
     problemas = []
     usadas = 0
     for p in swift_files():
-        for k in re.findall(r'AureaStrings\.t\(\s*"([^"]+)"', fonte_swift(p)):
+        for k in re.findall(r'Aurea(?:Strings|Text)\.t\(\s*"([^"]+)"\s*(?:,|\))', fonte_swift(p)):
             usadas += 1
             if k not in chaves:
                 problemas.append("%s: chave fora do catálogo: %s" % (p.name, k))
@@ -53,9 +53,12 @@ def bloco_textos():
 
 
 def api_ponte():
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(IOS / "verify"))
+    from check_api_swift import objc_method_names
     h = io.open(BRIDGE / "AureaEngine.h", encoding="utf-8").read()
     h += io.open(BRIDGE / "AureaBridge.h", encoding="utf-8").read()
-    return set(re.findall(r"[-+]\s*\([^)]*\)\s*([A-Za-z_][A-Za-z0-9_]*)", h))
+    return objc_method_names(h) | set(re.findall(r"[-+]\s*\([^)]*\)\s*([A-Za-z_][A-Za-z0-9_]*)", h))
 
 
 def membros_swift():

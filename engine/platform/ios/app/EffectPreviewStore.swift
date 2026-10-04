@@ -9,6 +9,23 @@ final class EffectPreviewStore {
     private let memory = NSCache<NSNumber, UIImage>()
     private let directory: URL
     private var sourceLoaded = false // Accessed only on queue.
+    private let pressureLock = NSLock()
+    private var pressureEpoch: UInt64 = 0
+    private var pressurePaused = false
+
+    private func requestEpoch() -> UInt64? {
+        pressureLock.lock(); defer { pressureLock.unlock() }
+        return pressurePaused ? nil : pressureEpoch
+    }
+
+    func trimMemory() {
+        pressureLock.lock(); pressureEpoch &+= 1; pressurePaused = true; pressureLock.unlock()
+        memory.removeAllObjects()
+    }
+
+    func resumeMemoryWork() {
+        pressureLock.lock(); pressurePaused = false; pressureLock.unlock()
+    }
 
     init(engine: AureaEngine) {
         self.engine = engine
@@ -28,12 +45,17 @@ final class EffectPreviewStore {
     }
 
     func image(for typeId: UInt32) async -> UIImage? {
+        guard let epoch = requestEpoch() else { return nil }
         let request = Request()
         return await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
                 queue.async { [self] in
-                    guard !request.isCancelled else { continuation.resume(returning: nil); return }
+                    guard !request.isCancelled, self.requestEpoch() == epoch else { continuation.resume(returning: nil); return }
                     let image = autoreleasepool { load(typeId) }
+                    guard self.requestEpoch() == epoch else {
+                        memory.removeAllObjects()
+                        continuation.resume(returning: nil); return
+                    }
                     continuation.resume(returning: request.isCancelled ? nil : image)
                 }
             }

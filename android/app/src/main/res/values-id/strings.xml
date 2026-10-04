@@ -3461,4 +3461,23 @@ untuk mengedit kurvanya.</string>
     <plurals name="pn_keyframes_edit_at_playhead">
         <item quantity="other">%1$d keyframe — edit di playhead</item>
     </plurals>
+    <string name="fxl_visible_duration">Durasi terlihat</string>
+    <string name="fxl_minimum_opacity">Opasitas minimum</string>
+    <string name="fxl_maximum_opacity">Opasitas maksimum</string>
+    <string name="fxl_grow">Perbesar</string>
+    <string name="fxl_vertical_scatter">Sebaran vertikal</string>
+    <string name="fxl_end_angle">Sudut akhir</string>
+    <string name="fxl_axis">Sumbu</string>
+    <string name="fxl_spacing">Jarak</string>
+    <string name="fxl_rotation_per_copy">Rotasi per salinan</string>
+    <string name="fxl_scale_per_copy">Skala per salinan</string>
+    <string name="fxl_end_opacity">Opasitas akhir</string>
+    <string name="fxl_orient_copies">Atur arah salinan</string>
+    <string name="fxl_remove_color_fringe">Hapus pinggiran warna</string>
+    <string name="fxo_rgb">RGB</string>
+    <string name="fxl_choke_1">Perkecil 1</string>
+    <string name="fxl_softness_1">Kelembutan 1</string>
+    <string name="fxl_choke_2">Perkecil 2</string>
+    <string name="fxl_softness_2">Kelembutan 2</string>
+    <string name="fxl_iterations">Iterasi</string>
 </resources>

@@ -271,7 +271,8 @@ fun EditorScreen(store: EditorStore) {
                 val sheetWidth = EditorLayout.wideSheetWidth(w)
                 val aspect = if (store.project.width > 0 && store.project.height > 0) store.project.width.toFloat() / store.project.height else 0f
                 val m = EditorLayout.solve(h, content, ui.fullscreen, w, aspect, previewPreference.floatValue,
-                    dockRows = if (content == SheetContent.Dock) dockTileRowCount(store) else 2)
+                    dockRows = if (content == SheetContent.Dock) dockTileRowCount(store) else 2,
+                    fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale)
                 if (store.sceneEditor) {
                     SceneLayoutWorkspace(store, ui, stage)
                 } else if (wide) {
@@ -332,7 +333,7 @@ private fun NarrowEditor(
     onPreviewReset: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
-        if (!ui.fullscreen) TopBarHost(store, ui)
+        if (!ui.fullscreen) Box(Modifier.fillMaxWidth().height(m.topBar.dp)) { TopBarHost(store, ui) }
         val previewH = if (ui.fullscreen) (m.preview - ShellDims.FullscreenTimeBar.value).coerceAtLeast(0f) else m.preview
         // O palco e a timeline NÃO espelham em árabe: o quadro 0 fica à
         // esquerda e o tempo anda para a direita em qualquer idioma.

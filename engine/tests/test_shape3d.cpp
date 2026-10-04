@@ -63,6 +63,24 @@ std::vector<f32> parts_of(Engine& e, u64 layer) {
 
 } // namespace
 
+AUREA_TEST(Shape3D, ImageDecodeChecksPeakBudgetAndCacheDoesNotRetainClosedSources) {
+    const std::string path = checker_png("aurea-shape-budget.png");
+    Image tooSmall;
+    AUREA_CHECK(!load_shape3d_image(path, 64, tooSmall, 32 * 1024));
+    Image first;
+    AUREA_CHECK(load_shape3d_image(path, 64, first, 128 * 1024));
+    std::weak_ptr<const std::vector<u8>> weak = first.sharedRgba;
+    Image same;
+    AUREA_CHECK(load_shape3d_image(path, 64, same, 128 * 1024));
+    AUREA_CHECK(first.sharedRgba == same.sharedRgba);
+    first = {}; same = {};
+    AUREA_CHECK(weak.expired());
+    Image reopened;
+    AUREA_CHECK(load_shape3d_image(path, 64, reopened, 128 * 1024));
+    AUREA_CHECK_EQ(reopened.width, 64u);
+    std::remove(path.c_str());
+}
+
 AUREA_TEST(Shape3D, EveryShapeBuildsValidClosedOutwardParts) {
     constexpr u32 expected[kShape3DKindCount] = {6, 2, 3, 2, 5, 4, 6, 2, 3, 8};
     for (u32 k = 0; k < kShape3DKindCount; ++k) {

@@ -74,6 +74,10 @@ public:
 /// declara suportar. Os fatos que SÓ a plataforma sabe (DeviceCapabilities.hpp).
 void fill_platform_info(PlatformInfo& out);
 
+/// App allocation headroom; simulator-only fallback uses a measured resident
+/// footprint against a conservative host-RAM budget when no app limit exists.
+[[nodiscard]] u64 process_memory_headroom() noexcept;
+
 /// Imagem do projeto (JPEG/PNG/HEIC/…) em RGBA8 sRGB de alfa reto, pelo
 /// ImageIO. Mesmo contrato do `decodeImage` do Android: é o que o motor chama
 /// ao reabrir um projeto com imagens.

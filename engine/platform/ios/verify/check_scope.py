@@ -3,8 +3,7 @@
 #
 #  Conferencias de ESCOPO da entrega do iOS:
 #
-#   1. nenhum .swift importa nada fora da Apple e do SwiftUI (nem biblioteca de
-#      terceiro, nem o projeto Flutter antigo);
+#   1. Swift usa Apple/SwiftUI, exceto SDKs de anuncios nos seus adaptadores;
 #   2. nenhum arquivo da ponte iOS (.mm/.h) e compilado pelo CMake do Android —
 #      a ponte e do iOS, e o .so do Android nao pode arrastar ObjC;
 #   3. o bundle id do Info.plist/pbxproj e o MESMO applicationId do Android;
@@ -27,7 +26,13 @@ APPLE_IMPORTS = {
     "SwiftUI", "PhotosUI", "Photos", "AVKit", "QuickLook", "Foundation", "UIKit", "Metal", "MetalKit", "QuartzCore", "CoreGraphics", "CoreText",
     "CoreVideo", "CoreMedia", "CoreImage", "VideoToolbox", "AVFoundation", "AudioToolbox", "CoreAudio",
     "ImageIO", "UniformTypeIdentifiers", "simd", "Combine", "Dispatch", "os", "Swift",
-    "Accelerate", "CoreFoundation", "IOSurface", "AVFAudio", "os.log", "CryptoKit", "Security", "Darwin", "MetricKit",
+    "Accelerate", "CoreFoundation", "CoreTransferable", "IOSurface", "AVFAudio", "os.log", "CryptoKit", "Security", "Darwin", "MetricKit",
+}
+
+ADS_IMPORTS = {
+    "Ads/GoogleAdsBackend.swift": {"GoogleMobileAds", "UserMessagingPlatform"},
+    "Ads/UmpConsent.swift": {"UserMessagingPlatform"},
+    "Ads/LevelPlayAdsBackend.swift": {"IronSource"},
 }
 
 problems = []
@@ -44,17 +49,21 @@ def read(path):
 def main():
     # --- 1. imports do Swift ------------------------------------------------
     app = os.path.join(IOS, "app")
-    swift_files = sorted(n for n in os.listdir(app) if n.endswith(".swift"))
+    swift_files = sorted(os.path.relpath(os.path.join(base, n), app)
+                         for base, _, files in os.walk(app) for n in files if n.endswith(".swift"))
     imports = set()
+    unknown = []
     for name in swift_files:
         for line in read(os.path.join(app, name)).splitlines():
             match = re.match(r"^\s*(?:@preconcurrency\s+)?import\s+([A-Za-z_][A-Za-z0-9_.]*)", line)
             if match:
                 imports.add(match.group(1))
-    unknown = sorted(i for i in imports if i.split(".")[0] not in APPLE_IMPORTS)
+                module = match.group(1).split(".")[0]
+                if module not in APPLE_IMPORTS and module not in ADS_IMPORTS.get(name.replace("\\", "/"), set()):
+                    unknown.append(name + ": " + module)
     for item in unknown:
-        fail("import fora da Apple no Swift: " + item)
-    print("swift: %d arquivos, %d imports distintos, todos da Apple: %s"
+        fail("import fora da Apple/adaptadores aprovados: " + item)
+    print("swift: %d arquivos, %d imports distintos, escopo Apple/adaptadores de anuncios: %s"
           % (len(swift_files), len(imports), "sim" if not unknown else "NAO"))
 
     # --- 2. a ponte nao entra no build do Android ---------------------------
@@ -102,7 +111,7 @@ def main():
     print("arquivos do motor que citam platform/ios: 0")
 
     # --- 5. sem formato proprio ---------------------------------------------
-    for name in os.listdir(app):
+    for name in swift_files:
         if name.endswith(".swift"):
             text = read(os.path.join(app, name))
             if re.search(r"\.aurea\.ios|iosFormat|AUREA_IOS_FORMAT", text):

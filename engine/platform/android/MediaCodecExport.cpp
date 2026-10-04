@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -93,9 +94,26 @@ struct Pending {
 class MediaCodecExportSink final : public ExportSink {
 public:
     ~MediaCodecExportSink() override { release(true); }
+    void set_cancel_flag(const std::atomic<bool>* flag) noexcept override { cancelFlag_ = flag; }
 
     Status open(const char* outputPath, const VideoStreamConfig& video,
                 const AudioStreamConfig* audio) noexcept override {
+        if (fd_ >= 0 || muxer_) return Status{Errc::InvalidState, "export ja esta aberto"};
+        if (!outputPath || !*outputPath || video.width == 0 || video.height == 0 ||
+            (video.width & 1u) || (video.height & 1u) || video.width > 16384 || video.height > 16384 ||
+            !std::isfinite(video.fps) || video.fps <= 0.0 || video.fps > 240.0 ||
+            (video.codec != ExportCodec::H264 && video.codec != ExportCodec::HEVC) ||
+            (audio && (audio->sampleRate == 0 || audio->channels == 0 || audio->channels > 2)))
+            return Status{Errc::InvalidArgument, "configuracao de exportacao invalida"};
+        video__ = Track{};
+        audio__ = Track{};
+        layoutReady_ = false;
+        plan_ = media::YuvCopyPlan{};
+        videoQueued_ = 0;
+        triedSoftwareReopen_ = false;
+        lastVideoPts_ = lastAudioPts_ = 0;
+        lastAudioInputPts_ = -1;
+        pendingBytes_ = 0;
         path_ = outputPath ? outputPath : "";
         video_ = video;
         hasAudio_ = audio != nullptr;
@@ -114,19 +132,27 @@ public:
     }
 
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
+        if (cancelled()) return Errc::Cancelled;
+        if (!video__.codec || video__.eos) return Status{Errc::InvalidState, "encoder de video fechado"};
         // Listras diagonais nascem AQUI. O quadro chegava com passo = largura e
         // era escrito no buffer do encoder com ESSE passo: se o encoder pede
         // linhas de 1152 bytes para uma imagem de 1080, sobram 72 bytes por
         // linha e a imagem desliza — listra diagonal. O plano abaixo usa o
         // passo REAL do encoder (Image API → getInputFormat → capacidade do
         // buffer) e recusa o que não dá para escrever com segurança.
-        if (yStride < video_.width || (uv != nullptr && uvStride < video_.width)) {
+        if (!y || !uv || yStride < video_.width || uvStride < video_.width) {
             return Status{Errc::InvalidState, "quadro com passo de linha menor que a largura"};
         }
-        const u64 deadline = monotonic_ns() + 5'000'000'000ull;
+        if (ptsUs < 0 || (videoQueued_ > 0 && ptsUs <= lastVideoPts_))
+            return Status{Errc::InvalidArgument, "tempo do quadro fora de ordem"};
+        u64 deadline = monotonic_ns() + stall_timeout_ns();
+        u64 generation = progressGeneration_;
         ssize_t idx = -1;
         while ((idx = AMediaCodec_dequeueInputBuffer(video__.codec, 2000)) < 0) {
+            if (cancelled()) return Errc::Cancelled;
+            if (idx != AMEDIACODEC_INFO_TRY_AGAIN_LATER) return codec_error("encoder de video recusou entrada", idx);
             if (const Status s = drain(video__, false); !s.ok()) return s;
+            if (generation != progressGeneration_) { generation = progressGeneration_; deadline = monotonic_ns() + stall_timeout_ns(); }
             if (monotonic_ns() > deadline) return Status{Errc::Timeout, "encoder de video parou de aceitar quadros"};
         }
         size_t cap = 0;
@@ -179,15 +205,24 @@ public:
     }
 
     Status write_audio(const i16* interleaved, u32 frames, i64 ptsUs) noexcept override {
+        if (cancelled()) return Errc::Cancelled;
         if (!hasAudio_) return OkStatus;
+        if (!audio__.codec || audio__.eos) return Status{Errc::InvalidState, "encoder de audio fechado"};
+        if (frames == 0) return OkStatus;
+        if (!interleaved || ptsUs < 0 || ptsUs < lastAudioInputPts_)
+            return Status{Errc::InvalidArgument, "bloco de audio invalido"};
         const usize bytesPerFrame = sizeof(i16) * audio_.channels;
         usize done = 0;
-        const u64 deadline = monotonic_ns() + 5'000'000'000ull;
+        u64 deadline = monotonic_ns() + stall_timeout_ns();
+        u64 generation = progressGeneration_;
         while (done < frames) {
+            if (cancelled()) return Errc::Cancelled;
             ssize_t idx = AMediaCodec_dequeueInputBuffer(audio__.codec, 2000);
             if (idx < 0) {
+                if (idx != AMEDIACODEC_INFO_TRY_AGAIN_LATER) return codec_error("encoder de audio recusou entrada", idx);
                 if (const Status s = drain(audio__, false); !s.ok()) return s;
                 if (const Status s = drain(video__, false); !s.ok()) return s;
+                if (generation != progressGeneration_) { generation = progressGeneration_; deadline = monotonic_ns() + stall_timeout_ns(); }
                 if (monotonic_ns() > deadline) return Status{Errc::Timeout, "encoder de audio parou"};
                 continue;
             }
@@ -202,25 +237,33 @@ public:
             if (queued != AMEDIA_OK) {
                 return codec_error("encoder de audio recusou o PCM", queued);
             }
+            lastAudioInputPts_ = pts;
             done += n;
+            deadline = monotonic_ns() + stall_timeout_ns();
         }
         return drain(audio__, false);
     }
 
     Status finish() noexcept override {
+        if (!video__.codec || !muxer_) return Status{Errc::InvalidState, "export nao esta aberto"};
         if (const Status s = signal_eos(video__); !s.ok()) return fail_status(s);
         if (hasAudio_) {
             if (const Status s = signal_eos(audio__); !s.ok()) return fail_status(s);
         }
-        const u64 deadline = monotonic_ns() + 10'000'000'000ull;
+        const u64 hardDeadline = monotonic_ns() + 120'000'000'000ull;
+        u64 deadline = monotonic_ns() + stall_timeout_ns();
+        u64 generation = progressGeneration_;
         while (!video__.eos || (hasAudio_ && !audio__.eos)) {
+            if (cancelled()) return fail_status(Errc::Cancelled);
             if (!video__.eos) {
                 if (const Status s = drain(video__, true); !s.ok()) return fail_status(s);
             }
             if (hasAudio_ && !audio__.eos) {
                 if (const Status s = drain(audio__, true); !s.ok()) return fail_status(s);
             }
-            if (monotonic_ns() > deadline) return fail_status(Status{Errc::Timeout, "encoder nao terminou"});
+            if (generation != progressGeneration_) { generation = progressGeneration_; deadline = monotonic_ns() + stall_timeout_ns(); }
+            if (monotonic_ns() > deadline || monotonic_ns() > hardDeadline)
+                return fail_status(Status{Errc::Timeout, "encoder nao terminou"});
         }
         if (!muxStarted_) return fail_status(Status{Errc::InvalidState, "nenhum quadro chegou ao arquivo"});
         const media_status_t ms = AMediaMuxer_stop(muxer_);
@@ -236,6 +279,12 @@ public:
     void abort() noexcept override { release(true); }
 
 private:
+    bool cancelled() const noexcept { return cancelFlag_ && cancelFlag_->load(std::memory_order_acquire); }
+    u64 stall_timeout_ns() const noexcept {
+        // Software H.264/HEVC can legitimately need >5 seconds on a busy or
+        // throttled phone. Only time without codec progress counts as a stall.
+        return info_.acceleration == Acceleration::Software ? 30'000'000'000ull : 10'000'000'000ull;
+    }
     /// Descobre o layout REAL do buffer de entrada, na ordem de confiança:
     /// `AMediaCodec_getInputImage` (API 21, dá rowStride/pixelStride por plano),
     /// `AMediaCodec_getInputFormat` (API 28, dá passo/fatia/formato) e, por
@@ -349,7 +398,8 @@ private:
             AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_BIT_RATE, static_cast<i32>(video_.bitrateBps));
             AMediaFormat_setFloat(f, AMEDIAFORMAT_KEY_FRAME_RATE, static_cast<f32>(video_.fps));
             const f64 gopSeconds = video_.keyframeIntervalFrames > 0 ? video_.keyframeIntervalFrames / video_.fps : 2.0;
-            AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, std::max(1, static_cast<i32>(gopSeconds + 0.5)));
+            AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, static_cast<i32>(
+                std::clamp(std::floor(gopSeconds + 0.5), 1.0, static_cast<f64>(std::numeric_limits<i32>::max()))));
             AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_COLOR_FORMAT, cf);
             // MediaCodecInfo.EncoderCapabilities: 0 = CQ, 1 = VBR, 2 = CBR. CQ nunca:
             // ignora a taxa (era o "1 minuto = 1 GB"). CBR quando o encoder do
@@ -414,7 +464,7 @@ private:
         layoutReady_ = false;
         plan_ = media::YuvCopyPlan{};
         const char* mime = video_.codec == ExportCodec::HEVC ? "video/hevc" : "video/avc";
-        if (!open_software_video(mime, hwName, "entregou buffer de entrada menor que o quadro")) return false;
+        if (!open_software_video(mime, hwName, why)) return false;
         if (AMediaCodec_start(video__.codec) != AMEDIA_OK) {
             AMediaCodec_delete(video__.codec);
             video__.codec = nullptr;
@@ -457,7 +507,9 @@ private:
         // quadro (resolve_layout): so depois do start o formato de entrada e o
         // buffer tem o tamanho de verdade, e o passo nunca e suposto igual a
         // largura.
-        if (AMediaCodec_start(video__.codec) != AMEDIA_OK) return fail(Errc::IoError, "encoder de video nao iniciou");
+        const media_status_t started = AMediaCodec_start(video__.codec);
+        if (started != AMEDIA_OK && !reopen_software_video("nao conseguiu iniciar"))
+            return fail_status(codec_error("encoder de video nao iniciou", started));
         AUREA_LOG_INFO("export: %s %s (%s) %ux%u @%.2f %u bps %s, formato pedido %s", mime,
                        info_.name[0] ? info_.name : "?",
                        info_.acceleration == Acceleration::Hardware ? "hardware"
@@ -492,13 +544,17 @@ private:
     }
 
     Status signal_eos(Track& t) noexcept {
-        const u64 deadline = monotonic_ns() + 5'000'000'000ull;
+        u64 deadline = monotonic_ns() + stall_timeout_ns();
+        u64 generation = progressGeneration_;
         ssize_t idx = -1;
         while ((idx = AMediaCodec_dequeueInputBuffer(t.codec, 2000)) < 0) {
+            if (cancelled()) return Errc::Cancelled;
+            if (idx != AMEDIACODEC_INFO_TRY_AGAIN_LATER) return codec_error("encoder recusou entrada de fim", idx);
             if (const Status s = drain(t, false); !s.ok()) return s;
+            if (generation != progressGeneration_) { generation = progressGeneration_; deadline = monotonic_ns() + stall_timeout_ns(); }
             if (monotonic_ns() > deadline) return Status{Errc::Timeout, "encoder nao aceitou o fim do fluxo"};
         }
-        const i64 pts = t.audio ? lastAudioPts_ : lastVideoPts_;
+        const i64 pts = t.audio ? std::max(lastAudioPts_, lastAudioInputPts_) : lastVideoPts_;
         if (AMediaCodec_queueInputBuffer(t.codec, static_cast<size_t>(idx), 0, 0, static_cast<u64>(std::max<i64>(0, pts)),
                                          AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != AMEDIA_OK) {
             return Status{Errc::IoError, "encoder recusou o fim do fluxo"};
@@ -509,16 +565,20 @@ private:
     /// Esvazia a saída do encoder. `wait` = espera um pouco por buffer (fim do
     /// fluxo); sem ele, só o que já está pronto.
     Status drain(Track& t, bool wait) noexcept {
-        for (;;) {
+        for (u32 packets = 0; packets < 256; ++packets) {
+            if (cancelled()) return Errc::Cancelled;
             AMediaCodecBufferInfo info{};
             const ssize_t idx = AMediaCodec_dequeueOutputBuffer(t.codec, &info, wait ? 10000 : 0);
             if (idx == AMEDIACODEC_INFO_TRY_AGAIN_LATER) return OkStatus;
             if (idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
+                if (t.formatKnown) return Status{Errc::EncodeFailed, "encoder mudou o formato durante a exportacao"};
                 AMediaFormat* f = AMediaCodec_getOutputFormat(t.codec);
+                if (!f) return Status{Errc::EncodeFailed, "encoder nao entregou o formato de saida"};
                 t.muxIndex = static_cast<i32>(AMediaMuxer_addTrack(muxer_, f));
                 AMediaFormat_delete(f);
                 if (t.muxIndex < 0) return codec_error("muxer recusou a trilha", t.muxIndex);
                 t.formatKnown = true;
+                ++progressGeneration_;
                 if (const Status s = maybe_start_muxer(); !s.ok()) return s;
                 continue;
             }
@@ -529,6 +589,7 @@ private:
             u8* data = AMediaCodec_getOutputBuffer(t.codec, static_cast<size_t>(idx), &cap);
             const bool config = (info.flags & AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) != 0;
             if (info.size > 0 && !config) {
+                ++progressGeneration_;
                 if (!data || info.offset < 0 || static_cast<size_t>(info.offset) > cap ||
                     static_cast<size_t>(info.size) > cap - static_cast<size_t>(info.offset)) {
                     AMediaCodec_releaseOutputBuffer(t.codec, static_cast<size_t>(idx), false);
@@ -542,11 +603,22 @@ private:
                         return codec_error("falha ao gravar no MP4", ms, true);
                     }
                 } else {
+                    // A broken encoder can emit packets forever without the
+                    // other track exposing its format. Bound that startup
+                    // queue instead of growing RAM until Android kills us.
+                    constexpr usize kMaxPendingBytes = 32u << 20;
+                    constexpr usize kMaxPendingPackets = 512;
+                    if (pending_.size() >= kMaxPendingPackets ||
+                        static_cast<usize>(info.size) > kMaxPendingBytes - pendingBytes_) {
+                        AMediaCodec_releaseOutputBuffer(t.codec, static_cast<size_t>(idx), false);
+                        return Status{Errc::Timeout, "encoder nao entregou as trilhas para iniciar o MP4"};
+                    }
                     Pending p;
                     p.audio = t.audio;
                     p.data.assign(data + info.offset, data + info.offset + info.size);
                     p.info = info;
                     p.info.offset = 0;
+                    pendingBytes_ += p.data.size();
                     pending_.push_back(std::move(p));
                 }
             }
@@ -556,6 +628,7 @@ private:
                 return OkStatus;
             }
         }
+        return OkStatus;
     }
 
     Status maybe_start_muxer() noexcept {
@@ -573,6 +646,7 @@ private:
             }
         }
         pending_.clear();
+        pendingBytes_ = 0;
         return OkStatus;
     }
 
@@ -616,6 +690,7 @@ private:
             if (deleteFile && !path_.empty()) ::unlink(path_.c_str());
         }
         pending_.clear();
+        pendingBytes_ = 0;
     }
 
     std::string path_;
@@ -640,6 +715,10 @@ private:
     bool triedSoftwareReopen_ = false;
     i64 lastVideoPts_ = 0;
     i64 lastAudioPts_ = 0;
+    i64 lastAudioInputPts_ = -1;
+    usize pendingBytes_ = 0;
+    u64 progressGeneration_ = 0;
+    const std::atomic<bool>* cancelFlag_ = nullptr;
     std::vector<Pending> pending_;
 };
 

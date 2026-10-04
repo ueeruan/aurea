@@ -221,6 +221,9 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
 Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, u32 height,
                                         const char* name, const char* sourcePath) noexcept {
     if (!rgba || width == 0 || height == 0) return Status{Errc::InvalidArgument, "imagem vazia"};
+    if (width > 65536 || height > 65536) return Status{Errc::BudgetExceeded, "imagem grande demais"};
+    const u64 bytes = static_cast<u64>(width) * height * 4;
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     Composition* comp = current_composition();
@@ -230,6 +233,11 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
     if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Image)) {
         return Status{Errc::NotFound, "camada de video ou imagem nao encontrada"};
     }
+    if (bytes + sizeof(ImagePixels) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    ImagePixels px; px.width = width; px.height = height;
+    try { px.rgba.assign(rgba, rgba + static_cast<usize>(bytes)); }
+    catch (const std::bad_alloc&) { return Status{Errc::OutOfMemory}; }
     history_.before_mutation(*comp, project_->timeline().current(), "substituir midia");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
 
@@ -244,10 +252,6 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
     asset.video.height = height;
     const AssetId assetId = project_->add_asset(std::move(asset));
 
-    ImagePixels px;
-    px.width = width;
-    px.height = height;
-    px.rgba.assign(rgba, rgba + static_cast<usize>(width) * height * 4);
     images_[assetId.pack()] = std::move(px);
 
     l = comp->layer(id);

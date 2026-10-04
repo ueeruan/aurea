@@ -3479,4 +3479,23 @@
         <item quantity="many">%1$d ключей — правка на указателе</item>
         <item quantity="other">%1$d ключа — правка на указателе</item>
     </plurals>
+    <string name="fxl_visible_duration">Время видимости</string>
+    <string name="fxl_minimum_opacity">Минимальная непрозрачность</string>
+    <string name="fxl_maximum_opacity">Максимальная непрозрачность</string>
+    <string name="fxl_grow">Увеличение</string>
+    <string name="fxl_vertical_scatter">Вертикальный разброс</string>
+    <string name="fxl_end_angle">Конечный угол</string>
+    <string name="fxl_axis">Ось</string>
+    <string name="fxl_spacing">Интервал</string>
+    <string name="fxl_rotation_per_copy">Поворот каждой копии</string>
+    <string name="fxl_scale_per_copy">Масштаб каждой копии</string>
+    <string name="fxl_end_opacity">Конечная непрозрачность</string>
+    <string name="fxl_orient_copies">Ориентировать копии</string>
+    <string name="fxl_remove_color_fringe">Удалить цветную кайму</string>
+    <string name="fxo_rgb">RGB</string>
+    <string name="fxl_choke_1">Сжатие 1</string>
+    <string name="fxl_softness_1">Мягкость 1</string>
+    <string name="fxl_choke_2">Сжатие 2</string>
+    <string name="fxl_softness_2">Мягкость 2</string>
+    <string name="fxl_iterations">Итерации</string>
 </resources>

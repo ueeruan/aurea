@@ -1548,6 +1548,9 @@ private:
     void drain_commands_locked() noexcept;
     [[nodiscard]] Composition* current_composition() noexcept;
     [[nodiscard]] Status recover_device_locked() noexcept;
+    // renderMutex_: a failed export may leave a real submission in flight.
+    [[nodiscard]] Status poll_export_gpu_locked() noexcept;
+    void retain_failed_export_gpu_locked() noexcept;
     void render_thread_main() noexcept;
     void update_perf(const FrameStats& stats, const RenderTimings& timings,
                      const FrameSnapshot& snap, u64 frameStartNs) noexcept;
@@ -1588,6 +1591,7 @@ private:
     AdaptiveResolutionController* adaptive_ = nullptr;
 
     std::unique_ptr<GPUBackend> gpu_;
+    u64                pendingExportGpuFrame_ = 0, pendingExportGpuGeneration_ = 0; ///< renderMutex_
     u64                gpuGeneration_ = 0; ///< under renderMutex_; survives backend/device recreation
     Renderer           renderer_;
     MediaManager       media_;

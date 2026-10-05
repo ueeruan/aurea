@@ -545,6 +545,10 @@ void Engine::shutdown() noexcept {
         std::lock_guard<std::mutex> rl(renderMutex_);
         // Stopping the render thread does not complete its last GPU frame.
         // Decoder/GL teardown must follow that frame and its retained leases.
+        // A void shutdown still depends on the driver completing teardown.
+        // Never leak the backend or free resources still owned by its queue.
+        if (!poll_export_gpu_locked().ok())
+            AUREA_LOG_WARN("shutdown: GPU do export ainda pendente; aguardando teardown seguro");
         if (gpu_) gpu_->wait_idle();
         snapshot_ = FrameSnapshot{};
         media_.close_all();
@@ -609,6 +613,10 @@ Status Engine::suspend() noexcept {
     }
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) {
+            state_ = s; // Native resources were not suspended; allow retry.
+            return ready;
+        }
         if (gpu_) {
             gpu_->wait_idle();
             gpu_->save_pipeline_cache();
@@ -639,7 +647,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     // Skipping this during export ignored pressure precisely at its peak.
     if (st >= static_cast<u8>(TrimStage::OldRenderCache)) {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (gpu_ && renderer_.ready()) {
+        if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
             gpu_->wait_idle();   // fora do caminho quente: é um aviso do sistema
             const u64 before = gpu_->memory_stats().usedBytes;
             const u32 textures = renderer_.trim_memory(st, frameCounter_);
@@ -654,6 +662,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     // (decoder + thread + buffers); reabrem sozinhas quando voltarem à tela.
     if (st >= static_cast<u8>(TrimStage::Temporaries) && !exportActive_.load(std::memory_order_acquire)) {
         std::lock_guard<std::mutex> rl(renderMutex_);
+        if (!poll_export_gpu_locked().ok()) return memory_.last_trim();
         const u32 before = media_.stats().sources;
         const usize framesBefore = memory_.used(MemoryClass::DecodedFrames);
         media_.collect(frameCounter_, 1);
@@ -681,6 +690,7 @@ void Engine::invalidate() noexcept {
 Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
     if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
+    if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     pendingSurfaceSize_.store(0, std::memory_order_release);
     surface_.nativeWindow = nativeWindow;
     surface_.width = width;
@@ -701,6 +711,9 @@ void Engine::detach_surface() noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
     surfaceAttached_ = false;
     pendingSurfaceSize_.store(0, std::memory_order_release);
+    // A void native surface teardown cannot report pending ownership.
+    if (!poll_export_gpu_locked().ok())
+        AUREA_LOG_WARN("detach: GPU do export ainda pendente; aguardando teardown seguro");
     if (gpu_) gpu_->detach_surface();
     surface_.nativeWindow = nullptr;
 }
@@ -852,6 +865,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     // place. Drain Vulkan/Metal before retiring decoder/GL contexts, and do not
     // let prepare() retain a raw VideoSource* while close_all destroys it.
     std::lock_guard<std::mutex> projectRenderLock(renderMutex_);
+    if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     renderer_.release_project_resources();
     snapshot_ = FrameSnapshot{};
     media_.close_all();
@@ -1107,6 +1121,7 @@ Status Engine::load_project(const char* path) noexcept {
     // Use the same render -> model order as render_frame. The old decoder's
     // native buffers and GL context must outlive every old GPU submission.
     std::unique_lock<std::mutex> projectRenderLock(renderMutex_);
+    if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     renderer_.release_project_resources();
     snapshot_ = FrameSnapshot{};
     media_.close_all();
@@ -8554,6 +8569,27 @@ RenderSettings Engine::current_render_settings() noexcept {
     return rs;
 }
 
+Status Engine::poll_export_gpu_locked() noexcept {
+    if (!pendingExportGpuFrame_) return OkStatus;
+    if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
+        pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
+        return OkStatus; // Normal device-loss handling owns actual recovery.
+    }
+    const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, 0);
+    if (ready.ok()) pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
+    return ready;
+}
+
+void Engine::retain_failed_export_gpu_locked() noexcept {
+    if (!gpu_) return;
+    const u64 frame = gpu_->last_submitted_frame();
+    const Status ready = gpu_->wait_frame(frame, 0);
+    if (frame && ready.code() == Errc::Timeout) {
+        pendingExportGpuFrame_ = frame;
+        pendingExportGpuGeneration_ = gpuGeneration_;
+    }
+}
+
 Status Engine::recover_device_locked() noexcept {
     // Dispositivo perdido (driver reiniciou, GPU resetou): tudo que o driver
     // tinha morreu. O PROJETO não — ele mora na CPU. Recria o backend, o
@@ -8580,7 +8616,17 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     if (exportActive_.load(std::memory_order_acquire)) return OkStatus;
     const u64 frameStart = monotonic_ns();
     std::lock_guard<std::mutex> rl(renderMutex_);
+    if (exportActive_.load(std::memory_order_acquire)) return OkStatus;
     lastSkipped_ = false;
+    if (const Status ready = poll_export_gpu_locked(); !ready.ok()) {
+        // CPU edits/saving stay available; do not consume a pending resize.
+        { std::lock_guard<std::mutex> lock(modelMutex_); drain_commands_locked(); }
+        lastSkipped_ = true;
+        refinePending_ = false;
+        nextFrameDueNs_ = frameStart + 50'000'000ull;
+        forceRender_.store(true, std::memory_order_release);
+        return ready;
+    }
 
     if (const u64 size = pendingSurfaceSize_.exchange(0, std::memory_order_acq_rel)) {
         const u32 width = static_cast<u32>(size >> 32), height = static_cast<u32>(size);
@@ -8925,6 +8971,7 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
     // deu ANR ("Input dispatching timed out") ao sair do editor.
     std::unique_lock<std::mutex> rl(renderMutex_);
     if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+    if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     if (!expectedGpuGeneration) expectedGpuGeneration = gpuGeneration_;
     if (expectedGpuGeneration != gpuGeneration_) return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
 
@@ -8956,6 +9003,7 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
         if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
         if (expectedGpuGeneration != gpuGeneration_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
             return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (((waitingLocalAi & 1u) && renderer_.depth_service() && renderer_.depth_service()->activity_state() == 2)
             || ((waitingLocalAi & 2u) && renderer_.foreground_service() && renderer_.foreground_service()->activity_state() == 2))
             return Status{Errc::DecodeFailed, "a IA local nao conseguiu analisar o quadro"};
@@ -9089,6 +9137,7 @@ Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vec
         h = std::max<u32>(1, static_cast<u32>(static_cast<f32>(h) * k));
     }
     std::lock_guard<std::mutex> rl(renderMutex_);
+    if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     const Status s = renderer_.render_effect_preview(effectRegistry_, typeId, w, h, out);
     if (s.ok()) {
         outWidth = w;
@@ -9132,6 +9181,7 @@ Status Engine::capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, 
         std::lock_guard<std::mutex> captureLock(renderMutex_);
         if (!gpu_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
             return Status{Errc::InvalidState, "sem GPU"};
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         captureGpu = gpu_.get();
         captureGeneration = gpuGeneration_;
         auto created = gpu_->create_texture(d);
@@ -9149,6 +9199,7 @@ Status Engine::capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, 
         // texture IDs. Never read or destroy an old target in the new device.
         if (captureGeneration != gpuGeneration_ || gpu_.get() != captureGpu || !gpu_)
             return Status{Errc::Cancelled, "GPU trocada durante captura"};
+        if (s.ok()) s = poll_export_gpu_locked();
         if (s.ok()) s = gpu_->read_texture(target, half.data(), width * 8);
         gpu_->destroy_texture(target);
     }
@@ -10282,6 +10333,10 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         if (running) return Status{Errc::InvalidState, "ja existe um export em andamento"};
         exportCtx_->thread.join();
     }
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+    }
 
     auto ctx = std::make_unique<ExportContext>();
     ctx->settings = settings;
@@ -10428,6 +10483,10 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     // Alvos de GPU da sessão: composição (linear), Y e CbCr.
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) {
+            ctx->sink->abort();
+            return ready;
+        }
         renderer_.clear_preview_cache();
         gpu_->wait_idle(); // Drain deferred cache destruction before export's allocation peak.
         TextureDesc cd;
@@ -10900,7 +10959,7 @@ void Engine::export_thread_main() noexcept {
             // wait for the queue we just stopped waiting on. Poll completed
             // fences; still-busy resources retain their deferred destruction.
             if (result.ok()) gpu_->wait_idle();
-            else (void)gpu_->wait_frame(gpu_->last_submitted_frame(), 0);
+            else retain_failed_export_gpu_locked();
         }
     }
     {
@@ -11131,6 +11190,10 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         if (running) return Status{Errc::InvalidState, "ja existe um export em andamento"};
         exportCtx_->thread.join();
     }
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+    }
 
     auto ctx = std::make_unique<ExportContext>();
     ctx->imageMode = true;
@@ -11191,6 +11254,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         cd.renderTarget = true;
         cd.transferSrc = true;
         cd.debugName = "export-imagem";
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         renderer_.clear_preview_cache();
         gpu_->wait_idle();
         auto c = gpu_->create_texture(cd);
@@ -11321,7 +11385,7 @@ void Engine::image_export_thread_main() noexcept {
         if (gpu_) {
             gpu_->destroy_texture(ctx.comp);
             if (result.ok()) gpu_->wait_idle();
-            else (void)gpu_->wait_frame(gpu_->last_submitted_frame(), 0);
+            else retain_failed_export_gpu_locked();
         }
     }
     {

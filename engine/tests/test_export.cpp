@@ -1571,6 +1571,114 @@ AUREA_TEST(Regression2135Gpu, CancelWhileDecodeNeedsGpuDoesNotWaitIdle) {
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
 }
 
+
+AUREA_TEST(ExportPendingGpu, CancelledSubmittedFrameBlocksNewGpuWorkUntilItsFenceCompletes) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72; cfg.frameCount = 30;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> waiting{false}, completed{false};
+    std::atomic<u64> pendingFrame{0};
+    backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
+        if (!frame || completed.load()) return OkStatus;
+        pendingFrame = frame;
+        if (timeout) { waiting = true; std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+        return Status{Errc::Timeout};
+    };
+    Rig r(cfg, 30, 30, 1, nullptr, backend);
+    struct CompleteOnExit { std::atomic<bool>& done; ~CompleteOnExit() { done = true; } } complete{completed};
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.attach_surface(reinterpret_cast<void*>(1), 128, 72).ok());
+    TextureDesc desc; desc.width = 64; desc.height = 36; desc.format = SurfaceFormat::RGBA16F;
+    desc.sampled = desc.renderTarget = true;
+    const auto target = backend->create_texture(desc); AUREA_CHECK(target.ok()); if (!target.ok()) return;
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK(r.e.start_export(settings, "test-pending-gpu.mp4").ok());
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!waiting.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(waiting.load()); AUREA_CHECK(pendingFrame.load() > 0);
+    r.e.cancel_export();
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
+    // Joining the previous worker also establishes exportActive=false before
+    // checking the preview gate (progress.finished is published just before it).
+    AUREA_CHECK_EQ(r.e.start_export(settings, "test-pending-gpu-retry.mp4").code(), Errc::Timeout);
+    const u32 submitted = backend->framesSubmitted, textures = backend->texturesCreated;
+    const u32 waits = backend->idleWaits.load(), acquires = backend->acquires;
+    const u32 oldWidth = backend->surfaceWidth, oldHeight = backend->surfaceHeight;
+    AUREA_CHECK(r.e.resize_surface(256, 144).ok());
+    Command duration; duration.type = CommandType::CompositionSetDuration;
+    duration.comp_duration.comp = r.e.project()->timeline().current(); duration.comp_duration.duration = FrameIndex{44};
+    AUREA_CHECK_EQ(r.e.submit_commands(&duration, 1), 1u);
+    AUREA_CHECK_EQ(r.e.render_frame().code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.comp()->duration().value, 44);
+    AUREA_CHECK_EQ(backend->surfaceWidth, oldWidth); AUREA_CHECK_EQ(backend->surfaceHeight, oldHeight);
+    AUREA_CHECK_EQ(r.e.render_offscreen(*target, 64, 36).code(), Errc::Timeout);
+    std::vector<u8> pixels; u32 width = 0, height = 0;
+    AUREA_CHECK_EQ(r.e.capture_frame_rgba(64, pixels, width, height).code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.render_effect_preview(1, 64, 36, pixels, width, height).code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.start_export(settings, "test-pending-gpu-again.mp4").code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.start_image_export(ImageExportSettings{}, "test-pending-gpu.png").code(), Errc::Timeout);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea-pending-gpu.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    const Project* project = r.e.project();
+    AUREA_CHECK_EQ(r.e.new_project(128, 72, 30, "blocked replacement").code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.load_project(path.c_str()).code(), Errc::Timeout);
+    AUREA_CHECK(r.e.project() == project);
+    AUREA_CHECK_EQ(r.e.suspend().code(), Errc::Timeout);
+    AUREA_CHECK(r.e.state() != EngineState::Suspended);
+    (void)r.e.trim_memory(80);
+    AUREA_CHECK_EQ(backend->framesSubmitted, submitted);
+    AUREA_CHECK_EQ(backend->texturesCreated, textures);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), waits);
+    AUREA_CHECK_EQ(backend->acquires, acquires);
+    AUREA_CHECK(!backend->deviceLost);
+    completed = true;
+    AUREA_CHECK(r.e.render_frame().ok());
+    AUREA_CHECK_EQ(backend->surfaceWidth, 256u); AUREA_CHECK_EQ(backend->surfaceHeight, 144u);
+    AUREA_CHECK(backend->framesSubmitted > submitted); AUREA_CHECK(backend->acquires > acquires);
+    backend->destroy_texture(*target);
+    std::remove(path.c_str()); std::remove((path + ".bak").c_str());
+}
+
+AUREA_TEST(ExportPendingGpu, CancelWithCompletedFenceImmediatelyResumesPreview) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72; cfg.frameCount = 30;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> waiting{false};
+    backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
+        if (!frame || !timeout) return OkStatus;
+        waiting = true; std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        return Status{Errc::Timeout};
+    };
+    Rig r(cfg, 30, 30, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.attach_surface(reinterpret_cast<void*>(1), 128, 72).ok());
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK(r.e.start_export(settings, "test-completed-cancel.mp4").ok());
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!waiting.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(waiting.load());
+    r.e.cancel_export();
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
+    const u32 before = backend->framesSubmitted;
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    do {
+        AUREA_CHECK(r.e.render_frame().ok());
+        if (backend->framesSubmitted > before) break;
+        std::this_thread::yield(); // worker publishes exportActive=false after finished
+    } while (std::chrono::steady_clock::now() < deadline);
+    AUREA_CHECK(backend->framesSubmitted > before);
+    AUREA_CHECK(!backend->deviceLost);
+}
+
 AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviveReopen) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg; cfg.width = 320; cfg.height = 180;

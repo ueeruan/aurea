@@ -82,7 +82,7 @@ AUREA_TEST(BoundedCommandsGpu, SixHundredPassesPreservePixelsBindingsTimersAndRe
     const auto pipeline = isolated.renderer.shaders().pipeline(PipelineKey::fullscreen(ShaderId::common_copy_frag, d.format));
     AUREA_CHECK(pipeline.ok()); if (!pipeline.ok()) return;
     std::vector<u16> baseline;
-    for (const u32 limit : {0u, 128u, 17u}) {
+    for (const u32 limit : {0u, 128u, 64u, 17u}) {
         vk::BoundedCommandsTestAccess::limit(b, limit);
         std::array<std::vector<VkCommandBuffer>, 2> retained;
         // Four frames cycle both pools twice, proving buffers remain reusable

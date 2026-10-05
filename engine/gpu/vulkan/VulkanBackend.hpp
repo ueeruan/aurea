@@ -500,7 +500,10 @@ private:
     // loss: older submissions must still retain their fences and resources.
     // Stop new work until shutdown/reinitialize instead of guessing layouts.
     Status recordingStatus_{};
-    u32 passesPerCommandBuffer_ = 128;
+    // Adreno's Full-HD temporal 3D path stalls with 128-pass primaries even
+    // when lower-resolution frames complete. Smaller primaries preserve every
+    // pass/sample and still share one submission and one completion fence.
+    u32 passesPerCommandBuffer_ = 64;
     bool debugUtils_ = false;
     bool timersEnabled_ = false;
     f32 timestampPeriod_ = 1.0f;

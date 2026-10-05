@@ -500,6 +500,94 @@ de projeto manual, sem falha ou teste ignorado.
 Esse checkpoint inclui a liberação de imports externos e as correções de
 captura, mas antecede o ajuste Android de cor do decoder de software.
 
+## Rodada integrada `9421757`: 720p aprovado, 1080p bloqueado
+
+O APK de teste `1B8D9B9DE2283994E442F5112383F7B9E2CF7F79BF9800C09A260CB70B5850DA`
+completou a edição original de 96 camadas, seeks, trim e reabertura. O trim
+recuperou 42.791.648 bytes. A exportação 720p terminou 90 quadros em
+316,356 s, gerando 2.790.811 bytes. Os 90 quadros foram decodificados
+independentemente com conteúdo e movimento; 480 regiões esperadas em cinco
+instantes tinham conteúdo, incluindo vídeos, texto, objetos 3D e a pré-comp.
+Essa métrica regional não é comparação exata contra um render de referência.
+
+O PNG feito pelo MediaMetadataRetriever do harness veio preto, mas os bytes
+do MP4 não: a verificação usa o arquivo exportado e sua decodificação
+independente. Uma captura final de 1280 pixels do mesmo projeto, no instante
+45 e com fontes originais, passou em 11,695 s. Contra o quadro 45 decodificado
+do MP4, o erro médio absoluto foi 0,645/255, PSNR 40,44 dB; 95% dos canais
+tiveram diferença até 3 e 99% até 8. O máximo isolado foi 130, portanto não
+há identidade de pixels. Nas 96 regiões, a sobreposição mínima do conteúdo
+foi 96,32%, com maior erro médio regional de 2,397. As esferas sobrepostas
+também foram verificadas no núcleo para evitar que uma vizinha escondesse
+a ausência do objeto esperado.
+
+Em 1080p, o motor registrou quatro gravações de quadro e falhou em
+`wait_export_gpu`, com deadline de 120 s. O retorno à prévia ficou no fence
+da superfície. Não houve novo registro de falta de memória. A primeira
+amostra acumulada de GPU busy ficou perto de 100%, mas duas posteriores
+foram 0/0; portanto, não há evidência de atividade contínua da GPU. O
+instrumentation encerrou seu próprio processo depois da falha, antes da
+coleta de stack nativo pelo debugger. Esta rodada de 96 camadas continua
+**reprovada** até corrigir e repetir o cenário 1080p.
+
+Evidências: `android-bounded-yuv-heavy96-*.txt`,
+`bounded-yuv-heavy96-fixture/decoded-720-analysis.json` e
+`bounded-yuv-heavy96-fixture/independent-content-audit-720.json`, além de
+`bounded-yuv-heavy96-fixture/independent-exact-reference-comparison-720.json`.
+
+## Bateria sustentada integrada e proteção após exportação
+
+O APK integrado `1B8D9B9D…` passou novamente na bateria de 48 camadas e quatro
+vídeos Full HD: 329,978 s totais, 270,504 s úteis, 11 ciclos/edições, 41
+capturas, sete reaberturas, sete recriações da superfície e 80 observações
+de reprodução. Reaberturas tiveram diferença máxima de 0–1 nível; repetições
+no mesmo estado, zero. Não houve ANR ou encerramento. O PSS retido final foi
+498,864 MB, contra 561,242 MB inicial; reserva GPU ficou em 150,995 MB nos
+dois pontos. Heap nativo foi de 49,966 para 51,310 MB. Houve picos maiores
+durante prévia Full HD, posteriormente liberados; esses números não aprovam
+a exportação 1080p da cena independente de 96 camadas.
+
+A falha de exportação revelou um segundo problema: a limpeza evitava esperar
+indefinidamente a GPU, mas acordava a prévia, que tentava apresentar outra
+imagem sobre a submissão ainda pendente. O motor compartilhado agora guarda
+o quadro e a geração GPU pendentes e verifica sua conclusão sem esperar,
+antes de prévia, resize, captura, novo export e trim GPU. Enquanto pendente,
+preserva a imagem e o resize, processa comandos CPU e permite salvar. Quando
+o fence conclui, a prévia retoma. Não declara perda de dispositivo falsa.
+
+Essa proteção não reinicia um driver travado. O teardown nativo sem retorno
+de status ainda depende de o driver terminar; não foram introduzidos vazamento
+intencional ou liberação de memória ainda usada pela GPU. A causa do timeout
+Full HD continua sendo investigada separadamente.
+
+Host: ExportPendingGpu 2 testes/45 checks, Regression2135Gpu 7/16.527 e
+ProjectLifecycle 5/71; total desses filtros distintos, 14/16.643, zero falhas.
+Os dois novos testes usam backend controlado e uma submissão com número real
+no mock: cancelamento com fence pendente não dispara novo trabalho nem perde
+resize/edições; a conclusão libera a prévia. O controle com fence já completo
+retoma imediatamente. Essa rodada ainda não comprova execução da proteção
+no aparelho ou no iOS.
+
+## Ajuste Full HD e checkpoint iOS
+
+O diagnóstico Full HD separou CPU, fence, coleta e leitura. No quadro 1,
+128 passes por command buffer levaram 57,646 s esperando a fence; 64 passes,
+6,252 s; 32 passes, 6,621 s. Gravação CPU e coleta ficaram próximas. Os
+quadros 0 e 1 das três variantes tiveram os mesmos 33.177.600 bytes RGBA16F
+somados, preservando passes, desenhos e amostras temporais. O limite padrão
+foi reduzido para 64, mantendo uma submissão por quadro. Não foi aumentado
+o timeout da exportação. A exportação completa do projeto real e a repetição
+no app continuam sendo condições para aprovar os pacotes.
+
+O checkpoint iOS `9421757` também compilou: IPA de 51.726.490 bytes,
+SHA-256 `2bfb0f89ac5e87f3dad98bd6ea0ee3e46d5ebd62798aa2fd3985910761180615`.
+O job de IPA passou em 12 min e o do simulador em 14 min 17 s; 25 cenas
+capturadas, 57 PNGs íntegros, sem erros de motor/captura/shader. O export
+iOS do probe completou 30 quadros e áudio AAC estéreo de 48 kHz. A suíte de
+52 gestos não foi repetida nesse run; permanece a aprovação de `499d835`.
+Esse IPA é intermediário, pois antecede a nova proteção compartilhada de
+GPU pendente após exportação, que exige recompilação nativa.
+
 ## Conteúdo acumulado dos pacotes
 
 Os APKs e o IPA partem das mesmas fontes compartilhadas e incluem as mudanças

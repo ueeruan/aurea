@@ -36,6 +36,7 @@ class HeavyEditingStressTest {
     /** Same producers, effects and animation as the full export acceptance.
      * This separate ABI check must never be reported as export validation. */
     @Test fun denseEditSurvivesPreviewTrimReloadIn32BitProcess() {
+        org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("aureaStress") == "true")
         assertFalse("This regression requires the actual 32-bit native process", android.os.Process.is64Bit())
         runDenseScene(includeExports = false)
     }

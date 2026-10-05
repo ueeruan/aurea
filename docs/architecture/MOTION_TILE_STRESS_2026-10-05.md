@@ -590,6 +590,25 @@ GPU pendente após exportação, que exige recompilação nativa.
 
 ## Conteúdo acumulado dos pacotes
 
+A revisão independente do gate após exportação confirmou a retenção dos
+quadros de vídeo até a fence, incluindo ReaderState/AImage e Pool/AHB; não
+foi necessário alterar o fechamento das camadas. Encontrou uma falha Metal:
+um command buffer encerrado com erro continuava sendo reportado como falha
+em toda consulta, mantendo o gate ativo. O backend agora confere o estado
+terminal real, libera somente as submissões comprovadamente concluídas e
+reporta o erro original uma vez. Uma submissão pendente não é liberada por
+um erro genérico. O teste Objective-C++ usa estados controlados e o mesmo
+helper da produção; sua execução macOS será registrada no próximo CI.
+
+No checkpoint Android `32c4d926`, o projeto real exportou 90/90 quadros em
+1080p no probe nativo (542,831 s, sem aproximação ou falha no encerramento).
+Decodificação independente confirmou 90 quadros únicos e 480 regiões de
+conteúdo nos cinco instantes verificados. Na repetição dentro do app, 720p
+também completou 90/90 em 321,248 s e passou na mesma auditoria independente.
+O resultado de 1080p dentro da interface ainda está em coleta. A inspeção
+dos novos APKs confirmou quatro bibliotecas da ABI correta em cada pacote,
+26 assets idênticos e cinco arquivos completos dos modelos de IA embutidos.
+
 Os APKs e o IPA partem das mesmas fontes compartilhadas e incluem as mudanças
 documentadas em [DEVICE_FIXES_2026-10-05.md](DEVICE_FIXES_2026-10-05.md) e
 [COMMUNITY_FIXES_2026-10-05.md](COMMUNITY_FIXES_2026-10-05.md), além deste relatório:

@@ -305,6 +305,7 @@ AUREA_TEST(FrameGraph, RecordingFailureStopsLaterPassesAndOutputTransitions) {
         void bind_texture(u32, TextureHandle, SamplerHandle) noexcept override { observe(); }
         void bind_storage_image(u32, TextureHandle) noexcept override { observe(); }
         void bind_storage_buffer(BufferHandle) noexcept override { observe(); }
+        void bind_storage_buffer_at(u32, BufferHandle) noexcept override { observe(); }
         void set_uniforms(const void*, u32) noexcept override { observe(); }
         void push_constants(const void*, u32) noexcept override { observe(); }
         void set_viewport(f32, f32, f32, f32) noexcept override { observe(); }

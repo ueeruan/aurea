@@ -1,5 +1,9 @@
 # Contorno, máscaras, sombra e fidelidade de pré-composições
 
+Registro desta rodada, com artefato intermediário. As compilações iOS,
+correções adicionais e validações posteriores estão em
+[MOTION_TILE_STRESS_2026-10-05.md](MOTION_TILE_STRESS_2026-10-05.md).
+
 Solicitação: quatro relatos visuais enviados pelo usuário. Na comparação entre versões, o usuário esclareceu que camadas/objetos somem ou mudam; não se trata apenas de atraso na reprodução. As imagens são referências de sintomas, sem projeto original, versões identificadas ou quadros equivalentes para comparação.
 
 As alterações anteriores do checkout foram preservadas. Evidências novas ficam em `build/reference/community-fixes-20261005/`.

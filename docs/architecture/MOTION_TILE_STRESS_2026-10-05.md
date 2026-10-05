@@ -383,6 +383,22 @@ comparações com o baseline foram idênticas e não houve erros de validação
 SyncVal. Isso valida o protótipo; a integração no app e as exportações de
 96 camadas ainda precisam ser executadas.
 
+A integração de produção usa um checkpoint explícito ao fim de cada passe
+do grafo, separado dos rótulos de depuração. Vulkan limita cada command
+buffer a 128 passes, preserva todos os estados e mantém uma submissão/fence
+por quadro. Metal usa o método padrão sem alterar seu encoder. Falhas de
+gravação/alocação interrompem o quadro, impedem publicar cache completo e
+conservam recursos até a drenagem real da GPU, sem simular perda do dispositivo.
+
+A compilação host integrada passou. Sete filtros completaram 35 testes e
+8.717 verificações, sem falhas ou erros de validação/SyncVal. Incluem
+BoundedCommandsGpu (3/7.503), FrameGraph (14/161), Heavy3DMotionGpu (1/459),
+UploadLifetimeGpu (3/40), MemoryPressureGpu (3/175), VulkanDescriptorsGpu
+(2/27) e SceneCuts (9/352). O teste de buffers cobre 600 passes, rollover
+de descritores, mais de 512 timers, reuso de pools, MRT/desenho indexado,
+atualização parcial de push constants e seis falhas injetadas sem enviar
+trabalho inválido à GPU.
+
 ## Cor no fallback de decodificação Android
 
 Uma reprodução isolada confirmou a conversão divergente no caminho
@@ -418,8 +434,31 @@ hardware, antes de Vulkan/efeitos. Com a mesma metadata e dataspace 260,
 buffers Qualcomm alternavam ciano (1,255,255)/azul (1,0,255) e
 ciano (23,255,254)/azul (3,0,245). O segundo conjunto corresponde ao desvio
 de matriz observado anteriormente. A conversão explícita de YUV cru com a
-função de cor compartilhada está sendo implementada para eliminar essa
-dependência da conversão automática do driver.
+função de cor compartilhada foi implementada para eliminar essa
+dependência da conversão automática do driver. O bridge agora usa ES3/VBO
+e `GL_EXT_YUV_target`, com metadata por quadro e a função `ycbcr_to_rgb`
+embutida diretamente de `engine/shaders/common/color.glsl`, sem alterar essa
+fonte compartilhada. Sem suporte à extensão, mantém o fallback de planos do
+decoder. O teste nativo isolado passou no moto g52: 6.912 comparações,
+diferença máxima zero, matrizes BT.601/709/2020 em faixas limitada/completa,
+quatro contextos e três rodadas. Isso valida conversão e runtime; os vídeos
+MediaCodec reais, efeitos e reaberturas ainda exigem a rodada integrada.
+
+A primeira regressão integrada de quatro vídeos MediaCodec pelo caminho
+padrão passou no APK de teste
+`1B8D9B9DE2283994E442F5112383F7B9E2CF7F79BF9800C09A260CB70B5850DA`:
+35,454 s, 12 reaberturas, 204 comparações, zero falhas e diferença máxima
+de um nível contra a referência planar (limite de quatro). Antes, a mesma
+verificação encontrava máximo 34 e 73 comparações fora do limite. As demais
+regressões de efeitos e a aceitação de estresse continuam separadas.
+
+A variante integrada com quatro decodificadores de software forçados
+também passou: 42,965 s e 204 comparações com diferença zero. Os quatro
+casos individuais passaram e seus dados foram conferidos: hardware sem
+efeitos teve máximo 1; hardware com Motion Tile/Blur/Glow, máximo 2;
+software com e sem efeitos, zero. As repetições foram idênticas. Os testes
+individuais também passaram a exigir a tolerância nos caminhos de hardware,
+em vez de apenas registrar os deltas.
 
 No iOS, a auditoria estática verificou que a saída YUV conserva metadata e
 entra na conversão compartilhada; apenas buffers RGB entram na importação
@@ -453,7 +492,11 @@ Foundation, Metal e validação do pacote. O arquivo intermediário tem
 51.727.040 bytes e SHA-256
 `dc401da551ff8bcd33da9cfb9147cc2cdf75045a6a6132f3ce9e8fde50181082`.
 As capturas reais do simulador e a validação de seus fixtures passaram em
-7 min 10 s; a suíte de gestos ainda estava em andamento neste registro.
+7 min 10 s. A suíte de gestos terminou com 52 testes e zero falhas em
+1.230,970 s de execução dos testes (22 min 30 s da etapa, incluindo preparo).
+Copiar/colar compacto, Motion Blur com desfazer e transformação de texto
+passaram individualmente. Houve uma advertência de prioridade/QoS no teste
+de projeto manual, sem falha ou teste ignorado.
 Esse checkpoint inclui a liberação de imports externos e as correções de
 captura, mas antecede o ajuste Android de cor do decoder de software.
 

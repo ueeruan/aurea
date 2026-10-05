@@ -154,7 +154,7 @@ class DiagnosticVideoPathColorDeviceTest {
             val maximum = a.indices.maxOf { abs((a[it].toInt() and 255) - (b[it].toInt() and 255)) }
             val changed = a.indices.count { abs((a[it].toInt() and 255) - (b[it].toInt() and 255)) > 4 }
             report.appendText("$label maximum=$maximum changedAbove4=$changed/${a.size}\n")
-            if (softwareFallback) assertTrue("Software fallback must preserve the readable YUV color conversion: $label max=$maximum", maximum <= 4)
+            assertTrue("Every decoder path must preserve the readable YUV color conversion: $label max=$maximum", maximum <= 4)
         }
         seek()
         val initialLabel = if (softwareFallback) "software-fallback-planes" else "hardware-gl"

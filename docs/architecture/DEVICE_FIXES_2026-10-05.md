@@ -1,5 +1,9 @@
 # Correções de edição e validação no moto g52
 
+Registro da primeira rodada, com artefato intermediário. As compilações iOS,
+correções adicionais e validações posteriores estão em
+[MOTION_TILE_STRESS_2026-10-05.md](MOTION_TILE_STRESS_2026-10-05.md).
+
 Solicitação: corrigir buffering, depth map, rotobrush, câmera após corte, fundo HDR após corte, iluminação em pré-composições e bordas do Motion Tile; compactar a edição nas interfaces Android e iOS.
 
 O checkout já continha alterações extensas. Elas foram preservadas. Evidências desta sessão: `build/reference/device-fixes-20261005/`.

@@ -125,12 +125,78 @@ AUREA_TEST(BoundedCommandsGpu, SixHundredPassesPreservePixelsBindingsTimersAndRe
             AUREA_CHECK(half_to_float(pixels[3]) > .99f);
             if (baseline.empty()) baseline = pixels;
             else AUREA_CHECK(pixels == baseline);
+            // wait_frame guarantees completion; timing collection is exposed
+            // by slot reuse/wait_idle, not by that fence-only API.
+            b.wait_idle();
             std::array<GpuTiming, 600> timings; f32 total = 0;
             const u32 count = b.read_gpu_timings(timings.data(), static_cast<u32>(timings.size()), &total);
             AUREA_CHECK_EQ(count, 512u); AUREA_CHECK(std::isfinite(total));
         }
     }
     b.destroy_texture(*input); b.wait_idle();
+    AUREA_CHECK_EQ(vk::Backend::validation_errors() - errors, 0u);
+}
+
+AUREA_TEST(BoundedCommandsGpu, IndexedMrtDrawRetainsTheTailOfPartiallyUpdatedPushConstants) {
+    AUREA_REQUIRE_GPU();
+    Gpu isolated; AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
+    auto& b = isolated.backend;
+    const u32 errors = vk::Backend::validation_errors();
+    TextureDesc d; d.width = d.height = 8; d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = d.sampled = d.transferDst = d.transferSrc = true;
+    const auto source = b.create_texture(d), display = b.create_texture(d), hdr = b.create_texture(d);
+    AUREA_CHECK(source.ok() && display.ok() && hdr.ok());
+    if (!source.ok() || !display.ok() || !hdr.ok()) return;
+    TextureDesc z = d; z.format = SurfaceFormat::Depth32F;
+    z.sampled = z.transferDst = z.transferSrc = false;
+    const auto depth = b.create_texture(z); AUREA_CHECK(depth.ok()); if (!depth.ok()) return;
+    std::vector<u16> data(8 * 8 * 4);
+    for (usize i = 0; i < data.size(); i += 4) {
+        data[i] = scene3d::float_to_half(.4f); data[i + 1] = scene3d::float_to_half(.6f);
+        data[i + 2] = scene3d::float_to_half(.8f); data[i + 3] = scene3d::float_to_half(1.f);
+    }
+    AUREA_CHECK(b.upload_texture(*source, data.data(), 8 * 8).ok());
+    BufferDesc ib; ib.bytes = 3 * sizeof(u16); ib.usage = BufferUsage::Index; ib.access = MemoryAccess::Upload;
+    const auto indices = b.create_buffer(ib); AUREA_CHECK(indices.ok()); if (!indices.ok()) return;
+    const u16 triangle[] = {0, 1, 2};
+    AUREA_CHECK(b.write_buffer(*indices, 0, triangle, sizeof(triangle)).ok());
+    auto key = PipelineKey::fullscreen(ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F);
+    key.hasDepth = key.hasColor1 = true;
+    const auto pipeline = isolated.renderer.shaders().pipeline(key);
+    AUREA_CHECK(pipeline.ok()); if (!pipeline.ok()) return;
+    std::vector<u16> baseline;
+    for (const u32 limit : {0u, 1u}) {
+        vk::BoundedCommandsTestAccess::limit(b, limit);
+        FrameBegin fb; AUREA_CHECK(b.begin_offscreen_frame(fb).ok()); if (!fb.commands) return;
+        auto& cmd = *fb.commands;
+        cmd.barrier(*source, ResourceState::ShaderRead);
+        cmd.bind_pipeline(*pipeline);
+        cmd.bind_texture(0, *source, isolated.renderer.shaders().sampler(CommonSampler::NearestClamp));
+        cmd.bind_index_buffer(*indices, 0, IndexType::U16);
+        // Actual plane shader: its alpha mode is in the last vec4 (offset96).
+        // Later writes replace only an unused first vec4, retaining that tail.
+        std::array<f32, 28> push{}; push[24] = .5f; push[25] = 1.f;
+        cmd.push_constants(push.data(), static_cast<u32>(sizeof(push)));
+        for (u32 pass = 0; pass < 3; ++pass) {
+            RenderPassBegin rp; rp.color = *display; rp.color1 = *hdr; rp.depth = *depth;
+            rp.load = pass ? LoadOp::Load : LoadOp::Clear;
+            cmd.begin_render_pass(rp); cmd.draw_indexed(3); cmd.end_render_pass();
+            const Vec4 prefix{static_cast<f32>(pass), 2, 3, 4};
+            cmd.push_constants(&prefix, sizeof(prefix));
+            AUREA_CHECK(cmd.finish_pass().ok());
+        }
+        AUREA_CHECK(b.end_frame().ok()); b.wait_idle();
+        std::vector<u16> pixels(data.size() * 2);
+        AUREA_CHECK(b.read_texture(*display, pixels.data(), 8 * 8).ok());
+        AUREA_CHECK(b.read_texture(*hdr, pixels.data() + data.size(), 8 * 8).ok());
+        AUREA_CHECK_NEAR(half_to_float(pixels[0]), .2f, .001f);
+        AUREA_CHECK_NEAR(half_to_float(pixels[3]), .5f, .001f);
+        AUREA_CHECK_NEAR(half_to_float(pixels[data.size() + 3]), .5f, .001f);
+        if (baseline.empty()) baseline = pixels;
+        else AUREA_CHECK(pixels == baseline);
+    }
+    for (const auto t : {*source, *display, *hdr, *depth}) b.destroy_texture(t);
+    b.destroy_buffer(*indices); b.wait_idle();
     AUREA_CHECK_EQ(vk::Backend::validation_errors() - errors, 0u);
 }
 
@@ -170,6 +236,8 @@ AUREA_TEST(BoundedCommandsGpu, RecordingFailuresAbortWithoutPublishingOrReleasin
             status = fault == Fault::Submit ? b.end_frame() : fb.commands->finish_pass();
         }
         AUREA_CHECK(!status.ok()); AUREA_CHECK(dispatch.failedCalls > 0);
+        AUREA_CHECK_EQ(b.last_submitted_frame(), prior.frameNumber);
+        AUREA_CHECK_EQ(dispatch.submitCalls, fault == Fault::Submit ? 1u : 0u);
         AUREA_CHECK(!b.is_device_lost());
         AUREA_CHECK(b.end_frame().code() == status.code());
         FrameBegin retry; AUREA_CHECK(b.begin_offscreen_frame(retry).code() == status.code());

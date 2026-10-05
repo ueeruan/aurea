@@ -13008,3 +13008,5 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "FlowCacheSourceGpu.inl"
 #include "Heavy3DMotionGpu.inl"
 #include "ExternalImportsGpu.inl"
+
+#include "BoundedCommandsGpu.inl"

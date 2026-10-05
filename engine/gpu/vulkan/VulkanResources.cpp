@@ -314,6 +314,7 @@ void Backend::destroy_buffer(BufferHandle h) noexcept {
 }
 
 Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, usize bytes) noexcept {
+    if (!recordingStatus_.ok()) return recordingStatus_;
     Buffer* b = buffers_.get(dst.id);
     if (!b || !data) return Errc::InvalidArgument;
     if (offset + bytes > b->desc.bytes) return Errc::OutOfRange;
@@ -1060,6 +1061,7 @@ void Backend::destroy_pipeline(PipelineHandle h) noexcept {
 // Upload e leitura de volta
 // =============================================================================
 Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPerRow) noexcept {
+    if (!recordingStatus_.ok()) return recordingStatus_;
     Texture* t = textures_.get(dst.id);
     if (!t || !data) return Errc::InvalidArgument;
     const u32 bpp = texel_bytes(t->format);
@@ -1123,6 +1125,7 @@ Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPer
 
 Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer, const void* data,
                                      usize bytes) noexcept {
+    if (!recordingStatus_.ok()) return recordingStatus_;
     Texture* t = textures_.get(dst.id);
     if (!t || !data || bytes == 0) return Errc::InvalidArgument;
     const u32 levels = std::max(1u, t->desc.mipLevels);
@@ -1210,6 +1213,7 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
 }
 
 Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
+    if (!recordingStatus_.ok()) return recordingStatus_;
     Texture* t = textures_.get(texture.id);
     if (!t) return Errc::InvalidArgument;
     const u32 levels = std::max(1u, t->desc.mipLevels);
@@ -1276,6 +1280,7 @@ Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
 }
 
 Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) noexcept {
+    if (!recordingStatus_.ok()) return recordingStatus_;
     Texture* t = textures_.get(src.id);
     if (!t || !outData) return Errc::InvalidArgument;
     const u32 bpp = texel_bytes(t->format);
@@ -1320,6 +1325,7 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
 
 Status Backend::submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*), void* ctx,
                                   u64 timeoutNs) noexcept {
+    if (!recordingStatus_.ok()) return recordingStatus_;
     if (!device_ || deviceLost_) return Errc::DeviceLost;
     collect_immediate();
     // Do not pile more work onto a queue whose previous bounded upload has
@@ -1395,6 +1401,7 @@ void Backend::collect_immediate(bool deviceIdle) noexcept {
 // Zero-copy: AHardwareBuffer do MediaCodec → VkImage amostrável
 // =============================================================================
 Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& img) noexcept {
+    if (!recordingStatus_.ok()) return recordingStatus_;
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
     // A conversão YCbCr só é exigida para buffer YUV; o RGBA8 do caminho GL do
     // driver (AndroidVideoPath.hpp) só precisa da importação de AHardwareBuffer.

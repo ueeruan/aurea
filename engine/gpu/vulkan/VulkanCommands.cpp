@@ -172,6 +172,12 @@ void CommandListImpl::bind_frame(Backend* backend, FrameContext* frame, VkComman
     uniformOffset_ = uniformSize_ = 0;
     lastSet_ = VK_NULL_HANDLE;
     dirty_ = true;
+    vertices_.clear();
+    indexBuffer_ = VK_NULL_HANDLE;
+    indexOffset_ = 0;
+    hasViewport_ = hasScissor_ = false;
+    pushLayout_ = VK_NULL_HANDLE;
+    pushBytes_ = labelDepth_ = 0;
 }
 
 void CommandListImpl::barrier(TextureHandle texture, ResourceState newState, bool discard) noexcept {
@@ -186,6 +192,7 @@ void CommandListImpl::barrier(TextureHandle texture, ResourceState newState, boo
 }
 
 void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
+    if (!cmd_) return;
     if (inRenderPass_) return;
     if (pass.depth.valid() && (pass.color1.valid() || pass.resolve.valid()
                                || (pass.color.valid() && backend_->texture(pass.color.id)
@@ -323,6 +330,7 @@ void CommandListImpl::end_render_pass() noexcept {
 }
 
 void CommandListImpl::bind_pipeline(PipelineHandle pipeline) noexcept {
+    if (!cmd_) return;
     const PipelineObject* p = backend_->pipeline(pipeline.id);
     if (!p) return;
     if (p != pipeline_) {
@@ -362,7 +370,10 @@ void CommandListImpl::set_uniforms(const void* data, u32 bytes) noexcept {
     VkBuffer buf = VK_NULL_HANDLE;
     VkDeviceSize off = 0;
     void* ptr = nullptr;
-    if (!frame_->uniforms.allocate(bytes, backend_->uniform_alignment(), buf, off, ptr)) return;
+    if (!frame_->uniforms.allocate(bytes, backend_->uniform_alignment(), buf, off, ptr)) {
+        (void)backend_->fail_recording(VK_ERROR_OUT_OF_DEVICE_MEMORY, "frame uniform allocation");
+        return;
+    }
     std::memcpy(ptr, data, bytes);
     if (buf != uniformBuffer_ || bytes != uniformSize_) dirty_ = true;
     uniformBuffer_ = buf;
@@ -371,19 +382,28 @@ void CommandListImpl::set_uniforms(const void* data, u32 bytes) noexcept {
 }
 
 void CommandListImpl::push_constants(const void* data, u32 bytes) noexcept {
-    if (!pipeline_ || !data) return;
+    if (!cmd_) return;
+    if (!pipeline_ || !data || !bytes) return;
+    const u32 count = std::min(bytes, binding::kPushConstantBytes);
+    std::memcpy(pushData_, data, count);
+    pushBytes_ = std::max(pushBytes_, count);
+    pushLayout_ = pipeline_->layout;
     vkCmdPushConstants(cmd_, pipeline_->layout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
                        0, std::min(bytes, binding::kPushConstantBytes), data);
 }
 
 void CommandListImpl::set_viewport(f32 x, f32 y, f32 w, f32 h) noexcept {
+    if (!cmd_) return;
     VkViewport v{x, y, w, h, 0.0f, 1.0f};
+    viewport_ = v; hasViewport_ = true;
     vkCmdSetViewport(cmd_, 0, 1, &v);
 }
 
 void CommandListImpl::set_scissor(i32 x, i32 y, u32 w, u32 h) noexcept {
+    if (!cmd_) return;
     VkRect2D r{{x, y}, {w, h}};
+    scissor_ = r; hasScissor_ = true;
     vkCmdSetScissor(cmd_, 0, 1, &r);
 }
 
@@ -395,7 +415,10 @@ bool CommandListImpl::flush_descriptors() noexcept {
         return true;
     }
     VkDescriptorSet set = backend_->allocate_set(*frame_, pipeline_->setLayout);
-    if (!set) return false;
+    if (!set) {
+        (void)backend_->fail_recording(VK_ERROR_OUT_OF_DEVICE_MEMORY, "frame descriptor allocation");
+        return false;
+    }
 
     VkDescriptorImageInfo images[binding::kTextureSlots]{};
     VkDescriptorImageInfo storage[binding::kStorageImageSlots]{};
@@ -496,16 +519,22 @@ void CommandListImpl::draw(u32 vertexCount, u32 instanceCount, u32 firstVertex) 
 }
 
 void CommandListImpl::bind_vertex_buffer(u32 binding, BufferHandle buffer, u64 offset) noexcept {
+    if (!cmd_) return;
     Buffer* b = backend_->buffer(buffer.id);
     if (!b) return;
     const VkDeviceSize off = offset;
+    if (vertices_.size() <= binding) vertices_.resize(static_cast<usize>(binding) + 1);
+    vertices_[binding] = VertexBinding{b->buffer, off};
     vkCmdBindVertexBuffers(cmd_, binding, 1, &b->buffer, &off);
 }
 
 void CommandListImpl::bind_index_buffer(BufferHandle buffer, u64 offset, IndexType type) noexcept {
+    if (!cmd_) return;
     Buffer* b = backend_->buffer(buffer.id);
     if (!b) return;
-    vkCmdBindIndexBuffer(cmd_, b->buffer, offset, type == IndexType::U16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+    indexBuffer_ = b->buffer; indexOffset_ = offset;
+    indexType_ = type == IndexType::U16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+    vkCmdBindIndexBuffer(cmd_, b->buffer, offset, indexType_);
 }
 
 void CommandListImpl::draw_indexed(u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset,
@@ -521,6 +550,7 @@ void CommandListImpl::dispatch(u32 x, u32 y, u32 z) noexcept {
 }
 
 void CommandListImpl::copy_texture(TextureHandle src, TextureHandle dst) noexcept {
+    if (!cmd_) return;
     Texture* s = backend_->texture(src.id);
     Texture* d = backend_->texture(dst.id);
     if (!s || !d || inRenderPass_) return;
@@ -535,6 +565,7 @@ void CommandListImpl::copy_texture(TextureHandle src, TextureHandle dst) noexcep
 }
 
 void CommandListImpl::copy_texture_to_buffer(TextureHandle src, BufferHandle dst) noexcept {
+    if (!cmd_) return;
     Texture* s = backend_->texture(src.id);
     Buffer* b = backend_->buffer(dst.id);
     if (!s || !b || inRenderPass_) return;
@@ -578,15 +609,75 @@ void CommandListImpl::end_timer() noexcept {
 }
 
 void CommandListImpl::begin_label(const char* label) noexcept {
-    if (!backend_->debug_utils() || !vkCmdBeginDebugUtilsLabelEXT || !label) return;
+    if (!cmd_) return;
+    if (!label) return;
+    ++labelDepth_;
+    if (!backend_->debug_utils() || !vkCmdBeginDebugUtilsLabelEXT) return;
     VkDebugUtilsLabelEXT l{VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
     l.pLabelName = label;
     vkCmdBeginDebugUtilsLabelEXT(cmd_, &l);
 }
 
 void CommandListImpl::end_label() noexcept {
+    if (!cmd_) return;
+    if (!labelDepth_) return;
+    --labelDepth_;
     if (!backend_->debug_utils() || !vkCmdEndDebugUtilsLabelEXT) return;
     vkCmdEndDebugUtilsLabelEXT(cmd_);
+}
+
+Status CommandListImpl::finish_pass() noexcept {
+    if (!backend_) return Status{Errc::InvalidState, "sem backend"};
+    if (!backend_->recordingStatus_.ok()) return backend_->recordingStatus_;
+    if (!frame_ || !cmd_) return Status{Errc::InvalidState, "sem frame"};
+    ++frame_->passesInCommandBuffer;
+    if (!backend_->passesPerCommandBuffer_
+        || frame_->passesInCommandBuffer < backend_->passesPerCommandBuffer_
+        || inRenderPass_ || labelDepth_ || !frame_->timerStack.empty()) return OkStatus;
+
+    // A large primary buffer stalls some mobile drivers with many independent
+    // 3D temporal passes. Split only recording, never quality or submissions.
+    // The one final submit/fence owns every primary and all per-frame storage.
+    FrameContext& f = *frame_;
+    if (const VkResult r = vkEndCommandBuffer(cmd_); r != VK_SUCCESS)
+        return backend_->fail_recording(r, "vkEndCommandBuffer checkpoint");
+    if (f.commandBufferCount == f.commandBuffers.size()) {
+        VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ai.commandPool = f.pool;
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = 1;
+        VkCommandBuffer next = VK_NULL_HANDLE;
+        if (const VkResult r = vkAllocateCommandBuffers(backend_->device(), &ai, &next); r != VK_SUCCESS)
+            return backend_->fail_recording(r, "vkAllocateCommandBuffers checkpoint");
+        f.commandBuffers.push_back(next);
+    }
+    f.cmd = f.commandBuffers[f.commandBufferCount++];
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (const VkResult r = vkBeginCommandBuffer(f.cmd, &bi); r != VK_SUCCESS)
+        return backend_->fail_recording(r, "vkBeginCommandBuffer checkpoint");
+    cmd_ = f.cmd;
+    f.passesInCommandBuffer = 0;
+
+    // Layouts use the same complete push-constant range. Preserve the tail
+    // after a caller overwrites only a prefix, as the unsplit buffer does.
+    if (pushLayout_ && pushBytes_)
+        vkCmdPushConstants(cmd_, pushLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                           | VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes_, pushData_);
+    if (pipeline_) {
+        vkCmdBindPipeline(cmd_, pipeline_->bindPoint, pipeline_->pipeline);
+        if (!dirty_ && lastSet_) {
+            const u32 offset = uniformBuffer_ ? uniformOffset_ : 0;
+            vkCmdBindDescriptorSets(cmd_, pipeline_->bindPoint, pipeline_->layout,
+                                    0, 1, &lastSet_, 1, &offset);
+        }
+    }
+    for (u32 i = 0; i < vertices_.size(); ++i) if (vertices_[i].buffer)
+        vkCmdBindVertexBuffers(cmd_, i, 1, &vertices_[i].buffer, &vertices_[i].offset);
+    if (indexBuffer_) vkCmdBindIndexBuffer(cmd_, indexBuffer_, indexOffset_, indexType_);
+    if (hasViewport_) vkCmdSetViewport(cmd_, 0, 1, &viewport_);
+    if (hasScissor_) vkCmdSetScissor(cmd_, 0, 1, &scissor_);
+    return OkStatus;
 }
 
 // =============================================================================
@@ -635,6 +726,21 @@ u32 Backend::read_gpu_timings(GpuTiming* out, u32 capacity, f32* totalMs) noexce
     return n;
 }
 
+Status Backend::fail_recording(VkResult result, const char* operation) noexcept {
+    if (recordingStatus_.ok()) {
+        recordingStatus_ = check(result, operation);
+        (void)note_device_lost(result);
+        AUREA_LOG_ERROR("vulkan: recording stopped until reinitialize: %s (%s)", operation, result_name(result));
+    }
+    // Nothing from this frame was submitted. Its tracked layouts may already
+    // have changed, so do not reuse them. Keep deferred releases until a real
+    // wait_idle/shutdown drains older submissions; never fake device loss.
+    if (current_) current_->timersWritten = false;
+    current_ = nullptr;
+    commands_.bind_frame(this, nullptr, VK_NULL_HANDLE);
+    return recordingStatus_;
+}
+
 Status Backend::begin_frame(FrameBegin& out) noexcept {
     return begin_frame_impl(out, true);
 }
@@ -647,6 +753,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     out = FrameBegin{};
     if (!initialized_) return Status{Errc::InvalidState, "backend nao inicializado"};
     if (deviceLost_) return Status{Errc::DeviceLost, "dispositivo perdido"};
+    if (!recordingStatus_.ok()) return recordingStatus_;
     if (current_) return Status{Errc::InvalidState, "frame ja aberto"};
     collect_immediate();
     // A finished slot may not be reused for two more frames. Retire its old
@@ -663,6 +770,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         const VkResult w = vkWaitForFences(device_, 1, &f.fence, VK_TRUE, 2'000'000'000ull);
         if (note_device_lost(w)) return Status{Errc::DeviceLost, "fence"};
         if (w == VK_TIMEOUT) return Status{Errc::Timeout, "GPU atrasada: frame pulado"};
+        if (w != VK_SUCCESS) return fail_recording(w, "vkWaitForFences frame");
         collect_timings(f);
         run_deferred(f);
         // Imagens importadas que ninguém usa há 10 s: a importação é soltada
@@ -678,7 +786,9 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     }
     f.submitted = false;
     f.frameNumber = ++frameNumber_;
-    for (VkDescriptorPool p : f.descriptorPools) vkResetDescriptorPool(device_, p, 0);
+    for (VkDescriptorPool p : f.descriptorPools)
+        if (const VkResult r = vkResetDescriptorPool(device_, p, 0); r != VK_SUCCESS)
+            return fail_recording(r, "vkResetDescriptorPool frame");
     f.descriptorPoolCursor = 0;
     f.uniforms.reset();
     f.staging.reset();
@@ -687,10 +797,15 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     f.externalAcquired.clear();
     uploadBytesFrame_ = 0;
 
-    vkResetCommandPool(device_, f.pool, 0);
+    f.cmd = f.commandBuffers.front();
+    f.commandBufferCount = 1;
+    f.passesInCommandBuffer = 0;
+    if (const VkResult r = vkResetCommandPool(device_, f.pool, 0); r != VK_SUCCESS)
+        return fail_recording(r, "vkResetCommandPool");
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(f.cmd, &bi);
+    if (const VkResult r = vkBeginCommandBuffer(f.cmd, &bi); r != VK_SUCCESS)
+        return fail_recording(r, "vkBeginCommandBuffer frame");
     if (f.queries && timersEnabled_) {
         vkCmdResetQueryPool(f.cmd, f.queries, 0, f.queryCount);
         vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, 0);
@@ -771,6 +886,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
 }
 
 Status Backend::end_frame() noexcept {
+    if (!recordingStatus_.ok()) return recordingStatus_;
     if (!current_) return Status{Errc::InvalidState, "nenhum frame aberto"};
     FrameContext& f = *current_;
     commands_.end_render_pass();
@@ -805,12 +921,14 @@ Status Backend::end_frame() noexcept {
         vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, 1);
         f.timersWritten = true;
     }
-    vkEndCommandBuffer(f.cmd);
+    if (const VkResult r = vkEndCommandBuffer(f.cmd); r != VK_SUCCESS)
+        return fail_recording(r, "vkEndCommandBuffer frame");
 
-    vkResetFences(device_, 1, &f.fence);
+    if (const VkResult r = vkResetFences(device_, 1, &f.fence); r != VK_SUCCESS)
+        return fail_recording(r, "vkResetFences frame");
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &f.cmd;
+    si.commandBufferCount = f.commandBufferCount;
+    si.pCommandBuffers = f.commandBuffers.data();
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     if (imageAcquired_) {
         // Espera a imagem só no estágio de SAÍDA DE COR: os passes anteriores
@@ -823,13 +941,10 @@ Status Backend::end_frame() noexcept {
         si.pSignalSemaphores = &renderDone_[imageIndex_];
     }
     const VkResult r = vkQueueSubmit(queue_, 1, &si, f.fence);
+    if (r != VK_SUCCESS) return fail_recording(r, "vkQueueSubmit frame");
     current_ = nullptr;
     commands_.bind_frame(this, nullptr, VK_NULL_HANDLE);
     frameCursor_ = (frameCursor_ + 1) % framesInFlight_;
-    if (r != VK_SUCCESS) {
-        (void)note_device_lost(r);
-        return check(r, "vkQueueSubmit");
-    }
     f.submitted = true;
     lastSubmitted_ = &f;
 

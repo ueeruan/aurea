@@ -1,0 +1,8 @@
+// Generated from shaders/common/color.glsl. Android's EGL bridge must use
+// exactly the same YUV conversion as the shared Vulkan/Metal video shaders.
+#pragma once
+namespace aurea::shaders {
+inline constexpr char kVideoColorGlsl[] = R"AUREA_COLOR_GLSL(
+@AUREA_SHARED_COLOR_GLSL@
+)AUREA_COLOR_GLSL";
+}

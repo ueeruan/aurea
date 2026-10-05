@@ -273,6 +273,7 @@ public:
     void end_timer() noexcept override;
     void begin_label(const char* label) noexcept override;
     void end_label() noexcept override;
+    [[nodiscard]] Status finish_pass() noexcept override;
 
     [[nodiscard]] bool in_render_pass() const noexcept { return inRenderPass_; }
     [[nodiscard]] VkCommandBuffer handle() const noexcept { return cmd_; }
@@ -298,6 +299,19 @@ private:
     u32 uniformSize_ = 0;
     VkDescriptorSet lastSet_ = VK_NULL_HANDLE;
     bool dirty_ = true;
+    // Command buffers do not inherit native state. Keep the bindings that the
+    // CommandList API permits callers to reuse across complete graph passes.
+    struct VertexBinding { VkBuffer buffer = VK_NULL_HANDLE; VkDeviceSize offset = 0; };
+    std::vector<VertexBinding> vertices_;
+    VkBuffer indexBuffer_ = VK_NULL_HANDLE;
+    VkDeviceSize indexOffset_ = 0;
+    VkIndexType indexType_ = VK_INDEX_TYPE_UINT16;
+    VkViewport viewport_{};
+    VkRect2D scissor_{};
+    bool hasViewport_ = false, hasScissor_ = false;
+    VkPipelineLayout pushLayout_ = VK_NULL_HANDLE;
+    u8 pushData_[binding::kPushConstantBytes]{};
+    u32 pushBytes_ = 0, labelDepth_ = 0;
 };
 
 // -----------------------------------------------------------------------------
@@ -311,6 +325,9 @@ struct DeferredRelease {
 struct FrameContext {
     VkCommandPool   pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer> commandBuffers;
+    u32 commandBufferCount = 0;
+    u32 passesInCommandBuffer = 0;
     VkFence         fence = VK_NULL_HANDLE;
     VkSemaphore     acquired = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> descriptorPools;
@@ -471,11 +488,19 @@ private:
     /// Corpo comum de `begin_frame` e `begin_offscreen_frame`; `withSurface`
     /// decide se o swapchain é adquirido.
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
+    [[nodiscard]] Status fail_recording(VkResult result, const char* operation) noexcept;
+    friend class CommandListImpl;
+    friend struct BoundedCommandsTestAccess;
 
     BackendConfig config_{};
     GPUCapabilities caps_{};
     bool initialized_ = false;
     bool deviceLost_ = false;
+    // Recording failure invalidates CPU layout tracking, but is NOT device
+    // loss: older submissions must still retain their fences and resources.
+    // Stop new work until shutdown/reinitialize instead of guessing layouts.
+    Status recordingStatus_{};
+    u32 passesPerCommandBuffer_ = 128;
     bool debugUtils_ = false;
     bool timersEnabled_ = false;
     f32 timestampPeriod_ = 1.0f;

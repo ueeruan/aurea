@@ -3,12 +3,14 @@
 //
 //  O caminho "GL do driver" do vídeo (ver aurea/platform/AndroidVideoPath.hpp):
 //  o AHardwareBuffer PRIVATE que o MediaCodec entregou vira EGLImage amostrado
-//  como GL_TEXTURE_EXTERNAL_OES — o DRIVER converte YUV, passo, fatia, AFBC — e
+//  como YUV cru via EXT_YUV_target — o driver reconstrói croma/AFBC, e a mesma
+//  função color.glsl do Vulkan/Metal aplica a matriz/faixa do próprio vídeo. Um
 //  um quadrilátero com o crop nas coordenadas desenha a região visível num
 //  AHardwareBuffer RGBA8 (EGLImage + FBO). É o que o app antigo fazia com
-//  SurfaceTexture + samplerExternalOES, sem Java e sem SurfaceTexture.
+//  samplerExternalOES comum não é usado: sua conversão depende de metadados
+//  privados do buffer, que alguns codecs perdem ao recriar a superfície.
 //
-//  Um contexto EGL próprio por decoder (ES 2, pbuffer 1×1). Ele só fica
+//  Um contexto EGL próprio por decoder (ES 3, pbuffer 1×1). Ele só fica
 //  corrente DURANTE uma conversão, na thread que chamou: a thread de decode
 //  pode acabar e o destrutor pode rodar em outra (a fila de encerramento do
 //  MediaManager) sem deixar contexto preso a uma thread morta.
@@ -22,6 +24,7 @@
 #pragma once
 
 #include "aurea/core/Result.hpp"
+#include "aurea/media/VideoTypes.hpp"
 #include "aurea/platform/AndroidVideoPath.hpp"
 
 #include <android/hardware_buffer.h>
@@ -41,7 +44,12 @@ public:
 
     /// nullptr = este aparelho não tem o que o caminho precisa (EGL, extensões
     /// de imagem nativa / textura externa, shader) — o decoder usa os planos.
-    [[nodiscard]] static std::unique_ptr<GlVideoBridge> create() noexcept;
+    [[nodiscard]] static std::unique_ptr<GlVideoBridge> create(bool diagnosticProbe = false) noexcept;
+
+    /// Optional debug observation of the completed RGBA FBO, before Vulkan.
+    /// Four samples at normalized positions (.92,.25), (.42,.55), (.60,.55),
+    /// (.25,.55); coordinates follow the decoded image's top-to-bottom memory.
+    struct DiagnosticPixels { u8 rgba[16]{}; bool valid = false; };
 
     /// Teto de alvos RGBA vivos (driver_gl_live_frames do tamanho do vídeo).
     void set_max_live_targets(u32 n) noexcept;
@@ -52,8 +60,8 @@ public:
     /// Converte `source` (buffer do decoder) na região `quad` para um alvo RGBA.
     /// BudgetExceeded = todos os alvos em uso (contrapressão, tente de novo);
     /// qualquer outro erro = o caminho GL não serve para este vídeo.
-    [[nodiscard]] Status convert(AHardwareBuffer* source, const ExternalQuad& quad,
-                                 std::shared_ptr<const Target>& out) noexcept;
+    [[nodiscard]] Status convert(AHardwareBuffer* source, const ExternalQuad& quad, const VideoColorInfo& color,
+                                 std::shared_ptr<const Target>& out, DiagnosticPixels* probe = nullptr) noexcept;
 
     /// Solta as imagens EGL dos buffers do decoder (o ImageReader foi recriado).
     void forget_sources() noexcept;

@@ -31,26 +31,26 @@ class DiagnosticVideoPathColorDeviceTest {
 
     @Test fun compareHardwareGlWithReadableSoftwarePlanes() = comparePaths(false)
     @Test fun compareTheSoakTileBlurGlowChainAcrossDecoderPaths() = comparePaths(true)
-    @Test fun compareSoftwareGlWithReadableSoftwarePlanes() = comparePaths(false, true)
-    @Test fun compareSoftwareGlTileBlurGlowWithReadableSoftwarePlanes() = comparePaths(true, true)
+    @Test fun compareForcedSoftwareFallbackWithReadableSoftwarePlanes() = comparePaths(false, true)
+    @Test fun compareForcedSoftwareFallbackTileBlurGlowWithReadableSoftwarePlanes() = comparePaths(true, true)
 
-    private fun comparePaths(withEffects: Boolean, softwareGl: Boolean = false) {
+    private fun comparePaths(withEffects: Boolean, softwareFallback: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         check(context.packageName == "com.aurea.aurea.uitest")
         org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("aureaStress") == "true")
-        val forcedSoftwareGl = ParcelFileDescriptor.AutoCloseInputStream(
-            instrumentation.uiAutomation.executeShellCommand("getprop debug.aurea.software_gl")
+        val forcedSoftwareFallback = ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand("getprop debug.aurea.force_sw_fallback")
         ).bufferedReader().use { it.readText().trim() } == "1"
-        assertEquals("Select the requested diagnostic before launching this fresh instrumentation process", softwareGl, forcedSoftwareGl)
+        assertEquals("Select the requested diagnostic before launching this fresh instrumentation process", softwareFallback, forcedSoftwareFallback)
         val source = context.filesDir.listFiles().orEmpty().filter { it.name.startsWith("stress-sustained-") }
             .sortedByDescending { it.name }.map { File(it, "fixture-1080p.mp4") }.firstOrNull { it.length() > 1000 }
         assertNotNull("Run the Full HD soak fixture generation before this diagnostic", source)
         val fixture = checkNotNull(source)
-        val folderName = (if (softwareGl) "video-path-software-gl" else "video-path-color") + (if (withEffects) "-effects" else "")
+        val folderName = (if (softwareFallback) "video-path-software-fallback" else "video-path-color") + (if (withEffects) "-effects" else "")
         val folder = File(context.filesDir, folderName).apply { mkdirs() }
         val report = File(folder, "progress.txt")
-        report.writeText("DIAGNOSTIC ${if (softwareGl) "software" else "hardware"} GL versus software planes; effects=$withEffects; fixture=${fixture.absolutePath}\n")
+        report.writeText("${if (softwareFallback) "REGRESSION forced software fallback planes" else "DIAGNOSTIC hardware GL"} versus readable software planes; effects=$withEffects; fixture=${fixture.absolutePath}\n")
         val media = MediaMetadataRetriever()
         try {
             media.setDataSource(fixture.absolutePath)
@@ -154,11 +154,12 @@ class DiagnosticVideoPathColorDeviceTest {
             val maximum = a.indices.maxOf { abs((a[it].toInt() and 255) - (b[it].toInt() and 255)) }
             val changed = a.indices.count { abs((a[it].toInt() and 255) - (b[it].toInt() and 255)) > 4 }
             report.appendText("$label maximum=$maximum changedAbove4=$changed/${a.size}\n")
+            if (softwareFallback) assertTrue("Software fallback must preserve the readable YUV color conversion: $label max=$maximum", maximum <= 4)
         }
         seek()
-        val glLabel = if (softwareGl) "software-gl" else "hardware-gl"
-        val gl = capture(glLabel)
-        compare("GL repeat", gl, capture("$glLabel-repeat"))
+        val initialLabel = if (softwareFallback) "software-fallback-planes" else "hardware-gl"
+        val initial = capture(initialLabel)
+        compare("initial path repeat", initial, capture("$initialLabel-repeat"))
         val project = File(folder, "same-video.aurea")
         assertEquals(0, engine.saveProject(project.absolutePath))
         engine.useReadableVideoPlanes()
@@ -166,7 +167,7 @@ class DiagnosticVideoPathColorDeviceTest {
         seek()
         val software = capture("software-planar")
         compare("software repeat", software, capture("software-planar-repeat"))
-        compare("GL versus software planar", gl, software)
-        report.appendText("DIAGNOSTIC COMPLETE; no color tolerance replaces soak assertions\n")
+        compare("initial path versus software planar", initial, software)
+        report.appendText("COMPLETE; forced software fallback enforces max channel difference <=4; native decoder log records the selected reader path\n")
     }
 }

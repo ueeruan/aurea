@@ -661,6 +661,7 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
 
         if (timers) cmds.end_timer();
         cmds.end_label();
+        if (!cmds.finish_pass().ok()) return;
     }
 
     for (const PlannedBarrier& pb : finalBarriers_) {

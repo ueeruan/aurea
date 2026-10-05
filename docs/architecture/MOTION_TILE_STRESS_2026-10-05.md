@@ -231,6 +231,7 @@ Diagnósticos posteriores, no mesmo APK com aposentadoria por fence:
 | Oito objetos com sombras desativadas e blur ativo | Bloqueio ao iniciar reprodução |
 | Uma primitiva com blur, sete objetos substituídos por formas 2D | Passou reprodução, seeks, trim, reabertura e captura |
 | Oito objetos com blur colocados contíguos no mesmo grupo 3D | Bloqueio ao iniciar reprodução, contiguidade verificada antes/depois da pré-comp |
+| Carga original com medições GPU desativadas por seletor diagnóstico | Bloqueio em apresentação; log confirmou timestamps desligados |
 
 Esses testes não incluem as exportações de aceitação. A variante Low também
 altera IBL/bloom e não deve ser interpretada como alteração isolada de MSAA.
@@ -238,6 +239,13 @@ Os resultados apontam para a carga de vários objetos 3D com Motion Blur; a
 última variante mostra que vários grupos separados não são necessários para
 o bloqueio. A auditoria de ponteiros e a validação GPU no Windows não
 reproduziram o bloqueio do Adreno do aparelho.
+
+O último diagnóstico foi coletado com 73 threads: renderização aguardando
+`Fence.waitForever` dentro de `Surface.queueBuffer`/`vkQueuePresentKHR`,
+decodificadores, proxy e jobs aguardando trabalho, sem produtor GL preso em
+`glFinish` nessa amostra. As duas últimas amostras de atividade GPU foram
+zero. O aplicativo de testes acabou reportando ANR. Isso exclui timestamps
+como condição necessária; ainda não identifica o passe causador.
 
 ## Captura completa e aparência após reabrir
 
@@ -320,8 +328,24 @@ verificações, incluindo liberação de imports em reload, suspensão, pressão
 crítica e novo projeto após drenar a GPU. UploadLifetimeGpu,
 MemoryPressureGpu, VulkanDescriptorsGpu, CaptureResources e CaptureProxyGpu
 também passaram: total desta rodada 20 testes/415 verificações, sem erros
-VUID/SyncVal registrados. O teste AHardwareBuffer real foi compilado para
-Android separadamente; sua execução física permanece pendente nesta etapa.
+VUID/SyncVal registrados. O teste AHardwareBuffer real também passou no
+Adreno do Android: 1 teste/36 verificações, incluindo importação/reuso,
+retenção até fence, reimportação com novo handle e igualdade dos pixels
+RGBA. A camada oficial de validação estava indisponível nesse executável;
+o resultado comprova a execução e as verificações, não uma rodada de
+validação Vulkan oficial no aparelho.
+
+A carga padrão de 48 camadas passou no APK `external-trim` (SHA-256
+`53D4DE7D2D443E8EC18C8F49C5BDB564DE3FD8D52CE78AAF260186260F737436`):
+326,314 s totais, 266,305 s de exercício útil, 11 ciclos/edições, 41 capturas,
+sete reaberturas, sete recriações reais de superfície e 76 amostras de
+reprodução. Todos os sete pares antes/depois tiveram diferença zero e
+sentinelas de vídeo presentes. PSS na retenção inicial/final:
+556,91/555,87 MB; memória nativa: 50,27/49,77 MB; reserva GPU:
+150,99/150,99 MB. Sem crash ou ANR, com pico de 501 ms do watchdog da
+interface na primeira recriação de superfície. Essa aprovação não se
+estende ao cenário de 96 camadas, ainda em investigação, nem significa
+reprodução em tempo real de toda a carga em Full HD.
 
 O teste GPU de 96 camadas no Windows percorreu 18 quadros reais: três
 disposições de objetos, duas resoluções e três posições da timeline, com
@@ -331,6 +355,78 @@ VUID/SyncVal. No quadro 45 em 960×540, oito grupos separados produziram
 804 passes/893 draws/16 amostras. Os três arranjos chegaram ao limite de
 512 medições GPU. Isso não reproduz nem comprova resolução do bloqueio no
 Adreno do aparelho Android.
+
+O executável nativo de diagnóstico no Adreno reproduziu a falha sem
+superfície de apresentação. Oito grupos 3D separados passaram os três
+quadros de 320×180, mas a submissão de 960×540/quadro 0 não concluiu a
+espera GPU em 90 s (`adreno_drawctxt_wait`, sem progresso nas amostras
+posteriores). O mesmo projeto sintético com oito esferas contíguas passou
+os seis quadros nas duas resoluções (159 verificações); com uma esfera,
+também passou (151 verificações). Em 960×540, os tempos GPU do grupo único
+ficaram aproximadamente em 1,0–1,1 s e os da esfera única em 420–440 ms.
+O caso separado e o contíguo usam cerca de 299/297 KB de uniforms: ambos
+cruzam o anel inicial de 256 KiB, o que exclui esse limiar como explicação
+suficiente. A versão de teste na interface com grupo contíguo continua
+tendo falhado; sua resolução efetiva não foi registrada e os resultados
+não devem ser tratados como equivalentes.
+
+Um protótipo isolado passou a gravar blocos de 128 passes em command buffers
+primários separados, mantendo uma única submissão e o mesmo fence por quadro.
+O caso de oito grupos separados no Adreno passou os seis quadros de
+320×180/960×540 (164 verificações), incluindo 1.344 passes, 1.440 draws e
+128 amostras no quadro 45, em aproximadamente 1,48 s de GPU. Não houve
+redução de efeitos, resolução ou Motion Blur. Os seis arquivos RGBA16F foram
+idênticos às variantes de submissões separadas e blocos de 256 passes.
+O controle contíguo também conservou todos os pixels em relação ao buffer
+único. No Windows, três variantes executaram 18 quadros cada; as 36
+comparações com o baseline foram idênticas e não houve erros de validação
+SyncVal. Isso valida o protótipo; a integração no app e as exportações de
+96 camadas ainda precisam ser executadas.
+
+## Cor no fallback de decodificação Android
+
+Uma reprodução isolada confirmou a conversão divergente no caminho
+software + EGL/GL: o decoder `c2.android` declarava BT.709 limitada, mas o
+FBO antes de Vulkan/efeitos continha ciano (23,255,254), amarelo (254,255,10)
+e azul (3,0,245), compatíveis com uma matriz BT.601 aplicada a esse conteúdo.
+A comparação com planos de software teve máximo 34/255 e 77.666 canais
+divergentes sem efeitos; com Motion Tile/Gaussian/Glow, máximo 34 e 53.127
+canais. Repetições de cada caminho foram idênticas.
+
+O leitor de saída agora é criado após identificar o decoder. Fallbacks de
+software usam planos YUV legíveis e a conversão compartilhada com os dados
+de cor do vídeo. O caminho de hardware permanece acelerado. Cada tentativa
+de configuração recebe uma fila própria. As duas regressões passaram no
+Android físico com diferença máxima zero, inclusive com a cadeia de
+efeitos; logs confirmaram software/planos CPU e a mesma metadata de cor.
+A bateria de quatro fontes simultâneas com 12 reaberturas passou no APK
+`6F5443D299E200F1C36FE425EC966A7FAAABE8E354EF59C7675CFAF90D7075E1`
+com fallback de software forçado: 38,99 s, 204 comparações e diferença
+máxima zero.
+
+A mesma bateria pelo caminho padrão revelou um segundo caso ainda aberto:
+73 das 204 comparações excederam quatro níveis, com máximo 34. Os quatro
+decodificadores originais eram hardware Qualcomm/GL; os decodificadores de
+software registrados já usavam planos CPU. A distribuição dos quadrantes
+com cores divergentes mudou após reabrir. Portanto, a correção do fallback
+de software não comprova fidelidade do caminho acelerado. O teste inicialmente
+apenas registrava diferenças no modo padrão e foi corrigido para reprovar
+também nesse modo, preservando todos os pares antes da asserção final.
+
+A captura diagnóstica confirmou a divergência já no FBO GL do decoder de
+hardware, antes de Vulkan/efeitos. Com a mesma metadata e dataspace 260,
+buffers Qualcomm alternavam ciano (1,255,255)/azul (1,0,255) e
+ciano (23,255,254)/azul (3,0,245). O segundo conjunto corresponde ao desvio
+de matriz observado anteriormente. A conversão explícita de YUV cru com a
+função de cor compartilhada está sendo implementada para eliminar essa
+dependência da conversão automática do driver.
+
+No iOS, a auditoria estática verificou que a saída YUV conserva metadata e
+entra na conversão compartilhada; apenas buffers RGB entram na importação
+opaca. Não foi encontrado o mesmo desvio EGL, específico do Android. Essa
+auditoria não comprova execução em iPhone. Em Android 26/27, um decoder
+implícito por MIME sem nome não pode ser identificado pela API28 de nomes;
+o fallback explícito por nome é protegido em todas as APIs suportadas.
 
 ## Compilação iOS intermediária
 
@@ -350,6 +446,16 @@ Os testes continuam exigindo alteração de valores e desfazer. A verificação
 das capturas também foi atualizada para a versão 6 dos dados de ambiente
 HDR; passou ao reaplicar os PNGs reais da CI, incluindo três mutações
 rejeitadas. Essas correções exigem nova execução nativa na CI final.
+
+O checkpoint seguinte, `499d8354e66d7b81bda25da7c0d63ecedda87bf8`, foi
+compilado no run 37267340744: o job de IPA passou em 13 min 37 s, incluindo
+Foundation, Metal e validação do pacote. O arquivo intermediário tem
+51.727.040 bytes e SHA-256
+`dc401da551ff8bcd33da9cfb9147cc2cdf75045a6a6132f3ce9e8fde50181082`.
+As capturas reais do simulador e a validação de seus fixtures passaram em
+7 min 10 s; a suíte de gestos ainda estava em andamento neste registro.
+Esse checkpoint inclui a liberação de imports externos e as correções de
+captura, mas antecede o ajuste Android de cor do decoder de software.
 
 ## Conteúdo acumulado dos pacotes
 

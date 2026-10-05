@@ -280,6 +280,78 @@ AUREA_TEST(FrameGraph, PassWithoutReaderIsCulled) {
     AUREA_CHECK_EQ(f.graph.stats().transientTextures, static_cast<u32>(1));
 }
 
+AUREA_TEST(FrameGraph, RecordingFailureStopsLaterPassesAndOutputTransitions) {
+    struct RecordingCommands final : CommandList {
+        u32 failAt = 0, completed = 0, passDepth = 0, timerDepth = 0, labelDepth = 0;
+        u32 presentTransitions = 0, commandsAfterFailure = 0;
+        bool failed = false, safeBoundaries = true;
+        void observe() { if (failed) ++commandsAfterFailure; }
+        void barrier(TextureHandle, ResourceState state, bool) noexcept override {
+            observe(); if (state == ResourceState::Present) ++presentTransitions;
+        }
+        void begin_render_pass(const RenderPassBegin&) noexcept override { observe(); ++passDepth; }
+        void end_render_pass() noexcept override { observe(); --passDepth; }
+        void begin_timer(const char*) noexcept override { observe(); ++timerDepth; }
+        void end_timer() noexcept override { observe(); --timerDepth; }
+        void begin_label(const char*) noexcept override { observe(); ++labelDepth; }
+        void end_label() noexcept override { observe(); --labelDepth; }
+        Status finish_pass() noexcept override {
+            observe();
+            safeBoundaries &= passDepth == 0 && timerDepth == 0 && labelDepth == 0;
+            failed = ++completed == failAt;
+            return failed ? Status{Errc::OutOfMemory, "injected recording failure"} : OkStatus;
+        }
+        void bind_pipeline(PipelineHandle) noexcept override { observe(); }
+        void bind_texture(u32, TextureHandle, SamplerHandle) noexcept override { observe(); }
+        void bind_storage_image(u32, TextureHandle) noexcept override { observe(); }
+        void bind_storage_buffer(BufferHandle) noexcept override { observe(); }
+        void set_uniforms(const void*, u32) noexcept override { observe(); }
+        void push_constants(const void*, u32) noexcept override { observe(); }
+        void set_viewport(f32, f32, f32, f32) noexcept override { observe(); }
+        void set_scissor(i32, i32, u32, u32) noexcept override { observe(); }
+        void draw(u32, u32, u32) noexcept override { observe(); }
+        void bind_vertex_buffer(u32, BufferHandle, u64) noexcept override { observe(); }
+        void bind_index_buffer(BufferHandle, u64, IndexType) noexcept override { observe(); }
+        void draw_indexed(u32, u32, u32, i32, u32) noexcept override { observe(); }
+        void dispatch(u32, u32, u32) noexcept override { observe(); }
+        void copy_texture(TextureHandle, TextureHandle) noexcept override { observe(); }
+        void copy_texture_to_buffer(TextureHandle, BufferHandle) noexcept override { observe(); }
+    };
+    for (bool timers : {false, true}) for (u32 failAt : {0u, 1u, 3u, 5u}) {
+        GraphFixture fixture;
+        RecordingCommands commands;
+        commands.failAt = failAt;
+        std::vector<u32> visited;
+        FGTexture previous;
+        for (u32 i = 0; i < 5; ++i) {
+            const auto target = fixture.graph.create_texture("checkpoint target", rt(8, 8));
+            const auto pass = fixture.graph.add_raster_pass("checkpoint pass", PassStage::Effects,
+                target, LoadOp::Clear, {}, [&, i](PassContext& context) {
+                    visited.push_back(i);
+                    context.cmds.draw(3);
+                });
+            if (previous.valid()) fixture.graph.read(pass, previous);
+            previous = target;
+        }
+        fixture.graph.set_output(previous, ResourceState::Present);
+        FrameBegin frame;
+        AUREA_CHECK(fixture.backend.begin_frame(frame).ok());
+        fixture.pool.begin_frame(fixture.backend, frame.frameNumber);
+        AUREA_CHECK(fixture.graph.compile(fixture.pool).ok());
+        fixture.graph.execute(commands, timers);
+        const u32 expected = failAt ? failAt : 5;
+        AUREA_CHECK_EQ(visited.size(), static_cast<usize>(expected));
+        for (u32 i = 0; i < visited.size(); ++i) AUREA_CHECK_EQ(visited[i], i);
+        AUREA_CHECK_EQ(commands.completed, expected);
+        AUREA_CHECK(commands.safeBoundaries);
+        AUREA_CHECK_EQ(commands.commandsAfterFailure, 0u);
+        AUREA_CHECK_EQ(commands.presentTransitions, failAt ? 0u : 1u);
+        fixture.graph.release(fixture.pool);
+        fixture.pool.end_frame();
+        AUREA_CHECK(fixture.backend.end_frame().ok());
+    }
+}
+
 AUREA_TEST(FrameGraph, TextureMemoryIsReusedWhenLifetimesDoNotOverlap) {
     // A textura A morre no passe 2; a mesma memória vira a textura C no 3.
     GraphFixture g;

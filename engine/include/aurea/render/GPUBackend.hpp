@@ -564,6 +564,11 @@ public:
     /// Rótulo para RenderDoc/validação. Sem custo quando não há depurador.
     virtual void begin_label(const char* label) noexcept = 0;
     virtual void end_label() noexcept = 0;
+
+    /// Safe boundary after a complete graph pass (outside render passes,
+    /// timers and labels). Backends may finish a native command buffer here;
+    /// all buffers still belong to one frame and complete on its single fence.
+    [[nodiscard]] virtual Status finish_pass() noexcept { return OkStatus; }
 };
 
 // -----------------------------------------------------------------------------

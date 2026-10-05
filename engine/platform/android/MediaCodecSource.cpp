@@ -302,10 +302,11 @@ const char* software_decoder_for(const char* mime) {
 class MediaCodecDecoder final : public VideoDecoderBackend {
 public:
     MediaCodecDecoder(SourceFd fd, bool zeroCopy, bool thumbnail, bool softwareOnly, bool driverGl = false,
-                      bool diagnosticSoftwareGl = false)
+                      bool diagnosticSoftwareFallback = false, bool diagnosticVideoPixels = false)
         : fd_(std::move(fd)), zeroCopy_((zeroCopy || driverGl) && !softwareOnly), thumbnail_(thumbnail),
           softwareFallback_(softwareOnly), glPath_(driverGl && !softwareOnly && !thumbnail),
-          diagnosticSoftwareGl_(diagnosticSoftwareGl && driverGl && !softwareOnly && !thumbnail) {}
+          diagnosticSoftwareFallback_(diagnosticSoftwareFallback && !softwareOnly && !thumbnail),
+          diagnosticVideoPixels_(diagnosticVideoPixels && !thumbnail) {}
     ~MediaCodecDecoder() override {
         destroy_codec();
         bridge_.reset();
@@ -315,7 +316,7 @@ public:
         if (glPath_) {
             // Caminho GL do driver (o do app antigo): contexto EGL próprio. Sem
             // ele (extensão ausente, EGL recusado), planos pela CPU desde já.
-            bridge_ = GlVideoBridge::create();
+            bridge_ = GlVideoBridge::create(diagnosticVideoPixels_);
             if (!bridge_) {
                 glPath_ = false;
                 zeroCopy_ = false;
@@ -659,27 +660,18 @@ private:
         if (info_.codedWidth == 0) fill_stream_info(ex_, format, mime, info_);
         AMediaExtractor_seekTo(ex_, 0, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
 
-        if (!reader_) {
-            const u32 w = info_.codedWidth ? info_.codedWidth : 16;
-            const u32 h = info_.codedHeight ? info_.codedHeight : 16;
-            if (const Status s = create_reader(w, h); !s.ok()) {
-                AMediaFormat_delete(format);
-                destroy_codec();
-                return s;
-            }
-        }
-
         // A rotação do container é aplicada no shader. Deixá-la no formato faria
         // o codec marcar o buffer com uma transformação que o AImage não expõe.
         AMediaFormat_setInt32(format, kKeyRotation, 0);
         AMediaFormat_setInt32(format, kKeyPriority, thumbnail_ ? 1 : 0);
 
         Status result = OkStatus;
+        Status readerStatus = OkStatus;
         // SIGSEGV in vendor planes cannot be caught and retried. In software
         // mode do not create a decoder by MIME, even when no AOSP codec exists.
-        if (!softwareFallback_ && !diagnosticSoftwareGl_) {
+        if (!softwareFallback_ && !diagnosticSoftwareFallback_) {
             codec_ = AMediaCodec_createDecoderByType(mime);
-            if (codec_ && !configure_and_start(format)) {
+            if (codec_ && !configure_and_start(format, readerStatus)) {
                 AMediaCodec_delete(codec_);
                 codec_ = nullptr;
             }
@@ -689,14 +681,15 @@ private:
                 const char* sw = android::software_video_decoder(mime, legacy);
                 if (!sw) continue;
                 codec_ = AMediaCodec_createCodecByName(sw);
-                if (codec_ && configure_and_start(format)) {
+                if (codec_ && configure_and_start(format, readerStatus, true)) {
                     softwareFallback_ = true;
                     break;
                 }
                 if (codec_) AMediaCodec_delete(codec_);
                 codec_ = nullptr;
             }
-            if (!codec_) result = Status{Errc::UnsupportedCodec, "nenhum decoder seguro aceitou o video"};
+            if (!codec_) result = readerStatus.ok()
+                ? Status{Errc::UnsupportedCodec, "nenhum decoder seguro aceitou o video"} : readerStatus;
         }
         AMediaFormat_delete(format);
         if (!result.ok()) {
@@ -704,6 +697,7 @@ private:
             return result;
         }
         codec_name(codec_, info_.decoderName, sizeof(info_.decoderName), info_.hardwareDecoder);
+        if (softwareFallback_) info_.hardwareDecoder = false;
         // gfxstream/goldfish has a single outstanding surface output slot.
         if (std::strstr(info_.decoderName, "goldfish")) legacyLookahead_ = true;
         info_.preciseFrameTiming = true;
@@ -715,7 +709,28 @@ private:
         return OkStatus;
     }
 
-    bool configure_and_start(AMediaFormat* format) {
+    bool configure_and_start(AMediaFormat* format, Status& readerStatus, bool knownSoftware = false) {
+        char selectedName[128]{};
+        bool hardware = true;
+        codec_name(codec_, selectedName, sizeof(selectedName), hardware);
+        if (knownSoftware || !hardware) {
+            // Select the reader AFTER the codec: a MIME lookup can itself
+            // return an AOSP software decoder. Its PRIVATE/EGL image may be
+            // sampled with BT.601 even when the stream declares BT.709.
+            // Read YUV planes and let the shared renderer use stream color
+            // metadata instead. Hardware codecs retain their selected path.
+            softwareFallback_ = true;
+            glPath_ = false;
+            zeroCopy_ = false;
+            bridge_.reset(); // outstanding RGBA frames own their targets
+        }
+        // A failed configure/start attempt must not lend its output queue to
+        // the next codec. Existing frames retain their own ReaderState.
+        reader_.reset();
+        const u32 w = info_.codedWidth ? info_.codedWidth : 16;
+        const u32 h = info_.codedHeight ? info_.codedHeight : 16;
+        readerStatus = create_reader(w, h);
+        if (!readerStatus.ok()) return false;
         if (AMediaCodec_configure(codec_, format, reader_->window, nullptr, 0) != AMEDIA_OK) return false;
         return AMediaCodec_start(codec_) == AMEDIA_OK;
     }
@@ -806,9 +821,9 @@ private:
         // A cor do bitstream (VUI) é mais confiável que a do container.
         info_.color = color_from(f, static_cast<u32>(w > 0 ? w : 0), static_cast<u32>(h > 0 ? h : 0),
                                  info_.color.bitDepth, &info_.color);
-        if (diagnosticSoftwareGl_) {
-            AUREA_LOG_INFO("diagnostico software GL: codec=%s standard=%d range=%d transfer=%d dataspace=%d tamanho=%dx%d",
-                          info_.decoderName, get_i32(f, kKeyColorStandard, 0), get_i32(f, kKeyColorRange, 0),
+        if (diagnosticSoftwareFallback_ || diagnosticVideoPixels_) {
+            AUREA_LOG_INFO("diagnostico formato video: codec=%s path=%s standard=%d range=%d transfer=%d dataspace=%d tamanho=%dx%d",
+                          info_.decoderName, glPath_ ? "GL" : "planos", get_i32(f, kKeyColorStandard, 0), get_i32(f, kKeyColorRange, 0),
                           get_i32(f, kKeyColorTransfer, 0), get_i32(f, "android._dataspace", 0), w, h);
         }
         AMediaFormat_delete(f);
@@ -884,8 +899,24 @@ private:
             return Status{Errc::UnsupportedFormat, "crop fora do buffer decodificado"};
         }
         std::shared_ptr<const GlVideoBridge::Target> target;
-        const Status s = bridge_->convert(hb, quad, target);
+        GlVideoBridge::DiagnosticPixels pixels;
+        const bool probe = diagnosticVideoPixels_ && pts == 1'500'000;
+        const Status s = bridge_->convert(hb, quad, info_.color, target, probe ? &pixels : nullptr);
         if (s.code() == Errc::BudgetExceeded) return s;
+        if (probe && s.ok()) {
+            // AImage dataspace is public from API34 only. Resolve it lazily so
+            // the API26 minimum and API33 device remain supported; -1 = unknown.
+            using GetDataSpace = media_status_t (*)(const AImage*, int32_t*);
+            static const auto getDataSpace = reinterpret_cast<GetDataSpace>(dlsym(RTLD_DEFAULT, "AImage_getDataSpace"));
+            int32_t dataSpace = -1;
+            if (getDataSpace && getDataSpace(image, &dataSpace) != AMEDIA_OK) dataSpace = -1;
+            const auto* p = pixels.rgba;
+            AUREA_LOG_INFO("diagnostico FBO RGBA: codec=%s pts=%lld source=%p target=%p size=%ux%u matrix=%u range=%u transfer=%u dataspace=%d valid=%d pixels=%u,%u,%u,%u|%u,%u,%u,%u|%u,%u,%u,%u|%u,%u,%u,%u",
+                info_.decoderName, static_cast<long long>(pts), static_cast<void*>(hb), static_cast<void*>(target->buffer),
+                quad.width, quad.height, static_cast<unsigned>(info_.color.matrix), info_.color.fullRange ? 1u : 0u,
+                static_cast<unsigned>(info_.color.transfer), dataSpace, pixels.valid ? 1 : 0,
+                p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8],p[9],p[10],p[11],p[12],p[13],p[14],p[15]);
+        }
         AImage_delete(image);
         if (!s.ok()) return s;
         auto* f = new (std::nothrow) GlFrame();
@@ -1026,7 +1057,8 @@ private:
     bool softwareFallback_ = false;
     /// Caminho GL do driver (padrão): o AImage PRIVATE vira RGBA num passe GL.
     bool glPath_ = false;
-    bool diagnosticSoftwareGl_ = false;
+    bool diagnosticSoftwareFallback_ = false;
+    bool diagnosticVideoPixels_ = false;
     std::unique_ptr<GlVideoBridge> bridge_;
     i64 nextDeliveryUs_ = 0;
     i64 keyframeUs_ = 2'000'000;
@@ -1287,7 +1319,7 @@ std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& 
     const bool zeroCopy = priority != MediaPriority::Thumbnail && zeroCopy_.load();
     auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy, priority == MediaPriority::Thumbnail,
                                                        path == VideoPath::SoftwarePlanes, path == VideoPath::DriverGl,
-                                                       diagnosticSoftwareGl_.load());
+                                                       diagnosticSoftwareFallback_.load(), diagnosticVideoPixels_.load());
     if (const Status s = decoder->open(); !s.ok()) {
         AUREA_LOG_ERROR("decoder nao abriu: %s", s.message().data());
         return nullptr;

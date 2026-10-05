@@ -243,6 +243,14 @@ target_compile_definitions(aurea_core
 )
 
 if(AUREA_PLATFORM_ANDROID)
+    # Keep the GL decoder bridge's color math byte-for-byte identical to the
+    # shared shaders. Both aurea and aurea_media_probe inherit this include
+    # directory through aurea_core. Regenerate when the source GLSL changes.
+    set(_video_color_glsl "${CMAKE_CURRENT_SOURCE_DIR}/shaders/common/color.glsl")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_video_color_glsl}")
+    file(READ "${_video_color_glsl}" AUREA_SHARED_COLOR_GLSL)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VideoColorGlsl.hpp.in"
+        "${AUREA_GENERATED_INCLUDE}/aurea/shaders/VideoColorGlsl.hpp" @ONLY)
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_ANDROID=1)
 elseif(AUREA_PLATFORM_IOS)
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_IOS=1)
@@ -392,7 +400,11 @@ if(AUREA_PLATFORM_ANDROID)
         add_executable(aurea_media_probe tests/android_media_probe.cpp platform/android/MediaCodecSource.cpp
                        platform/android/GlVideoBridge.cpp)
         target_include_directories(aurea_media_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
-        target_link_libraries(aurea_media_probe PRIVATE aurea_core android log mediandk EGL GLESv2)
+        target_link_libraries(aurea_media_probe PRIVATE aurea_core android log mediandk EGL GLESv3)
+        add_executable(aurea_gl_video_color_probe tests/android_gl_video_color_probe.cpp
+                       platform/android/GlVideoBridge.cpp)
+        target_include_directories(aurea_gl_video_color_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
+        target_link_libraries(aurea_gl_video_color_probe PRIVATE aurea_core android log dl EGL GLESv3)
         add_executable(aurea_export_probe tests/android_export_probe.cpp platform/android/MediaCodecExport.cpp)
         target_include_directories(aurea_export_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
         target_link_libraries(aurea_export_probe PRIVATE aurea_core android log mediandk)
@@ -407,8 +419,8 @@ if(AUREA_PLATFORM_ANDROID)
     target_include_directories(aurea PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
     # `mediandk` é o MediaCodec/MediaExtractor/ImageReader: sem ele não há
     # decode de hardware. `android` dá ANativeWindow e AHardwareBuffer.
-    # EGL + GLESv2: o caminho GL do driver do vídeo (GlVideoBridge).
-    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk aaudio EGL GLESv2)
+    # EGL + GLESv3: amostragem YUV explícita no caminho GL do vídeo.
+    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk aaudio EGL GLESv3)
     if(AUREA_GPU_GLES)
         target_link_libraries(aurea PRIVATE aurea_gles)
         target_compile_definitions(aurea PRIVATE AUREA_GPU_GLES=1)

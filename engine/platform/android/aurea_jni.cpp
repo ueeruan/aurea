@@ -463,14 +463,22 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     const bool rgbaImport = gpu->capabilities().externalMemoryHardwareBuffer && !emulatorVideo;
     c->media.set_driver_gl(rgbaImport);
     c->media.set_zero_copy(false);
-    bool diagnosticSoftwareGl = false;
+    bool diagnosticSoftwareFallback = false;
     if (debug == JNI_TRUE) {
-        char softwareGl[PROP_VALUE_MAX]{};
-        __system_property_get("debug.aurea.software_gl", softwareGl);
-        diagnosticSoftwareGl = std::strcmp(softwareGl, "1") == 0;
+        char softwareFallback[PROP_VALUE_MAX]{};
+        __system_property_get("debug.aurea.force_sw_fallback", softwareFallback);
+        diagnosticSoftwareFallback = std::strcmp(softwareFallback, "1") == 0;
     }
-    c->media.set_diagnostic_software_gl(diagnosticSoftwareGl);
-    if (diagnosticSoftwareGl) AUREA_LOG_INFO("diagnostico: decoder software forcado preservando GL/PRIVATE");
+    c->media.set_diagnostic_software_fallback(diagnosticSoftwareFallback);
+    if (diagnosticSoftwareFallback) AUREA_LOG_INFO("diagnostico: fallback software forcado com selecao de saida de producao");
+    bool diagnosticVideoPixels = false;
+    if (debug == JNI_TRUE) {
+        char videoPixels[PROP_VALUE_MAX]{};
+        __system_property_get("debug.aurea.video_pixels", videoPixels);
+        diagnosticVideoPixels = std::strcmp(videoPixels, "1") == 0;
+    }
+    c->media.set_diagnostic_video_pixels(diagnosticVideoPixels);
+    if (diagnosticVideoPixels) AUREA_LOG_INFO("diagnostico: pixels do FBO GL observados em PTS 1500000");
     // Sem o GL (backend GLES, sem importação): a regra de antes — Samsung no
     // decoder de software, o resto em planos pela CPU.
     c->media.set_software_only(emulatorVideo || (!rgbaImport && android::needs_software_video(manufacturer, std::atoi(sdk))));

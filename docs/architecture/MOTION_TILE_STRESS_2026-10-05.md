@@ -590,6 +590,20 @@ GPU pendente após exportação, que exige recompilação nativa.
 
 ## Conteúdo acumulado dos pacotes
 
+A primeira repetição sustentada de 48 camadas no APK de 64 passes passou
+nas verificações visuais e de interação, mas falhou no limite de reserva GPU
+ao final: 150.994.944 → 265.289.728 bytes, com PSS e heap nativo menores.
+A investigação confirmou que `fill_perf` copiava a última prévia e
+`trim_memory` não republicava seus contadores, embora o log registrasse a
+liberação de 236.988 KiB. Os valores não eram uma leitura pós-trim atual.
+O motor compartilhado agora publica somente `gpuMemoryBytes`,
+`gpuReservedBytes` e `gpuAllocations` após o segundo `wait_idle`, sob os locks
+já usados pela telemetria; nenhuma nova renderização é provocada. A asserção
+do harness permanece intacta. A regressão host compara com os contadores
+do backend após o drain e confirma que todos os demais bytes do PerfPOD e
+o número de submissões permanecem iguais. Rodada: 12 testes/322 verificações,
+zero falhas ou erros de Vulkan/SyncVal. A repetição nativa ainda será registrada.
+
 A revisão independente do gate após exportação confirmou a retenção dos
 quadros de vídeo até a fence, incluindo ReaderState/AImage e Pool/AHB; não
 foi necessário alterar o fechamento das camadas. Encontrou uma falha Metal:

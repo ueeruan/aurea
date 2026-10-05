@@ -61,6 +61,7 @@ public:
     std::function<Status(u64, u64)> beforeWaitFrame;
     std::function<Status(TextureHandle, const void*, u32)> beforeTextureUpload;
     std::function<u32()> beforeTrimExternalImages;
+    std::function<GpuMemoryStats()> queryMemoryStats;
     std::atomic<u32> idleWaits{0};
     GPUCapabilities caps;
 
@@ -198,7 +199,7 @@ public:
     u32 read_gpu_timings(GpuTiming*, u32, f32*) noexcept override { return 0; }
     bool is_device_lost() const noexcept override { return deviceLost; }
     u32 frames_in_flight() const noexcept override { return 2; }
-    GpuMemoryStats memory_stats() const noexcept override { return {}; }
+    GpuMemoryStats memory_stats() const noexcept override { return queryMemoryStats ? queryMemoryStats() : GpuMemoryStats{}; }
     void save_pipeline_cache() noexcept override {}
 
     // --- CommandList -----------------------------------------------------------

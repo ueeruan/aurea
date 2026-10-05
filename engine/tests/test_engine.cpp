@@ -422,6 +422,61 @@ AUREA_TEST(Engine, SurfaceResizeDoesNotWaitForABlockedRenderAndUsesLatestSize) {
     e.shutdown();
 }
 
+AUREA_TEST(Engine, MemoryTrimPublishesDrainedGpuCountersWithoutRedrawing) {
+    auto* mock = new aurea::test::MockBackend();
+    Engine e;
+    auto cfg = headless_config(); cfg.backend = mock;
+    auto textureMemory = [&] {
+        GpuMemoryStats result;
+        for (usize i = 0; i < mock->textures.size(); ++i) {
+            if (!mock->textureAlive[i]) continue;
+            result.usedBytes += mock->textures[i].estimated_bytes();
+            ++result.allocationCount;
+        }
+        // Model allocator reservation separately from used bytes.
+        result.reservedBytes = ((result.usedBytes + 4095) / 4096) * 4096;
+        return result;
+    };
+    bool deferAccounting = false;
+    GpuMemoryStats drained;
+    mock->queryMemoryStats = [&] { return deferAccounting ? drained : textureMemory(); };
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(320, 240, 30., "memory accounting").ok());
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 320, 240).ok());
+    AUREA_CHECK(e.add_shape(0).ok());
+    AUREA_CHECK(e.render_frame(true).ok());
+    bridge::PerfPOD before{}, after{};
+    e.fill_perf(before);
+    AUREA_CHECK(before.gpuMemoryBytes > 0);
+    AUREA_CHECK(before.gpuAllocations > 0);
+    AUREA_CHECK(before.passesExecuted > 0);
+    AUREA_CHECK(before.physicalTextures > 0);
+    const u32 submissions = mock->framesSubmitted;
+    const u32 idleWaits = mock->idleWaits.load();
+    drained = textureMemory();
+    deferAccounting = true;
+    // Resource retirement is visible only after the GPU drain, as on Vulkan.
+    mock->beforeWaitIdle = [&] { drained = textureMemory(); };
+    (void)e.trim_memory(80);
+    e.fill_perf(after); // No new frame or UI/GPU synchronization is required.
+    const auto actual = mock->memory_stats();
+    AUREA_CHECK(mock->idleWaits.load() >= idleWaits + 2);
+    AUREA_CHECK_EQ(mock->framesSubmitted, submissions);
+    AUREA_CHECK(actual.usedBytes < before.gpuMemoryBytes);
+    AUREA_CHECK(actual.allocationCount < before.gpuAllocations);
+    AUREA_CHECK_EQ(after.gpuMemoryBytes, actual.usedBytes);
+    AUREA_CHECK_EQ(after.gpuReservedBytes, actual.reservedBytes);
+    AUREA_CHECK_EQ(after.gpuAllocations, actual.allocationCount);
+    before.gpuMemoryBytes = after.gpuMemoryBytes;
+    before.gpuReservedBytes = after.gpuReservedBytes;
+    before.gpuAllocations = after.gpuAllocations;
+    AUREA_CHECK(std::memcmp(&before, &after, sizeof(before)) == 0);
+    mock->beforeWaitIdle = {};
+    mock->queryMemoryStats = {};
+    e.shutdown();
+}
+
 AUREA_TEST(Engine, MemoryWarningReleasesHiddenImageUploadsAndRebuildsThem) {
     auto* mock = new aurea::test::MockBackend();
     Engine e;

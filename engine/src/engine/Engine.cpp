@@ -652,7 +652,17 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
             const u64 before = gpu_->memory_stats().usedBytes;
             const u32 textures = renderer_.trim_memory(st, frameCounter_);
             gpu_->wait_idle();   // roda as destruições adiadas até o fence
-            const u64 after = gpu_->memory_stats().usedBytes;
+            const GpuMemoryStats retained = gpu_->memory_stats();
+            const u64 after = retained.usedBytes;
+            // A paused editor may not draw again after trimming. Publish the
+            // drained allocation counters without making UI polling wait on
+            // the GPU or replacing the last frame's timings/graph statistics.
+            {
+                std::lock_guard<std::mutex> pl(perfMutex_);
+                perf_.gpuMemoryBytes = retained.usedBytes;
+                perf_.gpuReservedBytes = retained.reservedBytes;
+                perf_.gpuAllocations = retained.allocationCount;
+            }
             memory_.note_trim_freed(TrimStage::OldRenderCache, before > after ? before - after : 0);
             AUREA_LOG_INFO("memoria: renderer soltou %u texturas (%llu KB de GPU)", textures,
                            static_cast<unsigned long long>((before > after ? before - after : 0) / 1024));

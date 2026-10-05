@@ -37,6 +37,9 @@ EngineConfig headless_config() {
 
 } // namespace
 
+#include "ProjectLifecycle.inl"
+#include "CaptureResources.inl"
+
 AUREA_TEST(TextOutline, NonTextTargetPreservesAnchorAnimationAndProjectState) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

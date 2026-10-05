@@ -649,6 +649,14 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     if (deviceLost_) return Status{Errc::DeviceLost, "dispositivo perdido"};
     if (current_) return Status{Errc::InvalidState, "frame ja aberto"};
     collect_immediate();
+    // A finished slot may not be reused for two more frames. Retire its old
+    // allocations now, before the next frame allocates replacement targets.
+    for (u32 i = 0; i < framesInFlight_; ++i) {
+        FrameContext& done = frames_[i];
+        if (done.submitted && !done.deferred.empty()
+                && vkWaitForFences(device_, 1, &done.fence, VK_TRUE, 0) == VK_SUCCESS)
+            run_deferred(done);
+    }
 
     FrameContext& f = frames_[frameCursor_];
     if (f.submitted) {

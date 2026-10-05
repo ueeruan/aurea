@@ -1,16 +1,20 @@
 #if !defined(AUREA_TEST_GLES)
 namespace aurea::vk {
 struct ImmediateSubmissionTestAccess {
-    static Status wait_event(Backend& backend, VkEvent event) {
-        return backend.submit_immediate([](Backend& backend, VkCommandBuffer command, void* context) {
-            const auto event = *static_cast<VkEvent*>(context);
-            const auto waitEvents = reinterpret_cast<PFN_vkCmdWaitEvents>(
-                vkGetDeviceProcAddr(backend.device(), "vkCmdWaitEvents"));
-            waitEvents(command, 1, &event, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                            0, nullptr, 0, nullptr, 0, nullptr);
-        }, &event, 0);
+    static Status submit(Backend& backend) {
+        return backend.submit_immediate([](Backend&, VkCommandBuffer, void*) {}, nullptr, 0);
     }
+    static void collect(Backend& backend) { backend.collect_immediate(); }
     static usize pending(const Backend& backend) { return backend.pendingImmediate_.size(); }
+    static VkFence frame_fence(const Backend& backend, u64 frameNumber) {
+        for (u32 i = 0; i < backend.framesInFlight_; ++i)
+            if (backend.frames_[i].frameNumber == frameNumber) return backend.frames_[i].fence;
+        return VK_NULL_HANDLE;
+    }
+    static VkImage native_image(const Backend& backend, TextureHandle texture) {
+        const auto* object = backend.textures_.get(texture.id);
+        return object ? object->image : VK_NULL_HANDLE;
+    }
     static usize deferred(const Backend& backend) {
         usize count = 0;
         for (const auto& submission : backend.pendingImmediate_) count += submission.deferred.size();
@@ -23,36 +27,70 @@ struct ImmediateSubmissionTestAccess {
 };
 }
 
+namespace {
+// The command buffer, submission and fence are real Vulkan objects. Only the
+// CPU's observation of completion is delayed: a successful/timeout poll for one
+// chosen fence reports TIMEOUT until release(). Never block the GPU with an
+// unsignaled host event (vkSetEvent while its wait is pending is invalid), or
+// depend on GPU speed to hit the timeout. Tests run serially; other fences and
+// all Vulkan calls still go through the real validation/driver dispatch.
+struct DelayedFenceObservation {
+    PFN_vkWaitForFences original = vk::vkWaitForFences;
+    VkDevice device = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    inline static DelayedFenceObservation* active = nullptr;
+    explicit DelayedFenceObservation(VkDevice target) : device(target) {
+        active = this;
+        vk::vkWaitForFences = &wait;
+    }
+    ~DelayedFenceObservation() { release(); }
+    DelayedFenceObservation(const DelayedFenceObservation&) = delete;
+    DelayedFenceObservation& operator=(const DelayedFenceObservation&) = delete;
+    void release() {
+        if (active == this) {
+            vk::vkWaitForFences = original;
+            active = nullptr;
+        }
+    }
+    VkResult await_real_completion() const {
+        return fence ? original(device, 1, &fence, VK_TRUE, 1'000'000'000ull) : VK_ERROR_UNKNOWN;
+    }
+    static VKAPI_ATTR VkResult VKAPI_CALL wait(VkDevice device, u32 count, const VkFence* fences,
+                                               VkBool32 all, u64 timeout) {
+        auto& gate = *active;
+        const VkResult result = gate.original(device, count, fences, all, timeout);
+        if (device == gate.device && count == 1 && timeout == 0) {
+            if (!gate.fence) gate.fence = fences[0];
+            if (fences[0] == gate.fence && (result == VK_SUCCESS || result == VK_TIMEOUT)) return VK_TIMEOUT;
+        }
+        return result;
+    }
+};
+}
+
 AUREA_TEST(UploadLifetimeGpu, TimedOutSubmissionKeepsItsFenceAndDeferredResourcesUntilCompletion) {
     AUREA_REQUIRE_GPU();
     Gpu isolated;
     AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
     auto& backend = isolated.backend;
-    const auto createEvent = reinterpret_cast<PFN_vkCreateEvent>(vk::vkGetDeviceProcAddr(backend.device(), "vkCreateEvent"));
-    const auto setEvent = reinterpret_cast<PFN_vkSetEvent>(vk::vkGetDeviceProcAddr(backend.device(), "vkSetEvent"));
-    const auto destroyEvent = reinterpret_cast<PFN_vkDestroyEvent>(vk::vkGetDeviceProcAddr(backend.device(), "vkDestroyEvent"));
-    VkEventCreateInfo info{VK_STRUCTURE_TYPE_EVENT_CREATE_INFO};
-    VkEvent event = VK_NULL_HANDLE;
-    AUREA_CHECK_EQ(createEvent(backend.device(), &info, nullptr, &event), VK_SUCCESS);
-    if (!event) return;
-    // Poll one real blocked submission with a zero timeout, then signal it.
-    // It must remain valid and later complete, rather than destroy in-flight
-    // command memory as the old VK_TIMEOUT path did on a heavy export. Never
-    // hold the desktop GPU for seconds (which could trigger its watchdog).
-    const auto status = vk::ImmediateSubmissionTestAccess::wait_event(backend, event);
+    const u32 validationErrors = vk::Backend::validation_errors();
+    DelayedFenceObservation completion(backend.device());
+    const auto status = vk::ImmediateSubmissionTestAccess::submit(backend);
     AUREA_CHECK(status.code() == Errc::Timeout);
     AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::pending(backend), 1u);
     bool released = false;
     backend.defer_until_gpu_done([](void* flag) { *static_cast<bool*>(flag) = true; }, &released);
     AUREA_CHECK(!released);
     // More immediate work must apply backpressure instead of adding submissions.
-    AUREA_CHECK(vk::ImmediateSubmissionTestAccess::wait_event(backend, event).code() == Errc::Timeout);
+    AUREA_CHECK(vk::ImmediateSubmissionTestAccess::submit(backend).code() == Errc::Timeout);
     AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::pending(backend), 1u);
-    AUREA_CHECK_EQ(setEvent(backend.device(), event), VK_SUCCESS);
-    backend.wait_idle();
+    completion.release();
+    AUREA_CHECK_EQ(completion.await_real_completion(), VK_SUCCESS);
+    vk::ImmediateSubmissionTestAccess::collect(backend);
     AUREA_CHECK(released);
     AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::pending(backend), 0u);
-    destroyEvent(backend.device(), event, nullptr);
+    backend.wait_idle();
+    AUREA_CHECK_EQ(vk::Backend::validation_errors() - validationErrors, 0u);
 }
 
 AUREA_TEST(UploadLifetimeGpu, RejectedRetriesDoNotAllocateStagingAndOpenFrameUploadsStillWork) {
@@ -75,14 +113,9 @@ AUREA_TEST(UploadLifetimeGpu, RejectedRetriesDoNotAllocateStagingAndOpenFrameUpl
     std::vector<u8> pixels(bufferDesc.bytes, 173), readback(bufferDesc.bytes);
     const bool bufferNeedsStaging = vk::ImmediateSubmissionTestAccess::buffer_needs_staging(backend, *buffer);
     backend.wait_idle();
-    const auto createEvent = reinterpret_cast<PFN_vkCreateEvent>(vk::vkGetDeviceProcAddr(backend.device(), "vkCreateEvent"));
-    const auto setEvent = reinterpret_cast<PFN_vkSetEvent>(vk::vkGetDeviceProcAddr(backend.device(), "vkSetEvent"));
-    const auto destroyEvent = reinterpret_cast<PFN_vkDestroyEvent>(vk::vkGetDeviceProcAddr(backend.device(), "vkDestroyEvent"));
-    VkEventCreateInfo eventInfo{VK_STRUCTURE_TYPE_EVENT_CREATE_INFO};
-    VkEvent event = VK_NULL_HANDLE;
-    AUREA_CHECK_EQ(createEvent(backend.device(), &eventInfo, nullptr, &event), VK_SUCCESS);
-    if (!event) return;
-    AUREA_CHECK(vk::ImmediateSubmissionTestAccess::wait_event(backend, event).code() == Errc::Timeout);
+    const u32 validationErrors = vk::Backend::validation_errors();
+    DelayedFenceObservation completion(backend.device());
+    AUREA_CHECK(vk::ImmediateSubmissionTestAccess::submit(backend).code() == Errc::Timeout);
     const auto before = backend.memory_stats();
     const auto deferredBefore = vk::ImmediateSubmissionTestAccess::deferred(backend);
     u32 rejected = 0, writtenDirectly = 0;
@@ -100,8 +133,8 @@ AUREA_TEST(UploadLifetimeGpu, RejectedRetriesDoNotAllocateStagingAndOpenFrameUpl
     AUREA_CHECK_EQ(after.usedBytes, before.usedBytes);
     AUREA_CHECK_EQ(after.allocationCount, before.allocationCount);
     AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::deferred(backend), deferredBefore);
-    // The preceding submission may be blocked while valid uploads are recorded
-    // in a later frame. Queue ordering, not CPU waiting, protects those uploads.
+    // The preceding submission's completion is still unobserved while valid
+    // uploads are recorded in a later frame, without adding immediate staging.
     FrameBegin frame;
     const bool frameOpened = backend.begin_offscreen_frame(frame).ok();
     AUREA_CHECK(frameOpened);
@@ -110,8 +143,9 @@ AUREA_TEST(UploadLifetimeGpu, RejectedRetriesDoNotAllocateStagingAndOpenFrameUpl
         AUREA_CHECK(backend.upload_texture_level(*levelTexture, 0, 0, pixels.data(), pixels.size()).ok());
         AUREA_CHECK(backend.end_frame().ok());
     }
-    // Always release the event, including failed checks: no desktop GPU hang.
-    AUREA_CHECK_EQ(setEvent(backend.device(), event), VK_SUCCESS);
+    completion.release();
+    AUREA_CHECK_EQ(completion.await_real_completion(), VK_SUCCESS);
+    vk::ImmediateSubmissionTestAccess::collect(backend);
     backend.wait_idle();
     AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::pending(backend), 0u);
     if (frameOpened) {
@@ -120,10 +154,10 @@ AUREA_TEST(UploadLifetimeGpu, RejectedRetriesDoNotAllocateStagingAndOpenFrameUpl
         AUREA_CHECK(backend.read_texture(*levelTexture, readback.data(), 128 * 4).ok());
         AUREA_CHECK(readback == pixels);
     }
-    destroyEvent(backend.device(), event, nullptr);
     backend.destroy_buffer(*buffer);
     backend.destroy_texture(*texture);
     backend.destroy_texture(*levelTexture);
+    AUREA_CHECK_EQ(vk::Backend::validation_errors() - validationErrors, 0u);
 }
 #endif
 

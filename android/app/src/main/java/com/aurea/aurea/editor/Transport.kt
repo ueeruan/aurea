@@ -140,7 +140,7 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
         )
         if (compact) Box {
             ChromeButton(CupertinoGlyph.Ellipsis, stringResource(R.string.timeline_more), onClick = { more = true },
-                size = 22.dp, width = side, height = side)
+                size = 22.dp, width = side, height = side, modifier = Modifier.testTag("transport.more"))
             DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
                 if (tiny) DropdownMenuItem(text = { Text(stringResource(R.string.editor_refazer)) }, enabled = canRedo,
                     onClick = { more = false; store.redo() })
@@ -150,6 +150,9 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
                     onClick = { more = false; store.toggleMarker() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.editor_duplicar_camada_segure_copiar)) }, enabled = hasSelection,
                     onClick = { more = false; store.duplicateLayers() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.editor_copiar_colar)) },
+                    modifier = Modifier.testTag("transport.copyPaste"),
+                    onClick = { more = false; openSheet(store, ui, ShellSheet.CopyPaste) })
             }
         }
         ChromeButton(

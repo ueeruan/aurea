@@ -180,6 +180,30 @@ void Backend::destroy_texture_now(Texture& t) noexcept {
 }
 
 void Backend::destroy_texture(TextureHandle h) noexcept {
+    retire_texture(h, 0);
+}
+
+void Backend::retire_texture(TextureHandle h, u64 lastUsedFrame) noexcept {
+    // Pool eviction only concerns earlier frames. Attaching those releases to
+    // current_ kept whole obsolete Full-HD targets alive for another ring turn.
+    // Zero preserves ordinary conservative destruction for arbitrary callers.
+    const bool exactFrame = lastUsedFrame && lastUsedFrame <= frameNumber_;
+    FrameContext* releaseOn = nullptr;
+    if (exactFrame) for (u32 i = 0; i < framesInFlight_; ++i) {
+        FrameContext& frame = frames_[i];
+        if (frame.frameNumber != lastUsedFrame) continue;
+        if (&frame == current_) releaseOn = &frame;
+        else if (frame.submitted && !deviceLost_) {
+            const VkResult ready = vkWaitForFences(device_, 1, &frame.fence, VK_TRUE, 0);
+            if (ready != VK_SUCCESS && !note_device_lost(ready)) releaseOn = &frame;
+        }
+        break;
+    }
+    const auto retire = [&](void (*fn)(void*), void* context) {
+        if (!exactFrame) defer_until_gpu_done(fn, context);
+        else if (releaseOn) releaseOn->deferred.push_back(DeferredRelease{fn, context});
+        else fn(context); // the known frame completed or its ring slot was recycled
+    };
     Texture t;
     if (!textures_.remove(h.id, t)) return;
     // Framebuffers 3D (MSAA/MRT/resolve) que usavam esta textura saem junto.
@@ -188,7 +212,7 @@ void Backend::destroy_texture(TextureHandle h) noexcept {
         for (u64 id : it->ids) uses = uses || id == h.id;
         if (!uses) { ++it; continue; }
         struct Node { Backend* b; VkFramebuffer fb; };
-        defer_until_gpu_done([](void* p) {
+        retire([](void* p) {
             auto* n = static_cast<Node*>(p);
             vkDestroyFramebuffer(n->b->device(), n->fb, nullptr);
             delete n;
@@ -202,7 +226,7 @@ void Backend::destroy_texture(TextureHandle h) noexcept {
             for (auto it = other.depthFramebuffers.begin(); it != other.depthFramebuffers.end();) {
                 if (it->depth != h.id) { ++it; continue; }
                 struct Node { Backend* b; VkFramebuffer fb; };
-                defer_until_gpu_done([](void* p) {
+                retire([](void* p) {
                     auto* n = static_cast<Node*>(p);
                     vkDestroyFramebuffer(n->b->device(), n->fb, nullptr);
                     delete n;
@@ -213,7 +237,7 @@ void Backend::destroy_texture(TextureHandle h) noexcept {
     }
     if (t.external && t.nativeBuffer) importedByBuffer_.erase(t.nativeBuffer);
     auto* pending = new PendingTexture{this, std::move(t)};
-    defer_until_gpu_done([](void* p) {
+    retire([](void* p) {
         auto* node = static_cast<PendingTexture*>(p);
         node->backend->destroy_texture_now(node->texture);
         delete node;
@@ -1585,5 +1609,21 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
 }
 
 void Backend::release_external_image(TextureHandle imported) noexcept { destroy_texture(imported); }
+
+u32 Backend::trim_external_images() noexcept {
+    // Native imports do not appear in the allocator's ordinary texture budget.
+    // They still own an AHardwareBuffer reference and its full backing storage.
+    // Called between frames; removing the lookup never releases a submitted
+    // reader early because retirement is tied to that import's last GPU frame.
+    if (current_) return 0;
+    std::vector<std::pair<u64, u64>> imports;
+    imports.reserve(importedByBuffer_.size());
+    for (const auto& [buffer, id] : importedByBuffer_) {
+        const Texture* t = textures_.get(id);
+        if (t) imports.emplace_back(id, t->lastUsedFrame);
+    }
+    for (const auto& [id, frame] : imports) retire_texture(TextureHandle{id}, frame);
+    return static_cast<u32>(imports.size());
+}
 
 } // namespace aurea::vk

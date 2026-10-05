@@ -390,6 +390,16 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     if (!config.backend) { c->startupError = "Sem memoria para inicializar a GPU"; return JNI_FALSE; }
     config.backendConfig.enableValidation = debug == JNI_TRUE;
     config.backendConfig.enableGpuTimers = true;
+    // Device diagnostics only: isolate timestamp-query driver failures without
+    // changing the scene, effects, shutter samples or release configuration.
+    if (debug == JNI_TRUE) {
+        char gpuTimers[PROP_VALUE_MAX]{};
+        __system_property_get("debug.aurea.gpu_timers", gpuTimers);
+        if (std::strcmp(gpuTimers, "0") == 0) {
+            config.backendConfig.enableGpuTimers = false;
+            AUREA_LOG_INFO("diagnostico: timestamps de GPU desativados");
+        }
+    }
     config.cacheDirectory = to_string(env, cacheDir);
     config.documentsDirectory = to_string(env, documentsDir);
     config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
@@ -453,6 +463,14 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     const bool rgbaImport = gpu->capabilities().externalMemoryHardwareBuffer && !emulatorVideo;
     c->media.set_driver_gl(rgbaImport);
     c->media.set_zero_copy(false);
+    bool diagnosticSoftwareGl = false;
+    if (debug == JNI_TRUE) {
+        char softwareGl[PROP_VALUE_MAX]{};
+        __system_property_get("debug.aurea.software_gl", softwareGl);
+        diagnosticSoftwareGl = std::strcmp(softwareGl, "1") == 0;
+    }
+    c->media.set_diagnostic_software_gl(diagnosticSoftwareGl);
+    if (diagnosticSoftwareGl) AUREA_LOG_INFO("diagnostico: decoder software forcado preservando GL/PRIVATE");
     // Sem o GL (backend GLES, sem importação): a regra de antes — Samsung no
     // decoder de software, o resto em planos pela CPU.
     c->media.set_software_only(emulatorVideo || (!rgbaImport && android::needs_software_video(manufacturer, std::atoi(sdk))));

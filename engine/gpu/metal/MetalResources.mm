@@ -167,7 +167,21 @@ void Impl::destroy_texture_now(Texture& t) noexcept {
 }
 
 void Backend::destroy_texture(TextureHandle h) noexcept {
+    retire_texture(h, 0);
+}
+
+void Backend::retire_texture(TextureHandle h, u64 lastUsedFrame) noexcept {
     Impl& d = *impl_;
+    const bool exactFrame = lastUsedFrame && lastUsedFrame <= d.frameNumber;
+    FrameContext* releaseOn = nullptr;
+    if (exactFrame) for (u32 i = 0; i < d.framesInFlight; ++i) {
+        FrameContext& frame = d.frames[i];
+        if (frame.frameNumber != lastUsedFrame) continue;
+        if (&frame == d.current) releaseOn = &frame;
+        else if (frame.submitted && !wait_command_buffer(frame.cmd, frame.completion, 0, "aposentar textura").ok())
+            releaseOn = &frame;
+        break;
+    }
     Texture t;
     if (!d.textures.remove(h.id, t)) return;
     if (t.external && t.pixelBuffer) {
@@ -180,11 +194,14 @@ void Backend::destroy_texture(TextureHandle h) noexcept {
     }
     auto* pending = new (std::nothrow) PendingTexture{&d, std::move(t)};
     if (!pending) return;
-    defer_until_gpu_done([](void* p) {
+    const auto release = [](void* p) {
         auto* node = static_cast<PendingTexture*>(p);
         node->impl->destroy_texture_now(node->texture);
         delete node;
-    }, pending);
+    };
+    if (!exactFrame) defer_until_gpu_done(release, pending);
+    else if (releaseOn) releaseOn->deferred.push_back(DeferredRelease{release, pending});
+    else release(pending);
 }
 
 TextureDesc Backend::texture_desc(TextureHandle h) const noexcept {
@@ -1110,5 +1127,21 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
 }
 
 void Backend::release_external_image(TextureHandle imported) noexcept { destroy_texture(imported); }
+
+u32 Backend::trim_external_images() noexcept {
+    Impl& d = *impl_;
+    if (d.current) return 0;
+    std::vector<std::pair<u64, u64>> imports;
+    imports.reserve(d.importedByBuffer.size());
+    for (const auto& [buffer, id] : d.importedByBuffer) {
+        const Texture* t = d.textures.get(id);
+        if (t) imports.emplace_back(id, t->lastUsedFrame);
+    }
+    for (const auto& [id, frame] : imports) retire_texture(TextureHandle{id}, frame);
+    // Drop the CoreVideo cache's own reusable views as well. The backend's
+    // retired textures still retain any CVPixelBuffer read by a pending frame.
+    if (d.textureCache) CVMetalTextureCacheFlush(d.textureCache, 0);
+    return static_cast<u32>(imports.size());
+}
 
 } // namespace aurea::mtl

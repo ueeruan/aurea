@@ -541,7 +541,14 @@ void Engine::shutdown() noexcept {
     renderer_.set_audio_source(nullptr, nullptr, nullptr);
     audio_.shutdown();
     waveforms_.reset();
-    media_.close_all();
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        // Stopping the render thread does not complete its last GPU frame.
+        // Decoder/GL teardown must follow that frame and its retained leases.
+        if (gpu_) gpu_->wait_idle();
+        snapshot_ = FrameSnapshot{};
+        media_.close_all();
+    }
     media_.set_memory(nullptr);
     jobs_.stop();
 
@@ -600,17 +607,19 @@ Status Engine::suspend() noexcept {
         playingHint_ = false;
         audio_.stop();
     }
-    // Decoders de hardware são recurso do SISTEMA: segurar em segundo plano
-    // faz outro app (ou o próprio Aurea ao voltar) falhar ao abrir um codec.
-    media_.suspend_all();
-    media_.proxies().set_pause_reason(PreviewProxyService::Background, true);
-    media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_) {
             gpu_->wait_idle();
             gpu_->save_pipeline_cache();
         }
+        snapshot_ = FrameSnapshot{};
+        if (gpu_) (void)gpu_->trim_external_images();
+        // Hardware suspension can retire decoder buffers on its worker as
+        // soon as it is notified. Complete GPU reads before that notification.
+        media_.suspend_all();
+        media_.proxies().set_pause_reason(PreviewProxyService::Background, true);
+        media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     }
     state_ = EngineState::Suspended;
     return OkStatus;
@@ -839,14 +848,16 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     join_motion_track();
     cameraTrack_.reset();
     motionTrack_.reset();
+    // A project transition owns rendering until the replacement model is in
+    // place. Drain Vulkan/Metal before retiring decoder/GL contexts, and do not
+    // let prepare() retain a raw VideoSource* while close_all destroys it.
+    std::lock_guard<std::mutex> projectRenderLock(renderMutex_);
+    renderer_.release_project_resources();
+    snapshot_ = FrameSnapshot{};
     media_.close_all();
     thumbs_.clear();
     media_.proxies().clear();
     if (waveforms_) waveforms_->clear();
-    {
-        std::lock_guard<std::mutex> rl(renderMutex_);
-        renderer_.release_project_resources();
-    }
     std::lock_guard<std::mutex> lock(modelMutex_);
     rawPlaybackLayer_ = {};
     previewBuffering_ = false;
@@ -1093,14 +1104,15 @@ Status Engine::load_project(const char* path) noexcept {
     join_motion_track();
     cameraTrack_.reset();
     motionTrack_.reset();
+    // Use the same render -> model order as render_frame. The old decoder's
+    // native buffers and GL context must outlive every old GPU submission.
+    std::unique_lock<std::mutex> projectRenderLock(renderMutex_);
+    renderer_.release_project_resources();
+    snapshot_ = FrameSnapshot{};
     media_.close_all();
     thumbs_.clear();
     media_.proxies().clear();
     if (waveforms_) waveforms_->clear();
-    {
-        std::lock_guard<std::mutex> rl(renderMutex_);
-        renderer_.release_project_resources();
-    }
     u64 loadedSession = 0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -1165,6 +1177,7 @@ Status Engine::load_project(const char* path) noexcept {
         // Recuperado de cópia/parcial: está sujo (o principal ainda é o ruim).
         if (mainFileSuspect_) project_->mark_dirty();
     }
+    projectRenderLock.unlock();
     u32 missingTotal = 0;
     // Imagens: o projeto guarda a origem; os pixels voltam pela plataforma. Fora
     // do lock do modelo (decodificar um JPEG grande custa dezenas de ms).
@@ -8915,6 +8928,7 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
     if (!expectedGpuGeneration) expectedGpuGeneration = gpuGeneration_;
     if (expectedGpuGeneration != gpuGeneration_) return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
 
+    auto originals = asPreview ? MediaManager::OriginalSourceLease{} : media_.retain_original_sources();
     RenderSettings rs;
     rs.dither = false;
     rs.gpuTimers = offscreenTimers_;
@@ -8932,7 +8946,8 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
     FrameIndex captureTime{};
     bool boundCapture = false;
     u32 waitingLocalAi = 0;
-    u64 videoWaitStart = 0;
+    const u64 videoDeadline = tStart + 4'000'000'000ull;
+    u64 completionDeadline = videoDeadline;
     // Espera os frames EXATOS de vídeo (export e teste não aceitam o frame
     // aproximado que o scrub mostra). Limite de 4 s para arquivo quebrado não
     // travar para sempre.
@@ -8980,60 +8995,68 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
         tPrep1 = monotonic_ns();
         waitingLocalAi = rs.deferLocalAi ? renderer_.local_ai_pending() : 0;
         const bool waitingVideo = snapshot_.missingVideoFrames != 0 || snapshot_.staleVideoFrames != 0;
-        if (!waitingVideo && !waitingLocalAi) break;
-        if (waitingVideo && !videoWaitStart) videoWaitStart = tPrep1;
-        if (!waitingVideo) videoWaitStart = 0;
-        if ((waitingVideo && tPrep1 - videoWaitStart >= 4'000'000'000ull)
-            || (waitingLocalAi && tPrep1 - tStart >= 30'000'000'000ull))
-            return Status{Errc::Timeout, "o quadro exato ainda esta sendo preparado"};
-        for (RenderLayer& l : snapshot_.layers) l.source.frame.reset();
-        // Dorme SEM o lock: quem precisa da GPU/superfície nesse meio-tempo
-        // (detach, render do preview) passa na frente.
-        rl.unlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds(waitingVideo ? 5 : 20));
-    }
-    if (!rl.owns_lock()) rl.lock();
-    if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
-    if (expectedGpuGeneration != gpuGeneration_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
-        return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
-    auto ms = [](u64 a, u64 b) { return static_cast<f32>(static_cast<f64>(b - a) * 1e-6); };
-    m.prepareMs = ms(tPrep0, tPrep1);
-    m.mediaWaitMs = ms(tStart, tPrep0);
-    for (const EffectPlan& p : snapshot_.plans) m.activeEffects += static_cast<u32>(p.evals.size());
-    for (const RenderLayer& l : snapshot_.layers) {
-        if (l.source.kind == LayerSource::Kind::Particles) m.particles += l.source.particleSlots;
-    }
+        // Absolute deadlines never restart when preview work interleaves or a
+        // different GPU resource becomes unavailable on the next attempt.
+        if (waitingLocalAi) completionDeadline = tStart + 30'000'000'000ull;
+        if (waitingVideo || waitingLocalAi) {
+            if ((waitingVideo && tPrep1 >= videoDeadline) || tPrep1 >= completionDeadline)
+                return Status{Errc::Timeout, "o quadro exato ainda esta sendo preparado"};
+            snapshot_.release_video_frames();
+            rl.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(waitingVideo ? 5 : 20));
+            continue;
+        }
+        auto ms = [](u64 a, u64 b) { return static_cast<f32>(static_cast<f64>(b - a) * 1e-6); };
+        m.prepareMs = ms(tPrep0, tPrep1);
+        m.mediaWaitMs = ms(tStart, tPrep0);
+        m.activeEffects = m.particles = 0;
+        for (const EffectPlan& p : snapshot_.plans) m.activeEffects += static_cast<u32>(p.evals.size());
+        for (const RenderLayer& l : snapshot_.layers) {
+            if (l.source.kind == LayerSource::Kind::Particles) m.particles += l.source.particleSlots;
+        }
 
-    OffscreenTarget off{target, width, height};
-    FrameStats stats;
-    RenderTimings timings;
-    const Status s = renderer_.render(snapshot_, rs, &off, stats, timings);
-    const u64 tW0 = monotonic_ns();
-    gpu_->wait_idle();
-    m.gpuWaitMs = ms(tW0, monotonic_ns());
-    m.recordMs = timings.cpuRecordMs;
-    m.submitMs = timings.presentMs;
-    m.passesExecuted = stats.passesExecuted;
-    m.passesCulled = stats.passesCulled;
-    m.drawCalls = stats.drawCalls;
-    m.layersRendered = stats.layersRendered;
-    if (!snapshot_.scenes.empty()) {   // sem cena o SceneStats é o do último quadro 3D
-        const scene3d::SceneStats& ss = renderer_.scene_stats();
-        m.draws3D = ss.drawCalls;
-        m.triangles3D = ss.triangles;
-        m.culled3D = ss.culledPrimitives;
+        OffscreenTarget off{target, width, height};
+        FrameStats stats;
+        RenderTimings timings;
+        const Status s = renderer_.render(snapshot_, rs, &off, stats, timings);
+        const bool incomplete = renderer_.take_incomplete();
+        const u64 tW0 = monotonic_ns();
+        gpu_->wait_idle();
+        m.gpuWaitMs = ms(tW0, monotonic_ns());
+        m.recordMs = timings.cpuRecordMs;
+        m.submitMs = timings.presentMs;
+        m.passesExecuted = stats.passesExecuted;
+        m.passesCulled = stats.passesCulled;
+        m.drawCalls = stats.drawCalls;
+        m.layersRendered = stats.layersRendered;
+        if (!snapshot_.scenes.empty()) {   // sem cena o SceneStats é o do último quadro 3D
+            const scene3d::SceneStats& ss = renderer_.scene_stats();
+            m.draws3D = ss.drawCalls;
+            m.triangles3D = ss.triangles;
+            m.culled3D = ss.culledPrimitives;
+        }
+        m.transientBytes = renderer_.graph_stats().transientBytes;
+        m.gpuUsedBytes = gpu_->memory_stats().usedBytes;
+        if (offscreenTimers_ && s.ok()) {
+            // Depois do wait_idle o backend já leu os timestamps DESTE quadro.
+            f32 total = 0.0f;
+            m.gpuPasses = gpu_->read_gpu_timings(offscreenPasses_, 64, &total);
+            m.gpuMeasured = m.gpuPasses > 0;
+            m.gpuMs = m.gpuMeasured ? total : 0.0f;
+        }
+        offscreenMeasure_ = m;
+        if (!s.ok() || asPreview || !incomplete) return s;
+        // Exact decoder inputs do not guarantee a complete frame: uploads, glyphs,
+        // models or pipelines can still be pending. Never return their omissions as
+        // a successful thumbnail/color sample. Release decoded-frame references
+        // before yielding; retain the original-source lease across all retries.
+        // Revalidate project, time and GPU on the next prepare, as for media waits.
+        snapshot_.release_video_frames();
+        if (monotonic_ns() >= completionDeadline)
+            return Status{Errc::Timeout, "recursos indisponiveis para renderizar todas as camadas"};
+        rl.unlock();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    m.transientBytes = renderer_.graph_stats().transientBytes;
-    m.gpuUsedBytes = gpu_->memory_stats().usedBytes;
-    if (offscreenTimers_ && s.ok()) {
-        // Depois do wait_idle o backend já leu os timestamps DESTE quadro.
-        f32 total = 0.0f;
-        m.gpuPasses = gpu_->read_gpu_timings(offscreenPasses_, 64, &total);
-        m.gpuMeasured = m.gpuPasses > 0;
-        m.gpuMs = m.gpuMeasured ? total : 0.0f;
-    }
-    offscreenMeasure_ = m;
-    return s;
 }
 
 u32 Engine::last_offscreen_gpu_passes(GpuTiming* out, u32 capacity) const noexcept {

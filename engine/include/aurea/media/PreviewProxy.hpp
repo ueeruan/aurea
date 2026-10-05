@@ -32,7 +32,7 @@ public:
                    std::string (*resolve)(const std::string&, void*) = nullptr, void* resolveContext = nullptr);
     void set_policy(u32 shortSide, u32 pacingMs = 0) noexcept;
     void set_paused(bool paused) noexcept;
-    enum PauseReason : u32 { Background = 1, Thermal = 2, Export = 4, Manual = 8, Playback = 16 };
+    enum PauseReason : u32 { Background = 1, Thermal = 2, Export = 4, Manual = 8, Playback = 16, Capture = 32 };
     void set_pause_reason(PauseReason reason, bool paused) noexcept;
     std::shared_ptr<const PreviewProxy> request(const Asset& asset);
     void clear() noexcept;

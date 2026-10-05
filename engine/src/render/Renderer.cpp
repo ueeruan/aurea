@@ -933,6 +933,9 @@ void Renderer::release_project_resources() noexcept {
     // project's submissions before releasing their imported images/buffers.
     backend_->wait_idle();
     clear_preview_cache();
+    // Imported native buffers are backend caches, outside planar_/images_.
+    // Leaving them behind retained entire closed decoder pools after reload.
+    (void)backend_->trim_external_images();
     pool_.clear();
     for (auto& [k, p] : planar_) {
         for (TextureHandle& t : p.plane) if (t.valid()) backend_->destroy_texture(t);
@@ -3913,9 +3916,13 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                          PassTexture{chan[2], {}, CommonSampler::LinearClamp}},
                         nullptr, 0);
                     if (pass != kInvalidIndex) out.texture = merged;
+                    else incomplete_ = true;
                 }
                 // Sem os três quadros (decoder atrasado), a camada sai da fonte
                 // principal: melhor mostrar o quadro atual do que um buraco.
+                // That fallback is presentable, but cannot complete a cached
+                // preview or an exact capture/export while GPU uploads retry.
+                if (!built || layer.source.channelCount != 3) incomplete_ = true;
             }
             // DETECTAR MOVIMENTO: a fonte no instante anterior, na mesma área e
             // densidade; a cadeia de efeitos a leva até o efeito.
@@ -3924,21 +3931,30 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 if (build_video_source(layer, layerIndex, w, h, past, frameNumber, layer.source.historyFrame.get())) {
                     out.history = past;
                     if (layer.source.historyFrame->hardwareBuffer) framesUsed.push_back(layer.source.historyFrame);
-                }
+                } else incomplete_ = true;
             }
             // Quadro seguinte da fonte: mistura, movimento de pixels e/ou
             // desfoque vetorial (os dois últimos pelo optical flow, em cache).
             if (layer.source.frameB) {
                 const FGTexture b = graph_.create_texture("layer-video-seguinte", d);
-                if (!build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) return true;
+                if (!build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) {
+                    incomplete_ = true;
+                    return true;
+                }
                 if (layer.source.frameB->hardwareBuffer) framesUsed.push_back(layer.source.frameB);
                 EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
                 const bool needFlow = (layer.source.blendMode == 2 && layer.source.blendT > 0.0f) || layer.source.vectorBlur > 0.0f;
                 FGTexture flow{};
                 u32 baseW = 0, baseH = 0;
                 if (needFlow) {
-                    const u64 pair = (static_cast<u64>(layer.source.frame->ptsUs) * 1000003ull) ^ static_cast<u64>(layer.source.frameB->ptsUs)
-                                   ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 52);
+                    u64 pair = (static_cast<u64>(layer.source.frame->ptsUs) * 1000003ull) ^ static_cast<u64>(layer.source.frameB->ptsUs)
+                             ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 52);
+                    // A proxy and its original share timestamps and output
+                    // dimensions, but not pixels. Decoder reopen/relink must
+                    // never reuse motion estimated from the previous source.
+                    // Content IDs also remain stable for cached decoded frames.
+                    for (const DecodedFrame* source : {layer.source.frame.get(), layer.source.frameB.get()})
+                        pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
                     flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, baseW, baseH, frameNumber);
                 }
                 if (layer.source.blendT > 0.0f && layer.source.blendMode == 2) {
@@ -5813,6 +5829,7 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
     if (!backend_ || stage < 4) return 0;
     u32 n = static_cast<u32>(previewFrames_.size());
     clear_preview_cache();
+    n += backend_->trim_external_images();
     auto unused = [frameNumber](u64 lastFrame) { return lastFrame < frameNumber; };
     // Original image uploads and their linear copies are recreatable caches
     // too. Keeping every image visited on the timeline defeats OS memory trims.

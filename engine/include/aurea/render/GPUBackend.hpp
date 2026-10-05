@@ -637,6 +637,13 @@ public:
     /// Destruição ADIADA: o objeto só morre quando a GPU terminou todo frame
     /// que pode tê-lo usado. O handle fica inválido na hora.
     virtual void destroy_texture(TextureHandle) noexcept = 0;
+    /// Retire an exclusively owned texture after its last recorded frame use.
+    /// Caller guarantees no later frame or immediate submission references it.
+    /// Backends without per-frame retirement may conservatively defer normally.
+    virtual void retire_texture(TextureHandle texture, u64 lastUsedFrame) noexcept {
+        (void)lastUsedFrame;
+        destroy_texture(texture);
+    }
     virtual void destroy_buffer(BufferHandle) noexcept = 0;
     virtual void destroy_sampler(SamplerHandle) noexcept = 0;
     virtual void destroy_shader(ShaderHandle) noexcept = 0;
@@ -674,6 +681,10 @@ public:
         const ExternalImageDesc& img) noexcept = 0;
     /// Libera a textura importada (adiado até a GPU terminar de lê-la).
     virtual void release_external_image(TextureHandle imported) noexcept = 0;
+    /// Drop recreatable imports between frames, under the renderer's queue
+    /// lock. Submitted reads retain their native buffers until their fence.
+    /// Decoder-owned frames remain valid and can be imported again on demand.
+    virtual u32 trim_external_images() noexcept { return 0; }
 
     /// Executa `fn(ctx)` quando a GPU concluir o frame que está sendo gravado
     /// agora. É como a camada de mídia devolve o buffer ao decoder no momento

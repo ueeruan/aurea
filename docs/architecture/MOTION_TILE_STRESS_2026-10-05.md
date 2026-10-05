@@ -114,8 +114,9 @@ BufferQueueProducer::queueBuffer → Fence::waitForever → poll`.
 As threads de decodificação estavam aguardando condição, sem espera em
 `glFinish`. O consumo permaneceu aproximadamente estável, com PSS de 452 MB;
 essa ocorrência não tem evidência de encerramento por falta de memória.
-A origem do fence não sinalizado ainda está em investigação. A bateria de
-96 camadas e a bateria sustentada **continuam sem aprovação**.
+A instrumentação adicional encontrou os erros descritos abaixo. A bateria de
+96 camadas e a bateria sustentada **continuam sem aprovação** até a repetição
+completa depois das correções.
 
 Uploads em Vulkan e Metal agora reutilizam o comando do frame quando aberto;
 uploads grandes temporários são mantidos até o fence. No Vulkan, um timeout
@@ -123,13 +124,16 @@ de upload imediato conserva os recursos ainda em uso e limita novas alocações
 até a conclusão real. Os testes verificam essa retenção e recuperação; isso
 não comprova, por si só, a causa do bloqueio de apresentação observado.
 
-Compilaram os candidatos APK release de 32 e 64 bits. Ainda precisam da
-qualificação final. O snapshot das fontes para IPA foi criado sem alterar
-HEAD, branch nem índice principal. O envio à branch nova no GitHub público
-foi bloqueado pela revisão automática; depois, o usuário autorizou explicitamente
-a publicação no repositório público. O snapshot será atualizado com as últimas
-correções antes da compilação. Nenhum IPA com essas fontes foi compilado até
-este registro.
+Compilaram novamente os candidatos APK release de 32 e 64 bits, incluindo as
+correções encontradas pelo validador. Ainda precisam da qualificação final.
+O snapshot das fontes para IPA foi criado sem alterar HEAD, branch nem índice
+principal. O envio à branch nova no GitHub público foi inicialmente bloqueado
+pela revisão automática; depois, o usuário autorizou explicitamente a publicação.
+O commit `901b9dab91eddbbfad22420881792712e63d621b` foi publicado em
+`codex/motion-tile-stress-2139-20261005` e a
+[compilação iOS 37262805922](https://github.com/ueeruan/aurea/actions/runs/37262805922)
+iniciou com esse SHA. Os resultados da compilação, simulador e aparelho Apple
+serão registrados separadamente; iniciar a CI não equivale a passar nos testes.
 
 Evidências adicionais: `android-motion-scene-final.log`,
 `android-heavy-final.log`, `heavy-final-lldb-stacks.txt`,
@@ -153,8 +157,217 @@ Erros concretos encontrados, inclusive em testes pequenos cujos pixels passaram:
 - O buffer vazio de fallback era usado como uniform dinâmico, mas não declarava
   uso `Uniform`. A declaração foi corrigida, preservando os bindings.
 - A cena 3D apontou texturas de ambiente 2D nos bindings 5/6, cujos shaders
-  exigem cubemaps. A origem e a correção estão em investigação.
+  exigem cubemaps. `release_environment` destruía o cubemap preto de reserva
+  ao trocar de projeto, sem recriá-lo. O motor compartilhado agora preserva
+  esse recurso global até encerrar o renderer. Isso corrige também o Metal.
 
 Esses erros não eram detectados pelos testes anteriores sem a camada instalada.
-A aprovação exige repetir a validação e a carga no aparelho após as correções;
-o simples desaparecimento de um erro estático não comprova estabilidade.
+Após a correção, sete testes nativos no moto g52 passaram com Khronos e SyncVal
+carregados, sem erros VUID/SYNC: MotionTileMargins (seis cenas em três testes)
+e SceneCut (quatro testes). Duração: 50,896 s. As seis imagens uniformes do Tile
+mantiveram todos os pixels em 200, sem bordas escuras ou transparentes.
+
+O contrato Vulkan de fallback uniform/storage e três trocas reais de projeto
+com cubo PBR também passou no Windows: dois testes, 27 verificações, zero erros
+de validação. As três capturas tinham cobertura visível de 17,4%. Há avisos
+não fatais de saída de fragmento sem attachment em variantes de pipeline;
+zero erros não significa zero avisos. SceneCuts: nove testes/352 verificações.
+
+A aprovação da estabilidade ainda exige terminar as duas baterias pesadas.
+
+## Ciclo de projeto e pressão sustentada
+
+A troca de projeto fechava fontes de vídeo antes de concluir as leituras da GPU
+e sem manter a exclusão da thread de renderização durante toda a troca. O motor
+compartilhado agora drena a GPU e solta o snapshot antes de fechar os decoders,
+sob o mesmo lock, ao criar, carregar, suspender e encerrar. O carregador de
+imagens é chamado depois de liberar o lock, preservando importações reentrantes.
+No Windows passaram ProjectLifecycle (4 testes/57 verificações) e
+ImportStability (3/68). As regressões GPU de captura, upload e descritores
+também passaram com validação. Essa correção de disputa não resolveu sozinha o
+bloqueio da carga de 96 camadas.
+
+Na repetição de 48 camadas com quatro vídeos Full HD, as capturas após seek e
+três reaberturas passaram com diferença máxima zero em 230.400 canais. Duas
+recriações de superfície e o watchdog da interface (0–1 ms) também passaram.
+Porém, a rodada foi encerrada pelo Android por LOW_MEMORY antes de completar
+os quatro minutos: PID 13778, 01:22:06. Após voltar à prévia Full HD e reproduzir,
+o consumo de GPU cresceu de aproximadamente 389 MB para 937 MB, com 54 texturas
+lógicas vivas e 188 alocações; PSS chegou a 1.116 MB. A memória nativa de CPU
+permaneceu em aproximadamente 56 MB. A bateria continua reprovada nessa versão.
+
+O pool descartava dimensões antigas, mas a liberação física era adiada até o
+frame novo que estava sendo gravado. Vulkan e Metal passaram a aposentar essas
+texturas pelo último frame que realmente as usou, mantendo-as vivas até seu
+fence e recolhendo liberações já concluídas antes das novas alocações. Não há
+redução de resolução, de camadas ou de amostras nessa mudança. A redução real
+de pico ainda depende de repetir a bateria no aparelho.
+
+## Isolamento do bloqueio pesado
+
+As variantes abaixo são diagnósticas, não substituem a bateria original:
+
+- Sem vídeo: preservou objetos 3D, 176 efeitos, 768 keyframes e Motion Blur
+  de 360 graus. Avançou reprodução/seeks, mas bloqueou ao aguardar a GPU no
+  trim. PSS aproximadamente 433 MB; GPU sem progresso nas amostras coletadas.
+- Sem objetos 3D: preservou oito vídeos, Vector Blur, os mesmos efeitos,
+  animações e Motion Blur. Passou reprodução/seeks, trim (26.006.720 bytes),
+  reabertura e captura com conteúdo visível em 28,151 s. PSS entre
+  aproximadamente 435 e 451 MB nas etapas finais. Não incluiu exportação.
+
+Esses resultados direcionam a investigação para o caminho 3D ou sua interação
+com a carga. Não demonstram ainda qual operação de GPU causa o bloqueio.
+Evidências: `android-isolation-no-video-*`, `android-isolation-no-3d-*`,
+`soak-validation-fixes-*`, `host-*-platform-final.log`.
+
+Diagnósticos posteriores, no mesmo APK com aposentadoria por fence:
+
+| Variante da carga original | Resultado diagnóstico |
+| --- | --- |
+| Sem Vector Blur dos vídeos | Bloqueio ao iniciar reprodução |
+| Motion Blur desligado somente nos oito objetos 3D | Passou em 27,475 s, com vídeos e demais efeitos ativos |
+| FBX substituído por primitiva, mantendo oito objetos com blur | Bloqueio ao iniciar reprodução |
+| Qualidade 3D Low, uma amostra de rasterização + FXAA | Bloqueio ao iniciar reprodução |
+| Oito objetos com sombras desativadas e blur ativo | Bloqueio ao iniciar reprodução |
+| Uma primitiva com blur, sete objetos substituídos por formas 2D | Passou reprodução, seeks, trim, reabertura e captura |
+| Oito objetos com blur colocados contíguos no mesmo grupo 3D | Bloqueio ao iniciar reprodução, contiguidade verificada antes/depois da pré-comp |
+
+Esses testes não incluem as exportações de aceitação. A variante Low também
+altera IBL/bloom e não deve ser interpretada como alteração isolada de MSAA.
+Os resultados apontam para a carga de vários objetos 3D com Motion Blur; a
+última variante mostra que vários grupos separados não são necessários para
+o bloqueio. A auditoria de ponteiros e a validação GPU no Windows não
+reproduziram o bloqueio do Adreno do aparelho.
+
+## Captura completa e aparência após reabrir
+
+O soak com aposentadoria por fence encontrou diferença estável entre as
+capturas antes e depois de reabrir: máximo 34/255, com 48.473 de 230.400 canais
+diferindo mais de quatro níveis. Duas capturas consecutivas antes são iguais,
+assim como duas depois. Os RGBA e PNG estão em `soak-rgba-fixture/`. A rodada
+foi interrompida por essa falha; não comprova quatro minutos sem crescimento
+de memória. Uma recriação de superfície também apresentou vídeos ausentes
+na prévia, embora a captura posterior tivesse conteúdo.
+
+O diagnóstico Android isolado com um vídeo Full HD sem efeitos comparou
+decoder GL de hardware e planos de software: repetições idênticas, diferença
+máxima de um nível e nenhum canal acima da tolerância de quatro. O arquivo
+declara BT.709, faixa limitada e transferência SDR. A repetição com a cadeia
+do soak (escala 0,105, rotação 90 graus, Motion Tile 150% espelhado com escala
+uniforme 70%, Gaussian 3 e Glow 20) também passou: máximo dois níveis,
+nenhum canal acima de quatro. Hardware e software foram confirmados nos
+metadados do teste. A diferença de 34 níveis exige outro fator da cena.
+
+Duas falhas adicionais foram reproduzidas no motor: uma captura final
+disputava com a prévia entre proxy e original (353 aberturas do original e
+335 do proxy durante uma captura de quatro segundos); uploads de imagem
+sempre falhando ainda permitiam que a captura retornasse sucesso. A correção
+mantém uma reserva contada das fontes originais durante a captura e exige
+renderização completa antes de retornar sucesso, com prazo absoluto e
+cancelamento ao mudar projeto, posição ou GPU. Após corrigir: uma abertura de
+cada fonte e captura correta (CaptureProxyGpu, 1 teste/55 verificações),
+recuperação transitória em 41 ms, timeout permanente em 4,015 s e cancelamento
+sem prender a interface (CaptureResources, 3/22). A reserva com duas capturas
+concorrentes e outras razões de pausa passou em 1/33.
+
+O cache de Optical Flow também reutilizava o resultado calculado sobre o
+proxy ao abrir o original com os mesmos timestamps e tamanho de saída. A
+chave agora inclui a identidade dos dois quadros decodificados. No teste GPU,
+a troca passou de um acerto indevido de cache e erro máximo 0,375488 linear
+(3.696 canais divergentes) para um recálculo e diferença zero. Repetir os
+mesmos quadros continua reutilizando o cache.
+
+Falhas de upload no segundo quadro do Vector Blur/mesclagem, nos canais de
+RGB no tempo e no histórico de detecção de movimento também retornavam
+sucesso com efeito incompleto. Os fallbacks agora sinalizam o quadro
+incompleto, conservam a imagem disponível na prévia e permitem que captura e
+exportação aguardem recuperação. Os três casos foram reproduzidos antes da
+mudança. Após corrigir, CaptureResources passou 6 testes/47 verificações;
+TimeWarpRGB, MotionDetect e VectorBlur mantiveram os pixels esperados.
+Ao todo, esta frente passou 27 testes e 497 verificações no motor, sem erros
+VUID/SyncVal nas execuções GPU. A validação física Android e a nova CI iOS
+continuam separadas.
+
+## Diagnóstico prolongado de vídeo e memória
+
+No APK `capture-lease`, a carga original de 48 camadas passou pelas três
+primeiras reaberturas sem diferença, mas falhou na quarta, aos 138 segundos:
+máximo 34 e os mesmos 48.473 canais divergentes. Os arquivos RGBA são
+idênticos aos estados antes/depois da falha anterior. Sentinelas de cor
+confirmaram vídeos presentes, portanto a comparação não aceitou apenas as
+formas do projeto. O PSS chegou a aproximadamente 1,26 GB, sem ANR ou morte
+por memória nesta rodada, que terminou pela diferença visual.
+
+No mesmo APK, a variante diagnóstica com quatro decodificadores em planos
+de software terminou em 317,992 s, incluindo 256,289 s de exercício útil:
+11 ciclos, 11 edições, 41 capturas, sete reaberturas, sete recriações reais de
+superfície e 81 amostras de reprodução. Todas as reaberturas e repetições
+tiveram diferença zero, com sentinelas de vídeo presentes e sem ANR/crash.
+PSS mediano inicial/final: 411/400 MB; memória nativa: 56,4/56,1 MB; reserva
+GPU: 364/376 MB. É um diagnóstico do caminho de vídeo, não substitui a
+aceitação do caminho padrão nem justifica desativar aceleração globalmente.
+
+Foi implementada liberação dos imports nativos de vídeo ao trocar projeto,
+suspender e receber pressão crítica de memória. Esses buffers estavam fora
+do orçamento comum de texturas e podiam manter pools de decodificadores já
+fechados. Vulkan e Metal removem a entrada de cache entre frames e retêm o
+buffer até o fence do último uso; quadros ainda pertencentes ao decoder
+podem ser importados novamente. A compilação e validação dessa mudança são
+registradas separadamente dos números anteriores.
+
+A compilação Windows passou. ProjectLifecycle passou 5 testes/71
+verificações, incluindo liberação de imports em reload, suspensão, pressão
+crítica e novo projeto após drenar a GPU. UploadLifetimeGpu,
+MemoryPressureGpu, VulkanDescriptorsGpu, CaptureResources e CaptureProxyGpu
+também passaram: total desta rodada 20 testes/415 verificações, sem erros
+VUID/SyncVal registrados. O teste AHardwareBuffer real foi compilado para
+Android separadamente; sua execução física permanece pendente nesta etapa.
+
+O teste GPU de 96 camadas no Windows percorreu 18 quadros reais: três
+disposições de objetos, duas resoluções e três posições da timeline, com
+176 efeitos e Motion Blur de 360 graus. Passou 459 verificações sem erros
+VUID/SyncVal. No quadro 45 em 960×540, oito grupos separados produziram
+1.344 passes/1.440 draws/128 amostras 3D; um grupo com oito objetos produziu
+804 passes/893 draws/16 amostras. Os três arranjos chegaram ao limite de
+512 medições GPU. Isso não reproduz nem comprova resolução do bloqueio no
+Adreno do aparelho Android.
+
+## Compilação iOS intermediária
+
+O job de IPA do run 37262805922 passou: compilação nativa Release, verificações
+Foundation, compilador Metal e validação do pacote 2139. O IPA sem assinatura
+foi baixado para `ipa-intermediate-901b9d/` dentro da pasta de evidências,
+SHA-256 `48c38369b65693d44336b4805681ff749e625e7b7b509176a961652585971c0e`.
+É um artefato intermediário: não inclui as correções posteriores de ciclo de
+projeto e aposentadoria de texturas. A entrega final exige nova compilação do
+mesmo código dos APKs. Execução em aparelho Apple não foi realizada.
+
+A suíte de gestos dessa CI terminou com 49/52 testes aprovados. Foram
+corrigidos localmente o seletor que contava botão e rótulo do Motion Blur
+como dois controles, a rolagem do eixo Y no teste de texto e uma regressão
+real do menu compacto: o acesso a copiar/colar voltou no Android e no iOS.
+Os testes continuam exigindo alteração de valores e desfazer. A verificação
+das capturas também foi atualizada para a versão 6 dos dados de ambiente
+HDR; passou ao reaplicar os PNGs reais da CI, incluindo três mutações
+rejeitadas. Essas correções exigem nova execução nativa na CI final.
+
+## Conteúdo acumulado dos pacotes
+
+Os APKs e o IPA partem das mesmas fontes compartilhadas e incluem as mudanças
+documentadas em [DEVICE_FIXES_2026-10-05.md](DEVICE_FIXES_2026-10-05.md) e
+[COMMUNITY_FIXES_2026-10-05.md](COMMUNITY_FIXES_2026-10-05.md), além deste relatório:
+
+- Buffer de reprodução, retenção e aquecimento de quadros;
+- Depth Map e Roto Brush locais, com fila assíncrona e estados de interface;
+- Câmera e ambiente HDR respeitando os cortes, iluminação de pré-comps;
+- Motion Tile com escala, espelho, margens e pilhas de efeitos;
+- Interface de edição compacta em Kotlin e Swift, com acessibilidade;
+- Contorno de texto, bordas de máscara, opção de mostrar somente a sombra;
+- Instâncias de pré-comps e captura coerente com projeto, tempo e geração;
+- Uso de memória, validade de recursos 3D e sincronização de GPU;
+- No iOS, identificadores próprios nos controles expandidos do Motion Blur.
+
+O teste iOS de mover um Null foi atualizado para a regra já existente do motor:
+Auto-Key não cria chaves em eixos sem alteração. Ele exige mudança real em X,
+Y/Z e suas curvas preservados, pose inicial intacta e um único desfazer. Essa é
+uma correção da expectativa do teste, separada da mudança de acessibilidade.

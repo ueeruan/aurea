@@ -161,6 +161,7 @@ public:
     [[nodiscard]] Result<PipelineHandle> create_pipeline(const PipelineDesc& desc) noexcept override;
 
     void destroy_texture(TextureHandle h) noexcept override;
+    void retire_texture(TextureHandle h, u64 lastUsedFrame) noexcept override;
     void destroy_buffer(BufferHandle h) noexcept override;
     void destroy_sampler(SamplerHandle h) noexcept override;
     void destroy_shader(ShaderHandle h) noexcept override;
@@ -215,6 +216,7 @@ public:
     [[nodiscard]] Result<ExternalTexture> import_external_image(
         const ExternalImageDesc& img) noexcept override;
     void release_external_image(TextureHandle imported) noexcept override;
+    u32 trim_external_images() noexcept override;
 
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 

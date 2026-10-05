@@ -34,14 +34,14 @@ import XCTest
         let shutter = app.descendants(matching: .any)["motionblur.shutter"].firstMatch
         XCTAssertTrue(shutter.waitForExistence(timeout: 5))
         XCTAssertTrue((shutter.value as? String ?? "").contains("°"))
-        let advanced = app.descendants(matching: .any)["motionblur.advanced"].firstMatch
+        let advanced = app.buttons["motionblur.advanced"].firstMatch
         XCTAssertTrue(advanced.waitForExistence(timeout: 5)); advanced.tap()
         let center = app.buttons["motionblur.center"].firstMatch
         XCTAssertTrue(center.waitForExistence(timeout: 5))
-        // A DisclosureGroup identifier must not replace identifiers on its
-        // expanded controls. Each control remains independently addressable.
+        // A DisclosureGroup also exposes its label as a StaticText child.
+        // Count actionable controls: expanded buttons must keep distinct IDs.
         for identifier in ["advanced", "phase", "center", "samples", "adaptive"] {
-            XCTAssertEqual(app.descendants(matching: .any)
+            XCTAssertEqual(app.buttons
                 .matching(identifier: "motionblur.\(identifier)").count, 1, identifier)
         }
         if !center.isHittable { app.scrollViews.firstMatch.swipeUp() }
@@ -202,8 +202,19 @@ import XCTest
         func ruler(_ component: Int) throws -> XCUIElement {
             let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "effects\\.param\\.[0-9]+\\.5\\.\(component)")).firstMatch
             XCTAssertTrue(row.waitForExistence(timeout: 5), "Offset row \(component) of the open Text Transform card")
-            for _ in 0..<8 where !row.isHittable { stack.swipeUp() }
+            // Full swipes can jump past the next44pt row in the compact panel.
+            // Use its actual position and reverse direction after overscroll.
+            for _ in 0..<10 {
+                let viewport = stack.frame.insetBy(dx: 8, dy: 12)
+                let center = CGPoint(x: row.frame.midX, y: row.frame.midY)
+                if row.isHittable && viewport.contains(center) { break }
+                let distance = row.frame.midY - viewport.midY
+                let travel = min(viewport.height * 0.35, max(24, abs(distance)))
+                let start = stack.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.5))
+                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: distance > 0 ? -travel : travel)), withVelocity: .slow, thenHoldForDuration: 0.1)
+            }
             XCTAssertTrue(row.isHittable)
+            XCTAssertTrue(stack.frame.contains(CGPoint(x: row.frame.midX, y: row.frame.midY)))
             return row
         }
         let x = try ruler(0)
@@ -287,8 +298,15 @@ import XCTest
         XCTAssertTrue(copy.waitForExistence(timeout: 5)); copy.tap()
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
-        // Redesenho 2026-09-29: copiar e colar saiu do transporte; é o SEGURAR do duplicar.
-        app.buttons["transport.duplicate"].firstMatch.press(forDuration: 0.8)
+        // The compact phone transport retains clipboard commands in More.
+        let more = app.buttons["transport.more"].firstMatch
+        if more.exists {
+            more.tap()
+            let clipboard = app.buttons["transport.copyPaste"].firstMatch
+            XCTAssertTrue(clipboard.waitForExistence(timeout: 5)); clipboard.tap()
+        } else {
+            app.buttons["transport.duplicate"].firstMatch.press(forDuration: 0.8)
+        }
         // A folha de copiar/colar anima ao abrir: espera a linha existir.
         let paste = app.buttons["Paste effects"].firstMatch
         XCTAssertTrue(paste.waitForExistence(timeout: 5)); paste.tap()

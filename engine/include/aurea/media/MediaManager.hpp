@@ -70,6 +70,23 @@ public:
     [[nodiscard]] VideoSourceFactory* factory() const noexcept { return factory_; }
     PreviewProxyService& proxies() noexcept { return proxies_; }
 
+    /// Keeps preview requests on originals while exact captures wait outside
+    /// the render lock. Counted because several captures may overlap/cancel.
+    class OriginalSourceLease {
+    public:
+        OriginalSourceLease() = default;
+        ~OriginalSourceLease();
+        OriginalSourceLease(const OriginalSourceLease&) = delete;
+        OriginalSourceLease& operator=(const OriginalSourceLease&) = delete;
+        OriginalSourceLease(OriginalSourceLease&& other) noexcept;
+        OriginalSourceLease& operator=(OriginalSourceLease&& other) noexcept;
+    private:
+        friend class MediaManager;
+        explicit OriginalSourceLease(MediaManager* owner) noexcept : owner_(owner) {}
+        MediaManager* owner_ = nullptr;
+    };
+    [[nodiscard]] OriginalSourceLease retain_original_sources() noexcept;
+
     /// Fonte da layer. Abre fora da thread de render; nula enquanto abre.
     [[nodiscard]] VideoSource* source_for(LayerId layer, AssetId assetId, const Asset& asset,
                                           u64 frameNumber, bool finalQuality = false);
@@ -138,6 +155,8 @@ private:
     void* readyCtx_ = nullptr;
     bool suspended_ = false;
     PreviewProxyService proxies_;
+    u32 originalSourceLeases_ = 0; // guarded by mutex_; never cleared by project teardown
+    void release_original_sources() noexcept;
 
     // One retirement worker: a slow platform codec shutdown must not join on
     // the render/UI thread. close_all drains it before factories/callbacks die.

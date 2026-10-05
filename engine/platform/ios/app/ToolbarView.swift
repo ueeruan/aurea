@@ -249,8 +249,13 @@ struct TransportView: View {
                     Button(AureaText.t("editor_duplicar_camada_segure_copiar")) {
                         model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
                     }.disabled(model.selection.isEmpty)
+                    Button(AureaText.t("editor_copiar_colar")) {
+                        if model.status.playing != 0 { model.playPause() }
+                        shell.sheet = .copyPaste
+                    }.accessibilityIdentifier("transport.copyPaste")
                 } label: { CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 22, color: AureaColors.text).frame(width: 48, height: 48) }
                 .accessibilityLabel(AureaText.t("timeline_more"))
+                .accessibilityIdentifier("transport.more")
             } else { duplicateButton }
             Spacer(minLength: 0)
             fullscreenButton

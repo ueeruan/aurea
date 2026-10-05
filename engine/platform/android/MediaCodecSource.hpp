@@ -40,6 +40,9 @@ public:
     /// importa AHardwareBuffer RGBA. Vale para decoders abertos depois.
     void set_driver_gl(bool enabled) noexcept { driverGl_.store(enabled); }
     [[nodiscard]] bool driver_gl() const noexcept { return driverGl_.load(); }
+    /// Debug initialization only: reproduce software fallback with a PRIVATE
+    /// reader/GL bridge, independently of device codec pressure.
+    void set_diagnostic_software_gl(bool enabled) noexcept { diagnosticSoftwareGl_.store(enabled); }
 
     void set_fd_opener(FdOpener fn, void* ctx) noexcept {
         opener_ = fn;
@@ -56,6 +59,7 @@ private:
     std::atomic<bool> zeroCopy_{true};
     std::atomic<bool> softwareOnly_{false};
     std::atomic<bool> driverGl_{false};
+    std::atomic<bool> diagnosticSoftwareGl_{false};
     FdOpener opener_ = nullptr;
     void* openerCtx_ = nullptr;
 };

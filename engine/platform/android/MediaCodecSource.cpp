@@ -301,9 +301,11 @@ const char* software_decoder_for(const char* mime) {
 // -----------------------------------------------------------------------------
 class MediaCodecDecoder final : public VideoDecoderBackend {
 public:
-    MediaCodecDecoder(SourceFd fd, bool zeroCopy, bool thumbnail, bool softwareOnly, bool driverGl = false)
+    MediaCodecDecoder(SourceFd fd, bool zeroCopy, bool thumbnail, bool softwareOnly, bool driverGl = false,
+                      bool diagnosticSoftwareGl = false)
         : fd_(std::move(fd)), zeroCopy_((zeroCopy || driverGl) && !softwareOnly), thumbnail_(thumbnail),
-          softwareFallback_(softwareOnly), glPath_(driverGl && !softwareOnly && !thumbnail) {}
+          softwareFallback_(softwareOnly), glPath_(driverGl && !softwareOnly && !thumbnail),
+          diagnosticSoftwareGl_(diagnosticSoftwareGl && driverGl && !softwareOnly && !thumbnail) {}
     ~MediaCodecDecoder() override {
         destroy_codec();
         bridge_.reset();
@@ -675,7 +677,7 @@ private:
         Status result = OkStatus;
         // SIGSEGV in vendor planes cannot be caught and retried. In software
         // mode do not create a decoder by MIME, even when no AOSP codec exists.
-        if (!softwareFallback_) {
+        if (!softwareFallback_ && !diagnosticSoftwareGl_) {
             codec_ = AMediaCodec_createDecoderByType(mime);
             if (codec_ && !configure_and_start(format)) {
                 AMediaCodec_delete(codec_);
@@ -804,6 +806,11 @@ private:
         // A cor do bitstream (VUI) é mais confiável que a do container.
         info_.color = color_from(f, static_cast<u32>(w > 0 ? w : 0), static_cast<u32>(h > 0 ? h : 0),
                                  info_.color.bitDepth, &info_.color);
+        if (diagnosticSoftwareGl_) {
+            AUREA_LOG_INFO("diagnostico software GL: codec=%s standard=%d range=%d transfer=%d dataspace=%d tamanho=%dx%d",
+                          info_.decoderName, get_i32(f, kKeyColorStandard, 0), get_i32(f, kKeyColorRange, 0),
+                          get_i32(f, kKeyColorTransfer, 0), get_i32(f, "android._dataspace", 0), w, h);
+        }
         AMediaFormat_delete(f);
     }
 
@@ -1019,6 +1026,7 @@ private:
     bool softwareFallback_ = false;
     /// Caminho GL do driver (padrão): o AImage PRIVATE vira RGBA num passe GL.
     bool glPath_ = false;
+    bool diagnosticSoftwareGl_ = false;
     std::unique_ptr<GlVideoBridge> bridge_;
     i64 nextDeliveryUs_ = 0;
     i64 keyframeUs_ = 2'000'000;
@@ -1278,7 +1286,8 @@ std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& 
     const VideoPath path = initial_video_path(in);
     const bool zeroCopy = priority != MediaPriority::Thumbnail && zeroCopy_.load();
     auto decoder = std::make_unique<MediaCodecDecoder>(std::move(fd), zeroCopy, priority == MediaPriority::Thumbnail,
-                                                       path == VideoPath::SoftwarePlanes, path == VideoPath::DriverGl);
+                                                       path == VideoPath::SoftwarePlanes, path == VideoPath::DriverGl,
+                                                       diagnosticSoftwareGl_.load());
     if (const Status s = decoder->open(); !s.ok()) {
         AUREA_LOG_ERROR("decoder nao abriu: %s", s.message().data());
         return nullptr;

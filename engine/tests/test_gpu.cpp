@@ -12910,6 +12910,7 @@ AUREA_TEST(Gpu, Text3DDepthAndBevelEditsReachTheFrame) {
 #include "PreviewCacheGpu.inl"
 #include "TextOutlineGpu.inl"
 #include "ImmediateUploadGpu.inl"
+#include "TextureRetirementGpu.inl"
 
 AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
     AUREA_REQUIRE_GPU();
@@ -13001,4 +13002,9 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 }
 
 #include "CaptureEpochGpu.inl"
+#include "ProxyCaptureGpu.inl"
 #include "VulkanDescriptorsGpu.inl"
+#include "OpticalFlowSamplingGpu.inl"
+#include "FlowCacheSourceGpu.inl"
+#include "Heavy3DMotionGpu.inl"
+#include "ExternalImportsGpu.inl"

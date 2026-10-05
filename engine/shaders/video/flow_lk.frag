@@ -49,7 +49,11 @@ void main() {
             float bx = 0.0, by = 0.0;
             for (int k = 0; k < 25; ++k) {
                 vec2 uv = v_uv + (vec2(float(k % 5 - 2), float(k / 5 - 2)) + flow) * p.texel.xy;
-                float dt = texture(u_level, uv).g - av[k];
+                // Each pyramid level is a separate single-mip texture. This
+                // branch/iteration count varies per pixel: implicit texture
+                // derivatives are undefined here, so keep the same bilinear
+                // sampling with an explicit base level on Vulkan and Metal.
+                float dt = textureLod(u_level, uv, 0.0).g - av[k];
                 bx += ix[k] * dt;
                 by += iy[k] * dt;
             }

@@ -2,6 +2,13 @@
 // with actual NV12 frames and Vulkan readback, not a mocked render result.
 #if defined(AUREA_TEST_VULKAN)
 namespace {
+struct CaptureValidationGuard {
+#if !defined(AUREA_TEST_GLES)
+    u32 errors = vk::Backend::validation_errors();
+    ~CaptureValidationGuard() { AUREA_CHECK_EQ(vk::Backend::validation_errors() - errors, 0u); }
+#endif
+};
+
 struct CaptureDecodeGate {
     std::atomic<bool> blocked{false};
     std::atomic<u32> entered{0};
@@ -47,6 +54,7 @@ bool capture_epoch_setup(Engine& e, VideoSourceFactory& factory, u32 layers = 1)
     EngineConfig config;
     config.backend = new vk::Backend();
     config.backendConfig.framesInFlight = 2;
+    config.backendConfig.enableValidation = true;
     config.mediaFactory = &factory;
     config.workerCount = 2;
     config.disableAutosave = true;
@@ -99,6 +107,7 @@ bool capture_epoch_wait(Predicate ready, u32 timeoutMs) {
 
 AUREA_TEST(CaptureEpochGpu, FourVideoSeekCompletesWhilePreviewRequestsFrames) {
     AUREA_REQUIRE_GPU();
+    CaptureValidationGuard validation;
     SyntheticConfig cfg;
     cfg.width = 96; cfg.height = 54; cfg.gop = 90;
     cfg.decodeCostUs = 8'000;
@@ -143,6 +152,7 @@ AUREA_TEST(CaptureEpochGpu, FourVideoSeekCompletesWhilePreviewRequestsFrames) {
 
 AUREA_TEST(CaptureEpochGpu, NewSeekCancelsOldThumbnailBeforeItsDecoderUnblocks) {
     AUREA_REQUIRE_GPU();
+    CaptureValidationGuard validation;
     SyntheticConfig cfg;
     cfg.width = 96; cfg.height = 54; cfg.gop = 90;
     cfg.decodeCostUs = 2'000;
@@ -181,6 +191,7 @@ AUREA_TEST(CaptureEpochGpu, NewSeekCancelsOldThumbnailBeforeItsDecoderUnblocks) 
 
 AUREA_TEST(CaptureEpochGpu, NaturalPlaybackAdvanceDoesNotCancelBoundCapture) {
     AUREA_REQUIRE_GPU();
+    CaptureValidationGuard validation;
     SyntheticConfig cfg;
     cfg.width = 96; cfg.height = 54;
     cfg.pattern = SyntheticPattern::FrameGray;

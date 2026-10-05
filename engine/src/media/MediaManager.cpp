@@ -99,16 +99,49 @@ void MediaManager::set_memory(MemoryManager* memory) noexcept {
     for (Entry& e : entries_) if (e.source) e.source->cache().attach(memory);
 }
 
+MediaManager::OriginalSourceLease::~OriginalSourceLease() {
+    if (owner_) owner_->release_original_sources();
+}
+
+MediaManager::OriginalSourceLease::OriginalSourceLease(OriginalSourceLease&& other) noexcept : owner_(other.owner_) {
+    other.owner_ = nullptr;
+}
+
+MediaManager::OriginalSourceLease& MediaManager::OriginalSourceLease::operator=(OriginalSourceLease&& other) noexcept {
+    if (this != &other) {
+        if (owner_) owner_->release_original_sources();
+        owner_ = other.owner_;
+        other.owner_ = nullptr;
+    }
+    return *this;
+}
+
+MediaManager::OriginalSourceLease MediaManager::retain_original_sources() noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // The service only signals cancellation here; it does not join its worker.
+    // Preserve background/thermal/export pauses when the last capture ends.
+    if (++originalSourceLeases_ == 1) proxies_.set_pause_reason(PreviewProxyService::Capture, true);
+    return OriginalSourceLease{this};
+}
+
+void MediaManager::release_original_sources() noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (originalSourceLeases_ && --originalSourceLeases_ == 0)
+        proxies_.set_pause_reason(PreviewProxyService::Capture, false);
+}
+
 VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asset& asset,
                                       u64 frameNumber, bool finalQuality) {
-    auto proxy = finalQuality ? std::shared_ptr<const PreviewProxy>{} : proxies_.request(asset);
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Pausing generation alone is insufficient: request() still returns ready
+    // proxies. Source selection and lease transitions must be serialized.
+    auto proxy = finalQuality || originalSourceLeases_ ? std::shared_ptr<const PreviewProxy>{} : proxies_.request(asset);
     Asset decodeAsset = asset;
     if (proxy) {
         decodeAsset.sourcePath = proxy->path;
         decodeAsset.video.width = proxy->width; decodeAsset.video.height = proxy->height;
         decodeAsset.profile.bitDepth = 8;
     }
-    std::lock_guard<std::mutex> lock(mutex_);
     for (usize i = 0; i < entries_.size();) {
         if (entries_[i].layer == layer && (entries_[i].asset != assetId || entries_[i].path != decodeAsset.sourcePath)) {
             retire_locked(std::move(entries_[i]));

@@ -56,9 +56,11 @@ public:
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
+    std::function<void()> beforeWaitIdle;
     std::function<Status(const BufferDesc&)> beforeCreateBuffer;
     std::function<Status(u64, u64)> beforeWaitFrame;
     std::function<Status(TextureHandle, const void*, u32)> beforeTextureUpload;
+    std::function<u32()> beforeTrimExternalImages;
     std::atomic<u32> idleWaits{0};
     GPUCapabilities caps;
 
@@ -178,11 +180,17 @@ public:
         return Status{Errc::NotSupported};
     }
     void release_external_image(TextureHandle) noexcept override {}
+    u32 trim_external_images() noexcept override {
+        return beforeTrimExternalImages ? beforeTrimExternalImages() : 0;
+    }
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override {
         if (frameOpen) deferred_.push_back({fn, ctx});
         else fn(ctx);
     }
-    void wait_idle() noexcept override { ++idleWaits; }
+    void wait_idle() noexcept override {
+        if (beforeWaitIdle) beforeWaitIdle();
+        ++idleWaits;
+    }
     u64 last_submitted_frame() const noexcept override { return framesSubmitted ? frame_ : 0; }
     Status wait_frame(u64 frame, u64 timeout) noexcept override {
         return beforeWaitFrame ? beforeWaitFrame(frame, timeout) : OkStatus;

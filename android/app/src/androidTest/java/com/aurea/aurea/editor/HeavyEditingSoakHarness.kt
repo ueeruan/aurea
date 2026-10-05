@@ -87,6 +87,14 @@ internal class HeavyEditingSoakHarness(private val compose: ComposeContentTestRu
                 }
             }
             compose.waitUntil(30000) { ready && store.engineReady }
+            val readableVideoDiagnostic = InstrumentationRegistry.getArguments()
+                .getString("aureaStressReadableVideo") == "true"
+            if (readableVideoDiagnostic) {
+                // Diagnostic A/B only: preserve the entire workload and pixel
+                // assertions while removing the hardware/GL video path.
+                engine.useReadableVideoPlanes()
+                journal.note("DIAGNOSTIC readableVideoPlanes=true; not the default-path acceptance run")
+            }
             val videos = makeFullHdVideos(folder)
             buildScene(videos)
             val project = File(folder, "sustained.aurea")
@@ -379,6 +387,7 @@ internal class HeavyEditingSoakHarness(private val compose: ComposeContentTestRu
         journal.stage.set("save/reload ${reloads + 1}")
         seek(frame)
         val before = capture("before-reload")
+        val beforeRepeat = capture("before-reload-repeat")
         assertEquals(0, engine.saveProject(project.absolutePath))
         assertTrue(project.length() > 1000)
         assertEquals(0, engine.loadProject(project.absolutePath))
@@ -386,10 +395,29 @@ internal class HeavyEditingSoakHarness(private val compose: ComposeContentTestRu
         seek(frame)
         verifyPresentedPreview("reload-${reloads + 1}", true)
         val after = capture("after-reload")
+        val afterRepeat = capture("after-reload-repeat")
         assertContent(after)
         val maximum = before.indices.maxOf { abs((before[it].toInt() and 255) - (after[it].toInt() and 255)) }
         val changed = before.indices.count { abs((before[it].toInt() and 255) - (after[it].toInt() and 255)) > 4 }
+        fun repeatChanged(a: ByteArray, b: ByteArray) = a.indices.count { abs((a[it].toInt() and 255) - (b[it].toInt() and 255)) > 4 }
+        journal.note("CAPTURE STABILITY beforeChanged=${repeatChanged(before, beforeRepeat)} afterChanged=${repeatChanged(after, afterRepeat)}")
         journal.note("RELOAD ${++reloads} maxDifference=$maximum changedChannels=$changed/${before.size}")
+        if (changed > before.size / 1000) {
+            assertEquals(0, engine.saveProject(File(journal.folder, "reload-$reloads-after.aurea").absolutePath))
+            File(journal.folder, "reload-$reloads-format.txt").writeText("RGBA8, 320x180, rowBytes=1280, frame=$frame\n")
+            for ((label, rgba) in listOf("before" to before, "before-repeat" to beforeRepeat,
+                "after" to after, "after-repeat" to afterRepeat)) {
+                File(journal.folder, "reload-$reloads-$label.rgba").writeBytes(rgba)
+                val bitmap = Bitmap.createBitmap(320, 180, Bitmap.Config.ARGB_8888)
+                try {
+                    bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(rgba))
+                    File(journal.folder, "reload-$reloads-$label.png").outputStream().use {
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                } finally { bitmap.recycle() }
+            }
+            sample("RELOAD PARITY FAILURE frame=$frame")
+        }
         assertTrue("Save/reload changed visible content: maximum=$maximum changed=$changed", changed <= before.size / 1000)
     }
 
@@ -424,6 +452,8 @@ internal class HeavyEditingSoakHarness(private val compose: ComposeContentTestRu
             journal.healthy()
             val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
             var colored = 0; var lit = 0; var samples = 0
+            val cyan = IntArray(3)
+            val magenta = IntArray(3)
             val colors = IntArray(25 * 41)
             try {
                 // Restrict to the 16:9 composition inside the stage's letterbox.
@@ -436,11 +466,19 @@ internal class HeavyEditingSoakHarness(private val compose: ComposeContentTestRu
                     val r = Color.red(pixel); val g = Color.green(pixel); val b = Color.blue(pixel)
                     if (maxOf(r, g, b) > 70) lit++
                     if (maxOf(r, g, b) - minOf(r, g, b) > 25) colored++
+                    // The synthetic footage contains repeated cyan/magenta
+                    // bands. Generic colored shapes still appear when every
+                    // video is missing, so they cannot be the ready signal.
+                    val region = minOf(2, x * 3 / 41)
+                    if (g > 160 && b > 160 && r < 110) cyan[region]++
+                    if (r > 160 && b > 160 && g < 110) magenta[region]++
                     colors[samples] = pixel
                     samples++
                 }
-                detail = "label=$label colored=$colored lit=$lit samples=$samples"
-                if (lit > 20 && colored > 10) {
+                detail = "label=$label colored=$colored lit=$lit samples=$samples videoCyan=${cyan.contentToString()} videoMagenta=${magenta.contentToString()}"
+                val videoPresent = cyan.sum() >= 20 && magenta.sum() >= 20 &&
+                    (0..2).all { cyan[it] >= 4 && magenta[it] >= 4 }
+                if (lit > 20 && colored > 10 && videoPresent) {
                     if (save) File(journal.folder, "presented-$label.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     journal.note("PRESENTED $detail")
                     return colors

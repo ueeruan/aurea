@@ -38,6 +38,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace aurea {
@@ -251,12 +252,16 @@ private:
     /// (quem roda devolve a vaga ao terminar).
     [[nodiscard]] bool take(Task& out, bool allowBackground, bool& bgSlot) noexcept;
     void run_task(const Task& t, u32 workerIndex, bool bgSlot) noexcept;
+    void finish_task(u64 id) noexcept;
     [[nodiscard]] bool has_work_for(u32 workerIndex) const noexcept;
     void notify_workers(u32 n) noexcept;
 
     static constexpr bool is_background(u8 p) noexcept { return p >= static_cast<u8>(JobPriority::Low); }
 
     WorkQueue                queues_[kQueueCount];
+    std::mutex               lifecycleMutex_;
+    std::mutex               taskMutex_;
+    std::unordered_set<u64>  unfinished_;
     std::atomic<bool>        running_{false};
     std::atomic<bool>        stop_{false};
     std::atomic<u64>         nextId_{1};

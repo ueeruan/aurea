@@ -683,6 +683,21 @@ struct ColorPickerSheet: View {
                 }
             }.padding(.init(top: 12, leading: 18, bottom: 16, trailing: 18)).foregroundStyle(AureaColors.text)
         }.onAppear { load(request.initial) }
+        .onChange(of: model.projectGeneration) { _ in picking = false; shot = nil }
+        .onChange(of: model.panel) { _ in picking = false; shot = nil }
+        .task(id: picking) {
+            guard picking else { shot = nil; return }
+            let project = model.projectGeneration
+            let panel = model.panel
+            let frame = await model.capturePreviewFrame(720)
+            guard !Task.isCancelled, picking, model.projectGeneration == project, model.panel == panel else { return }
+            guard let frame,
+                  let image = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height)) else {
+                picking = false
+                return
+            }
+            shot = PreviewShot(image: image, rgba: frame.data, width: Int(frame.width), height: Int(frame.height))
+        }
     }
     private var board: some View {
         GeometryReader { geometry in
@@ -709,12 +724,8 @@ struct ColorPickerSheet: View {
         }
     }
     private func togglePicking() {
-        if picking { picking = false; shot = nil; return }
-        var width: UInt32 = 0, height: UInt32 = 0
-        guard let data = model.engine.captureFrame(720, outWidth: &width, outHeight: &height), width > 0, height > 0,
-              let image = UIImage.fromRGBA(data, width: Int(width), height: Int(height)) else { return }
-        shot = PreviewShot(image: image, rgba: data, width: Int(width), height: Int(height))
-        picking = true
+        shot = nil
+        picking.toggle()
     }
     private func load(_ rgba: [Float]) { let hsv = AureaColorSpace.hsv(rgba); hue = hsv.h; saturation = hsv.s; brightness = hsv.v; alpha = hsv.a }
     private func setColor(_ rgba: [Float]) { load(rgba); push() }

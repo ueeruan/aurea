@@ -830,8 +830,26 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
         id<MTLTexture> texture = t->texture;
         if (!texture) return Errc::InvalidState;
 
-        // Sempre por submissão própria: o import de 3D roda fora do frame, e um
-        // nível 4K não cabe no anel de staging do frame.
+        if (d.current && !d.commands.in_render_pass()
+            && expected <= 4ull * 1024 * 1024
+            && d.current->staging.used() <= 4ull * 1024 * 1024 - expected) {
+            d.commands.finish_encoders();
+            id<MTLBuffer> buffer = nil;
+            u32 offset = 0;
+            void* mapped = nullptr;
+            if (!d.current->staging.allocate(expected, 16, buffer, offset, mapped)) return Errc::OutOfMemory;
+            std::memcpy(mapped, data, expected);
+            id<MTLBlitCommandEncoder> blit = [d.current->cmd blitCommandEncoder];
+            [blit copyFromBuffer:buffer sourceOffset:offset sourceBytesPerRow:rowBytes sourceBytesPerImage:0
+                     sourceSize:MTLSizeMake(w, h, 1) toTexture:texture destinationSlice:layer
+               destinationLevel:mipLevel destinationOrigin:MTLOriginMake(0, 0, 0)];
+            [blit endEncoding];
+            d.uploadBytesFrame += expected;
+            t->state = ResourceState::ShaderRead;
+            return OkStatus;
+        }
+
+        // Outside a frame, the caller needs a completed upload.
         BufferDesc sd;
         sd.bytes = expected;
         sd.usage = BufferUsage::TransferSrc;
@@ -848,7 +866,7 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
 
         struct Ctx { id<MTLTexture> dst; id<MTLBuffer> src; u32 mip, layer, w, h, rowBytes; usize total; }
             ctx{texture, s->buffer, mipLevel, layer, w, h, rowBytes, expected};
-        const Status st = d.submit_immediate([](Impl&, id<MTLCommandBuffer> cb, void* p) {
+        const auto record = [](Impl&, id<MTLCommandBuffer> cb, void* p) {
             auto* c = static_cast<Ctx*>(p);
             id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
             [blit copyFromBuffer:c->src
@@ -861,7 +879,16 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
                  destinationLevel:c->mip
                 destinationOrigin:MTLOriginMake(0, 0, 0)];
             [blit endEncoding];
-        }, &ctx);
+        };
+        if (d.current && !d.commands.in_render_pass()) {
+            d.commands.finish_encoders();
+            record(d, d.current->cmd, &ctx);
+            d.uploadBytesFrame += expected;
+            t->state = ResourceState::ShaderRead;
+            destroy_buffer(*staging);
+            return OkStatus;
+        }
+        const Status st = d.submit_immediate(record, &ctx);
         Buffer dead;
         if (d.buffers.remove(staging->id, dead)) d.destroy_buffer_now(dead);
         if (st.ok()) t->state = ResourceState::ShaderRead;
@@ -881,6 +908,14 @@ Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
         }
         id<MTLTexture> tex = t->texture;
         if (!tex) return Errc::InvalidState;
+        if (d.current && !d.commands.in_render_pass()) {
+            d.commands.finish_encoders();
+            id<MTLBlitCommandEncoder> blit = [d.current->cmd blitCommandEncoder];
+            [blit generateMipmapsForTexture:tex];
+            [blit endEncoding];
+            t->state = ResourceState::ShaderRead;
+            return OkStatus;
+        }
         // `generateMipmapsForTexture:` é o blit de mip chain do próprio Metal:
         // mesma conta da cadeia de `vkCmdBlitImage` do Vulkan, feita pela GPU.
         const Status st = d.submit_immediate([](Impl&, id<MTLCommandBuffer> cb, void* p) {

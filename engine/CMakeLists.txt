@@ -127,6 +127,9 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/PatternEffects.cpp
     src/effects/builtin/SampledBlurEffects.cpp
     src/effects/builtin/MotionBehaviorEffects.cpp
+    src/effects/builtin/MotionExtras.cpp
+    src/effects/builtin/RepeatExtras.cpp
+    src/effects/builtin/KeyingExtras.cpp
     src/effects/builtin/FinishingEffects.cpp
     src/effects/builtin/GenerateEffects.cpp
     src/effects/builtin/MatteEffects.cpp
@@ -255,6 +258,26 @@ set(AUREA_WARNINGS
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -fno-exceptions>
 )
 target_compile_options(aurea_core PRIVATE ${AUREA_WARNINGS})
+# These import boundaries catch allocation failures and translate them to
+# Status. Their allocating dependencies need unwind cleanup too, so a failed
+# staging allocation releases local vectors and project snapshots on mobile.
+set(AUREA_IMPORT_BOUNDARIES
+    src/audio/Beats.cpp
+    src/audio/AudioBlockCache.cpp
+    src/engine/Engine.cpp
+    src/engine/EngineMedia.cpp
+    src/engine/EnginePsd.cpp
+    src/project/Psd.cpp
+    src/project/Project.cpp
+    src/command/History.cpp
+    src/timeline/Composition.cpp
+    src/timeline/Timeline.cpp
+)
+if(MSVC)
+    set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS /EHsc)
+else()
+    set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS -fexceptions)
+endif()
 target_compile_options(aurea_core PRIVATE
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O3>
     $<$<AND:$<CONFIG:RelWithDebInfo>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O2 -g>

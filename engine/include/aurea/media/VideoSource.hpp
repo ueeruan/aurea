@@ -58,6 +58,8 @@ public:
     /// pts < `deliverFromUs` são decodificados e descartados sem produzir
     /// imagem (render = false no MediaCodec). Devolve o pts em `outPtsUs` nos
     /// dois casos; `out` só é preenchido quando entregue.
+    /// BudgetExceeded is retryable buffer pressure: retain the pending output
+    /// so the next call can finish it without seeking or losing its timestamp.
     [[nodiscard]] virtual Status next_frame(i64 deliverFromUs, FrameRef& out, i64& outPtsUs,
                                             bool& endOfStream) noexcept = 0;
 
@@ -151,7 +153,7 @@ private:
     void thread_main() noexcept;
     [[nodiscard]] bool reachable_forward(i64 needUs) const noexcept;
     void deliver(FrameRef frame, u64 epoch) noexcept;
-    void schedule_retry(u64 generation) noexcept;
+    void schedule_retry(u64 generation, bool backpressure = false) noexcept;
     void publish_info() noexcept;
 
     std::unique_ptr<VideoDecoderBackend> backend_;
@@ -172,12 +174,14 @@ private:
     u32 requestCacheVersion_ = 0;
     u64 retryAfterNs_ = 0;
     u32 retryAttempts_ = 0;
+    bool retryBackpressure_ = false;
     bool running_ = false;
     bool suspended_ = false;
     bool suspendApplied_ = false;
 
     // Estado do decoder — só a thread de decode toca.
     i64 decoderPosUs_ = -1;        ///< pts do último frame que saiu do decoder
+    i64 decoderSeekUs_ = 0;
     bool decoderValid_ = false;
     bool eos_ = false;
     /// Para trás (reverso, scrub descendo): quantos frames ANTES do alvo são

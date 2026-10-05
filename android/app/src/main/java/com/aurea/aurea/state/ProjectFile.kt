@@ -30,7 +30,8 @@ internal object ProjectFile {
 
     /** Grava o pacote do projeto em `target`. Roda em IO. */
     fun export(context: Context, engine: AureaEngine, projectPath: String, title: String, includeMedia: Boolean, target: Uri): ExportOutcome {
-        val tmp = File(context.cacheDir, "arquivo_projeto").apply { mkdirs() }.let { File(it, "saida.$EXTENSION") }
+        val tmp = try { File.createTempFile("saida-", ".$EXTENSION", context.cacheDir) }
+        catch (_: Exception) { return ExportOutcome(ERR_IO, 0, 0) }
         val opened = mutableListOf<ParcelFileDescriptor>()
         try {
             val media = mutableListOf<String>()
@@ -81,7 +82,8 @@ internal object ProjectFile {
         context: Context, engine: AureaEngine, source: Uri, projectsDir: File, fallbackTitle: String,
         uniqueName: (String) -> String,
     ): ImportOutcome {
-        val tmp = File(context.cacheDir, "arquivo_projeto").apply { mkdirs() }.let { File(it, "entrada.$EXTENSION") }
+        val tmp = try { File.createTempFile("entrada-", ".$EXTENSION", context.cacheDir) }
+        catch (_: Exception) { return ImportOutcome(ERR_IO) }
         try {
             val input = context.contentResolver.openInputStream(source) ?: return ImportOutcome(ERR_IO)
             input.use { i -> tmp.outputStream().use { i.copyTo(it, 1 shl 20) } }

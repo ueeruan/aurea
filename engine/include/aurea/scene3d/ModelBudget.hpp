@@ -91,6 +91,10 @@ struct ModelPlan {
 /// Teto de memória do import para o aparelho (pico, não residente).
 [[nodiscard]] u64 model_memory_budget(const DeviceMemoryHint& hint) noexcept;
 
+/// CPU allocations retained by an immutable scene, including animation, LODs,
+/// morphs and spare vector capacity. Shared image storage is counted conservatively.
+[[nodiscard]] u64 scene_asset_memory_bytes(const SceneAsset& scene) noexcept;
+
 /// Limites de uma qualidade. `textureCap` é o teto do motor (2048 no celular).
 [[nodiscard]] ModelBudget model_budget(const DeviceMemoryHint& hint, ModelQuality quality, u32 textureCap) noexcept;
 

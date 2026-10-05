@@ -90,7 +90,7 @@ public:
         const f64 decay = static_cast<f64>(finite_or(e.f(kDecay), 0));
         if (!(decay > 0)) return false;
         const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
-        const f64 earliest = static_cast<f64>(e.localTime.value) / fps - kShakeMaxShutter / fps;
+        const f64 earliest = e.time_frames() / fps - kShakeMaxShutter / fps;
         return std::exp(-std::min(decay, static_cast<f64>(kShakeMaxDecay)) * std::max(0.0, earliest)) < 1e-6;
     }
     f32 input_margin(const EffectEval&) const noexcept override { return 0; }
@@ -106,7 +106,7 @@ public:
         s.style = e.e(kStyle); s.phase = finite_or(e.f(kPhase), 0);
         s.wave = std::clamp(finite_or(e.f(kWave), 0) / 100.f, 0.f, 1.f);
         const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
-        const f64 seconds = static_cast<f64>(e.localTime.value) / fps;
+        const f64 seconds = e.time_frames() / fps;
         const f32 blur = std::clamp(finite_or(e.f(kBlur), 0) / 100.f, 0.f, kShakeMaxShutter);
         const u32 count = blur > .001f ? 8u : 1u;
         struct { Vec4 rows[16]; Vec4 options; Vec4 bounds; } u{};
@@ -202,7 +202,7 @@ public:
         u.p0 = Vec4{e.f(kAmount), e.f(kSize), e.f(kComplexity), e.f(kEvolution)};
         u.p1 = Vec4{e.f(kOffsetX), e.f(kOffsetY), static_cast<f32>(e.e(kSeed)), e.b(kHorizontal) ? 1.0f : 0.0f};
         u.p2 = Vec4{static_cast<f32>(e.e(kEdges)), e.f(kSpin), e.f(kMix)/100.0f, static_cast<f32>(e.e(kPin))};
-        u.p3 = Vec4{static_cast<f32>(e.localTime.value), finite_or(e.f(kComplexity), 3.0f), 0.0f, 0.0f};
+        u.p3 = Vec4{static_cast<f32>(e.time_frames()), finite_or(e.f(kComplexity), 3.0f), 0.0f, 0.0f};
 
         out = LayerImage{ctx.texture("turbulencia", w, h), region, w, h};
         if (ctx.fullscreen_pass("turbulencia", PassStage::Transform, out.texture,
@@ -265,7 +265,7 @@ public:
         u.p0 = Vec4{h, e.f(kWavelength), e.f(kSpeed), e.f(kPhase)};
         u.p1 = Vec4{static_cast<f32>(e.e(kDirection)), e.b(kSquare) ? 1.0f : 0.0f,
                     static_cast<f32>(e.e(kEdges)), e.b(kPin) ? 1.0f : 0.0f};
-        u.p3 = Vec4{static_cast<f32>(e.localTime.value), 0.0f, 0.0f, 0.0f};
+        u.p3 = Vec4{static_cast<f32>(e.time_frames()), 0.0f, 0.0f, 0.0f};
         u.p2 = Vec4{0.0f, 0.0f, input.region.x, input.region.y};   // origem da entrada (px da camada)
 
         out = LayerImage{ctx.texture("onda", w, hh), region, w, hh};
@@ -403,7 +403,7 @@ public:
         u.p0 = Vec4{progress * 1.05f - 0.02f, e.f(kAmplitude), e.f(kWavelength), soft};
         u.p1 = Vec4{c.x, c.y, e.f(kSpeed), static_cast<f32>(e.e(kSeed))};
         u.p2 = Vec4{e.b(kDistort) ? 1.0f : 0.0f, e.b(kInvert) ? 1.0f : 0.0f, 0.0f, 0.0f};
-        u.p3 = Vec4{static_cast<f32>(e.localTime.value), 0.0f, 0.0f, 0.0f};
+        u.p3 = Vec4{static_cast<f32>(e.time_frames()), 0.0f, 0.0f, 0.0f};
 
         out = LayerImage{ctx.texture("ondulacao", w, h), region, w, h};
         if (ctx.fullscreen_pass("ondulacao", PassStage::Transform, out.texture,

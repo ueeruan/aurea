@@ -565,7 +565,7 @@ AUREA_TEST(Memory8B, TrimFollowsTheSpecOrderAndNeverTouchesTheProject) {
     // Mapa do Android → estágio.
     AUREA_CHECK(trim_stage_for_os_level(5) == TrimStage::OldWaveforms);
     AUREA_CHECK(trim_stage_for_os_level(10) == TrimStage::UnusedDecodedFrames);
-    AUREA_CHECK(trim_stage_for_os_level(15) == TrimStage::OldRenderCache);
+    AUREA_CHECK(trim_stage_for_os_level(15) == TrimStage::Temporaries);
     AUREA_CHECK(trim_stage_for_os_level(20) == TrimStage::UnusedDecodedFrames);
     AUREA_CHECK(trim_stage_for_os_level(40) == TrimStage::OldRenderCache);
     AUREA_CHECK(trim_stage_for_os_level(60) == TrimStage::Unused3DAssets);

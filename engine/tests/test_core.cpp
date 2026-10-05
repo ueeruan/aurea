@@ -15,6 +15,7 @@
 #include <atomic>
 #include <memory>
 #include <chrono>
+#include <future>
 #include <string>
 #include <thread>
 
@@ -387,6 +388,70 @@ AUREA_TEST(Jobs, SubmitAfterStopIsRefused) {
     (void)jobs.start(1);
     jobs.stop();
     AUREA_CHECK(!jobs.submit(JobPriority::Normal, increment_job, nullptr).valid());
+}
+
+namespace {
+struct BlockedJob {
+    std::promise<void> entered, release;
+    std::shared_future<void> gate = release.get_future().share();
+};
+void blocked_job(void* data, JobContext&) {
+    auto& job = *static_cast<BlockedJob*>(data);
+    job.entered.set_value(); job.gate.wait();
+}
+void empty_job(void*, JobContext&) {}
+}
+
+AUREA_TEST(Jobs, WaitingForOneHandleIgnoresLaterAndInlineCompletions) {
+    JobSystem jobs; AUREA_CHECK(jobs.start(2).ok());
+    BlockedJob blocked;
+    auto entered = blocked.entered.get_future();
+    const JobHandle first = jobs.submit(JobPriority::High, blocked_job, &blocked);
+    AUREA_CHECK(first.valid());
+    AUREA_CHECK(entered.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+    const auto later = jobs.submit(JobPriority::High, empty_job, nullptr);
+    jobs.wait(later);
+    jobs.run_inline(empty_job, nullptr);
+    auto waiting = std::async(std::launch::async, [&] { jobs.wait(first); });
+    const bool returnedEarly = waiting.wait_for(std::chrono::milliseconds(50)) == std::future_status::ready;
+    blocked.release.set_value(); waiting.get();
+    AUREA_CHECK(!returnedEarly);
+    jobs.stop();
+}
+
+AUREA_TEST(Jobs, StopDoesNotDetachSlowWorkersFromTheirOwner) {
+    JobSystem jobs; AUREA_CHECK(jobs.start(1).ok());
+    BlockedJob blocked;
+    auto entered = blocked.entered.get_future();
+    AUREA_CHECK(jobs.submit(JobPriority::High, blocked_job, &blocked).valid());
+    AUREA_CHECK(entered.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+    auto stopping = std::async(std::launch::async, [&] { jobs.stop(); });
+    const bool detached = stopping.wait_for(std::chrono::milliseconds(2200)) == std::future_status::ready;
+    blocked.release.set_value(); stopping.get();
+    AUREA_CHECK(!detached);
+    AUREA_CHECK_EQ(jobs.stats().liveThreads, 0u);
+}
+
+AUREA_TEST(Jobs, ParallelForReportsPartialQueueSubmissionAndBoundsPriority) {
+    JobSystem jobs; AUREA_CHECK(jobs.start(2).ok());
+    BlockedJob a, b;
+    auto enteredA = a.entered.get_future(), enteredB = b.entered.get_future();
+    AUREA_CHECK(jobs.submit(JobPriority::High, blocked_job, &a).valid());
+    AUREA_CHECK(jobs.submit(JobPriority::High, blocked_job, &b).valid());
+    AUREA_CHECK(enteredA.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+    AUREA_CHECK(enteredB.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
+    for (u32 i = 0; i < 1023; ++i)
+        AUREA_CHECK(jobs.submit(JobPriority::Normal, empty_job, nullptr).valid());
+    // Only one of two slices fits. Returning true would silently lose half the work.
+    const bool accepted = jobs.parallel_for(JobPriority::Normal, 4, slice_job, nullptr, 0);
+    AUREA_CHECK(!accepted);
+    AUREA_CHECK_EQ(jobs.queue_depth(JobPriority::Count), 0u);
+    jobs.wait_idle(JobPriority::Count);
+    a.release.set_value(); b.release.set_value();
+    jobs.stop();
+    AUREA_CHECK(jobs.start(1).ok());
+    const auto restarted = jobs.submit(JobPriority::High, empty_job, nullptr);
+    jobs.wait(restarted); jobs.stop();
 }
 
 // -----------------------------------------------------------------------------

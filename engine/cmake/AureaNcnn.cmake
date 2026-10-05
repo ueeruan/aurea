@@ -108,15 +108,40 @@ else()
     # The compiler's dependency scan does not see .incbin inputs.
     set_source_files_properties("${ai_depth_cpp}" PROPERTIES OBJECT_DEPENDS "${ai_depth_bin};${ai_depth_param}")
 endif()
+# Foreground segmentation ships with both apps. First use and reopened projects
+# must not depend on an external download or writable model directory.
+set(ai_foreground_bin "${CMAKE_CURRENT_SOURCE_DIR}/assets/rotobrush/u2netp.bin")
+set(ai_foreground_param "${CMAKE_CURRENT_SOURCE_DIR}/assets/rotobrush/u2netp.param")
+file(SHA256 "${ai_foreground_bin}" ai_foreground_bin_sha)
+file(SHA256 "${ai_foreground_param}" ai_foreground_param_sha)
+if(NOT ai_foreground_bin_sha STREQUAL "e9cbc6a779f02490ac16ef87e6b800d3b8dc29fe8cd65226318c089c5d21fd2e" OR
+   NOT ai_foreground_param_sha STREQUAL "ab9567c0bfebecf51e8bb1292e2b4ca1bfb09006122a01bbba38a429ca94a4b0")
+    message(FATAL_ERROR "Bundled U2Net-P model checksum mismatch")
+endif()
+set(ai_foreground_cpp "${CMAKE_CURRENT_BINARY_DIR}/generated/AiForegroundModel.cpp")
+if(MSVC)
+    add_custom_command(OUTPUT "${ai_foreground_cpp}"
+        COMMAND "${CMAKE_COMMAND}" "-DBIN=${ai_foreground_bin}" "-DPARAM=${ai_foreground_param}" "-DOUTPUT=${ai_foreground_cpp}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedForegroundModel.cmake"
+        DEPENDS "${ai_foreground_bin}" "${ai_foreground_param}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedForegroundModel.cmake"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedDepthModel.cmake"
+        VERBATIM)
+else()
+    set(AI_FOREGROUND_BIN "${ai_foreground_bin}")
+    set(AI_FOREGROUND_PARAM "${ai_foreground_param}")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AiForegroundModel.incbin.cpp.in" "${ai_foreground_cpp}" @ONLY)
+    set_source_files_properties("${ai_foreground_cpp}" PROPERTIES OBJECT_DEPENDS "${ai_foreground_bin};${ai_foreground_param}")
+endif()
 target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
-               "${ai_model_cpp}" "${ai_depth_cpp}")
+               "${ai_model_cpp}" "${ai_depth_cpp}" "${ai_foreground_cpp}")
 target_link_libraries(aurea_core PRIVATE ncnn)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.
 if(MSVC)
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp
                                 PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp
                                 PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()

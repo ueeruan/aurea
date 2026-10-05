@@ -29,6 +29,7 @@ layout(location = 1) out vec4 o_scene;
 
 layout(set = 0, binding = AUREA_TEX0) uniform sampler2D t_reflection;   // reflexo planar (pré-mult., codificado)
 layout(set = 0, binding = AUREA_TEX1) uniform sampler2D t_contact;      // oclusão de contato desfocada (r)
+layout(set = 0, binding = AUREA_TEX2) uniform sampler2D t_reflectionDisplay; // unlit: linear de exibição, sem tone map
 layout(set = 0, binding = AUREA_TEX5) uniform samplerCube t_irradiance;
 layout(set = 0, binding = AUREA_TEX6) uniform samplerCube t_prefilter;
 layout(set = 0, binding = AUREA_TEX7) uniform sampler2D t_brdf;
@@ -169,10 +170,14 @@ void main() {
     envSpec *= g.envParams.x;
     // Reflexo planar: a cena espelhada na MESMA projeção — o texel é o do pixel.
     vec4 planar = vec4(0.0);
+    vec3 planarDisplay = vec3(0.0);
     if (g.viewport.z > 0.5) {
         planar = textureLod(t_reflection, gl_FragCoord.xy * g.viewport.xy, 0.0);
         planar.rgb = aurea_hdr_decode(planar.rgb);
         planar.a = clamp(planar.a, 0.0, 1.0);
+        if (g.contactParams.y > 0.5) {
+            planarDisplay = textureLod(t_reflectionDisplay, gl_FragCoord.xy * g.viewport.xy, 0.0).rgb;
+        }
     }
 
     // Oclusão de contato: no ambiente (difuso e reflexo do céu) inteira; na
@@ -188,7 +193,9 @@ void main() {
         alpha *= fade;
         refl *= fade;
         vec3 color = refl * g.cameraPos.w;
-        o_color = vec4(0.0, 0.0, 0.0, alpha);
+        // Preserve the scene's two color domains through reflection: unlit
+        // remains display-linear, while radiance receives the group's post.
+        o_color = vec4(planarDisplay * specW * fade * g.cameraPos.w, alpha);
         o_scene = vec4(aurea_hdr_encode(color), alpha);
         return;
     }
@@ -197,6 +204,6 @@ void main() {
     vec3 diffuse = (irradiance * albedo * contact) * (1.0 - specW) + direct * mix(1.0, contact, 0.5);
     vec3 color = diffuse + reflection * specW + directSpec;
     color *= g.cameraPos.w * fade;   // pré-multiplicado pelo desbotamento
-    o_color = vec4(0.0, 0.0, 0.0, fade);
+    o_color = vec4(planarDisplay * specW * fade * g.cameraPos.w, fade);
     o_scene = vec4(aurea_hdr_encode(color), fade);
 }

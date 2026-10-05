@@ -25,6 +25,39 @@ import XCTest
         app = nil
     }
 
+    func testMotionBlurCenterUsesDegreesAndOneUndoPreservesQuality() throws {
+        let before = try launch("motion-blur-controls")
+        let initial = try XCTUnwrap(before.motionBlurSettings)
+        XCTAssertEqual(initial.count, 6)
+        XCTAssertEqual(initial[1], 181, accuracy: 0.001)
+        XCTAssertEqual(initial[2], 45, accuracy: 0.001)
+        let shutter = app.descendants(matching: .any)["motionblur.shutter"].firstMatch
+        XCTAssertTrue(shutter.waitForExistence(timeout: 5))
+        XCTAssertTrue((shutter.value as? String ?? "").contains("°"))
+        let advanced = app.descendants(matching: .any)["motionblur.advanced"].firstMatch
+        XCTAssertTrue(advanced.waitForExistence(timeout: 5)); advanced.tap()
+        let center = app.buttons["motionblur.center"].firstMatch
+        XCTAssertTrue(center.waitForExistence(timeout: 5))
+        // A DisclosureGroup identifier must not replace identifiers on its
+        // expanded controls. Each control remains independently addressable.
+        for identifier in ["advanced", "phase", "center", "samples", "adaptive"] {
+            XCTAssertEqual(app.descendants(matching: .any)
+                .matching(identifier: "motionblur.\(identifier)").count, 1, identifier)
+        }
+        if !center.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        center.tap()
+        let changed = try awaitSnapshot("Center places the shutter around the frame") {
+            ($0.motionBlurSettings?.count ?? 0) == 6 && abs($0.motionBlurSettings![2] + 90.5) < 0.001
+        }
+        XCTAssertEqual(changed.motionBlurSettings?[1], initial[1])
+        XCTAssertEqual(Array(try XCTUnwrap(changed.motionBlurSettings).suffix(3)), Array(initial.suffix(3)))
+        try undo()
+        let restored = try awaitSnapshot("One undo restores the whole composition blur edit") {
+            $0.motionBlurSettings == initial
+        }
+        XCTAssertEqual(restored.motionBlurSettings, initial)
+    }
+
     func testMotionBlurTextExportCompletesAt1080p() throws {
         let snapshot = try launch("motion-blur-export")
         XCTAssertEqual(snapshot.compositionWidth, 1920)
@@ -50,6 +83,54 @@ import XCTest
         }
         XCTAssertTrue(ready.exists, "The export never reached the done screen")
         XCTAssertTrue(app.buttons["Open"].isEnabled)
+    }
+
+    func testTransformExpressionExplainsWhyPositionIsControlled() throws {
+        let before = try launch("transform-expression")
+        let notice = app.staticTexts["transform.expression.controlled"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertTrue(notice.label.contains("expression"))
+        XCTAssertEqual(before.detail.position[0], 540, accuracy: 0.01)
+        XCTAssertEqual(before.detail.position[1], 515, accuracy: 0.01)
+        let pad = app.descendants(matching: .any)["transform.move.pad"].firstMatch
+        XCTAssertTrue(pad.waitForExistence(timeout: 5)); XCTAssertTrue(pad.isHittable)
+        pad.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.65)))
+        let after = try snapshot()
+        XCTAssertEqual(after.detail.position[0], 540, accuracy: 0.01)
+        XCTAssertEqual(after.detail.position[1], 515, accuracy: 0.01)
+        XCTAssertTrue(notice.exists)
+        // The notice points to the existing expression editor; it must remain
+        // possible to change/disable the expression instead of removing it on drag.
+        let edit = app.buttons["Add expression"].firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
+        XCTAssertTrue(app.staticTexts["[540, 515]"].exists || app.textViews.firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testPreviewBufferStatusAndPauseRemainAvailable() throws {
+        _ = try launch("transform-expression")
+        let play = app.buttons["Play · hold to repeat"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+        let pause = app.buttons["Pause"].firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout: 5))
+        let buffer = app.descendants(matching: .any)["preview.buffer.status"].firstMatch
+        XCTAssertTrue(buffer.waitForExistence(timeout: 5))
+        XCTAssertFalse(buffer.label.isEmpty)
+        let cached = try awaitSnapshot("The timeline receives real composed-frame ranges") {
+            !($0.previewBufferRanges ?? []).isEmpty
+        }
+        let ranges = try XCTUnwrap(cached.previewBufferRanges)
+        XCTAssertTrue(ranges.allSatisfy { $0.count == 2 && $0[0] >= 0 && $0[1] > $0[0] })
+        XCTAssertLessThanOrEqual(ranges.reduce(Int64(0)) { $0 + $1[1] - $1[0] }, 30)
+        XCTAssertTrue(app.staticTexts["timeline.preview.buffer"].firstMatch.waitForExistence(timeout: 5))
+        pause.tap()
+        let paused = try awaitSnapshot("Pause cancels playback or pending buffer startup") { $0.playing == 0 }
+        // Give any queued preparation time to finish: it must not restart playback.
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        let later = try snapshot()
+        XCTAssertEqual(later.playing, 0)
+        XCTAssertEqual(later.corePlayhead, paused.corePlayhead)
     }
 
     func testText3DAnimatorRailOpensTheSelectedWiggleCurve() throws {
@@ -724,6 +805,25 @@ import XCTest
         } while Date() < deadline
     }
 
+    func testTimelineSeekRefreshesThePublishedAnimatedLayerDetail() throws {
+        let before = try launch("curve-null")
+        XCTAssertEqual(before.detail.position[1], 200, accuracy: 0.01)
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5)); XCTAssertTrue(timeline.isHittable)
+        let start = CGPoint(x: timeline.frame.midX + 70, y: timeline.frame.minY + 14)
+        let end = CGPoint(x: start.x - 90, y: start.y)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end),
+                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try awaitSnapshot("The inspector follows the native seek, even after an optimistic UI update") {
+            guard let shown = $0.publishedDetail, shown.position.count == 3 else { return false }
+            return $0.corePlayhead > 5 && $0.playhead == $0.corePlayhead
+                && shown.localPlayhead == $0.detail.localPlayhead
+                && abs(shown.position[1] - $0.detail.position[1]) < 0.01
+                && shown.position[1] > before.detail.position[1] + 1
+        }
+        XCTAssertEqual(moved.publishedDetail?.localPlayhead, moved.corePlayhead)
+    }
+
     func testHorizontalSwipeOnClipOnlyScrolls() throws {
         _ = try launch("layer-dock")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
@@ -1311,6 +1411,9 @@ import XCTest
         // Regra 3D (GestureMath.hpp): a escala Z é relativa ao X, então a escala
         // uniforme NÃO multiplica o Z guardado — a profundidade visível já cresce com o X.
         XCTAssertEqual(uniform.detail.scale[2], scaledY.detail.scale[2], accuracy: 0.0001)
+        let initialDepth = scaledY.detail.scale[0] * scaledY.detail.scale[2]
+        let scaledDepth = uniform.detail.scale[0] * uniform.detail.scale[2]
+        XCTAssertEqual(scaledDepth / initialDepth, factor, accuracy: 0.001)
         XCTAssertEqual(uniform.detail.position, before.detail.position)
         try undo()
         _ = try awaitSnapshot("Undo uniform scale") { $0.detail.scale == scaledY.detail.scale }
@@ -1338,19 +1441,22 @@ import XCTest
         try requireInsideStage(tip, end)
         coordinate(tip).press(forDuration: 0.05, thenDragTo: coordinate(end),
                              withVelocity: .slow, thenHoldForDuration: 0.1)
-        // Auto-Key (build 2130, Regression2130.AutoKeySkipsUnchangedAxes, as duas
-        // plataformas): a seta X grava SÓ a Posição X no cabeçote; Y e Z, que não
-        // mudaram, não ganham keyframe redundante.
+        // The projected X handle changes only world X. Auto-Key intentionally
+        // skips unchanged axes rather than adding redundant Y/Z hold keys.
         let keyed = try awaitSnapshot("Dragging the animated null in the scene keys frame 30") {
             !$0.isManipulating && $0.curveKeys.contains { $0.property == 0 && $0.time == 30 }
         }
         let xKey = try XCTUnwrap(keyed.curveKeys.first { $0.property == 0 && $0.time == 30 })
         XCTAssertEqual(xKey.value, keyed.detail.position[0], accuracy: 0.01)
-        XCTAssertNotEqual(xKey.value, first.first { $0.property == 0 }?.value ?? xKey.value)
-        XCTAssertTrue(keyed.curveKeys.filter { $0.property == 1 || $0.property == 2 }.allSatisfy { $0.time == 0 },
-                      "Auto-Key must not add Y/Z keys the X arrow did not change")
+        XCTAssertGreaterThan(abs(keyed.detail.position[0] - before.detail.position[0]), 0.01)
         XCTAssertEqual(keyed.detail.position[1], before.detail.position[1], accuracy: 0.0001)
         XCTAssertEqual(keyed.detail.position[2], before.detail.position[2], accuracy: 0.0001)
+        for property in [1, 2] {
+            XCTAssertEqual(keyed.curveKeys.filter { $0.property == property },
+                           before.curveKeys.filter { $0.property == property },
+                           "Unchanged axis \(property) must keep its entire curve")
+        }
+        XCTAssertEqual(keyed.curveKeys.count, before.curveKeys.count + 1)
         XCTAssertEqual(keyed.curveKeys.filter { $0.time == 0 }, first, "The frame-0 pose must not move")
         try undo()
         _ = try awaitSnapshot("One undo removes the scene keyframe") { $0.curveKeys == before.curveKeys }
@@ -1575,9 +1681,12 @@ import XCTest
         let canRedo: Bool
         let playhead: Int64
         let corePlayhead: Int64
+        let previewBufferRanges: [[Int64]]?
+        let motionBlurSettings: [Double]?
         let compositionWidth: Double
         let compositionHeight: Double
         let detail: Detail
+        let publishedDetail: Detail?
         let shapeParams: [Double]
         let stageCorners: [Double]
         let stageGizmo: [Double]

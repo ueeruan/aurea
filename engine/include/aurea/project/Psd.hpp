@@ -24,5 +24,7 @@ struct Document {
 };
 inline constexpr usize kMaxFileBytes = 128u * 1024u * 1024u;
 inline constexpr usize kMaxDecodedBytes = 128u * 1024u * 1024u;
-[[nodiscard]] Status read(std::span<const u8> bytes, Document& out);
+// Bounds decoded layers plus peak channel/mask scratch, before allocation.
+[[nodiscard]] Status read(std::span<const u8> bytes, Document& out,
+                          usize decodedBudget = kMaxDecodedBytes);
 }

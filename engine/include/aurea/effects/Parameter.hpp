@@ -140,8 +140,8 @@ public:
 
     u32 add_float(const char* id, const char* label, f32 def, f32 min, f32 max,
                   u16 flags = kParamAnimatable, const char* unit = nullptr);
-    u32 add_int(const char* id, const char* label, i32 def, i32 min, i32 max);
-    u32 add_bool(const char* id, const char* label, bool def);
+    u32 add_int(const char* id, const char* label, i32 def, i32 min, i32 max, u16 flags = kParamAnimatable);
+    u32 add_bool(const char* id, const char* label, bool def, u16 flags = kParamAnimatable);
     u32 add_color(const char* id, const char* label, Vec4 def);
     u32 add_point2(const char* id, const char* label, Vec2 def, f32 min, f32 max,
                    u16 flags = kParamAnimatable);
@@ -253,6 +253,9 @@ struct EffectInstance {
 [[nodiscard]] ParamValue evaluate_param(const TrackSet& tracks, const EffectInstance& effect,
                                         u32 paramIndex, const ParamSpec& spec,
                                         FrameIndex localTime, bool* usedFallback = nullptr) noexcept;
+[[nodiscard]] ParamValue evaluate_param_f(const TrackSet& tracks, const EffectInstance& effect,
+                                          u32 paramIndex, const ParamSpec& spec,
+                                          f64 localTime, bool* usedFallback = nullptr) noexcept;
 
 /// Cria os slots de uma instância nova com os padrões da declaração.
 void initialize_instance(EffectInstance& instance, const ParameterRegistry& params);

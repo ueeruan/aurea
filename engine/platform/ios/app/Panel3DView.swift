@@ -285,6 +285,29 @@ struct Panel3DView: View {
             toggleRow("environment_background", on: environment.count > 3 && environment[3] > 0.5) {
                 _ = model.engine.setEnvironmentBackground($0); refresh()
             }
+            if environment.count >= 6 && environment[3] > 0.5 {
+                let duration = Int64(Swift.max(1, model.status.duration))
+                let start = Swift.min(duration - 1, Swift.max(0, Int64(environment[4])))
+                let end = Swift.min(duration, Swift.max(start + 1, environment[5] < 0 ? duration : Int64(environment[5])))
+                sceneRow("environment_start", value: Float(start), range: 0...Float(end - 1), unit: "f", reset: 0, gesture: "ambiente") {
+                    _ = model.engine.setEnvironmentBackgroundRangeStart(Int64($0), end: end); refresh()
+                }
+                sceneRow("environment_end", value: Float(end), range: Float(start + 1)...Float(duration), unit: "f", reset: Float(duration), gesture: "ambiente") {
+                    _ = model.engine.setEnvironmentBackgroundRangeStart(start, end: Int64($0)); refresh()
+                }
+                horizontal {
+                    chip("environment_full_duration", on: start == 0 && environment[5] < 0) {
+                        finishEditing(); _ = model.engine.setEnvironmentBackgroundRangeStart(0, end: -1); refresh()
+                    }
+                    if let layer = model.selectedLayer {
+                        chip("environment_layer_duration", on: false) {
+                            finishEditing()
+                            _ = model.engine.setEnvironmentBackgroundRangeStart(Swift.max(0, Int64(layer.startFrame)),
+                                end: Swift.min(duration, Int64(layer.endFrame))); refresh()
+                        }
+                    }
+                }
+            }
             note("environment_hint")
             gap(4)
             advancedHeader(open: sceneAdvanced) { sceneAdvanced.toggle() }

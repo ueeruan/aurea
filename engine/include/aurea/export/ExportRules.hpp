@@ -47,7 +47,8 @@ struct ExportFrameSize {
     if (a == 0) a = 2;
     if (!(v > 0.0) || !std::isfinite(v)) return a;
     const f64 blocks = std::floor(v / static_cast<f64>(a) + 0.5);
-    return std::max<u32>(a, static_cast<u32>(blocks) * a);
+    const u32 maxBlocks = std::numeric_limits<u32>::max() / a;
+    return std::max<u32>(a, static_cast<u32>(std::min(blocks, static_cast<f64>(maxBlocks))) * a);
 }
 
 /// Tamanho do vídeo exportado: o lado menor pedido (`wantShort`, 0 = o da

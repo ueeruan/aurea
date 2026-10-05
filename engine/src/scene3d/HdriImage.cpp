@@ -42,6 +42,12 @@ constexpr u64 kLdr16MaxPixels = 4096ull * 4096; ///< png 16 bits
 constexpr u64 kExrMaxBytes = 160ull << 20;      ///< canais decodificados do EXR (tinyexr carrega inteiro)
 constexpr usize kZipMaxEntry = 512ull << 20;
 
+u64 output_bytes(u32 w, u32 h) {
+    u32 scale = 1;
+    while (static_cast<u64>(w / scale) * (h / scale) > kHdriMaxPixels || w / scale > 16384) ++scale;
+    return static_cast<u64>(std::max(1u, w / scale)) * std::max(1u, h / scale) * 3 * sizeof(f32);
+}
+
 f32 clean(f32 v) noexcept { return std::isfinite(v) && v > 0.0f ? std::min(v, 65504.0f) : 0.0f; }
 
 /// Acumula a imagem de entrada (w×h, em qualquer ordem de pixels) numa saída
@@ -154,7 +160,7 @@ bool read_scanline(Reader& r, u32 n, std::vector<u8>& scan) {
     return true;
 }
 
-HdriDecode decode_radiance(const u8* bytes, usize size) {
+HdriDecode decode_radiance(const u8* bytes, usize size, u64 room) {
     Reader r{bytes, bytes + size};
     std::string line;
     if (!r.line(line) || line.rfind("#?", 0) != 0) return fail(HdriStatus::UnsupportedFormat);
@@ -180,6 +186,7 @@ HdriDecode decode_radiance(const u8* bytes, usize size) {
     if (static_cast<u64>(n1) > kMaxSide || static_cast<u64>(n2) > kMaxSide) return fail(HdriStatus::TooLarge);
     const bool rowsAreY = a1 == 'Y';
     const u32 width = static_cast<u32>(rowsAreY ? n2 : n1), height = static_cast<u32>(rowsAreY ? n1 : n2);
+    if (output_bytes(width, height) + static_cast<u64>(n2) * 4 > room) return fail(HdriStatus::TooLarge);
     // Sinais: −Y = de cima para baixo (a imagem cresce para baixo); +X = da
     // esquerda para a direita.
     const bool yDown = (rowsAreY ? s1 : s2) == '-';
@@ -244,7 +251,7 @@ int exr_channel(const EXRHeader& h, char want) {
     return -1;
 }
 
-HdriDecode decode_exr(const u8* bytes, usize size) {
+HdriDecode decode_exr(const u8* bytes, usize size, u64 room) {
     EXRVersion version;
     if (ParseEXRVersionFromMemory(&version, bytes, size) != TINYEXR_SUCCESS) return fail(HdriStatus::Corrupt);
     if (version.multipart || version.non_image) return fail(HdriStatus::UnsupportedFormat);
@@ -268,6 +275,8 @@ HdriDecode decode_exr(const u8* bytes, usize size) {
     for (int i = 0; i < header.num_channels; ++i)
         bytesPerPixel += header.pixel_types[i] == TINYEXR_PIXELTYPE_HALF ? 2u : 4u;
     if (static_cast<u64>(w) * static_cast<u64>(h) * bytesPerPixel > kExrMaxBytes) return fail(HdriStatus::TooLarge);
+    if (static_cast<u64>(w) * static_cast<u64>(h) * bytesPerPixel * 2 + output_bytes(static_cast<u32>(w), static_cast<u32>(h)) > room)
+        return fail(HdriStatus::TooLarge);
     EXRImage image;
     InitEXRImage(&image);
     if (LoadEXRImageFromMemory(&image, &header, bytes, size, &err) != TINYEXR_SUCCESS) {
@@ -311,13 +320,15 @@ HdriDecode decode_exr(const u8* bytes, usize size) {
 
 // --- JPG / PNG ----------------------------------------------------------------
 
-HdriDecode decode_ldr(const u8* bytes, usize size, f32 ldrGain) {
+HdriDecode decode_ldr(const u8* bytes, usize size, f32 ldrGain, u64 room) {
     if (size > static_cast<usize>(INT32_MAX)) return fail(HdriStatus::TooLarge);
     const int n = static_cast<int>(size);
     int w = 0, h = 0, c = 0;
     if (!stbi_info_from_memory(bytes, n, &w, &h, &c) || w <= 0 || h <= 0) return fail(HdriStatus::UnsupportedFormat);
     const bool wide = stbi_is_16_bit_from_memory(bytes, n) != 0;
     if (static_cast<u64>(w) * static_cast<u64>(h) > (wide ? kLdr16MaxPixels : kLdrMaxPixels)) return fail(HdriStatus::TooLarge);
+    if (static_cast<u64>(w) * static_cast<u64>(h) * (wide ? 24 : 12) + output_bytes(static_cast<u32>(w), static_cast<u32>(h)) > room)
+        return fail(HdriStatus::TooLarge);
     if (stbi_is_hdr_from_memory(bytes, n)) return fail(HdriStatus::UnsupportedFormat);   // Radiance já foi tratado
     const f32 gain = std::isfinite(ldrGain) && ldrGain > 0.0f ? ldrGain : 1.0f;
     auto eotf = [gain](f32 e) {
@@ -364,9 +375,9 @@ bool ends_with(std::string_view s, std::string_view tail) {
     return true;
 }
 
-HdriDecode decode_any(const u8* bytes, usize size, f32 ldrGain, bool allowZip);
+HdriDecode decode_any(const u8* bytes, usize size, f32 ldrGain, bool allowZip, u64 room);
 
-HdriDecode decode_zip(const u8* bytes, usize size, f32 ldrGain) {
+HdriDecode decode_zip(const u8* bytes, usize size, f32 ldrGain, u64 room) {
     // Fim do diretório central: nos últimos 64 KiB + 22 bytes.
     if (size < 22) return fail(HdriStatus::Corrupt);
     usize eocd = static_cast<usize>(-1);
@@ -405,30 +416,32 @@ HdriDecode decode_zip(const u8* bytes, usize size, f32 ldrGain) {
     if (data > size || bestComp > size - data) return fail(HdriStatus::Corrupt);
     if (bestMethod == 0) {
         if (bestComp != bestRaw) return fail(HdriStatus::Corrupt);
-        return decode_any(bytes + data, bestRaw, ldrGain, false);
+        return decode_any(bytes + data, bestRaw, ldrGain, false, room);
     }
     if (bestMethod != 8 || bestComp > static_cast<usize>(INT32_MAX) || bestRaw > static_cast<usize>(INT32_MAX))
         return fail(HdriStatus::UnsupportedFormat);
+    if (bestRaw >= room) return fail(HdriStatus::TooLarge);
     std::vector<u8> raw(bestRaw);
     const int got = stbi_zlib_decode_noheader_buffer(reinterpret_cast<char*>(raw.data()), static_cast<int>(raw.size()),
                                                      reinterpret_cast<const char*>(bytes + data), static_cast<int>(bestComp));
     if (got != static_cast<int>(bestRaw)) return fail(HdriStatus::Corrupt);
-    return decode_any(raw.data(), raw.size(), ldrGain, false);
+    return decode_any(raw.data(), raw.size(), ldrGain, false, room - bestRaw);
 }
 
-HdriDecode decode_any(const u8* bytes, usize size, f32 ldrGain, bool allowZip) {
+HdriDecode decode_any(const u8* bytes, usize size, f32 ldrGain, bool allowZip, u64 room) {
     if (!bytes || size < 4) return fail(HdriStatus::Corrupt);
-    if (bytes[0] == '#' && bytes[1] == '?') return decode_radiance(bytes, size);
-    if (bytes[0] == 0x76 && bytes[1] == 0x2f && bytes[2] == 0x31 && bytes[3] == 0x01) return decode_exr(bytes, size);
+    if (bytes[0] == '#' && bytes[1] == '?') return decode_radiance(bytes, size, room);
+    if (bytes[0] == 0x76 && bytes[1] == 0x2f && bytes[2] == 0x31 && bytes[3] == 0x01) return decode_exr(bytes, size, room);
     if (bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] == 3 && bytes[3] == 4)
-        return allowZip ? decode_zip(bytes, size, ldrGain) : fail(HdriStatus::UnsupportedFormat);
-    return decode_ldr(bytes, size, ldrGain);
+        return allowZip ? decode_zip(bytes, size, ldrGain, room) : fail(HdriStatus::UnsupportedFormat);
+    return decode_ldr(bytes, size, ldrGain, room);
 }
 
 } // namespace
 
-HdriDecode decode_hdri_detailed(const u8* bytes, usize size, f32 ldrGain) noexcept {
-    return decode_any(bytes, size, ldrGain, true);
+HdriDecode decode_hdri_detailed(const u8* bytes, usize size, f32 ldrGain, u64 memoryBudget) noexcept {
+    if (size >= memoryBudget) return fail(HdriStatus::TooLarge);
+    return decode_any(bytes, size, ldrGain, true, memoryBudget - size);
 }
 
 } // namespace aurea::scene3d

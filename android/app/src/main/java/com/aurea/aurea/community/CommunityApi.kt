@@ -39,9 +39,13 @@ private fun InputStream.readBounded(limit: Int): ByteArray {
 
 internal open class CommunityApi(private val token: String,
     private val root: String = "https://aurea-ai-discovery.aureaapp.workers.dev/api/community") {
-    companion object {
+    companion object : com.aurea.aurea.engine.TrimmableImageCache {
+        init { com.aurea.aurea.engine.UiImageCaches.register(this) }
+        override fun releaseImages() = avatars.evictAll()
         fun query(value: String): String = URLEncoder.encode(value, "UTF-8")
-        private val avatars = LruCache<String, Bitmap>(64)
+        private val avatars = object : LruCache<String, Bitmap>(4 * 1024 * 1024) {
+            override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
+        }
     }
     private fun open(path: String, method: String): HttpURLConnection = (URI(root + path).toURL().openConnection() as HttpURLConnection).apply {
         requestMethod = method; connectTimeout = 15_000; readTimeout = 60_000; instanceFollowRedirects = false
@@ -101,8 +105,11 @@ internal open class CommunityApi(private val token: String,
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-            val opts = BitmapFactory.Options().apply { inSampleSize = (maxOf(bounds.outWidth, bounds.outHeight) / 192).coerceAtLeast(1) }
+            val sample = com.aurea.aurea.engine.ImageMemoryPolicy.sampleSize(bounds.outWidth, bounds.outHeight, 384, 384L * 384) ?: return null
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
             BitmapFactory.decodeByteArray(data, 0, data.size, opts)?.also { avatars.put(id, it) }
+        } catch (_: OutOfMemoryError) {
+            avatars.evictAll(); null
         } finally { c.disconnect() }
     }
 }

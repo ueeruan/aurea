@@ -543,7 +543,7 @@ private fun Model3DTab(store: EditorStore, close: () -> Unit) {
             AddItem(stringResource(R.string.panel_camera_3d), CupertinoGlyph.CameraFill, AureaColors.Accent) { store.addCamera(); close() },
             AddItem(stringResource(R.string.sh_add_null_3d), draw = { drawNullIcon() }) { store.addNull(true); close() },
         ),
-        hint = stringResource(R.string.sh_add_model_3d_hint),
+        hint = stringResource(R.string.sh_add_model_3d_hint) + "\n\n" + stringResource(R.string.model3d_risk_warning),
     )
 }
 

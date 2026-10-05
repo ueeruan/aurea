@@ -297,6 +297,8 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
         std::memcpy(static_cast<u8*>(b->alloc.mapped) + offset, data, bytes);
         return OkStatus;
     }
+    collect_immediate();
+    if (!pendingImmediate_.empty()) return Status{Errc::Timeout, "GPU ainda ocupada"};
     // Buffer só de GPU: staging + cópia, síncrono (não é caminho de frame).
     // O VkBuffer de destino é copiado ANTES de criar o staging: `create_buffer`
     // pode realocar o pool e `b` ficaria pendurado (use-after-free achado pelo
@@ -318,8 +320,7 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
         VkBufferCopy region{0, c->offset, c->size};
         vkCmdCopyBuffer(cmd, c->src, c->dst, 1, &region);
     }, &ctx);
-    Buffer dead;
-    if (buffers_.remove(staging->id, dead)) destroy_buffer_now(dead);
+    destroy_buffer(*staging);
     return st;
 }
 
@@ -1072,6 +1073,10 @@ Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPer
         return OkStatus;
     }
 
+    // Reject before allocating staging: a timed-out queue must not accumulate
+    // unused buffers on every retry while its earlier fence is still pending.
+    collect_immediate();
+    if (!pendingImmediate_.empty()) return Status{Errc::Timeout, "GPU ainda ocupada"};
     // Fora de frame: staging próprio, submissão e espera.
     BufferDesc sd;
     sd.bytes = total;
@@ -1088,8 +1093,7 @@ Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPer
         auto* c = static_cast<Ctx*>(p);
         (*c->rec)(cmd, c->buf, 0);
     }, &ctx);
-    Buffer dead;
-    if (buffers_.remove(staging->id, dead)) destroy_buffer_now(dead);
+    destroy_buffer(*staging);
     return st;
 }
 
@@ -1136,8 +1140,31 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
         c->t->state = ResourceState::ShaderRead;
         (void)be;
     };
-    // Sempre por submissão própria: o import de 3D roda fora do frame, e um
-    // nível 4K não cabe no anel de staging do frame.
+    if (current_ && !commands_.in_render_pass()
+        && expected <= 4ull * 1024 * 1024
+        && current_->staging.used() <= 4ull * 1024 * 1024 - expected) {
+        // HDR faces are often prepared while export is recording a frame.
+        // Keep their copies in that frame; waiting on a separate submission
+        // stalls behind older GPU work and is unnecessary. The staging ring
+        // remains owned until this frame's fence. Large cold HDR uploads use
+        // temporary staging below, avoiding a permanently enlarged frame ring.
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceSize offset = 0;
+        void* mapped = nullptr;
+        if (!current_->staging.allocate(expected, 16, buffer, offset, mapped)) return Errc::OutOfMemory;
+        std::memcpy(mapped, data, expected);
+        ctx = Ctx{this, t, buffer, offset, mipLevel, layer, w, h};
+        record(*this, current_->cmd, &ctx);
+        uploadBytesFrame_ += expected;
+        return OkStatus;
+    }
+    // Frame commands can follow the pending submission on the same queue.
+    // Only immediate uploads need backpressure before temporary allocation.
+    if (!current_ || commands_.in_render_pass()) {
+        collect_immediate();
+        if (!pendingImmediate_.empty()) return Status{Errc::Timeout, "GPU ainda ocupada"};
+    }
+    // Outside a frame, the caller needs a completed upload.
     BufferDesc sd;
     sd.bytes = expected;
     sd.usage = BufferUsage::TransferSrc;
@@ -1147,9 +1174,14 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
     Buffer* s = buffers_.get(staging->id);
     std::memcpy(s->alloc.mapped, data, expected);
     ctx = Ctx{this, t, s->buffer, 0, mipLevel, layer, w, h};
+    if (current_ && !commands_.in_render_pass()) {
+        record(*this, current_->cmd, &ctx);
+        uploadBytesFrame_ += expected;
+        destroy_buffer(*staging); // retires with this frame, not immediately
+        return OkStatus;
+    }
     const Status st = submit_immediate(record, &ctx);
-    Buffer dead;
-    if (buffers_.remove(staging->id, dead)) destroy_buffer_now(dead);
+    destroy_buffer(*staging);
     return st;
 }
 
@@ -1167,7 +1199,7 @@ Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
         return Status{Errc::NotSupported, "formato sem blit linear"};
     }
     struct Ctx { Texture* t; u32 levels; u32 layers; } ctx{t, levels, t->desc.cube ? 6u : std::max(1u, t->desc.layers)};
-    return submit_immediate([](Backend&, VkCommandBuffer cmd, void* p) {
+    const auto record = [](Backend&, VkCommandBuffer cmd, void* p) {
         auto* c = static_cast<Ctx*>(p);
         Texture& tx = *c->t;
         auto barrier = [&](u32 mip, VkImageLayout from, VkImageLayout to, VkAccessFlags src, VkAccessFlags dst,
@@ -1211,7 +1243,12 @@ Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
         }
         tx.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         tx.state = ResourceState::ShaderRead;
-    }, &ctx);
+    };
+    if (current_ && !commands_.in_render_pass()) {
+        record(*this, current_->cmd, &ctx);
+        return OkStatus;
+    }
+    return submit_immediate(record, &ctx);
 }
 
 Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) noexcept {
@@ -1222,6 +1259,8 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
     const u32 rowBytes = w * bpp;
     const VkDeviceSize total = static_cast<VkDeviceSize>(rowBytes) * h;
 
+    collect_immediate();
+    if (!pendingImmediate_.empty()) return Status{Errc::Timeout, "GPU ainda ocupada"};
     BufferDesc rd;
     rd.bytes = total;
     rd.usage = BufferUsage::TransferDst;
@@ -1251,12 +1290,17 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
             }
         }
     }
-    Buffer dead;
-    if (buffers_.remove(readback->id, dead)) destroy_buffer_now(dead);
+    destroy_buffer(*readback);
     return st;
 }
 
-Status Backend::submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*), void* ctx) noexcept {
+Status Backend::submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*), void* ctx,
+                                  u64 timeoutNs) noexcept {
+    if (!device_ || deviceLost_) return Errc::DeviceLost;
+    collect_immediate();
+    // Do not pile more work onto a queue whose previous bounded upload has
+    // not completed. A later frame or wait polls the real fence again.
+    if (!pendingImmediate_.empty()) return Status{Errc::Timeout, "GPU ainda ocupada"};
     VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     pi.queueFamilyIndex = graphicsFamily_;
@@ -1267,25 +1311,60 @@ Status Backend::submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    (void)vkAllocateCommandBuffers(device_, &ai, &cmd);
+    if (const VkResult r = vkAllocateCommandBuffers(device_, &ai, &cmd); r != VK_SUCCESS) {
+        vkDestroyCommandPool(device_, pool, nullptr);
+        return check(r, "vkAllocateCommandBuffers imediato");
+    }
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &bi);
+    if (const VkResult r = vkBeginCommandBuffer(cmd, &bi); r != VK_SUCCESS) {
+        vkDestroyCommandPool(device_, pool, nullptr);
+        return check(r, "vkBeginCommandBuffer imediato");
+    }
     record(*this, cmd, ctx);
-    vkEndCommandBuffer(cmd);
+    if (const VkResult r = vkEndCommandBuffer(cmd); r != VK_SUCCESS) {
+        vkDestroyCommandPool(device_, pool, nullptr);
+        return check(r, "vkEndCommandBuffer imediato");
+    }
 
     VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkFence fence = VK_NULL_HANDLE;
-    vkCreateFence(device_, &fi, nullptr, &fence);
+    if (const VkResult r = vkCreateFence(device_, &fi, nullptr, &fence); r != VK_SUCCESS) {
+        vkDestroyCommandPool(device_, pool, nullptr);
+        return check(r, "vkCreateFence imediato");
+    }
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd;
     VkResult r = vkQueueSubmit(queue_, 1, &si, fence);
-    if (r == VK_SUCCESS) r = vkWaitForFences(device_, 1, &fence, VK_TRUE, 5'000'000'000ull);
+    const bool submitted = r == VK_SUCCESS;
+    if (submitted) r = vkWaitForFences(device_, 1, &fence, VK_TRUE, timeoutNs);
     (void)note_device_lost(r);
-    vkDestroyFence(device_, fence, nullptr);
-    vkDestroyCommandPool(device_, pool, nullptr);
+    if (submitted && r != VK_SUCCESS && !deviceLost_) {
+        // Timeout is not cancellation: the command buffer and every staging
+        // resource it references must survive until its own fence completes.
+        pendingImmediate_.push_back(PendingImmediate{pool, fence, {}});
+    } else {
+        vkDestroyFence(device_, fence, nullptr);
+        vkDestroyCommandPool(device_, pool, nullptr);
+    }
     return check(r, "submissao imediata");
+}
+
+void Backend::collect_immediate(bool deviceIdle) noexcept {
+    for (usize i = 0; i < pendingImmediate_.size();) {
+        auto& submission = pendingImmediate_[i];
+        if (!deviceIdle && !deviceLost_
+            && vkWaitForFences(device_, 1, &submission.fence, VK_TRUE, 0) != VK_SUCCESS) {
+            ++i;
+            continue;
+        }
+        auto releases = std::move(submission.deferred);
+        vkDestroyFence(device_, submission.fence, nullptr);
+        vkDestroyCommandPool(device_, submission.pool, nullptr);
+        pendingImmediate_.erase(pendingImmediate_.begin() + static_cast<std::ptrdiff_t>(i));
+        for (const auto& release : releases) if (release.fn) release.fn(release.ctx);
+    }
 }
 
 // =============================================================================

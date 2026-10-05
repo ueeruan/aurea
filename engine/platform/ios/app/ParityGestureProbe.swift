@@ -70,6 +70,8 @@ import UIKit
             "coreStarted": model.started, "coreError": model.startError ?? "",
             "modelRevision": model.status.modelRevision, "playhead": model.status.playhead,
             "corePlayhead": readCoreStatus ? coreStatus.playhead : -1,
+            "previewBufferRanges": model.previewBufferRanges.map { [$0.lowerBound, $0.upperBound] },
+            "motionBlurSettings": model.engine.motionBlurSettings().map(\.floatValue),
             "layerCount": model.layers.count, "primaryID": primary ?? 0,
             "layerOrder": model.layers.map { $0.id },
             "layerStarts": model.layers.map { (row: LayerItem) -> Int64 in Int64(row.startFrame) },
@@ -95,7 +97,7 @@ import UIKit
             "keySelectMode": model.timelineKeySelectMode,
             "canUndo": model.status.canUndo != 0, "canRedo": model.status.canRedo != 0,
             "compositionWidth": model.compositionWidth, "compositionHeight": model.compositionHeight,
-            "detail": detail, "shapeParams": shape,
+            "detail": detail, "publishedDetail": model.detail, "shapeParams": shape,
             "stageCorners": stageCorners, "stageGizmo": stageGizmo,
             "frameWidth": readiness["frameWidth"] ?? 0, "frameHeight": readiness["frameHeight"] ?? 0,
         ]

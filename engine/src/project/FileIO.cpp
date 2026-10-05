@@ -266,6 +266,15 @@ Status write_atomic(const std::string& path, const void* data, usize size,
     return OkStatus;
 }
 
+Status commit_file(const std::string& temporary, const std::string& destination) noexcept {
+    if (temporary.empty() || destination.empty() || temporary == destination)
+        return Status{Errc::InvalidArgument, "caminho invalido"};
+    std::lock_guard<std::mutex> lock(g_writeMutex);
+    if (take_fault(Fault::RenameFails, destination) || !replace_with(temporary, destination, false, true))
+        return fail(errno == ENOSPC ? errno : 0, "nao foi possivel substituir o arquivo", nullptr);
+    return OkStatus;
+}
+
 Status copy_file(const std::string& from, const std::string& to) noexcept {
     std::vector<u8> bytes;
     if (!read_all(from, bytes, 2ull * 1024 * 1024 * 1024)) return Status{Errc::IoError, "origem ilegivel"};

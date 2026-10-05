@@ -44,8 +44,11 @@ Params params_from(const EffectEval& e) noexcept {
     p.centerY = finite_or(c.y, 0.5f);
     // Faixas do app antigo no slider: ladrilho 1%..500%, saída 0%..500%.
     // Digitado, o ladrilho vai a 1000% (kMaxTileScale).
-    p.tileX = std::clamp(finite_or(e.f(kTileWidth), 100.0f) / 100.0f, 0.01f, kMaxTileScale);
-    p.tileY = std::clamp(finite_or(e.f(kTileHeight), 100.0f) / 100.0f, 0.01f, kMaxTileScale);
+    // Escala uniforme acrescentada no fim: projetos anteriores mantêm 100%,
+    // sem renumerar largura/altura ou seus keyframes.
+    const f32 scale = e.count > kScale ? std::clamp(finite_or(e.f(kScale), 100.0f) / 100.0f, 0.01f, kMaxTileScale) : 1.0f;
+    p.tileX = std::clamp(finite_or(e.f(kTileWidth), 100.0f) / 100.0f, 0.01f, kMaxTileScale) * scale;
+    p.tileY = std::clamp(finite_or(e.f(kTileHeight), 100.0f) / 100.0f, 0.01f, kMaxTileScale) * scale;
     p.outputX = std::clamp(finite_or(e.f(kOutputWidth), 100.0f) / 100.0f, 0.0f, kMaxOutput);
     p.outputY = std::clamp(finite_or(e.f(kOutputHeight), 100.0f) / 100.0f, 0.0f, kMaxOutput);
     p.mirror = e.b(kMirror);
@@ -205,6 +208,9 @@ public:
         p.add_bool("horizontal_phase_shift", "Deslocamento de fase horizontal", false);
         // Marca da disposição atual (ver `upgrade_legacy_layout`).
         p.add_float("layout", "Disposição", 1.0f, 0.0f, 1.0f, kParamHidden);
+        p.add_float("tile_scale", "Escala", 100.0f, 1.0f, 500.0f,
+                    kParamAnimatable | kParamPercent, "%");
+        p.typed_range(1.0f, kMaxTileScale * 100.0f);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         using namespace motion_tile;
@@ -220,6 +226,14 @@ public:
     bool is_identity(const EffectEval& e) const noexcept override {
         const motion_tile::Params p = motion_tile::params_from(e);
         if (!p.identity_params()) return false;
+        // The original layer bounds do not describe an effect stack's input
+        // or its readers: a preceding Transform may shrink the image, and a
+        // following blur needs repeated pixels outside the composition. Only
+        // discard the wall when it is the layer's sole enabled effect.
+        if (e.layer) {
+            for (const auto& other : e.layer->effects)
+                if (other.enabled && &other != e.instance) return false;
+        }
         // IDENTIDADE SÓ QUANDO A LAYER JÁ COBRE O QUADRO. Com a layer reduzida,
         // girada ou deslocada, ladrilho 100% JÁ NÃO é a própria layer: é a
         // parede que cobre a composição.
@@ -231,7 +245,6 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         using motion_tile::kNoWindowHalf;
-        using motion_tile::kMaxCoverage;
         const motion_tile::Params p = motion_tile::params_from(e);
 
         Rect region = input.region;
@@ -250,8 +263,8 @@ public:
             region = motion_tile::tiled_region(p, *e.placement);
             // A parte que o quadro mostra MAIS a margem que os efeitos
             // seguintes leem (desfoque, brilho, distorções). A parede é
-            // infinita: a região cresce até cobrir isso tudo (até o teto de
-            // cobertura), em vez de parar no quadro — senão o desfoque depois
+            // infinita: a região cresce até cobrir isso tudo,
+            // em vez de parar no quadro — senão o desfoque depois
             // do Motion Tile puxava transparente da borda e escurecia o quadro.
             Rect vis = visible_layer_rect(*e.placement);
             if (vis.w > 0.0f && vis.h > 0.0f) {
@@ -259,12 +272,10 @@ public:
                 // filtro bilinear da composição leria transparente ali.
                 const f32 slack = margin + 2.0f + 0.01f * std::max(vis.w, vis.h);
                 vis = Rect{vis.x - slack, vis.y - slack, vis.w + 2.0f * slack, vis.h + 2.0f * slack};
-                const f32 lw = static_cast<f32>(std::max(e.placement->layerWidth, 1u));
-                const f32 lh = static_cast<f32>(std::max(e.placement->layerHeight, 1u));
-                const Rect cap{lw * 0.5f - lw * kMaxCoverage * 0.5f - margin, lh * 0.5f - lh * kMaxCoverage * 0.5f - margin,
-                               lw * kMaxCoverage + 2.0f * margin, lh * kMaxCoverage + 2.0f * margin};
-                const Rect clipped = Rect::intersect(cap, vis);
-                region = (clipped.w > 0.5f && clipped.h > 0.5f) ? clipped : Rect{0, 0, 1, 1};
+                // Não recortar contra 24x a layer: abaixo de 4,2% de escala,
+                // ou após um pan longo, isso abria faixas sem imagem. Só a
+                // parte visível é rasterizada; region_size limita a textura.
+                if (std::isfinite(vis.x) && std::isfinite(vis.y) && std::isfinite(vis.w) && std::isfinite(vis.h)) region = vis;
             }
         }
 
@@ -283,7 +294,19 @@ public:
         }
 
         u32 w = 0, h = 0;
-        ctx.region_size(region, input.texel_scale_x(), w, h);
+        f32 density = input.texel_scale_x();
+        const bool extremeCoverage = e.placement &&
+            (region.w > std::max(1u, e.placement->layerWidth) * motion_tile::kMaxCoverage ||
+             region.h > std::max(1u, e.placement->layerHeight) * motion_tile::kMaxCoverage);
+        if (extremeCoverage && !e.placement->inScene3d) {
+            const Mat4& m = e.placement->compFromLayer;
+            const f32 projected = std::max(std::hypot(m.col[0].x, m.col[0].y), std::hypot(m.col[1].x, m.col[1].y));
+            // Só a expansão além do antigo teto de 24x precisa desta redução.
+            // Em escalas normais, preservar a grade/densidade da entrada evita
+            // refiltrar as cópias e alterar margens dos efeitos seguintes.
+            if (std::isfinite(projected) && projected > 0.0f) density = std::min(density, projected);
+        }
+        ctx.region_size(region, density, w, h);
 
         struct {
             Vec4 uvMap;
@@ -399,6 +422,10 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_retro_displace_effects(registry);
     // Datamosh (Glitch). Sempre no FIM.
     builtin::register_datamosh_effect(registry);
+    builtin::register_motion_extras(registry);
+    builtin::register_repeat_extras(registry);
+    builtin::register_keying_extras(registry);
+    builtin::register_matte_choker(registry);
 }
 
 } // namespace aurea

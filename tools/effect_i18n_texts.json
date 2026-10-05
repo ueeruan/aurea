@@ -2616,6 +2616,81 @@
   "id": "Offset jalur",
   "ar": "الإزاحة على المسار"
  },
+ "Tempo visível": {
+  "en": "Visible duration", "es": "Duración visible", "ru": "Время видимости",
+  "hi": "दिखने की अवधि", "id": "Durasi terlihat", "ar": "مدة الظهور"
+ },
+ "Opacidade mínima": {
+  "en": "Minimum opacity", "es": "Opacidad mínima", "ru": "Минимальная непрозрачность",
+  "hi": "न्यूनतम अपारदर्शिता", "id": "Opasitas minimum", "ar": "العتامة الدنيا"
+ },
+ "Opacidade máxima": {
+  "en": "Maximum opacity", "es": "Opacidad máxima", "ru": "Максимальная непрозрачность",
+  "hi": "अधिकतम अपारदर्शिता", "id": "Opasitas maksimum", "ar": "العتامة القصوى"
+ },
+ "Crescer": {
+  "en": "Grow", "es": "Aumentar", "ru": "Увеличение",
+  "hi": "बढ़ाएँ", "id": "Perbesar", "ar": "تكبير"
+ },
+ "Dispersão vertical": {
+  "en": "Vertical scatter", "es": "Dispersión vertical", "ru": "Вертикальный разброс",
+  "hi": "ऊर्ध्वाधर फैलाव", "id": "Sebaran vertikal", "ar": "التشتت الرأسي"
+ },
+ "Ângulo final": {
+  "en": "End angle", "es": "Ángulo final", "ru": "Конечный угол",
+  "hi": "अंतिम कोण", "id": "Sudut akhir", "ar": "الزاوية النهائية"
+ },
+ "Eixo": {
+  "en": "Axis", "es": "Eje", "ru": "Ось",
+  "hi": "अक्ष", "id": "Sumbu", "ar": "المحور"
+ },
+ "Espaçamento": {
+  "en": "Spacing", "es": "Espaciado", "ru": "Интервал",
+  "hi": "अंतराल", "id": "Jarak", "ar": "التباعد"
+ },
+ "Rotação por cópia": {
+  "en": "Rotation per copy", "es": "Rotación por copia", "ru": "Поворот каждой копии",
+  "hi": "प्रति कॉपी घुमाव", "id": "Rotasi per salinan", "ar": "دوران كل نسخة"
+ },
+ "Escala por cópia": {
+  "en": "Scale per copy", "es": "Escala por copia", "ru": "Масштаб каждой копии",
+  "hi": "प्रति कॉपी स्केल", "id": "Skala per salinan", "ar": "تحجيم كل نسخة"
+ },
+ "Opacidade final": {
+  "en": "End opacity", "es": "Opacidad final", "ru": "Конечная непрозрачность",
+  "hi": "अंतिम अपारदर्शिता", "id": "Opasitas akhir", "ar": "العتامة النهائية"
+ },
+ "Orientar as cópias": {
+  "en": "Orient copies", "es": "Orientar las copias", "ru": "Ориентировать копии",
+  "hi": "कॉपियों की दिशा सेट करें", "id": "Atur arah salinan", "ar": "توجيه النسخ"
+ },
+ "Remover contaminação de cor": {
+  "en": "Remove color fringe", "es": "Eliminar halos de color", "ru": "Удалить цветную кайму",
+  "hi": "रंगीन किनारा हटाएँ", "id": "Hapus pinggiran warna", "ar": "إزالة الحواف الملونة"
+ },
+ "RGB": {
+  "en": "RGB", "es": "RGB", "ru": "RGB", "hi": "RGB", "id": "RGB", "ar": "RGB"
+ },
+ "Encolher 1": {
+  "en": "Choke 1", "es": "Contracción 1", "ru": "Сжатие 1",
+  "hi": "संकुचन 1", "id": "Perkecil 1", "ar": "تقليص 1"
+ },
+ "Suavidade 1": {
+  "en": "Softness 1", "es": "Suavidad 1", "ru": "Мягкость 1",
+  "hi": "कोमलता 1", "id": "Kelembutan 1", "ar": "نعومة 1"
+ },
+ "Encolher 2": {
+  "en": "Choke 2", "es": "Contracción 2", "ru": "Сжатие 2",
+  "hi": "संकुचन 2", "id": "Perkecil 2", "ar": "تقليص 2"
+ },
+ "Suavidade 2": {
+  "en": "Softness 2", "es": "Suavidad 2", "ru": "Мягкость 2",
+  "hi": "कोमलता 2", "id": "Kelembutan 2", "ar": "نعومة 2"
+ },
+ "Iterações": {
+  "en": "Iterations", "es": "Iteraciones", "ru": "Итерации",
+  "hi": "पुनरावृत्तियाँ", "id": "Iterasi", "ar": "التكرارات"
+ },
  "Ordem na grade": {
   "en": "Grid order",
   "es": "Orden en cuadrícula",

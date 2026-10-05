@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="environment_start">Background start</string>
+    <string name="environment_end">Background end</string>
+    <string name="environment_full_duration">Whole composition</string>
+    <string name="environment_layer_duration">Use layer duration</string>
+</resources>

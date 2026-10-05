@@ -79,7 +79,7 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         // A chave (ASCII) nomeia o passe: o nome exibido tem acento.
-        return affine_pass(ctx, input, matrix(e), e.placement, 1.0f, info().key, margin, out);
+        return affine_pass(ctx, input, matrix(e), e.placement, 1.0f, info().key, margin, out, e.texelScale);
     }
 
     /// T(pivô + deslocamento) · R · S · T(-pivô), em px da camada.
@@ -100,7 +100,7 @@ protected:
 
     [[nodiscard]] static f64 seconds(const EffectEval& e) noexcept {
         const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
-        return static_cast<f64>(e.localTime.value) / fps;
+        return e.time_frames() / fps;
     }
     /// Ponto relativo (0..1 da caixa natural) → px da camada.
     [[nodiscard]] static Vec2 layer_point(const EffectEval& e, Vec2 rel) noexcept {
@@ -208,7 +208,7 @@ public:
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(kMagnitude) == 0.0f; }
     void resolve_resources(EffectEval& e) const noexcept override {
         const double fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
-        const double end = std::max(0.0, double(e.localTime.value));
+        const double end = std::max(0.0, e.time_frames());
         double cycles = end / fps * e.f(kFrequency);
         const Track* track = e.layer && e.instance
             ? e.layer->tracks.find(TrackProperty::EffectParam, e.instance->id, param_track_key(kFrequency, 0)) : nullptr;

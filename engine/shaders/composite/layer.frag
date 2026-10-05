@@ -7,6 +7,7 @@
 //  destino, e por isso não há custo de leitura de framebuffer por layer.
 // =============================================================================
 #include "../common/bindings.glsl"
+#include "../scene3d/common/hdr.glsl"
 
 layout(push_constant) uniform Push {
     mat4 clipFromLayer;
@@ -22,6 +23,12 @@ layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex0;
 
 void main() {
     const vec4 c = texture(u_tex0, v_uv);
+    // Exposure integrates decoded scene radiance, not the MSAA resolve
+    // encoding. Re-encode only once for the existing bloom/tonemap pipeline.
+    if (pc.params.w < -0.5) {
+        o_color = vec4(pc.params.w < -1.5 ? aurea_hdr_encode(c.rgb) : aurea_hdr_decode(c.rgb), c.a) * pc.params.x;
+        return;
+    }
     // params.yzw ≠ 0: amostra de UM canal (RGB no tempo) — o canal inteiro e
     // um terço do alfa (três amostras somadas refazem a cor e o alfa).
     const vec3 mask = pc.params.yzw;

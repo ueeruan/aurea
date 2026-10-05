@@ -95,19 +95,27 @@ async def lifespan(app: FastAPI):
     estado.fila = Fila(cfg, estado.comfy, estado.biblioteca)
     await estado.fila.iniciar()
 
-    asyncio.create_task(_vigiar())
-
-    yield
-
-    if estado.batedor:
-        await estado.batedor.publicar_offline()
-        await estado.batedor.parar()
-    if estado.fila:
-        await estado.fila.parar()
-    if estado.comfy:
-        await estado.comfy.fechar()
-    if estado.tunel:
-        await estado.tunel.fechar()
+    vigilancia = asyncio.create_task(_vigiar(), name="inicializacao")
+    try:
+        yield
+    finally:
+        vigilancia.cancel()
+        await asyncio.gather(vigilancia, return_exceptions=True)
+        estado.pronto = False
+        estado.motivo = "encerrado"
+        # Stop users of these resources before closing their connections.
+        if estado.fila:
+            await estado.fila.parar()
+        if estado.batedor:
+            try:
+                await estado.batedor.publicar_offline()
+            except Exception:
+                log.exception("falha ao publicar encerramento")
+            await estado.batedor.parar()
+        if estado.comfy:
+            await estado.comfy.fechar()
+        if estado.tunel:
+            await estado.tunel.fechar()
 
 
 async def _vigiar() -> None:

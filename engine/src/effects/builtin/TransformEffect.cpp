@@ -112,7 +112,7 @@ public:
         const Rect region = spread_region(box, 0.0f, 0.0f, e.placement, margin);
 
         u32 w = 0, h = 0;
-        ctx.region_size(region, input.texel_scale_x(), w, h);
+        ctx.region_size(region, affine_texel_density(input, m, e.texelScale), w, h);
 
         // uv de saída → ponto no plano (região) → inversa → uv de entrada.
         const f32 inv = 1.0f / det;

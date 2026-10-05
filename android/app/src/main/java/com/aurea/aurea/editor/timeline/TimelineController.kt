@@ -943,6 +943,10 @@ internal class TimelineController(
 
     // --- Aparar ------------------------------------------------------------------------
     private suspend fun AwaitPointerEventScope.trimDrag(r: RowModel, start: Boolean, down: PointerInputChange) {
+        if (r.locked) {
+            store.showToast(AppText.get(store.getApplication<Application>(), R.string.editor_camada_bloqueada_desbloqueie_editar))
+            return consumeUntilUp()
+        }
         light()
         pauseIfPlaying()
         val id = r.id
@@ -950,7 +954,7 @@ internal class TimelineController(
         // Os keyframes da própria camada ficam parados no tempo ao aparar: bons alvos.
         val targets = snapTargets(longArrayOf(id), own = r, ownEdges = false, ownKeys = true)
         // Modo Edição: aparar o começo não move a camada — conta o que já foi.
-        val magnetic = start && store.editMode
+        val magnetic = start && (store.editMode || r.magnetic)
         var applied = 0
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = frameAt(p.x) + grab

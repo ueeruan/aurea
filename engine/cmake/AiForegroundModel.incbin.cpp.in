@@ -1,0 +1,45 @@
+// Gerado pelo CMake a partir de engine/cmake/AiForegroundModel.incbin.cpp.in.
+//
+// Modelo U2Net-P embutido (ver engine/assets/rotobrush/NOTICE.txt). Os 2,3 MB
+// do .bin entram no objeto COMO ESTÃO, pelo `.incbin` do montador (Clang/GCC:
+// Android e iOS): nenhum array de C++ gigante para o compilador ler. O MSVC
+// (host de testes) não tem `.incbin` e usa cmake/EmbedForegroundModel.cmake.
+#include <cstddef>
+#include <cstdint>
+
+#if defined(__APPLE__)
+#define AUREA_FOREGROUND_SECTION ".section __TEXT,__const\n"
+#define AUREA_FOREGROUND_SYM(name) "_" name
+#define AUREA_FOREGROUND_LOCAL(name) ".private_extern _" name "\n"
+#else
+#define AUREA_FOREGROUND_SECTION ".section .rodata.aurea_foreground,\"a\"\n"
+#define AUREA_FOREGROUND_SYM(name) name
+#define AUREA_FOREGROUND_LOCAL(name) ".hidden " name "\n"
+#endif
+#define AUREA_FOREGROUND_LABEL(name) ".globl " AUREA_FOREGROUND_SYM(name) "\n" AUREA_FOREGROUND_LOCAL(name) AUREA_FOREGROUND_SYM(name) ":\n"
+
+__asm__(
+    AUREA_FOREGROUND_SECTION
+    ".p2align 4\n"
+    AUREA_FOREGROUND_LABEL("aurea_foreground_model_bin")
+    ".incbin \"@AI_FOREGROUND_BIN@\"\n"
+    AUREA_FOREGROUND_LABEL("aurea_foreground_model_bin_end")
+    ".byte 0\n"
+    ".p2align 4\n"
+    AUREA_FOREGROUND_LABEL("aurea_foreground_model_param")
+    ".incbin \"@AI_FOREGROUND_PARAM@\"\n"
+    ".byte 0\n"
+    ".text\n");
+
+extern "C" const unsigned char aurea_foreground_model_bin[];
+extern "C" const unsigned char aurea_foreground_model_bin_end[];
+extern "C" const char aurea_foreground_model_param[];
+
+namespace aurea::ai::embedded {
+const unsigned char* foreground_model_weights() { return aurea_foreground_model_bin; }
+std::size_t foreground_model_weights_size() {
+    return static_cast<std::size_t>(reinterpret_cast<std::uintptr_t>(aurea_foreground_model_bin_end)
+                                    - reinterpret_cast<std::uintptr_t>(aurea_foreground_model_bin));
+}
+const char* foreground_model_param() { return aurea_foreground_model_param; }
+}

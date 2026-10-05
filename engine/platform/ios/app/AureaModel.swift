@@ -18,52 +18,38 @@
 //  toa (e arrastaria o usuário para uma UI que engasga).
 // =============================================================================
 import Foundation
-import CryptoKit
 import AVFoundation
 import Photos
 import ImageIO
 import Metal
 import UIKit
 
-private enum LocalRotoModel {
-    static let base = "https://raw.githubusercontent.com/ueeruan/aurea/59f95b16a89d3b4c1e41d945507661440e6d36ac/engine/assets/rotobrush/"
-    static let files: [(String, Int, String)] = [
-        ("u2netp.param", 25100, "ab9567c0bfebecf51e8bb1292e2b4ca1bfb09006122a01bbba38a429ca94a4b0"),
-        ("u2netp.bin", 2257156, "e9cbc6a779f02490ac16ef87e6b800d3b8dc29fe8cd65226318c089c5d21fd2e"),
-        ("LICENSE-U2Net.txt", 11357, "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4")
-    ]
-    static func valid(_ url: URL, size: Int, hash: String) -> Bool {
-        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]), values.fileSize == size,
-              let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return false }
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() == hash
-    }
-    static func prepare(directory: String) async throws {
-        guard !directory.isEmpty else { throw CocoaError(.fileNoSuchFile) }
-        let folder = URL(fileURLWithPath: directory, isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        for (name, size, hash) in files {
-            try Task.checkCancellation()
-            let target = folder.appendingPathComponent(name)
-            if valid(target, size: size, hash: hash) { continue }
-            var request = URLRequest(url: URL(string: base + name)!)
-            request.timeoutInterval = 30
-            let (temporary, response) = try await URLSession.shared.download(for: request)
-            defer { try? FileManager.default.removeItem(at: temporary) }
-            guard (response as? HTTPURLResponse)?.statusCode == 200,
-                  valid(temporary, size: size, hash: hash) else { throw CocoaError(.fileReadCorruptFile) }
-            let staging = folder.appendingPathComponent(UUID().uuidString + ".part")
-            try FileManager.default.copyItem(at: temporary, to: staging)
-            defer { try? FileManager.default.removeItem(at: staging) }
-            if FileManager.default.fileExists(atPath: target.path) {
-                _ = try FileManager.default.replaceItemAt(target, withItemAt: staging)
-            } else { try FileManager.default.moveItem(at: staging, to: target) }
-        }
-    }
-}
-
 // =============================================================================
 // Tipos da UI, derivados do que a ponte devolve.
 // =============================================================================
+struct MotionBlurControls: Equatable {
+    var enabled = false
+    var angle: Float = 180
+    var phase: Float = -90
+    var samples: UInt32 = 16
+    var adaptiveLimit: UInt32 = 128
+    var previewSamples: UInt32 = 16
+
+    init() {}
+    init(_ snapshot: [NSNumber]) {
+        guard snapshot.count >= 6 else { return }
+        let values = snapshot.map(\.floatValue)
+        guard values.allSatisfy({ $0.isFinite }), values[1] >= 0, values[1] <= 720,
+              values[2] >= -360, values[2] <= 360, values[3] >= 2, values[3] <= 64,
+              values[4] >= values[3], values[4] <= 256, values[5] >= 1, values[5] <= 256,
+              values[3].rounded() == values[3], values[4].rounded() == values[4],
+              values[5].rounded() == values[5] else { return }
+        enabled = values[0] != 0
+        angle = values[1]; phase = values[2]
+        samples = UInt32(values[3]); adaptiveLimit = UInt32(values[4]); previewSamples = UInt32(values[5])
+    }
+}
+
 struct LayerItem: Identifiable, Equatable {
     var id: Int64
     var kind: UInt32
@@ -332,6 +318,15 @@ final class AureaModel: ObservableObject {
     @Published var sort: ProjectSort = .recent
     @Published private(set) var openingProject = false
     @Published private(set) var importingMedia = false
+    private var mediaCreationRequest = UUID()
+    private(set) var projectGeneration = UUID()
+    // Closing the editor invalidates its UI requests, but may still finish the
+    // current project's cover. Replacing the document invalidates both.
+    private var projectContentGeneration = UUID()
+    private var thumbnailRequest = UUID()
+    private var thumbnailTask: Task<Void, Never>?
+    private var beatDetectionRequest: UUID?
+    private var projectOperations: Set<UUID> = []
     @Published private(set) var operationMessage = AureaText.t("ios_importing_media")
     @Published var pointPick: Bool?
     /// Pick Focus da lente armado: o próximo toque no palco mede a distância de foco.
@@ -545,6 +540,9 @@ final class AureaModel: ObservableObject {
     private var pendingExportURL: URL?
     private let mediaQueue = DispatchQueue(label: "com.aurea.media-import", qos: .userInitiated)
     private let autosaveQueue = DispatchQueue(label: "com.aurea.autosave", qos: .utility)
+    private let lifecycleQueue = DispatchQueue(label: "com.aurea.lifecycle", qos: .userInitiated)
+    private var stopping = false
+    private var restartAfterStop = false
     /// Capa da Home atrasada em relação ao `.aurea` (o autosave não a grava).
     private var homeCardStale = false
     private var lastAutosaveActivity = ProcessInfo.processInfo.systemUptime
@@ -601,6 +599,14 @@ final class AureaModel: ObservableObject {
     let playheadClock = PlayheadClock()
     private var playheadLink: CADisplayLink?
     private var memoryWarningObserver: NSObjectProtocol?
+    @Published private(set) var memoryCacheEpoch: UInt64 = 0
+    private var memoryCheckAt: TimeInterval = 0
+    private var memoryTrimAt: TimeInterval = -.infinity
+    private var memoryTrimPending = false
+    private var memoryTrimLevel: Int32 = 0
+    private var memoryTrimRequestedLevel: Int32 = 0
+    private var memoryPressureLimited = false
+    var thumbnailWorkAllowed: Bool { !memoryPressureLimited }
     private var lastRevision: UInt32 = 0
     private var lastThumbGeneration: UInt32 = 0
     private var lastEnginePlayhead: Int64 = .min
@@ -641,9 +647,9 @@ final class AureaModel: ObservableObject {
             var homeScrollProbe: [String: Any] = [:]
             var hdriProbe: [String: Any] = [:]
             if scene == "home-scroll", started {
-                homeScrollProbe = prepareParityHomeScroll()
+                homeScrollProbe = await prepareParityHomeScroll()
             } else if scene == "android-hdri", started {
-                hdriProbe = prepareParityHDRI()
+                hdriProbe = await prepareParityHDRI()
             } else if scene == "export-render", started {
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 refreshModel(force: true); enterEditor()
@@ -723,7 +729,7 @@ final class AureaModel: ObservableObject {
                     let kind: UInt32 = scene == "android-complex-3d" ? 10 : 11
                     if let id = layers.first(where: { $0.kind == kind })?.id {
                         select(layerId: id, additive: false); panel = kind == 10 ? .layer3D : .particles
-                        if kind == 11 { particleProbe = captureParityParticles(layerId: id, scene: scene) }
+                        if kind == 11 { particleProbe = await captureParityParticles(layerId: id, scene: scene) }
                     }
                     _ = saveProject(writeThumbnail: true)
                 }
@@ -749,6 +755,15 @@ final class AureaModel: ObservableObject {
                     case "text-edit-2d": addText()
                     case "text-edit-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25)
                     case "curve-null": addNull(threeD: true); panel = .transform
+                    case "transform-expression":
+                        addText(); textContentRequest = nil
+                        if let id = primarySelection {
+                            let request = ExpressionRequest(layer: id, label: "Position",
+                                tracks: [ExpressionTrack(property: 0), ExpressionTrack(property: 1)])
+                            _ = engine.setExpressions(id, tracks: request.packedTracks, source: "[540, 515]")
+                            refreshModel(force: true)
+                        }
+                        transformTab = 0; panel = .transform
                     case "rotation-isolation":
                         addNull(threeD: true)
                         if let id = primarySelection {
@@ -839,6 +854,14 @@ final class AureaModel: ObservableObject {
                             _ = engine.setMaskParam(id, mask: mask, param: 2, value: 0.25)
                             engine.run { $0.seek(toFrame: 0) }
                             panel = .mask; refreshModel(force: true)
+                        }
+                    case "motion-blur-controls":
+                        addShape(1)
+                        if let id = primarySelection {
+                            engine.run { $0.setMotionBlur(true, forLayer: id) }
+                            _ = engine.setMotionBlurSettings(true, shutter: 181, phase: 45, samples: 16, adaptiveLimit: 128)
+                            engine.setLayerMotionBlurLength(1.25, forLayer: id)
+                            refreshModel(force: true); transformTab = 5; panel = .transform
                         }
                     case "motion-blur-export":
                         let id = engine.addText("AUREA MOTION BLUR")
@@ -952,8 +975,9 @@ final class AureaModel: ObservableObject {
             }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             var frameWidth: UInt32 = 0, frameHeight: UInt32 = 0
-            if started, !["home", "home-scroll"].contains(scene), let pixels = engine.captureFrame(480, outWidth: &frameWidth, outHeight: &frameHeight),
-               let preview = UIImage.fromRGBA(pixels, width: Int(frameWidth), height: Int(frameHeight))?.pngData() {
+            if started, !["home", "home-scroll"].contains(scene), let frame = await capturePreviewFrame(480),
+               let preview = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height))?.pngData() {
+                frameWidth = frame.width; frameHeight = frame.height
                 try? preview.write(to: AureaPaths.documents.appendingPathComponent(scene + "-core.png"))
             }
             refreshStatus()
@@ -981,7 +1005,7 @@ final class AureaModel: ObservableObject {
 
     /// The environment must come from the original Android project. Never
     /// import/reassign its HDR here: that would hide a broken asset resolver.
-    private func prepareParityHDRI() -> [String: Any] {
+    private func prepareParityHDRI() async -> [String: Any] {
         let original = AureaPaths.documents.appendingPathComponent("android-hdri.aurea")
         let roundtrip = AureaPaths.documents.appendingPathComponent("android-hdri-roundtrip.aurea")
         let originalBytes = try? Data(contentsOf: original)
@@ -999,14 +1023,15 @@ final class AureaModel: ObservableObject {
                 select(layerId: id, additive: false); panel = .layer3D
             }
         }
-        func capture(_ phase: String) {
+        func capture(_ phase: String) async {
             var width: UInt32 = 0, height: UInt32 = 0
             var row: [String: Any] = ["phase": phase, "environment": engine.environment(),
                 "layers": engine.layers(), "loadNotice": engine.lastLoadNotice,
                 "missingAssets": engine.lastLoadMissingAssets]
             if let id = primarySelection { row["objectEnvironment"] = engine.objectEnvironment(forLayer: id) }
-            if let bytes = engine.captureFrame(480, outWidth: &width, outHeight: &height),
-               let png = UIImage.fromRGBA(bytes, width: Int(width), height: Int(height))?.pngData() {
+            if let frame = await capturePreviewFrame(480),
+               let png = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height))?.pngData() {
+                width = frame.width; height = frame.height
                 let name = "android-hdri-\(phase).png"
                 do { try png.write(to: AureaPaths.documents.appendingPathComponent(name)); row["file"] = name }
                 catch { row["error"] = error.localizedDescription }
@@ -1017,14 +1042,14 @@ final class AureaModel: ObservableObject {
             row["width"] = width; row["height"] = height
             frames.append(row)
         }
-        prepareFrame(); capture("loaded")
+        prepareFrame(); await capture("loaded")
         // Save to a new path: retain the approved Android input byte-for-byte.
         let saved = engine.saveProject(roundtrip.path)
         probe["saved"] = saved
         if saved, engine.loadProject(roundtrip.path) {
             probe["reopened"] = true
             projectURL = roundtrip; refreshModel(force: true)
-            prepareFrame(); capture("reopened")
+            prepareFrame(); await capture("reopened")
         }
         probe["originalUnchanged"] = originalBytes != nil && originalBytes == (try? Data(contentsOf: original))
         probe["frames"] = frames
@@ -1033,7 +1058,7 @@ final class AureaModel: ObservableObject {
     }
 
     /// Actual core projects and rendered JPEGs; no UI-only cards or fake covers.
-    private func prepareParityHomeScroll() -> [String: Any] {
+    private func prepareParityHomeScroll() async -> [String: Any] {
         let colors: [[Float]] = [
             [1, 0.1, 0.15], [0.05, 0.4, 1], [0.1, 0.9, 0.25], [0.9, 0.1, 1],
             [1, 0.6, 0.05], [0.05, 0.8, 0.9], [0.75, 0.15, 0.05], [0.3, 0.1, 1],
@@ -1049,7 +1074,8 @@ final class AureaModel: ObservableObject {
             let linear = AureaColorSpace.displayToEngine(color[0] * 0.75, color[1] * 0.75, color[2] * 0.75, 1)
             mutate { $0.setComposition(id, backgroundR: linear[0], g: linear[1], b: linear[2], a: 1) }
             editTransform(8, value: Float(index * 11))
-            let saved = saveProject(writeThumbnail: true)
+            let saved = saveProject(writeThumbnail: false)
+            await writeProjectThumbnail(name: url.deletingPathExtension().lastPathComponent).value
             writeHomeProjectMeta(url: url, title: title, width: 1920, height: 1080,
                                  fps: 30, durationFrames: Int(compositionDuration))
             let thumbnail = AureaPaths.thumbs.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".jpg")
@@ -1092,7 +1118,7 @@ final class AureaModel: ObservableObject {
     /// Render the imported Android Snow layer alone, so the 3D text beneath it
     /// cannot make a broken particle pass look successful. Every capture drains
     /// the real command queue and renders the requested frame through the core.
-    private func captureParityParticles(layerId: Int64, scene: String) -> [String: Any] {
+    private func captureParityParticles(layerId: Int64, scene: String) async -> [String: Any] {
         let originalLayers = layers
         let originalParameters = engine.particleParams(layerId)
         engine.run { core in
@@ -1107,16 +1133,17 @@ final class AureaModel: ObservableObject {
         }
         var frames: [[String: Any]] = []
         var rgba: [Int64: [UInt8]] = [:]
-        func capture(_ requested: Int64, mode: String) {
+        func capture(_ requested: Int64, mode: String) async {
             var width: UInt32 = 0, height: UInt32 = 0
             var row: [String: Any] = ["requestedFrame": requested, "mode": mode]
-            if let data = engine.captureFrame(480, outWidth: &width, outHeight: &height),
-               let image = UIImage.fromRGBA(data, width: Int(width), height: Int(height))?.pngData() {
+            if let frame = await capturePreviewFrame(480),
+               let image = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height))?.pngData() {
+                width = frame.width; height = frame.height
                 let file = "\(scene)-isolated-\(requested).png"
                 do {
                     try image.write(to: AureaPaths.documents.appendingPathComponent(file))
                     row["file"] = file
-                    rgba[requested] = [UInt8](data)
+                    rgba[requested] = [UInt8](frame.data)
                 } catch { row["error"] = error.localizedDescription }
             }
             var actual = AureaStatus()
@@ -1130,10 +1157,10 @@ final class AureaModel: ObservableObject {
         }
         for frame in [Int64(0), 36, 72] {
             seek(toFrame: frame)
-            capture(frame, mode: "seek")
+            await capture(frame, mode: "seek")
         }
         engine.run { core in core.scrubBegin(); core.scrub(toFrame: 59) }
-        capture(59, mode: "scrub")
+        await capture(59, mode: "scrub")
         engine.run { $0.scrubEnd() }
         func changedPixels(_ first: Int64, _ second: Int64) -> Int {
             guard let a = rgba[first], let b = rgba[second], a.count == b.count else { return -1 }
@@ -1153,6 +1180,7 @@ final class AureaModel: ObservableObject {
 #endif
 
     func start() {
+        if stopping { restartAfterStop = true; return }
         guard !started else { return }
         var error: NSString?
         let refresh = Double(UIScreen.main.maximumFramesPerSecond > 0 ? UIScreen.main.maximumFramesPerSecond : 60)
@@ -1171,6 +1199,7 @@ final class AureaModel: ObservableObject {
 
     func enterBackground() {
         guard started else { return }
+        releaseInterfaceCaches()
         // Grava ANTES de suspender (o motor ainda renderiza a capa) e dentro de
         // uma tarefa de segundo plano: o iOS pode congelar o app logo depois do
         // `.background`, e quem arrasta o app para fora do seletor mata o
@@ -1185,8 +1214,28 @@ final class AureaModel: ObservableObject {
             saveOnLeave(forceThumbnail: false)
             if task != .invalid { app.endBackgroundTask(task); task = .invalid }
         }
-        _ = engine.flush()
-        engine.suspend()
+        // Suspending cancels and drains any export before releasing decoders.
+        // A codec may take time to return its last frame; never block UIKit's
+        // lifecycle callback waiting for the worker (watchdog termination).
+        let app = UIApplication.shared
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = app.beginBackgroundTask(withName: "aurea-suspender") {
+            if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+        }
+        let lifecycleEngine = engine
+        lifecycleQueue.async {
+            lifecycleEngine.suspend()
+            DispatchQueue.main.async {
+                if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+            }
+        }
+    }
+
+    func enterInactive() {
+        guard started else { return }
+        // Permission sheets and Control Center are transient. Stop playback,
+        // but keep an export alive until the app actually enters background.
+        engine.run { $0.pause() }
     }
 
     /// Sair do editor / do app: grava só o que mudou (um projeto limpo não é
@@ -1200,7 +1249,11 @@ final class AureaModel: ObservableObject {
             toast = AureaText.t("ios_save_failed")
             return false
         }
-        if code == 0 || homeCardStale || forceThumbnail {
+        if exporting {
+            // The exporter owns the render context until it has drained.
+            // Refresh this cover on the next idle save instead.
+            homeCardStale = true
+        } else if code == 0 || homeCardStale || forceThumbnail {
             writeProjectThumbnail(name: url.deletingPathExtension().lastPathComponent)
             homeCardStale = false
         }
@@ -1210,9 +1263,13 @@ final class AureaModel: ObservableObject {
 
     func enterForeground() {
         guard started else { return }
-        engine.resume()
-        engine.invalidate()
-        refreshModel(force: true)
+        checkMemoryPressure(force: true)
+        let lifecycleEngine = engine
+        lifecycleQueue.async { [weak self] in
+            lifecycleEngine.resume()
+            lifecycleEngine.invalidate()
+            DispatchQueue.main.async { self?.refreshModel(force: true) }
+        }
     }
 
     /// Aviso de memória do sistema — o equivalente do `onTrimMemory` do
@@ -1228,12 +1285,69 @@ final class AureaModel: ObservableObject {
             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.started else { return }
-                _ = self.engine.trimMemory(15)
+                self.trimForMemoryPressure(level: 15)
             }
         }
     }
 
+    private func releaseInterfaceCaches() {
+        HomeThumbCache.shared.clear()
+        effectPreviews.trimMemory()
+        memoryCacheEpoch &+= 1
+    }
+
+    private func trimForMemoryPressure(level: Int32) {
+        memoryPressureLimited = true
+        releaseInterfaceCaches()
+        memoryTrimRequestedLevel = max(memoryTrimRequestedLevel, level)
+        scheduleMemoryTrimIfNeeded()
+    }
+
+    private func scheduleMemoryTrimIfNeeded() {
+        guard !memoryTrimPending else { return }
+        let level = memoryTrimRequestedLevel
+        let now = ProcessInfo.processInfo.systemUptime
+        // Critical warnings bypass the moderate trim's cooldown. If a native
+        // trim is in flight, retain only the strongest request until it returns.
+        guard level > 0, level > memoryTrimLevel || now - memoryTrimAt >= 5 else { return }
+        memoryTrimRequestedLevel = 0
+        memoryTrimLevel = level
+        memoryTrimAt = now
+        memoryTrimPending = true
+        let native = engine
+        lifecycleQueue.async { [weak self] in
+            _ = native.trimMemory(level)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.memoryTrimPending = false
+                self.scheduleMemoryTrimIfNeeded()
+            }
+        }
+    }
+
+    /// The process's jetsam headroom is distinct from Android's free system RAM.
+    /// Poll independently of the HUD: iOS can terminate without delivering a warning.
+    private func checkMemoryPressure(force: Bool = false) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard force || now - memoryCheckAt >= 1 else { return }
+        memoryCheckAt = now
+        let available = engine.availableMemoryBytes()
+        // For an app, zero can also mean its allocation limit is already exceeded.
+        if available < 128 * 1024 * 1024 {
+            let level: Int32 = available < 64 * 1024 * 1024 ? 15 : 10
+            if !memoryPressureLimited || level > max(memoryTrimLevel, memoryTrimRequestedLevel) || now - memoryTrimAt >= 5 {
+                trimForMemoryPressure(level: level)
+            }
+        } else if available >= 192 * 1024 * 1024 || !memoryPressureLimited {
+            memoryPressureLimited = false
+            effectPreviews.resumeMemoryWork()
+        }
+    }
+
     func stop() {
+        restartAfterStop = false
+        guard !stopping else { return }
+        stopping = true
         if let observer = memoryWarningObserver {
             NotificationCenter.default.removeObserver(observer)
             memoryWarningObserver = nil
@@ -1241,8 +1355,21 @@ final class AureaModel: ObservableObject {
         statusTimer?.invalidate()
         statusTimer = nil
         followPlayback(false)
-        engine.stop()
+        thumbnailTask?.cancel()
         started = false
+        let native = engine, captures = mediaQueue
+        lifecycleQueue.async { [weak self] in
+            // Suspend cancels a cold capture. Drain the queue before deleting
+            // the native host; neither the AI wait nor shutdown blocks UIKit.
+            native.suspend()
+            captures.sync {}
+            native.stop()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.stopping = false
+                if self.restartAfterStop { self.restartAfterStop = false; self.start() }
+            }
+        }
     }
 
     // =========================================================================
@@ -1261,15 +1388,19 @@ final class AureaModel: ObservableObject {
         guard started else { return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
+        // Detail is evaluated at the native playhead. The optimistic timeline
+        // position must not consume this change before a queued seek arrives.
+        let nativePlayhead = out.playhead
+        let playheadChanged = nativePlayhead != lastEnginePlayhead
+        lastEnginePlayhead = nativePlayhead
+        refreshPreviewBufferRanges()
         if let pending = pendingPlayhead {
             if out.playhead == pending || ProcessInfo.processInfo.systemUptime >= pendingPlayheadUntil { pendingPlayhead = nil }
             else { out.playhead = pending }
         }
-        let playheadChanged = out.playhead != lastEnginePlayhead
         if out.modelRevision != lastRevision {
             lastAutosaveActivity = ProcessInfo.processInfo.systemUptime
         }
-        lastEnginePlayhead = out.playhead
         if playheadClock.frame != out.playhead { playheadClock.frame = out.playhead }
         followPlayback(out.playing != 0)
         // Só publica quando algo que a UI MOSTRA mudou: publicar a 5 Hz sem
@@ -1288,6 +1419,7 @@ final class AureaModel: ObservableObject {
             lastThumbGeneration = out.thumbnailGeneration
         }
         if showPerf { perf = engine.perf() }
+        checkMemoryPressure()
         autosaveIfIdle()
     }
 
@@ -1343,6 +1475,7 @@ final class AureaModel: ObservableObject {
             && a.previewDenominator == other.previewDenominator
             && a.previewWidth == other.previewWidth
             && a.previewHeight == other.previewHeight
+            && a.previewBufferStatus == other.previewBufferStatus
             && abs(a.currentFps - other.currentFps) < 0.5
             && a.state == other.state
     }
@@ -1351,6 +1484,7 @@ final class AureaModel: ObservableObject {
     /// mudança de revisão (é UMA travessia por lista, ver Engine::query_*).
     func refreshModel(force: Bool = false) {
         guard started else { return }
+        refreshPreviewBufferRanges()
         let nextEditMode = engine.timelineEditMode
         if editMode != nextEditMode { editMode = nextEditMode }
         // Desfazer/refazer, abrir projeto e ripple também mexem nas marcas: a
@@ -1647,8 +1781,6 @@ final class AureaModel: ObservableObject {
     func renameCurrentProject(to newName: String) {
         guard let url = projectURL, url.deletingPathExtension().lastPathComponent != newName else { return }
         rename(ProjectFile(url: url, name: projectName, modified: Date(), sizeBytes: 0), to: newName)
-        projectURL = AureaPaths.documents.appendingPathComponent(newName + ".aurea")
-        projectName = newName
     }
 
     @Published private(set) var timelineOnlySelection: Set<Int64> = []
@@ -1864,6 +1996,11 @@ final class AureaModel: ObservableObject {
     /// o LADO MENOR (1080p em 9:16 = 1080×1920).
     @discardableResult
     func newProject(ratio: Double, shortSide: UInt32, fps: Double, title: String) -> Bool {
+        guard ratio.isFinite, ratio > 0,
+              Double(shortSide) * max(ratio, 1 / ratio) < Double(UInt32.max) else {
+            toast = AureaText.t("msg_nao_foi_possivel_criar_o_projeto")
+            return false
+        }
         let width: UInt32 = ratio >= 1 ? UInt32((Double(shortSide) * ratio).rounded()) : shortSide
         let height: UInt32 = ratio >= 1 ? shortSide : UInt32((Double(shortSide) / ratio).rounded())
         return newProject(width: width, height: height, fps: fps, title: title)
@@ -1874,6 +2011,7 @@ final class AureaModel: ObservableObject {
     /// nil = preto, como sempre (`home/ProjectMenu.kt`).
     @discardableResult
     func newProject(width: UInt32, height: UInt32, fps: Double, title: String, background: [Float]? = nil) -> Bool {
+        guard canChangeProject() else { return false }
         guard started else {
             toast = startError ?? AureaText.t("engine_not_ready")
             return false
@@ -1892,12 +2030,18 @@ final class AureaModel: ObservableObject {
             return false
         }
         let url = uniqueProjectURL(name)
+        // The engine already owns the new document. A failed first save must
+        // never leave the previous project's path attached to that document.
+        projectURL = url
+        projectName = name
+        projectGeneration = UUID()
+        projectContentGeneration = UUID()
+        missingModelTextures = nil; texturesTarget = nil
+        mediaCreationRequest = UUID()
         guard engine.saveProject(url.path) else {
             toast = AureaText.t("ios_project_save_failed")
             return false
         }
-        projectURL = url
-        projectName = name
         refreshProjectList()
         refreshModel(force: true)
         enterEditor()
@@ -1905,6 +2049,8 @@ final class AureaModel: ObservableObject {
     }
 
     func open(_ project: ProjectFile) {
+        guard canChangeProject() else { return }
+        mediaCreationRequest = UUID()
         openingProject = true
         defer { openingProject = false }
         guard engine.loadProject(project.url.path) else {
@@ -1913,6 +2059,9 @@ final class AureaModel: ObservableObject {
         }
         projectURL = project.url
         projectName = project.name
+        projectGeneration = UUID()
+        projectContentGeneration = UUID()
+        missingModelTextures = nil; texturesTarget = nil
         let notice = engine.lastLoadNotice
         if notice != 0 {
             // A UI AVISA em vez de esconder (o mesmo critério do Android: §55,
@@ -1936,10 +2085,12 @@ final class AureaModel: ObservableObject {
     }
 
     func closeProject() {
+        guard canChangeProject() else { return }
+        mediaCreationRequest = UUID()
         textContentRequest = nil
-        if exporting { toast = AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"); return }
         if sceneEditor { exitSceneEditor() }
         guard saveOnLeave(forceThumbnail: true) else { return }
+        projectGeneration = UUID()
         engine.clearSelection()
         screen = .home
         fullscreen = false
@@ -1968,15 +2119,58 @@ final class AureaModel: ObservableObject {
     /// renderiza o quadro do cabeçote (`capture_frame_rgba`) e o arquivo vai
     /// para `Thumbs/<nome>.jpg`. Isto é uma MINIATURA — o preview continua indo
     /// direto para o CAMetalLayer, sem bitmap nenhum no meio.
-    private func writeProjectThumbnail(name: String) {
-        var width: UInt32 = 0
-        var height: UInt32 = 0
-        guard let data = engine.captureFrame(720, outWidth: &width, outHeight: &height),
-              width > 0, height > 0,
-              let image = UIImage.fromRGBA(data, width: Int(width), height: Int(height)),
-              let jpeg = image.jpegData(compressionQuality: 0.82) else { return }
-        let url = AureaPaths.thumbs.appendingPathComponent(name + ".jpg")
-        try? jpeg.write(to: url, options: .atomic)
+    @discardableResult
+    private func writeProjectThumbnail(name: String) -> Task<Void, Never> {
+        let project = projectContentGeneration, sourceURL = projectURL
+        let request = UUID()
+        thumbnailRequest = request
+        thumbnailTask?.cancel()
+        let task = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled,
+                  self.projectContentGeneration == project, self.projectURL == sourceURL else { return }
+            guard let frame = await self.capturePreviewFrame(720) else {
+                if self.thumbnailRequest == request, self.projectContentGeneration == project {
+                    self.homeCardStale = true
+                }
+                return
+            }
+            let jpeg: Data? = await withCheckedContinuation { continuation in
+                self.mediaQueue.async {
+                    let image = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height))
+                    continuation.resume(returning: image?.jpegData(compressionQuality: 0.82))
+                }
+            }
+            // Publish only the current request. This also protects A -> B -> A
+            // when the first capture was queued before either project switch.
+            guard !Task.isCancelled, self.thumbnailRequest == request,
+                  self.projectContentGeneration == project, self.projectURL == sourceURL else { return }
+            guard let jpeg else { self.homeCardStale = true; return }
+            let url = AureaPaths.thumbs.appendingPathComponent(name + ".jpg")
+            do {
+                try jpeg.write(to: url, options: .atomic)
+                self.homeCardStale = false
+                if self.screen == .home { self.refreshProjectList() }
+            } catch { self.homeCardStale = true }
+        }
+        thumbnailTask = task
+        return task
+    }
+
+    /// Exact capture can wait for local AI. Keep that wait off the main actor;
+    /// retain the bridge until it returns; stop drains this queue before teardown.
+    func capturePreviewFrame(_ maxDimension: UInt32) async -> (data: Data, width: UInt32, height: UInt32)? {
+        guard started, !Task.isCancelled else { return nil }
+        let native = engine, project = projectContentGeneration, sourceURL = projectURL
+        let frame: (data: Data, width: UInt32, height: UInt32)? = await withCheckedContinuation { continuation in
+            mediaQueue.async {
+                var width: UInt32 = 0, height: UInt32 = 0
+                guard let data = native.captureFrame(maxDimension, outWidth: &width, outHeight: &height),
+                      width > 0, height > 0 else { continuation.resume(returning: nil); return }
+                continuation.resume(returning: (data, width, height))
+            }
+        }
+        guard started, !Task.isCancelled, projectContentGeneration == project, projectURL == sourceURL else { return nil }
+        return frame
     }
 
     private func uniqueProjectURL(_ name: String) -> URL {
@@ -2010,6 +2204,10 @@ final class AureaModel: ObservableObject {
     }
 
     func rename(_ project: ProjectFile, to newName: String) {
+        let invalid = CharacterSet(charactersIn: "/\\:").union(.controlCharacters)
+        let newName = newName.components(separatedBy: invalid).joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty else { return }
         let target = AureaPaths.documents.appendingPathComponent(newName + ".aurea")
         guard !FileManager.default.fileExists(atPath: target.path) else {
             toast = AureaText.t("ios_project_name_exists")
@@ -2036,9 +2234,29 @@ final class AureaModel: ObservableObject {
     // =========================================================================
     // Importação
     // =========================================================================
+    private func canChangeProject() -> Bool {
+        if exporting { toast = AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"); return false }
+        if importingMedia { toast = operationMessage; return false }
+        if !projectOperations.isEmpty { toast = AureaText.t("ios_importing_media"); return false }
+        if modelOptimize != nil { toast = AureaText.t("ios_importing_media"); return false }
+        return true
+    }
+
+    /// Keep the source document active until a queued native media operation
+    /// has returned, including after its view has requested cancellation.
+    func beginProjectOperation() -> UUID {
+        let token = UUID()
+        projectOperations.insert(token)
+        return token
+    }
+
+    func endProjectOperation(_ token: UUID) { projectOperations.remove(token) }
     /// Atalho da Home: primeiro cria a composição na proporção da mídia e só
     /// depois a importa. O importador do editor pressupõe um projeto aberto.
     func createFromMedia(url: URL, kind: ImportKind) {
+        guard canChangeProject() else { return }
+        let request = UUID()
+        mediaCreationRequest = request
         let scoped = url.startAccessingSecurityScopedResource()
         Task { @MainActor in
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -2062,7 +2280,8 @@ final class AureaModel: ObservableObject {
                 }
             default: break
             }
-            let ratio = mediaWidth > 0 && mediaHeight > 0
+            guard !Task.isCancelled, mediaCreationRequest == request, canChangeProject() else { return }
+            let ratio = mediaWidth.isFinite && mediaHeight.isFinite && mediaWidth > 0 && mediaHeight > 0
                 ? min(5.0, max(0.2, Double(mediaWidth / mediaHeight))) : 9.0 / 16.0
             let width = UInt32((ratio >= 1 ? 1080.0 * ratio : 1080.0).rounded()) & ~UInt32(1)
             let height = UInt32((ratio >= 1 ? 1080.0 : 1080.0 / ratio).rounded()) & ~UInt32(1)
@@ -2599,15 +2818,40 @@ final class AureaModel: ObservableObject {
     }
 
     func importSvg(url: URL) {
+        guard !importingMedia else { return }
+        importingMedia = true; operationMessage = AureaText.t("ios_importing_media")
         let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            toast = AureaText.t("msg_nao_foi_possivel_importar_svg"); return
+        let native = engine
+        mediaQueue.async { [weak self] in
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            var imported: Int64?
+            do {
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                var bytes = Data()
+                while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
+                    guard bytes.count + chunk.count <= 32 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+                    bytes.append(chunk)
+                }
+                if let text = String(data: bytes, encoding: .utf8), !text.isEmpty {
+                    imported = native.importSVG(text, name: url.deletingPathExtension().lastPathComponent)
+                }
+            } catch { imported = nil }
+            let result = imported
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                guard let id = result else { self.toast = AureaText.t("msg_nao_foi_possivel_ler_o_svg"); return }
+                guard id >= 0 else {
+                    self.toast = id == -17 ? AureaText.t("msg_svg_sem_formas_suportadas")
+                        : AureaText.t("msg_nao_foi_possivel_importar_o_svg", String(-id))
+                    return
+                }
+                self.showAddLayer = false
+                self.syncAfterEdit(); self.select(layerId: id, additive: false)
+                _ = self.saveProject(writeThumbnail: false)
+            }
         }
-        let id = engine.importSVG(text, name: url.deletingPathExtension().lastPathComponent)
-        guard id >= 0 else { toast = AureaText.t("msg_nao_foi_possivel_importar_svg"); return }
-        showAddLayer = false
-        syncAfterEdit(); select(layerId: id, additive: false)
     }
 
     func importPsd(url: URL) {
@@ -2648,44 +2892,47 @@ final class AureaModel: ObservableObject {
         }
         guard type == fxEffectTypeId("aurea.key.rotobrush") else { add(); return }
         guard ids.allSatisfy({ id in layers.contains { $0.id == id && ($0.kind == 1 || $0.kind == 2) } }) else { toast = AureaText.t("roto_select_media"); return }
-        prepareRotoModel(onReady: add)
-    }
-
-    func prepareRotoModel(onReady: (() -> Void)? = nil) {
-        guard !importingMedia else { return }
-        importingMedia = true; operationMessage = AureaText.t("roto_preparing")
-        let directory = engine.foregroundModelDirectory()
-        Task { @MainActor in
-            defer { importingMedia = false }
-            do {
-                try await LocalRotoModel.prepare(directory: directory)
-                onReady?(); engine.requestRender()
-            } catch { toast = AureaText.t("roto_download_failed") }
-        }
+        add()
     }
 
     func detectBeats() {
-        guard !importingMedia, let layer = selectedLayer, layer.kind == 1 || layer.kind == 3 else {
+        guard started, !importingMedia, let layer = selectedLayer, layer.kind == 1 || layer.kind == 3 else {
             toast = AureaText.t("msg_escolha_uma_camada_de_audio_ou"); return
         }
+        let request = UUID(), project = projectGeneration
+        let compositionID = (composition[AureaCompositionId] as? NSNumber)?.uint64Value ?? 0
+        beatDetectionRequest = request
         importingMedia = true; operationMessage = AureaText.t("msg_detectando_batidas")
         if status.playing != 0 { playPause() }
         let native = engine
         mediaQueue.async { [weak self] in
             var bpm: Double = 0
             let count = native.detectBeats(forLayer: layer.id, bpm: &bpm)
+            let detectedBPM = bpm
             DispatchQueue.main.async {
-                guard let self else { return }
-                self.importingMedia = false
-                self.refreshModel(force: true); self.refreshMarkers()
-                if count > 0 {
-                    self.toast = AureaText.t("msg_batidas_bpm", count, Int(bpm.rounded()))
-                    _ = self.saveProject(writeThumbnail: false)
-                } else {
-                    self.toast = count == 0 ? AureaText.t("msg_nenhuma_batida_clara_neste_som")
-                        : AureaText.t("msg_nao_foi_possivel_analisar_o_som", -count)
-                }
+                self?.finishBeatDetection(request: request, project: project, compositionID: compositionID,
+                                          count: count, bpm: detectedBPM)
             }
+        }
+    }
+
+    private func finishBeatDetection(request: UUID, project: UUID, compositionID: UInt64, count: Int64, bpm: Double) {
+        guard beatDetectionRequest == request else { return }
+        beatDetectionRequest = nil
+        // A late callback must not clear another project's import/analysis flag.
+        guard projectGeneration == project else { return }
+        importingMedia = false
+        guard started, (composition[AureaCompositionId] as? NSNumber)?.uint64Value == compositionID else { return }
+        refreshModel(force: true); refreshMarkers()
+        if count > 0 {
+            guard bpm.isFinite, bpm >= 0, let roundedBPM = Int32(exactly: bpm.rounded()) else {
+                toast = AureaText.t("msg_nao_foi_possivel_analisar_o_som", 10); return
+            }
+            toast = AureaText.t("msg_batidas_bpm", count, Int(roundedBPM))
+            _ = saveProject(writeThumbnail: false)
+        } else {
+            toast = count == 0 ? AureaText.t("msg_nenhuma_batida_clara_neste_som")
+                : AureaText.t("msg_nao_foi_possivel_analisar_o_som", count == Int64.min ? Int64.max : -count)
         }
     }
 
@@ -2782,28 +3029,39 @@ final class AureaModel: ObservableObject {
         return id != 0 ? Int64(id) : nil
     }
 
-    /// Arrasto livre do objeto 3D com o dedo: anda no plano dos dois eixos do
-    /// mundo que a vista mostra mais de frente (de cima, o chão XZ; de frente,
-    /// XY), seguindo o dedo. `dx`/`dy` em px da composição.
+    private struct SceneDragSnapshot {
+        let layer: Int64
+        let composition: UInt64
+        let project: UUID
+        let frame: Int64
+        let basis: [NSNumber]
+        var dx: Float = 0
+        var dy: Float = 0
+        var previous: [Float]
+    }
+    private var sceneDragSnapshot: SceneDragSnapshot?
+    private var transformGestureDepth = 0
+
+    /// Incremental composition-pixel deltas, projected by the shared gesture
+    /// basis captured once. Queued commands must not become the next base.
     func sceneDragObject(dx: Float, dy: Float) {
-        guard let id = primarySelection else { return }
-        let g = engine.gizmo(id, length: ShellStageGeometry.gizmoLength).map(\.floatValue)
-        guard g.count == 8 else { return }
-        let ax = (0..<3).map { g[($0 + 1) * 2] - g[0] }, ay = (0..<3).map { g[($0 + 1) * 2 + 1] - g[1] }
-        var u = 0, v = 1, area: Float = -1
-        for (i, j) in [(0, 1), (0, 2), (1, 2)] {
-            let a = abs(ax[i] * ay[j] - ay[i] * ax[j])
-            if a > area { area = a; u = i; v = j }
+        guard let id = primarySelection, dx.isFinite, dy.isFinite else { return }
+        let compositionID = (composition[AureaCompositionId] as? NSNumber)?.uint64Value ?? 0
+        if transformGestureDepth == 0 || sceneDragSnapshot?.layer != id ||
+            sceneDragSnapshot?.composition != compositionID || sceneDragSnapshot?.project != projectGeneration ||
+            sceneDragSnapshot?.frame != status.playhead {
+            let basis = engine.previewGestureBasis(id)
+            guard basis.count == 13 else { sceneDragSnapshot = nil; return }
+            sceneDragSnapshot = SceneDragSnapshot(layer: id, composition: compositionID, project: projectGeneration,
+                frame: status.playhead, basis: basis, previous: basis.prefix(3).map(\.floatValue))
         }
-        guard area >= 1 else { return }
-        let det = ax[u] * ay[v] - ay[u] * ax[v]
-        let a = (dx * ay[v] - dy * ax[v]) / det, b = (ax[u] * dy - ay[u] * dx) / det
-        let base = engine.gizmoMoveLocal(id, axis: UInt32(u), amount: 0).map(\.floatValue)
-        let pu = engine.gizmoMoveLocal(id, axis: UInt32(u), amount: a * ShellStageGeometry.gizmoLength).map(\.floatValue)
-        let pv = engine.gizmoMoveLocal(id, axis: UInt32(v), amount: b * ShellStageGeometry.gizmoLength).map(\.floatValue)
-        guard base.count == 3, pu.count == 3, pv.count == 3 else { return }
-        // A conversão mundo→local é afim: os dois passos somam sobre a base.
-        applyGizmoPosition(id, (0..<3).map { pu[$0] + pv[$0] - base[$0] })
+        guard var snapshot = sceneDragSnapshot else { return }
+        snapshot.dx += dx; snapshot.dy += dy
+        guard snapshot.dx.isFinite, snapshot.dy.isFinite else { return }
+        let next = engine.previewGestureValue(snapshot.basis, dx: snapshot.dx, dy: snapshot.dy, rotate: false).map(\.floatValue)
+        applyGizmoComponents(id, base: 0, previous: snapshot.previous, next: next)
+        snapshot.previous = next
+        sceneDragSnapshot = snapshot
     }
 
     /// Posição vinda do gizmo/arrasto 3D: com Auto-Key, trilha animada grava
@@ -3165,6 +3423,34 @@ final class AureaModel: ObservableObject {
     var compositionWidth: UInt32 { (composition["width"] as? NSNumber)?.uint32Value ?? 1920 }
     var compositionHeight: UInt32 { (composition["height"] as? NSNumber)?.uint32Value ?? 1080 }
 
+    var previewBuffering: Bool { status.previewBufferStatus & 0x8000_0000 != 0 }
+    @Published private(set) var previewBufferRanges: [Range<Int64>] = []
+    @Published private(set) var localAiActivity: UInt32 = 0
+    var previewTimelineCachedFrames: Int64 { previewBufferRanges.reduce(0) { $0 + $1.upperBound - $1.lowerBound } }
+    private func refreshPreviewBufferRanges() {
+        // Poll ranges even when the frame count stays equal: LRU replacement
+        // moves the blue timeline segments without changing the count.
+        let activity = engine.localAiStatus()
+        if activity != localAiActivity { localAiActivity = activity }
+        let pairs = engine.previewBufferRanges()
+        var ranges: [Range<Int64>] = []
+        ranges.reserveCapacity(pairs.count / 2)
+        for index in stride(from: 0, to: pairs.count - pairs.count % 2, by: 2) {
+            let start = pairs[index].int64Value, end = pairs[index + 1].int64Value
+            if start >= 0 && end > start { ranges.append(start..<end) }
+        }
+        if ranges != previewBufferRanges { previewBufferRanges = ranges }
+    }
+    var previewBufferedFrames: Int { Int(status.previewBufferStatus & 0xff) }
+    var previewBufferTarget: Int { Int((status.previewBufferStatus >> 8) & 0xff) }
+    var previewBufferLimited: Bool { status.previewBufferStatus & 0x4000_0000 != 0 }
+    var previewBufferLabel: String? {
+        if previewBuffering { return AureaText.t("preview_buffer_preparing", previewBufferedFrames, previewBufferTarget) }
+        if previewBufferLimited { return AureaText.t("preview_buffer_limited", previewBufferedFrames) }
+        if previewBufferedFrames > 0 { return AureaText.t("preview_buffer_ready", previewBufferedFrames) }
+        return nil
+    }
+
     // =========================================================================
     // --- casca do editor (SESSÃO B) ---
     //
@@ -3312,23 +3598,54 @@ final class AureaModel: ObservableObject {
     }
 
     // --- Obturador / desfoque de movimento da composição ---------------------
-    /// {ligado, obturador em graus} — o mesmo par do `motion_blur_settings`.
-    private var motionBlur: (on: Bool, shutter: Float) {
-        let values = engine.motionBlurSettings()
-        return (values.count > 0 && values[0].floatValue != 0, values.count > 1 ? values[1].floatValue : 180)
+    var motionBlurControls: MotionBlurControls { MotionBlurControls(engine.motionBlurSettings()) }
+    var compMotionBlur: Bool { motionBlurControls.enabled }
+    var shutterAngle: Float { motionBlurControls.angle }
+
+    private func writeMotionBlur(_ settings: MotionBlurControls) {
+        let changed = engine.setMotionBlurSettings(settings.enabled, shutter: settings.angle,
+            phase: settings.phase, samples: settings.samples, adaptiveLimit: settings.adaptiveLimit)
+        if changed { refreshModel(force: true) }
     }
 
-    var compMotionBlur: Bool { motionBlur.on }
-    var shutterAngle: Float { motionBlur.shutter }
-
     func setCompositionMotionBlur(_ on: Bool) {
-        engine.run { $0.setMotionBlurSettings(on, shutter: shutterAngle) }
-        refreshModel(force: true)
+        var settings = motionBlurControls
+        settings.enabled = on
+        writeMotionBlur(settings)
     }
 
     func changeShutterAngle(_ degrees: Float) {
-        engine.run { $0.setMotionBlurSettings(compMotionBlur, shutter: degrees) }
-        refreshModel(force: true)
+        guard degrees.isFinite else { return }
+        var settings = motionBlurControls
+        settings.angle = min(720, max(0, degrees))
+        writeMotionBlur(settings)
+    }
+
+    func changeShutterPhase(_ degrees: Float) {
+        guard degrees.isFinite else { return }
+        var settings = motionBlurControls
+        settings.phase = min(360, max(-360, degrees))
+        writeMotionBlur(settings)
+    }
+
+    func centerMotionBlurExposure() {
+        var settings = motionBlurControls
+        settings.phase = -settings.angle / 2
+        writeMotionBlur(settings)
+    }
+
+    func changeMotionBlurSamples(_ value: Float) {
+        guard value.isFinite else { return }
+        var settings = motionBlurControls
+        settings.samples = UInt32(min(Float(min(64, settings.adaptiveLimit)), max(2, value.rounded())))
+        writeMotionBlur(settings)
+    }
+
+    func changeMotionBlurAdaptiveLimit(_ value: Float) {
+        guard value.isFinite else { return }
+        var settings = motionBlurControls
+        settings.adaptiveLimit = UInt32(min(256, max(Float(settings.samples), value.rounded())))
+        writeMotionBlur(settings)
     }
 
     // --- Modo Edição ---------------------------------------------------------
@@ -3483,9 +3800,10 @@ final class AureaModel: ObservableObject {
     }
 
     /// Trim do INÍCIO para `frame`: o conteúdo fica parado e só a borda anda.
-    func trimStart(_ layerId: Int64, at frame: Int64) {
-        _ = engine.editClipTime(layerId, operation: 0, amount: frame, previous: 0, next: 0)
+    @discardableResult func trimStart(_ layerId: Int64, at frame: Int64) -> Bool {
+        let changed = engine.editClipTime(layerId, operation: 0, amount: frame, previous: 0, next: 0)
         refreshModel(force: true)
+        return changed
     }
 
     /// Puxa a camada INTEIRA para o cabeçote: o clipe anda, a duração não muda e
@@ -3505,9 +3823,10 @@ final class AureaModel: ObservableObject {
     }
 
     /// Trim do FIM para `frame`. O vídeo não passa do fim da mídia.
-    func trimEnd(_ layerId: Int64, at frame: Int64) {
-        _ = engine.editClipTime(layerId, operation: 1, amount: frame, previous: 0, next: 0)
+    @discardableResult func trimEnd(_ layerId: Int64, at frame: Int64) -> Bool {
+        let changed = engine.editClipTime(layerId, operation: 1, amount: frame, previous: 0, next: 0)
         refreshModel(force: true)
+        return changed
     }
 
     func editClipTime(_ operation: UInt32, amount: Int64, previous: Int64 = 0, next: Int64 = 0) {
@@ -3612,10 +3931,14 @@ final class AureaModel: ObservableObject {
     /// Um gesto contínuo (arrasto, alça, pinça) = UM passo de desfazer. Abra no
     /// começo e feche no fim; tudo que for enviado no meio desfaz junto.
     func beginGesture(_ label: String) {
+        if transformGestureDepth == 0 { sceneDragSnapshot = nil }
+        transformGestureDepth += 1
         engine.run { $0.beginUndoGroup() }
     }
 
     func endGesture() {
+        transformGestureDepth = max(0, transformGestureDepth - 1)
+        if transformGestureDepth == 0 { sceneDragSnapshot = nil }
         engine.run { $0.endUndoGroup() }
         refreshModel(force: true)
     }
@@ -3974,11 +4297,16 @@ extension AureaModel {
 extension AureaModel {
     /// "Substituir mídia": copia para Media/ e troca a fonte da camada. Um desfazer.
     func replaceMedia(layer: Int64, url: URL, video: Bool) {
+        guard !importingMedia else { return }
+        importingMedia = true; operationMessage = AureaText.t("ios_importing_media")
+        let operation = beginProjectOperation()
+        let scoped = url.startAccessingSecurityScopedResource()
         let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
         let name = url.deletingPathExtension().lastPathComponent
         let importer = engine
         if status.playing != 0 { engine.run { $0.pause() }; status.playing = 0 }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             var result: Int64 = -1
             var failure = ""
             do {
@@ -3994,6 +4322,8 @@ extension AureaModel {
             let replaced = result, reason = failure
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.endProjectOperation(operation)
+                self.importingMedia = false
                 if replaced < 0 {
                     self.toast = AureaText.t("layer_replace_failed", reason.isEmpty ? String(-replaced) : reason)
                     return
@@ -4029,6 +4359,7 @@ extension AureaModel {
         let invalid = CharacterSet(charactersIn: "/\\:").union(.controlCharacters)
         let safe = title.components(separatedBy: invalid).joined(separator: "-").trimmingCharacters(in: .whitespaces)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArquivoProjeto", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let out = directory.appendingPathComponent((safe.isEmpty ? "Aurea" : safe) + ".aureaproj")
         toast = AureaText.t("project_file_exporting")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -4070,6 +4401,8 @@ extension AureaModel {
     /// "Importar arquivo do projeto": sempre um projeto NOVO (nome livre), a
     /// mídia do pacote em Media/Projetos/<nome>/. `done` roda na thread principal.
     func importProjectFile(_ url: URL, done: @escaping () -> Void) {
+        guard canChangeProject() else { done(); return }
+        importingMedia = true; operationMessage = AureaText.t("project_file_importing")
         let scoped = url.startAccessingSecurityScopedResource()
         let fallback = url.deletingPathExtension().lastPathComponent
         let name = uniqueHomeProjectName(fallback.isEmpty ? AureaText.t("project_file_imported_title") : fallback)
@@ -4089,7 +4422,8 @@ extension AureaModel {
             let title = (r.count > 1 && !r[1].isEmpty) ? r[1] : name
             let missing = r.count > 4 ? Int(r[4]) ?? 0 : 0
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self else { done(); return }
+                self.importingMedia = false
                 if code == 0 {
                     // Sidecar com o título (Home); tamanho e duração vêm na primeira abertura.
                     writeHomeProjectMeta(url: project, title: title, width: 0, height: 0, fps: 30, durationFrames: 0)
@@ -4141,9 +4475,13 @@ extension AureaModel {
         guard cw > 0, ch > 0, !targets.isEmpty else { return }
         beginGesture(fill ? "preencher a tela" : "ajustar à tela")
         for (id, g) in targets {
-            let k = fill ? max(cw / g.w, ch / g.h) : min(cw / g.w, ch / g.h)
-            let sx = g.scale[0] < 0 ? -k : k, sy = g.scale[1] < 0 ? -k : k
-            let p = positionForCenter(g, sx: sx, sy: sy, cx: cw / 2, cy: ch / 2)
+            let values: [Float] = [cw, ch, g.w, g.h, g.scale[0], g.scale[1],
+                g.anchor[0] + (g.centered ? g.w / 2 : 0), g.anchor[1] + (g.centered ? g.h / 2 : 0),
+                // Match the layer renderer: stored skew does not affect placement.
+                g.rad * 180 / .pi, 0, 0]
+            let fit = engine.fitCanvas(values.map { NSNumber(value: $0) }, fill: fill).map(\.floatValue)
+            guard fit.count == 5, fit[4] > 0 else { continue }
+            let sx = fit[0], sy = fit[1], k = fit[4], p = (fit[2], fit[3])
             if g.threeD {
                 // A regra do motor: Z de conteúdo é relativo a X (o volume não estica).
                 gizmoSetComponents(id, base: 3, values: engine.gestureScale3D(g.kind, scaleX: g.scale[0], scaleY: g.scale[1],
@@ -4259,29 +4597,36 @@ extension AureaModel {
     /// HEIC → JPEG/PNG, até 2048 px) e gravada em Documentos/formas3d — o
     /// projeto guarda o caminho relativo.
     func setShapePartImage(_ id: Int64, part: Int, url: URL) {
+        guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
+        importingMedia = true
+        operationMessage = AureaText.t("ios_importing_media")
+        let operation = beginProjectOperation()
+        let project = projectGeneration
+        let scoped = url.startAccessingSecurityScopedResource()
         let engine = self.engine
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        mediaQueue.async { [weak self] in
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             var path: String?
-            if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
-                let longest = max(image.size.width * image.scale, image.size.height * image.scale)
-                let k = longest > 2048 ? 2048 / longest : 1
-                let size = CGSize(width: max(1, (image.size.width * image.scale * k).rounded()),
-                                  height: max(1, (image.size.height * image.scale * k).rounded()))
-                let format = UIGraphicsImageRendererFormat.default()
-                format.scale = 1
-                let info = image.cgImage?.alphaInfo ?? CGImageAlphaInfo.none
-                let alpha = info != CGImageAlphaInfo.none && info != .noneSkipFirst && info != .noneSkipLast
-                format.opaque = !alpha
-                let flat = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-                let bytes = alpha ? flat.pngData() : flat.jpegData(compressionQuality: 0.92)
-                let dir = AureaPaths.documents.appendingPathComponent("formas3d", isDirectory: true)
-                let file = dir.appendingPathComponent(UUID().uuidString + (alpha ? ".png" : ".jpg"))
-                if let bytes, (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil,
-                   (try? bytes.write(to: file)) != nil { path = file.path }
+            autoreleasepool {
+                // ImageIO decodes directly at the requested size; Data + UIImage
+                // decoded the full camera image before creating its 2048px copy.
+                if let image = decodeHomeThumbnail(path: url.path, maxPx: 2048) {
+                    let info = image.cgImage?.alphaInfo ?? CGImageAlphaInfo.none
+                    let alpha = info != CGImageAlphaInfo.none && info != .noneSkipFirst && info != .noneSkipLast
+                    let bytes = alpha ? image.pngData() : image.jpegData(compressionQuality: 0.92)
+                    let dir = AureaPaths.documents.appendingPathComponent("formas3d", isDirectory: true)
+                    let file = dir.appendingPathComponent(UUID().uuidString + (alpha ? ".png" : ".jpg"))
+                    if let bytes, (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil,
+                       (try? bytes.write(to: file)) != nil { path = file.path }
+                }
             }
             let ok = path.map { engine.setShape3DPartStyle(id, part: Int32(part), color: nil, image: $0) } ?? false
+            if !ok, let path { try? FileManager.default.removeItem(atPath: path) }
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.endProjectOperation(operation)
+                self.importingMedia = false
+                guard self.projectGeneration == project else { return }
                 if !ok { self.toast = AureaText.t("msg_nao_foi_possivel_importar_a_imagem") }
                 Shape3DState.shared.revision += 1
                 self.refreshModel(force: true)

@@ -52,6 +52,12 @@ jobs:
           python3 engine/platform/ios/verify/check_effect_contract.py
           python3 engine/platform/ios/verify/check_metal_frag_outputs.py
           python3 engine/platform/ios/verify/check_editor_layout.py
+          python3 engine/platform/ios/verify/check_preview_buffer.py
+          python3 engine/platform/ios/verify/check_ai_sessions.py
+          python3 engine/platform/ios/verify/check_project_lifecycle.py
+          python3 engine/platform/ios/verify/check_scene_drag.py
+          python3 engine/platform/ios/verify/check_memory_pressure.py
+          python3 engine/platform/ios/verify/check_motion_blur.py
       - name: Install shader tools
         run: brew install cmake ninja shaderc ccache
       - name: Verify Apple stereo audio and sample-rate conversion

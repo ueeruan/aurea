@@ -22,6 +22,7 @@ add_executable(aurea_tests
     test_core.cpp
     test_timeline.cpp
     test_render.cpp
+    test_motion_blur.cpp
     test_serialization.cpp
     test_engine.cpp
     test_media.cpp
@@ -52,6 +53,7 @@ add_executable(aurea_tests
     test_edit.cpp
     test_tracking.cpp
     test_motion_geometry.cpp
+    test_motion_extras.cpp
     test_tracking_flow.cpp
     test_text.cpp
     test_presets.cpp
@@ -92,6 +94,8 @@ target_include_directories(aurea_tests PRIVATE
 target_link_libraries(aurea_tests PRIVATE aurea_core)
 if(MSVC)
     target_compile_options(aurea_tests PRIVATE /MP2)
+    target_link_options(aurea_tests PRIVATE /DEBUG)
+    target_link_libraries(aurea_tests PRIVATE dbghelp)
 endif()
 
 # Os testes visuais usam o backend Vulkan real quando o host tem cabeçalhos
@@ -127,5 +131,7 @@ add_test(NAME aurea_engine_tests COMMAND aurea_tests)
 # diretório do usuário. Rodar daqui deixa os temporários visíveis e apagáveis.
 set_tests_properties(aurea_engine_tests PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    TIMEOUT 300
+    # Includes real long-clip tracking and GPU/export regressions; the coherent
+    # Windows audit already exceeds five minutes without a stalled test.
+    TIMEOUT 1800
 )

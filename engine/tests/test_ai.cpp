@@ -165,6 +165,65 @@ AUREA_TEST(Ai, TemporalStaticDetailDoesNotTrailMotionCutsOrSeeks) {
 // =============================================================================
 #include "aurea/ai/DepthEstimator.hpp"
 #include "aurea/ai/DepthMapService.hpp"
+
+namespace aurea::ai {
+struct DepthMapCacheTestAccess {
+    static void put(DepthMapService& service, u64 source, u64 key, DepthMapPtr map) {
+        service.insert(key, std::move(map));
+        service.publish_latest(source, key, 0, 33333);
+    }
+    static void publish(DepthMapService& service, u64 source, u64 key) {
+        service.publish_latest(source, key, 0, 33333);
+    }
+    static std::unique_lock<std::mutex> block_inference(DepthMapService& service) {
+        return std::unique_lock<std::mutex>(service.work_);
+    }
+    static bool fair_bounded_queue(DepthMapService& service) {
+        service.running_ = true; // inspect scheduling without starting inference
+        for (u64 source = 1; source <= DepthMapService::kMaxPending; ++source) {
+            DepthMapService::Job job; job.sourceKey = source; job.key = source;
+            service.enqueue(std::move(job));
+        }
+        for (u64 key = 100; key < 120; ++key) {
+            DepthMapService::Job job; job.sourceKey = 1; job.key = key;
+            service.enqueue(std::move(job));
+        }
+        DepthMapService::Job overflow; overflow.sourceKey = 99; overflow.key = 99;
+        service.enqueue(std::move(overflow));
+        bool ok = service.pending_.size() == DepthMapService::kMaxPending;
+        u64 expected = 1;
+        for (const auto& job : service.pending_) {
+            ok = ok && job.sourceKey == expected && job.key == (expected == 1 ? 119 : expected);
+            ++expected;
+        }
+        service.running_ = false;
+        service.pending_.clear();
+        return ok;
+    }
+};
+}
+
+AUREA_TEST(Ai, LatestVideoFallbackObeysLruAndCannotRepublishEvictedFrames) {
+    for (bool foreground : {false, true}) {
+        ai::DepthMapService service(foreground);
+        const usize capacity = foreground ? 16 : ai::DepthMapService::kMaxCached;
+        std::weak_ptr<const ai::DepthMap> evicted;
+        for (usize i = 0; i <= capacity; ++i) {
+            auto map = std::make_shared<ai::DepthMap>(); map->disparity.resize(4);
+            if (i == 0) evicted = map;
+            ai::DepthMapCacheTestAccess::put(service, i + 1, i + 100, std::move(map));
+        }
+        u64 key = 0; i64 target = 0, duration = 0;
+        AUREA_CHECK(evicted.expired());
+        AUREA_CHECK(!service.latest_video(1, key, target, duration));
+        ai::DepthMapCacheTestAccess::publish(service, 1, 100);
+        AUREA_CHECK(!service.latest_video(1, key, target, duration));
+        AUREA_CHECK(service.latest_video(capacity + 1, key, target, duration));
+        AUREA_CHECK_EQ(key, capacity + 100);
+        service.clear();
+        AUREA_CHECK(!service.latest_video(capacity + 1, key, target, duration));
+    }
+}
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -280,4 +339,40 @@ AUREA_TEST(Ai, DepthServiceRunsTheNetworkOncePerSourceFrame) {
         AUREA_CHECK_EQ(a->disparity.size(), static_cast<usize>(ai::DepthEstimator::kPixels));
         AUREA_CHECK(a->p98 > a->p2);
     }
+}
+
+AUREA_TEST(Ai, DepthQueueKeepsOtherLayersWhenOneSourceSeeksRapidly) {
+    ai::DepthMapService service;
+    AUREA_CHECK(ai::DepthMapCacheTestAccess::fair_bounded_queue(service));
+}
+
+AUREA_TEST(Ai, DepthAsyncImagesAllCompleteWithTheSamePixelsAsExport) {
+    std::vector<u8> photo;
+    u32 w = 0, h = 0;
+    AUREA_CHECK(depth_test_photo(photo, w, h));
+    if (photo.empty()) return;
+    ai::DepthMapService service;
+    std::atomic<u32> ready{0};
+    service.set_ready_callback([](void* ctx) { ++*static_cast<std::atomic<u32>*>(ctx); }, &ready);
+    {
+        // All three requests coexist before the network can consume the queue.
+        auto hold = ai::DepthMapCacheTestAccess::block_inference(service);
+        for (u64 key = 101; key <= 103; ++key)
+            AUREA_CHECK(!service.image(key, photo.data(), w, h, w * 4, 4, false));
+        AUREA_CHECK_EQ(service.activity_state(), 1u);
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (ready.load() < 3 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    AUREA_CHECK_EQ(ready.load(), 3u);
+    AUREA_CHECK_EQ(service.activity_state(), 0u);
+    const auto exact = service.image(200, photo.data(), w, h, w * 4, 4, true);
+    AUREA_CHECK(exact != nullptr);
+    for (u64 key = 101; key <= 103; ++key) {
+        const auto cached = service.cached(key);
+        AUREA_CHECK(cached != nullptr);
+        if (cached && exact) AUREA_CHECK(cached->disparity == exact->disparity);
+    }
+    AUREA_CHECK_EQ(service.stats().inferences, u64{4});
+    service.clear(); // callback context remains alive until the worker joins
 }

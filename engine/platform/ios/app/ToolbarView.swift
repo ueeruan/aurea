@@ -4,6 +4,7 @@ import UIKit
 import PhotosUI
 
 struct TopBarView: View {
+    var height: CGFloat = EditorLayout.topBar
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     private var layer: LayerItem? { model.selectedLayer }
@@ -19,7 +20,7 @@ struct TopBarView: View {
             else if let layer { layerBar(layer) }
             else { projectBar }
         }
-        .frame(height: EditorLayout.topBar)
+        .frame(height: height)
         .background(AureaColors.editorCanvas)
         // Abertos pelo menu da engrenagem (ShellOverlayHost) ou pela lupa das barras.
         .sheet(isPresented: $shell.performanceTest) { PerformanceTestPanel() }
@@ -226,42 +227,54 @@ struct TransportView: View {
     }
 
     private var buttons: some View {
+        GeometryReader { geometry in
+        let compact = geometry.size.width < 408
+        let tiny = geometry.size.width < 352
         HStack(spacing: 0) {
             undoButton
             Spacer(minLength: 0)
-            redoButton
-            Spacer(minLength: 0)
+            if !tiny { redoButton; Spacer(minLength: 0) }
             startButton
             Spacer(minLength: 0)
-            markerButton
-            Spacer(minLength: 0)
+            if !compact { markerButton; Spacer(minLength: 0) }
             playButton
             Spacer(minLength: 0)
             endButton
             Spacer(minLength: 0)
-            duplicateButton
+            if compact {
+                Menu {
+                    if tiny { Button(AureaText.t("editor_refazer")) { model.redo() }.disabled(model.status.canRedo == 0) }
+                    Button(AureaText.t("editor_dividir_cabecote")) { model.splitAtPlayhead(Array(model.selection)) }.disabled(model.selection.isEmpty)
+                    Button(AureaText.t("editor_marcar_ou_desmarcar_este_instante")) { model.toggleMarkerAt(model.status.playhead) }
+                    Button(AureaText.t("editor_duplicar_camada_segure_copiar")) {
+                        model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+                    }.disabled(model.selection.isEmpty)
+                } label: { CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 22, color: AureaColors.text).frame(width: 48, height: 48) }
+                .accessibilityLabel(AureaText.t("timeline_more"))
+            } else { duplicateButton }
             Spacer(minLength: 0)
             fullscreenButton
-        }.padding(.horizontal, 4)
+        }.padding(.horizontal, 4).frame(height: EditorLayout.transport)
+        }
     }
 
     private var undoButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 22, width: 44, height: 44,
+        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 22, width: 48, height: 48,
                        enabled: model.status.canUndo != 0, disabledTint: AureaColors.transportDisabled) { model.undo() }
     }
     private var redoButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 22, width: 44, height: 44,
+        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 22, width: 48, height: 48,
                        enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
     }
     /// Tocar navega por marcas/keyframes; segurar vai ao início.
     private var startButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowLeftToLine, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 24, width: 44, height: 44,
+        ShellBarButton(glyph: CupertinoGlyph.ArrowLeftToLine, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 24, width: 48, height: 48,
                        onLongPress: { model.seek(toFrame: 0) }, action: { model.stepTransport(-1) })
             .accessibilityIdentifier("transport.previous")
     }
     /// Tocar navega por marcas/keyframes; segurar vai ao fim.
     private var endButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowRightToLine, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 24, width: 44, height: 44,
+        ShellBarButton(glyph: CupertinoGlyph.ArrowRightToLine, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 24, width: 48, height: 48,
                        onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { model.stepTransport(1) })
             .accessibilityIdentifier("transport.next")
     }
@@ -269,7 +282,7 @@ struct TransportView: View {
         ZStack(alignment: .bottomTrailing) {
             ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
                            description: AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" : (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")),
-                           size: 26, width: 44, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
+                           size: 26, width: 48, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
                            onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
             if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false) }
         }
@@ -278,14 +291,14 @@ struct TransportView: View {
     private var markerButton: some View {
         let marked = model.markerFrames.contains(model.status.playhead)
         return ShellBarButton(glyph: marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
-                              description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 20, width: 44, height: 44,
+                              description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 20, width: 48, height: 48,
                               tint: marked ? AureaColors.accent : AureaColors.text,
                               onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
             .accessibilityIdentifier("transport.marker")
     }
     private var duplicateButton: some View {
         let empty: Bool = model.selection.isEmpty
-        return ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada_segure_copiar"), size: 22, width: 44, height: 44,
+        return ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada_segure_copiar"), size: 22, width: 48, height: 48,
                               tint: empty ? AureaColors.transportDisabled : AureaColors.text,
                               onLongPress: {
                                   if model.status.playing != 0 { model.playPause() }
@@ -299,7 +312,7 @@ struct TransportView: View {
     }
     private var fullscreenButton: some View {
         ShellBarButton(glyph: model.fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen,
-                       description: AureaText.t(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia"), size: 22, width: 44, height: 44) {
+                       description: AureaText.t(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia"), size: 22, width: 48, height: 48) {
             model.fullscreen.toggle(); model.invalidatePreview()
         }
     }

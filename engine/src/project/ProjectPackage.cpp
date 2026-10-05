@@ -19,6 +19,7 @@
 #include <cstring>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <set>
 
 namespace aurea::package {
@@ -31,6 +32,7 @@ constexpr u32 kSigLocal = 0x04034b50u;
 constexpr u32 kSigCentral = 0x02014b50u;
 constexpr u32 kSigEnd = 0x06054b50u;
 constexpr u16 kFlagUtf8 = 0x0800;
+std::mutex packageWriteMutex;
 
 const std::array<u32, 256>& crc_table() {
     static const std::array<u32, 256> table = [] {
@@ -267,6 +269,7 @@ struct ZipEntry {
     u32 size = 0;
     u32 compressed = 0;
     u32 localOffset = 0;
+    u32 dataLimit = 0;
 };
 
 Status read_directory(std::FILE* f, std::vector<ZipEntry>& out) {
@@ -278,42 +281,66 @@ Status read_directory(std::FILE* f, std::vector<ZipEntry>& out) {
     if (!seek(f, total - tail) || std::fread(b.data(), 1, b.size(), f) != b.size()) return Status{Errc::IoError, "arquivo ilegivel"};
     usize eocd = std::string::npos;
     for (usize i = b.size() - 22 + 1; i-- > 0;) {
-        if (get32(&b[i]) == kSigEnd) { eocd = i; break; }
+        if (get32(&b[i]) == kSigEnd && i + 22 + get16(&b[i + 20]) == b.size()) { eocd = i; break; }
     }
     if (eocd == std::string::npos) return Status{Errc::UnsupportedFormat, "nao e um pacote"};
     const u32 count = get16(&b[eocd + 10]);
     const u32 cdSize = get32(&b[eocd + 12]);
     const u32 cdOffset = get32(&b[eocd + 16]);
-    if (static_cast<u64>(cdOffset) + cdSize > total) return Status{Errc::CorruptData, "pacote cortado"};
-    std::vector<u8> cd(cdSize);
-    if (!seek(f, cdOffset) || (cdSize && std::fread(cd.data(), 1, cd.size(), f) != cd.size())) return Status{Errc::IoError, "arquivo ilegivel"};
-    usize p = 0;
+    if (get16(&b[eocd + 4]) || get16(&b[eocd + 6]) || get16(&b[eocd + 8]) != count)
+        return Status{Errc::UnsupportedFormat, "pacote em varios volumes"};
+    if (static_cast<u64>(cdOffset) + cdSize > total - tail + eocd || count > cdSize / 46)
+        return Status{Errc::CorruptData, "pacote cortado"};
+    // Stream each record: an untrusted directory length must not allocate GiB.
+    u64 p = 0, nameBytes = 0;
+    constexpr u64 kNameBudget = 8ull << 20;
+    std::set<std::string> names;
     for (u32 i = 0; i < count; ++i) {
-        if (p + 46 > cd.size() || get32(&cd[p]) != kSigCentral) return Status{Errc::CorruptData, "diretorio do pacote"};
+        u8 h[46];
+        if (p + sizeof h > cdSize || !seek(f, cdOffset + p) || std::fread(h, 1, sizeof h, f) != sizeof h || get32(h) != kSigCentral)
+            return Status{Errc::CorruptData, "diretorio do pacote"};
+        if ((get16(h + 8) & ~static_cast<u16>(kFlagUtf8 | 8)) || get16(h + 34))
+            return Status{Errc::UnsupportedFormat, "entrada nao suportada"};
         ZipEntry e;
-        e.method = get16(&cd[p + 10]);
-        e.crc = get32(&cd[p + 16]);
-        e.compressed = get32(&cd[p + 20]);
-        e.size = get32(&cd[p + 24]);
-        const u32 nameLen = get16(&cd[p + 28]);
-        const u32 extraLen = get16(&cd[p + 30]);
-        const u32 commentLen = get16(&cd[p + 32]);
-        e.localOffset = get32(&cd[p + 42]);
-        if (p + 46 + nameLen > cd.size()) return Status{Errc::CorruptData, "diretorio do pacote"};
-        e.name.assign(reinterpret_cast<const char*>(&cd[p + 46]), nameLen);
+        e.method = get16(h + 10);
+        e.crc = get32(h + 16);
+        e.compressed = get32(h + 20);
+        e.size = get32(h + 24);
+        const u32 nameLen = get16(h + 28);
+        const u32 extraLen = get16(h + 30);
+        const u32 commentLen = get16(h + 32);
+        e.localOffset = get32(h + 42);
+        e.dataLimit = cdOffset;
+        if (!nameLen || p + 46 + nameLen + extraLen + commentLen > cdSize || e.localOffset >= cdOffset)
+            return Status{Errc::CorruptData, "diretorio do pacote"};
+        if (nameLen > 4096 || nameLen > kNameBudget - nameBytes)
+            return Status{Errc::BudgetExceeded, "diretorio do pacote muito grande"};
+        nameBytes += nameLen;
+        e.name.resize(nameLen);
+        if (std::fread(e.name.data(), 1, nameLen, f) != nameLen || !names.insert(e.name).second)
+            return Status{Errc::CorruptData, "diretorio do pacote"};
         p += 46 + nameLen + extraLen + commentLen;
         out.push_back(std::move(e));
     }
+    return p == cdSize ? OkStatus : Status{Errc::CorruptData, "diretorio do pacote"};
+}
+
+Status seek_entry(std::FILE* f, const ZipEntry& e) {
+    if (e.method != 0 || e.compressed != e.size) return Status{Errc::UnsupportedFormat, "entrada comprimida"};
+    u8 h[30];
+    if (!seek(f, e.localOffset) || std::fread(h, 1, 30, f) != 30 || get32(h) != kSigLocal) return Status{Errc::CorruptData, "entrada do pacote"};
+    const u64 data = static_cast<u64>(e.localOffset) + 30 + get16(h + 26) + get16(h + 28);
+    if (get16(h + 8) != e.method || (get16(h + 6) & ~static_cast<u16>(kFlagUtf8 | 8)) ||
+        data + e.size > e.dataLimit || get16(h + 26) != e.name.size()) return Status{Errc::CorruptData, "entrada do pacote"};
+    std::string name(e.name.size(), '\0');
+    if (std::fread(name.data(), 1, name.size(), f) != name.size() || name != e.name || !seek(f, data))
+        return Status{Errc::CorruptData, "entrada do pacote"};
     return OkStatus;
 }
 
 /// Copia a entrada para `dest` conferindo o CRC. Só "stored".
 Status extract(std::FILE* f, const ZipEntry& e, const std::string& dest) {
-    if (e.method != 0 || e.compressed != e.size) return Status{Errc::UnsupportedFormat, "entrada comprimida"};
-    u8 h[30];
-    if (!seek(f, e.localOffset) || std::fread(h, 1, 30, f) != 30 || get32(h) != kSigLocal) return Status{Errc::CorruptData, "entrada do pacote"};
-    const u64 data = static_cast<u64>(e.localOffset) + 30 + get16(h + 26) + get16(h + 28);
-    if (!seek(f, data)) return Status{Errc::CorruptData, "entrada do pacote"};
+    if (const Status s = seek_entry(f, e); !s.ok()) return s;
     File out(fileio::open_file(dest, "wb"));
     if (!out.f) return Status{Errc::IoError, "destino"};
     std::vector<u8> buf(1u << 20);
@@ -330,17 +357,18 @@ Status extract(std::FILE* f, const ZipEntry& e, const std::string& dest) {
     }
     if (crc != e.crc) return Status{Errc::ChecksumMismatch, "pacote danificado"};
     std::FILE* raw = out.release();
-    if (std::fflush(raw) != 0 || std::fclose(raw) != 0) {
-        return errno == ENOSPC ? Status{Errc::StorageFull, "sem espaco"} : Status{Errc::IoError, "falha ao gravar"};
+    const int flushed = std::fflush(raw);
+    const int flushError = errno;
+    const int closed = std::fclose(raw);
+    if (flushed != 0 || closed != 0) {
+        return (flushed != 0 ? flushError : errno) == ENOSPC ? Status{Errc::StorageFull, "sem espaco"} : Status{Errc::IoError, "falha ao gravar"};
     }
     return OkStatus;
 }
 
 Status read_entry_text(std::FILE* f, const ZipEntry& e, std::string& out) {
     if (e.method != 0 || e.size > (1u << 20)) return Status{Errc::UnsupportedFormat, "manifesto"};
-    u8 h[30];
-    if (!seek(f, e.localOffset) || std::fread(h, 1, 30, f) != 30 || get32(h) != kSigLocal) return Status{Errc::CorruptData, "manifesto"};
-    if (!seek(f, static_cast<u64>(e.localOffset) + 30 + get16(h + 26) + get16(h + 28))) return Status{Errc::CorruptData, "manifesto"};
+    if (const Status s = seek_entry(f, e); !s.ok()) return s;
     out.resize(e.size);
     if (e.size && std::fread(out.data(), 1, e.size, f) != e.size) return Status{Errc::CorruptData, "manifesto"};
     if (crc_update(0, reinterpret_cast<const u8*>(out.data()), out.size()) != e.crc) return Status{Errc::ChecksumMismatch, "manifesto"};
@@ -357,6 +385,7 @@ std::string free_path(const fs::path& dir, const std::string& name) {
     for (int i = 2; fs::exists(candidate, ec) && i < 10000; ++i) {
         candidate = dir / fs::u8path(stem + "-" + std::to_string(i) + ext);
     }
+    if (fs::exists(candidate, ec) || ec) return {};
     return utf8_of(candidate);
 }
 
@@ -389,6 +418,7 @@ Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noex
 Status write_package(const std::string& aureaPath, const std::string& outPath, const std::string& title,
                      const std::string& appVersion, const std::vector<MediaFile>& media,
                      ExportResult* result) noexcept {
+    std::lock_guard<std::mutex> writeLock(packageWriteMutex);
     // O projeto precisa abrir aqui: não se manda adiante um arquivo quebrado.
     {
         Project p;
@@ -434,13 +464,9 @@ Status write_package(const std::string& aureaPath, const std::string& outPath, c
         fileio::remove_file(tmp);
         return s;
     }
-    std::error_code ec;
-    fs::rename(fs::u8path(tmp), fs::u8path(outPath), ec);
-    if (ec) {
-        fs::remove(fs::u8path(outPath), ec);
-        ec.clear();
-        fs::rename(fs::u8path(tmp), fs::u8path(outPath), ec);
-        if (ec) { fileio::remove_file(tmp); return Status{Errc::IoError, "falha ao gravar"}; }
+    if (const Status committed = fileio::commit_file(tmp, outPath); !committed.ok()) {
+        fileio::remove_file(tmp);
+        return committed;
     }
     if (result) *result = r;
     return OkStatus;
@@ -575,6 +601,7 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
             if (name.empty()) name = "media";
         }
         const std::string dest = free_path(fs::u8path(mediaDir), name);
+        if (dest.empty()) { rollback(); return Status{Errc::AlreadyExists, "nenhum nome de midia disponivel"}; }
         if (const Status s = extract(f.f, *e, dest); !s.ok()) {
             fileio::remove_file(dest);
             rollback();

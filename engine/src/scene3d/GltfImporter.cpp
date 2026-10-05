@@ -18,6 +18,8 @@
 #include <cctype>
 #include <cstring>
 #include <filesystem>
+#include <cstddef>
+#include <limits>
 #include <unordered_map>
 
 // Implementações de terceiros: os avisos deles não são nossos.
@@ -85,13 +87,17 @@ std::string dir_of(const std::string& path) {
     return slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
 }
 
-bool read_file(const std::string& path, std::vector<u8>& out) {
+bool read_file(const std::string& path, std::vector<u8>& out, u64 limit = 0, bool* exceeded = nullptr) {
     std::FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) return false;
     std::fseek(f, 0, SEEK_END);
     const long size = std::ftell(f);
     std::fseek(f, 0, SEEK_SET);
     if (size < 0) { std::fclose(f); return false; }
+    if (limit && static_cast<u64>(size) > limit) {
+        if (exceeded) *exceeded = true;
+        std::fclose(f); return false;
+    }
     out.resize(static_cast<usize>(size));
     const bool ok = size == 0 || std::fread(out.data(), 1, out.size(), f) == out.size();
     std::fclose(f);
@@ -107,14 +113,42 @@ std::string uri_decode(const char* uri) {
 }
 
 // --- Leitura de recursos externos pelo leitor da plataforma --------------------
+struct ParseBudget {
+    u64 limit = 0, held = 0;
+    bool exceeded = false;
+    struct alignas(std::max_align_t) Header { usize size; };
+    static void* allocate(void* user, cgltf_size size) {
+        auto& budget = *static_cast<ParseBudget*>(user);
+        if (size > std::numeric_limits<usize>::max() - sizeof(Header)
+            || (budget.limit && size + sizeof(Header) > budget.limit - budget.held)) {
+            budget.exceeded = true; return nullptr;
+        }
+        auto* memory = static_cast<Header*>(std::malloc(size + sizeof(Header)));
+        if (!memory) return nullptr;
+        memory->size = size + sizeof(Header); budget.held += memory->size;
+        return memory + 1;
+    }
+    static void release(void* user, void* data) {
+        if (!data) return;
+        auto& budget = *static_cast<ParseBudget*>(user);
+        auto* memory = static_cast<Header*>(data) - 1;
+        budget.held -= memory->size; std::free(memory);
+    }
+};
 struct ReaderCtx {
     const ImportOptions* options = nullptr;
     std::string baseDir;
+    ParseBudget* budget = nullptr;
 };
 
-cgltf_result file_read(const cgltf_memory_options*, const cgltf_file_options* fo, const char* path,
+cgltf_result file_read(const cgltf_memory_options* memory, const cgltf_file_options* fo, const char* path,
                        cgltf_size* size, void** data) {
     auto* ctx = static_cast<ReaderCtx*>(fo->user_data);
+    // The temporary vector and retained cgltf buffer coexist during the copy.
+    const u64 limit = ctx->budget->limit ? (ctx->budget->limit - ctx->budget->held) / 2 : 0;
+    if (ctx->budget->limit && (!limit || *size > limit)) {
+        ctx->budget->exceeded = true; return cgltf_result_out_of_memory;
+    }
     std::vector<u8> bytes;
     bool ok = false;
     if (ctx->options->reader) {
@@ -124,10 +158,13 @@ cgltf_result file_read(const cgltf_memory_options*, const cgltf_file_options* fo
         if (!ctx->baseDir.empty() && rel.rfind(ctx->baseDir, 0) == 0) rel = rel.substr(ctx->baseDir.size());
         ok = ctx->options->reader(rel.c_str(), bytes, ctx->options->readerUser);
     } else {
-        ok = read_file(path, bytes);
+        ok = read_file(path, bytes, limit, &ctx->budget->exceeded);
+    }
+    if (ctx->budget->exceeded || (limit && bytes.size() > limit)) {
+        ctx->budget->exceeded = true; return cgltf_result_out_of_memory;
     }
     if (!ok) return cgltf_result_file_not_found;
-    void* mem = std::malloc(bytes.empty() ? 1 : bytes.size());
+    void* mem = memory->alloc_func(memory->user_data, bytes.empty() ? 1 : bytes.size());
     if (!mem) return cgltf_result_out_of_memory;
     if (!bytes.empty()) std::memcpy(mem, bytes.data(), bytes.size());
     *size = bytes.size();
@@ -135,7 +172,9 @@ cgltf_result file_read(const cgltf_memory_options*, const cgltf_file_options* fo
     return cgltf_result_success;
 }
 
-void file_release(const cgltf_memory_options*, const cgltf_file_options*, void* data) { std::free(data); }
+void file_release(const cgltf_memory_options* memory, const cgltf_file_options*, void* data) {
+    memory->free_func(memory->user_data, data);
+}
 
 // --- Acessores ------------------------------------------------------------------
 template <typename T>
@@ -645,6 +684,11 @@ bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::
     const u8* data = nullptr;
     usize size = 0;
     void* b64 = nullptr;
+    struct Base64Guard {
+        const cgltf_options& options;
+        void*& data;
+        ~Base64Guard() { if (data) options.memory.free_func(options.memory.user_data, data); }
+    } base64Guard{opts, b64};
     if (src.buffer_view) {
         data = cgltf_buffer_view_data(src.buffer_view);
         size = src.buffer_view->size;
@@ -659,6 +703,10 @@ bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::
             return false;
         }
         const usize len = std::strlen(comma + 1);
+        if (len < 4 || len % 4 != 0) {
+            fail = {ImportError::TextureDecodeFailed, "imagem base64 invalida"};
+            return false;
+        }
         const usize decoded = len / 4 * 3 - (len >= 1 && comma[len] == '=') - (len >= 2 && comma[len - 1] == '=');
         if (cgltf_load_buffer_base64(&opts, decoded, comma + 1, &b64) != cgltf_result_success) {
             fail = {ImportError::TextureDecodeFailed, "imagem base64 invalida"};
@@ -687,7 +735,6 @@ bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::
     // KTX2 (KHR_texture_basisu): transcodificado para RGBA no import.
     if (is_ktx2(data, size)) {
         const bool ok = decode_ktx2(data, size, out);
-        if (b64) std::free(b64);
         if (!ok) fail = {ImportError::TextureDecodeFailed, "textura KTX2 '" + (out.uri.empty() ? out.name : out.uri) + "' ilegivel"};
         if (ok) {
             if (w0) *w0 = out.width;
@@ -698,7 +745,6 @@ bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::
     }
     u32 ow = 0, oh = 0;
     const Decode d = decode_capped(data, size, maxSide, transientLimit, out, ow, oh);
-    if (b64) std::free(b64);
     if (w0) *w0 = ow;
     if (h0) *h0 = oh;
     if (d == Decode::TooBig) {
@@ -1022,9 +1068,15 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
     const u64 tParse = monotonic_ns();
     set_phase(progress, ImportPhase::Parsing);
     if (!bytes || size < 12) return fail_result(ImportError::InvalidFormat, "arquivo vazio ou curto demais");
-
-    ReaderCtx rctx{&options, baseDir};
+    if (cancelled(progress)) return fail_result(ImportError::Cancelled, "cancelado");
+    if (options.memoryBudget && size >= options.memoryBudget)
+        return fail_result(ImportError::TooHeavy, "arquivo 3D excede a memoria disponivel para importar");
+    ParseBudget budget{options.memoryBudget ? options.memoryBudget - size : 0};
+    ReaderCtx rctx{&options, baseDir, &budget};
     cgltf_options opts{};
+    opts.memory.alloc_func = &ParseBudget::allocate;
+    opts.memory.free_func = &ParseBudget::release;
+    opts.memory.user_data = &budget;
     opts.file.read = &file_read;
     opts.file.release = &file_release;
     opts.file.user_data = &rctx;
@@ -1032,6 +1084,7 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
     cgltf_data* data = nullptr;
     cgltf_result r = cgltf_parse(&opts, bytes, size, &data);
     if (r != cgltf_result_success) {
+        if (budget.exceeded) return fail_result(ImportError::TooHeavy, "estrutura 3D excede a memoria disponivel para importar");
         return fail_result(r == cgltf_result_unknown_format ? ImportError::InvalidFormat : from_cgltf(r),
                            "nao e um glTF/GLB valido");
     }
@@ -1053,6 +1106,7 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
     const std::string loadPath = baseDir + "x.gltf";   // cgltf compõe URIs relativas a partir deste caminho
     r = cgltf_load_buffers(&opts, data, loadPath.c_str());
     if (r != cgltf_result_success) {
+        if (budget.exceeded) return fail_result(ImportError::TooHeavy, "buffers 3D excedem a memoria disponivel para importar");
         return fail_result(from_cgltf(r), r == cgltf_result_file_not_found ? "arquivo .bin do modelo ausente"
                                                                            : "buffers do modelo ilegiveis");
     }
@@ -1198,6 +1252,7 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
             skipped = true;
         } else if (!decode_image(data->images[i], opts, baseDir, A.images[i], fail, options.maxTextureSize, transient,
                                  &w0, &h0, &skipped)) {
+            if (budget.exceeded) return fail_result(ImportError::TooHeavy, "texturas 3D excedem a memoria disponivel para importar");
             return fail_result(fail.error, fail.detail);
         }
         if (skipped) {
@@ -1331,7 +1386,10 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
 
 ImportResult import_gltf_file(const std::string& path, const ImportOptions& options, ImportProgress* progress) {
     std::vector<u8> bytes;
-    if (!read_file(path, bytes)) return fail_result(ImportError::FileNotFound, path);
+    bool exceeded = false;
+    if (!read_file(path, bytes, options.memoryBudget, &exceeded))
+        return fail_result(exceeded ? ImportError::TooHeavy : ImportError::FileNotFound,
+            exceeded ? "arquivo 3D excede a memoria disponivel para importar" : path);
     ImportResult r = import_gltf_memory(bytes.data(), bytes.size(), dir_of(path), options, progress);
     if (r.ok()) {
         const usize slash = path.find_last_of("/\\");
@@ -1447,6 +1505,15 @@ ModelCost estimate_gltf_cost(const std::string& path, bool glb) {
     ModelCost c;
     const u64 size = file_bytes(path);
     if (size < 12) return c;
+    // Inspection is a cheap preflight, never another unrestricted import.
+    // Unknown counts retain the heavy-model warning; the actual importer will
+    // decide whether the requested quality fits its current aggregate quota.
+    const auto boundedUnknown = [size] {
+        ModelCost unknown; unknown.valid = true; unknown.exact = false;
+        unknown.fileBytes = unknown.parseBytes = size;
+        return unknown;
+    };
+    constexpr u64 jsonLimit = 16ull << 20;
     std::vector<u8> json;
     u64 binOffset = 0;   // início dos dados do chunk BIN no arquivo (GLB)
     if (glb) {
@@ -1454,15 +1521,22 @@ ModelCost estimate_gltf_cost(const std::string& path, bool glb) {
         if (!read_range(path, 0, 20, head) || head.size() < 20 || std::memcmp(head.data(), "glTF", 4) != 0) return c;
         u32 jsonLen = 0;
         std::memcpy(&jsonLen, head.data() + 12, 4);
-        if (jsonLen == 0 || jsonLen > size || jsonLen > (256u << 20)) return c;
+        if (jsonLen == 0 || jsonLen > size) return c;
+        if (jsonLen > jsonLimit) return boundedUnknown();
         if (!read_range(path, 20, jsonLen, json) || json.size() != jsonLen) return c;
         binOffset = 20ull + jsonLen + 8ull;
     } else {
-        if (size > (256u << 20) || !read_file(path, json)) return c;
+        if (size > jsonLimit) return boundedUnknown();
+        if (!read_file(path, json, jsonLimit)) return c;
     }
+    ParseBudget budget; budget.limit = 32ull << 20;
     cgltf_options opts{};
+    opts.memory.alloc_func = &ParseBudget::allocate;
+    opts.memory.free_func = &ParseBudget::release;
+    opts.memory.user_data = &budget;
     cgltf_data* data = nullptr;
-    if (cgltf_parse(&opts, json.data(), json.size(), &data) != cgltf_result_success || !data) return c;
+    if (cgltf_parse(&opts, json.data(), json.size(), &data) != cgltf_result_success || !data)
+        return budget.exceeded ? boundedUnknown() : c;
     struct Guard { cgltf_data* d; ~Guard() { cgltf_free(d); } } guard{data};
     c = cost_from_counts(count_gltf(data));
     c.fileBytes = size;

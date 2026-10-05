@@ -32,7 +32,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform GroundBlock {
     vec4 shadowParams;
     vec4 shadowParams2;
     mat4 contactMatrix;     // uv do mapa de contato ← mundo
-    vec4 contactParams;     // x = ligado, y..w livres
+    vec4 contactParams;     // x = contato ligado, y = reflexo unlit presente, z..w livres
 } g;
 
 #endif

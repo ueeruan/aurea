@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mb_shutter_angle">Shutter angle</string>
+    <string name="mb_shutter_phase">Shutter phase</string>
+    <string name="mb_phase_hint">Offsets exposure relative to the frame. Center places half of the exposure before the frame.</string>
+    <string name="mb_center_exposure">Center exposure</string>
+    <string name="mb_samples_per_frame">Samples per frame</string>
+    <string name="mb_adaptive_limit">Adaptive limit</string>
+    <string name="mb_quality_hint">Preview may use fewer samples to stay responsive. Export uses the selected quality. Higher values take longer.</string>
+    <string name="mb_advanced">Advanced</string>
+    <string name="mb_comp_settings_hint">Composition settings: affect every layer with motion blur enabled.</string>
+</resources>

@@ -153,17 +153,27 @@ fun ColorPickerSheet(
     withAlpha: Boolean = true,
     /** Conta-gotas (app antigo): o quadro do cabeçote renderizado; nulo = sem o botão. */
     pickFromPreview: (() -> Bitmap?)? = null,
+    /** Replacing a project/panel cancels a pending eyedropper result. */
+    previewIdentity: Any? = null,
     onChange: (r: Float, g: Float, b: Float, a: Float) -> Unit,
     onDone: () -> Unit,
 ) {
     val context = LocalContext.current
     var palette by remember { mutableStateOf(SavedPalette.load(context)) }
-    var picking by remember { mutableStateOf(false) }
-    var frame by remember { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(picking) {
+    var picking by remember(previewIdentity) { mutableStateOf(false) }
+    var frame by remember(previewIdentity) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(picking, previewIdentity) {
         if (picking && frame == null && pickFromPreview != null) {
-            frame = withContext(Dispatchers.Default) { runCatching { pickFromPreview() }.getOrNull() }
-            if (frame == null) picking = false
+            var captured: Bitmap? = null
+            try {
+                withContext(Dispatchers.Default) { captured = runCatching { pickFromPreview() }.getOrNull() }
+                frame = captured
+                captured = null
+                if (frame == null) picking = false
+            } finally {
+                // Native capture may finish after this sheet was dismissed.
+                captured?.recycle()
+            }
         }
     }
     val original = remember { rgbaColor(initial) }

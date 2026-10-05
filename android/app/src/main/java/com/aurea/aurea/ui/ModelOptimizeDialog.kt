@@ -49,7 +49,7 @@ fun ModelOptimizeDialog(store: EditorStore, req: EditorStore.ModelOptimizeReques
     val quality = store.modelOptimizeQuality
     AureaAlert(
         title = stringResource(R.string.model3d_heavy_title),
-        message = stringResource(R.string.model3d_heavy_body, tris),
+        message = stringResource(R.string.model3d_heavy_body, tris) + "\n\n" + stringResource(R.string.model3d_risk_warning),
         confirmLabel = stringResource(if (quality == MODEL_QUALITY_ORIGINAL) R.string.model3d_import else R.string.model3d_optimize_import),
         onConfirm = { store.confirmModelOptimize(req) },
         onDismiss = { store.dismissModelOptimize() },

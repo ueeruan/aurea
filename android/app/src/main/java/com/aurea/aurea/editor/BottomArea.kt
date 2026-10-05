@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
@@ -125,7 +126,15 @@ internal enum class DockSection(val glyph: Char, @StringRes val label: Int, val 
     Presets(CupertinoGlyph.WandStars, R.string.sh_dock_presets, EditorPanel.Presets),
     Effects(CupertinoGlyph.Sparkles, R.string.sh_dock_effects, EditorPanel.Effects),
     // Rig 2D: não abre painel — o palco vira o esqueleto (RigStage.kt).
-    Rig(CupertinoGlyph.PersonCropCircle, R.string.rig_dock, EditorPanel.Transform),
+    Rig(CupertinoGlyph.PersonCropCircle, R.string.rig_dock, EditorPanel.Transform);
+
+    /** A ficha usa uma ação curta; o leitor de tela mantém o nome completo. */
+    @get:StringRes
+    val shortLabel: Int get() = when (this) {
+        Move -> R.string.gizmo_tool_move
+        Blend -> R.string.panel_misturar
+        else -> label
+    }
 }
 
 /**
@@ -215,25 +224,24 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
     val l = layer ?: return
     val type = LayerType.of(l.kind)
     val sections = sectionsFor(l)
+    val tileHeight = EditorLayout.dockTile(LocalDensity.current.fontScale)
     val rows = buildList {
         var at = 0
         for (n in dockRows(sections.size)) { add(sections.subList(at, at + n)); at += n }
     }
-    // Igual ao Alight Motion: folha de cantos arredondados em cima; fileira
-    // rápida com a velocidade e o som em quadrados nas pontas e o bloco
-    // aparar início | dividir | aparar fim no meio; fichas grandes embaixo.
+    // Uma única superfície com ações pequenas; o espaço recuperado fica na timeline.
     Column(
         Modifier
             .fillMaxSize()
             .padding(top = 4.dp)
-            .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
             .background(ShellColors.DockSheet)
-            .padding(horizontal = 12.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
-        Spacer(Modifier.height(10.dp))
         Row(
             Modifier.fillMaxWidth().height(EditorLayout.DOCK_QUICK.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (type == LayerType.Group) {
@@ -266,7 +274,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DockTrimTool(TrimGlyph.Start, stringResource(R.string.editor_aparar_inicio_cabecote)) {
-                    timeEdit(store, l) { store.trimStart(l.id, store.playhead) }
+                    timeEdit(store, l) { if (!store.trimStart(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
                 }
                 DockDivider()
                 DockTrimTool(TrimGlyph.Split, stringResource(R.string.editor_dividir_cabecote)) {
@@ -274,7 +282,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
                 }
                 DockDivider()
                 DockTrimTool(TrimGlyph.End, stringResource(R.string.editor_aparar_fim_cabecote)) {
-                    timeEdit(store, l) { store.trimEnd(l.id, store.playhead) }
+                    timeEdit(store, l) { if (!store.trimEnd(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
                 }
             }
             // Som: sempre no canto direito; apagado sem áudio. Toque liga/desliga; segurar abre o volume.
@@ -295,9 +303,9 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             }
         }
         rows.forEach { row ->
-            Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { s -> DockTile(s, EditorLayout.DOCK_TILE) {
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { s -> DockTile(s, tileHeight) {
                     if (s == DockSection.EditText) store.openTextContentEditor()
                     else if (s == DockSection.Rig) RigStage.open(store)
                     else openPanel(store, ui, panelFor(store, s))
@@ -312,16 +320,18 @@ internal enum class TrimGlyph { Start, Split, End }
 
 @Composable
 private fun RowScope.DockTrimTool(kind: TrimGlyph, description: String, onClick: () -> Unit) {
-    Box(
+    Column(
         Modifier
             .weight(1f)
             .fillMaxHeight()
+            .testTag("timeline.cut.${kind.name.lowercase()}")
             .semantics { contentDescription = description }
             .tocavel(haptic = true, onClick = onClick),
-        contentAlignment = Alignment.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         val color = AureaColors.Text
-        androidx.compose.foundation.Canvas(Modifier.size(26.dp)) {
+        androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
             val u = size.width / 24f
             val stroke = 1.8f * u
             val dashed = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.2f * u, 2.0f * u))
@@ -346,6 +356,11 @@ private fun RowScope.DockTrimTool(kind: TrimGlyph, description: String, onClick:
                 strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round,
             )
         }
+        Text(stringResource(when(kind) {
+            TrimGlyph.Start -> R.string.timeline_cut_left
+            TrimGlyph.Split -> R.string.dock_short_split
+            TrimGlyph.End -> R.string.timeline_cut_right
+        }), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = AureaColors.Text)
     }
 }
 
@@ -426,27 +441,27 @@ private fun RowScope.DockTile(section: DockSection, height: Float, onClick: () -
             .weight(1f)
             .height(height.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(ShellColors.DockTile)
+            .background(ShellColors.DockSheet)
             .semantics { contentDescription = label }
             .tocavel(haptic = true, onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // Como no AM: ícone claro em cima e o nome cinza, em até duas linhas
-        // (4 + 26 + 6 + 2 × 13 + 4 cabe nos 72 da ficha).
-        val iconSize = 26.dp
+        // Ícone menor, mantendo o nome legível e o alvo inteiro da ficha.
+        val iconSize = 20.dp
         if (section == DockSection.Move) DockVector(Icons.Rounded.OpenWith, iconSize)
         else CupertinoIcon(section.glyph, iconSize, ShellColors.DockTileIcon)
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
-            label,
+            stringResource(section.shortLabel),
+            modifier = Modifier.clearAndSetSemantics { },
             textAlign = TextAlign.Center,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(
                 TextStyle(
-                    fontSize = 11.5.sp,
+                    fontSize = 12.sp,
                     lineHeight = 1.15.em,
                     fontWeight = FontWeight.W400,
                     color = ShellColors.DockTileContent,

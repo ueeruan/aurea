@@ -94,11 +94,12 @@ class Fila:
 
     async def parar(self) -> None:
         self._rodando = False
-        for t in self._trabalhadores:
+        tarefas = [*self._trabalhadores]
+        if self._limpador is not None:
+            tarefas.append(self._limpador)
+        for t in tarefas:
             t.cancel()
-        if self._limpador:
-            self._limpador.cancel()
-        await asyncio.gather(*self._trabalhadores, self._limpador, return_exceptions=True)
+        await asyncio.gather(*tarefas, return_exceptions=True)
         self._trabalhadores.clear()
         self._limpador = None
 
@@ -158,6 +159,8 @@ class Fila:
             try:
                 await self._executar(job)
             except asyncio.CancelledError:
+                self.cancelar(job.id, job.dono, False)
+                self._descartar_resultado(job)
                 raise
             except Exception as e:  # noqa: BLE001 — o job nao pode derrubar a fila
                 log.exception("job %s explodiu", job.id)
@@ -190,9 +193,10 @@ class Fila:
             self._falhar(job, "comfy_offline", str(e)[:300])
             return
 
-        job.status = StatusJob.generating
-        job.etapa = "Gerando"
-        job.publicar(job.evento_estado())
+        if not job.cancelar:
+            job.status = StatusJob.generating
+            job.etapa = "Gerando"
+            job.publicar(job.evento_estado())
 
         def ao_progresso(p: Progresso, etapa: str) -> None:
             if job.cancelar:
@@ -214,10 +218,12 @@ class Fila:
             saidas = await self.comfy.acompanhar(
                 job.comfy_prompt_id, ao_progresso, lambda: job.cancelar, self.cfg.job_timeout_s)
         except asyncio.CancelledError:
-            job.status = StatusJob.cancelled
-            job.etapa = "Cancelado"
-            job.terminado = time.time()
-            job.publicar({"type": "cancelled"})
+            cancelado_pelo_usuario = job.cancelar
+            self.cancelar(job.id, job.dono, False)
+            # Comfy also raises CancelledError for a user cancellation. A task
+            # cancellation belongs to shutdown and must reach the worker.
+            if not cancelado_pelo_usuario:
+                raise
             return
         except TimeoutError:
             self._falhar(job, "timeout", "o job passou do tempo maximo")
@@ -242,6 +248,10 @@ class Fila:
         except Exception as e:  # noqa: BLE001
             log.exception("falha ao recolher o resultado do job %s", job.id)
             self._falhar(job, "result_missing", str(e)[:300])
+            return
+
+        if job.cancelar:
+            self._descartar_resultado(job)
             return
 
         job.progresso = 1.0
@@ -325,6 +335,7 @@ class Fila:
         if not ffmpeg:
             log.warning("sem ffmpeg: job %s fica sem miniatura", job.id)
             return None
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 ffmpeg, "-y", "-v", "error", "-i", str(video),
@@ -334,9 +345,29 @@ class Fila:
         except (asyncio.TimeoutError, OSError) as e:
             log.warning("ffmpeg falhou no job %s: %s", job.id, e)
             return None
+        finally:
+            if proc is not None and proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.wait()
         return destino if destino.is_file() and destino.stat().st_size else None
 
     # -- auxiliares -------------------------------------------------------
+    def _descartar_resultado(self, job: Job) -> None:
+        # A cancelled ffmpeg await may leave a thumbnail before its path can be
+        # assigned to job.thumb. Both names belong to this job UUID.
+        miniatura = job.thumb or (job.video.with_suffix(".jpg") if job.video else None)
+        for arquivo in (job.video, miniatura):
+            if arquivo is not None:
+                try:
+                    arquivo.unlink(missing_ok=True)
+                except OSError:
+                    log.exception("nao consegui remover resultado cancelado %s", arquivo)
+        job.video = job.thumb = None
+        job.resultado = None
+
     def _falhar(self, job: Job, codigo: str, detalhe: str, node: str = "") -> None:
         if job.cancelar or job.status == StatusJob.cancelled:
             return

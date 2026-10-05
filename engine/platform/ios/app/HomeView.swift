@@ -366,7 +366,8 @@ struct HomeView: View {
             ReportProblemView(sessao: conta.sessao()) { model.toast = $0 }
         }
         .sheet(isPresented: $importing) {
-            HomeMediaPicker(onDismiss: { importing = false }, onPick: { url, kind in
+            HomeMediaPicker(onDismiss: { importing = false }, onPick: { [project = model.projectGeneration] url, kind in
+                guard project == model.projectGeneration else { importing = false; return }
                 importing = false; model.createFromMedia(url: url, kind: kind)
             }, onError: { error in importing = false; model.toast = error })
         }
@@ -506,6 +507,7 @@ private struct HomeDock: View {
     var body: some View {
         HStack(spacing: 0) {
             utility(CupertinoGlyph.SliderHorizontal3, "home_tab_settings", "home.menu", onMenu)
+                .frame(minWidth: 0, maxWidth: .infinity)
             tab(.projects, CupertinoGlyph.RectangleStack, "home_tab_projects", "home.projects")
             Button(action: onCreate) {
                 CupertinoGlyph.text(CupertinoGlyph.Plus, size: 30, color: AureaColors.onAccent)
@@ -534,7 +536,7 @@ private struct HomeDock: View {
                     .foregroundStyle(selected == kind ? AureaColors.text : AureaColors.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 Capsule().fill(selected == kind ? AureaColors.accent : AureaColors.surface).frame(width: 16, height: 2)
-            }.padding(.vertical, 8).frame(maxWidth: .infinity, minHeight: 64).contentShape(Rectangle())
+            }.padding(.vertical, 8).frame(minWidth: 0, maxWidth: .infinity, minHeight: 64).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier(tag)
             .accessibilityAddTraits(selected == kind ? .isSelected : [])
     }
@@ -1340,7 +1342,8 @@ struct HomeStartTab: View {
                 .background { HomeBackdropSource(tab: .start).allowsHitTesting(false) }
         }.foregroundStyle(AureaColors.text)
             .sheet(isPresented: $importing) {
-                HomeMediaPicker(onDismiss: { importing = false }, onPick: { url, kind in
+                HomeMediaPicker(onDismiss: { importing = false }, onPick: { [project = model.projectGeneration] url, kind in
+                    guard project == model.projectGeneration else { importing = false; return }
                     importing = false
                     model.createFromMedia(url: url, kind: kind)
                 }, onError: { error in importing = false; model.toast = error })

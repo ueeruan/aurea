@@ -77,6 +77,8 @@ import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
@@ -109,9 +111,21 @@ internal fun ExportScreen(store: EditorStore, onDismiss: () -> Unit) {
     var options by remember { mutableStateOf(ExportOptions(shortSide = min(1080, max(720, min(compW, compH))))) }
     val seconds = if (compFps > 0) store.exportDuration(options.trimToContent) / compFps else 0.0
     var preview by remember { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(store, store.projectGeneration) {
         exporter.reset()
-        preview = store.captureBitmap(640)
+        preview = null
+        val project = store.projectGeneration
+        var captured: Bitmap? = null
+        try {
+            withContext(Dispatchers.IO) { captured = runCatching { store.captureBitmap(640) }.getOrNull() }
+            if (store.projectGeneration == project) {
+                preview = captured
+                captured = null
+            }
+        } finally {
+            // A dismissed/recreated screen may cancel while the native readback completes.
+            captured?.recycle()
+        }
     }
     DisposableEffect(Unit) { onDispose { preview?.recycle() } }
 

@@ -692,11 +692,11 @@ public:
     /// esperou o fence dele). Ao concluir, libera as referências adiadas dos
     /// frames concluídos até ele; o decoder não precisa de uma nova submissão
     /// para recuperar seus buffers. Chamar sob a mesma exclusão do render.
-    /// O padrão, para backend sem fence por frame, é
-    /// esperar tudo.
+    /// Timeout zero é uma consulta sem bloqueio. Sem fence por frame o
+    /// fallback não pode garantir conclusão: retorna Timeout nesse caso.
     [[nodiscard]] virtual Status wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
         (void)frameNumber;
-        (void)timeoutNs;
+        if (timeoutNs == 0) return Status{Errc::Timeout};
         wait_idle();
         return OkStatus;
     }

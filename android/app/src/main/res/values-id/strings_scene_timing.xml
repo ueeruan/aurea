@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="environment_start">Awal latar</string>
+    <string name="environment_end">Akhir latar</string>
+    <string name="environment_full_duration">Seluruh komposisi</string>
+    <string name="environment_layer_duration">Gunakan durasi lapisan</string>
+</resources>

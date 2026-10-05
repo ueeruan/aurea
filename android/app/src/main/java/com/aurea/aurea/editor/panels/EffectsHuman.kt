@@ -212,7 +212,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         EffectHuman(
             name = R.string.fx_name_motion_tile,
             keywords = "motion tile azulejos repetir ladrilho mosaico tijolo fase espelhar parede de video",
-            principal = listOf(1, 2, 5, 7),
+            principal = listOf(10, 1, 2, 5, 7),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_centro),
                 1 to ParamHuman(label = R.string.fx_mt_largura_ladrilho),
@@ -222,6 +222,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 5 to ParamHuman(label = R.string.fx_mt_espelhar_bordas),
                 7 to ParamHuman(label = R.string.fx_fase),
                 8 to ParamHuman(label = R.string.fx_mt_fase_horizontal),
+                10 to ParamHuman(label = R.string.fx_escala, suffix = "%", decimals = 1),
             ),
         ),
     )
@@ -236,7 +237,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.key.chroma",
         EffectHuman(
-            name = R.string.fx_name_chroma_key,
+            name = R.string.fx_name_chroma_key_advanced,
             keywords = "chave de croma chroma key fundo verde green screen remover cor",
             principal = listOf(0, 1, 2),
             params = mapOf(
@@ -1081,6 +1082,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             2 to ParamHuman(label = R.string.fx_direcao, suffix = "°", decimals = 0),
             3 to ParamHuman(label = R.string.fx_distancia, suffix = "px", decimals = 0),
             4 to ParamHuman(label = R.string.fx_suavidade, suffix = "px", decimals = 0),
+            5 to ParamHuman(label = R.string.fxo_shadow_only),
         )))
     put("aurea.stylize.border", EffectHuman(
         name = R.string.fx_name_border,
@@ -1401,8 +1403,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
 @Composable
 internal fun effectDisplayName(typeId: Int, engineName: String): String {
     val context = LocalContext.current
-    val english = remember(context) {
-        context.createConfigurationContext(Configuration(context.resources.configuration).apply { setLocale(Locale.ENGLISH) }).resources
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val english = remember(context, configuration) {
+        context.createConfigurationContext(Configuration(configuration).apply { setLocale(Locale.ENGLISH) }).resources
     }
     return englishEffectName(typeId, engineName, english)
 }

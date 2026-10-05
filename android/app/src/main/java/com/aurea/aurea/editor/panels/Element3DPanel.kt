@@ -455,6 +455,27 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
         store.setEnvironment(store.environment[1], it)
     }
     ToggleLine(stringResource(R.string.environment_background), (e.getOrNull(3) ?: 0f) > .5f, store::setEnvironmentBackground)
+    if ((e.getOrNull(3) ?: 0f) > .5f && e.size >= 6) {
+        val duration = store.project.durationFrames.coerceAtLeast(1)
+        val start = e[4].toLong().coerceIn(0, (duration - 1).toLong())
+        val end = (if (e[5] < 0) duration.toLong() else e[5].toLong()).coerceIn(start + 1, duration.toLong())
+        SceneRow(env, stringResource(R.string.environment_start), start.toFloat(), 1f, 0f, (end - 1).toFloat(), "f", 0f, "ambiente") {
+            store.setEnvironmentBackgroundRange(it.toLong(), end)
+        }
+        SceneRow(env, stringResource(R.string.environment_end), end.toFloat(), 1f, (start + 1).toFloat(), duration.toFloat(), "f", duration.toFloat(), "ambiente") {
+            store.setEnvironmentBackgroundRange(start, it.toLong())
+        }
+        ChipRow {
+            KitChip(stringResource(R.string.environment_full_duration), on = start == 0L && e[5] < 0) {
+                store.setEnvironmentBackgroundRange(0, -1)
+            }
+            store.detail?.let { layer ->
+                KitChip(stringResource(R.string.environment_layer_duration), on = false) {
+                    store.setEnvironmentBackgroundRange(layer.startFrame.toLong().coerceAtLeast(0), layer.endFrame.toLong().coerceAtMost(duration.toLong()))
+                }
+            }
+        }
+    }
     KitHint(stringResource(R.string.environment_hint))
     Spacer(Modifier.height(4.dp))
     AdvancedSection(advanced, { advanced = !advanced }) {

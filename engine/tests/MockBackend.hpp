@@ -26,6 +26,7 @@ public:
         bool discard = false;
         LoadOp load = LoadOp::Clear;
         const char* label = nullptr;
+        u32 slot = 0;
     };
 
     std::vector<Event> events;
@@ -51,10 +52,13 @@ public:
     bool surfaceAttached = false;
     bool frameOpen = false;
     bool failPipelines = false;
+    bool deviceLost = false;
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
+    std::function<Status(const BufferDesc&)> beforeCreateBuffer;
     std::function<Status(u64, u64)> beforeWaitFrame;
+    std::function<Status(TextureHandle, const void*, u32)> beforeTextureUpload;
     std::atomic<u32> idleWaits{0};
     GPUCapabilities caps;
 
@@ -67,7 +71,7 @@ public:
     // --- GPUBackend -----------------------------------------------------------
     const char* name() const noexcept override { return "Mock"; }
     const GPUCapabilities& capabilities() const noexcept override { return caps; }
-    Status initialize(const BackendConfig&) noexcept override { return OkStatus; }
+    Status initialize(const BackendConfig&) noexcept override { deviceLost = false; return OkStatus; }
     void shutdown() noexcept override {}
     Status attach_surface(const SurfaceDesc&) noexcept override {
         surfaceAttached = true;
@@ -122,6 +126,10 @@ public:
         return TextureHandle{textures.size()};
     }
     Result<BufferHandle> create_buffer(const BufferDesc& desc) noexcept override {
+        if (beforeCreateBuffer) {
+            const Status status = beforeCreateBuffer(desc);
+            if (!status.ok()) return status;
+        }
         const BufferHandle handle{++ids_};
         if (mapBuffers) mappedBuffers[handle.id].resize(desc.bytes);
         return handle;
@@ -148,7 +156,9 @@ public:
     TextureDesc texture_desc(TextureHandle h) const noexcept override {
         return h.id && h.id <= textures.size() ? textures[h.id - 1] : TextureDesc{};
     }
-    Status upload_texture(TextureHandle, const void*, u32) noexcept override { return OkStatus; }
+    Status upload_texture(TextureHandle texture, const void* data, u32 stride) noexcept override {
+        return beforeTextureUpload ? beforeTextureUpload(texture, data, stride) : OkStatus;
+    }
     Status write_buffer(BufferHandle, usize, const void*, usize) noexcept override { return OkStatus; }
     Status map_buffer(BufferHandle handle, void*& out) noexcept override {
         const auto found = mappedBuffers.find(handle.id);
@@ -158,7 +168,11 @@ public:
     }
     void unmap_buffer(BufferHandle) noexcept override {}
     Status read_texture(TextureHandle, void*, u32) noexcept override { return Errc::NotSupported; }
-    Status upload_texture_level(TextureHandle, u32, u32, const void*, usize) noexcept override { return OkStatus; }
+    Status upload_texture_level(TextureHandle texture, u32 mip, u32, const void* data, usize) noexcept override {
+        const auto desc = texture_desc(texture);
+        const u32 rowBytes = std::max(1u, desc.width >> mip) * desc.bytes_per_pixel();
+        return beforeTextureUpload ? beforeTextureUpload(texture, data, rowBytes) : OkStatus;
+    }
     Status generate_mipmaps(TextureHandle) noexcept override { return OkStatus; }
     Result<ExternalTexture> import_external_image(const ExternalImageDesc&) noexcept override {
         return Status{Errc::NotSupported};
@@ -174,7 +188,7 @@ public:
         return beforeWaitFrame ? beforeWaitFrame(frame, timeout) : OkStatus;
     }
     u32 read_gpu_timings(GpuTiming*, u32, f32*) noexcept override { return 0; }
-    bool is_device_lost() const noexcept override { return false; }
+    bool is_device_lost() const noexcept override { return deviceLost; }
     u32 frames_in_flight() const noexcept override { return 2; }
     GpuMemoryStats memory_stats() const noexcept override { return {}; }
     void save_pipeline_cache() noexcept override {}
@@ -190,8 +204,10 @@ public:
     }
     void end_render_pass() noexcept override { events.push_back({Event::EndPass}); }
     void bind_pipeline(PipelineHandle) noexcept override { events.push_back({Event::BindPipeline}); }
-    void bind_texture(u32, TextureHandle t, SamplerHandle) noexcept override {
-        events.push_back({Event::BindTexture, t.id});
+    void bind_texture(u32 slot, TextureHandle t, SamplerHandle) noexcept override {
+        Event event{Event::BindTexture, t.id};
+        event.slot = slot;
+        events.push_back(event);
     }
     void bind_storage_image(u32, TextureHandle) noexcept override {}
     void bind_storage_buffer(BufferHandle) noexcept override {}

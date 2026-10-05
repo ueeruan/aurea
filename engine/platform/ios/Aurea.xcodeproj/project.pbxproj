@@ -42,7 +42,7 @@
 		AE0000000000000000000047 /* AureaBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000F /* AureaBridge.mm */; };
 		AE0000000000000000000048 /* AureaEngine.mm in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000010 /* AureaEngine.mm */; };
 		AE0000000000000000000049 /* IOSSurfaceView.mm in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000011 /* IOSSurfaceView.mm */; };
-		AE000000000000000000004A /* IOSVideoDecoder.mm in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000012 /* IOSVideoDecoder.mm */; };
+		AE000000000000000000004A /* IOSVideoDecoder.mm in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000012 /* IOSVideoDecoder.mm */; settings = {COMPILER_FLAGS = "-fexceptions"; }; };
 		AE000000000000000000004B /* IOSAudio.mm in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000013 /* IOSAudio.mm */; };
 		AE000000000000000000004C /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000019 /* Metal.framework */; };
 		AE000000000000000000004D /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE000000000000000000001A /* MetalKit.framework */; };
@@ -638,7 +638,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 2138;
+                CURRENT_PROJECT_VERSION = 2139;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -693,7 +693,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 2138;
+                CURRENT_PROJECT_VERSION = 2139;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",

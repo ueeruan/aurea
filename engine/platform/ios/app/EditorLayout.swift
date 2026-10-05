@@ -22,7 +22,7 @@ enum StageInk {
     static let white40        = Color(hex: 0x66FFFFFF)
     static let dockRow        = Color(hex: 0xFF272D40)   // cor do AM
     static let dockTile       = Color(hex: 0xFF272D40)
-    static let dockTileContent = Color(hex: 0xFF8E93A6)   // nome da ficha: cinza, como no AM
+    static let dockTileContent = Color(hex: 0xFFB7BDCC)   // rótulos compactos com contraste
     static let dockTileIcon   = Color(hex: 0xFFE6E9F0)
     static let dockSheet      = Color(hex: 0xFF1F2432)    // folha da doca, cantos arredondados em cima
     static let dockDisabled   = Color(hex: 0xFF4A5164)

@@ -47,6 +47,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -160,6 +162,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         RigModeBar(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
+        PreviewBufferBadge(store, Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 8.dp))
         StageZoomChip(store, Modifier.align(Alignment.BottomEnd).padding(8.dp))
         // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
         if (!store.rawPlayback) StageZoomButton(Modifier.align(Alignment.TopStart))
@@ -207,6 +210,25 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         }
         PerfHud(store, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 6.dp))
     }
+}
+
+/** Counts describe rendered frames actually held by the engine, including partial buffers. */
+@Composable
+private fun PreviewBufferBadge(store: EditorStore, modifier: Modifier = Modifier) {
+    val preview = store.preview
+    if (!preview.buffering && preview.bufferedFrames == 0) return
+    val label = when {
+        preview.buffering -> stringResource(R.string.preview_buffer_preparing, preview.bufferedFrames, preview.bufferTarget)
+        preview.bufferLimited -> stringResource(R.string.preview_buffer_limited, preview.bufferedFrames)
+        else -> stringResource(R.string.preview_buffer_ready, preview.bufferedFrames)
+    }
+    Text(
+        label,
+        style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)),
+        modifier = modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.EditorPanelHigh)
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .testTag("preview.buffer.status").padding(horizontal = 10.dp, vertical = 6.dp),
+    )
 }
 
 /** Faixa do modo vetorial: o que o dedo faz agora e "Concluir" (volta ao palco normal). */

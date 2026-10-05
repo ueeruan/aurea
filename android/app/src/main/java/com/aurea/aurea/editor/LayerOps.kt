@@ -261,10 +261,16 @@ internal object LayerOps {
         store.beginGesture(if (fill) "preencher a tela" else "ajustar à tela")
         for ((id, d, size) in targets) {
             val (w, h) = size
-            val k = if (fill) max(cw / w, ch / h) else min(cw / w, ch / h)
-            val sx = if (d.scale[0] < 0f) -k else k
-            val sy = if (d.scale[1] < 0f) -k else k
-            val (px, py) = positionForCenter(d, w, h, sx, sy, cw / 2f, ch / 2f)
+            val centered = d.kind == 10
+            val fit = com.aurea.aurea.engine.AureaEngine.fitCanvas(floatArrayOf(
+                cw, ch, w, h, d.scale[0], d.scale[1],
+                d.anchor[0] + if (centered) w / 2 else 0f,
+                d.anchor[1] + if (centered) h / 2 else 0f,
+                // The layer renderer currently uses rotation and scale here;
+                // stored skew fields are not part of its placement matrix.
+                d.rotation[2], 0f, 0f), fill)
+            if (fit.size != 5 || fit[4] <= 0f) continue
+            val sx = fit[0]; val sy = fit[1]; val px = fit[2]; val py = fit[3]; val k = fit[4]
             if (com.aurea.aurea.editor.panels.uses3D(d)) {
                 // Ajustar um volume exige a mesma escala também na profundidade
                 // (a regra do motor: Z de conteúdo é relativo a X).

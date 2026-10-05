@@ -460,7 +460,9 @@ private:
     [[nodiscard]] VkPipelineLayout pipeline_layout(u64 immutableSampler, VkDescriptorSetLayout& outSet) noexcept;
     void run_deferred(FrameContext& f) noexcept;
     void collect_timings(FrameContext& f) noexcept;
-    [[nodiscard]] Status submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*), void* ctx) noexcept;
+    [[nodiscard]] Status submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*), void* ctx,
+                                          u64 timeoutNs = 5'000'000'000ull) noexcept;
+    void collect_immediate(bool deviceIdle = false) noexcept;
     [[nodiscard]] FrameContext* deferral_target() noexcept;
     void load_pipeline_cache() noexcept;
     [[nodiscard]] bool note_device_lost(VkResult r) noexcept;
@@ -533,6 +535,13 @@ private:
     u32 frameCursor_ = 0;
     u64 frameNumber_ = 0;
     FrameContext* current_ = nullptr;
+    struct PendingImmediate {
+        VkCommandPool pool = VK_NULL_HANDLE;
+        VkFence fence = VK_NULL_HANDLE;
+        std::vector<DeferredRelease> deferred;
+    };
+    std::vector<PendingImmediate> pendingImmediate_;
+    friend struct ImmediateSubmissionTestAccess;
     FrameContext* lastSubmitted_ = nullptr;
     CommandListImpl commands_;
 

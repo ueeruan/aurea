@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mb_shutter_angle">زاوية الغالق</string>
+    <string name="mb_shutter_phase">طور الغالق</string>
+    <string name="mb_phase_hint">يزيح التعريض بالنسبة إلى الإطار. يضع التوسيط نصف التعريض قبل الإطار.</string>
+    <string name="mb_center_exposure">توسيط التعريض</string>
+    <string name="mb_samples_per_frame">العينات لكل إطار</string>
+    <string name="mb_adaptive_limit">الحد التكيفي</string>
+    <string name="mb_quality_hint">قد تستخدم المعاينة عينات أقل لتحسين الاستجابة. يستخدم التصدير الجودة المحددة. تستغرق القيم الأعلى وقتًا أطول.</string>
+    <string name="mb_advanced">متقدم</string>
+    <string name="mb_comp_settings_hint">إعدادات التركيب: تؤثر في كل الطبقات التي تم تفعيل ضبابية الحركة فيها.</string>
+</resources>

@@ -99,24 +99,28 @@ class AiRewardFlow(
     private val novoId: () -> String = { UUID.randomUUID().toString() },
 ) {
     private val sessoes = LinkedHashMap<String, AiGenerationSession>()
+    private var activeSessionId: String? = null
+    private var activeRun = 0L
 
     fun sessao(id: String): AiGenerationSession? = sessoes[id]
     fun todas(): List<AiGenerationSession> = sessoes.values.toList()
 
     private fun por(s: AiGenerationSession): AiGenerationSession {
         sessoes[s.generationId] = s
-        aoMudar(s)
+        if (s.generationId == activeSessionId) aoMudar(s)
         return s
     }
 
     /** Toque em "Gerar": ticket → anúncio. A geração só começa na recompensa. */
     fun gerar(pedido: Pedido, id: String = novoId()): AiGenerationSession {
         require(id !in sessoes) { "sessão repetida" }
+        activeSessionId = id
+        activeRun++
         por(AiGenerationSession(id, pedido, status = SessaoStatus.Preparando))
         pedirTicket(sessoes.getValue(id),
             { ticket ->
                 val s = sessoes[id]
-                if (s != null && s.ticket == null) {
+                if (id == activeSessionId && s != null && s.ticket == null) {
                     por(s.copy(ticket = ticket))
                     amarrarAnuncio(ticket)
                     prepararEApresentar(id)
@@ -134,12 +138,15 @@ class AiRewardFlow(
      * anúncio e não gera: quem retoma o ACOMPANHAMENTO do job é o estado.
      */
     fun retomar(s: AiGenerationSession): AiGenerationSession {
+        activeSessionId = s.generationId
+        activeRun++
         sessoes[s.generationId] = s
         return avaliar(s)
     }
 
     /** "Assistir de novo": anúncio que não veio ou fechou cedo. O mesmo ticket, o mesmo pedido. */
     fun assistirDeNovo(id: String) {
+        if (id != activeSessionId) return
         val s = sessoes[id] ?: return
         if (s.generationStarted || s.rewardEarned) return
         if (s.status != SessaoStatus.AnuncioIndisponivel && s.status != SessaoStatus.SemRecompensa) return
@@ -151,6 +158,7 @@ class AiRewardFlow(
 
     /** "Tentar de novo" depois de erro técnico: mesmo ticket, SEM anúncio. */
     fun repetirSemAnuncio(id: String) {
+        if (id != activeSessionId) return
         val s = sessoes[id] ?: return
         if (s.status != SessaoStatus.Falhou || !s.podeRepetirSemAnuncio || !s.rewardEarned || s.ticket == null) return
         iniciar(s.copy(jobId = null, erro = null, podeRepetirSemAnuncio = false, generationStarted = false))
@@ -171,7 +179,7 @@ class AiRewardFlow(
     }
 
     private fun apresentar(id: String) {
-        if (sessoes[id] == null) return
+        if (id != activeSessionId || sessoes[id] == null) return
         val mostrou = ads.mostrar(
             aoAbrir = {
                 val s = sessoes[id]
@@ -180,7 +188,7 @@ class AiRewardFlow(
             aoRecompensa = {
                 val s = sessoes[id]
                 // Um anúncio, uma geração: recompensa repetida não gera de novo.
-                if (s != null && !s.rewardEarned && !s.generationStarted) iniciar(s.copy(rewardEarned = true))
+                if (id == activeSessionId && s != null && !s.rewardEarned && !s.generationStarted) iniciar(s.copy(rewardEarned = true))
             },
             aoFechar = {
                 val s = sessoes[id]
@@ -194,9 +202,10 @@ class AiRewardFlow(
     private fun iniciar(base: AiGenerationSession) {
         val s = por(base.copy(generationStarted = true, status = SessaoStatus.Gerando, erro = null))
         val id = s.generationId
+        val run = ++activeRun
         iniciarGeracao(s,
-            { job -> sessoes[id]?.let { por(it.copy(jobId = job)) } },
-            { arquivo, erro, repetir -> terminou(id, arquivo, erro, repetir) })
+            { job -> if (activeSessionId == id && activeRun == run) sessoes[id]?.let { por(it.copy(jobId = job)) } },
+            { arquivo, erro, repetir -> if (activeSessionId == id && activeRun == run) terminou(id, arquivo, erro, repetir) })
     }
 
     private fun terminou(id: String, arquivo: File?, erro: String?, repetirSemAnuncio: Boolean) {

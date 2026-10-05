@@ -5,6 +5,7 @@
 #include "aurea/platform/DeviceCapabilities.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <thread>
 #include <vector>
 
@@ -153,6 +154,7 @@ constexpr u32 kSpinBeforeSleep = 64;
 JobSystem::~JobSystem() { stop(); }
 
 Status JobSystem::start(u32 workerCount) noexcept {
+    std::lock_guard<std::mutex> lifecycle(lifecycleMutex_);
     if (running_.load(std::memory_order_acquire)) return OkStatus;
 
     for (u8 i = 0; i < kQueueCount; ++i) {
@@ -193,7 +195,12 @@ Status JobSystem::start(u32 workerCount) noexcept {
 }
 
 void JobSystem::stop() noexcept {
-    if (!running_.exchange(false, std::memory_order_acq_rel)) return;
+    std::lock_guard<std::mutex> lifecycle(lifecycleMutex_);
+    {
+        // No producer can publish after shutdown begins draining the queues.
+        std::lock_guard<std::mutex> taskLock(taskMutex_);
+        if (!running_.exchange(false, std::memory_order_acq_rel)) return;
+    }
 
     stop_.store(true, std::memory_order_release);
     {
@@ -201,31 +208,35 @@ void JobSystem::stop() noexcept {
     }
     sleepCv_.notify_all();
 
-    // Espera os WORKERS saírem do laço (cada um termina a tarefa em curso e
-    // não pega outra). Com prazo: uma tarefa travada não pode travar o
-    // encerramento do app inteiro.
+    // Workers retain pointers to this pool and its owner's resources. A slow
+    // cancellation may be reported, but detaching would make teardown a UAF.
     const u64 deadline = monotonic_ns() + 2'000'000'000ull;   // 2 s
     while (liveWorkers_.load(std::memory_order_acquire) != 0) {
         if (monotonic_ns() > deadline) break;
         std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
     const bool allOut = liveWorkers_.load(std::memory_order_acquire) == 0;
+    if (!allOut) {
+        AUREA_LOG_WARN("JobSystem: aguardando cancelamento de %u workers apos 2 s",
+                       liveWorkers_.load(std::memory_order_relaxed));
+    }
     for (std::thread& t : threads_) {
         if (!t.joinable()) continue;
-        // Todos fora do laço: o join é imediato e devolve a thread ao sistema.
-        // Algum preso numa tarefa: destacado (e registrado) em vez de travar.
-        if (allOut) t.join();
-        else t.detach();
-    }
-    if (!allOut) {
-        AUREA_LOG_WARN("JobSystem: shutdown com %u workers presos apos 2 s (tarefa travada)",
-                       liveWorkers_.load(std::memory_order_relaxed));
+        t.join();
     }
     threads_.clear();
 
     for (u8 i = 0; i < kQueueCount; ++i) {
         Task t;
-        while (queues_[i].try_pop(t)) { /* descarta o que sobrou */ }
+        while (queues_[i].try_pop(t)) {
+            // parallel_for owns a shared allocation released by its last slice.
+            // A cancelled queued slice still has to release that ownership.
+            if (t.fn == parallel_slice_fn) {
+                JobContext context(t.prio, 0, &stop_);
+                parallel_slice_fn(t.userData, context);
+            }
+            finish_task(t.id);
+        }
     }
     pendingFg_.store(0, std::memory_order_relaxed);
     pendingBg_.store(0, std::memory_order_relaxed);
@@ -354,6 +365,12 @@ void JobSystem::run_task(const Task& t, u32 workerIndex, bool bgSlot) noexcept {
         // pegar agora.
         if (pendingBg_.load(std::memory_order_acquire) != 0) notify_workers(1);
     }
+    finish_task(t.id);
+}
+
+void JobSystem::finish_task(u64 id) noexcept {
+    std::lock_guard<std::mutex> lock(taskMutex_);
+    unfinished_.erase(id);
 }
 
 bool JobSystem::has_work_for(u32 workerIndex) const noexcept {
@@ -403,6 +420,7 @@ void JobSystem::worker_main(JobSystem* self, u32 index) {
 }
 
 JobHandle JobSystem::submit(JobPriority prio, JobFn fn, void* userData) noexcept {
+    std::lock_guard<std::mutex> lock(taskMutex_);
     if (!running_.load(std::memory_order_acquire) || !fn) return JobHandle{};
     const u8 p = static_cast<u8>(prio) < kQueueCount ? static_cast<u8>(prio) : static_cast<u8>(JobPriority::Normal);
 
@@ -411,14 +429,18 @@ JobHandle JobSystem::submit(JobPriority prio, JobFn fn, void* userData) noexcept
     t.userData = userData;
     t.id = nextId_.fetch_add(1, std::memory_order_relaxed);
     t.prio = static_cast<JobPriority>(p);
-
+    unfinished_.insert(t.id);
+    auto& pending = is_background(p) ? pendingBg_ : pendingFg_;
+    // A consumer may run as soon as the queue publishes its slot.
+    pending.fetch_add(1, std::memory_order_seq_cst);
     if (!queues_[p].try_push(t)) {
+        pending.fetch_sub(1, std::memory_order_seq_cst);
+        unfinished_.erase(t.id);
         AUREA_LOG_WARN("JobSystem: fila %s cheia, submissao recusada", to_string(t.prio));
         return JobHandle{};
     }
     // Contado ANTES de ler `sleepers_` (seq_cst dos dois lados): ou o worker
     // vê a tarefa no predicado, ou nós vemos o worker dormindo e o acordamos.
-    (is_background(p) ? pendingBg_ : pendingFg_).fetch_add(1, std::memory_order_seq_cst);
     notify_workers(1);
     return JobHandle{t.id};
 }
@@ -433,7 +455,7 @@ bool JobSystem::parallel_for(JobPriority prio, u32 count,
     // por worker), não uma por item: 2000 tarefas minúsculas custam mais em
     // submissão do que o trabalho que realizam.
     const u32 slices = count < workerCount_ ? count : workerCount_;
-    const u32 perSlice = (count + slices - 1) / slices;
+    const u32 perSlice = count / slices + (count % slices != 0);
 
     // A base do payload precisa sobreviver até as tarefas rodarem. Aloca um
     // bloco por chamada e o libera na última tarefa via contador atômico.
@@ -442,9 +464,10 @@ bool JobSystem::parallel_for(JobPriority prio, u32 count,
 
     u32 submitted = 0;
     for (u32 s = 0; s < slices && submitted < ParallelForShared::kMaxSlices; ++s) {
-        const u32 start = s * perSlice;
-        if (start >= count) break;
-        const u32 end = (start + perSlice) < count ? (start + perSlice) : count;
+        const u64 begin = static_cast<u64>(s) * perSlice;
+        if (begin >= count) break;
+        const u32 start = static_cast<u32>(begin);
+        const u32 end = static_cast<u32>(std::min<u64>(begin + perSlice, count));
         ParallelSlice& slice = shared->slices[submitted];
         slice.shared = shared;
         slice.fn     = fn;
@@ -462,15 +485,17 @@ bool JobSystem::parallel_for(JobPriority prio, u32 count,
     // submissão que falhar: uma tarefa já enfileirada pode terminar e liberar o
     // bloco antes de o laço acabar, o que faria o `shared` ser usado depois de
     // liberado.
+    bool allSubmitted = true;
     for (u32 s = 0; s < submitted; ++s) {
         if (!submit(prio, parallel_slice_fn, &shared->slices[s])) {
+            allSubmitted = false;
             if (shared->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                 delete shared;
                 return false;
             }
         }
     }
-    return true;
+    return allSubmitted;
 }
 
 void JobSystem::run_inline(JobFn fn, void* userData) noexcept {
@@ -486,12 +511,16 @@ void JobSystem::wait(JobHandle handle) noexcept {
     // Se quem espera é um worker, BLOQUEAR seria transformar o pool de N
     // threads em pool de N-1 (ou pior, deadlock se todas esperarem). Então
     // quem espera trabalha: processa a fila até a tarefa alvo ter rodado.
-    const u64 deadline = monotonic_ns() + 10'000'000'000ull;   // 10 s
-    while (completed_.load(std::memory_order_relaxed) < handle.id) {
-        if (monotonic_ns() > deadline) {
+    u64 deadline = monotonic_ns() + 10'000'000'000ull;   // diagnostic, never releases live payload
+    for (;;) {
+        {
+            std::lock_guard<std::mutex> lock(taskMutex_);
+            if (!unfinished_.count(handle.id)) return;
+        }
+        if (deadline && monotonic_ns() > deadline) {
             AUREA_LOG_WARN("JobSystem: espera excedeu 10 s pela tarefa %llu",
                            static_cast<unsigned long long>(handle.id));
-            return;
+            deadline = 0;
         }
         Task t;
         bool bgSlot = false;
@@ -502,6 +531,7 @@ void JobSystem::wait(JobHandle handle) noexcept {
 
 void JobSystem::wait_idle(JobPriority prio) noexcept {
     const u8 p = static_cast<u8>(prio);
+    if (p >= kQueueCount) return;
     const u64 deadline = monotonic_ns() + 5'000'000'000ull;
     while (queues_[p].size() != 0 || activeTasks_.load(std::memory_order_acquire) != 0) {
         if (monotonic_ns() > deadline) return;
@@ -523,7 +553,8 @@ void JobSystem::pump(u32 maxTasks) noexcept {
 }
 
 u32 JobSystem::queue_depth(JobPriority p) const noexcept {
-    return queues_[static_cast<u8>(p)].size();
+    const u8 index = static_cast<u8>(p);
+    return index < kQueueCount ? queues_[index].size() : 0;
 }
 
 } // namespace aurea

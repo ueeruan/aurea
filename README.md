@@ -10,9 +10,9 @@ CPU organiza.  GPU processa.  Hardware decodifica.  Hardware codifica.
 UI apenas controla.
 ```
 
-A UI não processa frame, não renderiza vídeo e não conhece a timeline. Ela
-apresenta e recebe input. Tudo o mais vive no motor C++, que não muda entre
-Android e iOS.
+A UI apresenta o estado do projeto e recebe os gestos. As regras de edição,
+animação e renderização vivem no motor C++ compartilhado. As pontes nativas
+integram codecs, áudio, arquivos e o ciclo de vida de cada plataforma.
 
 ## Estrutura
 
@@ -33,9 +33,9 @@ Aureabeta/
 │   │   ├── bridge/            CONTRATO DE MEMÓRIA (BridgePods.hpp)
 │   │   └── shaders/           fonte única dos shaders
 │   ├── src/                   implementação
-│   ├── tests/                 243 testes (os de GPU usam o Vulkan do host)
+│   ├── tests/                 testes do motor, incluindo GPU Vulkan real
 │   ├── gpu/vulkan/            backend Vulkan (Android e host de testes)
-│   └── platform/              ponte JNI + MediaCodec (Android) e ObjC++ (iOS, futuro)
+│   └── platform/              Android/JNI, iOS/ObjC++ e host Windows
 │
 ├── android/                   UI nativa
 │   └── app/src/main/
@@ -56,15 +56,15 @@ Aureabeta/
 
 ```bash
 cmake -S engine -B engine/build/host -G "Visual Studio 18 2026" -A x64 -DAUREA_BUILD_TESTS=ON
-cmake --build engine/build/host --config RelWithDebInfo
-engine/build/host/tests/RelWithDebInfo/aurea_tests.exe
+cmake --build engine/build/host --config Release --target aurea_tests
+engine/build/host/tests/Release/aurea_tests.exe
 ```
 
 ### Android
 
 ```bash
 cd android
-./gradlew :app:assembleDebug      # APK de desenvolvimento
+./gradlew :app:assembleUiTest     # APK para testes da interface
 ./gradlew :app:assembleRelease    # APK de release (assinado)
 ./gradlew :app:assembleRelease -PaureaAbi=arm64-v8a   # uma ABI só
 ```
@@ -78,7 +78,7 @@ Requer `JAVA_HOME` apontando para um JDK 17+ e `android/local.properties` com
 | --- | --- |
 | applicationId / bundle id | `com.aurea.aurea` |
 | Nome | Aurea Editor |
-| versionCode | 2102 (o antigo produzia 2101) |
+| versionCode / build iOS | 2139 |
 | minSdk | 26 (o antigo declarava 24 — ver a nota abaixo) |
 | Assinatura | a MESMA do Aurea oficial |
 
@@ -94,21 +94,17 @@ funcionar" e "não instalar".
 
 ## Estado da implementação
 
-O que **funciona hoje**: backend Vulkan (preview em superfície nativa, cache
-de pipeline, frames em voo, timestamps de GPU), FrameGraph e EffectGraph com
-fusão de passes, 12 efeitos novos (inclusive o Motion Tile portado), decode de
-vídeo por MediaCodec (zero-copy por AHardwareBuffer ou planos pela CPU) com a
-cor do próprio arquivo, scrub coalescido, playback no ritmo do conteúdo, preview
-adaptativo, miniaturas da timeline, imagens que voltam ao reabrir o projeto,
-desfazer/refazer por snapshot, timeline, keyframes, projeto `.aurea` com autosave
-e recuperação, painel de desempenho — coberto por 243 testes no host.
+Há implementação de renderização Vulkan e Metal, preview com cache limitado e
+linha azul na timeline, exportação de vídeo/áudio, composição 2D/3D, texto,
+vetor, máscaras, partículas, efeitos, animação, legendas, importação de mídia,
+projetos com autosave/recuperação, contas, comunidade e integração de IA.
 
-O que **não existe ainda**: Metal (iOS), áudio, export, texto, vetor, máscara
-renderizada, 3D e partículas. A UI mostra esses pontos de entrada e avisa "em
-breve" em vez de fingir; o motor recusa (`NotImplemented`) o que não faz.
-
-Ver [`docs/architecture/ENGINE.md`](docs/architecture/ENGINE.md) para a lista
-completa e a ordem de implementação.
+Implementação não equivale a validação em aparelho. A auditoria de estabilidade
+registra separadamente os testes do motor, Android, serviços locais e verificações
+estáticas do iOS em
+[`FULL_AUDIT_2026-10-04.md`](docs/architecture/FULL_AUDIT_2026-10-04.md).
+O host Windows não compila nem executa a interface iOS; essa validação exige Xcode
+e simulador/iPhone. Testes locais dos serviços usam dados e provedores de teste.
 
 ## Documentação
 
@@ -122,11 +118,11 @@ completa e a ordem de implementação.
 | [TIMELINE.md](docs/architecture/TIMELINE.md) | modelo, relógio, handles |
 | [PROJECT_FORMAT.md](docs/architecture/PROJECT_FORMAT.md) | formato `.aurea`, autosave |
 | [MEDIA_PIPELINE.md](docs/architecture/MEDIA_PIPELINE.md) | decode, proxy, zero-copy |
-| [EXPORT.md](docs/architecture/EXPORT.md) | export, por que é recusado hoje |
+| [EXPORT.md](docs/architecture/EXPORT.md) | documentação do pipeline de exportação |
 | [3D_ENGINE.md](docs/architecture/3D_ENGINE.md) | cena 3D, PBR, LOD |
 | [PERFORMANCE.md](docs/architecture/PERFORMANCE.md) | orçamento, threads, memória |
 | [ANDROID.md](docs/architecture/ANDROID.md) | build, ciclo de vida, superfícies |
-| [IOS.md](docs/architecture/IOS.md) | o que o projeto iOS será |
+| [IOS.md](docs/architecture/IOS.md) | arquitetura e integração iOS |
 
 ## Próximo passo
 

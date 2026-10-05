@@ -218,7 +218,7 @@ private fun EffectAddSheetBody(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
+                columns = GridCells.Adaptive(88.dp),
                 state = grid,
                 contentPadding = PaddingValues(start = AureaDims.S3, end = AureaDims.S3, top = AureaDims.S1, bottom = AureaDims.S5),
                 horizontalArrangement = Arrangement.spacedBy(AureaDims.S2),

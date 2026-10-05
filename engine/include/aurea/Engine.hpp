@@ -871,6 +871,10 @@ public:
     bool set_composition_motion_blur(bool on) noexcept;
     /// {ligado, obturador em graus} da composição atual.
     bool query_motion_blur(bool& on, f32& shutter) noexcept;
+    bool query_motion_blur_settings(MotionBlurSettings& out) noexcept;
+    /// One undoable composition edit. Rejects nonfinite values and invalid sample counts.
+    bool set_motion_blur_settings(bool enabled, f32 angle, f32 phase,
+                                  u32 samples, u32 adaptiveLimit) noexcept;
 
     // --- Rastreio de câmera 3D -----------------------------------------------------
     /// Estado da análise: 0 parado, 1 analisando, 2 pronto, 3 falhou, 4 cancelado.
@@ -965,6 +969,9 @@ public:
     /// Intensidade (≥ 0) e giro (graus) do ambiente.
     bool set_environment_background(bool visible) noexcept;
     bool environment_background() noexcept;
+    bool set_environment_background_range(i64 start, i64 end) noexcept;
+    i64 environment_background_start() noexcept;
+    i64 environment_background_end() noexcept;
     bool set_environment_params(f32 intensity, f32 rotationDeg) noexcept;
     /// {tem HDRI (0/1), intensidade, giro}.
     bool query_environment(f32* out3) noexcept;
@@ -1269,7 +1276,8 @@ public:
 
     /// Renderiza o instante atual numa textura (export, testes visuais), em
     /// resolução cheia, sem superfície. Espera a GPU terminar.
-    [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview = false) noexcept;
+    [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview = false,
+                                          u64 expectedGpuGeneration = 0) noexcept;
 
     /// Medição do último `render_offscreen` (suíte de benchmark da Fase 8A).
     /// Tudo cronometrado de verdade; a GPU só com os timers ligados
@@ -1328,6 +1336,11 @@ public:
 
     [[nodiscard]] EngineStatus read_status() noexcept;
     [[nodiscard]] EngineTelemetry read_telemetry() noexcept;
+    /// Complete preview-cache intervals for the current composition. Absolute
+    /// [start, end) frame pairs; returns pairs copied (at most 30), without a GPU wait.
+    [[nodiscard]] u32 copy_preview_buffer_ranges(i64* outPairs, u32 capacityRanges) noexcept;
+    /// Bits: depth working=1, foreground working=2, depth failed=4, foreground failed=8.
+    [[nodiscard]] u32 local_ai_status() noexcept;
 
     void fill_status(bridge::EngineStatusPOD& out) noexcept;
     void fill_telemetry(bridge::TelemetryPOD& out) noexcept;
@@ -1368,6 +1381,11 @@ public:
     /// Detalhe de uma camada no playhead. false = camada não existe.
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
 private:
+    /// Caller holds modelMutex_. Sources retained for undo share this CPU quota.
+    bool apply_motion_blur_settings_locked(Composition& comp, const MotionBlurSettings& settings) noexcept;
+    [[nodiscard]] u64 source_asset_room_locked() const noexcept;
+    /// Acquire BEFORE modelMutex_; slow imports must not overlap their peaks.
+    std::recursive_mutex sourceImportMutex_;
     Status ensure_text3d_layout(Layer& layer) noexcept; // modelMutex_ held; caller owns undo.
     [[nodiscard]] bool supports_text_animation(const Layer& layer) const noexcept;
     /// Camada de forma 3D (receita aurea-shape3d:). As partes já são nós
@@ -1570,6 +1588,7 @@ private:
     AdaptiveResolutionController* adaptive_ = nullptr;
 
     std::unique_ptr<GPUBackend> gpu_;
+    u64                gpuGeneration_ = 0; ///< under renderMutex_; survives backend/device recreation
     Renderer           renderer_;
     MediaManager       media_;
     ThumbnailService   thumbs_;
@@ -1645,6 +1664,7 @@ private:
     /// preso por outra thread que espere o de render — a ordem é sempre
     /// modelo → render, ou render sozinho.
     std::mutex renderMutex_;
+    std::atomic<u32> localAiStatusSnapshot_{0};
 
     std::thread renderThread_;
     std::mutex wakeMutex_;
@@ -1655,6 +1675,12 @@ private:
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
     PreviewRefill previewRefill_;
+    // Protected by modelMutex_. The published packed status is lock-free for UI.
+    bool previewBuffering_ = false;
+    i64 previewBufferStart_ = 0;
+    u64 previewBufferSince_ = 0;
+    u32 previewBufferReady_ = 0, previewBufferTarget_ = 0;
+    std::atomic<u32> previewBufferStatus_{0};
     u32  lastRenderedRevision_ = 0;           ///< modelRevision_ do último frame desenhado
     u32  incompleteRetries_ = 0;              ///< quadros seguidos com camada pendente
     u64  lastMediaGen_ = 0;
@@ -1707,6 +1733,12 @@ private:
     GpuTiming offscreenPasses_[64]{};
 
     struct ExportContext;
+    // Lifecycle operations may arrive from different native/UI worker queues.
+    // Workers never acquire this mutex, so joining them while holding it is safe.
+    mutable std::mutex exportLifecycleMutex_;
+    // Short-lived pointer lock: progress/cancel never wait for encoder startup
+    // or for the lifecycle join, only for publication of a new context.
+    mutable std::mutex exportContextMutex_;
     std::unique_ptr<ExportContext> exportCtx_;
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).

@@ -21,6 +21,7 @@ Uso: `python tools/i18n_effect_catalog.py <catalogo.json>`
      `python tools/i18n_effect_catalog.py <catalogo.json> --todo`  (lista textos sem tradução)
 """
 import json
+import glob
 import os
 import re
 import sys
@@ -38,21 +39,28 @@ TSV = os.path.join(ROOT, "tools", "effect_i18n.tsv")
 OUT_KT = os.path.join(ROOT, "android/app/src/main/java/com/aurea/aurea/effects/EffectI18nTable.kt")
 OUT_SWIFT = os.path.join(ROOT, "engine/platform/ios/app/EffectI18nTable.swift")
 LANGS = ["en", "es", "ru", "hi", "id", "ar"]
-REUSE_PREFIXES = ("fx_", "afx_", "fxl_", "fxo_")
+REUSE_PREFIXES = ("fx_", "afx_", "fxl_", "fxo_", "fx3_", "fx3o_", "core2_fx_", "core2_fxo_")
 
 
 def load_strings(folder):
     out = {}
-    for el in ET.parse(os.path.join(RES, folder, "strings.xml")).getroot():
-        if el.tag == "string":
-            text = "".join(el.itertext())
-            out[el.get("name")] = text.replace("\\'", "'").replace('\\"', '"')
+    directory = os.path.join(RES, folder)
+    paths = [os.path.join(directory, "strings.xml")] + sorted(glob.glob(os.path.join(directory, "strings_*.xml")))
+    for path in paths:
+        for el in ET.parse(path).getroot():
+            if el.tag == "string":
+                key = el.get("name")
+                if key in out:
+                    raise ValueError(f"recurso duplicado: {folder}/{key}")
+                text = "".join(el.itertext())
+                out[key] = text.replace("\\'", "'").replace('\\"', '"')
     return out
 
 
 def hand_labels():
     """{chave: {índice: recurso}} dos rótulos escritos à mão em EffectsHuman.kt."""
-    src = open(HUMAN_KT, encoding="utf-8").read()
+    with open(HUMAN_KT, encoding="utf-8") as source:
+        src = source.read()
     matrix = re.search(r"MatrixLabels = listOf\((.*?)\)", src, re.S)
     matrix = re.findall(r"R\.string\.(\w+)", matrix.group(1)) if matrix else []
     parts = re.split(r'put\(\s*"(aurea\.[a-z0-9_.]+)"', src)
@@ -75,10 +83,14 @@ def slug(text, limit=40):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     todo_only = "--todo" in sys.argv
-    catalog = json.load(open(args[0], encoding="utf-8"))
-    texts = json.load(open(TEXTS, encoding="utf-8")) if os.path.exists(TEXTS) else {}
-    pt = load_strings("values")
-    en = load_strings("values-en")
+    with open(args[0], encoding="utf-8") as source:
+        catalog = json.load(source)
+    texts = {}
+    if os.path.exists(TEXTS):
+        with open(TEXTS, encoding="utf-8") as source:
+            texts = json.load(source)
+    catalogs = {lang: load_strings(folder) for lang, folder in i18n_add.FOLDERS.items()}
+    pt, en = catalogs["pt"], catalogs["en"]
     hand = hand_labels()
 
     by_pt = {}
@@ -100,10 +112,14 @@ def main():
         want = tr.get("pt", text)
         base = prefix + slug(tr["en"])
         name, n = base, 2
-        while (name in pt and pt[name].strip() != want) or (name in new and new[name]["pt"] != want):
+        while (name in pt and pt[name].strip() != want) or (name in new and new[name].get("pt", pt.get(name)) != want):
             name, n = f"{base}_{n}", n + 1
-        if name not in pt:
-            new[name] = {"pt": want, **{l: tr[l] for l in LANGS if tr.get(l)}}
+        translations = {"pt": want, **{l: tr[l] for l in LANGS if tr.get(l)}}
+        # An existing Portuguese key can still lack an English/localized entry.
+        # Android merges every strings_*.xml; never duplicate or replace one.
+        missing = {lang: value for lang, value in translations.items() if name not in catalogs[lang]}
+        if missing:
+            new[name] = missing
         by_pt[text] = name
         return name
 
@@ -187,7 +203,8 @@ def write_kotlin(rows):
         "}",
         "",
     ]
-    open(OUT_KT, "w", encoding="utf-8", newline="\n").write("\n".join(lines))
+    with open(OUT_KT, "w", encoding="utf-8", newline="\n") as output:
+        output.write("\n".join(lines))
 
 
 def write_swift(rows):
@@ -216,7 +233,8 @@ def write_swift(rows):
     for key, index, pid, label, opts in groups:
         lines.append(f"    {key}|{index}|{pid}|{label}|{','.join(opts)}")
     lines += ['    """', "}", ""]
-    open(OUT_SWIFT, "w", encoding="utf-8", newline="\n").write("\n".join(lines))
+    with open(OUT_SWIFT, "w", encoding="utf-8", newline="\n") as output:
+        output.write("\n".join(lines))
 
 
 if __name__ == "__main__":

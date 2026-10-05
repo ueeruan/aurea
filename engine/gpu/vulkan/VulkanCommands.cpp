@@ -83,6 +83,17 @@ void Backend::transition(VkCommandBuffer cmd, Texture& t, ResourceState newState
     b.subresourceRange = {aspect_of(t.format), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
     VkPipelineStageFlags srcStage = from.stage;
 
+    if (imageAcquired_ && t.state == ResourceState::Undefined
+        && imageIndex_ < swapTextures_.size() && textures_.get(swapTextures_[imageIndex_]) == &t) {
+        // Discarding the old pixels does not end the presentation engine's
+        // read. Chain the first layout transition to the acquire semaphore's
+        // COLOR_ATTACHMENT_OUTPUT wait in end_frame; TOP_OF_PIPE would allow
+        // that transition to race the preceding presentation under load.
+        // Other images keep their own source stages, so offscreen work can
+        // still overlap acquisition of the window image.
+        srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    }
+
     if (t.external && !t.acquiredThisFrame) {
         // Frame do decoder: a imagem pertence a uma "fila estrangeira" (o
         // MediaCodec). Aquisição de posse com layout UNDEFINED, que para AHB
@@ -637,6 +648,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     if (!initialized_) return Status{Errc::InvalidState, "backend nao inicializado"};
     if (deviceLost_) return Status{Errc::DeviceLost, "dispositivo perdido"};
     if (current_) return Status{Errc::InvalidState, "frame ja aberto"};
+    collect_immediate();
 
     FrameContext& f = frames_[frameCursor_];
     if (f.submitted) {
@@ -847,6 +859,12 @@ FrameContext* Backend::deferral_target() noexcept {
 
 void Backend::defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept {
     if (!fn) return;
+    // Outside a frame, a timed-out immediate upload is newer than the last
+    // normal submission. Its resources cannot retire on that older fence.
+    if (!current_ && !deviceLost_ && !pendingImmediate_.empty()) {
+        pendingImmediate_.back().deferred.push_back(DeferredRelease{fn, ctx});
+        return;
+    }
     FrameContext* f = deferral_target();
     if (!f || deviceLost_) {
         // Nenhum trabalho de GPU pendente (ou o dispositivo morreu e nada mais
@@ -860,6 +878,7 @@ void Backend::defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept {
 void Backend::wait_idle() noexcept {
     if (!device_) return;
     vkDeviceWaitIdle(device_);
+    collect_immediate(true);
     for (u32 i = 0; i < framesInFlight_; ++i) {
         if (&frames_[i] == current_) continue;
         if (frames_[i].submitted) collect_timings(frames_[i]);
@@ -875,6 +894,7 @@ u64 Backend::last_submitted_frame() const noexcept {
 Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
     if (!device_) return Status{Errc::InvalidState, "backend nao inicializado"};
     if (deviceLost_) return Status{Errc::DeviceLost, "dispositivo perdido"};
+    collect_immediate();
     for (u32 i = 0; i < framesInFlight_; ++i) {
         FrameContext& f = frames_[i];
         if (&f == current_ || !f.submitted || f.frameNumber != frameNumber) continue;
@@ -883,6 +903,7 @@ Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
         if (w == VK_TIMEOUT) return Status{Errc::Timeout, "GPU atrasada"};
         const Status status = check(w, "vkWaitForFences");
         if (!status.ok()) return status;
+        collect_immediate();
         // One queue: this fence also covers earlier submissions. Release
         // decoder image leases now, even if export cannot submit another frame.
         for (u32 j = 0; j < framesInFlight_; ++j) {

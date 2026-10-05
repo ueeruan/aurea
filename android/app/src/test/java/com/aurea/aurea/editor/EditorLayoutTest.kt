@@ -5,6 +5,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditorLayoutTest {
+    @Test fun compactDockGivesSpaceBackWithoutShrinkingTouchTargets() {
+        assertTrue(EditorLayout.DOCK_QUICK >= 48f)
+        assertTrue(EditorLayout.DOCK_TILE >= 48f)
+        val normal = EditorLayout.solve(780f, SheetContent.Dock, false, 375f, 9f / 16f)
+        assertTrue(normal.sheet <= 200f)
+        assertTrue(normal.timeline >= EditorLayout.TIMELINE_MIN)
+        val phone = EditorLayout.solve(780f, SheetContent.Dock, false, 375f, 9f / 16f, fontScale = 1.3f)
+        assertEquals(EditorLayout.dock(2, 1.3f), phone.sheet, .01f)
+        assertTrue(phone.timeline >= EditorLayout.TIMELINE_MIN)
+        val large = EditorLayout.solve(780f, SheetContent.Dock, false, 375f, 9f / 16f, fontScale = 2f)
+        assertTrue(large.sheet > normal.sheet)
+        assertTrue(large.timeline >= EditorLayout.TIMELINE_MIN)
+        assertTrue(EditorLayout.dockTile(2f) > EditorLayout.dockTile())
+    }
+    @Test fun shortScreensAndLargeFontsKeepEveryZoneInsideTheWindow() {
+        for (height in listOf(240f, 320f, 480f, 568f, 720f, 960f)) {
+            for (content in SheetContent.entries) for (font in listOf(1f, 1.3f, 2f)) {
+                val m = EditorLayout.solve(height, content, false, 320f, 9f/16f, fontScale = font)
+                assertTrue(m.preview > 0f && m.timeline >= 0f && m.sheet >= 0f)
+                assertEquals(height, m.topBar+m.preview+m.transport+m.strip+m.timeline+m.sheet, .01f)
+            }
+        }
+    }
     @Test fun curvesStayCompactWithoutShrinkingOtherTools() {
         for (height in listOf(568f, 640f, 780f, 960f, 1200f)) {
             val curve = EditorLayout.solve(height, SheetContent.Curve, false)
@@ -56,10 +79,9 @@ class EditorLayoutTest {
             val overview = EditorLayout.solve(height, SheetContent.None, false)
             val editing = EditorLayout.solve(height, SheetContent.Panel, false)
             val dock = EditorLayout.solve(height, SheetContent.Dock, false)
-            // Painel de 336 sempre que a tela deixa (topo 64 + transporte 60 do
-            // redesenho); numa tela baixa ele leva tudo o que sobra sobre os pisos.
+            // Painel compacto de 288 quando cabe, com conteúdo rolável.
             val room = EditorLayout.workspace(height) - EditorLayout.PREVIEW_MIN - EditorLayout.TIMELINE_MIN
-            assertTrue("panel at $height", editing.sheet >= minOf(336f, room) - 0.01f)
+            assertTrue("panel at $height", editing.sheet >= minOf(288f, room) - 0.01f)
             // Doca compacta: a altura do conteúdo, o resto fica para a timeline.
             assertEquals("dock at $height", EditorLayout.DOCK, dock.sheet, 0.01f)
             assertTrue(dock.timeline >= 110f)
@@ -68,7 +90,7 @@ class EditorLayoutTest {
             assertTrue(editing.timeline >= 110f)
             assertEquals(height, editing.topBar + editing.preview + editing.strip +
                 editing.transport + editing.timeline + editing.sheet, 0.01f)
-            assertEquals(height * EditorLayout.PREVIEW_NATURAL_FRACTION, overview.preview, 0.01f)
+            assertEquals(minOf(420f, height * EditorLayout.PREVIEW_NATURAL_FRACTION), overview.preview, 0.01f)
         }
     }
     @Test fun batchSheetFitsTheStaggerRowAtFingerSize() {
@@ -122,7 +144,7 @@ class EditorLayoutTest {
         // Celular em pé nunca é largo; deitado (≥ 600) é.
         assertTrue(!EditorLayout.isWide(390f, 780f))
         assertTrue(EditorLayout.isWide(844f, 390f))
-        assertTrue(!EditorLayout.isWide(560f, 320f))
+        assertTrue(EditorLayout.isWide(560f, 320f))
         // Janela quadrada (Stage Manager / multitarefa): empilhado.
         assertTrue(!EditorLayout.isWide(1000f, 1000f))
     }
@@ -150,7 +172,7 @@ class EditorLayoutTest {
             assertTrue("timeline $timeline", timeline in 88f..280f)
             assertTrue("preview $preview at $h x $w", preview >= EditorLayout.PREVIEW_MIN)
             val sheet = EditorLayout.wideSheetWidth(h)
-            assertTrue("sheet $sheet", sheet in 280f..380f && h - sheet > 400f)
+            assertTrue("sheet $sheet", sheet in 240f..420f && h - sheet > 400f)
         }
     }
 }

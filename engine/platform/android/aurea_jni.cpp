@@ -212,11 +212,19 @@ void release_window_locked(NativeContext& c) noexcept {
 
 } // namespace
 
+#include "aurea/timeline/CanvasFit.hpp"
 #define AUREA_JNI extern "C" JNIEXPORT
 #define AUREA_FN(name) JNICALL Java_com_aurea_aurea_engine_AureaEngine_##name
 
 AUREA_JNI jfloat AUREA_FN(clampPinchFactor)(JNIEnv*, jclass, jfloat factor, jfloat x, jfloat y, jfloat z, jboolean threeD) {
     return aurea::clamp_pinch_factor(factor, x, y, z, threeD == JNI_TRUE);
+}
+
+AUREA_JNI jfloatArray AUREA_FN(fitCanvas)(JNIEnv* env,jclass,jfloatArray values,jboolean fill) {
+    if(!values||env->GetArrayLength(values)!=11)return env->NewFloatArray(0);
+    std::array<float,11> a{};env->GetFloatArrayRegion(values,0,11,a.data());
+    const auto fit=aurea::canvas_fit(a,fill==JNI_TRUE);
+    auto result=env->NewFloatArray(5);if(result)env->SetFloatArrayRegion(result,0,5,fit.data());return result;
 }
 
 // Escala 3D de gesto no formato gravado (GestureMath.hpp): o volume nunca estica.
@@ -832,7 +840,11 @@ AUREA_JNI jint AUREA_FN(nativeCaptureFrame)(JNIEnv* env, jclass, jlong handle, j
     if (!c || !dst || maxDim <= 0) return 0;
     std::vector<u8> rgba;
     u32 w = 0, h = 0;
-    if (!c->engine.capture_frame_rgba(static_cast<u32>(maxDim), rgba, w, h).ok()) return 0;
+    const Status captured = c->engine.capture_frame_rgba(static_cast<u32>(maxDim), rgba, w, h);
+    if (!captured.ok()) {
+        AUREA_LOG_WARN("captura do projeto falhou (%u): %s", static_cast<u32>(captured.code()), captured.message().data());
+        return 0;
+    }
     if (static_cast<jlong>(rgba.size()) > buffer_capacity(env, out)) return 0;
     std::memcpy(dst, rgba.data(), rgba.size());
     if (outSize && env->GetArrayLength(outSize) >= 2) {
@@ -1102,6 +1114,10 @@ AUREA_JNI jboolean AUREA_FN(nativeSetEnvironment)(JNIEnv*, jclass, jlong handle,
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_environment_params(intensity, rotation) ? JNI_TRUE : JNI_FALSE;
 }
+AUREA_JNI jboolean AUREA_FN(nativeSetEnvironmentBackgroundRange)(JNIEnv*, jclass, jlong handle, jlong start, jlong end) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_environment_background_range(start, end) ? JNI_TRUE : JNI_FALSE;
+}
 
 AUREA_JNI jboolean AUREA_FN(nativeQueryEnvironment)(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
@@ -1110,6 +1126,10 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryEnvironment)(JNIEnv* env, jclass, jlong h
     if (!c->engine.query_environment(v)) return JNI_FALSE;
     env->SetFloatArrayRegion(out, 0, 3, v);
     if (env->GetArrayLength(out) >= 4) { const f32 visible = c->engine.environment_background() ? 1.f : 0.f; env->SetFloatArrayRegion(out, 3, 1, &visible); }
+    if (env->GetArrayLength(out) >= 6) {
+        const f32 range[2]{static_cast<f32>(c->engine.environment_background_start()), static_cast<f32>(c->engine.environment_background_end())};
+        env->SetFloatArrayRegion(out, 4, 2, range);
+    }
     return JNI_TRUE;
 }
 
@@ -2701,6 +2721,26 @@ AUREA_JNI jfloat AUREA_FN(nativeMotionBlurState)(JNIEnv*, jclass, jlong handle) 
     return on ? shutter + 1.0f : -(shutter + 1.0f);   // sinal = ligado; módulo − 1 = obturador
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeQueryMotionBlurSettings)(JNIEnv* env, jclass, jlong handle, jfloatArray output) {
+    NativeContext* c = ctx_of(handle);
+    MotionBlurSettings settings;
+    if (!c || !output || env->GetArrayLength(output) < 6 ||
+        !c->engine.query_motion_blur_settings(settings)) return JNI_FALSE;
+    const jfloat values[] = {settings.enabled ? 1.0f : 0.0f, settings.shutterAngle,
+        settings.shutterPhase, static_cast<jfloat>(settings.samples),
+        static_cast<jfloat>(settings.adaptiveLimit), static_cast<jfloat>(settings.previewSamples)};
+    env->SetFloatArrayRegion(output, 0, 6, values);
+    return env->ExceptionCheck() ? JNI_FALSE : JNI_TRUE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlurSettings)(JNIEnv*, jclass, jlong handle,
+    jboolean enabled, jfloat angle, jfloat phase, jint samples, jint adaptiveLimit) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || samples < 0 || adaptiveLimit < 0) return JNI_FALSE;
+    return c->engine.set_motion_blur_settings(enabled == JNI_TRUE, angle, phase,
+        static_cast<u32>(samples), static_cast<u32>(adaptiveLimit)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI void AUREA_FN(nativeSetEditMode)(JNIEnv*, jclass, jlong handle, jboolean on) {
     if (NativeContext* c = ctx_of(handle)) c->engine.set_edit_mode(on == JNI_TRUE);
 }
@@ -3251,6 +3291,23 @@ AUREA_JNI jboolean AUREA_FN(nativeExportProgress)(JNIEnv* env, jclass, jlong han
     if (!c || !pod) return JNI_FALSE;
     c->engine.fill_export_progress(*pod);
     return JNI_TRUE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeLocalAiStatus)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.local_ai_status()) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativePreviewBufferRanges)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    const auto capacity = static_cast<u32>(std::min<jsize>(30, env->GetArrayLength(out) / 2));
+    i64 ranges[60]{};
+    const u32 count = c->engine.copy_preview_buffer_ranges(ranges, capacity);
+    jlong encoded[60]{};
+    for (u32 i = 0; i < count * 2; ++i) encoded[i] = static_cast<jlong>(ranges[i]);
+    if (count) env->SetLongArrayRegion(out, 0, static_cast<jsize>(count * 2), encoded);
+    return static_cast<jint>(count);
 }
 
 // =============================================================================

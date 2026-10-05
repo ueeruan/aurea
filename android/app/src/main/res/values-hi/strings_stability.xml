@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model3d_risk_warning">बहुत भारी 3D मॉडल से मेमोरी खत्म हो सकती है, डिवाइस गर्म हो सकता है, ऐप धीमा पड़ सकता है या बंद हो सकता है। अपने जोखिम पर उपयोग करें।</string>
+    <string name="preview_buffer_preparing">प्रीव्यू तैयार हो रहा है · %1$d/%2$d फ़्रेम</string>
+    <string name="preview_buffer_ready">मेमोरी में प्रीव्यू · %1$d फ़्रेम</string>
+    <string name="preview_buffer_timeline">कैश किया गया प्रीव्यू: %1$d फ़्रेम</string>
+    <string name="preview_buffer_limited">मेमोरी में आंशिक प्रीव्यू · %1$d फ़्रेम</string>
+    <string name="app_export_interrupted">एक्सपोर्ट बाधित हुआ। फिर से कोशिश करें।</string>
+    <string name="transform_expression_controlled">यह ट्रांसफ़ॉर्म एक एक्सप्रेशन से नियंत्रित है। एक्सप्रेशन बदलने या बंद करने के लिए = पर टैप करें।</string>
+    <string name="fx_custom_create">इफ़ेक्ट बनाएँ</string>
+    <string name="fx_custom_library">मेरे इफ़ेक्ट</string>
+    <string name="fx_custom_normal">सामान्य</string>
+    <string name="fx_custom_advanced">उन्नत</string>
+    <string name="fx_custom_save">इफ़ेक्ट सहेजें</string>
+    <string name="fx_custom_name">इफ़ेक्ट का नाम</string>
+    <string name="fx_custom_cancel">रद्द करें</string>
+    <string name="fx_custom_normal_help">इफ़ेक्ट जोड़ें और उनके मान बदलकर परिणाम संयोजित करें। सहेजने पर इफ़ेक्ट समूह और कीफ़्रेम दोबारा उपयोग के लिए रखे जाते हैं, फ़ोटो पर भी।</string>
+    <string name="fx_custom_advanced_help">सभी नियंत्रण बदलने के लिए इफ़ेक्ट खोलें। हर पैरामीटर के मेन्यू में एक्सप्रेशन और कीफ़्रेम मिलते हैं। सहेजने पर खुला इफ़ेक्ट रखा जाता है।</string>
+    <string name="fx_name_chroma_key_advanced">क्रोमा की (उन्नत)</string>
+    <string name="preview_buffer_note">स्वचालित बफ़र: प्लेबैक रुका होने पर अगले फ़्रेम तैयार होते हैं।</string>
+    <string name="timeline_cut_left">बायाँ</string>
+    <string name="timeline_cut_right">दायाँ</string>
+    <string name="timeline_more">टाइमलाइन की और कार्रवाइयाँ</string>
+    <string name="timeline_cut_failed">ट्रिम नहीं हो सका। क्लिप की सीमाएँ और चुंबकीय ट्रैक की लॉक की गई लेयर जाँचें।</string>
+    <string name="timeline_show_all">सभी लेयर</string>
+    <string name="timeline_selected_only">चयनित</string>
+    <string name="timeline_all_short">सभी</string>
+    <string name="timeline_selection_short">चयनित</string>
+</resources>
+

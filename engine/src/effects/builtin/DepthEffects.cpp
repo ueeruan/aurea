@@ -55,12 +55,13 @@ public:
         req.localTime = e.localTime;
         req.smoothing = std::clamp(finite_or(e.f(kSmoothing), 70.0f) / 100.0f, 0.0f, 1.0f);
         const DepthMapResult r = e.resources->depth_map(req);
-        if (!r.texture.valid()) return;
+        if (!r.texture.valid()) { e.auxInfo.w = r.failed ? 1.0f : 0.0f; return; }
         e.aux = r.texture;
         e.auxInfo = Vec4{r.lo, r.hi, 1.0f, 0.0f};
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
                  LayerImage& out) const override {
+        if (e.auxInfo.w > 0) return Status{Errc::MediaSourceMissing, "Depth map: model or source frame unavailable"};
         EffectUniforms u = base_uniforms(input);
         const bool has = e.aux.valid();
         u.p0 = Vec4{std::clamp(finite_or(e.f(kMix), 100.0f) / 100.0f, 0.0f, 1.0f), e.b(kInvert) ? 1.0f : 0.0f,

@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <new>
+#include <system_error>
 
 namespace aurea::ai {
 
-DepthMapService::DepthMapService(std::string model) : foregroundModel_(std::move(model)) {}
+DepthMapService::DepthMapService(bool foreground) : foregroundMode_(foreground) {}
 
 DepthMapService::~DepthMapService() {
     clear();
@@ -52,15 +54,26 @@ void DepthMapService::insert(u64 key, DepthMapPtr map) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (auto it = index_.find(key); it != index_.end()) {
         it->second->second = std::move(map);
+        for (auto& [source, latest] : latest_) if (latest.key == key) latest.map = it->second->second;
         lru_.splice(lru_.begin(), lru_, it->second);
         return;
     }
     lru_.emplace_front(key, std::move(map));
     index_[key] = lru_.begin();
-    while (lru_.size() > (foregroundModel_.empty() ? kMaxCached : 16u)) {
-        index_.erase(lru_.back().first);
+    while (lru_.size() > (!foregroundMode_ ? kMaxCached : 16u)) {
+        const u64 expired = lru_.back().first;
+        std::erase_if(latest_, [expired](const auto& item) { return item.second.key == expired; });
+        index_.erase(expired);
         lru_.pop_back();
     }
+}
+
+void DepthMapService::publish_latest(u64 sourceKey, u64 key, i64 targetUs, i64 frameUs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // An export/image request can evict this result between inference and
+    // publication. Only the bounded LRU owns maps retained for fallback.
+    const auto it = index_.find(key);
+    if (it != index_.end()) latest_[sourceKey] = Latest{key, targetUs, frameUs, it->second->second};
 }
 
 DepthMapService::Stats DepthMapService::stats() const {
@@ -68,19 +81,34 @@ DepthMapService::Stats DepthMapService::stats() const {
     return stats_;
 }
 
+u32 DepthMapService::activity_state() noexcept {
+    std::lock_guard<std::mutex> lock(queueMutex_);
+    if (hasActive_ || !pending_.empty()) return 1;
+    return lastJobFailed_.load(std::memory_order_relaxed) ? 2u : 0u;
+}
+
+void DepthMapService::report_failure(const char* reason) noexcept {
+    lastJobFailed_.store(true, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++stats_.failures;
+    }
+    AUREA_LOG_WARN("%s: %s", foregroundMode_ ? "Rotobrush" : "profundidade", reason);
+}
+
 bool DepthMapService::ensure_model_locked() {
-    if (!foregroundModel_.empty()) return foreground_.loaded() || foreground_.load(foregroundModel_).ok();
-    if (estimator_.loaded()) return true;
+    if (foregroundMode_ ? foreground_.loaded() : estimator_.loaded()) return true;
     if (modelFailed_) return false;
-    const Status s = estimator_.load(DepthEstimator::Backend::Auto);
+    const Status s = foregroundMode_ ? foreground_.load() : estimator_.load(DepthEstimator::Backend::Auto);
     std::lock_guard<std::mutex> lock(mutex_);
     stats_.modelLoaded = s.ok();
-    stats_.backend = estimator_.backend();
+    stats_.backend = foregroundMode_ ? DepthEstimator::Backend::Cpu : estimator_.backend();
     if (!s.ok()) {
         // Não tenta de novo a cada quadro: só depois de `clear` (outro projeto).
         modelFailed_ = true;
+        lastJobFailed_.store(true, std::memory_order_relaxed);
         ++stats_.failures;
-        AUREA_LOG_WARN("profundidade: modelo nao carregou (%s)", s.message().data());
+        AUREA_LOG_WARN("%s: modelo nao carregou (%s)", foregroundMode_ ? "Rotobrush" : "profundidade", s.message().data());
     }
     return s.ok();
 }
@@ -89,7 +117,7 @@ DepthMapPtr DepthMapService::run_pixels_locked(u64 key, const u8* pixels, u32 wi
                                                u32 channels) {
     if (!ensure_model_locked()) return nullptr;
     auto map = std::make_shared<DepthMap>();
-    const bool fg=!foregroundModel_.empty();
+    const bool fg=foregroundMode_;
     map->disparity.resize(fg ? ForegroundEstimator::kPixels : DepthEstimator::kPixels);
     if (fg) foreground_rgb(pixels,width,height,stride,channels,ForegroundEstimator::kSize,map->foregroundRgb);
     const Status s = fg ? foreground_.run(pixels,width,height,stride,channels,cancel_,map->disparity.data())
@@ -97,7 +125,10 @@ DepthMapPtr DepthMapService::run_pixels_locked(u64 key, const u8* pixels, u32 wi
     if (!s.ok()) {
         std::lock_guard<std::mutex> lock(mutex_);
         ++stats_.failures;
-        if (s.code() != Errc::Cancelled) AUREA_LOG_WARN("profundidade: inferencia falhou (%s)", s.message().data());
+        if (s.code() != Errc::Cancelled) {
+            lastJobFailed_.store(true, std::memory_order_relaxed);
+            AUREA_LOG_WARN("profundidade: inferencia falhou (%s)", s.message().data());
+        }
         return nullptr;
     }
     if (!fg) depth_percentiles(map->disparity.data(), DepthEstimator::kPixels, map->p2, map->p98);
@@ -106,22 +137,32 @@ DepthMapPtr DepthMapService::run_pixels_locked(u64 key, const u8* pixels, u32 wi
         std::lock_guard<std::mutex> lock(mutex_);
         ++stats_.inferences;
         stats_.lastInferenceMs = map->inferenceMs;
-        stats_.backend = estimator_.backend();
+        stats_.backend = foregroundMode_ ? DepthEstimator::Backend::Cpu : estimator_.backend();
     }
+    lastJobFailed_.store(false, std::memory_order_relaxed);
     DepthMapPtr done = std::move(map);
     insert(key, done);
     return done;
 }
 
-DepthMapPtr DepthMapService::image(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels, bool wait) {
+DepthMapPtr DepthMapService::image(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels, bool wait) try {
     if (DepthMapPtr hit = find(key)) return hit;
     if (!pixels || !width || !height || (channels != 3 && channels != 4) || width > 16384 || height > 16384 || stride < width * channels) return nullptr;
     if (!wait) {
-        Job job; job.key = key; job.imageSize = foregroundModel_.empty() ? DepthEstimator::kSize : ForegroundEstimator::kSize;
+        {
+            std::lock_guard<std::mutex> queue(queueMutex_);
+            if ((hasActive_ && activeKey_ == key) || std::any_of(pending_.begin(), pending_.end(),
+                    [key](const Job& job) { return job.key == key; })) return nullptr;
+        }
+        Job job; job.key = key; job.sourceKey = key; job.imageSize = !foregroundMode_ ? DepthEstimator::kSize : ForegroundEstimator::kSize;
         const u32 size = job.imageSize;
         job.pixels.resize(static_cast<usize>(size) * size * 4);
         std::vector<u8> rgb;
-        if (!foregroundModel_.empty()) foreground_rgb(pixels,width,height,stride,channels,size,rgb);
+        if (foregroundMode_) foreground_rgb(pixels,width,height,stride,channels,size,rgb);
+        else {
+            rgb.resize(static_cast<usize>(size) * size * 3);
+            depth_input_rgb(pixels, width, height, stride, channels, rgb.data());
+        }
         for (u32 y=0;y<size;++y) for (u32 x=0;x<size;++x) {
             const u32 sy=std::min(height-1,static_cast<u32>((y+.5)*height/size)),sx=std::min(width-1,static_cast<u32>((x+.5)*width/size));
             auto* dest=job.pixels.data()+(y*size+x)*4;
@@ -132,10 +173,16 @@ DepthMapPtr DepthMapService::image(u64 key, const u8* pixels, u32 width, u32 hei
     std::lock_guard<std::mutex> work(work_);
     if (DepthMapPtr hit = cached(key)) return hit;   // outra thread terminou enquanto esperávamos
     return run_pixels_locked(key, pixels, width, height, stride, channels);
+} catch (const std::bad_alloc&) {
+    report_failure("memoria insuficiente para o mapa");
+    return nullptr;
+} catch (const std::system_error&) {
+    report_failure("worker de inferencia indisponivel");
+    return nullptr;
 }
 
 DepthMapPtr DepthMapService::run_video_locked(const Job& job) {
-    if (foregroundModel_.empty()) return run_video_raw_locked(job);
+    if (!foregroundMode_) return run_video_raw_locked(job);
     const f64 fps = job.asset.video.fps > 0 ? job.asset.video.fps : 1e6 / job.frameUs;
     const i64 current = std::max<i64>(0, std::llround(job.targetUs * fps / 1e6));
     const i64 last = job.asset.video.frameCount.value > 0 ? job.asset.video.frameCount.value - 1 : current + 1;
@@ -240,7 +287,7 @@ DepthMapPtr DepthMapService::run_video_raw_locked(const Job& job) {
 }
 
 DepthMapPtr DepthMapService::video(u64 key, VideoSourceFactory* factory, const Asset& asset, u64 sourceKey,
-                                   i64 targetUs, i64 frameUs, bool wait) {
+                                   i64 targetUs, i64 frameUs, bool wait) try {
     if (DepthMapPtr hit = find(key)) return hit;
     if (!factory) return nullptr;
     Job job;
@@ -253,22 +300,47 @@ DepthMapPtr DepthMapService::video(u64 key, VideoSourceFactory* factory, const A
     if (wait) {
         std::lock_guard<std::mutex> work(work_);
         if (DepthMapPtr hit = cached(key)) return hit;
-        return run_video_locked(job);
+        const auto done = run_video_locked(job);
+        if (!cancel_.load(std::memory_order_relaxed)) lastJobFailed_.store(!done, std::memory_order_relaxed);
+        return done;
     }
     enqueue(std::move(job));
+    return nullptr;
+} catch (const std::bad_alloc&) {
+    report_failure("memoria insuficiente para o mapa");
+    return nullptr;
+} catch (const std::system_error&) {
+    report_failure("worker de inferencia indisponivel");
     return nullptr;
 }
 
 void DepthMapService::enqueue(Job job) {
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
-        if (hasPending_ && pending_.key == job.key) return;
-        pending_ = std::move(job);
-        hasPending_ = true;
+        if (hasActive_ && activeKey_ == job.key) return;
+        auto same = std::find_if(pending_.begin(), pending_.end(), [&job](const Job& queued) {
+            return queued.imageSize == job.imageSize && queued.sourceKey == job.sourceKey;
+        });
+        if (same != pending_.end()) {
+            if (same->key == job.key) return;
+            *same = std::move(job); // preserve this source's turn in the FIFO
+        } else {
+            // Retain older sources when saturated so continuous playback cannot
+            // repeatedly evict the same layer before it ever gets an inference.
+            if (pending_.size() >= kMaxPending) return;
+            pending_.push_back(std::move(job));
+        }
         cancel_.store(false, std::memory_order_relaxed);
         if (!running_) {
-            running_ = true;
-            thread_ = std::thread([this] { thread_main(); });
+            try {
+                thread_ = std::thread([this] { thread_main(); });
+                running_ = true;
+            } catch (...) {
+                // A failed thread launch must not leave a phantom running
+                // worker or a queued key that prevents the next retry.
+                pending_.clear();
+                throw;
+            }
         }
     }
     wake_.notify_one();
@@ -281,7 +353,7 @@ void DepthMapService::thread_main() noexcept {
         Job job;
         {
             std::unique_lock<std::mutex> lock(queueMutex_);
-            const auto ready = [&] { return !running_ || hasPending_; };
+            const auto ready = [&] { return !running_ || !pending_.empty(); };
             if (!wake_.wait_for(lock, std::chrono::milliseconds(kIdleReleaseMs), ready)) {
                 // Ocioso: a rede e o decoder saem da memória; voltam no próximo pedido.
                 lock.unlock();
@@ -289,23 +361,32 @@ void DepthMapService::thread_main() noexcept {
                 continue;
             }
             if (!running_) break;
-            job = std::move(pending_);
-            hasPending_ = false;
+            job = std::move(pending_.front());
+            pending_.pop_front();
+            activeKey_ = job.key;
+            hasActive_ = true;
         }
         DepthMapPtr done;
-        {
-            std::lock_guard<std::mutex> work(work_);
-            done = cached(job.key);
-            if (!done) done = job.imageSize ? run_pixels_locked(job.key,job.pixels.data(),job.imageSize,job.imageSize,job.imageSize*4,4) : run_video_locked(job);
+        try {
+            {
+                std::lock_guard<std::mutex> work(work_);
+                done = cached(job.key);
+                if (!done) done = job.imageSize ? run_pixels_locked(job.key,job.pixels.data(),job.imageSize,job.imageSize,job.imageSize*4,4) : run_video_locked(job);
+            }
+            if (done && !job.imageSize) {
+                publish_latest(job.sourceKey, job.key, job.targetUs, job.frameUs);
+            }
+        } catch (const std::bad_alloc&) {
+            report_failure("memoria insuficiente para o mapa");
+        } catch (const std::system_error&) {
+            report_failure("worker de inferencia indisponivel");
         }
-        if (done && !job.imageSize) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            latest_[job.sourceKey] = Latest{job.key, job.targetUs, job.frameUs, done};
-        }
+        if (!cancel_.load(std::memory_order_relaxed)) lastJobFailed_.store(!done, std::memory_order_relaxed);
         void (*fn)(void*) = nullptr;
         void* ctx = nullptr;
         {
             std::lock_guard<std::mutex> lock(queueMutex_);
+            hasActive_ = false;
             fn = readyFn_;
             ctx = readyCtx_;
         }
@@ -329,7 +410,7 @@ void DepthMapService::clear() noexcept {
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
         running_ = false;
-        hasPending_ = false;
+        pending_.clear();
         cancel_.store(true, std::memory_order_relaxed);
     }
     wake_.notify_all();
@@ -337,6 +418,8 @@ void DepthMapService::clear() noexcept {
     trim();
     std::lock_guard<std::mutex> work(work_);
     modelFailed_ = false;
+    lastJobFailed_.store(false, std::memory_order_relaxed);
+    { std::lock_guard<std::mutex> queue(queueMutex_); hasActive_ = false; }
     cancel_.store(false, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(mutex_);
     index_.clear();

@@ -166,7 +166,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.stylize.motion_tile", FxEffectHuman(
         name: "fx_name_motion_tile",
         keywords: "motion tile azulejos repetir ladrilho mosaico tijolo fase espelhar parede de video",
-        principal: [1, 2, 5, 7],
+        principal: [10, 1, 2, 5, 7],
         params: [
             0: FxParamHuman(label: "fx_centro"),
             1: FxParamHuman(label: "fx_mt_largura_ladrilho"),
@@ -176,6 +176,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             5: FxParamHuman(label: "fx_mt_espelhar_bordas"),
             7: FxParamHuman(label: "fx_fase"),
             8: FxParamHuman(label: "fx_mt_fase_horizontal"),
+            10: FxParamHuman(label: "fx_escala", suffix: "%", decimals: 1),
         ])),
     ("aurea.key.luma", FxEffectHuman(
         name: "fx_name_luma_key",
@@ -185,7 +186,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             1: FxParamHuman(label: "fx_limite"),
         ])),
     ("aurea.key.chroma", FxEffectHuman(
-        name: "fx_name_chroma_key",
+        name: "fx_name_chroma_key_advanced",
         keywords: "chave de croma chroma key fundo verde green screen remover cor",
         principal: [0, 1, 2],
         params: [
@@ -901,6 +902,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             2: FxParamHuman(label: "fx_direcao", suffix: "°", decimals: 0),
             3: FxParamHuman(label: "fx_distancia", suffix: "px", decimals: 0),
             4: FxParamHuman(label: "fx_suavidade", suffix: "px", decimals: 0),
+            5: FxParamHuman(label: "fxo_shadow_only"),
         ])),
     ("aurea.stylize.border", FxEffectHuman(
         name: "fx_name_border",

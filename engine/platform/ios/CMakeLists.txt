@@ -176,6 +176,10 @@ target_compile_options(aurea_ios PRIVATE
     "$<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANGUAGE:CXX,OBJCXX>>:-O2 -g>"
 )
 
+# This platform boundary converts failed index/image allocations into errors.
+# Keep exceptions local to the decoder instead of enabling them in the core.
+set_source_files_properties(bridge/IOSVideoDecoder.mm PROPERTIES COMPILE_OPTIONS "-fexceptions")
+
 target_link_libraries(aurea_ios PUBLIC aurea_core)
 target_compile_definitions(aurea_ios PRIVATE "$<$<CONFIG:Debug>:DEBUG=1>")
 if(AUREA_GPU_METAL)

@@ -129,7 +129,7 @@ class GizmoToolsTest {
         assertEquals(before.scale[0], y.scale[0])
         assertEquals(before.scale[2], y.scale[2])
         assertEquals(before.position, y.position)
-        // Centro: X, Y e Z pelo mesmo fator, preservando a proporção atual.
+        // Centro: X, Y e profundidade efetiva pelo mesmo fator; Z gravado é relativo a X.
         compose.onNodeWithTag("gizmo.stage").performTouchInput {
             val t = tips()
             down(Offset(t[0], t[1]))
@@ -142,7 +142,8 @@ class GizmoToolsTest {
         val f = u.scale[0] / y.scale[0]
         assertTrue(f > 1f)
         assertEquals(f, u.scale[1] / y.scale[1], 0.001f)
-        assertEquals(f, u.scale[2] / y.scale[2], 0.001f)
+        assertEquals(y.scale[2], u.scale[2], 0.001f)
+        assertEquals(f, (u.scale[0] * u.scale[2]) / (y.scale[0] * y.scale[2]), 0.001f)
         assertEquals(before.position, u.position)
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { store.detail!!.scale == y.scale }

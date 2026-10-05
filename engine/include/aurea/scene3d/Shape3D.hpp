@@ -110,10 +110,10 @@ using Shape3DPathResolver = std::function<std::string(const std::string&)>;
 /// Imagens ilegíveis não impedem a forma: a parte fica só com a cor e o nome
 /// do arquivo entra em `missingTextures`.
 [[nodiscard]] ImportResult build_shape3d(const Shape3DSpec& spec, const Shape3DPathResolver& resolve = {},
-                                         u32 maxTextureSize = 2048);
+                                         u32 maxTextureSize = 2048, u64 memoryBudget = 256ull << 20);
 
 /// Lê PNG/JPEG/BMP/TGA do disco para RGBA8 (reduzida até `maxSize`).
-[[nodiscard]] bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out);
+[[nodiscard]] bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out, u64 memoryBudget = 64ull << 20);
 
 /// Valor do canal da parte no instante local (fracionário): keyframes, ou o
 /// valor parado da trilha, ou o neutro (0 posição/rotação, 1 escala).

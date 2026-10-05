@@ -154,7 +154,7 @@ public:
 private:
     [[nodiscard]] bool need(usize n) noexcept {
         if (failed_) return false;
-        if (pos_ + n > size_) { failed_ = true; return false; }
+        if (n > size_ - pos_) { failed_ = true; return false; }
         return true;
     }
 
@@ -938,6 +938,10 @@ void read_layer(ByteReader& r, Layer& l) {
     l.transform.skewX = r.f32v();
     l.transform.skewY = r.f32v();
     l.transform.motionBlurAmount = r.f32v();
+    // Recover malformed legacy/project values without passing NaN into
+    // exposure timestamps (and subsequent floating-to-integer conversions).
+    l.transform.motionBlurAmount = std::isfinite(l.transform.motionBlurAmount)
+        ? std::clamp(l.transform.motionBlurAmount, 0.f, 4.f) : 0.f;
     l.transform.motionBlurEnabled = r.boolv();
 
     const u32 trackCount = r.u32v();
@@ -1745,6 +1749,13 @@ std::vector<u8> build_timeline_section(const Project& p) {
             w.f32v(fl.contactShadow);
             w.f32v(fl.fade);
         }
+        // v41: explicit shutter phase and adaptive sampling. Append only: old
+        // files keep every preceding field at its original offset.
+        w.f32v(mb.shutterPhase);
+        w.u32v(mb.adaptiveLimit);
+        // v42: independently timed panorama; legacy files stay unbounded.
+        w.i64v(env.backgroundStart.value);
+        w.i64v(env.backgroundEnd.value);
     });
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
@@ -1978,6 +1989,22 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
             fl.reflectivity = fin(r.f32v(), 0.0f, 1.0f, 0.5f);
             fl.contactShadow = fin(r.f32v(), 0.0f, 1.0f, 0.8f);
             fl.fade = fin(r.f32v(), 1.0f, 100.0f, 6.0f);
+        }
+        mb.shutterAngle = std::isfinite(mb.shutterAngle) ? std::clamp(mb.shutterAngle, 0.0f, 720.0f) : 180.0f;
+        mb.samples = std::clamp(mb.samples, 2u, 64u);
+        mb.previewSamples = std::clamp(mb.previewSamples, 1u, 64u);
+        mb.shutterPhase = -0.5f * mb.shutterAngle;
+        mb.adaptiveLimit = std::max(128u, mb.samples);
+        if (g_readingTimelineVersion >= 41) {
+            const f32 phase = r.f32v();
+            mb.shutterPhase = std::isfinite(phase) ? std::clamp(phase, -360.0f, 360.0f) : mb.shutterPhase;
+            mb.adaptiveLimit = std::clamp(r.u32v(), mb.samples, 256u);
+        }
+        if (g_readingTimelineVersion >= 42) {
+            env.backgroundStart = FrameIndex{std::max<i64>(0, r.i64v())};
+            env.backgroundEnd = FrameIndex{r.i64v()};
+            if (env.backgroundEnd.value < 0) env.backgroundEnd = FrameIndex{-1};
+            else env.backgroundEnd = FrameIndex{std::max(env.backgroundStart.value, env.backgroundEnd.value)};
         }
         c->rebuild_draw_order();
     }

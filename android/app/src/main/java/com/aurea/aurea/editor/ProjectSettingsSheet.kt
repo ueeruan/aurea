@@ -225,6 +225,7 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
             initial = initial,
             withAlpha = false,
             pickFromPreview = { store.captureBitmap(720) },
+            previewIdentity = store.projectGeneration to comp.id,
             onChange = { r, g, b, _ -> store.setCompositionBackground(r, g, b, 1f) },
             onDone = { pickingBackground = false },
         )

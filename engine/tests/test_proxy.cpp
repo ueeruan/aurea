@@ -51,6 +51,7 @@ AUREA_TEST(PreviewProxy, ExpensivePreparationYieldsAndCancellationInterruptsPaci
     std::shared_ptr<const PreviewProxy> proxy;
     while (!(proxy = service.request(asset)) && std::chrono::steady_clock::now() - start < std::chrono::seconds(8))
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (!proxy) std::printf(" proxy decoder opens=%u ", factory.opened.load());
     AUREA_CHECK(proxy != nullptr);
     // Six costly frames may not run back-to-back and monopolize the worker.
     AUREA_CHECK(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(800));

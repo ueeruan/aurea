@@ -51,10 +51,7 @@ AUREA_TEST(ForegroundAI, Regression2131TemporalMaskRejectsFlashesAndSceneCuts) {
 }
 AUREA_TEST(ForegroundAI, RealModelProducesDeterministicFiniteMasks) {
     set_log_sink([](LogLevel,const char* message,void*) {std::printf("\n    %s\n",message);},nullptr);
-    std::filesystem::path root=std::filesystem::current_path();
-    for(u32 i=0;i<8&&!std::filesystem::exists(root/"engine/assets/rotobrush/u2netp.bin");++i)root=root.parent_path();
-    const auto directory=(root/"engine/assets/rotobrush").string();
-    ai::ForegroundEstimator model;AUREA_CHECK(model.load(directory).ok());if(!model.loaded())return;
+    ai::ForegroundEstimator model;AUREA_CHECK(model.load().ok());if(!model.loaded())return;
     std::vector<u8> pixels(320*320*4,255);
     for(u32 y=0;y<320;++y)for(u32 x=0;x<320;++x){const bool inside=(int(x)-160)*(int(x)-160)+(int(y)-160)*(int(y)-160)<6400;auto* p=&pixels[(y*320+x)*4];p[0]=inside?220:30;p[1]=inside?40:120;p[2]=inside?30:70;}
     std::vector<f32> first(ai::ForegroundEstimator::kPixels),second(first.size());std::atomic<bool> cancel{false};
@@ -73,7 +70,7 @@ AUREA_TEST(ForegroundAI, Regression2131FinalVideoFrameWorksWithoutContainerFrame
     cfg.pattern=aurea::test::SyntheticPattern::MovingSquare;
     aurea::test::SyntheticFactory factory(cfg);
     Asset asset;asset.kind=AssetKind::Video;asset.video.width=96;asset.video.height=64;asset.video.fps=30;
-    ai::DepthMapService service("engine/assets/rotobrush");
+    ai::DepthMapService service(true);
     const auto last=service.video(1001,&factory,asset,101,33333,33333,true);
     AUREA_CHECK(last);if(!last)return;
     AUREA_CHECK_EQ(last->disparity.size(),ai::ForegroundEstimator::kPixels);

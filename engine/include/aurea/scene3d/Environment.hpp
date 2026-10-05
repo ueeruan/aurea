@@ -68,7 +68,8 @@ struct HdriDecode {
 /// ou XYZE), OpenEXR (sem compressão, RLE, ZIP, ZIPS, PIZ, PXR24, B44; meia
 /// precisão ou float; linhas ou tiles), JPG/PNG e um .zip com um desses
 /// dentro. Valores não finitos/negativos viram 0.
-[[nodiscard]] HdriDecode decode_hdri_detailed(const u8* bytes, usize size, f32 ldrGain = 1.0f) noexcept;
+[[nodiscard]] HdriDecode decode_hdri_detailed(const u8* bytes, usize size, f32 ldrGain = 1.0f,
+                                            u64 memoryBudget = ~u64{0}) noexcept;
 
 struct EnvironmentMaps {
     CubeData irradiance;      ///< 32², 1 mip

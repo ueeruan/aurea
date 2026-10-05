@@ -59,6 +59,9 @@ AUREA_TEST(VideoSource, TightCacheDoesNotDecodeAndSeekForever) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     AUREA_CHECK(raw->seeks.load() <= 1);
     AUREA_CHECK(raw->delivered.load() <= 5);
+    const u32 buffered=raw->delivered.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    AUREA_CHECK_EQ(raw->delivered.load(),buffered);
     source.request({raw->pts_of(31), DecodeMode::Playback, 1, 1.f});
     AUREA_CHECK(source.wait_for(raw->pts_of(31), 3000));
     source.stop();
@@ -507,6 +510,16 @@ AUREA_TEST(DecodedFrameCache, ScrubbingBackKeepsWhatIsBehind) {
     AUREA_CHECK(!cache.contains(14 * kFrame, kFrame / 2));
 }
 
+AUREA_TEST(DecodedFrameCache, AdvancingKeepsAllSixPrefetchedFrames) {
+    DecodedFrameCache cache;DecodedFrameCache::Config cfg;cfg.maxFrames=7;cache.configure(cfg);
+    cache.set_focus(0,+1);
+    for(i64 i=0;i<=6;++i)AUREA_CHECK(cache.insert(frame_at(i*kFrame)));
+    cache.set_focus(kFrame,+1);
+    AUREA_CHECK(cache.insert(frame_at(7*kFrame)));
+    for(i64 i=1;i<=7;++i)AUREA_CHECK(cache.contains(i*kFrame,kFrame/2));
+    AUREA_CHECK(!cache.contains(0,kFrame/2));
+}
+
 AUREA_TEST(DecodedFrameCache, ByteBudgetIsRespected) {
     DecodedFrameCache cache;
     DecodedFrameCache::Config cfg;
@@ -611,6 +624,48 @@ AUREA_TEST(VideoSource, StopWakesPendingWaitWithoutReportingSuccess) {
     waiter.join();
     AUREA_CHECK(woke);
     AUREA_CHECK(!ready);
+}
+
+AUREA_TEST(VideoSource, BufferPressureRetainsPendingFrameWithoutSeekingAgain) {
+    struct Decoder : VideoDecoderBackend {
+        VideoStreamInfo stream{};
+        std::atomic<u32> seeks{0}, attempts{0}, pressure{5};
+        i64 cursor = 0;
+        Decoder() { stream.fps = 30; stream.preciseFrameTiming = true; }
+        const VideoStreamInfo& info() const noexcept override { return stream; }
+        Status seek_to_keyframe(i64 t) noexcept override { ++seeks; cursor = t; return OkStatus; }
+        Status next_frame(i64, FrameRef& out, i64& pts, bool& eos) noexcept override {
+            out.reset(); eos = false; ++attempts;
+            if (pressure.load() > 0) {
+                --pressure;
+                return Status{Errc::BudgetExceeded, "GPU still uses output buffers"};
+            }
+            pts = cursor; out = frame_at(cursor); out->durationUs = kFrame;
+            cursor += kFrame;
+            return OkStatus;
+        }
+    };
+    auto decoder = std::make_unique<Decoder>();
+    auto* observed = decoder.get();
+    VideoSource source(std::move(decoder), MediaPriority::Preview);
+    source.start();
+    // Also exercise pressure before the first decoded output, far from time 0.
+    const i64 start = 3'000'000;
+    source.request({start, DecodeMode::Still, 0, 1});
+    AUREA_CHECK(source.wait_for(start, 1500));
+    AUREA_CHECK_EQ(observed->seeks.load(), 1u);
+    AUREA_CHECK_EQ(observed->attempts.load(), 6u);
+    observed->pressure.store(4);
+    source.request({start + kFrame, DecodeMode::Still, 0, 1});
+    AUREA_CHECK(source.wait_for(start + kFrame, 1500));
+    bool exact = false;
+    const auto frame = source.frame_for(start + kFrame, &exact);
+    AUREA_CHECK(frame && exact && frame->ptsUs == start + kFrame);
+    AUREA_CHECK_EQ(observed->seeks.load(), 1u);
+    const auto settled = observed->attempts.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    AUREA_CHECK_EQ(observed->attempts.load(), settled);
+    source.stop();
 }
 
 AUREA_TEST(VideoSource, RestartRedecodesTheLastRequest) {
@@ -771,9 +826,12 @@ AUREA_TEST(VideoSource, PlaybackPrefetchesCurrentNextAndNextPlusOne) {
     AUREA_CHECK(src.cache().contains(raw->pts_of(60), kFrame / 2));
     AUREA_CHECK(src.cache().contains(raw->pts_of(61), kFrame / 2));
     AUREA_CHECK(src.cache().contains(raw->pts_of(62), kFrame / 2));
-    // E para por aí: não decodifica o vídeo inteiro.
+    // 180 ms at 30 fps: six frames ahead plus the current one, then idle.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    AUREA_CHECK(raw->delivered.load() <= 5);
+    AUREA_CHECK(raw->delivered.load() <= 7);
+    const u32 buffered = raw->delivered.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    AUREA_CHECK_EQ(raw->delivered.load(), buffered);
     // O playhead avança: o prefetch acompanha.
     src.request({raw->pts_of(61), DecodeMode::Playback, +1, 1.0f});
     wait_until([&] { return src.cache().contains(raw->pts_of(63), kFrame / 2); });
@@ -932,6 +990,26 @@ AUREA_TEST(Thumbnail, ConvertsWithTheVideoMatrixAndKeepsAspect) {
     AUREA_CHECK(px(28, 4, 1) > 240 && px(28, 4, 0) < 16 && px(28, 4, 2) < 16);
     AUREA_CHECK(px(4, 14, 2) > 240 && px(4, 14, 0) < 16 && px(4, 14, 1) < 16);
     AUREA_CHECK(px(28, 14, 0) > 240 && px(28, 14, 1) > 240 && px(28, 14, 2) > 240);
+}
+
+AUREA_TEST(Thumbnail, RejectsInvalidPlaneLayoutsAndUnboundedOutput) {
+    const u8 y[4] = {16, 16, 16, 16}, uv[2] = {128, 128};
+    DecodedFrame frame; frame.width = frame.height = 2; frame.planeCount = 2;
+    frame.format = PixelFormat::NV12; frame.planes[0] = y; frame.planes[1] = uv;
+    frame.strides[0] = frame.strides[1] = 2;
+    ThumbnailService::Image image;
+    AUREA_CHECK(frame_to_thumbnail(frame, 2, image));
+    frame.strides[0] = 1;
+    const bool rejectsBadLayout = !frame_to_thumbnail(frame, 2, image);
+    AUREA_CHECK(rejectsBadLayout);
+    if (!rejectsBadLayout) return; // Do not probe huge dimensions against a stale/unsafe binary.
+    frame.strides[0] = 2; frame.strides[1] = 1; AUREA_CHECK(!frame_to_thumbnail(frame, 2, image));
+    frame.strides[1] = 2; frame.cropLeft = 1; AUREA_CHECK(!frame_to_thumbnail(frame, 2, image));
+    frame.cropLeft = 0; frame.visibleHeight = 3; AUREA_CHECK(!frame_to_thumbnail(frame, 2, image));
+    frame.visibleHeight = 0; frame.format = PixelFormat::RGBA8; AUREA_CHECK(!frame_to_thumbnail(frame, 2, image));
+    frame.format = PixelFormat::NV12; AUREA_CHECK(!frame_to_thumbnail(frame, 0xffffffffu, image));
+    frame.width = 65536; frame.height = 1; frame.strides[0] = frame.strides[1] = 65536;
+    AUREA_CHECK(!frame_to_thumbnail(frame, 256, image));
 }
 
 AUREA_TEST(Thumbnail, RotatedVideoIsUpright) {

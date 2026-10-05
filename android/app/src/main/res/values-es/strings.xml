@@ -3448,7 +3448,7 @@ para editar la curva.</string>
     <string name="roto_preparing">Preparando Rotobrush local…</string>
     <string name="roto_downloading">Descargando modelo de recorte: %1$d%%</string>
     <string name="roto_download_failed">No se pudo preparar el modelo. Revisa la conexión y el espacio libre; intenta añadir el efecto de nuevo.</string>
-    <string name="roto_note">Recorte automático del primer plano. Modelo local de 2,3 MB en el primer uso. Ajusta el borde y refina con las máscaras de la capa.</string>
+    <string name="roto_note">Recorte automático del primer plano, disponible sin conexión. Ajusta el borde y refina con las máscaras de la capa.</string>
     <string name="roto_select_media">Selecciona capas de imagen o vídeo para Rotobrush IA.</string>
     <string name="roto_prepare">Preparar IA local</string>
     <plurals name="pn_caption_transcript">
@@ -3471,4 +3471,25 @@ para editar la curva.</string>
         <item quantity="many">%1$d keyframes — editar en el cabezal</item>
         <item quantity="other">%1$d keyframes — editar en el cabezal</item>
     </plurals>
+    <string name="fxl_visible_duration">Duración visible</string>
+    <string name="fxl_minimum_opacity">Opacidad mínima</string>
+    <string name="fxl_maximum_opacity">Opacidad máxima</string>
+    <string name="fxl_grow">Aumentar</string>
+    <string name="fxl_vertical_scatter">Dispersión vertical</string>
+    <string name="fxl_end_angle">Ángulo final</string>
+    <string name="fxl_axis">Eje</string>
+    <string name="fxl_spacing">Espaciado</string>
+    <string name="fxl_rotation_per_copy">Rotación por copia</string>
+    <string name="fxl_scale_per_copy">Escala por copia</string>
+    <string name="fxl_end_opacity">Opacidad final</string>
+    <string name="fxl_orient_copies">Orientar las copias</string>
+    <string name="fxl_remove_color_fringe">Eliminar halos de color</string>
+    <string name="fxo_rgb">RGB</string>
+    <string name="fxl_choke_1">Contracción 1</string>
+    <string name="fxl_softness_1">Suavidad 1</string>
+    <string name="fxl_choke_2">Contracción 2</string>
+    <string name="fxl_softness_2">Suavidad 2</string>
+    <string name="fxl_iterations">Iteraciones</string>
+    <string name="local_ai_processing">Calculando IA local… El primer análisis puede tardar unos segundos.</string>
+    <string name="local_ai_failed">La IA local no pudo analizar el fotograma. Mueve el cursor o vuelve a abrir el proyecto.</string>
 </resources>

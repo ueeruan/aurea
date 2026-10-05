@@ -31,19 +31,28 @@ inline f32 sample(const u8* plane, u32 stride, u32 x, u32 y, bool tenBit, u32 pi
 } // namespace
 
 bool frame_to_thumbnail(const DecodedFrame& f, u32 height, ThumbnailService::Image& out) {
-    if (f.planeCount < 2 || !f.planes[0] || !f.planes[1] || f.width == 0 || f.height == 0 || height == 0) return false;
+    if (f.planeCount < 2 || !f.planes[0] || !f.planes[1] || f.width == 0 || f.height == 0 || height == 0
+        || height > 4096 || f.width > 65536 || f.height > 65536) return false;
     const bool threePlane = f.format == PixelFormat::YUV420P;
-    if (threePlane && !f.planes[2]) return false;
+    if (threePlane && (f.planeCount < 3 || !f.planes[2])) return false;
     const bool tenBit = f.format == PixelFormat::P010;
     const bool nv21 = f.format == PixelFormat::NV21;
+    if (!threePlane && !tenBit && !nv21 && f.format != PixelFormat::NV12) return false;
 
     const u32 vw = f.visibleWidth ? f.visibleWidth : f.width;
     const u32 vh = f.visibleHeight ? f.visibleHeight : f.height;
+    const u64 chromaWidth = (static_cast<u64>(f.width) + 1) / 2;
+    if (static_cast<u64>(f.cropLeft) + vw > f.width || static_cast<u64>(f.cropTop) + vh > f.height
+        || f.strides[0] < static_cast<u64>(f.width) * (tenBit ? 2 : 1)
+        || f.strides[1] < chromaWidth * (threePlane ? 1 : tenBit ? 4 : 2)
+        || (threePlane && f.strides[2] < chromaWidth)) return false;
     const bool sideways = f.rotation == 90 || f.rotation == 270;
     const u32 dispW = sideways ? vh : vw;
     const u32 dispH = sideways ? vw : vh;
+    const f64 width = std::max(1.0, std::round(static_cast<f64>(height) * dispW / dispH));
+    if (width > 4096 || width * height > 4.0 * 1024 * 1024) return false;
     out.height = height;
-    out.width = std::max<u32>(1, static_cast<u32>(std::lround(static_cast<f64>(height) * dispW / dispH)));
+    out.width = static_cast<u32>(width);
     out.rgba.assign(static_cast<usize>(out.width) * out.height * 4, 255);
 
     f32 kr = 0.2126f, kb = 0.0722f;

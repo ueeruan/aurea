@@ -90,13 +90,11 @@ struct ExportView: View {
                 model.exportOptions.bitrateMbps = 0
                 model.exportOptions.quality = 1
             }
-            let native = model.engine
-            let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
-                var width: UInt32 = 0, height: UInt32 = 0
-                guard let data = native.captureFrame(640, outWidth: &width, outHeight: &height) else { return nil }
-                return UIImage.fromRGBA(data, width: Int(width), height: Int(height))
-            }.value
-            if !Task.isCancelled { preview = image }
+            let project = model.projectGeneration
+            if let frame = await model.capturePreviewFrame(640),
+               !Task.isCancelled, model.projectGeneration == project {
+                preview = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height))
+            }
         }
     }
 

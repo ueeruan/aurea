@@ -48,6 +48,13 @@ struct EnvironmentSettings {
     /// v32: ambiente de estúdio procedural (StudioPreset: 0 nenhum, 1 estúdio
     /// escuro, 2 estúdio de produto, 3 céu e sol). Vale quando não há HDRI.
     u32     studioPreset = 0;
+    /// Half-open interval of the visible panorama, in composition frames.
+    /// -1 keeps the historical whole-composition end; lighting stays independent.
+    FrameIndex backgroundStart{0};
+    FrameIndex backgroundEnd{-1};
+    [[nodiscard]] bool background_at(FrameIndex time) const noexcept {
+        return showBackground && time >= backgroundStart && (backgroundEnd.value < 0 || time < backgroundEnd);
+    }
 };
 
 /// v32: chão do grupo 3D (plano horizontal no ponto mais baixo dos modelos;
@@ -94,10 +101,12 @@ struct PostProcessSettings {
 /// Motion blur da composição (o global; cada layer multiplica por seu próprio).
 struct MotionBlurSettings {
     bool enabled = false;
-    u32  samples = 64;        ///< export
+    u32  samples = 16;        ///< minimum samples while moving (export)
     u32  previewSamples = 16; ///< preview (adaptive budget can reduce this)
     f32  shutterAngle = 180.0f;
     bool vectorBlur = false;  ///< blur baseado em vetores de movimento
+    f32  shutterPhase = -90.0f; ///< exposure starts at frame + phase / 360
+    u32  adaptiveLimit = 128;  ///< bounded adaptive sample ceiling (export)
 };
 
 /// Marca na régua da composição. `kind` 0 = marca da pessoa, 1 = batida

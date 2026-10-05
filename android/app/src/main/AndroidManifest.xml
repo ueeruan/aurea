@@ -60,6 +60,15 @@
             android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
             android:value="true"/>
 
+        <!-- Android 8–9 exports stay in app-owned storage and are shared via scoped content URIs. -->
+        <provider
+            android:name=".state.ExportFileProvider"
+            android:authorities="${applicationId}.exports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/export_paths"/>
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

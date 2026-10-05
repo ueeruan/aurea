@@ -18,7 +18,7 @@ Rect visible_layer_rect(const LayerPlacement& pl) noexcept {
     // calcular. Vazio = "não corte por visibilidade" — quem chama já trata
     // assim, e era o corte que encolhia a região para 1x1 e fazia a camada
     // desaparecer atrás do efeito (Motion Tile, Meio-tom, brilhos...).
-    if (pl.inScene3d) return Rect{0, 0, 0, 0};
+    if (pl.inScene3d || pl.preserveFullExtent) return Rect{0, 0, 0, 0};
     // Parte 2D afim de comp←layer: x' = a x + c y + tx ; y' = b x + d y + ty.
     const Mat4& m = pl.compFromLayer;
     const f32 a = m.col[0].x, b = m.col[0].y;
@@ -218,6 +218,7 @@ void EffectPlan::clear() noexcept {
     hasFold = false;
     foldMatrix = Mat4::identity();
     foldOpacity = 1.0f;
+    foldEffectIndex = kInvalidIndex;
     droppedIdentity = 0;
     droppedUnknown = 0;
     fusedEffects = 0;
@@ -229,10 +230,16 @@ void EffectPlan::clear() noexcept {
 void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, FrameIndex localTime,
                        f32 texelScale, const LayerPlacement& placement,
                        EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition) {
+    plan_f(layer, registry, static_cast<f64>(localTime.value), texelScale, placement, resources, out, framesPerSecond, composition);
+}
+
+void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64 localTime,
+                         f32 texelScale, const LayerPlacement& placement,
+                         EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition) {
     out.clear();
     out.placement = placement;
 
-    struct Source { const Layer* owner; const EffectInstance* effect; FrameIndex time; };
+    struct Source { const Layer* owner; const EffectInstance* effect; f64 time; };
     // Memória de trabalho do planejamento, reaproveitada entre quadros (o
     // caminho quente não aloca: Perf8C.SteadyPlaybackOf50Layers...).
     static thread_local std::vector<Source> sources;
@@ -241,7 +248,8 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
     static thread_local std::vector<ParamValue> scratch;
     sources.clear();
     for (const auto& effect : layer.effects) sources.push_back({&layer, &effect, localTime});
-    const FrameIndex global{localTime.value + layer.start.value - layer.offset.value};
+    const f64 globalTime = localTime + layer.start.value - layer.offset.value;
+    const FrameIndex global{static_cast<i64>(std::floor(globalTime))};
     // A null has no pixels. Its Motion Tile controls the raster of each child;
     // sample the null's animation clock, not the child's trimmed/remapped clock.
     const Layer* parent = composition ? composition->layer(layer.parent) : nullptr;
@@ -249,7 +257,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         if (parent->kind == LayerKind::Null && parent->contains_time(global))
             for (const auto& effect : parent->effects)
                 if (effect.type == effect_type_id(effect_keys::kMotionTile))
-                    sources.push_back({parent, &effect, parent->local_time(global)});
+                    sources.push_back({parent, &effect, globalTime - parent->start.value + parent->offset.value});
         parent = composition->layer(parent->parent);
     }
     // 0. A geometria afim DEPOIS de cada efeito (de trás para a frente): o
@@ -273,14 +281,15 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
             if (!effect || !params || effect->effect_class() != EffectClass::Domain) continue;
             scratch.clear();
             for (u32 p = 0; p < params->count(); ++p)
-                scratch.push_back(evaluate_param(source.owner->tracks, inst, p, params->at(p), source.time));
+                scratch.push_back(evaluate_param_f(source.owner->tracks, inst, p, params->at(p), source.time));
             EffectEval e;
             e.effect = effect;
             e.instance = &inst;
             e.values = scratch.data();
             e.count = params->count();
             e.effectIndex = static_cast<u32>(i);
-            e.localTime = source.time;
+            e.localTime = FrameIndex{static_cast<i64>(std::floor(source.time))};
+            e.fractionalTime = source.time;
             e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
             e.texelScale = texelScale;
             e.placement = &out.placement;
@@ -312,7 +321,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
 
         const u32 offset = static_cast<u32>(out.values.size());
         for (u32 p = 0; p < params->count(); ++p) {
-            out.values.push_back(evaluate_param(source.owner->tracks, inst, p, params->at(p), source.time));
+            out.values.push_back(evaluate_param_f(source.owner->tracks, inst, p, params->at(p), source.time));
         }
 
         EffectEval e;
@@ -323,7 +332,8 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         e.valueOffset = offset;
         e.count = params->count();
         e.effectIndex = i;
-        e.localTime = source.time;
+        e.localTime = FrameIndex{static_cast<i64>(std::floor(source.time))};
+        e.fractionalTime = source.time;
         e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
         e.texelScale = texelScale;
         e.layer = &layer;
@@ -334,6 +344,9 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         e.placement = &stepPlacement;
 
         if (effect->is_identity(e)) {
+            Mat4 identityFold = Mat4::identity();
+            f32 identityOpacity = 1.f;
+            if (effect->fold_into_composite(e, identityFold, identityOpacity)) out.foldEffectIndex = i;
             ++out.droppedIdentity;
             out.values.resize(offset);
             continue;
@@ -349,6 +362,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
         }
         // O que só existe sob o lock (espectro do som) entra no eval agora.
         effect->resolve_resources(e);
+        out.foldEffectIndex = kInvalidIndex;
         e.placement = &out.placement;
         out.evals.push_back(e);
         out.colorOps.push_back(op);
@@ -368,6 +382,7 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
             out.hasFold = true;
             out.foldMatrix = m;
             out.foldOpacity = opacity;
+            out.foldEffectIndex = last.effectIndex;
             out.evals.pop_back();
             out.colorOps.pop_back();
         }
@@ -430,11 +445,37 @@ void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, Frame
     // 4. Margens: quanto de vizinhança as etapas SEGUINTES leem. Uma etapa
     //    que recorta a própria saída ao quadro visível precisa deixar isto.
     f32 margin = 0.0f;
+    bool fullExtent = false;
     for (usize s = out.stages.size(); s-- > 0;) {
         EffectStage& st = out.stages[s];
         st.margin = margin;
+        st.preserveFullExtent = fullExtent;
         for (u32 k = 0; k < st.count; ++k) {
             const EffectEval& e = out.evals[st.begin + k];
+            // Tiling reads the whole source, not just the part presently in
+            // view. Cropping a preceding blur/transform changes both the tile
+            // size and its origin when the layer moves offscreen.
+            if (e.effect->type_id() == effect_type_id(effect_keys::kMotionTile)) fullExtent = true;
+            // A reader's radius is in this stage's OUTPUT coordinates.
+            // Propagate it through the inverse affine before asking earlier
+            // stages for pixels. Tile -> scale 10% -> blur 24px needs 240px
+            // of tile padding, not 24px. Absolute inverse row sums bound
+            // both axes, including rotation, reflection and uneven scale.
+            if (margin > 0.0f && e.effect->effect_class() == EffectClass::Domain) {
+                Mat4 m = Mat4::identity();
+                f32 opacity = 1.0f;
+                if (e.effect->fold_into_composite(e, m, opacity)) {
+                    const f32 a = m.col[0].x, b = m.col[0].y;
+                    const f32 c = m.col[1].x, d = m.col[1].y;
+                    const f32 det = a * d - b * c;
+                    if (std::isfinite(det) && std::fabs(det) >= 1e-9f) {
+                        const f32 reach = std::max(std::fabs(d) + std::fabs(c),
+                                                   std::fabs(b) + std::fabs(a)) / std::fabs(det);
+                        const f32 expanded = margin * reach;
+                        if (std::isfinite(expanded)) margin = expanded;
+                    }
+                }
+            }
             margin += e.effect->input_margin(e);
         }
     }
@@ -541,11 +582,12 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
         e.values = plan.values.data() + e.valueOffset;
         e.placement = &plan.placement;
         LayerPlacement seen;
-        if (st.hasAfter) {
+        if (st.hasAfter || st.preserveFullExtent) {
             // A imagem desta etapa chega ao quadro pela camada E pela
             // geometria dos efeitos seguintes (dobrados ou não).
             seen = plan.placement;
-            seen.compFromLayer = plan.placement.compFromLayer * st.after;
+            if (st.hasAfter) seen.compFromLayer = plan.placement.compFromLayer * st.after;
+            seen.preserveFullExtent = st.preserveFullExtent;
             e.placement = &seen;
         }
         const bool wants = !past && e.effect->wants_history();

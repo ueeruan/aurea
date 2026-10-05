@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -75,7 +77,11 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
     val canRedo by remember { derivedStateOf { store.project.canRedo } }
     val hasSelection by remember { derivedStateOf { store.selection.isNotEmpty() } }
     val h = ShellDims.Transport
-    val side = 44.dp
+    val side = 48.dp
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val compact = maxWidth < 408.dp
+    val tiny = maxWidth < 352.dp
+    var more by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
@@ -91,7 +97,7 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             size = 22.dp, width = side, height = side,
             tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
         )
-        ChromeButton(
+        if (!tiny) ChromeButton(
             CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
             onClick = if (canRedo) ({ store.redo() }) else null,
             size = 22.dp, width = side, height = side,
@@ -106,7 +112,7 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             modifier = Modifier.testTag("transport.previous"),
         )
         val marked = store.playhead in store.markers.frames
-        ChromeButton(
+        if (!compact) ChromeButton(
             if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
             stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
             onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
@@ -123,7 +129,7 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             onLongClick = { store.seek(store.project.durationFrames) },
             modifier = Modifier.testTag("transport.next"),
         )
-        ChromeButton(
+        if (!compact) ChromeButton(
             CupertinoGlyph.PlusSquareOnSquare,
             stringResource(R.string.editor_duplicar_camada_segure_copiar),
             onClick = { if (store.selection.isNotEmpty()) store.duplicateLayers() },
@@ -132,12 +138,27 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             onLongClick = { openSheet(store, ui, ShellSheet.CopyPaste) },
             modifier = Modifier.testTag("transport.duplicate"),
         )
+        if (compact) Box {
+            ChromeButton(CupertinoGlyph.Ellipsis, stringResource(R.string.timeline_more), onClick = { more = true },
+                size = 22.dp, width = side, height = side)
+            DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                if (tiny) DropdownMenuItem(text = { Text(stringResource(R.string.editor_refazer)) }, enabled = canRedo,
+                    onClick = { more = false; store.redo() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.editor_dividir_cabecote)) }, enabled = hasSelection,
+                    onClick = { more = false; store.splitAtPlayhead() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.editor_marcar_ou_desmarcar_este_instante)) },
+                    onClick = { more = false; store.toggleMarker() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.editor_duplicar_camada_segure_copiar)) }, enabled = hasSelection,
+                    onClick = { more = false; store.duplicateLayers() })
+            }
+        }
         ChromeButton(
             if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen,
             if (ui.fullscreen) stringResource(R.string.editor_sair_tela_cheia) else stringResource(R.string.editor_tela_cheia),
             onClick = { ui.fullscreen = !ui.fullscreen },
             size = 22.dp, width = side, height = side,
         )
+    }
     }
 }
 
@@ -148,19 +169,19 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
  */
 @Composable
 private fun PlayButton(store: EditorStore) {
-    val playing = store.playing
+    val playing = store.playing || store.preview.buffering
     val loop = store.looping
     Box(contentAlignment = Alignment.Center) {
         ChromeButton(
             if (playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
             when {
-                loop -> stringResource(R.string.editor_repeticao_ligada_segure_desligar)
                 playing -> stringResource(R.string.editor_pausar)
+                loop -> stringResource(R.string.editor_repeticao_ligada_segure_desligar)
                 else -> stringResource(R.string.editor_reproduzir_segure_repetir)
             },
-            onClick = { store.togglePlayback() },
+            onClick = { if (store.preview.buffering) store.pause() else store.togglePlayback() },
             size = 26.dp,
-            width = 44.dp,
+            width = 48.dp,
             height = 48.dp,
             tint = if (loop) AureaColors.Accent else AureaColors.Text,
             onLongClick = { store.setLoop(!store.looping) },

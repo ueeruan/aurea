@@ -50,6 +50,7 @@ typedef struct {
     uint32_t previewNumerator;
     uint32_t previewDenominator;
     uint32_t previewAuto;
+    uint32_t previewBufferStatus;  ///< shared packed ready/target/active/limited flags
     int64_t  playhead;              ///< frame
     int64_t  duration;              ///< frames
     uint32_t playing;
@@ -250,6 +251,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (float)clampPinchFactor3D:(float)factor kind:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z NS_SWIFT_NAME(clampPinchFactor3D(_:kind:scaleX:scaleY:scaleZ:));
 /// Escala 3D de gesto já no formato gravado: axis 0..2 eixo, 3 uniforme, 4 ajustar (GestureMath.hpp).
 - (NSArray<NSNumber*>*)gestureScale3D:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z axis:(int)axis factor:(float)factor NS_SWIFT_NAME(gestureScale3D(_:scaleX:scaleY:scaleZ:axis:factor:));
+- (NSArray<NSNumber*>*)fitCanvas:(NSArray<NSNumber*>*)values fill:(BOOL)fill NS_SWIFT_NAME(fitCanvas(_:fill:));
 - (NSArray<NSNumber*>*)previewGestureBasis:(long long)layer;
 - (NSArray<NSNumber*>*)previewGestureValue:(NSArray<NSNumber*>*)basis dx:(float)dx dy:(float)dy rotate:(BOOL)rotate;
 
@@ -274,6 +276,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)invalidate;
 /// Pressão de memória: `level` no mesmo espírito do TRIM_MEMORY_* do Android.
 - (int64_t)trimMemory:(int32_t)level;
+/// Process allocation headroom reported by iOS; zero can mean the app exceeded its limit.
+/// Simulator without an app limit uses a measured host-RAM/residency budget.
+- (uint64_t)availableMemoryBytes;
 /// Estado térmico (0 nominal … 4 crítico) vindo de NSProcessInfo.
 - (void)setThermalLevel:(uint32_t)level throttling:(BOOL)throttling;
 
@@ -298,6 +303,10 @@ NS_SWIFT_NAME(AureaEngine)
 // --- Estado -----------------------------------------------------------------
 /// `YES` se leu. Sem alocação: a UI chama isto uma vez por frame.
 - (BOOL)readStatus:(AureaStatus*)out NS_SWIFT_NAME(readStatus(_:));
+/// Pares de quadros [inicio, fim exclusivo] já renderizados na composição atual.
+/// Snapshot curto: não aguarda o renderer nem a GPU.
+- (NSArray<NSNumber*>*)previewBufferRanges NS_SWIFT_NAME(previewBufferRanges());
+- (uint32_t)localAiStatus NS_SWIFT_NAME(localAiStatus());
 /// Painel DEV: medido, nunca estimado (chaves AureaPerf*).
 - (NSDictionary<NSString*, id>*)perf;
 #if DEBUG
@@ -510,6 +519,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber*>*)sceneSettings;
 - (BOOL)setSceneSetting:(uint32_t)parameter value:(float)value;
 - (BOOL)setEnvironmentBackground:(BOOL)visible;
+- (BOOL)setEnvironmentBackgroundRangeStart:(long long)start end:(long long)end;
 - (BOOL)setEnvironmentIntensity:(float)intensity rotation:(float)rotation;
 /// {tem HDRI, intensidade, giro}.
 - (NSArray<NSNumber*>*)environment;
@@ -800,8 +810,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next;
 - (BOOL)trimComposition:(int64_t)frame;
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));
+/// [enabled, shutterAngle, shutterPhase, samples, adaptiveLimit, previewSamples].
 - (NSArray<NSNumber*>*)motionBlurSettings;
 - (void)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter;
+- (BOOL)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter phase:(float)phase
+                      samples:(uint32_t)samples adaptiveLimit:(uint32_t)adaptiveLimit;
 - (nullable NSDictionary<NSString*, id>*)composition;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectCatalog;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectsForLayer:(long long)layerId;

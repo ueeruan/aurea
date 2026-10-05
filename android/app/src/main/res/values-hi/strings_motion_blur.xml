@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mb_shutter_angle">शटर कोण</string>
+    <string name="mb_shutter_phase">शटर फ़ेज़</string>
+    <string name="mb_phase_hint">फ़्रेम के सापेक्ष एक्सपोज़र को खिसकाता है। केंद्रित करने से आधा एक्सपोज़र फ़्रेम से पहले होता है।</string>
+    <string name="mb_center_exposure">एक्सपोज़र केंद्रित करें</string>
+    <string name="mb_samples_per_frame">प्रति फ़्रेम सैंपल</string>
+    <string name="mb_adaptive_limit">अनुकूली सीमा</string>
+    <string name="mb_quality_hint">तेज़ प्रतिक्रिया के लिए प्रीव्यू कम सैंपल इस्तेमाल कर सकता है। एक्सपोर्ट चुनी गई गुणवत्ता इस्तेमाल करता है। अधिक मानों में अधिक समय लगता है।</string>
+    <string name="mb_advanced">उन्नत</string>
+    <string name="mb_comp_settings_hint">कंपोज़िशन सेटिंग: मोशन ब्लर चालू वाली सभी लेयर पर लागू होती हैं।</string>
+</resources>

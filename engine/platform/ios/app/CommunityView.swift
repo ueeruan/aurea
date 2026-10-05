@@ -54,6 +54,7 @@ private actor SocialAPI {
         var r = request(path, method)
         if let body { r.httpBody = try JSONSerialization.data(withJSONObject: body); r.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let (data, response) = try await ContaAPI.boundedData(for: r, limit: 1_048_576)
+        try Task.checkCancellation()
         return try decode(data, response, as: type)
     }
     func upload(_ url: URL, kind: String) async throws -> SocialAsset {
@@ -68,6 +69,8 @@ private actor SocialAPI {
     func download(_ asset: SocialAsset) async throws -> URL {
         guard (1...50 * 1024 * 1024).contains(asset.bytes), UUID(uuidString: asset.id) != nil else { throw SocialFailure(code: "invalid_file") }
         let (file, response) = try await ContaAPI.session.download(for: request("/assets/\(asset.id)", "GET"))
+        defer { try? FileManager.default.removeItem(at: file) }
+        try Task.checkCancellation()
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               (try file.resourceValues(forKeys: [.fileSizeKey])).fileSize == Int(asset.bytes) else {
             try? FileManager.default.removeItem(at: file); throw SocialFailure(code: "invalid_file")
@@ -90,38 +93,61 @@ private final class SocialState: ObservableObject {
     @Published var error: String?
     var api = SocialAPI(token: "")
     var ownMode = false
+    private var generation = UUID()
+    private func requireCurrent(_ request: UUID) throws {
+        try Task.checkCancellation()
+        if request != generation { throw CancellationError() }
+    }
     func fail(_ error: Error) { self.error = (error as? SocialFailure)?.message ?? AureaText.t("social_error") }
     func run(_ action: @escaping () async throws -> Void) {
         guard !busy else { return }
+        let request = generation
         busy = true; error = nil
-        Task { defer { busy = false }; do { try await action() } catch { if !Task.isCancelled { fail(error) } } }
+        Task {
+            defer { if generation == request { busy = false } }
+            do { try requireCurrent(request); try await action() }
+            catch { if !Task.isCancelled && generation == request { fail(error) } }
+        }
     }
     func start(_ session: ContaSessao?, own: Bool) async {
+        let request = UUID(); generation = request
         api = SocialAPI(token: session?.token ?? ""); ownMode = own; profile = nil; feed = []; busy = true; error = nil
-        defer { busy = false }
-        do { try await refresh() } catch { if !Task.isCancelled { fail(error) } }
+        defer { if generation == request { busy = false } }
+        do { try await refresh() } catch { if !Task.isCancelled && generation == request { fail(error) } }
     }
     func refresh() async throws {
+        let request = generation
         let account = try await api.call("/me", as: SocialAccount.self)
+        try requireCurrent(request)
         me = account.profile; canVerify = account.canVerify == true
         if (ownMode && profile == nil) || profile?.id == me?.id { profile = me }
         try await loadFeed()
     }
     func loadFeed(more: Bool = false) async throws {
+        let request = generation
         let suffix = "?following=\(following && profile == nil ? 1 : 0)" + (profile.map { "&user=\($0.id)" } ?? "") + (more ? cursor.map { "&cursor=\(SocialAPI.query($0))" } ?? "" : "")
         let result = try await api.call("/posts\(suffix)", as: SocialPage<SocialPost>.self)
+        try requireCurrent(request)
         feed = more ? feed + result.items.filter { item in !feed.contains { $0.id == item.id } } : result.items
         cursor = result.cursor
     }
     func open(_ id: String) async throws {
-        profile = try await api.call("/profiles/\(id)", as: SocialAccount.self).profile
+        let request = generation
+        let result = try await api.call("/profiles/\(id)", as: SocialAccount.self).profile
+        try requireCurrent(request)
+        profile = result
         try await loadFeed()
     }
     func follow(_ p: SocialProfile) async throws {
-        profile = try await api.call("/profiles/\(p.id)/follow", method: p.followed == true ? "DELETE" : "PUT", as: SocialAccount.self).profile
+        let request = generation
+        let result = try await api.call("/profiles/\(p.id)/follow", method: p.followed == true ? "DELETE" : "PUT", as: SocialAccount.self).profile
+        try requireCurrent(request)
+        profile = result
     }
     func like(_ post: SocialPost) async throws {
+        let request = generation
         let result = try await api.call("/posts/\(post.id)/like", method: post.liked ? "DELETE" : "PUT", as: SocialLike.self)
+        try requireCurrent(request)
         if let i = feed.firstIndex(where: { $0.id == post.id }) { feed[i].liked = result.liked; feed[i].likes = result.likes }
     }
 }

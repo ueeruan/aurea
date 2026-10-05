@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="environment_start">बैकग्राउंड की शुरुआत</string>
+    <string name="environment_end">बैकग्राउंड का अंत</string>
+    <string name="environment_full_duration">पूरी कंपोज़िशन</string>
+    <string name="environment_layer_duration">लेयर की अवधि इस्तेमाल करें</string>
+</resources>

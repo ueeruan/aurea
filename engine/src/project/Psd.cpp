@@ -22,11 +22,11 @@ struct Channel { i16 id; u32 length; };
 struct Record {
     Layer layer; std::vector<Channel> channels;
     u32 section = 0; bool clipping = false;
-    i32 mx = 0, my = 0; u32 mw = 0, mh = 0;
+    i64 mx = 0, my = 0; u32 mw = 0, mh = 0;
     u8 maskDefault = 255, maskFlags = 2;
 };
-bool dimensions(i32 a, i32 b, u32& size) {
-    const i64 d = static_cast<i64>(b) - a;
+bool dimensions(i64 a, i64 b, u32& size) {
+    const i64 d = b - a;
     if (d < 0 || d > 16384) return false;
     size = static_cast<u32>(d); return true;
 }
@@ -80,8 +80,9 @@ bool channel(Reader r, u32 w, u32 h, u16 depth, std::vector<u8>& out) {
 }
 }
 
-Status read(std::span<const u8> bytes, Document& out) {
+Status read(std::span<const u8> bytes, Document& out, usize decodedBudget) {
     if (bytes.size() > kMaxFileBytes) return Errc::BudgetExceeded;
+    decodedBudget = std::min(decodedBudget, kMaxDecodedBytes);
     Reader r{bytes}; Document doc;
     if (r.tag() != "8BPS" || r.word() != 1) return Errc::UnsupportedFormat;
     r.take(6); const auto channels = r.word(); doc.height = r.dword(); doc.width = r.dword();
@@ -102,7 +103,7 @@ Status read(std::span<const u8> bytes, Document& out) {
     const i32 signedCount = static_cast<i16>(info.word()); const u32 count = static_cast<u32>(std::abs(signedCount));
     if (!r.ok || !lm.ok || !info.ok || count > 2048) return Errc::CorruptData;
     if (!count) return Errc::UnsupportedFormat;
-    std::vector<Record> records(count); usize budget = 0;
+    std::vector<Record> records(count); usize budget = 0, largestScratch = 0;
     for (auto& rec : records) {
         auto& l = rec.layer; l.top = info.integer(); l.left = info.integer();
         const auto bottom = info.integer(), right = info.integer();
@@ -137,12 +138,26 @@ Status read(std::span<const u8> bytes, Document& out) {
         }
         if (!info.ok || !extra.ok) return Errc::CorruptData;
         const usize size = static_cast<usize>(l.width) * l.height * 4;
-        if (size > kMaxDecodedBytes - budget) return Errc::BudgetExceeded;
-        budget += size;
-        if (rec.section == 0 && size) { l.rgba.assign(size, 0); for (usize p=3;p<size;p+=4) l.rgba[p]=255; }
+        if (rec.section == 0) {
+            if (size > decodedBudget - budget) return Errc::BudgetExceeded;
+            budget += size;
+            // raw and mask coexist; a mask may be much larger than its layer.
+            // Validate every record before materializing any decoded pixels.
+            for (const auto& c : rec.channels) {
+                if (c.id < -2 || c.id > (mode == 1 ? 0 : 2)) continue;
+                const usize plane = c.id == -2 ? static_cast<usize>(rec.mw) * rec.mh
+                                               : static_cast<usize>(l.width) * l.height;
+                largestScratch = std::max(largestScratch, plane * (depth / 8) * 2);
+            }
+            if (largestScratch > decodedBudget - budget) return Errc::BudgetExceeded;
+        }
     }
     for (auto& rec : records) {
         auto& l = rec.layer; std::vector<u8> raw, mask;
+        if (rec.section == 0) {
+            l.rgba.assign(static_cast<usize>(l.width) * l.height * 4, 0);
+            for (usize p = 3; p < l.rgba.size(); p += 4) l.rgba[p] = 255;
+        }
         for (const auto& c : rec.channels) {
             Reader data{info.take(c.length)}; if (!info.ok) return Errc::CorruptData;
             if (rec.section || (c.id < -2) || (c.id > (mode == 1 ? 0 : 2))) continue;

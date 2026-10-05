@@ -62,9 +62,11 @@ struct AureaApp: App {
                 // "Na frente": se o app morrer sem ir ao segundo plano, a próxima abertura sabe.
                 CrashReporter.shared.primeiroPlano(true, etapa: "screen=\(model.screen)")
                 conta.revalidarSeVencido()
-            case .background, .inactive:
+            case .background:
                 model.enterBackground()
-                if phase == .background { CrashReporter.shared.primeiroPlano(false, etapa: "") }
+                CrashReporter.shared.primeiroPlano(false, etapa: "")
+            case .inactive:
+                model.enterInactive()
             @unknown default: break
             }
         }

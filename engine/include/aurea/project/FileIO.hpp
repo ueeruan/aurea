@@ -54,6 +54,10 @@ struct AtomicWriteOptions {
 /// recuperação antes de regravar um projeto de formato antigo.
 [[nodiscard]] Status copy_file(const std::string& from, const std::string& to) noexcept;
 
+/// Commits an already closed temporary file on the same filesystem. A failed
+/// replacement preserves the existing destination; the caller owns cleanup.
+[[nodiscard]] Status commit_file(const std::string& temporary, const std::string& destination) noexcept;
+
 [[nodiscard]] bool exists(const std::string& path) noexcept;
 [[nodiscard]] inline std::string backup_path(const std::string& path) { return path + ".bak"; }
 [[nodiscard]] inline std::string temp_path(const std::string& path) { return path + ".tmp"; }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="environment_start">Начало фона</string>
+    <string name="environment_end">Конец фона</string>
+    <string name="environment_full_duration">Вся композиция</string>
+    <string name="environment_layer_duration">Длительность слоя</string>
+</resources>

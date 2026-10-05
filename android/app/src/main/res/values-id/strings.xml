@@ -3446,7 +3446,7 @@ untuk mengedit kurvanya.</string>
     <string name="roto_preparing">Menyiapkan Rotobrush lokal…</string>
     <string name="roto_downloading">Mengunduh model potong: %1$d%%</string>
     <string name="roto_download_failed">Model tidak dapat disiapkan. Periksa koneksi dan ruang kosong, lalu tambahkan efek lagi.</string>
-    <string name="roto_note">Potongan latar depan otomatis. Model lokal 2,3 MB diunduh saat pertama kali dipakai. Atur tepi dan perhalus dengan masker layer.</string>
+    <string name="roto_note">Potongan latar depan otomatis, tersedia offline. Atur tepi dan perhalus dengan masker layer.</string>
     <string name="roto_select_media">Pilih layer gambar atau video untuk Rotobrush AI.</string>
     <string name="roto_prepare">Siapkan AI lokal</string>
     <plurals name="pn_caption_transcript">
@@ -3461,4 +3461,25 @@ untuk mengedit kurvanya.</string>
     <plurals name="pn_keyframes_edit_at_playhead">
         <item quantity="other">%1$d keyframe — edit di playhead</item>
     </plurals>
+    <string name="fxl_visible_duration">Durasi terlihat</string>
+    <string name="fxl_minimum_opacity">Opasitas minimum</string>
+    <string name="fxl_maximum_opacity">Opasitas maksimum</string>
+    <string name="fxl_grow">Perbesar</string>
+    <string name="fxl_vertical_scatter">Sebaran vertikal</string>
+    <string name="fxl_end_angle">Sudut akhir</string>
+    <string name="fxl_axis">Sumbu</string>
+    <string name="fxl_spacing">Jarak</string>
+    <string name="fxl_rotation_per_copy">Rotasi per salinan</string>
+    <string name="fxl_scale_per_copy">Skala per salinan</string>
+    <string name="fxl_end_opacity">Opasitas akhir</string>
+    <string name="fxl_orient_copies">Atur arah salinan</string>
+    <string name="fxl_remove_color_fringe">Hapus pinggiran warna</string>
+    <string name="fxo_rgb">RGB</string>
+    <string name="fxl_choke_1">Perkecil 1</string>
+    <string name="fxl_softness_1">Kelembutan 1</string>
+    <string name="fxl_choke_2">Perkecil 2</string>
+    <string name="fxl_softness_2">Kelembutan 2</string>
+    <string name="fxl_iterations">Iterasi</string>
+    <string name="local_ai_processing">Memproses AI lokal… Analisis pertama dapat memerlukan beberapa detik.</string>
+    <string name="local_ai_failed">AI lokal tidak dapat menganalisis frame. Coba pindahkan playhead atau buka ulang proyek.</string>
 </resources>

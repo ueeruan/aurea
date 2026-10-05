@@ -108,14 +108,15 @@ class CommunityRegressionTest {
         compose.runOnIdle { store.addShape3D(0) }
         compose.waitUntil(10000) { store.detail?.kind == 10 && store.gizmo != null }
         val id = store.primary!!
-        // Fit must repair the old XY-only fit path, retaining a uniform 3D volume.
+        // Content stores Z relative to X; fitting XY must keep the effective volume uniform.
         compose.runOnIdle { store.setScale3(floatArrayOf(.05f, .05f, 1f)) }
         compose.waitUntil(5000) { store.detail!!.scale == listOf(.05f, .05f, 1f) }
         compose.runOnIdle { LayerOps.fitToCanvas(store, listOf(id), fill = false) }
         compose.waitUntil(5000) { abs(store.detail!!.scale[0] - .05f) > .001f }
         val fit = store.detail!!.scale
         assertEquals(abs(fit[0]), abs(fit[1]), .00001f)
-        assertEquals(abs(fit[0]), abs(fit[2]), .00001f)
+        assertEquals("relative depth stays unchanged", 1f, fit[2], .00001f)
+        assertEquals("effective depth follows width", abs(fit[0]), abs(fit[0] * fit[2]), .00001f)
         compose.onNodeWithText(context.getString(R.string.sh_dock_transform)).performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.panel_escala)).performClick()
         for (auto in listOf(false, true)) {
@@ -128,7 +129,10 @@ class CommunityRegressionTest {
             val scale = store.detail!!.scale
             assertTrue("downsizing actually shrinks", scale[0] < .05f)
             assertEquals("height follows the same factor", scale[0] * 2, scale[1], .00001f)
-            assertEquals("depth follows the same factor", scale[0] * 3, scale[2], .00001f)
+            assertEquals("relative depth stays unchanged", .15f, scale[2], .00001f)
+            val factor = scale[0] / .05f
+            assertEquals("effective depth follows the same factor", (.05f * .15f) * factor,
+                scale[0] * scale[2], .000001f)
             compose.runOnIdle { store.undo() }
             compose.waitUntil(5000) { store.detail!!.scale == listOf(.05f, .1f, .15f) }
         }
@@ -163,7 +167,8 @@ class CommunityRegressionTest {
             compose.waitUntil(5000) { store.detail!!.scale[0] < .9f }
             val scaled = store.detail!!.scale
             assertEquals(scaled[0], scaled[1], .00001f)
-            assertEquals(scaled[0], scaled[2], .00001f)
+            assertEquals("relative depth stays unchanged", 1f, scaled[2], .00001f)
+            assertEquals("effective depth follows width", scaled[0], scaled[0] * scaled[2], .00001f)
             compose.runOnIdle { store.undo() }
             compose.waitUntil(5000) { store.detail!!.scale == listOf(1f, 1f, 1f) }
         }

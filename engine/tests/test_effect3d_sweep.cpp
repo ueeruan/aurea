@@ -15,6 +15,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/effects/Particular.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -67,7 +68,7 @@ Medida medir(const std::vector<u8>& rgba, u32 w, u32 h) {
             if (p[0] > 8 || p[1] > 8 || p[2] > 8) {
                 ++m.acesos;
                 sx += x; sy += y;
-                minX = minX = std::min(minX, x); maxX = std::max(maxX, x);
+                minX = std::min(minX, x); maxX = std::max(maxX, x);
                 minY = std::min(minY, y); maxY = std::max(maxY, y);
             }
         }
@@ -107,8 +108,29 @@ Medida com_efeito(const char* key, bool threeD, u32 quantos = 1, bool forcar_par
             // Um efeito com o parâmetro no neutro nem monta passe: o teste
             // passaria sem exercitar nada. Um valor de verdade no primeiro
             // parâmetro escalar põe o efeito para trabalhar.
-            if (forcar_param && !inst.params.empty() && inst.params[0].constant.v[0] == 0.0f) {
+            if (forcar_param && !inst.params.empty() && params->at(0).type == ParamType::Float
+                && inst.params[0].constant.v[0] == 0.0f) {
                 inst.params[0].constant.v[0] = 12.0f;
+            }
+            if (inst.type == effect_type_id("aurea.motion.oscillate.cycles")) {
+                // The parity sweep measures planar movement. Orbit/depth
+                // intentionally has a different perspective in a 3D camera.
+                inst.params[0].constant = ParamValue::scalar(0);
+            }
+            if (inst.type == effect_type_id("aurea.generate.particular")) {
+                // This sweep compares the same planar scene. The default cone
+                // moves particles in Z: enabling the composition camera then
+                // legitimately changes perspective and the visible centroid.
+                // Keep a visible, non-neutral particle field at Z=0 here;
+                // dedicated particle tests cover depth/camera/trajectory.
+                auto set = [&](u32 p, f32 value) { inst.params[p].constant = ParamValue::scalar(value); };
+                for (u32 p : {particular::kVelocity, particular::kGravity, particular::kWindX,
+                              particular::kWindY, particular::kWindZ, particular::kTurbulence,
+                              particular::kEmitterD, particular::kPositionZ, particular::kSizeRandom,
+                              particular::kFadeIn, particular::kFadeOut, particular::kLifeRandom}) set(p, 0);
+                set(particular::kEmitterW, 30); set(particular::kEmitterH, 30);
+                set(particular::kSize, 10); set(particular::kSizeEnd, 100);
+                set(particular::kRate, 60); set(particular::kPreRoll, 1000);
             }
             l->effects.push_back(std::move(inst));
         }
@@ -153,11 +175,14 @@ AUREA_TEST(Effect3D, EveryRegisteredEffectDrawsTheSameWithAndWithout3D) {
         const char* key = reg.at(i).info().key;
         const Medida m2 = com_efeito(key, false, 1);
         const Medida m3 = com_efeito(key, true, 1);
+        if (effect_type_id(key) == effect_type_id("aurea.generate.particular")) {
+            AUREA_CHECK(m2.acesos > 32 && m3.acesos > 32);
+        }
         const f32 razao = m2.acesos ? static_cast<f32>(m3.acesos) / static_cast<f32>(m2.acesos) : 1.0f;
         const bool vazio_igual = (m2.acesos == 0 && m3.acesos == 0);
         const bool centro_ok = m2.acesos == 0 || m3.acesos == 0
                             || (std::fabs(m3.centroX - m2.centroX) < 24.0f && std::fabs(m3.centroY - m2.centroY) < 24.0f);
-        const bool ok = vazio_igual || (razao >= 0.25f && razao <= 4.0f && centro_ok);
+        const bool ok = vazio_igual || (m2.acesos > 0 && m3.acesos > 0 && razao >= 0.25f && razao <= 4.0f && centro_ok);
         std::printf("    %-34s 2D %6u px  3D %6u px  %.2fx%s\n", key, m2.acesos, m3.acesos,
                     static_cast<double>(razao), ok ? "" : "   <-- QUEBRADO");
         if (!ok) ++ruins;

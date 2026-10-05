@@ -18,7 +18,7 @@ internal object ShellColors {
     val White40 = Color(0x66FFFFFF)
     val DockRow = Color(0xFF272D40)      // quadrados/bloco da fileira rápida (cor do AM)
     val DockTile = Color(0xFF272D40)     // fichas (cor do AM)
-    val DockTileContent = Color(0xFF8E93A6)   // nome da ficha: cinza, como no AM
+    val DockTileContent = Color(0xFFB7BDCC)   // rótulos compactos com contraste na folha escura
     val DockTileIcon = Color(0xFFE6E9F0)
     val DockSheet = Color(0xFF1F2432)        // folha da doca, cantos arredondados em cima
     val DockDisabled = Color(0xFF4A5164)

@@ -9,8 +9,35 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 using namespace aurea;
+
+AUREA_TEST(Track, ShutterSubframesPreserveHoldCurvesAndReverseSampling) {
+    Track hold;
+    hold.set(FrameIndex{0}, 7.f, Interpolation::Hold);
+    hold.set(FrameIndex{1}, 99.f);
+    AUREA_CHECK_EQ(hold.sample_f(.999), 7.f);
+    AUREA_CHECK_EQ(hold.sample_f(1.), 99.f);
+    AUREA_CHECK_EQ(hold.sample_f(-.25), 7.f);
+    Track curve;
+    curve.set(FrameIndex{0}, 0.f, Interpolation::EaseIn);
+    curve.set(FrameIndex{1}, 100.f);
+    AUREA_CHECK_NEAR(curve.sample_f(.75), 56.25f, 1e-4);
+    AUREA_CHECK_NEAR(curve.sample_f(.25), 6.25f, 1e-4);
+    curve.keys[0].interp = Interpolation::Bezier;
+    curve.keys[0].bx1 = .1f; curve.keys[0].by1 = .8f;
+    curve.keys[0].bx2 = .7f; curve.keys[0].by2 = .9f;
+    AUREA_CHECK_NEAR(curve.sample_f(.37), 100 * keyframe_ease(curve.keys[0], .37f), 1e-4);
+    for (i64 frame = -2; frame <= 3; ++frame)
+        AUREA_CHECK_EQ(curve.sample_f(static_cast<f64>(frame)), curve.sample(FrameIndex{frame}));
+    AUREA_CHECK_EQ(curve.value_or_f(std::numeric_limits<f64>::quiet_NaN(), 42.f), 42.f);
+    curve.keys[0].interp = Interpolation::Linear;
+    curve.set(FrameIndex{2}, 300.f);
+    AUREA_CHECK_NEAR(curve.sample_f(1.75), 250.f, 1e-4);
+    AUREA_CHECK_NEAR(curve.sample_f(.25), 25.f, 1e-4);
+    AUREA_CHECK_NEAR(curve.sample_f(1.25), 150.f, 1e-4);
+}
 
 AUREA_TEST(Track, EmptyTrackReturnsStatic) {
     Track t;

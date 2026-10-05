@@ -208,6 +208,14 @@ EngineConfig engine_config(const std::string& docs = {}) {
 
 } // namespace
 
+AUREA_TEST(Hdri, DecodeBudgetIncludesInputOutputAndWorkingStorage) {
+    const auto bytes = make_hdr(64, 32, Scan::NewRle);
+    const u64 output = 64 * 32 * 3 * sizeof(f32);
+    AUREA_CHECK(decode_hdri_detailed(bytes.data(), bytes.size(), 1.f, bytes.size() + output - 1).status == HdriStatus::TooLarge);
+    AUREA_CHECK(decode_hdri_detailed(bytes.data(), bytes.size(), 1.f, bytes.size() + output + 64 * 4).pixels != nullptr);
+    AUREA_CHECK(decode_hdri_detailed(bytes.data(), bytes.size(), 1.f, bytes.size() - 1).status == HdriStatus::TooLarge);
+}
+
 AUREA_TEST(Hdri, RadianceAllVariantsDecodeToTheSamePanorama) {
     struct Case { const char* name; std::vector<u8> bytes; };
     const u32 w = 96, h = 48;

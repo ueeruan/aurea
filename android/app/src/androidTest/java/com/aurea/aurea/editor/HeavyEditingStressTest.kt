@@ -27,6 +27,10 @@ import java.nio.ByteOrder
 class HeavyEditingStressTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun sustainedFullHdEditingRecoversAfterReloadAndSurfaceRecreation() {
+        HeavyEditingSoakHarness(compose).run()
+    }
+
     @Test fun denseEditSurvivesPreviewTrimReloadAndExport() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

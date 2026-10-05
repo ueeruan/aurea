@@ -1,4 +1,5 @@
 #include "aurea/media/VideoSource.hpp"
+#include "aurea/media/PreviewBuffer.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/core/Time.hpp"
@@ -176,6 +177,10 @@ VideoSource::Stats VideoSource::stats() const noexcept {
 
 bool VideoSource::reachable_forward(i64 needUs) const noexcept {
     if (!decoderValid_ || eos_) return false;
+    // Buffer pressure can occur before the first output after a seek. Keep
+    // that seek alive even when the requested timestamp is far from zero.
+    if (decoderPosUs_ < 0)
+        return needUs >= decoderSeekUs_ && needUs - decoderSeekUs_ <= backend_->keyframe_interval_us();
     const i64 half = backend_->info().preciseFrameTiming ? 0 : frameUs_ / 2;
     // The decoder cannot reproduce its last output without seeking. This also
     // covers requests within that frame's tolerance after cache invalidation.
@@ -197,13 +202,15 @@ void VideoSource::deliver(FrameRef frame, u64 epoch) noexcept {
     if (fn) fn(ctx);
 }
 
-void VideoSource::schedule_retry(u64 generation) noexcept {
+void VideoSource::schedule_retry(u64 generation, bool backpressure) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     // Two delayed retries recover transient decoder/seek failures even when
     // playback is paused and no further UI request arrives. Corrupt media
     // cannot spin forever. A different request gets its own attempt budget.
-    if (running_ && requestGen_ == generation && retryAttempts_ < 2)
-        retryAfterNs_ = monotonic_ns() + 100'000'000ull * (retryAttempts_ + 1);
+    if (running_ && requestGen_ == generation && (backpressure || retryAttempts_ < 2)) {
+        retryBackpressure_ = backpressure;
+        retryAfterNs_ = monotonic_ns() + (backpressure ? 16'000'000ull : 100'000'000ull * (retryAttempts_ + 1));
+    }
 }
 
 void VideoSource::thread_main() noexcept {
@@ -236,7 +243,7 @@ void VideoSource::thread_main() noexcept {
                     return begin <= request_.targetUs && begin > low + half;
                 }
                 if (request_.direction == 0 || eos_) return false;   // congelado: só o alvo
-                const i64 ahead = frameUs_ * std::min<u32>(request_.speed > 1.5f ? 4u : 3u, cache_.prefetch_capacity());
+                const i64 ahead = frameUs_ * preview_buffer_frames(frameUs_, request_.speed, cache_.prefetch_capacity());
                 return cache_.contiguous_end(request_.targetUs, frameUs_) < request_.targetUs + ahead - half;
             };
             auto work_pending = [&] {
@@ -255,7 +262,7 @@ void VideoSource::thread_main() noexcept {
             if (!running_) break;
             if (retryAfterNs_ && monotonic_ns() >= retryAfterNs_) {
                 retryAfterNs_ = 0;
-                ++retryAttempts_;
+                if (!retryBackpressure_) ++retryAttempts_;
                 backfillAttemptUs_ = -1;
             }
             if (suspended_ != suspendApplied_) {
@@ -321,7 +328,7 @@ void VideoSource::thread_main() noexcept {
             // Congelado / time remap parado: só o alvo, exato.
             if (cache_.contains(req.targetUs, half)) continue;
         } else if (req.mode == DecodeMode::Playback) {
-            const i64 ahead = frameUs_ * std::min<u32>(req.speed > 1.5f ? 4u : 3u, cache_.prefetch_capacity());
+            const i64 ahead = frameUs_ * preview_buffer_frames(frameUs_, req.speed, cache_.prefetch_capacity());
             const i64 end = cache_.contiguous_end(req.targetUs, frameUs_);
             if (backend_->info().preciseFrameTiming) {
                 const bool haveTarget = cache_.contains(req.targetUs, half);
@@ -361,6 +368,7 @@ void VideoSource::thread_main() noexcept {
             }
             decoderValid_ = true;
             decoderPosUs_ = -1;   // desconhecido até o primeiro frame sair
+            decoderSeekUs_ = need;
             eos_ = false;
             std::lock_guard<std::mutex> s(statsMutex_);
             ++stats_.seeks;
@@ -402,7 +410,7 @@ void VideoSource::thread_main() noexcept {
                     requestNs = requestTimeNs_;
                     need = nr.targetUs;
                     limit = (nr.mode == DecodeMode::Playback)
-                          ? nr.targetUs + frameUs_ * std::min<u32>(nr.speed > 1.5f ? 4u : 3u, cache_.prefetch_capacity())
+                          ? nr.targetUs + frameUs_ * preview_buffer_frames(frameUs_, nr.speed, cache_.prefetch_capacity())
                           : (nr.mode == DecodeMode::Scrub && nr.direction > 0 ? need + 2 * frameUs_ : need);
                     std::lock_guard<std::mutex> s(statsMutex_);
                     ++stats_.forwardRetargets;
@@ -424,6 +432,13 @@ void VideoSource::thread_main() noexcept {
             publish_info();
             const f32 ms = static_cast<f32>(static_cast<f64>(monotonic_ns() - t0) * 1e-6);
             if (!s.ok()) {
+                if (s.code() == Errc::BudgetExceeded) {
+                    // The backend retains its pending output. GPU buffers in
+                    // flight are temporary pressure, not a corrupt decoder.
+                    // Seeking here discards that output and can repeat forever.
+                    schedule_retry(gen, true);
+                    break;
+                }
                 AUREA_LOG_ERROR("decode falhou (%s, alvo %lld us): %s — %.*s",
                     priority_ == MediaPriority::Thumbnail ? "thumbnail" : "video",
                     static_cast<long long>(need), s.message().data(),
@@ -451,8 +466,7 @@ void VideoSource::thread_main() noexcept {
             // before decoding ahead so a one-frame budget never throws away
             // future frames only to seek backwards for them on the next tick.
             if (req.mode == DecodeMode::Playback && req.direction > 0) {
-                limit = req.targetUs + frameUs_ * std::min<u32>(
-                    req.speed > 1.5f ? 4u : 3u, cache_.prefetch_capacity());
+                limit = req.targetUs + frameUs_ * preview_buffer_frames(frameUs_, req.speed, cache_.prefetch_capacity());
             }
             const bool coversLimit = deliveredEnd > limit;
             if (eos) { eos_ = true; break; }

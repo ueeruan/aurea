@@ -170,15 +170,19 @@ struct Track {
     /// Valor da propriedade em `t`, COM a expressão (se houver e estiver
     /// ligada). Sem keyframe, o valor parado é `staticValue`.
     [[nodiscard]] f32 sample(FrameIndex t) const noexcept;
+    /// Avaliação subframe real: mantém Hold e curvas dentro da exposição.
+    [[nodiscard]] f32 sample_f(f64 t) const noexcept;
 
     /// Como `sample`, mas sem keyframe o valor parado é `fallback` (o campo da
     /// camada que quem chama usaria — a posição do Transform, por exemplo). É
     /// a leitura dos renderers: `tr ? tr->value_or(t, base) : base`.
     [[nodiscard]] f32 value_or(FrameIndex t, f32 fallback) const noexcept;
+    [[nodiscard]] f32 value_or_f(f64 t, f32 fallback) const noexcept;
 
     /// Só os keyframes (valor "pré-expressão"): editar keyframe, o graph
     /// editor e o próprio avaliador (`value`, loopOut) leem daqui.
     [[nodiscard]] f32 sample_keys(FrameIndex t) const noexcept;
+    [[nodiscard]] f32 sample_keys_f(f64 t) const noexcept;
 
     /// Insere ou substitui um keyframe em `t`. Devolve o índice resultante.
     u32 set(FrameIndex t, f32 value, Interpolation interp = Interpolation::Linear) noexcept;
@@ -230,6 +234,9 @@ public:
     [[nodiscard]] f32 sample_or(TrackProperty p, FrameIndex t, f32 fallback,
                                 u32 effectIndex = kInvalidIndex,
                                 u32 effectParamIndex = 0) const noexcept;
+    [[nodiscard]] f32 sample_or_f(TrackProperty p, f64 t, f32 fallback,
+                                  u32 effectIndex = kInvalidIndex,
+                                  u32 effectParamIndex = 0) const noexcept;
 
     /// Define um valor estático (cria a track se preciso, sem animar).
     void set_static(TrackProperty p, f32 value, u32 effectIndex = kInvalidIndex,

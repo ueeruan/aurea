@@ -217,6 +217,19 @@ class CommandBatch(private val engine: AureaEngine) {
     fun autoKeyframe(layer: Long, property: Int, effectIndex: Int, effectParam: Int, timeFrame: Int, value: Float) =
         insertKeyframe(layer, property, effectIndex, effectParam, timeFrame, value, onlyIfChanged = true)
 
+    /**
+     * Gesto de transform (propriedade 0..14) com Auto-Key: [flags] são os bits
+     * `kAutoKey*` de Command.hpp (ver `gestureKeyFlags`). Com o bit 2 o motor
+     * usa o quadro que a prévia mostra — o tempo daqui é ignorado.
+     */
+    fun gestureKeyframe(layer: Long, property: Int, value: Float, flags: Int) =
+        emit(CommandType.KEYFRAME_INSERT) { b ->
+            writeTrackRef(b, layer, property, -1, 0)
+            b.putLong(Off.KEYFRAME_TIME, 0L)
+            b.putFloat(Off.KEYFRAME_VALUE, value)
+            b.putInt(Off.KEYFRAME_ONLY_IF_CHANGED, flags)
+        }
+
     fun deleteKeyframe(
         layer: Long, property: Int, effectIndex: Int, effectParam: Int, timeFrame: Int,
     ) = emit(CommandType.KEYFRAME_DELETE) { b -> writeTrackRef(b, layer, property, effectIndex, effectParam); b.putLong(Off.KEYFRAME_TIME, timeFrame.toLong()) }

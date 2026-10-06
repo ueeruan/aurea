@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mb_shutter_angle">Sudut rana</string>
+    <string name="mb_shutter_phase">Fase rana</string>
+    <string name="mb_phase_hint">Menggeser pencahayaan relatif terhadap bingkai. Pemusatan menempatkan setengah pencahayaan sebelum bingkai.</string>
+    <string name="mb_center_exposure">Pusatkan pencahayaan</string>
+    <string name="mb_samples_per_frame">Sampel per bingkai</string>
+    <string name="mb_adaptive_limit">Batas adaptif</string>
+    <string name="mb_quality_hint">Pratinjau dapat memakai lebih sedikit sampel agar tetap responsif. Ekspor memakai kualitas yang dipilih. Nilai lebih tinggi membutuhkan waktu lebih lama.</string>
+    <string name="mb_advanced">Lanjutan</string>
+    <string name="mb_comp_settings_hint">Pengaturan komposisi memengaruhi semua lapisan dengan buram gerakan aktif.</string>
+</resources>

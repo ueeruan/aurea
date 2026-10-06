@@ -34,6 +34,261 @@ Project make_project() {
 
 } // namespace
 
+AUREA_TEST(Serialization, MotionBlurShutterSettingsRoundTripAcrossCompositions) {
+    auto original = make_project();
+    const auto childId = original.timeline().create_composition("child", 64, 64, 30.);
+    auto& rootBlur = original.timeline().composition(original.timeline().root())->motion_blur();
+    auto& childBlur = original.timeline().composition(childId)->motion_blur();
+    rootBlur.enabled = true; rootBlur.samples = 32; rootBlur.previewSamples = 7;
+    rootBlur.shutterAngle = 270; rootBlur.shutterPhase = 40; rootBlur.adaptiveLimit = 192;
+    rootBlur.vectorBlur = true;
+    childBlur.enabled = false; childBlur.shutterAngle = 90; childBlur.shutterPhase = -80;
+    childBlur.samples = 8; childBlur.adaptiveLimit = 24;
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(original, SaveOptions{}, bytes).ok());
+    Project restored; LoadReport report;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}, &report).ok());
+    AUREA_CHECK_EQ(report.timelineVersion, kTimelineSectionVersion);
+    const auto& a = restored.timeline().composition(restored.timeline().root())->motion_blur();
+    AUREA_CHECK(a.enabled && a.vectorBlur);
+    AUREA_CHECK_EQ(a.shutterAngle, 270.f);
+    AUREA_CHECK_EQ(a.shutterPhase, 40.f);
+    AUREA_CHECK_EQ(a.samples, 32u);
+    AUREA_CHECK_EQ(a.adaptiveLimit, 192u);
+    AUREA_CHECK_EQ(a.previewSamples, 7u);
+    u32 children = 0;
+    restored.timeline().for_each_composition([&](CompositionId id, const Composition& c) {
+        if (id == restored.timeline().root()) return;
+        ++children;
+        AUREA_CHECK(!c.motion_blur().enabled);
+        AUREA_CHECK_EQ(c.motion_blur().shutterAngle, 90.f);
+        AUREA_CHECK_EQ(c.motion_blur().shutterPhase, -80.f);
+        AUREA_CHECK_EQ(c.motion_blur().samples, 8u);
+        AUREA_CHECK_EQ(c.motion_blur().adaptiveLimit, 24u);
+    });
+    AUREA_CHECK_EQ(children, 1u);
+}
+
+AUREA_TEST(Serialization, PanoramaRangeSurvivesSaveAndPreservesUnboundedDefault) {
+    auto original = make_project();
+    const auto childId = original.timeline().create_composition("panorama", 64, 64, 30.);
+    auto& env = original.timeline().composition(original.timeline().root())->environment();
+    env.showBackground = true; env.backgroundStart = FrameIndex{10}; env.backgroundEnd = FrameIndex{20};
+    original.timeline().composition(childId)->environment().showBackground = true;
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(original, SaveOptions{}, bytes).ok());
+    Project restored;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}).ok());
+    const auto& actual = restored.timeline().composition(restored.timeline().root())->environment();
+    AUREA_CHECK_EQ(actual.backgroundStart.value, 10);
+    AUREA_CHECK_EQ(actual.backgroundEnd.value, 20);
+    AUREA_CHECK(actual.background_at(FrameIndex{19}));
+    AUREA_CHECK(!actual.background_at(FrameIndex{20}));
+    restored.timeline().for_each_composition([&](CompositionId id, const Composition& c) {
+        if (id == restored.timeline().root()) return;
+        AUREA_CHECK_EQ(c.environment().backgroundStart.value, 0);
+        AUREA_CHECK_EQ(c.environment().backgroundEnd.value, -1);
+        AUREA_CHECK(c.environment().background_at(FrameIndex{100}));
+    });
+}
+
+AUREA_TEST(Serialization, MotionBlurAmountRecoversNonFiniteValuesAndPreservesValidRange) {
+    auto original = make_project();
+    auto* comp = original.timeline().composition(original.timeline().root());
+    const f32 values[]{0, .5f, 1, 4, -1, 5, std::numeric_limits<f32>::quiet_NaN(),
+        std::numeric_limits<f32>::infinity(), -std::numeric_limits<f32>::infinity()};
+    const f32 expected[]{0, .5f, 1, 4, 0, 4, 0, 0, 0};
+    for (f32 value : values) {
+        const auto id = comp->add_layer(LayerKind::Shape, "blur amount");
+        comp->layer(id)->transform.motionBlurAmount = value;
+    }
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(original, SaveOptions{}, bytes).ok());
+    Project restored;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}).ok());
+    comp = restored.timeline().composition(restored.timeline().root());
+    AUREA_CHECK(comp != nullptr); if (!comp) return;
+    AUREA_CHECK_EQ(comp->order().size(), 9u); if (comp->order().size() != 9) return;
+    for (u32 i = 0; i < comp->order().size(); ++i)
+        AUREA_CHECK_EQ(comp->layer(comp->order().at(i))->transform.motionBlurAmount, expected[i]);
+}
+
+AUREA_TEST(Serialization, MotionBlurVersion40PreservesSettingsAndAddsBoundedAdaptation) {
+    auto original = make_project();
+    auto& blur = original.timeline().composition(original.timeline().root())->motion_blur();
+    blur.enabled = true; blur.samples = 64; blur.previewSamples = 12;
+    blur.shutterAngle = 360; blur.vectorBlur = true;
+    std::vector<u8> bytes;
+    SaveOptions opts; opts.compress = false;
+    AUREA_CHECK(ProjectSerializer::encode(original, opts, bytes).ok());
+    auto read = [&](usize at, usize count) {
+        u64 value = 0;
+        for (usize i = 0; i < count; ++i) value |= static_cast<u64>(bytes.at(at + i)) << (8 * i);
+        return value;
+    };
+    auto write = [&](usize at, u64 value, usize count) {
+        for (usize i = 0; i < count; ++i) bytes.at(at + i) = static_cast<u8>(value >> (8 * i));
+    };
+    bool converted = false;
+    const auto index = static_cast<usize>(read(12, 8));
+    const u32 count = static_cast<u32>(read(8, 4));
+    for (u32 i = 0; i < count; ++i) {
+        const usize header = index + 40 * i;
+        if (read(header, 2) != static_cast<u16>(SectionKind::Timeline)) continue;
+        AUREA_CHECK_EQ(read(header + 34, 4), 0u);
+        const auto offset = static_cast<usize>(read(header + 6, 8));
+        const auto oldSize = static_cast<usize>(read(header + 14, 8)) - 8;
+        // A one-composition v40 timeline ends before the v41 phase/limit tail.
+        write(header + 2, 40, 4);
+        write(header + 14, oldSize, 8); write(header + 22, oldSize, 8);
+        u32 checksum = ~0u;
+        for (usize b = offset; b < offset + oldSize; ++b) {
+            checksum ^= bytes[b];
+            for (u32 bit = 0; bit < 8; ++bit) checksum = (checksum >> 1) ^ (0xedb88320u & (0u - (checksum & 1u)));
+        }
+        write(header + 30, ~checksum, 4);
+        converted = true;
+    }
+    AUREA_CHECK(converted);
+    Project restored; LoadReport report;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}, &report).ok());
+    AUREA_CHECK_EQ(report.timelineVersion, 40u);
+    AUREA_CHECK(report.olderFormat);
+    const auto& actual = restored.timeline().composition(restored.timeline().root())->motion_blur();
+    AUREA_CHECK(actual.enabled && actual.vectorBlur);
+    AUREA_CHECK_EQ(actual.shutterAngle, 360.f);
+    AUREA_CHECK_EQ(actual.shutterPhase, -180.f);
+    AUREA_CHECK_EQ(actual.samples, 64u);
+    AUREA_CHECK_EQ(actual.previewSamples, 12u);
+    AUREA_CHECK_EQ(actual.adaptiveLimit, 128u);
+}
+
+AUREA_TEST(Serialization, MotionBlurMalformedValuesHaveFiniteBoundedDefaults) {
+    auto original = make_project();
+    auto& blur = original.timeline().composition(original.timeline().root())->motion_blur();
+    blur.shutterAngle = std::numeric_limits<f32>::infinity();
+    blur.shutterPhase = std::numeric_limits<f32>::quiet_NaN();
+    blur.samples = ~0u; blur.previewSamples = 0; blur.adaptiveLimit = 0;
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(original, SaveOptions{}, bytes).ok());
+    Project restored;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}).ok());
+    const auto& actual = restored.timeline().composition(restored.timeline().root())->motion_blur();
+    AUREA_CHECK_EQ(actual.shutterAngle, 180.f);
+    AUREA_CHECK_EQ(actual.shutterPhase, -90.f);
+    AUREA_CHECK_EQ(actual.samples, 64u);
+    AUREA_CHECK_EQ(actual.previewSamples, 1u);
+    AUREA_CHECK_EQ(actual.adaptiveLimit, 64u);
+}
+
+AUREA_TEST(ProjectAssets, IndirectReferencesPreservedWithoutConfusingFontHandles) {
+    Project project = make_project();
+    auto asset = [&](AssetKind kind, const char* name) {
+        Asset value; value.kind = kind; value.name = name;
+        return project.add_asset(std::move(value));
+    };
+    const AssetId orphan = asset(AssetKind::Image, "orphan");
+    const AssetId sprite = asset(AssetKind::Image, "particle texture");
+    const AssetId objectEnv = asset(AssetKind::Environment, "object environment");
+    const AssetId globalEnv = asset(AssetKind::Environment, "composition environment");
+    const AssetId model = asset(AssetKind::Model3D, "model");
+    const AssetId image = asset(AssetKind::Image, "image");
+    const AssetId lut = asset(AssetKind::Lut, "lut");
+    auto* root = project.timeline().composition(project.timeline().root());
+    const auto text = root->add_layer(LayerKind::Text, "font handle collision");
+    root->layer(text)->text.font = FontId::unpack(orphan.pack());
+    const auto object = root->add_layer(LayerKind::Model3D, "object");
+    root->layer(object)->model.scene = model;
+    root->layer(object)->environmentAsset = objectEnv.pack();
+    root->layer(object)->environmentSource = 1;
+    root->environment().hdri = globalEnv;
+    const auto source = root->add_layer(LayerKind::Image, "direct image");
+    root->layer(source)->source = image;
+    EffectInstance effect; effect.type = effect_type_id("aurea.color.cube_lut");
+    effect.params.resize(1); effect.params[0].constant.ref = lut.pack();
+    root->layer(source)->effects.push_back(std::move(effect));
+    // References in a child composition count even while another is selected.
+    const auto childId = project.timeline().create_composition("child", 64, 64, 30.);
+    auto* child = project.timeline().composition(childId);
+    const auto particles = child->add_layer(LayerKind::ParticleSystem, "particles");
+    child->layer(particles)->particles.textureAsset = sprite.pack();
+
+    auto unused = project.unreferenced_assets();
+    AUREA_CHECK_EQ(unused.size(), 1u);
+    if (unused.size() != 1) return;
+    AUREA_CHECK(unused[0] == orphan);
+    AUREA_CHECK(project.remove_asset(unused[0]));
+    AUREA_CHECK(project.asset(sprite) != nullptr && project.asset(objectEnv) != nullptr);
+    AUREA_CHECK(project.unreferenced_assets().empty());
+
+    child->layer(particles)->particles.textureAsset = 0;
+    unused = project.unreferenced_assets();
+    AUREA_CHECK_EQ(unused.size(), 1u);
+    if (unused.size() == 1) AUREA_CHECK(unused[0] == sprite);
+}
+
+AUREA_TEST(ProjectAssets, ReopenLoadsParticleTextureAfterDeletingItsImageLayer) {
+    const std::string path = temp_path("particle_asset_reference");
+    std::remove(path.c_str());
+    EngineConfig config; config.workerCount = 1; config.disableAutosave = true;
+    config.memoryBudgetBytes = 64ull << 20;
+    const std::string emitterName = "retained particle emitter";
+    {
+        Engine writer;
+        AUREA_CHECK(writer.initialize(config).ok());
+        AUREA_CHECK(writer.new_project(64, 64, 30., "particle reference").ok());
+        auto* comp = writer.project()->timeline().composition(writer.project()->timeline().root());
+        // Keep packed zero free for APIs that use it as the unset sentinel.
+        (void)comp->add_layer(LayerKind::Shape, "placeholder");
+        Asset orphan; orphan.kind = AssetKind::Image; orphan.sourcePath = "orphan.png";
+        (void)writer.project()->add_asset(std::move(orphan));
+        const u8 pixels[] = {255, 32, 16, 255};
+        const auto image = writer.import_image(pixels, 1, 1, "sprite", "sprite.png");
+        const auto emitter = writer.add_particles(0);
+        AUREA_CHECK(image.ok() && emitter.ok());
+        if (!image.ok() || !emitter.ok()) return;
+        comp->layer(LayerId::unpack(*emitter))->name = emitterName;
+        AUREA_CHECK(writer.set_particle_texture(*emitter, *image));
+        Command remove; remove.type = CommandType::LayerDelete; remove.layer_ref.layer = LayerId::unpack(*image);
+        AUREA_CHECK(writer.apply_command(remove).ok());
+        AUREA_CHECK(writer.save_project(path.c_str()).ok());
+    }
+    std::vector<std::string> decoded;
+    config.imageLoaderContext = &decoded;
+    config.imageLoader = [](const char* source, ImagePixels& out, void* context) {
+        static_cast<std::vector<std::string>*>(context)->emplace_back(source);
+        out.width = out.height = 1; out.rgba = {255, 32, 16, 255}; return true;
+    };
+    {
+        Engine reader;
+        AUREA_CHECK(reader.initialize(config).ok());
+        AUREA_CHECK(reader.load_project(path.c_str()).ok());
+        AUREA_CHECK_EQ(decoded.size(), 1u);
+        if (decoded.size() == 1) AUREA_CHECK(decoded[0].find("sprite.png") != std::string::npos);
+        AUREA_CHECK_EQ(reader.last_load_missing_assets(), 0u);
+        auto* comp = reader.project()->timeline().composition(reader.project()->timeline().root());
+        // Serialized layer tables compact deleted slots. Resolve the loaded
+        // identities instead of reusing the writer's session-local handles.
+        LayerId emitter;
+        comp->layers().for_each([&](LayerId id, const Layer& layer) {
+            if (layer.kind == LayerKind::ParticleSystem && layer.name == emitterName) emitter = id;
+        });
+        AssetId texture;
+        reader.project()->for_each_asset([&](AssetId id, const Asset& asset) {
+            if (asset.kind == AssetKind::Image && asset.name == "sprite"
+                && asset.sourcePath.find("sprite.png") != std::string::npos) texture = id;
+        });
+        AUREA_CHECK(emitter.valid() && texture.valid());
+        const auto* layer = comp->layer(emitter);
+        AUREA_CHECK(layer && layer->particles.textureAsset == texture.pack());
+        // This route accepts a standalone asset only when its pixels reloaded.
+        AUREA_CHECK(reader.set_particle_texture(emitter.pack(), 0));
+        AUREA_CHECK(reader.set_particle_texture(emitter.pack(), texture.pack()));
+    }
+    std::remove(path.c_str());
+    std::remove((path + ".bak").c_str());
+}
+
 AUREA_TEST(Serialization, SaveAndLoadRoundTrip) {
     const std::string path = temp_path("roundtrip");
     std::remove(path.c_str());

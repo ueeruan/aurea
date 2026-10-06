@@ -56,6 +56,7 @@
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/render/PreviewRefill.hpp"
+#include "aurea/render/PreviewCachePolicy.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -184,6 +185,11 @@ struct EngineConfig {
     /// o anterior). 0 = automático (3; 1 sob calor). 1 = serial — o teste de
     /// equivalência compara os dois bytes a bytes.
     u32 exportPipelineDepth = 0;
+    /// Watchdog do worker do encoder (export/ExportWatchdog.hpp): sem batida
+    /// da plataforma por isto, o motor desiste do worker travado e conclui o
+    /// export com falha (EncoderStalled) em vez de esperar o join para sempre.
+    /// 0 = 45 s. Os testes usam menos.
+    u32 exportWorkerHangMs = 0;
 
     /// Saída de som da plataforma (AAudio no Android). NÃO é assumida a posse.
     /// Nula = preview mudo; o relógio do sistema conduz o playback e o export
@@ -394,7 +400,8 @@ public:
     /// desfazer. Devolve o id do clipe congelado.
     [[nodiscard]] Result<u64> freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcept;
     /// Nova forma no centro da composição, do cabeçote até o fim. `preset` é
-    /// o ladrilho da aba Forma (0..14). Devolve o id da camada.
+    /// o ladrilho da aba Forma (0..32; a tabela em Engine::add_shape). Devolve
+    /// o id da camada.
     [[nodiscard]] Result<u64> add_shape(u32 preset) noexcept;
 
     // --- Camada vetorial (Fase 7D; EngineVector.cpp) --------------------------------
@@ -444,10 +451,13 @@ public:
     bool ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept;
 
     /// Forma (SDF): os mesmos parâmetros de `ShapeSetParam` (1 raio, 2 lados,
-    /// 3 raio interno, 4 contorno, 5 largura, 6 altura), agora ANIMÁVEIS.
-    /// `out` recebe os 7 valores no playhead + bits de animado + bits de
-    /// keyframe aqui (kShapeParamFloats no total).
-    static constexpr u32 kShapeParamCount = 7;
+    /// 3 raio interno, 4 contorno, 5 largura, 6 altura, 7 profundidade,
+    /// 8 ponta, 9 espessura, 10 abertura, 11 ponta da seta, 12 haste,
+    /// 13 amplitude, 14 variante — shape::Param em timeline/ShapeGeometry.hpp),
+    /// todos ANIMÁVEIS. `out` recebe os kShapeParamCount valores no playhead
+    /// (o 0 é o tipo; 7..14 já com o padrão da forma resolvido) + bits de
+    /// animado + bits de keyframe aqui (kShapeParamFloats no total).
+    static constexpr u32 kShapeParamCount = 15;
     static constexpr u32 kShapeParamFloats = kShapeParamCount + 2;
     u32 query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept;
     bool set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept;
@@ -871,6 +881,10 @@ public:
     bool set_composition_motion_blur(bool on) noexcept;
     /// {ligado, obturador em graus} da composição atual.
     bool query_motion_blur(bool& on, f32& shutter) noexcept;
+    bool query_motion_blur_settings(MotionBlurSettings& out) noexcept;
+    /// One undoable composition edit. Rejects nonfinite values and invalid sample counts.
+    bool set_motion_blur_settings(bool enabled, f32 angle, f32 phase,
+                                  u32 samples, u32 adaptiveLimit) noexcept;
 
     // --- Rastreio de câmera 3D -----------------------------------------------------
     /// Estado da análise: 0 parado, 1 analisando, 2 pronto, 3 falhou, 4 cancelado.
@@ -965,6 +979,9 @@ public:
     /// Intensidade (≥ 0) e giro (graus) do ambiente.
     bool set_environment_background(bool visible) noexcept;
     bool environment_background() noexcept;
+    bool set_environment_background_range(i64 start, i64 end) noexcept;
+    i64 environment_background_start() noexcept;
+    i64 environment_background_end() noexcept;
     bool set_environment_params(f32 intensity, f32 rotationDeg) noexcept;
     /// {tem HDRI (0/1), intensidade, giro}.
     bool query_environment(f32* out3) noexcept;
@@ -1017,6 +1034,27 @@ public:
     /// {projeta, recebe}.
     bool query_model_shadows(u64 layerId, f32* out2) noexcept;
 
+    /// MOSTRAR INTERIOR (dupla face) de um objeto 3D (modelo, texto ou forma
+    /// 3D): as faces de trás são desenhadas com a normal invertida e a mesma
+    /// textura — a câmera dentro do cubo vê o lado de dentro. Grava ligado ou
+    /// desligado explícito (o padrão "automático" liga só nas formas 3D
+    /// prontas). Um passo de desfazer. API em EngineShape3D.cpp.
+    bool set_model_interior(u64 layerId, bool on) noexcept;
+    /// 1 = mostra o interior agora, 0 = não, −1 = não é objeto 3D.
+    [[nodiscard]] i32 query_model_interior(u64 layerId) noexcept;
+
+    /// MINIATURA DE MATERIAL (scene3d/MaterialPreview.hpp): a bola de estúdio
+    /// do material `material` da camada 3D — modelo importado (material i),
+    /// forma 3D (parte i) ou texto 3D (região i) — com os valores do instante
+    /// (ajuste da camada + keyframes) e a imagem do mapa de cor. `size` ×
+    /// `size` (16..256) em RGBA8 sRGB, alfa reto. Pode ser chamada fora da
+    /// thread principal: a trava do modelo só cobre a cópia dos fatores; a
+    /// bola é calculada na CPU, fora dela, e guardada num cache por receita.
+    bool material_preview(u64 layerId, u32 material, u32 size, std::vector<u8>& outRgba) noexcept;
+    /// A bola de um material pronto do texto 3D (0..6, a mesma ordem de
+    /// apply_text3d_material_preset). Não depende do projeto.
+    bool text3d_preset_preview(u32 preset, u32 size, std::vector<u8>& outRgba) noexcept;
+
     // --- Pré-composição ----------------------------------------------------------
     /// Move as camadas para uma composição nova (mesmo tamanho, taxa e
     /// duração; fundo transparente) e põe no lugar UMA camada que a mostra, na
@@ -1050,6 +1088,10 @@ public:
     /// (texto: fonte/tamanho/cor/contorno; forma: preenchimento/contorno).
     bool copy_style(u64 layerId) noexcept;
     u32 paste_style(const u64* ids, u32 count) noexcept;
+    /// Transform controls and their keyframes/expressions; paste preserves the
+    /// destination's parent, media, effects and time range. Clipboard bit 16.
+    bool copy_transform(u64 layerId) noexcept;
+    u32 paste_transform(const u64* ids, u32 count) noexcept;
     /// Efeitos (com os keyframes deles): colar ACRESCENTA ao fim da pilha.
     u32 copy_effects(u64 layerId, u32 effectId = kInvalidIndex) noexcept;
     u32 paste_effects(const u64* ids, u32 count) noexcept;
@@ -1269,7 +1311,8 @@ public:
 
     /// Renderiza o instante atual numa textura (export, testes visuais), em
     /// resolução cheia, sem superfície. Espera a GPU terminar.
-    [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview = false) noexcept;
+    [[nodiscard]] Status render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview = false,
+                                          u64 expectedGpuGeneration = 0) noexcept;
 
     /// Medição do último `render_offscreen` (suíte de benchmark da Fase 8A).
     /// Tudo cronometrado de verdade; a GPU só com os timers ligados
@@ -1328,6 +1371,11 @@ public:
 
     [[nodiscard]] EngineStatus read_status() noexcept;
     [[nodiscard]] EngineTelemetry read_telemetry() noexcept;
+    /// Complete preview-cache intervals for the current composition. Absolute
+    /// [start, end) frame pairs; returns pairs copied (at most 30), without a GPU wait.
+    [[nodiscard]] u32 copy_preview_buffer_ranges(i64* outPairs, u32 capacityRanges) noexcept;
+    /// Bits: depth working=1, foreground working=2, depth failed=4, foreground failed=8.
+    [[nodiscard]] u32 local_ai_status() noexcept;
 
     void fill_status(bridge::EngineStatusPOD& out) noexcept;
     void fill_telemetry(bridge::TelemetryPOD& out) noexcept;
@@ -1368,6 +1416,11 @@ public:
     /// Detalhe de uma camada no playhead. false = camada não existe.
     bool query_layer_detail(u64 layerId, bridge::LayerDetailPOD& out) noexcept;
 private:
+    /// Caller holds modelMutex_. Sources retained for undo share this CPU quota.
+    bool apply_motion_blur_settings_locked(Composition& comp, const MotionBlurSettings& settings) noexcept;
+    [[nodiscard]] u64 source_asset_room_locked() const noexcept;
+    /// Acquire BEFORE modelMutex_; slow imports must not overlap their peaks.
+    std::recursive_mutex sourceImportMutex_;
     Status ensure_text3d_layout(Layer& layer) noexcept; // modelMutex_ held; caller owns undo.
     [[nodiscard]] bool supports_text_animation(const Layer& layer) const noexcept;
     /// Camada de forma 3D (receita aurea-shape3d:). As partes já são nós
@@ -1453,6 +1506,9 @@ public:
         kExportSoftwareEncoder = 1u << 1,   ///< caiu para encoder de software (mais lento)
         kExportThermalReduced  = 1u << 2,   ///< calor: menos quadros em voo (qualidade igual)
         kExportFrameFallback   = 1u << 3,   ///< algum quadro de vídeo saiu com o decodificado mais próximo
+        kExportSafeMode        = 1u << 4,   ///< export no modo de segurança (refeito depois de o encoder travar)
+        // Bits 16..17: o próximo modo de segurança sugerido quando o export
+        // falhou pelo encoder (kExportRetryShift, export/ExportWatchdog.hpp).
     };
     [[nodiscard]] ExportProgress export_progress() const noexcept;
 
@@ -1530,6 +1586,9 @@ private:
     void drain_commands_locked() noexcept;
     [[nodiscard]] Composition* current_composition() noexcept;
     [[nodiscard]] Status recover_device_locked() noexcept;
+    // renderMutex_: a failed export may leave a real submission in flight.
+    [[nodiscard]] Status poll_export_gpu_locked() noexcept;
+    void retain_failed_export_gpu_locked() noexcept;
     void render_thread_main() noexcept;
     void update_perf(const FrameStats& stats, const RenderTimings& timings,
                      const FrameSnapshot& snap, u64 frameStartNs) noexcept;
@@ -1570,6 +1629,8 @@ private:
     AdaptiveResolutionController* adaptive_ = nullptr;
 
     std::unique_ptr<GPUBackend> gpu_;
+    u64                pendingExportGpuFrame_ = 0, pendingExportGpuGeneration_ = 0; ///< renderMutex_
+    u64                gpuGeneration_ = 0; ///< under renderMutex_; survives backend/device recreation
     Renderer           renderer_;
     MediaManager       media_;
     ThumbnailService   thumbs_;
@@ -1609,6 +1670,8 @@ private:
         i64 layersAnchor = 0;
         bool hasStyle = false;
         Layer style;
+        bool hasTransform = false;
+        Layer transform;
         std::vector<EffectInstance> effects;
         std::vector<Track> effectTracks;            ///< EffectParam dos efeitos copiados
         i64 effectsBase = 0;                        ///< offset da camada de origem (início dela em tempo local)
@@ -1645,6 +1708,7 @@ private:
     /// preso por outra thread que espere o de render — a ordem é sempre
     /// modelo → render, ou render sozinho.
     std::mutex renderMutex_;
+    std::atomic<u32> localAiStatusSnapshot_{0};
 
     std::thread renderThread_;
     std::mutex wakeMutex_;
@@ -1655,6 +1719,14 @@ private:
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
     PreviewRefill previewRefill_;
+    PreviewIdleBuffer previewIdle_;          ///< render thread / renderMutex_
+    std::atomic<u32> offscreenReaders_{0};    ///< idle work must not steal capture decode targets
+    // Protected by modelMutex_. The published packed status is lock-free for UI.
+    bool previewBuffering_ = false;
+    i64 previewBufferStart_ = 0;
+    u64 previewBufferSince_ = 0;
+    u32 previewBufferReady_ = 0, previewBufferTarget_ = 0;
+    std::atomic<u32> previewBufferStatus_{0};
     u32  lastRenderedRevision_ = 0;           ///< modelRevision_ do último frame desenhado
     u32  incompleteRetries_ = 0;              ///< quadros seguidos com camada pendente
     u64  lastMediaGen_ = 0;
@@ -1707,6 +1779,12 @@ private:
     GpuTiming offscreenPasses_[64]{};
 
     struct ExportContext;
+    // Lifecycle operations may arrive from different native/UI worker queues.
+    // Workers never acquire this mutex, so joining them while holding it is safe.
+    mutable std::mutex exportLifecycleMutex_;
+    // Short-lived pointer lock: progress/cancel never wait for encoder startup
+    // or for the lifecycle join, only for publication of a new context.
+    mutable std::mutex exportContextMutex_;
     std::unique_ptr<ExportContext> exportCtx_;
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).
@@ -1719,10 +1797,16 @@ private:
     std::atomic<bool> thermalDegrade_{false};
     void export_thread_main() noexcept;
     void export_encoder_main() noexcept;
+    /// Contexto cujo worker do encoder foi abandonado (travado na plataforma):
+    /// nunca é destruído — o worker pode voltar e tocar nele, e o destrutor do
+    /// sink chamaria a plataforma travada de novo. Vaza de propósito.
+    void retire_abandoned_export_locked() noexcept;
     void image_export_thread_main() noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status wait_export_gpu(u64 gpuFrame) noexcept; // renderMutex_ held by caller
-    [[nodiscard]] Status write_export_audio(i64 untilSample) noexcept;
+    /// O contexto vem explícito: um worker abandonado (ExportWatchdog.hpp) que
+    /// volte depois nunca pode tocar no export SEGUINTE por `exportCtx_`.
+    [[nodiscard]] Status write_export_audio(ExportContext& ctx, i64 untilSample) noexcept;
     /// Uma linha no log com o custo do export (telemetria): CPU do 1º quadro e
     /// dos demais, GPU por quadro e os passes mais caros.
     void log_export_profile() noexcept;

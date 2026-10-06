@@ -97,7 +97,7 @@ GroundPlacement ground_placement(const SceneFrame& frame) noexcept {
             const i32 mi = a.nodes[n].mesh;
             if (mi < 0 || mi >= static_cast<i32>(a.meshes.size())) continue;
             const Mat4 world = a.nodes[n].skin >= 0 ? inst.world
-                             : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
+                             : inst.world * (n < inst.pose().nodeWorld.size() ? inst.pose().nodeWorld[n] : Mat4::identity());
             for (const Primitive& p : a.meshes[static_cast<usize>(mi)].primitives) {
                 if (p.material >= 0 && p.material < static_cast<i32>(a.materials.size())) {
                     const Material& m = a.materials[static_cast<usize>(p.material)];
@@ -211,7 +211,7 @@ void collect_ground_pipelines(std::vector<PipelineKey>& out, usize first, usize 
 struct GroundDraw {
     PipelineHandle pipeline{};
     const GroundBlock* block = nullptr;
-    FGTexture reflection{}, contact{}, shadow{};
+    FGTexture reflection{}, reflectionDisplay{}, contact{}, shadow{};
     TextureHandle fallback{};
     TextureHandle irradiance{}, prefiltered{}, brdf{};
     SamplerHandle cubeSampler{};
@@ -360,20 +360,19 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
     // --- 1. Reflexo planar -----------------------------------------------------
     const f32 reflectivity = std::isfinite(fl.reflectivity) ? std::clamp(fl.reflectivity, 0.0f, 1.0f) : 0.0f;
     const f32 roughness = std::isfinite(fl.roughness) ? std::clamp(fl.roughness, 0.0f, 1.0f) : 0.35f;
-    FGTexture reflection{};
+    FGTexture reflection{}, reflectionDisplay{};
     const u32 div = in.exportQuality ? 1u : 2u;
     const u32 rw = std::max(1u, in.width / div), rh = std::max(1u, in.height / div);
     if (reflectivity > 0.0f && !in.lowTier && count > 0) {
         Mat4 mirror = Mat4::identity();
         mirror.col[1] = Vec4{0, -1, 0, 0};
         mirror.col[3] = Vec4{0, 2.0f * h, 0, 1};
-        const Mat4 reflViewProj = in.viewProj * mirror;
-        const Vec3 reflCam{cam.x, 2.0f * h - cam.y, cam.z};
         DrawT* list = arena.alloc_array<DrawT>(count);
         if (list) {
             // Um bloco espelhado por bloco original (materiais/ambientes).
             std::vector<std::pair<const SceneBlock*, const SceneBlock*>> remap;
             u32 n = 0;
+            bool hasDisplayReflection = false;
             for (u32 i = 0; i < count; ++i) {
                 DrawT d = draws[i];
                 const SceneBlock* nb = nullptr;
@@ -382,8 +381,12 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                     auto* b = static_cast<SceneBlock*>(arena.alloc(sizeof(SceneBlock), 16));
                     if (!b) continue;
                     *b = *d.block;
-                    b->viewProj = reflViewProj;
-                    b->cameraPos = Vec4{reflCam, d.block->cameraPos.w};
+                    // Exposure samples can carry a different camera for each
+                    // object (including the center camera when its blur is off).
+                    // Reflect that camera, as the main PBR draw does.
+                    b->viewProj = d.block->viewProj * mirror;
+                    b->cameraPos = Vec4{d.block->cameraPos.x, 2.0f * h - d.block->cameraPos.y,
+                                       d.block->cameraPos.z, d.block->cameraPos.w};
                     if (b->alpha.y > 2.5f) b->alpha.y = 1.0f;   // MASK por cobertura → descarte (1 amostra)
                     remap.emplace_back(d.block, b);
                     nb = b;
@@ -392,6 +395,7 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                 if (!pipe.ok()) continue;
                 d.block = nb;
                 d.pipeline = *pipe;
+                hasDisplayReflection |= d.block->alpha.z > 0.5f;
                 list[n++] = d;
             }
             if (n > 0) {
@@ -406,12 +410,15 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                 dd.sampled = false;
                 dd.transient = true;
                 TextureDesc md = cd;
-                md.sampled = false;
-                const FGTexture reflMask = graph.create_texture("3d-chao-reflexo-alfa", md);
+                // Unlit writes display-linear color in MRT0, while PBR writes
+                // encoded radiance in MRT1. Retain the first target only when
+                // it contains color, so PBR-only floors keep their old cost.
+                md.sampled = hasDisplayReflection;
+                const FGTexture reflDisplay = graph.create_texture("3d-chao-reflexo-exibicao", md);
                 const FGTexture reflHdr = graph.create_texture("3d-chao-reflexo", cd);
                 const FGTexture reflDepth = graph.create_texture("3d-chao-reflexo-prof", dd);
                 struct Cap { DrawT* draws; u32 count; GroundMeshContext x; } cap{list, n, in.mesh};
-                const u32 pass = graph.add_raster_pass_depth("3d-chao-reflexo", PassStage::Scene3D, reflMask, LoadOp::Clear,
+                const u32 pass = graph.add_raster_pass_depth("3d-chao-reflexo", PassStage::Scene3D, reflDisplay, LoadOp::Clear,
                                                              Vec4{0, 0, 0, 0}, reflDepth, LoadOp::Clear, false, 0.0f,
                                                              [cap](PassContext& pc) {
                     ground_record_draws(pc.cmds, pc, cap.draws, cap.count, cap.x, nullptr);
@@ -419,11 +426,16 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                 graph.set_color1(pass, reflHdr);
                 if (in.mesh.shadow.valid()) graph.read(pass, in.mesh.shadow);
                 reflection = reflHdr;
+                if (hasDisplayReflection) reflectionDisplay = reflDisplay;
                 // Desfoque pela rugosidade (σ em px da resolução inteira).
                 const f32 sigma = roughness * 0.03f * static_cast<f32>(in.height) / static_cast<f32>(div);
                 if (sigma >= 0.6f) {
                     const FGTexture blurred = ground_blur(graph, shaders, reflHdr, rw, rh, sigma, false);
                     if (blurred.valid()) reflection = blurred;
+                    if (hasDisplayReflection) {
+                        const FGTexture displayBlur = ground_blur(graph, shaders, reflDisplay, rw, rh, sigma, false);
+                        if (displayBlur.valid()) reflectionDisplay = displayBlur;
+                    }
                 }
             }
         }
@@ -523,10 +535,11 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
     gb->shadowParams = hd.shadowParams;
     gb->shadowParams2 = hd.shadowParams2;
     gb->contactMatrix = contactMatrix;
-    gb->contactParams = Vec4{contact.valid() ? 1.0f : 0.0f, 0, 0, 0};
+    gb->contactParams = Vec4{contact.valid() ? 1.0f : 0.0f, reflectionDisplay.valid() ? 1.0f : 0.0f, 0, 0};
     gd.pipeline = *pipe;
     gd.block = gb;
     gd.reflection = reflection;
+    gd.reflectionDisplay = reflectionDisplay;
     gd.contact = contact;
     gd.shadow = in.mesh.shadow;
     gd.fallback = in.black.valid() ? in.black : in.white;
@@ -546,6 +559,7 @@ void draw_ground(CommandList& c, PassContext& pc, const GroundDraw& g) noexcept 
     c.bind_pipeline(g.pipeline);
     c.bind_texture(0, g.reflection.valid() ? pc.texture(g.reflection) : g.fallback, SamplerHandle{g.linearClamp});
     c.bind_texture(1, g.contact.valid() ? pc.texture(g.contact) : g.fallback, SamplerHandle{g.linearClamp});
+    c.bind_texture(2, g.reflectionDisplay.valid() ? pc.texture(g.reflectionDisplay) : g.fallback, SamplerHandle{g.linearClamp});
     c.bind_texture(5, g.irradiance, g.cubeSampler);
     c.bind_texture(6, g.prefiltered, g.cubeSampler);
     c.bind_texture(7, g.brdf, SamplerHandle{g.linearClamp});
@@ -561,6 +575,7 @@ void draw_ground(CommandList& c, PassContext& pc, const GroundDraw& g) noexcept 
 void ground_reads(FrameGraph& graph, u32 pass, const GroundDraw& g) noexcept {
     if (!g.valid()) return;
     if (g.reflection.valid()) graph.read(pass, g.reflection);
+    if (g.reflectionDisplay.valid()) graph.read(pass, g.reflectionDisplay);
     if (g.contact.valid()) graph.read(pass, g.contact);
 }
 

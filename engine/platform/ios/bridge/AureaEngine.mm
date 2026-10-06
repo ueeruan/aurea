@@ -28,7 +28,9 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
+#include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
+#include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
@@ -392,6 +394,10 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     return e ? static_cast<int64_t>(e->trim_memory(level).total) : 0;
 }
 
+- (uint64_t)availableMemoryBytes {
+    return aurea::ios::process_memory_headroom();
+}
+
 - (void)setThermalLevel:(uint32_t)level throttling:(BOOL)throttling {
     if (auto* e = self.engine) e->set_thermal(level, throttling != NO);
 }
@@ -475,6 +481,7 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     out->previewNumerator    = pod.previewNumerator;
     out->previewDenominator  = pod.previewDenominator;
     out->previewAuto         = pod.previewAuto;
+    out->previewBufferStatus = pod.previewBufferStatus;
     out->playhead            = pod.playhead;
     out->duration            = pod.duration;
     out->playing             = pod.playing;
@@ -488,6 +495,18 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     out->gpuMemoryBytes      = pod.gpuMemoryBytes;
     out->cpuMemoryBytes      = pod.cpuMemoryBytes;
     return YES;
+}
+
+- (uint32_t)localAiStatus { auto* e = self.engine; return e ? e->local_ai_status() : 0; }
+
+- (NSArray<NSNumber*>*)previewBufferRanges {
+    auto* e = self.engine;
+    if (!e) return @[];
+    aurea::i64 pairs[60]{};
+    const aurea::u32 count = std::min<aurea::u32>(30, e->copy_preview_buffer_ranges(pairs, 30));
+    NSMutableArray<NSNumber*>* result = [NSMutableArray arrayWithCapacity:count * 2];
+    for (aurea::u32 i = 0; i < count * 2; ++i) [result addObject:@(pairs[i])];
+    return result;
 }
 
 - (NSDictionary<NSString*, id>*)perf {
@@ -1052,6 +1071,13 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     [self flush];
 }
 
+- (NSArray<NSNumber*>*)fitCanvas:(NSArray<NSNumber*>*)values fill:(BOOL)fill {
+    if(values.count!=11)return @[];
+    std::array<float,11> a{};for(NSUInteger i=0;i<11;++i)a[i]=values[i].floatValue;
+    const auto fit=aurea::canvas_fit(a,fill);
+    return @[@(fit[0]),@(fit[1]),@(fit[2]),@(fit[3]),@(fit[4])];
+}
+
 - (void)setPositionForLayer:(long long)layerId x:(float)x y:(float)y z:(float)z {
     if (auto* c = _batch.add(CommandType::LayerSetPosition)) {
         c->position.layer = layer_of(layerId);
@@ -1118,6 +1144,20 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         c->keyframe.time = aurea::FrameIndex{time};
         c->keyframe.value = value;
         c->keyframe.onlyIfChanged = 1;
+    }
+    [self flush];
+}
+
+- (void)gestureKeyframeForLayer:(long long)layerId property:(uint32_t)property value:(float)value wholeGroup:(BOOL)wholeGroup {
+    if (auto* c = _batch.add(CommandType::KeyframeInsert)) {
+        c->keyframe.track.layer = layer_of(layerId);
+        c->keyframe.track.property = static_cast<aurea::TrackProperty>(property);
+        c->keyframe.track.effectIndex = aurea::kInvalidIndex;
+        c->keyframe.track.effectParamIndex = 0;
+        c->keyframe.time = aurea::FrameIndex{0};   // o motor usa o quadro da prévia
+        c->keyframe.value = value;
+        c->keyframe.onlyIfChanged = aurea::kAutoKeyOnlyIfChanged | aurea::kAutoKeyAtPlayhead
+                                  | (wholeGroup ? 0u : aurea::kAutoKeyStaticWhenUnanimated);
     }
     [self flush];
 }
@@ -1292,6 +1332,20 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     if (auto* e = self.engine) (void)e->copy_keyframes(static_cast<aurea::u64>(layerId), frame);
 }
 
+- (BOOL)copyTransform:(long long)layerId {
+    auto* e = self.engine;
+    return e && e->copy_transform(static_cast<aurea::u64>(layerId));
+}
+
+- (uint32_t)pasteTransform:(NSArray<NSNumber*>*)layerIds {
+    auto* e = self.engine;
+    if (!e) return 0;
+    std::vector<aurea::u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* value in layerIds) ids.push_back(static_cast<aurea::u64>(value.longLongValue));
+    return e->paste_transform(ids.data(), static_cast<aurea::u32>(ids.size()));
+}
+
 - (uint32_t)keyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references action:(uint32_t)action delta:(int32_t)delta {
     auto* e = self.engine;
     if (!e || references.count == 0 || references.count % 4 != 0 || references.count > 16384 * 4 || action > 2) return 0;
@@ -1454,6 +1508,24 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (BOOL)setModelShadows:(long long)layerId cast:(BOOL)cast receive:(BOOL)receive {
     auto* e = self.engine; return e && e->set_model_shadows(layerId, cast, receive);
 }
+- (int32_t)modelInterior:(long long)layerId {
+    auto* e = self.engine; return e ? e->query_model_interior(static_cast<u64>(layerId)) : -1;
+}
+- (BOOL)setModelInterior:(long long)layerId on:(BOOL)on {
+    auto* e = self.engine; return e && e->set_model_interior(static_cast<u64>(layerId), on);
+}
+- (NSData*)materialPreview:(long long)layerId material:(uint32_t)material size:(uint32_t)size {
+    auto* e = self.engine;
+    std::vector<u8> rgba;
+    if (!e || !e->material_preview(static_cast<u64>(layerId), material, size, rgba) || rgba.empty()) return nil;
+    return [NSData dataWithBytes:rgba.data() length:rgba.size()];
+}
+- (NSData*)text3DPresetPreview:(uint32_t)preset size:(uint32_t)size {
+    auto* e = self.engine;
+    std::vector<u8> rgba;
+    if (!e || !e->text3d_preset_preview(preset, size, rgba) || rgba.empty()) return nil;
+    return [NSData dataWithBytes:rgba.data() length:rgba.size()];
+}
 - (int64_t)removeGaps { auto* e = self.engine; return e ? e->remove_gaps() : 0; }
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next {
     auto* e = self.engine; return e && e->edit_clip_time(layerId, operation, amount, previous, next);
@@ -1468,10 +1540,22 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 }
 
 - (NSArray<NSNumber*>*)motionBlurSettings {
-    auto* e = self.engine; bool on = false; float shutter = 180; if (!e || !e->query_motion_blur(on, shutter)) return @[]; return @[@(on), @(shutter)];
+    auto* e = self.engine;
+    aurea::MotionBlurSettings settings;
+    if (!e || !e->query_motion_blur_settings(settings)) return @[];
+    return @[@(settings.enabled), @(settings.shutterAngle), @(settings.shutterPhase),
+             @(settings.samples), @(settings.adaptiveLimit), @(settings.previewSamples)];
 }
 - (void)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter {
-    if (auto* e = self.engine) { (void)e->set_composition_motion_blur(enabled); (void)e->set_shutter_angle(shutter); }
+    auto* e = self.engine;
+    aurea::MotionBlurSettings settings;
+    if (e && e->query_motion_blur_settings(settings))
+        (void)e->set_motion_blur_settings(enabled, shutter, settings.shutterPhase, settings.samples, settings.adaptiveLimit);
+}
+- (BOOL)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter phase:(float)phase
+                      samples:(uint32_t)samples adaptiveLimit:(uint32_t)adaptiveLimit {
+    auto* e = self.engine;
+    return e && e->set_motion_blur_settings(enabled, shutter, phase, samples, adaptiveLimit);
 }
 
 - (NSDictionary<NSString*, id>*)textForLayer:(long long)layerId {
@@ -1657,13 +1741,18 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     auto* e = self.engine;
     return e && e->set_environment_params(intensity, rotation) ? YES : NO;
 }
+- (BOOL)setEnvironmentBackgroundRangeStart:(long long)start end:(long long)end {
+    auto* e = self.engine;
+    return e && e->set_environment_background_range(start, end) ? YES : NO;
+}
 
 - (NSArray<NSNumber*>*)environment {
     auto* e = self.engine;
     if (!e) return @[];
     f32 v[3]{};
     if (!e->query_environment(v)) return @[];
-    return @[@(v[0]), @(v[1]), @(v[2]), @(e->environment_background())];
+    return @[@(v[0]), @(v[1]), @(v[2]), @(e->environment_background()),
+             @(e->environment_background_start()), @(e->environment_background_end())];
 }
 
 - (BOOL)setObjectEnvironmentForLayer:(long long)layerId source:(uint32_t)source hdri:(long long)hdri
@@ -1810,7 +1899,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     aurea::scene3d::DeviceMemoryHint h;
     h.totalBytes = static_cast<aurea::u64>(NSProcessInfo.processInfo.physicalMemory);
-    const size_t available = os_proc_available_memory();
+    const size_t available = static_cast<size_t>(aurea::ios::process_memory_headroom());
     h.availableBytes = available > 0 ? static_cast<aurea::u64>(available) : 0;
     h.lowRam = h.totalBytes > 0 && h.totalBytes <= (2ull << 30) + (256ull << 20);
     return h;
@@ -3503,6 +3592,16 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
               quality:(uint32_t)quality {
+    return [self startExportTo:path codec:codec height:height fps:fps bitrateMbps:bitrateMbps
+             audioBitrateKbps:audioBitrateKbps aiUpscale:aiUpscale trimToContent:trimToContent quality:quality
+                     safeMode:0];
+}
+
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+              quality:(uint32_t)quality safeMode:(uint32_t)safeMode {
     auto* e = self.engine;
     if (!e) return NO;
     aurea::ExportSettings settings;
@@ -3516,6 +3615,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     settings.aiUpscale = aiUpscale;
     settings.trimToContent = trimToContent != NO;
     settings.quality = std::min<uint32_t>(quality, 2u);
+    settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportSafeModeMax);
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
     return e->start_export(settings, out.c_str()).ok() ? YES : NO;

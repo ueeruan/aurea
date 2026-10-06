@@ -52,10 +52,9 @@ import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.roundToInt
 
 /**
- * Partículas. Camada nova = o Particular (o sistema do app antigo, efeito
- * `aurea.generate.particular`): os presets dele em cima e os controles do
- * efeito embaixo, no painel de efeitos do Aurea. Camada antiga: os controles
- * compactos de antes, com os presets do Particular para converter.
+ * Partículas 3D AUREA: presets e controles do efeito compartilhado.
+ * O identificador `aurea.generate.particular` permanece estável nos projetos.
+ * Camadas do sistema anterior mantêm seus controles até a conversão explícita.
  */
 @Composable
 internal fun ParticlesPanel(env: PanelEnv) {

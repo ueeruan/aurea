@@ -28,9 +28,10 @@ class TextPresetsEntryTest {
             val sections = sectionsFor(l)
             assertTrue("presets on ${l.kind}", DockSection.Presets in sections)
             assertEquals(EditorPanel.Presets, DockSection.Presets.panel)
-            // Editar e opções continuam na frente; 6 fichas = 3 + 3.
-            assertEquals(listOf(DockSection.EditText, DockSection.TextOptions, DockSection.Presets), sections.take(3))
-            assertEquals(listOf(3, 3), dockRows(sections.size))
+            // Frequent actions remain visible; all six tools are reachable in one row.
+            assertEquals(listOf(DockSection.EditText, DockSection.Move, DockSection.Effects, DockSection.Blend), sections.take(4))
+            assertTrue(DockSection.TextOptions in sections)
+            assertEquals(listOf(6), dockRows(sections.size))
         }
     }
 

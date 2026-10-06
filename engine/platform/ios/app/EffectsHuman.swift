@@ -76,6 +76,13 @@ private let FxMatrixLabels = [
 /// idioma — ordenar pelo nome traduzido reordenaria a lista ao trocar de
 /// língua).
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
+    ("aurea.distort.bender", FxEffectHuman(name: "fx_name_bender", keywords: "bender bend curve curvar pontos", principal: [0, 1, 2, 3])),
+    ("aurea.distort.bend", FxEffectHuman(name: "fx_name_bend", keywords: "bend fold dobra papel", principal: [0, 1, 2, 5])),
+    ("aurea.distort.curl", FxEffectHuman(name: "fx_name_curl", keywords: "curl roll enrolar cilindro", principal: [0, 1, 2, 3, 6])),
+    ("aurea.distort.page_turn", FxEffectHuman(name: "fx_name_page_turn", keywords: "page turn pagina papel", principal: [0, 1, 2, 3, 8])),
+    ("aurea.distort.liquid_glass", FxEffectHuman(name: "fx_name_liquid_glass", keywords: "liquid glass vidro liquido lente refracao glassmorphism", principal: [0, 1, 2, 3, 5])),
+    ("aurea.transition.noise_dissolve", FxEffectHuman(name: "fx_name_noise_dissolve", keywords: "dissolve dissolver ruido queimar desintegrar", principal: [0, 1, 3, 8, 10])),
+    ("aurea.stylize.eight_bit", FxEffectHuman(name: "fx_name_eight_bit", keywords: "8 bit 8bit pixel retro dither pontilhado game", principal: [0, 1, 2, 3])),
     ("aurea.glitch.jpeg_codec", FxEffectHuman(keywords: "jpeg glitch compression compressao dct quantization dano", principal: [0, 1, 2, 4, 5])),
     ("aurea.glitch.analog_signal", FxEffectHuman(keywords: "signal analog analogico ntsc pal vhs television", principal: [0, 1, 2, 3, 4])),
     ("aurea.light.deep_glow_2", FxEffectHuman(keywords: "deep glow 2 brilho bloom halo", principal: [0, 1, 2, 3, 13])),
@@ -166,7 +173,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.stylize.motion_tile", FxEffectHuman(
         name: "fx_name_motion_tile",
         keywords: "motion tile azulejos repetir ladrilho mosaico tijolo fase espelhar parede de video",
-        principal: [1, 2, 5, 7],
+        principal: [10, 1, 2, 5, 7],
         params: [
             0: FxParamHuman(label: "fx_centro"),
             1: FxParamHuman(label: "fx_mt_largura_ladrilho"),
@@ -176,6 +183,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             5: FxParamHuman(label: "fx_mt_espelhar_bordas"),
             7: FxParamHuman(label: "fx_fase"),
             8: FxParamHuman(label: "fx_mt_fase_horizontal"),
+            10: FxParamHuman(label: "fx_escala", suffix: "%", decimals: 1),
         ])),
     ("aurea.key.luma", FxEffectHuman(
         name: "fx_name_luma_key",
@@ -185,7 +193,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             1: FxParamHuman(label: "fx_limite"),
         ])),
     ("aurea.key.chroma", FxEffectHuman(
-        name: "fx_name_chroma_key",
+        name: "fx_name_chroma_key_advanced",
         keywords: "chave de croma chroma key fundo verde green screen remover cor",
         principal: [0, 1, 2],
         params: [
@@ -305,7 +313,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.turbulence", FxEffectHuman(
         name: "fx_name_turbulence",
         keywords: "turbulencia displacement deslocamento ruido organico fumaca",
-        principal: [0, 1, 2, 4],
+        principal: [12, 0, 1, 2, 4],
         params: [
             0: FxParamHuman(label: "fx_intensidade", suffix: "px", decimals: 0),
             1: FxParamHuman(label: "fx_tamanho_ruido", suffix: "px", decimals: 0),
@@ -314,12 +322,12 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             4: FxParamHuman(label: "fx_deslocamento_x", suffix: "px", decimals: 0),
             5: FxParamHuman(label: "fx_deslocamento_y", suffix: "px", decimals: 0),
             8: FxParamHuman(label: "fx_bordas"),
-            10: FxParamHuman(label: "fx_girar_deslocamento", suffix: "°", decimals: 0),
+            9: FxParamHuman(label: "fx_girar_deslocamento", suffix: "°", decimals: 0),
         ])),
     ("aurea.distort.wave_warp", FxEffectHuman(
         name: "fx_name_wave_warp",
         keywords: "wave warp onda ondular senoide agua",
-        principal: [0, 1, 2, 4],
+        principal: [0, 1, 2, 4, 9],
         params: [
             0: FxParamHuman(label: "fx_altura_onda", suffix: "px", decimals: 0),
             1: FxParamHuman(label: "fx_largura_onda", suffix: "px", decimals: 0),
@@ -901,6 +909,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             2: FxParamHuman(label: "fx_direcao", suffix: "°", decimals: 0),
             3: FxParamHuman(label: "fx_distancia", suffix: "px", decimals: 0),
             4: FxParamHuman(label: "fx_suavidade", suffix: "px", decimals: 0),
+            5: FxParamHuman(label: "fxo_shadow_only"),
         ])),
     ("aurea.stylize.border", FxEffectHuman(
         name: "fx_name_border",

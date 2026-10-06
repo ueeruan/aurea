@@ -3,12 +3,14 @@
 // pesado sintético que entra (otimizado) em vez de derrubar o app.
 #include "TestFramework.hpp"
 #include "ImageIO.hpp"
+#include "MockBackend.hpp"
 
 #include "aurea/Engine.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/ModelBudget.hpp"
+#include "aurea/scene3d/SceneRenderer.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -16,9 +18,133 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <filesystem>
 
 using namespace aurea;
 using namespace aurea::scene3d;
+
+namespace aurea::scene3d {
+struct SceneUploadPoolTestAccess {
+    static void attach(SceneRenderer& renderer, GPUBackend& gpu) { renderer.gpu_ = &gpu; }
+    static BufferHandle allocate(SceneRenderer& renderer, usize bytes) { return renderer.take_upload(renderer.morphPool_, bytes); }
+};
+}
+
+AUREA_TEST(ModelBudget, SceneUploadPoolsTrimOnlyReturnedBuffersAndReleaseProjectStorage) {
+    test::MockBackend gpu; gpu.mapBuffers = true;
+    SceneRenderer renderer; SceneUploadPoolTestAccess::attach(renderer, gpu);
+    FrameBegin frame; AUREA_CHECK(gpu.begin_offscreen_frame(frame).ok());
+    const auto busy = SceneUploadPoolTestAccess::allocate(renderer, 1024 * 1024);
+    AUREA_CHECK(busy.valid());
+    AUREA_CHECK_EQ(renderer.resident_bytes(), 1024u * 1024u);
+    AUREA_CHECK_EQ(renderer.trim_upload_pools(), 0u);
+    AUREA_CHECK_EQ(gpu.mappedBuffers.size(), 1u);
+    AUREA_CHECK(gpu.end_frame().ok());
+    AUREA_CHECK_EQ(renderer.trim_upload_pools(), 1u);
+    AUREA_CHECK_EQ(gpu.mappedBuffers.size(), 0u);
+    AUREA_CHECK_EQ(renderer.resident_bytes(), 0u);
+    AUREA_CHECK(gpu.begin_offscreen_frame(frame).ok());
+    AUREA_CHECK(SceneUploadPoolTestAccess::allocate(renderer, 2048).valid());
+    renderer.release_all();
+    AUREA_CHECK(gpu.end_frame().ok()); // Old-generation ticket must not republish a destroyed buffer.
+    AUREA_CHECK_EQ(renderer.trim_upload_pools(), 0u);
+    AUREA_CHECK_EQ(renderer.resident_bytes(), 0u);
+    AUREA_CHECK_EQ(gpu.mappedBuffers.size(), 0u);
+    renderer.forget_device();
+}
+
+AUREA_TEST(ModelBudget, Base64TexturesUseTheParserAllocatorForEveryExit) {
+    const std::string path = std::string(AUREA_TEST_DATA_DIR) + "/mirrored-normal.gltf";
+    ImportOptions options; options.memoryBudget = 8ull << 20; options.maxTextureSize = 64;
+    for (u32 pass = 0; pass < 3; ++pass) {
+        const auto scene = import_gltf_file(path, options);
+        AUREA_CHECK(scene.ok());
+        if (scene.ok()) {
+            AUREA_CHECK(!scene.asset->images.empty());
+            AUREA_CHECK(scene.asset->images[0].width > 0);
+        }
+    }
+    options.memoryBudget = 128;
+    AUREA_CHECK(import_gltf_file(path, options).error == ImportError::TooHeavy);
+}
+
+AUREA_TEST(ModelBudget, ExternalTextureBudgetFailureIsReportedAsTooHeavy) {
+    const std::string path = std::string(AUREA_TEST_DATA_DIR) + "/mirrored-normal.gltf";
+    const auto size = std::filesystem::file_size(path);
+    std::string json(static_cast<usize>(size), ' ');
+    auto* file = std::fopen(path.c_str(), "rb"); AUREA_CHECK(file != nullptr); if (!file) return;
+    const usize got = std::fread(json.data(), 1, json.size(), file); std::fclose(file);
+    AUREA_CHECK_EQ(got, json.size());
+    const auto start = json.find("data:image/png;base64,");
+    AUREA_CHECK(start != std::string::npos); if (start == std::string::npos) return;
+    json.replace(start, json.find('"', start) - start, "large.png");
+    bool requested = false;
+    ImportOptions options; options.memoryBudget = 128 * 1024; options.maxTextureSize = 1;
+    options.readerUser = &requested;
+    options.reader = [](const char*, std::vector<u8>& bytes, void* context) {
+        *static_cast<bool*>(context) = true; bytes.resize(1024 * 1024); return true;
+    };
+    const auto imported = import_gltf_memory(reinterpret_cast<const u8*>(json.data()), json.size(), {}, options);
+    AUREA_CHECK(requested);
+    AUREA_CHECK(imported.error == ImportError::TooHeavy);
+}
+
+AUREA_TEST(ModelBudget, InspectionBoundsJsonAndKeepsHeavyWarningWithoutRejectingUnknownGeometry) {
+    const auto path = std::filesystem::temp_directory_path() / "aurea-estimate-budget.gltf";
+    auto* file = std::fopen(path.string().c_str(), "wb");
+    AUREA_CHECK(file != nullptr);
+    if (!file) return;
+    const char header[] = "{\"asset\":{\"version\":\"2.0\"}}";
+    std::fwrite(header, 1, sizeof(header) - 1, file);
+    std::fseek(file, 17 * 1024 * 1024, SEEK_SET); std::fputc(' ', file); std::fclose(file);
+    const auto cost = estimate_model_cost(path.string());
+    AUREA_CHECK(cost.valid && !cost.exact);
+    AUREA_CHECK(cost.fileBytes >= 17ull * 1024 * 1024);
+    const auto plan = plan_model_import(cost, {}, 2048);
+    AUREA_CHECK(plan.heavy && !plan.tooHeavy);
+    ImportOptions options; options.memoryBudget = 1024;
+    AUREA_CHECK(import_gltf_file(path.string(), options).error == ImportError::TooHeavy);
+    std::error_code error; std::filesystem::remove(path, error);
+}
+
+AUREA_TEST(ModelBudget, ResidentCostIncludesSpareMorphLodAndAnimationStorage) {
+    SceneAsset scene;
+    const u64 empty = scene_asset_memory_bytes(scene);
+    scene.meshes.resize(1); scene.meshes[0].primitives.resize(1);
+    auto& primitive = scene.meshes[0].primitives[0];
+    primitive.positions.reserve(1000);
+    primitive.morphTargets.resize(1); primitive.morphTargets[0].normals.reserve(2000);
+    primitive.lods.resize(1); primitive.lods[0].reserve(3000);
+    scene.animations.resize(1); scene.animations[0].samplers.resize(1);
+    scene.animations[0].samplers[0].values.reserve(4000);
+    AUREA_CHECK(scene_asset_memory_bytes(scene) >= empty + 3000 * sizeof(Vec3) + 3000 * sizeof(u32) + 4000 * sizeof(f32));
+}
+
+AUREA_TEST(ModelBudget, GltfBoundsInputAndParserBeforeLargeAllocations) {
+    ImportOptions options; options.memoryBudget = 1024;
+    std::vector<u8> oversized(2048, ' ');
+    const auto memory = import_gltf_memory(oversized.data(), oversized.size(), {}, options);
+    AUREA_CHECK(memory.error == ImportError::TooHeavy);
+    const auto path = std::filesystem::temp_directory_path() / "aurea-gltf-bounded-input.gltf";
+    if (auto* f = std::fopen(path.string().c_str(), "wb")) {
+        std::fwrite(oversized.data(), 1, oversized.size(), f); std::fclose(f);
+    }
+    const auto disk = import_gltf_file(path.string(), options);
+    AUREA_CHECK(disk.error == ImportError::TooHeavy);
+    std::error_code ec; std::filesystem::remove(path, ec);
+
+    const std::string json = R"({"asset":{"version":"2.0"},"buffers":[{"uri":"big.bin","byteLength":1000000000}]})";
+    options.memoryBudget = 64 * 1024;
+    bool read = false;
+    options.readerUser = &read;
+    options.reader = [](const char*, std::vector<u8>&, void* context) { *static_cast<bool*>(context) = true; return false; };
+    const auto buffers = import_gltf_memory(reinterpret_cast<const u8*>(json.data()), json.size(), {}, options);
+    AUREA_CHECK(buffers.error == ImportError::TooHeavy);
+    AUREA_CHECK(!read);
+    options.memoryBudget = json.size() + 16;
+    const auto parser = import_gltf_memory(reinterpret_cast<const u8*>(json.data()), json.size(), {}, options);
+    AUREA_CHECK(parser.error == ImportError::TooHeavy);
+}
 
 namespace {
 

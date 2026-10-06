@@ -14,10 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -75,11 +74,14 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
     ShapeTitle(stringResource(Shape3DCatalog.names.getOrElse(info.kind) { R.string.shape3d_title }) + " · " + stringResource(R.string.shape3d_parts))
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ShapeChip(stringResource(R.string.shape3d_whole), on = part < 0, modifier = Modifier.testTag("shape3d.part.all")) { store.chooseShapePart(-1) }
+        val layer = store.primary
         for (i in 0 until info.partCount) {
             val nameRes = Shape3DCatalog.partName(info.kind, i)
             val label = if (Shape3DCatalog.numbered(info.kind, i)) stringResource(nameRes, i + 1) else stringResource(nameRes)
             val c = info.colors[i]
-            ShapeChip(label, on = part == i, dot = Color(c[0], c[1], c[2]), modifier = Modifier.testTag("shape3d.part.$i")) {
+            // A bola do material da parte (cor + imagem da galeria), feita pelo motor.
+            val thumb = if (layer != null) rememberMaterialThumb(store, layer, i, store.curveRevision) else null
+            ShapeChip(label, on = part == i, dot = Color(c[0], c[1], c[2]), thumb = thumb, modifier = Modifier.testTag("shape3d.part.$i")) {
                 store.chooseShapePart(if (part == i) -1 else i)
             }
         }
@@ -207,14 +209,23 @@ private fun ShapeHint(t: String) {
 }
 
 @Composable
-private fun ShapeChip(label: String, on: Boolean, modifier: Modifier = Modifier, dot: Color? = null, onClick: () -> Unit) {
+private fun ShapeChip(
+    label: String,
+    on: Boolean,
+    modifier: Modifier = Modifier,
+    dot: Color? = null,
+    thumb: ImageBitmap? = null,
+    onClick: () -> Unit,
+) {
     Row(
         modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-            .tocavel(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp),
+            .tocavel(onClick = onClick).padding(start = if (dot != null) 6.dp else 12.dp, end = 12.dp, top = if (dot != null) 3.dp else 6.dp,
+                bottom = if (dot != null) 3.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (dot != null) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
+            // Parte: a bola do material (com a imagem, se houver); a cor chapada até ela chegar.
+            MaterialBall(thumb, dot, 26.dp)
             Spacer(Modifier.width(6.dp))
         }
         Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))

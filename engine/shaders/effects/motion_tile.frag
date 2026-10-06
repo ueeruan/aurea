@@ -35,12 +35,14 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 windowX;  // uv do quadro - 0.5: x = dot(xy, v_uv) + z;  w = meia janela
     vec4 windowY;  // idem em y
     vec4 box;      // ponto do ladrilho (0..1 = a caixa da layer) → uv da entrada: * xy + zw
+    vec4 windowW;  // denominador da projeção do quadro; (0,0,1) em 2D
 } p;
 
 void main() {
     vec2 frame = vec2(dot(p.windowX.xy, v_uv) + p.windowX.z,
                       dot(p.windowY.xy, v_uv) + p.windowY.z);
-    if (abs(frame.x) > p.windowX.w || abs(frame.y) > p.windowY.w) {
+    const float frameW = dot(p.windowW.xy, v_uv) + p.windowW.z;
+    if (frameW <= 0.0 || abs(frame.x) > p.windowX.w * frameW || abs(frame.y) > p.windowY.w * frameW) {
         o_color = vec4(0.0);
         return;
     }

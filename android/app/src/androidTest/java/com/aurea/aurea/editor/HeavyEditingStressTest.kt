@@ -27,12 +27,26 @@ import java.nio.ByteOrder
 class HeavyEditingStressTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun denseEditSurvivesPreviewTrimReloadAndExport() {
+    @Test fun sustainedFullHdEditingRecoversAfterReloadAndSurfaceRecreation() {
+        HeavyEditingSoakHarness(compose).run()
+    }
+
+    @Test fun denseEditSurvivesPreviewTrimReloadAndExport() = runDenseScene(includeExports = true)
+
+    /** Same producers, effects and animation as the full export acceptance.
+     * This separate ABI check must never be reported as export validation. */
+    @Test fun denseEditSurvivesPreviewTrimReloadIn32BitProcess() {
+        org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("aureaStress") == "true")
+        assertFalse("This regression requires the actual 32-bit native process", android.os.Process.is64Bit())
+        runDenseScene(includeExports = false)
+    }
+
+    private fun runDenseScene(includeExports: Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         check(context.packageName.endsWith(".uitest"))
         org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("aureaStress") == "true")
-        val folder = File(context.filesDir, "stress-2126").apply { mkdirs() }
+        val folder = File(context.filesDir, if (includeExports) "stress-2126" else "stress-96-arm32").apply { mkdirs() }
         val report = File(folder, "progress.txt")
         fun note(text: String) {
             val mem = Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }
@@ -139,6 +153,21 @@ class HeavyEditingStressTest {
         compose.runOnIdle { assertEquals(0, engine.loadProject(project.absolutePath)) }
         assertEquals(expected, engine.queryLayers(layerRows, 128, names))
         note("reopen-passed")
+        if (!includeExports) {
+            val rgba = ByteBuffer.allocateDirect(320 * 180 * 4)
+            val dimensions = IntArray(2)
+            // Instrumentation thread; cold media/GPU completion must not block UI.
+            assertEquals(320 * 180 * 4, engine.captureFrame(320, rgba, dimensions))
+            assertArrayEquals(intArrayOf(320, 180), dimensions)
+            val bytes = ByteArray(rgba.capacity()).also { rgba.rewind(); rgba.get(it) }
+            File(folder, "reopened-320x180.rgba").writeBytes(bytes)
+            val lit = (bytes.indices step 4).count { offset ->
+                (0..2).any { channel -> (bytes[offset + channel].toInt() and 255) > 25 }
+            }
+            assertTrue("Reopened heavy scene must contain rendered content", lit > 100)
+            note("32-BIT PREVIEW/TRIM/REOPEN/CAPTURE PASSED; exports not exercised here; lit=$lit")
+            return
+        }
         for (height in listOf(720, 1080)) {
             val progress = ExportProgress()
             val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())

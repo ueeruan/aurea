@@ -71,7 +71,7 @@ void TransientTexturePool::end_frame() noexcept {
     for (usize i = 0; i < entries_.size();) {
         Entry& e = entries_[i];
         if (!e.inUse && frame_ > e.lastUsedFrame + idleFrames_) {
-            backend_->destroy_texture(e.texture);
+            backend_->retire_texture(e.texture, e.lastUsedFrame);
             stats_.bytes -= std::min(stats_.bytes, e.desc.estimated_bytes());
             if (stats_.alive) --stats_.alive;
             ++stats_.destroyedThisFrame;
@@ -96,7 +96,7 @@ void TransientTexturePool::trim_for(u64 incomingBytes) noexcept {
         }
         if (oldest == entries_.size()) break;
         const Entry& e = entries_[oldest];
-        backend_->destroy_texture(e.texture);
+        backend_->retire_texture(e.texture, e.lastUsedFrame);
         stats_.bytes -= std::min(stats_.bytes, e.desc.estimated_bytes());
         --stats_.alive;
         ++stats_.destroyedThisFrame;
@@ -661,6 +661,7 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
 
         if (timers) cmds.end_timer();
         cmds.end_label();
+        if (!cmds.finish_pass().ok()) return;
     }
 
     for (const PlannedBarrier& pb : finalBarriers_) {

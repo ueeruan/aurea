@@ -1318,15 +1318,19 @@ struct ShapePanel: View {
     private var selected: Int { model.shapeSelectedParam }
     private var fill: [Float] { rgba(1) }
     private var stroke: [Float] { rgba(2) }
-    private let types = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15]
+    private let types = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
     private var track: [KeyframeItem] {
-        preferredCurveTrack(([selected] + [5, 6, 1, 2, 3, 4].filter { $0 != selected }).map { param in
+        preferredCurveTrack(([selected] + ([5, 6, 1, 2, 3, 4] + Array(7...14)).filter { $0 != selected }).map { param in
             (model.keyframes[id] ?? []).filter { $0.property == 35 && $0.paramIndex == UInt32(param) }.sorted { $0.time < $1.time }
         })
     }
+    /// Bits de animado e de keyframe aqui: os dois últimos números de `shapeParams`
+    /// (o motor tem 15 parâmetros; antes eram 7 — nunca por índice fixo).
+    private var animBits: UInt32 { params.count >= 2 ? UInt32(max(0, params[params.count - 2])) : 0 }
+    private var keyBits: UInt32 { params.count >= 2 ? UInt32(max(0, params[params.count - 1])) : 0 }
     private func look(_ param: Int) -> KeyframeLook {
-        if UInt32(value(8)) & (1 << UInt32(param)) != 0 { return .keyHere }
-        return UInt32(value(7)) & (1 << UInt32(param)) != 0 ? .animated : .none
+        if keyBits & (1 << UInt32(param)) != 0 { return .keyHere }
+        return animBits & (1 << UInt32(param)) != 0 ? .animated : .none
     }
 
     var body: some View {
@@ -1383,12 +1387,13 @@ struct ShapePanel: View {
                     switcher
                     Color.clear.frame(height: 4)
                     sizeRow
-                    if shapeType == 0 {
+                    if [0, 16, 21].contains(shapeType) {
                         shapeRow(1, "panel_raio", value: value(1), step: 0.3, range: 0...max(0, min(value(5), value(6)) / 2), unit: "px", reset: 0, gesture: "raio") { write(1, $0) }
                     }
                     if [3, 4, 8, 14].contains(shapeType) {
                         shapeRow(2, shapeType == 3 ? "panel_lados" : shapeType == 8 ? "panel_petalas" : shapeType == 14 ? "panel_dentes" : "panel_pontas", value: value(2), step: 0.06, range: 3...64, reset: 5, gesture: "pontas") { write(2, $0.rounded()) }
                     }
+                    if [19, 23, 24].contains(shapeType) { countRow }
                     if shapeType == 4 {
                         shapeRow(3, "panel_raio_interno", value: value(3) * 100, step: 0.3, range: 5...95, unit: "%", reset: 50, gesture: AureaText.t("panel_raio_interno_75cf")) { write(3, $0 / 100) }
                     } else if shapeType == 5 || shapeType == 6 {
@@ -1399,6 +1404,7 @@ struct ShapePanel: View {
                         let reset: Float = [60, 50, 30, 22][shapeType - 12]
                         shapeRow(3, key, value: value(3) * 100, step: 0.3, range: 5...95, unit: "%", reset: reset, gesture: key) { write(3, $0 / 100) }
                     }
+                    paramRows
                     Color.clear.frame(height: 6)
                     kitHint(AureaText.t("panel_arraste_alcas_palco_mudar_tamanho") + (shapeType == 0 ? "; " + AureaText.t("ios_shape_blue_handle_rounds") + ". " : ". ") + AureaText.t("panel_losango_trilho_grava_keyframe_linha_acesa"))
                 }.padding(.top, 6).padding(.trailing, 10).padding(.bottom, 16)
@@ -1426,7 +1432,7 @@ struct ShapePanel: View {
         Button {
             let index = types.firstIndex(of: shapeType) ?? 0, next = types[(index + delta + types.count) % types.count]
             beginGesture("trocar forma")
-            // Type 0 is a command; the animated shape API only accepts 1...6.
+            // Type 0 is a command; the animated shape API takes 1...14.
             model.mutate { $0.setShape(id, param: 0, value: Float(next)) }
             finishGesture(); load()
         } label: { CupertinoGlyph.text(glyph, size: 18).mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph)).frame(width: 44, height: 44) }
@@ -1438,8 +1444,57 @@ struct ShapePanel: View {
         case 5: return AureaText.t("sh_shape_cross"); case 6: return AureaText.t("sh_shape_ring"); case 7: return AureaText.t("sh_shape_slice"); case 8: return AureaText.t("sh_shape_flower")
         case 9: return AureaText.t("sh_shape_arrow"); case 10: return AureaText.t("sh_shape_triangle")
         case 12: return AureaText.t("sh_shape_trapezoid"); case 13: return AureaText.t("sh_shape_parallelogram")
-        case 14: return AureaText.t("sh_shape_gear"); case 15: return AureaText.t("sh_shape_double_arrow"); default: return AureaText.t("target_shape")
+        case 14: return AureaText.t("sh_shape_gear"); case 15: return AureaText.t("sh_shape_double_arrow")
+        case 16: return AureaText.t("sh_shape_line"); case 17: return AureaText.t("sh_shape_diamond"); case 18: return AureaText.t("sh_shape_heart")
+        case 19: return AureaText.t("sh_shape_seal"); case 20: return AureaText.t("sh_shape_arc"); case 21: return AureaText.t("sh_shape_bubble")
+        case 22: return AureaText.t("sh_shape_bolt"); case 23: return AureaText.t("sh_shape_wave"); case 24: return AureaText.t("sh_shape_blob")
+        default: return AureaText.t("target_shape")
         }
+    }
+    /// Selo: saliências; onda: ondas; mancha: lóbulos (o parâmetro 2 do motor).
+    private var countRow: some View {
+        let key = shapeType == 19 ? "shp_bumps" : shapeType == 23 ? "shp_waves" : "shp_lobes"
+        let low: Float = shapeType == 19 ? 3 : shapeType == 23 ? 1 : 2
+        let high: Float = shapeType == 19 ? 48 : 12
+        let reset: Float = shapeType == 19 ? 14 : shapeType == 23 ? 3 : 4
+        return shapeRow(2, key, value: value(2), step: 0.06, range: low...high, reset: reset, gesture: "contagem") { write(2, $0.rounded()) }
+    }
+    /// Parâmetros das formas paramétricas (7..14 do motor, ShapeGeometry.hpp);
+    /// o valor vem resolvido (padrão da forma) em `shapeParams`.
+    @ViewBuilder private var paramRows: some View {
+        switch shapeType {
+        case 7: sweepRow
+        case 8: percentRow(7, "shp_depth", range: 5...95, reset: 28, gesture: "profundidade")
+        case 9:
+            percentRow(11, "shp_head", range: 10...90, reset: 45, gesture: "ponta")
+            percentRow(12, "shp_shaft", range: 5...100, reset: 44, gesture: "haste")
+        case 14: percentRow(7, "shp_depth", range: 5...95, reset: 22, gesture: "profundidade")
+        case 15: percentRow(11, "shp_head", range: 10...90, reset: 27.5, gesture: "ponta")
+        case 16: percentRow(9, "panel_espessura", range: 2...100, reset: 100, gesture: "espessura")
+        case 17: percentRow(8, "shp_waist", range: 5...95, reset: 50, gesture: "cintura")
+        case 18: percentRow(7, "shp_depth", range: 5...95, reset: 40, gesture: "profundidade")
+        case 19: percentRow(7, "shp_depth", range: 5...95, reset: 60, gesture: "profundidade")
+        case 20:
+            percentRow(9, "panel_espessura", range: 2...50, reset: 20, gesture: "espessura")
+            sweepRow
+        case 21: percentRow(8, "shp_tail", range: 0...100, reset: 30, gesture: "ponta do balão")
+        case 22: percentRow(8, "panel_inclinacao", range: 0...100, reset: 50, gesture: "inclinacao")
+        case 23:
+            percentRow(9, "panel_espessura", range: 2...100, reset: 40, gesture: "espessura")
+            percentRow(13, "shp_amplitude", range: 0...100, reset: 100, gesture: "amplitude")
+        case 24:
+            percentRow(7, "shp_variation", range: 5...95, reset: 50, gesture: "variacao")
+            shapeRow(14, "shp_seed", value: value(14), step: 0.06, range: 0...99, reset: 0, gesture: "variante") { write(14, $0.rounded()) }
+        default: EmptyView()
+        }
+    }
+    /// Parâmetro em porcentagem (o motor guarda a fração 0..1).
+    private func percentRow(_ param: Int, _ key: String, range: ClosedRange<Float>, reset: Float, gesture: String) -> some View {
+        shapeRow(param, key, value: value(param) * 100, step: 0.3, range: range, unit: "%", reset: reset, gesture: gesture) { write(param, $0 / 100) }
+    }
+    /// Abertura da fatia e do arco (graus; 270° = a fatia de 3/4 de sempre).
+    private var sweepRow: some View {
+        shapeRow(10, "shp_sweep", value: value(10), step: 0.6, range: 1...360, unit: "°", reset: 270, gesture: "abertura") { write(10, $0) }
     }
     private var sizeRow: some View {
         let title = AureaText.t("panel_tamanho"), current = value(axis == 0 ? 5 : 6)
@@ -1627,6 +1682,20 @@ private struct ShapeEditGlyph: View {
             case 14:
                 context.fill(ShapeGlyphPaths.gear(center: c, radius: r, teeth: 10, hub: 0.3), with: .color(AureaColors.text), style: FillStyle(eoFill: true)); return
             case 15: path = ShapeGlyphPaths.doubleArrow(center: c, radius: r)
+            case 16: path.addRoundedRect(in: CGRect(x: c.x - r, y: c.y - r * 0.14, width: 2 * r, height: 0.28 * r), cornerSize: CGSize(width: r * 0.06, height: r * 0.06))
+            case 17: path = ShapeGlyphPaths.diamond(center: c, radius: r)
+            case 18: path = ShapeGlyphPaths.heart(center: c, radius: r)
+            case 19: path = ShapeGlyphPaths.seal(center: c, radius: r, bumps: 12)
+            case 20:
+                path.addArc(center: c, radius: r * 0.82, startAngle: .degrees(0), endAngle: .degrees(270), clockwise: false)
+                context.stroke(path, with: .color(AureaColors.text), lineWidth: r * 0.36); return
+            case 21:
+                for part in ShapeGlyphPaths.bubble(center: c, radius: r) { context.fill(part, with: .color(AureaColors.text)) }
+                return
+            case 22: path = ShapeGlyphPaths.bolt(center: c, radius: r)
+            case 23:
+                context.stroke(ShapeGlyphPaths.wave(center: c, radius: r, waves: 2), with: .color(AureaColors.text), lineWidth: r * 0.3); return
+            case 24: path = ShapeGlyphPaths.blob(center: c, radius: r)
             default: path.addRect(CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
             }
             context.fill(path, with: .color(AureaColors.text))

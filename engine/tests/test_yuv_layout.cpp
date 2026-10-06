@@ -473,6 +473,15 @@ AUREA_TEST(ExportRules, FrameSizeAlignsLongSideTo16AndKeepsShortSideEven) {
     AUREA_CHECK_EQ(tiny.height, 2u);
 }
 
+AUREA_TEST(ExportRules, ExtremeDimensionsDoNotWrapIntoSmallValidExports) {
+    const auto size = export_frame_size(1920, 1080, std::numeric_limits<u32>::max());
+    AUREA_CHECK(size.width > 16384);
+    AUREA_CHECK(size.height > 16384);
+    AUREA_CHECK_EQ(size.width % kExportLongSideAlign, 0u);
+    AUREA_CHECK_EQ(size.height % kExportShortSideAlign, 0u);
+    AUREA_CHECK_EQ(export_align_nearest(1e100, 16), std::numeric_limits<u32>::max() - 15u);
+}
+
 AUREA_TEST(ExportRules, MediaTekStrideBugIsGoneWithAlignedWidth) {
     // O encoder do Y30: passo = ALIGN(largura, 16), fatia = altura, buffer =
     // largura crua · altura · 3/2.

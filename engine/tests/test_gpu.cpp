@@ -47,6 +47,7 @@ namespace aurea { namespace vk = gles; }
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <filesystem>
 #include <iterator>
 #include <cstdlib>
 #include <cstring>
@@ -57,6 +58,14 @@ namespace aurea { namespace vk = gles; }
 
 using namespace aurea;
 using namespace aurea::test;
+
+namespace aurea::ai {
+struct DepthMapGpuTestAccess {
+    static std::unique_lock<std::mutex> block_inference(DepthMapService& service) {
+        return std::unique_lock<std::mutex>(service.work_);
+    }
+};
+}
 
 namespace {
 
@@ -575,6 +584,42 @@ AUREA_TEST(Gpu, PreviewScaleKeepsLogicalCoordinates) {
     AUREA_CHECK(near4(full.mean(), quarter.mean(), 0.02f));
     // O mesmo ponto lógico tem a mesma cor em qualquer escala.
     AUREA_CHECK(near4(full.v(100, 55), half.v(50, 27), 0.01f));
+}
+
+AUREA_TEST(PrecompInstancesGpu, DuplicatedVideoPrecompsKeepIndependentSourceFrames) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 64);
+    SyntheticConfig cfg; cfg.width = cfg.height = 64; cfg.pattern = SyntheticPattern::FrameGray;
+    const LayerId video = s.video(cfg, 32, 32);
+    auto& timeline = s.project.timeline();
+    const CompositionId childId = timeline.create_composition("shared video", 64, 64, 30.);
+    s.comp = timeline.composition(timeline.root());
+    auto* child = timeline.composition(childId);
+    child->set_transparent_background(true);
+    const LayerId inner = child->add_layer(LayerKind::Video, "frame gray");
+    *child->layer(inner) = *s.comp->layer(video);
+    s.comp->remove_layer(video);
+    for (int i = 0; i < 2; ++i) {
+        const auto id = s.comp->add_layer(LayerKind::Composition, "instance");
+        auto* layer = s.comp->layer(id);
+        layer->nested.composition = childId;
+        layer->offset = FrameIndex{i * 15};
+        layer->transform.anchor = Vec3{32, 32, 0};
+        layer->transform.position = Vec3{32.f + i * 64.f, 32, 0};
+    }
+    const auto expected = [](u32 frame) {
+        const f32 code = std::clamp((frame_gray_code(frame) - 16.f) / 219.f, 0.f, 1.f);
+        return srgb_decode(code);
+    };
+    for (const i64 frame : {0, 7, 0, 15, 3}) for (const u32 denominator : {1u, 2u}) {
+        const auto image = s.render(FrameIndex{frame}, denominator, true);
+        const f32 left = image.v(32 / denominator, 32 / denominator).x;
+        const f32 right = image.v(96 / denominator, 32 / denominator).x;
+        std::printf("    independent precomp frame %lld/%lld den%u: %.4f / %.4f\n", frame, frame + 15, denominator, left, right);
+        AUREA_CHECK_NEAR(left, expected(static_cast<u32>(frame)), .006f);
+        AUREA_CHECK_NEAR(right, expected(static_cast<u32>(frame + 15)), .006f);
+        AUREA_CHECK(std::fabs(left - right) > .05f);
+    }
 }
 
 AUREA_TEST(Gpu, VideoPreviewScaleKeepsGeometryAndReusesPlaneUpload) {
@@ -1238,6 +1283,59 @@ AUREA_TEST(Gpu, GoldenMotionTile) {
 // =============================================================================
 // Performance e ciclo de vida no backend real
 // =============================================================================
+AUREA_TEST(MemoryPressureGpu, IncrementalCompositionPreservesEveryBlendedMotionBlurPixel) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(96, 64);
+    scene.comp->set_background(Color{.08f, .12f, .2f, .7f});
+    scene.comp->motion_blur().enabled = true;
+    for (u32 i = 0; i < 24; ++i) {
+        const auto id = scene.solid(40, 30, Vec4{f32(i % 3) * .35f + .1f, .2f, .8f, .3f},
+                                    24 + f32(i % 6) * 8, 20 + f32(i / 6) * 8);
+        auto* layer = scene.comp->layer(id); layer->motionBlur = true;
+        layer->transform.opacity = .45f;
+        layer->tracks.get_or_create(TrackProperty::RotationZ).set(FrameIndex{0}, -60);
+        layer->tracks.get_or_create(TrackProperty::RotationZ).set(FrameIndex{60}, 60);
+        scene.add_effect(id, effect_keys::kGaussianBlur).params[0].constant.v[0] = 2;
+    }
+    // Inject an identity adjustment after prepare (empty model adjustments are
+    // normally culled). It forces the original complete-stack compositor while
+    // preserving the pixels, independently of the new normal-batch path.
+    auto render = [&](u32 den, bool incremental) {
+        auto& g = gpu();
+        RenderSettings settings; settings.previewDenominator = den;
+        settings.finalQuality = den == 1; settings.dither = false;
+        FrameSnapshot snapshot;
+        g.renderer.prepare(*scene.comp, scene.project, FrameIndex{30}, nullptr, nullptr, nullptr,
+                           settings, 1, 0, DecodeMode::Still, 1, snapshot);
+        if (!incremental) {
+            snapshot.layers.emplace_back();
+            snapshot.layers.back().source.kind = LayerSource::Kind::Adjustment;
+            snapshot.plans.emplace_back();
+        }
+        const u32 w = 96 / den, h = 64 / den;
+        OffscreenTarget target{g.target(w, h), w, h};
+        FrameStats stats; RenderTimings timings;
+        AUREA_CHECK(g.renderer.render(snapshot, settings, &target, stats, timings).ok());
+        g.backend.wait_idle();
+        std::vector<u16> half(usize(w) * h * 4);
+        AUREA_CHECK(g.backend.read_texture(target.texture, half.data(), w * 8).ok());
+        std::vector<f32> pixels(half.size());
+        for (usize i = 0; i < half.size(); ++i) pixels[i] = half_to_float(half[i]);
+        return pixels;
+    };
+    for (const u32 den : {1u, 2u}) {
+        const auto reference = render(den, false);
+        const auto unbatched = gpu().renderer.graph_stats().transientBytes;
+        const auto incremental = render(den, true);
+        AUREA_CHECK(gpu().renderer.graph_stats().transientBytes < unbatched / 2);
+        AUREA_CHECK_EQ(incremental.size(), reference.size());
+        f32 difference = 0;
+        for (usize i = 0; i < incremental.size(); ++i)
+            difference = std::max(difference, std::fabs(incremental[i] - reference[i]));
+        AUREA_CHECK(difference <= .001f);
+    }
+}
+
 AUREA_TEST(Gpu, SteadyPlaybackCreatesNoTexturesAndMeasuresGpu) {
     AUREA_REQUIRE_GPU();
     Scene s(256, 144);
@@ -1375,7 +1473,7 @@ bool file_exists(const std::string& p) {
 /// Um triângulo glTF de um lado só, virado para +Z (para quem olha do lado
 /// +Z, que é onde o observador do glTF fica) ou para −Z. Buffer em base64
 /// dentro do JSON — o teste não depende de arquivo externo.
-std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b) {
+std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b, bool unlit = true) {
     const f32 pos[9] = {-0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.0f, 0.5f, 0.0f};
     const u16 idx[3] = {0, static_cast<u16>(facingViewer ? 1 : 2), static_cast<u16>(facingViewer ? 2 : 1)};
     std::vector<u8> bin(36 + 6 + 2);
@@ -1391,18 +1489,27 @@ std::string write_triangle_gltf(bool facingViewer, f32 r, f32 g, f32 b) {
         enc += i + 1 < bin.size() ? b64[(v >> 6) & 63] : '=';
         enc += i + 2 < bin.size() ? b64[v & 63] : '=';
     }
+    char material[512];
+    if (unlit) {
+        std::snprintf(material, sizeof(material),
+            R"({"pbrMetallicRoughness":{"baseColorFactor":[%f,%f,%f,1],"metallicFactor":0,"roughnessFactor":1},"extensions":{"KHR_materials_unlit":{}}})", r, g, b);
+    } else {
+        std::snprintf(material, sizeof(material),
+            R"({"pbrMetallicRoughness":{"baseColorFactor":[0,0,0,1],"metallicFactor":0,"roughnessFactor":1},"emissiveFactor":[%f,%f,%f]})", r, g, b);
+    }
     char json[2048];
     std::snprintf(json, sizeof(json),
         R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)"
         R"("meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],)"
-        R"("materials":[{"pbrMetallicRoughness":{"baseColorFactor":[%f,%f,%f,1],"metallicFactor":0,"roughnessFactor":1},"extensions":{"KHR_materials_unlit":{}}}],)"
-        R"("extensionsUsed":["KHR_materials_unlit"],)"
+        R"("materials":[%s],%s)"
         R"("buffers":[{"byteLength":%u,"uri":"data:application/octet-stream;base64,%s"}],)"
         R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":6}],)"
         R"("accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-0.5,-0.5,0],"max":[0.5,0.5,0]},)"
         R"({"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}]})",
-        r, g, b, static_cast<unsigned>(bin.size()), enc.c_str());
-    const std::string path = std::string("aurea_teste_triangulo_") + (facingViewer ? "frente" : "costas") + ".gltf";
+        material, unlit ? R"("extensionsUsed":["KHR_materials_unlit"],)" : "",
+        static_cast<unsigned>(bin.size()), enc.c_str());
+    const std::string path = std::string("aurea_teste_triangulo_") + (facingViewer ? "frente" : "costas")
+        + (unlit ? "" : "_emissivo") + ".gltf";
     std::FILE* f = std::fopen(path.c_str(), "wb");
     std::fwrite(json, 1, std::strlen(json), f);
     std::fclose(f);
@@ -1450,6 +1557,29 @@ f32 coverage(const Image8& img) {
 }
 
 } // namespace
+
+AUREA_TEST(SceneCutsGpu, GroupingCompleteLitScenePreservesStudioFloorAndPixels) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    AUREA_CHECK(rig.e.set_studio_environment(1).ok());
+    // Matches Android/iOS's studio preset action, including its floor.
+    AUREA_CHECK(rig.e.set_scene_floor(1, .18f, .18f, .18f, .2f, .5f));
+    const auto cube = rig.e.add_shape3d(0, "Lit cube");
+    const auto light = rig.e.add_light(1);
+    AUREA_CHECK(cube.ok() && light.ok()); if (!cube.ok() || !light.ok()) return;
+    const auto before = rig.capture(320);
+    const u64 ids[]{*cube, *light};
+    const auto group = rig.e.precompose(ids, 2);
+    AUREA_CHECK(group.ok()); if (!group.ok()) return;
+    const auto after = rig.capture(320);
+    u32 difference = 0, changed = 0;
+    for (usize i = 0; i < before.rgba.size(); ++i) {
+        const u32 delta = static_cast<u32>(std::abs(static_cast<int>(before.rgba[i]) - after.rgba[i]));
+        difference = std::max(difference, delta); changed += delta > 3;
+    }
+    std::printf("    grouped studio max difference=%u, changed channels=%u\n", difference, changed);
+    AUREA_CHECK(difference <= 3);
+}
 
 AUREA_TEST(Gpu, Scene3DFrontFaceIsVisibleAndBackFaceIsCulled) {
     AUREA_REQUIRE_GPU();
@@ -3447,6 +3577,27 @@ AUREA_TEST(Gpu, MotionTileLeavesNoHoleInAnyCombination) {
     AUREA_CHECK_EQ(holes, 0u);
 }
 
+AUREA_TEST(Gpu, MotionTileTinyAndDistantLayersStillCoverTheFrame) {
+    // A antiga caixa de 24x cortava a parede em zooms pequenos e pans longos.
+    AUREA_REQUIRE_GPU();
+    for (f32 scale : {0.01f, 0.03f, 0.5f}) {
+        for (f32 x : {80.0f, -2000.0f}) {
+            Scene s(160, 90);
+            const LayerId id = s.image(uniform_image(64, 36, 220, 220, 220), x, 45, scale);
+            auto& effect = s.add_effect(id, effect_keys::kMotionTile);
+            effect.params[motion_tile::kMirror].constant = ParamValue::boolean(true);
+            effect.params[motion_tile::kScale].constant = ParamValue::scalar(75.0f);
+            const FloatImage image = s.render();
+            for (u32 y = 0; y < image.height; y += 2) {
+                for (u32 xx = 0; xx < image.width; xx += 2) {
+                    AUREA_CHECK(image.at(xx, y)[3] > 0.99f);
+                    AUREA_CHECK(image.at(xx, y)[0] > 0.65f);
+                }
+            }
+        }
+    }
+}
+
 namespace {
 /// Pixels do quadro (de 2 em 2) sem cobertura plena ou fora do cinza
 /// uniforme: com uma parede de ladrilhos de uma cor só, qualquer borda
@@ -3537,6 +3688,9 @@ AUREA_TEST(Gpu, MotionTileFeedsLaterEffectsWithoutBlackEdges) {
         }
     }
 }
+
+#include "MotionTileChainsGpu.inl"
+#include "EffectGeometryGpu.inl"
 
 AUREA_TEST(Gpu, MotionTileUnderAShrinkingTransformIsNotIdentity) {
     // A layer cobre o quadro (Motion Tile a 100% seria neutro), mas o
@@ -5539,6 +5693,130 @@ AUREA_TEST(Gpu, TextBackgroundAndShadowRender) {
     AUREA_CHECK(whiteShadow * 10 > whitePlain * 8);   // a sombra fica ATRÁS do texto
 }
 
+AUREA_TEST(Gpu, TextOutlineKeepsNeighborFillsAndAnimatedMargins) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(640, 360);
+    auto id = rig.e.add_text("AVAVA");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    layer->text.size = 100;
+    layer->text.tracking = -80;
+    layer->text.color = {1, 1, 1, 1};
+    layer->text.strokeColor = {1, 0, 0, 1};
+    // Reproduce the atlas occupancy of the preceding text tests when this
+    // regression runs alone as well. A is inserted early and V only below;
+    // absolute atlas UV interpolation used to change the two V edge pixels.
+    const auto font = text::default_font();
+    AUREA_CHECK(font != nullptr);
+    if (!font) return;
+    for (const char* content : {"Aurea", "Aurea\nEditor", "Texto Aurea", "AUREA", "Aurea Glifo", "Legenda"}) {
+        TextData warmup = layer->text;
+        warmup.content = content;
+        text::TextLayout layout;
+        AUREA_CHECK(text::layout_quads(*font, warmup, 2.f, layout));
+    }
+    auto stroke = [&](f32 width) {
+        Command cmd; cmd.type = CommandType::TextSetStrokeWidth;
+        cmd.text_stroke_width.layer = LayerId::unpack(*id);
+        cmd.text_stroke_width.width = width;
+        AUREA_CHECK(rig.e.apply_command(cmd).ok());
+    };
+    stroke(0);
+    const Image8 plain = rig.capture(640);
+    stroke(18);
+    const Image8 outlined = rig.capture(640);
+    u32 white = 0, overwritten = 0;
+    for (usize p = 0; p + 3 < plain.rgba.size(); p += 4) {
+        if (plain.rgba[p + 1] < 250) continue;
+        ++white;
+        if (outlined.rgba[p + 1] < 240) ++overwritten;
+    }
+    std::printf("    outline: %u filled pixels, %u overwritten by adjacent stroke\n", white, overwritten);
+    AUREA_CHECK(white > 1000);
+    AUREA_CHECK(overwritten < white / 100);
+
+    // A uniform text animator must have the same margin as a static outline.
+    stroke(0);
+    TextAnimator animator;
+    animator.props = kTextPropStrokeWidth;
+    animator.strokeWidth = 18;
+    layer->text.animators.push_back(animator);
+    const Image8 animated = rig.capture(640);
+    // Inspect only after all original captures; diagnostics must not prepare
+    // an extra renderer frame or change atlas state between those captures.
+    text::TextLayout atlasLayout;
+    if (text::layout_quads(*font, layer->text, 20.f, atlasLayout) && atlasLayout.quads.size() >= 2) {
+        const auto& a = atlasLayout.quads[0];
+        const auto& v = atlasLayout.quads[1];
+        std::printf("    outline atlas: A %.8f %.8f, V %.8f %.8f\n", a.u0, a.v0, v.u0, v.v0);
+    }
+    Image8 difference = outlined;
+    u32 changed = 0, x0 = outlined.width, y0 = outlined.height, x1 = 0, y1 = 0;
+    u32 maxX = 0, maxY = 0, largest = 0;
+    for (u32 y = 0; y < outlined.height; ++y) for (u32 x = 0; x < outlined.width; ++x) {
+        const usize p = (static_cast<usize>(y) * outlined.width + x) * 4;
+        u32 delta = 0;
+        for (u32 channel = 0; channel < 3; ++channel) {
+            const u32 d = static_cast<u32>(std::abs(int(outlined.rgba[p + channel]) - int(animated.rgba[p + channel])));
+            difference.rgba[p + channel] = static_cast<u8>(std::min(255u, d * 8));
+            delta = std::max(delta, d);
+        }
+        difference.rgba[p + 3] = 255;
+        if (delta > largest) { largest = delta; maxX = x; maxY = y; }
+        if (delta > 2) { ++changed; x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x); y1 = std::max(y1, y); }
+    }
+    const auto* staticPixel = outlined.at(maxX, maxY);
+    const auto* animatedPixel = animated.at(maxX, maxY);
+    std::printf("    outline difference: max %u at %u,%u static %u,%u,%u animated %u,%u,%u; %u pixels >2, bounds %u,%u..%u,%u\n",
+        largest, maxX, maxY, staticPixel[0], staticPixel[1], staticPixel[2], animatedPixel[0], animatedPixel[1], animatedPixel[2],
+        changed, x0, y0, x1, y1);
+    AUREA_CHECK_MSG(max_diff(outlined, animated) <= 2, "animated outline clipped at the text layer bounds");
+    (void)write_png("build/text-outline-regression.png", outlined);
+    (void)write_png("build/text-outline-animated.png", animated);
+    (void)write_png("build/text-outline-difference-x8.png", difference);
+}
+
+AUREA_TEST(Gpu, TextOutlineSmallSpanDoesNotBecomeSolidRectangle) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    auto id = rig.e.add_text("O");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    layer->text.size = 100;
+    TextSpan span; span.start = 0; span.end = 1; span.scale = .25f;
+    layer->text.spans.push_back(span);
+    layer->text.color = {1, 1, 1, 1};
+    layer->text.strokeColor = {1, 0, 0, 1};
+    Command stroke; stroke.type = CommandType::TextSetStrokeWidth;
+    stroke.text_stroke_width.layer = LayerId::unpack(*id);
+    stroke.text_stroke_width.width = 20;
+    AUREA_CHECK(rig.e.apply_command(stroke).ok());
+    const Image8 outlined = rig.capture(320);
+    int x0 = 320, y0 = 180, x1 = 0, y1 = 0;
+    for (u32 y = 0; y < outlined.height; ++y) for (u32 x = 0; x < outlined.width; ++x) {
+        if (outlined.at(x, y)[0] < 128) continue;
+        x0 = std::min(x0, int(x)); y0 = std::min(y0, int(y));
+        x1 = std::max(x1, int(x)); y1 = std::max(y1, int(y));
+    }
+    AUREA_CHECK(x1 > x0 && y1 > y0);
+    if (x1 > x0 && y1 > y0) {
+        u32 corners = 0;
+        for (int dy = 0; dy < 3; ++dy) for (int dx = 0; dx < 3; ++dx) {
+            corners += outlined.at(x0 + dx, y0 + dy)[0] > 128;
+            corners += outlined.at(x1 - dx, y0 + dy)[0] > 128;
+            corners += outlined.at(x0 + dx, y1 - dy)[0] > 128;
+            corners += outlined.at(x1 - dx, y1 - dy)[0] > 128;
+        }
+        std::printf("    outline: %u of 36 corner pixels filled\n", corners);
+        AUREA_CHECK(corners < 18);
+    }
+    (void)write_png("build/text-outline-small-span.png", outlined);
+}
+
 AUREA_TEST(Gpu, ParticleWorldModesSurviveReverseSeekAndReopen) {
     AUREA_REQUIRE_GPU();
     for (u32 preset : {10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u, 18u}) {
@@ -5589,9 +5867,15 @@ AUREA_TEST(Gpu, JuanPresetsRenderAndKeepExpressionsAfterReopen) {
             command.seek.time = tick_at(FrameIndex{frame}, 30.0);
             AUREA_CHECK(rig.e.apply_command(command).ok());
         };
-        seek(60);
+        // The pack presets (19+) include an exit shortly after their one-second
+        // entry. Sample the entry endpoint before checking the saved animation.
+        seek(preset >= 19 ? 30 : 60);
         const auto settled = rig.capture(640);
         AUREA_CHECK(coverage(settled) > .00001f);
+        if (preset == 20 || preset == 21 || preset == 24) {
+            seek(60);
+            AUREA_CHECK(coverage(rig.capture(640)) < .00001f);
+        }
         seek(12);
         const auto before = rig.capture(640);
         const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_juan_roundtrip.aurea";
@@ -6066,6 +6350,50 @@ AUREA_TEST(Gpu, MaskModesCombineInStackOrder) {
     AUREA_CHECK(px(inv, 20, 20) < t && std::fabs(px(inv, 100, 20) - 0.5f) < t);
 }
 
+AUREA_TEST(MaskEdgesGpu, NeutralMaskKeepsProjectedPrecompPixelsAtTheirActualResolution) {
+    AUREA_REQUIRE_GPU();
+    Scene s(256, 192);
+    auto& timeline = s.project.timeline();
+    const CompositionId childId = timeline.create_composition("edge detail", 128, 128, 30.);
+    auto* child = timeline.composition(childId);
+    child->set_background(Color{0, 0, 0, 0});
+    child->set_transparent_background(true);
+    const LayerId shapeId = child->add_layer(LayerKind::Shape, "slanted shape");
+    auto* shape = child->layer(shapeId);
+    shape->shape.bounds = Rect{0, 0, 73, 91};
+    shape->shape.fillColor = Vec4{1, 1, 1, 1};
+    shape->transform.anchor = Vec3{36.5f, 45.5f, 0};
+    shape->transform.position = Vec3{64, 64, 0};
+    shape->transform.rotation.z = 17;
+    // A thin interior cut makes unintended downsampling measurable away from
+    // the outer quad as well as on its slanted border.
+    shape->masks.push_back(rect_mask(1, 35.25f, -100, 37.25f, 200, MaskOperation::Subtract));
+    const LayerId nestedId = s.comp->add_layer(LayerKind::Composition, "projected precomp");
+    auto* nested = s.comp->layer(nestedId);
+    nested->nested.composition = childId;
+    nested->transform.anchor = Vec3{64, 64, 0};
+    nested->transform.position = Vec3{128, 96, 0};
+    for (const bool projected : {false, true}) for (const u32 denominator : {1u, 2u}) {
+        nested->threeD = projected;
+        nested->transform.rotation = projected ? Vec3{24, 47, 11} : Vec3{0, 0, 11};
+        nested->transform.scale = Vec3{.37f, .37f, 1};
+        nested->masks.clear();
+        const FloatImage before = s.render(FrameIndex{0}, denominator, true);
+        nested->masks.push_back(rect_mask(2, -100, -100, 228, 228));
+        const FloatImage masked = s.render(FrameIndex{0}, denominator, true);
+        f32 maximum = 0;
+        u32 edgePixels = 0;
+        for (usize i = 0; i < before.px.size(); i += 4) {
+            maximum = std::max(maximum, std::fabs(before.px[i] - masked.px[i]));
+            if (before.px[i] > .01f && before.px[i] < .99f) ++edgePixels;
+        }
+        std::printf("    precomp neutral mask projected=%d denominator=%u: max %.6f, edge pixels %u\n",
+                    projected, denominator, maximum, edgePixels);
+        AUREA_CHECK(edgePixels > 10);
+        AUREA_CHECK(maximum <= .001f);
+    }
+}
+
 AUREA_TEST(Gpu, MaskFeatherIsAGaussianRampOfTheExpectedWidth) {
     AUREA_REQUIRE_GPU();
     Scene s(192, 96);
@@ -6494,6 +6822,52 @@ AUREA_TEST(EffectPackGpu, OscillateCyclesMovesPixelsAndMatchesFinalRender) {
     AUREA_CHECK(max_abs_diff(right,s.render(FrameIndex{0}))<.001f);
 }
 
+AUREA_TEST(EffectPackGpu, OscillatorDepthDoesNotClipTwoDAndThreeDStillProjectsDepth) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 96);
+    const auto id = s.image(uniform_image(16, 16, 255, 255, 255), 48, 48);
+    const auto original = s.render();
+    auto& fx = s.add_effect(id, effect_keys::kOscillateCycles);
+    fx.params[1].constant = ParamValue::scalar(0);
+    fx.params[2].constant = ParamValue::scalar(0);
+    fx.params[3].constant = ParamValue::scalar(12);
+    for (u32 mode : {1u, 2u}) {
+        fx.params[0].constant = ParamValue::scalar(static_cast<f32>(mode));
+        for (f32 phase : {0.f, .5f}) {
+            // Depth's extrema are a quarter cycle after Orbit's extrema.
+            fx.params[5].constant = ParamValue::scalar(phase + (mode == 1 ? .25f : 0.f));
+            AUREA_CHECK(max_abs_diff(original, s.render()) < .001f);
+        }
+    }
+    s.comp->layer(id)->threeD = true;
+    fx.params[0].constant = ParamValue::scalar(2);
+    fx.params[5].constant = ParamValue::scalar(0);
+    const auto far = s.render();
+    fx.params[5].constant = ParamValue::scalar(.5f);
+    const auto near = s.render();
+    AUREA_CHECK(far.v(48, 48).x > .9f && near.v(48, 48).x > .9f);
+    AUREA_CHECK(near.mean().x > far.mean().x * 1.1f);
+}
+
+AUREA_TEST(MotionBlurGpu, OscillatorExposureResolvesPhaseAtEverySample) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 96);
+    const auto id = s.image(uniform_image(8, 16, 255, 255, 255), 64, 48);
+    auto& fx = s.add_effect(id, effect_keys::kOscillateCycles);
+    fx.params[1].constant = ParamValue::scalar(0);
+    fx.params[2].constant = ParamValue::scalar(4);
+    fx.params[3].constant = ParamValue::scalar(24);
+    const auto sharp = s.render();
+    s.comp->layer(id)->motionBlur = true;
+    auto& mb = s.comp->motion_blur();
+    mb.enabled = true; mb.shutterAngle = 360; mb.shutterPhase = -180;
+    const auto blurred = s.render(FrameIndex{0}, 1, true);
+    // The shutter spans negative time (held) through a positive moving phase.
+    AUREA_CHECK(blurred.v(72, 48).x > .05f && sharp.v(72, 48).x < .01f);
+    AUREA_CHECK(max_abs_diff(blurred, sharp) > .1f);
+    AUREA_CHECK_NEAR(blurred.mean().x, sharp.mean().x, sharp.mean().x * .06f);
+}
+
 AUREA_TEST(EffectPackGpu, OscillateMovesTheLayerAndSettlesBackExactly) {
     AUREA_REQUIRE_GPU();
     Scene s(64, 64);
@@ -6526,6 +6900,85 @@ AUREA_TEST(EffectPackGpu, ShakeDirectionConstrainsTheAxisAndDecayStopsIt) {
     fx.params[16].constant = ParamValue::scalar(6.0f);   // decaimento
     AUREA_CHECK(max_abs_diff(s.render(FrameIndex{7}), plain) > .002f);
     AUREA_CHECK(max_abs_diff(s.render(FrameIndex{200}), plain) < 1e-3f);
+}
+
+AUREA_TEST(DropShadowGpu, OpaqueClipEdgesDoNotCoverTheExpandedShadow) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 80);
+    s.comp->set_transparent_background(true);
+    SyntheticConfig video; video.width = 24; video.height = 24;
+    const LayerId id = s.video(video, 32, 40);
+    auto& fx = s.add_effect(id, effect_keys::kDropShadow);
+    fx.params[1].constant = ParamValue::scalar(100);
+    fx.params[2].constant = ParamValue::scalar(0);
+    fx.params[3].constant = ParamValue::scalar(24);
+    fx.params[4].constant = ParamValue::scalar(0);
+    const auto frame = s.render();
+    AUREA_CHECK(frame.v(36, 44).x > .9f && frame.v(36, 44).w > .99f);
+    // The original clip ends at x=44. Its white right edge must not repeat
+    // into x=56 and hide the black silhouette shifted 24 pixels to the right.
+    AUREA_CHECK(near4(frame.v(56, 44), Vec4{0, 0, 0, 1}, .01f));
+    AUREA_CHECK(frame.v(18, 40).w < .001f);
+    AUREA_CHECK(frame.v(56, 20).w < .001f);
+}
+
+AUREA_TEST(DropShadowGpu, MaskedVideoUsesTheCutoutAndShadowOnlyRemovesTheClip) {
+    AUREA_REQUIRE_GPU();
+    Scene s(112, 80);
+    s.comp->set_transparent_background(true);
+    SyntheticConfig video; video.width = 64; video.height = 48;
+    const LayerId id = s.video(video, 48, 40);
+    s.comp->layer(id)->masks.push_back(rect_mask(1, 8, 8, 24, 40));
+    auto& fx = s.add_effect(id, effect_keys::kDropShadow);
+    fx.params[1].constant = ParamValue::scalar(100);
+    fx.params[2].constant = ParamValue::scalar(0);
+    fx.params[3].constant = ParamValue::scalar(32);
+    fx.params[4].constant = ParamValue::scalar(0);
+    const auto combined = s.render();
+    AUREA_CHECK(combined.v(32, 44).w > .99f);
+    AUREA_CHECK(near4(combined.v(64, 44), Vec4{0, 0, 0, 1}, .01f));
+    AUREA_CHECK(combined.v(88, 44).w < .001f); // no shadow from the removed clip rectangle
+    fx.params[5].constant = ParamValue::scalar(1);
+    const auto isolated = s.render();
+    AUREA_CHECK(isolated.v(32, 44).w < .001f);
+    AUREA_CHECK(near4(isolated.v(64, 44), combined.v(64, 44), .001f));
+    AUREA_CHECK(isolated.v(88, 44).w < .001f);
+}
+
+AUREA_TEST(DropShadowGpu, ShadowOnlyPreservesAlphaHolesColorAndZeroOpacity) {
+    AUREA_REQUIRE_GPU();
+    Scene s(112, 80);
+    s.comp->set_transparent_background(true);
+    auto source = uniform_image(48, 48, 255, 0, 0, 0);
+    for (u32 y = 8; y < 40; ++y) for (u32 x = 8; x < 24; ++x) {
+        if (x >= 12 && x < 16 && y >= 20 && y < 24) continue;
+        source.rgba[(static_cast<usize>(y) * 48 + x) * 4 + 3] = 128;
+    }
+    const LayerId id = s.image(std::move(source), 48, 40);
+    auto& fx = s.add_effect(id, effect_keys::kDropShadow);
+    fx.params[0].constant = ParamValue::color(0, .5f, 1, .5f);
+    fx.params[1].constant = ParamValue::scalar(80);
+    fx.params[2].constant = ParamValue::scalar(0);
+    fx.params[3].constant = ParamValue::scalar(32);
+    fx.params[4].constant = ParamValue::scalar(0);
+    fx.params[5].constant = ParamValue::scalar(1);
+    const f32 alpha = (128.0f / 255.0f) * .8f * .5f;
+    const auto isolated = s.render();
+    AUREA_CHECK(near4(isolated.v(72, 32), Vec4{0, .5f * alpha, alpha, alpha}, .004f));
+    AUREA_CHECK(isolated.v(70, 38).w < .001f); // the cutout hole remains a hole
+    AUREA_CHECK(isolated.v(40, 32).w < .001f); // original red foreground removed
+    fx.params[4].constant = ParamValue::scalar(8);
+    const auto soft = s.render();
+    AUREA_CHECK(soft.v(62, 32).w > .001f && soft.v(62, 32).w < alpha * .5f);
+    AUREA_CHECK(soft.v(52, 32).w < .001f);
+    fx.params[4].constant = ParamValue::scalar(0);
+    fx.params[3].constant = ParamValue::scalar(0);
+    AUREA_CHECK(near4(s.render().v(40, 32), Vec4{0, .5f * alpha, alpha, alpha}, .004f));
+    fx.params[1].constant = ParamValue::scalar(0);
+    for (const f32 value : s.render().px) AUREA_CHECK(std::fabs(value) < .001f);
+    fx.params[1].constant = ParamValue::scalar(100);
+    fx.params[0].constant = ParamValue::color(0, .5f, 1, 0);
+    for (const f32 value : s.render().px) AUREA_CHECK(std::fabs(value) < .001f);
 }
 
 AUREA_TEST(EffectPackGpu, FinishingEffectsAreNeutralAtZeroAndDoWhatTheySay) {
@@ -7180,13 +7633,14 @@ AUREA_TEST(Gpu, ShapeSizeAndRadiusAnimateWithKeyframes) {
     f32 v[Engine::kShapeParamFloats];
     AUREA_CHECK_EQ(rig.e.query_shape_params(*id, v, Engine::kShapeParamFloats), Engine::kShapeParamFloats);
     std::printf("    forma animada: %ux%u -> %ux%u (meio %ux%u), centro %u,%u; bits anim %.0f\n", small.w(), small.h(), big.w(), big.h(),
-                mid.w(), mid.h(), (mid.x0 + mid.x1) / 2, (mid.y0 + mid.y1) / 2, v[7]);
+                mid.w(), mid.h(), (mid.x0 + mid.x1) / 2, (mid.y0 + mid.y1) / 2, v[Engine::kShapeParamCount]);
     AUREA_CHECK(big.w() >= small.w() * 2 - 3 && big.w() <= small.w() * 2 + 3);
     AUREA_CHECK(mid.w() > small.w() + 20 && mid.w() < big.w() - 20);
     // O centro fica no lugar enquanto o tamanho cresce.
     AUREA_CHECK(std::abs(static_cast<int>((mid.x0 + mid.x1) / 2) - 200) <= 2);
     AUREA_CHECK(std::abs(static_cast<int>((mid.y0 + mid.y1) / 2) - 200) <= 2);
-    AUREA_CHECK(static_cast<u32>(v[7]) == ((1u << 5) | (1u << 6)));
+    // Bits de animado logo depois dos kShapeParamCount valores.
+    AUREA_CHECK(static_cast<u32>(v[Engine::kShapeParamCount]) == ((1u << 5) | (1u << 6)));
     // Salvar e reabrir mantém a animação da forma.
     const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea_teste_forma.aurea";
     AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
@@ -7740,9 +8194,10 @@ AUREA_TEST(Gpu, EveryRegisteredEffectBuildsAndRenders) {
 // ColorOp — o EffectGraph os tirava do plano como identidade e, aplicados no
 // projeto, não mudavam nada (só a prévia do catálogo, que chama o build
 // direto, mostrava o efeito). Aqui cada efeito do catálogo, com os valores de
-// demonstração, tem de MUDAR o quadro do projeto. Ficam de fora os controles
-// de expressão (não desenham por definição) e os temporais (numa imagem
-// parada não há outro instante para misturar).
+// demonstração, tem de MUDAR o quadro do projeto. Os recursos e a região
+// visível também precisam existir: LUT, guia de repetição, pixels transparentes
+// e um instante não neutro. Controles que exigem outro tipo de camada/contexto
+// são verificados pelos testes específicos de comportamento citados abaixo.
 AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
     AUREA_REQUIRE_GPU();
     std::vector<std::string> inert;
@@ -7759,8 +8214,26 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         // pô-los numa foto); o efeito deles no quadro é coberto por TextTransform.* e
         // TextAnimatorEditing.* / Regression2135Gpu.
         if (fx.type_id() == effect_type_id(text::kTransformEffect) || fx.type_id() == effect_type_id(text::kAnimatorEffect)) continue;
+        // Grid Builder/Item are membership/controller metadata, deliberately
+        // absent from Engine::query_effect_catalog. A lone photo has no grid.
+        // Gpu.NewToolsGridVisibleAndMorphChangesFrame exercises actual members.
+        if (std::strcmp(key, "aurea.layout.grid_builder") == 0 || std::strcmp(key, "aurea.layout.grid_item") == 0) continue;
+        // Scene flare only exists on a 3D light; an image has no sceneFlare
+        // placement. Regression2135Gpu.SceneFlareFollowsParentCameraAndCullsBehindLens
+        // verifies visible light, parenting, camera, save/reopen and culling.
+        if (fx.type_id() == effect_type_id(effect_keys::kSceneFlare)) continue;
+        // A mask-less photo is not a completed AI segmentation. The dedicated
+        // Gpu.NewToolsRotobrushRealMaskAndControls test loads the real model,
+        // waits for final-quality inference and checks mask/inversion/mix pixels.
+        if (fx.type_id() == effect_type_id(effect_keys::kRotobrush)) continue;
         const bool parenting = fx.type_id() == effect_type_id(effect_keys::kParentingHelper);
         const bool shadow = fx.type_id() == effect_type_id(effect_keys::kShadowStudio3);
+        const bool cubeLut = fx.type_id() == effect_type_id(effect_keys::kCubeLut);
+        const bool repeat = std::strncmp(key, "aurea.repeat.", 13) == 0;
+        const bool repeatPath = std::strcmp(key, "aurea.repeat.path") == 0;
+        const bool solidMatte = std::strcmp(key, "aurea.key.solid_matte") == 0;
+        const bool timedMotion = std::strcmp(key, "aurea.motion.blink") == 0 || std::strcmp(key, "aurea.motion.swing_range") == 0;
+        const FrameIndex sampleFrame{timedMotion ? 11 : 0};
         // Sombra projetada e Borda desenham FORA da caixa da camada: com a
         // imagem cobrindo o quadro inteiro não sobra lugar para elas — a foto
         // fica menor e o fundo claro, como no Shadow Studio.
@@ -7772,8 +8245,14 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         // Black shadows need exposed, lit background; a full opaque image
         // covering a black canvas cannot reveal them.
         if (outside) s.comp->set_background(Color{1, 1, 1, 1});
-        const u32 size = outside || parenting ? 40u : 96u;
-        const LayerId id = s.image(reference_image(size, size), 48, 48);
+        const u32 size = repeat ? 12u : outside || parenting ? 40u : 96u;
+        if (repeatPath) s.solid(60, 60, {0, 0, 0, 1}, 48, 48);
+        auto pixels = reference_image(size, size);
+        if (solidMatte) {
+            for (u32 y = 0; y < size / 2; ++y) for (u32 x = 0; x < size / 2; ++x)
+                pixels.rgba[(static_cast<usize>(y) * size + x) * 4 + 3] = 0;
+        }
+        const LayerId id = s.image(std::move(pixels), 48, 48);
         if (parenting) {
             const LayerId parent = s.comp->add_layer(LayerKind::Null, "rotated parent");
             s.comp->layer(parent)->transform.position = {48, 48, 0};
@@ -7781,7 +8260,16 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
             s.comp->layer(id)->parent = parent;
             s.comp->layer(id)->transform.position = {0, 0, 0};
         }
-        const FloatImage plain = s.render();
+        const FloatImage plain = s.render(sampleFrame);
+        std::shared_ptr<CubeLut> cube;
+        if (cubeLut) {
+            cube = std::make_shared<CubeLut>(); cube->size = 2; cube->dimensions = 3;
+            for (int b = 0; b < 2; ++b) for (int g = 0; g < 2; ++g) for (int r = 0; r < 2; ++r)
+                cube->values.push_back({static_cast<f32>(b), static_cast<f32>(g), static_cast<f32>(r), 1});
+            gpu().renderer.set_cube_lookup([](void* data, AssetId) -> std::shared_ptr<const CubeLut> {
+                return *static_cast<std::shared_ptr<CubeLut>*>(data);
+            }, &cube);
+        }
         EffectInstance e;
         e.id = s.comp->layer(id)->alloc_effect_id();
         e.type = fx.type_id();
@@ -7795,8 +8283,21 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         // Corner Pin intentionally starts at identity; move one corner.
         if (fx.type_id() == effect_type_id(effect_keys::kCornerPin))
             e.params[0].constant = ParamValue::scalar(20.f);
+        if (cubeLut) e.params[0].constant.ref = AssetId{12, 1}.pack();
+        if (repeat) {
+            e.params[0].constant = ParamValue::scalar(4);
+            e.params[1].constant = ParamValue::vec2(22, 22);
+            e.params[5].constant = ParamValue::scalar(2);
+            e.params[6].constant = ParamValue::scalar(26);
+        }
+        if (solidMatte) e.params[0].constant = ParamValue::color(0, 0, 1, 1);
+        if (std::strcmp(key, "aurea.transform.offset") == 0) e.params[0].constant = ParamValue::vec2(17, 11);
         s.comp->layer(id)->effects.push_back(std::move(e));
-        const FloatImage with = s.render();
+        // A prévia da IA local é assíncrona (não trava o render); a qualidade
+        // final espera o mapa, como a exportação.
+        const bool localAi = std::strncmp(key, "aurea.ai.", 9) == 0;
+        const FloatImage with = s.render(sampleFrame, 1, localAi);
+        if (cubeLut) gpu().renderer.set_cube_lookup(nullptr, nullptr);
         u32 changed = 0;
         for (usize k = 0; k < with.px.size() && k < plain.px.size(); ++k) changed += std::fabs(with.px[k] - plain.px[k]) > 0.004f ? 1u : 0u;
         if (std::strncmp(key, "aurea.audio.", 12) == 0) {
@@ -10831,8 +11332,9 @@ AUREA_TEST(Gpu, DepthMapEffectPaintsTheNearSideBright) {
     const FloatImage before = s.render();
     s.add_effect(id, effect_keys::kDepthMap);
     ai::DepthMapService* svc = nullptr;
-    const FloatImage after = s.render();
+    (void)s.render(); // preview schedules the first map without blocking the renderer
     svc = gpu().renderer.depth_service();
+    const FloatImage after = s.render(FrameIndex{0}, 1, true);
     AUREA_CHECK(svc != nullptr);
     const f32 person = encoded_mean(after, 60, 60, 100, 120);
     const f32 background = 0.5f * (encoded_mean(after, 0, 0, 20, 20) + encoded_mean(after, 140, 0, 160, 20));
@@ -11471,7 +11973,7 @@ AUREA_TEST(Gpu, ParticularLayerRotationIsThreeDimensional) {
 // obturador da composição.
 AUREA_TEST(Gpu, ParticularPerParticleMotionBlurStreaks) {
     AUREA_REQUIRE_GPU();
-    enum class Mode { Off, Effect, LayerSwitch };
+    enum class Mode { Off, Effect, LayerSwitch, LayerShifted };
     auto shot = [](Mode mode) {
         Scene3DRig rig(320, 180);
         auto id = rig.e.add_particles(particular::kPresetBase + 4);   // faíscas
@@ -11486,10 +11988,11 @@ AUREA_TEST(Gpu, ParticularPerParticleMotionBlurStreaks) {
         if (mode == Mode::Effect) {
             fx.params[particular::kMotionBlur].constant = ParamValue::boolean(true);
             fx.params[particular::kShutterAngle].constant = ParamValue::scalar(360.0f);
-        } else if (mode == Mode::LayerSwitch) {
+        } else if (mode == Mode::LayerSwitch || mode == Mode::LayerShifted) {
             l->motionBlur = true;
             comp->motion_blur().enabled = true;
             comp->motion_blur().shutterAngle = 360.0f;
+            comp->motion_blur().shutterPhase = mode == Mode::LayerSwitch ? -180.f : -90.f;
         }
         seek_frame(rig.e, 30);
         return rig.capture(320);
@@ -11502,6 +12005,9 @@ AUREA_TEST(Gpu, ParticularPerParticleMotionBlurStreaks) {
     AUREA_CHECK(c0 > 0.0005f);
     AUREA_CHECK(c1 > c0 * 1.3f);          // os pontos viraram rastros
     AUREA_CHECK(fx.rgba == sw.rgba);      // mesmo obturador, mesmo quadro
+    const Image8 shifted = shot(Mode::LayerShifted);
+    AUREA_CHECK(shifted.rgba != sw.rgba); // independent phase shifts the exposure
+    AUREA_CHECK(shot(Mode::LayerShifted).rgba == shifted.rgba);
     AUREA_CHECK(shot(Mode::Effect).rgba == fx.rgba);   // determinístico
     if (const char* dir = std::getenv("AUREA_FX_DUMP"); dir && *dir) {
         (void)write_png(std::string(dir) + "/particular_mb_off.png", off);
@@ -11510,6 +12016,104 @@ AUREA_TEST(Gpu, ParticularPerParticleMotionBlurStreaks) {
 }
 
 #if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(Gpu, RotobrushCaptureWaitsForColdInferenceAfterReload) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(256, 256, true);
+    auto pixels = uniform_image(256, 256, 30, 120, 70);
+    for (u32 y = 0; y < 256; ++y) for (u32 x = 0; x < 256; ++x)
+        if ((int(x) - 128) * (int(x) - 128) + (int(y) - 128) * (int(y) - 128) < 64 * 64) {
+            auto* pixel = &pixels.rgba[(y * 256 + x) * 4];
+            pixel[0] = 220; pixel[1] = 40; pixel[2] = 30;
+        }
+    std::filesystem::create_directories("build/reference");
+    const std::string source = std::filesystem::absolute("build/reference/roto-capture-source.png").string();
+    const std::string path = std::filesystem::absolute("build/reference/roto-capture-reload.aurea").string();
+    Image8 sourceImage; sourceImage.width = 256; sourceImage.height = 256; sourceImage.rgba = pixels.rgba;
+    AUREA_CHECK(write_png(source, sourceImage));
+    const auto id = rig.e.import_image(pixels.rgba.data(), 256, 256, "circle", source.c_str());
+    AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    comp->set_background(Color{0, 0, 0, 1});
+    comp->set_transparent_background(false);
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    EffectInstance effect;
+    effect.id = layer->alloc_effect_id(); effect.type = effect_type_id(effect_keys::kRotobrush);
+    initialize_instance(effect, *rig.e.effects().params(effect.type));
+    layer->effects.push_back(std::move(effect));
+    // No preview warmup: the first capture must wait for inference itself.
+    const auto before = rig.capture(256);
+    AUREA_CHECK_EQ(before.rgba.size(), 256u * 256u * 4u);
+    if (before.rgba.size() != 256u * 256u * 4u) return;
+    AUREA_CHECK(before.at(128, 128)[0] > 180);
+    AUREA_CHECK(before.at(0, 0)[1] < 15);
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    auto* foreground = rig.e.renderer().foreground_service();
+    AUREA_CHECK(foreground != nullptr); if (!foreground) return;
+    auto inferenceLock = ai::DepthMapGpuTestAccess::block_inference(*foreground);
+    Image8 reopened; Status captured;
+    std::thread capture([&] { captured = rig.e.capture_frame_rgba(256, reopened.rgba, reopened.width, reopened.height); });
+    for (u32 attempt = 0; attempt < 200 && foreground->activity_state() != 1; ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    AUREA_CHECK_EQ(foreground->activity_state(), 1u);
+    std::atomic<bool> detached{false};
+    std::thread detach([&] { rig.e.detach_surface(); detached.store(true, std::memory_order_release); });
+    for (u32 attempt = 0; attempt < 100 && !detached.load(std::memory_order_acquire); ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    const bool detachedWhileInferenceBlocked = detached.load(std::memory_order_acquire);
+    inferenceLock.unlock();
+    capture.join(); detach.join();
+    AUREA_CHECK_MSG(detachedWhileInferenceBlocked, "surface detach must not wait for local AI inference");
+    AUREA_CHECK(captured.ok());
+    AUREA_CHECK_EQ(reopened.rgba.size(), before.rgba.size());
+    if (reopened.rgba.size() == before.rgba.size()) {
+        std::printf("    cold/reopened corner G: %u/%u, center R: %u/%u\n",
+                    before.at(0, 0)[1], reopened.at(0, 0)[1], before.at(128, 128)[0], reopened.at(128, 128)[0]);
+        AUREA_CHECK(reopened.at(128, 128)[0] > 180);
+        AUREA_CHECK(reopened.at(0, 0)[1] < 15);
+        AUREA_CHECK(reopened.rgba == before.rgba);
+    }
+    std::remove(source.c_str()); std::remove(path.c_str()); std::remove((path + ".bak").c_str());
+}
+
+AUREA_TEST(Gpu, RotobrushBundledModelWorksWithoutDirectoryOrDownload) {
+    AUREA_REQUIRE_GPU();
+    Scene s(320, 320); s.comp->set_transparent_background(true);
+    auto pixels = uniform_image(320, 320, 30, 120, 70);
+    for (u32 y = 0; y < 320; ++y) for (u32 x = 0; x < 320; ++x)
+        if ((int(x) - 160) * (int(x) - 160) + (int(y) - 160) * (int(y) - 160) < 6400) {
+            auto* p = &pixels.rgba[(y * 320 + x) * 4]; p[0] = 220; p[1] = 40; p[2] = 30;
+        }
+    const auto id = s.image(std::move(pixels), 160, 160);
+    s.add_effect(id, effect_keys::kRotobrush);
+    auto& renderer = gpu().renderer;
+    renderer.set_foreground_model_directory("");
+    RenderSettings settings; settings.finalQuality = true;
+    FrameSnapshot snapshot;
+    auto prepare = [&] {
+        renderer.prepare(*s.comp, s.project, FrameIndex{0}, &s.media, &Scene::lookup, &s,
+            settings, 1, 0, DecodeMode::Still, 1.f, snapshot);
+    };
+    prepare();
+    AUREA_CHECK(renderer.foreground_service() != nullptr);
+    AUREA_CHECK(!renderer.take_incomplete());
+    const auto offline = s.render(FrameIndex{0}, 1, true);
+    AUREA_CHECK(offline.v(160, 160).w > .9f);
+    AUREA_CHECK(offline.v(0, 0).w < .01f);
+    renderer.set_foreground_model_directory("engine/tests/fixtures/no-such-rotobrush-model");
+    prepare();
+    AUREA_CHECK(renderer.foreground_service() != nullptr);
+    AUREA_CHECK(!renderer.take_incomplete());
+    renderer.set_foreground_model_directory("engine/assets/rotobrush");
+    AUREA_CHECK(renderer.foreground_service() == nullptr);
+    const auto mask = s.render(FrameIndex{0}, 1, true);
+    AUREA_CHECK(mask.v(160, 160).w > .9f);
+    AUREA_CHECK(mask.v(0, 0).w < .01f);
+    auto* ready = renderer.foreground_service();
+    renderer.set_foreground_model_directory("engine/assets/rotobrush");
+    AUREA_CHECK(renderer.foreground_service() == ready);
+}
+
 AUREA_TEST(Gpu, NewToolsRotobrushRealMaskAndControls) {
     AUREA_REQUIRE_GPU();
     Scene s(320,320); s.comp->set_transparent_background(true);
@@ -12078,6 +12682,129 @@ AUREA_TEST(Regression2137Gpu, AdjustmentLayerHonoursBlendModeAndMask) {
 // 2137): o rastro tem o comprimento do obturador e também vale para o
 // movimento que vem do efeito Transform (dobrado na matriz). Antes só o
 // transform da camada entrava nas amostras; o Transform animado saía nítido.
+AUREA_TEST(MotionBlurGpu, PhaseMovesTheExposureWithoutChangingItsEnergy) {
+    AUREA_REQUIRE_GPU();
+    auto render = [](f32 phase) {
+        Scene scene(128,64);
+        const auto id = scene.solid(10,10,Vec4{1,1,1,1},64,32);
+        auto* layer = scene.comp->layer(id); layer->motionBlur = true;
+        auto& track = layer->tracks.get_or_create(TrackProperty::PositionX);
+        track.set(FrameIndex{0},14); track.set(FrameIndex{10},114);
+        auto& mb = scene.comp->motion_blur(); mb.enabled = true; mb.samples = 16;
+        mb.shutterAngle = 360; mb.shutterPhase = phase;
+        return scene.render(FrameIndex{5},1,true);
+    };
+    auto moment = [](const FloatImage& img) {
+        f64 energy=0,moment=0;
+        for(u32 y=0;y<img.height;++y)for(u32 x=0;x<img.width;++x){const f64 v=img.v(x,y).x;energy+=v;moment+=v*(x+.5);}
+        return std::pair<f64,f64>{energy,moment/std::max(energy,1e-9)};
+    };
+    const auto centered=moment(render(-180)),forward=moment(render(0)),backward=moment(render(-360));
+    AUREA_CHECK_NEAR(forward.second-centered.second,5.,.35);
+    AUREA_CHECK_NEAR(centered.second-backward.second,5.,.35);
+    AUREA_CHECK_NEAR(forward.first/centered.first,1.,.015);
+    AUREA_CHECK_NEAR(backward.first/centered.first,1.,.015);
+}
+
+AUREA_TEST(MotionBlurGpu, TextOverlapAndOpposingGlyphLayerMotionKeepTheOriginalImage) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320,180);
+    const auto id=rig.e.add_text("WW"); AUREA_CHECK(id.ok()); if(!id.ok())return;
+    AUREA_CHECK_EQ(rig.e.add_text_animator(*id,kTextPropPosition),0);
+    auto* comp=rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    auto* layer=comp->layer(LayerId::unpack(*id));
+    layer->text.size=70; layer->text.tracking=-48;
+    auto describe = [&](const char* label) {
+        FrameSnapshot snapshot;
+        RenderSettings settings; settings.finalQuality = true;
+        rig.e.renderer().prepare(*comp, *rig.e.project(), FrameIndex{5}, nullptr, nullptr, nullptr,
+            settings, 1000, 0, DecodeMode::Still, 1.f, snapshot);
+        for (const auto& text : snapshot.layers) if (text.source.kind == LayerSource::Kind::Text) {
+            std::printf("    %s: source %ux%u scale %.3f sets %u matrices %zu shift %.5f %.5f\n", label,
+                text.source.width, text.source.height, text.texelScale, text.source.glyphSets, text.blurMatrices.size(),
+                text.blurSourceTransform.col[3].x, text.blurSourceTransform.col[3].y);
+            if (text.source.glyphCount && text.source.glyphFirst < snapshot.glyphs.size()) {
+                const auto& glyph = snapshot.glyphs[text.source.glyphFirst];
+                std::printf("      glyph %.5f %.5f matrix %.5f %.5f layer %.5f %.5f\n", glyph.rect.x, glyph.rect.y,
+                    glyph.xform.col[3].x, glyph.xform.col[3].y, text.compFromLayer.col[3].x, text.compFromLayer.col[3].y);
+            }
+        }
+    };
+    seek_frame(rig.e,5);
+    const Image8 sharp=rig.capture(320);
+    describe("sharp");
+    // The two authored translations cancel even before enabling exposure.
+    // A fixed 2x2 SDF derivative quad used to change coverage at odd pixels.
+    layer->text.animators[0].position.x = 1.f;
+    layer->transform.position.x -= 1.f;
+    const Image8 compensatedPixel = rig.capture(320);
+    AUREA_CHECK(max_diff(sharp, compensatedPixel) <= 5);
+    layer->text.animators[0].position.x = 0.f;
+    layer->transform.position.x += 1.f;
+    const Vec3 originalScale = layer->transform.scale;
+    const Vec3 originalPosition = layer->transform.position;
+    for (f32 scale : {.5f, 1.5f}) {
+        layer->transform.scale = Vec3{scale, scale, 1};
+        const Image8 scaled = rig.capture(320);
+        layer->text.animators[0].position.x = 1.f;
+        layer->transform.position.x = originalPosition.x - scale;
+        const Image8 compensated = rig.capture(320);
+        AUREA_CHECK(max_diff(scaled, compensated) <= 5);
+        layer->text.animators[0].position.x = 0.f;
+        layer->transform.position = originalPosition;
+    }
+    layer->transform.scale = originalScale;
+    AUREA_CHECK(rig.e.set_motion_blur(*id,true));
+    const Image8 stillBlur=rig.capture(320);
+    describe("stillBlur");
+    AUREA_CHECK(max_diff(sharp,stillBlur)<=4);
+    const f32 x=layer->transform.position.x;
+    auto& world=layer->tracks.get_or_create(TrackProperty::PositionX);
+    world.set(FrameIndex{0},x+320);world.set(FrameIndex{10},x-320);
+    auto& glyph=layer->tracks.get_or_create(TrackProperty::TextAnimParam,0,text::kPosX);
+    glyph.set(FrameIndex{0},-320);glyph.set(FrameIndex{10},320);
+    const Image8 cancelledMotion=rig.capture(320);
+    describe("cancelledMotion");
+    std::printf("    text diff compensated1px %u still %u cancelled %u coverage %.6f %.6f\n", max_diff(sharp, compensatedPixel),
+        max_diff(sharp, stillBlur), max_diff(sharp, cancelledMotion), coverage(sharp), coverage(cancelledMotion));
+    if (max_diff(sharp, cancelledMotion) > 5) {
+        (void)write_png("text-motion-sharp.png", sharp);
+        (void)write_png("text-motion-cancelled.png", cancelledMotion);
+    }
+    // At every subframe the opposite motions cancel. A convolution of two
+    // independently blurred images instead produces a wide, faint trail.
+    AUREA_CHECK(max_diff(sharp,cancelledMotion)<=5);
+    AUREA_CHECK_NEAR(coverage(cancelledMotion),coverage(sharp),.008);
+}
+
+AUREA_TEST(MotionBlurGpu, ZoomBlurRespectsSharpObjectsInTheSameScene) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320,180);
+    ModelImport source; source.path=write_triangle_gltf(true,1,0,0);
+    const auto moving=rig.e.import_model(source); const auto sharp=rig.e.import_model(source);
+    AUREA_CHECK(moving.ok()&&sharp.ok());if(!moving.ok()||!sharp.ok())return;
+    const auto camera=rig.e.add_camera();AUREA_CHECK(camera.ok());if(!camera.ok())return;
+    auto* comp=rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    for(auto id:{*moving,*sharp}){auto* layer=comp->layer(LayerId::unpack(id));layer->model.unitScale*=.16f;}
+    comp->layer(LayerId::unpack(*sharp))->transform.position.x=105;
+    comp->layer(LayerId::unpack(*moving))->transform.position.x=215;
+    auto& zoom=comp->layer(LayerId::unpack(*camera))->tracks.get_or_create(TrackProperty::FocalLength);
+    zoom.set(FrameIndex{0},24);zoom.set(FrameIndex{2},72);
+    seek_frame(rig.e,1);
+    const auto before=rig.capture(320);
+    AUREA_CHECK(rig.e.set_motion_blur(*moving,true));
+    AUREA_CHECK(rig.e.set_motion_blur_settings(true,360,-180,8,32));
+    const auto after=rig.capture(320);
+    u32 left=0,right=0;
+    for(u32 y=0;y<180;++y)for(u32 x=0;x<320;++x)for(u32 c=0;c<3;++c){
+        const u32 difference=static_cast<u32>(std::abs(before.at(x,y)[c]-after.at(x,y)[c]));
+        if(x<155)left=std::max(left,difference);else right=std::max(right,difference);
+    }
+    AUREA_CHECK(left<=3);AUREA_CHECK(right>15);
+    AUREA_CHECK(rig.e.set_layer_motion_blur_length(*moving,0));
+    AUREA_CHECK(max_diff(before,rig.capture(320))<=3);
+}
+
 AUREA_TEST(Regression2137Gpu, MotionBlurFollowsTheTransformEffectWithTheAeShutter) {
     AUREA_REQUIRE_GPU();
     auto trail = [](bool viaEffect, bool blur, f32 angle) {
@@ -12184,3 +12911,114 @@ AUREA_TEST(Gpu, Text3DDepthAndBevelEditsReachTheFrame) {
         }
     }
 }
+#include "MotionExtrasGpu.inl"
+#include "PreviewCacheGpu.inl"
+#include "TextOutlineGpu.inl"
+#include "ImmediateUploadGpu.inl"
+#include "TextureRetirementGpu.inl"
+
+AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
+    AUREA_REQUIRE_GPU();
+    constexpr u32 width = 384, height = 216;
+    for (const bool unlit : {true, false}) {
+        Scene3DRig rig(width, height);
+        ModelImport source;
+        source.path = write_triangle_gltf(true, 1, 0, 0, unlit);
+        const auto model = rig.e.import_model(source);
+        AUREA_CHECK(model.ok()); if (!model.ok()) return;
+        auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        auto* layer = comp->layer(LayerId::unpack(*model));
+        layer->model.unitScale *= .35f;
+        layer->transform.position.x = 130;
+        comp->post_process().bloom = false;
+        const Image8 bare = rig.capture(width);
+        u32 bottom = 0;
+        for (u32 y = 0; y < height; ++y) for (u32 x = 0; x < width; ++x)
+            if (bare.at(x,y)[0] > bare.at(x,y)[1] + 20) bottom = std::max(bottom, y);
+        AUREA_CHECK(bottom > height / 2 && bottom + 15 < height);
+        if (bottom <= height / 2 || bottom + 15 >= height) return;
+        AUREA_CHECK(rig.e.set_scene_floor(1, 0, 0, 0, .02f, 1, 0));
+        (void)rig.capture(width); // Complete environment/pipeline setup before measuring.
+
+        TextureDesc desc;
+        desc.width = width; desc.height = height; desc.format = SurfaceFormat::RGBA16F;
+        desc.renderTarget = desc.sampled = desc.transferSrc = true;
+        auto target = rig.e.gpu()->create_texture(desc);
+        AUREA_CHECK(target.ok()); if (!target.ok()) return;
+        auto measure = [&](f32 shift) {
+            RenderSettings settings; settings.finalQuality = true; settings.dither = false;
+            FrameSnapshot snapshot;
+            rig.e.renderer().prepare(*comp, *rig.e.project(), FrameIndex{0}, nullptr, nullptr, nullptr,
+                                     settings, 1, 0, DecodeMode::Still, 1, snapshot);
+            AUREA_CHECK_EQ(snapshot.scenes.size(), 1u);
+            for (auto& scene : snapshot.scenes) for (auto& instance : scene.instances) {
+                // Keep the group/floor camera fixed. Only this object's exposure
+                // sample changes projection, exactly as a mixed blur on/off group.
+                instance.cameraOverride = true;
+                instance.sampleView = scene.camera.view;
+                instance.sampleCameraPosition = scene.camera.position;
+                instance.sampleViewProj = Mat4::translation(Vec3{2 * shift / width, 0, 0})
+                    * scene.camera.imageTransform
+                    * scene3d::reverse_z_perspective(scene.camera.fovY, f32(width) / height, scene.camera.nearZ)
+                    * scene.camera.view;
+            }
+            OffscreenTarget output{*target, width, height};
+            FrameStats stats; RenderTimings timings;
+            AUREA_CHECK(rig.e.renderer().render(snapshot, settings, &output, stats, timings).ok());
+            rig.e.gpu()->wait_idle();
+            std::vector<u16> pixels(usize(width) * height * 4);
+            AUREA_CHECK(rig.e.gpu()->read_texture(*target, pixels.data(), width * 8).ok());
+            std::array<f64, 4> sums{}; // primary energy/x, reflection energy/x
+            for (u32 y = 0; y < height; ++y) for (u32 x = 0; x < width; ++x) {
+                const usize index = (usize(y) * width + x) * 4;
+                const f64 red = std::max(0.f, half_to_float(pixels[index]) - half_to_float(pixels[index + 1]));
+                if (y <= bottom) { sums[0] += red; sums[1] += red * x; }
+                else if (y > bottom + 2) { sums[2] += red; sums[3] += red * x; }
+            }
+            std::printf("    %s shift %.0f: object energy %.3f, reflection energy %.3f\n",
+                        unlit ? "unlit" : "emissive PBR", shift, sums[0], sums[2]);
+            AUREA_CHECK(sums[0] > 10); AUREA_CHECK(sums[2] > 2);
+            return std::array<f64, 4>{sums[1] / std::max(1., sums[0]), sums[3] / std::max(1., sums[2]), sums[0], sums[2]};
+        };
+        // The rougher case exercises both separable display/HDR reflection
+        // filters. A zero-energy reflection must fail before centroid comparison.
+        for (const f32 roughness : {.02f, .2f}) {
+            AUREA_CHECK(rig.e.set_scene_floor(1, 0, 0, 0, roughness, 1, 0));
+            AUREA_CHECK(rig.e.set_scene3d_tonemap(0, 1));
+            const auto original = measure(0), shifted = measure(30);
+            std::printf("    %s roughness %.2f per-instance camera: object %.2f px, floor reflection %.2f px\n",
+                        unlit ? "unlit" : "emissive PBR", roughness, shifted[0] - original[0], shifted[1] - original[1]);
+            AUREA_CHECK_NEAR(shifted[0] - original[0], 30, .5);
+            AUREA_CHECK_NEAR(shifted[1] - original[1], 30, 1.5);
+            AUREA_CHECK(rig.e.set_scene3d_tonemap(0, .25f));
+            const auto dimmed = measure(0);
+            if (unlit) {
+                // Display-linear unlit color bypasses group exposure, including its
+                // reflection; folding it into HDR would fail these energy checks.
+                AUREA_CHECK_NEAR(dimmed[2] / original[2], 1., .01);
+                AUREA_CHECK_NEAR(dimmed[3] / original[3], 1., .01);
+            } else {
+                AUREA_CHECK(dimmed[2] < original[2] * .6);
+                AUREA_CHECK(dimmed[3] < original[3] * .6);
+            }
+        }
+        rig.e.gpu()->destroy_texture(*target);
+    }
+}
+
+#include "CaptureEpochGpu.inl"
+#include "ProxyCaptureGpu.inl"
+#include "VulkanDescriptorsGpu.inl"
+#include "OpticalFlowSamplingGpu.inl"
+#include "FlowCacheSourceGpu.inl"
+#include "Heavy3DMotionGpu.inl"
+#include "ExternalImportsGpu.inl"
+
+#include "BoundedCommandsGpu.inl"
+#include "ParticleCameraGpu.inl"
+#include "SurfaceDeformGpu.inl"
+#include "PageTurnGpu.inl"
+#include "PaperStationaryGpu.inl"
+#include "LightRaysTextGpu.inl"
+#include "TurbulenceTypesGpu.inl"
+#include "Shapes2DGpu.inl"

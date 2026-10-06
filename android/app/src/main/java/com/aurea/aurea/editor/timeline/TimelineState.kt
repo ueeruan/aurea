@@ -78,7 +78,10 @@ internal class TimelineState {
  * pisca nem pede de novo ao motor. LRU limitado — as imagens são do cache do
  * store; aqui só se guarda a referência.
  */
-internal class ThumbStrip {
+internal class ThumbStrip : com.aurea.aurea.engine.TrimmableImageCache {
+    init { com.aurea.aurea.engine.UiImageCaches.register(this) }
+    private var cacheEpoch = -1L
+    override fun releaseImages() { hits.clear(); misses.clear(); aspects.clear() }
     private class Key(var layer: Long = 0L, var bucket: Int = 0, var height: Int = 0) {
         fun set(layer: Long, bucket: Int, height: Int): Key {
             this.layer = layer
@@ -113,8 +116,8 @@ internal class ThumbStrip {
 
     // Busca com uma chave reaproveitada: acerto no cache não aloca (a tira repinta a 60 Hz).
     private val probe = Key()
-    private val hits = object : LinkedHashMap<Key, Bitmap>(128, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Bitmap>?) = size > MAX_HITS
+    private val hits = object : LinkedHashMap<Key, java.lang.ref.WeakReference<Bitmap>>(128, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, java.lang.ref.WeakReference<Bitmap>>?) = size > MAX_HITS
     }
     /** Balde que o motor ainda não tinha → geração em que foi pedido (não repergunta até ela mudar). */
     private val misses = HashMap<Key, Int>()
@@ -124,8 +127,9 @@ internal class ThumbStrip {
     fun aspect(layer: Long): Float = aspects.get(layer) ?: DEFAULT_ASPECT
 
     fun get(cache: ThumbnailCache, layer: Long, bucket: Int, timelineFrame: Int, heightPx: Int, generation: Int): Bitmap? {
+        if (cacheEpoch != cache.epoch) { releaseImages(); cacheEpoch = cache.epoch }
         probe.set(layer, bucket, heightPx)
-        hits[probe]?.let { return it }
+        hits[probe]?.get()?.let { return it }
         val missed = misses[probe]
         if (missed != null && missed == generation) return null
         if (budget <= 0) {
@@ -141,7 +145,7 @@ internal class ThumbStrip {
             return null
         }
         misses.remove(key)
-        hits[key] = bmp
+        hits[key] = java.lang.ref.WeakReference(bmp)
         if (aspects.get(layer) == null && bmp.height > 0) {
             aspects.put(layer, (bmp.width.toFloat() / bmp.height).coerceIn(MIN_ASPECT, MAX_ASPECT))
         }

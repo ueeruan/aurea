@@ -246,7 +246,7 @@ struct EngineStatusPOD {
     i32 lastError        = 0;     // +4
     char errorDetail[96]{};       // +8
     u32 modelRevision    = 0;     // +104 muda a cada alteração do modelo (a UI relê listas)
-    u32 reservedRev      = 0;     // +108
+    u32 previewBufferStatus = 0;  // +108 ready[0..7], target[8..15], limited[30], buffering[31]
     f32 compFps          = 0.0f;  // +112 composição atual (a UI converte frame ↔ tempo)
     u32 compWidth        = 0;     // +116
     u32 compHeight       = 0;     // +120

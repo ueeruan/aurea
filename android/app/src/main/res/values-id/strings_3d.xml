@@ -19,4 +19,6 @@
     <string name="ui3d_deform_letters">Ubah bentuk huruf (putar, silinder, pilin)</string>
     <string name="ui3d_shadows">Bayangan</string>
     <string name="ui3d_bloom_strength">Kekuatan cahaya</string>
+    <string name="ui3d_show_interior">Tampilkan bagian dalam</string>
+    <string name="ui3d_show_interior_hint">Sisi dalam juga digambar dengan tekstur yang sama: masukkan kamera ke dalam objek (atau perbesar skalanya) untuk melihat bagian dalamnya.</string>
 </resources>

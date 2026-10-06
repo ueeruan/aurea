@@ -35,7 +35,9 @@ void main() {
             light += tint * ghost * p.p1.y / 100.0;
         }
         light *= p.p0.z / 100.0;
-        vec4 base = texture(u_tex0, v_uv);
+        // A saída pode ser maior que a entrada (o clarão passa da caixa da layer):
+        // a imagem é lida pelo uvMap; fora dela, borda transparente.
+        vec4 base = texture(u_tex0, v_uv * p.uvMap.xy + p.uvMap.zw);
         float coverage = clamp(max(light.r, max(light.g, light.b)), 0.0, 1.0);
         o_color = vec4(base.rgb + light, base.a + coverage*(1.0-base.a));
     } else if (mode == 1) {

@@ -19,7 +19,7 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
-/** Exercises the actual Canvas and drag callbacks, with a four-slot global
+/** Exercises the actual Canvas and drag callbacks, with a six-slot global
  * environment and different per-object values (exposure is object slot 4). */
 class ObjectEnvironmentCrashTest {
     @get:Rule val compose = createComposeRule()
@@ -43,7 +43,7 @@ class ObjectEnvironmentCrashTest {
             }
         }
         compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
-        compose.runOnIdle { assertEquals(4, store.environment.size) }
+        compose.runOnIdle { assertEquals(6, store.environment.size) }
         val global = store.environment.toList()
         for (index in 0..2) {
             val before = values[index]

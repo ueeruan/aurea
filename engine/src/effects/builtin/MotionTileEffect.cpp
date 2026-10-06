@@ -44,8 +44,11 @@ Params params_from(const EffectEval& e) noexcept {
     p.centerY = finite_or(c.y, 0.5f);
     // Faixas do app antigo no slider: ladrilho 1%..500%, saída 0%..500%.
     // Digitado, o ladrilho vai a 1000% (kMaxTileScale).
-    p.tileX = std::clamp(finite_or(e.f(kTileWidth), 100.0f) / 100.0f, 0.01f, kMaxTileScale);
-    p.tileY = std::clamp(finite_or(e.f(kTileHeight), 100.0f) / 100.0f, 0.01f, kMaxTileScale);
+    // Escala uniforme acrescentada no fim: projetos anteriores mantêm 100%,
+    // sem renumerar largura/altura ou seus keyframes.
+    const f32 scale = e.count > kScale ? std::clamp(finite_or(e.f(kScale), 100.0f) / 100.0f, 0.01f, kMaxTileScale) : 1.0f;
+    p.tileX = std::clamp(finite_or(e.f(kTileWidth), 100.0f) / 100.0f, 0.01f, kMaxTileScale) * scale;
+    p.tileY = std::clamp(finite_or(e.f(kTileHeight), 100.0f) / 100.0f, 0.01f, kMaxTileScale) * scale;
     p.outputX = std::clamp(finite_or(e.f(kOutputWidth), 100.0f) / 100.0f, 0.0f, kMaxOutput);
     p.outputY = std::clamp(finite_or(e.f(kOutputHeight), 100.0f) / 100.0f, 0.0f, kMaxOutput);
     p.mirror = e.b(kMirror);
@@ -166,6 +169,7 @@ namespace {
 
 class MotionTile final : public Effect {
 public:
+    bool needs_full_input() const noexcept override { return true; }
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kMotionTile, "Motion Tile", "Estilizar", EffectClass::Domain};
         return i;
@@ -205,6 +209,9 @@ public:
         p.add_bool("horizontal_phase_shift", "Deslocamento de fase horizontal", false);
         // Marca da disposição atual (ver `upgrade_legacy_layout`).
         p.add_float("layout", "Disposição", 1.0f, 0.0f, 1.0f, kParamHidden);
+        p.add_float("tile_scale", "Escala", 100.0f, 1.0f, 500.0f,
+                    kParamAnimatable | kParamPercent, "%");
+        p.typed_range(1.0f, kMaxTileScale * 100.0f);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         using namespace motion_tile;
@@ -220,6 +227,14 @@ public:
     bool is_identity(const EffectEval& e) const noexcept override {
         const motion_tile::Params p = motion_tile::params_from(e);
         if (!p.identity_params()) return false;
+        // The original layer bounds do not describe an effect stack's input
+        // or its readers: a preceding Transform may shrink the image, and a
+        // following blur needs repeated pixels outside the composition. Only
+        // discard the wall when it is the layer's sole enabled effect.
+        if (e.layer) {
+            for (const auto& other : e.layer->effects)
+                if (other.enabled && &other != e.instance) return false;
+        }
         // IDENTIDADE SÓ QUANDO A LAYER JÁ COBRE O QUADRO. Com a layer reduzida,
         // girada ou deslocada, ladrilho 100% JÁ NÃO é a própria layer: é a
         // parede que cobre a composição.
@@ -231,7 +246,6 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         using motion_tile::kNoWindowHalf;
-        using motion_tile::kMaxCoverage;
         const motion_tile::Params p = motion_tile::params_from(e);
 
         Rect region = input.region;
@@ -250,8 +264,8 @@ public:
             region = motion_tile::tiled_region(p, *e.placement);
             // A parte que o quadro mostra MAIS a margem que os efeitos
             // seguintes leem (desfoque, brilho, distorções). A parede é
-            // infinita: a região cresce até cobrir isso tudo (até o teto de
-            // cobertura), em vez de parar no quadro — senão o desfoque depois
+            // infinita: a região cresce até cobrir isso tudo,
+            // em vez de parar no quadro — senão o desfoque depois
             // do Motion Tile puxava transparente da borda e escurecia o quadro.
             Rect vis = visible_layer_rect(*e.placement);
             if (vis.w > 0.0f && vis.h > 0.0f) {
@@ -259,12 +273,10 @@ public:
                 // filtro bilinear da composição leria transparente ali.
                 const f32 slack = margin + 2.0f + 0.01f * std::max(vis.w, vis.h);
                 vis = Rect{vis.x - slack, vis.y - slack, vis.w + 2.0f * slack, vis.h + 2.0f * slack};
-                const f32 lw = static_cast<f32>(std::max(e.placement->layerWidth, 1u));
-                const f32 lh = static_cast<f32>(std::max(e.placement->layerHeight, 1u));
-                const Rect cap{lw * 0.5f - lw * kMaxCoverage * 0.5f - margin, lh * 0.5f - lh * kMaxCoverage * 0.5f - margin,
-                               lw * kMaxCoverage + 2.0f * margin, lh * kMaxCoverage + 2.0f * margin};
-                const Rect clipped = Rect::intersect(cap, vis);
-                region = (clipped.w > 0.5f && clipped.h > 0.5f) ? clipped : Rect{0, 0, 1, 1};
+                // Não recortar contra 24x a layer: abaixo de 4,2% de escala,
+                // ou após um pan longo, isso abria faixas sem imagem. Só a
+                // parte visível é rasterizada; region_size limita a textura.
+                if (std::isfinite(vis.x) && std::isfinite(vis.y) && std::isfinite(vis.w) && std::isfinite(vis.h)) region = vis;
             }
         }
 
@@ -282,8 +294,49 @@ public:
             }
         }
 
+        // A finite output window has a finite preimage on a visible plane.
+        // Clip the raster region to its bounds after grid alignment: close to
+        // the camera, magnifying a full-layer alpha mask would magnify its
+        // bilinear fringe too. The resulting geometry now bounds that fringe.
+        if (e.placement && e.placement->inScene3d && p.outputX < 1.f && p.outputY < 1.f) {
+            const auto& pl = *e.placement;
+            const Mat4& m = pl.compFromLayer;
+            f64 minX=1e30,minY=1e30,maxX=-1e30,maxY=-1e30;
+            bool finite = pl.compWidth && pl.compHeight;
+            for (const f32 cy : {.5f-.5f*p.outputY,.5f+.5f*p.outputY})
+                for (const f32 cx : {.5f-.5f*p.outputX,.5f+.5f*p.outputX}) {
+                    const f64 qx=static_cast<f64>(cx)*pl.compWidth,qy=static_cast<f64>(cy)*pl.compHeight;
+                    const f64 a=m.col[0].x-qx*m.col[0].w,c=m.col[1].x-qx*m.col[1].w;
+                    const f64 b=m.col[0].y-qy*m.col[0].w,d=m.col[1].y-qy*m.col[1].w;
+                    const f64 tx=qx*m.col[3].w-m.col[3].x,ty=qy*m.col[3].w-m.col[3].y;
+                    const f64 det=a*d-b*c;
+                    if (!std::isfinite(det)||std::fabs(det)<1e-10) {finite=false;continue;}
+                    const f64 x=(d*tx-c*ty)/det,y=(a*ty-b*tx)/det;
+                    const f64 z=m.col[0].w*x+m.col[1].w*y+m.col[3].w;
+                    if(!std::isfinite(x)||!std::isfinite(y)||z<=0) {finite=false;continue;}
+                    minX=std::min(minX,x);maxX=std::max(maxX,x);minY=std::min(minY,y);maxY=std::max(maxY,y);
+                }
+            if(finite && maxX>minX && maxY>minY) {
+                const Rect clipped=Rect::intersect(region,{static_cast<f32>(minX),static_cast<f32>(minY),
+                    static_cast<f32>(maxX-minX),static_cast<f32>(maxY-minY)});
+                if(clipped.w>0 && clipped.h>0)region=clipped;
+            }
+        }
+
         u32 w = 0, h = 0;
-        ctx.region_size(region, input.texel_scale_x(), w, h);
+        f32 density = input.texel_scale_x();
+        const bool extremeCoverage = e.placement &&
+            (region.w > std::max(1u, e.placement->layerWidth) * motion_tile::kMaxCoverage ||
+             region.h > std::max(1u, e.placement->layerHeight) * motion_tile::kMaxCoverage);
+        if (extremeCoverage && !e.placement->inScene3d) {
+            const Mat4& m = e.placement->compFromLayer;
+            const f32 projected = std::max(std::hypot(m.col[0].x, m.col[0].y), std::hypot(m.col[1].x, m.col[1].y));
+            // Só a expansão além do antigo teto de 24x precisa desta redução.
+            // Em escalas normais, preservar a grade/densidade da entrada evita
+            // refiltrar as cópias e alterar margens dos efeitos seguintes.
+            if (std::isfinite(projected) && projected > 0.0f) density = std::min(density, projected);
+        }
+        ctx.region_size(region, density, w, h);
 
         struct {
             Vec4 uvMap;
@@ -293,6 +346,7 @@ public:
             Vec4 windowX;
             Vec4 windowY;
             Vec4 box;
+            Vec4 windowW;
         } u{};
         // p = coordenada normalizada NO LADRILHO (a caixa da layer) do pixel
         // de saída; `box` leva o ponto do ladrilho ao uv da entrada.
@@ -310,13 +364,14 @@ public:
                        0.5f / (static_cast<f32>(std::max(input.height, 1u)) * std::max(u.box.y, 1e-6f)), 0, 0};
 
         // A JANELA DE SAÍDA, medida no QUADRO: o uv da textura de saída vai ao
-        // uv da composição por um afim (região → px da layer → px do quadro).
-        // Em 100% ou mais (ou numa camada da cena 3D, sem quadro 2D) não corta.
+        // uv da composição pela projeção (região → px da layer → quadro).
+        // Em 100% ou mais não corta; W=1 preserva a conta afim das camadas 2D.
         const f32 hx = p.outputX >= 1.0f ? kNoWindowHalf : p.outputX * 0.5f;
         const f32 hy = p.outputY >= 1.0f ? kNoWindowHalf : p.outputY * 0.5f;
         u.windowX = Vec4{0, 0, 0, kNoWindowHalf};
         u.windowY = Vec4{0, 0, 0, kNoWindowHalf};
-        if (e.placement && !e.placement->inScene3d && e.placement->compWidth && e.placement->compHeight
+        u.windowW = Vec4{0, 0, 1, 0};
+        if (e.placement && e.placement->compWidth && e.placement->compHeight
             && (hx < kNoWindowHalf || hy < kNoWindowHalf)) {
             const Mat4& m = e.placement->compFromLayer;
             const f32 a = m.col[0].x, b = m.col[0].y, c = m.col[1].x, d = m.col[1].y;
@@ -326,6 +381,18 @@ public:
                              (a * region.x + c * region.y + m.col[3].x) / cw - 0.5f, hx};
             u.windowY = Vec4{b * region.w / ch, d * region.h / ch,
                              (b * region.x + d * region.y + m.col[3].y) / ch - 0.5f, hy};
+            if (e.placement->inScene3d) {
+                // Center the homogeneous numerator before dividing by W.
+                // This keeps the same frame window through rotation and depth.
+                u.windowW = Vec4{m.col[0].w * region.w, m.col[1].w * region.h,
+                    m.col[0].w * region.x + m.col[1].w * region.y + m.col[3].w, 0};
+                u.windowX.x -= .5f * u.windowW.x;
+                u.windowX.y -= .5f * u.windowW.y;
+                u.windowX.z += .5f - .5f * u.windowW.z;
+                u.windowY.x -= .5f * u.windowW.x;
+                u.windowY.y -= .5f * u.windowW.y;
+                u.windowY.z += .5f - .5f * u.windowW.z;
+            }
         }
 
         const FGTexture tex = ctx.texture("motion-tile", w, h);
@@ -399,6 +466,14 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_retro_displace_effects(registry);
     // Datamosh (Glitch). Sempre no FIM.
     builtin::register_datamosh_effect(registry);
+    builtin::register_motion_extras(registry);
+    builtin::register_repeat_extras(registry);
+    builtin::register_keying_extras(registry);
+    builtin::register_matte_choker(registry);
+    builtin::register_surface_deform_effects(registry);
+    builtin::register_page_turn_effect(registry);
+    // Vidro líquido, Dissolver com ruído e 8 bits. Sempre no FIM.
+    builtin::register_optical_stylize_effects(registry);
 }
 
 } // namespace aurea

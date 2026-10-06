@@ -63,6 +63,7 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
     config_ = config;
     framesInFlight_ = std::clamp<u32>(config.framesInFlight, 1, 3);
     deviceLost_ = false;
+    recordingStatus_ = OkStatus;
 
     if (!load_library()) return Status{Errc::NotSupported, "biblioteca Vulkan ausente"};
     if (const Status s = create_instance(config.enableValidation); !s.ok()) return s;
@@ -84,6 +85,7 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
 void Backend::shutdown() noexcept {
     if (!device_ && !instance_) return;
     if (device_) vkDeviceWaitIdle(device_);
+    if (device_) collect_immediate(true);
 
     for (u32 i = 0; i < 3; ++i) run_deferred(frames_[i]);
     destroy_swapchain();
@@ -720,6 +722,7 @@ Status Backend::create_frames() noexcept {
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         ai.commandBufferCount = 1;
         if (const Status s = check(vkAllocateCommandBuffers(device_, &ai, &f.cmd), "vkAllocateCommandBuffers"); !s.ok()) return s;
+        f.commandBuffers.push_back(f.cmd);
         VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;   // o primeiro wait não pode travar
         if (const Status s = check(vkCreateFence(device_, &fi, nullptr, &f.fence), "vkCreateFence"); !s.ok()) return s;
@@ -796,7 +799,10 @@ Status Backend::create_dummies() noexcept {
 
     BufferDesc bd;
     bd.bytes = 256;
-    bd.usage = BufferUsage::Storage;
+    // Unbound descriptors share this fallback, including the dynamic uniform
+    // binding. Vulkan requires every descriptor's buffer usage to match even
+    // when the active shader does not read that binding.
+    bd.usage = BufferUsage::Storage | BufferUsage::Uniform;
     bd.debugName = "reserva-buffer";
     auto b = create_buffer(bd);
     if (!b.ok()) return b.status();

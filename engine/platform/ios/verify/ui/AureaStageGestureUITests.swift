@@ -1,6 +1,7 @@
 // Native UI-test target source. Simulator execution is required to validate it.
 // These tests operate the launched application; they never link/call its engine.
 import XCTest
+import UIKit
 
 @MainActor final class AureaStageGestureUITests: XCTestCase {
     private var app: XCUIApplication!
@@ -23,6 +24,120 @@ import XCTest
             app.terminate()
         }
         app = nil
+    }
+
+    func testPermanentBeatButtonStaysBesidePlayAndMarksDuringPlayback() throws {
+        let before = try launch("timeline-markers")
+        let marker = app.buttons["transport.marker"].firstMatch
+        let play = app.buttons["transport.play"].firstMatch
+        XCTAssertTrue(marker.waitForExistence(timeout: 5)); XCTAssertTrue(marker.isHittable)
+        XCTAssertTrue(play.isHittable)
+        XCTAssertGreaterThanOrEqual(marker.frame.width, 48)
+        XCTAssertGreaterThanOrEqual(marker.frame.height, 48)
+        XCTAssertLessThanOrEqual(marker.frame.maxX, play.frame.minX + 1)
+        marker.tap()
+        _ = try awaitSnapshot("Toggling the mark at frame60 removes it") { $0.markerCount == before.markerCount - 1 }
+        marker.tap()
+        _ = try awaitSnapshot("The direct button restores the mark") { $0.markerCount == before.markerCount }
+        play.tap()
+        _ = try awaitSnapshot("Playback actually advances") { $0.playing != 0 && $0.corePlayhead > 65 }
+        XCTAssertTrue(marker.isHittable); marker.tap()
+        _ = try awaitSnapshot("Adding a beat keeps playback running") { $0.playing != 0 && $0.markerCount == before.markerCount + 1 }
+        play.tap()
+        _ = try awaitSnapshot("Pause remains beside the marker") { $0.playing == 0 }
+        let more = app.buttons["transport.more"].firstMatch
+        if more.exists {
+            more.tap()
+            XCTAssertTrue(app.buttons["transport.copyPaste"].firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["transport.fullscreen"].firstMatch.exists)
+        }
+    }
+
+    func testTimelineMarkersRemainOverClipsWhenFilteringZoomingAndScrubbing() throws {
+        let before = try launch("timeline-markers")
+        XCTAssertEqual(before.markerCount, 3)
+        _ = try awaitSnapshot("Marker viewport is centered on frame60") { $0.corePlayhead == 60 }
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        func assertGuides(_ label: String) throws {
+            let shot = timeline.screenshot()
+            let image = try XCTUnwrap(shot.image.cgImage)
+            let width = image.width, height = image.height
+            let scale = CGFloat(width) / timeline.frame.width
+            let minimumRun = max(14 * scale, (CGFloat(height) - 44 * scale) * 0.65)
+            var rgba = [UInt8](repeating: 0, count: width * height * 4)
+            let rendered = rgba.withUnsafeMutableBytes { bytes -> Bool in
+                guard let context = CGContext(data: bytes.baseAddress, width: width, height: height,
+                    bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+                return true
+            }
+            XCTAssertTrue(rendered)
+            var groups = 0, previous = -10
+            for x in 0..<width {
+                var run = 0, longest = 0
+                for y in 0..<height {
+                    let p = (y * width + x) * 4
+                    if rgba[p] > 140 && rgba[p + 2] > 140 && rgba[p + 1] < 64 {
+                        run += 1; longest = max(longest, run)
+                    } else { run = 0 }
+                }
+                if CGFloat(longest) >= minimumRun {
+                    if x > previous + 1 { groups += 1 }
+                    previous = x
+                }
+            }
+            XCTAssertGreaterThanOrEqual(groups, 2, "\(label): two off-playhead guides must cross the clip area")
+            XCTAssertEqual(try snapshot().markerCount, 3, "Viewport changes must preserve marker data")
+            let attachment = XCTAttachment(screenshot: shot)
+            attachment.name = label; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        try assertGuides("Markers in compact selection")
+        let filter = app.buttons["timeline.showAllLayers"].firstMatch
+        XCTAssertTrue(filter.waitForExistence(timeout: 5)); filter.tap()
+        try assertGuides("Markers with all timeline rows")
+        timeline.pinch(withScale: 1.5, velocity: 1)
+        try assertGuides("Markers after timeline zoom")
+        let rect = timeline.frame
+        let start = CGPoint(x: rect.midX + 20, y: rect.minY + 8)
+        let end = CGPoint(x: start.x + 20, y: start.y)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
+        _ = try awaitSnapshot("Scrubbing changes the visible timeline interval") { $0.corePlayhead != 60 }
+        try assertGuides("Markers after timeline scrub")
+    }
+
+    func testMotionBlurCenterUsesDegreesAndOneUndoPreservesQuality() throws {
+        let before = try launch("motion-blur-controls")
+        let initial = try XCTUnwrap(before.motionBlurSettings)
+        XCTAssertEqual(initial.count, 6)
+        XCTAssertEqual(initial[1], 181, accuracy: 0.001)
+        XCTAssertEqual(initial[2], 45, accuracy: 0.001)
+        let shutter = app.descendants(matching: .any)["motionblur.shutter"].firstMatch
+        XCTAssertTrue(shutter.waitForExistence(timeout: 5))
+        XCTAssertTrue((shutter.value as? String ?? "").contains("°"))
+        let advanced = app.buttons["motionblur.advanced"].firstMatch
+        XCTAssertTrue(advanced.waitForExistence(timeout: 5)); advanced.tap()
+        let center = app.buttons["motionblur.center"].firstMatch
+        XCTAssertTrue(center.waitForExistence(timeout: 5))
+        // A DisclosureGroup also exposes its label as a StaticText child.
+        // Count actionable controls: expanded buttons must keep distinct IDs.
+        for identifier in ["advanced", "phase", "center", "samples", "adaptive"] {
+            XCTAssertEqual(app.buttons
+                .matching(identifier: "motionblur.\(identifier)").count, 1, identifier)
+        }
+        if !center.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        center.tap()
+        let changed = try awaitSnapshot("Center places the shutter around the frame") {
+            ($0.motionBlurSettings?.count ?? 0) == 6 && abs($0.motionBlurSettings![2] + 90.5) < 0.001
+        }
+        XCTAssertEqual(changed.motionBlurSettings?[1], initial[1])
+        XCTAssertEqual(Array(try XCTUnwrap(changed.motionBlurSettings).suffix(3)), Array(initial.suffix(3)))
+        try undo()
+        let restored = try awaitSnapshot("One undo restores the whole composition blur edit") {
+            $0.motionBlurSettings == initial
+        }
+        XCTAssertEqual(restored.motionBlurSettings, initial)
     }
 
     func testMotionBlurTextExportCompletesAt1080p() throws {
@@ -50,6 +165,82 @@ import XCTest
         }
         XCTAssertTrue(ready.exists, "The export never reached the done screen")
         XCTAssertTrue(app.buttons["Open"].isEnabled)
+    }
+
+    func testTransformExpressionExplainsWhyPositionIsControlled() throws {
+        let before = try launch("transform-expression")
+        let notice = app.staticTexts["transform.expression.controlled"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertTrue(notice.label.contains("expression"))
+        XCTAssertEqual(before.detail.position[0], 540, accuracy: 0.01)
+        XCTAssertEqual(before.detail.position[1], 515, accuracy: 0.01)
+        let pad = app.descendants(matching: .any)["transform.move.pad"].firstMatch
+        XCTAssertTrue(pad.waitForExistence(timeout: 5)); XCTAssertTrue(pad.isHittable)
+        pad.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.65)))
+        let after = try snapshot()
+        XCTAssertEqual(after.detail.position[0], 540, accuracy: 0.01)
+        XCTAssertEqual(after.detail.position[1], 515, accuracy: 0.01)
+        XCTAssertTrue(notice.exists)
+        // The notice points to the existing expression editor; it must remain
+        // possible to change/disable the expression instead of removing it on drag.
+        let edit = app.buttons["Add expression"].firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
+        XCTAssertTrue(app.staticTexts["[540, 515]"].exists || app.textViews.firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testPausedPreviewPreparesFutureFramesBeforePlay() throws {
+        let initial = try launch("transform-expression")
+        XCTAssertEqual(initial.playing, 0)
+        let frame = initial.corePlayhead
+        let warmed = try awaitSnapshot("Paused native rendering prepares complete future frames", timeout: 15) {
+            $0.playing == 0 && $0.corePlayhead == frame && ($0.previewBufferRanges ?? []).contains {
+                $0.count == 2 && $0[0] == frame && $0[1] >= frame + 2
+            }
+        }
+        let ranges = try XCTUnwrap(warmed.previewBufferRanges)
+        XCTAssertLessThanOrEqual(ranges.reduce(Int64(0)) { $0 + $1[1] - $1[0] }, 30)
+        let picture = XCTAttachment(screenshot: stage.screenshot())
+        picture.name = "Paused picture after native idle preparation"
+        picture.lifetime = .keepAlways; add(picture)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        let still = try snapshot()
+        XCTAssertEqual(still.corePlayhead, frame)
+        XCTAssertEqual(still.playing, 0)
+        let play = app.buttons["Play · hold to repeat"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+        _ = try awaitSnapshot("Play advances using the prepared native preview", timeout: 5) {
+            $0.playing != 0 && $0.corePlayhead > frame
+        }
+        let pause = app.buttons["Pause"].firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout: 5)); pause.tap()
+        _ = try awaitSnapshot("Pause remains responsive after idle preparation") { $0.playing == 0 }
+    }
+
+    func testPreviewBufferStatusAndPauseRemainAvailable() throws {
+        _ = try launch("transform-expression")
+        let play = app.buttons["Play · hold to repeat"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+        let pause = app.buttons["Pause"].firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout: 5))
+        let buffer = app.descendants(matching: .any)["preview.buffer.status"].firstMatch
+        XCTAssertTrue(buffer.waitForExistence(timeout: 5))
+        XCTAssertFalse(buffer.label.isEmpty)
+        let cached = try awaitSnapshot("The timeline receives real composed-frame ranges") {
+            !($0.previewBufferRanges ?? []).isEmpty
+        }
+        let ranges = try XCTUnwrap(cached.previewBufferRanges)
+        XCTAssertTrue(ranges.allSatisfy { $0.count == 2 && $0[0] >= 0 && $0[1] > $0[0] })
+        XCTAssertLessThanOrEqual(ranges.reduce(Int64(0)) { $0 + $1[1] - $1[0] }, 30)
+        XCTAssertTrue(app.staticTexts["timeline.preview.buffer"].firstMatch.waitForExistence(timeout: 5))
+        pause.tap()
+        let paused = try awaitSnapshot("Pause cancels playback or pending buffer startup") { $0.playing == 0 }
+        // Give any queued preparation time to finish: it must not restart playback.
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        let later = try snapshot()
+        XCTAssertEqual(later.playing, 0)
+        XCTAssertEqual(later.corePlayhead, paused.corePlayhead)
     }
 
     func testText3DAnimatorRailOpensTheSelectedWiggleCurve() throws {
@@ -121,8 +312,19 @@ import XCTest
         func ruler(_ component: Int) throws -> XCUIElement {
             let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "effects\\.param\\.[0-9]+\\.5\\.\(component)")).firstMatch
             XCTAssertTrue(row.waitForExistence(timeout: 5), "Offset row \(component) of the open Text Transform card")
-            for _ in 0..<8 where !row.isHittable { stack.swipeUp() }
+            // Full swipes can jump past the next44pt row in the compact panel.
+            // Use its actual position and reverse direction after overscroll.
+            for _ in 0..<10 {
+                let viewport = stack.frame.insetBy(dx: 8, dy: 12)
+                let center = CGPoint(x: row.frame.midX, y: row.frame.midY)
+                if row.isHittable && viewport.contains(center) { break }
+                let distance = row.frame.midY - viewport.midY
+                let travel = min(viewport.height * 0.35, max(24, abs(distance)))
+                let start = stack.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.5))
+                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: distance > 0 ? -travel : travel)), withVelocity: .slow, thenHoldForDuration: 0.1)
+            }
             XCTAssertTrue(row.isHittable)
+            XCTAssertTrue(stack.frame.contains(CGPoint(x: row.frame.midX, y: row.frame.midY)))
             return row
         }
         let x = try ruler(0)
@@ -206,8 +408,15 @@ import XCTest
         XCTAssertTrue(copy.waitForExistence(timeout: 5)); copy.tap()
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
-        // Redesenho 2026-09-29: copiar e colar saiu do transporte; é o SEGURAR do duplicar.
-        app.buttons["transport.duplicate"].firstMatch.press(forDuration: 0.8)
+        // The compact phone transport retains clipboard commands in More.
+        let more = app.buttons["transport.more"].firstMatch
+        if more.exists {
+            more.tap()
+            let clipboard = app.buttons["transport.copyPaste"].firstMatch
+            XCTAssertTrue(clipboard.waitForExistence(timeout: 5)); clipboard.tap()
+        } else {
+            app.buttons["transport.duplicate"].firstMatch.press(forDuration: 0.8)
+        }
         // A folha de copiar/colar anima ao abrir: espera a linha existir.
         let paste = app.buttons["Paste effects"].firstMatch
         XCTAssertTrue(paste.waitForExistence(timeout: 5)); paste.tap()
@@ -430,13 +639,22 @@ import XCTest
         XCTAssertEqual(before.detail.startFrame, 0)
         let duration = before.detail.endFrame - before.detail.startFrame
         XCTAssertGreaterThan(duration, 0)
-        // "Puxar para o cabeçote" saiu da doca (igual à do AM) e mora no menu ⋯ da camada.
-        let more = app.buttons["More layer actions"].firstMatch
-        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
-        let move = app.buttons["Pull the layer to the playhead"].firstMatch
+        // The dedicated layer-edge buttons are independent of marker/keyframe navigation.
+        let end = app.buttons["timeline.layer.end"].firstMatch
+        let start = app.buttons["timeline.layer.start"].firstMatch
+        XCTAssertTrue(end.waitForExistence(timeout: 5)); XCTAssertTrue(end.isHittable)
+        end.tap()
+        _ = try awaitSnapshot("Go to the selected layer end") { $0.corePlayhead == before.detail.endFrame }
+        start.tap()
+        _ = try awaitSnapshot("Go to the selected layer start") { $0.corePlayhead == before.detail.startFrame }
+        // Existing marker navigation reaches the fixture's frame60 marker.
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0)).withOffset(CGVector(dx: 0, dy: 16)).tap()
+        // Restore the known playhead with the fixture's direct navigation rather than moving the clip while testing an edge.
+        app.buttons["transport.next"].firstMatch.tap()
+        _ = try awaitSnapshot("Navigate to the next mark") { $0.corePlayhead == 60 }
+        let move = app.buttons["timeline.layer.moveStart"].firstMatch
         XCTAssertTrue(move.waitForExistence(timeout: 5))
-        let menu = app.scrollViews.containing(.button, identifier: "Pull the layer to the playhead").firstMatch
-        for _ in 0..<6 where !move.isHittable && menu.exists { menu.swipeUp() }
         XCTAssertTrue(move.isHittable)
         move.tap()
         let after = try awaitSnapshot("Video moved to the two-second playhead", timeout: 10) {
@@ -724,6 +942,25 @@ import XCTest
         } while Date() < deadline
     }
 
+    func testTimelineSeekRefreshesThePublishedAnimatedLayerDetail() throws {
+        let before = try launch("curve-null")
+        XCTAssertEqual(before.detail.position[1], 200, accuracy: 0.01)
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5)); XCTAssertTrue(timeline.isHittable)
+        let start = CGPoint(x: timeline.frame.midX + 70, y: timeline.frame.minY + 14)
+        let end = CGPoint(x: start.x - 90, y: start.y)
+        coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end),
+                                withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = try awaitSnapshot("The inspector follows the native seek, even after an optimistic UI update") {
+            guard let shown = $0.publishedDetail, shown.position.count == 3 else { return false }
+            return $0.corePlayhead > 5 && $0.playhead == $0.corePlayhead
+                && shown.localPlayhead == $0.detail.localPlayhead
+                && abs(shown.position[1] - $0.detail.position[1]) < 0.01
+                && shown.position[1] > before.detail.position[1] + 1
+        }
+        XCTAssertEqual(moved.publishedDetail?.localPlayhead, moved.corePlayhead)
+    }
+
     func testHorizontalSwipeOnClipOnlyScrolls() throws {
         _ = try launch("layer-dock")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
@@ -768,6 +1005,28 @@ import XCTest
             XCTAssertEqual(state.sheet, "dock")
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         } while Date() < deadline
+    }
+
+    func testContextToolsScrollInOneRowAndOpenTheSelectedTool() throws {
+        let before = try launch("layer-dock")
+        let row = app.scrollViews["dock.tools"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let move = app.buttons["dock.tool.move"].firstMatch
+        XCTAssertTrue(move.isHittable)
+        let toolY = move.frame.midY
+        XCTAssertGreaterThanOrEqual(move.frame.height, 44)
+        let stageBefore = stage.frame
+        row.swipeLeft()
+        let color = app.buttons["dock.tool.color"].firstMatch
+        XCTAssertTrue(color.isHittable)
+        XCTAssertEqual(color.frame.midY, toolY, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(color.frame.height, 44)
+        XCTAssertEqual(stage.frame.height, stageBefore.height, accuracy: 1)
+        XCTAssertEqual(try snapshot().primaryID, before.primaryID)
+        color.tap()
+        _ = try awaitSnapshot("Scrolling tools still opens the chosen layer panel") {
+            $0.sheet == "panel" && $0.primaryID == before.primaryID
+        }
     }
 
     func testHoldingLayerToMoveDoesNotOpenOptionsButTapDoes() throws {
@@ -1311,6 +1570,9 @@ import XCTest
         // Regra 3D (GestureMath.hpp): a escala Z é relativa ao X, então a escala
         // uniforme NÃO multiplica o Z guardado — a profundidade visível já cresce com o X.
         XCTAssertEqual(uniform.detail.scale[2], scaledY.detail.scale[2], accuracy: 0.0001)
+        let initialDepth = scaledY.detail.scale[0] * scaledY.detail.scale[2]
+        let scaledDepth = uniform.detail.scale[0] * uniform.detail.scale[2]
+        XCTAssertEqual(scaledDepth / initialDepth, factor, accuracy: 0.001)
         XCTAssertEqual(uniform.detail.position, before.detail.position)
         try undo()
         _ = try awaitSnapshot("Undo uniform scale") { $0.detail.scale == scaledY.detail.scale }
@@ -1338,19 +1600,22 @@ import XCTest
         try requireInsideStage(tip, end)
         coordinate(tip).press(forDuration: 0.05, thenDragTo: coordinate(end),
                              withVelocity: .slow, thenHoldForDuration: 0.1)
-        // Auto-Key (build 2130, Regression2130.AutoKeySkipsUnchangedAxes, as duas
-        // plataformas): a seta X grava SÓ a Posição X no cabeçote; Y e Z, que não
-        // mudaram, não ganham keyframe redundante.
+        // The projected X handle changes only world X. Auto-Key intentionally
+        // skips unchanged axes rather than adding redundant Y/Z hold keys.
         let keyed = try awaitSnapshot("Dragging the animated null in the scene keys frame 30") {
             !$0.isManipulating && $0.curveKeys.contains { $0.property == 0 && $0.time == 30 }
         }
         let xKey = try XCTUnwrap(keyed.curveKeys.first { $0.property == 0 && $0.time == 30 })
         XCTAssertEqual(xKey.value, keyed.detail.position[0], accuracy: 0.01)
-        XCTAssertNotEqual(xKey.value, first.first { $0.property == 0 }?.value ?? xKey.value)
-        XCTAssertTrue(keyed.curveKeys.filter { $0.property == 1 || $0.property == 2 }.allSatisfy { $0.time == 0 },
-                      "Auto-Key must not add Y/Z keys the X arrow did not change")
+        XCTAssertGreaterThan(abs(keyed.detail.position[0] - before.detail.position[0]), 0.01)
         XCTAssertEqual(keyed.detail.position[1], before.detail.position[1], accuracy: 0.0001)
         XCTAssertEqual(keyed.detail.position[2], before.detail.position[2], accuracy: 0.0001)
+        for property in [1, 2] {
+            XCTAssertEqual(keyed.curveKeys.filter { $0.property == property },
+                           before.curveKeys.filter { $0.property == property },
+                           "Unchanged axis \(property) must keep its entire curve")
+        }
+        XCTAssertEqual(keyed.curveKeys.count, before.curveKeys.count + 1)
         XCTAssertEqual(keyed.curveKeys.filter { $0.time == 0 }, first, "The frame-0 pose must not move")
         try undo()
         _ = try awaitSnapshot("One undo removes the scene keyframe") { $0.curveKeys == before.curveKeys }
@@ -1575,9 +1840,12 @@ import XCTest
         let canRedo: Bool
         let playhead: Int64
         let corePlayhead: Int64
+        let previewBufferRanges: [[Int64]]?
+        let motionBlurSettings: [Double]?
         let compositionWidth: Double
         let compositionHeight: Double
         let detail: Detail
+        let publishedDetail: Detail?
         let shapeParams: [Double]
         let stageCorners: [Double]
         let stageGizmo: [Double]

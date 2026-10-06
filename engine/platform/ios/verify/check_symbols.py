@@ -47,6 +47,7 @@ KNOWN_NON_CORE = {
     "CVPixelBufferGetBaseAddressOfPlane", "CVPixelBufferGetBytesPerRowOfPlane",
     "CVPixelBufferGetHeightOfPlane", "CVPixelBufferLockBaseAddress",
     "CVPixelBufferUnlockBaseAddress", "CVPixelBufferPoolCreate", "CVPixelBufferPoolCreatePixelBuffer",
+    "CVPixelBufferPoolCreatePixelBufferWithAuxAttributes",
     "CVPixelBufferRelease", "CVPixelBufferPoolRelease", "CGImageSourceCreateWithURL",
     "CGImageSourceCreateImageAtIndex", "CGImageGetWidth", "CGImageGetHeight",
     "CGImageRelease", "CGColorSpaceCreateDeviceRGB", "CGColorSpaceRelease",

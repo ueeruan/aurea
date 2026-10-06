@@ -19,4 +19,6 @@
     <string name="ui3d_deform_letters">अक्षर मोड़ें (घुमाव, सिलेंडर, ऐंठन)</string>
     <string name="ui3d_shadows">छायाएँ</string>
     <string name="ui3d_bloom_strength">चमक की तीव्रता</string>
+    <string name="ui3d_show_interior">अंदर का हिस्सा दिखाएँ</string>
+    <string name="ui3d_show_interior_hint">अंदर की सतहें भी उसी टेक्सचर के साथ बनती हैं: कैमरे को ऑब्जेक्ट के अंदर ले जाएँ (या स्केल बढ़ाएँ) तो अंदर का हिस्सा दिखेगा।</string>
 </resources>

@@ -11,6 +11,8 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/MaterialPreview.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 
@@ -62,6 +64,24 @@ std::vector<f32> parts_of(Engine& e, u64 layer) {
 }
 
 } // namespace
+
+AUREA_TEST(Shape3D, ImageDecodeChecksPeakBudgetAndCacheDoesNotRetainClosedSources) {
+    const std::string path = checker_png("aurea-shape-budget.png");
+    Image tooSmall;
+    AUREA_CHECK(!load_shape3d_image(path, 64, tooSmall, 32 * 1024));
+    Image first;
+    AUREA_CHECK(load_shape3d_image(path, 64, first, 128 * 1024));
+    std::weak_ptr<const std::vector<u8>> weak = first.sharedRgba;
+    Image same;
+    AUREA_CHECK(load_shape3d_image(path, 64, same, 128 * 1024));
+    AUREA_CHECK(first.sharedRgba == same.sharedRgba);
+    first = {}; same = {};
+    AUREA_CHECK(weak.expired());
+    Image reopened;
+    AUREA_CHECK(load_shape3d_image(path, 64, reopened, 128 * 1024));
+    AUREA_CHECK_EQ(reopened.width, 64u);
+    std::remove(path.c_str());
+}
 
 AUREA_TEST(Shape3D, EveryShapeBuildsValidClosedOutwardParts) {
     constexpr u32 expected[kShape3DKindCount] = {6, 2, 3, 2, 5, 4, 6, 2, 3, 8};
@@ -501,6 +521,272 @@ AUREA_TEST(Shape3DAnim, EngineAcceptsShapeLayoutAndPartAnimationOnlyOnShapes) {
     AUREA_CHECK(asset && asset->shapeParts && asset->textUnits.size() == 18u);
     e.shutdown();
 }
+
+// =============================================================================
+// MOSTRAR INTERIOR (Model3DData::interior, v43) e a MINIATURA DE MATERIAL
+// (scene3d/MaterialPreview.hpp) das listas do painel 3D.
+// =============================================================================
+
+AUREA_TEST(Shape3DInterior, DefaultsUndoSaveAndReopenKeepTheChoice) {
+    // Automático: a forma pronta mostra o interior; texto 3D e modelo importado não.
+    static_assert(model_interior_visible(ModelInterior::Auto, true));
+    static_assert(!model_interior_visible(ModelInterior::Auto, false));
+    static_assert(model_interior_visible(ModelInterior::On, false));
+    static_assert(!model_interior_visible(ModelInterior::Off, true));
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const Result<u64> cube = e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Cubo");
+    const Result<u64> keep = e.add_shape3d(static_cast<u32>(Shape3DKind::Sphere), "Esfera");
+    Text3DSpec spec;
+    spec.content = "IN";
+    const Result<u64> text = e.add_text3d(spec);
+    AUREA_CHECK(cube.ok() && keep.ok() && text.ok());
+    if (!cube.ok() || !keep.ok() || !text.ok()) { e.shutdown(); return; }
+    AUREA_CHECK_EQ(e.query_model_interior(*cube), 1);
+    AUREA_CHECK_EQ(e.query_model_interior(*keep), 1);
+    AUREA_CHECK_EQ(e.query_model_interior(*text), 0);
+    // Camada que não é objeto 3D: recusa.
+    AUREA_CHECK_EQ(e.query_model_interior(0), -1);
+    AUREA_CHECK(!e.set_model_interior(0, true));
+
+    // Um passo de desfazer por troca.
+    AUREA_CHECK(e.set_model_interior(*cube, false));
+    AUREA_CHECK_EQ(e.query_model_interior(*cube), 0);
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(e.query_model_interior(*cube), 1);
+    Command redo;
+    redo.type = CommandType::Redo;
+    AUREA_CHECK(e.apply_command(redo).ok());
+    AUREA_CHECK_EQ(e.query_model_interior(*cube), 0);
+    AUREA_CHECK(e.set_model_interior(*text, true));
+    AUREA_CHECK_EQ(e.query_model_interior(*text), 1);
+
+    // Salvar e reabrir: desligado explícito, automático e ligado explícito.
+    const std::string path = temp_file("aurea_teste_interior.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(e.query_model_interior(*cube), 0);
+    AUREA_CHECK_EQ(e.query_model_interior(*keep), 1);
+    AUREA_CHECK_EQ(e.query_model_interior(*text), 1);
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto mode = [&](u64 id) {
+        const Layer* l = comp ? comp->layer(LayerId::unpack(id)) : nullptr;
+        return l ? static_cast<int>(l->model.interior) : -1;
+    };
+    AUREA_CHECK_EQ(mode(*cube), static_cast<int>(ModelInterior::Off));
+    AUREA_CHECK_EQ(mode(*keep), static_cast<int>(ModelInterior::Auto));
+    AUREA_CHECK_EQ(mode(*text), static_cast<int>(ModelInterior::On));
+    std::remove(path.c_str());
+    e.shutdown();
+}
+
+namespace {
+
+struct BallStats {
+    f32 r = 0, g = 0, b = 0;   ///< média da cor onde a bola cobre (0..255)
+    u32 opaque = 0;            ///< pixels com alfa cheio
+    u32 reds = 0, blues = 0;   ///< pixels nitidamente vermelhos / azuis
+};
+
+BallStats ball_stats(const std::vector<u8>& rgba, u32 size) {
+    BallStats s;
+    u32 n = 0;
+    for (u32 i = 0; i < size * size; ++i) {
+        const u8* p = &rgba[i * 4u];
+        if (p[3] < 255) continue;
+        ++s.opaque; ++n;
+        s.r += p[0]; s.g += p[1]; s.b += p[2];
+        if (p[0] > p[2] + 40) ++s.reds;
+        if (p[2] > p[0] + 40) ++s.blues;
+    }
+    if (n) { s.r /= static_cast<f32>(n); s.g /= static_cast<f32>(n); s.b /= static_cast<f32>(n); }
+    return s;
+}
+
+} // namespace
+
+AUREA_TEST(MaterialPreview, PresetBallsAreRoundDistinctAndDeterministic) {
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    constexpr u32 size = 64;
+    std::vector<std::vector<u8>> balls(7);
+    for (u32 p = 0; p < 7; ++p) {
+        AUREA_CHECK(e.text3d_preset_preview(p, size, balls[p]));
+        AUREA_CHECK_EQ(balls[p].size(), static_cast<usize>(size * size * 4));
+        if (balls[p].size() != size * size * 4) { e.shutdown(); return; }
+        // Fundo transparente nos cantos, bola cheia no meio.
+        AUREA_CHECK_EQ(balls[p][3], 0);
+        AUREA_CHECK_EQ(balls[p][(size * size - 1) * 4 + 3], 0);
+        AUREA_CHECK_EQ(balls[p][((size / 2) * size + size / 2) * 4 + 3], 255);
+        AUREA_CHECK(ball_stats(balls[p], size).opaque > size * size / 2);
+    }
+    // Fora da faixa: nada.
+    std::vector<u8> none;
+    AUREA_CHECK(!e.text3d_preset_preview(7, size, none) && none.empty());
+    AUREA_CHECK(!e.text3d_preset_preview(0, 8, none) && none.empty());
+    AUREA_CHECK(!e.text3d_preset_preview(0, 512, none) && none.empty());
+    const BallStats chrome = ball_stats(balls[0], size), gold = ball_stats(balls[1], size),
+                    glossy = ball_stats(balls[3], size), matte = ball_stats(balls[4], size), neon = ball_stats(balls[5], size);
+    std::printf("\n    cromado %.0f,%.0f,%.0f ouro %.0f,%.0f,%.0f vermelho %.0f,%.0f,%.0f fosco %.0f,%.0f,%.0f neon %.0f,%.0f,%.0f",
+                chrome.r, chrome.g, chrome.b, gold.r, gold.g, gold.b, glossy.r, glossy.g, glossy.b, matte.r, matte.g, matte.b,
+                neon.r, neon.g, neon.b);
+    // O ouro é quente; o cromado é neutro; o vermelho brilhante é vermelho; o neon é ciano e claro.
+    AUREA_CHECK(gold.r > gold.b + 30.0f);
+    AUREA_CHECK(std::fabs(chrome.r - chrome.b) < 20.0f);
+    AUREA_CHECK(glossy.r > glossy.g + 40.0f && glossy.r > glossy.b + 40.0f);
+    AUREA_CHECK(neon.g > neon.r + 40.0f && neon.b > neon.r + 40.0f);
+    // Todos diferentes entre si (a lista não mostra duas bolas iguais).
+    for (u32 a = 0; a < 7; ++a)
+        for (u32 b = a + 1; b < 7; ++b) AUREA_CHECK(balls[a] != balls[b]);
+    // Determinística: o mesmo pedido devolve os mesmos bytes (e passa pelo cache).
+    std::vector<u8> again;
+    AUREA_CHECK(e.text3d_preset_preview(1, size, again));
+    AUREA_CHECK(again == balls[1]);
+    MaterialBall gold1;
+    AUREA_CHECK(text3d_preset_ball(1, gold1));
+    AUREA_CHECK(render_material_ball(gold1, size) == balls[1]);
+    e.shutdown();
+}
+
+AUREA_TEST(MaterialPreview, LayerBallShowsPartImageColorAndMaterialEdits) {
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const Result<u64> id = e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Cubo");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    constexpr u32 size = 96;
+    std::vector<u8> plain, textured, recolored, metal, other;
+    // Parte 1 (de trás) é a referência: a imagem vai só na frente (parte 0).
+    AUREA_CHECK(e.material_preview(*id, 0, size, plain));
+    AUREA_CHECK(e.material_preview(*id, 1, size, other));
+    AUREA_CHECK_EQ(plain.size(), static_cast<usize>(size * size * 4));
+    AUREA_CHECK(plain != other);   // cada parte tem a cor dela na paleta padrão
+    const std::string png = checker_png("aurea_teste_bola_material.png");
+    const f32 white[4] = {1, 1, 1, 1};
+    AUREA_CHECK(e.set_shape3d_part_style(*id, 0, white, png.c_str()).ok());
+    AUREA_CHECK(e.material_preview(*id, 0, size, textured));
+    const BallStats t = ball_stats(textured, size);
+    std::printf("\n    bola com imagem: vermelho %u, azul %u (de %u)", t.reds, t.blues, t.opaque);
+    // A textura aplicada aparece na bola: as duas cores do quadriculado.
+    AUREA_CHECK(t.reds > 300 && t.blues > 300);
+    std::vector<u8> back;
+    AUREA_CHECK(e.material_preview(*id, 1, size, back));
+    AUREA_CHECK(back == other);    // só a parte que mudou muda
+    // Cor da parte tinge a imagem: o quadriculado fica sem azul.
+    const f32 red[4] = {1, 0, 0, 1};
+    AUREA_CHECK(e.set_shape3d_part_style(*id, 0, red, nullptr).ok());
+    AUREA_CHECK(e.material_preview(*id, 0, size, recolored));
+    const BallStats rc = ball_stats(recolored, size);
+    AUREA_CHECK(rc.blues < t.blues / 4 && recolored != textured);
+    // Ajuste de material da camada (o mesmo da lista do modelo importado).
+    AUREA_CHECK(e.set_material_param(*id, 1, 4, 1.0f).ok());   // metal
+    AUREA_CHECK(e.set_material_param(*id, 1, 5, 0.05f).ok());  // rugosidade
+    AUREA_CHECK(e.material_preview(*id, 1, size, metal));
+    AUREA_CHECK(metal != other);
+    // Fora da faixa / sem material / não é 3D: nada.
+    std::vector<u8> none;
+    AUREA_CHECK(!e.material_preview(*id, 6, size, none) && none.empty());
+    AUREA_CHECK(!e.material_preview(*id, 0, 4, none) && none.empty());
+    AUREA_CHECK(!e.material_preview(0, 0, size, none) && none.empty());
+    std::remove(png.c_str());
+    e.shutdown();
+}
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(Gpu, Shape3DInteriorShowsTexturedInnerFacesFromInsideTheCube) {
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    if (!e.initialize(ec).ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    AUREA_CHECK(e.new_project(256, 144, 30.0, nullptr).ok());
+    const Result<u64> id = e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Cubo");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    // A mesma imagem nas seis faces (parte −1 = todas).
+    const std::string png = checker_png("aurea_teste_interior_gpu.png");
+    const f32 white[4] = {1, 1, 1, 1};
+    AUREA_CHECK(e.set_shape3d_part_style(*id, -1, white, png.c_str()).ok());
+    auto capture = [&] {
+        test::Image8 img;
+        AUREA_CHECK(e.capture_frame_rgba(256, img.rgba, img.width, img.height).ok());
+        return img;
+    };
+    struct Look { f32 coverage = 0; u32 reds = 0, blues = 0; };
+    auto look = [](const test::Image8& img) {
+        Look l;
+        u32 lit = 0;
+        for (u32 y = 0; y < img.height; ++y)
+            for (u32 x = 0; x < img.width; ++x) {
+                const u8* q = img.at(x, y);
+                if (q[0] > 8 || q[1] > 8 || q[2] > 8) ++lit;
+                if (q[0] > q[2] + 30) ++l.reds;
+                if (q[2] > q[0] + 30) ++l.blues;
+            }
+        l.coverage = static_cast<f32>(lit) / static_cast<f32>(std::max(1u, img.width * img.height));
+        return l;
+    };
+    auto set_scale = [&](f32 s) {
+        Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        Layer* l = comp ? comp->layer(LayerId::unpack(*id)) : nullptr;
+        AUREA_CHECK(l != nullptr);
+        // Escala Z da camada é relativa à X (a profundidade acompanha): {s, s, 1} = cubo s× maior.
+        if (l) l->transform.scale = Vec3{s, s, 1.0f};
+        e.request_render();
+    };
+
+    // De FORA: ligar o interior não muda nada (a face de trás fica atrás da da frente).
+    AUREA_CHECK_EQ(e.query_model_interior(*id), 1);
+    const test::Image8 outsideOn = capture();
+    AUREA_CHECK(e.set_model_interior(*id, false));
+    const test::Image8 outsideOff = capture();
+    u32 worst = 0;
+    for (usize i = 0; i < outsideOn.rgba.size() && i < outsideOff.rgba.size(); ++i)
+        worst = std::max(worst, static_cast<u32>(std::abs(int(outsideOn.rgba[i]) - int(outsideOff.rgba[i]))));
+    std::printf("\n    de fora: maior diferença ligado/desligado %u", worst);
+    AUREA_CHECK(look(outsideOn).coverage > 0.05f);
+    AUREA_CHECK(worst <= 4u);
+
+    // DENTRO: cubo 12× maior (aresta 0,45·12 da altura; a câmera padrão fica a
+    // 1,2 alturas do centro) — a câmera está dentro do cubo.
+    set_scale(12.0f);
+    const Look off = look(capture());
+    std::printf("\n    dentro, interior desligado: cobertura %.3f", off.coverage);
+    // Sem o interior todas as faces estão de costas para a câmera: nada desenhado.
+    AUREA_CHECK(off.coverage < 0.01f);
+    AUREA_CHECK(e.set_model_interior(*id, true));
+    const Look on = look(capture());
+    std::printf("\n    dentro, interior ligado: cobertura %.3f, vermelho %u, azul %u", on.coverage, on.reds, on.blues);
+    // Com o interior: as faces de dentro cobrem o quadro, com a imagem (as
+    // duas cores do quadriculado) — não só a cor chapada.
+    AUREA_CHECK(on.coverage > 0.95f);
+    AUREA_CHECK(on.reds > 500 && on.blues > 500);
+    // Desfazer volta a recortar.
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    set_scale(12.0f);
+    AUREA_CHECK_EQ(e.query_model_interior(*id), 0);
+    AUREA_CHECK(look(capture()).coverage < 0.01f);
+    std::remove(png.c_str());
+    e.shutdown();
+}
+#endif
 
 #if defined(AUREA_TEST_VULKAN)
 AUREA_TEST(Gpu, Shape3DTexturedCubeRendersAndMovingOneFaceChangesTheFrame) {

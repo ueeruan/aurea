@@ -63,6 +63,7 @@ object ExitDiagnostics {
      * Um build novo reavalia do zero.
      */
     fun safeVideoMode(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 30) return false
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (prefs.contains(SAFE_VIDEO)) prefs.edit().remove(SAFE_VIDEO).apply()
         val build = BuildConfig.VERSION_CODE

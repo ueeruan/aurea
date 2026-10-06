@@ -24,8 +24,8 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 uvMap;
     vec4 texel;
     vec4 p0;   // x = altura da onda (px da layer), y = largura de onda (px), z = velocidade (px/quadro), w = fase (graus)
-    vec4 p1;   // x = direção (0 horiz, 1 vert, 2 diag, 3 horiz+vert), y = 1 quadrada, z = borda, w = 1 travar nas bordas
-    vec4 p2;   // x = centro X da onda (0..1), y = centro Y (0..1)
+    vec4 p1;   // x = direção (0 horiz, 1 vert, 2 diag, 3 horiz+vert, 4 ângulo), y = quadrada, z = borda, w = travar
+    vec4 p2;   // xy = direção angular unitária; zw = origem da entrada em px da camada
     vec4 p3;   // x = quadro local
     vec4 color;
 } p;
@@ -64,6 +64,14 @@ void main() {
         const float along = (layerPx.x - layerPx.y) * 0.7071;
         const float w = wave_at(along, wavelength, travel, phase, square) * h * 0.7071;
         d += vec2(w, -w);
+    }
+    if (dir == 4) {
+        // A rotated basis: the displacement follows the chosen direction,
+        // and phase varies along its perpendicular. Zero degrees retains
+        // the horizontal contract; existing modes above remain unchanged.
+        const vec2 axis = p.p2.xy;
+        const float along = dot(layerPx, vec2(-axis.y, axis.x));
+        d = axis * wave_at(along, wavelength, travel, phase, square) * h;
     }
 
     // Travar nas bordas: a onda some perto da caixa, como se a imagem

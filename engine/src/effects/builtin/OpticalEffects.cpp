@@ -116,7 +116,33 @@ public:
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_optical_frag, work));
     }
-    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32, LayerImage& out) const override {
+    /// Reflexo de lente é LUZ: o clarão, o risco e os reflexos internos passam
+    /// da caixa da layer (num texto ela é justa nos glifos e o reflexo saía
+    /// cortado num retângulo). A saída cobre o clarão até cair abaixo de
+    /// 1/255 e a linha dos reflexos; no 2D, recortada ao quadro visível.
+    static Rect flare_region(const Rect& in, Vec2 light, f32 w, f32 h, f32 brightness, f32 size,
+                             const LayerPlacement* placement, f32 margin) noexcept {
+        const bool clipped = placement && !placement->inScene3d && !placement->preserveFullExtent
+                          && placement->compWidth && placement->compHeight;
+        const f32 unit = std::max(std::min(w, h) * size / 100.f, 1.f);
+        // núcleo .004/r² e risco e^(−5|x|)·.5, vezes o brilho, abaixo de 1/255.
+        const f32 gain = std::clamp(brightness / 100.f, 0.f, 20.f);
+        f32 reach = unit * std::min(std::max(1.25f, std::sqrt(1.1f * gain)), 8.f);
+        // Sem recorte (cena 3D): o mesmo alcance do 2D numa camada pequena — o
+        // teste 2D × 3D cobra isso —, mas uma mídia grande não passa da caixa.
+        if (!clipped) reach = std::min(reach, std::max(.5f * std::max(w, h), 512.f));
+        if (!std::isfinite(reach) || !std::isfinite(light.x) || !std::isfinite(light.y)) return in;
+        // Reflexos: de luz + .4·eixo até o espelho do ponto pelo centro.
+        const f32 ghost = .06f * unit;
+        const f32 mx = w - light.x, my = h - light.y;
+        const f32 left = std::min({in.x, light.x - reach, std::min(light.x, mx) - ghost});
+        const f32 right = std::max({in.x + in.w, light.x + reach, std::max(light.x, mx) + ghost});
+        const f32 top = std::min({in.y, light.y - reach, std::min(light.y, my) - ghost});
+        const f32 bottom = std::max({in.y + in.h, light.y + reach, std::max(light.y, my) + ghost});
+        return spread_region(Rect{left, top, right - left, bottom - top}, 0.f, 0.f, placement, margin);
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin, LayerImage& out) const override {
         auto u = base_uniforms(input);
         const f32 w = e.placement ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
         const f32 h = e.placement ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
@@ -130,7 +156,19 @@ public:
             u.p0.y = e.placement->flarePosition.y;
             u.p1.x = 0;
         }
-        return single_pass(ctx, ShaderId::effects_optical_frag, input, u, "optical", out);
+        if (mode_ != 0) return single_pass(ctx, ShaderId::effects_optical_frag, input, u, "optical", out);
+        const Rect region = flare_region(input.region, Vec2{u.p0.x, u.p0.y}, w, h, e.f(2), e.f(3), e.placement, margin);
+        u32 ow = 0, oh = 0;
+        ctx.region_size(region, input.texel_scale_x(), ow, oh);
+        // O shader lê o pixel da layer pela região da SAÍDA (p2) e a imagem
+        // de entrada pelo uvMap; fora dela o amostrador é transparente.
+        u.uvMap = EffectBuildContext::uv_map(region, input.region);
+        u.p2 = {region.x, region.y, region.w, region.h};
+        out = LayerImage{ctx.texture("optical", ow, oh), region, ow, oh};
+        if (ctx.fullscreen_pass("optical", PassStage::Effects, out.texture, ShaderId::effects_optical_frag,
+                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}}, &u, sizeof(u)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        return OkStatus;
     }
 private:
     u32 mode_;

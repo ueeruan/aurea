@@ -856,7 +856,9 @@ AUREA_TEST(Heavy, Scene3DInstancingCullingAndShadowKnob) {
     std::printf("    uma caixa fora da tela: visíveis %u, recortadas %u\n", a.stats().lastSceneVisible, a.stats().lastSceneCulled);
     AUREA_CHECK(a.stats().lastSceneCulled >= 1u);
     AUREA_CHECK(a.stats().lastSceneVisible < sa.lastSceneVisible);
-    // Sombra: export (e preview frio) 2048; preview crítico 512 e filtro barato.
+    // Sombra: a captura não-prévia segue o contrato do export (finalQuality),
+    // que é sempre ULTRA — mapa 4096, limitado pela GPU — e ignora o calor;
+    // preview crítico 512 e filtro barato.
     AUREA_CHECK(a.render(false));
     const u32 full = a.stats().lastShadowMapSize;
     a.e.set_thermal(3, true);
@@ -866,9 +868,10 @@ AUREA_TEST(Heavy, Scene3DInstancingCullingAndShadowKnob) {
     const u32 exportAgain = a.stats().lastShadowMapSize;
     a.e.set_thermal(0, false);
     std::printf("    mapa de sombra: cheio %u, preview crítico %u, export durante o calor %u\n", full, hot, exportAgain);
-    AUREA_CHECK_EQ(full, 2048u);
+    const u32 finalMap = std::clamp(a.e.gpu()->capabilities().maxTexture2D, 256u, 4096u);
+    AUREA_CHECK_EQ(full, finalMap);
     AUREA_CHECK_EQ(hot, 512u);
-    AUREA_CHECK_EQ(exportAgain, 2048u);
+    AUREA_CHECK_EQ(exportAgain, finalMap);
 }
 
 // §82: o cache do optical flow respeita o orçamento (LRU por camada).

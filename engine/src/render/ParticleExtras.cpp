@@ -21,6 +21,7 @@
 #include "aurea/text/FontManager.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/timeline/Composition.hpp"
+#include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/vector/Vector.hpp"
 
 #include <algorithm>
@@ -29,8 +30,6 @@
 
 namespace aurea::particles {
 namespace {
-
-constexpr f32 kPi = 3.14159265358979f;
 
 u64 mix64(u64 h, u64 v) noexcept {
     h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
@@ -197,139 +196,6 @@ void contour_points(const std::vector<std::vector<Vec2>>& lines, const std::vect
 }
 
 // -----------------------------------------------------------------------------
-// Forma (SDF): a MESMA matemática de shaders/shape/shape.frag, na CPU
-// -----------------------------------------------------------------------------
-f32 sd_round_box(Vec2 q, Vec2 b, f32 r) {
-    r = std::min(r, std::min(b.x, b.y));
-    const Vec2 d{std::fabs(q.x) - b.x + r, std::fabs(q.y) - b.y + r};
-    const Vec2 m{std::max(d.x, 0.0f), std::max(d.y, 0.0f)};
-    return m.length() + std::min(std::max(d.x, d.y), 0.0f) - r;
-}
-f32 sd_ellipse(Vec2 q, Vec2 ab) {
-    const f32 k0 = Vec2{q.x / ab.x, q.y / ab.y}.length();
-    const f32 k1 = Vec2{q.x / (ab.x * ab.x), q.y / (ab.y * ab.y)}.length();
-    return k0 < 1e-6f ? -std::min(ab.x, ab.y) : k0 * (k0 - 1.0f) / k1;
-}
-f32 glsl_mod(f32 x, f32 y) { return x - y * std::floor(x / y); }
-f32 sd_ngon(Vec2 q, f32 r, f32 n) {
-    const f32 an = kPi / n;
-    const f32 bn = glsl_mod(std::atan2(q.x, -q.y), 2.0f * an) - an;
-    const f32 L = q.length();
-    q = Vec2{L * std::cos(bn), std::fabs(L * std::sin(bn))};
-    q = q - Vec2{r * std::cos(an), r * std::sin(an)};
-    q.y += std::clamp(-q.y, 0.0f, r * std::sin(an));
-    return q.length() * (q.x > 0.0f ? 1.0f : (q.x < 0.0f ? -1.0f : 0.0f));
-}
-f32 sd_star(Vec2 q, f32 r, f32 n, f32 inner) {
-    const f32 an = kPi / n;
-    const f32 a = glsl_mod(std::atan2(q.x, -q.y), 2.0f * an) - an;
-    const f32 L = q.length();
-    q = Vec2{L * std::cos(a), std::fabs(L * std::sin(a))};
-    const Vec2 tip{r, 0.0f};
-    const Vec2 valley{inner * r * std::cos(an), inner * r * std::sin(an)};
-    const Vec2 e = valley - tip, w = q - tip;
-    const f32 h = std::clamp((w.x * e.x + w.y * e.y) / (e.x * e.x + e.y * e.y), 0.0f, 1.0f);
-    const f32 d = (w - e * h).length();
-    const f32 s = e.x * w.y - e.y * w.x;
-    return s > 0.0f ? -d : d;
-}
-f32 sd_triangle(Vec2 q, Vec2 p0, Vec2 p1, Vec2 p2) {
-    auto dot = [](Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; };
-    const Vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
-    const Vec2 v0 = q - p0, v1 = q - p1, v2 = q - p2;
-    const Vec2 pq0 = v0 - e0 * std::clamp(dot(v0, e0) / dot(e0, e0), 0.0f, 1.0f);
-    const Vec2 pq1 = v1 - e1 * std::clamp(dot(v1, e1) / dot(e1, e1), 0.0f, 1.0f);
-    const Vec2 pq2 = v2 - e2 * std::clamp(dot(v2, e2) / dot(e2, e2), 0.0f, 1.0f);
-    const f32 s = (e0.x * e2.y - e0.y * e2.x) >= 0.0f ? 1.0f : -1.0f;
-    f32 dx = dot(pq0, pq0), dy = s * (v0.x * e0.y - v0.y * e0.x);
-    dx = std::min(dx, dot(pq1, pq1)); dy = std::min(dy, s * (v1.x * e1.y - v1.y * e1.x));
-    dx = std::min(dx, dot(pq2, pq2)); dy = std::min(dy, s * (v2.x * e2.y - v2.y * e2.x));
-    return -std::sqrt(dx) * (dy > 0.0f ? 1.0f : (dy < 0.0f ? -1.0f : 0.0f));
-}
-f32 sd_trapezoid(Vec2 q, f32 top, f32 bottom, f32 he) {
-    auto dot = [](Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; };
-    const Vec2 k1{bottom, he}, k2{bottom - top, 2.0f * he};
-    q.x = std::fabs(q.x);
-    const Vec2 ca{q.x - std::min(q.x, q.y < 0.0f ? top : bottom), std::fabs(q.y) - he};
-    const Vec2 cb = q - k1 + k2 * std::clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0f, 1.0f);
-    const f32 s = (cb.x < 0.0f && ca.y < 0.0f) ? -1.0f : 1.0f;
-    return s * std::sqrt(std::min(dot(ca, ca), dot(cb, cb)));
-}
-f32 sd_parallelogram(Vec2 q, f32 wi, f32 he, f32 sk) {
-    auto dot = [](Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; };
-    const Vec2 e{sk, he};
-    if (q.y < 0.0f) q = Vec2{-q.x, -q.y};
-    Vec2 w = q - e;
-    w.x -= std::clamp(w.x, -wi, wi);
-    f32 dx = dot(w, w), dy = -w.y;
-    const f32 s = q.x * e.y - q.y * e.x;
-    if (s < 0.0f) q = Vec2{-q.x, -q.y};
-    Vec2 v = q - Vec2{wi, 0.0f};
-    v = v - e * std::clamp(dot(v, e) / dot(e, e), -1.0f, 1.0f);
-    dx = std::min(dx, dot(v, v));
-    dy = std::min(dy, wi * he - std::fabs(s));
-    return std::sqrt(dx) * (dy > 0.0f ? -1.0f : (dy < 0.0f ? 1.0f : 0.0f));
-}
-f32 sd_gear(Vec2 q, f32 r, f32 n, f32 hub) {
-    const f32 root = r * 0.78f;
-    const f32 sector = 2.0f * kPi / n;
-    const f32 a = glsl_mod(std::atan2(q.x, -q.y) + sector * 0.5f, sector) - sector * 0.5f;
-    const f32 L = q.length();
-    const Vec2 f{L * std::sin(a), L * std::cos(a)};
-    const f32 tw = root * std::sin(sector * 0.25f);
-    const f32 tooth = sd_round_box(f - Vec2{0.0f, (root + r) * 0.5f}, Vec2{tw, (r - root) * 0.5f + 1e-3f}, 0.0f);
-    return std::max(std::min(L - root, tooth), hub * root - L);
-}
-f32 shape_sd(const ShapeData& sh, Vec2 q, Vec2 half) {
-    const u32 type = sh.shapeType;
-    const f32 m = std::min(half.x, half.y);
-    const Vec2 st{half.x / m, half.y / m};
-    const f32 mst = std::min(st.x, st.y);
-    const f32 inner = std::clamp(sh.innerRadius, 0.05f, 0.95f);
-    switch (type) {
-        case 0: return sd_round_box(q, half, sh.cornerRadius);
-        case 1: return sd_ellipse(q, half);
-        case 3: return sd_ngon(Vec2{q.x / st.x, q.y / st.y}, m, std::max(3.0f, sh.points)) * mst;
-        case 4: return sd_star(Vec2{q.x / st.x, q.y / st.y}, m, std::max(3.0f, sh.points), inner) * mst;
-        case 5: {
-            const Vec2 a{std::fabs(q.x), std::fabs(q.y)};
-            const f32 t = m * inner;
-            return std::min(sd_round_box(a, Vec2{half.x, t}, 0.0f), sd_round_box(a, Vec2{t, half.y}, 0.0f));
-        }
-        case 6: {
-            const f32 ring = m * (1.0f - inner) * 0.5f;
-            return std::fabs(sd_ellipse(q, Vec2{half.x - ring, half.y - ring})) - ring;
-        }
-        case 7: return std::max(sd_ellipse(q, half), -std::max(-q.x, q.y));
-        case 8: {
-            const f32 n = std::max(3.0f, sh.points);
-            const f32 r = m * (0.72f + 0.28f * std::cos(n * std::atan2(q.y, q.x)));
-            return (Vec2{q.x / st.x, q.y / st.y}.length() - r) * mst * 0.8f;
-        }
-        case 9: {
-            const f32 shaft = sd_round_box(q - Vec2{-half.x * 0.25f, 0.0f}, Vec2{half.x * 0.75f, half.y * 0.22f}, 0.0f);
-            const f32 head = sd_triangle(q, Vec2{half.x * 0.1f, -half.y}, Vec2{half.x, 0.0f}, Vec2{half.x * 0.1f, half.y});
-            return std::min(shaft, head);
-        }
-        case 10: return sd_triangle(q, Vec2{-half.x, -half.y}, Vec2{-half.x, half.y}, Vec2{half.x, half.y});
-        case 12: return sd_trapezoid(q, half.x * inner, half.x, half.y);
-        case 13: {
-            const f32 sk = half.x * inner * 0.5f;
-            return sd_parallelogram(Vec2{q.x, -q.y}, half.x - sk, half.y, sk);
-        }
-        case 14: return sd_gear(Vec2{q.x / st.x, q.y / st.y}, m, std::max(3.0f, sh.points), inner) * mst;
-        case 15: {
-            const f32 t = half.y * inner;
-            const f32 shaft = sd_round_box(q, Vec2{half.x * 0.6f, t}, 0.0f);
-            const f32 right = sd_triangle(q, Vec2{half.x * 0.45f, -half.y}, Vec2{half.x, 0.0f}, Vec2{half.x * 0.45f, half.y});
-            const f32 left = sd_triangle(q, Vec2{-half.x * 0.45f, half.y}, Vec2{-half.x, 0.0f}, Vec2{-half.x * 0.45f, -half.y});
-            return std::min(shaft, std::min(left, right));
-        }
-        default: return sd_round_box(q, half, 0.0f);
-    }
-}
-
-// -----------------------------------------------------------------------------
 // Fontes
 // -----------------------------------------------------------------------------
 
@@ -392,7 +258,8 @@ bool shape_grid(const ShapeData& sh, Grid& g) {
     for (u32 y = 0; y < g.h; ++y) {
         for (u32 x = 0; x < g.w; ++x) {
             const Vec2 q{(static_cast<f32>(x) + 0.5f) * g.cell - w * 0.5f, (static_cast<f32>(y) + 0.5f) * g.cell - h * 0.5f};
-            const f32 d = shape_sd(sh, q, Vec2{std::max(half.x, 0.5f), std::max(half.y, 0.5f)});
+            // A conta de shape.frag na CPU (timeline/ShapeGeometry).
+            const f32 d = shape::signed_distance(sh, q, Vec2{std::max(half.x, 0.5f), std::max(half.y, 0.5f)});
             const bool in = (fill && d <= 0.0f) || (stroke > 0.0f && std::fabs(d) <= stroke * 0.5f);
             g.on[static_cast<usize>(y) * g.w + x] = in ? 1 : 0;
         }
@@ -730,6 +597,8 @@ u64 source_key(const Layer& src, u32 emitterType, u32 emitFrom, FrameIndex local
                 h = mixf(mixf(mixf(mixf(h, s.bounds.w), s.bounds.h), s.cornerRadius), s.points);
                 h = mixf(mixf(mixf(h, s.innerRadius), s.strokeWidth), s.strokeColor.w);
                 h = mixf(mix64(h, s.filled ? 1u : 0u), s.fillColor.w);
+                h = mixf(mixf(mixf(mixf(h, s.depth), s.tip), s.thickness), s.sweep);
+                h = mixf(mixf(mixf(mixf(h, s.head), s.shaft), s.amplitude), s.seed);
             }
             break;
         }

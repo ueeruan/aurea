@@ -34,9 +34,13 @@ final class AureaAiState: ObservableObject {
 
     /// Relê a cota no servidor (depois de abrir, de gerar e de falhar).
     func refreshQuota() {
+        let request = UUID()
+        quotaRequest = request
         Task { [weak self] in
             guard let self else { return }
-            if let q = try? await self.provider.quota() { self.quota = q }
+            if let q = try? await self.provider.quota(), !Task.isCancelled, self.quotaRequest == request {
+                self.quota = q
+            }
         }
     }
     @Published private(set) var job: AiJob?
@@ -52,6 +56,9 @@ final class AureaAiState: ObservableObject {
     private var currentSessionId: String?
     private var watchTask: Task<Void, Never>?
     private var generationTask: Task<Void, Never>?
+    private var generationRun = UUID()
+    private var connectionRun = UUID()
+    private var quotaRequest = UUID()
     private var attempt = 0
     private var resumed = false
 
@@ -62,28 +69,33 @@ final class AureaAiState: ObservableObject {
             Task { @MainActor in
                 do {
                     let t = try await self.provider.ticket(s.request)
+                    guard !Task.isCancelled, s.generationId == self.currentSessionId else { return }
                     Self.log("ticket = ok")
                     onTicket(t)
                 } catch let e as VideoFailure {
+                    guard !Task.isCancelled, s.generationId == self.currentSessionId else { return }
                     Self.log("ticket recusado: \(e.code)")
                     onFail(e.code)
                 } catch {
+                    guard !Task.isCancelled, s.generationId == self.currentSessionId else { return }
                     onFail("sem_conexao")
                 }
             }
         },
         bindAd: { ticket in AureaAdsManager.shared.setRewardUserId(ticket) },
         startGeneration: { [weak self] s, onJob, onFinish in
-            guard let self else { return }
+            guard let self, s.generationId == self.currentSessionId else { return }
             self.generationTask?.cancel()
+            let run = UUID()
+            self.generationRun = run
             self.generationTask = Task { @MainActor [weak self] in
-                await self?.generateAndFollow(s, onJob: onJob, finish: onFinish)
+                await self?.generateAndFollow(s, run: run, onJob: onJob, finish: onFinish)
             }
         },
         onChange: { [weak self] s in
-            // Grava SEMPRE, e antes de tudo: o anúncio costuma matar o processo.
-            GuardaDaSessao.shared.write(s)
             guard let self, s.generationId == self.currentSessionId else { return }
+            // Um callback atrasado de outro anúncio não pode substituir a sessão atual.
+            GuardaDaSessao.shared.write(s)
             self.session = s
             if s.status == .unlocked || s.status == .failed || s.status == .generating { self.refreshQuota() }
             switch s.status {
@@ -112,15 +124,18 @@ final class AureaAiState: ObservableObject {
     /// Lê a configuração do backend (o que ele deixa pedir) e fica de olho.
     func connect() {
         watchTask?.cancel()
+        let run = UUID()
+        connectionRun = run
         attempt = 0
-        watchTask = Task { [weak self] in await self?.search() }
+        watchTask = Task { [weak self] in await self?.search(run: run) }
     }
 
-    private func search() async {
-        while !Task.isCancelled {
+    private func search(run: UUID) async {
+        while !Task.isCancelled && connectionRun == run {
             if attempt == 0 && !status.canGenerate { status = .checking }
             do {
                 let cfg = try await provider.config()
+                guard !Task.isCancelled, connectionRun == run else { return }
                 attempt = 0
                 modelName = cfg.model
                 promptMax = cfg.promptMax
@@ -129,7 +144,7 @@ final class AureaAiState: ObservableObject {
                 if cfg.enabled {
                     if message == explainVideoFailure("sem_conexao") || message == explainVideoFailure("ia_desligada") { message = "" }
                     status = session?.status == .generating ? .generating : .connected
-                    if let q = try? await provider.quota() { quota = q }
+                    refreshQuota()
                     resumeIfNeeded()
                 } else {
                     status = .disconnected
@@ -137,6 +152,7 @@ final class AureaAiState: ObservableObject {
                 }
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
             } catch {
+                guard !Task.isCancelled, connectionRun == run else { return }
                 status = attempt == 0 ? .reconnecting : .disconnected
                 message = explainVideoFailure("sem_conexao")
                 let wait = aiBackoff(attempt)
@@ -160,9 +176,11 @@ final class AureaAiState: ObservableObject {
             flow.resume(saved)
         } else if saved.generationStarted, saved.ticket != nil {
             flow.resume(saved)
+            let run = UUID()
+            generationRun = run
             generationTask = Task { @MainActor [weak self] in
-                await self?.generateAndFollow(saved, onJob: { _ in }, finish: { [weak self] file, e, retry in
-                    guard let self else { return }
+                await self?.generateAndFollow(saved, run: run, onJob: { _ in }, finish: { [weak self] file, e, retry in
+                    guard let self, self.currentSessionId == saved.generationId, self.generationRun == run else { return }
                     var s = self.session ?? saved
                     if let file, e == nil { s.generationCompleted = true; s.result = file }
                     else { s.error = e ?? "geracao_falhou"; s.status = .failed; s.canRetryWithoutAd = retry && s.rewardEarned }
@@ -214,9 +232,11 @@ final class AureaAiState: ObservableObject {
 
     /// A geração real: pede o job (esperando o callback assinado do anúncio
     /// chegar), acompanha o estado REAL e baixa. Sem porcentagem inventada.
-    private func generateAndFollow(_ s: AiGenerationSession, onJob: @escaping (String) -> Void,
+    private func generateAndFollow(_ s: AiGenerationSession, run: UUID, onJob: @escaping (String) -> Void,
                                    finish: @escaping AiRewardFlow.Finish) async {
-        defer { generationTask = nil }
+        func current() -> Bool { !Task.isCancelled && currentSessionId == s.generationId && generationRun == run }
+        guard current() else { return }
+        defer { if generationRun == run { generationTask = nil; downloading = false } }
         guard let ticket = s.ticket else { finish(nil, "ticket_invalido", false); return }
         let start = Date()
         func step(_ st: String, _ text: String, id: String = "", result: AiResult? = nil) -> AiJob {
@@ -229,8 +249,10 @@ final class AureaAiState: ObservableObject {
             if jobId == nil {
                 job = step("sending", AureaText.t("ios_ai_stage_sending"))
                 while jobId == nil {
+                    guard current() else { return }
                     do {
                         jobId = try await provider.generate(ticket: ticket)
+                        guard current() else { return }
                     } catch let e as VideoFailure where (e.code == "recompensa_pendente" || e.code == "em_andamento")
                         && Date().timeIntervalSince(start) < rewardWaitSeconds {
                         // O callback do LevelPlay ainda não chegou ao servidor.
@@ -244,10 +266,13 @@ final class AureaAiState: ObservableObject {
             var failures = 0
             while true {
                 try Task.checkCancellation()
+                guard current() else { return }
                 let j: AiVideoJob
                 do {
                     j = try await provider.status(id); failures = 0
+                    guard current() else { return }
                 } catch let e as VideoFailure where e.transient {
+                    guard current() else { return }
                     failures += 1
                     if failures >= 30 { throw e }
                     status = .reconnecting
@@ -276,15 +301,17 @@ final class AureaAiState: ObservableObject {
                 try await Task.sleep(nanoseconds: 2_000_000_000)
             }
             downloading = true
-            defer { downloading = false }
             let file = try await provider.download(id, to: Self.folder.appendingPathComponent("\(id).mp4"))
+            guard current() else { return }
             guard let meta = await Self.metadata(file) else { throw VideoFailure("resultado_nao_e_video") }
+            guard current() else { return }
             job = step("completed", AureaText.t("ios_ai_stage_done"), id: id, result: meta)
             status = .connected
             finish(file, nil, false)
         } catch is CancellationError {
             return
         } catch let e as VideoFailure {
+            guard current() else { return }
             Self.log("falha = \(e.code)")
             status = .connected
             // `recompensa_pendente`: o anúncio FOI assistido; só a confirmação do
@@ -292,6 +319,7 @@ final class AureaAiState: ObservableObject {
             finish(nil, e.code, e.transient || e.code.hasPrefix("download") || e.code == "tempo_esgotado"
                    || e.code == "recompensa_pendente")
         } catch {
+            guard current() else { return }
             status = .connected
             finish(nil, "geracao_falhou", true)
         }
@@ -305,7 +333,10 @@ final class AureaAiState: ObservableObject {
               let size = try? await track.load(.naturalSize),
               let fps = try? await track.load(.nominalFrameRate) else { return nil }
         let seconds = CMTimeGetSeconds(duration)
-        guard seconds > 0, size.width > 0, size.height > 0 else { return nil }
+        guard seconds.isFinite, seconds > 0,
+              size.width.isFinite, size.width > 0, size.width < CGFloat(Int.max),
+              size.height.isFinite, size.height > 0, size.height < CGFloat(Int.max),
+              fps.isFinite, fps >= 0, Double(fps) < Double(Int.max) else { return nil }
         let audio = ((try? await asset.loadTracks(withMediaType: .audio)) ?? []).isEmpty == false
         return AiResult(videoURL: "", durationSeconds: seconds, width: Int(abs(size.width)),
                         height: Int(abs(size.height)), fps: Int(fps.rounded()), hasAudio: audio)

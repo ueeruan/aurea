@@ -365,6 +365,9 @@ public:
     }
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(kIntensity) < 1e-3f; }
     f32 input_margin(const EffectEval&) const noexcept override { return 0.0f; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_rays_frag, work));
+    }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kIntensity] = ParamValue::scalar(1.6f);
         v[kThreshold] = ParamValue::scalar(52.0f);
@@ -372,19 +375,73 @@ public:
         v[kCenter] = ParamValue::vec2(0.30f, 0.86f);   // o clarão da cartela
         return true;
     }
-    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+
+    /// Até onde os raios chegam (px da layer). O pixel p colhe as amostras
+    /// q = p + (C − p)·t, t ≤ L; então a luz de q chega a p = C + (q − C)/(1 − t):
+    /// a região de entrada ESCALADA a partir do ponto de luz por 1/(1 − L).
+    /// Antes a saída era a região de entrada — num texto (caixa justa nos
+    /// glifos, transparente em volta) os raios não tinham onde aparecer.
+    /// No 2D a região é recortada ao quadro visível (spread_region). Na cena 3D
+    /// (sem recorte) cada lado cresce no máximo max(¼ do lado maior, 512 px):
+    /// numa camada pequena os raios saem como no 2D; um vídeo 1080p não vira
+    /// uma textura 4K em meio-float.
+    static Rect rays_region(const Rect& in, Vec2 light, f32 length, const LayerPlacement* placement,
+                            f32 margin) noexcept {
+        const bool clipped = placement && !placement->inScene3d && !placement->preserveFullExtent
+                          && placement->compWidth && placement->compHeight;
+        const f32 reach = std::clamp(std::isfinite(length) ? length : 0.0f, 0.0f, 1.0f);
+        const f32 k = std::min(1.0f / std::max(1.0f - reach, 1e-3f), 16.0f);
+        if (!std::isfinite(light.x) || !std::isfinite(light.y) || k <= 1.0f) return in;
+        const f32 x0 = light.x + (in.x - light.x) * k, x1 = light.x + (in.x + in.w - light.x) * k;
+        const f32 y0 = light.y + (in.y - light.y) * k, y1 = light.y + (in.y + in.h - light.y) * k;
+        f32 left = std::min({in.x, x0, x1}), right = std::max({in.x + in.w, x0, x1});
+        f32 top = std::min({in.y, y0, y1}), bottom = std::max({in.y + in.h, y0, y1});
+        if (!clipped) {
+            const f32 grow = std::max(0.25f * std::max(in.w, in.h), 512.0f);
+            left = std::max(left, in.x - grow); right = std::min(right, in.x + in.w + grow);
+            top = std::max(top, in.y - grow); bottom = std::min(bottom, in.y + in.h + grow);
+        }
+        return spread_region(Rect{left, top, right - left, bottom - top}, 0.0f, 0.0f, placement, margin);
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
-        EffectUniforms u = base_uniforms(input);
-        // O ponto de luz é relativo; o shader trabalha em uv, então basta
-        // passar as coordenadas relativas.
-        const Vec2 c = e.p2(kCenter);
-        u.p0 = Vec4{e.f(kIntensity), e.f(kLength) / 100.0f, e.f(kThreshold) / 100.0f, e.f(kDecay) / 100.0f};
+        // O ponto de luz é relativo à LAYER (0..1 do tamanho natural), como o
+        // centro da Faixa de luz — não à região da entrada, que um efeito
+        // anterior pode ter alargado.
+        const Vec2 rel = e.p2(kCenter);
+        const f32 lw = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
+        const f32 lh = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
+        const f32 lx = e.placement && e.placement->layerWidth ? 0.0f : input.region.x;
+        const f32 ly = e.placement && e.placement->layerHeight ? 0.0f : input.region.y;
+        const Vec2 light{lx + rel.x * lw, ly + rel.y * lh};
+        const f32 length = e.f(kLength) / 100.0f;
+        const Rect region = rays_region(input.region, light, length, e.placement, margin);
+        u32 w = 0, h = 0;
+        ctx.region_size(region, input.texel_scale_x(), w, h);
+
+        EffectUniforms u;
+        u.uvMap = EffectBuildContext::uv_map(region, input.region);
+        u.texel = Vec4{1.0f / static_cast<f32>(std::max(1u, w)), 1.0f / static_cast<f32>(std::max(1u, h)), 0.0f, 0.0f};
+        u.p0 = Vec4{e.f(kIntensity), length, e.f(kThreshold) / 100.0f, e.f(kDecay) / 100.0f};
         // Amostras ao longo do raio: o preview adaptativo reduz (mín. 8); export = as do usuário.
         const f32 samples = std::max(std::min(8.0f, e.f(kSamples)), std::round(e.f(kSamples) * ctx.resources().effect_quality()));
-        u.p1 = Vec4{c.x, c.y, samples, e.f(kKnee) / 100.0f};
+        // O shader marcha no uv da SAÍDA: o ponto de luz vai nele.
+        const f32 cu = region.w > 0.0f ? (light.x - region.x) / region.w : 0.5f;
+        const f32 cv = region.h > 0.0f ? (light.y - region.y) / region.h : 0.5f;
+        u.p1 = Vec4{cu, cv, samples, e.f(kKnee) / 100.0f};
         u.p2 = Vec4{e.b(kKeepSource) ? 1.0f : 0.0f, e.f(kColorShift), 0.0f, 0.0f};
         u.color = e.color(kColor);
-        return single_pass(ctx, ShaderId::effects_rays_frag, input, u, "raios", out);
+
+        out = LayerImage{ctx.texture("raios", w, h), region, w, h};
+        // Borda transparente: fora da entrada não há luz (Clamp repetia a
+        // última coluna do texto por toda a região alargada).
+        if (ctx.fullscreen_pass("raios", PassStage::Effects, out.texture, ShaderId::effects_rays_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
+                                &u, sizeof(u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        return OkStatus;
     }
 };
 

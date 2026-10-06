@@ -28,6 +28,37 @@
 using namespace aurea;
 using namespace aurea::test;
 
+AUREA_TEST(Captions, TranscriptionRejectsReentryAndResultsFromReplacedProjects) {
+    struct Factory final : VideoSourceFactory {
+        Engine* engine = nullptr; u64 layer = 0;
+        bool nestedRejected = false, cancellationPreserved = false;
+        bool probe(const char*, MediaProbe& probe) override {
+            probe.hasAudio = true; probe.audioSampleRate = 48000; probe.audioChannels = 2;
+            probe.audioDurationUs = 1'000'000; return true;
+        }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override { return {}; }
+        std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char*) override {
+            engine->captionCancelled.store(true);
+            auto nested = engine->transcribe_local(layer, "missing.bin", "");
+            nestedRejected = !nested.ok() && nested.status().code() == Errc::InvalidState;
+            cancellationPreserved = engine->captionCancelled.load();
+            (void)engine->new_project(32, 32, 30, "replacement");
+            return {};
+        }
+    } factory;
+    Engine engine; factory.engine = &engine;
+    EngineConfig config; config.workerCount = 2; config.disableAutosave = true; config.mediaFactory = &factory;
+    AUREA_CHECK(engine.initialize(config).ok());
+    AUREA_CHECK(engine.new_project(32, 32, 30, nullptr).ok());
+    VideoImport request; request.sourcePath = "synthetic"; request.displayName = "audio";
+    auto audio = engine.import_audio(request);
+    AUREA_CHECK(audio.ok()); if (!audio.ok()) return;
+    factory.layer = *audio;
+    auto result = engine.transcribe_local(*audio, "missing.bin", "");
+    AUREA_CHECK(!result.ok() && result.status().code() == Errc::Cancelled);
+    AUREA_CHECK(factory.nestedRejected && factory.cancellationPreserved);
+}
+
 AUREA_TEST(Captions, WhisperPreservesUnalignedPortugueseSubtokens) {
     std::vector<text::CaptionWord> result;
     text::WhisperWords words(result, 27, 28, 56);

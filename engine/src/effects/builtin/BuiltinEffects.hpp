@@ -8,6 +8,7 @@
 #include "aurea/effects/MotionTile.hpp"
 
 namespace aurea::builtin {
+void register_matte_choker(EffectRegistry& r);
 
 void register_color_effects(EffectRegistry& r);
 void register_blur_effects(EffectRegistry& r);
@@ -18,6 +19,9 @@ void register_keying_effects(EffectRegistry& r);
 void register_expression_controls(EffectRegistry& r);
 void register_echo_effect(EffectRegistry& r);
 void register_distort_effects(EffectRegistry& r);
+void register_surface_deform_effects(EffectRegistry& r);
+void register_page_turn_effect(EffectRegistry& r);
+void register_optical_stylize_effects(EffectRegistry& r);
 void register_stylize_effects(EffectRegistry& r);
 void register_light_effects(EffectRegistry& r);
 void register_glitch_effects(EffectRegistry& r);
@@ -58,6 +62,9 @@ void register_motion_detect_effect(EffectRegistry& r);
 void register_retro_displace_effects(EffectRegistry& r);
 /// Datamosh (DatamoshEffect.cpp). Sempre no fim.
 void register_datamosh_effect(EffectRegistry& r);
+void register_motion_extras(EffectRegistry& r);
+void register_repeat_extras(EffectRegistry& r);
+void register_keying_extras(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///
@@ -86,13 +93,17 @@ static_assert(sizeof(EffectUniforms) == 112, "layout std140 dos uniforms de efei
 /// que mantém a região (o caso de [single_pass]).
 [[nodiscard]] EffectUniforms base_uniforms(const LayerImage& input) noexcept;
 
+/// Restore reduced input density when an affine shrinks the image, capped at
+/// the frame's working density. Avoid a second resolution loss after tiling.
+[[nodiscard]] f32 affine_texel_density(const LayerImage& input, const Mat4& m, f32 workingDensity) noexcept;
+
 /// Um passe de REAMOSTRAGEM AFIM: a saída lê a entrada pela inversa de `m`,
 /// com a região da caixa transformada. É o corpo do Transformar e do Shake —
 /// os dois são "mover a imagem no plano", só que um pelo usuário e o outro
 /// por um sorteio determinístico.
 [[nodiscard]] Status affine_pass(EffectBuildContext& ctx, const LayerImage& input, const Mat4& m,
                                  const LayerPlacement* placement, f32 opacity, const char* name,
-                                 f32 margin, LayerImage& out);
+                                 f32 margin, LayerImage& out, f32 workingDensity);
 
 /// Pedido de gaussiano, em pixels de LAYER. O construtor converte para texels
 /// pela densidade da entrada e reduz a imagem enquanto o sigma passar de 8

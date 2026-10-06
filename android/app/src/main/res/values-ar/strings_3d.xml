@@ -19,4 +19,6 @@
     <string name="ui3d_deform_letters">تشويه الحروف (دوران، أسطوانة، التواء)</string>
     <string name="ui3d_shadows">الظلال</string>
     <string name="ui3d_bloom_strength">قوة التوهج</string>
+    <string name="ui3d_show_interior">إظهار الداخل</string>
+    <string name="ui3d_show_interior_hint">يرسم الأوجه الداخلية أيضًا بنفس النسيج: أدخل الكاميرا إلى داخل الكائن (أو كبّر حجمه) لرؤية الجانب الداخلي.</string>
 </resources>

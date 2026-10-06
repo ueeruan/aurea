@@ -2,12 +2,17 @@
 #include "aurea/ai/ForegroundMatte.hpp"
 #include "aurea/core/Time.hpp"
 #include <net.h>
+#include <datareader.h>
 #include <algorithm>
 #include <cmath>
 #include <new>
 #include <vector>
 #include "aurea/core/Log.hpp"
 namespace aurea::ai {
+namespace embedded {
+const unsigned char* foreground_model_weights();
+const char* foreground_model_param();
+}
 namespace {
 class InferenceAllocator final : public ncnn::Allocator {
 public:
@@ -28,14 +33,17 @@ ForegroundEstimator::~ForegroundEstimator() = default;
 bool ForegroundEstimator::loaded() const noexcept { return impl_ && impl_->ready; }
 f32 ForegroundEstimator::last_inference_ms() const noexcept { return impl_ ? impl_->ms : 0; }
 void ForegroundEstimator::unload() noexcept { if(impl_) {impl_->net.clear();impl_->ready=false;} }
-Status ForegroundEstimator::load(const std::string& dir) try {
+Status ForegroundEstimator::load() try {
     if(!impl_) return Errc::OutOfMemory; unload();
     auto& net=impl_->net;
     net.opt.num_threads=1;net.opt.use_vulkan_compute=false;net.opt.lightmode=true;
     net.opt.use_fp16_storage=false;net.opt.use_fp16_arithmetic=false;net.opt.use_bf16_storage=false;
     // Large Winograd/im2col workspaces compete with the editor on 32-bit devices.
     net.opt.use_winograd_convolution=false;net.opt.use_sgemm_convolution=false;
-    if(net.load_param((dir+"/u2netp.param").c_str()) || net.load_model((dir+"/u2netp.bin").c_str())) return Errc::MediaSourceMissing;
+    const unsigned char* weights=embedded::foreground_model_weights();
+    ncnn::DataReaderFromMemory reader(weights);
+    if(net.load_param_mem(embedded::foreground_model_param()) || net.load_model(reader))
+        return Status{Errc::CorruptData,"Rotobrush: bundled model could not be loaded"};
     impl_->ready=true; return OkStatus;
 } catch(const std::bad_alloc&) {return Errc::OutOfMemory;}
 Status ForegroundEstimator::run(const u8* pixels,u32 w,u32 h,u32 stride,u32 channels,const std::atomic<bool>& cancel,f32* out) try {

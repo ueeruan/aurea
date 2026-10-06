@@ -23,6 +23,9 @@ struct Panel3DView: View {
     @State private var importedMaterials: [[Float]] = []
     @State private var selectedMaterial: UInt32 = 0
     @State private var shadows: [Float] = []
+    /// Mostrar interior: 1/0; −1 = não é objeto 3D (câmera).
+    @State private var interior: Int32 = -1
+    @ObservedObject private var thumbs = MaterialThumbStore.shared
     @State private var pickingHdri = false
     @State private var pickingFont = false
     @State private var hdriTarget: Int64?
@@ -68,6 +71,7 @@ struct Panel3DView: View {
                         if isText { textMaterialTab }
                         else if isShape { Shape3DPanelSection(layerId: layerId, page: .material) }
                         else { section("panel_material"); importedMaterialSection }
+                        interiorToggle
                     case .shape:
                         if isText { textShapeTab }
                         else if isShape { Shape3DPanelSection(layerId: layerId, page: .shape); shapeLayoutButton }
@@ -137,7 +141,8 @@ struct Panel3DView: View {
             section("ui3d_ready_materials")
             horizontal {
                 ForEach([6, 0, 1, 2, 3, 4, 5], id: \.self) { index in
-                    swatchChip(presetKeys[index], swatch: presetSwatches[index]) {
+                    // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
+                    swatchChip(presetKeys[index], swatch: presetSwatches[index], thumb: presetThumb(index)) {
                         finishEditing()
                         _ = model.engine.applyText3DPreset(layerId, preset: UInt32(index))
                         refresh()
@@ -285,6 +290,29 @@ struct Panel3DView: View {
             toggleRow("environment_background", on: environment.count > 3 && environment[3] > 0.5) {
                 _ = model.engine.setEnvironmentBackground($0); refresh()
             }
+            if environment.count >= 6 && environment[3] > 0.5 {
+                let duration = Int64(Swift.max(1, model.status.duration))
+                let start = Swift.min(duration - 1, Swift.max(0, Int64(environment[4])))
+                let end = Swift.min(duration, Swift.max(start + 1, environment[5] < 0 ? duration : Int64(environment[5])))
+                sceneRow("environment_start", value: Float(start), range: 0...Float(end - 1), unit: "f", reset: 0, gesture: "ambiente") {
+                    _ = model.engine.setEnvironmentBackgroundRangeStart(Int64($0), end: end); refresh()
+                }
+                sceneRow("environment_end", value: Float(end), range: Float(start + 1)...Float(duration), unit: "f", reset: Float(duration), gesture: "ambiente") {
+                    _ = model.engine.setEnvironmentBackgroundRangeStart(start, end: Int64($0)); refresh()
+                }
+                horizontal {
+                    chip("environment_full_duration", on: start == 0 && environment[5] < 0) {
+                        finishEditing(); _ = model.engine.setEnvironmentBackgroundRangeStart(0, end: -1); refresh()
+                    }
+                    if let layer = model.selectedLayer {
+                        chip("environment_layer_duration", on: false) {
+                            finishEditing()
+                            _ = model.engine.setEnvironmentBackgroundRangeStart(Swift.max(0, Int64(layer.startFrame)),
+                                end: Swift.min(duration, Int64(layer.endFrame))); refresh()
+                        }
+                    }
+                }
+            }
             note("environment_hint")
             gap(4)
             advancedHeader(open: sceneAdvanced) { sceneAdvanced.toggle() }
@@ -386,16 +414,64 @@ struct Panel3DView: View {
                 .contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle())
     }
-    private func swatchChip(_ key: String, swatch: [Float], action: @escaping () -> Void) -> some View {
+    private func swatchChip(_ key: String, swatch: [Float], thumb: UIImage?, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 7) {
-                Circle().fill(AureaColorSpace.color(swatch + [1])).frame(width: 16, height: 16)
+                MaterialBallView(image: thumb, fallback: AureaColorSpace.color(swatch + [1]), size: 30)
                 Text(AureaText.t(key)).font(.aurea(size: 12.5)).foregroundStyle(AureaColors.text)
             }
-            .padding(.horizontal, 10).frame(minHeight: 44)
+            .padding(.leading, 5).padding(.trailing, 10).frame(minHeight: 44)
             .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
             .contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle())
+    }
+    /// Ficha de material: bola + nome; acesa = destaque (MaterialChip do Android).
+    private func materialChip(_ label: String, on: Bool, thumb: UIImage?, fallback: Color,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                MaterialBallView(image: thumb, fallback: fallback, size: 30)
+                Text(label).font(.aurea(size: 12.5)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+            }
+            .padding(.leading, 5).padding(.trailing, 12).frame(minHeight: 44)
+            .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle())
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+    }
+    /// Bola de um material pronto do texto 3D (não depende do projeto).
+    private func presetThumb(_ index: Int) -> UIImage? {
+        let key = "p:\(index)"
+        let engine = model.engine
+        thumbs.request(key, revision: 0) { engine.text3DPresetPreview(UInt32(index), size: materialThumbSide) }
+        return thumbs.image(key)
+    }
+    /// Bola do material `id` do modelo: pedida de novo quando o modelo ou os
+    /// valores mudam (a anterior fica na tela até a nova chegar).
+    private func layerMaterialThumb(_ id: UInt32, values: [Float]) -> UIImage? {
+        let key = "m:\(layerId):\(id)"
+        let engine = model.engine, target = layerId
+        thumbs.request(key, revision: [Float(model.status.modelRevision)] + values) {
+            engine.materialPreview(target, material: id, size: materialThumbSide)
+        }
+        return thumbs.image(key)
+    }
+    /// MOSTRAR INTERIOR (dupla face): as faces de dentro com a mesma textura —
+    /// a câmera que entra no cubo vê o lado de dentro. Ligado por padrão nas
+    /// formas 3D prontas; modelo importado e texto 3D começam desligados.
+    @ViewBuilder private var interiorToggle: some View {
+        if interior >= 0 {
+            gap(6)
+            toggleRow("ui3d_show_interior", on: interior == 1) { value in
+                finishEditing()
+                _ = model.engine.setModelInterior(layerId, on: value)
+                refresh()
+            }
+            .accessibilityIdentifier("panel3d.interior")
+            note("ui3d_show_interior_hint")
+            gap(10)
+        }
     }
     private func toggleRow(_ key: String, on: Bool, onChange: @escaping (Bool) -> Void) -> some View {
         HStack(spacing: 0) {
@@ -460,11 +536,18 @@ struct Panel3DView: View {
     @ViewBuilder private var importedMaterialSection: some View {
         if let material = importedMaterials.first(where: { UInt32($0[0]) == selectedMaterial }) ?? importedMaterials.first {
             let index = UInt32(material[0])
-            Menu {
+            // Element3DPanel.kt: uma ficha por material, com a BOLA do material de
+            // verdade (cor, metal, rugosidade e a textura do arquivo), não só o nome.
+            horizontal {
                 ForEach(importedMaterials.indices, id: \.self) { row in
-                    Button(AureaText.t("i18n_material_n", Int(importedMaterials[row][0]) + 1)) { selectedMaterial = UInt32(importedMaterials[row][0]) }
+                    let values = importedMaterials[row]
+                    let id = UInt32(values[0])
+                    materialChip(AureaText.t("i18n_material_n", Int(id) + 1), on: id == index,
+                                 thumb: layerMaterialThumb(id, values: values),
+                                 fallback: AureaColorSpace.color([values[2], values[3], values[4], 1])) { selectedMaterial = id }
+                        .accessibilityIdentifier("panel3d.material.\(id)")
                 }
-            } label: { Text(AureaText.t("i18n_material_n", Int(index) + 1)).font(.aurea(size: 14)).frame(minHeight: 44) }
+            }
             ForEach(0..<6, id: \.self) { param in
                 materialControl(material, index: index, param: param)
             }
@@ -603,6 +686,7 @@ struct Panel3DView: View {
         let values = model.engine.environment().map(\.floatValue)
         environment = values.count >= 3 ? values : [0, 1, 0]
         shadows = model.engine.modelShadows(layerId).map(\.floatValue)
+        interior = isCamera ? -1 : model.engine.modelInterior(layerId)
         objectEnvironment = model.engine.objectEnvironment(forLayer: layerId)
         loadMaterials()
     }
@@ -847,4 +931,68 @@ private struct Text3DAnimSection: View {
         load()
     }
     private func reapply() { if current >= 0 { apply(current) } }
+}
+
+// =============================================================================
+// MINIATURAS DE MATERIAL — port de editor/panels/MaterialThumbs.kt. A bola de
+// estúdio é do MOTOR (Engine::material_preview, scene3d/MaterialPreview.hpp):
+// cor, metal, rugosidade e a imagem do mapa de cor. Pedida numa fila de um só,
+// fora da main thread; o motor guarda as prontas por receita (pedir de novo
+// depois de uma edição só recalcula o material que mudou) e aqui fica a ÚLTIMA
+// de cada item, para a lista reabrir já com as bolas e não piscar.
+// =============================================================================
+
+/// Lado da bola em px (nítida em 30 pt até 3×).
+let materialThumbSide: UInt32 = 96
+
+@MainActor final class MaterialThumbStore: ObservableObject {
+    static let shared = MaterialThumbStore()
+    @Published private(set) var images: [String: UIImage] = [:]
+    /// Revisão já pedida por item: a mesma revisão não pede de novo.
+    private var asked: [String: AnyHashable] = [:]
+    private let queue = DispatchQueue(label: "aurea.material-thumbs", qos: .utility)
+
+    func image(_ key: String) -> UIImage? { images[key] }
+
+    /// Pede a bola quando `revision` muda. `render` roda na fila (fora da main
+    /// thread) e devolve RGBA8 de alfa reto, `materialThumbSide` de lado.
+    func request(_ key: String, revision: AnyHashable, render: @escaping () -> Data?) {
+        if asked[key] == revision { return }
+        asked[key] = revision
+        let side = Int(materialThumbSide)
+        queue.async { [weak self] in
+            guard let data = render(), let image = UIImage.fromRGBA(data, width: side, height: side) else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if self.images.count > 160 { self.images.removeAll() }
+                self.images[key] = image
+            }
+        }
+    }
+
+    /// Aviso de memória: solta as bolas (refeitas sob demanda).
+    func trimMemory() {
+        images.removeAll()
+        asked.removeAll()
+    }
+}
+
+/// A bola desenhada: a miniatura do motor ou, enquanto ela não chega, a
+/// bolinha da cor do material. Decorativa para o VoiceOver — o nome ao lado
+/// já diz o que é.
+struct MaterialBallView: View {
+    let image: UIImage?
+    let fallback: Color
+    let size: CGFloat
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().interpolation(.high)
+            } else {
+                Circle().fill(fallback).padding(size * 0.08)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
 }

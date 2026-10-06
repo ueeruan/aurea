@@ -135,6 +135,54 @@ u32 add_control(Layer& l, const char* key, f32 constant) {
 // -----------------------------------------------------------------------------
 // Linguagem
 // -----------------------------------------------------------------------------
+AUREA_TEST(Expr, ShutterSubframesPreserveTimeReferencesHoldAndMemoIdentity) {
+    Rig rig;
+    auto* source = rig.add("Source");
+    auto& x = source->tracks.get_or_create(TrackProperty::PositionX);
+    x.set(FrameIndex{0}, 7.f, Interpolation::Hold);
+    x.set(FrameIndex{1}, 99.f);
+    auto& y = source->tracks.get_or_create(TrackProperty::PositionY);
+    set_expr(y, "time * time * 900");
+    auto* target = rig.add("Target");
+    auto& read = target->tracks.get_or_create(TrackProperty::PositionX);
+    set_expr(read, "thisComp.layer(\"Source\").transform.position[0]");
+    auto& readTime = target->tracks.get_or_create(TrackProperty::PositionY);
+    set_expr(readTime, "thisComp.layer(\"Source\").transform.position[1]");
+    expr::Scope scope(rig.tl);
+    AUREA_CHECK_EQ(read.sample_f(.999), 7.f);
+    AUREA_CHECK_EQ(read.sample_f(1.), 99.f);
+    AUREA_CHECK_EQ(read.sample_f(.25), 7.f);
+    for (f64 frame : {.25, .75, .25, 1.25, -.25}) {
+        AUREA_CHECK_NEAR(readTime.sample_f(frame), frame * frame, 1e-5);
+        AUREA_CHECK_NEAR(y.sample_f(frame), frame * frame, 1e-5);
+    }
+    AUREA_CHECK(read.expression->error().ok);
+    AUREA_CHECK(readTime.expression->error().ok);
+}
+
+AUREA_TEST(Expr, ShutterSubframesResolveDifferentLayerOffsetsInCompositionTime) {
+    Rig rig;
+    auto* source = rig.add("Source");
+    source->start = FrameIndex{10}; source->offset = FrameIndex{3};
+    auto& x = source->tracks.get_or_create(TrackProperty::PositionX);
+    x.set(FrameIndex{0}, 7.f, Interpolation::Hold);
+    x.set(FrameIndex{1}, 99.f);
+    auto& y = source->tracks.get_or_create(TrackProperty::PositionY);
+    set_expr(y, "time * time * 900");
+    auto* target = rig.add("Target");
+    target->start = FrameIndex{20}; target->offset = FrameIndex{5};
+    auto& read = target->tracks.get_or_create(TrackProperty::PositionX);
+    set_expr(read, "thisComp.layer(\"Source\").transform.position[0]");
+    auto& timed = target->tracks.get_or_create(TrackProperty::PositionY);
+    set_expr(timed, "thisComp.layer(\"Source\").transform.position.valueAtTime(time + .25/30)[1]");
+    expr::Scope scope(rig.tl);
+    AUREA_CHECK_EQ(read.sample_f(-7.001), 7.f);
+    AUREA_CHECK_EQ(read.sample_f(-7.), 99.f);
+    AUREA_CHECK_NEAR(timed.sample_f(.5), 15.75 * 15.75, 1e-3);
+    AUREA_CHECK_NEAR(timed.sample_f(.25), 15.5 * 15.5, 1e-3);
+    AUREA_CHECK(timed.expression->error().ok);
+}
+
 AUREA_TEST(Expr, ArithmeticPrecedenceAndStatements) {
     AUREA_CHECK_NEAR(num("1 + 2 * 3"), 7.0, 1e-12);
     AUREA_CHECK_NEAR(num("(1 + 2) * 3"), 9.0, 1e-12);

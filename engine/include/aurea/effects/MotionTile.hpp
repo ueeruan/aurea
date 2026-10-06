@@ -50,10 +50,10 @@ struct Params {
 
 /// Índices dos parâmetros do efeito (ordem de declaração). Os slots 0..8 são
 /// os do Motion Tile anterior (keyframes e expressões continuam endereçados);
-/// o 6 ficou oculto e o 9 marca a disposição nova.
+/// o 6 ficou oculto, o 9 marca a disposição nova e o 10 é a escala uniforme.
 enum ParamIndex : u32 {
     kCenter = 0, kTileWidth, kTileHeight, kOutputWidth, kOutputHeight,
-    kMirror, kLegacyClamp, kPhase, kHorizontalPhase, kLayout,
+    kMirror, kLegacyClamp, kPhase, kHorizontalPhase, kLayout, kScale,
 };
 
 /// Quantos slots tinha o Motion Tile anterior (sem `kLayout`).

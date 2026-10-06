@@ -90,7 +90,7 @@ public:
         const f64 decay = static_cast<f64>(finite_or(e.f(kDecay), 0));
         if (!(decay > 0)) return false;
         const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
-        const f64 earliest = static_cast<f64>(e.localTime.value) / fps - kShakeMaxShutter / fps;
+        const f64 earliest = e.time_frames() / fps - kShakeMaxShutter / fps;
         return std::exp(-std::min(decay, static_cast<f64>(kShakeMaxDecay)) * std::max(0.0, earliest)) < 1e-6;
     }
     f32 input_margin(const EffectEval&) const noexcept override { return 0; }
@@ -106,7 +106,7 @@ public:
         s.style = e.e(kStyle); s.phase = finite_or(e.f(kPhase), 0);
         s.wave = std::clamp(finite_or(e.f(kWave), 0) / 100.f, 0.f, 1.f);
         const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
-        const f64 seconds = static_cast<f64>(e.localTime.value) / fps;
+        const f64 seconds = e.time_frames() / fps;
         const f32 blur = std::clamp(finite_or(e.f(kBlur), 0) / 100.f, 0.f, kShakeMaxShutter);
         const u32 count = blur > .001f ? 8u : 1u;
         struct { Vec4 rows[16]; Vec4 options; Vec4 bounds; } u{};
@@ -147,8 +147,10 @@ public:
 // -----------------------------------------------------------------------------
 class Turbulence final : public Effect {
 public:
+    // Novos sempre no FIM: o projeto salvo guarda os parâmetros por índice.
     enum : u32 { kAmount = 0, kSize, kComplexity, kEvolution, kOffsetX, kOffsetY, kSeed,
-                 kHorizontal, kEdges, kSpin, kMix, kPin };
+                 kHorizontal, kEdges, kSpin, kMix, kPin, kType, kCycleOn, kCycle };
+    static constexpr u32 kTypeCount = 9, kPinCount = 11, kLegacyPinLast = 5, kMaxCycle = 30;
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kTurbulence, "Turbulência", "Distorcer", EffectClass::Domain};
@@ -174,8 +176,20 @@ public:
         p.add_enum("edges", "Bordas", kEdgeModes, 3, 1);
         p.add_angle("spin", "Girar o deslocamento", 0.0f);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        static const char* const pins[] = {"Nenhuma", "Todas", "Esquerda", "Direita", "Acima", "Abaixo"};
-        p.add_enum("pinning", "Fixar bordas", pins, 6, 0);
+        // 0..5 são os de sempre (seguram o vetor inteiro a 12% da borda). Os
+        // novos vão no fim, medidos em 2x a intensidade: sem trava só segura o
+        // movimento que atravessa a borda; travada segura as duas direções.
+        static const char* const pins[kPinCount] = {"Nenhuma", "Todas", "Esquerda", "Direita", "Acima", "Abaixo",
+            "Bordas horizontais", "Bordas verticais", "Todas travadas", "Bordas horizontais travadas",
+            "Bordas verticais travadas"};
+        p.add_enum("pinning", "Fixar bordas", pins, kPinCount, 0);
+        // O padrão (Turbulento, sem ciclo) é o campo de antes, bit a bit.
+        static const char* const types[kTypeCount] = {"Turbulento", "Protuberância", "Torção",
+            "Turbulento mais suave", "Protuberância mais suave", "Torção mais suave", "Vertical", "Horizontal",
+            "Cruzado"};
+        p.add_enum("displacement", "Tipo de deslocamento", types, kTypeCount, 0);
+        p.add_bool("cycle_evolution", "Ciclo de evolução", false);
+        p.add_int("cycle", "Ciclo (em revoluções)", 1, 1, static_cast<i32>(kMaxCycle));
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return e.f(kMix) < 0.01f || e.f(kAmount) < 0.01f;
@@ -201,12 +215,35 @@ public:
                        input.texel_scale_x(), input.texel_scale_y()};
         u.p0 = Vec4{e.f(kAmount), e.f(kSize), e.f(kComplexity), e.f(kEvolution)};
         u.p1 = Vec4{e.f(kOffsetX), e.f(kOffsetY), static_cast<f32>(e.e(kSeed)), e.b(kHorizontal) ? 1.0f : 0.0f};
-        u.p2 = Vec4{static_cast<f32>(e.e(kEdges)), e.f(kSpin), e.f(kMix)/100.0f, static_cast<f32>(e.e(kPin))};
-        u.p3 = Vec4{static_cast<f32>(e.localTime.value), finite_or(e.f(kComplexity), 3.0f), 0.0f, 0.0f};
+        const u32 pin = std::min(e.e(kPin), kPinCount - 1);
+        u.p2 = Vec4{static_cast<f32>(e.e(kEdges)), e.f(kSpin), e.f(kMix)/100.0f, static_cast<f32>(pin)};
+        // Ciclo: N revoluções da evolução = N células no eixo do tempo. O tempo
+        // já vai dobrado em [0, N) em double — a evolução 0 e a N*360 caem no
+        // MESMO ponto, sem o arredondamento da GPU, e evolução grande não perde
+        // precisão.
+        const u32 type = e.count > kType ? std::min(e.e(kType), kTypeCount - 1) : 0u;
+        const bool cycleOn = e.count > kCycle && e.b(kCycleOn);
+        const u32 cycle = cycleOn ? std::clamp(e.e(kCycle), 1u, kMaxCycle) : 0u;
+        f64 cycleZ = 0.0;
+        if (cycle > 0) {
+            const f64 turns = static_cast<f64>(finite_or(e.f(kEvolution), 0.0f)) / 360.0;
+            cycleZ = std::fmod(turns, static_cast<f64>(cycle));
+            if (cycleZ < 0.0) cycleZ += static_cast<f64>(cycle);
+            if (!(cycleZ > 0.0 && cycleZ < static_cast<f64>(cycle))) cycleZ = 0.0;   // -0, N e NaN
+        }
+        u.p3 = Vec4{static_cast<f32>(e.time_frames()), finite_or(e.f(kComplexity), 3.0f),
+                    static_cast<f32>(type), static_cast<f32>(cycle)};
+        u.color = Vec4{static_cast<f32>(cycleZ), 0.0f, 0.0f, 0.0f};   // p4 no shader
+        // O caso de sempre (Turbulento, sem ciclo, fixações 0..5) fica no
+        // shader de sempre, sem uma linha mudada: o mesmo SPIR-V é o que deixa
+        // o projeto antigo bit a bit igual em qualquer GPU. O resto vai para o
+        // shader dos tipos, com os mesmos uniforms.
+        const bool legacy = type == 0 && cycle == 0 && pin <= kLegacyPinLast;
+        const ShaderId shader = legacy ? ShaderId::effects_turbulence_displace_frag
+                                       : ShaderId::effects_turbulence_types_frag;
 
         out = LayerImage{ctx.texture("turbulencia", w, h), region, w, h};
-        if (ctx.fullscreen_pass("turbulencia", PassStage::Transform, out.texture,
-                                ShaderId::effects_turbulence_displace_frag,
+        if (ctx.fullscreen_pass("turbulencia", PassStage::Transform, out.texture, shader,
                                 {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
@@ -221,14 +258,15 @@ public:
 // -----------------------------------------------------------------------------
 class WaveWarp final : public Effect {
 public:
-    enum : u32 { kHeight = 0, kWavelength, kSpeed, kPhase, kDirection, kSquare, kEdges, kPin, kMix };
+    enum : u32 { kHeight = 0, kWavelength, kSpeed, kPhase, kDirection, kSquare, kEdges, kPin, kMix,
+                 kDirectionAngle };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kWaveWarp, "Onda", "Distorcer", EffectClass::Domain};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        static const char* const kDirs[] = {"Horizontal", "Vertical", "Diagonal", "As duas"};
+        static const char* const kDirs[] = {"Horizontal", "Vertical", "Diagonal", "As duas", "Ângulo"};
         static const char* const kEdgeModes[] = {"Repetir", "Recortar", "Esticar"};
         // Digitado ~10x o slider: uma amostra por pixel, custo fixo.
         p.add_float("height", "Altura da onda", 30.0f, 0.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
@@ -238,11 +276,14 @@ public:
         p.add_float("speed", "Velocidade", 0.0f, -200.0f, 200.0f, kParamAnimatable | kParamPixels, "px/quadro");
         p.typed_range(-5000.0f, 5000.0f);
         p.add_angle("phase", "Fase", 0.0f);
-        p.add_enum("direction", "Direção", kDirs, 4, 0);
+        p.add_enum("direction", "Direção", kDirs, 5, 0);
         p.add_bool("square", "Onda quadrada", false);
         p.add_enum("edges", "Bordas", kEdgeModes, 3, 1);
         p.add_bool("pin_edges", "Travar nas bordas", false);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        // Append, never reinterpret the four direction values saved before
+        // this control existed. It is read only by the new angular mode.
+        p.add_angle("direction_angle", "Ângulo", 0.0f, -360.0f, 360.0f);
     }
     bool is_identity(const EffectEval& e) const noexcept override { return e.f(kMix) < 0.01f || e.f(kHeight) < 0.01f; }
     f32 input_margin(const EffectEval& e) const noexcept override { return e.f(kHeight); }
@@ -265,8 +306,10 @@ public:
         u.p0 = Vec4{h, e.f(kWavelength), e.f(kSpeed), e.f(kPhase)};
         u.p1 = Vec4{static_cast<f32>(e.e(kDirection)), e.b(kSquare) ? 1.0f : 0.0f,
                     static_cast<f32>(e.e(kEdges)), e.b(kPin) ? 1.0f : 0.0f};
-        u.p3 = Vec4{static_cast<f32>(e.localTime.value), 0.0f, 0.0f, 0.0f};
-        u.p2 = Vec4{0.0f, 0.0f, input.region.x, input.region.y};   // origem da entrada (px da camada)
+        u.p3 = Vec4{static_cast<f32>(e.time_frames()), 0.0f, 0.0f, 0.0f};
+        const f32 angle = e.count > kDirectionAngle && std::isfinite(e.f(kDirectionAngle))
+            ? std::remainder(e.f(kDirectionAngle), 360.0f) * kDeg2Rad : 0.0f;
+        u.p2 = Vec4{std::cos(angle), std::sin(angle), input.region.x, input.region.y};
 
         out = LayerImage{ctx.texture("onda", w, hh), region, w, hh};
         if (ctx.fullscreen_pass("onda", PassStage::Transform, out.texture, ShaderId::effects_wave_warp_frag,
@@ -403,7 +446,7 @@ public:
         u.p0 = Vec4{progress * 1.05f - 0.02f, e.f(kAmplitude), e.f(kWavelength), soft};
         u.p1 = Vec4{c.x, c.y, e.f(kSpeed), static_cast<f32>(e.e(kSeed))};
         u.p2 = Vec4{e.b(kDistort) ? 1.0f : 0.0f, e.b(kInvert) ? 1.0f : 0.0f, 0.0f, 0.0f};
-        u.p3 = Vec4{static_cast<f32>(e.localTime.value), 0.0f, 0.0f, 0.0f};
+        u.p3 = Vec4{static_cast<f32>(e.time_frames()), 0.0f, 0.0f, 0.0f};
 
         out = LayerImage{ctx.texture("ondulacao", w, h), region, w, h};
         if (ctx.fullscreen_pass("ondulacao", PassStage::Transform, out.texture,

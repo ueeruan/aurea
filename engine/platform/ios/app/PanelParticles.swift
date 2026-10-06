@@ -1,6 +1,5 @@
-// Partículas. Camada nova = o Particular (efeito aurea.generate.particular):
-// presets em cima, controles do efeito no painel de efeitos. Camada antiga
-// (Particle World): os controles compactos de antes + presets para converter.
+// Partículas 3D AUREA: presets e controles do efeito compartilhado.
+// Camadas do sistema anterior mantêm os controles até a conversão explícita.
 // Parameter IDs remain compatible with existing saved projects.
 import SwiftUI
 

@@ -73,6 +73,20 @@ private val MatrixLabels = listOf(
 
 private val Table: Map<Int, EffectHuman> = buildMap {
     fun put(key: String, e: EffectHuman) = put(effectTypeId(key), e)
+    put("aurea.distort.bender", EffectHuman(name = R.string.fx_name_bender,
+        keywords = "bender bend curve curvar pontos", principal = listOf(0, 1, 2, 3)))
+    put("aurea.distort.bend", EffectHuman(name = R.string.fx_name_bend,
+        keywords = "bend fold dobra papel", principal = listOf(0, 1, 2, 5)))
+    put("aurea.distort.curl", EffectHuman(name = R.string.fx_name_curl,
+        keywords = "curl roll enrolar cilindro", principal = listOf(0, 1, 2, 3, 6)))
+    put("aurea.distort.page_turn", EffectHuman(name = R.string.fx_name_page_turn,
+        keywords = "page turn pagina papel", principal = listOf(0, 1, 2, 3, 8)))
+    put("aurea.distort.liquid_glass", EffectHuman(name = R.string.fx_name_liquid_glass,
+        keywords = "liquid glass vidro liquido lente refracao glassmorphism", principal = listOf(0, 1, 2, 3, 5)))
+    put("aurea.transition.noise_dissolve", EffectHuman(name = R.string.fx_name_noise_dissolve,
+        keywords = "dissolve dissolver ruido queimar desintegrar", principal = listOf(0, 1, 3, 8, 10)))
+    put("aurea.stylize.eight_bit", EffectHuman(name = R.string.fx_name_eight_bit,
+        keywords = "8 bit 8bit pixel retro dither pontilhado game", principal = listOf(0, 1, 2, 3)))
     put("aurea.glitch.jpeg_codec", EffectHuman(keywords = "jpeg glitch compression compressao dct quantization dano",
         principal = listOf(0, 1, 2, 4, 5)))
     put("aurea.glitch.analog_signal", EffectHuman(keywords = "signal analog analogico ntsc pal vhs television",
@@ -212,7 +226,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         EffectHuman(
             name = R.string.fx_name_motion_tile,
             keywords = "motion tile azulejos repetir ladrilho mosaico tijolo fase espelhar parede de video",
-            principal = listOf(1, 2, 5, 7),
+            principal = listOf(10, 1, 2, 5, 7),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_centro),
                 1 to ParamHuman(label = R.string.fx_mt_largura_ladrilho),
@@ -222,6 +236,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 5 to ParamHuman(label = R.string.fx_mt_espelhar_bordas),
                 7 to ParamHuman(label = R.string.fx_fase),
                 8 to ParamHuman(label = R.string.fx_mt_fase_horizontal),
+                10 to ParamHuman(label = R.string.fx_escala, suffix = "%", decimals = 1),
             ),
         ),
     )
@@ -236,7 +251,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put(
         "aurea.key.chroma",
         EffectHuman(
-            name = R.string.fx_name_chroma_key,
+            name = R.string.fx_name_chroma_key_advanced,
             keywords = "chave de croma chroma key fundo verde green screen remover cor",
             principal = listOf(0, 1, 2),
             params = mapOf(
@@ -397,7 +412,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         EffectHuman(
             name = R.string.fx_name_turbulence,
             keywords = "turbulencia displacement deslocamento ruido organico fumaca",
-            principal = listOf(0, 1, 2, 4),
+            principal = listOf(12, 0, 1, 2, 4),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_intensidade, suffix = "px", decimals = 0),
                 1 to ParamHuman(label = R.string.fx_tamanho_ruido, suffix = "px", decimals = 0),
@@ -406,7 +421,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 4 to ParamHuman(label = R.string.fx_deslocamento_x, suffix = "px", decimals = 0),
                 5 to ParamHuman(label = R.string.fx_deslocamento_y, suffix = "px", decimals = 0),
                 8 to ParamHuman(label = R.string.fx_bordas),
-                10 to ParamHuman(label = R.string.fx_girar_deslocamento, suffix = "°", decimals = 0),
+                9 to ParamHuman(label = R.string.fx_girar_deslocamento, suffix = "°", decimals = 0),
             ),
         ),
     )
@@ -415,7 +430,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         EffectHuman(
             name = R.string.fx_name_wave_warp,
             keywords = "wave warp onda ondular senoide agua",
-            principal = listOf(0, 1, 2, 4),
+            principal = listOf(0, 1, 2, 4, 9),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_altura_onda, suffix = "px", decimals = 0),
                 1 to ParamHuman(label = R.string.fx_largura_onda, suffix = "px", decimals = 0),
@@ -1081,6 +1096,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             2 to ParamHuman(label = R.string.fx_direcao, suffix = "°", decimals = 0),
             3 to ParamHuman(label = R.string.fx_distancia, suffix = "px", decimals = 0),
             4 to ParamHuman(label = R.string.fx_suavidade, suffix = "px", decimals = 0),
+            5 to ParamHuman(label = R.string.fxo_shadow_only),
         )))
     put("aurea.stylize.border", EffectHuman(
         name = R.string.fx_name_border,
@@ -1401,8 +1417,9 @@ private val Table: Map<Int, EffectHuman> = buildMap {
 @Composable
 internal fun effectDisplayName(typeId: Int, engineName: String): String {
     val context = LocalContext.current
-    val english = remember(context) {
-        context.createConfigurationContext(Configuration(context.resources.configuration).apply { setLocale(Locale.ENGLISH) }).resources
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val english = remember(context, configuration) {
+        context.createConfigurationContext(Configuration(configuration).apply { setLocale(Locale.ENGLISH) }).resources
     }
     return englishEffectName(typeId, engineName, english)
 }

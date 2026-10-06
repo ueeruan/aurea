@@ -154,7 +154,7 @@ public:
 private:
     [[nodiscard]] bool need(usize n) noexcept {
         if (failed_) return false;
-        if (pos_ + n > size_) { failed_ = true; return false; }
+        if (n > size_ - pos_) { failed_ = true; return false; }
         return true;
     }
 
@@ -869,6 +869,17 @@ void write_layer(ByteWriter& w, const Layer& l) {
     // v39: manter o tom do áudio (remapeamento/velocidade).
     w.boolv(l.keepPitch);
     w.f32v(l.light.shadowStrength);
+    // v43: mostrar interior (dupla face) do objeto 3D.
+    w.u8v(static_cast<u8>(l.model.interior));
+    // v44: parâmetros das formas paramétricas (shape::Param 7..14).
+    w.f32v(l.shape.depth);
+    w.f32v(l.shape.tip);
+    w.f32v(l.shape.thickness);
+    w.f32v(l.shape.sweep);
+    w.f32v(l.shape.head);
+    w.f32v(l.shape.shaft);
+    w.f32v(l.shape.amplitude);
+    w.f32v(l.shape.seed);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -896,6 +907,13 @@ void write_layer(ByteWriter& w, const Layer& l) {
 // v36: animadores de camada, escopo do ajuste e câmera que atravessa o grupo,
 //      no fim da camada. Antes dela: nenhum animador, ajuste em tudo abaixo e
 //      grupo fechado para a câmera (o render de sempre).
+// v43: mostrar interior do objeto 3D (Model3DData::interior, um byte no fim
+//      da camada). Antes dela: automático.
+// v44: parâmetros das formas paramétricas (profundidade, ponta, espessura,
+//      abertura, ponta e haste da seta, amplitude, variante), 8 floats no fim
+//      da camada. Antes dela: os padrões da ShapeData — profundidade, ponta,
+//      espessura e ponta da seta "da forma" (negativos), abertura 270°, haste
+//      0,44 —, que desenham cada forma antiga exatamente como antes.
 // v37: camadas escolhidas do ajuste (escopo 2), depois da câmera do grupo.
 //      Antes dela a lista é vazia (e o escopo só vai até 1).
 // v38: rig 2D da camada de imagem (juntas), no fim da camada. Antes dela: sem
@@ -938,6 +956,10 @@ void read_layer(ByteReader& r, Layer& l) {
     l.transform.skewX = r.f32v();
     l.transform.skewY = r.f32v();
     l.transform.motionBlurAmount = r.f32v();
+    // Recover malformed legacy/project values without passing NaN into
+    // exposure timestamps (and subsequent floating-to-integer conversions).
+    l.transform.motionBlurAmount = std::isfinite(l.transform.motionBlurAmount)
+        ? std::clamp(l.transform.motionBlurAmount, 0.f, 4.f) : 0.f;
     l.transform.motionBlurEnabled = r.boolv();
 
     const u32 trackCount = r.u32v();
@@ -1419,6 +1441,37 @@ void read_layer(ByteReader& r, Layer& l) {
     l.light.shadowStrength = g_readingTimelineVersion >= 40 ? r.f32v() : 1.0f;
     if (!std::isfinite(l.light.shadowStrength)) l.light.shadowStrength = 1.0f;
     l.light.shadowStrength = std::clamp(l.light.shadowStrength, 0.0f, 1.0f);
+    // Projeto anterior à v43: automático (a forma 3D pronta mostra o lado de
+    // dentro; modelo importado e texto 3D abrem como antes).
+    l.model.interior = g_readingTimelineVersion >= 43
+        ? checked_enum(r.u8v(), ModelInterior::Off, ModelInterior::Auto) : ModelInterior::Auto;
+    {
+        // v44: parâmetros das formas paramétricas. Valor estragado (não
+        // finito) volta ao padrão; negativo é válido ("o padrão da forma").
+        const ShapeData defaults{};
+        auto read_param = [&](f32& field, f32 fallback) {
+            const f32 v = r.f32v();
+            field = std::isfinite(v) ? v : fallback;
+        };
+        l.shape.depth = defaults.depth;
+        l.shape.tip = defaults.tip;
+        l.shape.thickness = defaults.thickness;
+        l.shape.sweep = defaults.sweep;
+        l.shape.head = defaults.head;
+        l.shape.shaft = defaults.shaft;
+        l.shape.amplitude = defaults.amplitude;
+        l.shape.seed = defaults.seed;
+        if (g_readingTimelineVersion >= 44) {
+            read_param(l.shape.depth, defaults.depth);
+            read_param(l.shape.tip, defaults.tip);
+            read_param(l.shape.thickness, defaults.thickness);
+            read_param(l.shape.sweep, defaults.sweep);
+            read_param(l.shape.head, defaults.head);
+            read_param(l.shape.shaft, defaults.shaft);
+            read_param(l.shape.amplitude, defaults.amplitude);
+            read_param(l.shape.seed, defaults.seed);
+        }
+    }
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap
@@ -1745,6 +1798,13 @@ std::vector<u8> build_timeline_section(const Project& p) {
             w.f32v(fl.contactShadow);
             w.f32v(fl.fade);
         }
+        // v41: explicit shutter phase and adaptive sampling. Append only: old
+        // files keep every preceding field at its original offset.
+        w.f32v(mb.shutterPhase);
+        w.u32v(mb.adaptiveLimit);
+        // v42: independently timed panorama; legacy files stay unbounded.
+        w.i64v(env.backgroundStart.value);
+        w.i64v(env.backgroundEnd.value);
     });
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
@@ -1978,6 +2038,22 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
             fl.reflectivity = fin(r.f32v(), 0.0f, 1.0f, 0.5f);
             fl.contactShadow = fin(r.f32v(), 0.0f, 1.0f, 0.8f);
             fl.fade = fin(r.f32v(), 1.0f, 100.0f, 6.0f);
+        }
+        mb.shutterAngle = std::isfinite(mb.shutterAngle) ? std::clamp(mb.shutterAngle, 0.0f, 720.0f) : 180.0f;
+        mb.samples = std::clamp(mb.samples, 2u, 64u);
+        mb.previewSamples = std::clamp(mb.previewSamples, 1u, 64u);
+        mb.shutterPhase = -0.5f * mb.shutterAngle;
+        mb.adaptiveLimit = std::max(128u, mb.samples);
+        if (g_readingTimelineVersion >= 41) {
+            const f32 phase = r.f32v();
+            mb.shutterPhase = std::isfinite(phase) ? std::clamp(phase, -360.0f, 360.0f) : mb.shutterPhase;
+            mb.adaptiveLimit = std::clamp(r.u32v(), mb.samples, 256u);
+        }
+        if (g_readingTimelineVersion >= 42) {
+            env.backgroundStart = FrameIndex{std::max<i64>(0, r.i64v())};
+            env.backgroundEnd = FrameIndex{r.i64v()};
+            if (env.backgroundEnd.value < 0) env.backgroundEnd = FrameIndex{-1};
+            else env.backgroundEnd = FrameIndex{std::max(env.backgroundStart.value, env.backgroundEnd.value)};
         }
         c->rebuild_draw_order();
     }

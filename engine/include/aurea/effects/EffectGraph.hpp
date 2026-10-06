@@ -53,6 +53,7 @@ struct EffectStage {
     /// parede para fora, deixando faixas pretas.
     Mat4 after = Mat4::identity();
     bool hasAfter = false;
+    bool preserveFullExtent = false; ///< a later Motion Tile needs the whole source
 };
 
 /// Máximo de operações num passe de cor fundido (casa com MAX_OPS do shader).
@@ -69,6 +70,7 @@ struct EffectPlan {
     bool hasFold = false;
     Mat4 foldMatrix = Mat4::identity();
     f32  foldOpacity = 1.0f;
+    u32 foldEffectIndex = kInvalidIndex;
 
     u32 droppedIdentity = 0;   ///< efeitos neutros removidos
     u32 droppedUnknown = 0;    ///< tipo que esta versão não conhece
@@ -87,6 +89,11 @@ public:
                      f32 texelScale, const LayerPlacement& placement,
                      EffectResources* resources, EffectPlan& out, f64 framesPerSecond = 30.0,
                      const Composition* composition = nullptr);
+
+    static void plan_f(const Layer& layer, const EffectRegistry& registry, f64 localTime,
+                       f32 texelScale, const LayerPlacement& placement,
+                       EffectResources* resources, EffectPlan& out, f64 framesPerSecond = 30.0,
+                       const Composition* composition = nullptr);
 
     /// Declara os passes do plano no FrameGraph e devolve a imagem final da
     /// layer. Sem etapas, devolve a própria entrada.

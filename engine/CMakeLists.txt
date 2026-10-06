@@ -76,6 +76,7 @@ set(AUREA_CORE_SOURCES
     src/timeline/LayerAnimator.cpp
     src/timeline/Timeline.cpp
     src/timeline/Rig.cpp
+    src/timeline/ShapeGeometry.cpp
     src/project/Project.cpp
     src/project/Serialization.cpp
     src/project/FileIO.cpp
@@ -114,6 +115,9 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/EchoEffect.cpp
     src/effects/builtin/EffectsSupport.cpp
     src/effects/builtin/DistortEffects.cpp
+    src/effects/builtin/SurfaceDeformEffects.cpp
+    src/effects/builtin/PageTurnEffect.cpp
+    src/effects/builtin/OpticalStylizeEffects.cpp
     src/effects/builtin/StylizeEffects.cpp
     src/effects/builtin/LightEffects.cpp
     src/effects/builtin/GlitchEffects.cpp
@@ -127,6 +131,9 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/PatternEffects.cpp
     src/effects/builtin/SampledBlurEffects.cpp
     src/effects/builtin/MotionBehaviorEffects.cpp
+    src/effects/builtin/MotionExtras.cpp
+    src/effects/builtin/RepeatExtras.cpp
+    src/effects/builtin/KeyingExtras.cpp
     src/effects/builtin/FinishingEffects.cpp
     src/effects/builtin/GenerateEffects.cpp
     src/effects/builtin/MatteEffects.cpp
@@ -180,6 +187,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/Animation.cpp
     src/scene3d/Text3D.cpp
     src/scene3d/Shape3D.cpp
+    src/scene3d/MaterialPreview.cpp
     src/engine/Engine.cpp
     src/engine/EngineMotion.cpp
     src/engine/EngineMotion.cpp
@@ -240,6 +248,14 @@ target_compile_definitions(aurea_core
 )
 
 if(AUREA_PLATFORM_ANDROID)
+    # Keep the GL decoder bridge's color math byte-for-byte identical to the
+    # shared shaders. Both aurea and aurea_media_probe inherit this include
+    # directory through aurea_core. Regenerate when the source GLSL changes.
+    set(_video_color_glsl "${CMAKE_CURRENT_SOURCE_DIR}/shaders/common/color.glsl")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_video_color_glsl}")
+    file(READ "${_video_color_glsl}" AUREA_SHARED_COLOR_GLSL)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VideoColorGlsl.hpp.in"
+        "${AUREA_GENERATED_INCLUDE}/aurea/shaders/VideoColorGlsl.hpp" @ONLY)
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_ANDROID=1)
 elseif(AUREA_PLATFORM_IOS)
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_IOS=1)
@@ -255,6 +271,26 @@ set(AUREA_WARNINGS
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -fno-exceptions>
 )
 target_compile_options(aurea_core PRIVATE ${AUREA_WARNINGS})
+# These import boundaries catch allocation failures and translate them to
+# Status. Their allocating dependencies need unwind cleanup too, so a failed
+# staging allocation releases local vectors and project snapshots on mobile.
+set(AUREA_IMPORT_BOUNDARIES
+    src/audio/Beats.cpp
+    src/audio/AudioBlockCache.cpp
+    src/engine/Engine.cpp
+    src/engine/EngineMedia.cpp
+    src/engine/EnginePsd.cpp
+    src/project/Psd.cpp
+    src/project/Project.cpp
+    src/command/History.cpp
+    src/timeline/Composition.cpp
+    src/timeline/Timeline.cpp
+)
+if(MSVC)
+    set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS /EHsc)
+else()
+    set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS -fexceptions)
+endif()
 target_compile_options(aurea_core PRIVATE
     $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O3>
     $<$<AND:$<CONFIG:RelWithDebInfo>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-O2 -g>
@@ -369,7 +405,11 @@ if(AUREA_PLATFORM_ANDROID)
         add_executable(aurea_media_probe tests/android_media_probe.cpp platform/android/MediaCodecSource.cpp
                        platform/android/GlVideoBridge.cpp)
         target_include_directories(aurea_media_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
-        target_link_libraries(aurea_media_probe PRIVATE aurea_core android log mediandk EGL GLESv2)
+        target_link_libraries(aurea_media_probe PRIVATE aurea_core android log mediandk EGL GLESv3)
+        add_executable(aurea_gl_video_color_probe tests/android_gl_video_color_probe.cpp
+                       platform/android/GlVideoBridge.cpp)
+        target_include_directories(aurea_gl_video_color_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
+        target_link_libraries(aurea_gl_video_color_probe PRIVATE aurea_core android log dl EGL GLESv3)
         add_executable(aurea_export_probe tests/android_export_probe.cpp platform/android/MediaCodecExport.cpp)
         target_include_directories(aurea_export_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
         target_link_libraries(aurea_export_probe PRIVATE aurea_core android log mediandk)
@@ -384,8 +424,8 @@ if(AUREA_PLATFORM_ANDROID)
     target_include_directories(aurea PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
     # `mediandk` é o MediaCodec/MediaExtractor/ImageReader: sem ele não há
     # decode de hardware. `android` dá ANativeWindow e AHardwareBuffer.
-    # EGL + GLESv2: o caminho GL do driver do vídeo (GlVideoBridge).
-    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk aaudio EGL GLESv2)
+    # EGL + GLESv3: amostragem YUV explícita no caminho GL do vídeo.
+    target_link_libraries(aurea PRIVATE aurea_core aurea_vulkan android log mediandk aaudio EGL GLESv3)
     if(AUREA_GPU_GLES)
         target_link_libraries(aurea PRIVATE aurea_gles)
         target_compile_definitions(aurea PRIVATE AUREA_GPU_GLES=1)

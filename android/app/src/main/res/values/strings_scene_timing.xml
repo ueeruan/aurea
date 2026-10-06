@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="environment_start">Início do fundo</string>
+    <string name="environment_end">Fim do fundo</string>
+    <string name="environment_full_duration">Toda a composição</string>
+    <string name="environment_layer_duration">Usar duração da camada</string>
+</resources>

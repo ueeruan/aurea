@@ -55,10 +55,10 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // versionCode 2138: árabe completo (RTL), HDRI/EXR, profundidade/chanfro do texto 3D, áudio que se recupera, curva em X/Y/Z, keyframes fáceis de arrastar, blur do Transform. Um número maior é
+        // versionCode 2140: novas deformações, partículas 3D, cache ocioso e barra compacta. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2138
-        versionName = "2.0.0-beta2"
+        versionCode = 2140
+        versionName = "0.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

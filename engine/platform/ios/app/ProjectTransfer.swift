@@ -57,7 +57,8 @@ enum MediaInfoProbe {
     }
 
     static func duration(_ seconds: Double) -> String {
-        seconds < 60 ? String(format: "%.1f s", seconds)
+        guard seconds.isFinite, seconds >= 0, seconds / 60 < Double(Int.max) else { return "?" }
+        return seconds < 60 ? String(format: "%.1f s", seconds)
             : String(format: "%d:%04.1f", Int(seconds / 60), seconds.truncatingRemainder(dividingBy: 60))
     }
 
@@ -87,7 +88,10 @@ enum MediaInfoProbe {
             readable = true
             if let size = try? await track.load(.naturalSize), let transform = try? await track.load(.preferredTransform) {
                 let oriented = size.applying(transform)
-                rows.append(("media_info_resolution", "\(Int(abs(oriented.width))) × \(Int(abs(oriented.height)))"))
+                if oriented.width.isFinite, oriented.height.isFinite,
+                   abs(oriented.width) < CGFloat(Int.max), abs(oriented.height) < CGFloat(Int.max) {
+                    rows.append(("media_info_resolution", "\(Int(abs(oriented.width))) × \(Int(abs(oriented.height)))"))
+                }
             }
             if let fps = try? await track.load(.nominalFrameRate), fps > 0 {
                 rows.append(("media_info_fps", String(format: "%.3f", fps).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)))
@@ -110,7 +114,8 @@ enum MediaInfoProbe {
             readable = true
             if let format = (try? await track.load(.formatDescriptions))?.first {
                 rows.append(("media_info_audio_codec", codecName(CMFormatDescriptionGetMediaSubType(format))))
-                if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee, asbd.mSampleRate > 0 {
+                if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+                   asbd.mSampleRate.isFinite, asbd.mSampleRate > 0, asbd.mSampleRate < Double(Int.max) {
                     let channels = asbd.mChannelsPerFrame > 0 ? " · \(asbd.mChannelsPerFrame) ch" : ""
                     rows.append(("media_info_sample_rate", "\(Int(asbd.mSampleRate)) Hz" + channels))
                 }

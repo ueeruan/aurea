@@ -19,4 +19,6 @@
     <string name="ui3d_deform_letters">Deform letters (rotate, cylinder, twist)</string>
     <string name="ui3d_shadows">Shadows</string>
     <string name="ui3d_bloom_strength">Bloom strength</string>
+    <string name="ui3d_show_interior">Show inside</string>
+    <string name="ui3d_show_interior_hint">Also draws the inner faces with the same texture: move the camera into the object (or scale it up) to see the inside.</string>
 </resources>

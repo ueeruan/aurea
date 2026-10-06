@@ -19,4 +19,6 @@
     <string name="ui3d_deform_letters">Деформировать буквы (поворот, цилиндр, скручивание)</string>
     <string name="ui3d_shadows">Тени</string>
     <string name="ui3d_bloom_strength">Сила свечения</string>
+    <string name="ui3d_show_interior">Показывать изнутри</string>
+    <string name="ui3d_show_interior_hint">Рисует и внутренние грани с той же текстурой: войдите камерой внутрь объекта (или увеличьте масштаб), чтобы увидеть его изнутри.</string>
 </resources>

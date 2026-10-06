@@ -51,6 +51,7 @@ AUREA_TEST(PreviewProxy, ExpensivePreparationYieldsAndCancellationInterruptsPaci
     std::shared_ptr<const PreviewProxy> proxy;
     while (!(proxy = service.request(asset)) && std::chrono::steady_clock::now() - start < std::chrono::seconds(8))
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    if (!proxy) std::printf(" proxy decoder opens=%u ", factory.opened.load());
     AUREA_CHECK(proxy != nullptr);
     // Six costly frames may not run back-to-back and monopolize the worker.
     AUREA_CHECK(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(800));
@@ -71,6 +72,75 @@ AUREA_TEST(PreviewProxy, ExpensivePreparationYieldsAndCancellationInterruptsPaci
     AUREA_CHECK(std::chrono::steady_clock::now() - cancel < std::chrono::seconds(1));
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
+}
+
+AUREA_TEST(PreviewProxy, OriginalSourceLeasesOverlapMoveAndPreserveOtherPauses) {
+    struct Factory final : VideoSourceFactory {
+        test::SyntheticConfig config;
+        std::atomic<u32> originals{0}, proxies{0}, generated{0};
+        Factory() { config.width = 64; config.height = 36; config.frameCount = 6; }
+        bool probe(const char* path, MediaProbe& out) override { test::SyntheticFactory f(config); return f.probe(path, out); }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset, MediaPriority priority) override {
+            if (priority == MediaPriority::Thumbnail) ++generated;
+            else if (asset.sourcePath == "lease-original") ++originals;
+            else ++proxies;
+            auto c = config;
+            c.width = asset.video.width; c.height = asset.video.height;
+            return std::make_unique<test::SyntheticDecoder>(c);
+        }
+    } factory;
+    MediaManager manager; manager.set_factory(&factory);
+    const auto directory = std::filesystem::absolute("../build/reference/heavy-stress-20261005") /
+        ("lease-proxy-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    manager.proxies().configure(&factory, proxy_test_sink, nullptr, directory.generic_string());
+    manager.proxies().set_policy(18);
+    Asset asset; asset.kind = AssetKind::Video; asset.sourcePath = "lease-original";
+    asset.video.width = 64; asset.video.height = 36;
+    auto wait = [&](auto predicate) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (!predicate() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return predicate();
+    };
+    AUREA_CHECK(wait([&] { return !!manager.proxies().request(asset); }));
+    auto source = [&] { return manager.source_for(LayerId{0, 1}, AssetId{0, 1}, asset, 1, false); };
+    AUREA_CHECK(wait([&] { return source() != nullptr; }));
+    AUREA_CHECK_EQ(factory.proxies.load(), 1u);
+    auto first = manager.retain_original_sources();
+    auto moved = std::move(first);
+    // A second capture lives on another thread. Cancelling/releasing the first
+    // must not resume proxy selection or generation until this one also exits.
+    std::promise<void> retained, release;
+    auto releaseFuture = release.get_future();
+    auto second = std::async(std::launch::async, [&] {
+        auto lease = manager.retain_original_sources();
+        retained.set_value(); releaseFuture.wait();
+    });
+    retained.get_future().wait();
+    VideoSource* original = nullptr;
+    AUREA_CHECK(wait([&] { original = source(); return original != nullptr; }));
+    AUREA_CHECK_EQ(factory.originals.load(), 1u);
+    if (original) AUREA_CHECK_EQ(original->info().display_width(), 64u);
+    moved = {};
+    for (u32 i = 0; i < 20; ++i) AUREA_CHECK(source() == original);
+    AUREA_CHECK_EQ(factory.proxies.load(), 1u);
+    Asset another = asset; another.sourcePath = "lease-other-original";
+    const u32 generated = factory.generated.load();
+    (void)manager.proxies().request(another);
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    AUREA_CHECK_EQ(factory.generated.load(), generated);
+    manager.proxies().set_pause_reason(PreviewProxyService::Manual, true);
+    release.set_value(); second.get();
+    AUREA_CHECK(wait([&] { return source() != nullptr; }));
+    AUREA_CHECK_EQ(factory.proxies.load(), 2u); // ready proxy resumes after the last lease
+    // Manual remains active after Capture is cleared; no competing encoder.
+    (void)manager.proxies().request(another);
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    AUREA_CHECK_EQ(factory.generated.load(), generated);
+    manager.proxies().set_pause_reason(PreviewProxyService::Manual, false);
+    AUREA_CHECK(wait([&] { return !!manager.proxies().request(another); }));
+    AUREA_CHECK_EQ(factory.generated.load(), generated + 1);
+    manager.close_all(); manager.proxies().stop();
 }
 
 AUREA_TEST(PreviewProxy, AreaResamplingPreservesCropRotationAndChromaOrder) {

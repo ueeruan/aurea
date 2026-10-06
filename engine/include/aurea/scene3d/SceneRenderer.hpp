@@ -137,6 +137,14 @@ struct SceneEnvironment {
 };
 
 struct SceneInstance {
+    /// Rigid exposure samples share immutable pose/material state. Only the
+    /// transform and camera vary; a dense static glTF is never copied K times.
+    std::shared_ptr<const SceneInstance> sharedPose;
+    [[nodiscard]] const SceneInstance& pose() const noexcept { return sharedPose ? *sharedPose : *this; }
+    bool cameraOverride = false;
+    Mat4 sampleViewProj = Mat4::identity();
+    Mat4 sampleView = Mat4::identity();
+    Vec3 sampleCameraPosition{};
     /// Dono compartilhado: apagar a layer no meio do frame não invalida o
     /// asset que o render ainda está desenhando.
     std::shared_ptr<const SceneAsset> asset;
@@ -152,6 +160,10 @@ struct SceneInstance {
     std::vector<f32> nodeOpacity;
     std::vector<Vec4> nodeFill; ///< Linear RGB override and selector mix weight.
     bool castShadows = true;
+    /// MOSTRAR INTERIOR (Model3DData::interior): todo material deste objeto
+    /// vira dupla face — sem recorte da face de trás, normal invertida no
+    /// shader (pbr.frag), a mesma textura. Copiado nos sub-quadros do desfoque.
+    bool doubleSided = false;
     u64  layerKey = 0;                 ///< camada de origem (sub-quadros do desfoque)
     bool motionBlur = false;           ///< a camada pede desfoque de movimento
     /// Ambiente PRÓPRIO deste objeto (v22). `ownEnvironment` falso = usa o do
@@ -320,7 +332,7 @@ public:
         const char* name = "";
         std::mutex mutex;                  ///< a devolução pode vir de outra thread (Metal)
         std::vector<Buf> free;
-        std::vector<BufferHandle> all;     ///< vivos (livres ou em voo), para o shutdown
+        std::vector<Buf> all;     ///< vivos (livres ou em voo), para o shutdown
         u32 generation = 0;                ///< muda no shutdown/perda do device: devolução velha é descartada
     };
 
@@ -333,6 +345,11 @@ public:
     /// Solta modelos que nenhum frame usou nos últimos `idleFrames`.
     void collect(u64 frameNumber, u64 idleFrames = 240) noexcept;
     void release_all() noexcept;
+    /// Between frames only: free reusable upload storage; busy tickets retain ownership.
+    u32 trim_upload_pools() noexcept;
+    /// Between frames after the GPU is idle: release environments not used by
+    /// the last rendered frame, including caches below the normal LRU budget.
+    u32 trim_environment_cache(u64 frameNumber) noexcept;
 
     /// Monta os passes do grupo: cor (RGBA16F, limpa transparente) e
     /// profundidade (transitória). `outColor` recebe a textura a compor.
@@ -351,7 +368,10 @@ public:
     [[nodiscard]] bool build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                              u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes = nullptr,
                              const SceneParticleDraw* particles = nullptr, u32 particleCount = 0,
-                             FGTexture* outDepth = nullptr) noexcept;
+                             FGTexture* outDepth = nullptr, FGTexture* outExposureHdr = nullptr) noexcept;
+    /// Complete a linear temporal exposure once, after all geometry samples.
+    [[nodiscard]] FGTexture finish_exposure(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
+                                            FGTexture display, FGTexture scene) noexcept;
     /// O grupo tem luz de cena (modelo, texto 3D, céu)? Sem ela, planos e
     /// partículas vão num alvo só, sem pós.
     [[nodiscard]] static bool wants_hdr(const SceneFrame& frame) noexcept {
@@ -376,12 +396,13 @@ public:
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;
 
-        /// Conjunto de mapas JÁ subidos, por chave de HDRI — o cache que faz dois
+    /// Conjunto de mapas JÁ subidos, por chave de HDRI — o cache que faz dois
     /// objetos com o mesmo ambiente custarem um upload só.
     struct EnvSet {
         TextureHandle irradiance{}, prefiltered{}, brdf{};
         u32 mips = 0;
         u64 lastFrame = 0;
+        u64 bytes = 0;
     };
     /// Troca o ambiente (IBL). Sem chamada, o primeiro grupo 3D usa o estúdio
     /// neutro padrão.
@@ -397,9 +418,9 @@ public:
     void finish_environment(const SceneEnvironment& env) noexcept;
     /// Ambiente atual (0 = estúdio; ~0 = nenhum ainda).
     [[nodiscard]] u64 environment_key() const noexcept { return envKey_; }
-    /// Pede o ambiente do quadro: gera fora da thread de render e troca quando
-    /// ficar pronto (o anterior continua valendo até lá). Pedir de novo o que
-    /// já está na GPU não gera nada.
+    /// Pede o ambiente do quadro: reutiliza seus mapas, ou gera fora da thread
+    /// de render. Enquanto espera, usa o céu neutro (nunca o HDRI de outra cena).
+    /// Pedir de novo o que já está na GPU não gera nada.
     void request_environment(const SceneEnvironment& env) noexcept;
     /// Quantas vezes um ambiente do grupo subiu para a GPU (desde o início).
     [[nodiscard]] u64 environment_uploads() const noexcept { return envUploads_; }
@@ -416,6 +437,10 @@ public:
     [[nodiscard]] u32 environment_background_size() const noexcept { return backgroundSize_; }
 
     [[nodiscard]] const SceneStats& stats() const noexcept { return stats_; }
+    /// Accumulates omitted resources across all groups/subframes of one render.
+    /// A fallback may be displayed, but must never become a completed cache entry.
+    [[nodiscard]] bool incomplete() const noexcept { return incomplete_; }
+    void reset_incomplete() noexcept { incomplete_ = false; }
     /// Qualidade (HeavyQuality): mapa de sombra (256..4096), nível da sombra
     /// (0 BAIXO = PCF 8, 1 MÉDIO = PCF 16, 2 ALTO = PCSS 12+24, 3 ULTRA =
     /// PCSS 16+32) e viés do LOD. O export chama com (4096, 3, 1).
@@ -437,6 +462,7 @@ private:
         std::unique_ptr<GpuModel> model;
         u64 lastFrame = 0;
         bool failed = false;
+        u64 retryAfterNs = 0;
     };
 
     [[nodiscard]] PipelineKey key_for(AlphaMode mode, bool doubleSided, bool skinned) const noexcept;
@@ -480,6 +506,7 @@ private:
     std::unordered_map<u64, LodState> lodState_;
 
     GPUBackend* gpu_ = nullptr;
+    friend struct SceneUploadPoolTestAccess;
     ShaderLibrary* shaders_ = nullptr;
     std::unordered_map<u64, Entry> models_;
     // Um buffer mapeado por chamada de build: matrizes de junta, vértices de
@@ -511,6 +538,22 @@ private:
     u64 envKey_ = ~0ull;       ///< o que está na GPU
     u64 pendingKey_ = ~0ull;   ///< o que está sendo gerado
     u64 envUploads_ = 0;
+    u64 environmentBytes_ = 0;
+    // A frame may contain several precompositions with different HDRIs. Keep
+    // their maps alive until every pass that captured them has been submitted.
+    struct CachedSceneEnvironment {
+        u64 key = ~0ull, lastFrame = 0;
+        TextureHandle irradiance{}, prefiltered{}, brdf{}, background{};
+        u32 mips = 1, specularSize = 0, backgroundSize = 0;
+        u32 specularTier = 0, backgroundTier = 0;
+        u64 bytes = 0;
+    };
+    std::vector<CachedSceneEnvironment> sceneEnvironments_;
+    u64 envLastFrame_ = 0;
+    [[nodiscard]] CachedSceneEnvironment current_environment() const noexcept;
+    void use_environment(const CachedSceneEnvironment& env) noexcept;
+    bool restore_environment(u64 key) noexcept;
+    void trim_scene_environments(u64 frameNumber) noexcept;
     SamplerHandle cubeSampler_{};
     void release_environment() noexcept;
     /// Conjuntos por HDRI: um upload por asset, compartilhado pelos objetos.
@@ -519,6 +562,7 @@ private:
     std::vector<std::pair<u64, EnvSet>> envSets_;
     usize envSetFrame_ = 0;
     SceneStats stats_{};
+    bool incomplete_ = false;
 };
 
 } // namespace aurea::scene3d

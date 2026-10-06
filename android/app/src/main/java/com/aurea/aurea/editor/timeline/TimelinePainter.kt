@@ -197,7 +197,8 @@ internal class TimelinePainter(
             }
         }
         drawRuler(w, view, ppf, cx, fps, st.pps)
-        drawMarkers(store.markers, w, view, ppf, cx)
+        drawPreviewBuffer(store.previewBufferRanges, w, view, ppf, cx)
+        drawMarkers(store.markers, w, h, view, ppf, cx)
         drawTimecode(cx, store.playhead, fps)
         if (thumbs.starved) c.requestRedraw()
         // Uma origem temporal para clipes, losangos e fio, inclusive na seleção.
@@ -205,6 +206,17 @@ internal class TimelinePainter(
         // Fio de 1 dp interrompido apenas na faixa do relógio.
         drawRect(color, Offset(playheadX - m.playhead / 2f, m.playheadTop), Size(m.playhead, h - m.playheadTop))
         drawRect(color, Offset(playheadX - m.playhead / 2f, 0f), Size(m.playhead, m.rulerTicks))
+    }
+
+    /** Completed frames only, using the same temporal axis as clips, ticks and playhead. */
+    private fun DrawScope.drawPreviewBuffer(ranges: List<com.aurea.aurea.engine.PreviewBufferRange>, w: Float,
+                                           view: Double, ppf: Float, cx: Float) {
+        val height = 3f * m.density
+        for (range in ranges) {
+            val left = TimeAxis.xOf(range.startFrame.toDouble(), view, ppf, cx).coerceAtLeast(0f)
+            val right = TimeAxis.xOf(range.endFrame.toDouble(), view, ppf, cx).coerceAtMost(w)
+            if (right > left) drawRect(Color(0xFF4DA3FF), Offset(left, m.rulerTicks - height), Size(right - left, height))
+        }
     }
 
     // --- Linhas ---------------------------------------------------------------------------
@@ -978,8 +990,8 @@ internal class TimelinePainter(
         drawPath(majorPath, AureaTimeline.TickMajor, style = majorStroke)
     }
 
-    /** Marcas na régua: triângulo no alto + fio até a base dos riscos; batidas em laranja, menores. */
-    private fun DrawScope.drawMarkers(mk: com.aurea.aurea.state.EditorStore.Markers, w: Float, view: Double, ppf: Float, cx: Float) {
+    /** Composition guides remain visible over clips even when compact controls cover the ruler. */
+    private fun DrawScope.drawMarkers(mk: com.aurea.aurea.state.EditorStore.Markers, w: Float, h: Float, view: Double, ppf: Float, cx: Float) {
         if (mk.size == 0) return
         val half = m.tickBottom * 0.28f
         for (i in 0 until mk.size) {
@@ -988,14 +1000,26 @@ internal class TimelinePainter(
             val beat = mk.kinds[i] == 1
             val c = mk.colors[i]
             val color = Color(red = (c and 0xFF) / 255f, green = ((c shr 8) and 0xFF) / 255f, blue = ((c shr 16) and 0xFF) / 255f)
-            val s = if (beat) half * 0.7f else half
+            val s = max(if (beat) half * 0.7f else half, 3.5f * m.density)
             markerPath.reset()
             markerPath.moveTo(x - s, 0f)
             markerPath.lineTo(x + s, 0f)
             markerPath.lineTo(x, s * 1.4f)
             markerPath.close()
             drawPath(markerPath, color)
-            drawLine(color, Offset(x, s * 1.4f), Offset(x, m.tickBottom), strokeWidth = if (beat) 1f else 1.5f * m.density)
+            drawLine(color, Offset(x, s * 1.4f), Offset(x, m.tickBottom), strokeWidth = m.density)
+            if (h > m.rowsTop) {
+                // Draw after the clips, using the same time axis; never filter
+                // this by selected rows, audio visibility or compact mode.
+                drawLine(Color.Black.copy(alpha = .35f), Offset(x, m.rowsTop), Offset(x, h), strokeWidth = 3f * m.density)
+                drawLine(color.copy(alpha = .7f), Offset(x, m.rowsTop), Offset(x, h), strokeWidth = m.density)
+                markerPath.reset()
+                markerPath.moveTo(x - s, m.rowsTop)
+                markerPath.lineTo(x + s, m.rowsTop)
+                markerPath.lineTo(x, m.rowsTop + s * 1.4f)
+                markerPath.close()
+                drawPath(markerPath, color)
+            }
         }
     }
     private val markerPath = androidx.compose.ui.graphics.Path()

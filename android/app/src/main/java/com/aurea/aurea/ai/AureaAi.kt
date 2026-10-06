@@ -135,22 +135,30 @@ class AureaAiState(
                 try {
                     val t = withContext(Dispatchers.IO) { provedor.ticket(s.pedido) }
                     Log.i(TAG, "[AUREA AI] ticket = ok")
-                    aoTicket(t)
+                    if (s.generationId == sessaoAtualId) aoTicket(t)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: FalhaDeVideo) {
                     Log.w(TAG, "[AUREA AI] ticket recusado: ${e.codigo}")
-                    aoFalhar(e.codigo)
+                    if (s.generationId == sessaoAtualId) aoFalhar(e.codigo)
+                } catch (e: Exception) {
+                    Log.w(TAG, "[AUREA AI] ticket unavailable", e)
+                    if (s.generationId == sessaoAtualId) aoFalhar("sem_conexao")
                 }
             }
         },
         amarrarAnuncio = { ticket -> AureaAdsManager.definirUsuarioDaRecompensa(ticket) },
         iniciarGeracao = { s, aoJob, aoTerminar ->
-            acompanhando?.cancel()
-            acompanhando = escopo.launch { gerarEAcompanhar(s, aoJob, aoTerminar) }
+            if (s.generationId == sessaoAtualId) {
+                val attempt = ++generationEpoch
+                acompanhando?.cancel()
+                acompanhando = escopo.launch { gerarEAcompanhar(s, attempt, aoJob, aoTerminar) }
+            }
         },
         aoMudar = { s ->
-            // Grava SEMPRE, antes de tudo: o anúncio costuma matar o processo.
-            guarda.gravar(s)
-            if (s.generationId == sessaoAtualId) {
+            if (escopo.isActive && s.generationId == sessaoAtualId) {
+                // A late callback from an older ad must not replace the current persisted job.
+                guarda.gravar(s)
                 sessao = s
                 if (s.status == SessaoStatus.Liberado || s.status == SessaoStatus.Falhou || s.status == SessaoStatus.Gerando) atualizarCota()
                 when (s.status) {
@@ -177,6 +185,7 @@ class AureaAiState(
 
     private var laco: CoroutineJob? = null
     private var acompanhando: CoroutineJob? = null
+    private var generationEpoch = 0L
     private var tentativa = 0
 
     val conectado: Boolean get() = estado.podeGerar()
@@ -201,8 +210,13 @@ class AureaAiState(
             if (tentativa == 0 && !estado.podeGerar()) estado = AureaAiEstado.Checking
             val cfg = try {
                 withContext(Dispatchers.IO) { provedor.config() }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: FalhaDeVideo) {
                 Log.w(TAG, "[AUREA AI] config: ${e.codigo}")
+                null
+            } catch (e: Exception) {
+                Log.w(TAG, "[AUREA AI] config unavailable", e)
                 null
             }
             if (cfg == null) {
@@ -224,6 +238,7 @@ class AureaAiState(
                 if (mensagem == explicarFalhaDeVideo(app, "sem_conexao") || mensagem == explicarFalhaDeVideo(app, "ia_desligada")) mensagem = ""
                 estado = if (sessao?.status == SessaoStatus.Gerando) AureaAiEstado.Generating else AureaAiEstado.Connected
                 runCatching { withContext(Dispatchers.IO) { provedor.cota() } }.onSuccess { cota = it }
+                if (!coroutineContext.isActive) return
                 retomarSePreciso()
             } else {
                 estado = AureaAiEstado.Disconnected
@@ -251,15 +266,18 @@ class AureaAiState(
             gravada.generationCompleted && gravada.result != null -> recompensa.retomar(gravada)
             gravada.generationStarted && gravada.ticket != null -> {
                 recompensa.retomar(gravada)
+                val attempt = ++generationEpoch
                 acompanhando = escopo.launch {
-                    gerarEAcompanhar(gravada, { }, { arquivo, e, repetir ->
+                    gerarEAcompanhar(gravada, attempt, { }, { arquivo, e, repetir ->
                         // A sessão foi retomada: o fim volta pelo fluxo normal.
-                        val atual = sessao ?: gravada
-                        val fim = if (e != null || arquivo == null)
-                            atual.copy(erro = e ?: "geracao_falhou", status = SessaoStatus.Falhou,
-                                podeRepetirSemAnuncio = repetir && atual.rewardEarned)
-                        else atual.copy(generationCompleted = true, result = arquivo)
-                        recompensa.retomar(fim)
+                        if (sessaoAtualId == gravada.generationId) {
+                            val atual = sessao ?: gravada
+                            val fim = if (e != null || arquivo == null)
+                                atual.copy(erro = e ?: "geracao_falhou", status = SessaoStatus.Falhou,
+                                    podeRepetirSemAnuncio = repetir && atual.rewardEarned)
+                            else atual.copy(generationCompleted = true, result = arquivo)
+                            recompensa.retomar(fim)
+                        }
                     })
                 }
             }
@@ -327,9 +345,16 @@ class AureaAiState(
      */
     private suspend fun gerarEAcompanhar(
         s: AiGenerationSession,
+        attempt: Long,
         aoJob: (String) -> Unit,
         aoTerminar: (File?, String?, Boolean) -> Unit,
     ) {
+        val trackingContext = coroutineContext
+        fun requireCurrent() {
+            if (!trackingContext.isActive || attempt != generationEpoch || s.generationId != sessaoAtualId)
+                throw kotlinx.coroutines.CancellationException("Generation tracking was replaced")
+        }
+        requireCurrent()
         val ticket = s.ticket ?: run { aoTerminar(null, "ticket_invalido", false); return }
         val inicio = System.currentTimeMillis()
         fun etapa(status: String, texto: String) = Job(
@@ -355,6 +380,7 @@ class AureaAiState(
                     }
                 }
                 Log.i(TAG, "[AUREA AI] job = $jobId")
+                requireCurrent()
                 aoJob(jobId)
             }
 
@@ -370,6 +396,7 @@ class AureaAiState(
                     delay(3000)
                     continue
                 }
+                requireCurrent()
                 estado = AureaAiEstado.Generating
                 job = Job(
                     id = j.id, status = j.status, progresso = 0.0,
@@ -400,17 +427,19 @@ class AureaAiState(
                     provedor.baixar(jobId, File(File(app.filesDir, "aurea-ai"), "$jobId.mp4"))
                 }
             } finally {
-                baixando = false
+                if (attempt == generationEpoch && s.generationId == sessaoAtualId) baixando = false
             }
             Log.i(TAG, "[AUREA AI] download = ${arquivo.length()} bytes")
             val meta = withContext(Dispatchers.IO) { metadataDoVideo(arquivo) }
                 ?: throw FalhaDeVideo("resultado_nao_e_video")
+            requireCurrent()
             job = job?.copy(status = "completed", etapa = AppText.get(app, R.string.app_ai_stage_done), resultado = meta)
             estado = AureaAiEstado.Connected
             aoTerminar(arquivo, null, false)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: FalhaDeVideo) {
+            requireCurrent()
             Log.w(TAG, "[AUREA AI] falha = ${e.codigo}")
             estado = AureaAiEstado.Connected
             // Técnica (rede, provedor fora, download) = a recompensa segue valendo.
@@ -420,6 +449,7 @@ class AureaAiState(
                 e.codigo == "recompensa_pendente"
             aoTerminar(null, e.codigo, repetir)
         } catch (e: Exception) {
+            requireCurrent()
             Log.w(TAG, "[AUREA AI] falha = $e")
             estado = AureaAiEstado.Connected
             aoTerminar(null, "geracao_falhou", true)

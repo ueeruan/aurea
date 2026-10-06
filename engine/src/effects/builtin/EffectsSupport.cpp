@@ -39,9 +39,21 @@ Status single_pass(EffectBuildContext& ctx, ShaderId frag, const LayerImage& inp
     return OkStatus;
 }
 
+f32 affine_texel_density(const LayerImage& input, const Mat4& m, f32 workingDensity) noexcept {
+    const f32 current = input.texel_scale_x();
+    if (!(workingDensity > current) || !std::isfinite(workingDensity)) return current;
+    const f32 a = m.col[0].x, b = m.col[0].y, c = m.col[1].x, d = m.col[1].y;
+    const f32 det = std::fabs(a * d - b * c);
+    const f32 norm = a * a + b * b + c * c + d * d;
+    const f32 largest = std::sqrt(0.5f * (norm + std::sqrt(std::max(0.0f, norm * norm - 4.0f * det * det))));
+    const f32 smallest = largest > 0.0f ? det / largest : 0.0f;
+    if (!(smallest > 0.0f) || !std::isfinite(smallest)) return current;
+    return std::max(current, std::min(workingDensity, current / smallest));
+}
+
 Status affine_pass(EffectBuildContext& ctx, const LayerImage& input, const Mat4& m,
                    const LayerPlacement* placement, f32 opacity, const char* name, f32 margin,
-                   LayerImage& out) {
+                   LayerImage& out, f32 workingDensity) {
     const f32 a = m.col[0].x, b = m.col[0].y, c = m.col[1].x, d = m.col[1].y;
     const f32 tx = m.col[3].x, ty = m.col[3].y;
     const f32 det = a * d - b * c;
@@ -66,7 +78,7 @@ Status affine_pass(EffectBuildContext& ctx, const LayerImage& input, const Mat4&
     const Rect region = spread_region(box, 0.0f, 0.0f, placement, margin);
 
     u32 w = 0, h = 0;
-    ctx.region_size(region, input.texel_scale_x(), w, h);
+    ctx.region_size(region, affine_texel_density(input, m, workingDensity), w, h);
 
     // uv de saída → ponto no plano (região) → inversa → uv de entrada.
     const f32 inv = 1.0f / det;

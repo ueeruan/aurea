@@ -27,7 +27,7 @@ layout(set = 0, binding = AUREA_TEX1) uniform sampler2D u_tex1;   // a camada co
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 uvMap;   // região do efeito → região da silhueta (identidade: mesma região)
     vec4 texel;
-    vec4 p0;      // x,y = passo por amostra, em PIXELS da camada, z = reservado, w = opacidade
+    vec4 p0;      // x,y = passo por amostra, z = só a sombra, w = opacidade
     vec4 p1;
     vec4 p2;      // mapa de uv da camada: x,y = escala, z,w = deslocamento
     vec4 p3;      // x,y = px de layer por uv da silhueta (largura, altura da região)
@@ -46,8 +46,13 @@ void main() {
         sum += texture(u_tex0, uv + axis * float(i)).a * w;
         weight += w;
     }
-    const float shadowA = (sum / max(weight, 1e-6)) * clamp(p.p0.w, 0.0, 1.0);
+    const float shadowA = (sum / max(weight, 1e-6)) * clamp(p.p0.w, 0.0, 1.0) * clamp(p.color.a, 0.0, 1.0);
     const vec4 shadow = vec4(p.color.rgb * shadowA, shadowA);
-    const vec4 layer = texture(u_tex1, v_uv * p.p2.xy + p.p2.zw);   // pré-multiplicado
+    if (p.p0.z > 0.5) { o_color = shadow; return; }
+    // The expanded region extends beyond the clip. Clamping its edge pixels
+    // would repeat opaque video over the shadow and hide it completely.
+    const vec2 layerUV = v_uv * p.p2.xy + p.p2.zw;
+    const bool inside = all(greaterThanEqual(layerUV, vec2(0.0))) && all(lessThanEqual(layerUV, vec2(1.0)));
+    const vec4 layer = inside ? texture(u_tex1, layerUV) : vec4(0.0);   // pré-multiplicado
     o_color = layer + shadow * (1.0 - layer.a);
 }

@@ -401,7 +401,7 @@ public:
 // -----------------------------------------------------------------------------
 class DropShadow final : public Effect {
 public:
-    enum : u32 { kShadowColor = 0, kOpacity, kDirection, kDistance, kSoftness };
+    enum : u32 { kShadowColor = 0, kOpacity, kDirection, kDistance, kSoftness, kShadowOnly };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kDropShadow, "Sombra projetada", "Estilizar",
@@ -416,8 +416,12 @@ public:
         p.typed_range(0.0f, 5000.0f);
         p.add_float("softness", "Suavidade", 12.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
         p.typed_range(0.0f, 5000.0f);
+        // Append only: saved parameters and their keyframe addresses stay stable.
+        p.add_bool("shadow_only", "Só a sombra", false);
     }
     bool is_identity(const EffectEval& e) const noexcept override {
+        // A zero-opacity isolated shadow is transparent, not the original clip.
+        if (e.count > kShadowOnly && e.b(kShadowOnly)) return false;
         return !(e.color(kShadowColor).w > 0.0f) || !(e.f(kOpacity) > 0.01f);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
@@ -449,7 +453,7 @@ public:
         // Direção em graus. Os passos vão em PIXELS DA CAMADA e o shader os
         // converte para uv com a densidade do que ele amostra — é o que faz a
         // mesma distância deslocar o mesmo tanto na horizontal e na vertical.
-        const f32 ang = e.f(kDirection) * kDeg2Rad;
+        const f32 ang = finite_or(e.f(kDirection), 135.0f) * kDeg2Rad;
         const f32 dx = std::cos(ang), dy = std::sin(ang);
         const f32 perStep = softness / (2.0f * 8.0f);
 
@@ -478,7 +482,7 @@ public:
         // A perpendicular é a direção girada 90°: (-dy, dx). Agora a amostra é
         // a silhueta, que já está na região do efeito — a densidade é a dela e
         // o mapa é identidade.
-        u.p0 = Vec4{-dy * perStep, dx * perStep, 0.0f,
+        u.p0 = Vec4{-dy * perStep, dx * perStep, e.count > kShadowOnly && e.b(kShadowOnly) ? 1.0f : 0.0f,
                     std::clamp(finite_or(e.f(kOpacity), 0.0f) / 100.0f, 0.0f, 1.0f)};
         u.p1 = Vec4{0.0f, 0.0f, 0.0f, 0.0f};
         u.p2 = toInput;                 // só a camada usa este mapa
@@ -490,7 +494,7 @@ public:
         if (ctx.fullscreen_pass("sombra-projetada", PassStage::Effects, result,
                                 ShaderId::effects_drop_shadow_combine_frag,
                                 {PassTexture{alpha, {}, CommonSampler::LinearClamp},
-                                 PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                 PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }

@@ -9,6 +9,8 @@ import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -842,7 +844,7 @@ class StressBattery(
      * exatos de vídeo, então o número inclui render e leitura. Não é o tempo de
      * apresentação, mas é o custo real de um quadro desta composição.
      */
-    private fun captura(maxDim: Int): Captura? {
+    private suspend fun captura(maxDim: Int): Captura? = withContext(Dispatchers.Default) {
         val tam = maxDim * maxDim * 4
         val buf = ByteBuffer.allocateDirect(tam).order(ByteOrder.nativeOrder())
         val wh = IntArray(2)
@@ -850,11 +852,11 @@ class StressBattery(
         val n = engine.captureFrame(maxDim, buf, wh)
         capturasMs += (System.currentTimeMillis() - t0).toFloat()
         if (n > 0 && engine.readOffscreenMeasure(medidaBuf)) medidas += Medida.de(medidaBuf)
-        if (n <= 0) return null
+        if (n <= 0) return@withContext null
         val bytes = ByteArray(n)
         buf.rewind()
         buf.get(bytes)
-        return Captura(bytes, wh[0], wh[1])
+        Captura(bytes, wh[0], wh[1])
     }
 
     private class Captura(val bytes: ByteArray, val w: Int, val h: Int)

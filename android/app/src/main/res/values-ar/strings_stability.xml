@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="model3d_risk_warning">قد تستنفد النماذج ثلاثية الأبعاد الثقيلة جدًا الذاكرة، وتتسبب في سخونة الجهاز أو بطئه أو إغلاق التطبيق. استخدمها على مسؤوليتك.</string>
+    <string name="preview_buffer_preparing">جارٍ تحضير المعاينة · %1$d/%2$d إطار</string>
+    <string name="preview_buffer_ready">المعاينة في الذاكرة · %1$d إطار</string>
+    <string name="preview_buffer_timeline">المعاينة المخزنة مؤقتًا: %1$d إطار</string>
+    <string name="preview_buffer_limited">معاينة جزئية في الذاكرة · %1$d إطار</string>
+    <string name="app_export_interrupted">تمت مقاطعة التصدير. حاول مجددًا.</string>
+    <string name="transform_expression_controlled">يتحكم تعبير في هذا التحويل. اضغط على = لتعديل التعبير أو تعطيله.</string>
+    <string name="fx_custom_create">إنشاء تأثير</string>
+    <string name="fx_custom_library">تأثيراتي</string>
+    <string name="fx_custom_normal">عادي</string>
+    <string name="fx_custom_advanced">متقدم</string>
+    <string name="fx_custom_save">حفظ التأثير</string>
+    <string name="fx_custom_name">اسم التأثير</string>
+    <string name="fx_custom_cancel">إلغاء</string>
+    <string name="fx_custom_normal_help">أضف تأثيرات واضبط قيمها لدمج النتيجة. يحفظ زر الحفظ مجموعة التأثيرات والإطارات الرئيسية لإعادة استخدامها، بما في ذلك على الصور.</string>
+    <string name="fx_custom_advanced_help">افتح تأثيرًا لتعديل جميع عناصر التحكم. تتضمن قائمة كل معلمة تعبيرات وإطارات رئيسية. يحفظ زر الحفظ التأثير المفتوح.</string>
+    <string name="fx_name_chroma_key_advanced">مفتاح الكروما (متقدم)</string>
+    <string name="preview_buffer_note">تخزين مؤقت تلقائي: يتم تحضير الإطارات التالية أثناء توقف التشغيل مؤقتًا.</string>
+    <string name="timeline_cut_left">يسار</string>
+    <string name="timeline_cut_right">يمين</string>
+    <string name="timeline_more">المزيد من إجراءات الخط الزمني</string>
+    <string name="timeline_cut_failed">تعذر القص. تحقق من حدود المقطع والطبقات المقفلة في المسار المغناطيسي.</string>
+    <string name="timeline_show_all">كل الطبقات</string>
+    <string name="timeline_selected_only">المحددة</string>
+    <string name="timeline_all_short">الكل</string>
+    <string name="timeline_selection_short">المحددة</string>
+</resources>
+

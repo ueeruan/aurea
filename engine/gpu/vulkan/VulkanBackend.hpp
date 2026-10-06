@@ -273,6 +273,7 @@ public:
     void end_timer() noexcept override;
     void begin_label(const char* label) noexcept override;
     void end_label() noexcept override;
+    [[nodiscard]] Status finish_pass() noexcept override;
 
     [[nodiscard]] bool in_render_pass() const noexcept { return inRenderPass_; }
     [[nodiscard]] VkCommandBuffer handle() const noexcept { return cmd_; }
@@ -298,6 +299,19 @@ private:
     u32 uniformSize_ = 0;
     VkDescriptorSet lastSet_ = VK_NULL_HANDLE;
     bool dirty_ = true;
+    // Command buffers do not inherit native state. Keep the bindings that the
+    // CommandList API permits callers to reuse across complete graph passes.
+    struct VertexBinding { VkBuffer buffer = VK_NULL_HANDLE; VkDeviceSize offset = 0; };
+    std::vector<VertexBinding> vertices_;
+    VkBuffer indexBuffer_ = VK_NULL_HANDLE;
+    VkDeviceSize indexOffset_ = 0;
+    VkIndexType indexType_ = VK_INDEX_TYPE_UINT16;
+    VkViewport viewport_{};
+    VkRect2D scissor_{};
+    bool hasViewport_ = false, hasScissor_ = false;
+    VkPipelineLayout pushLayout_ = VK_NULL_HANDLE;
+    u8 pushData_[binding::kPushConstantBytes]{};
+    u32 pushBytes_ = 0, labelDepth_ = 0;
 };
 
 // -----------------------------------------------------------------------------
@@ -311,6 +325,9 @@ struct DeferredRelease {
 struct FrameContext {
     VkCommandPool   pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer> commandBuffers;
+    u32 commandBufferCount = 0;
+    u32 passesInCommandBuffer = 0;
     VkFence         fence = VK_NULL_HANDLE;
     VkSemaphore     acquired = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> descriptorPools;
@@ -361,6 +378,7 @@ public:
     [[nodiscard]] Result<PipelineHandle> create_pipeline(const PipelineDesc& desc) noexcept override;
 
     void destroy_texture(TextureHandle h) noexcept override;
+    void retire_texture(TextureHandle h, u64 lastUsedFrame) noexcept override;
     void destroy_buffer(BufferHandle h) noexcept override;
     void destroy_sampler(SamplerHandle h) noexcept override;
     void destroy_shader(ShaderHandle h) noexcept override;
@@ -379,6 +397,7 @@ public:
 
     [[nodiscard]] Result<ExternalTexture> import_external_image(const ExternalImageDesc& img) noexcept override;
     void release_external_image(TextureHandle imported) noexcept override;
+    u32 trim_external_images() noexcept override;
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 
     void wait_idle() noexcept override;
@@ -460,18 +479,31 @@ private:
     [[nodiscard]] VkPipelineLayout pipeline_layout(u64 immutableSampler, VkDescriptorSetLayout& outSet) noexcept;
     void run_deferred(FrameContext& f) noexcept;
     void collect_timings(FrameContext& f) noexcept;
-    [[nodiscard]] Status submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*), void* ctx) noexcept;
+    [[nodiscard]] Status submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*), void* ctx,
+                                          u64 timeoutNs = 5'000'000'000ull) noexcept;
+    void collect_immediate(bool deviceIdle = false) noexcept;
     [[nodiscard]] FrameContext* deferral_target() noexcept;
     void load_pipeline_cache() noexcept;
     [[nodiscard]] bool note_device_lost(VkResult r) noexcept;
     /// Corpo comum de `begin_frame` e `begin_offscreen_frame`; `withSurface`
     /// decide se o swapchain é adquirido.
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
+    [[nodiscard]] Status fail_recording(VkResult result, const char* operation) noexcept;
+    friend class CommandListImpl;
+    friend struct BoundedCommandsTestAccess;
 
     BackendConfig config_{};
     GPUCapabilities caps_{};
     bool initialized_ = false;
     bool deviceLost_ = false;
+    // Recording failure invalidates CPU layout tracking, but is NOT device
+    // loss: older submissions must still retain their fences and resources.
+    // Stop new work until shutdown/reinitialize instead of guessing layouts.
+    Status recordingStatus_{};
+    // Adreno's Full-HD temporal 3D path stalls with 128-pass primaries even
+    // when lower-resolution frames complete. Smaller primaries preserve every
+    // pass/sample and still share one submission and one completion fence.
+    u32 passesPerCommandBuffer_ = 64;
     bool debugUtils_ = false;
     bool timersEnabled_ = false;
     f32 timestampPeriod_ = 1.0f;
@@ -533,6 +565,13 @@ private:
     u32 frameCursor_ = 0;
     u64 frameNumber_ = 0;
     FrameContext* current_ = nullptr;
+    struct PendingImmediate {
+        VkCommandPool pool = VK_NULL_HANDLE;
+        VkFence fence = VK_NULL_HANDLE;
+        std::vector<DeferredRelease> deferred;
+    };
+    std::vector<PendingImmediate> pendingImmediate_;
+    friend struct ImmediateSubmissionTestAccess;
     FrameContext* lastSubmitted_ = nullptr;
     CommandListImpl commands_;
 

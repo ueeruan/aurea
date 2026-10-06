@@ -9,4 +9,6 @@
     <string name="expfail_media">salah satu file media proyek tidak dapat dibaca</string>
     <string name="expfail_file">file video tidak dapat disimpan</string>
     <string name="expfail_unsupported">ponsel ini tidak dapat mengekspor dengan resolusi atau format ini</string>
+    <string name="expfail_stuck">ekspor berhenti berjalan selama beberapa menit dan dihentikan; tutup aplikasi lain lalu coba lagi</string>
+    <string name="app_export_safe_mode">Encoder video ponsel macet: mengekspor ulang dalam mode kompatibel (H.264, bisa lebih lama).</string>
 </resources>

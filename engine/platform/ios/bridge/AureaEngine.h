@@ -50,6 +50,7 @@ typedef struct {
     uint32_t previewNumerator;
     uint32_t previewDenominator;
     uint32_t previewAuto;
+    uint32_t previewBufferStatus;  ///< shared packed ready/target/active/limited flags
     int64_t  playhead;              ///< frame
     int64_t  duration;              ///< frames
     uint32_t playing;
@@ -197,6 +198,8 @@ typedef NS_OPTIONS(uint32_t, AureaExportFlag) {
     AureaExportFlagSoftwareEncoder = 1u << 1,
     AureaExportFlagThermalReduced  = 1u << 2,
     AureaExportFlagFrameFallback   = 1u << 3,
+    /// Export refeito no modo de segurança depois de o encoder travar.
+    AureaExportFlagSafeMode        = 1u << 4,
 };
 
 /// Códigos de codec de saída (ExportCodec).
@@ -250,6 +253,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (float)clampPinchFactor3D:(float)factor kind:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z NS_SWIFT_NAME(clampPinchFactor3D(_:kind:scaleX:scaleY:scaleZ:));
 /// Escala 3D de gesto já no formato gravado: axis 0..2 eixo, 3 uniforme, 4 ajustar (GestureMath.hpp).
 - (NSArray<NSNumber*>*)gestureScale3D:(int)kind scaleX:(float)x scaleY:(float)y scaleZ:(float)z axis:(int)axis factor:(float)factor NS_SWIFT_NAME(gestureScale3D(_:scaleX:scaleY:scaleZ:axis:factor:));
+- (NSArray<NSNumber*>*)fitCanvas:(NSArray<NSNumber*>*)values fill:(BOOL)fill NS_SWIFT_NAME(fitCanvas(_:fill:));
 - (NSArray<NSNumber*>*)previewGestureBasis:(long long)layer;
 - (NSArray<NSNumber*>*)previewGestureValue:(NSArray<NSNumber*>*)basis dx:(float)dx dy:(float)dy rotate:(BOOL)rotate;
 
@@ -274,6 +278,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)invalidate;
 /// Pressão de memória: `level` no mesmo espírito do TRIM_MEMORY_* do Android.
 - (int64_t)trimMemory:(int32_t)level;
+/// Process allocation headroom reported by iOS; zero can mean the app exceeded its limit.
+/// Simulator without an app limit uses a measured host-RAM/residency budget.
+- (uint64_t)availableMemoryBytes;
 /// Estado térmico (0 nominal … 4 crítico) vindo de NSProcessInfo.
 - (void)setThermalLevel:(uint32_t)level throttling:(BOOL)throttling;
 
@@ -298,6 +305,10 @@ NS_SWIFT_NAME(AureaEngine)
 // --- Estado -----------------------------------------------------------------
 /// `YES` se leu. Sem alocação: a UI chama isto uma vez por frame.
 - (BOOL)readStatus:(AureaStatus*)out NS_SWIFT_NAME(readStatus(_:));
+/// Pares de quadros [inicio, fim exclusivo] já renderizados na composição atual.
+/// Snapshot curto: não aguarda o renderer nem a GPU.
+- (NSArray<NSNumber*>*)previewBufferRanges NS_SWIFT_NAME(previewBufferRanges());
+- (uint32_t)localAiStatus NS_SWIFT_NAME(localAiStatus());
 /// Painel DEV: medido, nunca estimado (chaves AureaPerf*).
 - (NSDictionary<NSString*, id>*)perf;
 #if DEBUG
@@ -408,6 +419,11 @@ NS_SWIFT_NAME(AureaEngine)
 // --- Keyframes --------------------------------------------------------------
 - (void)insertKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value;
 - (void)autoKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value;
+/// Gesto de transform (0..14) com Auto-Key: o MOTOR decide com as trilhas vivas
+/// — animada ganha chave no quadro que a prévia mostra, parada muda o valor
+/// (Command.hpp kAutoKey*). `wholeGroup`: grupo XYZ do 3D animado, todo eixo
+/// ganha chave. Par do `gestureKeyframe` do CommandBatch.kt.
+- (void)gestureKeyframeForLayer:(long long)layerId property:(uint32_t)property value:(float)value wholeGroup:(BOOL)wholeGroup NS_SWIFT_NAME(gestureKeyframe(forLayer:property:value:wholeGroup:));
 - (void)deleteKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time NS_SWIFT_NAME(deleteKeyframe(forLayer:property:time:));
 - (void)moveKeyframeForLayer:(long long)layerId property:(uint32_t)property from:(int32_t)from to:(int32_t)to;
 - (void)setKeyframeValueForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value NS_SWIFT_NAME(setKeyframeValue(forLayer:property:time:value:));
@@ -433,6 +449,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)pasteEffects:(NSArray<NSNumber*>*)layerIds;
 - (void)copyStyle:(long long)layerId;
 - (void)pasteStyle:(NSArray<NSNumber*>*)layerIds;
+- (BOOL)copyTransform:(long long)layerId;
+- (uint32_t)pasteTransform:(NSArray<NSNumber*>*)layerIds;
 - (void)copyKeyframes:(long long)layerId atFrame:(int32_t)frame;
 - (uint32_t)keyframeSelection:(long long)layerId references:(NSArray<NSNumber*>*)references action:(uint32_t)action delta:(int32_t)delta;
 - (void)pasteKeyframes:(NSArray<NSNumber*>*)layerIds atFrame:(int32_t)frame;
@@ -510,6 +528,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber*>*)sceneSettings;
 - (BOOL)setSceneSetting:(uint32_t)parameter value:(float)value;
 - (BOOL)setEnvironmentBackground:(BOOL)visible;
+- (BOOL)setEnvironmentBackgroundRangeStart:(long long)start end:(long long)end;
 - (BOOL)setEnvironmentIntensity:(float)intensity rotation:(float)rotation;
 /// {tem HDRI, intensidade, giro}.
 - (NSArray<NSNumber*>*)environment;
@@ -796,12 +815,24 @@ NS_SWIFT_NAME(AureaEngine)
                duration:(float)duration stagger:(float)stagger;
 - (NSArray<NSNumber*>*)modelShadows:(long long)layerId;
 - (BOOL)setModelShadows:(long long)layerId cast:(BOOL)cast receive:(BOOL)receive;
+/// Mostrar interior (dupla face) do objeto 3D: 1 mostra, 0 não, −1 não é objeto 3D.
+- (int32_t)modelInterior:(long long)layerId;
+/// Liga/desliga o interior (um passo de desfazer).
+- (BOOL)setModelInterior:(long long)layerId on:(BOOL)on;
+/// Miniatura (bola de estúdio) do material `material` do objeto 3D, `size` ×
+/// `size` em RGBA8 sRGB com alfa reto. Pode ser chamada fora da main thread.
+- (nullable NSData*)materialPreview:(long long)layerId material:(uint32_t)material size:(uint32_t)size;
+/// A bola de um material pronto do texto 3D (0..6), no mesmo formato.
+- (nullable NSData*)text3DPresetPreview:(uint32_t)preset size:(uint32_t)size;
 - (int64_t)removeGaps;
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next;
 - (BOOL)trimComposition:(int64_t)frame;
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));
+/// [enabled, shutterAngle, shutterPhase, samples, adaptiveLimit, previewSamples].
 - (NSArray<NSNumber*>*)motionBlurSettings;
 - (void)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter;
+- (BOOL)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter phase:(float)phase
+                      samples:(uint32_t)samples adaptiveLimit:(uint32_t)adaptiveLimit;
 - (nullable NSDictionary<NSString*, id>*)composition;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectCatalog;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectsForLayer:(long long)layerId;
@@ -875,6 +906,13 @@ NS_SWIFT_NAME(AureaEngine)
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
               quality:(uint32_t)quality;
+/// `safeMode` 0..2: o modo de segurança que o motor sugeriu depois de o
+/// encoder travar (bits 16..17 de AureaExportFlags; export/ExportWatchdog.hpp).
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+              quality:(uint32_t)quality safeMode:(uint32_t)safeMode;
 /// A taxa de vídeo (bps) que o export usaria — a mesma regra do encoder, para a
 /// tela mostrar o tamanho estimado sem conta própria.
 - (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps

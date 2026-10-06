@@ -76,6 +76,8 @@ final class AiRewardFlow {
     private let startGeneration: (AiGenerationSession, @escaping (String) -> Void, @escaping Finish) -> Void
     private let onChange: (AiGenerationSession) -> Void
     private(set) var sessions: [String: AiGenerationSession] = [:]
+    private var activeSessionId: String?
+    private var activeRun = UUID()
 
     init(ads: RewardedAds,
          requestTicket: @escaping (AiGenerationSession, _ onTicket: @escaping (String) -> Void,
@@ -99,10 +101,12 @@ final class AiRewardFlow {
     @discardableResult
     func generate(_ request: AiRequest, id: String = UUID().uuidString) -> AiGenerationSession? {
         guard sessions[id] == nil else { return nil }
+        activeSessionId = id
+        activeRun = UUID()
         put(AiGenerationSession(generationId: id, request: request))
         requestTicket(sessions[id]!,
             { [weak self] ticket in
-                guard let self, var s = self.sessions[id], s.ticket == nil else { return }
+                guard let self, self.activeSessionId == id, var s = self.sessions[id], s.ticket == nil else { return }
                 s.ticket = ticket
                 self.put(s)
                 self.bindAd(ticket)
@@ -110,7 +114,7 @@ final class AiRewardFlow {
             },
             { [weak self] code in
                 // Sem ticket (limite, IA desligada, rede): nenhum anúncio, nada gerado.
-                guard let self, var s = self.sessions[id] else { return }
+                guard let self, self.activeSessionId == id, var s = self.sessions[id], s.ticket == nil else { return }
                 s.status = .failed; s.error = code; s.canRetryWithoutAd = false
                 self.put(s)
             })
@@ -120,13 +124,14 @@ final class AiRewardFlow {
     /// Põe de volta uma sessão gravada. Não pede ticket, não mostra anúncio e não gera.
     @discardableResult
     func resume(_ s: AiGenerationSession) -> AiGenerationSession {
+        activeSessionId = s.generationId
         sessions[s.generationId] = s
         return evaluate(s)
     }
 
     /// "Assistir de novo": o anúncio não veio ou fechou cedo. Mesmo ticket, mesmo pedido.
     func watchAgain(_ id: String) {
-        guard var s = sessions[id], !s.generationStarted, !s.rewardEarned,
+        guard activeSessionId == id, var s = sessions[id], !s.generationStarted, !s.rewardEarned,
               s.status == .adUnavailable || s.status == .noReward, let ticket = s.ticket else { return }
         s.status = .preparing; s.adError = nil; s.adClosedEarly = false
         put(s)
@@ -136,7 +141,7 @@ final class AiRewardFlow {
 
     /// "Tentar de novo" depois de erro técnico: mesmo ticket, SEM anúncio.
     func retryWithoutAd(_ id: String) {
-        guard var s = sessions[id], s.status == .failed, s.canRetryWithoutAd, s.rewardEarned, s.ticket != nil else { return }
+        guard activeSessionId == id, var s = sessions[id], s.status == .failed, s.canRetryWithoutAd, s.rewardEarned, s.ticket != nil else { return }
         s.jobId = nil; s.error = nil; s.canRetryWithoutAd = false; s.generationStarted = false
         start(s)
     }
@@ -148,27 +153,28 @@ final class AiRewardFlow {
     }
 
     private func noAd(_ id: String, _ e: String) {
-        guard var s = sessions[id], !s.rewardEarned, !s.generationStarted else { return }
+        guard activeSessionId == id, var s = sessions[id], !s.rewardEarned, !s.generationStarted else { return }
         s.status = .adUnavailable; s.adError = e
         put(s)
     }
 
     private func present(_ id: String) {
-        guard sessions[id] != nil else { return }
+        guard activeSessionId == id, let s = sessions[id], s.status == .preparing,
+              !s.rewardEarned, !s.generationStarted else { return }
         let shown = ads.show(
             opened: { [weak self] in
-                guard let self, var s = self.sessions[id], !s.rewardEarned else { return }
+                guard let self, self.activeSessionId == id, var s = self.sessions[id], !s.rewardEarned else { return }
                 s.status = .adShowing; s.adError = nil
                 self.put(s)
             },
             reward: { [weak self] in
                 // Um anúncio, uma geração: recompensa repetida não gera de novo.
-                guard let self, var s = self.sessions[id], !s.rewardEarned, !s.generationStarted else { return }
+                guard let self, self.activeSessionId == id, var s = self.sessions[id], !s.rewardEarned, !s.generationStarted else { return }
                 s.rewardEarned = true
                 self.start(s)
             },
             closed: { [weak self] in
-                guard let self, var s = self.sessions[id], !s.rewardEarned else { return }
+                guard let self, self.activeSessionId == id, var s = self.sessions[id], !s.rewardEarned else { return }
                 s.status = .noReward; s.adClosedEarly = true
                 self.put(s)
             },
@@ -177,16 +183,22 @@ final class AiRewardFlow {
     }
 
     private func start(_ base: AiGenerationSession) {
+        guard activeSessionId == base.generationId else { return }
+        let run = UUID()
+        activeRun = run
         var s = base
         s.generationStarted = true; s.status = .generating; s.error = nil
         put(s)
         let id = s.generationId
         startGeneration(s,
             { [weak self] job in
-                guard let self, var c = self.sessions[id] else { return }
+                guard let self, self.activeSessionId == id, self.activeRun == run, var c = self.sessions[id] else { return }
                 c.jobId = job; self.put(c)
             },
-            { [weak self] file, error, retry in self?.finished(id, file, error, retry) })
+            { [weak self] file, error, retry in
+                guard let self, self.activeSessionId == id, self.activeRun == run else { return }
+                self.finished(id, file, error, retry)
+            })
     }
 
     private func finished(_ id: String, _ file: URL?, _ error: String?, _ retry: Bool) {

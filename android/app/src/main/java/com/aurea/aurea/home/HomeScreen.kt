@@ -112,7 +112,7 @@ fun HomeScreen(store: EditorStore) {
     if (about || licenses) AlertDialog(onDismissRequest = { about = false; licenses = false },
         title = { Text(stringResource(if (licenses) R.string.licenses_title else R.string.settings_group_about)) },
         text = { Text(if (licenses) stringResource(R.string.licenses_ai_body) else
-            "Aurea ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n\n" + stringResource(R.string.settings_technology_value) + "\n\n" + stringResource(R.string.settings_made_by),
+            "Aurea Beta ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n\n" + stringResource(R.string.settings_technology_value) + "\n\n" + stringResource(R.string.settings_made_by),
             modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) },
         confirmButton = { TextButton(onClick = { about = false; licenses = false }) { Text(stringResource(R.string.editor_fechar)) } })
 }
@@ -169,7 +169,9 @@ internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> 
         .clip(RoundedCornerShape(28.dp)).background(AureaColors.Surface)
         .border(1.dp, AureaColors.Border, RoundedCornerShape(28.dp)).padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        DockUtility(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_tab_settings), "home.menu", onMenu)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            DockUtility(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_tab_settings), "home.menu", onMenu)
+        }
         DockTab(CupertinoGlyph.RectangleStack, stringResource(R.string.home_tab_projects), selected == HomeViewModel.PROJECTS_TAB,
             Modifier.weight(1f).testTag("home.projects"), onProjects)
         val createLabel = stringResource(R.string.home_new_project)

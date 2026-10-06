@@ -270,6 +270,11 @@ private val SHAPES = listOf(
     16 to R.string.sh_shape_pentagon, 15 to R.string.sh_shape_octagon, 17 to R.string.sh_shape_trapezoid,
     18 to R.string.sh_shape_parallelogram, 19 to R.string.sh_shape_star4, 20 to R.string.sh_shape_star6,
     21 to R.string.sh_shape_gear, 22 to R.string.sh_shape_double_arrow,
+    // Formas paramétricas (presets 23..32 do motor: explosão e os tipos 16..24).
+    23 to R.string.sh_shape_burst, 24 to R.string.sh_shape_line, 25 to R.string.sh_shape_diamond,
+    26 to R.string.sh_shape_heart, 27 to R.string.sh_shape_seal, 28 to R.string.sh_shape_arc,
+    29 to R.string.sh_shape_bubble, 30 to R.string.sh_shape_bolt, 31 to R.string.sh_shape_wave,
+    32 to R.string.sh_shape_blob,
 )
 
 /** Tocar põe a forma no centro da cena, já escolhida (e fecha o adicionar). */
@@ -407,6 +412,27 @@ private fun DrawScope.drawShapePreset(preset: Int) {
         }
         21 -> drawPath(com.aurea.aurea.editor.panels.gearGlyph(p(0.5f, 0.5f), s * 0.5f, 10, 0.3f), fill)
         22 -> drawPath(com.aurea.aurea.editor.panels.doubleArrowGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
+        23 -> {
+            // Explosão: estrela de 14 pontas rasas.
+            val burst = Path()
+            for (k in 0 until 28) {
+                val r = if (k % 2 == 0) 0.5f else 0.36f
+                val a = -Math.PI / 2 + k * Math.PI / 14
+                val q = p(0.5f + r * cos(a).toFloat(), 0.5f + r * sin(a).toFloat())
+                if (k == 0) burst.moveTo(q.x, q.y) else burst.lineTo(q.x, q.y)
+            }
+            burst.close()
+            drawPath(burst, fill)
+        }
+        24 -> drawRoundRect(fill, p(0f, 0.44f), Size(s, s * 0.12f), CornerRadius(s * 0.03f))
+        25 -> drawPath(com.aurea.aurea.editor.panels.diamondGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
+        26 -> drawPath(com.aurea.aurea.editor.panels.heartGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
+        27 -> drawPath(com.aurea.aurea.editor.panels.sealGlyph(p(0.5f, 0.5f), s * 0.5f, 14), fill)
+        28 -> drawArc(fill, 0f, 270f, false, p(0.1f, 0.1f), Size(s * 0.8f, s * 0.8f), style = Stroke(s * 0.2f))
+        29 -> drawPath(com.aurea.aurea.editor.panels.bubbleGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
+        30 -> drawPath(com.aurea.aurea.editor.panels.boltGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
+        31 -> drawPath(com.aurea.aurea.editor.panels.waveGlyph(p(0.5f, 0.5f), s * 0.5f, 3), fill, style = Stroke(s * 0.12f))
+        32 -> drawPath(com.aurea.aurea.editor.panels.blobGlyph(p(0.5f, 0.5f), s * 0.5f), fill)
         else -> {   // 8: seta (camada nasce 1,6 : 1)
             drawLine(fill, p(0.04f, 0.5f), p(0.66f, 0.5f), s * 0.2f, StrokeCap.Butt)
             drawPath(poly(0.6f, 0.2f, 0.98f, 0.5f, 0.6f, 0.8f), fill)
@@ -543,7 +569,7 @@ private fun Model3DTab(store: EditorStore, close: () -> Unit) {
             AddItem(stringResource(R.string.panel_camera_3d), CupertinoGlyph.CameraFill, AureaColors.Accent) { store.addCamera(); close() },
             AddItem(stringResource(R.string.sh_add_null_3d), draw = { drawNullIcon() }) { store.addNull(true); close() },
         ),
-        hint = stringResource(R.string.sh_add_model_3d_hint),
+        hint = stringResource(R.string.sh_add_model_3d_hint) + "\n\n" + stringResource(R.string.model3d_risk_warning),
     )
 }
 

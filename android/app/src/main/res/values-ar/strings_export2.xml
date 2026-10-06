@@ -9,4 +9,6 @@
     <string name="expfail_media">تعذّرت قراءة ملف وسائط في المشروع</string>
     <string name="expfail_file">تعذّر حفظ ملف الفيديو</string>
     <string name="expfail_unsupported">لا يستطيع هذا الهاتف التصدير بهذه الدقة أو هذه الصيغة</string>
+    <string name="expfail_stuck">توقف التصدير عن التقدّم لعدة دقائق فأُوقف؛ أغلق التطبيقات الأخرى وحاول مرة أخرى</string>
+    <string name="app_export_safe_mode">تجمّد مُرمّز الفيديو في الهاتف: تتم إعادة التصدير في الوضع المتوافق (H.264، قد يستغرق وقتًا أطول).</string>
 </resources>

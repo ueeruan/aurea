@@ -26,9 +26,11 @@ u64 vector_bytes(const VectorData& v) noexcept {
 u64 layer_bytes(const Layer& l) noexcept {
     u64 n = sizeof(Layer) + l.name.size();
     n += l.timeRemap.keys.size() * sizeof(Keyframe);
+    for (const Track& t : l.timeRemapLegacyTracks) n += sizeof(Track) + t.keys.size() * sizeof(Keyframe);
     for (u32 i = 0; i < l.tracks.size(); ++i) n += sizeof(Track) + l.tracks.at(i).keys.size() * sizeof(Keyframe);
     for (const EffectInstance& e : l.effects) {
         n += sizeof(EffectInstance) + e.params.size() * sizeof(ParamSlot);
+        n += e.curves.size() * sizeof(CurveData) + e.gradients.size() * sizeof(GradientData);
         for (const CurveData& c : e.curves) {
             for (const auto& ch : c.channel) n += ch.size() * sizeof(CurveData::Point);
         }
@@ -44,6 +46,11 @@ u64 layer_bytes(const Layer& l) noexcept {
         for (const auto& word : segment.words) n += sizeof(text::CaptionToken) + word.text.size();
     }
     n += l.text.spans.size() * sizeof(TextSpan) + l.text.animators.size() * sizeof(TextAnimator);
+    for (const TextAnimator& a : l.text.animators) n += a.name.size();
+    for (const LayerAnimator& a : l.layerAnimators) n += sizeof(LayerAnimator) + a.name.size();
+    n += l.rig.joints.size() * sizeof(RigJoint);
+    n += l.model.materials.size() * sizeof(MaterialOverride);
+    n += l.adjustmentTargets.size() * sizeof(LayerId);
     n += l.shape.path.size() * sizeof(Vec2) + vector_bytes(l.shape.vector);
     // Conservative accounting: shared snapshots do not allocate this again,
     // but an old snapshot may be the last owner after reanalysis.
@@ -109,20 +116,20 @@ void History::end_group() noexcept {
 }
 
 void History::before_mutation(const Composition& comp, CompositionId id, const char* label) {
-    if (groupDepth_ > 0) {
-        if (groupCaptured_) return;
-        groupCaptured_ = true;
-    }
-    // Ação nova depois de desfazer: o futuro alternativo é descartado.
-    erase_range(cursor_, entries_.size());
-
+    if (groupDepth_ > 0 && groupCaptured_) return;
+    // Allocate the complete snapshot and entry capacity before discarding redo
+    // or marking a group captured. Allocation failure leaves history untouched.
     Entry e;
     e.label = groupDepth_ > 0 && !groupLabel_.empty() ? groupLabel_ : std::string(label ? label : "");
     e.comp = id;
     e.before = comp.clone();
     e.beforeBytes = estimate_bytes(comp);
-    bytes_ += e.beforeBytes;
+    if (cursor_ == entries_.size()) entries_.reserve(entries_.size() + 1);
+    erase_range(cursor_, entries_.size());
+    const u64 addedBytes = e.beforeBytes;
     entries_.push_back(std::move(e));
+    bytes_ += addedBytes;
+    if (groupDepth_ > 0) groupCaptured_ = true;
     cursor_ = entries_.size();
     enforce_budget();
 }

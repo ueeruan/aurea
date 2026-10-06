@@ -26,6 +26,7 @@ struct BeatResult {
 };
 
 /// `mono` a 48 kHz. Menos de ~3 s ou sem ataques = resultado vazio.
-[[nodiscard]] BeatResult detect_beats(const f32* mono, usize count) noexcept;
+/// Allocations propagate to the importing/analysis boundary, which reports OOM.
+[[nodiscard]] BeatResult detect_beats(const f32* mono, usize count);
 
 } // namespace aurea::audio

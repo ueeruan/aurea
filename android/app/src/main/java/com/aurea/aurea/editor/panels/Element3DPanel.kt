@@ -15,12 +15,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -40,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -101,13 +100,16 @@ internal fun Element3DPanel(env: PanelEnv) {
                 .padding(start = 18.dp, top = 6.dp, end = 18.dp, bottom = 24.dp),
         ) {
             when (tab) {
-                Tab3D.Material -> when {
-                    text != null -> Text3DMaterialTab(env, text)
-                    shape != null -> Shape3DSection(env, shape, Shape3DPage.Material)
-                    else -> {
-                        KitTitle(stringResource(R.string.panel_material))
-                        ImportedMaterialSection(store)
+                Tab3D.Material -> {
+                    when {
+                        text != null -> Text3DMaterialTab(env, text)
+                        shape != null -> Shape3DSection(env, shape, Shape3DPage.Material)
+                        else -> {
+                            KitTitle(stringResource(R.string.panel_material))
+                            ImportedMaterialSection(store)
+                        }
                     }
+                    InteriorToggle(store)
                 }
                 Tab3D.Shape -> when {
                     text != null -> Text3DShapeTab(env, text)
@@ -193,7 +195,10 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
     KitTitle(stringResource(R.string.ui3d_ready_materials))
     ChipRow {
         (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
-            SwatchChip(stringResource(preset.labelRes), PresetSwatch[preset] ?: Color.White, Modifier.testTag("text3d.materialPreset.${preset.ordinal}")) {
+            // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
+            val thumb = rememberPresetThumb(store, preset.ordinal)
+            SwatchChip(stringResource(preset.labelRes), PresetSwatch[preset] ?: Color.White, thumb,
+                Modifier.testTag("text3d.materialPreset.${preset.ordinal}")) {
                 store.applyText3DPreset(preset)
             }
         }
@@ -343,18 +348,35 @@ private fun T3DRow(
     )
 }
 
-/** Chip com a amostra redonda da cor do material. */
+/** Chip com a bola do material (miniatura do motor; a cor chapada enquanto ela não chega). */
 @Composable
-private fun SwatchChip(label: String, swatch: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun SwatchChip(label: String, swatch: Color, thumb: ImageBitmap?, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        modifier.height(36.dp).clip(RoundedCornerShape(9.dp)).background(AureaColors.Chip)
-            .tocavel(shrink = 1f, onClick = onClick).padding(horizontal = 10.dp),
+        modifier.height(40.dp).clip(RoundedCornerShape(9.dp)).background(AureaColors.Chip)
+            .tocavel(shrink = 1f, onClick = onClick).padding(start = 5.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(16.dp).clip(CircleShape).background(swatch))
+        MaterialBall(thumb, swatch, 30.dp)
         Spacer(Modifier.width(7.dp))
         Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, color = AureaColors.Text)))
     }
+}
+
+/**
+ * MOSTRAR INTERIOR (dupla face): as faces de dentro do objeto aparecem com a
+ * mesma textura — a câmera que entra no cubo vê o lado de dentro. Ligado por
+ * padrão nas formas 3D prontas; modelo importado e texto 3D começam desligados.
+ */
+@Composable
+private fun InteriorToggle(store: EditorStore) {
+    val on by remember(store) { derivedStateOf { store.modelInterior } }
+    val current = on ?: return
+    Spacer(Modifier.height(6.dp))
+    Box(Modifier.testTag("panel3d.interior")) {
+        ToggleLine(stringResource(R.string.ui3d_show_interior), current) { store.setModelInterior(it) }
+    }
+    KitHint(stringResource(R.string.ui3d_show_interior_hint))
+    Spacer(Modifier.height(10.dp))
 }
 
 // --- Modelo importado -----------------------------------------------------------
@@ -378,10 +400,16 @@ private fun ImportedMaterialSection(store: EditorStore) {
     if (materials.isEmpty()) return
     val current = materials.firstOrNull { it[0].toInt() == selected } ?: materials.first()
     val index = current[0].toInt()
+    val layer = store.primary
     ChipRow {
         materials.forEach { material ->
             val id = material[0].toInt()
-            KitChip(stringResource(R.string.i18n_material_n, id + 1), on = id == index) { selected = id }
+            // Bola do material de verdade (cor, metal, rugosidade e a textura do
+            // arquivo), não só o nome; refeita quando a revisão ou os valores mudam.
+            val thumb = if (layer != null) rememberMaterialThumb(store, layer, id, revision to material.contentHashCode()) else null
+            val fallback = Color(material[2].coerceIn(0f, 1f), material[3].coerceIn(0f, 1f), material[4].coerceIn(0f, 1f))
+            MaterialChip(stringResource(R.string.i18n_material_n, id + 1), on = id == index, thumb = thumb, fallback = fallback,
+                modifier = Modifier.testTag("panel3d.material.$id")) { selected = id }
         }
     }
     val labels = listOf("R", "G", "B", "Alpha", stringResource(R.string.pn_t3d_metallic), stringResource(R.string.pn_t3d_roughness))
@@ -455,6 +483,27 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
         store.setEnvironment(store.environment[1], it)
     }
     ToggleLine(stringResource(R.string.environment_background), (e.getOrNull(3) ?: 0f) > .5f, store::setEnvironmentBackground)
+    if ((e.getOrNull(3) ?: 0f) > .5f && e.size >= 6) {
+        val duration = store.project.durationFrames.coerceAtLeast(1)
+        val start = e[4].toLong().coerceIn(0, (duration - 1).toLong())
+        val end = (if (e[5] < 0) duration.toLong() else e[5].toLong()).coerceIn(start + 1, duration.toLong())
+        SceneRow(env, stringResource(R.string.environment_start), start.toFloat(), 1f, 0f, (end - 1).toFloat(), "f", 0f, "ambiente") {
+            store.setEnvironmentBackgroundRange(it.toLong(), end)
+        }
+        SceneRow(env, stringResource(R.string.environment_end), end.toFloat(), 1f, (start + 1).toFloat(), duration.toFloat(), "f", duration.toFloat(), "ambiente") {
+            store.setEnvironmentBackgroundRange(start, it.toLong())
+        }
+        ChipRow {
+            KitChip(stringResource(R.string.environment_full_duration), on = start == 0L && e[5] < 0) {
+                store.setEnvironmentBackgroundRange(0, -1)
+            }
+            store.detail?.let { layer ->
+                KitChip(stringResource(R.string.environment_layer_duration), on = false) {
+                    store.setEnvironmentBackgroundRange(layer.startFrame.toLong().coerceAtLeast(0), layer.endFrame.toLong().coerceAtMost(duration.toLong()))
+                }
+            }
+        }
+    }
     KitHint(stringResource(R.string.environment_hint))
     Spacer(Modifier.height(4.dp))
     AdvancedSection(advanced, { advanced = !advanced }) {

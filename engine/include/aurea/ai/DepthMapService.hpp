@@ -7,10 +7,10 @@
 //  o export pedem pela mesma chave (asset + quadro da fonte): o mesmo quadro
 //  nunca roda a rede duas vezes enquanto está no cache.
 //
-//   - Imagem: síncrono. A rede roda na primeira vez (dezenas de ms) e o mapa
+//   - Imagem: assíncrona no preview, síncrona no export. O mapa
 //     fica no cache — a foto não muda.
-//   - Vídeo no preview: nunca bloqueia. O pedido vai para o worker (um slot:
-//     o mais recente substitui o anterior, como o seek do decoder) e o render
+//   - Vídeo no preview: nunca bloqueia. O worker mantém o pedido mais recente
+//     por fonte numa fila limitada; as fontes se alternam sem fome. O render
 //     é acordado quando o mapa fica pronto.
 //   - Vídeo no export: bloqueia até o mapa DESTE quadro existir.
 //
@@ -59,12 +59,12 @@ public:
         bool modelLoaded = false;
     };
 
-    explicit DepthMapService(std::string foregroundModel = {});
+    explicit DepthMapService(bool foreground = false);
     ~DepthMapService();
     DepthMapService(const DepthMapService&) = delete;
     DepthMapService& operator=(const DepthMapService&) = delete;
 
-    /// Imagem RGB8/RGBA8 na CPU. Síncrono; nulo se a rede não carregou.
+    /// Imagem RGB8/RGBA8: assíncrona no preview; export espera o mapa exato.
     [[nodiscard]] DepthMapPtr image(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels, bool wait = true);
 
     /// Quadro de vídeo no instante `targetUs` DA MÍDIA (já na grade da fonte;
@@ -90,11 +90,16 @@ public:
     void trim() noexcept;
 
     [[nodiscard]] Stats stats() const;
+    /// 0 idle, 1 working/queued, 2 last requested job failed. Not model readiness.
+    [[nodiscard]] u32 activity_state() noexcept;
 
     static constexpr usize kMaxCached = 48;          ///< ~12 MB de mapas
+    static constexpr usize kMaxPending = 16;          ///< bounded fair queue, one latest job per source
     static constexpr u32 kIdleReleaseMs = 30'000;    ///< rede ociosa sai da memória
 
 private:
+    friend struct DepthMapCacheTestAccess;
+    friend struct DepthMapGpuTestAccess;
     struct Job {
         u64 key = 0;
         Asset asset;          ///< cópia: o modelo pode mudar enquanto decodifica
@@ -107,6 +112,7 @@ private:
     };
 
     void thread_main() noexcept;
+    void report_failure(const char* reason) noexcept;
     /// Com `work_` travado: decodifica, infere e guarda. Nulo em falha.
     DepthMapPtr run_video_locked(const Job& job);
     DepthMapPtr run_video_raw_locked(const Job& job);
@@ -114,6 +120,7 @@ private:
     [[nodiscard]] bool ensure_model_locked();
     void enqueue(Job job);
     void insert(u64 key, DepthMapPtr map);
+    void publish_latest(u64 sourceKey, u64 key, i64 targetUs, i64 frameUs);
     [[nodiscard]] DepthMapPtr find(u64 key);
 
     // Cache (mutex_): LRU por chave.
@@ -127,7 +134,7 @@ private:
     // Trabalho (work_): a rede e o decoder só são usados sob este lock.
     std::mutex work_;
     DepthEstimator estimator_;
-    std::string foregroundModel_;
+    bool foregroundMode_ = false;
     ForegroundEstimator foreground_;
     bool modelFailed_ = false;
     std::unique_ptr<VideoDecoderBackend> decoder_;
@@ -135,14 +142,16 @@ private:
     VideoSourceFactory* decoderFactory_ = nullptr;
     i64 decoderPts_ = -1;       ///< último quadro que o decoder entregou/pulou
 
-    // Worker (queueMutex_): um slot — o pedido mais recente substitui o anterior.
+    // Worker (queueMutex_): bounded FIFO, coalescing only the same source.
     std::mutex queueMutex_;
     std::condition_variable wake_;
-    Job pending_;
-    bool hasPending_ = false;
+    std::list<Job> pending_;
+    u64 activeKey_ = 0;
+    bool hasActive_ = false;
     bool running_ = false;
     std::thread thread_;
     std::atomic<bool> cancel_{false};
+    std::atomic<bool> lastJobFailed_{false};
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
 };

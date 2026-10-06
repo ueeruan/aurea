@@ -8,6 +8,7 @@
 //  (as partes, juntas, não deixam buraco). Ver Shape3D.hpp.
 // =============================================================================
 #include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/ModelBudget.hpp"
 #include "aurea/scene3d/Text3D.hpp"   // triangulate_polygon
 
 #include "aurea/animation/Curve.hpp"
@@ -379,7 +380,7 @@ void build_diamond(std::vector<PartMesh>& parts) {
 // Imagens (cache por arquivo: trocar a cor não decodifica de novo)
 // -----------------------------------------------------------------------------
 struct CachedImage {
-    std::shared_ptr<const std::vector<u8>> rgba;
+    std::weak_ptr<const std::vector<u8>> rgba;
     u32 w = 0, h = 0;
     bool alpha = false;
     std::filesystem::file_time_type stamp{};
@@ -593,7 +594,7 @@ bool decode_shape3d(const std::string& src, Shape3DSpec& out) {
 // Imagem
 // =============================================================================
 
-bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out) {
+bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out, u64 memoryBudget) {
     if (path.empty()) return false;
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -606,8 +607,9 @@ bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out) {
     {
         std::lock_guard<std::mutex> lock(image_cache_mutex());
         const auto it = image_cache().find(key);
-        if (it != image_cache().end() && it->second.stamp == stamp && it->second.bytes == bytes) {
-            out.sharedRgba = it->second.rgba;
+        const auto cached = it == image_cache().end() ? nullptr : it->second.rgba.lock();
+        if (cached && it->second.stamp == stamp && it->second.bytes == bytes && cached->capacity() <= memoryBudget) {
+            out.sharedRgba = cached;
             out.width = it->second.w;
             out.height = it->second.h;
             out.hasAlpha = it->second.alpha;
@@ -616,9 +618,12 @@ bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out) {
             return true;
         }
     }
+    if (bytes >= memoryBudget) return false;
     std::vector<u8> file;
-    if (!fileio::read_all(path, file, 64u << 20)) return false;
+    if (!fileio::read_all(path, file, std::min<u64>(64u << 20, memoryBudget))) return false;
     int w = 0, h = 0, comp = 0;
+    if (!stbi_info_from_memory(file.data(), static_cast<int>(file.size()), &w, &h, &comp) || w <= 0 || h <= 0
+        || static_cast<u64>(w) * h > (memoryBudget - file.size()) / 16) return false;
     stbi_uc* px = stbi_load_from_memory(file.data(), static_cast<int>(file.size()), &w, &h, &comp, 4);
     if (!px || w <= 0 || h <= 0) {
         if (px) stbi_image_free(px);
@@ -629,7 +634,8 @@ bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out) {
     u32 uw = static_cast<u32>(w), uh = static_cast<u32>(h);
     halve_until(rgba, uw, uh, maxSize);
     CachedImage c;
-    c.rgba = std::make_shared<const std::vector<u8>>(std::move(rgba));
+    const auto pixels = std::make_shared<const std::vector<u8>>(std::move(rgba));
+    c.rgba = pixels;
     c.w = uw;
     c.h = uh;
     c.alpha = comp == 2 || comp == 4;
@@ -641,7 +647,7 @@ bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out) {
         if (cache.size() >= kImageCacheMax) cache.clear();
         cache[key] = c;
     }
-    out.sharedRgba = c.rgba;
+    out.sharedRgba = pixels;
     out.width = uw;
     out.height = uh;
     out.hasAlpha = c.alpha;
@@ -654,7 +660,7 @@ bool load_shape3d_image(const std::string& path, u32 maxSize, Image& out) {
 // Malha
 // =============================================================================
 
-ImportResult build_shape3d(const Shape3DSpec& in, const Shape3DPathResolver& resolve, u32 maxTextureSize) {
+ImportResult build_shape3d(const Shape3DSpec& in, const Shape3DPathResolver& resolve, u32 maxTextureSize, u64 memoryBudget) {
     Shape3DSpec spec = in;
     normalize_shape3d(spec);
     const u32 count = shape3d_part_count(spec.kind);
@@ -692,7 +698,8 @@ ImportResult build_shape3d(const Shape3DSpec& in, const Shape3DPathResolver& res
         if (!part.image.empty()) {
             Image img;
             const std::string path = resolve ? resolve(part.image) : part.image;
-            if (load_shape3d_image(path, maxTextureSize, img)) {
+            const u64 held = scene_asset_memory_bytes(*asset);
+            if (load_shape3d_image(path, maxTextureSize, img, held < memoryBudget / 2 ? memoryBudget / 2 - held : 0)) {
                 img.name = mat.name;
                 mat.baseColorTex.image = static_cast<i32>(asset->images.size());
                 asset->images.push_back(std::move(img));
@@ -725,6 +732,7 @@ ImportResult build_shape3d(const Shape3DSpec& in, const Shape3DPathResolver& res
         asset->roots.push_back(static_cast<i32>(i));
     }
     ImportOptions o;
+    o.memoryBudget = memoryBudget;
     o.generateLods = false;   // as formas já são leves; LOD mudaria a silhueta das partes
     ImportResult fin = finalize_scene_asset(std::move(asset), o);
     if (fin.ok()) fin.asset->stats.images = static_cast<u32>(fin.asset->images.size());

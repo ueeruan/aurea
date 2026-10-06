@@ -29,6 +29,9 @@
 #include "aurea/render/ShaderLibrary.hpp"
 
 #include <span>
+#include <memory>
+#include <limits>
+#include <cmath>
 
 #include <initializer_list>
 #include <vector>
@@ -97,6 +100,9 @@ struct LayerPlacement {
     /// região que o efeito devolve — o brilho (que depende dela) saía 1x1 e a
     /// camada 3D sumia.
     bool inScene3d = false;
+    /// A later tiling stage can read any part of this image, including pixels
+    /// outside the final viewport. Earlier effects must retain their bounds.
+    bool preserveFullExtent = false;
     /// Lens flare is generated in camera pixels at the projected light origin.
     bool sceneFlare = false;
     Vec2 flarePosition{};
@@ -111,12 +117,17 @@ struct LayerPlacement {
     Mat4 worldFromLayer = Mat4::identity();
     Mat4 compFromWorld = Mat4::identity();
     Mat4 previousParticleProjection = Mat4::identity(); ///< layer -> camera pixels one frame earlier
+    /// Camera pixels -> the layer's original raster plane. Keep this separate
+    /// from compFromLayer: planning appends downstream effect transforms there,
+    /// which a generated emitter must not undo. A dedicated particle sheet uses identity.
+    Mat4 particleLayerFromComp = Mat4::identity();
     Vec3 camRight{1.0f, 0.0f, 0.0f};
     Vec3 camUp{0.0f, 1.0f, 0.0f};
     /// Obturador (graus) do desfoque de movimento da camada: > 0 só com a
     /// chave da camada e o desfoque da composição ligados. O Particular usa
     /// para o rastro por partícula (a folha em si não se move).
     f32 shutterAngle = 0.0f;
+    f32 shutterPhase = 0.0f;
 };
 
 /// Retângulo, em pixels da layer, que o quadro inteiro da composição cobre
@@ -232,6 +243,8 @@ struct AudioAnalysisResult {
 class EffectResources {
 public:
     virtual ~EffectResources() = default;
+    // Equal-distance positions (xy) and tangent (z, radians), in host-layer pixels.
+    [[nodiscard]] virtual std::vector<Vec4> repeat_path(const Layer*, u32, f32) noexcept { return {}; }
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
     [[nodiscard]] virtual TextureHandle cube_lut(AssetId) noexcept { return {}; }
@@ -290,7 +303,12 @@ struct EffectEval {
     TextureHandle         aux{};
     Vec4                  auxInfo{};   ///< o que o efeito quiser anotar junto (nº de faixas...)
     i64                   foregroundSourceTimeUs = -1;
+    std::shared_ptr<const std::vector<Vec4>> pathSamples;
+    f64 fractionalTime = std::numeric_limits<f64>::quiet_NaN();
 
+    [[nodiscard]] f64 time_frames() const noexcept {
+        return std::isfinite(fractionalTime) ? fractionalTime : static_cast<f64>(localTime.value);
+    }
     [[nodiscard]] const ParamValue& value(u32 i) const noexcept { return values[i]; }
     [[nodiscard]] f32  f(u32 i) const noexcept { return values[i].v[0]; }
     [[nodiscard]] bool b(u32 i) const noexcept { return values[i].as_bool(); }
@@ -414,6 +432,10 @@ public:
         (void)eval;
         return false;
     }
+
+    /// Sampling may move source pixels outside the visible viewport back into
+    /// view. Earlier effects must preserve their full output for this reader.
+    [[nodiscard]] virtual bool needs_full_input() const noexcept { return false; }
 
     /// VALORES DE DEMONSTRAÇÃO — os que a PRÉVIA do catálogo usa (Fase 7.3
     /// §13). O vetor chega preenchido com os padrões da declaração; o efeito

@@ -49,7 +49,10 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     val context = LocalContext.current
     val token = conta.sessao()?.token.orEmpty()
     val api = remember(token, suppliedApi) { suppliedApi ?: CommunityApi(token) }
-    val scope = rememberCoroutineScope()
+    // Profile/account navigation invalidates work started by buttons too, not
+    // only the initial LaunchedEffect refresh.
+    val scope = remember(api, profileMode) { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+    DisposableEffect(scope) { onDispose { scope.cancel() } }
     var me by remember(api) { mutableStateOf<CommunityProfile?>(null) }
     var canVerify by remember(api) { mutableStateOf(false) }
     var profile by remember(api) { mutableStateOf<CommunityProfile?>(null) }
@@ -81,7 +84,7 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
         if (busy) return
         scope.launch { busy = true; error = null
             try { action() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
-            finally { busy = false }
+            finally { if (scope.isActive) busy = false }
         }
     }
     suspend fun loadFeed(more: Boolean = false) {
@@ -110,9 +113,10 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     }
     LaunchedEffect(api, profileMode) {
         profile = null; search = ""; feed = emptyList(); busy = true
-        try { refresh() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) } finally { busy = false }
+        try { refresh() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
+        finally { if (currentCoroutineContext().isActive) busy = false }
     }
-    LaunchedEffect(search) {
+    LaunchedEffect(api, profileMode, search) {
         if (search.trim().length < 2) { results = emptyList(); return@LaunchedEffect }
         delay(300)
         try { results = withContext(Dispatchers.IO) { api.request("/profiles?q=${CommunityApi.query(search.trim().removePrefix("@"))}") }.optJSONArray("items").mapObjects { it.profile() } }
@@ -264,7 +268,7 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch { busy = true
             try { photo = withContext(Dispatchers.IO) {
-                val bitmap = AureaEngine.decodeBitmapRgba(context, uri) ?: throw CommunityFailure("invalid_image")
+                val bitmap = AureaEngine.decodeBitmapRgba(context, uri, 512) ?: throw CommunityFailure("invalid_image")
                 val factor = 512f / maxOf(bitmap.width, bitmap.height); val result = Bitmap.createScaledBitmap(bitmap, (bitmap.width * factor).toInt().coerceAtLeast(1), (bitmap.height * factor).toInt().coerceAtLeast(1), true)
                 if (result !== bitmap) bitmap.recycle(); result
             } } catch (e: Exception) { error = context.getString(R.string.social_error) } finally { busy = false }

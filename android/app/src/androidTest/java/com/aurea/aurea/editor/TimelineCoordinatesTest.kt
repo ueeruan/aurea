@@ -135,6 +135,41 @@ class TimelineCoordinatesTest {
         assertPixels(frame, message)
     }
 
+    @Test fun compositionMarkersRemainVisibleOverClipsAcrossSelectionZoomAndScroll() {
+        launch(emptyList())
+        compose.runOnIdle {
+            for (frame in listOf(30, 60, 90))
+                assertTrue(store.editMarker(-1, frame, 0xFFFF00FF.toInt(), "Beat $frame"))
+        }
+        compose.waitUntil(5000) { store.markers.frames.contentEquals(intArrayOf(30, 60, 90)) }
+        for (compact in listOf(false, true)) for (selected in listOf(false, true))
+            for (zoom in listOf(20f, 80f, 800f)) {
+                compose.runOnIdle {
+                    if (selected) store.select(id, openOptions = false) else store.clearSelection()
+                    state.compact = compact
+                    state.heldView = 60.375
+                    state.pps = zoom
+                    state.scrollY = metrics.row * 3
+                }
+                compose.waitForIdle()
+                val pixels = surface().captureToImage().toPixelMap()
+                val expectedX = pixels.width / 2.0 + (60 - state.heldView) * zoom * metrics.density / 30.0
+                val firstY = (metrics.rowsTop + 12 * metrics.density).roundToInt()
+                val lastY = minOf(pixels.height - 1, (metrics.rowsTop + 120 * metrics.density).roundToInt())
+                var visibleRows = 0
+                for (y in firstY until lastY) {
+                    val painted = ((expectedX - 2 * metrics.density).toInt()..(expectedX + 2 * metrics.density).toInt()).any { x ->
+                        val c = pixels[x.coerceIn(0, pixels.width - 1), y]
+                        c.red > .55f && c.blue > .55f && c.green < .25f
+                    }
+                    if (painted) visibleRows++
+                }
+                assertTrue("Marker at frame60 must remain over the clip area: compact=$compact selected=$selected zoom=$zoom rows=$visibleRows",
+                    visibleRows >= (lastY - firstY) * .9)
+                assertArrayEquals("Selection/viewport changes must preserve markers", intArrayOf(30, 60, 90), store.markers.frames)
+            }
+    }
+
     @Test fun compactCapEndsAtTheActualStartAcrossZoomScrollMoveAndTrim() {
         launch()
         compose.runOnIdle { state.compact = true }

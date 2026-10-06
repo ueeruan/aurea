@@ -325,6 +325,7 @@ enum CaptionTranscriber {
         if let data = try? JSONEncoder().encode(words) { try? data.write(to: url, options: .atomic) }
     }
     static func prepareModel() async throws -> URL {
+        try Task.checkCancellation()
         let base = ProcessInfo.processInfo.physicalMemory >= 6 * 1024 * 1024 * 1024 && !ProcessInfo.processInfo.isLowPowerModeEnabled
         let name = base ? "base" : "tiny"
         let expected = base ? 59707625 : 32152673
@@ -336,10 +337,14 @@ enum CaptionTranscriber {
             guard (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue == expected else { return false }
             let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
             var digest = SHA256()
-            while let data = try file.read(upToCount: 65536), !data.isEmpty { digest.update(data: data) }
+            while let data = try file.read(upToCount: 65536), !data.isEmpty {
+                try Task.checkCancellation()
+                digest.update(data: data)
+            }
             return digest.finalize().map { String(format: "%02x", $0) }.joined() == hash
         }
         if (try? valid(target)) == true { return target }
+        try Task.checkCancellation()
         let remote = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(target.lastPathComponent)")!
         let (temporary, response) = try await URLSession.shared.download(from: remote)
         defer { try? FileManager.default.removeItem(at: temporary) }
@@ -396,6 +401,7 @@ struct CaptionsPanel: View {
     @State private var busy: String?
     @State private var error: String?
     @State private var job: Task<Void, Never>?
+    @State private var jobRevision = UUID()
     @State private var loading: Task<Void, Never>?
     @State private var fillers: Set<UUID> = []
     @State private var wordRevision = UUID()
@@ -533,14 +539,15 @@ struct CaptionsPanel: View {
         }
     }
     private func open() {
+        jobRevision = UUID()
         loading?.cancel(); job?.cancel(); busy = nil; error = nil; editing = nil
-        let source = path, sourceId = id
+        let source = path, sourceId = id, project = model.projectGeneration
         sourcePath = source; words = []; fillers = []; transcriptSource = nil; wordRevision = UUID()
         hasKey = !CaptionKeychain.read().isEmpty; captionCount = Int(model.engine.captionCount(sourceId))
         guard !source.isEmpty else { return }
         loading = Task {
             let cached = await Task.detached(priority: .userInitiated) { CaptionTranscriber.load(source) }.value
-            guard !Task.isCancelled, model.primarySelection == sourceId, words.isEmpty else { return }
+            guard !Task.isCancelled, model.projectGeneration == project, model.primarySelection == sourceId, words.isEmpty else { return }
             setWords(cached, from: cached.isEmpty ? nil : AureaText.t("i18n_caption_source_cache"))
         }
     }
@@ -575,34 +582,54 @@ struct CaptionsPanel: View {
         editing = nil; persist()
     }
     private func importSRT(_ result: Result<URL, Error>) {
-        let sourceId = id, engine = model.engine
+        guard busy == nil else { return }
+        let sourceId = id, engine = model.engine, project = model.projectGeneration
+        job?.cancel()
+        let revision = UUID(); jobRevision = revision
         job = Task {
             do {
                 let url = try result.get()
-                let text = try await Task.detached(priority: .userInitiated) {
+                let parsed = try await Task.detached(priority: .userInitiated) {
                     let access = url.startAccessingSecurityScopedResource()
                     defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    return try String(contentsOf: url, encoding: .utf8)
+                    let file = try FileHandle(forReadingFrom: url)
+                    defer { try? file.close() }
+                    var bytes = Data()
+                    while let chunk = try file.read(upToCount: 65_536), !chunk.isEmpty {
+                        guard bytes.count + chunk.count <= 4 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+                        bytes.append(chunk)
+                    }
+                    guard let text = String(data: bytes, encoding: .utf8) else { throw CocoaError(.fileReadInapplicableStringEncoding) }
+                    return engine.parseSRT(text).compactMap(CaptionWord.init)
                 }.value
-                let parsed = engine.parseSRT(text).compactMap(CaptionWord.init)
-                guard !Task.isCancelled, model.primarySelection == sourceId else { return }
+                guard !Task.isCancelled, jobRevision == revision, model.projectGeneration == project, model.primarySelection == sourceId else { return }
                 if parsed.isEmpty { error = AureaText.t("ios_srt_unreadable"); return }
                 error = nil; setWords(parsed, from: "SRT"); persist()
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+            } catch { if !Task.isCancelled && jobRevision == revision { self.error = error.localizedDescription } }
         }
     }
     private func transcribe() {
         guard busy == nil else { return }
-        let sourceId = id, engine = model.engine, selectedLanguage = language
+        let sourceId = id, engine = model.engine, selectedLanguage = language, project = model.projectGeneration
         guard !path.isEmpty else { error = AureaText.t("ios_no_audio_media"); return }
         busy = AureaText.t("ios_whisper_preparing"); error = nil
+        let revision = UUID(); jobRevision = revision
         job = Task {
             do {
-                let modelFile = try await Task.detached(priority: .utility) { try await CaptionTranscriber.prepareModel() }.value
+                let preparation = Task.detached(priority: .utility) { try await CaptionTranscriber.prepareModel() }
+                let modelFile = try await withTaskCancellationHandler {
+                    try await preparation.value
+                } onCancel: { preparation.cancel() }
                 try Task.checkCancellation()
+                guard jobRevision == revision, model.projectGeneration == project else { return }
+                let operation = model.beginProjectOperation()
+                defer { model.endProjectOperation(operation) }
                 busy = AureaText.t("ios_transcribing_on_device")
                 let ticker = Task { @MainActor in
-                    while !Task.isCancelled { try? await Task.sleep(nanoseconds: 400_000_000); if !Task.isCancelled { busy = "Whisper local: \(engine.captionProgress(false))%" } }
+                    while !Task.isCancelled && jobRevision == revision {
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        if !Task.isCancelled && jobRevision == revision { busy = "Whisper local: \(engine.captionProgress(false))%" }
+                    }
                 }
                 defer { ticker.cancel() }
                 let result = try await withTaskCancellationHandler {
@@ -611,9 +638,15 @@ struct CaptionsPanel: View {
                     }.value
                 } onCancel: { _ = engine.captionProgress(true) }
                 try Task.checkCancellation()
-                guard model.primarySelection == sourceId else { busy = nil; return }
+                guard jobRevision == revision else { return }
+                guard model.projectGeneration == project, model.primarySelection == sourceId else { busy = nil; return }
                 setWords(result, from: AureaText.t("i18n_caption_source_whisper")); busy = nil; persist(); apply()
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription }; busy = nil }
+            } catch {
+                if jobRevision == revision {
+                    if !Task.isCancelled { self.error = error.localizedDescription }
+                    busy = nil
+                }
+            }
         }
     }
     private func apply() {
@@ -622,13 +655,20 @@ struct CaptionsPanel: View {
             error = AureaText.t("ios_check_word_times"); return
         }
         persist(); model.captionOptions = options; busy = AureaText.t("ios_creating_captions"); error = nil
-        let sourceId = id, engine = model.engine, snapshot = words.map(\.native), settings = options
+        let sourceId = id, engine = model.engine, snapshot = words.map(\.native), settings = options, project = model.projectGeneration
+        let operation = model.beginProjectOperation()
+        let revision = UUID(); jobRevision = revision
         job = Task {
+            defer {
+                model.endProjectOperation(operation)
+                if jobRevision == revision { busy = nil }
+            }
             let result = await Task.detached(priority: .userInitiated) {
                 engine.createCaptions(sourceId, words: snapshot, options: settings)
             }.value
+            guard !Task.isCancelled, jobRevision == revision, model.projectGeneration == project else { return }
             model.refreshModel(force: true)
-            guard model.primarySelection == sourceId else { return }
+            guard model.primarySelection == sourceId else { busy = nil; return }
             busy = nil; error = result.isEmpty ? nil : AureaEngineText.sentence(result); captionCount = Int(engine.captionCount(sourceId))
         }
     }

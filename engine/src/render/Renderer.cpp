@@ -1,4 +1,7 @@
 #include "aurea/render/Renderer.hpp"
+#include "aurea/render/PreviewCachePolicy.hpp"
+#include "aurea/render/ShutterPlan.hpp"
+#include <bit>
 #include "aurea/timeline/GridLayout.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/audio/Audio.hpp"
@@ -15,6 +18,8 @@
 #include "aurea/text/TextAnimator.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 #include "aurea/timeline/Rig.hpp"
+#include "aurea/timeline/ShapeGeometry.hpp"
+#include "aurea/tracking/MotionGeometry.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -23,6 +28,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <new>
 
 namespace aurea {
@@ -41,6 +47,55 @@ i64 last_source_timestamp(const VideoStreamInfo& info, i64 frameUs) noexcept {
         return std::clamp<i64>(static_cast<i64>(std::llround(index*1e6/info.fps)),0,info.durationUs-1);
     }
     return std::max<i64>(0,info.durationUs-std::max<i64>(1,frameUs));
+}
+
+// Instante da fonte (us) que uma camada de vídeo pede no quadro de fonte
+// `sourceFrame` (em quadros da composição): a MESMA conta do prepare — grade
+// da fonte quando o arquivo não traz intervalos, preso ao último quadro.
+i64 video_media_us(f64 sourceFrame, f64 compFps, const VideoStreamInfo& info, i64 frameUs) noexcept {
+    i64 us = static_cast<i64>(std::llround(sourceFrame * 1e6 / compFps));
+    if (info.fps > 0.0 && !info.preciseFrameTiming) {
+        const f64 idx = std::floor(static_cast<f64>(us) * info.fps / 1e6 + 1e-3);
+        us = static_cast<i64>(std::llround(idx * 1e6 / info.fps));
+    }
+    if (info.durationUs > 0) us = std::clamp<i64>(us, 0, last_source_timestamp(info, frameUs));
+    return us;
+}
+
+// O quadro APROXIMADO `f` (o cache não tem o de `targetUs`) pode representar
+// a camada agora? Só se é um quadro que ela mostra em algum instante: nada de
+// antes do ponto de entrada nem de depois do de saída — no corte de um split
+// esse quadro é a imagem da outra metade; num seek, o keyframe de fora do
+// trecho. `direction` ≠ 0 (camada acabando de entrar, tocando ou arrastando):
+// também nada adiante do alvo no sentido em que a fonte anda — um quadro de
+// outro ponto deste clipe que sobrou no cache seria o "futuro" piscando antes
+// do começo. Exceção: o começo do arquivo (alguns têm o 1º pts > 0, e antes
+// dele não existe quadro nenhum — o 1º É a imagem do início).
+bool video_fallback_allowed(const Layer& l, const DecodedFrame& f, i64 targetUs, f64 compFps,
+                            const VideoStreamInfo& info, i64 frameUs, i32 direction) noexcept {
+    frameUs = std::max<i64>(1, frameUs);
+    const i64 half = frameUs / 2;
+    // Velocidade fixa ou animada (nunca negativa): a fonte é monotônica no
+    // trecho, as pontas bastam. A curva de tempo vai e volta: os valores dos
+    // keyframes entram também (o trecho fica, no máximo, mais largo).
+    f64 lo = l.source_frame(l.start);
+    f64 hi = l.source_frame(FrameIndex{std::max(l.start.value, l.end.value - 1)});
+    if (lo > hi) std::swap(lo, hi);
+    if (l.timeRemapEnabled) {
+        for (const Keyframe& k : l.timeRemap.keys) {
+            lo = std::min(lo, static_cast<f64>(k.value));
+            hi = std::max(hi, static_cast<f64>(k.value));
+        }
+    }
+    if (!std::isfinite(lo) || !std::isfinite(hi)) return true;
+    const i64 loUs = video_media_us(lo, compFps, info, frameUs);
+    const i64 hiUs = video_media_us(hi, compFps, info, frameUs);
+    const i64 begin = f.durationUs > 0 ? f.ptsUs : f.ptsUs - half;
+    const i64 end = f.durationUs > 0 ? f.ptsUs + f.durationUs : f.ptsUs + half + 1;
+    if (end <= loUs || begin > hiUs) return false;
+    if (direction > 0 && f.ptsUs > targetUs && f.ptsUs > 2 * frameUs) return false;
+    if (direction < 0 && end <= targetUs) return false;
+    return true;
 }
 
 /// As máscaras de canal do RGB no tempo: uma amostra contribui exatamente um
@@ -115,17 +170,9 @@ Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
          * Mat4::scale(scale) * Mat4::translation(-anchor);
 }
 
-/// Valor da trilha num instante FRACIONÁRIO: interpola entre os dois quadros
-/// vizinhos (sub-quadro do obturador). Exato para keyframe linear; nas curvas,
-/// a corda de um quadro — invisível no desfoque.
-/// `fallback` = valor parado da camada (sem keyframe); a expressão, se houver,
-/// entra pelo `value_or`.
+/// Curves, holds and expressions all evaluate at the actual exposure time.
 f32 sample_frac(const Track& tr, f64 t, f32 fallback) noexcept {
-    const f64 f = std::floor(t);
-    const f32 a = tr.value_or(FrameIndex{static_cast<i64>(f)}, fallback);
-    const f32 k = static_cast<f32>(t - f);
-    if (k <= 0.0f) return a;
-    return a + (tr.value_or(FrameIndex{static_cast<i64>(f) + 1}, fallback) - a) * k;
+    return tr.value_or_f(t, fallback);
 }
 
 /// `layer_matrix` num tempo local fracionário. Os animadores de camada (entrada,
@@ -259,10 +306,7 @@ Mat4 parenting_basis(const Layer& child, Mat4 parent, f64 local, f32* continuous
     for (const EffectInstance& effect : child.effects) {
         if (!effect.enabled || effect.type != effect_type_id(effect_keys::kParentingHelper)) continue;
         auto value = [&](u32 i) {
-            const FrameIndex frame{static_cast<i64>(std::floor(local))};
-            const f32 a = evaluate_param(child.tracks, effect, i, parameters.at(i), frame).as_float();
-            const f32 b = evaluate_param(child.tracks, effect, i, parameters.at(i), FrameIndex{frame.value + 1}).as_float();
-            return lerpf(a, b, static_cast<f32>(local - std::floor(local))) * .01f;
+            return evaluate_param_f(child.tracks, effect, i, parameters.at(i), local).as_float() * .01f;
         };
         const f32 rotation = value(0), scale = value(1);
         if (rotation == 1.f && scale == 1.f) continue;
@@ -365,16 +409,6 @@ Mat4 world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept
 
 /// Modelo 3D no instante (fracionário): mundo com a cadeia de pais e pose da
 /// animação no relógio da TIMELINE (tempo local × velocidade do clipe).
-/// Amostras do desfoque 3D no PREVIEW: cada uma é a cena inteira de novo
-/// (sombra, MSAA, pós). Com o orçamento cheio, as do preview (= export com as
-/// mesmas amostras); com o aparelho apertado, de 4 a 8. Menos de 4 vira cópias
-/// sobrepostas; 16 cenas por quadro travavam o celular tocando.
-u32 scene_blur_preview_samples(const MotionBlurSettings& mb, const RenderSettings& settings) noexcept {
-    const f32 h = std::clamp(settings.heavyScale, 0.1f, 1.0f);
-    const u32 k = static_cast<u32>(static_cast<f32>(mb.previewSamples) * h);
-    return std::clamp<u32>(k, 4u, h >= 0.999f ? 64u : 8u);
-}
-
 void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAsset& asset, f64 time,
                  scene3d::SceneInstance& inst) {
     inst.world = world_3d_frac(comp, l, time) * layer_from_model(l.model);
@@ -440,6 +474,32 @@ struct CameraPassThrough {
 };
 thread_local CameraPassThrough g_cameraPassThrough;
 
+bool has_active_camera(const Composition& comp, FrameIndex time) noexcept {
+    const auto& order = comp.order();
+    for (u32 i = 0; i < order.size(); ++i) {
+        const Layer* l = comp.layer(order.at(i));
+        if (l && l->kind == LayerKind::Camera && l->camera.active && l->visible && l->contains_time(time)) return true;
+    }
+    return false;
+}
+
+// Projected particles are rasterized back into the source plane. Keep this
+// inverse separate from effects appended later to compFromLayer, so those
+// effects still transform the generated pixels exactly once.
+bool inverse_particle_plane(const Mat4& matrix, Mat4& inverse) noexcept {
+    const tracking::Homography plane{{matrix.col[0].x, matrix.col[1].x, matrix.col[3].x,
+        matrix.col[0].y, matrix.col[1].y, matrix.col[3].y,
+        matrix.col[0].w, matrix.col[1].w, matrix.col[3].w}};
+    tracking::Homography result;
+    if (!plane.inverse(result)) return false;
+    const auto& h = result.m;
+    inverse.col[0] = Vec4{static_cast<f32>(h[0]), static_cast<f32>(h[3]), 0, static_cast<f32>(h[6])};
+    inverse.col[1] = Vec4{static_cast<f32>(h[1]), static_cast<f32>(h[4]), 0, static_cast<f32>(h[7])};
+    inverse.col[2] = Vec4{0, 0, 1, 0};
+    inverse.col[3] = Vec4{static_cast<f32>(h[2]), static_cast<f32>(h[5]), 0, static_cast<f32>(h[8])};
+    return true;
+}
+
 /// Inversa de uma matriz afim (3×3 + translação); singular = identidade.
 Mat4 affine_inverse(const Mat4& m) noexcept {
     const f32 a = m.col[0].x, b = m.col[1].x, c = m.col[2].x;
@@ -468,6 +528,8 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
     const CameraPassThrough pt = g_cameraPassThrough;
     if (pt.child != &comp || !pt.parent || !pt.group) return camera_for_frac_own(comp, timeF, w, h);
     const f64 outer = pt.parentTime0 + (timeF - pt.childTime0) * pt.rate;
+    if (!has_active_camera(*pt.parent, FrameIndex{static_cast<i64>(std::floor(outer))}))
+        return camera_for_frac_own(comp, timeF, w, h);
     g_cameraPassThrough = CameraPassThrough{};   // a de fora com as regras dela
     scene3d::SceneCamera cam = camera_for_frac(*pt.parent, outer, w, h);
     g_cameraPassThrough = pt;
@@ -893,6 +955,12 @@ void Renderer::shutdown() noexcept {
 }
 
 void Renderer::forget_device() noexcept {
+    previewFrames_.clear();
+    previewCacheKey_ = 0;
+    previewCacheCapacity_ = 0;
+    previewCacheRevision_ = previewCacheComposition_ = 0;
+    previewCacheHit_ = false;
+    publish_preview_buffer_ranges();
     glyphAtlas_ = TextureHandle{};
     particleQuad_ = BufferHandle{};
     glyphAtlasGen_ = 0;
@@ -924,10 +992,18 @@ void Renderer::forget_device() noexcept {
 }
 
 void Renderer::release_project_resources() noexcept {
+    renderInstancePath_.clear();
+    nestedNamespaces_.clear();
+    nestSalt_ = 0;
     if (!backend_) return;
+    incomplete_ = false;
     // Called between frames under the engine's render mutex. Complete the old
     // project's submissions before releasing their imported images/buffers.
     backend_->wait_idle();
+    clear_preview_cache();
+    // Imported native buffers are backend caches, outside planar_/images_.
+    // Leaving them behind retained entire closed decoder pools after reload.
+    (void)backend_->trim_external_images();
     pool_.clear();
     for (auto& [k, p] : planar_) {
         for (TextureHandle& t : p.plane) if (t.valid()) backend_->destroy_texture(t);
@@ -961,6 +1037,102 @@ void Renderer::release_project_resources() noexcept {
     // Backends may defer destruction even after the first wait. Drain those
     // releases now, so the next project does not overlap the old one's VRAM.
     backend_->wait_idle();
+}
+
+void Renderer::clear_preview_cache() noexcept {
+    previewCacheRevision_ = previewCacheComposition_ = 0;
+    // Withdraw the UI snapshot before releasing any GPU resources.
+    publish_preview_buffer_ranges();
+    if (backend_) for (auto& frame : previewFrames_)
+        if (frame.texture.valid()) backend_->destroy_texture(frame.texture);
+    previewFrames_.clear();
+    previewCacheKey_ = 0;
+    previewCacheCapacity_ = 0;
+    previewCacheHit_ = false;
+}
+
+void Renderer::set_preview_cache_budget(u64 bytes) noexcept {
+    const u64 bounded = std::min<u64>(bytes, 48ull << 20);
+    if (bounded != previewCacheBudget_) clear_preview_cache();
+    previewCacheBudget_ = bounded;
+}
+
+u32 Renderer::configure_preview_cache(u32 width, u32 height, const RenderSettings& s) noexcept {
+    if (!s.previewCacheRevision || s.finalQuality || s.rawPlayback || !backend_) {
+        clear_preview_cache();
+        return 0;
+    }
+    const u32 num = std::max(1u, s.previewNumerator), den = std::max(1u, s.previewDenominator);
+    const u32 w = std::max(1u, width * num / den), h = std::max(1u, height * num / den);
+    u64 key = 1469598103934665603ull;
+    auto add = [&](u64 value) { key = (key ^ value) * 1099511628211ull; };
+    auto number = [&](f32 value) { add(std::bit_cast<u32>(value)); };
+    add(s.previewCacheRevision); add(s.previewCacheComposition); add(w); add(h);
+    add(rigSetupLayer_); add(s.sceneEditor.enabled);
+    number(s.sceneEditor.yaw); number(s.sceneEditor.pitch); number(s.sceneEditor.distance);
+    number(s.heavyScale);
+    const PreviewQuality q = effective_quality(s);
+    number(q.motionBlurSamples); number(q.flowResolution); number(q.ssao);
+    number(q.shadowResolution); number(q.particles); number(q.blurSamples); number(q.lodBias);
+    const HeavyQuality heavy = resolve_heavy(s);
+    number(heavy.particles); number(heavy.flow); number(heavy.lodBias); number(heavy.effects);
+    add(heavy.flowBlurSamples); add(heavy.shadowMapSize); add(heavy.shadowFilter);
+    add(heavy.msaaSamples); add(heavy.fxaa); add(heavy.bloomStartDiv); add(heavy.bloomLevels);
+    if (key != previewCacheKey_) { clear_preview_cache(); previewCacheKey_ = key; }
+    previewCacheRevision_ = s.previewCacheRevision;
+    previewCacheComposition_ = s.previewCacheComposition;
+    previewCacheCapacity_ = preview_cache_capacity(w, h, previewCacheBudget_);
+    return previewCacheCapacity_;
+}
+
+bool Renderer::preview_cached(FrameIndex time) const noexcept {
+    for (const auto& f : previewFrames_) if (f.time == time.value && f.complete) return true;
+    return false;
+}
+
+u32 Renderer::preview_cached_count() const noexcept {
+    return static_cast<u32>(std::count_if(previewFrames_.begin(), previewFrames_.end(),
+        [](const auto& f) { return f.complete; }));
+}
+
+void Renderer::publish_preview_buffer_ranges() noexcept {
+    // Only the render thread reads previewFrames_. Sorting/grouping is done
+    // outside the UI mutex; publication copies a fixed, tiny snapshot.
+    std::array<i64, 30> frames{};
+    u32 frameCount = 0;
+    if (previewCacheRevision_) for (const auto& frame : previewFrames_) {
+        if (frame.complete && frame.texture.valid() && frame.time >= 0
+            && frame.time < std::numeric_limits<i64>::max() && frameCount < frames.size())
+            frames[frameCount++] = frame.time;
+    }
+    std::sort(frames.begin(), frames.begin() + frameCount);
+    std::array<i64, 60> ranges{};
+    u32 rangeCount = 0;
+    for (u32 i = 0; i < frameCount; ++i) {
+        const i64 frame = frames[i];
+        if (rangeCount && frame <= ranges[rangeCount * 2 - 1])
+            ranges[rangeCount * 2 - 1] = std::max(ranges[rangeCount * 2 - 1], frame + 1);
+        else {
+            ranges[rangeCount * 2] = frame;
+            ranges[rangeCount * 2 + 1] = frame + 1;
+            ++rangeCount;
+        }
+    }
+    std::lock_guard<std::mutex> lock(previewRangesMutex_);
+    previewRangePairs_ = ranges;
+    previewRangeCount_ = rangeCount;
+    previewRangeRevision_ = previewCacheRevision_;
+    previewRangeComposition_ = previewCacheComposition_;
+}
+
+u32 Renderer::copy_preview_buffer_ranges(u64 revision, u64 composition,
+                                         i64* outPairs, u32 capacityRanges) const noexcept {
+    if (!outPairs || !capacityRanges || !revision) return 0;
+    std::lock_guard<std::mutex> lock(previewRangesMutex_);
+    if (revision != previewRangeRevision_ || composition != previewRangeComposition_) return 0;
+    const u32 count = std::min(capacityRanges, previewRangeCount_);
+    std::copy_n(previewRangePairs_.begin(), count * 2, outPairs);
+    return count;
 }
 
 PreviewQuality Renderer::effective_quality(const RenderSettings& s) noexcept {
@@ -1055,6 +1227,47 @@ bool layer_sounds_at(const Layer& l, const Project& project, FrameIndex t) noexc
 }
 
 } // namespace
+
+std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase) noexcept {
+    std::vector<Vec4> result;
+    if (!planComp_ || !host || count == 0) return result;
+    const auto& comp=*planComp_;
+    const auto& order=comp.order(); const Layer* guide=nullptr;
+    for(u32 i=1;i<order.size();++i) if(comp.layer(order.at(i))==host) { guide=comp.layer(order.at(i-1)); break; }
+    if(!guide) return result;
+    vector::Contour contour;
+    if(guide->kind==LayerKind::Shape) {
+        const auto& shape=guide->shape;
+        const Vec2 center{shape.bounds.x+shape.bounds.w*.5f,shape.bounds.y+shape.bounds.h*.5f};
+        const Vec2 size{shape.bounds.w,shape.bounds.h};
+        if(shape.shapeType==kShapeVector) {
+            if(!vector::guide_contour(shape.vector,guide->tracks,double(guide->local_time(planTime_).value),contour))return result;
+        } else if(shape.shapeType==0)vector::flatten(vector::make_rect(center,size,shape.cornerRadius),.25f,contour);
+        else if(shape.shapeType==1)vector::flatten(vector::make_ellipse(center,size),.25f,contour);
+        else if(shape.shapeType==2){contour.pts=shape.path;contour.closed=shape.filled;}
+    }
+    if(contour.pts.empty()&&!guide->masks.empty()) {
+        std::vector<MaskPoint> points;std::vector<Vec4> edges;
+        const auto& mask=guide->masks.front();
+        mask::evaluate_path(mask,double(guide->local_time(planTime_).value),points);
+        mask::flatten(points,mask.closed,.25f,{},edges);
+        contour.closed=mask.closed;
+        for(const auto& edge:edges)contour.pts.push_back({edge.x,edge.y});
+        if(!mask.closed&&!edges.empty())contour.pts.push_back({edges.back().z,edges.back().w});
+    }
+    auto affine=[](const Mat4& m){return vector::Affine2{m.col[0].x,m.col[0].y,m.col[1].x,m.col[1].y,m.col[3].x,m.col[3].y};};
+    const auto toHost=affine(layer_world_matrix(comp,*host,planTime_)).inverse()*affine(layer_world_matrix(comp,*guide,planTime_));
+    for(auto& point:contour.pts)point=toHost.apply(point);
+    const double length=vector::length_of(contour); if(length<1e-6)return result;
+    count=std::min(count,64u); result.reserve(count);
+    for(u32 i=0;i<count;++i) {
+        double unit=double(i)/double(contour.closed?count:std::max(1u,count-1))+phase;
+        unit=contour.closed?unit-std::floor(unit):std::clamp(unit,0.,1.);
+        Vec2 point,tangent; if(!vector::sample_at(contour,unit*length,point,tangent))return {};
+        result.push_back({point.x,point.y,std::atan2(tangent.y,tangent.x),0});
+    }
+    return result;
+}
 
 TextureHandle Renderer::audio_spectrum(const AudioSpectrumRequest& request) noexcept {
     if (!backend_ || !planComp_ || !planProject_ || !planMedia_) return TextureHandle{};
@@ -1203,13 +1416,25 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const ImagePixels* (*lookup)(void*, AssetId);
         void* ctx;
         bool final;
-        DepthScope(Renderer& self, const ImagePixels* (*l)(void*, AssetId), void* c, bool f)
-            : r(self), lookup(self.planImageLookup_), ctx(self.planImageCtx_), final(self.planFinal_) {
-            r.planImageLookup_ = l; r.planImageCtx_ = c; r.planFinal_ = f;
+        bool defer;
+        DepthScope(Renderer& self, const ImagePixels* (*l)(void*, AssetId), void* c, bool f, bool d)
+            : r(self), lookup(self.planImageLookup_), ctx(self.planImageCtx_), final(self.planFinal_), defer(self.planDeferLocalAi_) {
+            r.planImageLookup_ = l; r.planImageCtx_ = c; r.planFinal_ = f; r.planDeferLocalAi_ = d;
         }
-        ~DepthScope() { r.planImageLookup_ = lookup; r.planImageCtx_ = ctx; r.planFinal_ = final; }
-    } depthScope{*this, imageLookup, imageCtx, settings.finalQuality};
-    if (prepareDepth_ == 0) quality_ = effective_quality(settings);
+        ~DepthScope() { r.planImageLookup_ = lookup; r.planImageCtx_ = ctx; r.planFinal_ = final; r.planDeferLocalAi_ = defer; }
+    } depthScope{*this, imageLookup, imageCtx, settings.finalQuality, settings.deferLocalAi};
+    if (prepareDepth_ == 0) {
+        CompositionId rootComposition{};
+        project.timeline().for_each_composition([&](CompositionId id, const Composition& candidate) {
+            if (&candidate == &comp) rootComposition = id;
+        });
+        renderInstancePath_.assign(1, rootComposition.pack());
+        localAiPending_ = 0;
+        quality_ = effective_quality(settings);
+        // Child snapshots and all of their uploads coexist until the same
+        // frame fence. A per-composition budget would multiply with nesting.
+        exposureBytesRemaining_ = 32ull * 1024 * 1024;
+    }
     // Fora do playback contínuo (parado, scrub, export): o que o projeto usa e
     // ainda não foi compilado entra na fila; render() compila antes do grafo.
     // No playback não varre — nada muda no modelo sem pausar.
@@ -1254,6 +1479,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                                 cam3d.fovY, static_cast<f32>(out.compWidth) / static_cast<f32>(std::max(1u, out.compHeight)),
                                 cam3d.nearZ) * cam3d.view;
     const Mat4 compFromClip = comp_from_clip(static_cast<f32>(out.compWidth), static_cast<f32>(out.compHeight));
+    const CameraPassThrough inheritedCamera = g_cameraPassThrough;
+    const bool effectCameraActive = has_active_camera(comp, time)
+        || (inheritedCamera.child == &comp && inheritedCamera.parent
+            && has_active_camera(*inheritedCamera.parent, FrameIndex{static_cast<i64>(std::floor(
+                inheritedCamera.parentTime0 + (time.value - inheritedCamera.childTime0) * inheritedCamera.rate))}));
     const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
 
     // A ORDEM DO CORE É A ORDEM DE COMPOSIÇÃO: `order()` do fundo para a
@@ -1264,7 +1494,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.scenes.clear();
     // The panorama is a bottom layer, even in a camera-only scene. Never
     // repeat it in subsequent 3D groups (which would hide lower 2D layers).
-    if (comp.environment().showBackground && (comp.environment().hdri.valid() || comp.environment().studioPreset != 0)) {
+    if (comp.environment().background_at(time) && (comp.environment().hdri.valid() || comp.environment().studioPreset != 0)) {
         out.scenes.emplace_back();
         out.scenes.back().environment.showBackground = true;
         RenderLayer sky;
@@ -1325,6 +1555,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const LayerId id = order.at(i);
         const Layer* l = comp.layer(id);
         if (!l || !l->contains_time(time)) continue;
+        if (nestSalt_ && id.index > 0xFFFFu) { incomplete_ = true; continue; }
         const bool isMatte = std::find(mattes.begin(), mattes.end(), id.pack()) != mattes.end();
         const bool isInput = std::find(inputLayers.begin(), inputLayers.end(), id.pack()) != inputLayers.end();
         if (!l->visible && !isMatte && !isInput) continue;
@@ -1462,7 +1693,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
             case LayerKind::Image: {
                 const ImagePixels* px = imageLookup ? imageLookup(imageCtx, l->source) : nullptr;
-                if (!px || !px->width || !px->height) continue;
+                if (!px || !px->width || !px->height) { incomplete_ = true; continue; }
                 rl.source.kind = LayerSource::Kind::Image;
                 rl.source.image = l->source;
                 rl.source.pixels = px;
@@ -1524,15 +1755,28 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     animated = l->shape;
                     ShapeData& a = animated;
                     pick(1, a.cornerRadius, 0.0f, 100000.0f);
-                    pick(2, a.points, 3.0f, 64.0f, true);
+                    pick(2, a.points, 1.0f, 64.0f, true);
                     pick(3, a.innerRadius, 0.05f, 0.95f);
                     pick(4, a.strokeWidth, 0.0f, 500.0f);
                     pick(5, a.bounds.w, 1.0f, 16384.0f);
                     pick(6, a.bounds.h, 1.0f, 16384.0f);
+                    // Parâmetros das formas paramétricas (7..14): a faixa é a de
+                    // shape::clamp_param. Não mexem na caixa (sem srcShift).
+                    bool paramAnimated = false;
+                    for (u32 p = shape::kParamDepth; p < shape::kParamTotal; ++p) {
+                        const Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, p);
+                        if (!tr || tr->keys.empty()) continue;
+                        if (f32* dst = shape::param_field(a, p)) {
+                            *dst = shape::clamp_param(p, tr->sample(local));
+                            paramAnimated = true;
+                        }
+                    }
                     if (shp == &animated) {
                         // O centro da forma continua na posição da camada
                         // mesmo com o tamanho animado (a âncora é parada).
                         srcShift = Vec2{a.bounds.w * 0.5f - l->transform.anchor.x, a.bounds.h * 0.5f - l->transform.anchor.y};
+                    } else if (paramAnimated) {
+                        shp = &animated;
                     }
                 }
                 const ShapeData& sh = *shp;
@@ -1598,16 +1842,22 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 rl.source.kind = LayerSource::Kind::Shape;
                 rl.source.shapeType = sh.shapeType;
-                rl.source.shapeParams = Vec4{sh.cornerRadius, sh.points, sh.innerRadius, fill ? 1.0f : 0.0f};
                 rl.source.shapeFill = premul(sh.fillColor);
                 rl.source.shapeStroke = premul(sh.strokeColor);
                 rl.source.shapeStrokeWidth = stroke ? sh.strokeWidth : 0.0f;
+                {
+                    const shape::SdfParams sp = shape::sdf_params(sh, fill, rl.source.shapeStrokeWidth);
+                    rl.source.shapeParams = sp.shape;
+                    rl.source.shapeExtra = sp.extra;
+                    rl.source.shapeMore = sp.more;
+                    rl.source.shapeBlob = sp.blob;
+                }
                 break;
             }
             case LayerKind::Model3D: {
                 std::shared_ptr<const scene3d::SceneAsset> asset =
                     modelLookup_ ? modelLookup_(modelCtx_, l->model.scene) : nullptr;
-                if (!asset) continue;   // asset ausente: a layer não desenha (a UI mostra "modelo ausente")
+                if (!asset) { incomplete_ = true; continue; }
                 scene3d::SceneInstance inst;
                 fill_object_environment(*l, inst);
                 // Matriz 3D para qualquer pai (num pai 2D comum ela é a mesma
@@ -1616,6 +1866,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 inst.layerKey = rid.pack();
                 inst.motionBlur = l->motionBlur;
                 inst.castShadows = l->model.castShadows;
+                inst.doubleSided = model_interior_visible(l->model.interior, asset->shapeParts);
                 inst.assetKey = l->model.scene.pack();
                 inst.asset = std::move(asset);
                 if (groupOpen && !out.scenes.empty()) {
@@ -1700,6 +1951,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (a.props & kTextPropScale) extra += T.size * std::max(0.0f, std::max(maxAbs(ai, text::kScaleX, a.scale.x), maxAbs(ai, text::kScaleY, a.scale.y)) / 100.0f - 1.0f);
                         if (a.props & kTextPropRotation) extra += T.size * 0.5f;
                         if (a.props & kTextPropBlur) extra += maxAbs(ai, text::kBlur, a.blur) * 2.0f;
+                        if (a.props & kTextPropStrokeWidth) extra += std::min(std::max(0.0f, strokeMax), maxAbs(ai, text::kStrokeWidth, a.strokeWidth));
                         if (a.props & kTextPropTracking) extra += maxAbs(ai, text::kTracking, a.tracking) * static_cast<f32>(std::min<usize>(T.content.size(), 200));
                     }
                     pad += std::min(extra, 4000.0f);
@@ -1735,14 +1987,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 for (usize g = 0; g < L.quads.size(); ++g) units[g] = text::GlyphUnits{L.quads[g].charIndex, L.quads[g].wordIndex, L.quads[g].lineIndex};
                 // Desfoque de movimento POR LETRA: um conjunto de glifos por instante do obturador.
                 u32 sets = 1;
-                f64 open = 0.0;
+                ShutterPlan textShutter;
                 if (animated && l->motionBlur && comp.motion_blur().enabled && comp.motion_blur().shutterAngle > 0.0f) {
                     const MotionBlurSettings& mb = comp.motion_blur();
-                    sets = std::clamp<u32>(settings.finalQuality ? mb.samples
-                                                                 : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
-                                           2u, settings.finalQuality ? 64u : 16u);
-                    open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0
-                         * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
+                    textShutter = shutter_window(mb, l->transform.motionBlurAmount);
+                    if (textShutter.duration > 0)
+                        sets = shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, 0, true);
                 }
                 // Texto no caminho: cada letra vai para o seu ponto do caminho-guia
                 // (pelo centro do avanço), girada pela tangente. O animador age
@@ -1775,6 +2025,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                 }
                 auto pathM = [&](usize g) { return onPath.empty() ? Mat4::identity() : onPath[g]; };
+                // A span or a fit-to-box layout can make individual glyphs
+                // smaller than T.size. Their distance field shrinks too; a
+                // wider stroke would turn the entire atlas cell into a box.
+                auto glyphStroke = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
+                    return std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, text::kGlyphSpread * q.k - 1.0f));
+                };
+                const bool outlinePass = stroke > 0 || animatorEffect || std::any_of(T.animators.begin(), T.animators.end(),
+                    [](const TextAnimator& a) { return a.enabled && (a.props & kTextPropStrokeWidth); });
                 std::vector<text::GlyphAnim> anim;
                 const Vec4 emptyBounds{1e30f, 1e30f, -1e30f, -1e30f};
                 std::vector<Vec4> wordBounds(std::max(1u, L.words), emptyBounds), lineBounds(std::max(1u, L.lines), emptyBounds);
@@ -1783,31 +2041,78 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     if (q.wordIndex < wordBounds.size()) extend(wordBounds[q.wordIndex]);
                     if (q.lineIndex < lineBounds.size()) extend(lineBounds[q.lineIndex]);
                 }
-                for (u32 si = 0; si < sets; ++si) {
-                    const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? ((static_cast<f64>(si) + 0.5) / static_cast<f64>(sets) - 0.5) * open : 0.0);
+                auto glyphMatrix = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
+                    f32 x0 = q.x0, x1 = q.x1, y0 = q.y0, y1 = q.y1;
+                    const Vec4* group = a.anchorGrouping == 1 && q.wordIndex < wordBounds.size() ? &wordBounds[q.wordIndex]
+                                  : a.anchorGrouping == 2 && q.lineIndex < lineBounds.size() ? &lineBounds[q.lineIndex] : nullptr;
+                    if (group) {
+                        x0 = group->x; y0 = group->y; x1 = group->z; y1 = group->w;
+                    }
+                    const Vec3 pivot{(x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 0};
+                    Mat4 m = Mat4::translation(pivot + a.translate + Vec3{a.trackingShift, 0, 0});
+                    if (a.rotation.x != 0 || a.rotation.y != 0 || a.rotation.z != 0)
+                        m = m * Mat4::from_quat(Quat::from_euler_zyx(a.rotation.x * kDeg2Rad, a.rotation.y * kDeg2Rad, a.rotation.z * kDeg2Rad));
+                    m = m * a.skewTransform;
+                    return m * Mat4::scale(Vec3{a.scale.x, a.scale.y, 1}) * Mat4::translation(-pivot);
+                };
+                std::vector<Mat4> textTransforms;
+                auto evaluateGlyphs = [&](f64 lt) {
                     text::evaluate_text_animators(T, *textTracks, lt, fps, units, L.chars, L.words, L.lines, anim);
                     if (animatorEffect) text::evaluate_animator_effects(*l, lt, fps, units, L.chars, L.words, L.lines, anim);
                     if (unitAnim) {
-                        const f32 align = T.alignment == 1 ? 0.5f : T.alignment == 2 ? 1.0f : 0.0f;
+                        const f32 align = T.alignment == 1 ? .5f : T.alignment == 2 ? 1.f : 0.f;
                         layeranim::apply_to_glyphs(*l, lt, fps, units, L.chars, L.words, L.lines, align, anim);
                     }
-                    std::vector<Mat4> textTransforms;
                     if (textEffect) text::evaluate_transform_effects(*l, *effects_, lt, L, anim, textTransforms);
-                    auto glyphMatrix = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
-                        f32 x0 = q.x0, x1 = q.x1, y0 = q.y0, y1 = q.y1;
-                        const Vec4* group = a.anchorGrouping == 1 && q.wordIndex < wordBounds.size() ? &wordBounds[q.wordIndex]
-                                          : a.anchorGrouping == 2 && q.lineIndex < lineBounds.size() ? &lineBounds[q.lineIndex] : nullptr;
-                        if (group) {
-                            x0 = group->x; y0 = group->y; x1 = group->z; y1 = group->w;
+                };
+                if (sets > 1) {
+                    std::vector<std::array<Vec2, 4>> previous(L.quads.size());
+                    std::vector<std::array<f64, 4>> distance(L.quads.size());
+                    f64 travel = 0;
+                    constexpr u32 probes = 17;
+                    for (u32 p = 0; p < probes; ++p) {
+                        const f64 unit = p == 0 || p + 1 == probes ? static_cast<f64>(p) / (probes - 1)
+                            : (p + .23 * std::sin(p * 2.399963229728653)) / (probes - 1);
+                        const f64 offset = textShutter.begin + textShutter.duration * unit;
+                        evaluateGlyphs(local.value + offset);
+                        const f64 t = time.value + offset;
+                        const Mat4 world = (wants_3d(comp, *l, time)
+                            ? (settings.sceneEditor.enabled && !settings.finalQuality
+                                ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
+                                : comp_view_projection_frac(comp, t, out.compWidth, out.compHeight)) * world_3d_frac(comp, *l, t)
+                            : world_2d_frac(comp, *l, t)) * Mat4::translation(Vec3{-srcShift.x, -srcShift.y, 0});
+                        for (usize g = 0; g < L.quads.size(); ++g) {
+                            const auto& q = L.quads[g];
+                            const Mat4 matrix = world * pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, anim[g]);
+                            const Vec4 corners[4]{{q.x0,q.y0,0,1},{q.x1,q.y0,0,1},{q.x0,q.y1,0,1},{q.x1,q.y1,0,1}};
+                            for (u32 c = 0; c < 4; ++c) {
+                                const Vec4 v = matrix * corners[c];
+                                if (!std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.w) || std::fabs(v.w) < 1e-5f) { travel = 1e6; continue; }
+                                const Vec2 point{v.x / v.w, v.y / v.w};
+                                if (p) distance[g][c] += (point - previous[g][c]).length() * previewFactor;
+                                previous[g][c] = point;
+                                travel = std::max(travel, distance[g][c]);
+                            }
                         }
-                        const Vec3 pivot{(x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 0};
-                        Mat4 m = Mat4::translation(pivot + a.translate + Vec3{a.trackingShift, 0, 0});
-                        if (a.rotation.x != 0 || a.rotation.y != 0 || a.rotation.z != 0)
-                            m = m * Mat4::from_quat(Quat::from_euler_zyx(a.rotation.x * kDeg2Rad, a.rotation.y * kDeg2Rad, a.rotation.z * kDeg2Rad));
-                        m = m * a.skewTransform;
-                        return m * Mat4::scale(Vec3{a.scale.x, a.scale.y, 1}) * Mat4::translation(-pivot);
-                    };
-                    const f32 w = 1.0f / static_cast<f32>(sets);
+                    }
+                    sets = shutter_sample_count(comp.motion_blur(), settings.finalQuality,
+                        effective_quality(settings).motionBlurSamples, travel, true);
+                }
+                // Charge the same frame allowance as 3D samples, including
+                // already prepared children. No admission means no allocation.
+                const u64 bytesPerSet = (static_cast<u64>(L.quads.size()) * (1u + (T.shadow ? 1u : 0u) + (outlinePass ? 1u : 0u)) + 1u) * sizeof(GlyphInstance);
+                const u32 admitted = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit,
+                    exposureBytesRemaining_ / std::max<u64>(1, bytesPerSet)));
+                if (admitted == 0) { incomplete_ = true; continue; }
+                if (sets > admitted) { incomplete_ = true; sets = admitted; }
+                exposureBytesRemaining_ -= bytesPerSet * sets;
+                textShutter.count = sets;
+                for (u32 si = 0; si < sets; ++si) {
+                    const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? textShutter.offset(si) : 0.0);
+                    evaluateGlyphs(lt);
+                    // Composite each instant at full opacity, then average its
+                    // premultiplied result. Weighting glyphs changes their overlap.
+                    const f32 w = 1.0f;
                     // Fundo (caixa arredondada atrás do texto): uv.x < 0 marca "sólido".
                     if (T.background && T.backgroundColor.w > 0.0f && onPath.empty()) {
                         const f32 bp = std::max(0.0f, T.backgroundPadding);
@@ -1834,11 +2139,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             gi.stroke.w *= a.opacity * w;
                             gi.xform = Mat4::translation(Vec3{T.shadowOffset.x, T.shadowOffset.y, 0}) * pathM(g)
                                 * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
-                            gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
+                            gi.misc = Vec4{0, 0, q.k, glyphStroke(q, a)};
                             gi.extra = Vec4{std::max(0.0f, T.shadowBlur) * 0.5f + a.blur, 0, 0, 0};
                             out.glyphs.push_back(gi);
                         }
                     }
+                    const usize textGlyphStart = out.glyphs.size();
                     for (usize g = 0; g < L.quads.size(); ++g) {
                         const text::GlyphQuad& q = L.quads[g];
                         const text::GlyphAnim& a = anim[g];
@@ -1860,15 +2166,30 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         gi.fill = fill;
                         gi.stroke = sc;
                         gi.xform = pathM(g) * (textEffect ? textTransforms[g] : Mat4::identity()) * glyphMatrix(q, a);
-                        gi.misc = Vec4{0, 0, q.k, std::clamp(stroke + a.strokeAdd, 0.0f, std::max(0.0f, strokeMax))};
+                        gi.misc = Vec4{0, 0, q.k, glyphStroke(q, a)};
                         gi.extra = Vec4{a.blur, 0, 0, 0};
                         out.glyphs.push_back(gi);
+                    }
+                    if (outlinePass) {
+                        // Draw every outline behind every fill. Interleaving
+                        // fill+outline per letter let the next letter's thick
+                        // outline erase part of its neighbor (kerning/script).
+                        const usize end = out.glyphs.size();
+                        for (usize gi = textGlyphStart; gi < end; ++gi) {
+                            GlyphInstance fill = out.glyphs[gi];
+                            out.glyphs[gi].fill = Vec4{};
+                            fill.stroke = Vec4{};
+                            fill.misc.w = 0;
+                            out.glyphs.push_back(fill);
+                        }
                     }
                     if (si == 0) rl.source.glyphCount = static_cast<u32>(out.glyphs.size()) - rl.source.glyphFirst;
                 }
                 rl.source.glyphSets = sets;
-                if (!onPath.empty()) {
-                    // A textura passa a ser a caixa das letras já no caminho (+ a margem).
+                if (!onPath.empty() || animated) {
+                    // Extend animated bounds without changing the original
+                    // raster grid: an opacity-only animator must not move the
+                    // glyphs to a fractional texel and filter them twice.
                     Vec2 bmin{1e30f, 1e30f}, bmax{-1e30f, -1e30f};
                     for (usize gi = rl.source.glyphFirst; gi < out.glyphs.size(); ++gi) {
                         const GlyphInstance& G = out.glyphs[gi];
@@ -1879,14 +2200,26 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         }
                     }
                     if (bmin.x <= bmax.x) {
-                        const Vec2 S{pad - bmin.x, pad - bmin.y};
+                        const bool pathBounds = !onPath.empty();
+                        const f32 left = pathBounds ? bmin.x - pad : std::floor(std::min(0.f, bmin.x));
+                        const f32 top = pathBounds ? bmin.y - pad : std::floor(std::min(0.f, bmin.y));
+                        const f64 width = std::ceil(pathBounds ? bmax.x - bmin.x + 2.0 * pad
+                            : std::max<f64>(rl.source.width, bmax.x) - left);
+                        const f64 height = std::ceil(pathBounds ? bmax.y - bmin.y + 2.0 * pad
+                            : std::max<f64>(rl.source.height, bmax.y) - top);
+                        if (!std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0
+                            || width >= std::numeric_limits<u32>::max() || height >= std::numeric_limits<u32>::max()) {
+                            incomplete_ = true;
+                            continue;
+                        }
+                        const Vec2 S{-left, -top};
                         const Mat4 st = Mat4::translation(Vec3{S.x, S.y, 0});
                         for (usize gi = rl.source.glyphFirst; gi < out.glyphs.size(); ++gi) out.glyphs[gi].xform = st * out.glyphs[gi].xform;
-                        rl.source.width = static_cast<u32>(std::ceil(bmax.x - bmin.x + 2.0f * pad));
-                        rl.source.height = static_cast<u32>(std::ceil(bmax.y - bmin.y + 2.0f * pad));
+                        rl.source.width = static_cast<u32>(width);
+                        rl.source.height = static_cast<u32>(height);
                         srcShift = srcShift + S;
-                        rl.source.textPersp.x = static_cast<f32>(rl.source.width) * 0.5f;
-                        rl.source.textPersp.y = static_cast<f32>(rl.source.height) * 0.5f;
+                        rl.source.textPersp.x = pathBounds ? rl.source.width * .5f : rl.source.textPersp.x + S.x;
+                        rl.source.textPersp.y = pathBounds ? rl.source.height * .5f : rl.source.textPersp.y + S.y;
                     }
                 }
                 break;
@@ -1988,13 +2321,28 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (cf < 0 || cf >= child->duration().value) continue;
                 auto snapChild = std::make_unique<FrameSnapshot>();
                 const u32 savedSalt = nestSalt_;
-                nestSalt_ = (savedSalt * 131u + l->nested.composition.index + 1u) & 0x3FFFu;
-                if (nestSalt_ == 0) nestSalt_ = 1;
+                const usize savedPathSize = renderInstancePath_.size();
+                renderInstancePath_.push_back(id.pack());
+                renderInstancePath_.push_back(l->nested.composition.pack());
+                auto ns = nestedNamespaces_.find(renderInstancePath_);
+                if (ns == nestedNamespaces_.end()) {
+                    // The packed format reserves 14 bits for the namespace.
+                    // Never wrap and silently alias a still-live decoder/cache.
+                    if (nestedNamespaces_.size() >= 0x3FFFu) {
+                        renderInstancePath_.resize(savedPathSize);
+                        incomplete_ = true;
+                        continue;
+                    }
+                    const u32 next = static_cast<u32>(nestedNamespaces_.size()) + 1u;
+                    ns = nestedNamespaces_.emplace(renderInstancePath_, next).first;
+                }
+                nestSalt_ = ns->second;
                 ++prepareDepth_;
                 RenderSettings childSettings = settings;
                 childSettings.sceneEditor.enabled = false;
                 const CameraPassThrough savedThrough = g_cameraPassThrough;
                 cameraThrough = l->nested.cameraPassThrough && child->width() == comp.width() && child->height() == comp.height()
+                             && has_active_camera(comp, time)
                              && !(settings.sceneEditor.enabled && !settings.finalQuality);
                 if (cameraThrough) {
                     CameraPassThrough pt;
@@ -2011,6 +2359,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 g_cameraPassThrough = savedThrough;
                 --prepareDepth_;
                 nestSalt_ = savedSalt;
+                renderInstancePath_.resize(savedPathSize);
                 frameNumber_ = frameNumber;
                 out.videoLayers += snapChild->videoLayers;
                 out.staleVideoFrames += snapChild->staleVideoFrames;
@@ -2054,6 +2403,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const Mat4 shiftM = Mat4::translation(Vec3{-srcShift.x, -srcShift.y, 0});
         const bool shifted = srcShift.x != 0.0f || srcShift.y != 0.0f;
         if (shifted) m = m * shiftM;
+        Mat4 particleLayerFromComp = Mat4::identity();
+        const bool cameraEmitter = !particularSheet && (effectCameraActive || inScene3d)
+            && std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
+                return effect.enabled && effect.type == effect_type_id(effect_keys::kParticular);
+            }) && inverse_particle_plane(m, particleLayerFromComp);
         // Transições de entrada/saída: ajuste procedural perto das bordas.
         if (l->transitionIn != 0 || l->transitionOut != 0) {
             const f32 cw = static_cast<f32>(comp.width()), chh = static_cast<f32>(comp.height());
@@ -2133,43 +2487,32 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                                              0.2f / std::max(rl.texelScale, 1e-3f), out.maskData, rl.maskStart, rl.maskKey);
         }
 
-        // Desfoque de movimento (transform 2D, com pais): K amostras no
-        // obturador centrado no quadro — a regra do After Effects: o
-        // obturador fica aberto (ângulo / 360) de um quadro, centrado nele
-        // (fase = −ângulo/2). Camada parada no intervalo = nada.
-        std::vector<Mat4> blurSamples;
-        f64 blurOpen = 0.0;
+        // Exposure starts at phase/360 and lasts angle/360 frames. Sample
+        // density follows projected motion; quality never shifts this clock.
+        ShutterPlan layerShutter = l->motionBlur && !cameraThrough
+            ? shutter_window(comp.motion_blur(), l->transform.motionBlurAmount) : ShutterPlan{};
+        rl.blurSourceTransform = shifted ? shiftM : Mat4::identity();
+        auto shutterMatrix = [&](f64 offset) {
+            const f64 ts = static_cast<f64>(time.value) + offset;
+            Mat4 matrix = wants_3d(comp, *l, time)
+                ? (settings.sceneEditor.enabled && !settings.finalQuality ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
+                    : comp_view_projection_frac(comp, ts, out.compWidth, out.compHeight)) * world_3d_frac(comp, *l, ts)
+                : world_2d_frac(comp, *l, ts);
+            return shifted ? matrix * shiftM : matrix;
+        };
         if (l->motionBlur && comp.motion_blur().enabled && !cameraThrough) {
-            const bool in3d = wants_3d(comp, *l, time);
             const MotionBlurSettings& mb = comp.motion_blur();
-            // Preview: no mínimo 6 amostras. Com o AUTO apertado sobravam 2 e a
-            // camada aparecia em DUAS cópias sobrepostas em vez de um rastro
-            // (cada amostra é só mais um desenho do mesmo quadrilátero).
-            // Plano na cena 3D: as MESMAS K amostras da cena (ver o desfoque 3D
-            // no fim do prepare), uma matriz por sub-quadro da cena.
-            const u32 k = settings.finalQuality ? std::clamp<u32>(mb.samples, 2u, 64u)
-                        : inScene3d ? scene_blur_preview_samples(mb, settings)
-                        : std::clamp<u32>(static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)), 6u, 64u);
-            // Comprimento do rastro desta camada (× o obturador da composição).
-            const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0
-                           * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
-            if (open > 0.0) {
+            // Scene planes are resampled on the group's clock below.
+            const f64 travel = shutter_projected_path(layerShutter, static_cast<f32>(rl.source.width),
+                static_cast<f32>(rl.source.height), shutterMatrix, previewFactor);
+            const u32 k = rl.source.glyphSets > 1 ? rl.source.glyphSets
+                : shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel);
+            layerShutter.count = k;
+            if (layerShutter.duration > 0.0 && k > 1) {
                 rl.blurMatrices.resize(k);
-                blurOpen = open;
-                bool moves = false;
                 for (u32 i = 0; i < k; ++i) {
-                    const f64 u = (static_cast<f64>(i) + 0.5) / static_cast<f64>(k) - 0.5;
-                    const f64 ts = static_cast<f64>(time.value) + u * open;
-                    rl.blurMatrices[i] = in3d ? (settings.sceneEditor.enabled && !settings.finalQuality ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor) : comp_view_projection_frac(comp, ts, out.compWidth, out.compHeight)) * world_3d_frac(comp, *l, ts)
-                                              : world_2d_frac(comp, *l, ts);
-                    if (shifted) rl.blurMatrices[i] = rl.blurMatrices[i] * shiftM;
-                    for (int c = 0; c < 4 && !moves; ++c) {
-                        const Vec4 d = rl.blurMatrices[i].col[c] - rl.blurMatrices[0].col[c];
-                        if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) moves = true;
-                    }
+                    rl.blurMatrices[i] = shutterMatrix(layerShutter.offset(i));
                 }
-                blurSamples = rl.blurMatrices;   // o Transform (efeito) pode mexer mesmo com a camada parada
-                if (!moves) rl.blurMatrices.clear();
             }
         }
         // Eco e RGB no tempo (transform 2D com pais, em instantes passados).
@@ -2294,69 +2637,80 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // Vai para a cena 3D (plano no mundo): o corte pela área visível da
             // composição não se aplica — ver LayerPlacement::inScene3d.
             placement.inScene3d = inScene3d;
-            if (particularSheet) {
+            if (particularSheet || cameraEmitter) {
                 placement.particleSpace = true;
-                placement.worldFromLayer = particularWorld;
+                placement.worldFromLayer = particularSheet ? particularWorld : world_3d(comp, *l, time) * shiftM;
                 placement.compFromWorld = compFromClip * viewProj3d;
+                placement.particleLayerFromComp = particleLayerFromComp;
                 const f64 previousTime = static_cast<f64>(time.value) - 1.0;
                 const Mat4 previousCamera = settings.sceneEditor.enabled && !settings.finalQuality
                     ? compFromClip * viewProj3d
                     : comp_view_projection_frac(comp, previousTime, out.compWidth, out.compHeight);
                 placement.previousParticleProjection = previousCamera * world_3d_frac(comp, *l, previousTime);
+                if (!particularSheet) placement.previousParticleProjection = placement.previousParticleProjection * shiftM;
                 // Linhas da vista = eixos da câmera no mundo.
                 const Mat4& v = cam3d.view;
                 placement.camRight = Vec3{v.col[0].x, v.col[1].x, v.col[2].x};
                 placement.camUp = Vec3{v.col[0].y, v.col[1].y, v.col[2].y};
-                rl.blurMatrices.clear();   // a folha não se move: o movimento é das partículas
-                rl.temporal.clear();
-                if (l->motionBlur && comp.motion_blur().enabled) {
+                if (particularSheet) {
+                    rl.blurMatrices.clear();   // a folha não se move: o movimento é das partículas
+                    rl.temporal.clear();
+                }
+                if (particularSheet && l->motionBlur && comp.motion_blur().enabled) {
                     placement.shutterAngle = comp.motion_blur().shutterAngle
-                                           * std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f);
+                                           * motion_blur_amount(l->transform.motionBlurAmount);
+                    placement.shutterPhase = comp.motion_blur().shutterPhase
+                                           * motion_blur_amount(l->transform.motionBlurAmount);
                 }
             }
             EffectGraph::plan(*l, *effects_, local, rl.texelScale, placement, this, out.plans[used], fps, &comp);
-            // Transform (efeito) no fim da pilha vira a matriz "dobrada": ela
-            // também anda dentro do obturador. Cada amostra leva o Transform
-            // do SEU instante (interpolado entre os quadros inteiros vizinhos,
-            // onde os parâmetros são avaliados) — antes o rastro só via o
-            // movimento do transform da camada.
-            if (!blurSamples.empty() && out.plans[used].hasFold && !inScene3d && !particularSheet && rl.temporal.empty() && !rgbOn) {
-                const u32 k = static_cast<u32>(blurSamples.size());
-                const i64 first = static_cast<i64>(std::floor(static_cast<f64>(local.value) - blurOpen * 0.5));
-                const i64 last = static_cast<i64>(std::ceil(static_cast<f64>(local.value) + blurOpen * 0.5));
-                std::vector<Mat4> folds;
-                bool ok = last - first <= 16;
-                for (i64 f = first; ok && f <= last; ++f) {
-                    if (f == local.value) { folds.push_back(out.plans[used].foldMatrix); continue; }
-                    EffectPlan at;
-                    EffectGraph::plan(*l, *effects_, FrameIndex{f}, rl.texelScale, placement, this, at, fps, &comp);
-                    folds.push_back(at.hasFold ? at.foldMatrix : Mat4::identity());
-                }
-                if (ok && !folds.empty()) {
-                    auto lerpM = [](const Mat4& a, const Mat4& b, f32 t) {
-                        Mat4 r;
-                        for (int c = 0; c < 4; ++c) r.col[c] = a.col[c] + (b.col[c] - a.col[c]) * t;
-                        return r;
-                    };
-                    bool moves = false;
-                    rl.blurMatrices.resize(k);
-                    for (u32 i = 0; i < k; ++i) {
-                        const f64 u = (static_cast<f64>(i) + 0.5) / static_cast<f64>(k) - 0.5;
-                        const f64 lt = static_cast<f64>(local.value) + u * blurOpen;
-                        const f64 rel = std::clamp(lt - static_cast<f64>(first), 0.0, static_cast<f64>(folds.size() - 1));
-                        const usize a = std::min(static_cast<usize>(rel), folds.size() - 1);
-                        const usize b = std::min(a + 1, folds.size() - 1);
-                        const Mat4 fold = lerpM(folds[a], folds[b], static_cast<f32>(rel - static_cast<f64>(a)));
-                        rl.blurMatrices[i] = blurSamples[i] * fold;
-                        for (int c = 0; c < 4 && !moves; ++c) {
-                            const Vec4 d = rl.blurMatrices[i].col[c] - rl.blurMatrices[0].col[c];
-                            if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) moves = true;
-                        }
+            // Integrate the actual parameter curves; interpolating matrices
+            // shrinks rotating objects and incorrectly anticipates Hold keys.
+            const u32 foldIndex = out.plans[used].foldEffectIndex;
+            if (layerShutter.duration > 0 && foldIndex < l->effects.size()
+                && !inScene3d && !particularSheet && rl.temporal.empty() && !rgbOn) {
+                const EffectInstance& instance = l->effects[foldIndex];
+                const Effect* effect = effects_->find(instance.type);
+                const ParameterRegistry* params = effects_->params(instance.type);
+                std::vector<ParamValue> values(params ? params->count() : 0);
+                auto matrixAt = [&](f64 offset) {
+                    Mat4 fold = Mat4::identity();
+                    if (effect && params) {
+                        for (u32 p = 0; p < params->count(); ++p)
+                            values[p] = evaluate_param_f(l->tracks, instance, p, params->at(p), local.value + offset);
+                        EffectEval eval;
+                        eval.effect = effect; eval.instance = &instance; eval.layer = l;
+                        eval.values = values.data(); eval.count = static_cast<u32>(values.size());
+                        eval.fractionalTime = local.value + offset; eval.framesPerSecond = fps;
+                        eval.localTime = FrameIndex{static_cast<i64>(std::floor(eval.fractionalTime))};
+                        eval.placement = &placement; eval.texelScale = rl.texelScale;
+                        effect->resolve_resources(eval); // e.g. integrated oscillator phase at this sample
+                        f32 opacity = 1.f;
+                        (void)effect->fold_into_composite(eval, fold, opacity);
                     }
-                    if (moves) rl.blurIncludesFold = true;
-                    else rl.blurMatrices.clear();
-                }
+                    return shutterMatrix(offset) * fold;
+                };
+                const f64 travel = shutter_projected_path(layerShutter, static_cast<f32>(rl.source.width),
+                    static_cast<f32>(rl.source.height), matrixAt, previewFactor);
+                layerShutter.count = rl.source.glyphSets > 1 ? rl.source.glyphSets
+                    : shutter_sample_count(comp.motion_blur(), settings.finalQuality,
+                        effective_quality(settings).motionBlurSamples, travel);
+                if (layerShutter.count > 1) {
+                    rl.blurMatrices.resize(layerShutter.count);
+                    for (u32 si = 0; si < layerShutter.count; ++si) rl.blurMatrices[si] = matrixAt(layerShutter.offset(si));
+                    rl.blurIncludesFold = true;
+                } else rl.blurMatrices.clear();
             }
+        }
+        if (!inScene3d) {
+            // 2D composition has no depth. A domain effect can carry Z (for
+            // its 3D orbit mode); keep XY and homogeneous W but do not let
+            // that residual Z clip the entire 2D layer outside the GPU range.
+            auto flatten = [](Mat4& matrix) { for (auto& column : matrix.col) column.z = 0.f; };
+            flatten(rl.compFromLayer);
+            for (auto& matrix : rl.blurMatrices) flatten(matrix);
+            for (auto& sample : rl.temporal) flatten(sample.m);
+            if (out.plans[used].hasFold) flatten(out.plans[used].foldMatrix);
         }
         // FORA DA TELA: a caixa da camada (com o Transform dobrado) não toca a
         // composição e nada na pilha dela pode trazer pixel para dentro (só
@@ -2478,6 +2832,26 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 bool exact = false;
                 rl.source.frame = src->frame_for(mediaUs, &exact,
                     decodeMode == DecodeMode::Playback && !settings.finalQuality ? req.direction : 0);
+                // QUADRO DE OUTRO TRECHO (o fantasma do corte): sem o exato, a
+                // fonte devolve o mais próximo que tem no cache — e na entrada
+                // de um clipe isso pode ser o keyframe do seek ou o quadro antes
+                // do ponto de entrada (no split, a imagem da PRIMEIRA metade),
+                // ou o que sobrou de outro ponto do clipe (parado lá antes do
+                // play). Ia para a tela por um instante e, depois do prazo, para
+                // o arquivo exportado. Aproximado só vale se é um quadro deste
+                // trecho e, logo depois da entrada, não está adiante do alvo.
+                // Sem candidato a camada fica sem quadro: a prévia segura a
+                // imagem inteira anterior (PreviewRefill) e o export espera.
+                if (rl.source.frame && !exact) {
+                    const bool moving = (decodeMode == DecodeMode::Playback || decodeMode == DecodeMode::Scrub)
+                                     && req.direction != 0;
+                    const i64 entryFrames = std::max<i64>(2, static_cast<i64>(std::llround(fps * 0.5)));
+                    const bool entering = moving && layerTime.value - l->start.value < entryFrames;
+                    if (!video_fallback_allowed(*l, *rl.source.frame.get(), mediaUs, fps, streamInfo,
+                                                src->frame_duration_us(), entering ? req.direction : 0)) {
+                        rl.source.frame.reset();
+                    }
+                }
                 if (nextUs >= 0) {
                     bool exactB = false;
                     FrameRef b = src->frame_for(nextUs, &exactB);
@@ -2744,78 +3118,179 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
     }
     if (!out.scenes.empty()) fill_scene_context(comp, time, out, cam3d);
-    // Desfoque de movimento 3D: cada grupo com modelo que pede desfoque vira
-    // K cenas no obturador (câmera, mundo e pose no sub-quadro). No preview
-    // cada amostra é a cena INTEIRA de novo (sombra, MSAA, pós): até 8, senão
-    // o celular travava ao tocar com o desfoque ligado. O export usa todas.
+    // A shared exposure clock, with a fixed CPU admission budget. Rigid models
+    // share their immutable pose; only deforming models need sampled geometry.
     if (!out.scenes.empty() && comp.motion_blur().enabled && comp.motion_blur().shutterAngle > 0.0f) {
         const MotionBlurSettings& mb = comp.motion_blur();
-        const u32 k = settings.finalQuality
-            ? std::clamp<u32>(mb.samples, 2u, 64u)
-            : scene_blur_preview_samples(mb, settings);
-        const f64 open = std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0;
-        auto differs = [](const Mat4& a, const Mat4& b) {
-            for (int c = 0; c < 4; ++c) {
-                const Vec4 d = a.col[c] - b.col[c];
-                if (std::fabs(d.x) + std::fabs(d.y) + std::fabs(d.z) + std::fabs(d.w) > 1e-4f) return true;
-            }
-            return false;
+        // Render ids are salted inside a precomposition. They identify GPU
+        // state, whereas the composition table still owns the original ids.
+        std::unordered_map<u64, const Layer*> sourceLayers;
+        sourceLayers.reserve(order.size());
+        for (u32 i = 0; i < order.size(); ++i) sourceLayers.emplace(render_id(order.at(i)).pack(), comp.layer(order.at(i)));
+        auto sourceLayer = [&](u64 key) -> const Layer* {
+            const auto found = sourceLayers.find(key);
+            return found == sourceLayers.end() ? nullptr : found->second;
+        };
+        u64& stateBudget = exposureBytesRemaining_;
+        auto poseBytes = [](const scene3d::SceneInstance& in) {
+            const auto& p = in.pose();
+            u64 bytes = p.nodeWorld.size() * sizeof(Mat4) + p.jointMatrices.size() * sizeof(Mat4)
+                + p.skinJointOffset.size() * sizeof(u32) + p.materials.size() * sizeof(MaterialOverride)
+                + p.nodeOpacity.size() * sizeof(f32) + p.nodeFill.size() * sizeof(Vec4)
+                + p.morphWeights.size() * sizeof(std::vector<f32>);
+            for (const auto& weights : p.morphWeights) bytes += weights.size() * sizeof(f32);
+            return bytes;
+        };
+        const auto cameraAt = [&](f64 offset) {
+            return settings.sceneEditor.enabled && !settings.finalQuality ? cam3d
+                : camera_for_frac(comp, time.value + offset, out.compWidth, out.compHeight);
+        };
+        const auto projection = [&](const scene3d::SceneCamera& camera) {
+            return camera.imageTransform * scene3d::reverse_z_perspective(camera.fovY,
+                static_cast<f32>(out.compWidth) / std::max(1u, out.compHeight), camera.nearZ) * camera.view;
         };
         for (scene3d::SceneFrame& f : out.scenes) {
             f.blurFrames.clear();
-            bool any = false;
-            for (const scene3d::SceneInstance& in : f.instances) any |= in.motionBlur;
-            // Partículas com desfoque: andam no obturador mesmo com tudo parado.
-            bool particleBlur = false;
-            for (u32 pi : f.particleLayers) particleBlur |= pi < out.layers.size() && out.layers[pi].particle.blur;
-            any |= particleBlur;
-            // Planos (camadas 2D no 3D) com desfoque: as matrizes do obturador
-            // só existem quando a camada se mexe nele (ver acima).
-            bool planeBlur = false;
-            for (u32 pi : f.planeLayers) planeBlur |= pi < out.layers.size() && !out.layers[pi].blurMatrices.empty();
-            any |= planeBlur;
-            if (!any) continue;
-            bool moves = particleBlur || planeBlur;
-            f.blurFrames.resize(k);
-            for (u32 s = 0; s < k; ++s) {
-                const f64 ts = static_cast<f64>(time.value) + ((static_cast<f64>(s) + 0.5) / static_cast<f64>(k) - 0.5) * open;
-                scene3d::SceneFrame& sf = f.blurFrames[s];
-                sf.subFrame = ts - static_cast<f64>(time.value);
-                sf.camera = settings.sceneEditor.enabled && !settings.finalQuality ? cam3d : camera_for_frac(comp, ts, out.compWidth, out.compHeight);
-                sf.lights = f.lights;
-                sf.environment = f.environment;
-                sf.post = f.post;
-                sf.instances = f.instances;
-                for (scene3d::SceneInstance& in : sf.instances) {
-                    if (!in.motionBlur) continue;
-                    const Layer* l = comp.layer(LayerId::unpack(in.layerKey));
-                    if (l && in.asset) {
-                        // The scene camera follows the composition shutter; each
-                        // object's transform and skeletal pose use its own trail
-                        // length, just like the 2D layer sampling above.
-                        const f64 layerTime = static_cast<f64>(time.value)
-                            + (ts - static_cast<f64>(time.value))
-                            * static_cast<f64>(std::clamp(l->transform.motionBlurAmount, 0.0f, 4.0f));
-                        place_model(comp, *l, *in.asset, layerTime, in);
+            ShutterPlan shutter = shutter_window(mb);
+            bool changing = false;
+            f64 travel = 0;
+            u32 minimum = 1;
+            u64 bytesPerSample = sizeof(scene3d::SceneFrame) + f.instances.size() * sizeof(scene3d::SceneInstance)
+                + f.lights.size() * sizeof(scene3d::SceneLight);
+            std::vector<bool> deforming(f.instances.size(), false);
+            for (usize i = 0; i < f.instances.size(); ++i) {
+                const auto& in = f.instances[i];
+                // Upload pools retain every submitted sample until the fence.
+                // Sharing CPU poses does not share morph vertices or joints on
+                // the GPU. Admit those bytes and graph draw/uniform state too.
+                const u64 jointBytes = in.pose().jointMatrices.size() * sizeof(Mat4);
+                if (jointBytes) bytesPerSample += std::max<u64>(4096, jointBytes);
+                if (in.asset) for (const auto& node : in.asset->nodes) {
+                    if (node.mesh < 0 || static_cast<usize>(node.mesh) >= in.asset->meshes.size()) continue;
+                    for (const auto& primitive : in.asset->meshes[static_cast<usize>(node.mesh)].primitives) {
+                        bytesPerSample += 4096; // draw lists, instance matrices, material/camera uniforms, shadow/reflection state
+                        if (!primitive.morphTargets.empty())
+                            bytesPerSample += (static_cast<u64>(primitive.positions.size()) * (sizeof(Vec3) + kMeshShadingStride) + 255u) & ~255ull;
                     }
                 }
-                if (s > 0 && !moves) {
-                    const scene3d::SceneFrame& s0 = f.blurFrames[0];
-                    moves = differs(sf.camera.view, s0.camera.view);
-                    for (usize i = 0; i < sf.instances.size() && !moves; ++i) {
-                        moves = differs(sf.instances[i].world, s0.instances[i].world);
-                        const auto& a = sf.instances[i].nodeWorld;
-                        const auto& b = s0.instances[i].nodeWorld;
-                        for (usize n = 0; n < a.size() && n < b.size() && !moves; ++n) moves = differs(a[n], b[n]);
-                    }
+                const Layer* layer = sourceLayer(in.layerKey);
+                if (!layer || !in.asset || !in.motionBlur || motion_blur_amount(layer->transform.motionBlurAmount) <= 0.f) continue;
+                deforming[i] = (layer->model.animationClip >= 0 && layer->model.animationClip < static_cast<i32>(in.asset->animations.size()))
+                    || in.asset->textGlyphLayout || in.asset->shapeParts;
+                for (u32 t = 0; t < layer->tracks.size(); ++t)
+                    if (layer->tracks.at(t).property == TrackProperty::MaterialParam && layer->tracks.at(t).animated()) deforming[i] = true;
+                changing |= deforming[i];
+                if (deforming[i]) bytesPerSample += poseBytes(in);
+                const ShutterPlan own = shutter_window(mb, layer->transform.motionBlurAmount);
+                const auto& bounds = in.asset->bounds;
+                if (!bounds.valid()) { changing = true; continue; }
+                for (f32 z : {bounds.min.z, bounds.max.z}) {
+                    const Mat4 origin = Mat4::translation(Vec3{bounds.min.x, bounds.min.y, z});
+                    travel = std::max(travel, shutter_projected_path(own, bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y,
+                        [&](f64 offset) {
+                            const Mat4 camera = settings.sceneEditor.enabled && !settings.finalQuality
+                                ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
+                                : comp_view_projection_frac(comp, time.value + offset, out.compWidth, out.compHeight);
+                            return camera * world_3d_frac(comp, *layer, time.value + offset) * layer_from_model(layer->model) * origin;
+                        }, previewFactor));
                 }
             }
-            if (!moves) f.blurFrames.clear();   // nada se mexe no obturador: uma cena só
+            for (u32 pi : f.particleLayers) if (pi < out.layers.size() && out.layers[pi].particle.blur) changing = true;
+            for (u32 pi : f.planeLayers) if (pi < out.layers.size())
+                minimum = std::max(minimum, static_cast<u32>(out.layers[pi].blurMatrices.size()));
+            const u32 admitted = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit, stateBudget / std::max<u64>(1, bytesPerSample)));
+            if (admitted < 2 && (changing || travel >= .01 || minimum > 1)) { incomplete_ = true; continue; }
+            if (settings.finalQuality && admitted < std::clamp(mb.samples, 2u, 64u)
+                && (changing || travel >= .01 || minimum > 1)) { incomplete_ = true; continue; }
+            shutter.count = std::max(minimum, shutter_sample_count(mb, settings.finalQuality,
+                effective_quality(settings).motionBlurSamples, travel, changing, admitted));
+            if (shutter.count <= 1) continue;
+            if (shutter.count > admitted) { incomplete_ = true; continue; }
+            stateBudget -= bytesPerSample * shutter.count;
+            std::vector<std::shared_ptr<const scene3d::SceneInstance>> poses;
+            poses.reserve(f.instances.size());
+            for (auto& base : f.instances) {
+                // Transfer ownership once; even the shared pose must not copy
+                // an already resident dense model's vectors for every frame.
+                auto pose = std::make_shared<scene3d::SceneInstance>(std::move(base));
+                base = scene3d::SceneInstance{};
+                base.asset = pose->asset; base.assetKey = pose->assetKey; base.world = pose->world;
+                base.layerKey = pose->layerKey; base.motionBlur = pose->motionBlur; base.castShadows = pose->castShadows;
+                base.doubleSided = pose->doubleSided;
+                base.ownEnvironment = pose->ownEnvironment; base.environment = pose->environment;
+                base.sharedPose = pose;
+                poses.push_back(std::move(pose));
+            }
+            for (u32 pi : f.particleLayers) {
+                if (pi >= out.layers.size()) continue;
+                auto& ps = out.layers[pi].particle;
+                ps.subs.resize(shutter.count);
+                for (u32 s = 0; s < shutter.count; ++s) {
+                    const f64 offset = ps.blur ? shutter.offset(s) * ps.blurAmount : 0.;
+                    const auto camera = cameraAt(offset);
+                    auto& sub = ps.subs[s]; sub.shift = static_cast<f32>(offset / std::max(1.f, ps.fps));
+                    sub.clip = projection(camera);
+                    sub.right = Vec4{camera.view.col[0].x,camera.view.col[1].x,camera.view.col[2].x,0};
+                    sub.down = Vec4{camera.view.col[0].y,camera.view.col[1].y,camera.view.col[2].y,0};
+                }
+            }
+            // Resample planes on exactly the scene clock. Selecting the nearest
+            // sample from a different-sized exposure introduces temporal judder.
+            for (u32 pi : f.planeLayers) {
+                if (pi >= out.layers.size()) continue;
+                auto& plane = out.layers[pi];
+                if (plane.blurMatrices.empty()) continue;
+                const Layer* layer = sourceLayer(plane.id.pack());
+                if (!layer) continue;
+                const auto own = shutter_window(mb, layer->transform.motionBlurAmount);
+                ShutterPlan plan = own; plan.count = shutter.count;
+                plane.blurMatrices.resize(shutter.count);
+                for (u32 s = 0; s < shutter.count; ++s) {
+                    const f64 t = time.value + plan.offset(s);
+                    plane.blurMatrices[s] = (settings.sceneEditor.enabled && !settings.finalQuality
+                        ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
+                        : comp_view_projection_frac(comp, t, out.compWidth, out.compHeight)) * world_3d_frac(comp, *layer, t) * plane.blurSourceTransform;
+                }
+            }
+            f.blurFrames.resize(shutter.count);
+            for (u32 s = 0; s < shutter.count; ++s) {
+                auto& sf = f.blurFrames[s];
+                sf.subFrame = shutter.offset(s);
+                sf.camera = cameraAt(sf.subFrame);
+                sf.lights = f.lights; sf.environment = f.environment; sf.post = f.post;
+                sf.shadow = f.shadow; sf.floor = f.floor;
+                sf.instances.reserve(f.instances.size());
+                for (usize i = 0; i < f.instances.size(); ++i) {
+                    const auto& base = f.instances[i];
+                    scene3d::SceneInstance in;
+                    in.asset = base.asset; in.assetKey = base.assetKey; in.world = base.world;
+                    in.layerKey = base.layerKey; in.motionBlur = base.motionBlur; in.castShadows = base.castShadows;
+                    in.doubleSided = base.doubleSided;
+                    in.ownEnvironment = base.ownEnvironment; in.environment = base.environment;
+                    in.sharedPose = poses[i];
+                    const Layer* layer = sourceLayer(base.layerKey);
+                    const f32 amount = layer && in.motionBlur ? motion_blur_amount(layer->transform.motionBlurAmount) : 0.f;
+                    const f64 offset = sf.subFrame * amount;
+                    if (layer && in.asset && amount > 0) {
+                        if (deforming[i]) {
+                            in.sharedPose.reset();
+                            place_model(comp, *layer, *in.asset, time.value + offset, in);
+                        } else in.world = world_3d_frac(comp, *layer, time.value + offset) * layer_from_model(layer->model);
+                    }
+                    // A layer with blur off (or amount zero) retains its center
+                    // camera too. Other blurred objects in the group cannot smear it.
+                    const auto camera = cameraAt(offset);
+                    in.cameraOverride = amount != 1.f;
+                    in.sampleViewProj = projection(camera); in.sampleView = camera.view;
+                    in.sampleCameraPosition = camera.position;
+                    sf.instances.push_back(std::move(in));
+                }
+            }
         }
     }
 }
 
-void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out, const scene3d::SceneCamera& camera) const noexcept {
+void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out, const scene3d::SceneCamera& camera) noexcept {
     // Câmera: a camada de câmera ATIVA visível no instante (com pais, inclusive
     // nulo 3D — rig de órbita); sem ela, a padrão.
     const scene3d::SceneCamera cam = camera;
@@ -2874,6 +3349,9 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     if (es.hdri.valid() && hdriLookup_) {
         env.hdri = hdriLookup_(hdriCtx_, es.hdri);
         env.hdriKey = es.hdri.pack();
+        // Nulo = ainda carregando; vazio = arquivo ausente (fica o estúdio neutro).
+        if (!env.hdri) incomplete_ = true;
+        else if (env.hdri->rgb.empty()) env.hdri.reset();
     } else if (es.studioPreset != 0) {
         // v32: estúdio procedural — o MESMO caminho de um HDRI (chave própria).
         env.hdri = scene3d::studio_hdri(es.studioPreset);
@@ -2948,6 +3426,8 @@ void Renderer::fill_object_environment(const Layer& l, scene3d::SceneInstance& i
     } else if (hdri.valid() && hdriLookup_) {
         e.hdri = hdriLookup_(hdriCtx_, hdri);
         e.hdriKey = hdri.pack();
+        if (!e.hdri) incomplete_ = true;
+        else if (e.hdri->rgb.empty()) e.hdri.reset();
     }
     inst.environment = std::move(e);
     inst.ownEnvironment = true;
@@ -2983,7 +3463,7 @@ void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
         glyphCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!glyphBuf_[slot].valid() || !backend_->map_buffer(glyphBuf_[slot], ptr).ok() || !ptr) return;
+    if (!glyphBuf_[slot].valid() || !backend_->map_buffer(glyphBuf_[slot], ptr).ok() || !ptr) { incomplete_ = true; return; }
     auto* dst = static_cast<GlyphInstance*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->glyphs.begin(), s->glyphs.end(), dst + s->glyphBase);
     backend_->unmap_buffer(glyphBuf_[slot]);
@@ -3021,7 +3501,7 @@ void Renderer::upload_vectors(FrameSnapshot& snap) noexcept {
         vecCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!vecBuf_[slot].valid() || !backend_->map_buffer(vecBuf_[slot], ptr).ok() || !ptr) return;
+    if (!vecBuf_[slot].valid() || !backend_->map_buffer(vecBuf_[slot], ptr).ok() || !ptr) { incomplete_ = true; return; }
     auto* dst = static_cast<Vec4*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->vec.begin(), s->vec.end(), dst + s->vecBase);
     backend_->unmap_buffer(vecBuf_[slot]);
@@ -3029,12 +3509,37 @@ void Renderer::upload_vectors(FrameSnapshot& snap) noexcept {
 }
 
 void Renderer::flush_uploads() noexcept {
-    for (PendingUpload& up : uploads_) {
-        if (const Status s = backend_->upload_texture(up.texture, up.data.data(), up.bytesPerRow); !s.ok()) {
+    usize retained = 0;
+    for (usize i = 0; i < uploads_.size(); ++i) {
+        PendingUpload& up = uploads_[i];
+        const auto desc = backend_->texture_desc(up.texture);
+        if (!desc.width) continue; // trimmed since the failed attempt
+        // Video/atlas preparation may have queued a newer version while an
+        // earlier upload was waiting for memory. Retain only the newest copy.
+        bool superseded = false;
+        for (usize j = i + 1; j < uploads_.size(); ++j)
+            if (uploads_[j].texture == up.texture) { superseded = true; break; }
+        if (superseded) continue;
+        const u64 pixelBytes = desc.bytes_per_pixel();
+        const u64 rowBytes = static_cast<u64>(desc.width) * pixelBytes;
+        const u64 stride = up.bytesPerRow ? up.bytesPerRow : rowBytes;
+        // The backend accepts a raw pointer, so only this owner can check the
+        // allocation extent. Compare by division to avoid hostile-size overflow.
+        const bool enough = desc.height && pixelBytes && stride >= rowBytes && stride % pixelBytes == 0
+            && rowBytes <= up.data.size()
+            && static_cast<u64>(desc.height - 1) <= (up.data.size() - rowBytes) / stride;
+        if (!enough) AUREA_LOG_ERROR("upload com pixels insuficientes: %s %u x %u, passo %u, bytes %zu",
+            desc.debugName ? desc.debugName : "textura", desc.width, desc.height, up.bytesPerRow, up.data.size());
+        const Status s = enough ? backend_->upload_texture(up.texture, up.data.data(), up.bytesPerRow)
+                                : Status{Errc::InvalidArgument, "pixels insuficientes para a textura"};
+        if (!s.ok()) {
+            incomplete_ = true;
             AUREA_LOG_WARN("upload de textura falhou: %s", s.message().data());
+            if (retained != i) uploads_[retained] = std::move(up);
+            ++retained;
         }
     }
-    uploads_.clear();
+    uploads_.resize(retained);
 }
 
 bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 w, u32 h,
@@ -3313,15 +3818,20 @@ void Renderer::trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept {
 }
 
 bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEffects, LayerImage& out,
-                            std::vector<FrameRef>& framesUsed, u64 frameNumber) noexcept {
+                            std::vector<FrameRef>& framesUsed, u64 frameNumber, u32 glyphSet) noexcept {
     if (layer.source.kind == LayerSource::Kind::Nested) {
         if (!currentSnap_ || layer.source.nestedIndex >= currentSnap_->nested.size()) return false;
         const FrameSnapshot* child = currentSnap_->nested[layer.source.nestedIndex].get();
         if (!child || !child->target.valid()) return false;
         out.texture = child->target;
         out.region = Rect{0.0f, 0.0f, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
-        out.width = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(layer.source.width) * layer.texelScale)));
-        out.height = std::max(1u, static_cast<u32>(std::lround(static_cast<f32>(layer.source.height) * layer.texelScale)));
+        // The child was rendered at the composition's working resolution.
+        // Projecting/scaling its parent does not resize that texture. Describing
+        // it with the parent's texelScale made a neutral mask resample the child
+        // at another resolution, breaking thin details and antialiased edges.
+        const TextureDesc& actual = graph_.desc(child->target);
+        out.width = actual.width;
+        out.height = actual.height;
         return true;
     }
     if (layer.source.kind == LayerSource::Kind::Scene3D) {
@@ -3356,6 +3866,9 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             else if (tier == Scene3DQuality::Ultra) preview = scene3d::EnvironmentQuality::final_quality();
             scene3d_.set_environment_quality(preview, scene3d::EnvironmentQuality::final_quality());
         }
+        // Every precomposition has its own environment. Final rendering must
+        // resolve each group's maps before its passes capture the handles.
+        if (heavyQ_.exportFrame) scene3d_.finish_environment(group.environment);
         struct SceneStatsSink {
             Renderer* r;
             ~SceneStatsSink() {
@@ -3391,6 +3904,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             ad.sampled = true;
             ad.renderTarget = true;
             tex = graph_.create_texture("3d-desfoque", ad);
+            FGTexture integratedHdr{};
             // Consume each sample before building the next one. Keeping all K
             // outputs alive until a final pass used >1 GB at 1080p/64 samples.
             // Planos com desfoque: cada sub-quadro leva o plano na matriz do
@@ -3404,7 +3918,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             const Mat4 clipComp = clip_from_comp(static_cast<f32>(currentSnap_ ? currentSnap_->compWidth : layer.source.width),
                                                  static_cast<f32>(currentSnap_ ? currentSnap_->compHeight : layer.source.height));
             for (u32 s = 0; s < k; ++s) {
-                FGTexture sample;
+                FGTexture sample, sampleHdr;
                 const std::vector<scene3d::ScenePlane>* samplePlanes = planes;
                 if (planeBlur) {
                     blurPlanes_.assign(planes->begin(), planes->end());
@@ -3421,14 +3935,17 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 }
                 const u32 np = scene_particle_draws(group, group.blurFrames[s], parts);
                 if (!scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, sample, samplePlanes,
-                                    parts, np)) continue;
+                                    parts, np, nullptr, &sampleHdr)) { incomplete_ = true; continue; }
                 struct Cap {
-                    FGTexture sample; const u32* count; PipelineHandle p; u64 sampler; f32 w; f32 h;
+                    FGTexture sample; const u32* count; PipelineHandle p; u64 sampler; f32 w; f32 h; bool hdr = false;
                 } cap{sample, built, *pAdd, shaders_.sampler(CommonSampler::LinearClamp).id,
                       static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
                 const LoadOp load = *built == 0 ? LoadOp::Clear : LoadOp::Load;
                 ++*built;
-                const u32 pass = graph_.add_raster_pass("3d-desfoque", PassStage::Composite, tex, load, Vec4{0, 0, 0, 0},
+                auto accumulate = [&](FGTexture target, FGTexture source, bool hdr = false) {
+                cap.sample = source;
+                cap.hdr = hdr;
+                const u32 pass = graph_.add_raster_pass("3d-desfoque", PassStage::Composite, target, load, Vec4{0, 0, 0, 0},
                                                         [cap](PassContext& pc) {
                     pc.cmds.bind_pipeline(cap.p);
                     pc.cmds.bind_texture(0, pc.texture(cap.sample), SamplerHandle{cap.sampler});
@@ -3436,13 +3953,39 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     push.clipFromLayer = clip_from_comp(cap.w, cap.h);
                     push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
                     push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
-                    push.params = Vec4{1.0f / static_cast<f32>(*cap.count), 0, 0, 0};
+                    push.params = Vec4{1.0f / static_cast<f32>(*cap.count), 0, 0, cap.hdr ? -1.f : 0.f};
                     pc.cmds.push_constants(&push, sizeof(push));
                     pc.cmds.draw(6);
                 });
-                graph_.read(pass, sample);
+                graph_.read(pass, source);
+                };
+                accumulate(tex, sample);
+                if (sampleHdr.valid()) {
+                    if (!integratedHdr.valid()) integratedHdr = graph_.create_texture("3d-exposicao-hdr", ad);
+                    accumulate(integratedHdr, sampleHdr, true);
+                }
             }
             if (*built == 0) return false;
+            if (integratedHdr.valid()) {
+                const FGTexture encoded = graph_.create_texture("3d-exposicao-resolve", ad);
+                struct Encode { FGTexture src; PipelineHandle pipeline; u64 sampler; f32 w; f32 h; } cap{
+                    integratedHdr, *pAdd, shaders_.sampler(CommonSampler::LinearClamp).id,
+                    static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+                const u32 pass = graph_.add_raster_pass("3d-exposicao-resolve", PassStage::Composite, encoded,
+                    LoadOp::Clear, Vec4{}, [cap](PassContext& pc) {
+                        pc.cmds.bind_pipeline(cap.pipeline);
+                        pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+                        LayerPush push;
+                        push.clipFromLayer = clip_from_comp(cap.w, cap.h);
+                        push.region = Vec4{0,0,cap.w,cap.h}; push.uvRect = Vec4{0,0,1,1};
+                        push.params = Vec4{1,0,0,-2};
+                        pc.cmds.push_constants(&push, sizeof(push)); pc.cmds.draw(6);
+                    });
+                graph_.read(pass, integratedHdr);
+                integratedHdr = encoded;
+            }
+            tex = scene3d_.finish_exposure(graph_, group, compTargetW_, compTargetH_, tex, integratedHdr);
+            if (!tex.valid()) return false;
         }
         out.texture = tex;
         out.region = Rect{0.0f, 0.0f, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
@@ -3500,9 +4043,13 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                          PassTexture{chan[2], {}, CommonSampler::LinearClamp}},
                         nullptr, 0);
                     if (pass != kInvalidIndex) out.texture = merged;
+                    else incomplete_ = true;
                 }
                 // Sem os três quadros (decoder atrasado), a camada sai da fonte
                 // principal: melhor mostrar o quadro atual do que um buraco.
+                // That fallback is presentable, but cannot complete a cached
+                // preview or an exact capture/export while GPU uploads retry.
+                if (!built || layer.source.channelCount != 3) incomplete_ = true;
             }
             // DETECTAR MOVIMENTO: a fonte no instante anterior, na mesma área e
             // densidade; a cadeia de efeitos a leva até o efeito.
@@ -3511,21 +4058,30 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 if (build_video_source(layer, layerIndex, w, h, past, frameNumber, layer.source.historyFrame.get())) {
                     out.history = past;
                     if (layer.source.historyFrame->hardwareBuffer) framesUsed.push_back(layer.source.historyFrame);
-                }
+                } else incomplete_ = true;
             }
             // Quadro seguinte da fonte: mistura, movimento de pixels e/ou
             // desfoque vetorial (os dois últimos pelo optical flow, em cache).
             if (layer.source.frameB) {
                 const FGTexture b = graph_.create_texture("layer-video-seguinte", d);
-                if (!build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) return true;
+                if (!build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) {
+                    incomplete_ = true;
+                    return true;
+                }
                 if (layer.source.frameB->hardwareBuffer) framesUsed.push_back(layer.source.frameB);
                 EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
                 const bool needFlow = (layer.source.blendMode == 2 && layer.source.blendT > 0.0f) || layer.source.vectorBlur > 0.0f;
                 FGTexture flow{};
                 u32 baseW = 0, baseH = 0;
                 if (needFlow) {
-                    const u64 pair = (static_cast<u64>(layer.source.frame->ptsUs) * 1000003ull) ^ static_cast<u64>(layer.source.frameB->ptsUs)
-                                   ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 52);
+                    u64 pair = (static_cast<u64>(layer.source.frame->ptsUs) * 1000003ull) ^ static_cast<u64>(layer.source.frameB->ptsUs)
+                             ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 52);
+                    // A proxy and its original share timestamps and output
+                    // dimensions, but not pixels. Decoder reopen/relink must
+                    // never reuse motion estimated from the previous source.
+                    // Content IDs also remain stable for cached decoded frames.
+                    for (const DecodedFrame* source : {layer.source.frame.get(), layer.source.frameB.get()})
+                        pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
                     flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, baseW, baseH, frameNumber);
                 }
                 if (layer.source.blendT > 0.0f && layer.source.blendMode == 2) {
@@ -3583,7 +4139,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             auto pipe = shaders_.pipeline(PipelineKey::graphics(ShaderId::text_glyph_vert, ShaderId::text_glyph_frag, kWorkFormat, true,
                                                                 BlendMode::Normal));
             if (!pipe.ok()) return false;
-            const u32 sets = std::max(1u, layer.source.glyphSets);
+            const u32 sets = glyphSet == kInvalidIndex ? std::max(1u, layer.source.glyphSets) : 1u;
             struct Cap { PipelineHandle p; TextureHandle atlas; u64 sampler; BufferHandle buf; Mat4 clip; Vec4 params; u32 count; };
             const Mat4 clip = clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height));
             const Vec4 persp = layer.source.textPersp;
@@ -3602,11 +4158,11 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             };
             if (sets == 1) {
                 out.texture = graph_.create_texture("layer-texto", d);
-                drawSet(out.texture, 0);
+                drawSet(out.texture, glyphSet == kInvalidIndex ? 0 : glyphSet);
                 return true;
             }
-            // Keep one sample and the accumulator live. Glyphs already carry
-            // 1/K; preserve their overlap within each sample before adding it.
+            // Keep one full-opacity sample and the accumulator live; average
+            // only after compositing all overlapping glyphs in each instant.
             auto pAdd = shaders_.pipeline(PipelineKey::graphics(
                 ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
             if (!pAdd.ok()) return false;
@@ -3614,8 +4170,8 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             for (u32 si = 0; si < sets; ++si) {
                 const FGTexture sample = graph_.create_texture("texto-instante", d);
                 drawSet(sample, si);
-                struct Acc { FGTexture sample; PipelineHandle p; u64 sampler; f32 w; f32 h; } acc{sample, *pAdd,
-                    shaders_.sampler(CommonSampler::LinearClamp).id, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height)};
+                struct Acc { FGTexture sample; PipelineHandle p; u64 sampler; f32 w; f32 h; f32 weight; } acc{sample, *pAdd,
+                    shaders_.sampler(CommonSampler::LinearClamp).id, static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height), 1.f / sets};
                 const u32 pass = graph_.add_raster_pass("texto-desfoque", PassStage::Decode, out.texture,
                     si == 0 ? LoadOp::Clear : LoadOp::Load, Vec4{0, 0, 0, 0}, [acc](PassContext& pc) {
                     pc.cmds.bind_pipeline(acc.p);
@@ -3624,7 +4180,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     push.clipFromLayer = clip_from_comp(acc.w, acc.h);
                     push.region = Vec4{0.0f, 0.0f, acc.w, acc.h};
                     push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
-                    push.params = Vec4{1.0f, 0, 0, 0};
+                    push.params = Vec4{acc.weight, 0, 0, 0};
                     pc.cmds.push_constants(&push, sizeof(push));
                     pc.cmds.draw(6);
                 });
@@ -3741,15 +4297,18 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         case LayerSource::Kind::Shape: {
             out.texture = graph_.create_texture("layer-forma", d);
             EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+            // Mesma ordem do bloco `Params` de shaders/shape/shape.frag.
             struct ShapeBlock {
-                Vec4 size, shape, fill, stroke, extra;
+                Vec4 size, shape, fill, stroke, extra, more, blob;
             } block{};
             const f32 lw = static_cast<f32>(layer.source.width), lh = static_cast<f32>(layer.source.height);
             block.size = Vec4{lw, lh, lw / static_cast<f32>(w), static_cast<f32>(layer.source.shapeType)};
             block.shape = layer.source.shapeParams;
             block.fill = layer.source.shapeFill;
             block.stroke = layer.source.shapeStroke;
-            block.extra = Vec4{layer.source.shapeStrokeWidth, 0, 0, 0};
+            block.extra = Vec4{layer.source.shapeStrokeWidth, layer.source.shapeExtra.y, layer.source.shapeExtra.z, layer.source.shapeExtra.w};
+            block.more = layer.source.shapeMore;
+            block.blob = layer.source.shapeBlob;
             return ctx.fullscreen_pass("forma", PassStage::Decode, out.texture, ShaderId::shape_shape_frag, {},
                                        &block, sizeof(block)) != kInvalidIndex;
         }
@@ -3992,7 +4551,7 @@ void Renderer::upload_masks(FrameSnapshot& snap) noexcept {
         maskCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!maskBuf_[slot].valid() || !backend_->map_buffer(maskBuf_[slot], ptr).ok() || !ptr) return;
+    if (!maskBuf_[slot].valid() || !backend_->map_buffer(maskBuf_[slot], ptr).ok() || !ptr) { incomplete_ = true; return; }
     auto* dst = static_cast<Vec4*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->maskData.begin(), s->maskData.end(), dst + s->maskBase);
     backend_->unmap_buffer(maskBuf_[slot]);
@@ -4085,7 +4644,7 @@ FGTexture Renderer::draw_to_comp(const CompositeDraw& d, const TextureDesc& comp
                                  const char* name) noexcept {
     auto pNormal = shaders_.pipeline(PipelineKey::graphics(
         ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
-    if (!pNormal.ok()) return FGTexture{};
+    if (!pNormal.ok()) { incomplete_ = true; return FGTexture{}; }
     TextureDesc td = compDesc;
     td.transferSrc = false;
     const FGTexture t = graph_.create_texture(name, td);
@@ -4140,7 +4699,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
         if (!build_source(layer, i, hasEffects || layer.maskCount > 0, src, framesInFlight_, frameNumber)) {
-            if (layer.source.kind != LayerSource::Kind::Video) incomplete_ = true;
+            incomplete_ = true;
             continue;
         }
         apply_masks(layer, src, frameNumber);
@@ -4167,10 +4726,50 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         const RenderLayer& layer = snap.layers[i];
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
+        if (layer.source.kind == LayerSource::Kind::Text && layer.source.glyphSets > 1 && layer.temporal.empty()) {
+            // Sample glyph animation and layer motion together. Blurring text
+            // locally first and its layer second convolves unrelated times.
+            const u32 count = layer.source.glyphSets;
+            auto pipeline = shaders_.pipeline(PipelineKey::graphics(
+                ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
+            if (!pipeline.ok()) { incomplete_ = true; return false; }
+            TextureDesc desc = compDesc; desc.transferSrc = false;
+            const FGTexture integrated = graph_.create_texture("texto-exposicao", desc);
+            const EffectPlan* plan = i < snap.plans.size() ? &snap.plans[i] : nullptr;
+            for (u32 s = 0; s < count; ++s) {
+                LayerImage sample;
+                if (!build_source(layer, i, hasEffects || layer.maskCount > 0, sample, framesInFlight_, frameNumber, s)) {
+                    incomplete_ = true; return false;
+                }
+                apply_masks(layer, sample, frameNumber);
+                LayerImage final = sample;
+                if (hasEffects && !EffectGraph::build(*plan, ctx, sample, final).ok()) { incomplete_ = true; return false; }
+                Mat4 matrix = s < layer.blurMatrices.size() ? layer.blurMatrices[s] : layer.compFromLayer;
+                if (plan && plan->hasFold && !layer.blurIncludesFold) matrix = matrix * plan->foldMatrix;
+                struct TextSample { FGTexture texture; PipelineHandle pipeline; u64 sampler; Mat4 matrix; Vec4 region; f32 weight; } cap{
+                    final.texture, *pipeline, shaders_.sampler(CommonSampler::LinearBorder).id,
+                    clip_from_comp(compW, compH) * matrix, Vec4{final.region.x, final.region.y, final.region.w, final.region.h}, 1.f / count};
+                const u32 pass = graph_.add_raster_pass("texto-exposicao", PassStage::Composite, integrated,
+                    s == 0 ? LoadOp::Clear : LoadOp::Load, Vec4{}, [cap](PassContext& pc) {
+                        pc.cmds.bind_pipeline(cap.pipeline);
+                        pc.cmds.bind_texture(0, pc.texture(cap.texture), SamplerHandle{cap.sampler});
+                        LayerPush push;
+                        push.clipFromLayer = cap.matrix; push.region = cap.region;
+                        push.uvRect = Vec4{0,0,1,1}; push.params = Vec4{cap.weight,0,0,0};
+                        pc.cmds.push_constants(&push, sizeof(push)); pc.cmds.draw(6);
+                    });
+                graph_.read(pass, final.texture);
+            }
+            draw.texture = integrated; draw.region = Rect{0,0,compW,compH};
+            draw.compFromLayer = Mat4::identity(); draw.blend = layer.blend;
+            draw.opacity = layer.opacity * (plan && plan->hasFold ? plan->foldOpacity : 1.f);
+            draw.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
+            return true;
+        }
         if (!build_source(layer, i, hasEffects || layer.maskCount > 0, src, framesInFlight_, frameNumber)) {
             // Camada fora deste quadro por recurso ainda não pronto (pipeline
             // compilando, textura a caminho): o próximo quadro tenta de novo.
-            if (layer.source.kind != LayerSource::Kind::Video) incomplete_ = true;
+            incomplete_ = true;
             return false;
         }
         // Máscaras ANTES dos efeitos (como no AE): o blur vê a borda recortada.
@@ -4287,6 +4886,17 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         CompositeDraw d;
         if (make_draw(i, d)) matteTex[i] = draw_to_comp(d, compDesc, compW, compH, "track-matte-fonte");
     }
+    // Consume small batches while declaring the sources. Keeping every layer's
+    // motion-blur accumulator alive until one final hardware blend required
+    // 1.5 GiB for 96 full-HD RGBA16F layers. Normal blending is associative in
+    // this order, so load the accumulated backdrop and reuse the finished
+    // sources. Directed adjustments can rewrite earlier draws and therefore
+    // keep the complete stack until their existing compositor runs.
+    const bool streamNormal = snap.layers.size() >= 8
+        && std::none_of(snap.layers.begin(), snap.layers.end(), [](const RenderLayer& layer) {
+            return layer.source.kind == LayerSource::Kind::Adjustment || layer.blend != BlendMode::Normal;
+        });
+    u32 streamedDraws = 0;
     for (u32 i = 0; i < snap.layers.size(); ++i) {
         const RenderLayer& layer = snap.layers[i];
         if (layer.planeGroup >= 0 || layer.matteOnly || layer.particle.inScene) continue;   // na cena 3D / só recorta
@@ -4386,9 +4996,14 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         }
         draw.layer = layer.id.pack();
         draws.push_back(draw);
+        if (streamNormal && draws.size() - streamedDraws >= 4) {
+            composite_draws(snap, comp, compDesc, draws, ctx, streamedDraws);
+            streamedDraws = static_cast<u32>(draws.size());
+        }
     }
 
-    composite_draws(snap, comp, compDesc, draws, ctx);
+    if (!streamedDraws || streamedDraws < draws.size())
+        composite_draws(snap, comp, compDesc, draws, ctx, streamedDraws);
 }
 
 // =============================================================================
@@ -4406,7 +5021,8 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
 // no quadro, o caminho é exatamente o de antes: um passe, zero texturas a mais.
 // =============================================================================
 void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc,
-                               const std::vector<CompositeDraw>& draws, EffectBuildContext& ctx) noexcept {
+                               const std::vector<CompositeDraw>& draws, EffectBuildContext& ctx,
+                               u32 firstDraw) noexcept {
     auto pNormal = shaders_.pipeline(PipelineKey::graphics(
         ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
     auto pAdd = shaders_.pipeline(PipelineKey::graphics(
@@ -4417,7 +5033,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         return d.adjustPlan == kInvalidIndex && d.blend == BlendMode::Normal;
     };
     u32 lastRead = kInvalidIndex;   // último desenho que lê o fundo
-    for (u32 i = 0; i < count; ++i) if (!hardware(draws[i])) lastRead = i;
+    for (u32 i = firstDraw; i < count; ++i) if (!hardware(draws[i])) lastRead = i;
     PipelineHandle copyP{}, blendP{};
     if (lastRead != kInvalidIndex) {
         auto c = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat));
@@ -4433,8 +5049,8 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
     // O alvo final (import do export/captura) pode não ser amostrável: o
     // fundo lido é sempre uma textura do grafo.
     FGTexture cur = readsBackdrop ? graph_.create_texture("composicao-fundo", pingDesc) : comp;
-    bool fresh = true;        // `cur` ainda não foi escrito (o lote limpa com o fundo)
-    u32 batchBegin = 0;
+    bool fresh = firstDraw == 0; // later normal batches load the existing backdrop
+    u32 batchBegin = firstDraw;
 
     struct HwCap {
         CompositeDraw* draws; u32 count; PipelineHandle normal; PipelineHandle add; f32 compW; f32 compH;
@@ -4482,7 +5098,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         f32 masked = 0.0f;   ///< ajuste com máscara: fora dela o fundo fica
         bool drawSrc = false;
     };
-    for (u32 i = 0; readsBackdrop && i < count; ++i) {
+    for (u32 i = firstDraw; readsBackdrop && i < count; ++i) {
         const CompositeDraw& d = draws[i];
         if (hardware(d)) continue;
         flush(i);
@@ -4615,6 +5231,8 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     // swapchain (compilar segurando a imagem atrasaria a apresentação).
     if (!settings.rawPlayback) flush_warmup();
     const u64 t0 = monotonic_ns();
+    const u64 effectsBypassedBefore = EffectGraph::bypassed_total();
+    scene3d_.reset_incomplete();
     videoUploadMs_ = 0;
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
     quality_ = effective_quality(settings);
@@ -4629,7 +5247,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     // Alvo offscreen (export, captura): frame SEM swapchain. Com begin_frame o
     // backend adquiria uma imagem da tela e a apresentava vazia a cada quadro
     // exportado — e disputava a superfície com o ciclo de vida do app.
-    const bool offscreenFrame = offscreen && offscreen->texture.valid();
+    const bool offscreenFrame = (offscreen && offscreen->texture.valid()) || settings.previewCacheOnly;
     if (const Status s = offscreenFrame ? backend_->begin_offscreen_frame(fb) : backend_->begin_frame(fb); !s.ok()) {
         // Sem imagem de swapchain neste vsync (superfície em recriação): os
         // frames de vídeo deste snapshot só são soltos — não houve GPU.
@@ -4705,7 +5323,41 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     compDesc.sampled = true;
     compDesc.renderTarget = true;
     compDesc.transferSrc = true;
-    const FGTexture comp = (offscreen && offscreen->texture.valid())
+    PreviewFrame* cached = nullptr;
+    previewCacheHit_ = false;
+    const bool usePreviewCache = (!offscreen || offscreen->display.valid()) && !settings.finalQuality && !settings.rawPlayback
+        && settings.previewCacheRevision && previewCacheCapacity_;
+    if (usePreviewCache) {
+        for (auto& f : previewFrames_) if (f.time == snap.time.value) { cached = &f; break; }
+        if (!cached && previewFrames_.size() >= previewCacheCapacity_) {
+            cached = &*std::min_element(previewFrames_.begin(), previewFrames_.end(),
+                [](const auto& a, const auto& b) { return a.used < b.used; });
+            // Poll; never stall playback or allocate replacements above the
+            // budget while a prior submission is still reading this slot.
+            if (!backend_->wait_frame(cached->gpuFrame, 0).ok()) cached = nullptr;
+            else {
+                cached->complete = false; cached->time = -1;
+                publish_preview_buffer_ranges();
+            }
+        }
+        if (!cached && previewFrames_.size() < previewCacheCapacity_) {
+            previewFrames_.push_back({}); cached = &previewFrames_.back();
+        }
+        if (cached && !cached->texture.valid()) {
+            auto texture = backend_->create_texture(compDesc);
+            if (texture.ok()) cached->texture = *texture;
+        }
+        if (cached) {
+            cached->time = snap.time.value;
+            cached->used = ++previewCacheUse_;
+            cached->gpuFrame = fb.frameNumber;
+            previewCacheHit_ = cached->complete && cached->texture.valid();
+            if (!cached->texture.valid()) cached = nullptr;
+        }
+    }
+    const FGTexture comp = cached
+                         ? graph_.import_texture("preview-cache", cached->texture, compDesc)
+                         : (offscreen && offscreen->texture.valid())
                          ? graph_.import_texture("composicao", offscreen->texture, compDesc)
                          : graph_.create_texture("composicao", compDesc);
     currentScenes_ = &snap.scenes;
@@ -4713,7 +5365,10 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     compTargetW_ = cw;
     compTargetH_ = ch;
 
-    if (settings.rawPlayback) {
+    if (previewCacheHit_) {
+        // The complete composition already contains text, effects and 3D.
+        // Only the ordinary output pass (zoom, pan, display transform) remains.
+    } else if (settings.rawPlayback) {
         const bool decoded = !snap.layers.empty() && build_video_source(snap.layers.front(), 0, cw, ch, comp, fb.frameNumber);
         if (!decoded) graph_.add_raster_pass("raw-buffering", PassStage::Decode, comp, LoadOp::Clear,
                                             Vec4{0, 0, 0, 1}, [](PassContext&) {});
@@ -4737,7 +5392,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     // Teste do passe de saída sem swapchain (OffscreenTarget::display): o
     // alvo, o tamanho e a rotação vêm do alvo; tudo o mais é o caminho da tela.
     const bool displayTest = offscreen && offscreen->display.valid() && !offscreen->yPlane.valid();
-    if ((!offscreen && fb.backbuffer.valid()) || displayTest) {
+    if ((!offscreen && !settings.previewCacheOnly && fb.backbuffer.valid()) || displayTest) {
         const TextureHandle bbTex = displayTest ? offscreen->display : fb.backbuffer;
         const u32 bbW = displayTest ? offscreen->displayWidth : fb.backbufferWidth;
         const u32 bbH = displayTest ? offscreen->displayHeight : fb.backbufferHeight;
@@ -4750,6 +5405,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const FGTexture bb = graph_.import_texture("swapchain", bbTex, bbDesc);
         auto pOut = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
                                                             ShaderId::composite_output_frag, bbFormat));
+        if (!pOut.ok()) incomplete_ = true;
         // A composição encaixada (letterbox) no espaço LÓGICO do display, e a
         // pré-rotação aplicada no clip: o compositor do sistema não precisa
         // girar a imagem (o que custaria um passe a mais por frame, dele).
@@ -4847,6 +5503,23 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
 
     const u64 tRecorded = monotonic_ns();
     const Status endStatus = backend_->end_frame();
+    incomplete_ = incomplete_ || scene3d_.incomplete()
+        || EffectGraph::bypassed_total() != effectsBypassedBefore;
+    if (cached) cached->complete = result.ok() && endStatus.ok() && !incomplete_
+        && !snap.missingVideoFrames && !snap.staleVideoFrames
+        && EffectGraph::bypassed_total() == effectsBypassedBefore
+        && !scene3d_.incomplete()
+        && (snap.scenes.empty() || !environment_pending());
+    if (cached) publish_preview_buffer_ranges();
+    if (!uploads_.empty()) {
+        // Intermediate image/flow caches built from an unavailable upload are
+        // not reusable after that upload succeeds. Destruction is GPU-deferred.
+        for (auto& [key, image] : images_) destroy_image_linear(image);
+        for (auto& [key, flow] : flowCache_)
+            for (auto texture : flow.tex) if (texture.valid()) backend_->destroy_texture(texture);
+        flowCache_.clear();
+        heavyStats_.flowCacheBytes = 0;
+    }
     const u64 tEnd = monotonic_ns();
 
     // External images remain owned by the decoder until GPU completion. CPU
@@ -5284,7 +5957,9 @@ void Renderer::destroy_image_linear(ImageTexture& img) noexcept {
 
 u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
     if (!backend_ || stage < 4) return 0;
-    u32 n = 0;
+    u32 n = static_cast<u32>(previewFrames_.size());
+    clear_preview_cache();
+    n += backend_->trim_external_images();
     auto unused = [frameNumber](u64 lastFrame) { return lastFrame < frameNumber; };
     // Original image uploads and their linear copies are recreatable caches
     // too. Keeping every image visited on the timeline defeats OS memory trims.
@@ -5343,7 +6018,13 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
     // Entre quadros nada do pool está em uso: tudo volta a nascer sob demanda.
     n += pool_.stats().alive;
     pool_.clear();
-    if (stage >= 6) scene3d_.collect(frameNumber, 0);
+    if (stage >= 6) {
+        // Environment timestamps use the backend frame clock, not prepare's
+        // counter (which also advances while waiting for decoders/local AI).
+        n += scene3d_.trim_environment_cache(renderFrameNumber_);
+        scene3d_.collect(renderFrameNumber_, 0);
+        n += scene3d_.trim_upload_pools();
+    }
     return n;
 }
 

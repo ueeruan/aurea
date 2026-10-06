@@ -9,6 +9,7 @@
 // =============================================================================
 #include "aurea/Engine.hpp"
 
+#include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/vector/Vector.hpp"
 
 #include <cstdio>
@@ -393,27 +394,15 @@ Layer* sdf_shape_layer(Composition* comp, u64 layerId) noexcept {
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     return l && l->kind == LayerKind::Shape && l->shape.shapeType != kShapeVector ? l : nullptr;
 }
-/// Onde cada parâmetro mora na ShapeData (o índice é o de ShapeSetParam).
-f32* shape_param_ref(ShapeData& sh, u32 param) noexcept {
-    switch (param) {
-        case 1: return &sh.cornerRadius;
-        case 2: return &sh.points;
-        case 3: return &sh.innerRadius;
-        case 4: return &sh.strokeWidth;
-        case 5: return &sh.bounds.w;
-        case 6: return &sh.bounds.h;
-        default: return nullptr;   // 0 = tipo da forma, não é animável
-    }
+/// Onde cada parâmetro mora na ShapeData (o índice é o de ShapeSetParam;
+/// 0 = tipo da forma, não é animável). Tabela em timeline/ShapeGeometry.
+f32* shape_param_ref(ShapeData& sh, u32 param) noexcept { return shape::param_field(sh, param); }
+f32 clamp_shape_param(u32 param, f32 v) noexcept { return shape::clamp_param(param, v); }
+/// Valor parado do parâmetro (o campo; nos 7..14 o "padrão da forma" resolvido).
+f32 shape_param_static(const ShapeData& sh, u32 param, const f32* field) noexcept {
+    return param >= shape::kParamDepth ? shape::param_value(sh, param) : *field;
 }
-f32 clamp_shape_param(u32 param, f32 v) noexcept {
-    switch (param) {
-        case 1: return std::max(0.0f, v);
-        case 2: return std::clamp(std::round(v), 3.0f, 64.0f);
-        case 3: return std::clamp(v, 0.05f, 0.95f);
-        case 4: return std::clamp(v, 0.0f, 500.0f);
-        default: return std::clamp(v, 1.0f, 16384.0f);
-    }
-}
+static_assert(Engine::kShapeParamCount == shape::kParamTotal, "parâmetros da forma: Engine e ShapeGeometry juntos");
 } // namespace
 
 u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
@@ -433,7 +422,8 @@ u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
             if (tr->find_exact(local) != kInvalidIndex) keys |= 1u << p;
             if (r) *r = clamp_shape_param(p, tr->sample(local));
         }
-        out[p] = r ? *r : 0.0f;
+        // 7..14: o valor efetivo (o "padrão da forma" já resolvido).
+        out[p] = p >= shape::kParamDepth ? shape::param_value(sh, p) : (r ? *r : 0.0f);
     }
     out[kShapeParamCount] = static_cast<f32>(anim);
     out[kShapeParamCount + 1] = static_cast<f32>(keys);
@@ -481,7 +471,7 @@ bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
     // COM keyframe aqui: regrava o valor AVALIADO (não apaga). É o que o
     // losango do painel faz — "criar keyframe" nunca pode devolver a forma ao
     // estado anterior só porque o quadro já tinha um.
-    const f32 atual = tr.keys.empty() ? *r : tr.sample(local);
+    const f32 atual = tr.keys.empty() ? shape_param_static(l->shape, param, r) : tr.sample(local);
     (void)tr.set(local, clamp_shape_param(param, atual), Interpolation::Bezier);
     project_->mark_dirty();
     request_render();
@@ -504,7 +494,7 @@ bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
         if (tr.keys.size() == 1) *r = clamp_shape_param(param, tr.keys[0].value);
         (void)tr.remove(local);
     } else {
-        (void)tr.set(local, tr.keys.empty() ? *r : tr.sample(local), Interpolation::Bezier);
+        (void)tr.set(local, tr.keys.empty() ? shape_param_static(l->shape, param, r) : tr.sample(local), Interpolation::Bezier);
     }
     project_->mark_dirty();
     request_render();

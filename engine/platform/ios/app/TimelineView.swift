@@ -71,6 +71,7 @@ struct TimelineView: View {
     /// Camada escolhida com a doca aberta (layout de celular): a timeline vira a
     /// fileira única dela, como com painel aberto (EditorScreen.kt `compactDock`).
     var compactDock = false
+    @State private var showAllLayers = false
     /// Estilo do relógio sobre o cabeçote (o mesmo parâmetro do Android).
     var timecodeStyle: TimecodeStyle = .underline
     /// O cabeçote a cada quadro da tela durante o play (ver `PlayheadClock`).
@@ -159,7 +160,7 @@ struct TimelineView: View {
     /// sem trilhas de propriedade abertas e fora do modo de escolher keyframes —
     /// senão a timeline volta inteira e dá para mexer (par do Timeline.kt).
     private var compact: Bool {
-        timelineCompact(panel: model.sheetContent == .panel || model.sheetContent == .curve,
+        !showAllLayers && timelineCompact(panel: model.sheetContent == .panel || model.sheetContent == .curve,
                         dock: compactDock && model.sheetContent == .dock,
                         tracksOpen: tracksOpen,
                         selectingKeys: model.timelineKeySelectMode || model.timelineLayerSelectMode)
@@ -217,7 +218,15 @@ struct TimelineView: View {
             Canvas { context, canvasSize in
                 drawRows(&context, size: canvasSize)
                 drawRuler(&context, size: canvasSize)
+                drawPreviewBuffer(&context, size: canvasSize)
+                drawMarkerGuides(&context, size: canvasSize)
                 drawPlayhead(&context, size: canvasSize)
+            }
+            .accessibilityChildren {
+                if !model.previewBufferRanges.isEmpty {
+                    Text(AureaText.t("preview_buffer_timeline", model.previewTimelineCachedFrames))
+                        .accessibilityIdentifier("timeline.preview.buffer")
+                }
             }
             .background(AureaTimeline.background)
             .overlay {
@@ -231,6 +240,15 @@ struct TimelineView: View {
             // Por cima da superfície de gestos: o toque num botão não chega à timeline.
             .overlay(alignment: keyBarAlignment) { keyActionBar }
             .overlay(alignment: .bottom) { layerPickBar }
+            .overlay(alignment: .topLeading) {
+                if !model.selection.isEmpty && (compactDock || model.sheetContent == .panel || model.sheetContent == .curve) {
+                    Button { showAllLayers.toggle() } label: {
+                        Text(AureaText.t(showAllLayers ? "timeline_selection_short" : "timeline_all_short"))
+                            .font(.aurea(size: 12)).lineLimit(1).frame(width: 84, height: 44)
+                    }.accessibilityLabel(AureaText.t(showAllLayers ? "timeline_selected_only" : "timeline_show_all"))
+                        .accessibilityIdentifier("timeline.showAllLayers")
+                }
+            }
             .onAppear {
                 // A timeline some e volta (painel, doca, rotação): o zoom e a
                 // rolagem do projeto voltam como estavam. Ajustar à duração só
@@ -243,14 +261,21 @@ struct TimelineView: View {
                     TimelineViewMemory.state[memoryKey] = (pps, scrollY)
                 }
                 haptics.prepare()
+                refreshMarkers()
                 refreshMedia(size: size)
             }
             .onChange(of: guide) { snap in if snap != Snap.none { haptics.snap() } }
             .onChange(of: pps) { value in TimelineViewMemory.state[memoryKey] = (value, scrollY) }
             .onChange(of: scrollY) { value in TimelineViewMemory.state[memoryKey] = (pps, value) }
             .onChange(of: model.status.thumbnailGeneration) { _ in mediaNeedsRefresh = true }
+            .onChange(of: model.memoryCacheEpoch) { _ in
+                thumbCache = TimelineThumbStrip()
+                thumbnails = [:]; pillThumbs = [:]
+                mediaNeedsRefresh = true
+            }
             .onChange(of: model.status.playhead) { _ in mediaNeedsRefresh = true }
-            .onChange(of: model.status.modelRevision) { _ in mediaNeedsRefresh = true }
+            .onChange(of: model.status.modelRevision) { _ in refreshMarkers(); mediaNeedsRefresh = true }
+            .onChange(of: model.markerFrames) { _ in refreshMarkers() }
             .onChange(of: scrollY) { _ in mediaNeedsRefresh = true }
             .onChange(of: pps) { _ in mediaNeedsRefresh = true }
             .onChange(of: heldView) { _ in mediaNeedsRefresh = true }
@@ -432,7 +457,7 @@ struct TimelineView: View {
         for marker in markers {
             let px = x(Double(marker.frame), width: size.width), half = m.tickBottom * 0.28
             guard px >= -half && px <= size.width + half else { continue }
-            let s = marker.kind == 1 ? half * 0.7 : half
+            let s = max(marker.kind == 1 ? half * 0.7 : half, 3.5)
             let color = Color(.sRGB, red: Double(marker.packedColor & 255) / 255,
                               green: Double((marker.packedColor >> 8) & 255) / 255,
                               blue: Double((marker.packedColor >> 16) & 255) / 255, opacity: 1)
@@ -443,6 +468,35 @@ struct TimelineView: View {
             context.stroke(line, with: .color(color), lineWidth: marker.kind == 1 ? 1 : 1.5)
         }
         drawTimecode(&context, size: size)
+    }
+
+    /// Composition guides stay above clips in both compact and expanded timelines.
+    private func drawMarkerGuides(_ context: inout GraphicsContext, size: CGSize) {
+        guard size.height > m.rowsTop else { return }
+        let half: CGFloat = 3.5
+        for marker in markers {
+            let px = x(Double(marker.frame), width: size.width)
+            guard px >= -half && px <= size.width + half else { continue }
+            let color = markerTint(marker.packedColor)
+            var line = Path()
+            line.move(to: CGPoint(x: px, y: m.rowsTop)); line.addLine(to: CGPoint(x: px, y: size.height))
+            context.stroke(line, with: .color(.black.opacity(0.35)), lineWidth: 3)
+            context.stroke(line, with: .color(color.opacity(0.7)), lineWidth: 1)
+            var head = Path()
+            head.move(to: CGPoint(x: px - half, y: m.rowsTop))
+            head.addLine(to: CGPoint(x: px + half, y: m.rowsTop))
+            head.addLine(to: CGPoint(x: px, y: m.rowsTop + half * 1.4)); head.closeSubpath()
+            context.fill(head, with: .color(color))
+        }
+    }
+
+    private func drawPreviewBuffer(_ context: inout GraphicsContext, size: CGSize) {
+        for range in model.previewBufferRanges {
+            guard let span = TimelinePreviewBuffer.span(range, view: viewFrame, pxPerFrame: ppf, width: size.width) else { continue }
+            let rect = CGRect(x: span.lowerBound, y: m.rulerTicks - TimelinePreviewBuffer.height,
+                              width: span.upperBound - span.lowerBound, height: TimelinePreviewBuffer.height)
+            context.fill(Path(rect), with: .color(AureaTimeline.previewBuffer))
+        }
     }
 
     /// O relógio na faixa 30..60, centrado no cabeçote: sublinhado (traço de 2
@@ -992,8 +1046,10 @@ struct TimelineView: View {
             }
         }
         thumbnails = next; waves = nextWaves; pillThumbs = nextPill
-        // Marcas só mudam com o modelo (revisão) ou com a lista local do modelo:
-        // relê-las a cada quadro de playback/scrub era trabalho jogado fora.
+    }
+
+    // Marker updates are independent of thumbnail work and its frame budget.
+    private func refreshMarkers() {
         let markerKey = (model.status.modelRevision, model.markerFrames)
         if markerKey.0 != markersRevision || markerKey.1 != markersFrames {
             markersRevision = markerKey.0; markersFrames = markerKey.1
@@ -1535,14 +1591,14 @@ struct TimelineView: View {
             if change != g.sentDelta {
                 openUndo(&g)
                 if g.mode == .trimStart {
-                    if model.editMode, let current = model.layers.first(where: { $0.id == row.id }) {
+                    if model.editMode || row.magnetic, let current = model.layers.first(where: { $0.id == row.id }) {
                         model.trimStart(row.id, at: Int64(current.startFrame) + Int64(change) - Int64(g.sentDelta))
                         if let changed = model.layers.first(where: { $0.id == row.id }) {
                             g.sentDelta += current.duration - changed.duration
                         }
                     } else { model.trimStart(row.id, at: Int64(target)) }
                 } else { model.trimEnd(row.id, at: Int64(target)) }
-                if g.mode != .trimStart || !model.editMode { g.sentDelta = change }
+                if g.mode != .trimStart || !(model.editMode || row.magnetic) { g.sentDelta = change }
             }
             guide = snapped
         case .key:

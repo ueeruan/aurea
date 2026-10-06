@@ -96,6 +96,7 @@ internal object PodLayout {
     const val ST_OFF_LAST_ERROR = 4       // i32
     const val ST_OFF_ERROR_DETAIL = 8     // char[96]
     const val ST_OFF_MODEL_REVISION = 104 // u32
+    const val ST_OFF_PREVIEW_BUFFER = 108 // u32: active/limited flags + ready/target frames
     const val ST_OFF_COMP_FPS = 112       // f32
     const val ST_OFF_COMP_WIDTH = 116     // u32
     const val ST_OFF_COMP_HEIGHT = 120    // u32
@@ -328,6 +329,7 @@ class EngineStatus {
     var compWidth: Int = 0
     var compHeight: Int = 0
     var modelRevision: Int = 0
+    var previewBufferStatus: Int = 0
     var thumbnailGeneration: Int = 0
     var layerCount: Int = 0
     var selectedCount: Int = 0
@@ -365,6 +367,7 @@ class EngineStatus {
         compWidth = buffer.getInt(PodLayout.ST_OFF_COMP_WIDTH)
         compHeight = buffer.getInt(PodLayout.ST_OFF_COMP_HEIGHT)
         modelRevision = buffer.getInt(PodLayout.ST_OFF_MODEL_REVISION)
+        previewBufferStatus = buffer.getInt(PodLayout.ST_OFF_PREVIEW_BUFFER)
         thumbnailGeneration = buffer.getInt(PodLayout.ST_OFF_THUMB_GENERATION)
         layerCount = buffer.getInt(PodLayout.ST_OFF_LAYER_COUNT)
         selectedCount = buffer.getInt(PodLayout.ST_OFF_SELECTED_COUNT)
@@ -467,6 +470,13 @@ class ExportProgress {
     val thermalReduced: Boolean get() = flags and FLAG_THERMAL_REDUCED != 0
     /** Algum quadro saiu com o vídeo decodificado mais próximo (o exato não veio). */
     val frameFallback: Boolean get() = flags and FLAG_FRAME_FALLBACK != 0
+    /** Este export roda no modo de segurança (refeito depois de o encoder travar). */
+    val safeMode: Boolean get() = flags and FLAG_SAFE_MODE != 0
+    /**
+     * Falhou pelo encoder: o modo de segurança em que o MOTOR manda refazer
+     * (bits 16..17, kExportRetryShift em export/ExportWatchdog.hpp). 0 = não refazer.
+     */
+    val retrySafeMode: Int get() = (flags ushr RETRY_SHIFT) and 0x3
 
     internal fun readFrom(buffer: ByteBuffer) {
         running = buffer.getInt(PodLayout.EPD_OFF_RUNNING) != 0
@@ -490,6 +500,9 @@ class ExportProgress {
         const val FLAG_SOFTWARE_ENCODER = 1 shl 1
         const val FLAG_THERMAL_REDUCED = 1 shl 2
         const val FLAG_FRAME_FALLBACK = 1 shl 3
+        const val FLAG_SAFE_MODE = 1 shl 4
+        // aurea::kExportRetryShift (ExportWatchdog.hpp).
+        const val RETRY_SHIFT = 16
         // aurea::kExportFailureShift / ExportFailure (ExportRules.hpp).
         const val FAILURE_SHIFT = 24
         const val FAILURE_NONE = 0

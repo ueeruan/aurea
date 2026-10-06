@@ -12,7 +12,9 @@
 #include "aurea/Engine.hpp"
 
 #include "aurea/render/Renderer.hpp"
+#include "aurea/scene3d/MaterialPreview.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/ModelBudget.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -78,16 +80,26 @@ std::vector<Mat4> laid_out(const scene3d::SceneAsset& asset, const Layer& l, Fra
 } // namespace
 
 Result<u64> Engine::add_shape3d(u32 kind, const char* name) noexcept {
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    u64 session = 0, room = 0; CompositionId composition;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return Status{Errc::InvalidState};
+        session = projectSession_; composition = project_->timeline().current(); room = source_asset_room_locked();
+    }
+    if (room < 4096) return Status{Errc::BudgetExceeded};
     if (kind >= scene3d::kShape3DKindCount) return Status{Errc::InvalidArgument, "forma 3D desconhecida"};
     const scene3d::Shape3DSpec spec = scene3d::default_shape3d(static_cast<scene3d::Shape3DKind>(kind));
     scene3d::ImportResult r = scene3d::build_shape3d(spec, [this](const std::string& s) { return resolve_asset_path(s); },
-                                                     model_texture_cap());
+                                                     model_texture_cap(), room);
     if (!r.ok()) return Status{Errc::InvalidArgument, "forma 3D sem geometria"};
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
     const std::string label = name && *name ? std::string(name) : std::string("Forma 3D");
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()) return Status{Errc::Cancelled};
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Status{Errc::BudgetExceeded};
     history_.before_mutation(*comp, project_->timeline().current(), "forma 3D");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const AssetId assetId = add_shape_asset(*project_, *scene, label, scene3d::encode_shape3d(spec));
@@ -111,21 +123,34 @@ Result<u64> Engine::add_shape3d(u32 kind, const char* name) noexcept {
 }
 
 Status Engine::set_shape3d(u64 layerId, const scene3d::Shape3DSpec& in) noexcept {
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    u64 session = 0, room = 0; CompositionId composition; AssetId previous;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        const Layer* layer = project_ ? shape_layer(current_composition(), layerId) : nullptr;
+        if (!layer) return Errc::InvalidArgument;
+        session = projectSession_; composition = project_->timeline().current(); previous = layer->model.scene;
+        room = source_asset_room_locked();
+    }
+    if (room < 4096) return Errc::BudgetExceeded;
     scene3d::Shape3DSpec spec = in;
     scene3d::normalize_shape3d(spec);
     // Malha e imagens FORA do lock (decodificar uma foto grande leva tempo).
     scene3d::ImportResult r = scene3d::build_shape3d(spec, [this](const std::string& s) { return resolve_asset_path(s); },
-                                                     model_texture_cap());
+                                                     model_texture_cap(), room);
     if (!r.ok()) return Status{Errc::InvalidArgument, "forma 3D sem geometria"};
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()) return Errc::Cancelled;
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = shape_layer(comp, layerId);
     if (!l) return Errc::InvalidArgument;
+    if (l->model.scene != previous) return Errc::Cancelled;
     if (l->locked) return Status{Errc::InvalidState, "camada bloqueada"};
     const Asset* old = project_->asset(l->model.scene);
     scene3d::Shape3DSpec prev;
     if (!old || !scene3d::decode_shape3d(old->sourcePath, prev)) return Status{Errc::InvalidArgument, "selecione uma forma 3D"};
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Errc::BudgetExceeded;
     history_.before_mutation(*comp, project_->timeline().current(), "editar forma 3D");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     const AssetId assetId = add_shape_asset(*project_, *scene, old->name, scene3d::encode_shape3d(spec));
@@ -380,6 +405,13 @@ bool group_transform_track(TrackProperty p) noexcept {
 } // namespace
 
 Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<u64>* slices) noexcept {
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    u64 session = 0, room = 0; CompositionId composition;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return Status{Errc::InvalidState};
+        session = projectSession_; composition = project_->timeline().current(); room = source_asset_room_locked();
+    }
     if (slices) slices->clear();
     if (axis > 2 || count < scene3d::kShape3DSplitMin || count > scene3d::kShape3DSplitMax)
         return Status{Errc::InvalidArgument, "eixo ou numero de partes invalido"};
@@ -391,14 +423,19 @@ Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<
     // Malhas e imagens FORA do lock (como em set_shape3d).
     std::vector<std::shared_ptr<const scene3d::SceneAsset>> scenes;
     scenes.reserve(count);
+    u64 held = 0;
     for (const scene3d::Shape3DSpec& s : parts) {
+        if (room <= held + 4096) return Status{Errc::BudgetExceeded};
         scene3d::ImportResult r = scene3d::build_shape3d(s, [this](const std::string& p) { return resolve_asset_path(p); },
-                                                         model_texture_cap());
+                                                         model_texture_cap(), room - held);
         if (!r.ok()) return Status{Errc::InvalidArgument, "forma 3D sem geometria"};
+        held += scene3d::scene_asset_memory_bytes(*r.asset);
+        if (held > room) return Status{Errc::BudgetExceeded};
         scenes.emplace_back(std::move(r.asset));
     }
 
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_ || session != projectSession_ || composition != project_->timeline().current()) return Status{Errc::Cancelled};
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     // A fila vem ANTES (como em add_null): um desfazer ainda na fila rodaria
     // depois deste passo e desmancharia o grupo pela metade.
@@ -413,6 +450,7 @@ Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<
     if (!oldAsset || !scene3d::decode_shape3d(oldAsset->sourcePath, now) || scene3d::encode_shape3d(now) != scene3d::encode_shape3d(spec))
         return Status{Errc::InvalidState, "a forma mudou; tente de novo"};
     if (comp->layers().count() + count > kMaxLayerCount) return Status{Errc::OutOfMemory, "limite de camadas"};
+    if (held > source_asset_room_locked()) return Status{Errc::BudgetExceeded};
 
     history_.before_mutation(*comp, project_->timeline().current(), "dividir forma 3D");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
@@ -481,6 +519,88 @@ Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<
     request_render();
     if (slices) *slices = ids;
     return groupId.pack();
+}
+
+// =============================================================================
+// Mostrar interior (dupla face) e miniatura de material — valem para todo
+// objeto 3D (modelo importado, texto 3D e forma 3D), não só para as formas.
+// =============================================================================
+bool Engine::set_model_interior(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = shape_layer(comp, layerId);
+    if (!l) return false;
+    const ModelInterior mode = on ? ModelInterior::On : ModelInterior::Off;
+    if (l->model.interior == mode) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "interior do objeto 3D");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->model.interior = mode;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+i32 Engine::query_model_interior(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Layer* l = project_ ? shape_layer(current_composition(), layerId) : nullptr;
+    if (!l) return -1;
+    const auto found = models_.find(l->model.scene.pack());
+    const bool shape = found != models_.end() && found->second && found->second->shapeParts;
+    return model_interior_visible(l->model.interior, shape) ? 1 : 0;
+}
+
+bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u8>& out) noexcept {
+    out.clear();
+    if (size < scene3d::kMaterialPreviewMinSize || size > scene3d::kMaterialPreviewMaxSize) return false;
+    // O asset fica seguro pelo shared_ptr depois de soltar a trava: a bola lê
+    // os pixels do mapa de cor fora dela.
+    std::shared_ptr<const scene3d::SceneAsset> asset;
+    scene3d::MaterialBall ball;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        const Layer* layer = project_ ? shape_layer(current_composition(), layerId) : nullptr;
+        if (!layer) return false;
+        const auto found = models_.find(layer->model.scene.pack());
+        if (found == models_.end() || !found->second || material >= found->second->materials.size()) return false;
+        asset = found->second;
+        ball = scene3d::material_ball_of(*asset, asset->materials[material]);
+        // Os mesmos valores que query_materials mostra e o renderer desenha:
+        // ajuste da camada (máscara por canal) e keyframes no instante.
+        f32 fields[6]{ball.baseColor.x, ball.baseColor.y, ball.baseColor.z, ball.baseColor.w, ball.metallic, ball.roughness};
+        u32 mask = 0;
+        for (const MaterialOverride& over : layer->model.materials) {
+            if (over.materialIndex != material) continue;
+            const f32 overrides[6]{over.baseColor.x, over.baseColor.y, over.baseColor.z, over.baseColor.w, over.metallic, over.roughness};
+            for (u32 p = 0; p < 6; ++p) if (over.mask & (1u << p)) fields[p] = overrides[p];
+            mask |= over.mask;
+            break;
+        }
+        const auto local = layer->local_time(playback_.current());
+        for (u32 p = 0; p < 6; ++p) {
+            if (const Track* track = layer->tracks.find(TrackProperty::MaterialParam, material, p)) {
+                fields[p] = track->value_or(local, fields[p]);
+                mask |= 1u << p;
+            }
+        }
+        ball.baseColor = Vec4{fields[0], fields[1], fields[2], std::clamp(fields[3], 0.0f, 1.0f)};
+        ball.metallic = fields[4];
+        ball.roughness = fields[5];
+        // Como no renderer: opacidade editada num material opaco mistura, e
+        // metal/rugosidade editados ligam a luz de um material unlit.
+        if ((mask & 8u) && ball.alphaMode == scene3d::AlphaMode::Opaque && ball.baseColor.w < 1.0f)
+            ball.alphaMode = scene3d::AlphaMode::Blend;
+        if (mask & 48u) ball.unlit = false;
+    }
+    out = scene3d::material_ball_cached(ball, size);
+    return !out.empty();
+}
+
+bool Engine::text3d_preset_preview(u32 preset, u32 size, std::vector<u8>& out) noexcept {
+    out.clear();
+    scene3d::MaterialBall ball;
+    if (!scene3d::text3d_preset_ball(preset, ball)) return false;
+    out = scene3d::material_ball_cached(ball, size);
+    return !out.empty();
 }
 
 } // namespace aurea

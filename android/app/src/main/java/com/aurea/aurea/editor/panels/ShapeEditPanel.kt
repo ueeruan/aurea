@@ -39,6 +39,7 @@ import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -64,6 +65,7 @@ import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -81,7 +83,29 @@ internal object ShapeEditState {
 }
 
 /** As formas simples (SDF do motor, `shape.frag`) na ordem da troca ‹ ›. */
-internal val SimpleShapes = intArrayOf(0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15)
+internal val SimpleShapes = intArrayOf(0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24)
+
+/**
+ * Parâmetros das formas (shape::Param do motor, ShapeGeometry.hpp): o índice
+ * do vetor de `queryShapeParams` e da trilha ShapeParam.
+ */
+internal object ShapeParam {
+    const val CORNER = 1
+    const val COUNT = 2
+    const val INNER = 3
+    const val DEPTH = 7
+    const val TIP = 8
+    const val THICKNESS = 9
+    const val SWEEP = 10
+    const val HEAD = 11
+    const val SHAFT = 12
+    const val AMPLITUDE = 13
+    const val SEED = 14
+}
+
+/** Bits de "animado" e de "keyframe aqui": os dois últimos números do vetor de parâmetros. */
+internal fun shapeAnimBits(sp: FloatArray?): Int = sp?.let { it.getOrNull(it.size - 2) }?.toInt() ?: 0
+internal fun shapeKeyBits(sp: FloatArray?): Int = sp?.let { it.getOrNull(it.size - 1) }?.toInt() ?: 0
 
 @Composable
 internal fun shapeName(type: Int): String = stringResource(when (type) {
@@ -99,6 +123,15 @@ internal fun shapeName(type: Int): String = stringResource(when (type) {
     13 -> R.string.sh_shape_parallelogram
     14 -> R.string.sh_shape_gear
     15 -> R.string.sh_shape_double_arrow
+    16 -> R.string.sh_shape_line
+    17 -> R.string.sh_shape_diamond
+    18 -> R.string.sh_shape_heart
+    19 -> R.string.sh_shape_seal
+    20 -> R.string.sh_shape_arc
+    21 -> R.string.sh_shape_bubble
+    22 -> R.string.sh_shape_bolt
+    23 -> R.string.sh_shape_wave
+    24 -> R.string.sh_shape_blob
     else -> R.string.target_shape
 })
 
@@ -128,10 +161,10 @@ internal fun ShapeEditPanel(env: PanelEnv) {
     // Estado de animação dos parâmetros (valores + bits) no cabeçote.
     val sp by remember(store) { derivedStateOf { store.shapeParams } }
     val sel = ShapeEditState.param
-    val curveKeys = curveTrack((listOf(sel) + listOf(5, 6, 1, 2, 3, 4)).distinct()
+    val curveKeys = curveTrack((listOf(sel) + listOf(5, 6, 1, 2, 3, 4) + (7..14)).distinct()
         .map { store.primaryKeys().shapeTrack(it) })
-    val animBits = sp?.getOrNull(7)?.toInt() ?: 0
-    val keyBits = sp?.getOrNull(8)?.toInt() ?: 0
+    val animBits = shapeAnimBits(sp)
+    val keyBits = shapeKeyBits(sp)
     val look = when {
         keyBits and (1 shl sel) != 0 -> KeyframeLook.KeyHere
         animBits and (1 shl sel) != 0 -> KeyframeLook.Animated
@@ -165,11 +198,21 @@ internal fun ShapeEditPanel(env: PanelEnv) {
             SizeRow(env, detail.sourceWidth.toFloat(), detail.sourceHeight.toFloat())
             val w = detail.sourceWidth.toFloat()
             val h = detail.sourceHeight.toFloat()
+            // Valor no cabeçote dos parâmetros 7..14 (o motor já resolve o padrão da forma).
+            fun pv(param: Int, fallback: Float): Float = sp?.getOrNull(param) ?: fallback
             when (type) {
-                0 -> ShapeRow(env, 1, stringResource(R.string.panel_raio), detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
+                0, 16, 21 -> ShapeRow(env, 1, stringResource(R.string.panel_raio), detail.shapeCorner, 0.3f, 0f, max(0f, min(w, h) / 2f), "px", 0, 0f, "raio") { store.setShapeParam(1, it) }
                 3, 4, 8, 14 -> ShapeRow(env, 2, when (type) { 3 -> stringResource(R.string.panel_lados); 8 -> stringResource(R.string.panel_petalas); 14 -> stringResource(R.string.panel_dentes); else -> stringResource(R.string.panel_pontas) }, points.toFloat(), 0.06f, 3f, 64f, "", 0, 5f, "pontas") {
                     store.setShapeParam(2, it.roundToInt().toFloat())
                 }
+                // Selo: saliências; onda: ondas; mancha: lóbulos.
+                19, 23, 24 -> ShapeRow(
+                    env, 2,
+                    stringResource(when (type) { 19 -> R.string.shp_bumps; 23 -> R.string.shp_waves; else -> R.string.shp_lobes }),
+                    points.toFloat(), 0.06f,
+                    when (type) { 19 -> 3f; 23 -> 1f; else -> 2f }, when (type) { 19 -> 48f; else -> 12f }, "", 0,
+                    when (type) { 19 -> 14f; 23 -> 3f; else -> 4f }, "contagem",
+                ) { store.setShapeParam(2, it.roundToInt().toFloat()) }
             }
             when (type) {
                 4 -> ShapeRow(env, 3, stringResource(R.string.panel_raio_interno), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, stringResource(R.string.panel_raio_interno_75cf)) { store.setShapeParam(3, it / 100f) }
@@ -178,8 +221,41 @@ internal fun ShapeEditPanel(env: PanelEnv) {
                 6 -> ShapeRow(env, 3, stringResource(R.string.panel_espessura), (1f - detail.shapeInner) * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "espessura") { store.setShapeParam(3, 1f - it / 100f) }
                 12 -> ShapeRow(env, 3, stringResource(R.string.panel_largura_topo), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 60f, "topo") { store.setShapeParam(3, it / 100f) }
                 13 -> ShapeRow(env, 3, stringResource(R.string.panel_inclinacao), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 50f, "inclinacao") { store.setShapeParam(3, it / 100f) }
-                14 -> ShapeRow(env, 3, stringResource(R.string.panel_cubo), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 30f, "cubo") { store.setShapeParam(3, it / 100f) }
-                15 -> ShapeRow(env, 3, stringResource(R.string.panel_espessura), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 22f, "espessura") { store.setShapeParam(3, it / 100f) }
+                14 -> {
+                    ShapeRow(env, 3, stringResource(R.string.panel_cubo), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 30f, "cubo") { store.setShapeParam(3, it / 100f) }
+                    PercentRow(env, ShapeParam.DEPTH, stringResource(R.string.shp_depth), pv(ShapeParam.DEPTH, 0.22f), 5f, 95f, 22f, "profundidade")
+                }
+                15 -> {
+                    ShapeRow(env, 3, stringResource(R.string.panel_espessura), detail.shapeInner * 100f, 0.3f, 5f, 95f, "%", 0, 22f, "espessura") { store.setShapeParam(3, it / 100f) }
+                    PercentRow(env, ShapeParam.HEAD, stringResource(R.string.shp_head), pv(ShapeParam.HEAD, 0.275f), 10f, 90f, 27.5f, "ponta")
+                }
+                // Fatia e arco: abertura em graus (270° = a fatia de sempre).
+                7 -> SweepRow(env, pv(ShapeParam.SWEEP, 270f))
+                8 -> PercentRow(env, ShapeParam.DEPTH, stringResource(R.string.shp_depth), pv(ShapeParam.DEPTH, 0.28f), 5f, 95f, 28f, "profundidade")
+                9 -> {
+                    PercentRow(env, ShapeParam.HEAD, stringResource(R.string.shp_head), pv(ShapeParam.HEAD, 0.45f), 10f, 90f, 45f, "ponta")
+                    PercentRow(env, ShapeParam.SHAFT, stringResource(R.string.shp_shaft), pv(ShapeParam.SHAFT, 0.44f), 5f, 100f, 44f, "haste")
+                }
+                16 -> PercentRow(env, ShapeParam.THICKNESS, stringResource(R.string.panel_espessura), pv(ShapeParam.THICKNESS, 1f), 2f, 100f, 100f, "espessura")
+                17 -> PercentRow(env, ShapeParam.TIP, stringResource(R.string.shp_waist), pv(ShapeParam.TIP, 0.5f), 5f, 95f, 50f, "cintura")
+                18 -> PercentRow(env, ShapeParam.DEPTH, stringResource(R.string.shp_depth), pv(ShapeParam.DEPTH, 0.4f), 5f, 95f, 40f, "profundidade")
+                19 -> PercentRow(env, ShapeParam.DEPTH, stringResource(R.string.shp_depth), pv(ShapeParam.DEPTH, 0.6f), 5f, 95f, 60f, "profundidade")
+                20 -> {
+                    PercentRow(env, ShapeParam.THICKNESS, stringResource(R.string.panel_espessura), pv(ShapeParam.THICKNESS, 0.2f), 2f, 50f, 20f, "espessura")
+                    SweepRow(env, pv(ShapeParam.SWEEP, 270f))
+                }
+                21 -> PercentRow(env, ShapeParam.TIP, stringResource(R.string.shp_tail), pv(ShapeParam.TIP, 0.3f), 0f, 100f, 30f, "ponta do balão")
+                22 -> PercentRow(env, ShapeParam.TIP, stringResource(R.string.panel_inclinacao), pv(ShapeParam.TIP, 0.5f), 0f, 100f, 50f, "inclinacao")
+                23 -> {
+                    PercentRow(env, ShapeParam.THICKNESS, stringResource(R.string.panel_espessura), pv(ShapeParam.THICKNESS, 0.4f), 2f, 100f, 40f, "espessura")
+                    PercentRow(env, ShapeParam.AMPLITUDE, stringResource(R.string.shp_amplitude), pv(ShapeParam.AMPLITUDE, 1f), 0f, 100f, 100f, "amplitude")
+                }
+                24 -> {
+                    PercentRow(env, ShapeParam.DEPTH, stringResource(R.string.shp_variation), pv(ShapeParam.DEPTH, 0.5f), 5f, 95f, 50f, "variacao")
+                    ShapeRow(env, ShapeParam.SEED, stringResource(R.string.shp_seed), pv(ShapeParam.SEED, 0f), 0.06f, 0f, 99f, "", 0, 0f, "variante") {
+                        store.setShapeParam(ShapeParam.SEED, it.roundToInt().toFloat())
+                    }
+                }
             }
             Spacer(Modifier.height(6.dp))
             KitHint(
@@ -328,6 +404,20 @@ private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
     }
 }
 
+/** Linha de parâmetro em porcentagem (o motor guarda a fração 0..1). */
+@Composable
+private fun PercentRow(env: PanelEnv, param: Int, label: String, fraction: Float, min: Float, max: Float, default: Float, gesture: String) {
+    ShapeRow(env, param, label, fraction * 100f, 0.3f, min, max, "%", 0, default, gesture) { env.store.setShapeParam(param, it / 100f) }
+}
+
+/** Abertura da fatia e do arco (graus; 270° = a fatia de 3/4 de sempre). */
+@Composable
+private fun SweepRow(env: PanelEnv, degrees: Float) {
+    ShapeRow(env, ShapeParam.SWEEP, stringResource(R.string.shp_sweep), degrees, 0.6f, 1f, 360f, "°", 0, 270f, "abertura") {
+        env.store.setShapeParam(ShapeParam.SWEEP, it)
+    }
+}
+
 /** Uma linha de parâmetro da forma (um arrasto = um desfazer). */
 @Composable
 private fun ShapeRow(
@@ -346,8 +436,8 @@ private fun ShapeRow(
 ) {
     val store = env.store
     val sp = store.shapeParams
-    val anim = (sp?.getOrNull(7)?.toInt() ?: 0) and (1 shl param) != 0
-    val here = (sp?.getOrNull(8)?.toInt() ?: 0) and (1 shl param) != 0
+    val anim = shapeAnimBits(sp) and (1 shl param) != 0
+    val here = shapeKeyBits(sp) and (1 shl param) != 0
     HumanRow(
         env, label, value, step, min, max, unit, decimals, default,
         onStart = { ShapeEditState.param = param; store.beginGesture(gesture) },
@@ -419,8 +509,80 @@ internal fun DrawScope.drawShapeGlyph(type: Int, color: Color) {
         13 -> drawPath(quad(c, r, -0.5f, -0.7f, 1f, -0.7f, 0.5f, 0.7f, -1f, 0.7f), color)
         14 -> drawPath(gearGlyph(c, r, 10, 0.3f), color)
         15 -> drawPath(doubleArrowGlyph(c, r), color)
+        16 -> drawRoundRect(color, Offset(c.x - r, c.y - r * 0.14f), Size(2 * r, 0.28f * r), CornerRadius(r * 0.06f))
+        17 -> drawPath(diamondGlyph(c, r), color)
+        18 -> drawPath(heartGlyph(c, r), color)
+        19 -> drawPath(sealGlyph(c, r, 12), color)
+        20 -> drawArc(color, 0f, 270f, false, Offset(c.x - r * 0.82f, c.y - r * 0.82f), Size(1.64f * r, 1.64f * r), style = Stroke(r * 0.36f))
+        21 -> drawPath(bubbleGlyph(c, r), color)
+        22 -> drawPath(boltGlyph(c, r), color)
+        23 -> drawPath(waveGlyph(c, r, 2), color, style = Stroke(r * 0.3f))
+        24 -> drawPath(blobGlyph(c, r), color)
         else -> drawRect(color, Offset(c.x - r, c.y - r), Size(2 * r, 2 * r))
     }
+}
+
+// --- Silhuetas das formas paramétricas (mesmas proporções do motor; também
+// na grade de Adicionar › Forma) -------------------------------------------------
+
+internal fun diamondGlyph(c: Offset, r: Float): Path = quad(c, r, 0f, -1f, 0.8f, 0f, 0f, 1f, -0.8f, 0f)
+
+/** Raio: os 7 vértices do motor numa caixa 0,6 : 1. */
+internal fun boltGlyph(c: Offset, r: Float): Path =
+    quad(c, r, -0.03f, -1f, 0.36f, -1f, 0.072f, -0.12f, 0.42f, -0.12f, -0.252f, 1f, -0.012f, 0.14f, -0.372f, 0.14f)
+
+internal fun heartGlyph(c: Offset, r: Float): Path = Path().apply {
+    moveTo(c.x, c.y + 0.9f * r)
+    cubicTo(c.x - 0.35f * r, c.y + 0.55f * r, c.x - r, c.y + 0.15f * r, c.x - r, c.y - 0.35f * r)
+    cubicTo(c.x - r, c.y - 0.85f * r, c.x - 0.2f * r, c.y - 0.95f * r, c.x, c.y - 0.5f * r)
+    cubicTo(c.x + 0.2f * r, c.y - 0.95f * r, c.x + r, c.y - 0.85f * r, c.x + r, c.y - 0.35f * r)
+    cubicTo(c.x + r, c.y + 0.15f * r, c.x + 0.35f * r, c.y + 0.55f * r, c.x, c.y + 0.9f * r)
+    close()
+}
+
+/** Selo: círculo com `bumps` saliências em arco, uma em cima. */
+internal fun sealGlyph(c: Offset, r: Float, bumps: Int): Path = Path().apply {
+    val steps = bumps * 12
+    for (i in 0..steps) {
+        val t = i.toFloat() / steps
+        val a = -PI.toFloat() / 2f + t * 2f * PI.toFloat()
+        val rr = r * (0.84f + 0.16f * abs(cos(bumps * t * PI.toFloat())))
+        val x = c.x + rr * cos(a)
+        val y = c.y + rr * sin(a)
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+    }
+    close()
+}
+
+/** Onda (linha do meio, para desenhar com traço): começa descendo, como no motor. */
+internal fun waveGlyph(c: Offset, r: Float, waves: Int): Path = Path().apply {
+    val steps = 48
+    for (i in 0..steps) {
+        val t = i.toFloat() / steps
+        val x = c.x - r + 2f * r * t
+        val y = c.y + 0.4f * r * sin(t * waves * 2f * PI.toFloat())
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+    }
+}
+
+/** Mancha: raio polar com três harmônicos (4, 5 e 2), como o blob do motor. */
+internal fun blobGlyph(c: Offset, r: Float): Path = Path().apply {
+    val steps = 96
+    for (i in 0..steps) {
+        val a = i.toFloat() / steps * 2f * PI.toFloat()
+        val rr = r * (1f + 0.18f * (0.55f * cos(4f * a + 0.9f) + 0.3f * cos(5f * a + 2.4f) + 0.15f * cos(2f * a + 4.1f))) / 1.18f
+        val x = c.x + rr * cos(a)
+        val y = c.y + rr * sin(a)
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+    }
+    close()
+}
+
+/** Balão de fala: corpo arredondado + rabicho à esquerda (unidos num caminho só). */
+internal fun bubbleGlyph(c: Offset, r: Float): Path {
+    val body = Path().apply { addRoundRect(RoundRect(c.x - r, c.y - 0.8f * r, c.x + r, c.y + 0.42f * r, CornerRadius(0.35f * r))) }
+    val tail = quad(c, r, -0.5f, 0.3f, -0.6f, 0.88f, -0.05f, 0.3f)
+    return Path().apply { op(body, tail, androidx.compose.ui.graphics.PathOperation.Union) }
 }
 
 /** Quadrilátero em frações de `r` em volta de `c` (trapézio, paralelogramo). */

@@ -4,16 +4,18 @@
 #include "GlVideoBridge.hpp"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/shaders/VideoColorGlsl.hpp"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES2/gl2.h>
+#include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -36,30 +38,33 @@ bool has_token(const char* list, const char* name) noexcept {
 // v0, a linha de CIMA da região visível: a ordem das linhas se mantém do buffer
 // do decoder ao alvo — e o Vulkan lê a linha 0 como o topo. Sem inverter.
 constexpr const char* kVertex =
-    "attribute vec2 a_pos;\n"
+    "#version 300 es\n"
+    "in vec2 a_pos;\n"
     "uniform vec4 u_rect;\n"
-    "varying vec2 v_uv;\n"
+    "out vec2 v_uv;\n"
     "void main() {\n"
     "    vec2 k = a_pos * 0.5 + 0.5;\n"
     "    v_uv = vec2(mix(u_rect.x, u_rect.z, k.x), mix(u_rect.y, u_rect.w, k.y));\n"
     "    gl_Position = vec4(a_pos, 0.0, 1.0);\n"
     "}\n";
 
-// O sampler externo: o driver converte YUV (matriz/faixa do buffer), passo,
-// fatia e compressão. highp nas coordenadas: mediump (10 bits) erra o texel
-// num buffer de 1920.
-constexpr const char* kFragment =
-    "#extension GL_OES_EGL_image_external : require\n"
-    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+// EXT_YUV_target returns normalized Y/Cb/Cr codes without the driver's
+// matrix/range conversion. Use the exact shared Vulkan/Metal function below,
+// then leave transfer/primaries conversion to the shared video render pass.
+constexpr const char* kFragmentHeader =
+    "#version 300 es\n"
+    "#extension GL_EXT_YUV_target : require\n"
     "precision highp float;\n"
-    "#else\n"
-    "precision mediump float;\n"
-    "#endif\n"
-    "uniform samplerExternalOES u_tex;\n"
+    "precision highp __samplerExternal2DY2YEXT;\n";
+constexpr const char* kFragmentBody =
+    "uniform __samplerExternal2DY2YEXT u_tex;\n"
     "uniform vec4 u_clamp;\n"
-    "varying vec2 v_uv;\n"
+    "uniform vec4 u_color;\n"
+    "in vec2 v_uv;\n"
+    "out vec4 o_color;\n"
     "void main() {\n"
-    "    gl_FragColor = vec4(texture2D(u_tex, clamp(v_uv, u_clamp.xy, u_clamp.zw)).rgb, 1.0);\n"
+    "    vec3 ycc = texture(u_tex, clamp(v_uv, u_clamp.xy, u_clamp.zw)).rgb;\n"
+    "    o_color = vec4(ycbcr_to_rgb(ycc, u_color.x, u_color.y, u_color.z > 0.5, u_color.w), 1.0);\n"
     "}\n";
 
 GLuint compile(GLenum type, const char* src) noexcept {
@@ -132,8 +137,8 @@ struct GlVideoBridge::Impl {
     PFNEGLCLIENTWAITSYNCKHRPROC clientWaitSync = nullptr;
     PFNEGLDESTROYSYNCKHRPROC destroySync = nullptr;
 
-    GLuint program = 0;
-    GLint aPos = -1, uRect = -1, uClamp = -1, uTex = -1;
+    GLuint program = 0, quadBuffer = 0;
+    GLint aPos = -1, uRect = -1, uClamp = -1, uTex = -1, uColor = -1;
 
     struct Source { EGLImageKHR image = EGL_NO_IMAGE_KHR; GLuint texture = 0; };
     struct Dest { EGLImageKHR image = EGL_NO_IMAGE_KHR; GLuint texture = 0; GLuint fbo = 0; u32 width = 0, height = 0; };
@@ -199,6 +204,7 @@ struct GlVideoBridge::Impl {
         if (context != EGL_NO_CONTEXT && make_current()) {
             for (auto& [b, s] : sources) drop_source(b, s);
             for (auto& [b, d] : dests) drop_dest(b, d);
+            if (quadBuffer) glDeleteBuffers(1, &quadBuffer);
             if (program) glDeleteProgram(program);
             release_current();
         } else {
@@ -217,7 +223,7 @@ struct GlVideoBridge::Impl {
 GlVideoBridge::GlVideoBridge(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
 GlVideoBridge::~GlVideoBridge() = default;
 
-std::unique_ptr<GlVideoBridge> GlVideoBridge::create() noexcept {
+std::unique_ptr<GlVideoBridge> GlVideoBridge::create(bool diagnosticProbe) noexcept {
     auto impl = std::make_unique<Impl>();
     Impl& g = *impl;
     g.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -248,15 +254,15 @@ std::unique_ptr<GlVideoBridge> GlVideoBridge::create() noexcept {
     }
 
     const EGLint cfgAttrs[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT_KHR, EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_NONE,
     };
     EGLint count = 0;
     if (!eglChooseConfig(g.display, cfgAttrs, &g.config, 1, &count) || count < 1) {
-        AUREA_LOG_WARN("video GL: nenhuma config EGL ES2");
+        AUREA_LOG_WARN("video GL: nenhuma config EGL ES3; usando planos do decoder");
         return nullptr;
     }
-    const EGLint ctxAttrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+    const EGLint ctxAttrs[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
     g.context = eglCreateContext(g.display, g.config, EGL_NO_CONTEXT, ctxAttrs);
     if (g.context == EGL_NO_CONTEXT) {
         AUREA_LOG_WARN("video GL: contexto EGL nao criado (0x%x)", eglGetError());
@@ -275,15 +281,21 @@ std::unique_ptr<GlVideoBridge> GlVideoBridge::create() noexcept {
     bool ok = false;
     do {
         const char* gl = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
-        if (!has_token(gl, "GL_OES_EGL_image_external")) {
-            AUREA_LOG_WARN("video GL: sem GL_OES_EGL_image_external");
+        if (diagnosticProbe) {
+            const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+            AUREA_LOG_INFO("diagnostico video GL: version=%s EXT_YUV_target=%s", version ? version : "?",
+                          has_token(gl, "GL_EXT_YUV_target") ? "sim" : "nao");
+        }
+        if (!has_token(gl, "GL_OES_EGL_image_external") || !has_token(gl, "GL_EXT_YUV_target")) {
+            AUREA_LOG_WARN("video GL: sem amostragem YUV explicita; usando planos do decoder");
             break;
         }
         g.imageTargetTexture = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
             eglGetProcAddress("glEGLImageTargetTexture2DOES"));
         if (!g.imageTargetTexture) break;
         const GLuint vs = compile(GL_VERTEX_SHADER, kVertex);
-        const GLuint fs = compile(GL_FRAGMENT_SHADER, kFragment);
+        const std::string fragment = std::string(kFragmentHeader) + shaders::kVideoColorGlsl + kFragmentBody;
+        const GLuint fs = compile(GL_FRAGMENT_SHADER, fragment.c_str());
         if (!vs || !fs) {
             if (vs) glDeleteShader(vs);
             if (fs) glDeleteShader(fs);
@@ -308,11 +320,20 @@ std::unique_ptr<GlVideoBridge> GlVideoBridge::create() noexcept {
         g.uRect = glGetUniformLocation(g.program, "u_rect");
         g.uClamp = glGetUniformLocation(g.program, "u_clamp");
         g.uTex = glGetUniformLocation(g.program, "u_tex");
+        g.uColor = glGetUniformLocation(g.program, "u_color");
+        // ES3 forbids client-memory vertex arrays. This immutable VBO belongs
+        // to the decoder context and survives every conversion.
+        static const GLfloat vertices[8] = {-1, -1, 1, -1, -1, 1, 1, 1};
+        glGenBuffers(1, &g.quadBuffer);
+        glBindBuffer(GL_ARRAY_BUFFER, g.quadBuffer);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        if (!g.quadBuffer || glGetError() != GL_NO_ERROR) break;
         ok = true;
     } while (false);
     g.release_current();
     if (!ok) return nullptr;
-    AUREA_LOG_INFO("video GL: contexto do driver pronto (EGL %d.%d, fence %s)", major, minor, g.fenceSync ? "sim" : "glFinish");
+    AUREA_LOG_INFO("video GL: YUV explicito com cor compartilhada pronto (ES3, EGL %d.%d, fence %s)", major, minor, g.fenceSync ? "sim" : "glFinish");
     return std::unique_ptr<GlVideoBridge>(new GlVideoBridge(std::move(impl)));
 }
 
@@ -339,9 +360,10 @@ void GlVideoBridge::forget_sources() noexcept {
     g.sources.clear();
 }
 
-Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad,
-                              std::shared_ptr<const Target>& out) noexcept {
+Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad, const VideoColorInfo& color,
+                              std::shared_ptr<const Target>& out, DiagnosticPixels* probe) noexcept {
     out.reset();
+    if (probe) *probe = DiagnosticPixels{};
     Impl& g = *impl_;
     if (!source || !quad.width || !quad.height) return Status{Errc::InvalidArgument, "quadro vazio"};
 
@@ -449,12 +471,15 @@ Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad,
     glUniform1i(g.uTex, 0);
     glUniform4f(g.uRect, quad.u0, quad.v0, quad.u1, quad.v1);
     glUniform4f(g.uClamp, quad.minU, quad.minV, quad.maxU, quad.maxV);
-    static const GLfloat kQuad[8] = {-1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f};
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glVertexAttribPointer(static_cast<GLuint>(g.aPos), 2, GL_FLOAT, GL_FALSE, 0, kQuad);
+    f32 kr = 0, kb = 0;
+    color.coefficients(kr, kb);
+    glUniform4f(g.uColor, kr, kb, color.fullRange ? 1.0f : 0.0f, static_cast<f32>(color.bitDepth));
+    glBindBuffer(GL_ARRAY_BUFFER, g.quadBuffer);
+    glVertexAttribPointer(static_cast<GLuint>(g.aPos), 2, GL_FLOAT, GL_FALSE, 0, nullptr);
     glEnableVertexAttribArray(static_cast<GLuint>(g.aPos));
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glDisableVertexAttribArray(static_cast<GLuint>(g.aPos));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     const GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         AUREA_LOG_WARN("video GL: desenho falhou (0x%x)", err);
@@ -476,6 +501,19 @@ Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad,
         }
     }
     if (!waited) glFinish();
+    if (probe) {
+        // Debug only: the completed FBO is still bound and has not entered the
+        // Vulkan/color/effect pipeline. Do not alter conversion or color state.
+        constexpr float positions[4][2] = {{.92f,.25f}, {.42f,.55f}, {.60f,.55f}, {.25f,.55f}};
+        for (u32 i = 0; i < 4; ++i) {
+            const GLint x = static_cast<GLint>(positions[i][0] * quad.width);
+            const GLint y = static_cast<GLint>(positions[i][1] * quad.height);
+            glReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, probe->rgba + i * 4);
+        }
+        const GLenum error = glGetError();
+        probe->valid = error == GL_NO_ERROR;
+        if (!probe->valid) AUREA_LOG_WARN("diagnostico video GL: leitura FBO falhou 0x%x", error);
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
     out = std::move(lease);

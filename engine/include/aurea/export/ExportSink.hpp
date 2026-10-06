@@ -18,6 +18,7 @@
 #pragma once
 
 #include <memory>
+#include <atomic>
 
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Types.hpp"
@@ -45,6 +46,12 @@ struct VideoStreamConfig {
     /// qualidade constante: CQ ignora `bitrateBps` e o arquivo explode.
     u32 rateMode = 1;
     ExportColorTags color{};
+    /// Perfil (ExportWatchdog.hpp): 0 = o padrão do encoder, 1 = Baseline (modo
+    /// de segurança — sem B-quadros, o que todo encoder de fabricante faz).
+    u32 profile = 0;
+    /// Modo de segurança nível 2: abrir direto o encoder de SOFTWARE do sistema
+    /// (Android). Plataforma sem essa escolha ignora.
+    bool preferSoftware = false;
 };
 
 struct AudioStreamConfig {
@@ -56,6 +63,18 @@ struct AudioStreamConfig {
 class ExportSink {
 public:
     virtual ~ExportSink() = default;
+
+    /// Optional session-owned cancellation flag. Native backpressure waits
+    /// poll it; it remains alive until the sink is destroyed. This permits
+    /// slower software encoders without blocking cancellation/suspension.
+    virtual void set_cancel_flag(const std::atomic<bool>* flag) noexcept { (void)flag; }
+
+    /// Batida de vida (export/ExportWatchdog.hpp): o sink grava o relógio
+    /// monotônico (ns) a cada chamada da plataforma que RETORNA — inclusive nos
+    /// laços de espera. Assim o motor distingue "esperando o encoder num laço
+    /// com prazo" de "preso dentro do encoder do aparelho" e desiste do segundo
+    /// em vez de esperar para sempre. Vive até o sink ser destruído.
+    virtual void set_heartbeat(std::atomic<u64>* beatNs) noexcept { (void)beatNs; }
 
     /// Abre o arquivo e configura os encoders. `audio` nulo = vídeo sem som.
     [[nodiscard]] virtual Status open(const char* outputPath, const VideoStreamConfig& video,

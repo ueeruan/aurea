@@ -53,8 +53,15 @@ for (w, h) in portraitTablets {
 }
 check(!EditorLayout.isWide(390, 780), "celular em pé não é largo")
 check(EditorLayout.isWide(844, 390), "celular deitado (≥ 600) é largo")
-check(!EditorLayout.isWide(560, 320), "deitado estreito (< 600) não é largo")
+check(EditorLayout.isWide(560, 320), "celular deitado usa folha lateral")
 check(!EditorLayout.isWide(1000, 1000), "janela quadrada fica empilhada")
+check(EditorLayout.dockQuick >= 44 && EditorLayout.dockTile >= 44, "doca preserva alvos de toque")
+let compactDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, width: 375, aspect: 9.0 / 16.0)
+let largeDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, width: 375, aspect: 9.0 / 16.0, fontScale: 2)
+let phoneDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, width: 375, aspect: 9.0 / 16.0, fontScale: 1.3)
+check(near(phoneDock.sheet, EditorLayout.dockHeight(rows: 2, fontScale: 1.3)), "doca cabe com fonte 130%")
+check(compactDock.sheet <= 200, "doca padrão deve ser compacta")
+check(largeDock.sheet > compactDock.sheet && largeDock.timeline >= EditorLayout.timelineMin, "fonte grande ganha espaço mantendo timeline")
 
 let contents: [SheetContent] = [.none, .addBar, .dock, .panel, .curve, .batch, .adding]
 for (w, h) in portraitTablets {
@@ -82,7 +89,17 @@ for (w, h) in portraitTablets {
     check(timeline >= 88 && timeline <= 280, "\(h)x\(w) deitado: timeline \(timeline)")
     check(preview >= EditorLayout.previewMin, "\(h)x\(w) deitado: palco \(preview)")
     let sheet = EditorLayout.wideSheetWidth(h)
-    check(sheet >= 280 && sheet <= 380 && h - sheet > 400, "\(h)x\(w) deitado: folha \(sheet)")
+    check(sheet >= 240 && sheet <= 420 && h - sheet > 400, "\(h)x\(w) deitado: folha \(sheet)")
+}
+for height in [CGFloat(240), 320, 480, 640, 960] {
+    for scale in [CGFloat(1), 1.3, 2] {
+        for content in contents {
+            let m = EditorLayout.solve(total: height, content: content, fullscreen: false, width: 320, aspect: 16.0 / 9.0, fontScale: scale)
+            let sum = m.topBar + m.preview + m.strip + m.transport + m.timeline + m.sheet
+            check(near(sum, height), "tela curta \(height), fonte \(scale): soma \(sum)")
+            check(m.preview >= 0 && m.timeline >= 0 && m.sheet >= 0, "altura negativa em \(height)")
+        }
+    }
 }
 if failures > 0 { print("check_editor_layout: \(failures) falha(s)"); exit(1) }
 print("check_editor_layout: OK")
@@ -92,8 +109,8 @@ print("check_editor_layout: OK")
 def main() -> int:
     source = THEME.read_text(encoding='utf-8')
     wide = re.search(r'static func isWide\(_ width: CGFloat, _ height: CGFloat\) -> Bool \{\s*(.*?)\s*\}', source, re.S)
-    if not wide or re.sub(r'\s+', ' ', wide.group(1)) != 'width >= 600 && width > height':
-        print('check_editor_layout: EditorLayout.isWide tem de ser só paisagem (width >= 600 && width > height)')
+    if not wide or re.sub(r'[\s()]+', '', wide.group(1)) != 'width>=520&&width>height&&height<600||width>=900&&width>height':
+        print('check_editor_layout: divergência na regra responsiva entre plataformas')
         return 1
     swiftc = shutil.which('swiftc')
     if not swiftc:

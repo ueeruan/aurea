@@ -46,6 +46,7 @@ def objc_method_names(header):
     pedaco e o que basta para conferir o nome.
     """
     names = set()
+    names.update(re.findall(r"NS_SWIFT_NAME\(\s*([A-Za-z_][A-Za-z0-9_]*)\(", header))
     prepositions = ("For", "With", "In", "At", "To", "From", "By", "Of", "On")
     for line in strip_comments(header).splitlines():
         match = re.match(r"^-\s*\([^)]*\)\s*([A-Za-z_][A-Za-z0-9_]*)", line)
@@ -102,11 +103,12 @@ def main():
     used_keys = 0
     dynamic_keys = []
 
-    for name in sorted(os.listdir(APP)):
-        if not name.endswith(".swift") or name == "AureaModel.swift":
-            continue
+    swift_files = sorted(os.path.relpath(os.path.join(base, name), APP)
+                         for base, _, files in os.walk(APP) for name in files
+                         if name.endswith(".swift"))
+    for name in swift_files:
         text = strip_comments(read(os.path.join(APP, name)))
-        for member in sorted(set(re.findall(r"\bmodel\.([A-Za-z_][A-Za-z0-9_]*)", text))):
+        for member in sorted(set(re.findall(r"\bmodel\.([A-Za-z_][A-Za-z0-9_]*)", text))) if name != "AureaModel.swift" else []:
             used_model += 1
             if member not in members:
                 problems.append("%s: model.%s nao existe em AureaModel" % (name, member))
@@ -114,7 +116,7 @@ def main():
             used_engine += 1
             if call not in engine_api and call != "run":
                 problems.append("%s: engine.%s nao existe em AureaEngine.h" % (name, call))
-        for key in sorted(set(re.findall(r'AureaText\.t\("([^"]+)"\)', text))):
+        for key in sorted(set(re.findall(r'AureaText\.t\("([^"]+)"\s*(?:,|\))', text))):
             used_keys += 1
             if key not in keys:
                 problems.append("%s: chave de texto ausente no catalogo: %s" % (name, key))

@@ -1,12 +1,7 @@
 // =============================================================================
-//  Particular — o sistema de partículas do app antigo, nativo no motor.
-//
-//  O dono pediu: "remova as partículas do Aurea e coloque o Particular do app
-//  antigo". A simulação, o visual e os parâmetros são os de lá (emissor em
-//  caixa/esfera medido em fração do quadro, pré-rolagem, velocidade com cone
-//  e mira 3D, gravidade, vento, arrasto do ar, turbulência, vida, tamanho e
-//  cor ao longo da vida, surgir/sumir, esticar no movimento, mistura aditiva);
-//  a interface é a do Aurea (as linhas genéricas do painel de efeitos).
+//  Partículas 3D AUREA: emissor em caixa/esfera, direção em cone, forças,
+//  tamanho e cor ao longo da vida. A câmera e o espaço de emissão vêm da
+//  composição; uma camada 2D sem câmera mantém sua projeção local.
 //
 //  Como tudo aqui é FECHADO (particular.vert), o quadro depende só de
 //  (parâmetros, tempo, semente): prévia = export, determinístico.
@@ -17,8 +12,7 @@
 //    2. composição: partículas presas em 0..1, por cima da camada quando
 //       "Mostrar camada" está ligado.
 //
-//  Unidades guardadas: percentuais em % (o app antigo guardava frações com
-//  escala de exibição 100 — os presets convertem), tempos em ms, ângulos em
+//  Unidades guardadas: percentuais em %, tempos em ms, ângulos em
 //  graus, distâncias em px da composição.
 // =============================================================================
 #include "BuiltinEffects.hpp"
@@ -42,7 +36,7 @@ f32 pct(const EffectEval& e, u32 i, f32 lo, f32 hi) noexcept {
 constexpr u16 kAnim = kParamAnimatable;
 constexpr u16 kAnimPct = kParamAnimatable | kParamPercent;
 constexpr u16 kAnimPx = kParamAnimatable | kParamPixels;
-/// Teto de slots (6 vértices cada) e de partículas por segundo — os do app antigo.
+/// Teto de slots (6 vértices cada) e de partículas por segundo.
 constexpr f32 kMaxSlots = 4000.0f;
 constexpr f32 kMaxRate = 1000.0f;
 
@@ -51,8 +45,9 @@ struct ParticularUniforms {
     Mat4 worldFromLayer, compFromWorld;   // camada do Particular (LayerPlacement::particleSpace)
     Vec4 camRight, camUp;                 // camRight.w = 1 liga o espaço 3D
     Mat4 previousParticleProjection;
+    Mat4 layerFromComp;
 };
-static_assert(sizeof(ParticularUniforms) == 448, "layout std140 do particular.vert");
+static_assert(sizeof(ParticularUniforms) == 512, "layout std140 do particular.vert");
 
 Vec4 linear(Vec4 c) noexcept {
     return Vec4{Color::srgb_to_linear(std::clamp(c.x, 0.0f, 1.0f)), Color::srgb_to_linear(std::clamp(c.y, 0.0f, 1.0f)),
@@ -62,7 +57,7 @@ Vec4 linear(Vec4 c) noexcept {
 class Particular final : public Effect {
 public:
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kParticular, "Particular", "Gerar", EffectClass::Domain};
+        static const EffectInfo i{effect_keys::kParticular, "Partículas 3D", "Gerar", EffectClass::Domain};
         return i;
     }
 
@@ -110,7 +105,7 @@ public:
         p.add_bool("add_mode", "Mistura aditiva", true);
         p.add_bool("show_source", "Mostrar camada", false);
         p.add_float("seed", "Semente", 0.0f, 0.0f, 9999.0f, kAnim);
-        // Desfoque de movimento por partícula (o do app antigo): rastro na
+        // Desfoque de movimento por partícula: rastro na
         // direção do movimento visível, do tamanho do trajeto no obturador.
         // Também liga sozinho com a chave de desfoque de movimento da camada
         // (aí vale o obturador da composição).
@@ -120,7 +115,7 @@ public:
 
     bool is_identity(const EffectEval&) const noexcept override { return false; }
 
-    // A prévia do catálogo: a neve mansa que o app antigo mostrava no cartão.
+    // Prévia do catálogo: emissão suave distribuída no volume.
     bool demo_values(EffectInstance& instance, std::vector<ParamValue>& values) const noexcept override {
         (void)instance;
         if (values.size() < kParamCount) return false;
@@ -170,13 +165,13 @@ public:
         ctx.region_size(region, texel, w, h);
         if (!w || !h) return Status{Errc::InvalidArgument, "particular: regiao vazia"};
 
-        // --- A grade de slots (a conta do app antigo) --------------------------
+        // --- Grade determinística de nascimentos -----------------------------
         const f32 rate = std::clamp(finite_or(e.f(kRate), 0.0f), 0.0f, kMaxRate);
         const f32 lifeMs = std::clamp(finite_or(e.f(kLife), 2000.0f), 50.0f, 30000.0f);
         const f32 lifeRandom = pct(e, kLifeRandom, 0.0f, 100.0f);
         const f32 preRoll = std::clamp(finite_or(e.f(kPreRoll), 0.0f), 0.0f, 30000.0f) * 0.001f;
         const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
-        const f32 now = static_cast<f32>(static_cast<f64>(e.localTime.value) / fps) + preRoll;
+        const f32 now = static_cast<f32>(e.time_frames() / fps) + preRoll;
         const f32 span = std::max((lifeRandom + 1.0f) * lifeMs * 0.001f * 1.05f, 1e-3f);
         const f32 grid = std::min(kMaxRate, kMaxSlots / span);
         const u32 slots = static_cast<u32>(std::clamp(std::ceil(span * grid), 1.0f, kMaxSlots));
@@ -207,6 +202,9 @@ public:
         if (e.b(kMotionBlur)) shutterDeg = std::clamp(finite_or(e.f(kShutterAngle), 0.0f), 0.0f, 720.0f);
         else if (e.placement) shutterDeg = std::clamp(finite_or(e.placement->shutterAngle, 0.0f), 0.0f, 2880.0f);
         const f32 halfShutter = shutterDeg / 360.0f / static_cast<f32>(fps) * 0.5f;
+        if (!e.b(kMotionBlur) && e.placement && shutterDeg > 0.f)
+            u.clock.x += (finite_or(e.placement->shutterPhase, -shutterDeg * .5f) + shutterDeg * .5f)
+                / (360.f * static_cast<f32>(fps));
         u.motion = Vec4{pct(e, kAirDrag, 0.0f, 800.0f), std::clamp(finite_or(e.f(kTurbulence), 0.0f), 0.0f, 40000.0f),
                         pct(e, kTurbulenceSpeed, 0.0f, 1000.0f), halfShutter};
         u.lifeSize = Vec4{lifeMs, lifeRandom, std::clamp(finite_or(e.f(kSize), 0.0f), 0.0f, 20000.0f),
@@ -225,6 +223,7 @@ public:
             u.camRight = Vec4{e.placement->camRight.x, e.placement->camRight.y, e.placement->camRight.z, 1.0f};
             u.camUp = Vec4{e.placement->camUp.x, e.placement->camUp.y, e.placement->camUp.z, static_cast<f32>(fps)};
             u.previousParticleProjection = e.placement->previousParticleProjection;
+            u.layerFromComp = e.placement->particleLayerFromComp;
         }
 
         const bool additive = e.b(kAddMode);
@@ -256,7 +255,7 @@ public:
     }
 };
 
-// --- Presets do app antigo -----------------------------------------------------
+// --- Presets de Partículas 3D --------------------------------------------------
 // Valores nas unidades guardadas (%, ms, graus, px). Cores em sRGB, como o
 // usuário escolhe no seletor.
 struct PresetValue { u32 param = kParamCount; f32 v = 0.0f; };   // kParamCount = fim da lista

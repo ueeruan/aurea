@@ -28,6 +28,9 @@ namespace aurea { namespace vk = gles; }
 #endif
 
 #include "aurea/Engine.hpp"
+#include "aurea/core/Time.hpp"
+#include "aurea/export/BitratePolicy.hpp"
+#include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/project/Project.hpp"
@@ -72,7 +75,15 @@ struct BenchCapture {
     bool opened = false, finished = false, aborted = false;
     bool keepFrames = false;
     u32 encodeUs = 0;                    ///< latência extra simulada do encoder
+    u32 openDelayUs = 0;
+    std::atomic<bool>* openEntered = nullptr;
+    std::atomic<bool>* writeEntered = nullptr;
+    std::atomic<bool>* allowWrite = nullptr;
     Status writeFailure{};              ///< fault injection at the platform boundary
+    Status openFailure{};
+    Status finishFailure{};
+    bool invalidateDiagnosticOnDestroy = false;
+    char platformDiagnostic[192]{};
     std::vector<u64> hashes;             ///< FNV-1a de Y+CbCr por quadro
     std::vector<std::vector<u8>> frames; ///< Y + CbCr (keepFrames)
     std::vector<i64> pts;
@@ -83,6 +94,16 @@ struct BenchCapture {
     bool audioContiguous = true;
     std::vector<u8> input;               ///< "buffer de entrada do codec"
     ExportSink::Acceleration accel = ExportSink::Acceleration::Unknown;   ///< o que o sink diz ter aberto
+    // Watchdog (export/ExportWatchdog.hpp): o encoder do aparelho preso DENTRO
+    // da plataforma — a chamada não volta e ninguém bate o coração.
+    i64 hangWriteAt = -1;                ///< n-ésima chamada de write_video que trava
+    bool hangFinish = false;             ///< o finish trava
+    std::atomic<bool>* hangEntered = nullptr;
+    std::atomic<bool>* hangRelease = nullptr;   ///< solta a chamada presa (fim do teste)
+    std::atomic<bool>* hangReturned = nullptr;
+    u32 beatingWriteMs = 0;              ///< a 1ª escrita demora isto BATENDO (encoder lento, vivo)
+    std::atomic<u64>* beat = nullptr;    ///< o que o motor entregou em set_heartbeat
+    u32 writes = 0;
 };
 
 /// FNV-1a em palavras de 64 bits (o de byte a byte custaria ~3 ms por quadro
@@ -102,7 +123,29 @@ u64 fnv(u64 h, const u8* p, usize n) {
 class BenchSink final : public ExportSink {
 public:
     explicit BenchSink(BenchCapture* c) : c_(c) {}
+    void set_heartbeat(std::atomic<u64>* beatNs) noexcept override { c_->beat = beatNs; }
+    /// Preso na "plataforma": não bate, só volta quando o teste soltar. Ao
+    /// voltar não toca em mais nada da captura (o motor já desistiu dele).
+    Status hang() noexcept {
+        if (c_->hangEntered) c_->hangEntered->store(true, std::memory_order_release);
+        std::atomic<bool>* release = c_->hangRelease;
+        std::atomic<bool>* returned = c_->hangReturned;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while (!(release && release->load(std::memory_order_acquire)) && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (returned) returned->store(true, std::memory_order_release);
+        return Errc::Timeout;
+    }
+    ~BenchSink() override {
+        // Stable test storage models the end of a platform-owned diagnostic
+        // lifetime without making the regression itself read freed memory.
+        if (c_->invalidateDiagnosticOnDestroy)
+            std::snprintf(c_->platformDiagnostic, sizeof(c_->platformDiagnostic), "diagnostico expirado");
+    }
     Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
+        if (c_->openEntered) c_->openEntered->store(true, std::memory_order_release);
+        if (c_->openDelayUs) std::this_thread::sleep_for(std::chrono::microseconds(c_->openDelayUs));
+        if (!c_->openFailure.ok()) return c_->openFailure;
         c_->video = v;
         c_->hasAudio = a != nullptr;
         if (a) c_->audio = *a;
@@ -111,7 +154,25 @@ public:
         return OkStatus;
     }
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
+        if (c_->writeEntered) c_->writeEntered->store(true, std::memory_order_release);
+        if (c_->allowWrite) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (!c_->allowWrite->load(std::memory_order_acquire)) {
+                if (std::chrono::steady_clock::now() >= deadline) return Errc::Timeout;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
         if (!c_->writeFailure.ok()) return c_->writeFailure;
+        const u32 call = c_->writes++;
+        if (static_cast<i64>(call) == c_->hangWriteAt) return hang();
+        if (call == 0 && c_->beatingWriteMs) {
+            // Lento mas vivo: o laço do encoder volta da plataforma e bate.
+            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(c_->beatingWriteMs);
+            while (std::chrono::steady_clock::now() < until) {
+                if (c_->beat) c_->beat->store(monotonic_ns(), std::memory_order_release);
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
         const u32 w = c_->video.width, h = c_->video.height;
         // O trabalho do MediaCodecExport: planos → buffer de entrada do codec.
         u8* dst = c_->input.data();
@@ -134,7 +195,11 @@ public:
                             static_cast<usize>(frames) * c_->audio.channels * sizeof(i16));
         return OkStatus;
     }
-    Status finish() noexcept override { c_->finished = true; return OkStatus; }
+    Status finish() noexcept override {
+        if (c_->hangFinish) return hang();
+        c_->finished = true;
+        return c_->finishFailure;
+    }
     void abort() noexcept override { c_->aborted = true; }
     EncoderInfo encoder_info() const noexcept override {
         EncoderInfo i;
@@ -177,8 +242,9 @@ struct Rig {
     Engine e;
     bool ok = false;
     Rig(const SyntheticConfig& cfg, f64 compFps, i64 frames, u32 depth,
-        VideoSourceFactory* mediaFactory = nullptr, GPUBackend* backend = nullptr) : factory(cfg) {
+        VideoSourceFactory* mediaFactory = nullptr, GPUBackend* backend = nullptr, u32 workerHangMs = 0) : factory(cfg) {
         EngineConfig ec;
+        ec.exportWorkerHangMs = workerHangMs;
         ec.backend = backend ? backend : new vk::Backend();
         ec.backendConfig.enableValidation = false;
         ec.mediaFactory = mediaFactory ? mediaFactory : &factory;
@@ -717,10 +783,10 @@ AUREA_TEST(Export, TemporalRgbReleasesFiniteDecoderImages) {
     AUREA_CHECK_EQ(factory.leases->live.load(), 0u);
 }
 
-/// Decoder that never produces a frame (all image leases taken): the export
-/// must not die. The layer without any decoded frame is left out of those
-/// frames, the file is finished and the UI gets the fallback flag.
-AUREA_TEST(Export, MissingVideoFramesFallBackInsteadOfAborting) {
+/// Never report a successful black/incomplete export if no frame of a visible
+/// source can be decoded. Stop cleanly, remove the partial output and identify
+/// the media failure, while still allowing approximate decoded frames below.
+AUREA_TEST(Export, MissingVideoFramesAbortInsteadOfReportingBlankVideoAsSuccess) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;
     LeasedFactory factory(cfg);
@@ -732,14 +798,13 @@ AUREA_TEST(Export, MissingVideoFramesFallBackInsteadOfAborting) {
     const Outcome o = run_export(r, 36, 30, false, 30);
     const f64 secs = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
     AUREA_CHECK(o.finished);
-    AUREA_CHECK_EQ(o.p.result, Errc::Ok);
-    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
-    AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(3));
-    AUREA_CHECK((o.p.flags & Engine::kExportFrameFallback) != 0);
+    AUREA_CHECK_EQ(o.p.result, Errc::DecodeFailed);
+    AUREA_CHECK(!r.cap.finished && r.cap.aborted);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(0));
+    AUREA_CHECK_EQ(o.p.failure, 5u); // ExportFailure::Media
     AUREA_CHECK(factory.leases->exhausted.load() > 0);
-    // 4 s for the first frame, then 1 s each while the source stays broken.
-    std::printf("fallback em %.1f s ", secs);
-    AUREA_CHECK(secs < 9.0);
+    std::printf("falha de midia tratada em %.1f s ", secs);
+    AUREA_CHECK(secs < 7.0);
 }
 
 namespace {
@@ -844,7 +909,7 @@ AUREA_TEST(Export, DecoderStallUsesNearestDecodedFrameAndFinishes) {
     }
 }
 
-/// Many clips in sequence, device with 3 decoder instances. The preview used to
+/// Many clips in sequence, device with just one decoder instance. The preview used to
 /// be the only one retiring idle decoders, and it does not run during export:
 /// every finished clip kept its codec until the end, the 4th clip could not
 /// open and the export died with "quadros de video indisponiveis".
@@ -855,6 +920,7 @@ AUREA_TEST(Export, ManyClipsRetireDecodersDuringExport) {
     cfg.pattern = SyntheticPattern::FrameGray;
     cfg.frameCount = 60;
     SlotFactory factory(cfg);
+    factory.slots->limit = 1;
     constexpr i64 kClips = 12, kClipFrames = 10;
     Rig r(cfg, 30.0, kClips * kClipFrames, 3, &factory);
     AUREA_CHECK(r.ok);
@@ -1056,6 +1122,232 @@ AUREA_TEST(Export, EncoderFailurePreservesActionableDetailAndAborts) {
     AUREA_CHECK(std::strcmp(o.p.message, "falha ao gravar no MP4 (codigo -10000)") == 0);
     AUREA_CHECK(r.cap.aborted);
     AUREA_CHECK(!r.cap.finished);
+}
+
+AUREA_TEST(Export, PlatformDiagnosticSurvivesSinkDestructionAtEveryFailureStage) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36; cfg.frameCount = 1;
+    for (int stage = 0; stage < 3; ++stage) {
+        auto* backend = new MockBackend(); backend->mapBuffers = true;
+        Rig r(cfg, 30, 1, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+        r.comp()->layer(r.video_layer())->visible = false;
+        r.cap.invalidateDiagnosticOnDestroy = true;
+        const char* expected = "falha nativa com diagnostico pertencente ao sink";
+        std::snprintf(r.cap.platformDiagnostic, sizeof(r.cap.platformDiagnostic), "%s", expected);
+        const Status fault{Errc::IoError, r.cap.platformDiagnostic};
+        if (stage == 0) {
+            r.cap.openFailure = fault;
+            ExportSettings settings; settings.height = 36;
+            const Status result = r.e.start_export(settings, "nao-usado.mp4");
+            AUREA_CHECK_EQ(result.code(), Errc::IoError);
+            AUREA_CHECK(result.detail() == expected);
+        } else {
+            if (stage == 1) r.cap.writeFailure = fault;
+            else r.cap.finishFailure = fault;
+            const Outcome o = run_export(r, 36, 30, false, 5);
+            AUREA_CHECK(o.finished);
+            AUREA_CHECK_EQ(o.p.result, Errc::IoError);
+            AUREA_CHECK(std::strcmp(o.p.message, expected) == 0);
+        }
+        AUREA_CHECK(std::strcmp(r.cap.platformDiagnostic, "diagnostico expirado") == 0);
+    }
+}
+
+AUREA_TEST(Export, InvalidSettingsAreRejectedBeforeOpeningTheEncoder) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    for (f64 rate : {-1.0, std::numeric_limits<f64>::quiet_NaN(),
+                     std::numeric_limits<f64>::infinity(), std::numeric_limits<f64>::denorm_min()}) {
+        ExportSettings settings; settings.fps = rate;
+        AUREA_CHECK(!r.e.start_export(settings, "nao-usado.mp4").ok());
+        AUREA_CHECK(!r.cap.opened);
+    }
+    ExportSettings settings; settings.height = std::numeric_limits<u32>::max();
+    AUREA_CHECK(!r.e.start_export(settings, "nao-usado.mp4").ok());
+    AUREA_CHECK(!r.cap.opened);
+}
+
+AUREA_TEST(Export, ReadbackMappingFailureNeverReachesTheEncoder) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 1, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    backend->beforeWaitFrame = [&](u64 frame, u64) {
+        if (frame > 0) backend->mappedBuffers.clear();
+        return OkStatus;
+    };
+    const Outcome o = run_export(r, 36, 30, false, 5);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::NotSupported);
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+    AUREA_CHECK(r.cap.hashes.empty());
+}
+
+AUREA_TEST(Export, TemporaryMissingGpuTextBufferRetriesBeforeEncoding) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 1, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.add_text("Text").ok());
+    u32 refused = 0;
+    backend->beforeCreateBuffer = [&](const BufferDesc& desc) {
+        if (desc.debugName && std::strcmp(desc.debugName, "glifos") == 0 && refused++ == 0)
+            return Status{Errc::OutOfDeviceMemory};
+        return OkStatus;
+    };
+    const Outcome o = run_export(r, 36, 30, false, 8);
+    AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), usize{1});
+    AUREA_CHECK(refused >= 2);
+    AUREA_CHECK(backend->framesSubmitted >= 2);
+}
+
+AUREA_TEST(Export, PersistentMissingGpuTextBufferFailsInsteadOfSavingIncompleteVideo) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 1, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.add_text("Text").ok());
+    backend->beforeCreateBuffer = [](const BufferDesc& desc) {
+        return desc.debugName && std::strcmp(desc.debugName, "glifos") == 0
+            ? Status{Errc::OutOfDeviceMemory} : OkStatus;
+    };
+    const Outcome o = run_export(r, 36, 30, false, 8);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::InvalidState);
+    AUREA_CHECK_EQ(o.p.failure, 3u); // ExportFailure::Render
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+    AUREA_CHECK(r.cap.hashes.empty());
+}
+
+AUREA_TEST(Export, CriticalMemoryTrimReleasesCachesWhileEncoderKeepsItsFrame) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    std::atomic<bool> entered{false}, allow{false};
+    r.cap.writeEntered = &entered;
+    r.cap.allowWrite = &allow;
+    ExportSettings settings; settings.height = 36;
+    AUREA_CHECK(r.e.start_export(settings, "nao-usado.mp4").ok());
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!entered.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(entered.load());
+    AUREA_CHECK(r.e.export_progress().running);
+    const u32 waits = backend->idleWaits.load();
+    const auto trim = r.e.trim_memory(15);
+    AUREA_CHECK(trim.upTo == TrimStage::Temporaries);
+    AUREA_CHECK(backend->idleWaits.load() >= waits + 2);
+    // The frame already handed to the encoder remains mapped and readable;
+    // all subsequent frames must still encode, without altering the project.
+    allow.store(true, std::memory_order_release);
+    const auto finish = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < finish)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const auto progress = r.e.export_progress();
+    AUREA_CHECK(progress.finished && progress.result == Errc::Ok);
+    r.e.shutdown(); // Join before inspecting the sink capture or destroying gates.
+    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), usize{3});
+    AUREA_CHECK(r.cap.ptsMonotonic);
+}
+
+AUREA_TEST(Export, PreviewSleepsThroughExportWithExpiredRefinementAndResumes) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.add_shape(0).ok());
+    int window = 0;
+    AUREA_CHECK(r.e.attach_surface(&window, 128, 72).ok());
+    const auto initialQuality = r.e.read_telemetry();
+    FrameStats expensive; expensive.gpuMs = 200; expensive.cpuMs = 100;
+    for (u32 i = 0; i < 100; ++i) r.e.debug_feed_frame_stats(expensive);
+    const auto reducedQuality = r.e.read_telemetry();
+    AUREA_CHECK(reducedQuality.previewDenominator > initialQuality.previewDenominator
+        || reducedQuality.previewHeavyLevel > initialQuality.previewHeavyLevel);
+    AUREA_CHECK(r.e.render_frame().ok()); // leave a real reduced-quality refinement pending
+    std::atomic<bool> entered{false}, allow{false};
+    r.cap.writeEntered = &entered; r.cap.allowWrite = &allow;
+    const u32 presentedBeforeExport = backend->presents;
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK(r.e.start_export(settings, "nao-usado.mp4").ok());
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!entered.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(entered.load());
+    r.e.start_render_thread();
+    const u64 before = r.e.render_wakeups();
+    // Simulate repeated mobile vsync/decoder callbacks past the 250 ms deadline.
+    for (u32 i = 0; i < 40; ++i) {
+        r.e.request_render();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    AUREA_CHECK(r.e.export_progress().running);
+    AUREA_CHECK(r.e.render_wakeups() - before <= 1);
+    const u64 sleepingWakeups = r.e.render_wakeups();
+    allow.store(true, std::memory_order_release);
+    const auto resumeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((!r.e.export_progress().finished || r.e.render_wakeups() <= sleepingWakeups)
+        && std::chrono::steady_clock::now() < resumeDeadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Ok);
+    AUREA_CHECK(r.e.render_wakeups() > sleepingWakeups);
+    // Stop joins the currently executing render before reading mock counters.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    r.e.stop_render_thread();
+    AUREA_CHECK(backend->presents > presentedBeforeExport);
+    r.e.shutdown();
+}
+
+AUREA_TEST(Export, SuspendStopsExportBeforeClosingMediaAndAllowsRestart) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 300, 2, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    r.cap.encodeUs = 20000;
+    ExportSettings settings; settings.height = 36;
+    AUREA_CHECK(r.e.start_export(settings, "nao-usado.mp4").ok());
+    AUREA_CHECK(r.e.suspend().ok());
+    const auto progress = r.e.export_progress();
+    AUREA_CHECK_EQ(r.e.state(), EngineState::Suspended);
+    AUREA_CHECK(progress.finished && !progress.running);
+    AUREA_CHECK_EQ(progress.result, Errc::Cancelled);
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+    AUREA_CHECK(r.e.resume().ok());
+    r.cap.encodeUs = 0;
+    const Outcome restarted = run_export(r, 36, 30, false, 5);
+    AUREA_CHECK(restarted.finished && restarted.p.result == Errc::Ok);
+}
+
+AUREA_TEST(Export, SuspendSerializesWithAnEncoderThatIsStillOpening) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 300, 2, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    std::atomic<bool> opening{false};
+    r.cap.openEntered = &opening;
+    r.cap.openDelayUs = 100000;
+    r.cap.encodeUs = 20000;
+    Status start;
+    std::thread exporting([&] { ExportSettings s; s.height = 36; start = r.e.start_export(s, "nao-usado.mp4"); });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!opening.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(opening.load());
+    AUREA_CHECK(r.e.suspend().ok());
+    exporting.join();
+    AUREA_CHECK(start.ok());
+    AUREA_CHECK_EQ(r.e.state(), EngineState::Suspended);
+    const auto progress = r.e.export_progress();
+    AUREA_CHECK(progress.finished && !progress.running);
+    AUREA_CHECK_EQ(progress.result, Errc::Cancelled);
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+    ExportSettings settings;
+    AUREA_CHECK_EQ(r.e.start_export(settings, "nao-usado.mp4").code(), Errc::InvalidState);
+    r.cap.openEntered = nullptr;
 }
 
 AUREA_TEST(Export, CancelIsResponsiveAndReleasesTheSink) {
@@ -1291,7 +1583,9 @@ AUREA_TEST(Regression2135Gpu, CancelWhileDecodeNeedsGpuDoesNotWaitIdle) {
     auto* backend = new MockBackend(); backend->mapBuffers = true;
     std::atomic<bool> waiting{false};
     std::atomic<u64> waitingFrame{~u64{0}};
+    std::atomic<u32> nonBlockingPolls{0};
     backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
+        if (timeout == 0) { ++nonBlockingPolls; return Status{Errc::Timeout}; }
         waitingFrame.store(frame);
         waiting.store(true);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -1314,7 +1608,116 @@ AUREA_TEST(Regression2135Gpu, CancelWhileDecodeNeedsGpuDoesNotWaitIdle) {
     AUREA_CHECK(r.e.export_progress().finished);
     AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
     AUREA_CHECK_EQ(backend->idleWaits.load(), idleBefore);
+    AUREA_CHECK_EQ(nonBlockingPolls.load(), 1u);
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+}
+
+
+AUREA_TEST(ExportPendingGpu, CancelledSubmittedFrameBlocksNewGpuWorkUntilItsFenceCompletes) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72; cfg.frameCount = 30;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> waiting{false}, completed{false};
+    std::atomic<u64> pendingFrame{0};
+    backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
+        if (!frame || completed.load()) return OkStatus;
+        pendingFrame = frame;
+        if (timeout) { waiting = true; std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+        return Status{Errc::Timeout};
+    };
+    Rig r(cfg, 30, 30, 1, nullptr, backend);
+    struct CompleteOnExit { std::atomic<bool>& done; ~CompleteOnExit() { done = true; } } complete{completed};
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.attach_surface(reinterpret_cast<void*>(1), 128, 72).ok());
+    TextureDesc desc; desc.width = 64; desc.height = 36; desc.format = SurfaceFormat::RGBA16F;
+    desc.sampled = desc.renderTarget = true;
+    const auto target = backend->create_texture(desc); AUREA_CHECK(target.ok()); if (!target.ok()) return;
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK(r.e.start_export(settings, "test-pending-gpu.mp4").ok());
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!waiting.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(waiting.load()); AUREA_CHECK(pendingFrame.load() > 0);
+    r.e.cancel_export();
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
+    // Joining the previous worker also establishes exportActive=false before
+    // checking the preview gate (progress.finished is published just before it).
+    AUREA_CHECK_EQ(r.e.start_export(settings, "test-pending-gpu-retry.mp4").code(), Errc::Timeout);
+    const u32 submitted = backend->framesSubmitted, textures = backend->texturesCreated;
+    const u32 waits = backend->idleWaits.load(), acquires = backend->acquires;
+    const u32 oldWidth = backend->surfaceWidth, oldHeight = backend->surfaceHeight;
+    AUREA_CHECK(r.e.resize_surface(256, 144).ok());
+    Command duration; duration.type = CommandType::CompositionSetDuration;
+    duration.comp_duration.comp = r.e.project()->timeline().current(); duration.comp_duration.duration = FrameIndex{44};
+    AUREA_CHECK_EQ(r.e.submit_commands(&duration, 1), 1u);
+    AUREA_CHECK_EQ(r.e.render_frame().code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.comp()->duration().value, 44);
+    AUREA_CHECK_EQ(backend->surfaceWidth, oldWidth); AUREA_CHECK_EQ(backend->surfaceHeight, oldHeight);
+    AUREA_CHECK_EQ(r.e.render_offscreen(*target, 64, 36).code(), Errc::Timeout);
+    std::vector<u8> pixels; u32 width = 0, height = 0;
+    AUREA_CHECK_EQ(r.e.capture_frame_rgba(64, pixels, width, height).code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.render_effect_preview(1, 64, 36, pixels, width, height).code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.start_export(settings, "test-pending-gpu-again.mp4").code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.start_image_export(ImageExportSettings{}, "test-pending-gpu.png").code(), Errc::Timeout);
+    const std::string path = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/aurea-pending-gpu.aurea";
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    const Project* project = r.e.project();
+    AUREA_CHECK_EQ(r.e.new_project(128, 72, 30, "blocked replacement").code(), Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.load_project(path.c_str()).code(), Errc::Timeout);
+    AUREA_CHECK(r.e.project() == project);
+    AUREA_CHECK_EQ(r.e.suspend().code(), Errc::Timeout);
+    AUREA_CHECK(r.e.state() != EngineState::Suspended);
+    (void)r.e.trim_memory(80);
+    AUREA_CHECK_EQ(backend->framesSubmitted, submitted);
+    AUREA_CHECK_EQ(backend->texturesCreated, textures);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), waits);
+    AUREA_CHECK_EQ(backend->acquires, acquires);
+    AUREA_CHECK(!backend->deviceLost);
+    completed = true;
+    AUREA_CHECK(r.e.render_frame().ok());
+    AUREA_CHECK_EQ(backend->surfaceWidth, 256u); AUREA_CHECK_EQ(backend->surfaceHeight, 144u);
+    AUREA_CHECK(backend->framesSubmitted > submitted); AUREA_CHECK(backend->acquires > acquires);
+    backend->destroy_texture(*target);
+    std::remove(path.c_str()); std::remove((path + ".bak").c_str());
+}
+
+AUREA_TEST(ExportPendingGpu, CancelWithCompletedFenceImmediatelyResumesPreview) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72; cfg.frameCount = 30;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> waiting{false};
+    backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
+        if (!frame || !timeout) return OkStatus;
+        waiting = true; std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        return Status{Errc::Timeout};
+    };
+    Rig r(cfg, 30, 30, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.attach_surface(reinterpret_cast<void*>(1), 128, 72).ok());
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK(r.e.start_export(settings, "test-completed-cancel.mp4").ok());
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!waiting.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(waiting.load());
+    r.e.cancel_export();
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
+    const u32 before = backend->framesSubmitted;
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    do {
+        AUREA_CHECK(r.e.render_frame().ok());
+        if (backend->framesSubmitted > before) break;
+        std::this_thread::yield(); // worker publishes exportActive=false after finished
+    } while (std::chrono::steady_clock::now() < deadline);
+    AUREA_CHECK(backend->framesSubmitted > before);
+    AUREA_CHECK(!backend->deviceLost);
 }
 
 AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviveReopen) {
@@ -1348,6 +1751,10 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
     AUREA_CHECK(frames == r.cap.frames);
     std::remove(path.c_str());
 }
+
+#include "ExportAudioProgress.inl"
+#include "CutFrameGpu.inl"
+#include "ExportWatchdog.inl"
 
 #endif // AUREA_TEST_VULKAN
 
@@ -1394,4 +1801,124 @@ AUREA_TEST(ExportBitrate, ResolutionFpsQualityAndCodecScaleSanely) {
     // Mbps manual é respeitado.
     AUREA_CHECK_EQ(export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Low, 10), 10'000'000u);
     AUREA_CHECK_EQ(export_estimated_bytes(10'000'000u, 0u, 0.0), 0ull);
+}
+
+// =============================================================================
+//  Regras do watchdog do export (export/ExportWatchdog.hpp) — sem GPU. "A
+//  exportação para num percentual e nunca termina": toda espera tem prazo sem
+//  progresso e teto, e a recuperação (modo de segurança) é regra do motor.
+// =============================================================================
+#include "aurea/export/ExportWatchdog.hpp"
+
+AUREA_TEST(ExportWatchdogRules, DeadlineRenewsOnProgressButNeverPassesTheCeiling) {
+    using namespace aurea;
+    ProgressDeadline d(1000, 100, 250);
+    AUREA_CHECK(!d.expired(1100));
+    AUREA_CHECK(d.expired(1101));
+    d.progress(1050);                       // renova: 1150
+    AUREA_CHECK(!d.expired(1150));
+    AUREA_CHECK(d.expired(1151));
+    d.progress(1200);                       // 1300, mas o teto é 1250
+    AUREA_CHECK_EQ(d.deadline(), u64{1250});
+    d.exclude(40);                          // tempo que não conta empurra prazo e teto
+    AUREA_CHECK_EQ(d.deadline(), u64{1290});
+    d.progress(1280);
+    AUREA_CHECK_EQ(d.deadline(), u64{1290});
+    ProgressDeadline open(0, 10, 0);        // sem teto
+    open.progress(1'000'000);
+    AUREA_CHECK_EQ(open.deadline(), u64{1'000'010});
+}
+
+/// Antes: depois do 1º quadro aproximado a paciência caía para 1 s, mas o teto
+/// de 60 s continuava valendo sempre que OUTRO decoder entregava algo — um
+/// quadro por minuto, o export "parado". Agora o teto cai junto.
+AUREA_TEST(ExportWatchdogRules, SourcePatienceShrinksWithConsecutiveFallbacks) {
+    using namespace aurea;
+    const ExportSourceWait exact = export_source_wait(0);
+    AUREA_CHECK_EQ(exact.patienceNs, u64{4'000'000'000});
+    AUREA_CHECK_EQ(exact.hardCapNs, u64{60'000'000'000});
+    u64 previousPatience = exact.patienceNs, previousCap = exact.hardCapNs;
+    u64 worst = 0;   // 300 quadros quebrados seguidos, com decoders entregando o tempo todo
+    for (u32 k = 0; k < 300; ++k) {
+        const ExportSourceWait w = export_source_wait(k);
+        AUREA_CHECK(w.patienceNs <= previousPatience && w.hardCapNs <= previousCap);
+        AUREA_CHECK(w.patienceNs <= w.hardCapNs);
+        previousPatience = w.patienceNs;
+        previousCap = w.hardCapNs;
+        worst += w.hardCapNs;
+    }
+    AUREA_CHECK_EQ(export_source_wait(kExportFallbackStreak).hardCapNs, u64{1'000'000'000});
+    // 300 × 60 s = 5 horas antes; agora poucos minutos no pior caso.
+    AUREA_CHECK(worst < u64{420} * 1'000'000'000ull);
+}
+
+AUREA_TEST(ExportWatchdogRules, OnlyAWorkerStuckInsideThePlatformIsHung) {
+    using namespace aurea;
+    const u64 s = 1'000'000'000ull;
+    // Parado na fila (o produtor está lento) não é travar.
+    AUREA_CHECK(!export_worker_hung(false, 100 * s, 0, 45 * s));
+    AUREA_CHECK(!export_worker_hung(true, 44 * s, 0, 45 * s));
+    AUREA_CHECK(export_worker_hung(true, 46 * s, 0, 45 * s));
+    // Batida recente (laço do sink voltando da plataforma) = vivo.
+    AUREA_CHECK(!export_worker_hung(true, 100 * s, 99 * s, 45 * s));
+    // Relógio da batida à frente (outra thread acabou de bater) não é travar.
+    AUREA_CHECK(!export_worker_hung(true, 10 * s, 11 * s, 1));
+    // Limites: 45 s padrão; soltar o encoder 10 s; cancelado 3 s.
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Video, 0), kExportWorkerHangNs);
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Abort, 0), kExportWorkerAbortHangNs);
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Finish, 0, true), kExportWorkerCancelHangNs);
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Video, 400'000'000ull, true), u64{400'000'000});
+    AUREA_CHECK(export_worker_hang_code(ExportWorkerPhase::AudioMix) == Errc::DecodeFailed);
+    AUREA_CHECK(export_worker_hang_code(ExportWorkerPhase::Video) == Errc::Timeout);
+    // A tela só desiste bem depois de todos os prazos do motor.
+    AUREA_CHECK(u64{kExportUiStallSeconds} * s > kExportWorkerHangNs + 120 * s);
+}
+
+AUREA_TEST(ExportWatchdogRules, SafeModeLadderAndItsVideoRecipe) {
+    using namespace aurea;
+    AUREA_CHECK_EQ(export_retry_safe_mode(ExportFailure::EncoderStalled, 0), 1u);
+    AUREA_CHECK_EQ(export_retry_safe_mode(ExportFailure::Encoder, 1), 2u);
+    AUREA_CHECK_EQ(export_retry_safe_mode(ExportFailure::EncoderStalled, 2), 0u);   // última volta
+    for (ExportFailure f : {ExportFailure::None, ExportFailure::Render, ExportFailure::GpuMemory, ExportFailure::Media,
+                            ExportFailure::File, ExportFailure::Storage, ExportFailure::Unsupported, ExportFailure::Other})
+        AUREA_CHECK_EQ(export_retry_safe_mode(f, 0), 0u);
+    // Bits 16..17 do progresso: abaixo do motivo (24..31) e acima das flags.
+    const u32 flags = (2u << kExportRetryShift) | (2u << kExportFailureShift) | 0x1Fu;
+    AUREA_CHECK_EQ(export_retry_from_flags(flags), 2u);
+    AUREA_CHECK_EQ(kExportRetryMask & ((1u << kExportFailureShift) - 1u), kExportRetryMask);
+    // Sempre H.264 no modo de segurança.
+    AUREA_CHECK(export_safe_codec(ExportCodec::HEVC, 1) == ExportCodec::H264);
+    AUREA_CHECK(export_safe_codec(ExportCodec::HEVC, 0) == ExportCodec::HEVC);
+    // Taxa menor, nunca abaixo de 0,5 Mbps (nem sobe o que já era menor).
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 0), 14'000'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 1), 10'500'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 2), 8'400'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(600'000u, 2), 500'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(300'000u, 1), 300'000u);
+    // Os dois lados em múltiplo de 16, para baixo (nunca acima do teto do aparelho).
+    const u32 cases[][5] = {
+        {1920, 1080, 1080, 1920, 1072}, {1080, 1920, 1080, 1072, 1920}, {1920, 1080, 480, 848, 480},
+        {1920, 1080, 720, 1280, 720},   {1080, 1350, 1080, 1072, 1344}, {1080, 1080, 1080, 1072, 1072},
+        {3840, 2160, 2160, 3840, 2160}, {64, 36, 36, 64, 32},
+    };
+    for (const auto& c : cases) {
+        const ExportFrameSize z = export_safe_frame_size(c[0], c[1], c[2]);
+        AUREA_CHECK_EQ(z.width, c[3]);
+        AUREA_CHECK_EQ(z.height, c[4]);
+        const ExportFrameSize n = export_frame_size(c[0], c[1], c[2]);
+        AUREA_CHECK(z.width <= n.width && z.height <= n.height);
+    }
+    AUREA_CHECK_EQ(export_safe_frame_size(0, 1080, 480).width, 0u);
+}
+
+/// Encoder que entrega todos os quadros mas engole a marca de fim não pode
+/// custar o arquivo; um que perdeu quadros, sim (nada de MP4 incompleto).
+AUREA_TEST(ExportWatchdogRules, StreamEndsWithoutEosOnlyWhenEverythingCameOut) {
+    using namespace aurea;
+    AUREA_CHECK(!export_video_complete_without_eos(0, 0));
+    AUREA_CHECK(!export_video_complete_without_eos(300, 299));
+    AUREA_CHECK(export_video_complete_without_eos(300, 300));
+    AUREA_CHECK(export_audio_complete_without_eos(-1, 0));
+    AUREA_CHECK(export_audio_complete_without_eos(10'000'000, 9'800'000));
+    AUREA_CHECK(!export_audio_complete_without_eos(10'000'000, 9'700'000));
 }

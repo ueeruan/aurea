@@ -684,6 +684,12 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     if (!initialized) return Status{Errc::InvalidState, "backend nao inicializado"};
     if (deviceLost) return Status{Errc::DeviceLost, "dispositivo perdido"};
     if (current) return Status{Errc::InvalidState, "frame ja aberto"};
+    for (u32 i = 0; i < framesInFlight; ++i) {
+        FrameContext& done = frames[i];
+        if (done.submitted && !done.deferred.empty()
+                && wait_command_buffer(done.cmd, done.completion, 0, "coletar frame concluido").ok())
+            run_deferred(done);
+    }
 
     FrameContext& f = frames[frameCursor];
     if (f.submitted) {

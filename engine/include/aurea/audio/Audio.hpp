@@ -158,7 +158,10 @@ public:
 
     /// Bloco, decodificando agora se preciso (export / testes). Nulo = asset
     /// ilegível.
-    [[nodiscard]] std::shared_ptr<const AudioBlock> fetch(u64 key, i64 block);
+    /// Cancellation is observed between native reads; a cancelled/partial block
+    /// is never published in the cache. The caller owns the flag for this call.
+    [[nodiscard]] std::shared_ptr<const AudioBlock> fetch(u64 key, i64 block,
+                                                        const std::atomic<bool>* cancel = nullptr);
 
     struct Stats {
         u32 blocks = 0;
@@ -198,7 +201,8 @@ private:
         i64 urgency;
     };
 
-    [[nodiscard]] std::shared_ptr<const AudioBlock> decode_block(u64 key, i64 block);
+    [[nodiscard]] std::shared_ptr<const AudioBlock> decode_block(u64 key, i64 block,
+                                                               const std::atomic<bool>* cancel = nullptr);
     [[nodiscard]] std::shared_ptr<const AudioBlock> finish_block(Reader& r, u64 key, i64 block, u64 revision, u64 t0);
     void insert(const Key& k, std::shared_ptr<const AudioBlock> b);
     void thread_main();
@@ -465,6 +469,7 @@ private:
         bool done = false;
         bool failed = false;
         u64 bytes = 0;                          ///< contado no orçamento
+        u64 revision = 0;
         mutable u64 lastQueryNs = 0;
     };
     void thread_main();
@@ -492,6 +497,7 @@ private:
     mutable u64 hits_ = 0, misses_ = 0;
     u64 evictions_ = 0;
     u32 version_ = 0;
+    u64 nextRevision_ = 0;
     bool quit_ = false;
     std::thread thread_;
 };

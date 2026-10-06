@@ -35,16 +35,8 @@ namespace {
 using Values = std::array<ParamValue, kTransformParamCount>;
 Values sample(const Layer& layer, const EffectInstance& effect, const ParameterRegistry& specs, f64 time) {
     Values values;
-    const f64 floor = std::floor(time);
-    const FrameIndex frame{static_cast<i64>(floor)};
-    const f32 mix = static_cast<f32>(time - floor);
     for (u32 i = 0; i < kTransformParamCount; ++i) {
-        values[i] = evaluate_param(layer.tracks, effect, i, specs.at(i), frame);
-        if (mix > 0 && specs.at(i).animatable()) {
-            const auto next = evaluate_param(layer.tracks, effect, i, specs.at(i), FrameIndex{frame.value + 1});
-            for (u32 c = 0; c < component_count(specs.at(i).type); ++c)
-                values[i].v[c] += (next.v[c] - values[i].v[c]) * mix;
-        }
+        values[i] = evaluate_param_f(layer.tracks, effect, i, specs.at(i), time);
     }
     return values;
 }
@@ -123,7 +115,7 @@ void evaluate_transform_effects(const Layer& layer, const ParameterRegistry& spe
             for (u32 axis=0; axis<3; ++axis) {
                 if (const auto* track = layer.tracks.find(static_cast<TrackProperty>(static_cast<u16>(TrackProperty::AnchorX)+axis))) {
                     const float base = axis==0 ? layerAnchor.x : axis==1 ? layerAnchor.y : layerAnchor.z;
-                    const float value = track->value_or(FrameIndex{static_cast<i64>(std::floor(time))},base);
+                    const float value = track->value_or_f(time,base);
                     if (axis==0) layerAnchor.x=value; else if(axis==1) layerAnchor.y=value; else layerAnchor.z=value;
                 }
             }

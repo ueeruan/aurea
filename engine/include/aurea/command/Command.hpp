@@ -168,7 +168,7 @@ enum class CommandType : u16 {
     // --- Forma (fase 6) -----------------------------------------------------------
     ShapeSetFill,          ///< cor de preenchimento sRGB + alfa (TextColorPayload); alfa 0 = sem preenchimento
     ShapeSetStroke,        ///< cor do contorno (TextColorPayload)
-    ShapeSetParam,         ///< ShapeParamPayload: 0 tipo, 1 canto, 2 pontas, 3 raio interno, 4 contorno, 5 largura, 6 altura
+    ShapeSetParam,         ///< ShapeParamPayload: 0 tipo, 1 canto, 2 pontas, 3 raio interno, 4 contorno, 5 largura, 6 altura, 7..14 shape::Param (ShapeGeometry.hpp)
     LayerLayoutTransform, ///< ShapeParamPayload: transform property 0..14, target at playhead; preserves animation key times/count.
     LayerSetLightParam,    ///< ShapeParamPayload: layer, LightData field 0..10, value.
     LayerSetMaterialParam, ///< MaterialParamPayload: per-instance material override.
@@ -223,8 +223,18 @@ struct TransformPayload { LayerId layer; f32 x,y,z, sx,sy,sz, rx,ry,rz, ax,ay,az
 struct KeyframePayload {
     TrackRef track; FrameIndex time; f32 value;
     // Auto-Key ignores an unchanged transform; explicit keys still allow holds.
+    // Bits (kAutoKey*): 1 = Auto-Key (só se mudou; recusa expressão),
+    // 2 = no quadro que a prévia MOSTRA (o motor ignora `time`), 4 = transform
+    // sem keyframe recebe o valor parado em vez de uma chave nova.
     u32 onlyIfChanged;
 };
+/// `KeyframePayload::onlyIfChanged`. O gesto de transform (palco, almofada,
+/// gizmo) manda 1|2|4: a regra "trilha animada ganha keyframe no cabeçote,
+/// parada muda o valor" mora no motor, com o estado VIVO das trilhas e o
+/// tempo do quadro na tela — nunca com o retrato que a UI leu antes.
+inline constexpr u32 kAutoKeyOnlyIfChanged = 1u;
+inline constexpr u32 kAutoKeyAtPlayhead = 2u;
+inline constexpr u32 kAutoKeyStaticWhenUnanimated = 4u;
 struct KeyframeMovePayload { TrackRef track; FrameIndex fromTime; FrameIndex toTime; };
 /// `power`: força da bézier (1..3); 0 = mantém a do keyframe. Ocupa o byte que
 /// já era preenchimento depois de `interp`: os floats não mudam de lugar.

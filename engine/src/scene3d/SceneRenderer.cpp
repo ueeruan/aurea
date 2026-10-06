@@ -263,6 +263,7 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
     }
 
     // --- Texturas: uma por (imagem, espaço de cor) --------------------------
+    Errc resourceFailure = Errc::Ok;
     std::unordered_map<u64, TextureHandle> byImage;
     auto texture_for = [&](const TextureRef& ref, bool srgb) -> TextureHandle {
         if (!ref.valid() || ref.image >= static_cast<i32>(asset.images.size())) return {};
@@ -280,8 +281,10 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
         d.transferDst = true;
         d.debugName = srgb ? "3d-textura-cor" : "3d-textura-dado";
         auto t = gpu.create_texture(d);
-        if (!t.ok()) return {};
-        if (!gpu.upload_texture_level(*t, 0, 0, pixels.data(), pixels.size()).ok()) {
+        if (!t.ok()) { resourceFailure = t.code(); return {}; }
+        const Status uploaded = gpu.upload_texture_level(*t, 0, 0, pixels.data(), pixels.size());
+        if (!uploaded.ok()) {
+            resourceFailure = uploaded.code();
             gpu.destroy_texture(*t);
             return {};
         }
@@ -305,6 +308,7 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
         d.wrapV = to_desc(s.wrapT);
         d.maxAnisotropy = aniso;
         auto h = gpu.create_sampler(d);
+        if (!h.ok()) resourceFailure = h.code();
         const SamplerHandle out = h.ok() ? *h : SamplerHandle{};
         if (h.ok()) ownedSamplers_.push_back(out);
         bySampler.emplace(ref.sampler, out);
@@ -326,6 +330,7 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
     // Material padrão do glTF: branco, metal 1, rugosidade 1 — como o spec manda
     // para primitivas sem material.
     defaultMaterial.factors = Material{};
+    if (resourceFailure != Errc::Ok) return Status{resourceFailure, "recurso do modelo 3D nao subiu para GPU"};
     return OkStatus;
 }
 
@@ -396,6 +401,13 @@ Status SceneRenderer::initialize(GPUBackend& gpu, ShaderLibrary& shaders) noexce
 
 void SceneRenderer::release_environment() noexcept {
     if (!gpu_) return;
+    // A finished job from the previous project must never repopulate this cache.
+    if (pendingEnv_.valid()) { pendingEnv_.wait(); pendingEnv_ = {}; }
+    for (auto& env : sceneEnvironments_) {
+        for (TextureHandle t : {env.irradiance, env.prefiltered, env.brdf, env.background})
+            if (t.valid()) gpu_->destroy_texture(t);
+    }
+    sceneEnvironments_.clear();
     for (auto& kv : envSets_) {
         for (TextureHandle* t : {&kv.second.irradiance, &kv.second.prefiltered, &kv.second.brdf}) {
             if (t->valid()) gpu_->destroy_texture(*t);
@@ -409,12 +421,14 @@ void SceneRenderer::release_environment() noexcept {
     // As texturas foram embora, então o que o renderer ACHA que está na GPU
     // também tem de ser esquecido — senão `request_environment` compara a
     // chave nova com uma antiga ainda "montada", não gera nada, e a cena fica
-    // sem ambiente nenhum. `envCube_` é o céu analítico e cai junto.
+    // sem ambiente nenhum. The 1x1 black `envCube_` is a renderer-owned
+    // typed fallback, not project HDR data. Keep it until shutdown: the
+    // first asynchronous frame still binds samplerCube at PBR slots 5/6.
     envKey_ = pendingKey_ = ~0ull;
     envSpecTier_ = envBgTier_ = pendingSpecTier_ = pendingBgTier_ = 0;
+    environmentBytes_ = 0;
     prefilteredSize_ = backgroundSize_ = 0;
     envRequested_ = false;
-    if (envCube_.valid()) { gpu_->destroy_texture(envCube_); envCube_ = TextureHandle{}; }
 }
 
 Status SceneRenderer::upload_environment(const EnvironmentMaps& maps, EnvSet& out) noexcept {
@@ -469,6 +483,9 @@ Status SceneRenderer::upload_environment(const EnvironmentMaps& maps, EnvSet& ou
     out.prefiltered = pre;
     out.brdf = lut;
     out.mips = maps.prefiltered.mips;
+    out.bytes = maps.brdfLut.size() * sizeof(u16);
+    for (const auto* cube : {&maps.irradiance, &maps.prefiltered})
+        for (const auto& level : cube->levels) out.bytes += level.size() * sizeof(u16);
     return OkStatus;
 }
 
@@ -482,10 +499,9 @@ Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
     // próximo quadro não reconhecia o ambiente que acabou de subir e pedia
     // outro: o IBL era refeito em laço durante o preview (texto/modelo 3D
     // piscando entre a luz do HDRI e a do estúdio, e CPU esquentando).
-    for (TextureHandle* t : {&irradiance_, &prefiltered_, &iblLut_, &background_}) {
-        if (t->valid()) gpu_->destroy_texture(*t);
-        *t = TextureHandle{};
-    }
+    if (irradiance_.valid()) sceneEnvironments_.push_back(current_environment());
+    irradiance_ = prefiltered_ = iblLut_ = background_ = TextureHandle{};
+    environmentBytes_ = novo.bytes;
     // Fundo com a cadeia de mips inteira: o céu escolhe o LOD pela pegada do
     // pixel (nítido sem serrilhar) e o desfoque sobe nela.
     backgroundSize_ = 0;
@@ -503,7 +519,10 @@ Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
                 for (u32 f = 0; f < 6 && uploaded; ++f)
                     uploaded = gpu_->upload_texture_level(*texture, m, f, b.levels[m].data() + count * f, count * 2).ok();
             }
-            if (uploaded) { background_ = *texture; backgroundSize_ = b.size; } else gpu_->destroy_texture(*texture);
+            if (uploaded) {
+                background_ = *texture; backgroundSize_ = b.size;
+                for (const auto& level : b.levels) environmentBytes_ += level.size() * sizeof(u16);
+            } else gpu_->destroy_texture(*texture);
         }
     }
     ++envUploads_;
@@ -513,6 +532,64 @@ Status SceneRenderer::set_environment(const EnvironmentMaps& maps) noexcept {
     prefilteredMips_ = novo.mips;
     prefilteredSize_ = maps.prefiltered.size;
     return OkStatus;
+}
+
+SceneRenderer::CachedSceneEnvironment SceneRenderer::current_environment() const noexcept {
+    return {envKey_, envLastFrame_, irradiance_, prefiltered_, iblLut_, background_,
+            prefilteredMips_, prefilteredSize_, backgroundSize_, envSpecTier_, envBgTier_, environmentBytes_};
+}
+
+void SceneRenderer::use_environment(const CachedSceneEnvironment& e) noexcept {
+    envKey_ = e.key; envLastFrame_ = e.lastFrame;
+    irradiance_ = e.irradiance; prefiltered_ = e.prefiltered; iblLut_ = e.brdf; background_ = e.background;
+    prefilteredMips_ = e.mips; prefilteredSize_ = e.specularSize; backgroundSize_ = e.backgroundSize;
+    envSpecTier_ = e.specularTier; envBgTier_ = e.backgroundTier;
+    environmentBytes_ = e.bytes;
+}
+
+bool SceneRenderer::restore_environment(u64 key) noexcept {
+    auto best = sceneEnvironments_.end();
+    u64 quality = key == envKey_ ? (static_cast<u64>(envSpecTier_) << 32) | envBgTier_ : 0;
+    for (auto it = sceneEnvironments_.begin(); it != sceneEnvironments_.end(); ++it) {
+        const u64 tier = (static_cast<u64>(it->specularTier) << 32) | it->backgroundTier;
+        if (it->key == key && tier > quality) { best = it; quality = tier; }
+    }
+    if (best != sceneEnvironments_.end()) {
+        const auto previous = current_environment();
+        use_environment(*best); *best = previous;
+    }
+    return key == envKey_;
+}
+
+void SceneRenderer::trim_scene_environments(u64 frameNumber) noexcept {
+    // Keep four recently used environments. More may coexist in a complex
+    // frame, but never evict a texture captured by an unsubmitted pass.
+    constexpr u64 cacheBudget = 64ull * 1024 * 1024;
+    u64 cachedBytes = 0;
+    for (const auto& e : sceneEnvironments_) cachedBytes += e.bytes;
+    for (const auto& e : envSets_) cachedBytes += e.second.bytes;
+    while (sceneEnvironments_.size() > kMaxEnvSets || cachedBytes > cacheBudget) {
+        auto oldest = sceneEnvironments_.end();
+        for (auto it = sceneEnvironments_.begin(); it != sceneEnvironments_.end(); ++it)
+            if (frameNumber > it->lastFrame && frameNumber - it->lastFrame > 2
+                && (oldest == sceneEnvironments_.end() || it->lastFrame < oldest->lastFrame)) oldest = it;
+        if (oldest == sceneEnvironments_.end()) break;
+        for (TextureHandle t : {oldest->irradiance, oldest->prefiltered, oldest->brdf, oldest->background})
+            if (t.valid()) gpu_->destroy_texture(t);
+        cachedBytes -= oldest->bytes;
+        sceneEnvironments_.erase(oldest);
+    }
+    while (envSets_.size() > kMaxEnvSets || cachedBytes > cacheBudget) {
+        auto oldest = envSets_.end();
+        for (auto it = envSets_.begin(); it != envSets_.end(); ++it)
+            if (frameNumber > it->second.lastFrame && frameNumber - it->second.lastFrame > 2
+                && (oldest == envSets_.end() || it->second.lastFrame < oldest->second.lastFrame)) oldest = it;
+        if (oldest == envSets_.end()) break;
+        for (TextureHandle t : {oldest->second.irradiance, oldest->second.prefiltered, oldest->second.brdf})
+            if (t.valid()) gpu_->destroy_texture(t);
+        cachedBytes -= oldest->second.bytes;
+        envSets_.erase(oldest);
+    }
 }
 
 namespace {
@@ -536,23 +613,28 @@ const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironme
             return &kv.second;
         }
     }
-    // Teto atingido: sai o mais antigo (os objetos que o usavam voltam ao
-    // ambiente do grupo naquele quadro; o próximo pedido sobe de novo).
+    // Reuse inactive entries; maps recently referenced by other objects or
+    // precompositions stay alive and are accounted in resident_bytes().
     if (envSets_.size() >= kMaxEnvSets) {
-        usize pior = 0;
-        for (usize i = 1; i < envSets_.size(); ++i) {
-            if (envSets_[i].second.lastFrame < envSets_[pior].second.lastFrame) pior = i;
+        usize pior = envSets_.size();
+        for (usize i = 0; i < envSets_.size(); ++i) {
+            if (frameNumber > envSets_[i].second.lastFrame && frameNumber - envSets_[i].second.lastFrame > 2
+                && (pior == envSets_.size() || envSets_[i].second.lastFrame < envSets_[pior].second.lastFrame)) pior = i;
         }
-        for (TextureHandle* t : {&envSets_[pior].second.irradiance, &envSets_[pior].second.prefiltered, &envSets_[pior].second.brdf}) {
-            if (t->valid()) gpu_->destroy_texture(*t);
+        // Several precompositions can use more than four maps in one frame.
+        // They must coexist: the earlier draw lists already captured handles.
+        if (pior < envSets_.size()) {
+            for (TextureHandle* t : {&envSets_[pior].second.irradiance, &envSets_[pior].second.prefiltered, &envSets_[pior].second.brdf}) {
+                if (t->valid()) gpu_->destroy_texture(*t);
+            }
+            envSets_.erase(envSets_.begin() + static_cast<ptrdiff_t>(pior));
         }
-        envSets_.erase(envSets_.begin() + static_cast<ptrdiff_t>(pior));
     }
     // Ambiente por objeto: só luz (sem fundo), na qualidade do preview.
     EnvironmentQuality q = envPreview_;
     q.backgroundSize = 0;
     EnvSet novo;
-    if (!upload_environment(build_for(env, q), novo).ok()) return nullptr;
+    if (!upload_environment(build_for(env, q), novo).ok()) { incomplete_ = true; return nullptr; }
     novo.lastFrame = frameNumber;
     envSets_.emplace_back(key, novo);
     return &envSets_.back().second;
@@ -561,17 +643,20 @@ const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironme
 void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     if (!gpu_) return;
     const u64 key = key_of(env);
-    if (pendingEnv_.valid()) {
-        if (pendingEnv_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;   // ainda gerando
+    if (pendingEnv_.valid() && pendingEnv_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         const Status s = set_environment(pendingEnv_.get());
-        if (!s.ok()) AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
+        if (!s.ok()) { incomplete_ = true; AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data()); }
         else { envKey_ = pendingKey_; envSpecTier_ = pendingSpecTier_; envBgTier_ = pendingBgTier_; }
     }
     // Atendido: mesma chave, qualidade ≥ a do preview e fundo (se pedido).
     // O que está na GPU nunca é rebaixado (um final do export serve ao preview).
     const u32 wantBg = env.showBackground ? envPreview_.backgroundSize : 0u;
+    restore_environment(key);
     const bool same = key == envKey_;
-    if (same && envSpecTier_ >= envPreview_.specularSize && envBgTier_ >= wantBg) return;
+    if (same) envLastFrame_ = statsFrame_ == ~0ull ? 0 : statsFrame_;
+    if (same && envSpecTier_ >= envPreview_.specularSize && envBgTier_ >= wantBg
+        && (wantBg == 0 || background_.valid())) return;
+    if (pendingEnv_.valid()) { incomplete_ = true; return; }
     envRequested_ = true;
     pendingKey_ = key;
     EnvironmentQuality q = envPreview_;
@@ -581,6 +666,7 @@ void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     pendingBgTier_ = q.backgroundSize;
     SceneEnvironment copy = env;
     pendingEnv_ = std::async(std::launch::async, [copy, q] { return build_for(copy, q); });
+    incomplete_ = true;
 }
 
 void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
@@ -589,29 +675,33 @@ void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
     // qualidade serve; se for menor, espera e gera o final.
     if (!gpu_) return;
     const u64 key = key_of(env);
+    restore_environment(key);
     const u32 wantBg = env.showBackground ? envFinal_.backgroundSize : 0u;
     auto enough = [&](u64 k, u32 spec, u32 bg) { return k == key && spec >= envFinal_.specularSize && bg >= wantBg; };
-    if (enough(envKey_, envSpecTier_, envBgTier_) && !pendingEnv_.valid()) return;
+    if (enough(envKey_, envSpecTier_, envBgTier_) && (wantBg == 0 || background_.valid()) && !pendingEnv_.valid()) return;
     EnvironmentMaps maps;
-    u32 spec = 0, bg = 0;
+    u32 spec = 0, backgroundTier = 0;
     if (pendingEnv_.valid() && enough(pendingKey_, pendingSpecTier_, pendingBgTier_)) {
         maps = pendingEnv_.get();
         spec = pendingSpecTier_;
-        bg = pendingBgTier_;
+        backgroundTier = pendingBgTier_;
     } else {
         if (pendingEnv_.valid()) pendingEnv_.wait();
         pendingEnv_ = {};
-        if (enough(envKey_, envSpecTier_, envBgTier_)) return;
+        if (enough(envKey_, envSpecTier_, envBgTier_) && (wantBg == 0 || background_.valid())) return;
         EnvironmentQuality q = envFinal_;
         q.backgroundSize = key == envKey_ ? std::max(envBgTier_, wantBg) : wantBg;
         q.specularSize = key == envKey_ ? std::max(envSpecTier_, q.specularSize) : q.specularSize;
         maps = build_for(env, q);
         spec = q.specularSize;
-        bg = q.backgroundSize;
+        backgroundTier = q.backgroundSize;
     }
     envRequested_ = true;
-    if (const Status s = set_environment(maps); !s.ok()) AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
-    else { envKey_ = key; envSpecTier_ = spec; envBgTier_ = bg; }
+    if (const Status s = set_environment(maps); !s.ok()) {
+        incomplete_ = true;
+        AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
+    }
+    else { envKey_ = key; envSpecTier_ = spec; envBgTier_ = backgroundTier; }
 }
 
 std::shared_ptr<SceneRenderer::UploadPool> SceneRenderer::make_upload_pool(BufferUsage usage, usize minBytes, const char* name) {
@@ -649,13 +739,14 @@ BufferHandle SceneRenderer::take_upload(const std::shared_ptr<UploadPool>& pool,
             // Nenhum cabe: um pequeno sai, para o pool não acumular sobras.
             retire = pool->free.back().handle;
             pool->free.pop_back();
-            pool->all.erase(std::remove(pool->all.begin(), pool->all.end(), retire), pool->all.end());
+            pool->all.erase(std::remove_if(pool->all.begin(), pool->all.end(), [retire](const UploadPool::Buf& b) { return b.handle == retire; }), pool->all.end());
         }
     }
     if (retire.valid()) gpu_->destroy_buffer(retire);
     if (!buf.handle.valid()) {
         BufferDesc bd;
-        bd.bytes = std::max<usize>(bytes * 2, pool->minBytes);
+        // Exact demand avoids doubling the peak for large morph/instance uploads.
+        bd.bytes = std::max<usize>(bytes, pool->minBytes);
         bd.usage = pool->usage;
         bd.access = MemoryAccess::Upload;
         bd.debugName = pool->name;
@@ -663,7 +754,7 @@ BufferHandle SceneRenderer::take_upload(const std::shared_ptr<UploadPool>& pool,
         if (!b.ok()) return BufferHandle{};
         buf = UploadPool::Buf{*b, bd.bytes};
         std::lock_guard<std::mutex> lock(pool->mutex);
-        pool->all.push_back(buf.handle);
+        pool->all.push_back(buf);
     }
     u32 generation = 0;
     {
@@ -686,12 +777,27 @@ void SceneRenderer::drop_upload_pools(bool destroy) noexcept {
     for (const std::shared_ptr<UploadPool>& pool : {jointPool_, morphPool_, instPool_}) {
         std::lock_guard<std::mutex> lock(pool->mutex);
         if (destroy && gpu_) {
-            for (BufferHandle b : pool->all) gpu_->destroy_buffer(b);
+            for (const auto& b : pool->all) gpu_->destroy_buffer(b.handle);
         }
         pool->all.clear();
         pool->free.clear();
         ++pool->generation;
     }
+}
+
+u32 SceneRenderer::trim_upload_pools() noexcept {
+    u32 released = 0;
+    if (!gpu_) return released;
+    for (const auto& pool : {jointPool_, morphPool_, instPool_}) {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        for (const auto& b : pool->free) {
+            gpu_->destroy_buffer(b.handle);
+            pool->all.erase(std::remove_if(pool->all.begin(), pool->all.end(), [&b](const UploadPool::Buf& held) { return held.handle == b.handle; }), pool->all.end());
+            ++released;
+        }
+        pool->free.clear();
+    }
+    return released;
 }
 
 void SceneRenderer::shutdown() noexcept {
@@ -715,18 +821,30 @@ void SceneRenderer::forget_device() noexcept {
     irradiance_ = prefiltered_ = iblLut_ = background_ = TextureHandle{};
     white_ = flatNormal_ = black_ = envCube_ = brdfLut_ = TextureHandle{};
     cubeSampler_ = SamplerHandle{};
+    sceneEnvironments_.clear();
+    envSets_.clear();
+    envKey_ = pendingKey_ = ~0ull;
+    environmentBytes_ = 0;
+    if (pendingEnv_.valid()) { pendingEnv_.wait(); pendingEnv_ = {}; }
     gpu_ = nullptr;
 }
 
 const GpuModel* SceneRenderer::model(u64 assetKey, const SceneAsset& asset) noexcept {
     Entry& e = models_[assetKey];
     if (e.model) return e.model.get();
-    if (e.failed || !gpu_) return nullptr;
+    const u64 now = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+    if (e.failed || !gpu_ || now < e.retryAfterNs) { incomplete_ = true; return nullptr; }
     auto m = std::make_unique<GpuModel>();
     if (const Status s = m->upload(*gpu_, asset); !s.ok()) {
         AUREA_LOG_ERROR("3D: upload do modelo falhou: %s", s.message().data());
         m->release(*gpu_);
-        e.failed = true;
+        // Resource pressure can clear after trimming/export. Permanent failure
+        // would make the model disappear until the project was reopened.
+        e.failed = s.code() != Errc::OutOfDeviceMemory && s.code() != Errc::OutOfMemory
+            && s.code() != Errc::BudgetExceeded && s.code() != Errc::Timeout;
+        e.retryAfterNs = now + 500'000'000ull;
+        incomplete_ = true;
         return nullptr;
     }
     AUREA_LOG_INFO("3D: modelo na GPU (%.1f MB geometria, %.1f MB texturas)", m->geometryBytes / 1048576.0,
@@ -736,6 +854,7 @@ const GpuModel* SceneRenderer::model(u64 assetKey, const SceneAsset& asset) noex
 }
 
 void SceneRenderer::collect(u64 frameNumber, u64 idleFrames) noexcept {
+    if (gpu_) trim_scene_environments(frameNumber);
     for (auto it = models_.begin(); it != models_.end();) {
         if (frameNumber > it->second.lastFrame + idleFrames) {
             if (it->second.model && gpu_) it->second.model->release(*gpu_);
@@ -746,7 +865,37 @@ void SceneRenderer::collect(u64 frameNumber, u64 idleFrames) noexcept {
     }
 }
 
+u32 SceneRenderer::trim_environment_cache(u64 frameNumber) noexcept {
+    if (!gpu_) return 0;
+    u32 released = 0;
+    const auto release = [&](std::initializer_list<TextureHandle> textures) {
+        for (TextureHandle texture : textures) if (texture.valid()) {
+            gpu_->destroy_texture(texture);
+            ++released;
+        }
+    };
+    for (auto it = sceneEnvironments_.begin(); it != sceneEnvironments_.end();) {
+        if (it->lastFrame >= frameNumber) { ++it; continue; }
+        release({it->irradiance, it->prefiltered, it->brdf, it->background});
+        it = sceneEnvironments_.erase(it);
+    }
+    for (auto it = envSets_.begin(); it != envSets_.end();) {
+        if (it->second.lastFrame >= frameNumber) { ++it; continue; }
+        release({it->second.irradiance, it->second.prefiltered, it->second.brdf});
+        it = envSets_.erase(it);
+    }
+    if (envLastFrame_ < frameNumber) {
+        release({irradiance_, prefiltered_, iblLut_, background_});
+        use_environment(CachedSceneEnvironment{});
+        envRequested_ = false;
+    }
+    // Do not wait for a background HDR build in an OS pressure callback.
+    // Its future owns CPU data only; request_environment consumes it safely.
+    return released;
+}
+
 void SceneRenderer::release_all() noexcept {
+    drop_upload_pools(true);
     for (auto& [k, e] : models_) {
         if (e.model && gpu_) e.model->release(*gpu_);
     }
@@ -761,9 +910,15 @@ void SceneRenderer::release_all() noexcept {
 }
 
 u64 SceneRenderer::resident_bytes() const noexcept {
-    u64 b = 0;
+    u64 b = environmentBytes_;
+    for (const auto& e : sceneEnvironments_) b += e.bytes;
+    for (const auto& e : envSets_) b += e.second.bytes;
     for (const auto& [k, e] : models_) {
         if (e.model) b += e.model->geometryBytes + e.model->textureBytes;
+    }
+    for (const auto& pool : {jointPool_, morphPool_, instPool_}) {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        for (const auto& upload : pool->all) b += upload.cap;
     }
     return b;
 }
@@ -880,9 +1035,11 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
 
 bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& frame, u32 width, u32 height,
                           u64 frameNumber, FGTexture& outColor, const std::vector<ScenePlane>* planes,
-                          const SceneParticleDraw* particles, u32 particleCount, FGTexture* outDepth) noexcept {
+                          const SceneParticleDraw* particles, u32 particleCount, FGTexture* outDepth, FGTexture* outExposureHdr) noexcept {
     if (outDepth) *outDepth = FGTexture{};
+    if (outExposureHdr) *outExposureHdr = FGTexture{};
     if (frameNumber != statsFrame_) {
+        trim_scene_environments(frameNumber);
         stats_ = SceneStats{};
         statsFrame_ = frameNumber;
         // Estado de LOD de primitivas que sumiram há 10 s sai (sem crescer à toa).
@@ -896,7 +1053,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // Ambiente (IBL): o estúdio neutro ou o HDRI do projeto, gerado fora da
     // thread de render; pronto → vale no próximo quadro.
     request_environment(frame.environment);
-    const bool ibl = irradiance_.valid();
+    const bool ibl = irradiance_.valid() && envKey_ == key_of(frame.environment);
 
     // --- Alvos do passe da cena ----------------------------------------------
     // MSAA (a qualidade pede, o aparelho corta) e MRT: 0 = 2D de exibição,
@@ -1064,7 +1221,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     auto* envSlots = arena.alloc_array<EnvSlot>(frame.instances.size() + 1);
     if (!envSlots) return false;
     usize envCount = 1;
-    envSlots[0] = EnvSlot{envKey_, &header, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
+    envSlots[0] = EnvSlot{ibl ? envKey_ : ~0ull, &header, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
                          ibl ? iblLut_ : brdfLut_, 0};
     auto env_of = [&](const SceneInstance& inst) -> const EnvSlot* {
         if (!inst.ownEnvironment) return &envSlots[0];
@@ -1088,11 +1245,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
 
     // Stable per-frame copies change factors only; texture/buffer handles remain shared.
     auto overriddenMaterials = std::make_shared<std::deque<GpuMaterial>>();
+    // MOSTRAR INTERIOR (SceneInstance::doubleSided): cópia de dupla face por
+    // material de ORIGEM — dois objetos iguais com o interior ligado dividem a
+    // mesma cópia e continuam instanciados juntos.
+    std::vector<std::pair<const GpuMaterial*, const GpuMaterial*>> twoSidedCopies;
+    auto two_sided = [&](const GpuMaterial* source) -> const GpuMaterial* {
+        if (source->factors.doubleSided) return source;
+        for (const auto& c : twoSidedCopies) if (c.first == source) return c.second;
+        overriddenMaterials->push_back(*source);
+        auto& mat = overriddenMaterials->back();
+        mat.factors.doubleSided = true;
+        twoSidedCopies.emplace_back(source, &mat);
+        return &mat;
+    };
     std::vector<std::tuple<const SceneInstance*, i32, const GpuMaterial*>> materialCopies;
     auto material_for = [&](const SceneInstance& inst, const GpuModel& model, i32 index) -> const GpuMaterial* {
         const GpuMaterial* source = index >= 0 && index < static_cast<i32>(model.materials.size()) ? &model.materials[index] : &model.defaultMaterial;
         for (const auto& cached : materialCopies) if (std::get<0>(cached) == &inst && std::get<1>(cached) == index) return std::get<2>(cached);
-        for (const auto& over : inst.materials) if (index >= 0 && over.materialIndex == static_cast<u32>(index) && over.mask) {
+        for (const auto& over : inst.pose().materials) if (index >= 0 && over.materialIndex == static_cast<u32>(index) && over.mask) {
             overriddenMaterials->push_back(*source);
             auto& mat = overriddenMaterials->back();
             if (over.mask & 1) mat.factors.baseColor.x = over.baseColor.x;
@@ -1110,6 +1280,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             if (over.mask & 48) mat.factors.unlit = false; // An explicit PBR edit opts this instance into lighting.
             source = &mat; break;
         }
+        if (inst.doubleSided) source = two_sided(source);
         materialCopies.emplace_back(&inst, index, source); return source;
     };
     // Letra do texto 3D sumindo (SceneInstance::nodeOpacity): cópia do
@@ -1197,7 +1368,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         usize total = 0;
         for (usize i = 0; i < frame.instances.size(); ++i) {
             instJointBase[i] = static_cast<u32>(total);
-            total += frame.instances[i].jointMatrices.size();
+            total += frame.instances[i].pose().jointMatrices.size();
         }
         if (total > 0) {
             const BufferHandle buf = take_upload(jointPool_, total * sizeof(Mat4));
@@ -1205,12 +1376,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             if (buf.valid() && gpu_->map_buffer(buf, ptr).ok() && ptr) {
                 auto* dst = static_cast<Mat4*>(ptr);
                 for (usize i = 0; i < frame.instances.size(); ++i) {
-                    const auto& jm = frame.instances[i].jointMatrices;
+                    const auto& jm = frame.instances[i].pose().jointMatrices;
                     std::copy(jm.begin(), jm.end(), dst + instJointBase[i]);
                 }
                 gpu_->unmap_buffer(buf);
                 joints = buf;
-            }
+            } else incomplete_ = true;
         }
     }
 
@@ -1236,8 +1407,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 const i32 mi = nodes[n].mesh;
                 if (mi < 0 || mi >= static_cast<i32>(inst.asset->meshes.size())) continue;
                 const Mesh& mesh = inst.asset->meshes[static_cast<usize>(mi)];
-                const std::vector<f32>* w = n < inst.morphWeights.size() && !inst.morphWeights[n].empty()
-                                          ? &inst.morphWeights[n] : &mesh.morphWeights;
+                const std::vector<f32>* w = n < inst.pose().morphWeights.size() && !inst.pose().morphWeights[n].empty()
+                                          ? &inst.pose().morphWeights[n] : &mesh.morphWeights;
                 bool any = false;
                 for (f32 v : *w) any = any || std::fabs(v) > 1e-5f;
                 if (!any) continue;
@@ -1292,6 +1463,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 gpu_->unmap_buffer(buf);
                 morphBuf = buf;
             } else {
+                incomplete_ = true;
                 morphJobs.clear();
             }
         }
@@ -1361,17 +1533,17 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             const SceneInstance& inst = frame.instances[instIndex];
             if (!inst.asset || !inst.castShadows) continue;
             const GpuModel* gm = model(inst.assetKey, *inst.asset);
-            if (!gm) continue;
+            if (!gm) { incomplete_ = true; continue; }
             const std::vector<Node>& nodes = inst.asset->nodes;
             for (usize n = 0; n < nodes.size(); ++n) {
                 const i32 mi = nodes[n].mesh;
                 if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
-                if (n < inst.nodeOpacity.size() && inst.nodeOpacity[n] < 0.5f) continue;   // letra sumindo não projeta
+                if (n < inst.pose().nodeOpacity.size() && inst.pose().nodeOpacity[n] < 0.5f) continue;   // letra sumindo não projeta
                 const i32 skinIndex = nodes[n].skin;
                 const bool skinnedNode = joints.valid() && skinIndex >= 0
-                                       && skinIndex < static_cast<i32>(inst.skinJointOffset.size()) && gm->skin.valid();
+                                       && skinIndex < static_cast<i32>(inst.pose().skinJointOffset.size()) && gm->skin.valid();
                 const Mat4 world = skinnedNode ? inst.world
-                                               : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
+                                               : inst.world * (n < inst.pose().nodeWorld.size() ? inst.pose().nodeWorld[n] : Mat4::identity());
                 Aabb skinBox;   // primitivas com skin deste nó (espaço de bind)
                 for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
                     const GpuPrimitive& p = gm->meshes[mi][primIndex];
@@ -1381,13 +1553,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
                     const bool sk = skinnedNode && p.skinned;
                     auto pipe = shaders_->pipeline(shadow_key(sk));
-                    if (!pipe.ok()) continue;
+                    if (!pipe.ok()) { incomplete_ = true; continue; }
                     ShadowDraw sd{};
                     sd.model = gm;
                     sd.prim = &p;
                     sd.push.model = world;   // × luz depois do ajuste
                     sd.push.normalCol[0].x = sk ? static_cast<f32>(instJointBase[instIndex]
-                                                                    + inst.skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
+                                                                    + inst.pose().skinJointOffset[static_cast<usize>(skinIndex)]) : 0.0f;
                     sd.pipeline = *pipe;
                     sd.skinned = sk;
                     sd.morph = mj != nullptr;
@@ -1399,12 +1571,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     else if (box.valid()) ls.add(box.transformed(lightRot * world));
                 }
                 if (skinBox.valid()) {
-                    const usize first = inst.skinJointOffset[static_cast<usize>(skinIndex)];
-                    const usize last = static_cast<usize>(skinIndex) + 1 < inst.skinJointOffset.size()
-                                     ? inst.skinJointOffset[static_cast<usize>(skinIndex) + 1] : inst.jointMatrices.size();
+                    const usize first = inst.pose().skinJointOffset[static_cast<usize>(skinIndex)];
+                    const usize last = static_cast<usize>(skinIndex) + 1 < inst.pose().skinJointOffset.size()
+                                     ? inst.pose().skinJointOffset[static_cast<usize>(skinIndex) + 1] : inst.pose().jointMatrices.size();
                     const Mat4 lw = lightRot * inst.world;
-                    for (usize j = first; j < last && j < inst.jointMatrices.size(); ++j)
-                        ls.add(skinBox.transformed(lw * inst.jointMatrices[j]));
+                    for (usize j = first; j < last && j < inst.pose().jointMatrices.size(); ++j)
+                        ls.add(skinBox.transformed(lw * inst.pose().jointMatrices[j]));
                 }
             }
         }
@@ -1473,23 +1645,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!inst.asset) continue;
         const GpuModel* gm = model(inst.assetKey, *inst.asset);
         if (auto it = models_.find(inst.assetKey); it != models_.end()) it->second.lastFrame = frameNumber;
-        if (!gm) continue;
+        if (!gm) { incomplete_ = true; continue; }
         const std::vector<Node>& nodes = inst.asset->nodes;
+        std::unordered_map<const SceneBlock*, const SceneBlock*> sampleBlocks;
         for (usize n = 0; n < nodes.size(); ++n) {
             const i32 mi = nodes[n].mesh;
             if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
-            const f32 nodeAlpha = n < inst.nodeOpacity.size() ? inst.nodeOpacity[n] : 1.0f;
+            const f32 nodeAlpha = n < inst.pose().nodeOpacity.size() ? inst.pose().nodeOpacity[n] : 1.0f;
             if (nodeAlpha <= 0.004f) continue;   // letra ainda invisível: nada a desenhar
             // Malha com skin: a pose vem das juntas (já no espaço da cena do
             // modelo); o nó da malha não entra (regra do glTF).
             const i32 skinIndex = nodes[n].skin;
             const bool skinnedNode = joints.valid() && skinIndex >= 0
-                                   && skinIndex < static_cast<i32>(inst.skinJointOffset.size())
+                                   && skinIndex < static_cast<i32>(inst.pose().skinJointOffset.size())
                                    && gm->skin.valid();
             const Mat4 world = skinnedNode ? inst.world
-                                           : inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
-            const Mat4 clipFromLocal = viewProj * world;
-            const Mat4 viewFromLocal = frame.camera.view * world;
+                                           : inst.world * (n < inst.pose().nodeWorld.size() ? inst.pose().nodeWorld[n] : Mat4::identity());
+            const Mat4 clipFromLocal = (inst.cameraOverride ? inst.sampleViewProj : viewProj) * world;
+            const Mat4 viewFromLocal = (inst.cameraOverride ? inst.sampleView : frame.camera.view) * world;
             const Vec3 worldX{world.col[0].x, world.col[0].y, world.col[0].z};
             const Vec3 worldY{world.col[1].x, world.col[1].y, world.col[1].z};
             const Vec3 worldZ{world.col[2].x, world.col[2].y, world.col[2].z};
@@ -1504,7 +1677,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
                 const GpuMaterial* mat = faded(material_for(inst, *gm, nodes[n].material_for(primitive)), nodeAlpha);
-                if (n < inst.nodeFill.size()) mat = tinted(mat, inst.nodeFill[n]);
+                if (n < inst.pose().nodeFill.size()) mat = tinted(mat, inst.pose().nodeFill[n]);
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:
                 // o que está atrás aparece e o reflexo continua inteiro.
@@ -1514,10 +1687,23 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 // which authored surface is its front face.
                 if (mirrored && !mat->factors.doubleSided) key.frontFaceCCW = false;
                 auto pipe = shaders_->pipeline(key);
-                if (!pipe.ok()) continue;
+                if (!pipe.ok()) { incomplete_ = true; continue; }
                 const EnvSlot* env = env_of(inst);
                 const SceneBlock* blk = block_for(mat, env);
-                if (!blk) continue;
+                if (!blk) { incomplete_ = true; continue; }
+                if (inst.cameraOverride) {
+                    const auto found = sampleBlocks.find(blk);
+                    if (found != sampleBlocks.end()) blk = found->second;
+                    else {
+                        auto* sampled = arena.alloc_array<SceneBlock>(1);
+                        if (!sampled) { incomplete_ = true; continue; }
+                        *sampled = *blk;
+                        sampled->viewProj = inst.sampleViewProj;
+                        sampled->cameraPos = Vec4{inst.sampleCameraPosition, blk->cameraPos.w};
+                        sampleBlocks.emplace(blk, sampled);
+                        blk = sampled;
+                    }
+                }
                 Draw d{};
                 d.model = gm;
                 d.prim = &p;
@@ -1534,7 +1720,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 if (skinDraw) {
                     d.push.normalCol[0].w = static_cast<f32>(instJointBase[instIndex]
-                                                             + inst.skinJointOffset[static_cast<usize>(skinIndex)]);
+                                                             + inst.pose().skinJointOffset[static_cast<usize>(skinIndex)]);
                 }
                 d.pipeline = *pipe;
                 d.instanceCount = 1;
@@ -1578,6 +1764,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             h = mix(h, reinterpret_cast<uintptr_t>(d.model));
             h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
             h = mix(h, reinterpret_cast<uintptr_t>(d.material));
+            h = mix(h, reinterpret_cast<uintptr_t>(d.block));
             h = mix(h, d.pipeline.id);
             h = mix(h, (static_cast<u64>(d.firstIndex) << 32) | d.indexCount);
             auto [it, fresh] = groupOf.try_emplace(h, static_cast<u32>(merged.size()));
@@ -1687,6 +1874,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     if (planes && !planes->empty()) {
         auto pp = shaders_->pipeline(plane_key());
         auto blend = shaders_->pipeline(plane_key(true));
+        if (!pp.ok() || !blend.ok()) incomplete_ = true;
         if (pp.ok() && blend.ok()) {
             planePipe = *pp;
             planeBlendPipe = *blend;
@@ -1710,6 +1898,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             k.sampleCount = static_cast<u8>(passSamples_);
             k.hasColor1 = passMrt_;
             if (auto pp = shaders_->pipeline(k); pp.ok()) partList[i].pipeline = *pp;
+            else { incomplete_ = true; return false; }
         }
     }
     const u32 opaqueCount = static_cast<u32>(opaque.size());
@@ -1788,12 +1977,14 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // ===== fim do chão ==========================================================
     PipelineHandle skyPipe{};
     const bool skyReady = frame.environment.showBackground && background_.valid() && envKey_ == key_of(frame.environment);
+    if (frame.environment.showBackground && !skyReady) incomplete_ = true;
     if (skyReady) {
         auto key = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
         key.hasDepth = true; key.depthFormat = SurfaceFormat::Depth32F;
         key.sampleCount = static_cast<u8>(passSamples_);
         key.hasColor1 = passMrt_;
         auto pipe = shaders_->pipeline(key); if (pipe.ok()) skyPipe = *pipe;
+        else incomplete_ = true;
     }
     struct SkyBlock { Mat4 view; Vec4 projection; Vec4 light; Vec4 post; };
     // Fundo: LOD pela pegada do pixel (textureGrad no shader) × o desfoque;
@@ -1814,6 +2005,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             auto key = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag,
                                              SurfaceFormat::RGBA16F);
             if (auto pipe = shaders_->pipeline(key); pipe.ok()) direct = *pipe;
+            else incomplete_ = true;
         }
         SkyBlock skyDirect = sky;
         skyDirect.post = Vec4{std::clamp(frame.environment.exposure, 0.01f, 64.0f),
@@ -1966,17 +2158,28 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // Com luz de cena: exposição → bloom → tone map → + 2D. Sem (só planos e
     // partículas): o alvo de exibição já é a saída, como sempre foi.
     FGTexture display = color, scene = sceneHdr;
-    if (dofOn && depth1x.valid()) (void)build_dof(graph, frame, width, height, display, scene, depth1x);
-    FGTexture result = passMrt_ ? build_post(graph, frame, width, height, display, scene) : color;
-    if (!result.valid()) result = display;
+    if (dofOn && depth1x.valid() && !build_dof(graph, frame, width, height, display, scene, depth1x)) incomplete_ = true;
+    if (outExposureHdr) {
+        *outExposureHdr = scene;
+        outColor = display;
+        return true;
+    }
+    outColor = finish_exposure(graph, frame, width, height, display, scene);
+    return outColor.valid();
+}
+
+FGTexture SceneRenderer::finish_exposure(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
+                                        FGTexture display, FGTexture scene) noexcept {
+    FGTexture result = scene.valid() ? build_post(graph, frame, width, height, display, scene) : display;
+    if (!result.valid()) { incomplete_ = true; result = display; }
     // Sem MSAA (GLES, nível BAIXO): FXAA na imagem já em espaço de exibição.
     // FXAA: nível BAIXO, ou o aparelho não tem o MSAA pedido (GLES).
-    if (!msaa && (postFxaa_ || postMsaa_ > 1) && antialias_) {
+    if (passSamples_ <= 1 && (postFxaa_ || postMsaa_ > 1) && antialias_) {
         const FGTexture aa = build_fxaa(graph, width, height, result);
         if (aa.valid()) result = aa;
+        else incomplete_ = true;
     }
-    outColor = result;
-    return true;
+    return result;
 }
 
 FGTexture SceneRenderer::build_post(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
@@ -2000,6 +2203,7 @@ FGTexture SceneRenderer::build_post(FrameGraph& graph, const SceneFrame& frame, 
         auto downPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_bloom_down_frag, SurfaceFormat::RGBA16F));
         auto upPipe = shaders_->pipeline(PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_post_bloom_up_frag,
                                                                SurfaceFormat::RGBA16F, true, BlendMode::Add));
+        if (!downPipe.ok() || !upPipe.ok()) incomplete_ = true;
         if (downPipe.ok() && upPipe.ok()) {
             u32 w = std::max(1u, width / bloomDiv_), h = std::max(1u, height / bloomDiv_);
             const u32 want = std::min(bloomLevels_, kMaxLevels);

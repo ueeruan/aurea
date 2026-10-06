@@ -9,8 +9,10 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import androidx.annotation.StringRes
+import androidx.core.content.FileProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -23,6 +25,7 @@ import com.aurea.aurea.engine.directBuffer
 import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ui.i18n.EngineText
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -148,7 +151,7 @@ data class ExportUiState(
     val notice: String = "",
     val format: ExportFormat = ExportFormat.Video,
 ) {
-    val fraction: Float get() = if (framesTotal > 0) framesDone.toFloat() / framesTotal else 0f
+    val fraction: Float get() = if (framesTotal > 0) (framesDone.toFloat() / framesTotal).coerceIn(0f, 1f) else 0f
 }
 
 /**
@@ -169,9 +172,10 @@ class Exporter internal constructor(
     private val progressBuffer = directBuffer(128)
     private val progress = ExportProgress()
     private var poll: Job? = null
+    private var sessionActive by mutableStateOf(false)
     @Volatile private var cancelPending = false
 
-    val busy: Boolean get() = state.phase == ExportPhase.Running || state.phase == ExportPhase.Publishing
+    val busy: Boolean get() = sessionActive || state.phase == ExportPhase.Running || state.phase == ExportPhase.Publishing
 
     init {
         // Temporário de um export que o sistema matou no meio (o app não teve
@@ -220,7 +224,7 @@ class Exporter internal constructor(
     fun start(title: String, compWidth: Int, compHeight: Int, compFps: Double, options: ExportOptions) {
         if (busy) return
         val dir = File(app.cacheDir, "export")
-        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ROOT).format(Date())
         val base = title.ifBlank { "Aurea" }.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifBlank { "Aurea" }
         val file = File(dir, "$base $stamp.${options.format.extension}")
         if (options.format != ExportFormat.Video) {
@@ -233,17 +237,15 @@ class Exporter internal constructor(
         val mbps = options.customMbps.coerceAtLeast(0)
 
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension)
+        sessionActive = true
         cancelPending = false
         poll?.cancel()
         val guarded = projectPath()
         poll = scope.launch {
             // Galaxy A32 "fecha em 70%": o marcador diz no próximo crash que foi
             // no export, e em que quadro (atualizado a cada 1% abaixo).
-            if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
-            try {
+            guardedExport(guarded) {
                 runExport(dir, file, options, mbps)
-            } finally {
-                if (guarded != null) withContext(NonCancellable + Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
             }
         }
     }
@@ -251,47 +253,116 @@ class Exporter internal constructor(
     /** PNG, sequência .zip ou GIF: o motor renderiza e codifica; aqui, só publicar. */
     private fun startImage(dir: File, file: File, options: ExportOptions) {
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension, format = options.format)
+        sessionActive = true
         cancelPending = false
         poll?.cancel()
         val guarded = projectPath()
         poll = scope.launch {
-            if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
-            try {
+            guardedExport(guarded) {
                 runEngineJob(dir, file, options) {
                     engine.startImageExport(file.absolutePath, options.format.engineCode, options.imageShortSide, options.gifWidth,
                         imageFps(options), options.trimToContent)
                 }
-            } finally {
-                if (guarded != null) withContext(NonCancellable + Dispatchers.IO) { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
             }
         }
     }
 
-    private suspend fun runExport(dir: File, file: File, options: ExportOptions, mbps: Int) = runEngineJob(dir, file, options) {
-        engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
-            options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc))
+    /** A failed IO/JNI call is a recoverable export error, never an uncaught UI coroutine. */
+    private suspend fun guardedExport(guarded: String?, job: suspend () -> Unit) {
+        try {
+            if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
+            job()
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { engine.cancelExport() } }
+            state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+            throw cancelled
+        } catch (error: Exception) {
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { engine.cancelExport() } }
+            android.util.Log.e("AureaExport", "Export operation failed", error)
+            state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_interrupted))
+        } finally {
+            try {
+                if (guarded != null) withContext(NonCancellable + Dispatchers.IO) {
+                    runCatching { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
+                        .onFailure { android.util.Log.w("AureaExport", "Export marker cleanup failed", it) }
+                }
+            } finally {
+                // A new job cannot cancel this coroutine while its old guard cleanup is still pending.
+                sessionActive = false
+            }
+        }
     }
 
-    private suspend fun runEngineJob(dir: File, file: File, options: ExportOptions, startJob: () -> Int) {
+    /**
+     * O vídeo. O encoder do aparelho travou ou recusou no meio: o MOTOR sugere
+     * refazer no modo de segurança (export/ExportWatchdog.hpp — H.264 Baseline
+     * em múltiplos de 16 com taxa menor, depois o encoder de software). Refaz do
+     * começo (um MP4 não continua de onde outro encoder parou), com o aviso na
+     * tela, em vez de a exportação morrer no percentual em que travou.
+     */
+    private suspend fun runExport(dir: File, file: File, options: ExportOptions, mbps: Int) {
+        var safeMode = 0
+        while (true) {
+            val level = safeMode
+            val suggested = runEngineJob(dir, file, options, level) {
+                engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
+                    options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc), level)
+            }
+            val next = ExportStallWatchdog.nextSafeMode(level, suggested)
+            if (next == 0) return
+            android.util.Log.w("AureaExport", "Video encoder stalled/refused; exporting again in safe mode $next")
+            safeMode = next
+            state = state.copy(phase = ExportPhase.Running, framesDone = 0, fps = 0f, etaSeconds = 0, message = "",
+                notice = text(R.string.app_export_safe_mode))
+        }
+    }
+
+    /**
+     * Roda um export do motor até o fim e publica. Devolve o modo de segurança
+     * em que o motor manda refazer (só vídeo, só se o usuário não cancelou);
+     * 0 = terminou (pronto, falhou ou cancelado — o estado já diz qual).
+     */
+    private suspend fun runEngineJob(dir: File, file: File, options: ExportOptions, safeMode: Int = 0,
+                                     startJob: () -> Int): Int {
         run {
             // Abrir o encoder, o MP4 e os alvos de GPU leva segundos em aparelho
             // lento (e no emulador): na main thread isso dava "Aurea não está
             // respondendo" no toque de Exportar.
             val code = withContext(Dispatchers.IO) {
-                dir.mkdirs()
-                dir.listFiles()?.forEach { it.delete() }   // sobra de export interrompido
+                check(dir.isDirectory || dir.mkdirs()) { "Export directory unavailable" }
+                // Startup removes orphaned files. A previous failed job can still be
+                // unwinding its native writer here; never unlink that writer's output.
                 startJob()
             }
             if (code != 0) {
-                state = ExportUiState(ExportPhase.Failed, message = startError(code, options))
-                return
+                state = state.copy(phase = ExportPhase.Failed, message = startError(code, options))
+                return 0
             }
             if (cancelPending) engine.cancelExport()
             var markedPercent = -1
+            val watchdog = ExportStallWatchdog()
             while (true) {
                 delay(100)
-                if (!engine.exportProgress(progressBuffer)) continue
+                check(engine.exportProgress(progressBuffer)) { "Export engine unavailable" }
                 progress.readFrom(progressBuffer)
+                if (!progress.finished) {
+                    // A última rede (ExportStallWatchdog): nada muda há minutos
+                    // → cancela; nem assim conclui → a tela desiste e se libera.
+                    when (watchdog.observe(SystemClock.elapsedRealtime(), progress.framesDone, progress.message)) {
+                        ExportStallWatchdog.Verdict.Cancel -> {
+                            android.util.Log.w("AureaExport", "No export progress for ${ExportStallWatchdog.STALL_MS / 1000} s " +
+                                "at frame ${progress.framesDone}/${progress.framesTotal}; cancelling")
+                            withContext(Dispatchers.IO) { runCatching { engine.cancelExport() } }
+                        }
+                        ExportStallWatchdog.Verdict.GiveUp -> {
+                            android.util.Log.e("AureaExport", "Export engine did not conclude after the stall cancel; releasing the screen")
+                            state = state.copy(phase = ExportPhase.Failed,
+                                message = text(R.string.app_export_failed, text(R.string.expfail_stuck)))
+                            return 0
+                        }
+                        ExportStallWatchdog.Verdict.Running -> Unit
+                    }
+                }
                 val percent = if (progress.framesTotal > 0) (progress.framesDone.toLong() * 100 / progress.framesTotal).toInt() else 0
                 if (percent != markedPercent) {
                     markedPercent = percent
@@ -305,9 +376,25 @@ class Exporter internal constructor(
                     notice = if (options.aiUpscale > 0 && progress.message.startsWith("IA:")) EngineText.aiProgress(app, progress.message) else noticeFor(progress, options),
                 )
                 if (!progress.finished) continue
+                // O encoder travou/recusou e o motor sugere o modo de segurança:
+                // nada de "falhou" na tela — o vídeo é refeito (runExport).
+                val retry = if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending &&
+                    !watchdog.cancelled) ExportStallWatchdog.nextSafeMode(safeMode, progress.retrySafeMode) else 0
+                if (retry > 0) {
+                    android.util.Log.w("AureaExport", "Export failed (reason ${progress.failure}, ${progress.message}); " +
+                        "engine suggests safe mode $retry")
+                    withContext(Dispatchers.IO) { file.delete() }
+                    return retry
+                }
                 when (progress.result) {
                     0 -> publish(file, options.format)
-                    CANCELLED -> state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+                    // Cancelado pela própria tela (sem progresso por minutos), não
+                    // pelo usuário: é falha, com o motivo.
+                    CANCELLED -> state = if (watchdog.cancelled && !cancelPending) {
+                        state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_failed, text(R.string.expfail_stuck)))
+                    } else {
+                        state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+                    }
                     STORAGE_FULL -> state = state.copy(phase = ExportPhase.Failed, message = text(R.string.msg_sem_espaco_no_aparelho_libere_espaco))
                     else -> state = state.copy(
                         phase = ExportPhase.Failed,
@@ -324,6 +411,7 @@ class Exporter internal constructor(
                 break
             }
         }
+        return 0
     }
 
     fun cancel() {
@@ -361,17 +449,18 @@ class Exporter internal constructor(
 
     private suspend fun publish(file: File, format: ExportFormat) {
         state = state.copy(phase = ExportPhase.Publishing)
-        val result = withContext(Dispatchers.IO) {
+        // Complete or roll back the MediaStore transaction even if the view model is cleared.
+        val result = withContext(NonCancellable + Dispatchers.IO) {
             runCatching { if (format == ExportFormat.Video) copyToGallery(file) else copyImageOut(file, format) }
         }
-        file.delete()
+        withContext(NonCancellable + Dispatchers.IO) { file.delete() }
         result.fold(
             onSuccess = { (uri, label) ->
                 val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri, message = label)
                 // Publication succeeded independently of the ad SDK. A late
                 // callback must never overwrite a newer export's state.
                 state = pronto
-                com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { }
+                runCatching { com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { } }
             },
             onFailure = { state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_gallery_failed)) },
         )
@@ -379,6 +468,7 @@ class Exporter internal constructor(
 
     /** Copia para Filmes/Aurea. Devolve a Uri e o texto de onde ficou. */
     private fun copyToGallery(file: File): Pair<Uri, String> {
+        check(file.isFile && file.length() > 0L) { "Export produced no file" }
         val resolver = app.contentResolver
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
@@ -390,10 +480,10 @@ class Exporter internal constructor(
             val uri = resolver.insert(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
                 ?: error("MediaStore recusou")
             try {
-                resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
-                resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                checkNotNull(resolver.openOutputStream(uri)).use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
+                check(resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null) > 0)
             } catch (e: Exception) {
-                resolver.delete(uri, null, null)
+                runCatching { resolver.delete(uri, null, null) }
                 throw e
             }
             return uri to text(R.string.app_saved_to_gallery)
@@ -402,7 +492,7 @@ class Exporter internal constructor(
         val dir = File(app.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Aurea").apply { mkdirs() }
         val dst = File(dir, file.name)
         file.copyTo(dst, overwrite = true)
-        return Uri.fromFile(dst) to text(R.string.app_saved_to_path, dst.absolutePath)
+        return FileProvider.getUriForFile(app, "${app.packageName}.exports", dst) to text(R.string.app_saved_to_path, dst.absolutePath)
     }
 
     /**
@@ -410,6 +500,7 @@ class Exporter internal constructor(
      * Downloads/Aurea (o app Arquivos abre e descompacta).
      */
     private fun copyImageOut(file: File, format: ExportFormat): Pair<Uri, String> {
+        check(file.isFile && file.length() > 0L) { "Export produced no file" }
         val resolver = app.contentResolver
         val zip = format == ExportFormat.Sequence
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -424,10 +515,10 @@ class Exporter internal constructor(
                 else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             val uri = resolver.insert(collection, values) ?: error("MediaStore recusou")
             try {
-                resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
-                resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                checkNotNull(resolver.openOutputStream(uri)).use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
+                check(resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) > 0)
             } catch (e: Exception) {
-                resolver.delete(uri, null, null)
+                runCatching { resolver.delete(uri, null, null) }
                 throw e
             }
             return uri to text(if (zip) R.string.exp2_saved_downloads else R.string.exp2_saved_pictures)
@@ -437,7 +528,7 @@ class Exporter internal constructor(
             .apply { mkdirs() }
         val dst = File(dir, file.name)
         file.copyTo(dst, overwrite = true)
-        return Uri.fromFile(dst) to text(R.string.app_saved_to_path, dst.absolutePath)
+        return FileProvider.getUriForFile(app, "${app.packageName}.exports", dst) to text(R.string.app_saved_to_path, dst.absolutePath)
     }
 
     /**
@@ -462,9 +553,13 @@ class Exporter internal constructor(
     }
 
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
-        val lines = ArrayList<String>(2)
+        val lines = ArrayList<String>(3)
+        if (p.safeMode) {
+            lines += text(R.string.app_export_safe_mode)
+        }
         if (p.softwareEncoder) {
-            val codec = if (options.hevc) "HEVC" else "H.264"
+            // O modo de segurança é sempre H.264 (ExportWatchdog.hpp).
+            val codec = if (options.hevc && !p.safeMode) "HEVC" else "H.264"
             lines += text(R.string.app_export_software_encoder, codec)
         }
         if (p.thermalReduced) {
@@ -487,8 +582,8 @@ class Exporter internal constructor(
         try {
             val enc = codec.codecInfo.getCapabilitiesForType(mime).encoderCapabilities
             when {
-                enc.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR) -> 1
-                enc.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) -> 0
+                enc?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR) == true -> 1
+                enc?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) == true -> 0
                 else -> 1
             }
         } finally {

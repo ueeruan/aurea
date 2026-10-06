@@ -10,7 +10,9 @@
 #include "aurea/project/Serialization.hpp"
 #include "aurea/timeline/Rig.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <vector>
 
@@ -310,6 +312,22 @@ bool rig_vulkan_ok() {
     return ok != 0;
 }
 
+f32 rig_half(u16 h) {
+    const u32 sign = (h & 0x8000u) << 16, exp = (h >> 10) & 0x1Fu, mant = h & 0x3FFu;
+    u32 bits = 0;
+    if (exp == 0) {
+        if (mant != 0) {
+            u32 e = 113, m = mant;
+            while (!(m & 0x400u)) { m <<= 1; --e; }
+            bits = sign | (e << 23) | ((m & 0x3FFu) << 13);
+        } else bits = sign;
+    } else if (exp == 31) bits = sign | 0x7F800000u | (mant << 13);
+    else bits = sign | ((exp + 112) << 23) | (mant << 13);
+    f32 f;
+    std::memcpy(&f, &bits, 4);
+    return f;
+}
+
 } // namespace
 
 AUREA_TEST(RigGpu, PosedRigChangesTheRenderedFrame) {
@@ -364,9 +382,38 @@ AUREA_TEST(RigGpu, PosedRigChangesTheRenderedFrame) {
     AUREA_CHECK(!red(posedPx, 228, 128));
     AUREA_CHECK(below > 300u);
     AUREA_CHECK(changed > 2000u);
-    // Montagem aberta: o preview volta a mostrar a imagem sem deformação.
+    // Montagem aberta: o PREVIEW volta a mostrar a imagem sem deformação. A
+    // captura (capture_frame_rgba) segue o contrato do export — que sempre
+    // mostra a pose —, então a montagem é lida de um quadro de prévia.
+    auto grab_preview = [&] {
+        std::vector<u8> px(256u * 256u * 4u, 0);
+        TextureDesc d;
+        d.width = d.height = 256;
+        d.format = SurfaceFormat::RGBA16F;
+        d.renderTarget = true;
+        d.sampled = true;
+        d.transferSrc = true;
+        auto t = e.gpu()->create_texture(d);
+        AUREA_CHECK(t.ok());
+        if (!t.ok()) return px;
+        std::vector<u16> half(px.size());
+        AUREA_CHECK(e.render_offscreen(*t, 256, 256, true).ok());
+        AUREA_CHECK(e.gpu()->read_texture(*t, half.data(), 256 * 8).ok());
+        e.gpu()->destroy_texture(*t);
+        auto enc = [](f32 v) {
+            v = std::clamp(v, 0.0f, 1.0f);
+            return static_cast<u8>(std::lround((v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f) * 255.0f));
+        };
+        for (usize i = 0; i < px.size(); i += 4) {
+            const f32 a = rig_half(half[i + 3]);
+            const f32 inv = a > 1e-5f ? 1.0f / a : 0.0f;   // pré-multiplicado
+            for (usize c = 0; c < 3; ++c) px[i + c] = enc(rig_half(half[i + c]) * inv);
+            px[i + 3] = static_cast<u8>(std::lround(std::clamp(a, 0.0f, 1.0f) * 255.0f));
+        }
+        return px;
+    };
     e.set_rig_setup_layer(layer);
-    const std::vector<u8> setup = grab();
+    const std::vector<u8> setup = grab_preview();
     AUREA_CHECK(red(setup, 228, 128));
     AUREA_CHECK_EQ(red_below(setup), 0u);
     e.set_rig_setup_layer(0);

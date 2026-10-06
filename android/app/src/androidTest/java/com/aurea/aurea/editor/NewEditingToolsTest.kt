@@ -7,12 +7,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.editor.panels.effectTypeId
-import com.aurea.aurea.effects.LocalRotoModel
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -23,7 +21,7 @@ import java.nio.ByteOrder
 class NewEditingToolsTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun downloadOnceCutoutExportGridAndLayeredPsd() {
+    @Test fun bundledCutoutExportGridAndLayeredPsd() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         check(context.packageName.endsWith(".uitest"))
@@ -36,12 +34,6 @@ class NewEditingToolsTest {
         }
         compose.waitUntil(30000) { ready && store.engineReady }
         val engine = store.engineForStress
-        val directory = engine.foregroundModelDirectory()
-        runBlocking { LocalRotoModel.prepare(directory) {} }
-        val model = File(directory, "u2netp.bin")
-        val modified = model.lastModified()
-        runBlocking { LocalRotoModel.prepare(directory) {} }
-        assertEquals("A valid model must not be downloaded again", modified, model.lastModified())
         compose.runOnIdle { store.newProject(320,320,30f,"AI cutout") }
         compose.waitUntil(15000) { store.project.title == "AI cutout" }
         val pixels = ByteBuffer.allocateDirect(320*320*4)

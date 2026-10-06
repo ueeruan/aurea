@@ -9,6 +9,7 @@
 //  já trabalha no N+1).
 // =============================================================================
 #include "MetalInternal.hpp"
+#include "MetalFrameCompletion.hpp"
 
 #include "aurea/core/Log.hpp"
 
@@ -506,13 +507,12 @@ Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
         FrameContext& f = d.frames[i];
         if (&f == d.current || !f.submitted || f.frameNumber != frameNumber) continue;
         const Status status = wait_command_buffer(f.cmd, f.completion, timeoutNs, "aguardar frame");
-        if (!status.ok()) return status;
-        for (u32 j = 0; j < d.framesInFlight; ++j) {
-            FrameContext& done = d.frames[j];
-            if (&done != d.current && done.submitted && done.frameNumber <= frameNumber)
+        if (status.code() == Errc::DeviceLost) d.deviceLost = true;
+        return finish_frame_wait(f, d.frames, d.framesInFlight, d.current, status,
+            [&d](FrameContext& done) {
+                d.collect_timings(done);
                 d.run_deferred(done);
-        }
-        return OkStatus;
+            });
     }
     // Frame já reciclado = concluído (o begin_frame esperou seu command buffer).
     return OkStatus;

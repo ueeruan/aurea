@@ -50,6 +50,16 @@ enum ParityExportProbe {
             guard (engine.exportProgress()[AureaExportRunning] as? NSNumber)?.boolValue != true else {
                 throw Failure(message: "Another export is already running")
             }
+            report["phase"] = "particle-camera"
+            try writeReport()
+            report["particleCamera"] = try await checkParticleCamera(engine: engine, documents: documents)
+            report["phase"] = "paper-effects"
+            try writeReport()
+            report["paperEffects"] = try await checkPaperEffects(engine: engine, documents: documents)
+            report["phase"] = "preview-viewport"
+            try writeReport()
+            report["previewViewport"] = try await checkPreviewViewport(engine: engine)
+            report["phase"] = "fixture"
             engine.pause()
             _ = engine.flush()
             guard engine.newProjectWidth(1920, height: 1080, fps: 30, title: "Parity Export") else {
@@ -178,6 +188,9 @@ enum ParityExportProbe {
             guard (variableRate["passed"] as? NSNumber)?.boolValue == true else {
                 throw Failure(message: "Production VFR decoder regression failed: \(variableRate)")
             }
+            report["phase"] = "audio-failure-recovery"
+            try writeReport()
+            report["audioFailureRecovery"] = try await checkAudioFailureRecovery(engine: engine, documents: documents)
             report["passed"] = true
             report["phase"] = "complete"
         } catch {
@@ -195,6 +208,221 @@ enum ParityExportProbe {
         return report
     }
 
+    @MainActor
+    private static func checkPreviewViewport(engine: AureaEngine) async throws -> [String: Any] {
+        guard engine.newProjectWidth(1920, height: 1080, fps: 30, title: "Preview viewport") else {
+            throw Failure(message: "Viewport project unavailable")
+        }
+        _ = engine.addShape(0)
+        engine.setViewportZoom(1, panX: 0, panY: 0)
+        engine.setPreviewScaleNumerator(1, denominator: 1, automatic: false)
+        _ = engine.flush()
+        func wait(_ accepts: (AureaStatus) -> Bool) async throws -> AureaStatus {
+            let deadline = ProcessInfo.processInfo.systemUptime + 10
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                var state = AureaStatus()
+                if engine.readStatus(&state), accepts(state) { return state }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            throw Failure(message: "Viewport render dimensions did not settle")
+        }
+        _ = try await wait { $0.previewWidth == 1920 && $0.previewAuto == 0 }
+        func exact() async throws -> Data {
+            let pixels: Data? = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var width: UInt32 = 0, height: UInt32 = 0
+                    let data = engine.captureFrame(320, outWidth: &width, outHeight: &height)
+                    continuation.resume(returning: width == 320 && height == 180 ? data : nil)
+                }
+            }
+            guard let pixels else { throw Failure(message: "Viewport exact capture unavailable") }
+            return pixels
+        }
+        let original = try await exact()
+        engine.setPreviewScaleNumerator(1, denominator: 1, automatic: true); _ = engine.flush()
+        let automatic = try await wait { $0.previewAuto != 0 && $0.previewWidth > 0 && $0.previewWidth <= 1920 }
+        // A large tablet may fit the full composition. Both native sizes remain valid.
+        let captured = try await exact()
+        guard original == captured else { throw Failure(message: "AUTO changed an exact capture") }
+        engine.setPreviewScaleNumerator(1, denominator: 2, automatic: false); _ = engine.flush()
+        _ = try await wait { $0.previewWidth == 960 && $0.previewAuto == 0 }
+        engine.setPreviewScaleNumerator(1, denominator: 1, automatic: false); _ = engine.flush()
+        _ = try await wait { $0.previewWidth == 1920 && $0.previewAuto == 0 }
+        return ["passed": true, "automaticWidth": automatic.previewWidth,
+                "automaticHeight": automatic.previewHeight, "manualFullWidth": 1920,
+                "manualHalfWidth": 960, "exactCaptureUnchanged": true]
+    }
+
+    /// A generated opaque image and a hidden-source emitter exercise the same
+    /// catalog path as Android. Captures execute the real Metal backend.
+    @MainActor
+    private static func checkParticleCamera(engine: AureaEngine, documents: URL) async throws -> [String: Any] {
+        engine.pause(); _ = engine.flush()
+        guard engine.newProjectWidth(320, height: 180, fps: 30, title: "Particle camera probe"),
+              let composition = engine.composition(),
+              let compositionID = (composition[AureaCompositionId] as? NSNumber)?.uint64Value else {
+            throw Failure(message: "Particle camera project could not be created")
+        }
+        engine.setComposition(compositionID, backgroundR: 0, g: 0, b: 0, a: 1)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 180), format: format).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 180))
+        }
+        let source = documents.appendingPathComponent("particle-camera-source.png")
+        guard let png = image.pngData() else { throw Failure(message: "Particle source PNG unavailable") }
+        try png.write(to: source, options: .atomic)
+        let layer = engine.importImageFile(source.path, name: "Emitter source")
+        guard layer >= 0 else { throw Failure(message: "Particle source import failed") }
+        let type = fxEffectTypeId("aurea.generate.particular") // saved-project compatibility key
+        engine.addEffect(type, toLayer: layer, at: 0)
+        let project = documents.appendingPathComponent("particle-camera-probe.aurea")
+        guard engine.saveProject(project.path), let effect = engine.effects(forLayer: layer).first,
+              let effectID = (effect[AureaEffectId] as? NSNumber)?.uint32Value else {
+            throw Failure(message: "Particle catalog effect was not attached")
+        }
+        for p in [UInt32(5), 6, 7, 9, 15, 16, 17, 18, 20, 23, 25, 28, 29, 31, 36, 38] {
+            engine.setEffect(effectID, forLayer: layer, paramIndex: p, value: 0)
+        }
+        let values: [UInt32: Float] = [0: 30, 1: 1000, 22: 30000, 24: 12, 26: 100, 37: 71]
+        for (p, value) in values { engine.setEffect(effectID, forLayer: layer, paramIndex: p, value: value) }
+        guard engine.saveProject(project.path) else { throw Failure(message: "Particle parameters could not be saved") }
+        func measure(_ frame: Int64) async throws -> (x: Double, y: Double, energy: Double) {
+            engine.seek(toFrame: frame); _ = engine.flush()
+            let data: Data? = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var width: UInt32 = 0, height: UInt32 = 0
+                    let data = engine.captureFrame(320, outWidth: &width, outHeight: &height)
+                    continuation.resume(returning: width == 320 && height == 180 ? data : nil)
+                }
+            }
+            guard let data, data.count == 320 * 180 * 4 else {
+                throw Failure(message: "Particle capture failed at frame \(frame)")
+            }
+            try data.write(to: documents.appendingPathComponent("particle-camera-\(frame).rgba"), options: .atomic)
+            var energy = 0.0, x = 0.0, y = 0.0
+            data.withUnsafeBytes { bytes in
+                let pixels = bytes.bindMemory(to: UInt8.self)
+                for i in stride(from: 0, to: pixels.count, by: 4) {
+                    let value = Double(pixels[i]) + Double(pixels[i + 1]) + Double(pixels[i + 2])
+                    energy += value; x += value * (Double(i / 4 % 320) + 0.5)
+                    y += value * (Double(i / 4 / 320) + 0.5)
+                }
+            }
+            guard energy > 2000 else { throw Failure(message: "Particle image is empty at frame \(frame)") }
+            return (x / energy, y / energy, energy)
+        }
+        let baseline = try await measure(15)
+        guard abs(baseline.x - 160) <= 1, abs(baseline.y - 90) <= 1 else {
+            throw Failure(message: "Particle emitter has an unexpected initial position")
+        }
+        engine.seek(toFrame: 0); _ = engine.flush()
+        guard engine.saveProject(project.path) else { throw Failure(message: "Particle seek did not apply") }
+        let camera = engine.addCamera()
+        guard camera >= 0 else { throw Failure(message: "Particle camera could not be created") }
+        engine.setCameraParam(camera, param: 0, value: Float(12 / tan(Double.pi / 9)))
+        engine.setPosition(forLayer: camera, x: 195, y: 90, z: Float(-90 / tan(Double.pi / 9)))
+        engine.setLayer(camera, startFrame: 10, endFrame: 20, offsetFrames: 0, setOffset: true)
+        guard engine.saveProject(project.path) else { throw Failure(message: "Particle camera range was not applied") }
+        var samples: [[String: Any]] = []
+        for frame in [Int64(9), 10, 15, 20, 15, 20, 9] {
+            let sample = try await measure(frame)
+            let expectedX = baseline.x - ((10..<20).contains(frame) ? 35 : 0)
+            guard abs(sample.x - expectedX) <= 1, abs(sample.y - baseline.y) <= 1 else {
+                throw Failure(message: "Particle camera mismatch at \(frame): \(sample.x),\(sample.y); expected \(expectedX),\(baseline.y)")
+            }
+            samples.append(["frame": frame, "x": sample.x, "y": sample.y,
+                            "energy": sample.energy, "expectedX": expectedX])
+        }
+        let result: [String: Any] = ["passed": true, "width": 320, "height": 180,
+                                     "baselineX": baseline.x, "baselineY": baseline.y, "samples": samples]
+        if let data = AureaJSONData(result, true) {
+            try data.write(to: documents.appendingPathComponent("particle-camera-ready.json"), options: .atomic)
+        }
+        return result
+    }
+
+    @MainActor
+    private static func checkPaperEffects(engine: AureaEngine, documents: URL) async throws -> [[String: Any]] {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = false
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 180), format: format).image { context in
+            for y in stride(from: 0, to: 180, by: 20) {
+                for x in stride(from: 0, to: 320, by: 20) {
+                    UIColor(red: x < 160 ? 240.0 / 255 : 32.0 / 255,
+                            green: ((x / 20 + y / 20) % 2 == 0) ? 40.0 / 255 : 200.0 / 255,
+                            blue: x < 160 ? 32.0 / 255 : 240.0 / 255, alpha: 1).setFill()
+                    context.fill(CGRect(x: CGFloat(x), y: CGFloat(y), width: 20, height: 20))
+                }
+            }
+            context.cgContext.clear(CGRect(x: 0, y: 80, width: 320, height: 20))
+        }
+        guard let png = image.pngData() else { throw Failure(message: "Paper source PNG unavailable") }
+        let source = documents.appendingPathComponent("paper-source.png")
+        try png.write(to: source, options: .atomic)
+        func capture(_ name: String) async throws -> Data {
+            let pixels: Data? = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var width: UInt32 = 0, height: UInt32 = 0
+                    let data = engine.captureFrame(320, outWidth: &width, outHeight: &height)
+                    continuation.resume(returning: width == 320 && height == 180 ? data : nil)
+                }
+            }
+            guard let pixels, pixels.count == 320 * 180 * 4,
+                  let preview = UIImage.fromRGBA(pixels, width: 320, height: 180)?.pngData() else {
+                throw Failure(message: "Native paper image is missing: \(name)")
+            }
+            try preview.write(to: documents.appendingPathComponent("paper-\(name).png"), options: .atomic)
+            return pixels
+        }
+        func difference(_ a: Data, _ b: Data) -> Int {
+            let x = [UInt8](a), y = [UInt8](b)
+            guard x.count == y.count else { return Int.max }
+            var changed = 0
+            for i in stride(from: 0, to: x.count, by: 4) {
+                let delta = abs(Int(x[i]) - Int(y[i])) + abs(Int(x[i+1]) - Int(y[i+1])) + abs(Int(x[i+2]) - Int(y[i+2]))
+                if delta > 8 { changed += 1 }
+            }
+            return changed
+        }
+        var results: [[String: Any]] = []
+        for (name, amount) in [("bender", Float(35)), ("bend", 65), ("curl", 145), ("page_turn", 50)] {
+            engine.pause(); _ = engine.flush()
+            guard engine.newProjectWidth(320, height: 180, fps: 30, title: "Paper \(name)"),
+                  let composition = engine.composition(),
+                  let compositionID = (composition[AureaCompositionId] as? NSNumber)?.uint64Value else {
+                throw Failure(message: "Paper project could not be created")
+            }
+            engine.setComposition(compositionID, backgroundR: 0, g: 0, b: 0, a: 1)
+            let layer = engine.importImageFile(source.path, name: "Paper source")
+            guard layer >= 0 else { throw Failure(message: "Paper source import failed") }
+            let original = try await capture(name + "-original")
+            engine.addEffect(fxEffectTypeId("aurea.distort." + name), toLayer: layer, at: 0)
+            let project = documents.appendingPathComponent("paper-\(name).aurea")
+            guard engine.saveProject(project.path), let effect = engine.effects(forLayer: layer).first,
+                  let effectID = (effect[AureaEffectId] as? NSNumber)?.uint32Value else {
+                throw Failure(message: "Paper catalog effect could not be added: \(name)")
+            }
+            engine.setEffect(effectID, forLayer: layer, paramIndex: 0, value: amount)
+            if name == "curl" { engine.setEffect(effectID, forLayer: layer, paramIndex: 1, value: 32) }
+            if name == "page_turn" { engine.setEffect(effectID, forLayer: layer, paramIndex: 2, value: 16) }
+            guard engine.saveProject(project.path) else { throw Failure(message: "Paper parameters could not be saved") }
+            let deformed = try await capture(name + "-deformed")
+            let changed = difference(original, deformed)
+            guard changed > 400 else { throw Failure(message: "Paper effect did not change its pixels: \(name)") }
+            guard engine.loadProject(project.path) else { throw Failure(message: "Paper project did not reopen") }
+            let reopened = try await capture(name + "-reopened")
+            guard difference(deformed, reopened) == 0 else { throw Failure(message: "Paper persistence changed pixels: \(name)") }
+            engine.setEffect(effectID, forLayer: layer, paramIndex: 0, value: 0)
+            _ = engine.flush()
+            let neutral = try await capture(name + "-zero")
+            guard difference(original, neutral) == 0 else { throw Failure(message: "Zero paper effect is not identity: \(name)") }
+            results.append(["effect": name, "changedPixels": changed, "identityPassed": true, "persistencePassed": true])
+        }
+        if let data = AureaJSONData(["passed": true, "effects": results], true) {
+            try data.write(to: documents.appendingPathComponent("paper-effects-ready.json"), options: .atomic)
+        }
+        return results
+    }
+
     private struct DecodedMovie: Sendable {
         var frameCount = 0
         var duration = 0.0
@@ -209,6 +437,66 @@ enum ParityExportProbe {
              "durationSeconds": duration, "fileBytes": fileBytes, "timestampsSeconds": timestamps,
              "lightPixels": lightPixels, "darkPixels": darkPixels, "minRGB": minRGB, "maxRGB": maxRGB]
         }
+    }
+
+    @MainActor
+    private static func checkAudioFailureRecovery(engine: AureaEngine, documents: URL) async throws -> [String: Any] {
+        let token = UUID().uuidString
+        let tone = documents.appendingPathComponent("audio-failure-\(token).wav")
+        let broken = documents.appendingPathComponent("audio-failure-\(token).mp4")
+        let recovered = documents.appendingPathComponent("audio-recovered-\(token).mp4")
+        let project = documents.appendingPathComponent("audio-failure-\(token).aurea")
+        engine.pause()
+        guard engine.newProjectWidth(320, height: 180, fps: 30, title: "Audio failure recovery") else {
+            throw Failure(message: "Audio failure fixture could not open")
+        }
+        try writeTone(to: tone)
+        guard engine.addShape(1) >= 0, engine.importAudio(tone.path, name: "Required audio") >= 0,
+              let composition = engine.composition(),
+              let id = (composition[AureaCompositionId] as? NSNumber)?.uint64Value else {
+            throw Failure(message: "Audio failure fixture did not import its real WAV")
+        }
+        engine.setComposition(id, duration: 30)
+        guard engine.saveProject(project.path) else { throw Failure(message: "Audio fixture commands were not applied") }
+        // Corrupt only this generated temporary source after import establishes
+        // valid metadata; export owns a fresh decoder, independent of preview.
+        try Data("invalid generated WAV".utf8).write(to: tone, options: .atomic)
+        var running = false
+        defer { if running { engine.cancelExport() } }
+        func export(_ target: URL) async throws -> [String: Any] {
+            guard engine.startExport(to: target.path, codec: .h264, height: 180, fps: 30,
+                                     bitrateMbps: 2, audioBitrateKbps: 128) else {
+                throw Failure(message: "Audio failure test export did not start")
+            }
+            running = true
+            let deadline = ProcessInfo.processInfo.systemUptime + 60
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                let progress = engine.exportProgress()
+                if (progress[AureaExportFinished] as? NSNumber)?.boolValue == true {
+                    running = false
+                    return progress
+                }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+            throw Failure(message: "Audio failure recovery exceeded60 seconds")
+        }
+        let failed = try await export(broken)
+        guard (failed[AureaExportFailure] as? NSNumber)?.intValue == 5,
+              (failed[AureaExportResult] as? NSNumber)?.intValue != 0,
+              !FileManager.default.fileExists(atPath: broken.path) else {
+            throw Failure(message: "Missing audible PCM was saved as successful silence: \(failed)")
+        }
+        try writeTone(to: tone)
+        let success = try await export(recovered)
+        guard (success[AureaExportResult] as? NSNumber)?.intValue == 0,
+              (success[AureaExportFramesDone] as? NSNumber)?.intValue == 30 else {
+            throw Failure(message: "Restored audio could not export all30 frames: \(success)")
+        }
+        let audio = try await Task.detached(priority: .utility) {
+            try await decodeAudio(movie: recovered)
+        }.value
+        return ["passed": true, "failedProgress": failed, "recoveredProgress": success,
+                "decodedAudio": audio.dictionary, "movieFile": recovered.lastPathComponent]
     }
 
     private static func writeTone(to url: URL) throws {

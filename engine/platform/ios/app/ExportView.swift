@@ -90,13 +90,11 @@ struct ExportView: View {
                 model.exportOptions.bitrateMbps = 0
                 model.exportOptions.quality = 1
             }
-            let native = model.engine
-            let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
-                var width: UInt32 = 0, height: UInt32 = 0
-                guard let data = native.captureFrame(640, outWidth: &width, outHeight: &height) else { return nil }
-                return UIImage.fromRGBA(data, width: Int(width), height: Int(height))
-            }.value
-            if !Task.isCancelled { preview = image }
+            let project = model.projectGeneration
+            if let frame = await model.capturePreviewFrame(640),
+               !Task.isCancelled, model.projectGeneration == project {
+                preview = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height))
+            }
         }
     }
 
@@ -481,6 +479,9 @@ struct ExportView: View {
     }
     private var failureNotice: String? {
         if model.exportCancelled || cancelled { return AureaText.t("ios_export_cancelled") }
+        // A tela desistiu de um export sem progresso por minutos (o motor
+        // devolve "cancelado", mas não foi o usuário).
+        if model.exportStalled { return AureaText.t("ios_export_failed_detail", AureaText.t("expfail_stuck")) }
         let result = (model.exportProgress["result"] as? NSNumber)?.intValue ?? 0
         if result == 28 { return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco") }
         if result != 0 {
@@ -495,6 +496,7 @@ struct ExportView: View {
     private var progressNotice: String {
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
+        if flags & AureaExportFlag.safeMode.rawValue != 0 { notices.append(AureaText.t("app_export_safe_mode")) }
         if model.exportOptions.aiUpscale > 0, let message = model.exportProgress["message"] as? String, message.hasPrefix("IA:") {
             notices.append(AureaEngineText.aiProgress(message))
         }

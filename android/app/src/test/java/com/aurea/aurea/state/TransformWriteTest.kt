@@ -42,6 +42,21 @@ class TransformWriteTest {
         assertEquals(TransformWrite.Static, transformWrite(sceneEditor = false, autoKey = true, animated = false))
     }
 
+    /**
+     * Beta 2026-10-05: arrastar um texto com chaves de posição não fazia nada.
+     * O gesto não decide mais pelo detalhe lido (que pode estar atrasado): manda
+     * os bits do motor — só se mudou, no quadro da prévia, valor parado quando
+     * a trilha não tem chave. Os números são os de Command.hpp (kAutoKey*).
+     */
+    @Test fun stageGestureLetsTheEngineKeyTheShownFrameOrSetTheStaticValue() {
+        assertEquals(1, AUTO_KEY_ONLY_IF_CHANGED)
+        assertEquals(2, AUTO_KEY_AT_PLAYHEAD)
+        assertEquals(4, AUTO_KEY_STATIC_WHEN_UNANIMATED)
+        assertEquals(7, gestureKeyFlags(wholeGroup = false))
+        // O grupo XYZ do 3D animado: todo eixo ganha chave, nunca valor parado.
+        assertEquals(3, gestureKeyFlags(wholeGroup = true))
+    }
+
     @Test fun autoKeyOffAlwaysShiftsTheWholeAnimation() {
         for (scene in listOf(true, false)) for (animated in listOf(true, false)) {
             assertEquals("scene=$scene animated=$animated", TransformWrite.Layout, transformWrite(scene, autoKey = false, animated = animated))

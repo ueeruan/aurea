@@ -48,14 +48,8 @@ namespace {
 std::array<ParamValue, aeCount> animator_values(const Layer& layer, const EffectInstance& fx, f64 time) {
     static const ParameterRegistry specs = [] { ParameterRegistry p; declare_animator_effect_params(p); return p; }();
     std::array<ParamValue, aeCount> values{};
-    const auto frame = static_cast<i64>(std::floor(time));
-    const f32 blend = static_cast<f32>(time - frame);
     for (u32 p = 0; p < aeCount; ++p) {
-        values[p] = evaluate_param(layer.tracks, fx, p, specs.at(p), FrameIndex{frame});
-        if (blend > 0 && specs.at(p).animatable()) {
-            const auto next = evaluate_param(layer.tracks, fx, p, specs.at(p), FrameIndex{frame + 1});
-            for (u32 c = 0; c < component_count(specs.at(p).type); ++c) values[p].v[c] += (next.v[c] - values[p].v[c]) * blend;
-        }
+        values[p] = evaluate_param_f(layer.tracks, fx, p, specs.at(p), time);
     }
     return values;
 }
@@ -163,11 +157,7 @@ u32 unit_of(const TextSelector& s, const GlyphUnits& u) { return s.basedOn == 1 
 f32 anim_param(const TrackSet& tracks, u32 animator, u32 param, f64 local, f32 fallback) noexcept {
     const Track* tr = tracks.find(TrackProperty::TextAnimParam, animator, param);
     if (!tr || !tr->driven()) return fallback;
-    const f64 f = std::floor(local);
-    const f32 a = tr->value_or(FrameIndex{static_cast<i64>(f)}, fallback);
-    const f32 k = static_cast<f32>(local - f);
-    if (k <= 0.0f) return a;
-    return a + (tr->value_or(FrameIndex{static_cast<i64>(f) + 1}, fallback) - a) * k;
+    return tr->value_or_f(local, fallback);
 }
 
 bool has_animators(const TextData& t) noexcept {

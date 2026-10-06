@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="environment_start">بداية الخلفية</string>
+    <string name="environment_end">نهاية الخلفية</string>
+    <string name="environment_full_duration">التكوين بالكامل</string>
+    <string name="environment_layer_duration">استخدام مدة الطبقة</string>
+</resources>

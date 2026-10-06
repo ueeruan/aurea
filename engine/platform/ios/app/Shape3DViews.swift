@@ -294,6 +294,7 @@ enum Shape3DPanelPage { case material, shape }
 struct Shape3DPanelSection: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var state = Shape3DState.shared
+    @ObservedObject private var thumbs = MaterialThumbStore.shared
     let layerId: Int64
     var page: Shape3DPanelPage = .material
     @State private var picking = false
@@ -315,7 +316,9 @@ struct Shape3DPanelSection: View {
                     HStack(spacing: 6) {
                         chip(AureaText.t("shape3d_whole"), on: part < 0) { choose(-1) }
                         ForEach(0..<info.colors.count, id: \.self) { i in
-                            chip(Shape3DState.partLabel(kind: info.kind, part: i), on: part == i, dot: AureaColorSpace.color(info.colors[i])) {
+                            // A bola do material da parte (cor + imagem da galeria), feita pelo motor.
+                            chip(Shape3DState.partLabel(kind: info.kind, part: i), on: part == i, dot: AureaColorSpace.color(info.colors[i]),
+                                 thumb: partThumb(i)) {
                                 choose(part == i ? -1 : i)
                             }.accessibilityIdentifier("shape3d.part.\(i)")
                         }
@@ -463,13 +466,25 @@ struct Shape3DPanelSection: View {
         Text(AureaText.t(key)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
     }
 
-    private func chip(_ label: String, on: Bool, dot: Color? = nil, action: @escaping () -> Void) -> some View {
+    /// Bola do material da parte `i` (material i do asset da forma), pedida de
+    /// novo quando o modelo muda (cor, imagem, desfazer).
+    private func partThumb(_ i: Int) -> UIImage? {
+        let key = "m:\(layerId):\(i)"
+        let engine = model.engine, target = layerId
+        thumbs.request(key, revision: model.status.modelRevision) {
+            engine.materialPreview(target, material: UInt32(i), size: materialThumbSide)
+        }
+        return thumbs.image(key)
+    }
+
+    private func chip(_ label: String, on: Bool, dot: Color? = nil, thumb: UIImage? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let dot { Circle().fill(dot).frame(width: 10, height: 10) }
+                // Parte: a bola do material (com a imagem, se houver); a cor chapada até ela chegar.
+                if let dot { MaterialBallView(image: thumb, fallback: dot, size: 26) }
                 Text(label).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
+            .padding(.leading, dot == nil ? 12 : 6).padding(.trailing, 12).padding(.vertical, dot == nil ? 6 : 3)
             .frame(minHeight: 44)
             .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())

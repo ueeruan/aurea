@@ -147,6 +147,7 @@ fun PanelContent(
         ColorPickerSheet(
             initial = r.initial,
             pickFromPreview = { store.captureBitmap(720) },
+            previewIdentity = Triple(store.projectGeneration, panel, r),
             onChange = r.onChange,
             onDone = {
                 color = null

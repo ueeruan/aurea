@@ -9,4 +9,6 @@
     <string name="expfail_media">no se pudo leer un archivo multimedia del proyecto</string>
     <string name="expfail_file">no se pudo guardar el archivo de video</string>
     <string name="expfail_unsupported">este teléfono no puede exportar en esta resolución o formato</string>
+    <string name="expfail_stuck">la exportación dejó de avanzar durante minutos y se detuvo; cierra otras apps e inténtalo de nuevo</string>
+    <string name="app_export_safe_mode">El codificador de video del teléfono se bloqueó: exportando de nuevo en modo compatible (H.264, puede tardar más).</string>
 </resources>

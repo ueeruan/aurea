@@ -2,7 +2,7 @@
 // =============================================================================
 //  Aurea / shaders / effects / particular.vert
 //
-//  Particular (o sistema de partículas do app antigo, refeito no motor): cada
+//  Partículas 3D AUREA: cada
 //  partícula é um quadrado gerado aqui, sem vertex buffer (6 vértices por
 //  slot). A simulação é FECHADA: posição, tamanho, cor e opacidade saem de
 //  (slot, geração, semente, tempo) — nada de estado entre quadros. Por isso a
@@ -10,8 +10,8 @@
 //  pré-rolagem é só somar tempo.
 //
 //  Espaço: px da camada, y para BAIXO, +z para LONGE (como a composição). A
-//  câmera é a padrão da composição (40° na vertical, olhando o centro); uma
-//  partícula em z > 0 encolhe e se aproxima do centro.
+//  câmera vem da composição. Sem câmera, o efeito 2D usa uma projeção local
+//  de 40° na vertical; uma partícula em z > 0 encolhe em direção ao centro.
 //
 //  Slots: uma GRADE fixa de nascimentos (`clock.y` por segundo) em ciclos de
 //  `clock.z` slots; a taxa pedida só decide QUANTOS slots disparam (sorteio
@@ -41,6 +41,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 camRight;         // xyz = eixo da câmera no mundo; w = 1 liga este modo
     vec4 camUp;
     mat4 previousParticleProjection;
+    mat4 layerFromComp;    // composição -> plano original, antes dos efeitos seguintes
 } p;
 
 layout(location = 0) out vec2 v_corner;   // -1..1 no quadrado da partícula
@@ -151,7 +152,7 @@ void main() {
     const float speed = p.launch.x * max(0.0, 1.0 + (rD.x - 0.5) * 2.0 * p.launch.y);
     const vec3 start = vec3(p.emitPos.x * p.frame.x, p.emitPos.y * p.frame.y, p.emitPos.z * p.frame.y) + offset;
     const vec3 pos = vec3(p.frame.zw, 0.0) + start + flight(age, dir, speed) + wander(now, k, rC * TWO_PI, generation);
-    // Desfoque de movimento POR PARTÍCULA (o do app antigo): a folha não se
+    // Desfoque de movimento POR PARTÍCULA: a folha não se
     // move, o movimento está nas partículas. Onde ela estava meia janela do
     // obturador atrás é só avaliar a mesma fórmula fechada de novo — a
     // turbulência também, no instante anterior, para que só a VARIAÇÃO dela
@@ -246,7 +247,12 @@ void main() {
         const vec3 world = center + wu * (corner.x * size * 0.5) + wv * (corner.y * sv * 0.5);
         const vec4 c = p.compFromWorld * vec4(world, 1.0);
         const vec2 at3 = c.xy / max(c.w, 1e-6);
-        gl_Position = vec4((at3 - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0, 0.5, 1.0);
+        const vec4 plane = p.layerFromComp * vec4(at3, 0.0, 1.0);
+        if (plane.w <= 1e-6) { cull(); return; }
+        // Retain homogeneous W so perspective interpolation remains correct
+        // when the compositor projects this source plane again.
+        gl_Position = vec4((plane.xy - p.region.xy * plane.w)
+            / max(p.region.zw, vec2(1e-4)) * 2.0 - plane.w, 0.5 * plane.w, plane.w);
         return;
     }
 

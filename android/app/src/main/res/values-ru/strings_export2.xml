@@ -9,4 +9,6 @@
     <string name="expfail_media">не удалось прочитать медиафайл проекта</string>
     <string name="expfail_file">не удалось сохранить видеофайл</string>
     <string name="expfail_unsupported">этот телефон не может экспортировать в этом разрешении или формате</string>
+    <string name="expfail_stuck">экспорт не продвигался несколько минут и был остановлен; закройте другие приложения и попробуйте снова</string>
+    <string name="app_export_safe_mode">Видеокодер телефона завис: повторный экспорт в режиме совместимости (H.264, может занять больше времени).</string>
 </resources>

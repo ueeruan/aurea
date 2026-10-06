@@ -12,6 +12,8 @@ Original ONNX MD5: 8e83ca70e441ab06c318d82300c84806.
 Modified for AUREA: converted ONNX to ncnn at 320x320 with pnnx 20260526,
 then compressed weights to fp16 with ncnnoptimize (flag 65536).
 Training weights were not changed. Runtime inference is float32 on CPU.
+The verified weights and graph are embedded in the shared Android/iOS core;
+first use and reopening a project work without a model download.
 The model estimates salient foreground. It is not Adobe Roto Brush and
 does not provide SAM-style arbitrary-object prompting or video tracking.
 

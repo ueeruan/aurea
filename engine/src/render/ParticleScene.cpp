@@ -26,6 +26,7 @@
 // =============================================================================
 #include "aurea/render/ParticleScene.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/render/ShutterPlan.hpp"
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/timeline/Layer.hpp"
 #include "aurea/scene3d/SceneRenderer.hpp"
@@ -103,7 +104,7 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
     const ParticleData pd = sampled_particles(l, local);
     const bool world = pd.emitterSpace == 1;
     const MotionBlurSettings& mb = comp.motion_blur();
-    ps.blurAmount = std::clamp(l.transform.motionBlurAmount, 0.f, 4.f);
+    ps.blurAmount = motion_blur_amount(l.transform.motionBlurAmount);
     const bool blur = l.motionBlur && mb.enabled && mb.shutterAngle > 0.0f && ps.blurAmount > 0;
     // Emissão animada: taxa, velocidade, direção, espalhamento, offset do
     // emissor — e a posição da camada quando a partícula herda o movimento.
@@ -152,12 +153,13 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
 
     // --- Janela do histórico ---------------------------------------------------
     const f64 tl = static_cast<f64>(local.value);
-    const f64 open = blur ? std::clamp(static_cast<f64>(mb.shutterAngle), 0.0, 720.0) / 360.0 * ps.blurAmount : 0.0;
+    ShutterPlan shutter = blur ? shutter_window(mb, ps.blurAmount) : ShutterPlan{};
+    const f64 open = shutter.duration;
     const f64 life = static_cast<f64>(std::clamp(pd.lifetime, 0.05f, 60.0f)) * (1.0 + std::clamp(static_cast<f64>(pd.lifeRandom), 0.0, 1.0));
     const f64 auxLife = pd.auxCount > 0 ? std::max(0.0, static_cast<f64>(pd.auxLife)) : 0.0;
-    const f64 span = (life + auxLife) * fps + open * 0.5 + 2.0;
+    const f64 span = (life + auxLife) * fps - std::min(0.0, shutter.begin) + 2.0;
     i64 f0 = std::max<i64>(0, static_cast<i64>(std::floor(tl - span)));
-    const i64 f1 = std::max<i64>(f0, static_cast<i64>(std::ceil(tl + open * 0.5)) + 1);
+    const i64 f1 = std::max<i64>(f0, static_cast<i64>(std::ceil(tl + std::max(0.0, shutter.begin + open))) + 1);
     i64 step = std::max<i64>(1, (f1 - f0 + static_cast<i64>(ps_::kMaxSamples) - 3) / static_cast<i64>(ps_::kMaxSamples - 2));
     u32 count = 0;
     for (;;) {
@@ -239,14 +241,15 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
     // Na cena, a câmera e o deslocamento vêm do (sub)quadro da cena. Fora
     // dela: K instantes do obturador (o mesmo nº de amostras das camadas;
     // prévia reduzida pela qualidade, export completo), média aditiva.
+    const f64 travel = std::fabs(pd.speed) * open / fps + shutter_projected_path(shutter,
+        static_cast<f32>(comp.width()), static_cast<f32>(comp.height()), [&](f64 offset) { return outFrom(tl + offset); });
     const u32 k = (blur && !ps.inScene)
-        ? std::clamp<u32>(settings.finalQuality ? mb.samples
-                                                : static_cast<u32>(static_cast<f32>(mb.previewSamples) * std::clamp(settings.heavyScale, 0.1f, 1.0f)),
-                          2u, 64u)
+        ? shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel, true)
         : 1u;
+    shutter.count = k;
     ps.subs.resize(k);
     for (u32 s = 0; s < k; ++s) {
-        const f64 shiftFrames = k > 1 ? ((static_cast<f64>(s) + 0.5) / static_cast<f64>(k) - 0.5) * open : 0.0;
+        const f64 shiftFrames = k > 1 ? shutter.offset(s) : 0.0;
         ParticleSub& sub = ps.subs[s];
         sub.shift = static_cast<f32>(shiftFrames / fps);
         if (in3d) {
@@ -383,6 +386,12 @@ u32 Renderer::scene_particle_draws(const scene3d::SceneFrame& group, const scene
                          static_cast<f32>(currentSnap_->particleBase + ps.dataFirst), 1.0f};
         push.camRight = right;
         push.camDown = down;
+        for (usize sample = 0; sample < group.blurFrames.size() && sample < ps.subs.size(); ++sample) {
+            if (&group.blurFrames[sample] != &frame) continue;
+            push.clip = ps.subs[sample].clip;
+            push.camRight = ps.subs[sample].right; push.camDown = ps.subs[sample].down;
+            break;
+        }
         scene3d::SceneParticleDraw& d = out[used++];
         d = scene3d::SceneParticleDraw{};
         d.pipeline = *pipe;

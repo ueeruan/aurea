@@ -38,14 +38,21 @@
 #import <VideoToolbox/VideoToolbox.h>
 
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
+#include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/media/MediaManager.hpp"
 
 #include <sys/sysctl.h>
 #include <unistd.h>
 #include <os/proc.h>
+#include <TargetConditionals.h>
+#if TARGET_OS_SIMULATOR
+#include <mach/mach.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cstdio>
 #include <cmath>
 #include <cstring>
@@ -65,6 +72,28 @@ using namespace aurea;
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 namespace aurea::ios {
+
+u64 process_memory_headroom() noexcept {
+    const u64 available = static_cast<u64>(os_proc_available_memory());
+#if TARGET_OS_SIMULATOR
+    // macOS-hosted simulator processes may have no iOS allocation limit. Only
+    // there, a zero API result uses measured RAM/residency instead of disabling
+    // all imports. This is a conservative simulated budget, not a jetsam limit.
+    if (available == 0) {
+        u64 total = 0;
+        size_t length = sizeof(total);
+        mach_task_basic_info_data_t usage{};
+        mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+        if (sysctlbyname("hw.memsize", &total, &length, nullptr, 0) != 0
+            || task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                         reinterpret_cast<task_info_t>(&usage), &count) != KERN_SUCCESS) return 0;
+        const u64 budget = std::min<u64>(total / 8, 1ull << 30);
+        return budget > usage.resident_size ? budget - usage.resident_size : 0;
+    }
+#endif
+    return available;
+}
+
 namespace {
 
 // =============================================================================
@@ -77,6 +106,22 @@ inline CMTime cm_time_us(i64 us) {
 inline i64 us_of(CMTime t) {
     if (!CMTIME_IS_VALID(t)) return 0;
     return (i64)llround(CMTimeGetSeconds(t) * 1'000'000.0);
+}
+
+// Duração do VÍDEO: o fim da trilha de imagem, não o do arquivo. No iPhone o
+// áudio costuma passar uns quadros do último quadro de imagem; com a duração
+// do arquivo o clipe importado ficava mais longo que o vídeo e o último quadro
+// segurava o intervalo extra inteiro — o quadro "preso" logo antes do corte,
+// no preview e no export. É a mesma conta do Android (KEY_DURATION da trilha).
+inline i64 video_track_end_us(AVAsset* asset, AVAssetTrack* track) {
+    if (track) {
+        const CMTimeRange range = track.timeRange;
+        if (CMTIMERANGE_IS_VALID(range) && !CMTIMERANGE_IS_EMPTY(range)) {
+            const CMTime end = CMTimeRangeGetEnd(range);
+            if (CMTIME_IS_NUMERIC(end) && us_of(end) > 0) return us_of(end);
+        }
+    }
+    return asset ? us_of(asset.duration) : 0;
 }
 
 // =============================================================================
@@ -216,6 +261,7 @@ private:
     struct PresentationTime { i64 us; CMTime exact; };
     std::vector<PresentationTime> presentationTimes_;
     bool timingIndexed_ = false;
+    bool timingIndexLimited_ = false;
 };
 
 AVFoundationVideoDecoder::AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack* track,
@@ -226,7 +272,7 @@ AVFoundationVideoDecoder::AVFoundationVideoDecoder(AVAsset* asset, AVAssetTrack*
         info_.codedWidth = (u32)llround(size.width);
         info_.codedHeight = (u32)llround(size.height);
         info_.fps = track_.nominalFrameRate > 0.0f ? (f64)track_.nominalFrameRate : 30.0;
-        info_.durationUs = us_of(asset_.duration);
+        info_.durationUs = video_track_end_us(asset_, track_);
         // Rotação: o container diz (o vídeo de celular é gravado deitado).
         const CGAffineTransform t = track_.preferredTransform;
         if (t.a == 0.0 && t.b == 1.0) info_.rotation = 90;
@@ -273,6 +319,13 @@ void AVFoundationVideoDecoder::teardown() noexcept {
 
 bool AVFoundationVideoDecoder::build_timing_index() noexcept {
     if (timingIndexed_) return true;
+    timingIndexLimited_ = false;
+    // A complete VFR/B-frame index must not grow outside every memory budget.
+    // Limit each decoder to 16 MiB and at most 1/16 of current process headroom.
+    const size_t available = static_cast<size_t>(process_memory_headroom());
+    const size_t indexBytes = std::min<size_t>(16u << 20, available / 16);
+    const size_t capacityLimit = indexBytes / sizeof(PresentationTime);
+    if (!capacityLimit) { timingIndexLimited_ = true; return false; }
     // Sample references read container timing without copying/decoding video.
     // Build lazily on the decode worker: initial playback at zero needs no index.
     AVAssetReader* indexReader = [[AVAssetReader alloc] initWithAsset:asset_ error:nullptr];
@@ -283,7 +336,28 @@ bool AVFoundationVideoDecoder::build_timing_index() noexcept {
     std::vector<PresentationTime> times;
     while (CMSampleBufferRef sample = [references copyNextSampleBuffer]) {
         const CMTime time = CMSampleBufferGetPresentationTimeStamp(sample);
-        if (CMTIME_IS_NUMERIC(time)) times.push_back({us_of(time), time});
+        if (CMTIME_IS_NUMERIC(time)) {
+            if (times.size() >= capacityLimit) {
+                CFRelease(sample);
+                [indexReader cancelReading];
+                timingIndexLimited_ = true;
+                AUREA_LOG_WARN("videotoolbox: indice de tempo excede o limite de %zu bytes", indexBytes);
+                return false;
+            }
+            try {
+                if (times.size() == times.capacity()) {
+                    const size_t next = std::min(capacityLimit, std::max<size_t>(4096, times.capacity() * 2));
+                    times.reserve(next);
+                }
+                times.push_back({us_of(time), time});
+            } catch (const std::bad_alloc&) {
+                CFRelease(sample);
+                [indexReader cancelReading];
+                timingIndexLimited_ = true;
+                AUREA_LOG_WARN("videotoolbox: sem memoria para o indice de tempo");
+                return false;
+            }
+        }
         CFRelease(sample);
     }
     if (indexReader.status != AVAssetReaderStatusCompleted || times.empty()) return false;
@@ -354,7 +428,9 @@ Status AVFoundationVideoDecoder::seek_to_keyframe(i64 targetUs) noexcept {
         seekTargetUs_ = targetUs;
         // A new reader invalidates decoder history and pending output atomically.
         // Frames already retained by Metal keep their CVPixelBuffer ownership.
-        if (!start_reader(targetUs)) return Status{Errc::DecodeFailed, "nao foi possivel posicionar"};
+        if (!start_reader(targetUs)) return timingIndexLimited_
+            ? Status{Errc::OutOfMemory, "indice de tempo do video excede o limite de memoria"}
+            : Status{Errc::DecodeFailed, "nao foi possivel posicionar"};
         suspended_ = false;
         return OkStatus;
     }
@@ -496,6 +572,9 @@ void AVFoundationVideoDecoder::suspend() noexcept {
         // sistema dá poucos (regra do VideoSource, §13 do spec da Fase 8).
         suspended_ = true;
         teardown();
+        std::vector<PresentationTime>().swap(presentationTimes_);
+        timingIndexed_ = false;
+        timingIndexLimited_ = false;
     }
 }
 
@@ -661,7 +740,7 @@ public:
                 out.video.codedWidth = (u32)llround(size.width);
                 out.video.codedHeight = (u32)llround(size.height);
                 out.video.fps = track.nominalFrameRate > 0.0f ? (f64)track.nominalFrameRate : 30.0;
-                out.video.durationUs = us_of(asset.duration);
+                out.video.durationUs = video_track_end_us(asset, track);
                 const CGAffineTransform t = track.preferredTransform;
                 if (t.a == 0.0 && t.b == 1.0) out.video.rotation = 90;
                 else if (t.a == -1.0 && t.b == 0.0) out.video.rotation = 180;
@@ -883,6 +962,10 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
 #endif
 
 @interface AureaExportHost : NSObject
+- (void)setCancelFlag:(const std::atomic<bool>*)flag;
+/// Batida de vida do watchdog do motor (export/ExportWatchdog.hpp).
+- (void)setHeartbeat:(std::atomic<uint64_t>*)beat;
+- (void)pulse;
 - (BOOL)openURL:(NSURL*)url
           video:(const VideoStreamConfig&)video
           audio:(const AudioStreamConfig*)audio
@@ -904,6 +987,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
 - (BOOL)waitForCapacity:(BOOL)video;
 - (BOOL)startSessionIfNeeded:(int64_t)ptsUs;
 - (BOOL)startWriterIfPossible;
+- (NSError*)failureError;
 @property (nonatomic, readonly, copy) NSString* encoderName;
 @property (nonatomic, readonly) BOOL hardwareEncoder;
 @end
@@ -920,6 +1004,8 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
     NSMutableArray* _audioSamples;
     NSError* _firstError;
     BOOL _cancelled;
+    const std::atomic<bool>* _cancelFlag;
+    std::atomic<uint64_t>* _beat;
     BOOL _finishing;
     BOOL _videoFinished;
     BOOL _audioFinished;
@@ -937,6 +1023,8 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
     NSUInteger _pendingAudio;
     NSUInteger _submittedVideo;
     NSUInteger _appendedVideo;
+    NSUInteger _videoCapacity;
+    NSDictionary* _poolLimits;
 }
 
 - (instancetype)init {
@@ -975,9 +1063,36 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 }
 
 - (BOOL)healthyLocked {
+    if (_cancelFlag && _cancelFlag->load(std::memory_order_acquire)) _cancelled = YES;
     if (_writer.status == AVAssetWriterStatusFailed || _writer.status == AVAssetWriterStatusCancelled)
         [self failLocked:_writer.error message:@"o gravador foi interrompido"];
     return !_cancelled && !_firstError;
+}
+
+- (void)setCancelFlag:(const std::atomic<bool>*)flag {
+    [_state lock];
+    _cancelFlag = flag;
+    [_state unlock];
+}
+
+- (void)setHeartbeat:(std::atomic<uint64_t>*)beat {
+    [_state lock];
+    _beat = beat;
+    [_state unlock];
+}
+
+/// Uma chamada da plataforma voltou (ou um laço com prazo deu mais uma volta):
+/// o watchdog do motor só desiste de quem fica PRESO dentro do VideoToolbox
+/// ou do AVAssetWriter.
+- (void)pulse {
+    if (_beat) _beat->store(aurea::monotonic_ns(), std::memory_order_release);
+}
+
+- (NSError*)failureError {
+    [_state lock];
+    NSError* error = _firstError ?: _writer.error;
+    [_state unlock];
+    return error;
 }
 
 /// This callback may run synchronously inside EncodeFrame/CompleteFrames.
@@ -985,7 +1100,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 /// same producer from supplying the audio needed by the writer's interleaver.
 - (void)onEncoded:(CMSampleBufferRef)sample status:(OSStatus)status flags:(VTEncodeInfoFlags)flags {
     [_state lock];
-    if (_cancelled || _firstError) {
+    if (![self healthyLocked]) {
         if (_pendingVideo) --_pendingVideo;
     } else if (status != noErr || !sample || (flags & kVTEncodeInfo_FrameDropped)) {
         NSError* error = status == noErr ? nil : [NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil];
@@ -1105,7 +1220,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 /// Cap retained work and use a bounded wait, so a failed/stalled writer cannot
 /// trap the core's encoder thread during cancellation/shutdown.
 - (BOOL)waitForCapacity:(BOOL)video {
-    const NSUInteger capacity = video ? 64 : 256;
+    const NSUInteger capacity = video ? _videoCapacity : 256;
     [_state lock];
     BOOL healthy = [self healthyLocked];
     const BOOL full = (video ? _pendingVideo : _pendingAudio) >= capacity;
@@ -1117,6 +1232,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         // to start/interleave, and the core uses one producer for both tracks.
         // No lock or writer-queue task is held; callbacks only enqueue.
         const OSStatus status = VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
+        [self pulse];
         if (status != noErr) {
             [_state lock];
             [self failLocked:[NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil]
@@ -1125,15 +1241,16 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             return NO;
         }
     }
-    const double deadline = NSProcessInfo.processInfo.systemUptime + 5.0;
+    const double deadline = NSProcessInfo.processInfo.systemUptime + 30.0;
     [_state lock];
     while ([self healthyLocked] && (video ? _pendingVideo : _pendingAudio) >= capacity) {
         const double remaining = deadline - NSProcessInfo.processInfo.systemUptime;
         if (remaining <= 0) {
-            [self failLocked:nil message:@"o gravador nao liberou espaco em 5 segundos"];
+            [self failLocked:nil message:@"o gravador nao liberou espaco em 30 segundos"];
             break;
         }
         [_state waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:std::min(remaining, 0.1)]];
+        [self pulse];
     }
     healthy = [self healthyLocked];
     [_state unlock];
@@ -1145,8 +1262,21 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
           audio:(const AudioStreamConfig*)audio
           error:(NSError**)error {
     @autoreleasepool {
-        _width = video.width ? video.width : 2;
-        _height = video.height ? video.height : 2;
+        if (!video.width || !video.height || (video.width & 1) || (video.height & 1)
+            || video.width > INT32_MAX || video.height > INT32_MAX
+            || !std::isfinite(video.fps) || video.fps <= 0) {
+            if (error) *error = [NSError errorWithDomain:@"aurea.export" code:1
+                userInfo:@{NSLocalizedDescriptionKey: @"dimensoes ou taxa de quadros invalidas"}];
+            return NO;
+        }
+        _width = video.width;
+        _height = video.height;
+        // Credits cover raw frames held by VT as well as compressed samples
+        // waiting for the writer. 64 raw 4K NV12 frames could consume ~760 MiB.
+        const uint64_t frameBytes = uint64_t(_width) * _height * 3 / 2;
+        _videoCapacity = (NSUInteger)std::clamp<uint64_t>((32ull << 20) / frameBytes, 2, 12);
+        // VT may retain reference frames after their compressed callback.
+        _poolLimits = @{(id)kCVPixelBufferPoolAllocationThresholdKey: @(_videoCapacity + 2)};
         _frameDurationUs = video.fps > 0.0 ? (int64_t)llround(1'000'000.0 / video.fps) : 33'333;
         _hasAudio = audio != nullptr && audio->sampleRate > 0;
         _audioRate = _hasAudio ? audio->sampleRate : 48000;
@@ -1182,17 +1312,24 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         }
 
         // VTCompressionSession: o encoder de vídeo de verdade.
+        // Modo de segurança (export/ExportWatchdog.hpp): Baseline sem
+        // reordenação (nenhum B-quadro segurando amostras no intercalador do
+        // gravador) e, no nível 2, sem exigir o encoder de hardware — o
+        // VideoToolbox escolhe o que tiver.
+        const BOOL baseline = video.profile == aurea::kExportProfileBaseline && video.codec == ExportCodec::H264;
         NSDictionary* encoderSpec = nil;
         if (@available(iOS 17.4, *)) {
-            encoderSpec = @{
-                (id)kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: @YES,
-            };
+            if (!video.preferSoftware) {
+                encoderSpec = @{
+                    (id)kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: @YES,
+                };
+            }
         }
         const uint32_t averageBps = video.bitrateBps > 0 ? video.bitrateBps : 14'000'000u;
         const long long peakBytesPerSecond = (long long)(averageBps / 8.0 * (video.rateMode == 0 ? 1.1 : 1.5));
         NSDictionary* compressionProps = @{
             (id)kVTCompressionPropertyKey_RealTime: @NO,
-            (id)kVTCompressionPropertyKey_AllowFrameReordering: @YES,
+            (id)kVTCompressionPropertyKey_AllowFrameReordering: baseline ? @NO : @YES,
             (id)kVTCompressionPropertyKey_MaxKeyFrameInterval:
                 @(video.keyframeIntervalFrames > 0 ? (int)video.keyframeIntervalFrames
                                                    : (int)llround(video.fps * 2.0)),
@@ -1215,6 +1352,10 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             if (error) *error = [NSError errorWithDomain:@"aurea.export" code:(NSInteger)propertyStatus userInfo:nil];
             return NO;
         }
+        // Default VT lookahead is unlimited. Bound it beneath our producer
+        // credits; CompleteFrames remains the fallback for unsupported keys.
+        (void)VTSessionSetProperty(session, kVTCompressionPropertyKey_MaxFrameDelayCount,
+                                  (__bridge CFNumberRef)@(_videoCapacity - 1));
         // Opcionais (um encoder que não conhece a chave não derruba o export):
         // teto de pico — sem ele a média é só um alvo e cena difícil estoura
         // (o "1 minuto = 1 GB"); bytes por janela de 1 s, 1,5× a média em VBR
@@ -1230,7 +1371,8 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                                        (__bridge CFNumberRef)@2.0);
             (void)VTSessionSetProperty(session, kVTCompressionPropertyKey_ProfileLevel,
                                        video.codec == ExportCodec::HEVC ? kVTProfileLevel_HEVC_Main_AutoLevel
-                                                                        : kVTProfileLevel_H264_High_AutoLevel);
+                                       : baseline ? kVTProfileLevel_H264_Baseline_AutoLevel
+                                                  : kVTProfileLevel_H264_High_AutoLevel);
         }
         _hardwareEncoder = NO;
         _encoderName = @"VideoToolbox";
@@ -1270,10 +1412,14 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
         };
         CVPixelBufferPoolRef pool = nullptr;
-        if (CVPixelBufferPoolCreate(kCFAllocatorDefault, nullptr, (__bridge CFDictionaryRef)poolAttributes,
-                                    &pool) == kCVReturnSuccess) {
-            _pool = pool;
+        const CVReturn poolStatus = CVPixelBufferPoolCreate(kCFAllocatorDefault, nullptr,
+                                                           (__bridge CFDictionaryRef)poolAttributes, &pool);
+        if (poolStatus != kCVReturnSuccess || !pool) {
+            if (error) *error = [NSError errorWithDomain:@"aurea.export.memory" code:poolStatus
+                userInfo:@{NSLocalizedDescriptionKey: @"memoria insuficiente para os quadros do export"}];
+            return NO;
         }
+        _pool = pool;
 
         return YES;
     }
@@ -1282,16 +1428,17 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 /// Remember the first source PTS before submitting to VT. The writer/session
 /// starts later, using the first compressed frame's format description.
 - (BOOL)startSessionIfNeeded:(int64_t)ptsUs {
-    __block BOOL healthy = NO;
-    dispatch_sync(_writerQueue, ^{
-        [_state lock];
-        healthy = [self healthyLocked];
-        [_state unlock];
-        if (healthy && !_sessionTimeSet) {
-            _sessionStartUs = ptsUs;
-            _sessionTimeSet = YES;
-        }
-    });
+    // Sob o _state (não mais dispatch_sync na fila do gravador a CADA quadro:
+    // um append preso na fila prendia também o encoder do núcleo). O writer
+    // queue lê _sessionStartUs só depois de ver amostra de vídeo sob o mesmo
+    // lock, e a primeira amostra só existe depois deste carimbo.
+    [_state lock];
+    const BOOL healthy = [self healthyLocked];
+    if (healthy && !_sessionTimeSet) {
+        _sessionStartUs = ptsUs;
+        _sessionTimeSet = YES;
+    }
+    [_state unlock];
     return healthy;
 }
 
@@ -1300,29 +1447,46 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
               ptsUs:(int64_t)ptsUs durationUs:(int64_t)durationUs {
     @autoreleasepool {
         if (!_session || !_pool) return NO;
+        if (!y || !uv || yStride < _width || uvStride < _width) return NO;
         if (![self startSessionIfNeeded:ptsUs] || ![self waitForCapacity:YES]) return NO;
         CVPixelBufferRef pixel = nullptr;
-        if (CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, _pool, &pixel) != kCVReturnSuccess
-            || !pixel) {
+        CVReturn allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, _pool,
+                                                    (__bridge CFDictionaryRef)_poolLimits, &pixel);
+        if (allocation == kCVReturnWouldExceedAllocationThreshold) {
+            // Recycle VT references before declaring memory pressure terminal.
+            (void)VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
+            allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, _pool,
+                                                    (__bridge CFDictionaryRef)_poolLimits, &pixel);
+        }
+        if (allocation != kCVReturnSuccess || !pixel) {
+            [_state lock];
+            [self failLocked:[NSError errorWithDomain:@"aurea.export.memory" code:allocation
+                userInfo:@{NSLocalizedDescriptionKey: @"memoria insuficiente para um quadro do export"}] message:nil];
+            [_state unlock];
             return NO;
         }
-        CVPixelBufferLockBaseAddress(pixel, 0);
+        if (CVPixelBufferLockBaseAddress(pixel, 0) != kCVReturnSuccess) {
+            CVPixelBufferRelease(pixel);
+            return NO;
+        }
         auto* dstY = (uint8_t*)CVPixelBufferGetBaseAddressOfPlane(pixel, 0);
         auto* dstUV = (uint8_t*)CVPixelBufferGetBaseAddressOfPlane(pixel, 1);
         const size_t dstYStride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 0);
         const size_t dstUVStride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 1);
         const size_t dstUVHeight = CVPixelBufferGetHeightOfPlane(pixel, 1);
-        // O stride do destino é do POOL (alinhado pelo driver), raramente igual
-        // ao do motor: copiar linha a linha com o mínimo dos dois é o que evita
-        // a faixa torta no arquivo.
+        // Copy only visible bytes: source padding is not part of a frame.
         const size_t yRows = CVPixelBufferGetHeightOfPlane(pixel, 0);
-        const size_t yCopy = yStride < dstYStride ? yStride : dstYStride;
-        for (size_t r = 0; r < yRows; ++r) {
-            std::memcpy(dstY + r * dstYStride, y + r * yStride, yCopy);
+        if (!dstY || !dstUV || dstYStride < _width || dstUVStride < _width
+            || yRows != _height || dstUVHeight != _height / 2) {
+            CVPixelBufferUnlockBaseAddress(pixel, 0);
+            CVPixelBufferRelease(pixel);
+            return NO;
         }
-        const size_t uvCopy = uvStride < dstUVStride ? uvStride : dstUVStride;
+        for (size_t r = 0; r < yRows; ++r) {
+            std::memcpy(dstY + r * dstYStride, y + r * yStride, _width);
+        }
         for (size_t r = 0; r < dstUVHeight; ++r) {
-            std::memcpy(dstUV + r * dstUVStride, uv + r * uvStride, uvCopy);
+            std::memcpy(dstUV + r * dstUVStride, uv + r * uvStride, _width);
         }
         CVPixelBufferUnlockBaseAddress(pixel, 0);
 
@@ -1336,6 +1500,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         VTEncodeInfoFlags flags = 0;
         const OSStatus status = VTCompressionSessionEncodeFrame(_session, pixel, pts, duration, nullptr,
                                                                 nullptr, &flags);
+        [self pulse];
         [_state lock];
         if (status != noErr || (flags & kVTEncodeInfo_FrameDropped)) {
             NSError* error = status == noErr ? nil : [NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil];
@@ -1352,6 +1517,8 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 - (BOOL)writeAudio:(const int16_t*)pcm frames:(uint32_t)frames ptsUs:(int64_t)ptsUs {
     @autoreleasepool {
         if (!_hasAudio || !_audioInput) return YES;   // vídeo sem som: não é erro
+        if (!frames) return YES;
+        if (!pcm) return NO;
         if (![self startSessionIfNeeded:ptsUs] || ![self waitForCapacity:NO]) return NO;
 
         // O formato e o que o sink declarou no `open` (o motor sempre manda
@@ -1411,8 +1578,13 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 
 - (BOOL)finish {
     @autoreleasepool {
+        [_state lock];
+        const BOOL canFinish = [self healthyLocked];
+        [_state unlock];
+        if (!canFinish) { [self abort]; return NO; }
         if (_session) {
             const OSStatus status = VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
+            [self pulse];
             if (status != noErr) {
                 [_state lock];
                 [self failLocked:[NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil]
@@ -1433,15 +1605,18 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                 break;
             }
             [_state waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:std::min(remaining, 0.1)]];
+            [self pulse];
         }
-        if (!_firstError && _submittedVideo != _appendedVideo)
+        if (!_cancelled && !_firstError && _submittedVideo != _appendedVideo)
             [self failLocked:nil message:@"o numero de quadros gravados difere dos quadros enviados"];
         const BOOL healthy = [self healthyLocked];
         [_state unlock];
         if (!healthy) { [self abort]; return NO; }
 
+        // Assíncrono: uma fila do gravador presa (append que não volta) não
+        // pode prender também esta thread — a espera abaixo tem prazo.
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
-        dispatch_sync(_writerQueue, ^{
+        dispatch_async(_writerQueue, ^{
             if (!_startedSession) {
                 [_state lock];
                 [self failLocked:nil message:@"nenhum quadro iniciou a sessao MP4"];
@@ -1453,7 +1628,19 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             [self finishInputIfDrained:NO];
             [_writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(done); }];
         });
-        const long waited = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 60ull * NSEC_PER_SEC));
+        // Poll the shared cancellation flag while AVAssetWriter finalizes.
+        // A single 60-second wait delayed background suspension and teardown.
+        const double finishDeadline = NSProcessInfo.processInfo.systemUptime + 60.0;
+        long waited = 1;
+        while (NSProcessInfo.processInfo.systemUptime < finishDeadline) {
+            [_state lock];
+            const BOOL stillHealthy = [self healthyLocked];
+            [_state unlock];
+            if (!stillHealthy) { [self abort]; return NO; }
+            waited = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 100ull * NSEC_PER_MSEC));
+            [self pulse];
+            if (waited == 0) break;
+        }
         if (waited != 0 || _writer.status != AVAssetWriterStatusCompleted) {
             [_state lock];
             [self failLocked:_writer.error message:waited ? @"tempo esgotado ao finalizar o MP4" : @"o MP4 nao foi finalizado"];
@@ -1471,15 +1658,21 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         _cancelled = YES;
         [_state broadcast];
         [_state unlock];
-        // Complete/invalidate outside every lock and outside the writer queue.
-        // Callbacks see cancellation, release their credit, and never wait.
+        // Abort discards pending frames. Do not flush the entire encoder here:
+        // cancellation is precisely when the remaining output is unwanted.
+        // Invalidate outside every lock and outside the writer queue.
         if (_session) {
-            (void)VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
             VTCompressionSessionInvalidate(_session);
             CFRelease(_session);
             _session = nullptr;
         }
-        dispatch_sync(_writerQueue, ^{
+        [self pulse];
+        // Com prazo: a fila do gravador presa num append que não volta não pode
+        // prender o abort (e com ele o fim do export) para sempre. Sem resposta
+        // em 5 s, o arquivo parcial sai daqui e o bloco, se um dia rodar, só
+        // cancela o gravador.
+        dispatch_semaphore_t cleared = dispatch_semaphore_create(0);
+        dispatch_async(_writerQueue, ^{
             if (_writer && _writer.status == AVAssetWriterStatusWriting) [_writer cancelWriting];
             [_state lock];
             [_videoSamples removeAllObjects];
@@ -1487,7 +1680,12 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             _pendingVideo = _pendingAudio = 0;
             [_state broadcast];
             [_state unlock];
+            dispatch_semaphore_signal(cleared);
         });
+        if (dispatch_semaphore_wait(cleared, dispatch_time(DISPATCH_TIME_NOW, 5ull * NSEC_PER_SEC)) != 0) {
+            AUREA_LOG_ERROR("export: a fila do gravador nao respondeu ao abort em 5 s");
+        }
+        [self pulse];
         NSURL* url = _writer.outputURL;
         if (url) [NSFileManager.defaultManager removeItemAtURL:url error:nil];
     }
@@ -1503,19 +1701,34 @@ public:
     VideoToolboxExportSink() = default;
     ~VideoToolboxExportSink() override { abort(); }
 
+    void set_cancel_flag(const std::atomic<bool>* flag) noexcept override {
+        _cancelFlag = flag;
+        if (AureaExportHost* host = host_ref()) [host setCancelFlag:flag];
+    }
+
+    void set_heartbeat(std::atomic<u64>* beatNs) noexcept override {
+        _beat = beatNs;
+        if (AureaExportHost* host = host_ref()) [host setHeartbeat:beatNs];
+    }
+
     Status open(const char* outputPath, const VideoStreamConfig& video,
                 const AudioStreamConfig* audio) noexcept override {
         @autoreleasepool {
+            if (cancelled()) return Status{Errc::Cancelled, "export cancelado"};
             if (!outputPath || !*outputPath) return Status{Errc::InvalidArgument, "sem caminho de saida"};
             if (_host) return Status{Errc::InvalidState, "export ja aberto"};
             NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:outputPath]];
             if (!url) return Status{Errc::InvalidArgument, "caminho invalido"};
             AureaExportHost* host = [[AureaExportHost alloc] init];
+            [host setCancelFlag:_cancelFlag];
+            [host setHeartbeat:_beat];
             NSError* error = nil;
             if (![host openURL:url video:video audio:audio error:&error]) {
                 AUREA_LOG_ERROR("export: encoder recusado (%s)",
                                 error.localizedDescription.UTF8String ? error.localizedDescription.UTF8String : "?");
-                return Status{Errc::EncodeFailed, "o encoder recusou o arquivo"};
+                const Status failure = error_status(error, "o encoder recusou o arquivo");
+                [host abort];
+                return failure;
             }
             _host = (__bridge_retained void*)host;
             return OkStatus;
@@ -1531,7 +1744,7 @@ public:
             AureaExportHost* host = host_ref();
             if (!host || !y || !uv) return Status{Errc::InvalidState, "export nao aberto"};
             if (![host writeVideoY:y yStride:yStride uv:uv uvStride:uvStride ptsUs:ptsUs durationUs:durationUs]) {
-                return Status{Errc::EncodeFailed, "o encoder recusou o quadro"};
+                return error_status([host failureError], "o encoder recusou o quadro");
             }
             return OkStatus;
         }
@@ -1542,7 +1755,7 @@ public:
             AureaExportHost* host = host_ref();
             if (!host) return Status{Errc::InvalidState, "export nao aberto"};
             if (![host writeAudio:(const int16_t*)interleaved frames:frames ptsUs:ptsUs]) {
-                return Status{Errc::EncodeFailed, "o encoder recusou o audio"};
+                return error_status([host failureError], "o encoder recusou o audio");
             }
             return OkStatus;
         }
@@ -1553,9 +1766,10 @@ public:
             AureaExportHost* host = host_ref();
             if (!host) return Status{Errc::InvalidState, "export nao aberto"};
             const BOOL ok = [host finish];
+            const Status result = ok ? OkStatus : error_status([host failureError], "o arquivo nao foi finalizado");
             // Solta o host (o ARC libera writer, inputs e sessão).
             (void)(__bridge_transfer AureaExportHost*)release_host();
-            return ok ? OkStatus : Status{Errc::EncodeFailed, "o arquivo nao foi finalizado"};
+            return result;
         }
     }
 
@@ -1579,6 +1793,27 @@ public:
     }
 
 private:
+    bool cancelled() const noexcept {
+        return _cancelFlag && _cancelFlag->load(std::memory_order_acquire);
+    }
+
+    Status error_status(NSError* error, const char* fallback) noexcept {
+        if (cancelled()) return Status{Errc::Cancelled, "export cancelado"};
+        Errc code = Errc::EncodeFailed;
+        NSError* cause = error;
+        for (unsigned depth = 0; cause && depth < 8; ++depth, cause = cause.userInfo[NSUnderlyingErrorKey]) {
+            if ([cause.domain isEqualToString:@"aurea.export.memory"]) { code = Errc::OutOfMemory; break; }
+            if (([cause.domain isEqualToString:NSCocoaErrorDomain] && cause.code == NSFileWriteOutOfSpaceError)
+                || ([cause.domain isEqualToString:NSPOSIXErrorDomain] && cause.code == ENOSPC)) {
+                code = Errc::StorageFull; break;
+            }
+            if (cause.userInfo[NSUnderlyingErrorKey] == cause) break;
+        }
+        const char* detail = error.localizedDescription.UTF8String;
+        std::snprintf(_errorDetail, sizeof(_errorDetail), "%s", detail && *detail ? detail : fallback);
+        return Status{code, _errorDetail};
+    }
+
     AureaExportHost* host_ref() const noexcept { return (__bridge AureaExportHost*)_host; }
     void* release_host() noexcept {
         void* raw = _host;
@@ -1587,6 +1822,9 @@ private:
     }
 
     void* _host = nullptr;
+    const std::atomic<bool>* _cancelFlag = nullptr;
+    std::atomic<u64>* _beat = nullptr;
+    char _errorDetail[512]{};
 };
 
 } // namespace
@@ -1640,8 +1878,9 @@ void fill_platform_info(PlatformInfo& out) {
         if (sysctlbyname("hw.memsize", &memsize, &len, nullptr, 0) == 0) out.totalMemoryBytes = memsize;
         // `os_proc_available_memory` é o que o app pode usar AGORA (o limite do
         // processo, não a RAM livre do aparelho) — é o número certo para o
-        // orçamento, e é o análogo do `availMem` do Android.
-        const size_t available = os_proc_available_memory();
+        // orçamento. Android mede RAM/heap por APIs distintas. No simulador
+        // sem limite de app, a ponte usa seu orçamento conservador medido.
+        const size_t available = static_cast<size_t>(process_memory_headroom());
         out.availableMemoryBytes = available > 0 ? (u64)available : 0;
 
         // RefreshRate: quem sabe é a UIScreen, e a ponte ObjC passa esse valor
@@ -1732,15 +1971,43 @@ bool ios_load_image(const char* sourcePath, ImagePixels& out, void* ctx) {
         if (!sourcePath || !*sourcePath) return false;
         NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:sourcePath]];
         if (!url) return false;
-        CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url, nullptr);
+        CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url,
+            (__bridge CFDictionaryRef)@{(id)kCGImageSourceShouldCache: @NO});
         if (!src) return false;
-        CGImageRef image = CGImageSourceCreateImageAtIndex(src, 0, nullptr);
+        NSDictionary* props = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(src, 0, nullptr));
+        const double sourceW = [props[(id)kCGImagePropertyPixelWidth] doubleValue];
+        const double sourceH = [props[(id)kCGImagePropertyPixelHeight] doubleValue];
+        if (!std::isfinite(sourceW) || !std::isfinite(sourceH) || sourceW < 1 || sourceH < 1
+            || sourceW > UINT32_MAX || sourceH > UINT32_MAX) { CFRelease(src); return false; }
+        // Match Android's canonical power-of-two sampling and 4096-pixel cap.
+        // Headroom can reject this decode, but must never change its dimensions:
+        // the renderer uses them for layer geometry when the project reopens.
+        const size_t available = static_cast<size_t>(process_memory_headroom());
+        constexpr uint64_t reserve = 16ull << 20;
+        // In an app, zero can mean the process has already exceeded its limit.
+        if (available <= reserve) { CFRelease(src); return false; }
+        const uint64_t pixelBudget = std::min<uint64_t>(4096ull * 4096, (available - reserve) / 12);
+        uint64_t sample = 1;
+        while (std::ceil(sourceW / sample) > 4096 || std::ceil(sourceH / sample) > 4096) {
+            if (sample > (1ull << 32)) { CFRelease(src); return false; }
+            sample *= 2;
+        }
+        if (std::ceil(sourceW / sample) * std::ceil(sourceH / sample) > pixelBudget) {
+            CFRelease(src); return false;
+        }
+        const size_t edge = static_cast<size_t>(std::max(1.0, std::ceil(std::max(sourceW, sourceH) / sample)));
+        CGImageRef image = CGImageSourceCreateThumbnailAtIndex(src, 0, (__bridge CFDictionaryRef)@{
+            (id)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+            (id)kCGImageSourceThumbnailMaxPixelSize: @(edge),
+            (id)kCGImageSourceShouldCacheImmediately: @YES
+        });
         CFRelease(src);
         if (!image) return false;
 
         const size_t width = CGImageGetWidth(image);
         const size_t height = CGImageGetHeight(image);
-        if (width == 0 || height == 0 || width > 16384 || height > 16384) {
+        if (width == 0 || height == 0 || width > 4096 || height > 4096
+            || uint64_t(width) * height > pixelBudget) {
             CGImageRelease(image);
             return false;
         }
@@ -1748,7 +2015,13 @@ bool ios_load_image(const char* sourcePath, ImagePixels& out, void* ctx) {
         // quer alfa RETO, e o CoreGraphics só entrega premultiplicado quando a
         // imagem tem alfa. Sem desmultiplicar, uma sombra semitransparente
         // chegaria escura.
-        std::vector<u8> premul(width * height * 4);
+        std::vector<u8> premul;
+        try {
+            premul.resize(width * height * 4);
+        } catch (const std::bad_alloc&) {
+            CGImageRelease(image);
+            return false;
+        }
         CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
         CGContextRef context = CGBitmapContextCreate(
             premul.data(), width, height, 8, width * 4, space,
@@ -1765,20 +2038,17 @@ bool ios_load_image(const char* sourcePath, ImagePixels& out, void* ctx) {
 
         out.width = (u32)width;
         out.height = (u32)height;
-        out.rgba.resize(width * height * 4);
         for (size_t i = 0; i < width * height; ++i) {
             const u8 a = premul[i * 4 + 3];
-            if (a == 0 || a == 255) {
-                for (int c = 0; c < 4; ++c) out.rgba[i * 4 + c] = premul[i * 4 + c];
-            } else {
+            if (a != 0 && a != 255) {
                 // Desmultiplica com arredondamento: (v * 255 + a/2) / a.
                 for (int c = 0; c < 3; ++c) {
                     const u32 v = premul[i * 4 + c];
-                    out.rgba[i * 4 + c] = (u8)std::min<u32>(255u, (v * 255u + a / 2u) / a);
+                    premul[i * 4 + c] = (u8)std::min<u32>(255u, (v * 255u + a / 2u) / a);
                 }
-                out.rgba[i * 4 + 3] = a;
             }
         }
+        out.rgba = std::move(premul); // No second full-resolution CPU pixel buffer.
         return true;
     }
 }

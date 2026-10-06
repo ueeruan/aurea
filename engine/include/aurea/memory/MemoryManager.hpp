@@ -131,7 +131,9 @@ enum class TrimStage : u8 {
     if (level >= 60) return TrimStage::Unused3DAssets;       // MODERATE
     if (level >= 40) return TrimStage::OldRenderCache;       // BACKGROUND
     if (level >= 20) return TrimStage::UnusedDecodedFrames;  // UI_HIDDEN: nada na tela
-    if (level >= 15) return TrimStage::OldRenderCache;       // RUNNING_CRITICAL
+    // A foreground critical warning (including iOS) must also release unused
+    // 3D resources. Waiting for a background/COMPLETE callback is too late.
+    if (level >= 15) return TrimStage::Temporaries;          // RUNNING_CRITICAL
     if (level >= 10) return TrimStage::UnusedDecodedFrames;  // RUNNING_LOW
     if (level >= 5)  return TrimStage::OldWaveforms;         // RUNNING_MODERATE
     return TrimStage::None;

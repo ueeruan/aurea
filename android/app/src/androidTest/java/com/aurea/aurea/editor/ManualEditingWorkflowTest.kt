@@ -41,8 +41,11 @@ class ManualEditingWorkflowTest {
         compose.waitUntil(5000) { store.primary == id && store.detail?.id == id }
     }
     private fun command(title: String) {
-        compose.onAllNodesWithContentDescription("Buscar ferramentas").filter(hasClickAction())[0].performClick()
-        compose.onAllNodesWithContentDescription("Buscar ferramentas").filter(hasSetTextAction())[0].performTextInput(title)
+        if (compose.onAllNodesWithTag("editor.sectionBar").fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithContentDescription(context.getString(R.string.pn_back_to_layer_tools)).performClick()
+        }
+        compose.onAllNodesWithContentDescription(context.getString(R.string.edt_cmd_search_desc)).filter(hasClickAction())[0].performClick()
+        compose.onAllNodesWithContentDescription(context.getString(R.string.edt_cmd_search_desc)).filter(hasSetTextAction())[0].performTextInput(title)
         compose.onNode(hasText(title, substring = false) and !hasSetTextAction()).performClick()
     }
 
@@ -121,8 +124,16 @@ class ManualEditingWorkflowTest {
             compose.waitUntil(5000) { store.effects.size == count + 1 }
         }
         val copiedType=store.effects.last().typeId
-        compose.onNodeWithContentDescription("Mais opções de Motion Tile").performClick()
-        compose.onNodeWithText("Copiar este efeito").performClick()
+        val copiedCard = com.aurea.aurea.effects.effectCardId(copiedType)
+        val copiedHeader = "effects.expand.$copiedCard"
+        val copiedMenu = "effects.more.$copiedCard"
+        compose.onNodeWithTag("aurea.effects.stack").performScrollToNode(hasTestTag(copiedHeader))
+        if (compose.onAllNodesWithTag(copiedMenu).fetchSemanticsNodes().isEmpty()) {
+            compose.onNodeWithTag(copiedHeader).performClick()
+        }
+        compose.onNodeWithTag("aurea.effects.stack").performScrollToNode(hasTestTag(copiedMenu))
+        compose.onNodeWithTag(copiedMenu).performClick()
+        compose.onNodeWithText(context.getString(R.string.fx_copy_this_effect)).performClick()
         select(clips[1])
         compose.runOnIdle { store.pasteEffects() }
         compose.waitUntil(5000) { store.effects.size==1 }
@@ -153,7 +164,40 @@ class ManualEditingWorkflowTest {
         seek(0)
         compose.onNodeWithContentDescription(context.getString(R.string.editor_reproduzir_segure_repetir)).performClick()
         compose.waitUntil(20000) { store.playhead > 190 }
-        compose.onNodeWithContentDescription(context.getString(R.string.editor_pausar)).performClick()
+        val pauseLabel = context.getString(R.string.editor_pausar)
+        val pauseVisible = compose.onAllNodesWithContentDescription(pauseLabel).fetchSemanticsNodes().isNotEmpty()
+        compose.runOnIdle {
+            File(context.filesDir, "manual-playback-checkpoint.txt").writeText(
+                "frame=${store.playhead}/${store.project.durationFrames} playing=${store.playing} buffering=${store.preview.buffering} pauseVisible=$pauseVisible\n")
+        }
+        fun requireNaturalPlaybackEnd() {
+            compose.runOnIdle {
+                File(context.filesDir, "manual-playback-checkpoint.txt").appendText(
+                    "afterPauseLookup frame=${store.playhead}/${store.project.durationFrames} playing=${store.playing}\n")
+                assertFalse("Playback stopped exposing Pause while still playing", store.playing)
+                assertTrue("Playback stopped before the project end at ${store.playhead}",
+                    store.playhead >= store.project.durationFrames - 1)
+            }
+        }
+        if (pauseVisible) {
+            try {
+                compose.onNodeWithContentDescription(pauseLabel).performClick()
+            } catch (missingPause: AssertionError) {
+                // The semantic lookup and injection are separate UI turns. If
+                // playback ends between them, Pause legitimately becomes Play.
+                // Preserve the original failure unless the exact end is proved.
+                try {
+                    requireNaturalPlaybackEnd()
+                } catch (notAtEnd: AssertionError) {
+                    missingPause.addSuppressed(notAtEnd)
+                    throw missingPause
+                }
+            }
+        } else {
+            // Compose may wait for the continuously updating playback UI until
+            // its natural end. A missing Pause is valid only at that boundary.
+            requireNaturalPlaybackEnd()
+        }
         compose.waitUntil(5000) { !store.playing }
         compose.runOnIdle { assertNull(store.errorMessage); assertTrue(store.project.durationFrames >= 480) }
         // Runtime handles are remapped when loading. Validate ordered content and
@@ -176,8 +220,12 @@ class ManualEditingWorkflowTest {
         val reopenedNull = store.layers.first { it.name == "AMV controller" }.id
         select(reopenedNull); compose.runOnIdle { assertEquals(2, store.keyframes[reopenedNull].orEmpty().size) }
         val reopenedCamera=store.layers.first { it.name=="AMV camera" }.id
-        // Câmera 3D: X em 0 e o grupo XYZ em 120 (keyframes XYZ agrupados do build 2125).
-        select(reopenedCamera); compose.runOnIdle { assertEquals(4,store.keyframes[reopenedCamera].orEmpty().size) }
+        // Auto-Key skips unchanged Y/Z values: only X needs keys at 0 and 120.
+        select(reopenedCamera); compose.runOnIdle {
+            val keys = store.keyframes[reopenedCamera].orEmpty()
+            assertEquals(listOf(0, 120), keys.map { it.time }.sorted())
+            assertTrue(keys.all { it.property == 0 })
+        }
         val output = File(context.filesDir,"manual-editing-acceptance.mp4")
         val progress = ExportProgress()
         val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())

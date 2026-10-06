@@ -15,6 +15,7 @@
 // =============================================================================
 #include "aurea/render/Renderer.hpp"
 
+#include "aurea/core/Log.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/scene3d/Environment.hpp"
 
@@ -74,8 +75,18 @@ TextureDesc depth_texture_desc(u32 size = ai::DepthEstimator::kSize) noexcept {
 
 } // namespace
 
+void Renderer::set_foreground_model_directory(std::string path) {
+    if (path == foregroundModelDirectory_) return;
+    // Retained for bridge compatibility. Both models are now embedded, and
+    // changing the legacy location only invalidates cached inference resources.
+    release_depth(true);
+    foreground_.reset();
+    foregroundModelDirectory_ = std::move(path);
+    clear_preview_cache();
+}
+
 DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
-    DepthMapResult none; none.failed = request.foreground && planFinal_;
+    DepthMapResult none; none.failed = planFinal_;
     auto& service = request.foreground ? foreground_ : depth_;
     const u32 mapSize = request.foreground ? ai::ForegroundEstimator::kSize : ai::DepthEstimator::kSize;
     if (!backend_) return none;
@@ -85,7 +96,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     if (l.kind != LayerKind::Image && l.kind != LayerKind::Video) return none;
     const Asset* asset = planProject_->asset(l.source);
     if (!asset) return none;
-    if (!service) service = std::make_unique<ai::DepthMapService>(request.foreground ? foregroundModelDirectory_ : std::string{});
+    if (!service) service = std::make_unique<ai::DepthMapService>(request.foreground);
     if (planMedia_) {
         void (*wake)(void*) = nullptr; void* ctx = nullptr;
         planMedia_->ready_callback(wake, ctx); service->set_ready_callback(wake, ctx);
@@ -103,7 +114,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         if (!px || !px->width || !px->height || px->rgba.size() < static_cast<usize>(px->width) * px->height * 4)
             return none;
         frameKey = mix64(mix64(sourceKey, 0x1D), (static_cast<u64>(px->width) << 32) | px->height);
-        map = service->image(frameKey, px->rgba.data(), px->width, px->height, px->width * 4, 4, !request.foreground || planFinal_);
+        map = service->image(frameKey, px->rgba.data(), px->width, px->height, px->width * 4, 4, planFinal_ && !planDeferLocalAi_);
     } else {
         if (!asset->has_video() || !planMedia_ || !planMedia_->factory()) return none;
         video = true;
@@ -125,7 +136,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         const i64 targetUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
         sourceTimeUs = targetUs;
         const i64 frameUs = static_cast<i64>(std::llround(1e6 / srcFps));
-        map = service->video(frameKey, planMedia_->factory(), *asset, sourceKey, targetUs, frameUs, planFinal_);
+        map = service->video(frameKey, planMedia_->factory(), *asset, sourceKey, targetUs, frameUs, planFinal_ && !planDeferLocalAi_);
     }
 
     // O estado da suavização: (camada, efeito), export separado do preview.
@@ -159,14 +170,23 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         }
     }
     if (!map) {
-        if (request.foreground && planFinal_) return none;
-        if (request.foreground) incomplete_ = true;
+        if (planFinal_) {
+            if (planDeferLocalAi_) localAiPending_ |= request.foreground ? 2u : 1u;
+            return none;
+        }
+        incomplete_ = true;
         // O último mapa pronto desta instância segura o quadro (melhor
         // atrasado que piscando o original).
         if (auto it = depthTex_.find(st.frameKey); st.frameKey && st.asset == sourceKey && it != depthTex_.end()) {
             it->second.lastFrame = frameNumber_;
             return DepthMapResult{it->second.texture, st.texLo, st.texHi, false, request.foreground ? st.sourceTimeUs : -1};
         }
+        return none;
+    }
+
+    if (map->disparity.size() != static_cast<usize>(mapSize) * mapSize) {
+        incomplete_ = true;
+        AUREA_LOG_ERROR("mapa IA com tamanho invalido: %zu, esperado %u x %u", map->disparity.size(), mapSize, mapSize);
         return none;
     }
 
@@ -191,7 +211,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
             }
         }
         auto created = backend_->create_texture(depth_texture_desc(mapSize));
-        if (!created.ok()) return none;
+        if (!created.ok()) { incomplete_ = true; return none; }
         PendingUpload up;
         up.texture = *created;
         up.bytesPerRow = mapSize * 2;
@@ -252,7 +272,7 @@ DepthMapResult Renderer::depth_map_preview() noexcept {
     if (!depth_) depth_ = std::make_unique<ai::DepthMapService>();
     const u8* origin = previewSrc_.data() + (static_cast<usize>(y0) * previewSrcW_ + x0) * 4;
     const ai::DepthMapPtr map = depth_->image(key, origin, cw, ch, previewSrcW_ * 4, 4);
-    if (!map) return none;
+    if (!map || map->disparity.size() != ai::DepthEstimator::kPixels) return none;
     const std::vector<u8> texels = depth_texels(*map);
     auto created = backend_->create_texture(depth_texture_desc());
     if (!created.ok()) return none;

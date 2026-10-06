@@ -9,4 +9,6 @@
     <string name="expfail_media">प्रोजेक्ट की एक मीडिया फ़ाइल पढ़ी नहीं जा सकी</string>
     <string name="expfail_file">वीडियो फ़ाइल सेव नहीं की जा सकी</string>
     <string name="expfail_unsupported">यह फ़ोन इस रिज़ॉल्यूशन या फ़ॉर्मैट में एक्सपोर्ट नहीं कर सकता</string>
+    <string name="expfail_stuck">एक्सपोर्ट कई मिनट तक आगे नहीं बढ़ा और रोक दिया गया; दूसरे ऐप बंद करके फिर से कोशिश करें</string>
+    <string name="app_export_safe_mode">फ़ोन का वीडियो एनकोडर अटक गया: संगत मोड में फिर से एक्सपोर्ट हो रहा है (H.264, ज़्यादा समय लग सकता है)।</string>
 </resources>

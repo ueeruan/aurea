@@ -252,8 +252,10 @@ struct ShapeData {
     /// 0 retângulo (cantos arredondados), 1 elipse, 2 caminho, 3 polígono
     /// regular, 4 estrela, 5 cruz, 6 anel, 7 fatia, 8 flor, 9 seta,
     /// 10 triângulo retângulo, 12 trapézio, 13 paralelogramo, 14 engrenagem
-    /// (pontas = dentes, innerRadius = cubo), 15 seta dupla
-    /// (shaders/shape/shape.frag), 11 vetorial
+    /// (pontas = dentes, innerRadius = cubo), 15 seta dupla, 16 linha,
+    /// 17 losango, 18 coração, 19 selo, 20 arco, 21 balão de fala, 22 raio,
+    /// 23 onda, 24 blob (shaders/shape/shape.frag; nomes em
+    /// timeline/ShapeGeometry.hpp), 11 vetorial
     /// (kShapeVector: grupos em `vector`, vector/Vector.hpp).
     u32  shapeType = 0;
     Rect bounds{0.0f, 0.0f, 200.0f, 200.0f};
@@ -273,6 +275,17 @@ struct ShapeData {
     std::vector<Vec2> path;
     /// Camada vetorial (shapeType == kShapeVector).
     VectorData vector;
+    // --- v44: parâmetros das formas paramétricas (timeline/ShapeGeometry.hpp,
+    // índices 7..14 de ShapeSetParam). Negativo = "o padrão da forma"
+    // (shape::default_param): projeto antigo abre igual.
+    f32  depth = -1.0f;        ///< entalhe/saliência/dente/pétala/variação (0..1)
+    f32  tip = 0.5f;           ///< cintura do losango, ponta do balão, inclinação do raio (0..1)
+    f32  thickness = -1.0f;    ///< espessura da linha, do arco e da onda (0..1)
+    f32  sweep = 270.0f;       ///< abertura da fatia e do arco (graus)
+    f32  head = -1.0f;         ///< ponta da seta (fração da largura)
+    f32  shaft = 0.44f;        ///< haste da seta (fração da altura)
+    f32  amplitude = 1.0f;     ///< amplitude da onda (0..1 da folga)
+    f32  seed = 0.0f;          ///< variante do blob
 };
 
 struct CameraData {
@@ -334,6 +347,19 @@ struct MaterialOverride {
     f32 roughness = 1.0f;
 };
 
+/// MOSTRAR INTERIOR (dupla face) de um objeto 3D. Gravado no projeto (v43);
+/// o número é contrato de arquivo.
+enum class ModelInterior : u8 {
+    Auto = 0,   ///< forma 3D pronta mostra; modelo importado e texto 3D seguem o material do arquivo
+    On   = 1,   ///< todas as faces de trás desenhadas (normal invertida, a mesma textura)
+    Off  = 2,   ///< faces de trás recortadas (salvo material de dupla face do próprio arquivo)
+};
+/// O objeto mostra o lado de dentro? `shapeParts` = o asset é uma forma 3D
+/// pronta (SceneAsset::shapeParts): entrar no cubo mostra a imagem por dentro.
+[[nodiscard]] constexpr bool model_interior_visible(ModelInterior mode, bool shapeParts) noexcept {
+    return mode == ModelInterior::On || (mode == ModelInterior::Auto && shapeParts);
+}
+
 struct Model3DData {
     AssetId scene{};
     /// Metros do modelo → pixels da composição, e o centro da caixa do modelo
@@ -345,6 +371,8 @@ struct Model3DData {
     f32     timeScale = 1.0f;
     bool    castShadows = true;
     bool    receiveShadows = true;
+    /// Mostrar interior (dupla face) — ver ModelInterior.
+    ModelInterior interior = ModelInterior::Auto;
     /// Índices de LOD forçado, ou -1 para automático por tamanho na tela.
     i32     forcedLod = -1;
     std::vector<MaterialOverride> materials;

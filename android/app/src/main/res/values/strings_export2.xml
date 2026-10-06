@@ -9,4 +9,7 @@
     <string name="expfail_media">uma mídia do projeto não pôde ser lida</string>
     <string name="expfail_file">o arquivo de vídeo não pôde ser gravado</string>
     <string name="expfail_unsupported">este aparelho não exporta nesta resolução ou formato</string>
+    <string name="expfail_stuck">a exportação parou de avançar por minutos e foi interrompida; feche outros apps e tente de novo</string>
+    <!-- Aviso durante o export refeito no modo de segurança (export/ExportWatchdog.hpp). -->
+    <string name="app_export_safe_mode">O codificador de vídeo do aparelho travou: exportando de novo no modo compatível (H.264, pode demorar mais).</string>
 </resources>

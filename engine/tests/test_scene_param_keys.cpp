@@ -78,6 +78,52 @@ Result<u64> import_quad(Engine& e) {
 
 // Material metálico com keys em 0 (0.0) e 60 (1.0). Na cena 3D, no quadro 30,
 // a régua manda 0.9 → esperado: key NOVO em 30 = 0.9; 0 e 60 intactos.
+AUREA_TEST(SceneCuts, PanoramaRangeUndoAndGroupingPreserveIllumination) {
+    ParamRig rig;
+    AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    auto& e = rig.e;
+    AUREA_CHECK(e.set_environment_background_range(10, 20));
+    AUREA_CHECK(!e.set_environment_background_range(20, 20));
+    AUREA_CHECK(!e.set_environment_background_range(-1, 20));
+    AUREA_CHECK(!e.set_environment_background_range(0, comp_of(e)->duration().value + 1));
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(e.environment_background_start(), 0);
+    AUREA_CHECK_EQ(e.environment_background_end(), -1);
+    auto* parent = comp_of(e);
+    parent->environment().studioPreset = 2;
+    parent->environment().intensity = 2.7f;
+    parent->environment().rotation = 95.f;
+    parent->environment().showBackground = true;
+    parent->environment().backgroundStart = FrameIndex{10};
+    parent->environment().backgroundEnd = FrameIndex{20};
+    parent->shadows().normalBias = .04f;
+    parent->post_process().quality3d = 3;
+    parent->floor().mode = 1;
+    parent->floor().roughness = .2f;
+    parent->floor().reflectivity = .5f;
+    const auto shape = parent->add_layer(LayerKind::Model3D, "3D object");
+    parent->layer(shape)->threeD = true;
+    const auto light = parent->add_layer(LayerKind::Light, "3D light");
+    const u64 ids[]{shape.pack(), light.pack()};
+    const auto grouped = e.precompose(ids, 2);
+    AUREA_CHECK(grouped.ok()); if (!grouped.ok()) return;
+    parent = comp_of(e);
+    const auto* child = e.project()->timeline().composition(parent->layer(LayerId::unpack(*grouped))->nested.composition);
+    AUREA_CHECK(child != nullptr); if (!child) return;
+    AUREA_CHECK_EQ(child->environment().studioPreset, 2u);
+    AUREA_CHECK_EQ(child->environment().intensity, 2.7f);
+    AUREA_CHECK_EQ(child->environment().rotation, 95.f);
+    AUREA_CHECK(!child->environment().showBackground);
+    AUREA_CHECK(parent->environment().background_at(FrameIndex{19}));
+    AUREA_CHECK(!parent->environment().background_at(FrameIndex{20}));
+    AUREA_CHECK_EQ(child->shadows().normalBias, .04f);
+    AUREA_CHECK_EQ(child->post_process().quality3d, 3u);
+    AUREA_CHECK_EQ(child->floor().mode, 1u);
+    AUREA_CHECK_EQ(child->floor().roughness, .2f);
+    AUREA_CHECK_EQ(child->floor().reflectivity, .5f);
+}
+
 AUREA_TEST(SceneParamKeys, MaterialParamInsideSceneEditorKeysAtPlayheadKeepsOtherKeys) {
     ParamRig rig; AUREA_CHECK(rig.ok); if (!rig.ok) return;
     Engine& e = rig.e;

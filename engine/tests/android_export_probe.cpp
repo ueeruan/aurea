@@ -86,9 +86,22 @@ int main(int argc, char** argv) {
     vc.bitrateBps = 12000000;
     AudioStreamConfig ac; const bool audio = std::atoi(argv[5]) != 0;
     auto sink = android::make_mediacodec_export_sink(nullptr);
+    std::atomic<bool> cancel{false};
+    sink->set_cancel_flag(&cancel);
+    VideoStreamConfig invalid = vc; invalid.fps = std::numeric_limits<f64>::quiet_NaN();
+    if (sink->open(argv[1], invalid, nullptr).ok() || sink->open(nullptr, vc, nullptr).ok()) return 8;
     if (!check(sink->open(argv[1], vc, audio ? &ac : nullptr), "open")) return 3;
     std::vector<u8> y(vc.width * vc.height), uv(y.size() / 2, 128);
     std::vector<i16> pcm(1600 * 2);
+    cancel = true;
+    if (sink->write_video(y.data(), vc.width, uv.data(), vc.width, 0).code() != Errc::Cancelled) return 8;
+    cancel = false;
+    // Rejected calls must not consume a codec input slot or truncate the file.
+    if (sink->open(argv[1], vc, nullptr).ok() ||
+        sink->write_video(nullptr, vc.width, uv.data(), vc.width, 0).ok() ||
+        sink->write_video(y.data(), vc.width, nullptr, vc.width, 0).ok() ||
+        sink->write_video(y.data(), vc.width, uv.data(), vc.width, -1).ok() ||
+        (audio && sink->write_audio(nullptr, 1600, 0).ok())) return 8;
     for (int frame = 0; frame < 30; ++frame) {
         for (u32 row = 0; row < vc.height; ++row) for (u32 col = 0; col < vc.width; ++col)
             y[row * vc.width + col] = static_cast<u8>(16 + ((col / 16 + row / 16 + frame * 2) % 220));
@@ -100,7 +113,13 @@ int main(int argc, char** argv) {
         }
     }
     if (!check(sink->finish(), "finish")) return 6;
+    if (sink->write_video(y.data(), vc.width, uv.data(), vc.width, 1000000).ok() || sink->finish().ok()) return 8;
     if (!remux_with_offsets(argv[1])) return 7;
+    // Reusing a completed sink must reset EOS, mux tracks and layout state.
+    const std::string reused = std::string(argv[1]) + ".reused.mp4";
+    if (!check(sink->open(reused.c_str(), vc, nullptr), "reopen") ||
+        !check(sink->write_video(y.data(), vc.width, uv.data(), vc.width, 0), "reopened video") ||
+        !check(sink->finish(), "reopened finish")) return 9;
     std::printf("PASS real export %ux%u codec=%d audio=%d with nonzero packet offsets\n", vc.width, vc.height, static_cast<int>(vc.codec), audio);
     return 0;
 }

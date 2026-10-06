@@ -27,13 +27,14 @@ struct EditorView: View {
     var body: some View {
         GeometryReader { geometry in
             let wide = !model.fullscreen && model.panel != .curve && EditorLayout.isWide(geometry.size.width, geometry.size.height)
-            let sideWidth = (geometry.size.width * 0.4).clamped(to: 280...380)
+            let sideWidth = EditorLayout.wideSheetWidth(geometry.size.width)
             let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
             // Fora da tela cheia o palco tem 8 pt de margem de cada lado.
             let sideMargin: CGFloat = model.fullscreen ? 0 : EditorLayout.previewSideMargin
             let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent, fullscreen: model.fullscreen,
                                              width: max(0, geometry.size.width - sideMargin * 2), aspect: aspect, preferred: CGFloat(previewPreference),
-                                             dockRows: model.sheetContent == .dock ? DockView.tileRows(model) : 2)
+                                             dockRows: model.sheetContent == .dock ? DockView.tileRows(model) : 2,
+                                             fontScale: UIFont.preferredFont(forTextStyle: .body).pointSize / 17)
             Group {
                 if model.sceneEditor {
                     SceneLayoutWorkspace(height: geometry.size.height)
@@ -56,7 +57,7 @@ struct EditorView: View {
                     }
                 } else {
                     VStack(spacing: 0) {
-                        if !model.fullscreen { TopBarView().frame(height: metrics.topBar) }
+                        if !model.fullscreen { TopBarView(height: metrics.topBar) }
                         PreviewStage(height: max(0, metrics.preview - (model.fullscreen ? StageDim.fullscreenTimeBar : 0)))
                             .padding(.horizontal, sideMargin)
                         if model.fullscreen {
@@ -145,10 +146,12 @@ private struct AddLayerPickers: ViewModifier {
     @State private var fileKind = ShellAddPicker.model
     @State private var choosingPhotos = false
     @State private var photoKind = ShellAddPicker.gallery
+    @State private var pickerProject = UUID()
     func body(content: Content) -> some View {
         content
             .onChange(of: shell.addPicker) { request in
                 guard let request else { return }
+                pickerProject = model.projectGeneration
                 shell.addPicker = nil
                 if request == .model { fileKind = request; importingModel = true }
                 else if request.isFile { fileKind = request; importing = true }
@@ -156,6 +159,7 @@ private struct AddLayerPickers: ViewModifier {
             }
             .fullScreenCover(isPresented: $importingModel) {
                 ModelDocumentPicker { urls in
+                    guard pickerProject == model.projectGeneration else { importingModel = false; return }
                     // Start the owned copy while the picker URLs are still valid.
                     if let urls { model.importModelFiles(urls: urls) }
                     importingModel = false
@@ -165,6 +169,7 @@ private struct AddLayerPickers: ViewModifier {
             // atende um — o do modelo 3D ficava mudo (as texturas vêm por aqui também).
             .fileImporter(isPresented: $importing, allowedContentTypes: fileTypes,
                           allowsMultipleSelection: fileKind == .model || fileKind == .modelTextures) { result in
+                guard pickerProject == model.projectGeneration else { return }
                 if case .failure(let error) = result {
                     let issue = error as NSError
                     if issue.domain != NSCocoaErrorDomain || issue.code != NSUserCancelledError {
@@ -188,6 +193,7 @@ private struct AddLayerPickers: ViewModifier {
             .sheet(isPresented: $choosingPhotos) {
                 ShellMediaPicker(filter: photoKind == .photo ? .images : ((photoKind == .video || photoKind == .audioFromVideo) ? .videos : .any(of: [.images, .videos]))) { url, video in
                     choosingPhotos = false
+                    guard pickerProject == model.projectGeneration else { return }
                     guard let url else { return }
                     let kind: AureaModel.ImportKind = photoKind == .audioFromVideo ? .audio : (video ? .video : .image)
                     model.importMedia(url: url, kind: kind)
@@ -309,7 +315,8 @@ private struct ModelOptimizePrompt: ViewModifier {
                 if let req = model.modelOptimize {
                     let tris = AureaModel.modelCount(req.plan.triangles)
                     let lines = req.plan.offered.map { "\(label($0, req.plan)): \(hint($0, req.plan))" }
-                    Text(AureaText.t("model3d_heavy_body", req.plan.exact ? tris : "~" + tris) + "\n\n" + lines.joined(separator: "\n"))
+                    Text(AureaText.t("model3d_heavy_body", req.plan.exact ? tris : "~" + tris) + "\n\n" + lines.joined(separator: "\n")
+                         + "\n\n" + AureaText.t("model3d_risk_warning"))
                 }
             }
     }
@@ -387,6 +394,23 @@ private struct ModelOptimizePrompt: ViewModifier {
                     .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             }
             if model.hudVisible { ShellPerfHud().padding(.leading, 8).padding(.top, 6).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).allowsHitTesting(false) }
+            if let label = model.previewBufferLabel, !model.exporting {
+                HStack(spacing: 6) {
+                    if model.previewBuffering {
+                        ProgressView().tint(AureaColors.accent).scaleEffect(0.7)
+                            .accessibilityHidden(true)
+                    }
+                    Text(label).font(.aurea(size: 12, weight: .medium)).multilineTextAlignment(.center)
+                }
+                .foregroundStyle(model.previewBufferLimited ? AureaColors.warning : AureaColors.text)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(StageInk.resolutionChip, in: Capsule())
+                .accessibilityElement(children: .ignore).accessibilityLabel(label)
+                .accessibilityIdentifier("preview.buffer.status")
+                .allowsHitTesting(false)
+                .padding(.horizontal, 64).padding(.bottom, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
             // Zoom da vista: "250 %" só com a prévia ampliada; tocar volta a 100 %.
             StageZoomChip().padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
@@ -929,6 +953,14 @@ private struct DockView: View {
             case .effects: return "sh_dock_effects"
             }
         }
+        /// Short visible action; accessibility continues to use the full label.
+        var shortLabel: String {
+            switch self {
+            case .move: return "gizmo_tool_move"
+            case .blend: return "panel_misturar"
+            default: return label
+            }
+        }
         var glyph: Character {
             switch self {
             case .color: return CupertinoGlyph.Paintbrush
@@ -973,20 +1005,18 @@ private struct DockView: View {
         guard let layer = model.selectedLayer else { return [] }
         let hasAudio = ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0
         if layer.adjustment || layer.kind == 7 { return [.effects, .blend] }
-        // Ordem do AM: o que é do tipo e a mistura na fileira de cima; mover,
-        // editar e efeitos na de baixo (7 → 3 + 4; 5 → 2 + 3).
-        let common: [Section] = [.blend, .move, .effects]
+        // Frequent actions stay before the horizontally scrollable extras.
+        let common: [Section] = [.move, .effects, .blend]
         switch layer.kind {
-        case 5: return model.isVectorLayer ? [.blend, .move, .vector, .effects] : [.color, .blend, .move, .shape, .effects]
-        // Texto: editar, opções e presets em cima; mistura, mover e efeitos embaixo (6 → 3 + 3).
-        case 4: return [Section.editText, Section.text, Section.presets] + common
-        case 1: return hasAudio ? [.blend, .move, .audio, .effects] : common
+        case 5: return model.isVectorLayer ? [Section.vector] + common : [Section.shape] + common + [Section.color]
+        case 4: return [Section.editText] + common + [Section.text, Section.presets]
+        case 1: return hasAudio ? common + [Section.audio] : common
         case 2: return common + [Section.rig]
         case 12: return common
         case 3: return [.audio, .effects]
         case 10: return (model.engine.text3D(forLayer: layer.id) ?? [:]).isEmpty
             ? [.move, .environment, .effects, .blend]
-            : [Section.editText, Section.text3DOptions, Section.presets] + common
+            : [Section.editText] + common + [Section.text3DOptions, Section.presets]
         case 8: return [.move, .environment]
         case 11: return [Section.particles] + common
         case 9: return layer.effectCount > 0 ? common : [.move]
@@ -994,24 +1024,17 @@ private struct DockView: View {
         default: return []
         }
     }
-    /// Quantas fileiras de fichas a doca usa (1 ou 2): a altura é a do conteúdo.
-    fileprivate static func tileRows(_ model: AureaModel) -> Int { sections(model).count > 4 ? 2 : 1 }
-
-    /// Até duas fileiras, a de baixo com a metade maior (`dockRows` do
-    /// Android: 7 → 3 + 4, 8 → 4 + 4, 6 → 3 + 3): a doca tem altura fixa.
-    private var rows: [[Section]] {
-        let n = sections.count
-        guard n > 4 else { return [sections] }
-        return [Array(sections.prefix(n / 2)), Array(sections.suffix(n - n / 2))]
-    }
+    /// Fileira de tempo (início/fim) + fileira rolável de ferramentas: reserva de
+    /// duas fileiras, senão as ferramentas ficam abaixo da tela com fonte grande.
+    fileprivate static func tileRows(_ model: AureaModel) -> Int { model.selectedLayer == nil ? 1 : 2 }
 
     var body: some View {
         if let layer = model.selectedLayer {
-            // Igual ao Alight Motion: folha de cantos arredondados em cima; fileira
-            // rápida com a velocidade e o som em quadrados nas pontas e o bloco
-            // aparar início | dividir | aparar fim no meio; fichas grandes embaixo.
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
+            // Superfície compacta, com rolagem quando a área disponível é curta.
+            let fontScale = UIFont.preferredFont(forTextStyle: .body).pointSize / 17
+            ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
                     if layer.kind == 12 {
                         // As portas do grupo no lugar da velocidade: entrar e desagrupar.
                         dockSquare { quickAction(CupertinoGlyph.ArrowDownRightSquare, "editor_entrar_grupo", size: 20) { model.openGroup(layer.id) } }
@@ -1028,11 +1051,11 @@ private struct DockView: View {
                     }
                     // O tempo num bloco só, com os colchetes do AM: a parte tracejada é a que sai.
                     HStack(spacing: 0) {
-                        trimAction(.start, "editor_aparar_inicio_cabecote") { timeEdit(layer) { model.trimStart(layer.id, at: model.status.playhead) } }
+                        trimAction(.start, "editor_aparar_inicio_cabecote") { timeEdit(layer) { if !model.trimStart(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                         dockDivider
                         trimAction(.split, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
                         dockDivider
-                        trimAction(.end, "editor_aparar_fim_cabecote") { timeEdit(layer) { model.trimEnd(layer.id, at: model.status.playhead) } }
+                        trimAction(.end, "editor_aparar_fim_cabecote") { timeEdit(layer) { if !model.trimEnd(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
@@ -1049,38 +1072,61 @@ private struct DockView: View {
                     }
                 }
                 .frame(height: EditorLayout.dockQuick)
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    HStack(spacing: 10) {
-                        ForEach(row, id: \.rawValue) { section in
+                HStack(spacing: 0) {
+                    layerTimeAction(CupertinoGlyph.ArrowLeftToLine, "panel_inicio", "editor_go_layer_start", "timeline.layer.start") {
+                        model.seek(toFrame: Int64(layer.startFrame))
+                    }
+                    layerTimeAction(CupertinoGlyph.ArrowRightToLine, "panel_fim", "editor_go_layer_end", "timeline.layer.end") {
+                        model.seek(toFrame: Int64(max(layer.startFrame, layer.endFrame - 1)))
+                    }
+                    dockDivider
+                    layerTimeAction(CupertinoGlyph.ChevronRight, "timeline_starts_at_playhead", "editor_move_layer_start_here", "timeline.layer.moveStart", enabled: !layer.locked) {
+                        model.arrangeLayerTimes(5)
+                    }
+                    layerTimeAction(CupertinoGlyph.ChevronLeft, "timeline_ends_at_playhead", "editor_move_layer_end_here", "timeline.layer.moveEnd", enabled: !layer.locked) {
+                        model.arrangeLayerTimes(6)
+                    }
+                }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+                GeometryReader { geometry in
+                    let minimum = CGFloat(76) + 28 * (min(max(fontScale, 1), 2) - 1)
+                    let fitted = (geometry.size.width - 8 * CGFloat(max(0, sections.count - 1))) / CGFloat(max(1, sections.count))
+                    let toolWidth = min(max(fitted, minimum), 160)
+                    ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(spacing: 8) {
+                        ForEach(sections, id: \.rawValue) { section in
                             Button {
                                 if section == .editText { model.openTextContentEditor() }
                                 else if section == .rig { RigStageState.shared.open(model) }
                                 else { model.openPanel(section.panel) }
                             } label: {
-                                // Como no AM: ícone claro em cima e o nome cinza, em até duas linhas.
-                                VStack(spacing: 6) {
+                                VStack(spacing: 4) {
                                     if section == .move {
-                                        MaterialGlyph("rounded.OpenWith", size: 26, color: StageInk.dockTileIcon)
+                                        MaterialGlyph("rounded.OpenWith", size: 20, color: StageInk.dockTileIcon)
                                     } else {
-                                        CupertinoGlyph.text(section.glyph, size: 26, color: StageInk.dockTileIcon)
+                                        CupertinoGlyph.text(section.glyph, size: 20, color: StageInk.dockTileIcon)
                                     }
-                                    Text(AureaText.t(section.label))
-                                        .font(.aurea(size: 11.5))
+                                    Text(AureaText.t(section.shortLabel))
+                                        .font(.aurea(size: 12 * min(max(fontScale, 1), 2)))
                                         .foregroundStyle(StageInk.dockTileContent).lineLimit(2).multilineTextAlignment(.center)
                                 }
-                                .padding(.horizontal, 6).padding(.vertical, 4).frame(maxWidth: .infinity).frame(height: EditorLayout.dockTile)
-                                .background(StageInk.dockTile, in: RoundedRectangle(cornerRadius: 10))
+                                .padding(.horizontal, 6).padding(.vertical, 4).frame(width: toolWidth, height: EditorLayout.dockTileHeight(fontScale: fontScale))
+                                .background(StageInk.dockSheet, in: RoundedRectangle(cornerRadius: 10))
                                 .contentShape(RoundedRectangle(cornerRadius: 10))
                             }.buttonStyle(.plain)
                                 .accessibilityLabel(AureaText.t(section.label))
+                                .accessibilityIdentifier("dock.tool.\(section.rawValue)")
                         }
                     }
+                    }
+                    .id(layer.id)
+                    .accessibilityIdentifier("dock.tools")
                 }
-                Spacer(minLength: 0)
+                .frame(height: EditorLayout.dockTileHeight(fontScale: fontScale))
             }
-            .padding(.horizontal, 12).padding(.top, 10)
+            .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(StageInk.dockSheet, in: DockSheetShape(radius: 18))
+            .background(StageInk.dockSheet, in: DockSheetShape(radius: 12))
             .padding(.top, 4)
         } else {
             Text(AureaText.t("editor_toque_num_objeto_tela_editar"))
@@ -1100,6 +1146,18 @@ private struct DockView: View {
         Rectangle().fill(AureaColors.border).frame(width: 1, height: 20)
     }
 
+    private func layerTimeAction(_ glyph: Character, _ title: String, _ description: String, _ id: String,
+                                 enabled: Bool = true, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 0) {
+                CupertinoGlyph.text(glyph, size: 19, color: enabled ? AureaColors.text : StageInk.dockDisabled)
+                Text(AureaText.t(title)).font(.aurea(size: 10)).lineLimit(2).multilineTextAlignment(.center)
+                    .foregroundStyle(enabled ? AureaColors.text : StageInk.dockDisabled)
+            }.frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(!enabled)
+            .accessibilityLabel(AureaText.t(description)).accessibilityIdentifier(id)
+    }
+
     private func timeEdit(_ layer: LayerItem, action: () -> Void) {
         guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
         guard model.status.playhead > Int64(layer.startFrame), model.status.playhead < Int64(layer.endFrame) else { model.toast = AureaText.t("sh_playhead_into_layer"); return }
@@ -1110,6 +1168,7 @@ private struct DockView: View {
     /// mesma geometria do `DockTrimTool` do Android).
     private enum TrimGlyph { case start, split, end }
     private func trimAction(_ kind: TrimGlyph, _ key: String, action: @escaping () -> Void) -> some View {
+        VStack(spacing: 0) {
         Canvas { context, size in
             let u = size.width / 24
             let stroke = 1.8 * u
@@ -1126,9 +1185,13 @@ private struct DockView: View {
             mid.move(to: CGPoint(x: 12 * u, y: 3.5 * u)); mid.addLine(to: CGPoint(x: 12 * u, y: 20.5 * u))
             context.stroke(mid, with: .color(AureaColors.text), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
         }
-        .frame(width: 26, height: 26)
+        .frame(width: 22, height: 22)
+        Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
+            .font(.aurea(size: 10)).lineLimit(1)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         .onTapGesture(perform: action)
+        .accessibilityIdentifier(kind == .start ? "timeline.cut.start" : kind == .end ? "timeline.cut.end" : "timeline.cut.split")
         .accessibilityElement().accessibilityLabel(AureaText.t(key)).accessibilityAddTraits(.isButton)
     }
     /// Só o ícone, como na fileira de tempo do editor antigo; a descrição
@@ -1438,7 +1501,11 @@ private struct AddLayerSheet: View {
         (4, "sh_shape_triangle"), (14, "sh_shape_right_triangle"), (6, "editor_poligono"), (11, "editor_estrela"),
         (2, "sh_shape_cross"), (3, "sh_shape_ring"), (5, "sh_shape_slice"), (7, "sh_shape_flower"), (8, "sh_shape_arrow"),
         (16, "sh_shape_pentagon"), (15, "sh_shape_octagon"), (17, "sh_shape_trapezoid"), (18, "sh_shape_parallelogram"),
-        (19, "sh_shape_star4"), (20, "sh_shape_star6"), (21, "sh_shape_gear"), (22, "sh_shape_double_arrow")
+        (19, "sh_shape_star4"), (20, "sh_shape_star6"), (21, "sh_shape_gear"), (22, "sh_shape_double_arrow"),
+        // Formas paramétricas (presets 23..32 do motor: explosão e os tipos 16..24).
+        (23, "sh_shape_burst"), (24, "sh_shape_line"), (25, "sh_shape_diamond"), (26, "sh_shape_heart"),
+        (27, "sh_shape_seal"), (28, "sh_shape_arc"), (29, "sh_shape_bubble"), (30, "sh_shape_bolt"),
+        (31, "sh_shape_wave"), (32, "sh_shape_blob")
     ]
 
     var body: some View {
@@ -1540,6 +1607,12 @@ private struct AddLayerSheet: View {
                     Text(AureaText.t(hint)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                         .padding(.horizontal, 4).padding(.vertical, 2)
                 }
+                if tab == 5 && !shapes3D {
+                    Text(AureaText.t("model3d_risk_warning")).font(.aurea(size: 12))
+                        .foregroundStyle(AureaColors.warning).fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.vertical, 2)
+                        .accessibilityIdentifier("model3d.risk.warning")
+                }
             }.padding(.horizontal, 12).padding(.vertical, 10)
         }
     }
@@ -1638,11 +1711,13 @@ private final class EditorPhotoLibrary: NSObject, ObservableObject, PHPhotoLibra
 }
 
 private struct EditorMediaGallery: View {
+    @EnvironmentObject private var model: AureaModel
     @StateObject private var library = EditorPhotoLibrary()
     @Environment(\.scenePhase) private var phase
     @State private var video = false
     @State private var importing = false
     @State private var failure = false
+    @State private var importRequest = UUID()
     let openFiles: (Bool) -> Void
     let openAI: () -> Void
     let picked: (URL, Bool) -> Void
@@ -1694,10 +1769,13 @@ private struct EditorMediaGallery: View {
             .onAppear { library.show(video: video) }
             .onChange(of: video) { library.show(video: $0) }
             .onChange(of: phase) { if $0 == .active { library.reload() } }
+            .onDisappear { importRequest = UUID() }
             .disabled(importing)
     }
     private func importAsset(_ asset: PHAsset) {
         guard !importing else { return }
+        let request = UUID(), project = model.projectGeneration
+        importRequest = request
         let isVideo = asset.mediaType == .video
         let resources = PHAssetResource.assetResources(for: asset)
         let primary: PHAssetResourceType = isVideo ? .fullSizeVideo : .fullSizePhoto
@@ -1711,6 +1789,10 @@ private struct EditorMediaGallery: View {
         let options = PHAssetResourceRequestOptions(); options.isNetworkAccessAllowed = true
         PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options) { error in
             DispatchQueue.main.async {
+                guard importRequest == request, model.projectGeneration == project else {
+                    try? FileManager.default.removeItem(at: folder)
+                    return
+                }
                 importing = false
                 if error != nil { try? FileManager.default.removeItem(at: folder); failure = true }
                 else { picked(destination, isVideo) }

@@ -22,7 +22,7 @@ enum StageInk {
     static let white40        = Color(hex: 0x66FFFFFF)
     static let dockRow        = Color(hex: 0xFF272D40)   // cor do AM
     static let dockTile       = Color(hex: 0xFF272D40)
-    static let dockTileContent = Color(hex: 0xFF8E93A6)   // nome da ficha: cinza, como no AM
+    static let dockTileContent = Color(hex: 0xFFB7BDCC)   // rótulos compactos com contraste
     static let dockTileIcon   = Color(hex: 0xFFE6E9F0)
     static let dockSheet      = Color(hex: 0xFF1F2432)    // folha da doca, cantos arredondados em cima
     static let dockDisabled   = Color(hex: 0xFF4A5164)
@@ -348,6 +348,20 @@ struct ShellShapeGlyph: View {
             case 20: context.fill(radial(12, 0.5, 0.28), with: fill)
             case 21: context.fill(ShapeGlyphPaths.gear(center: p(0.5, 0.5), radius: s / 2, teeth: 10, hub: 0.3), with: fill, style: FillStyle(eoFill: true))
             case 22: context.fill(ShapeGlyphPaths.doubleArrow(center: p(0.5, 0.5), radius: s / 2), with: fill)
+            // Formas paramétricas (presets 23..32).
+            case 23: context.fill(radial(28, 0.5, 0.36), with: fill)
+            case 24: context.fill(Path(roundedRect: rect(0, 0.44, 1, 0.12), cornerRadius: s * 0.03), with: fill)
+            case 25: context.fill(ShapeGlyphPaths.diamond(center: p(0.5, 0.5), radius: s / 2), with: fill)
+            case 26: context.fill(ShapeGlyphPaths.heart(center: p(0.5, 0.5), radius: s / 2), with: fill)
+            case 27: context.fill(ShapeGlyphPaths.seal(center: p(0.5, 0.5), radius: s / 2, bumps: 14), with: fill)
+            case 28:
+                var arc = Path()
+                arc.addArc(center: p(0.5, 0.5), radius: s * 0.4, startAngle: .degrees(0), endAngle: .degrees(270), clockwise: false)
+                context.stroke(arc, with: fill, lineWidth: s * 0.2)
+            case 29: for part in ShapeGlyphPaths.bubble(center: p(0.5, 0.5), radius: s / 2) { context.fill(part, with: fill) }
+            case 30: context.fill(ShapeGlyphPaths.bolt(center: p(0.5, 0.5), radius: s / 2), with: fill)
+            case 31: context.stroke(ShapeGlyphPaths.wave(center: p(0.5, 0.5), radius: s / 2, waves: 3), with: fill, lineWidth: s * 0.12)
+            case 32: context.fill(ShapeGlyphPaths.blob(center: p(0.5, 0.5), radius: s / 2), with: fill)
             default:
                 var stem = Path(); stem.move(to: p(0.04, 0.5)); stem.addLine(to: p(0.66, 0.5))
                 context.stroke(stem, with: fill, lineWidth: s * 0.2)
@@ -392,6 +406,73 @@ enum ShapeGlyphPaths {
         }
         path.closeSubpath()
         return path
+    }
+
+    // --- Formas paramétricas (as mesmas silhuetas do Android, ShapeEditPanel.kt) ---
+    static func diamond(center c: CGPoint, radius r: CGFloat) -> Path {
+        quad(center: c, radius: r, [0, -1, 0.8, 0, 0, 1, -0.8, 0])
+    }
+    /// Raio: os 7 vértices do motor numa caixa 0,6 : 1.
+    static func bolt(center c: CGPoint, radius r: CGFloat) -> Path {
+        quad(center: c, radius: r, [-0.03, -1, 0.36, -1, 0.072, -0.12, 0.42, -0.12, -0.252, 1, -0.012, 0.14, -0.372, 0.14])
+    }
+    static func heart(center c: CGPoint, radius r: CGFloat) -> Path {
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: c.x + x * r, y: c.y + y * r) }
+        var path = Path()
+        path.move(to: pt(0, 0.9))
+        path.addCurve(to: pt(-1, -0.35), control1: pt(-0.35, 0.55), control2: pt(-1, 0.15))
+        path.addCurve(to: pt(0, -0.5), control1: pt(-1, -0.85), control2: pt(-0.2, -0.95))
+        path.addCurve(to: pt(1, -0.35), control1: pt(0.2, -0.95), control2: pt(1, -0.85))
+        path.addCurve(to: pt(0, 0.9), control1: pt(1, 0.15), control2: pt(0.35, 0.55))
+        path.closeSubpath()
+        return path
+    }
+    /// Selo: círculo com `bumps` saliências em arco, uma em cima.
+    static func seal(center c: CGPoint, radius r: CGFloat, bumps: Int) -> Path {
+        var path = Path()
+        let steps = bumps * 12
+        for i in 0...steps {
+            let t = CGFloat(i) / CGFloat(steps)
+            let a: CGFloat = -CGFloat.pi / 2 + t * 2 * CGFloat.pi
+            let bump: CGFloat = abs(cos(CGFloat(bumps) * t * CGFloat.pi))
+            let rr: CGFloat = r * (0.84 + 0.16 * bump)
+            let point = CGPoint(x: c.x + rr * cos(a), y: c.y + rr * sin(a))
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        return path
+    }
+    /// Onda (linha do meio, para traçar): começa descendo, como no motor.
+    static func wave(center c: CGPoint, radius r: CGFloat, waves: Int) -> Path {
+        var path = Path()
+        for i in 0...48 {
+            let t = CGFloat(i) / 48
+            let y: CGFloat = c.y + 0.4 * r * sin(t * CGFloat(waves) * 2 * CGFloat.pi)
+            let point = CGPoint(x: c.x - r + 2 * r * t, y: y)
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        return path
+    }
+    /// Mancha: raio polar com três harmônicos (4, 5 e 2), como o blob do motor.
+    static func blob(center c: CGPoint, radius r: CGFloat) -> Path {
+        var path = Path()
+        for i in 0...96 {
+            let a: CGFloat = CGFloat(i) / 96 * 2 * CGFloat.pi
+            let h1: CGFloat = 0.55 * cos(4 * a + 0.9)
+            let h2: CGFloat = 0.3 * cos(5 * a + 2.4)
+            let h3: CGFloat = 0.15 * cos(2 * a + 4.1)
+            let rr: CGFloat = r * (1 + 0.18 * (h1 + h2 + h3)) / 1.18
+            let point = CGPoint(x: c.x + rr * cos(a), y: c.y + rr * sin(a))
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        return path
+    }
+    /// Balão de fala: corpo arredondado e rabicho à esquerda — duas peças
+    /// preenchidas uma a uma (juntas num caminho só a sobreposição viraria furo).
+    static func bubble(center c: CGPoint, radius r: CGFloat) -> [Path] {
+        [Path(roundedRect: CGRect(x: c.x - r, y: c.y - 0.8 * r, width: 2 * r, height: 1.22 * r), cornerRadius: 0.35 * r),
+         quad(center: c, radius: r, [-0.5, 0.3, -0.6, 0.88, -0.05, 0.3])]
     }
 }
 

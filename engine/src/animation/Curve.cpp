@@ -81,6 +81,39 @@ f32 Track::value_or(FrameIndex t, f32 fallback) const noexcept {
     return keys.empty() ? fallback : sample_keys(t);
 }
 
+f32 Track::sample_f(f64 t) const noexcept {
+    if (!std::isfinite(t)) return staticValue;
+    if (has_expression()) return expr::evaluate_track_f(*this, t, nullptr);
+    return sample_keys_f(t);
+}
+
+f32 Track::value_or_f(f64 t, f32 fallback) const noexcept {
+    if (!std::isfinite(t)) return fallback;
+    if (has_expression()) return expr::evaluate_track_f(*this, t, &fallback);
+    return keys.empty() ? fallback : sample_keys_f(t);
+}
+
+f32 Track::sample_keys_f(f64 t) const noexcept {
+    if (!std::isfinite(t) || keys.empty()) return staticValue;
+    if (keys.size() == 1 || t < static_cast<f64>(keys.front().time.value)) return keys.front().value;
+    if (t >= static_cast<f64>(keys.back().time.value)) return keys.back().value;
+    usize before = lastIndex;
+    if (before + 1 >= keys.size() || t < static_cast<f64>(keys[before].time.value)
+        || t >= static_cast<f64>(keys[before + 1].time.value)) {
+        const auto next = std::upper_bound(keys.begin(), keys.end(), t,
+            [](f64 frame, const Keyframe& key) { return frame < static_cast<f64>(key.time.value); });
+        before = static_cast<usize>(next - keys.begin() - 1);
+        lastIndex = static_cast<u32>(before);
+    }
+    const auto& a = keys[before];
+    const auto& b = keys[before + 1];
+    if (a.interp == Interpolation::Hold) return a.value;
+    const f64 span = static_cast<f64>(b.time.value) - static_cast<f64>(a.time.value);
+    if (span <= 0.0) return b.value;
+    return lerpf(a.value, b.value, keyframe_ease(a,
+        static_cast<f32>((t - static_cast<f64>(a.time.value)) / span)));
+}
+
 f32 Track::sample_keys(FrameIndex t) const noexcept {
     const usize n = keys.size();
     if (n == 0) return staticValue;

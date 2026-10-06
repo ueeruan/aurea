@@ -49,17 +49,19 @@ u32 ParameterRegistry::add_float(const char* id, const char* label, f32 def, f32
     return add(s);
 }
 
-u32 ParameterRegistry::add_int(const char* id, const char* label, i32 def, i32 min, i32 max) {
+u32 ParameterRegistry::add_int(const char* id, const char* label, i32 def, i32 min, i32 max, u16 flags) {
     ParamSpec s;
     s.id = id; s.label = label; s.type = ParamType::Int;
+    s.flags = flags;
     s.defaultValue = ParamValue::scalar(static_cast<f32>(def));
     s.minValue = static_cast<f32>(min); s.maxValue = static_cast<f32>(max);
     return add(s);
 }
 
-u32 ParameterRegistry::add_bool(const char* id, const char* label, bool def) {
+u32 ParameterRegistry::add_bool(const char* id, const char* label, bool def, u16 flags) {
     ParamSpec s;
     s.id = id; s.label = label; s.type = ParamType::Bool;
+    s.flags = flags;
     s.defaultValue = ParamValue::boolean(def);
     s.minValue = 0.0f; s.maxValue = 1.0f;
     return add(s);
@@ -226,6 +228,11 @@ u64 CurveData::hash() const noexcept {
 // =============================================================================
 ParamValue evaluate_param(const TrackSet& tracks, const EffectInstance& effect, u32 paramIndex,
                           const ParamSpec& spec, FrameIndex localTime, bool* usedFallback) noexcept {
+    return evaluate_param_f(tracks, effect, paramIndex, spec, static_cast<f64>(localTime.value), usedFallback);
+}
+
+ParamValue evaluate_param_f(const TrackSet& tracks, const EffectInstance& effect, u32 paramIndex,
+                            const ParamSpec& spec, f64 localTime, bool* usedFallback) noexcept {
     if (usedFallback) *usedFallback = false;
     if (paramIndex >= effect.params.size()) return spec.defaultValue;
     const ParamSlot& slot = effect.params[paramIndex];
@@ -243,7 +250,7 @@ ParamValue evaluate_param(const TrackSet& tracks, const EffectInstance& effect, 
     const u32 comps = spec.animatable() && !fromExpressionSlot ? component_count(spec.type) : 0;
     for (u32 c = 0; c < comps; ++c) {
         const Track* t = tracks.find(TrackProperty::EffectParam, effect.id, param_track_key(paramIndex, c));
-        if (t) out.v[c] = t->value_or(localTime, out.v[c]);   // keyframes e/ou expressão
+        if (t) out.v[c] = t->value_or_f(localTime, out.v[c]);
     }
     // O efeito só vê valores dentro do contrato do parâmetro (§117). Uma
     // expressão, um keyframe antigo ou um arquivo corrompido podem trazer NaN,

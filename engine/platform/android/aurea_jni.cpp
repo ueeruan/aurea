@@ -33,6 +33,7 @@
 #include "aurea/core/Version.hpp"
 #include "aurea/core/GestureMath.hpp"
 #include "aurea/export/BitratePolicy.hpp"
+#include "aurea/export/ExportWatchdog.hpp"
 
 #include <cstdio>
 #include <algorithm>
@@ -212,11 +213,19 @@ void release_window_locked(NativeContext& c) noexcept {
 
 } // namespace
 
+#include "aurea/timeline/CanvasFit.hpp"
 #define AUREA_JNI extern "C" JNIEXPORT
 #define AUREA_FN(name) JNICALL Java_com_aurea_aurea_engine_AureaEngine_##name
 
 AUREA_JNI jfloat AUREA_FN(clampPinchFactor)(JNIEnv*, jclass, jfloat factor, jfloat x, jfloat y, jfloat z, jboolean threeD) {
     return aurea::clamp_pinch_factor(factor, x, y, z, threeD == JNI_TRUE);
+}
+
+AUREA_JNI jfloatArray AUREA_FN(fitCanvas)(JNIEnv* env,jclass,jfloatArray values,jboolean fill) {
+    if(!values||env->GetArrayLength(values)!=11)return env->NewFloatArray(0);
+    std::array<float,11> a{};env->GetFloatArrayRegion(values,0,11,a.data());
+    const auto fit=aurea::canvas_fit(a,fill==JNI_TRUE);
+    auto result=env->NewFloatArray(5);if(result)env->SetFloatArrayRegion(result,0,5,fit.data());return result;
 }
 
 // Escala 3D de gesto no formato gravado (GestureMath.hpp): o volume nunca estica.
@@ -382,6 +391,16 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     if (!config.backend) { c->startupError = "Sem memoria para inicializar a GPU"; return JNI_FALSE; }
     config.backendConfig.enableValidation = debug == JNI_TRUE;
     config.backendConfig.enableGpuTimers = true;
+    // Device diagnostics only: isolate timestamp-query driver failures without
+    // changing the scene, effects, shutter samples or release configuration.
+    if (debug == JNI_TRUE) {
+        char gpuTimers[PROP_VALUE_MAX]{};
+        __system_property_get("debug.aurea.gpu_timers", gpuTimers);
+        if (std::strcmp(gpuTimers, "0") == 0) {
+            config.backendConfig.enableGpuTimers = false;
+            AUREA_LOG_INFO("diagnostico: timestamps de GPU desativados");
+        }
+    }
     config.cacheDirectory = to_string(env, cacheDir);
     config.documentsDirectory = to_string(env, documentsDir);
     config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
@@ -445,6 +464,22 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     const bool rgbaImport = gpu->capabilities().externalMemoryHardwareBuffer && !emulatorVideo;
     c->media.set_driver_gl(rgbaImport);
     c->media.set_zero_copy(false);
+    bool diagnosticSoftwareFallback = false;
+    if (debug == JNI_TRUE) {
+        char softwareFallback[PROP_VALUE_MAX]{};
+        __system_property_get("debug.aurea.force_sw_fallback", softwareFallback);
+        diagnosticSoftwareFallback = std::strcmp(softwareFallback, "1") == 0;
+    }
+    c->media.set_diagnostic_software_fallback(diagnosticSoftwareFallback);
+    if (diagnosticSoftwareFallback) AUREA_LOG_INFO("diagnostico: fallback software forcado com selecao de saida de producao");
+    bool diagnosticVideoPixels = false;
+    if (debug == JNI_TRUE) {
+        char videoPixels[PROP_VALUE_MAX]{};
+        __system_property_get("debug.aurea.video_pixels", videoPixels);
+        diagnosticVideoPixels = std::strcmp(videoPixels, "1") == 0;
+    }
+    c->media.set_diagnostic_video_pixels(diagnosticVideoPixels);
+    if (diagnosticVideoPixels) AUREA_LOG_INFO("diagnostico: pixels do FBO GL observados em PTS 1500000");
     // Sem o GL (backend GLES, sem importação): a regra de antes — Samsung no
     // decoder de software, o resto em planos pela CPU.
     c->media.set_software_only(emulatorVideo || (!rgbaImport && android::needs_software_video(manufacturer, std::atoi(sdk))));
@@ -832,7 +867,11 @@ AUREA_JNI jint AUREA_FN(nativeCaptureFrame)(JNIEnv* env, jclass, jlong handle, j
     if (!c || !dst || maxDim <= 0) return 0;
     std::vector<u8> rgba;
     u32 w = 0, h = 0;
-    if (!c->engine.capture_frame_rgba(static_cast<u32>(maxDim), rgba, w, h).ok()) return 0;
+    const Status captured = c->engine.capture_frame_rgba(static_cast<u32>(maxDim), rgba, w, h);
+    if (!captured.ok()) {
+        AUREA_LOG_WARN("captura do projeto falhou (%u): %s", static_cast<u32>(captured.code()), captured.message().data());
+        return 0;
+    }
     if (static_cast<jlong>(rgba.size()) > buffer_capacity(env, out)) return 0;
     std::memcpy(dst, rgba.data(), rgba.size());
     if (outSize && env->GetArrayLength(outSize) >= 2) {
@@ -1005,6 +1044,17 @@ AUREA_JNI jint AUREA_FN(nativeCopyEffects)(JNIEnv*, jclass, jlong handle, jlong 
     return c ? static_cast<jint>(c->engine.copy_effects(static_cast<u64>(layer),static_cast<u32>(effect))) : 0;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeCopyTransform)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.copy_transform(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativePasteTransform)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    const auto values = jlongs(env, ids);
+    return c ? static_cast<jint>(c->engine.paste_transform(values.data(), static_cast<u32>(values.size()))) : 0;
+}
+
 AUREA_JNI jint AUREA_FN(nativePasteEffects)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
     NativeContext* c = ctx_of(handle);
     const auto v = jlongs(env, ids);
@@ -1102,6 +1152,10 @@ AUREA_JNI jboolean AUREA_FN(nativeSetEnvironment)(JNIEnv*, jclass, jlong handle,
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_environment_params(intensity, rotation) ? JNI_TRUE : JNI_FALSE;
 }
+AUREA_JNI jboolean AUREA_FN(nativeSetEnvironmentBackgroundRange)(JNIEnv*, jclass, jlong handle, jlong start, jlong end) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_environment_background_range(start, end) ? JNI_TRUE : JNI_FALSE;
+}
 
 AUREA_JNI jboolean AUREA_FN(nativeQueryEnvironment)(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
@@ -1110,6 +1164,10 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryEnvironment)(JNIEnv* env, jclass, jlong h
     if (!c->engine.query_environment(v)) return JNI_FALSE;
     env->SetFloatArrayRegion(out, 0, 3, v);
     if (env->GetArrayLength(out) >= 4) { const f32 visible = c->engine.environment_background() ? 1.f : 0.f; env->SetFloatArrayRegion(out, 3, 1, &visible); }
+    if (env->GetArrayLength(out) >= 6) {
+        const f32 range[2]{static_cast<f32>(c->engine.environment_background_start()), static_cast<f32>(c->engine.environment_background_end())};
+        env->SetFloatArrayRegion(out, 4, 2, range);
+    }
     return JNI_TRUE;
 }
 
@@ -1510,6 +1568,50 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryModelShadows)(JNIEnv* env, jclass, jlong 
     if (!c->engine.query_model_shadows(static_cast<u64>(layer), v)) return JNI_FALSE;
     env->SetFloatArrayRegion(out, 0, 2, v);
     return JNI_TRUE;
+}
+
+// --- Mostrar interior e miniatura de material (EngineShape3D.cpp) -----------------
+AUREA_JNI jboolean AUREA_FN(nativeSetModelInterior)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_model_interior(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryModelInterior)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.query_model_interior(static_cast<u64>(layer))) : -1;
+}
+
+namespace {
+/// RGBA8 (alfa reto) → ARGB por int, o formato de Bitmap.createBitmap(int[]).
+jintArray argb_array(JNIEnv* env, const std::vector<u8>& rgba) {
+    const jsize n = static_cast<jsize>(rgba.size() / 4u);
+    jintArray out = n > 0 ? env->NewIntArray(n) : nullptr;
+    if (!out) return nullptr;
+    std::vector<jint> px(static_cast<usize>(n));
+    for (jsize i = 0; i < n; ++i) {
+        const u8* p = &rgba[static_cast<usize>(i) * 4u];
+        px[static_cast<usize>(i)] = static_cast<jint>((static_cast<u32>(p[3]) << 24) | (static_cast<u32>(p[0]) << 16)
+                                                      | (static_cast<u32>(p[1]) << 8) | p[2]);
+    }
+    env->SetIntArrayRegion(out, 0, n, px.data());
+    return out;
+}
+} // namespace
+
+AUREA_JNI jintArray AUREA_FN(nativeMaterialPreview)(JNIEnv* env, jclass, jlong handle, jlong layer, jint material, jint size) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<u8> rgba;
+    if (!c || material < 0 || size <= 0
+        || !c->engine.material_preview(static_cast<u64>(layer), static_cast<u32>(material), static_cast<u32>(size), rgba)) return nullptr;
+    return argb_array(env, rgba);
+}
+
+AUREA_JNI jintArray AUREA_FN(nativeText3DPresetPreview)(JNIEnv* env, jclass, jlong handle, jint preset, jint size) {
+    NativeContext* c = ctx_of(handle);
+    std::vector<u8> rgba;
+    if (!c || preset < 0 || size <= 0
+        || !c->engine.text3d_preset_preview(static_cast<u32>(preset), static_cast<u32>(size), rgba)) return nullptr;
+    return argb_array(env, rgba);
 }
 
 // --- Formas 3D (Engine::add_shape3d e família; scene3d/Shape3D.hpp) -----------
@@ -2701,6 +2803,26 @@ AUREA_JNI jfloat AUREA_FN(nativeMotionBlurState)(JNIEnv*, jclass, jlong handle) 
     return on ? shutter + 1.0f : -(shutter + 1.0f);   // sinal = ligado; módulo − 1 = obturador
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeQueryMotionBlurSettings)(JNIEnv* env, jclass, jlong handle, jfloatArray output) {
+    NativeContext* c = ctx_of(handle);
+    MotionBlurSettings settings;
+    if (!c || !output || env->GetArrayLength(output) < 6 ||
+        !c->engine.query_motion_blur_settings(settings)) return JNI_FALSE;
+    const jfloat values[] = {settings.enabled ? 1.0f : 0.0f, settings.shutterAngle,
+        settings.shutterPhase, static_cast<jfloat>(settings.samples),
+        static_cast<jfloat>(settings.adaptiveLimit), static_cast<jfloat>(settings.previewSamples)};
+    env->SetFloatArrayRegion(output, 0, 6, values);
+    return env->ExceptionCheck() ? JNI_FALSE : JNI_TRUE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlurSettings)(JNIEnv*, jclass, jlong handle,
+    jboolean enabled, jfloat angle, jfloat phase, jint samples, jint adaptiveLimit) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || samples < 0 || adaptiveLimit < 0) return JNI_FALSE;
+    return c->engine.set_motion_blur_settings(enabled == JNI_TRUE, angle, phase,
+        static_cast<u32>(samples), static_cast<u32>(adaptiveLimit)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI void AUREA_FN(nativeSetEditMode)(JNIEnv*, jclass, jlong handle, jboolean on) {
     if (NativeContext* c = ctx_of(handle)) c->engine.set_edit_mode(on == JNI_TRUE);
 }
@@ -3162,10 +3284,12 @@ AUREA_JNI jint AUREA_FN(nativeRecoverSession)(JNIEnv*, jclass, jlong handle) {
 // =============================================================================
 /// `shortSide` = lado menor do vídeo (720/1080/1440/2160); `fps` 0 = o da
 /// composição; `codec` 0 = H.264, 1 = HEVC; `bitrateMbps` 0 = automático;
-/// `quality` 0 Baixa / 1 Normal / 2 Alta; `rateMode` 0 CBR / 1 VBR.
+/// `quality` 0 Baixa / 1 Normal / 2 Alta; `rateMode` 0 CBR / 1 VBR;
+/// `safeMode` 0..2 = o modo de segurança que o motor sugeriu depois de o
+/// encoder travar (export/ExportWatchdog.hpp).
 AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint shortSide,
                                            jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale, jboolean trimToContent,
-                                           jint quality, jint rateMode) {
+                                           jint quality, jint rateMode, jint safeMode) {
     NativeContext* c = ctx_of(handle);
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, outputPath);
@@ -3179,6 +3303,7 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
     settings.trimToContent = trimToContent == JNI_TRUE;
     settings.quality = static_cast<u32>(std::clamp<jint>(quality, 0, 2));
     settings.rateMode = rateMode == 0 ? 0u : 1u;
+    settings.safeMode = static_cast<u32>(std::clamp<jint>(safeMode, 0, static_cast<jint>(kExportSafeModeMax)));
     settings.audioBitrateKbps = kExportAudioKbps;
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
 }
@@ -3251,6 +3376,23 @@ AUREA_JNI jboolean AUREA_FN(nativeExportProgress)(JNIEnv* env, jclass, jlong han
     if (!c || !pod) return JNI_FALSE;
     c->engine.fill_export_progress(*pod);
     return JNI_TRUE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeLocalAiStatus)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.local_ai_status()) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativePreviewBufferRanges)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    const auto capacity = static_cast<u32>(std::min<jsize>(30, env->GetArrayLength(out) / 2));
+    i64 ranges[60]{};
+    const u32 count = c->engine.copy_preview_buffer_ranges(ranges, capacity);
+    jlong encoded[60]{};
+    for (u32 i = 0; i < count * 2; ++i) encoded[i] = static_cast<jlong>(ranges[i]);
+    if (count) env->SetLongArrayRegion(out, 0, static_cast<jsize>(count * 2), encoded);
+    return static_cast<jint>(count);
 }
 
 // =============================================================================

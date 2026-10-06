@@ -19,4 +19,6 @@
     <string name="ui3d_deform_letters">Deformar letras (giro, cilindro, torsión)</string>
     <string name="ui3d_shadows">Sombras</string>
     <string name="ui3d_bloom_strength">Intensidad del brillo</string>
+    <string name="ui3d_show_interior">Mostrar interior</string>
+    <string name="ui3d_show_interior_hint">También dibuja las caras interiores con la misma textura: al entrar en el objeto con la cámara (o aumentar la escala), se ve el interior.</string>
 </resources>

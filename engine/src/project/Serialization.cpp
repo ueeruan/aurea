@@ -926,6 +926,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.f32v(l.shape.shaft);
     w.f32v(l.shape.amplitude);
     w.f32v(l.shape.seed);
+    // v45: "aceita luzes" da camada 2D no espaço 3D.
+    w.boolv(l.acceptsLights);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -955,6 +957,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
 //      grupo fechado para a câmera (o render de sempre).
 // v43: mostrar interior do objeto 3D (Model3DData::interior, um byte no fim
 //      da camada). Antes dela: automático.
+// v45: "aceita luzes" da camada (Layer::acceptsLights, um bool no fim da
+//      camada). Antes dela: desligado — as luzes não tocam as camadas 2D.
 // v44: parâmetros das formas paramétricas (profundidade, ponta, espessura,
 //      abertura, ponta e haste da seta, amplitude, variante), 8 floats no fim
 //      da camada. Antes dela: os padrões da ShapeData — profundidade, ponta,
@@ -1518,6 +1522,9 @@ void read_layer(ByteReader& r, Layer& l) {
             read_param(l.shape.seed, defaults.seed);
         }
     }
+    // Projeto anterior à v45: a camada não recebe luz (as luzes da composição
+    // iluminavam só os modelos 3D) — abre exatamente como foi feito.
+    l.acceptsLights = g_readingTimelineVersion >= 45 ? r.boolv() : false;
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap

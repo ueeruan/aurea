@@ -1776,7 +1776,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.0.3 (2142) • 10/07/2026\n\n• Trackball gizmo for 3D rotation: X/Y/Z rings and a view ring; drag to rotate freely.\n• Mesh Warp: a grid of points and handles to deform the layer, animatable.\n• New Disintegrate effect; Balls with light direction and mix.\n• Mask and Exclude blending, like Alight Motion.\n• Puppet: pins to deform images (follows the cutout).\n• Rotoscoping: paint object/background and propagate through the clip.\n• Delete account from the app.\n• Ad privacy in settings.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.4 (2143) • 10/07/2026\n\n• Fixed: since 0.0.2, 3D lights started lighting 3D images, videos, texts and shapes and changed the look of older projects. This is now the per-layer \"Accepts lights\" option (off by default), and projects look as before again.\n• Everything from 0.0.3: 3D rotation trackball, Mesh Warp, Disintegrate, Mask/Exclude, Puppet, Rotoscoping, Delete account.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -3148,6 +3148,8 @@ to edit the curve.</string>
     <string name="la_affected_hint">A group right below counts as one layer: the adjustment applies only to it.</string>
     <string name="la_group_camera">Camera reaches the group</string>
     <string name="la_group_camera_hint">The outer camera sees the 3D layers inside the group</string>
+    <string name="la_accepts_lights">Accepts lights</string>
+    <string name="la_accepts_lights_hint">Scene lights illuminate this layer in 3D space</string>
     <string name="la_add_to_group">Add to Group</string>
     <string name="la_remove_from_group">Remove from Group</string>
     <string name="la_pick_group">Pick the group</string>

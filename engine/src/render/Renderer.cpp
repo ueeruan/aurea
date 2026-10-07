@@ -3202,6 +3202,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // O mundo da camada (o mesmo de `m`, sem a projeção): as luzes
                 // da composição iluminam o plano pela normal dele.
                 rl.worldFromLayer = shifted ? world_3d(comp, *l, time) * shiftM : world_3d(comp, *l, time);
+                rl.acceptsLights = l->acceptsLights;
                 out.scenes.back().planeLayers.push_back(used);
             }
         } else {
@@ -4929,6 +4930,10 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         // Luzes da composição (o bloco do grupo) no mundo desta camada.
         if (static_cast<usize>(layer.planeGroup) < snap.scenes.size()) p.light = snap.scenes[static_cast<usize>(layer.planeGroup)].planeLight;
         p.light.worldFromLayer = layer.worldFromLayer;
+        // "Aceita luzes" desligado (o padrão, e todo projeto anterior à v45):
+        // o plano sai como no 2D mesmo com luz na composição — as luzes de
+        // um projeto do 2138 eram para os modelos e não podem lavar as imagens.
+        if (!layer.acceptsLights) p.light.cameraPos.w = 0.0f;
         groupPlanes_[static_cast<usize>(layer.planeGroup)].push_back(p);
     }
     const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);

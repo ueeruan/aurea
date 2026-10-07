@@ -235,6 +235,8 @@ struct RenderLayer {
     /// Plano na cena: mundo (px) ← px da camada (a normal e a posição que as
     /// luzes da composição iluminam).
     Mat4 worldFromLayer = Mat4::identity();
+    /// Layer::acceptsLights: só então o plano recebe as luzes da composição.
+    bool acceptsLights = false;
     /// Máscaras (render/MaskRaster.hpp): bloco em FrameSnapshot::maskData a
     /// partir de `maskFirst`, `maskCount` ativas, cobertura inicial e a chave
     /// do bloco (cache da cobertura).

@@ -2537,6 +2537,16 @@ AUREA_JNI jint AUREA_FN(nativeQueryGroupCameraPassThrough)(JNIEnv*, jclass, jlon
     return c ? static_cast<jint>(c->engine.query_group_camera_pass_through(static_cast<u64>(layer))) : -1;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerAcceptsLights)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_accepts_lights(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryLayerAcceptsLights)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.query_layer_accepts_lights(static_cast<u64>(layer))) : -1;
+}
+
 AUREA_JNI jstring AUREA_FN(nativeAddLayersToGroup)(JNIEnv* env, jclass, jlong handle, jlongArray ids, jlong group) {
     NativeContext* c = ctx_of(handle);
     if (!c) return env->NewStringUTF("motor indisponivel");

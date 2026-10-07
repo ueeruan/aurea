@@ -3419,6 +3419,14 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if (auto* e = self.engine) return e->query_group_camera_pass_through(static_cast<aurea::u64>(layerId));
     return -1;
 }
+- (BOOL)setLayerAcceptsLights:(BOOL)on forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->set_layer_accepts_lights(static_cast<aurea::u64>(layerId), on != NO);
+    return NO;
+}
+- (int32_t)layerAcceptsLights:(long long)layerId {
+    if (auto* e = self.engine) return e->query_layer_accepts_lights(static_cast<aurea::u64>(layerId));
+    return -1;
+}
 - (NSString*)addLayers:(NSArray<NSNumber*>*)layerIds toGroup:(long long)groupId {
     auto* e = self.engine;
     if (!e) return @"motor indisponivel";

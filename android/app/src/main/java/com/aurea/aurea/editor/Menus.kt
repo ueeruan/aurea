@@ -220,6 +220,15 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
                     detail = stringResource(R.string.la_group_camera_hint),
                 )
             }
+            if (store.layerAcceptsLights >= 0) {
+                MenuItemRow(
+                    CupertinoGlyph.Lightbulb,
+                    stringResource(R.string.la_accepts_lights),
+                    { store.changeLayerAcceptsLights(store.layerAcceptsLights != 1) },
+                    checked = store.layerAcceptsLights == 1,
+                    detail = stringResource(R.string.la_accepts_lights_hint),
+                )
+            }
             // Pôr esta camada num grupo que já existe aqui / tirar do grupo aberto.
             val addToGroup = stringResource(R.string.la_add_to_group)
             store.layers.filter { it.id != id && LayerType.of(it.kind) == LayerType.Group }.forEach { g ->

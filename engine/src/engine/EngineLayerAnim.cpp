@@ -509,6 +509,41 @@ i32 Engine::query_group_camera_pass_through(u64 layerId) noexcept {
     return l->nested.cameraPassThrough ? 1 : 0;
 }
 
+namespace {
+/// Camadas que viram plano na cena 3D (as luzes da composição podem tocá-las).
+bool accepts_lights_applies(const Layer& l) noexcept {
+    switch (l.kind) {
+        case LayerKind::Camera: case LayerKind::Light: case LayerKind::Model3D:
+        case LayerKind::Audio: case LayerKind::Null:
+            return false;
+        default:
+            return true;
+    }
+}
+} // namespace
+
+bool Engine::set_layer_accepts_lights(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !accepts_lights_applies(*l)) return false;
+    if (l->acceptsLights == on) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "aceita luzes");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    l->acceptsLights = on;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+i32 Engine::query_layer_accepts_lights(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !accepts_lights_applies(*l)) return -1;
+    return l->acceptsLights ? 1 : 0;
+}
+
 Result<u32> Engine::add_layers_to_group(const u64* ids, u32 count, u64 groupLayerId, std::string* why) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     auto refuse = [&](Errc code, const char* reason) {

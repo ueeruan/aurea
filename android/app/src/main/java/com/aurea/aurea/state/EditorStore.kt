@@ -1550,9 +1550,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             adjustmentScope = engine.queryAdjustmentScope(id)
             adjustmentTargets = if (adjustmentScope == 2) engine.queryAdjustmentTargets(id).toSet() else emptySet()
             groupCameraPassThrough = engine.queryGroupCameraPassThrough(id)
+            layerAcceptsLights = engine.queryLayerAcceptsLights(id)
         } else {
             layerAnimators = emptyList()
             groupCameraPassThrough = -1
+            layerAcceptsLights = -1
         }
         shapeParams = same(shapeParams, if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && !isVectorLayer) engine.queryShapeParams(id) else null)
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
@@ -4608,6 +4610,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo). */
     var groupCameraPassThrough by mutableStateOf(-1)
         private set
+    /** "Aceita luzes" da camada (−1 = camada sem a opção). */
+    var layerAcceptsLights by mutableStateOf(-1)
+        private set
 
     fun applyTextPreset(preset: Int) {
         val id = primary ?: return
@@ -4966,6 +4971,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (engine.setGroupCameraPassThrough(id, on)) {
             showToast(appText(if (on) R.string.app_group_camera_reaches else R.string.app_group_camera_sealed))
         }
+        refreshNow()
+        refreshDetail()
+    }
+
+    fun changeLayerAcceptsLights(on: Boolean) {
+        val id = primary ?: return
+        engine.setLayerAcceptsLights(id, on)
         refreshNow()
         refreshDetail()
     }

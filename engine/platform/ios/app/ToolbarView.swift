@@ -648,6 +648,13 @@ private struct ShellMenuRow: View {
                         model.refreshModel(force: true)
                     }
                 } else { ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_converter_grupo") { act { model.groupSelection() } } }
+                let acceptsLights = model.engine.layerAcceptsLights(row.id)
+                if acceptsLights >= 0 {
+                    ShellMenuRow(CupertinoGlyph.Lightbulb, "la_accepts_lights", checked: acceptsLights == 1, detail: "la_accepts_lights_hint") {
+                        _ = model.engine.setLayerAcceptsLights(acceptsLights != 1, forLayer: row.id)
+                        model.refreshModel(force: true)
+                    }
+                }
                 // Pôr esta camada num grupo que já existe aqui / tirar do grupo aberto.
                 ForEach(model.layers.filter { $0.kind == 12 && $0.id != row.id }) { group in
                     ShellMenuRow(CupertinoGlyph.RectangleStack, "la_add_to_group", title: AureaText.t("la_add_to_group") + " · " + group.name) {

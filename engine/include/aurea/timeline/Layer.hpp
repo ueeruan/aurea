@@ -688,6 +688,11 @@ struct Layer {
     /// está ligado, e cada camada pode discordar depois.
     bool     magneticTrack = false;
     bool     threeD  = false;  ///< participa da cena 3D da composição
+    /// "Aceita luzes" (o Accepts Lights do After Effects): camada 2D no espaço
+    /// 3D recebe as luzes da composição. Desligado por padrão — projeto do
+    /// build 2138 (as luzes eram só para os modelos) abre com as imagens,
+    /// vídeos, textos e formas exatamente como antes. Gravado na v45.
+    bool     acceptsLights = false;
     /// Camada de ajuste: não desenha conteúdo próprio; os efeitos dela valem
     /// para a composição de TUDO o que está abaixo (no trecho de tempo dela),
     /// no quadro inteiro, misturados pela opacidade da camada.

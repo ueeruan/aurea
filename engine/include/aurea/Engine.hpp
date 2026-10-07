@@ -607,6 +607,11 @@ public:
     bool set_group_camera_pass_through(u64 layerId, bool on) noexcept;
     /// −1 = não é grupo; 0/1.
     [[nodiscard]] i32 query_group_camera_pass_through(u64 layerId) noexcept;
+    /// "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição
+    /// (Layer::acceptsLights; desligado por padrão, como os projetos antigos).
+    bool set_layer_accepts_lights(u64 layerId, bool on) noexcept;
+    /// −1 = camada sem essa opção (câmera, luz, modelo 3D, áudio, nulo); 0/1.
+    [[nodiscard]] i32 query_layer_accepts_lights(u64 layerId) noexcept;
     /// Põe as camadas dentro do grupo `groupLayerId` (mesma composição), com
     /// os mesmos tempos na tela. Recusa (motivo em `why`) grupo com o tempo
     /// alterado. Desfazível num passo. Devolve quantas entraram.

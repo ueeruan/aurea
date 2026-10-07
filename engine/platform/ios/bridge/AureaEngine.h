@@ -519,6 +519,10 @@ NS_SWIFT_NAME(AureaEngine)
 /// Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo).
 - (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId;
 - (int32_t)groupCameraPassThrough:(long long)layerId;
+/// "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição.
+- (BOOL)setLayerAcceptsLights:(BOOL)on forLayer:(long long)layerId;
+/// −1 = camada sem a opção (câmera, luz, modelo 3D, áudio, nulo); 0/1.
+- (int32_t)layerAcceptsLights:(long long)layerId;
 /// "" = deu certo; senão o motivo da recusa.
 - (NSString*)addLayers:(NSArray<NSNumber*>*)layerIds toGroup:(long long)groupId;
 - (NSString*)removeLayerFromGroup:(long long)layerId NS_SWIFT_NAME(removeLayerFromGroup(_:));

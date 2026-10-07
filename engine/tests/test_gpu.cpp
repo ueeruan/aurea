@@ -3377,6 +3377,7 @@ AUREA_TEST(Gpu, ExpressionOnPositionMovesTheLayer) {
                 x0, y0, x1, y1, x2 - x0, x3, y3);
 }
 
+#include "CameraRegressionScenarios.inl"
 #endif // AUREA_TEST_VULKAN
 
 AUREA_TEST(Gpu, TemporalRgbVideoPixelsSurviveSaveAndReopen) {
@@ -5616,6 +5617,10 @@ AUREA_TEST(Gpu, ThreeDLayerPlaneIsLitByCompositionLights) {
     light->light.range = 0.0f;
     light->transform.position = Vec3{64, 64, -100};
     plane->transform.rotation.y = 0;
+    // "Aceita luzes" desligado (padrão; projetos do 2138): a luz não toca a
+    // camada. Ligado: a camada recebe as luzes da composição.
+    const f32 refused = s.render().v(64, 64).x;
+    plane->acceptsLights = true;
     const f32 lit0 = s.render().v(64, 64).x;
     plane->transform.rotation.y = 70;
     const f32 lit70 = s.render().v(64, 64).x;
@@ -5635,6 +5640,7 @@ AUREA_TEST(Gpu, ThreeDLayerPlaneIsLitByCompositionLights) {
     std::printf("    plano 3D: sem luz %.3f / %.3f (70 graus); ponto %.3f de frente, %.3f a 70, %.3f a -70, %.3f atras; spot %.3f, fora do cone %.3f\n",
                 unlit0, unlit70, lit0, lit70, litMinus70, behind, spotOn, spotOff);
     AUREA_CHECK(unlit0 > .95f && unlit70 > .95f);   // sem luz: cheio, como antes
+    AUREA_CHECK(refused > .95f);                    // não aceita luzes: igual ao sem luz
     AUREA_CHECK(lit0 > .9f);                        // de frente: cor cheia
     AUREA_CHECK(lit70 < lit0 * .6f && lit70 > .1f); // cos 70 ≈ 0,34
     AUREA_CHECK(litMinus70 < lit0 * .6f);

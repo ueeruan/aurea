@@ -732,6 +732,10 @@ class AureaEngine private constructor() {
     fun setGroupCameraPassThrough(layer: Long, on: Boolean): Boolean = nativeSetGroupCameraPassThrough(nativeHandle, layer, on)
     /** −1 = não é grupo. */
     fun queryGroupCameraPassThrough(layer: Long): Int = nativeQueryGroupCameraPassThrough(nativeHandle, layer)
+    /** "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição. */
+    fun setLayerAcceptsLights(layer: Long, on: Boolean): Boolean = nativeSetLayerAcceptsLights(nativeHandle, layer, on)
+    /** −1 = camada sem a opção (câmera, luz, modelo 3D, áudio, nulo). */
+    fun queryLayerAcceptsLights(layer: Long): Int = nativeQueryLayerAcceptsLights(nativeHandle, layer)
     /** Nulo = deu certo; senão o motivo da recusa. */
     fun addLayersToGroup(ids: LongArray, group: Long): String? = nativeAddLayersToGroup(nativeHandle, ids, group)
     fun removeLayerFromGroup(layer: Long): String? = nativeRemoveLayerFromGroup(nativeHandle, layer)
@@ -1144,6 +1148,8 @@ class AureaEngine private constructor() {
     private external fun nativeRotoStatus(handle: Long, layer: Long, effectId: Int): LongArray?
     private external fun nativeSetGroupCameraPassThrough(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeQueryGroupCameraPassThrough(handle: Long, layer: Long): Int
+    private external fun nativeSetLayerAcceptsLights(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeQueryLayerAcceptsLights(handle: Long, layer: Long): Int
     private external fun nativeAddLayersToGroup(handle: Long, ids: LongArray, group: Long): String?
     private external fun nativeRemoveLayerFromGroup(handle: Long, layer: Long): String?
     private external fun nativeSavePreset(handle: Long, layer: Long, kind: Int, name: ByteArray, parts: Int): ByteArray?

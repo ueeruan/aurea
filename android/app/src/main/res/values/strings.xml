@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea Beta 0.0.3 (2142) • 07/10/2026\n\n• Gizmo trackball na rotação 3D: anéis X/Y/Z e anel da vista; arraste para girar livre.\n• Mesh Warp: grade de pontos e alças para deformar a camada, animável.\n• Novo efeito Desintegrar; Bolas com direção da luz e mistura.\n• Máscara e Excluir na mistura, como no Alight Motion.\n• Fantoche: pinos para deformar imagens (segue o recorte).\n• Rotoscopia: pinte objeto/fundo e propague pelo clipe.\n• Excluir conta pelo app.\n• Privacidade dos anúncios nos ajustes.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.4 (2143) • 07/10/2026\n\n• Corrigido: desde a 0.0.2, luzes 3D passaram a iluminar imagens, vídeos, textos e formas em 3D e mudaram o visual de projetos antigos. Agora isso é a opção \"Aceita luzes\" de cada camada (desligada por padrão) e os projetos voltam a ficar como antes.\n• Tudo da 0.0.3: trackball na rotação 3D, Mesh Warp, Desintegrar, Máscara/Excluir, Fantoche, Rotoscopia, Excluir conta.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -3181,6 +3181,8 @@
     <string name="la_affected_hint">Um grupo logo abaixo conta como uma camada: o ajuste vale só para ele.</string>
     <string name="la_group_camera">Câmera alcança o grupo</string>
     <string name="la_group_camera_hint">A câmera de fora vê as camadas 3D de dentro do grupo</string>
+    <string name="la_accepts_lights">Aceita luzes</string>
+    <string name="la_accepts_lights_hint">As luzes da cena iluminam esta camada no espaço 3D</string>
     <string name="la_add_to_group">Pôr no grupo</string>
     <string name="la_remove_from_group">Tirar do grupo</string>
     <string name="la_pick_group">Escolha o grupo</string>

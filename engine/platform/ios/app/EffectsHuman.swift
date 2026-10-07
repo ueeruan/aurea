@@ -80,6 +80,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.bend", FxEffectHuman(name: "fx_name_bend", keywords: "bend fold dobra papel", principal: [0, 1, 2, 5])),
     ("aurea.distort.curl", FxEffectHuman(name: "fx_name_curl", keywords: "curl roll enrolar cilindro", principal: [0, 1, 2, 3, 6])),
     ("aurea.distort.page_turn", FxEffectHuman(name: "fx_name_page_turn", keywords: "page turn pagina papel", principal: [0, 1, 2, 3, 8])),
+    ("aurea.distort.mesh_warp", FxEffectHuman(name: "fx_name_mesh_warp", keywords: "mesh warp malha deformacao grade bezier entortar", principal: [0, 1, 2])),
+    ("aurea.distort.puppet", FxEffectHuman(name: "fx_name_puppet", keywords: "puppet fantoche pino pin marionete rig personagem deformar arap", principal: [0, 1, 2])),
     ("aurea.distort.liquid_glass", FxEffectHuman(name: "fx_name_liquid_glass", keywords: "liquid glass vidro liquido lente refracao glassmorphism", principal: [0, 1, 2, 3, 5])),
     ("aurea.transition.noise_dissolve", FxEffectHuman(name: "fx_name_noise_dissolve", keywords: "dissolve dissolver ruido queimar desintegrar", principal: [0, 1, 3, 8, 10])),
     ("aurea.stylize.eight_bit", FxEffectHuman(name: "fx_name_eight_bit", keywords: "8 bit 8bit pixel retro dither pontilhado game", principal: [0, 1, 2, 3])),
@@ -1201,6 +1203,24 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             6: FxParamHuman(label: "afx_p_ball_size", decimals: 0),
             7: FxParamHuman(label: "afx_p_instability_state"),
             8: FxParamHuman(label: "afx_p_instability", suffix: "px", decimals: 1),
+            9: FxParamHuman(label: "fx_deform_light_direction"),
+            10: FxParamHuman(label: "fx_mistura", decimals: 0),
+        ])),
+    // Desintegrar: a camada se desfaz em fragmentos que voam.
+    ("aurea.transition.disintegrate", FxEffectHuman(
+        name: "afx_name_disintegrate",
+        keywords: "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao",
+        principal: [0, 1, 2, 3, 5, 11],
+        params: [
+            0: FxParamHuman(decimals: 0),
+            2: FxParamHuman(suffix: "px", decimals: 1),
+            3: FxParamHuman(decimals: 0),
+            5: FxParamHuman(suffix: "px", decimals: 0),
+            6: FxParamHuman(label: "particular_turbulence", suffix: "px", decimals: 0),
+            7: FxParamHuman(suffix: "px", decimals: 0),
+            8: FxParamHuman(decimals: 0),
+            11: FxParamHuman(label: "afx_p_edge_glow", decimals: 0),
+            12: FxParamHuman(label: "fx_mistura", decimals: 0),
         ])),
     // Particular: as partículas do app antigo.
     ("aurea.generate.particular", FxEffectHuman(
@@ -1598,10 +1618,12 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.generate.audio_waveform", "afx_desc_audio_waveform", FxAllTargets, "forma de onda waveform audio osciloscopio som visualizador")
     put("aurea.generate.spectrum_analyzer", "afx_desc_spectrum", FxAllTargets, "espectro spectrum audio barras frequencias visualizador equalizador")
     put("aurea.stylize.ball_grid", "afx_desc_balls", FxVisualTargets, "bolas esferas balls spheres grade particulas explodir dispersar")
+    put("aurea.transition.disintegrate", "afx_desc_disintegrate", FxVisualTargets, "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao")
     put("aurea.shape3d.layout", "fx_desc_shape3d_layout", [.cena3D], "forma 3d shape partes parts girar espalhar explodir atraso aleatorio")
     put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")
+    put("aurea.distort.puppet", "fx_desc_puppet", FxAllTargets, "fantoche puppet pino pin marionete rig personagem deformar")
     return out
 }()
 

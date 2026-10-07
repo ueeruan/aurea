@@ -418,6 +418,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun consumeEffectFocus() { pendingEffectFocus = null }
+    /** Abre o cartão do efeito `type` que a camada já tem (o último dele). */
+    fun focusExistingEffect(type: Int) {
+        val layer = primary ?: return
+        pendingEffectFocus = EffectFocusRequest(layer, type, emptySet())
+    }
     /** Parâmetros de cada efeito da camada principal (por effectId). */
     var effectParams by mutableStateOf<Map<Int, List<EffectParam>>>(emptyMap())
         private set
@@ -1777,6 +1782,47 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun rigGestureEnd() {
         rigRevision++
         refreshNow()
+    }
+    // Malha de deformação no palco (editor/MeshWarpStage.kt). `rigRevision`
+    // serve de relógio do desenho também (sobe a cada edição).
+    fun meshWarp(layer: Long, effect: Int): FloatArray {
+        var buf = FloatArray(4 + 32 * 32 * 10)
+        val need = engine.queryMeshWarp(layer, effect, buf)
+        if (need > buf.size) { buf = FloatArray(need); engine.queryMeshWarp(layer, effect, buf) }
+        return if (need <= 0) FloatArray(0) else buf.copyOf(need)
+    }
+    fun meshWarpDrag(layer: Long, effect: Int, vertex: Int, grip: Int, u: Float, v: Float, continuing: Boolean) {
+        if (playing) pause()
+        if (engine.meshWarpDrag(layer, effect, vertex, grip, u, v, autoKeyTransforms, continuing)) rigRevision++
+    }
+    fun meshWarpReset(layer: Long, effect: Int) {
+        if (engine.meshWarpReset(layer, effect)) { rigRevision++; refreshNow() }
+    }
+    // Fantoche no palco (editor/PuppetStage.kt): pinos e malha em fração da camada.
+    private fun puppetQuery(layer: Long, effect: Int, mesh: Boolean): FloatArray {
+        var buf = FloatArray(if (mesh) 4096 else 64)
+        var need = if (mesh) engine.queryPuppetMesh(layer, effect, buf) else engine.queryPuppet(layer, effect, buf)
+        if (need > buf.size) {
+            buf = FloatArray(need)
+            need = if (mesh) engine.queryPuppetMesh(layer, effect, buf) else engine.queryPuppet(layer, effect, buf)
+        }
+        return if (need <= 0) FloatArray(0) else buf.copyOf(need)
+    }
+    fun puppetPins(layer: Long, effect: Int): FloatArray = puppetQuery(layer, effect, false)
+    fun puppetMesh(layer: Long, effect: Int): FloatArray = puppetQuery(layer, effect, true)
+    fun puppetAddPin(layer: Long, effect: Int, u: Float, v: Float): Int {
+        if (playing) pause()
+        val pin = engine.puppetAddPin(layer, effect, u, v)
+        if (pin >= 0) { rigRevision++; refreshNow() }
+        return pin
+    }
+    /** Arrasto ao vivo; `continuing` = mesmo gesto (um passo de desfazer); auto-key do palco. */
+    fun puppetMovePin(layer: Long, effect: Int, pin: Int, u: Float, v: Float, continuing: Boolean) {
+        if (playing) pause()
+        if (engine.puppetMovePin(layer, effect, pin, u, v, autoKeyTransforms, continuing)) rigRevision++
+    }
+    fun puppetRemovePin(layer: Long, effect: Int, pin: Int) {
+        if (engine.puppetRemovePin(layer, effect, pin)) { rigRevision++; refreshNow() }
     }
     /** Esqueleto automático (troca o rig que houver); quantas juntas saíram. */
     fun rigAutoHumanoid(layer: Long): Int {
@@ -3610,6 +3656,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         applyGizmoComponents(id, d, base, current, values)
     }
     fun previewGestureBasis(id: Long): FloatArray? = engine.previewGestureBasis(id)
+    /** Trackball do gizmo de girar (TrackballStage.kt). */
+    fun queryTrackball(id: Long): FloatArray? = engine.queryTrackball(id)
 
     private fun applyGizmoPosition(id: Long, d: LayerDetail, out: FloatArray) =
         applyGizmoComponents(id, d, TrackProperty.POSITION_X, d.position, out)
@@ -4898,6 +4946,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
             refreshDetail()
         }
+    }
+
+    /** Roto Brush (editor/RotoPaint.kt): depois de traço/desfazer no motor. */
+    fun rotoChanged() {
+        refreshNow()
+        refreshDetail()
     }
 
     /** Alternar grupo: um grupo escolhido desagrupa; senão as escolhidas viram grupo. */

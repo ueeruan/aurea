@@ -248,6 +248,12 @@ public:
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
     [[nodiscard]] virtual TextureHandle cube_lut(AssetId) noexcept { return {}; }
+    /// Textura RGBA32F `width`×`height` de DADO (lida por texelFetch no vértice:
+    /// a grade tesselada da Malha de deformação), guardada por `key` como as LUTs.
+    [[nodiscard]] virtual TextureHandle data_texture(u64 key, const Vec4* texels, u32 width, u32 height) noexcept {
+        (void)key; (void)texels; (void)width; (void)height;
+        return {};
+    }
     /// Fração das amostras que os efeitos caros usam neste quadro (0,25..1).
     /// Preview adaptativo/calor < 1; export e prévia do catálogo = 1 sempre.
     [[nodiscard]] virtual f32 effect_quality() const noexcept { return 1.0f; }

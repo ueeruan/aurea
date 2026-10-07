@@ -586,6 +586,23 @@ public:
     /// Aplica o preset `preset` ao efeito `effectId` da camada: escreve os
     /// valores parados dos parâmetros dele num passo de desfazer.
     bool apply_effect_preset(u64 layerId, u32 effectId, u32 preset) noexcept;
+    // --- Roto Brush do Rotobrush IA (EngineRoto.cpp) ---------------------------
+    /// Um traço no quadro atual: `xy` em px da COMPOSIÇÃO (x,y intercalados),
+    /// raio em px da composição. O motor leva à camada e guarda no efeito
+    /// (um passo de desfazer). `background` = traço de fundo (vermelho).
+    bool roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 radius, const f32* xy, u32 count) noexcept;
+    /// Desfaz o último traço do quadro atual (sem traço aqui: o último de todos).
+    bool roto_undo_stroke(u64 layerId, u32 effectId) noexcept;
+    /// out3: [0] traços no quadro atual, [1] traços no total, [2] quadros-base.
+    bool roto_stroke_info(u64 layerId, u32 effectId, u32* out3) noexcept;
+    /// "Propagar clipe": recortes de todos os quadros do clipe no worker.
+    bool roto_propagate(u64 layerId, u32 effectId) noexcept;
+    /// out4: feitos, total, rodando (0/1), falhou (0/1). Falso = nada propagado.
+    bool roto_progress(i64* out4) noexcept;
+    void roto_cancel() noexcept;
+    /// Modo de vista (0 final, 1 máscara, 2 sobreposição) sem passo de desfazer:
+    /// o modo de pintura liga a sobreposição e devolve o anterior ao sair.
+    bool roto_set_view(u64 layerId, u32 effectId, u32 mode) noexcept;
     /// Grupo (pré-composição): a câmera de fora alcança as camadas 3D de dentro.
     bool set_group_camera_pass_through(u64 layerId, bool on) noexcept;
     /// −1 = não é grupo; 0/1.
@@ -807,6 +824,39 @@ public:
     bool rig_pose_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool continuing) noexcept;
     /// Montagem aberta nesta camada: o preview a mostra sem deformação (0 = nenhuma).
     void set_rig_setup_layer(u64 layerId) noexcept;
+    /// MALHA DE DEFORMAÇÃO no palco (EngineMeshWarp.cpp). Cabeçalho de
+    /// `kMeshWarpHeaderFloats` {linhas, colunas, key no cabeçote, animada} e
+    /// 10 floats por vértice NORMALIZADOS à caixa da camada (0..1): posição e
+    /// as alças esquerda, direita, cima, baixo RELATIVAS — a UI leva à tela
+    /// pelos cantos da camada. Devolve o nº de floats (0 = não é o efeito).
+    static constexpr u32 kMeshWarpHeaderFloats = 4;
+    u32 query_mesh_warp(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept;
+    /// Leva o vértice (`handle` 0; as alças vão junto) ou uma alça (1 esq, 2 dir,
+    /// 3 cima, 4 baixo) até (u, v) normalizado. Malha animada ou `autoKey` =
+    /// key no cabeçote; senão a malha parada. `continuing` = o mesmo arrasto
+    /// (um passo de desfazer por gesto).
+    bool mesh_warp_drag(u64 layerId, u32 effectId, u32 vertex, u32 handle, f32 u, f32 v, bool autoKey,
+                        bool continuing) noexcept;
+    /// "Redefinir malha": a de fábrica, sem keys. Um passo de desfazer.
+    bool mesh_warp_reset(u64 layerId, u32 effectId) noexcept;
+    // --- Fantoche (aurea.distort.puppet; effects/Puppet.hpp) — EnginePuppet.cpp.
+    // u, v = fração da caixa da camada (como a malha de deformação).
+    /// Por pino ligado kPuppetPinFloats floats: índice, u, v (posição no
+    /// playhead), 1 = keyframe neste instante. Devolve o necessário.
+    static constexpr u32 kPuppetPinFloats = 4;
+    u32 query_puppet(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept;
+    /// Pino novo sob o toque (−1 = cheio/sem efeito). Um passo de desfazer.
+    i32 puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept;
+    /// Arrasto do pino; `continuing` = mesmo gesto (sem passo novo).
+    bool puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, bool autoKey, bool continuing) noexcept;
+    bool puppet_remove_pin(u64 layerId, u32 effectId, u32 pin) noexcept;
+    /// Malha deformada no playhead (o mesmo contorno e densidade do render):
+    /// 6 floats por triângulo (u, v dos 3 vértices). Devolve o necessário.
+    u32 query_puppet_mesh(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept;
+    /// Tamanho natural da camada (px) e contorno opaco dela agora — imagem
+    /// (alfa) ou recorte do Rotobrush já calculado. Sob modelMutex_.
+    void puppet_layer_size(const Layer& l, f32& w, f32& h) const noexcept;
+    bool puppet_capture_outline(const Composition& comp, const Layer& l, FrameIndex local, f32* rows) noexcept;
     /// Rastreia a máscara no vídeo da camada do cabeçote em diante (NCC no
     /// centro e em 4 pontos por dentro dela) e grava um key de caminho por
     /// quadro. `mode` 0 = só posição; 1 = posição + escala + giro. Síncrono
@@ -969,6 +1019,10 @@ public:
     /// mundo ao longo do eixo `axis` (0 X, 1 Y, 2 Z) a partir de onde está.
     /// axis 0..2 uses world XYZ; 3..5 uses evaluated local XYZ. Output is parent-local position.
     bool gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* outXYZ) noexcept;
+    /// Trackball do gizmo de girar (core/Trackball.hpp): origem em px da
+    /// composição (2), eixos locais na vista A (9), frame pai→vista F (9) e a
+    /// Rotação XYZ avaliada no cabeçote (3) — trackball::kQueryFloats floats.
+    bool query_trackball(u64 layerId, f32* out23) noexcept;
 
     // --- Ambiente 3D (HDRI) ------------------------------------------------------
     /// HDRI Radiance (.hdr) do arquivo local: ilumina e reflete nos modelos 3D

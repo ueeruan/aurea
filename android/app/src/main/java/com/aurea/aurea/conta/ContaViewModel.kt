@@ -146,6 +146,35 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
         revogarPendentes()
     }
 
+    /** Exclusão da conta em andamento (o botão não repete o pedido). */
+    var excluindo by mutableStateOf(false)
+        private set
+
+    /**
+     * Exclui a conta no servidor (conta, sessões, comunidade, relatos — ver
+     * `excluirConta` em discovery/contas.js) e só DEPOIS sai. Sem resposta
+     * positiva do servidor nada muda aqui: a pessoa não pode achar que a conta
+     * sumiu quando ela continua lá.
+     */
+    fun excluirConta(aoTerminar: (Boolean) -> Unit) {
+        val guardada = sessao()
+        if (excluindo || guardada == null) { aoTerminar(false); return }
+        excluindo = true
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) { ContaApi.excluir(guardada.token) }
+            excluindo = false
+            if (!r.ok) { aoTerminar(false); return@launch }
+            apagarSessao()
+            runCatching { cofre.remove(KEY_REVOGAR) }
+            estado = ContaEstado.Fora
+            // Conta nova: a tela abre no cadastro, não no "entrar".
+            entrando = false
+            erro = null
+            atualizarUsuarios()
+            aoTerminar(true)
+        }
+    }
+
     private fun pendentes(): List<String> = cofre.get(KEY_REVOGAR).orEmpty().lineSequence()
         .filter { it.matches(Regex("[A-Za-z0-9_-]{43}")) }.distinct().toList()
 

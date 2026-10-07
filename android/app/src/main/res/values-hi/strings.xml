@@ -64,7 +64,7 @@
     <string name="settings_groq_key">Groq कुंजी</string>
     <string name="settings_groq_set">सेट है — बदलने या हटाने के लिए दबाएँ</string>
     <string name="settings_groq_unset">सेट नहीं है — जोड़ने के लिए दबाएँ</string>
-    <string name="settings_groq_note">कुंजी सिर्फ़ इसी डिवाइस पर, एन्क्रिप्ट होकर रहती है। ऑडियो Groq पर तभी जाता है जब आप कैप्शन बनाएँ दबाते हैं; बिना कुंजी SRT फ़ाइल भी चलेगी।</string>
+    <string name="settings_groq_note">कुंजी सिर्फ़ इसी डिवाइस पर, एन्क्रिप्ट होकर रहती है।</string>
     <string name="settings_group_device">प्रदर्शन</string>
     <string name="settings_device_auto">स्वतः अनुकूलन</string>
     <string name="settings_device_auto_note">पहली बार खोलने पर ऐप डिवाइस नापता है और प्रीव्यू स्केल, वर्कर की संख्या और एक्सपोर्ट की सीमा चुनता है। आगे वही सेट रहता है।</string>
@@ -1081,7 +1081,7 @@
     <string name="conta_entrar">साइन इन करें</string>
     <string name="conta_ir_entrar">मेरा खाता है · साइन इन</string>
     <string name="conta_ir_cadastro">मेरा खाता नहीं है · बनाएँ</string>
-    <string name="conta_privacidade">अगर Aurea अपने आप बंद हो जाए या अटक जाए, तो त्रुटि की तकनीकी रिपोर्ट (ऐप वर्ज़न, डिवाइस मॉडल, सिस्टम और त्रुटि का ट्रेस, आपके खाते के ईमेल के साथ) सुधार के लिए डेवलपर को अपने आप भेजी जाती है। आपके प्रोजेक्ट और मीडिया कभी नहीं भेजे जाते।</string>
+    <string name="conta_privacidade">अगर Aurea अपने आप बंद हो जाए या अटक जाए, तो त्रुटि की तकनीकी रिपोर्ट (ऐप वर्शन, डिवाइस मॉडल, सिस्टम और त्रुटि का ट्रेस, आपके खाते के ईमेल के साथ) सुधार के लिए डेवलपर को अपने आप भेजी जाती है। आपके प्रोजेक्ट और मीडिया डिवाइस से तभी बाहर जाते हैं जब आप कम्युनिटी में प्रकाशित करते हैं या कोई ऑनलाइन AI सुविधा इस्तेमाल करते हैं।</string>
     <string name="conta_erro_email">मान्य ईमेल दर्ज करें।</string>
     <string name="conta_erro_senha">पासवर्ड में 8 से 128 अक्षर होने चाहिए।</string>
     <string name="conta_erro_credenciais">ईमेल या पासवर्ड गलत है।</string>
@@ -1140,7 +1140,7 @@
     <string name="consent_title">सहमति और ज़िम्मेदारी</string>
     <string name="consent_accept">सहमत होकर जारी रखें</string>
     <string name="consent_body">Aurea डिजिटल सामग्री के संपादन, निर्माण और उत्पादन के लिए एक पेशेवर उपकरण है। ऐप का उपयोग करके उपयोगकर्ता स्वीकार करता है कि वह प्लेटफ़ॉर्म के माध्यम से बनाई, संपादित, आयात, निर्यात, प्रकाशित या साझा की गई सामग्री के लिए पूरी तरह ज़िम्मेदार है।\n\nAurea अवैध, अपमानजनक, धोखाधड़ी वाली, हानिकारक या तीसरे पक्ष के अधिकारों का उल्लंघन करने वाली गतिविधियों के लिए उपकरण के उपयोग को नियंत्रित, प्रोत्साहित, समर्थन या अधिकृत नहीं करता है।\n\nउपयोगकर्ता यह सुनिश्चित करने के लिए ज़िम्मेदार है कि उसके पास उपयोग की गई सामग्री के लिए आवश्यक अनुमतियाँ, लाइसेंस और अधिकार हैं, जिनमें चित्र, वीडियो, संगीत, ट्रेडमार्क, मॉडल, फ़ाइलें और अन्य संरक्षित सामग्री शामिल हैं।\n\nAurea द्वारा दी गई रचनात्मक स्वतंत्रता का अर्थ यह नहीं है कि ऐप उस चीज़ का अनुमोदन करता है, उसमें भाग लेता है या उसकी ज़िम्मेदारी लेता है जिसे प्रत्येक उपयोगकर्ता उपकरण से बनाने या करने का निर्णय लेता है।\n\nउपयोगकर्ता Aurea का उपयोग लागू कानून के अनुसार करने पर सहमत है और अपने कार्यों तथा ऐप के माध्यम से बनाई या वितरित की गई सामग्री की ज़िम्मेदारी स्वीकार करता है।\n\nलागू कानून द्वारा अनुमत अधिकतम सीमा तक, Aurea और उसके ज़िम्मेदार व्यक्ति केवल उपयोगकर्ता द्वारा किए गए कार्यों, उपकरण के दुरुपयोग या उपयोगकर्ता द्वारा बनाई, प्रकाशित या साझा की गई सामग्री से उत्पन्न परिणामों के लिए ज़िम्मेदार नहीं होंगे।\n\nAurea उपकरण प्रदान करता है। उपयोगकर्ता इसके उपयोग के अपने चुने हुए तरीके के लिए ज़िम्मेदार है।\n\nजारी रखकर उपयोगकर्ता घोषणा करता है कि उसने इन शर्तों को पढ़ा, समझा और स्वीकार किया है।</string>
-    <string name="release_notes_body">Aurea Beta 0.0.2 (2141) • 06/10/2026\n\n• 3D मॉडल फिर से टेक्सचर के साथ इम्पोर्ट होते हैं (GLB, glTF, OBJ+MTL और FBX); Sketchfab मॉडल में रिफ़्लेक्शन।\n• OBJ के बाद .mtl चुना जा सकता है।\n• 3D में 2D लेयर्स पर सीन की रोशनी पड़ती है।\n• बिना बैकग्राउंड PNG और PNG सीक्वेंस एक्सपोर्ट: प्रोजेक्ट में पारदर्शी विकल्प।\n• Echo, Timewarp RGB और मोशन डिटेक्ट प्री-कंपोज़िशन में काम करते हैं।\n• Time Remap: इफ़ेक्ट हटाने पर कीफ़्रेम भी हटते हैं।\n• मेमोरी में बहुत बड़ा प्रीव्यू (फ़ोन की RAM के अनुसार)।\n• रोटेशन चक्कर दिखाता है (2x +30°)।\n• पैनल बंद करने पर मास्क गायब नहीं होता।\n• एक टैप में नल से लिंक; नल हटाने पर चाइल्ड की मूवमेंट बनी रहती है।\n• एडिटर छोड़ने पर ऑडियो रुकता है।\n• इमेज पर एक्सक्लूज़न ब्लेंड सही।\n• पुराने प्रोजेक्ट में Motion Tile ठीक।\n• नया प्लेयर बार: ग्रिड, तेज़ प्रीव्यू, मार्कर, फ़्रेम, लेयर्स, अनडू और रीडू।</string>
+    <string name="release_notes_body">Aurea Beta 0.0.3 (2142) • 07/10/2026\n\n• 3D रोटेशन के लिए ट्रैकबॉल गिज़्मो: X/Y/Z रिंग और व्यू रिंग; खुलकर घुमाने के लिए खींचें।\n• Mesh Warp: लेयर को मोड़ने के लिए बिंदुओं और हैंडल का ग्रिड, एनिमेट करने योग्य।\n• नया विघटन इफ़ेक्ट; बॉल्स में लाइट की दिशा और मिक्स।\n• Alight Motion जैसा मास्क और एक्सक्लूड ब्लेंड।\n• कठपुतली: इमेज मोड़ने के लिए पिन (कटआउट के साथ चलता है)।\n• रोटोस्कोपी: ऑब्जेक्ट/बैकग्राउंड पेंट करें और पूरी क्लिप में फैलाएँ।\n• ऐप से खाता हटाएँ।\n• सेटिंग्स में विज्ञापन गोपनीयता।</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">भरें</string>
@@ -3054,7 +3054,7 @@
     <string name="project_file_err_corrupt">फ़ाइल के अंदर का प्रोजेक्ट पढ़ा नहीं जा सका।</string>
     <string name="project_file_err_unreadable">यह फ़ाइल पढ़ी नहीं जा सकी।</string>
     <string name="report_title">समस्या की रिपोर्ट करें</string>
-    <string name="report_subtitle">सीधे Aurea बनाने वालों तक, डिवाइस की जानकारी के साथ जाता है। कोई प्रोजेक्ट या मीडिया नहीं भेजा जाता।</string>
+    <string name="report_subtitle">यह सीधे Aurea बनाने वालों तक डिवाइस की जानकारी के साथ जाता है। इस रिपोर्ट में आपके प्रोजेक्ट या मीडिया शामिल नहीं होते।</string>
     <string name="report_what_did">आपने क्या किया (वैकल्पिक)</string>
     <string name="report_what_happened">आपने क्या उम्मीद की थी और क्या हुआ</string>
     <string name="report_steps">दोहराने के चरण (वैकल्पिक)</string>
@@ -3574,4 +3574,48 @@
     <string name="edt_rotation_turns">चक्कर</string>
     <string name="edt_rotation_degrees">डिग्री</string>
     <string name="edt_rotation_value_a11y">%1$s चक्कर, %2$s डिग्री</string>
+    <string name="pn_blend_cat_mask">मास्क</string>
+    <string name="pn_blend_mask">मास्क</string>
+    <string name="pn_blend_exclude">बाहर करें</string>
+    <string name="pn_blend_mask_desc">नीचे की लेयर्स को इस लेयर के आकार में काटता है</string>
+    <string name="pn_blend_exclude_desc">नीचे की लेयर्स से इस लेयर का आकार काट देता है</string>
+    <string name="gizmo_trackball_hint">ट्रैकबॉल: स्वतंत्र रूप से घुमाने के लिए गोले को खींचें; लाल, हरा और नीला छल्ला केवल X, Y या Z पर घुमाते हैं; ग्रे छल्ला दृश्य के चारों ओर घुमाता है</string>
+    <string name="fx_name_mesh_warp">मेश वार्प</string>
+    <string name="mesh_warp_reset">मेश रीसेट करें</string>
+    <string name="mesh_warp_hint">वीडियो पर मेश के बिंदु खींचें। हैंडल देखने के लिए किसी बिंदु पर टैप करें।</string>
+    <string name="fx_name_puppet">कठपुतली</string>
+    <string name="fx_desc_puppet">लेयर पर पिन: पिन खींचें और इमेज कठपुतली की तरह मुड़ जाती है</string>
+    <string name="puppet_edit_pins">पिन संपादित करें</string>
+    <string name="puppet_hint">पिन जोड़ने के लिए टैप करें, खिसकाने के लिए खींचें, हटाने के लिए दबाकर रखें</string>
+    <string name="puppet_pin_a11y">कठपुतली पिन %1$d</string>
+    <string name="puppet_done">हो गया</string>
+    <string name="afx_name_disintegrate">विघटन</string>
+    <string name="afx_desc_disintegrate">लेयर को छोटे टुकड़ों में तोड़ता है जो एक बढ़ती रेखा के साथ उड़ते, घूमते और फीके पड़ते हैं।</string>
+    <string name="roto_paint">कटआउट पेंट करें</string>
+    <string name="roto_object">वस्तु</string>
+    <string name="roto_background">पृष्ठभूमि</string>
+    <string name="roto_brush_size">ब्रश का आकार</string>
+    <string name="roto_undo">स्ट्रोक पूर्ववत करें</string>
+    <string name="roto_propagate">पूरी क्लिप ट्रैक करें</string>
+    <string name="roto_progress">%2$d में से %1$d ट्रैक हो रहे हैं</string>
+    <string name="roto_done">हो गया</string>
+    <string name="roto_hint">वस्तु को हरे रंग से पेंट करें; हिस्से हटाने के लिए पृष्ठभूमि चुनें। दूसरे फ़्रेम के स्ट्रोक अगले फ़्रेम अपडेट करते हैं।</string>
+    <string name="fxl_roto_contrast">कंट्रास्ट</string>
+    <string name="fxl_roto_smooth">स्मूद</string>
+    <string name="fxl_roto_chatter">कंपन कम करें</string>
+    <string name="fxl_roto_decontaminate">किनारे के रंग साफ़ करें</string>
+    <string name="fxl_roto_view">दृश्य</string>
+    <string name="fxo_roto_final">अंतिम</string>
+    <string name="fxl_particle_size">कण का आकार</string>
+    <string name="fxl_fade">फीका करना</string>
+    <string name="fxl_triangles">त्रिभुज</string>
+    <string name="fxl_expansion">विस्तार</string>
+    <string name="fxl_rigidity">कठोरता</string>
+    <string name="afx_p_edge_glow">किनारे की चमक</string>
+    <string name="conta_excluir">खाता हटाएँ</string>
+    <string name="conta_excluir_mensagem">इससे आपका खाता, कम्युनिटी प्रोफ़ाइल और पोस्ट, और इस ईमेल से भेजी गई समस्या रिपोर्ट हमेशा के लिए हट जाएँगी। इस डिवाइस के प्रोजेक्ट नहीं हटेंगे। इसे वापस नहीं किया जा सकता।</string>
+    <string name="conta_excluida">खाता हटा दिया गया।</string>
+    <string name="conta_excluir_falhou">खाता नहीं हटाया जा सका। कनेक्शन जाँचें और फिर से कोशिश करें।</string>
+    <string name="settings_ad_privacy">विज्ञापन गोपनीयता</string>
+    <string name="settings_ad_privacy_note">विज्ञापनों के लिए अपनी सहमति देखें या बदलें</string>
 </resources>

@@ -98,6 +98,7 @@ set(AUREA_CORE_SOURCES
     src/render/ParticleExtras.cpp
     src/render/ParticleScene.cpp
     src/render/RendererDepth.cpp
+    src/render/RendererRoto.cpp
     src/render/RendererAudio.cpp
     src/effects/Parameter.cpp
     src/effects/CubeLut.cpp
@@ -133,6 +134,9 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/MotionBehaviorEffects.cpp
     src/effects/builtin/MotionExtras.cpp
     src/effects/builtin/RepeatExtras.cpp
+    src/effects/builtin/MeshWarpEffect.cpp
+    src/effects/Puppet.cpp
+    src/effects/builtin/PuppetEffect.cpp
     src/effects/builtin/KeyingExtras.cpp
     src/effects/builtin/FinishingEffects.cpp
     src/effects/builtin/GenerateEffects.cpp
@@ -142,6 +146,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/RotobrushEffect.cpp
     src/effects/builtin/AudioPackEffects.cpp
     src/effects/builtin/ParticularEffect.cpp
+    src/effects/builtin/DisintegrateEffect.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -150,6 +155,8 @@ set(AUREA_CORE_SOURCES
     src/media/ThumbnailService.cpp
     src/media/PreviewProxy.cpp
     src/ai/DepthMapService.cpp
+    src/ai/RotoMatte.cpp
+    src/ai/RotoService.cpp
     src/audio/AudioCore.cpp
     src/audio/AudioBlockCache.cpp
     src/audio/AudioMixer.cpp
@@ -174,9 +181,12 @@ set(AUREA_CORE_SOURCES
     src/vector/VectorDocument.cpp
     src/engine/EngineVector.cpp
     src/engine/EngineRig.cpp
+    src/engine/EngineMeshWarp.cpp
+    src/engine/EnginePuppet.cpp
     src/engine/EngineShape3D.cpp
     src/engine/EngineMedia.cpp
     src/engine/EngineLayerAnim.cpp
+    src/engine/EngineRoto.cpp
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp
     src/scene3d/ModelBudget.cpp
@@ -280,6 +290,8 @@ set(AUREA_IMPORT_BOUNDARIES
     src/engine/Engine.cpp
     src/engine/EngineMedia.cpp
     src/engine/EnginePsd.cpp
+    src/engine/EngineRoto.cpp
+    src/render/RendererRoto.cpp
     src/project/Psd.cpp
     src/project/Project.cpp
     src/command/History.cpp
@@ -432,6 +444,11 @@ if(AUREA_PLATFORM_ANDROID)
     endif()
     target_compile_options(aurea PRIVATE $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -fno-exceptions>)
     set_target_properties(aurea PROPERTIES OUTPUT_NAME "aurea" PREFIX "lib")
+    # Páginas de 16 KB (exigência do Google Play para apps com alvo Android 15+):
+    # os segmentos LOAD da .so alinhados em 16384. O NDK r28 já faz isso por
+    # padrão no arm64; explícito para não depender do padrão do NDK e cobrir
+    # também o armeabi-v7a.
+    target_link_options(aurea PRIVATE -Wl,-z,max-page-size=16384)
 endif()
 
 # -----------------------------------------------------------------------------

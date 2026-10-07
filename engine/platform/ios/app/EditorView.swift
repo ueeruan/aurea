@@ -338,6 +338,9 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageOverlay().allowsHitTesting(false) } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageInteractionOverlay().allowsHitTesting(false) } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RigStageOverlay() } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { MeshWarpStageOverlay() } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { PuppetStageOverlay() } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { RotoPaintStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }
             if model.panel == .tracking && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
@@ -371,6 +374,7 @@ private struct ModelOptimizePrompt: ViewModifier {
                                 .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: 8))
                         }.accessibilityLabel(AureaText.t("gizmo_tool_label"))
                             .accessibilityValue(AureaText.t(model.gizmoTool == 1 ? "gizmo_tool_rotate" : model.gizmoTool == 2 ? "gizmo_tool_scale" : "gizmo_tool_move"))
+                            .accessibilityHint(TrackballOverlay.active(model) ? AureaText.t("gizmo_trackball_hint") : "")
                             .accessibilityIdentifier("stage.gizmo.tool")
                     }
                     // Mundo/Local vale para mover; girar e escala usam os eixos da camada.
@@ -542,7 +546,9 @@ private struct ShellStageBanner: View {
                     let color: Color = lines[i + 4] == 1 ? .yellow : lines[i + 4] == 2 ? .cyan : .gray.opacity(0.22)
                     context.stroke(line, with: .color(color), lineWidth: 1)
                 }
-                if let selected = model.selectedLayer {
+                if TrackballOverlay.draw(&context, model: model, screen: screen) {
+                    // Ferramenta Girar: o trackball no lugar das setas.
+                } else if let selected = model.selectedLayer {
                     let g = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
                     if g.count == 8 {
                         let tips = ShellStageGeometry.gizmoTips(stride(from: 0, to: 8, by: 2).map { screen(g[$0], g[$0 + 1]) })
@@ -628,7 +634,7 @@ private struct ShellStageBanner: View {
             }
             guard model.selection.count == 1, !selected.locked, !(model.panel == .mask && model.editingMask != nil), points.count == 4 else { return }
             if ShapeStageGeometry.enabled(model) { return }
-            if gizmo.count == 8 {
+            if gizmo.count == 8 && !TrackballOverlay.draw(&context, model: model, screen: screen) {
                 // Ponta = ferramenta (Stage.kt drawGizmo): bola mover, anel girar, quadrado escala.
                 let tips = ShellStageGeometry.gizmoTips(stride(from: 0, to: 8, by: 2).map { screen(gizmo[$0], gizmo[$0 + 1]) })
                 let tool = model.gizmoTool
@@ -947,7 +953,7 @@ private struct DockView: View {
             case .particles: return "sh_dock_particles"
             case .audio: return "sh_add_tab_audio"
             case .move: return "sh_dock_transform"
-            case .rig: return "rig_dock"
+            case .rig: return "fx_name_puppet"
             case .blend: return "sh_dock_opacity_blend"
             case .environment: return "sh_dock_environment"
             case .presets: return "sh_dock_presets"
@@ -1097,7 +1103,8 @@ private struct DockView: View {
                         ForEach(sections, id: \.rawValue) { section in
                             Button {
                                 if section == .editText { model.openTextContentEditor() }
-                                else if section == .rig { RigStageState.shared.open(model) }
+                                // O antigo Rig abre o Fantoche (pinos); o rig gravado continua desenhando.
+                                else if section == .rig { model.openPuppetTool() }
                                 else { model.openPanel(section.panel) }
                             } label: {
                                 VStack(spacing: 4) {

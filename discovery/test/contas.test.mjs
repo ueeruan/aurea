@@ -139,6 +139,50 @@ test("sessao de usuario apagado deixa de valer", async () => {
   assert.equal((await chamar(env, "/api/auth/session", { token: corpo.token })).status, 401);
 });
 
+test("excluir conta: exige sessao e confirmacao; apaga usuario, sessoes, comunidade e relatos", async () => {
+  const env = ambiente();
+  const apagados = [];
+  env.COMMUNITY_FILES = { delete: async (ids) => { apagados.push(...[].concat(ids)); } };
+  const a = (await cadastro(env, "sai@aurea.app", "12345678")).corpo;
+  const b = (await cadastro(env, "fica@aurea.app", "12345678")).corpo;
+  const segunda = (await login(env, "sai@aurea.app", "12345678")).corpo;
+  const db = env.AUREA_DB.sqlite;
+  const uid = (e) => db.prepare("SELECT id FROM users WHERE email = ?").get(e).id;
+  const ua = uid("sai@aurea.app"), ub = uid("fica@aurea.app");
+  const agora = Date.now();
+  db.prepare("INSERT INTO community_profiles (uid, username, created_at, updated_at) VALUES (?, 'sai', ?, ?), (?, 'fica', ?, ?)").run(ua, agora, agora, ub, agora, agora);
+  db.prepare("INSERT INTO community_assets (id, uid, kind, name, mime, bytes, created_at) VALUES ('arq1', ?, 'avatar', 'a.png', 'image/png', 1, ?)").run(ua, agora);
+  db.prepare("INSERT INTO community_posts (id, uid, body, asset, created_at) VALUES ('p1', ?, 'oi', 'arq1', ?), ('p2', ?, 'ola', NULL, ?)").run(ua, agora, ub, agora);
+  db.prepare("INSERT INTO community_comments (id, post, uid, body, created_at) VALUES ('c1', 'p1', ?, 'x', ?), ('c2', 'p2', ?, 'y', ?)").run(ub, agora, ua, agora);
+  db.prepare("INSERT INTO community_likes (post, uid) VALUES ('p2', ?), ('p1', ?)").run(ua, ub);
+  db.prepare("INSERT INTO community_follows (follower, followed) VALUES (?, ?), (?, ?)").run(ua, ub, ub, ua);
+  db.prepare("INSERT INTO user_reports (id, dedupe, received_at, platform, install_id, email, what_happened) VALUES ('r1', 'd1', ?, 'android', 'i', 'sai@aurea.app', 'travou')").run(agora);
+
+  assert.equal((await chamar(env, "/api/auth/delete", { metodo: "POST", corpo: { confirm: true } })).status, 401);
+  assert.equal((await chamar(env, "/api/auth/delete", { metodo: "POST", corpo: {}, token: a.token })).status, 400);
+  const r = await chamar(env, "/api/auth/delete", { metodo: "POST", corpo: { confirm: true }, token: a.token });
+  assert.equal(r.status, 200);
+  assert.equal(r.corpo.deleted, true);
+
+  assert.deepEqual(apagados, ["arq1"]);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM users WHERE id = ?").get(ua).n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM sessions WHERE uid = ?").get(ua).n, 0);
+  for (const tabela of ["community_profiles", "community_assets", "community_posts", "community_comments", "community_likes"]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${tabela} WHERE uid = ?`).get(ua).n, 0, tabela);
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM community_comments").get().n, 0); // c1 estava na publicacao apagada
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM community_follows").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM user_reports").get().n, 0);
+  assert.equal(db.prepare("SELECT value FROM counters WHERE name = 'users'").get().value, 1);
+  // As duas sessoes da conta apagada morrem; a outra conta segue intacta.
+  assert.equal((await chamar(env, "/api/auth/session", { token: a.token })).status, 401);
+  assert.equal((await chamar(env, "/api/auth/session", { token: segunda.token })).status, 401);
+  assert.equal((await chamar(env, "/api/auth/session", { token: b.token })).status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM community_posts WHERE uid = ?").get(ub).n, 1);
+  // O mesmo e-mail pode se cadastrar de novo depois.
+  assert.equal((await cadastro(env, "sai@aurea.app", "12345678")).status, 201);
+});
+
 test("limite de login por e-mail vale de qualquer IP; por IP no cadastro", async () => {
   const env = ambiente();
   await cadastro(env, "alvo@aurea.app", "senha-certa-123", "192.0.2.1");

@@ -214,6 +214,31 @@ DepthMapPtr DepthMapService::run_video_locked(const Job& job) {
     return result;
 }
 
+DepthMapPtr DepthMapService::foreground_video_frame(VideoSourceFactory* factory, const Asset& asset, u64 sourceKey,
+                                                    i64 index, f64 fps) try {
+    if (!foregroundMode_ || !factory || !(fps > 0.0)) return nullptr;
+    const i64 last = asset.video.frameCount.value > 0 ? asset.video.frameCount.value - 1 : std::max<i64>(index, 0);
+    index = std::clamp(index, i64{0}, last);
+    // A mesma chave de `run_video_locked` (vizinhos crus): um cache só.
+    u64 key = sourceKey ^ (static_cast<u64>(index) + 0x72E46D87FA912BC3ull);
+    key = (key ^ (key >> 30)) * 0xBF58476D1CE4E5B9ull;
+    key ^= key >> 27;
+    if (DepthMapPtr hit = find(key)) return hit;
+    Job job;
+    job.key = key; job.asset = asset; job.sourceKey = sourceKey; job.factory = factory;
+    job.frameUs = std::max<i64>(1, static_cast<i64>(std::llround(1e6 / fps)));
+    job.targetUs = static_cast<i64>(std::llround(static_cast<f64>(index) * 1e6 / fps));
+    std::lock_guard<std::mutex> work(work_);
+    if (DepthMapPtr hit = cached(key)) return hit;
+    return run_video_raw_locked(job);
+} catch (const std::bad_alloc&) {
+    report_failure("memoria insuficiente para o mapa");
+    return nullptr;
+} catch (const std::system_error&) {
+    report_failure("worker de inferencia indisponivel");
+    return nullptr;
+}
+
 DepthMapPtr DepthMapService::run_video_raw_locked(const Job& job) {
     if (!job.factory) return nullptr;
     if (!ensure_model_locked()) return nullptr;

@@ -4,12 +4,20 @@ import java.util.Properties
 // =============================================================================
 //  Módulo :app — o app Aurea.
 //
-//  A parte que mais importa aqui é a ASSINATURA. O Aurea oficial é assinado com
-//  a chave de DEBUG da máquina do dono (auditado: o SHA-256 do certificado do
-//  aurea-release.apk bate exatamente com a de ~/.android/debug.keystore). Para
-//  que o APK novo ATUALIZE por cima do instalado, ele tem que sair com a MESMA
-//  chave. `android/key.properties` aponta para ela; sem o arquivo, o build cai
-//  no debug padrão do Gradle, que é a mesma chave.
+//  A parte que mais importa aqui é a ASSINATURA. Duas chaves possíveis:
+//
+//  1. `android/keystore.properties` (Google Play): a CHAVE DE UPLOAD do dono.
+//     Modelo documentado em `android/keystore.properties.example`. Quando o
+//     arquivo existe, TODO build release (APK e AAB) sai com ela.
+//  2. `android/key.properties` (legado, sideload): aponta para a chave de
+//     DEBUG da máquina do dono, que assina o Aurea distribuído fora da loja
+//     (auditado: o SHA-256 do aurea-release.apk bate com
+//     ~/.android/debug.keystore). Sem nenhum dos dois arquivos, o build cai no
+//     debug padrão do Gradle, que é a mesma chave.
+//
+//  O Google Play RECUSA bundle assinado com chave de debug. Por isso
+//  `bundleRelease` falha alto quando a assinatura seria de debug, a não ser
+//  com `-PallowDebugSigning=true` (só para testar o AAB localmente).
 //
 //  Ver _identity/signing/IDENTIDADE.md para a auditoria completa.
 // =============================================================================
@@ -24,10 +32,43 @@ plugins {
 }
 
 val keystoreProperties = Properties()
-val keystorePropertiesFile = rootProject.file("key.properties")
-val temChaveDeRelease = keystorePropertiesFile.exists()
-if (temChaveDeRelease) {
+// A chave de upload do Play (keystore.properties) tem prioridade sobre a
+// chave legada de sideload (key.properties). Os dois estão no .gitignore.
+val keystorePropertiesFile = listOf("keystore.properties", "key.properties")
+    .map { rootProject.file(it) }
+    .firstOrNull { it.exists() }
+val temChaveDeRelease = keystorePropertiesFile != null
+if (keystorePropertiesFile != null) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+    for (campo in listOf("storeFile", "storePassword", "keyAlias", "keyPassword")) {
+        require(!keystoreProperties.getProperty(campo).isNullOrBlank()) {
+            "${keystorePropertiesFile.name}: falta '$campo' (veja android/keystore.properties.example)"
+        }
+    }
+}
+
+// Release assinado com a chave de DEBUG? Sem arquivo de chave o release usa o
+// debug do Gradle; com key.properties apontando para debug.keystore também.
+val releaseComChaveDeDebug = !temChaveDeRelease ||
+    keystoreProperties.getProperty("keyAlias") == "androiddebugkey" ||
+    File(keystoreProperties.getProperty("storeFile") ?: "").name == "debug.keystore"
+val permitirAssinaturaDeDebug = providers.gradleProperty("allowDebugSigning")
+    .map { it.toBoolean() }.getOrElse(false)
+val mensagemChaveDeDebug = """
+    |O bundle release seria assinado com a CHAVE DE DEBUG — o Google Play recusa.
+    |Crie a chave de upload e o android/keystore.properties (modelo em
+    |android/keystore.properties.example). Só para testar o AAB localmente:
+    |  ./gradlew :app:bundleRelease -PallowDebugSigning=true
+    """.trimMargin()
+// Falha ANTES de compilar o motor (minutos), quando a tarefa pedida é o bundle
+// release. A checagem dentro de signReleaseBundle (abaixo) cobre nomes
+// abreviados e qualquer outro caminho até o AAB.
+val pedeBundleRelease = gradle.startParameter.taskNames.any {
+    val nome = it.substringAfterLast(':')
+    nome == "bundle" || nome == "bundleRelease" || nome == "signReleaseBundle"
+}
+if (pedeBundleRelease && releaseComChaveDeDebug && !permitirAssinaturaDeDebug) {
+    throw GradleException(mensagemChaveDeDebug)
 }
 
 // Uma ABI por build. `--split-per-abi` produz um APK por arquitetura com um
@@ -57,8 +98,8 @@ android {
         targetSdk = 36
         // versionCode 2140: novas deformações, partículas 3D, cache ocioso e barra compacta. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2141
-        versionName = "0.0.2"
+        versionCode = 2142
+        versionName = "0.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -112,7 +153,9 @@ android {
             create("release") {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
+                // Caminho relativo resolve a partir de android/ (onde mora o
+                // .properties), não de android/app/.
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
                 storePassword = keystoreProperties["storePassword"] as String
                 enableV1Signing = true
                 enableV2Signing = true
@@ -140,6 +183,12 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Explícito: o Play recusa pacote depurável.
+            isDebuggable = false
+            // A tabela de símbolos do motor vai DENTRO do AAB (BUNDLE-METADATA,
+            // não no APK instalado): o Play Console simboliza os crashes
+            // nativos. O mapping do R8 já entra no AAB sozinho.
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
         }
         debug {
             applicationIdSuffix = ".debug"
@@ -273,4 +322,13 @@ androidComponents {
     onVariants { variant ->
         variant.sources.res?.addGeneratedSourceDirectory(aureaIndonesianLegacyRes, AureaIndonesianLegacyRes::outputDir)
     }
+}
+
+// Rede de segurança da regra da chave de debug: qualquer caminho que chegue à
+// assinatura do AAB release (nome abreviado, `bundle`, IDE) para aqui. Só
+// valores simples são capturados — compatível com o configuration cache.
+tasks.matching { it.name == "signReleaseBundle" }.configureEach {
+    val falhar = releaseComChaveDeDebug && !permitirAssinaturaDeDebug
+    val mensagem = mensagemChaveDeDebug
+    doFirst { if (falhar) throw GradleException(mensagem) }
 }

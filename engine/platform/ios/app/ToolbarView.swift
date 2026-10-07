@@ -547,9 +547,13 @@ private struct ShellMenuRow: View {
     }
     private var resolutionPopup: some View {
         VStack(spacing: 0) {
+            // Teste de reprodução crua (texto fixo, sem tradução): só no build
+            // Debug — é o que a CI de gestos usa. Na App Store/Play não aparece.
+            #if DEBUG
             Button(model.rawPlayback ? AureaText.t("ios_raw_back_to_compositor") : "AUREA RAW PLAYBACK TEST") {
                 shell.resolutionAnchor = nil; model.toggleRawPlayback()
             }.font(.aurea(size: 11)).padding(8).accessibilityIdentifier("rawPlaybackToggle")
+            #endif
             ForEach(Array(["AUTO", AureaText.t("i18n_preview_full"), "1/2", "1/4", "1/8"].enumerated()), id: \.offset) { index, name in
                 let denominator: UInt32 = [1, 1, 2, 4, 8][index]
                 let on = index == 0 ? model.status.previewAuto != 0 : model.status.previewAuto == 0 && model.status.previewDenominator == denominator

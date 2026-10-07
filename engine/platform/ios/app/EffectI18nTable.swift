@@ -29,7 +29,7 @@ enum EffectI18nTable {
     aurea.color.exposure|2|gamma|fx_tons_medios|
     aurea.color.exposure|3|space|fx_aplicar_em|fxo_linear_light,fxo_encoded_value
     aurea.color.brightness_contrast|0|brightness|fx_brilho|
-    aurea.color.brightness_contrast|1|contrast|fx_contraste|
+    aurea.color.brightness_contrast|1|contrast|fxl_roto_contrast|
     aurea.color.saturation|0|saturation|fx_saturacao|
     aurea.color.tint|0|map_black|fx_cor_sombras|
     aurea.color.tint|1|map_white|fx_cor_luzes|
@@ -880,6 +880,11 @@ enum EffectI18nTable {
     aurea.key.rotobrush|3|invert|fxl_invert_mask|
     aurea.key.rotobrush|4|mix|fxl_mix|
     aurea.key.rotobrush|5|matte|fx_mostrar_mascara|
+    aurea.key.rotobrush|6|contrast|fxl_roto_contrast|
+    aurea.key.rotobrush|7|smooth|fxl_roto_smooth|
+    aurea.key.rotobrush|8|chatter|fxl_roto_chatter|
+    aurea.key.rotobrush|9|decontaminate|fxl_roto_decontaminate|
+    aurea.key.rotobrush|10|view|fxl_view|fxo_roto_final,fxo_matte,fxl_overlap
     aurea.layout.grid_builder|0|mode|fxl_layout|fxo_rectangular,fxo_radial,fxo_path,fxo_sphere
     aurea.layout.grid_builder|1|columns|fxl_columns|
     aurea.layout.grid_builder|2|spacing_x|fxl_x_spacing|
@@ -1006,6 +1011,8 @@ enum EffectI18nTable {
     aurea.stylize.ball_grid|6|ball_size|afx_p_ball_size|
     aurea.stylize.ball_grid|7|instability_state|afx_p_instability_state|
     aurea.stylize.ball_grid|8|instability|afx_p_instability|
+    aurea.stylize.ball_grid|9|light_direction|fx_deform_light_direction|
+    aurea.stylize.ball_grid|10|mix|fx_mistura|
     aurea.motion.twitch|0|frequency|fx_frequencia|
     aurea.motion.twitch|1|strength|fx_intensidade|
     aurea.motion.twitch|2|rotation|fx_rotacao|
@@ -1289,5 +1296,24 @@ enum EffectI18nTable {
     aurea.stylize.eight_bit|8|color_c|fx_cor_3|
     aurea.stylize.eight_bit|9|color_d|fx_cor_4|
     aurea.stylize.eight_bit|10|mix|fxl_mix|
+    aurea.transition.disintegrate|0|completion|fx_conclusao|
+    aurea.transition.disintegrate|1|direction|fxl_direction|
+    aurea.transition.disintegrate|2|particle_size|fxl_particle_size|
+    aurea.transition.disintegrate|3|randomness|fxl_randomness|
+    aurea.transition.disintegrate|4|spread|fxl_spread|
+    aurea.transition.disintegrate|5|speed|fxl_speed|
+    aurea.transition.disintegrate|6|turbulence|particular_turbulence|
+    aurea.transition.disintegrate|7|gravity|fxl_gravity|
+    aurea.transition.disintegrate|8|fade|fxl_fade|
+    aurea.transition.disintegrate|9|seed|fxl_seed|
+    aurea.transition.disintegrate|10|glow_color|fx_cor_brilho|
+    aurea.transition.disintegrate|11|glow_intensity|afx_p_edge_glow|
+    aurea.transition.disintegrate|12|mix|fx_mistura|
+    aurea.distort.mesh_warp|0|rows|fxo_lines|
+    aurea.distort.mesh_warp|1|columns|fxl_columns|
+    aurea.distort.mesh_warp|2|quality|fxl_quality|
+    aurea.distort.puppet|0|triangles|fxl_triangles|
+    aurea.distort.puppet|1|expansion|fxl_expansion|
+    aurea.distort.puppet|2|rigidity|fxl_rigidity|
     """
 }

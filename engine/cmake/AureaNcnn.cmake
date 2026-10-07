@@ -139,9 +139,9 @@ target_link_libraries(aurea_core PRIVATE ncnn)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.
 if(MSVC)
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp
                                 PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp
                                 PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()

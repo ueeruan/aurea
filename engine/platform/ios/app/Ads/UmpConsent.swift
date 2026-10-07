@@ -24,4 +24,17 @@ enum UmpConsent {
         // Sessões anteriores já decidiram: pode seguir em paralelo (recomendação do Google).
         if ConsentInformation.shared.canRequestAds { answer(true) }
     }
+
+    /// GDPR/UMP: onde a região exige, a pessoa tem de poder rever o
+    /// consentimento a qualquer hora — a linha "Privacidade dos anúncios" em
+    /// Ajustes só aparece quando isto é verdade. (O mesmo do Android.)
+    static var privacyOptionsRequired: Bool {
+        return ConsentInformation.shared.privacyOptionsRequirementStatus == .required
+    }
+
+    static func presentPrivacyOptions(done: @escaping () -> Void = {}) {
+        guard var presenter: UIViewController = AureaAds.rootViewController() else { done(); return }
+        while let next: UIViewController = presenter.presentedViewController { presenter = next }
+        ConsentForm.presentPrivacyOptionsForm(from: presenter) { _ in done() }
+    }
 }

@@ -254,6 +254,7 @@ struct HomeView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var conta: ContaModel
     @State private var confirmLogout: Bool = false
+    @State private var confirmDelete: Bool = false
     @StateObject private var library = HomeLibrary()
     @StateObject private var defaults = HomeDefaults()
     @StateObject private var backdrop = HomeBackdrop()
@@ -334,6 +335,8 @@ struct HomeView: View {
             Button(AureaText.t("settings_group_about")) { homeInfo = "settings_group_about" }
             Button(AureaText.t("licenses_title")) { homeInfo = "licenses_title" }
             Button(AureaText.t("conta_sair"), role: .destructive) { confirmLogout = true }
+            // Google Play e App Store exigem excluir a conta de dentro do app.
+            Button(AureaText.t("conta_excluir"), role: .destructive) { confirmDelete = true }
         } message: {
             if let email: String = conta.email { Text(AureaText.t("conta_conectado", email)) }
         }
@@ -342,6 +345,14 @@ struct HomeView: View {
             Button(AureaText.t("common_cancel"), role: .cancel) {}
         } message: {
             Text(AureaText.t("conta_sair_mensagem"))
+        }
+        .alert(AureaText.t("conta_excluir"), isPresented: $confirmDelete) {
+            Button(AureaText.t("conta_excluir"), role: .destructive) {
+                conta.excluirConta { ok in model.toast = AureaText.t(ok ? "conta_excluida" : "conta_excluir_falhou") }
+            }
+            Button(AureaText.t("common_cancel"), role: .cancel) {}
+        } message: {
+            Text(AureaText.t("conta_excluir_mensagem"))
         }
         .sheet(isPresented: Binding(get: { homeInfo != nil }, set: { if !$0 { homeInfo = nil } })) {
             NavigationStack {
@@ -1099,6 +1110,13 @@ struct HomeSettingsTab: View {
                     tapRow("settings_clear_recents", subtitle: AureaText.t("settings_clear_recents_note")) {
                         FxEffectPrefs().clearRecents()
                         model.toast = AureaText.t("settings_recents_cleared")
+                    }
+                    // Consentimento de anúncios (UMP/GDPR): só onde a região exige.
+                    if UmpConsent.privacyOptionsRequired {
+                        groupDivider
+                        tapRow("settings_ad_privacy", subtitle: AureaText.t("settings_ad_privacy_note")) {
+                            UmpConsent.presentPrivacyOptions()
+                        }
                     }
                 }
                 DonationCard()

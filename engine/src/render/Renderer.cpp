@@ -1230,6 +1230,45 @@ TextureHandle Renderer::cube_lut(AssetId id) noexcept {
     return *tex;
 }
 
+// Malha de deformação: grade tesselada em px da camada (float cheio — meia
+// precisão erraria 2 px numa camada de 4000).
+TextureHandle Renderer::data_texture(u64 key, const Vec4* texels, u32 width, u32 height) noexcept {
+    if (!backend_ || !texels || width == 0 || height == 0 || width > 4096 || height > 4096) return {};
+    key ^= 0x4d4553485f574152ull;
+    if (auto it = luts_.find(key); it != luts_.end()) {
+        it->second.lastFrame = frameNumber_;
+        return it->second.texture;
+    }
+    TextureDesc d;
+    d.width = width;
+    d.height = height;
+    d.format = SurfaceFormat::RGBA32F;
+    d.sampled = true;
+    d.transferDst = true;
+    d.debugName = "malha-deformacao";
+    auto tex = backend_->create_texture(d);
+    if (!tex.ok()) return {};
+    PendingUpload up;
+    up.texture = *tex;
+    up.bytesPerRow = width * 16;
+    up.data.resize(usize(width) * height * 16);
+    std::memcpy(up.data.data(), texels, up.data.size());
+    uploads_.push_back(std::move(up));
+    luts_[key] = LutTexture{*tex, frameNumber_};
+    // Malha animada = uma grade por quadro: só as últimas ficam (a faxina de
+    // 240 quadros das LUTs guardaria dezenas de MB na reprodução).
+    meshDataKeys_.push_back(key);
+    for (usize i = 0; meshDataKeys_.size() > 12 && i < meshDataKeys_.size();) {
+        auto it = luts_.find(meshDataKeys_[i]);
+        if (it == luts_.end()) { meshDataKeys_.erase(meshDataKeys_.begin() + static_cast<std::ptrdiff_t>(i)); continue; }
+        if (it->second.lastFrame + 2 >= frameNumber_) { ++i; continue; }
+        backend_->destroy_texture(it->second.texture);
+        luts_.erase(it);
+        meshDataKeys_.erase(meshDataKeys_.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+    return *tex;
+}
+
 namespace {
 
 /// A camada tem som que toca no instante `t`? (vídeo com trilha ou áudio,
@@ -5238,6 +5277,14 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         else incomplete_ = true;   // pipeline compilando: este quadro cai no Normal, o próximo tenta de novo
     }
     const bool readsBackdrop = lastRead != kInvalidIndex && copyP.valid() && blendP.valid();
+    // Máscara/Excluir (AM) recortam as CAMADAS abaixo, não a cor de fundo da
+    // composição: a pilha monta sobre transparente e o fundo entra por baixo
+    // num último passe (fundo + resultado "sobre" ele).
+    const bool bgUnder = readsBackdrop && pNormal.ok() && firstDraw == 0 && snap.background.w > 0.0f
+        && std::any_of(draws.begin() + firstDraw, draws.end(), [](const CompositeDraw& d) {
+               return d.adjustPlan == kInvalidIndex && (d.blend == BlendMode::Mask || d.blend == BlendMode::Exclude);
+           });
+    const Vec4 stackClear = bgUnder ? Vec4{0.0f, 0.0f, 0.0f, 0.0f} : snap.background;
     TextureDesc pingDesc = compDesc;
     pingDesc.transferSrc = false;
     pingDesc.sampled = true;
@@ -5260,13 +5307,15 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         for (u32 i = batchBegin; i < end; ++i) if (draws[i].adjustPlan == kInvalidIndex) arr[k++] = draws[i];
         const HwCap cap{arr, n, pNormal.ok() ? *pNormal : PipelineHandle{}, pAdd.ok() ? *pAdd : PipelineHandle{}, compW, compH};
         const u32 pass = graph_.add_raster_pass("composicao", PassStage::Composite, cur, fresh ? LoadOp::Clear : LoadOp::Load,
-                                                snap.background, [cap](PassContext& pc) {
+                                                stackClear, [cap](PassContext& pc) {
             const Mat4 clip = clip_from_comp(cap.compW, cap.compH);
             PipelineHandle bound{};
             for (u32 i = 0; i < cap.count; ++i) {
                 const CompositeDraw& d = cap.draws[i];
                 // Os modos que leem o fundo só chegam aqui se o pipeline deles
                 // ainda não existe: Add cai na soma de hardware, o resto no Normal.
+                // Máscara/Excluir sem o pipeline: não pinta (a camada nunca aparece).
+                if (d.blend == BlendMode::Mask || d.blend == BlendMode::Exclude) continue;
                 const PipelineHandle p = d.blend == BlendMode::Add && cap.add.valid() ? cap.add : cap.normal;
                 if (!p.valid()) continue;
                 if (!(p == bound)) { pc.cmds.bind_pipeline(p); bound = p; }
@@ -5293,6 +5342,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         f32 opacity = 1.0f, mode = 0.0f, compW = 0.0f, compH = 0.0f;
         f32 masked = 0.0f;   ///< ajuste com máscara: fora dela o fundo fica
         bool drawSrc = false;
+        bool copyBackdrop = true;   ///< false = BlendMode::Mask: fora da camada fica transparente
     };
     for (u32 i = firstDraw; readsBackdrop && i < count; ++i) {
         const CompositeDraw& d = draws[i];
@@ -5345,14 +5395,18 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             rc->compFromLayer = d.compFromLayer;
             rc->srcSampler = d.sampler;
             rc->mode = static_cast<f32>(static_cast<u16>(d.blend));
+            // Máscara (AM): só sobra o fundo sob o alfa da camada — o que
+            // está fora do quad dela some, então o fundo não é copiado.
+            rc->copyBackdrop = d.blend != BlendMode::Mask;
         }
-        const FGTexture next = i == lastRead ? comp : graph_.create_texture("composicao-mistura", pingDesc);
+        const FGTexture next = i == lastRead && !bgUnder ? comp : graph_.create_texture("composicao-mistura", pingDesc);
         const u32 pass = graph_.add_raster_pass("mistura", PassStage::Composite, next, LoadOp::Clear, Vec4{0, 0, 0, 0},
                                                 [rc](PassContext& pc) {
             const Mat4 clip = clip_from_comp(rc->compW, rc->compH);
             // 1) o fundo, texel a texel (mesmo tamanho, amostra no centro).
-            pc.cmds.bind_pipeline(rc->copy);
             LayerPush push;
+            if (rc->copyBackdrop) {
+            pc.cmds.bind_pipeline(rc->copy);
             push.clipFromLayer = clip;
             push.region = Vec4{0.0f, 0.0f, rc->compW, rc->compH};
             push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
@@ -5360,11 +5414,13 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             pc.cmds.bind_texture(0, pc.texture(rc->backdrop), SamplerHandle{rc->copySampler});
             pc.cmds.push_constants(&push, sizeof(push));
             pc.cmds.draw(6);
+            }
             if (!rc->drawSrc) return;
             // 2) a camada, com a cor final calculada contra o fundo.
             pc.cmds.bind_pipeline(rc->blend);
             push.clipFromLayer = clip * rc->compFromLayer;
             push.region = rc->region;
+            push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};   // também sem a cópia do fundo (Máscara)
             push.params = Vec4{rc->opacity, rc->mode, rc->masked, 0.0f};
             pc.cmds.bind_texture(0, pc.texture(rc->src), SamplerHandle{rc->srcSampler});
             pc.cmds.bind_texture(1, pc.texture(rc->backdrop), SamplerHandle{rc->copySampler});
@@ -5377,6 +5433,24 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         fresh = false;
     }
     flush(count);
+    if (bgUnder && pNormal.ok() && !(cur == comp)) {
+        // A cor de fundo por baixo da pilha já recortada pelas máscaras.
+        struct BgCap { PipelineHandle p; FGTexture src; u64 sampler; f32 compW, compH; };
+        const BgCap bc{*pNormal, cur, shaders_.sampler(CommonSampler::NearestClamp).id, compW, compH};
+        const u32 pass = graph_.add_raster_pass("composicao-fundo-final", PassStage::Composite, comp, LoadOp::Clear,
+                                                snap.background, [bc](PassContext& pc) {
+            pc.cmds.bind_pipeline(bc.p);
+            LayerPush push;
+            push.clipFromLayer = clip_from_comp(bc.compW, bc.compH);
+            push.region = Vec4{0.0f, 0.0f, bc.compW, bc.compH};
+            push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+            push.params = Vec4{1.0f, 0.0f, 0.0f, 0.0f};
+            pc.cmds.bind_texture(0, pc.texture(bc.src), SamplerHandle{bc.sampler});
+            pc.cmds.push_constants(&push, sizeof(push));
+            pc.cmds.draw(6);
+        });
+        graph_.read(pass, cur);
+    }
 }
 
 void Renderer::prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i64 mediaUs,

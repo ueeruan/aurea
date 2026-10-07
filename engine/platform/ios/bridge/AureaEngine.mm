@@ -28,6 +28,7 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
+#include "aurea/core/Trackball.hpp"
 #include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
@@ -2681,6 +2682,22 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     float points[8]{}; auto* e = self.engine;
     return e && e->query_gizmo(layerId, length, points, localSpace) ? floats_to_array(points, 8) : @[];
 }
+- (NSArray<NSNumber*>*)trackball:(long long)layerId {
+    float values[aurea::trackball::kQueryFloats]{}; auto* e = self.engine;
+    return e && e->query_trackball(layerId, values) ? floats_to_array(values, aurea::trackball::kQueryFloats) : @[];
+}
+- (NSArray<NSNumber*>*)trackballDrag:(NSArray<NSNumber*>*)args {
+    if (args.count != aurea::trackball::kDragArgs) return @[];
+    float in[aurea::trackball::kDragArgs]{}, out[aurea::trackball::kDragOut]{};
+    for (NSUInteger i = 0; i < aurea::trackball::kDragArgs; ++i) in[i] = args[i].floatValue;
+    return aurea::trackball::drag(in, out) ? floats_to_array(out, aurea::trackball::kDragOut) : @[];
+}
+- (int)trackballHit:(NSArray<NSNumber*>*)axes x:(float)x y:(float)y radius:(float)radius tolerance:(float)tolerance {
+    if (axes.count < 9) return aurea::trackball::kNone;
+    float a[9]{};
+    for (NSUInteger i = 0; i < 9; ++i) a[i] = axes[i].floatValue;
+    return aurea::trackball::hit_test(a, x, y, radius, tolerance);
+}
 - (void)cancelCameraTracking { if (auto* e = self.engine) e->cancel_camera_track(); }
 - (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov { auto* e=self.engine;return e&&e->refine_camera_track(remove,motion,fov); }
 - (NSArray<NSNumber*>*)cameraTrackTarget:(long long)frame { auto* e=self.engine;if(!e)return @[];float xy[64]{};const auto n=e->camera_track_target(frame,xy,32);return floats_to_array(xy,n*2); }
@@ -3140,6 +3157,54 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (void)setRigSetupLayer:(long long)layerId {
     auto* e = self.engine; if (e) e->set_rig_setup_layer(layerId);
 }
+- (NSArray<NSNumber*>*)meshWarp:(long long)layerId effect:(int32_t)effectId {
+    auto* e = self.engine;
+    if (!e || effectId < 0) return @[];
+    const aurea::u32 need = e->query_mesh_warp(layerId, static_cast<aurea::u32>(effectId), nullptr, 0);
+    if (need == 0) return @[];
+    std::vector<float> v(need);
+    const aurea::u32 got = e->query_mesh_warp(layerId, static_cast<aurea::u32>(effectId), v.data(), need);
+    return got == need ? floats_to_array(v.data(), need) : @[];
+}
+- (BOOL)meshWarpDrag:(long long)layerId effect:(int32_t)effectId vertex:(int32_t)vertex grip:(int32_t)grip u:(float)u v:(float)v autoKey:(BOOL)autoKey continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && effectId >= 0 && vertex >= 0 && grip >= 0
+        && e->mesh_warp_drag(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(vertex),
+                             static_cast<aurea::u32>(grip), u, v, autoKey, continuing);
+}
+- (BOOL)meshWarpReset:(long long)layerId effect:(int32_t)effectId {
+    auto* e = self.engine; return e && effectId >= 0 && e->mesh_warp_reset(layerId, static_cast<aurea::u32>(effectId));
+}
+- (NSArray<NSNumber*>*)puppetPins:(long long)layerId effect:(int32_t)effectId {
+    auto* e = self.engine;
+    if (!e || effectId < 0) return @[];
+    const aurea::u32 need = e->query_puppet(layerId, static_cast<aurea::u32>(effectId), nullptr, 0);
+    if (need == 0) return @[];
+    std::vector<float> v(need);
+    const aurea::u32 got = e->query_puppet(layerId, static_cast<aurea::u32>(effectId), v.data(), need);
+    return got == need ? floats_to_array(v.data(), need) : @[];
+}
+- (NSArray<NSNumber*>*)puppetMesh:(long long)layerId effect:(int32_t)effectId {
+    auto* e = self.engine;
+    if (!e || effectId < 0) return @[];
+    const aurea::u32 need = e->query_puppet_mesh(layerId, static_cast<aurea::u32>(effectId), nullptr, 0);
+    if (need == 0) return @[];
+    std::vector<float> v(need);
+    const aurea::u32 got = e->query_puppet_mesh(layerId, static_cast<aurea::u32>(effectId), v.data(), need);
+    return got == need ? floats_to_array(v.data(), need) : @[];
+}
+- (int32_t)puppetAddPin:(long long)layerId effect:(int32_t)effectId u:(float)u v:(float)v {
+    auto* e = self.engine; return e && effectId >= 0 ? e->puppet_add_pin(layerId, static_cast<aurea::u32>(effectId), u, v) : -1;
+}
+- (BOOL)puppetMovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin u:(float)u v:(float)v autoKey:(BOOL)autoKey continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && effectId >= 0 && pin >= 0
+        && e->puppet_move_pin(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(pin), u, v, autoKey, continuing);
+}
+- (BOOL)puppetRemovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin {
+    auto* e = self.engine;
+    return e && effectId >= 0 && pin >= 0 && e->puppet_remove_pin(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(pin));
+}
 - (long long)addShape3D:(uint32_t)kind name:(NSString*)name {
     auto* e = self.engine;
     if (!e) return -1;
@@ -3301,6 +3366,47 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     }
     return out;
 }
+- (BOOL)rotoAddStroke:(NSArray<NSNumber *> *)xy background:(BOOL)background radius:(float)radius effect:(uint32_t)effectId forLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e || xy.count < 2) return NO;
+    std::vector<float> pts;
+    pts.reserve(xy.count);
+    for (NSNumber* n in xy) pts.push_back(n.floatValue);
+    return e->roto_add_stroke(static_cast<aurea::u64>(layerId), effectId, background == YES, radius, pts.data(),
+                              static_cast<aurea::u32>(pts.size() / 2)) ? YES : NO;
+}
+
+- (BOOL)rotoUndoStrokeForEffect:(uint32_t)effectId layer:(long long)layerId {
+    if (auto* e = self.engine) return e->roto_undo_stroke(static_cast<aurea::u64>(layerId), effectId) ? YES : NO;
+    return NO;
+}
+
+- (BOOL)rotoPropagateEffect:(uint32_t)effectId layer:(long long)layerId {
+    if (auto* e = self.engine) return e->roto_propagate(static_cast<aurea::u64>(layerId), effectId) ? YES : NO;
+    return NO;
+}
+
+- (void)rotoCancel {
+    if (auto* e = self.engine) e->roto_cancel();
+}
+
+- (BOOL)rotoSetView:(uint32_t)mode effect:(uint32_t)effectId layer:(long long)layerId {
+    if (auto* e = self.engine) return e->roto_set_view(static_cast<aurea::u64>(layerId), effectId, mode) ? YES : NO;
+    return NO;
+}
+
+- (NSArray<NSNumber *> *)rotoStatusForEffect:(uint32_t)effectId layer:(long long)layerId {
+    long long v[6] = {0, 0, 0, 0, 0, 0};
+    if (auto* e = self.engine) {
+        aurea::i64 p[4] = {0, 0, 0, 0};
+        aurea::u32 info[3] = {0, 0, 0};
+        (void)e->roto_progress(p);
+        (void)e->roto_stroke_info(static_cast<aurea::u64>(layerId), effectId, info);
+        v[0] = p[0]; v[1] = p[1]; v[2] = p[2]; v[3] = p[3]; v[4] = info[0]; v[5] = info[1];
+    }
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5])];
+}
+
 - (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId {
     if (auto* e = self.engine) return e->apply_effect_preset(static_cast<aurea::u64>(layerId), effectId, preset) ? YES : NO;
     return NO;

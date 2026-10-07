@@ -498,6 +498,12 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_page_turn_effect(registry);
     // Vidro líquido, Dissolver com ruído e 8 bits. Sempre no FIM.
     builtin::register_optical_stylize_effects(registry);
+    // Desintegrar (Transição). No fim.
+    builtin::register_disintegrate_effect(registry);
+    // Malha de deformação (Distorcer). No fim.
+    builtin::register_mesh_warp_effect(registry);
+    // Fantoche (Distorcer). No fim.
+    builtin::register_puppet_effect(registry);
 }
 
 } // namespace aurea

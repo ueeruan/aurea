@@ -8,17 +8,29 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Leitura de mídia. A partir do Android 13 o acesso é por tipo; nas
-         versões anteriores vale READ_EXTERNAL_STORAGE. -->
-    <!-- Só para a transcrição (Groq), quando o usuário toca em "Gerar legendas". -->
+    <!-- Rede: conta (obrigatória), comunidade, relatório de crash, IA de
+         vídeo, avisos, download do modelo de legendas e anúncios. Tudo HTTPS
+         (usesCleartextTraffic="false"). -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Leitura de mídia para a GALERIA do editor (Adicionar → mídia), pedida
+         só quando ela abre; o seletor de fotos do sistema (PickVisualMedia)
+         continua como alternativa sem permissão. Editor de vídeo = uso
+         principal (política "Photo and Video Permissions" do Google Play).
+         A partir do Android 13 o acesso é por tipo; antes, READ_EXTERNAL_STORAGE.
+         READ_MEDIA_AUDIO saiu (Play, 10/2026): o áudio entra pelo seletor de
+         documentos (SAF), que não pede permissão. -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
+
+    <!-- ID de publicidade: os SDKs de anúncio (LevelPlay/Unity Ads, AdMob) o
+         usam. Explícito para não depender do merge das bibliotecas; o Play
+         Console tem de declarar "usa ID de publicidade: sim (publicidade)". -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
 
     <!-- Fase 8I (§185, §195): saíram CAMERA, RECORD_AUDIO (não há captura no
          editor), REQUEST_INSTALL_PACKAGES (não há atualização dentro do app)
@@ -34,6 +46,12 @@
         android:required="false"/>
     <uses-feature android:glEsVersion="0x00030001" android:required="true"/>
 
+    <!-- allowBackup=false + dataExtractionRules excluindo tudo: decisão
+         documentada em res/xml/data_extraction_rules.xml (caches de GB; projeto
+         restaurado sem a mídia da sandbox viraria camadas órfãs).
+         largeHeap: miniaturas, imagens importadas e prévias de efeito vivem em
+         Bitmap no heap Java; o motor é nativo, mas sem largeHeap aparelhos com
+         heap padrão de 192–256 MB estouram ao abrir projeto com muitas imagens. -->
     <application
         android:name=".AureaApplication"
         android:label="Aurea Beta"

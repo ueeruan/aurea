@@ -65,6 +65,12 @@ void register_datamosh_effect(EffectRegistry& r);
 void register_motion_extras(EffectRegistry& r);
 void register_repeat_extras(EffectRegistry& r);
 void register_keying_extras(EffectRegistry& r);
+/// Desintegrar (DisintegrateEffect.cpp). No fim.
+void register_disintegrate_effect(EffectRegistry& r);
+/// Malha de deformação (MeshWarpEffect.cpp). No fim.
+void register_mesh_warp_effect(EffectRegistry& r);
+/// Fantoche — pinos com ARAP (PuppetEffect.cpp). No fim.
+void register_puppet_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

@@ -1,6 +1,7 @@
 package com.aurea.aurea.ads
 
 import android.app.Activity
+import android.content.Context
 import com.google.android.ump.ConsentInformation
 import com.google.android.ump.ConsentRequestParameters
 import com.google.android.ump.UserMessagingPlatform
@@ -26,5 +27,20 @@ object UmpConsent {
         })
         // Sessões anteriores já decidiram: pode seguir em paralelo (recomendação do Google).
         if (consent.canRequestAds()) decidir(true)
+    }
+
+    /**
+     * GDPR/UMP: onde a região exige (EEE, Reino Unido, Suíça), a pessoa tem de
+     * poder rever o consentimento a qualquer hora — a linha "Privacidade dos
+     * anúncios" em Ajustes só aparece quando isto é verdade.
+     */
+    fun opcoesDePrivacidadeExigidas(context: Context): Boolean = runCatching {
+        UserMessagingPlatform.getConsentInformation(context.applicationContext).privacyOptionsRequirementStatus ==
+            ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+    }.getOrDefault(false)
+
+    fun mostrarOpcoesDePrivacidade(activity: Activity, aoTerminar: () -> Unit = {}) {
+        runCatching { UserMessagingPlatform.showPrivacyOptionsForm(activity) { aoTerminar() } }
+            .onFailure { aoTerminar() }
     }
 }

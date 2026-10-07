@@ -3023,5 +3023,149 @@
   "hi": "ऊर्ध्वाधर किनारे लॉक",
   "id": "Tepi vertikal terkunci",
   "ar": "الحواف العمودية مثبّتة"
+ },
+ "Expansão": {
+  "ar": "التمدد",
+  "en": "Expansion",
+  "es": "Expansión",
+  "hi": "विस्तार",
+  "id": "Ekspansi",
+  "ru": "Расширение"
+ },
+ "Pino": {
+  "ar": "دبوس",
+  "en": "Pin",
+  "es": "Pin",
+  "hi": "पिन",
+  "id": "Pin",
+  "ru": "Булавка"
+ },
+ "Pino (posição)": {
+  "ar": "دبوس (الموضع)",
+  "en": "Pin (position)",
+  "es": "Pin (posición)",
+  "hi": "पिन (स्थिति)",
+  "id": "Pin (posisi)",
+  "ru": "Булавка (позиция)"
+ },
+ "Pino (repouso)": {
+  "ar": "دبوس (السكون)",
+  "en": "Pin (rest)",
+  "es": "Pin (reposo)",
+  "hi": "पिन (विश्राम)",
+  "id": "Pin (diam)",
+  "ru": "Булавка (покой)"
+ },
+ "Rigidez": {
+  "ar": "الصلابة",
+  "en": "Rigidity",
+  "es": "Rigidez",
+  "hi": "कठोरता",
+  "id": "Kekakuan",
+  "ru": "Жёсткость"
+ },
+ "Triângulos": {
+  "ar": "المثلثات",
+  "en": "Triangles",
+  "es": "Triángulos",
+  "hi": "त्रिभुज",
+  "id": "Segitiga",
+  "ru": "Треугольники"
+ },
+ "Conclusão": {
+  "en": "Completion",
+  "es": "Finalización",
+  "ru": "Завершение",
+  "hi": "पूर्णता",
+  "id": "Penyelesaian",
+  "ar": "الاكتمال"
+ },
+ "Direção": {
+  "en": "Direction",
+  "es": "Dirección",
+  "ru": "Направление",
+  "hi": "दिशा",
+  "id": "Arah",
+  "ar": "الاتجاه"
+ },
+ "Tamanho da partícula": {
+  "en": "Particle size",
+  "es": "Tamaño de partícula",
+  "ru": "Размер частиц",
+  "hi": "कण का आकार",
+  "id": "Ukuran partikel",
+  "ar": "حجم الجسيم"
+ },
+ "Aleatoriedade": {
+  "en": "Randomness",
+  "es": "Aleatoriedad",
+  "ru": "Случайность",
+  "hi": "यादृच्छिकता",
+  "id": "Keacakan",
+  "ar": "العشوائية"
+ },
+ "Espalhamento": {
+  "en": "Spread",
+  "es": "Dispersión",
+  "ru": "Разброс",
+  "hi": "फैलाव",
+  "id": "Sebaran",
+  "ar": "الانتشار"
+ },
+ "Velocidade": {
+  "en": "Speed",
+  "es": "Velocidad",
+  "ru": "Скорость",
+  "hi": "गति",
+  "id": "Kecepatan",
+  "ar": "السرعة"
+ },
+ "Turbulência": {
+  "en": "Turbulence",
+  "es": "Turbulencia",
+  "ru": "Турбулентность",
+  "hi": "अशांति",
+  "id": "Turbulensi",
+  "ar": "الاضطراب"
+ },
+ "Esmaecer": {
+  "en": "Fade",
+  "es": "Desvanecer",
+  "ru": "Затухание",
+  "hi": "फीका करना",
+  "id": "Memudar",
+  "ar": "التلاشي"
+ },
+ "Cor do brilho": {
+  "en": "Glow color",
+  "es": "Color del brillo",
+  "ru": "Цвет свечения",
+  "hi": "चमक का रंग",
+  "id": "Warna cahaya",
+  "ar": "لون التوهج"
+ },
+ "Direção da luz": {
+  "en": "Light direction",
+  "es": "Dirección de la luz",
+  "ru": "Направление света",
+  "hi": "प्रकाश की दिशा",
+  "id": "Arah cahaya",
+  "ar": "اتجاه الضوء"
+ },
+ "Final": {
+  "en": "Final",
+  "es": "Final",
+  "ru": "Итог",
+  "hi": "अंतिम",
+  "id": "Akhir",
+  "ar": "النهائي"
+ },
+ "Contorno": {
+  "en": "Outline",
+  "es": "Contorno",
+  "ru": "Контур",
+  "hi": "रूपरेखा",
+  "id": "Kontur",
+  "ar": "المخطط"
  }
 }

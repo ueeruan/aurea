@@ -19,6 +19,7 @@
 #include "aurea/core/Handle.hpp"
 #include "aurea/core/Math.hpp"
 #include "aurea/core/Types.hpp"
+#include "aurea/effects/MeshWarp.hpp"
 
 #include <cmath>
 #include <limits>
@@ -238,6 +239,8 @@ struct EffectInstance {
     std::vector<CurveData>    curves;      ///< indexado por ParamValue::ref
     std::vector<GradientData> gradients;
     MaskId       mask{};
+    /// Malha de deformação (só aurea.distort.mesh_warp; vazio nos outros).
+    std::vector<MeshWarpData> meshes;
 };
 
 /// Chave do track de um componente de parâmetro. O track mora no `TrackSet`

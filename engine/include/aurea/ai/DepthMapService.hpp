@@ -73,6 +73,11 @@ public:
     [[nodiscard]] DepthMapPtr video(u64 key, VideoSourceFactory* factory, const Asset& asset, u64 sourceKey,
                                     i64 targetUs, i64 frameUs, bool wait);
 
+    /// Roto Brush: o mapa CRU (probabilidade + RGB da rede) do quadro `index`
+    /// da fonte, esperando — mesma chave/cache dos vizinhos da estabilização.
+    [[nodiscard]] DepthMapPtr foreground_video_frame(VideoSourceFactory* factory, const Asset& asset, u64 sourceKey,
+                                                     i64 index, f64 fps);
+
     /// O que já está no cache, sem pedir nada.
     [[nodiscard]] DepthMapPtr cached(u64 key);
 

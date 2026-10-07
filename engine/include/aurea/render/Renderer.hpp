@@ -22,6 +22,7 @@
 #pragma once
 
 #include "aurea/ai/DepthMapService.hpp"
+namespace aurea::ai { class RotoService; struct RotoStroke; }
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/effects/CubeLut.hpp"
 #include "aurea/media/MediaManager.hpp"
@@ -515,6 +516,7 @@ public:
     // --- EffectResources -----------------------------------------------------
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
     [[nodiscard]] TextureHandle cube_lut(AssetId id) noexcept override;
+    [[nodiscard]] TextureHandle data_texture(u64 key, const Vec4* texels, u32 width, u32 height) noexcept override;
     /// Espectro do som de uma camada no instante do `prepare` em curso (ver
     /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
@@ -540,6 +542,16 @@ public:
     /// O serviço dos mapas (testes e HUD); nulo até o primeiro pedido.
     [[nodiscard]] ai::DepthMapService* depth_service() noexcept { return depth_.get(); }
     [[nodiscard]] ai::DepthMapService* foreground_service() noexcept { return foreground_.get(); }
+    /// Roto Brush (traços + propagação, RendererRoto.cpp); nulo até o primeiro pedido.
+    [[nodiscard]] ai::RotoService* roto_service() noexcept { return roto_.get(); }
+    /// Recorte do Rotobrush JÁ calculado da camada (CPU, RotoService::kSize²,
+    /// 0..1) no quadro `frame` da fonte; nulo = ainda não há (o Fantoche usa
+    /// como contorno da malha).
+    [[nodiscard]] std::shared_ptr<const std::vector<f32>> roto_cached_matte(const Composition* comp, const Layer& layer,
+                                                                            const EffectInstance& instance, i64 frame) noexcept;
+    /// "Propagar clipe": todos os quadros da fonte da camada no worker do Roto.
+    bool roto_propagate(const Project& project, const Composition& comp, const Layer& layer,
+                        const EffectInstance& instance, MediaManager* media) noexcept;
     void set_foreground_model_directory(std::string path);
 
     // --- Consultas -------------------------------------------------------------
@@ -798,6 +810,7 @@ public:
 private:
     std::unordered_map<u64, ImageTexture> images_;     ///< por AssetId empacotado
     std::unordered_map<u64, LutTexture> luts_;         ///< por hash da curva
+    std::vector<u64> meshDataKeys_;                    ///< data_texture em luts_, da mais velha à mais nova
     // --- Espectro de áudio (EffectResources::audio_spectrum) ----------------
     // A textura de um quadro é função pura de (asset, amostra central, faixas,
     // ganho): a chave é isso. Blocos decodificados na hora, num cache próprio
@@ -835,6 +848,9 @@ private:
     };
     std::unique_ptr<ai::DepthMapService> depth_;
     std::unique_ptr<ai::DepthMapService> foreground_;
+    std::shared_ptr<ai::RotoService> roto_;   ///< shared_ptr: tipo incompleto aqui
+    [[nodiscard]] DepthMapResult roto_map(const DepthMapRequest& request,
+                                          const std::vector<ai::RotoStroke>& strokes) noexcept;
     std::string foregroundModelDirectory_;
     std::unordered_map<u64, LutTexture> depthTex_;     ///< por quadro-fonte
     std::unordered_map<u64, DepthState> depthState_;   ///< por (camada, efeito, export?)

@@ -418,7 +418,7 @@ public:
 class BallGrid final : public Effect {
 public:
     enum : u32 { kScatter = 0, kAxis, kRotation, kTwistProperty, kTwistAngle, kSpacing, kBallSize,
-                 kInstabilityState, kInstability };
+                 kInstabilityState, kInstability, kLightDirection, kMix };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kBallGrid, "Bolas", "Estilizar", EffectClass::Domain};
@@ -441,8 +441,21 @@ public:
         p.add_angle("instability_state", "Estado de instabilidade", 0.0f);
         p.add_float("instability", "Instabilidade", 0.0f, 0.0f, 200.0f, kParamAnimatable | kParamPixels, "px");
         p.typed_range(0.0f, 2000.0f);
+        // De onde vem a luz (0° = da direita, 90° = de baixo): 225° = de cima
+        // à esquerda, a luz fixa de antes.
+        p.add_angle("light_direction", "Direção da luz", 225.0f);
+        p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kAnimPct, "%");
     }
-    bool is_identity(const EffectEval&) const noexcept override { return false; }
+    bool is_identity(const EffectEval& e) const noexcept override { return !(finite_or(e.f(kMix), 100.0f) > 0.0f); }
+    // Bolas de fora do quadro visível podem girar/espalhar para dentro dele.
+    bool needs_full_input() const noexcept override { return true; }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        v[kSpacing] = ParamValue::scalar(6.0f);
+        v[kAxis] = ParamValue::scalar(3.0f);   // XY
+        v[kRotation] = ParamValue::scalar(28.0f);
+        v[kScatter] = ParamValue::scalar(5.0f);
+        return true;
+    }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         PipelineKey k = PipelineKey::graphics(ShaderId::effects_ball_grid_vert, ShaderId::effects_ball_grid_frag, work);
         k.hasDepth = true;
@@ -451,8 +464,9 @@ public:
         k.depthCompare = CompareOp::GreaterOrEqual;
         k.depthFormat = SurfaceFormat::Depth32F;
         out.push_back(k);
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_disintegrate_compose_frag, work));
     }
-    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         struct BallUniforms {
             Vec4 grid;     // colunas, linhas, espaçamento (px), raio (px)
@@ -461,8 +475,10 @@ public:
             Vec4 extra;    // eixo, estado (rad), instabilidade (px), distância focal (px)
             Vec4 center;   // centro da rotação (px), tamanho natural da camada
             Vec4 texel;    // texels por px da camada (x, y), px por texel
+            Vec4 dst;      // região da saída (px da camada)
+            Vec4 light;    // direção da luz (normalizada)
         } u{};
-        static_assert(sizeof(BallUniforms) == 96);
+        static_assert(sizeof(BallUniforms) == 128);
         const Rect r = input.region;
         f32 spacing = std::clamp(finite_or(e.f(kSpacing), 8.0f), 1.0f, 400.0f);
         // Teto de bolas (vértices = 6 por bola): o espaçamento cresce antes.
@@ -485,21 +501,74 @@ public:
                        2.0f * std::max(size.x, size.y)};
         u.center = Vec4{size.x * 0.5f, size.y * 0.5f, size.x, size.y};
         u.texel = Vec4{input.texel_scale_x(), input.texel_scale_y(), 1.0f / std::max(input.texel_scale_x(), 1e-4f), 0.0f};
-        out = input;
-        out.texture = ctx.texture("bolas", input.width, input.height);
-        const u32 vertices = static_cast<u32>(cols * rows) * 6u;
-        if (radius <= 0.0f) {
-            // Bola de tamanho zero: nada a desenhar (a camada some).
-            if (ctx.geometry_pass("bolas", PassStage::Effects, out.texture, ShaderId::effects_ball_grid_vert,
-                                  ShaderId::effects_ball_grid_frag, {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
-                                  &u, sizeof(u), 0, true) == kInvalidIndex) {
-                return Errc::PipelineCompileFailed;
-            }
-            return OkStatus;
+        const f32 light = finite_or(e.f(kLightDirection), 225.0f) * deg;
+        {
+            const Vec4 l{0.7106f * std::cos(light), 0.7106f * std::sin(light), 0.70f, 0.0f};
+            const f32 n = std::sqrt(l.x * l.x + l.y * l.y + l.z * l.z);
+            u.light = Vec4{l.x / n, l.y / n, l.z / n, 0.0f};
         }
-        if (ctx.geometry_pass("bolas", PassStage::Effects, out.texture, ShaderId::effects_ball_grid_vert,
+
+        // Região da saída: as bolas saem da caixa da camada. Parada (sem
+        // dispersão, instabilidade, rotação nem torção), só a bola maior que a
+        // célula passa da borda; em movimento, o círculo que contém qualquer
+        // bola em volta do centro de rotação, aumentado pela perspectiva.
+        const f32 scatter = u.motion.x, instability = u.extra.z, focal = u.extra.w;
+        const bool moving = scatter > 0.0f || instability > 0.0f || u.motion.y != 0.0f || u.motion.z != 0.0f;
+        Rect want = r;
+        if (!moving) {
+            const f32 grow = radius > 0.5f * spacing ? radius - 0.5f * spacing + 1.0f : 0.0f;
+            want = Rect{r.x - grow, r.y - grow, r.w + 2.0f * grow, r.h + 2.0f * grow};
+        } else {
+            f32 far = 0.0f;
+            for (const Vec2 c : {Vec2{r.x, r.y}, Vec2{r.x + r.w, r.y}, Vec2{r.x, r.y + r.h}, Vec2{r.x + r.w, r.y + r.h}}) {
+                far = std::max(far, std::hypot(c.x - u.center.x, c.y - u.center.y));
+            }
+            const f32 reach = far + scatter * 1.7321f + instability;
+            const f32 k = focal / std::max(focal - reach, 0.05f * focal);
+            const f32 ext = (reach + radius) * k + 2.0f;
+            const f32 left = std::min(r.x, u.center.x - ext), top = std::min(r.y, u.center.y - ext);
+            const f32 right = std::max(r.x + r.w, u.center.x + ext), bottom = std::max(r.y + r.h, u.center.y + ext);
+            want = Rect{left, top, right - left, bottom - top};
+        }
+        const bool clipped = e.placement && !e.placement->inScene3d && !e.placement->preserveFullExtent
+                          && e.placement->compWidth && e.placement->compHeight;
+        if (!clipped) {
+            // Cena 3D (sem recorte ao quadro): teto no crescimento, como nos raios.
+            const f32 cap = std::max(0.25f * std::max(r.w, r.h), 512.0f);
+            const f32 left = std::max(want.x, r.x - cap), top = std::max(want.y, r.y - cap);
+            const f32 right = std::min(want.x + want.w, r.x + r.w + cap), bottom = std::min(want.y + want.h, r.y + r.h + cap);
+            want = Rect{left, top, right - left, bottom - top};
+        }
+        const Rect region = spread_region(want, 0.0f, 0.0f, e.placement, margin);
+        u32 w = 0, h = 0;
+        ctx.region_size(region, input.texel_scale_x(), w, h);
+        if (!w || !h) return Status{Errc::InvalidArgument, "bolas: regiao vazia"};
+        u.dst = Vec4{region.x, region.y, region.w, region.h};
+
+        const f32 mix = std::clamp(finite_or(e.f(kMix), 100.0f) / 100.0f, 0.0f, 1.0f);
+        const bool blend = mix < 1.0f;
+        const FGTexture balls = ctx.texture(blend ? "bolas-grade" : "bolas", w, h);
+        // Bola de tamanho zero: nada a desenhar (a camada some).
+        const u32 vertices = radius > 0.0f ? static_cast<u32>(cols * rows) * 6u : 0u;
+        if (ctx.geometry_pass("bolas", PassStage::Effects, balls, ShaderId::effects_ball_grid_vert,
                               ShaderId::effects_ball_grid_frag, {PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
                               &u, sizeof(u), vertices, true) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        out = LayerImage{balls, region, w, h};
+        if (!blend) return OkStatus;
+        // Mistura com a camada: o passe de composição do Desintegrar, sem resto.
+        struct ComposeUniforms {
+            Vec4 src, dst, grid, front, timing, motion, glow, texel, uvMap, mode;
+        } cu{};
+        static_assert(sizeof(ComposeUniforms) == 160);
+        cu.uvMap = EffectBuildContext::uv_map(region, r);
+        cu.mode = Vec4{mix, 0.0f, 0.0f, 0.0f};
+        out.texture = ctx.texture("bolas", w, h);
+        if (ctx.fullscreen_pass("bolas-mistura", PassStage::Effects, out.texture, ShaderId::effects_disintegrate_compose_frag,
+                                {PassTexture{balls, {}, CommonSampler::LinearClamp},
+                                 PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
+                                &cu, sizeof(cu)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
         return OkStatus;

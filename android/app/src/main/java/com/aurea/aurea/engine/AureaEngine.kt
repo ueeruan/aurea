@@ -129,6 +129,10 @@ class AureaEngine private constructor() {
         @JvmStatic external fun clampPinchFactor3D(kind: Int, factor: Float, x: Float, y: Float, z: Float): Float
         /** Escala 3D de gesto já no formato gravado; [axis] 0..2 eixo, 3 uniforme, 4 ajustar (GestureMath.hpp). */
         @JvmStatic external fun gestureScale3D(kind: Int, x: Float, y: Float, z: Float, axis: Int, factor: Float): FloatArray
+        /** Trackball (core/Trackball.hpp): 27 argumentos → Euler XYZ + Q acumulado (7), ou vazio. */
+        @JvmStatic external fun trackballDrag(args: FloatArray): FloatArray
+        /** Parte do trackball sob o dedo: 0..2 anel X/Y/Z, 3 anel da vista, 4 esfera, −1 nada. */
+        @JvmStatic external fun trackballHit(axes: FloatArray, x: Float, y: Float, radius: Float, tolerance: Float): Int
         @JvmStatic external fun fitCanvas(values: FloatArray, fill: Boolean): FloatArray
         @JvmStatic external fun previewGestureValue(basis: FloatArray, dx: Float, dy: Float, rotate: Boolean): FloatArray
         @JvmStatic external fun nativeDestroy(handle: Long)
@@ -439,6 +443,9 @@ class AureaEngine private constructor() {
     fun gizmoMoveLocal(layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean = nativeGizmoMoveLocal(nativeHandle, layer, axis, amount, out)
     fun previewGestureBasis(layer: Long): FloatArray? = FloatArray(13).takeIf { nativePreviewGestureBasis(nativeHandle, layer, it) }
     private external fun nativePreviewGestureBasis(handle: Long, layer: Long, out: FloatArray): Boolean
+    /** Trackball: origem (2), eixos na vista A (9), frame F (9), Rotação XYZ (3). */
+    fun queryTrackball(layer: Long): FloatArray? = FloatArray(23).takeIf { nativeQueryTrackball(nativeHandle, layer, it) }
+    private external fun nativeQueryTrackball(handle: Long, layer: Long, out: FloatArray): Boolean
 
     fun sceneSettings(): FloatArray = nativeSceneSettings(nativeHandle)
     fun setSceneSetting(parameter: Int, value: Float): Boolean = nativeSetSceneSetting(nativeHandle, parameter, value)
@@ -510,6 +517,22 @@ class AureaEngine private constructor() {
         nativeRigPoseJoint(nativeHandle, layer, joint, x, y, continuing)
     /** Montagem aberta nesta camada (a prévia sem deformação); 0 = nenhuma. */
     fun setRigSetupLayer(layer: Long) = nativeSetRigSetupLayer(nativeHandle, layer)
+    // Malha de deformação (Engine::query_mesh_warp): 4 floats de cabeçalho
+    // {linhas, colunas, key no cabeçote, animada} + 10 por vértice, normalizados à camada.
+    fun queryMeshWarp(layer: Long, effect: Int, out: FloatArray): Int = nativeQueryMeshWarp(nativeHandle, layer, effect, out)
+    /** [grip] 0 = vértice (alças juntas), 1..4 = alça esquerda, direita, cima, baixo; (u, v) normalizado. */
+    fun meshWarpDrag(layer: Long, effect: Int, vertex: Int, grip: Int, u: Float, v: Float, autoKey: Boolean, continuing: Boolean): Boolean =
+        nativeMeshWarpDrag(nativeHandle, layer, effect, vertex, grip, u, v, autoKey, continuing)
+    fun meshWarpReset(layer: Long, effect: Int): Boolean = nativeMeshWarpReset(nativeHandle, layer, effect)
+    // Fantoche (Engine::query_puppet): 4 floats por pino {índice, u, v, key no cabeçote};
+    // a malha deformada: 6 floats por triângulo (u, v). u, v = fração da camada.
+    fun queryPuppet(layer: Long, effect: Int, out: FloatArray): Int = nativeQueryPuppet(nativeHandle, layer, effect, out)
+    fun queryPuppetMesh(layer: Long, effect: Int, out: FloatArray): Int = nativeQueryPuppetMesh(nativeHandle, layer, effect, out)
+    /** Pino novo (−1 = cheio). */
+    fun puppetAddPin(layer: Long, effect: Int, u: Float, v: Float): Int = nativePuppetAddPin(nativeHandle, layer, effect, u, v)
+    fun puppetMovePin(layer: Long, effect: Int, pin: Int, u: Float, v: Float, autoKey: Boolean, continuing: Boolean): Boolean =
+        nativePuppetMovePin(nativeHandle, layer, effect, pin, u, v, autoKey, continuing)
+    fun puppetRemovePin(layer: Long, effect: Int, pin: Int): Boolean = nativePuppetRemovePin(nativeHandle, layer, effect, pin)
     fun setTrackMatte(layer: Long, matte: Long, mode: Int): Boolean = nativeSetTrackMatte(nativeHandle, layer, matte, mode)
     /** {matte, modo} (matte 0 = nenhuma). */
     fun queryTrackMatte(layer: Long, out: LongArray): Boolean = nativeQueryTrackMatte(nativeHandle, layer, out)
@@ -697,6 +720,15 @@ class AureaEngine private constructor() {
     fun effectPresets(typeId: Int): List<Pair<String, String>> =
         (nativeEffectPresets(nativeHandle, typeId) ?: emptyArray()).toList().chunked(2).filter { it.size == 2 }.map { it[0] to it[1] }
     fun applyEffectPreset(layer: Long, effectId: Int, preset: Int): Boolean = nativeApplyEffectPreset(nativeHandle, layer, effectId, preset)
+    // Roto Brush do Rotobrush IA: pontos em px da composição (x,y intercalados).
+    fun rotoAddStroke(layer: Long, effectId: Int, background: Boolean, radius: Float, xy: FloatArray): Boolean =
+        nativeRotoAddStroke(nativeHandle, layer, effectId, background, radius, xy)
+    fun rotoUndoStroke(layer: Long, effectId: Int): Boolean = nativeRotoUndoStroke(nativeHandle, layer, effectId)
+    fun rotoPropagate(layer: Long, effectId: Int): Boolean = nativeRotoPropagate(nativeHandle, layer, effectId)
+    fun rotoCancel() = nativeRotoCancel(nativeHandle)
+    fun rotoSetView(layer: Long, effectId: Int, mode: Int): Boolean = nativeRotoSetView(nativeHandle, layer, effectId, mode)
+    /** [feitos, total, rodando, falhou, traços no quadro, traços no total] */
+    fun rotoStatus(layer: Long, effectId: Int): LongArray = nativeRotoStatus(nativeHandle, layer, effectId) ?: LongArray(6)
     fun setGroupCameraPassThrough(layer: Long, on: Boolean): Boolean = nativeSetGroupCameraPassThrough(nativeHandle, layer, on)
     /** −1 = não é grupo. */
     fun queryGroupCameraPassThrough(layer: Long): Int = nativeQueryGroupCameraPassThrough(nativeHandle, layer)
@@ -1104,6 +1136,12 @@ class AureaEngine private constructor() {
     private external fun nativeQueryAdjustmentTargets(handle: Long, layer: Long): LongArray?
     private external fun nativeEffectPresets(handle: Long, typeId: Int): Array<String>?
     private external fun nativeApplyEffectPreset(handle: Long, layer: Long, effectId: Int, preset: Int): Boolean
+    private external fun nativeRotoAddStroke(handle: Long, layer: Long, effectId: Int, background: Boolean, radius: Float, xy: FloatArray): Boolean
+    private external fun nativeRotoUndoStroke(handle: Long, layer: Long, effectId: Int): Boolean
+    private external fun nativeRotoPropagate(handle: Long, layer: Long, effectId: Int): Boolean
+    private external fun nativeRotoCancel(handle: Long)
+    private external fun nativeRotoSetView(handle: Long, layer: Long, effectId: Int, mode: Int): Boolean
+    private external fun nativeRotoStatus(handle: Long, layer: Long, effectId: Int): LongArray?
     private external fun nativeSetGroupCameraPassThrough(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeQueryGroupCameraPassThrough(handle: Long, layer: Long): Int
     private external fun nativeAddLayersToGroup(handle: Long, ids: LongArray, group: Long): String?
@@ -1181,6 +1219,16 @@ class AureaEngine private constructor() {
     private external fun nativeRigAutoHumanoid(handle: Long, layer: Long): Int
     private external fun nativeRigPoseJoint(handle: Long, layer: Long, joint: Int, x: Float, y: Float, continuing: Boolean): Boolean
     private external fun nativeSetRigSetupLayer(handle: Long, layer: Long)
+    private external fun nativeQueryMeshWarp(handle: Long, layer: Long, effect: Int, out: FloatArray): Int
+    private external fun nativeMeshWarpDrag(handle: Long, layer: Long, effect: Int, vertex: Int, grip: Int, u: Float, v: Float,
+                                            autoKey: Boolean, continuing: Boolean): Boolean
+    private external fun nativeMeshWarpReset(handle: Long, layer: Long, effect: Int): Boolean
+    private external fun nativeQueryPuppet(handle: Long, layer: Long, effect: Int, out: FloatArray): Int
+    private external fun nativeQueryPuppetMesh(handle: Long, layer: Long, effect: Int, out: FloatArray): Int
+    private external fun nativePuppetAddPin(handle: Long, layer: Long, effect: Int, u: Float, v: Float): Int
+    private external fun nativePuppetMovePin(handle: Long, layer: Long, effect: Int, pin: Int, u: Float, v: Float,
+                                             autoKey: Boolean, continuing: Boolean): Boolean
+    private external fun nativePuppetRemovePin(handle: Long, layer: Long, effect: Int, pin: Int): Boolean
     private external fun nativeSetTrackMatte(handle: Long, layer: Long, matte: Long, mode: Int): Boolean
     private external fun nativeQueryTrackMatte(handle: Long, layer: Long, out: LongArray): Boolean
     private external fun nativeTrackPoint(handle: Long, layer: Long, x: Float, y: Float, stabilize: Boolean, tracked: IntArray): Long

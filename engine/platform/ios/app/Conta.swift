@@ -318,6 +318,30 @@ final class ContaModel: ObservableObject {
         revogarPendentes()
     }
 
+    /// Exclusão da conta em andamento (o botão não repete o pedido).
+    @Published private(set) var excluindo: Bool = false
+
+    /// Exclui a conta no servidor (conta, sessões, comunidade, relatos — ver
+    /// `excluirConta` em discovery/contas.js) e só DEPOIS sai. Sem resposta
+    /// positiva do servidor nada muda aqui. (O mesmo do Android.)
+    func excluirConta(_ terminou: @escaping (Bool) -> Void) {
+        guard !excluindo, let guardada: ContaSessao = sessao() else { terminou(false); return }
+        excluindo = true
+        Task { @MainActor in
+            let r: ContaResposta = await ContaAPI.chamar("/api/auth/delete", metodo: "POST", corpo: ["confirm": true], token: guardada.token)
+            excluindo = false
+            guard r.ok else { terminou(false); return }
+            apagarSessao()
+            ContaKeychain.apagar("revogar")
+            email = nil
+            // Conta nova: a tela abre no cadastro, não no "entrar".
+            entrando = false
+            erro = nil
+            await atualizarUsuarios()
+            terminou(true)
+        }
+    }
+
     private func pendentes() -> [String] {
         (ContaKeychain.ler("revogar") ?? "").components(separatedBy: "\n").filter {
             $0.range(of: "^[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil

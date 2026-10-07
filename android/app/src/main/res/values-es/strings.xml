@@ -64,7 +64,7 @@
     <string name="settings_groq_key">Clave de Groq</string>
     <string name="settings_groq_set">Configurada — toca para cambiar o quitar</string>
     <string name="settings_groq_unset">Sin configurar — toca para añadir</string>
-    <string name="settings_groq_note">La clave se queda solo en este dispositivo, cifrada. El audio solo va a Groq cuando tocas Generar subtítulos; sin clave puedes usar un archivo SRT.</string>
+    <string name="settings_groq_note">La clave se queda solo en este dispositivo, cifrada.</string>
     <string name="settings_group_device">Rendimiento</string>
     <string name="settings_device_auto">Optimización automática</string>
     <string name="settings_device_auto_note">En la primera apertura la app mide el dispositivo y elige la escala del visor, el número de hilos y el tope de exportación. Queda configurado para las próximas veces.</string>
@@ -1081,7 +1081,7 @@ para editar la curva.</string>
     <string name="conta_entrar">Iniciar sesión</string>
     <string name="conta_ir_entrar">Ya tengo cuenta · Entrar</string>
     <string name="conta_ir_cadastro">Aún no tengo cuenta · Crear</string>
-    <string name="conta_privacidade">Si Aurea se cierra solo o se congela, se envía automáticamente al desarrollador un informe técnico del error (versión de la app, modelo del dispositivo, sistema y rastro del error, con el correo de tu cuenta) para corregirlo. Tus proyectos y archivos nunca se envían.</string>
+    <string name="conta_privacidade">Si Aurea se cierra solo o se bloquea, se envía automáticamente al desarrollador un informe técnico del error (versión de la app, modelo del dispositivo, sistema y rastro del error, con el correo de tu cuenta) para corregirlo. Tus proyectos y medios solo salen del dispositivo cuando publicas en la Comunidad o usas una función de IA en línea.</string>
     <string name="conta_erro_email">Escribe un correo válido.</string>
     <string name="conta_erro_senha">La contraseña debe tener de 8 a 128 caracteres.</string>
     <string name="conta_erro_credenciais">Correo o contraseña incorrectos.</string>
@@ -1140,7 +1140,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea Beta 0.0.2 (2141) • 06/10/2026\n\n• Los modelos 3D vuelven a importarse con textura (GLB, glTF, OBJ+MTL y FBX); modelos de Sketchfab con reflejos.\n• Puedes elegir el .mtl después del OBJ.\n• Las capas 2D en 3D reciben la luz de la escena.\n• Exportar PNG y secuencia PNG sin fondo: opción Transparente en el proyecto.\n• Echo, Timewarp RGB y Detectar movimiento funcionan en precomposiciones.\n• Time Remap: quitar el efecto borra sus keyframes.\n• Vista previa en memoria mucho mayor (según la RAM del teléfono).\n• La rotación muestra las vueltas (2x +30°).\n• La máscara ya no desaparece al cerrar el panel.\n• Vincular a un nulo con un toque; borrar el nulo conserva el movimiento del hijo.\n• El audio se detiene al salir del editor.\n• Modo Exclusión correcto en imágenes.\n• Motion Tile corregido en proyectos antiguos.\n• Nueva barra del reproductor: cuadrícula, vista previa rápida, marcador, fotogramas, capas, deshacer y rehacer.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.3 (2142) • 07/10/2026\n\n• Gizmo trackball para la rotación 3D: anillos X/Y/Z y anillo de vista; arrastra para girar libremente.\n• Mesh Warp: cuadrícula de puntos y manijas para deformar la capa, animable.\n• Nuevo efecto Desintegrar; Bolas con dirección de luz y mezcla.\n• Máscara y Excluir en la mezcla, como en Alight Motion.\n• Títere: pines para deformar imágenes (sigue el recorte).\n• Rotoscopia: pinta objeto/fondo y propaga por el clip.\n• Eliminar cuenta desde la app.\n• Privacidad de anuncios en los ajustes.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -3054,7 +3054,7 @@ para editar la curva.</string>
     <string name="project_file_err_corrupt">No se pudo leer el proyecto dentro del archivo.</string>
     <string name="project_file_err_unreadable">No se pudo leer ese archivo.</string>
     <string name="report_title">Informar un problema</string>
-    <string name="report_subtitle">Llega directo a quienes hacen Aurea, con los datos del dispositivo. No se envía ningún proyecto ni medio.</string>
+    <string name="report_subtitle">Va directo a quienes hacen Aurea, con los datos del dispositivo. Este informe no incluye tus proyectos ni medios.</string>
     <string name="report_what_did">Qué hiciste (opcional)</string>
     <string name="report_what_happened">Qué esperabas y qué pasó en su lugar</string>
     <string name="report_steps">Pasos para repetirlo (opcional)</string>
@@ -3578,4 +3578,48 @@ para editar la curva.</string>
     <string name="edt_rotation_turns">Vueltas</string>
     <string name="edt_rotation_degrees">Grados</string>
     <string name="edt_rotation_value_a11y">%1$s vueltas, %2$s grados</string>
+    <string name="pn_blend_cat_mask">Máscara</string>
+    <string name="pn_blend_mask">Máscara</string>
+    <string name="pn_blend_exclude">Excluir</string>
+    <string name="pn_blend_mask_desc">Recorta las capas de abajo con la forma de esta capa</string>
+    <string name="pn_blend_exclude_desc">Abre un hueco con la forma de esta capa en las capas de abajo</string>
+    <string name="gizmo_trackball_hint">Trackball: arrastra la esfera para girar libremente; los anillos rojo, verde y azul giran solo en X, Y o Z; el anillo gris gira alrededor de la vista</string>
+    <string name="fx_name_mesh_warp">Malla de deformación</string>
+    <string name="mesh_warp_reset">Restablecer malla</string>
+    <string name="mesh_warp_hint">Arrastra los puntos de la malla en el vídeo. Toca un punto para ver sus manijas.</string>
+    <string name="fx_name_puppet">Marioneta</string>
+    <string name="fx_desc_puppet">Pines en la capa: arrastra un pin y la imagen se dobla como una marioneta</string>
+    <string name="puppet_edit_pins">Editar pines</string>
+    <string name="puppet_hint">Toca para poner un pin, arrastra para mover, mantén pulsado para borrar</string>
+    <string name="puppet_pin_a11y">Pin %1$d de la marioneta</string>
+    <string name="puppet_done">Listo</string>
+    <string name="afx_name_disintegrate">Desintegrar</string>
+    <string name="afx_desc_disintegrate">Deshace la capa en pequeños fragmentos que salen volando, giran y se desvanecen a lo largo de un frente.</string>
+    <string name="roto_paint">Pintar recorte</string>
+    <string name="roto_object">Objeto</string>
+    <string name="roto_background">Fondo</string>
+    <string name="roto_brush_size">Tamaño del pincel</string>
+    <string name="roto_undo">Deshacer trazo</string>
+    <string name="roto_propagate">Propagar clip</string>
+    <string name="roto_progress">Propagando %1$d de %2$d</string>
+    <string name="roto_done">Listo</string>
+    <string name="roto_hint">Pinta el objeto en verde; cambia a Fondo para quitar partes. Los trazos en otro cuadro actualizan los siguientes.</string>
+    <string name="fxl_roto_contrast">Contraste</string>
+    <string name="fxl_roto_smooth">Suavizar</string>
+    <string name="fxl_roto_chatter">Reducir vibración</string>
+    <string name="fxl_roto_decontaminate">Descontaminar colores del borde</string>
+    <string name="fxl_roto_view">Vista</string>
+    <string name="fxo_roto_final">Final</string>
+    <string name="fxl_particle_size">Tamaño de partícula</string>
+    <string name="fxl_fade">Desvanecer</string>
+    <string name="fxl_triangles">Triángulos</string>
+    <string name="fxl_expansion">Expansión</string>
+    <string name="fxl_rigidity">Rigidez</string>
+    <string name="afx_p_edge_glow">Brillo del borde</string>
+    <string name="conta_excluir">Eliminar cuenta</string>
+    <string name="conta_excluir_mensagem">Esto elimina para siempre tu cuenta, tu perfil y tus publicaciones de la comunidad y los reportes de problemas enviados con este correo. Los proyectos de este dispositivo no se eliminan. No se puede deshacer.</string>
+    <string name="conta_excluida">Cuenta eliminada.</string>
+    <string name="conta_excluir_falhou">No se pudo eliminar la cuenta. Revisa la conexión e inténtalo de nuevo.</string>
+    <string name="settings_ad_privacy">Privacidad de los anuncios</string>
+    <string name="settings_ad_privacy_note">Revisa o cambia tu consentimiento para anuncios</string>
 </resources>

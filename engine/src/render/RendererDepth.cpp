@@ -14,6 +14,7 @@
 //     têm estados separados — o export não herda o que o preview tocou.
 // =============================================================================
 #include "aurea/render/Renderer.hpp"
+#include "aurea/ai/RotoService.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/project/Project.hpp"
@@ -87,6 +88,11 @@ void Renderer::set_foreground_model_directory(std::string path) {
 
 DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     DepthMapResult none; none.failed = planFinal_;
+    if (request.foreground && request.instance) {
+        // Rotobrush com traços: o recorte do Roto Brush (RendererRoto.cpp).
+        ai::RotoStrokes strokes;
+        if (ai::roto_instance_strokes(*request.instance, strokes)) return roto_map(request, strokes);
+    }
     auto& service = request.foreground ? foreground_ : depth_;
     const u32 mapSize = request.foreground ? ai::ForegroundEstimator::kSize : ai::DepthEstimator::kSize;
     if (!backend_) return none;
@@ -311,6 +317,7 @@ void Renderer::release_depth(bool destroyTextures) noexcept {
     depthState_.clear();
     if (depth_) depth_->clear();
     if (foreground_) foreground_->clear();
+    if (roto_) roto_->clear();
 }
 
 } // namespace aurea

@@ -508,6 +508,14 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSString*>*)effectPresets:(uint32_t)typeId NS_SWIFT_NAME(effectPresets(_:));
 /// Aplica o preset (todos os valores, um passo de desfazer).
 - (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(applyEffectPreset(_:effect:forLayer:));
+/// Roto Brush do Rotobrush IA: pontos em px da composição (x,y intercalados).
+- (BOOL)rotoAddStroke:(NSArray<NSNumber *> *)xy background:(BOOL)background radius:(float)radius effect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(rotoAddStroke(_:background:radius:effect:forLayer:));
+- (BOOL)rotoUndoStrokeForEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoUndoStroke(effect:layer:));
+- (BOOL)rotoPropagateEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoPropagate(effect:layer:));
+- (void)rotoCancel NS_SWIFT_NAME(rotoCancel());
+- (BOOL)rotoSetView:(uint32_t)mode effect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoSetView(_:effect:layer:));
+/// [feitos, total, rodando, falhou, traços no quadro, traços no total]
+- (NSArray<NSNumber *> *)rotoStatusForEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoStatus(effect:layer:));
 /// Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo).
 - (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId;
 - (int32_t)groupCameraPassThrough:(long long)layerId;
@@ -674,6 +682,19 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)rigAutoHumanoid:(long long)layerId NS_SWIFT_NAME(rigAutoHumanoid(_:));
 - (BOOL)rigPoseJoint:(long long)layerId joint:(int32_t)joint x:(float)x y:(float)y continuing:(BOOL)continuing;
 - (void)setRigSetupLayer:(long long)layerId;
+// Malha de deformação (Engine::query_mesh_warp e família): 4 floats de cabeçalho
+// {linhas, colunas, key no cabeçote, animada} + 10 por vértice, normalizados à
+// caixa da camada. `grip` 0 = vértice, 1..4 = alça esquerda, direita, cima, baixo.
+- (NSArray<NSNumber*>*)meshWarp:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(meshWarp(_:effect:));
+- (BOOL)meshWarpDrag:(long long)layerId effect:(int32_t)effectId vertex:(int32_t)vertex grip:(int32_t)grip u:(float)u v:(float)v autoKey:(BOOL)autoKey continuing:(BOOL)continuing NS_SWIFT_NAME(meshWarpDrag(_:effect:vertex:grip:u:v:autoKey:continuing:));
+- (BOOL)meshWarpReset:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(meshWarpReset(_:effect:));
+// Fantoche (Engine::query_puppet e família; u, v = fração da caixa da camada):
+// pinos = 4 floats cada {índice, u, v, key no cabeçote}; malha = 6 por triângulo.
+- (NSArray<NSNumber*>*)puppetPins:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(puppetPins(_:effect:));
+- (NSArray<NSNumber*>*)puppetMesh:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(puppetMesh(_:effect:));
+- (int32_t)puppetAddPin:(long long)layerId effect:(int32_t)effectId u:(float)u v:(float)v NS_SWIFT_NAME(puppetAddPin(_:effect:u:v:));
+- (BOOL)puppetMovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin u:(float)u v:(float)v autoKey:(BOOL)autoKey continuing:(BOOL)continuing NS_SWIFT_NAME(puppetMovePin(_:effect:pin:u:v:autoKey:continuing:));
+- (BOOL)puppetRemovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin NS_SWIFT_NAME(puppetRemovePin(_:effect:pin:));
 // Formas 3D (Engine::add_shape3d e família; scene3d/Shape3D.hpp). Receita:
 // [forma, nº de partes, 5 por parte (RGBA sRGB, 1 = tem imagem)]. Partes no
 // cabeçote: 14 floats cada (Engine::kShapePartFloats).
@@ -726,6 +747,13 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length NS_SWIFT_NAME(gizmo(_:length:));
 - (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length localSpace:(BOOL)localSpace NS_SWIFT_NAME(gizmo(_:length:localSpace:));
 - (NSArray<NSNumber*>*)gizmoMoveLocal:(long long)layerId axis:(uint32_t)axis amount:(float)amount NS_SWIFT_NAME(gizmoMoveLocal(_:axis:amount:));
+/// Trackball do gizmo de girar (core/Trackball.hpp): origem (2), eixos na vista A (9),
+/// frame F (9) e Rotação XYZ (3) — 23 números, ou vazio sem gizmo 3D.
+- (NSArray<NSNumber*>*)trackball:(long long)layerId NS_SWIFT_NAME(trackball(_:));
+/// Um passo do arrasto: 27 argumentos → Rotação XYZ + Q acumulado (7), ou vazio.
+- (NSArray<NSNumber*>*)trackballDrag:(NSArray<NSNumber*>*)args NS_SWIFT_NAME(trackballDrag(_:));
+/// Parte sob o dedo: 0..2 anel X/Y/Z, 3 anel da vista, 4 esfera, −1 nada.
+- (int)trackballHit:(NSArray<NSNumber*>*)axes x:(float)x y:(float)y radius:(float)radius tolerance:(float)tolerance NS_SWIFT_NAME(trackballHit(_:x:y:radius:tolerance:));
 - (void)cancelCameraTracking;
 - (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov;
 - (NSArray<NSNumber*>*)cameraTrackTarget:(long long)frame;

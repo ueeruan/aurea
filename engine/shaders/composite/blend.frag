@@ -47,7 +47,9 @@ const int kAdd = 1, kSubtract = 2, kMultiply = 3, kScreen = 4, kOverlay = 5, kDa
           kColorDodge = 8, kColorBurn = 9, kHardLight = 10, kSoftLight = 11, kDifference = 12,
           kExclusion = 13, kHue = 14, kSaturation = 15, kColor = 16, kLuminosity = 17,
           // Os quatro do editor antigo (ver BlendMode em Types.hpp).
-          kDivide = 18, kVividLight = 19, kLinearDodge = 20, kLinearBurn = 21, kAdjustMix = 100;
+          kDivide = 18, kVividLight = 19, kLinearDodge = 20, kLinearBurn = 21,
+          // Máscara do Alight Motion: recorte Porter-Duff do fundo pela camada.
+          kMask = 22, kExclude = 23, kAdjustMix = 100;
 
 const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
 
@@ -178,6 +180,11 @@ void main() {
         return;
     }
     const vec4 src = texture(u_src, v_uv) * pc.params.x;
+    // Máscara / Excluir: a camada não pinta cor nenhuma, só o alfa dela
+    // (com a opacidade) recorta o fundo. Fora do quad da camada o renderer
+    // não copia o fundo no Mask (fica transparente) e copia no Exclude.
+    if (mode == kMask)    { o_color = dst * src.a; return; }
+    if (mode == kExclude) { o_color = dst * (1.0 - src.a); return; }
     const float as = src.a, ab = dst.a;
     const vec3 cs = as > 1e-6 ? src.rgb / as : vec3(0.0);
     const vec3 cb = ab > 1e-6 ? dst.rgb / ab : vec3(0.0);

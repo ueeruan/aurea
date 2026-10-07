@@ -82,7 +82,7 @@
     <string name="settings_groq_key">مفتاح Groq</string>
     <string name="settings_groq_set">مُعيَّن — اضغط للاستبدال أو الإزالة</string>
     <string name="settings_groq_unset">غير مُعيَّن — اضغط للإضافة</string>
-    <string name="settings_groq_note">يبقى المفتاح مشفّرًا على هذا الجهاز فقط. لا يُرسَل الصوت إلى Groq إلا عند الضغط على «إنشاء الترجمة المصاحبة»؛ وبدون مفتاح يظل بإمكانك تحميل ملف SRT.</string>
+    <string name="settings_groq_note">يبقى المفتاح على هذا الجهاز فقط، مشفّرًا.</string>
     <string name="settings_group_device">الأداء</string>
     <string name="settings_device_auto">التحسين التلقائي</string>
     <string name="settings_device_auto_note">عند التشغيل الأول، يقيس التطبيق قدرات الجهاز ويختار مقياس المعاينة وعدد مسارات المعالجة والحد الأقصى للتصدير، وتبقى هذه الإعدادات محفوظة بعد ذلك.</string>
@@ -1103,7 +1103,7 @@
     <string name="conta_entrar">تسجيل الدخول</string>
     <string name="conta_ir_entrar">لدي حساب بالفعل · تسجيل الدخول</string>
     <string name="conta_ir_cadastro">ليس لدي حساب بعد · إنشاء حساب</string>
-    <string name="conta_privacidade">إذا أُغلق Aurea من تلقاء نفسه أو توقف عن الاستجابة، يُرسَل تلقائيًا إلى المطوّر تقرير تقني عن الخطأ (إصدار التطبيق وطراز الجهاز والنظام وتتبّع الخطأ، مع البريد الإلكتروني لحسابك) لإصلاحه. لا تُرسَل مشاريعك ووسائطك أبدًا.</string>
+    <string name="conta_privacidade">إذا أُغلق Aurea من تلقاء نفسه أو تجمّد، يُرسَل تلقائيًا إلى المطوّر تقرير تقني بالخطأ (إصدار التطبيق، طراز الجهاز، النظام وأثر الخطأ، مع بريد حسابك) لإصلاحه. لا تغادر مشاريعك ووسائطك الجهاز إلا عندما تنشر في المجتمع أو تستخدم ميزة ذكاء اصطناعي عبر الإنترنت.</string>
     <string name="conta_erro_email">أدخل بريدًا إلكترونيًا صالحًا.</string>
     <string name="conta_erro_senha">يجب أن تتكون كلمة المرور من 8 إلى 128 حرفًا.</string>
     <string name="conta_erro_credenciais">البريد الإلكتروني أو كلمة المرور غير صحيحة.</string>
@@ -1166,7 +1166,7 @@
     <string name="consent_title">الموافقة والمسؤولية</string>
     <string name="consent_accept">موافقة ومتابعة</string>
     <string name="consent_body">Aurea أداة احترافية لتحرير المحتوى الرقمي وإنشائه وإنتاجه. باستخدام التطبيق، يقر المستخدم بأنه يتحمل المسؤولية الكاملة عن المحتوى الذي ينشئه أو يحرره أو يستورده أو يصدره أو ينشره أو يشاركه عبر المنصة.\n\nلا يتحكم Aurea في استخدام الأداة لأنشطة غير قانونية أو مسيئة أو احتيالية أو ضارة أو تنتهك حقوق الآخرين، ولا يشجع هذا الاستخدام أو يدعمه أو يصرح به.\n\nيتحمل المستخدم مسؤولية التأكد من امتلاكه التصاريح والتراخيص والحقوق اللازمة للمواد المستخدمة، بما فيها الصور ومقاطع الفيديو والموسيقى والعلامات التجارية والنماذج والملفات وغيرها من المحتويات المحمية.\n\nلا تعني الحرية الإبداعية التي يوفرها Aurea موافقة التطبيق أو مشاركته أو مسؤوليته عما يقرر كل مستخدم إنتاجه أو فعله باستخدام الأداة.\n\nيوافق المستخدم على استخدام Aurea وفقاً للقانون المعمول به ويتحمل مسؤولية أفعاله والمحتوى المنتج أو الموزع عبر التطبيق.\n\nإلى أقصى حد يسمح به القانون المعمول به، لا يتحمل Aurea والمسؤولون عنه المسؤولية عن الأفعال التي يقوم بها المستخدم وحده، أو إساءة استخدام الأداة، أو العواقب الناجمة عن المحتوى الذي ينشئه المستخدم نفسه أو ينشره أو يشاركه.\n\nيوفر Aurea الأداة. ويتحمل المستخدم مسؤولية الطريقة التي يختار استخدامها بها.\n\nبالمتابعة، يقر المستخدم بأنه قرأ هذه الشروط وفهمها ووافق عليها.</string>
-    <string name="release_notes_body">Aurea Beta 0.0.2 (2141) • 06/10/2026\n\n• النماذج ثلاثية الأبعاد تُستورد مع الخامات من جديد (GLB وglTF وOBJ+MTL وFBX)؛ ونماذج Sketchfab مع الانعكاسات.\n• يمكن اختيار ملف .mtl بعد OBJ.\n• الطبقات ثنائية الأبعاد داخل المشهد ثلاثي الأبعاد تستقبل إضاءة المشهد.\n• تصدير PNG وتسلسل PNG بلا خلفية: خيار شفاف في المشروع.\n• Echo وTimewarp RGB وكشف الحركة تعمل في التراكيب المسبقة.\n• Time Remap: إزالة التأثير تحذف إطاراته المفتاحية.\n• معاينة أكبر بكثير في الذاكرة (حسب ذاكرة الهاتف).\n• الدوران يعرض عدد اللفات (2x +30°).\n• القناع لا يختفي عند إغلاق اللوحة.\n• الربط بالكائن الفارغ بلمسة واحدة؛ وحذفه يحافظ على حركة الطبقة التابعة.\n• يتوقف الصوت عند مغادرة المحرر.\n• وضع الدمج «استبعاد» صحيح على الصور.\n• إصلاح Motion Tile في المشاريع القديمة.\n• شريط مشغل جديد: شبكة، معاينة سريعة، علامة، إطارات، طبقات، تراجع وإعادة.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.3 (2142) • 07/10/2026\n\n• أداة كرة التتبع للدوران ثلاثي الأبعاد: حلقات X/Y/Z وحلقة العرض؛ اسحب للدوران بحرية.\n• Mesh Warp: شبكة نقاط ومقابض لتشويه الطبقة، قابلة للتحريك.\n• تأثير جديد «تفكك»؛ و«الكرات» مع اتجاه الضوء والمزج.\n• وضعا «قناع» و«استبعاد» في المزج، كما في Alight Motion.\n• الدمية: دبابيس لتشويه الصور (تتبع القصّ).\n• الروتوسكوب: لوّن الكائن/الخلفية وانشره عبر المقطع.\n• حذف الحساب من التطبيق.\n• خصوصية الإعلانات في الإعدادات.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">تعبئة</string>
@@ -3080,7 +3080,7 @@
     <string name="project_file_err_corrupt">تعذّرت قراءة المشروع الموجود داخل الملف.</string>
     <string name="project_file_err_unreadable">تعذّرت قراءة هذا الملف.</string>
     <string name="report_title">الإبلاغ عن مشكلة</string>
-    <string name="report_subtitle">يصل مباشرةً إلى فريق تطوير Aurea مع بيانات جهازك. لا يُرسَل أي مشروع أو وسائط.</string>
+    <string name="report_subtitle">يصل مباشرة إلى صانعي Aurea مع بيانات الجهاز. لا يتضمن هذا التقرير مشاريعك أو وسائطك.</string>
     <string name="report_what_did">ما الذي فعلته (اختياري)</string>
     <string name="report_what_happened">ما الذي توقعته، وما الذي حدث بدلاً منه</string>
     <string name="report_steps">خطوات تكرار المشكلة (اختياري)</string>
@@ -3616,4 +3616,48 @@
     <string name="edt_rotation_turns">الدورات</string>
     <string name="edt_rotation_degrees">الدرجات</string>
     <string name="edt_rotation_value_a11y">%1$s دورات، %2$s درجة</string>
+    <string name="pn_blend_cat_mask">قناع</string>
+    <string name="pn_blend_mask">قناع</string>
+    <string name="pn_blend_exclude">استبعاد</string>
+    <string name="pn_blend_mask_desc">يقص الطبقات السفلية بشكل هذه الطبقة</string>
+    <string name="pn_blend_exclude_desc">يقطع شكل هذه الطبقة من الطبقات السفلية</string>
+    <string name="gizmo_trackball_hint">كرة التتبع: اسحب الكرة للتدوير بحرية؛ الحلقات الحمراء والخضراء والزرقاء تدور حول X أو Y أو Z فقط؛ الحلقة الرمادية تدور حول محور العرض</string>
+    <string name="fx_name_mesh_warp">تشويه الشبكة</string>
+    <string name="mesh_warp_reset">إعادة ضبط الشبكة</string>
+    <string name="mesh_warp_hint">اسحب نقاط الشبكة على الفيديو. اضغط على نقطة لإظهار مقابضها.</string>
+    <string name="fx_name_puppet">دمية</string>
+    <string name="fx_desc_puppet">دبابيس على الطبقة: اسحب دبوسًا فتنثني الصورة كالدمية</string>
+    <string name="puppet_edit_pins">تعديل الدبابيس</string>
+    <string name="puppet_hint">انقر لإضافة دبوس، واسحب للتحريك، واضغط مطولًا للحذف</string>
+    <string name="puppet_pin_a11y">دبوس الدمية %1$d</string>
+    <string name="puppet_done">تم</string>
+    <string name="afx_name_disintegrate">تفكك</string>
+    <string name="afx_desc_disintegrate">يفكك الطبقة إلى شظايا صغيرة تتطاير وتدور وتتلاشى على امتداد جبهة متحركة.</string>
+    <string name="roto_paint">رسم القص</string>
+    <string name="roto_object">العنصر</string>
+    <string name="roto_background">الخلفية</string>
+    <string name="roto_brush_size">حجم الفرشاة</string>
+    <string name="roto_undo">تراجع عن الضربة</string>
+    <string name="roto_propagate">تتبع المقطع كله</string>
+    <string name="roto_progress">جارٍ التتبع %1$d من %2$d</string>
+    <string name="roto_done">تم</string>
+    <string name="roto_hint">ارسم العنصر بالأخضر؛ بدّل إلى الخلفية لإزالة أجزاء. الضربات في إطار آخر تحدّث الإطارات التالية.</string>
+    <string name="fxl_roto_contrast">التباين</string>
+    <string name="fxl_roto_smooth">تنعيم</string>
+    <string name="fxl_roto_chatter">تقليل الارتجاف</string>
+    <string name="fxl_roto_decontaminate">تنقية ألوان الحافة</string>
+    <string name="fxl_roto_view">العرض</string>
+    <string name="fxo_roto_final">النهائي</string>
+    <string name="fxl_particle_size">حجم الجسيم</string>
+    <string name="fxl_fade">التلاشي</string>
+    <string name="fxl_triangles">المثلثات</string>
+    <string name="fxl_expansion">التمدد</string>
+    <string name="fxl_rigidity">الصلابة</string>
+    <string name="afx_p_edge_glow">توهج الحافة</string>
+    <string name="conta_excluir">حذف الحساب</string>
+    <string name="conta_excluir_mensagem">سيؤدي هذا إلى حذف حسابك وملفك الشخصي ومنشوراتك في المجتمع وبلاغات المشكلات المرسلة بهذا البريد نهائيًا. لن تُحذف المشاريع الموجودة على هذا الجهاز. لا يمكن التراجع عن ذلك.</string>
+    <string name="conta_excluida">تم حذف الحساب.</string>
+    <string name="conta_excluir_falhou">تعذّر حذف الحساب. تحقّق من الاتصال وحاول مرة أخرى.</string>
+    <string name="settings_ad_privacy">خصوصية الإعلانات</string>
+    <string name="settings_ad_privacy_note">راجع موافقتك على الإعلانات أو غيّرها</string>
 </resources>

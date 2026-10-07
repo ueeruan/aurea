@@ -971,6 +971,7 @@ private fun EffectCardItem(
         }
         if (effect.typeId == effectTypeId("aurea.key.rotobrush")) {
             PanelNotice(stringResource(R.string.roto_note))
+            com.aurea.aurea.editor.RotoPaintControls(store, effect.effectId, 0)
         }
         val localAiBit = when (effect.typeId) {
             effectTypeId("aurea.ai.depth_map") -> 1
@@ -988,6 +989,8 @@ private fun EffectCardItem(
             TimeRemapEffectEditor(env, id)
             return@FxStackCard
         }
+        if (effect.typeId == effectTypeId("aurea.distort.mesh_warp")) com.aurea.aurea.editor.MeshWarpCardTools(store, id)
+        if (effect.typeId == effectTypeId("aurea.distort.puppet")) com.aurea.aurea.editor.PuppetCardTools(store, id)
         val visible = slots.filter { !it.hidden }
         if (visible.isEmpty()) {
             PanelNotice(stringResource(R.string.panel_este_efeito_nao_tem_ajustes))

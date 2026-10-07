@@ -58,7 +58,7 @@ import com.aurea.aurea.ui.theme.tocavel
  * Um modo de mescla [A] (`ModoDeMescla`): rótulo, o `aurea::BlendMode` (nulo =
  * modo que o motor não tem) e o modo do Compose para a miniatura.
  */
-private class BlendChoice(@StringRes val label: Int, val engine: Int?, val preview: BlendMode)
+private class BlendChoice(@StringRes val label: Int, val engine: Int?, val preview: BlendMode, val cut: Int = 0)
 
 private class BlendCategory(@StringRes val name: Int, val modes: List<BlendChoice>)
 
@@ -67,7 +67,8 @@ private class BlendCategory(@StringRes val name: Int, val modes: List<BlendChoic
  * são `aurea::BlendMode` (Types.hpp): Normal 0, Add 1, Subtract 2, Multiply 3,
  * Screen 4, Overlay 5, Darken 6, Lighten 7, ColorDodge 8, ColorBurn 9, HardLight
  * 10, SoftLight 11, Difference 12, Exclusion 13, Hue 14, Saturation 15, Color 16,
- * Luminosity 17, Divide 18, VividLight 19, LinearDodge 20, LinearBurn 21.
+ * Luminosity 17, Divide 18, VividLight 19, LinearDodge 20, LinearBurn 21, Mask 22,
+ * Exclude 23.
  */
 private val BlendCategories = listOf(
     BlendCategory(R.string.panel_normal, listOf(BlendChoice(R.string.panel_normal, 0, BlendMode.SrcOver))),
@@ -113,6 +114,14 @@ private val BlendCategories = listOf(
             BlendChoice(R.string.pn_blend_color, 16, BlendMode.Color), BlendChoice(R.string.pn_blend_luminosity, 17, BlendMode.Luminosity),
         ),
     ),
+    // Máscara do Alight Motion: a camada recorta as de baixo (22) ou fura (23).
+    BlendCategory(
+        R.string.pn_blend_cat_mask,
+        listOf(
+            BlendChoice(R.string.pn_blend_mask, 22, BlendMode.DstIn, cut = 1),
+            BlendChoice(R.string.pn_blend_exclude, 23, BlendMode.DstOut, cut = 2),
+        ),
+    ),
 )
 
 /**
@@ -120,7 +129,7 @@ private val BlendCategories = listOf(
  * blend de hardware; os outros num passe que lê o fundo). Só entra na lista o
  * modo que o motor desenha: nada de chip que não faz nada.
  */
-private val RenderedBlendModes = (0..21).toSet()
+private val RenderedBlendModes = (0..23).toSet()
 
 /**
  * MESCLAGEM E OPACIDADE [A] (`BlendingPanel`): trilho com ◇ e curva da opacidade,
@@ -281,7 +290,7 @@ private fun BlendChip(m: BlendChoice, lit: Boolean, onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Camada própria (offscreen): o modo do disco de cima compõe só com o de baixo.
-        Canvas(Modifier.size(34.dp, 22.dp).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
+        if (m.cut != 0) BlendCutThumb(exclude = m.cut == 2) else Canvas(Modifier.size(34.dp, 22.dp).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
             val r = size.height * 0.46f
             drawCircle(AureaColors.BlendThumbBottom, r, Offset(size.width * 0.38f, size.height / 2f))
             drawCircle(AureaColors.BlendThumbTop, r, Offset(size.width * 0.62f, size.height / 2f), blendMode = m.preview)

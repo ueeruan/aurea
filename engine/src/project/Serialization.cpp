@@ -270,6 +270,24 @@ void write_effect(ByteWriter& w, const EffectInstance& e) {
         for (const GradientStop& s : g.stops) { w.f32v(s.position); w.vec4(s.color); }
     }
     w.u64v(e.mask.pack());
+    // Malha de deformação: bloco SÓ deste tipo (efeito novo — projeto antigo
+    // não tem nenhum, então nada antigo muda de formato).
+    if (e.type == effect_type_id(kMeshWarpKey)) {
+        w.u32v(static_cast<u32>(e.meshes.size()));
+        for (const MeshWarpData& m : e.meshes) {
+            w.u32v(m.rows);
+            w.u32v(m.cols);
+            w.u32v(static_cast<u32>(m.values.size()));
+            for (f32 f : m.values) w.f32v(f);
+            w.u32v(static_cast<u32>(m.keys.size()));
+            for (const MeshWarpKey& k : m.keys) {
+                w.i64v(k.frame);
+                w.u8v(k.interp);
+                w.u32v(static_cast<u32>(k.values.size()));
+                for (f32 f : k.values) w.f32v(f);
+            }
+        }
+    }
 }
 
 void read_effect(ByteReader& r, EffectInstance& e) {
@@ -309,6 +327,34 @@ void read_effect(ByteReader& r, EffectInstance& e) {
         for (GradientStop& s : g.stops) { s.position = r.f32v(); s.color = r.vec4(); }
     }
     e.mask = MaskId::unpack(r.u64v());
+    if (e.type == effect_type_id(kMeshWarpKey)) {
+        const u32 meshCount = r.u32v();
+        if (meshCount > 4) { r.fail(); return; }
+        constexpr u32 kMaxValues = mesh_warp::value_count(kMeshWarpMaxDivisions, kMeshWarpMaxDivisions);
+        auto readValues = [&](std::vector<f32>& v) {
+            const u32 n = r.u32v();
+            if (n > kMaxValues || r.remaining() < static_cast<u64>(n) * 4) { r.fail(); return false; }
+            v.resize(n);
+            for (f32& f : v) { f = r.f32v(); if (!std::isfinite(f)) f = 0.0f; }
+            return true;
+        };
+        e.meshes.resize(meshCount);
+        for (MeshWarpData& m : e.meshes) {
+            m.rows = r.u32v();
+            m.cols = r.u32v();
+            if (!readValues(m.values)) return;
+            const u32 nk = r.u32v();
+            if (nk > kMeshWarpMaxKeys) { r.fail(); return; }
+            m.keys.resize(nk);
+            for (MeshWarpKey& k : m.keys) {
+                k.frame = r.i64v();
+                k.interp = std::min<u8>(r.u8v(), 2);
+                if (!readValues(k.values)) return;
+            }
+            std::stable_sort(m.keys.begin(), m.keys.end(),
+                             [](const MeshWarpKey& a, const MeshWarpKey& b) { return a.frame < b.frame; });
+        }
+    }
 }
 
 void write_mask(ByteWriter& w, const Mask& m) {
@@ -938,7 +984,7 @@ void read_layer(ByteReader& r, Layer& l) {
 
     l.parent = LayerId::unpack(r.u64v());
     l.zOrder = r.u32v();
-    l.blendMode = checked_enum(r.u16v(), BlendMode::LinearBurn, BlendMode::Normal);
+    l.blendMode = checked_enum(r.u16v(), kLastBlendMode, BlendMode::Normal);
     l.visible = r.boolv();
     l.locked = r.boolv();
     l.solo = r.boolv();

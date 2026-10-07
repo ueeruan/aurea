@@ -12279,6 +12279,62 @@ AUREA_TEST(Gpu, Regression2131RotobrushCoversPortraitSourceAtReducedPreviewSize)
     gpu().renderer.release_project_resources();
 }
 
+// Roto Brush: traço de fundo pintado sobre o que a rede chama de objeto tira
+// o objeto no EXPORT (a captura fria espera o recorte), sobrevive a salvar e
+// reabrir, e desfazer o traço devolve o recorte da rede.
+AUREA_TEST(Gpu, RotoBrushStrokeCutsCaptureAndSurvivesReload) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(256, 256, true);
+    auto pixels = uniform_image(256, 256, 30, 120, 70);
+    for (u32 y = 0; y < 256; ++y) for (u32 x = 0; x < 256; ++x)
+        if ((int(x) - 128) * (int(x) - 128) + (int(y) - 128) * (int(y) - 128) < 64 * 64) {
+            auto* pixel = &pixels.rgba[(y * 256 + x) * 4];
+            pixel[0] = 220; pixel[1] = 40; pixel[2] = 30;
+        }
+    std::filesystem::create_directories("build/reference");
+    const std::string source = std::filesystem::absolute("build/reference/roto-brush-source.png").string();
+    const std::string path = std::filesystem::absolute("build/reference/roto-brush-reload.aurea").string();
+    Image8 sourceImage; sourceImage.width = 256; sourceImage.height = 256; sourceImage.rgba = pixels.rgba;
+    AUREA_CHECK(write_png(source, sourceImage));
+    const auto id = rig.e.import_image(pixels.rgba.data(), 256, 256, "circle", source.c_str());
+    AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    comp->set_background(Color{0, 0, 0, 1});
+    comp->set_transparent_background(false);
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    EffectInstance effect;
+    effect.id = layer->alloc_effect_id(); effect.type = effect_type_id(effect_keys::kRotobrush);
+    initialize_instance(effect, *rig.e.effects().params(effect.type));
+    const u32 effectId = effect.id;
+    layer->effects.push_back(std::move(effect));
+    const auto plain = rig.capture(256);
+    AUREA_CHECK(plain.rgba.size() == 256u * 256u * 4u); if (plain.rgba.size() != 256u * 256u * 4u) return;
+    AUREA_CHECK(plain.at(128, 128)[0] > 180);       // a rede: o disco é objeto
+    // Traço de FUNDO cruzando o disco (px da composição).
+    const f32 xy[] = {100.f, 110.f, 128.f, 128.f, 150.f, 140.f};
+    AUREA_CHECK(rig.e.roto_add_stroke(*id, effectId, true, 6.f, xy, 3));
+    u32 info[3]{};
+    AUREA_CHECK(rig.e.roto_stroke_info(*id, effectId, info));
+    AUREA_CHECK_EQ(info[0], 1u); AUREA_CHECK_EQ(info[1], 1u); AUREA_CHECK_EQ(info[2], 1u);
+    const auto cut = rig.capture(256);
+    AUREA_CHECK(cut.rgba.size() == plain.rgba.size()); if (cut.rgba.size() != plain.rgba.size()) return;
+    std::printf("    disco: rede R=%u, com traco de fundo R=%u (borda %u)\n", plain.at(128, 128)[0], cut.at(128, 128)[0], cut.at(180, 128)[0]);
+    AUREA_CHECK(cut.at(128, 128)[0] < 40);          // o pintado saiu
+    AUREA_CHECK(cut.at(180, 128)[0] < 40);          // e a região da mesma cor, longe do traço
+    AUREA_CHECK(rig.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(path.c_str()).ok());
+    u32 reopened[3]{};
+    AUREA_CHECK(rig.e.roto_stroke_info(*id, effectId, reopened));
+    AUREA_CHECK_EQ(reopened[1], 1u);
+    const auto again = rig.capture(256);
+    AUREA_CHECK(again.rgba == cut.rgba);            // cache frio, mesmo recorte
+    AUREA_CHECK(rig.e.roto_undo_stroke(*id, effectId));
+    const auto undone = rig.capture(256);
+    AUREA_CHECK(undone.rgba.size() == plain.rgba.size());
+    if (undone.rgba.size() == plain.rgba.size()) AUREA_CHECK(undone.at(128, 128)[0] > 180);
+    std::remove(source.c_str()); std::remove(path.c_str()); std::remove((path + ".bak").c_str());
+}
+
 AUREA_TEST(Gpu, NewToolsGridVisibleAndMorphChangesFrame) {
     AUREA_REQUIRE_GPU(); Scene3DRig rig(320,240);
     std::vector<u64> ids;
@@ -13114,11 +13170,15 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "ParticleCameraGpu.inl"
 #include "SurfaceDeformGpu.inl"
 #include "PageTurnGpu.inl"
+#include "MeshWarpGpu.inl"
 #include "PaperStationaryGpu.inl"
 #include "LightRaysTextGpu.inl"
 #include "TurbulenceTypesGpu.inl"
 #include "Shapes2DGpu.inl"
 #include "PrecompTemporalGpu.inl"
+#include "MaskBlendGpu.inl"
+#include "PuppetGpu.inl"
+#include "DisintegrateBallsGpu.inl"
 
 // -----------------------------------------------------------------------------
 // Build 2140: modelos com textura entravam CINZA em aparelho real. O espaço do

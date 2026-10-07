@@ -66,8 +66,11 @@ test_output/
 # A keystore e o key.properties NUNCA vão para o repositório. Ver
 # _identity/signing/IDENTIDADE.md para onde a chave aponta e por quê.
 key.properties
+keystore.properties
 *.jks
 *.keystore
+*.p12
+*.pepk
 /android/local.properties
 
 # ---- iOS ----

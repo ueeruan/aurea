@@ -64,7 +64,7 @@
     <string name="settings_groq_key">Kunci Groq</string>
     <string name="settings_groq_set">Sudah diisi — ketuk untuk mengganti atau menghapus</string>
     <string name="settings_groq_unset">Belum diisi — ketuk untuk menambahkan</string>
-    <string name="settings_groq_note">Kunci hanya tersimpan di perangkat ini, terenkripsi. Audio hanya dikirim ke Groq saat Anda mengetuk Buat teks; tanpa kunci, berkas SRT tetap bisa dipakai.</string>
+    <string name="settings_groq_note">Kunci hanya disimpan di perangkat ini, terenkripsi.</string>
     <string name="settings_group_device">Kinerja</string>
     <string name="settings_device_auto">Optimasi otomatis</string>
     <string name="settings_device_auto_note">Saat pertama dibuka, aplikasi mengukur perangkat dan memilih skala pratinjau, jumlah worker, dan batas ekspor. Setelah itu pengaturannya tetap.</string>
@@ -1080,7 +1080,7 @@ untuk mengedit kurvanya.</string>
     <string name="conta_entrar">Masuk</string>
     <string name="conta_ir_entrar">Saya sudah punya akun · Masuk</string>
     <string name="conta_ir_cadastro">Saya belum punya akun · Buat</string>
-    <string name="conta_privacidade">Jika Aurea tertutup sendiri atau macet, laporan teknis kesalahan (versi aplikasi, model perangkat, sistem, dan jejak kesalahan, beserta email akun Anda) dikirim otomatis ke pengembang untuk diperbaiki. Proyek dan media Anda tidak pernah dikirim.</string>
+    <string name="conta_privacidade">Jika Aurea tertutup sendiri atau macet, laporan teknis kesalahan (versi aplikasi, model perangkat, sistem dan jejak kesalahan, dengan email akun Anda) dikirim otomatis ke pengembang untuk diperbaiki. Proyek dan media Anda hanya keluar dari perangkat saat Anda memublikasikan ke Komunitas atau memakai fitur AI online.</string>
     <string name="conta_erro_email">Masukkan email yang valid.</string>
     <string name="conta_erro_senha">Kata sandi harus terdiri dari 8 hingga 128 karakter.</string>
     <string name="conta_erro_credenciais">Email atau kata sandi salah.</string>
@@ -1138,7 +1138,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea Beta 0.0.2 (2141) • 06/10/2026\n\n• Model 3D kembali diimpor dengan tekstur (GLB, glTF, OBJ+MTL, dan FBX); model Sketchfab dengan pantulan.\n• File .mtl bisa dipilih setelah OBJ.\n• Layer 2D di 3D menerima cahaya adegan.\n• Ekspor PNG dan urutan PNG tanpa latar: opsi Transparan di proyek.\n• Echo, Timewarp RGB, dan Deteksi gerakan berfungsi di pra-komposisi.\n• Time Remap: menghapus efek juga menghapus keyframe-nya.\n• Pratinjau di memori jauh lebih besar (sesuai RAM ponsel).\n• Rotasi menampilkan putaran (2x +30°).\n• Masker tidak hilang saat panel ditutup.\n• Tautkan ke null dengan satu ketukan; menghapus null mempertahankan gerakan anak.\n• Audio berhenti saat keluar dari editor.\n• Mode campuran Eksklusi benar pada gambar.\n• Motion Tile diperbaiki di proyek lama.\n• Bilah pemutar baru: kisi, pratinjau cepat, penanda, frame, layer, urungkan, dan ulangi.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.3 (2142) • 07/10/2026\n\n• Gizmo trackball untuk rotasi 3D: cincin X/Y/Z dan cincin tampilan; seret untuk memutar bebas.\n• Mesh Warp: kisi titik dan pegangan untuk melengkungkan layer, bisa dianimasikan.\n• Efek baru Disintegrasi; Bola dengan arah cahaya dan campuran.\n• Campuran Masker dan Kecualikan, seperti Alight Motion.\n• Boneka: pin untuk melengkungkan gambar (mengikuti potongan).\n• Rotoskop: lukis objek/latar dan sebarkan ke seluruh klip.\n• Hapus akun dari aplikasi.\n• Privasi iklan di pengaturan.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -3052,7 +3052,7 @@ untuk mengedit kurvanya.</string>
     <string name="project_file_err_corrupt">Proyek di dalam berkas tidak dapat dibaca.</string>
     <string name="project_file_err_unreadable">Tidak dapat membaca berkas itu.</string>
     <string name="report_title">Laporkan masalah</string>
-    <string name="report_subtitle">Langsung ke pembuat Aurea, dengan detail perangkat. Tidak ada proyek atau media yang dikirim.</string>
+    <string name="report_subtitle">Langsung ke pembuat Aurea, beserta data perangkat. Laporan ini tidak menyertakan proyek atau media Anda.</string>
     <string name="report_what_did">Apa yang Anda lakukan (opsional)</string>
     <string name="report_what_happened">Apa yang Anda harapkan, dan apa yang terjadi</string>
     <string name="report_steps">Langkah untuk mengulang (opsional)</string>
@@ -3568,4 +3568,48 @@ untuk mengedit kurvanya.</string>
     <string name="edt_rotation_turns">Putaran</string>
     <string name="edt_rotation_degrees">Derajat</string>
     <string name="edt_rotation_value_a11y">%1$s putaran, %2$s derajat</string>
+    <string name="pn_blend_cat_mask">Masker</string>
+    <string name="pn_blend_mask">Masker</string>
+    <string name="pn_blend_exclude">Kecualikan</string>
+    <string name="pn_blend_mask_desc">Memotong lapisan di bawah sesuai bentuk lapisan ini</string>
+    <string name="pn_blend_exclude_desc">Melubangi lapisan di bawah dengan bentuk lapisan ini</string>
+    <string name="gizmo_trackball_hint">Trackball: seret bola untuk memutar bebas; cincin merah, hijau, dan biru hanya memutar pada X, Y, atau Z; cincin abu-abu memutar di sekitar tampilan</string>
+    <string name="fx_name_mesh_warp">Mesh Warp</string>
+    <string name="mesh_warp_reset">Atur ulang mesh</string>
+    <string name="mesh_warp_hint">Seret titik mesh di video. Ketuk titik untuk melihat pegangannya.</string>
+    <string name="fx_name_puppet">Boneka</string>
+    <string name="fx_desc_puppet">Pin pada lapisan: seret pin dan gambar melengkung seperti boneka</string>
+    <string name="puppet_edit_pins">Edit pin</string>
+    <string name="puppet_hint">Ketuk untuk menambah pin, seret untuk memindah, tekan lama untuk menghapus</string>
+    <string name="puppet_pin_a11y">Pin boneka %1$d</string>
+    <string name="puppet_done">Selesai</string>
+    <string name="afx_name_disintegrate">Disintegrasi</string>
+    <string name="afx_desc_disintegrate">Memecah layer menjadi fragmen kecil yang terbang, berputar, dan memudar mengikuti garis depan yang menyapu.</string>
+    <string name="roto_paint">Lukis potongan</string>
+    <string name="roto_object">Objek</string>
+    <string name="roto_background">Latar</string>
+    <string name="roto_brush_size">Ukuran kuas</string>
+    <string name="roto_undo">Urungkan goresan</string>
+    <string name="roto_propagate">Lacak seluruh klip</string>
+    <string name="roto_progress">Melacak %1$d dari %2$d</string>
+    <string name="roto_done">Selesai</string>
+    <string name="roto_hint">Lukis objek dengan hijau; ganti ke Latar untuk membuang bagian. Goresan di frame lain memperbarui frame berikutnya.</string>
+    <string name="fxl_roto_contrast">Kontras</string>
+    <string name="fxl_roto_smooth">Haluskan</string>
+    <string name="fxl_roto_chatter">Kurangi getaran</string>
+    <string name="fxl_roto_decontaminate">Bersihkan warna tepi</string>
+    <string name="fxl_roto_view">Tampilan</string>
+    <string name="fxo_roto_final">Akhir</string>
+    <string name="fxl_particle_size">Ukuran partikel</string>
+    <string name="fxl_fade">Memudar</string>
+    <string name="fxl_triangles">Segitiga</string>
+    <string name="fxl_expansion">Ekspansi</string>
+    <string name="fxl_rigidity">Kekakuan</string>
+    <string name="afx_p_edge_glow">Cahaya tepi</string>
+    <string name="conta_excluir">Hapus akun</string>
+    <string name="conta_excluir_mensagem">Ini menghapus permanen akun Anda, profil dan postingan komunitas Anda, serta laporan masalah yang dikirim dengan email ini. Proyek di perangkat ini tidak dihapus. Tindakan ini tidak dapat dibatalkan.</string>
+    <string name="conta_excluida">Akun dihapus.</string>
+    <string name="conta_excluir_falhou">Akun tidak dapat dihapus. Periksa koneksi lalu coba lagi.</string>
+    <string name="settings_ad_privacy">Privasi iklan</string>
+    <string name="settings_ad_privacy_note">Tinjau atau ubah persetujuan iklan Anda</string>
 </resources>

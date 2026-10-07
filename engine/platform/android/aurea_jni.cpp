@@ -32,6 +32,7 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
 #include "aurea/core/GestureMath.hpp"
+#include "aurea/core/Trackball.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 
@@ -236,6 +237,25 @@ AUREA_JNI jfloatArray AUREA_FN(gestureScale3D)(JNIEnv* env, jclass, jint kind, j
     jfloatArray arr = env->NewFloatArray(3);
     if (arr) env->SetFloatArrayRegion(arr, 0, 3, out);
     return arr;
+}
+
+// Trackball do gizmo de girar (core/Trackball.hpp): um passo do arrasto e a parte sob o dedo.
+AUREA_JNI jfloatArray AUREA_FN(trackballDrag)(JNIEnv* env, jclass, jfloatArray args) {
+    if (!args || env->GetArrayLength(args) != static_cast<jsize>(aurea::trackball::kDragArgs)) return env->NewFloatArray(0);
+    float in[aurea::trackball::kDragArgs]{};
+    env->GetFloatArrayRegion(args, 0, aurea::trackball::kDragArgs, in);
+    float out[aurea::trackball::kDragOut]{};
+    if (!aurea::trackball::drag(in, out)) return env->NewFloatArray(0);
+    jfloatArray arr = env->NewFloatArray(aurea::trackball::kDragOut);
+    if (arr) env->SetFloatArrayRegion(arr, 0, aurea::trackball::kDragOut, out);
+    return arr;
+}
+
+AUREA_JNI jint AUREA_FN(trackballHit)(JNIEnv* env, jclass, jfloatArray axes, jfloat x, jfloat y, jfloat radius, jfloat tolerance) {
+    if (!axes || env->GetArrayLength(axes) < 9) return aurea::trackball::kNone;
+    float a[9]{};
+    env->GetFloatArrayRegion(axes, 0, 9, a);
+    return aurea::trackball::hit_test(a, x, y, radius, tolerance);
 }
 
 AUREA_JNI jfloat AUREA_FN(clampPinchFactor3D)(JNIEnv*, jclass, jint kind, jfloat factor, jfloat x, jfloat y, jfloat z) {
@@ -1108,6 +1128,16 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryGizmo)(JNIEnv* env, jclass, jlong handle,
     return JNI_TRUE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeQueryTrackball)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    constexpr jsize n = static_cast<jsize>(aurea::trackball::kQueryFloats);
+    if (!c || !out || env->GetArrayLength(out) < n) return JNI_FALSE;
+    f32 v[aurea::trackball::kQueryFloats]{};
+    if (!c->engine.query_trackball(static_cast<u64>(layer), v)) return JNI_FALSE;
+    env->SetFloatArrayRegion(out, 0, n, v);
+    return JNI_TRUE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativePreviewGestureBasis)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
     auto* c = ctx_of(handle); f32 values[13]{};
     if (!c || !out || env->GetArrayLength(out) < 13 || !c->engine.query_preview_gesture_basis(static_cast<u64>(layer), values)) return JNI_FALSE;
@@ -1392,6 +1422,73 @@ AUREA_JNI jboolean AUREA_FN(nativeRigPoseJoint)(JNIEnv*, jclass, jlong handle, j
 AUREA_JNI void AUREA_FN(nativeSetRigSetupLayer)(JNIEnv*, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     if (c) c->engine.set_rig_setup_layer(static_cast<u64>(layer));
+}
+
+// --- Malha de deformação (Engine::query_mesh_warp e família) ------------------
+AUREA_JNI jint AUREA_FN(nativeQueryMeshWarp)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || effect < 0) return 0;
+    const jsize cap = out ? env->GetArrayLength(out) : 0;
+    std::vector<f32> v(static_cast<usize>(cap));
+    const u32 need = c->engine.query_mesh_warp(static_cast<u64>(layer), static_cast<u32>(effect), cap ? v.data() : nullptr,
+                                               static_cast<u32>(cap));
+    if (need && need <= static_cast<u32>(cap)) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(need), v.data());
+    return static_cast<jint>(need);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMeshWarpDrag)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect, jint vertex, jint grip,
+                                                jfloat u, jfloat v, jboolean autoKey, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 && vertex >= 0 && grip >= 0
+        && c->engine.mesh_warp_drag(static_cast<u64>(layer), static_cast<u32>(effect), static_cast<u32>(vertex),
+                                    static_cast<u32>(grip), u, v, autoKey == JNI_TRUE, continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMeshWarpReset)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 && c->engine.mesh_warp_reset(static_cast<u64>(layer), static_cast<u32>(effect)) ? JNI_TRUE : JNI_FALSE;
+}
+
+// --- Fantoche (Engine::query_puppet e família; u, v = fração da camada) -------
+static jint puppet_query(JNIEnv* env, jfloatArray out, u32 (*fn)(NativeContext*, u64, u32, f32*, u32), NativeContext* c,
+                         jlong layer, jint effect) {
+    if (!c || effect < 0) return 0;
+    const jsize cap = out ? env->GetArrayLength(out) : 0;
+    std::vector<f32> v(static_cast<usize>(cap));
+    const u32 need = fn(c, static_cast<u64>(layer), static_cast<u32>(effect), cap ? v.data() : nullptr, static_cast<u32>(cap));
+    if (need && need <= static_cast<u32>(cap)) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(need), v.data());
+    return static_cast<jint>(need);
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryPuppet)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect, jfloatArray out) {
+    return puppet_query(env, out, [](NativeContext* c, u64 l, u32 e, f32* o, u32 n) { return c->engine.query_puppet(l, e, o, n); },
+                        ctx_of(handle), layer, effect);
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryPuppetMesh)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect, jfloatArray out) {
+    return puppet_query(env, out, [](NativeContext* c, u64 l, u32 e, f32* o, u32 n) { return c->engine.query_puppet_mesh(l, e, o, n); },
+                        ctx_of(handle), layer, effect);
+}
+
+AUREA_JNI jint AUREA_FN(nativePuppetAddPin)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect, jfloat u, jfloat v) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 ? c->engine.puppet_add_pin(static_cast<u64>(layer), static_cast<u32>(effect), u, v) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativePuppetMovePin)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect, jint pin, jfloat u, jfloat v,
+                                                 jboolean autoKey, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 && pin >= 0
+        && c->engine.puppet_move_pin(static_cast<u64>(layer), static_cast<u32>(effect), static_cast<u32>(pin), u, v,
+                                     autoKey == JNI_TRUE, continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativePuppetRemovePin)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect, jint pin) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 && pin >= 0
+        && c->engine.puppet_remove_pin(static_cast<u64>(layer), static_cast<u32>(effect), static_cast<u32>(pin)) ? JNI_TRUE : JNI_FALSE;
 }
 
 /// Quadros rastreados, ou −Errc.
@@ -2328,6 +2425,47 @@ AUREA_JNI jint AUREA_FN(nativePasteLayerAnimators)(JNIEnv* env, jclass, jlong ha
 AUREA_JNI jint AUREA_FN(nativeLayerAnimatorClipboard)(JNIEnv*, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);
     return c ? static_cast<jint>(c->engine.layer_animator_clipboard()) : 0;
+}
+
+// --- Roto Brush (EngineRoto.cpp) ---------------------------------------------
+AUREA_JNI jboolean AUREA_FN(nativeRotoAddStroke)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId,
+                                                 jboolean background, jfloat radius, jfloatArray xy) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !xy) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(xy);
+    std::vector<f32> pts(static_cast<usize>(n));
+    if (n > 0) env->GetFloatArrayRegion(xy, 0, n, pts.data());
+    return c->engine.roto_add_stroke(static_cast<u64>(layer), static_cast<u32>(effectId), background == JNI_TRUE, radius,
+                                     pts.data(), static_cast<u32>(n / 2)) ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeRotoUndoStroke)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.roto_undo_stroke(static_cast<u64>(layer), static_cast<u32>(effectId)) ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeRotoPropagate)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.roto_propagate(static_cast<u64>(layer), static_cast<u32>(effectId)) ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI void AUREA_FN(nativeRotoCancel)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.roto_cancel();
+}
+AUREA_JNI jboolean AUREA_FN(nativeRotoSetView)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.roto_set_view(static_cast<u64>(layer), static_cast<u32>(effectId), static_cast<u32>(std::max(0, mode))) ? JNI_TRUE : JNI_FALSE;
+}
+/// [feitos, total, rodando, falhou, traços aqui, traços total]
+AUREA_JNI jlongArray AUREA_FN(nativeRotoStatus)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    jlong v[6]{};
+    if (c) {
+        i64 p[4]{}; u32 info[3]{};
+        (void)c->engine.roto_progress(p);
+        (void)c->engine.roto_stroke_info(static_cast<u64>(layer), static_cast<u32>(effectId), info);
+        v[0] = p[0]; v[1] = p[1]; v[2] = p[2]; v[3] = p[3]; v[4] = info[0]; v[5] = info[1];
+    }
+    jlongArray out = env->NewLongArray(6);
+    if (out) env->SetLongArrayRegion(out, 0, 6, v);
+    return out;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeSetLayerMotionBlurLength)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat factor) {

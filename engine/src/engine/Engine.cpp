@@ -19,6 +19,7 @@
 #include "aurea/vector/Vector.hpp"
 #include "aurea/animation/KeyframeOptimize.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Trackball.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
@@ -5297,6 +5298,46 @@ bool Engine::gizmo_move_local(u64 layerId, u32 axis, f32 amount, f32* out) noexc
     out[0] = pos.x + d.x;
     out[1] = pos.y + d.y;
     out[2] = pos.z + d.z;
+    return true;
+}
+
+// Trackball (core/Trackball.hpp): a vista no pivô vem da MESMA projeção do
+// gizmo (câmera ativa ou a da Cena 3D); o pai entra só com a rotação.
+bool Engine::query_trackball(u64 layerId, f32* out) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || !out || !lives_in_3d(*l)) return false;
+    const FrameIndex now = playback_.current();
+    const FrameIndex local = l->local_time(now);
+    const Mat4 w = layer_world_3d(*comp, *l, now);
+    const Vec3 a = l->kind == LayerKind::Model3D ? Vec3{0, 0, 0} : Vec3{
+        l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
+        l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
+        l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
+    const Vec3 o = w.transform_point(a);
+    const Mat4 vp = sceneEditor_.enabled ? scene_editor_projection(comp->width(), comp->height(), sceneEditor_)
+        : comp_view_projection(*comp, now);
+    const Vec4 c = vp * Vec4{o.x, o.y, o.z, 1};
+    if (!(c.w > 1e-6f)) return false;
+    const Vec3 projected{c.x / c.w, c.y / c.w, c.z / c.w};
+    const Mat4 inv = inverse4(vp);
+    const Vec3 at = inv.transform_point(projected);
+    const Vec3 screenX = inv.transform_point(projected + Vec3{1, 0, 0}) - at;
+    const Vec3 screenY = inv.transform_point(projected + Vec3{0, 1, 0}) - at;
+    const Layer* parent = l->parent.valid() ? comp->layer(l->parent) : nullptr;
+    const Mat4 pw = (parent ? layer_world_3d(*comp, *parent, now) : Mat4::identity()) * l->parentBasis;
+    const Vec3 cols[3]{Vec3{pw.col[0].x, pw.col[0].y, pw.col[0].z}, Vec3{pw.col[1].x, pw.col[1].y, pw.col[1].z},
+                       Vec3{pw.col[2].x, pw.col[2].y, pw.col[2].z}};
+    out[0] = projected.x;
+    out[1] = projected.y;
+    if (!trackball::frame_from(screenX, screenY, cols, out + 11)) return false;
+    const Vec3 e{l->tracks.sample_or(TrackProperty::RotationX, local, l->transform.rotation.x),
+                 l->tracks.sample_or(TrackProperty::RotationY, local, l->transform.rotation.y),
+                 l->tracks.sample_or(TrackProperty::RotationZ, local, l->transform.rotation.z)};
+    trackball::axes(out + 11, e, out + 2);
+    out[20] = e.x; out[21] = e.y; out[22] = e.z;
+    for (u32 i = 0; i < trackball::kQueryFloats; ++i) if (!std::isfinite(out[i])) return false;
     return true;
 }
 
@@ -12014,7 +12055,7 @@ bool command_valid(const Command& c) noexcept {
         case CommandType::LayerCreate:
             return static_cast<u16>(c.layer_create.kind) <= static_cast<u16>(LayerKind::Composition);
         case CommandType::LayerSetBlendMode:
-            return static_cast<u16>(c.layer_blend.mode) <= static_cast<u16>(BlendMode::LinearBurn);
+            return static_cast<u16>(c.layer_blend.mode) <= static_cast<u16>(kLastBlendMode);
         case CommandType::LayerSetTimeRange:
             // `offset` só conta com `setOffset` (a UI e os testes deixam o resto do payload sem valor).
             return frame_ok(c.layer_range.start) && frame_ok(c.layer_range.end)

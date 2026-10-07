@@ -6,6 +6,9 @@
 //    POST /api/auth/login    {email, password} → 200 {token, email}
 //    GET  /api/auth/session  Bearer <token>    → 200 {email} | 401
 //    POST /api/auth/logout   Bearer <token>    → 200 {ok}
+//    POST /api/auth/delete   Bearer <token>  {confirm:true} → 200 {ok, deleted}
+//                            EXCLUI a conta e os dados dela (Google Play exige
+//                            exclusão dentro do app). Ver `excluirConta`.
 //    GET  /api/stats/users                     → 200 {count}  (público, cache curto)
 //
 //  Onde mora cada coisa:
@@ -330,6 +333,82 @@ async function apagarSessao(env, s) {
   if (env.AUREA_KV) await env.AUREA_KV.delete("sess:" + s.hash).catch(() => {});
 }
 
+// -----------------------------------------------------------------------------
+//  Exclusão de conta (Google Play: "Account deletion" + App Store 5.1.1(v)).
+//
+//  Só com sessão válida e `{confirm: true}` no corpo (um POST acidental não
+//  apaga nada). Apaga, nesta ordem:
+//    1. os arquivos da comunidade no R2 (avatar, presets, projetos publicados);
+//    2. numa transação do D1: verificações, curtidas, comentários (os dela e os
+//       feitos nas publicações dela), publicações, seguidores, arquivos,
+//       perfil, papéis, TODAS as sessões, relatos de problema com o e-mail da
+//       conta e, por fim, o usuário — e desconta 1 do contador de cadastrados.
+//  Os relatórios de crash no KV não são indexados por conta e expiram sozinhos
+//  em CRASH_TTL_DAYS (30 dias). O que já foi enviado por e-mail ao dono não
+//  volta — a política de privacidade precisa dizer isso.
+// -----------------------------------------------------------------------------
+async function excluirConta(req, env) {
+  const s = await lerSessao(env, req);
+  if (!s) return json({ error: "nao_autorizado" }, 401);
+  const { valor, erro } = await lerJson(req, CORPO_MAX);
+  if (erro) return json({ error: erro }, erro === "corpo_grande" ? 413 : 400);
+  if (valor.confirm !== true) return json({ error: "confirmacao_obrigatoria" }, 400);
+
+  const db = env.AUREA_DB;
+  const q = (sql, ...p) => db.prepare(sql).bind(...p);
+  let arquivos = [];
+  try {
+    const r = await q("SELECT id FROM community_assets WHERE uid = ?", s.uid).all();
+    arquivos = (r?.results ?? []).map((x) => x.id).filter((id) => typeof id === "string");
+  } catch {
+    // Banco sem as tabelas da comunidade (migração 0004 não aplicada): nada a apagar lá.
+    arquivos = [];
+  }
+  if (arquivos.length && env.COMMUNITY_FILES) {
+    for (let i = 0; i < arquivos.length; i += 1000) {
+      await env.COMMUNITY_FILES.delete(arquivos.slice(i, i + 1000));
+    }
+  }
+
+  const minhasPublicacoes = "SELECT id FROM community_posts WHERE uid = ?";
+  const comunidade = [
+    q("DELETE FROM community_verifications WHERE uid = ? OR admin = ?", s.uid, s.uid),
+    q(`DELETE FROM community_likes WHERE uid = ? OR post IN (${minhasPublicacoes})`, s.uid, s.uid),
+    q(`DELETE FROM community_comments WHERE uid = ? OR post IN (${minhasPublicacoes})`, s.uid, s.uid),
+    // Publicação de outra pessoa que aponte para um arquivo desta conta perde o anexo.
+    q("UPDATE community_posts SET asset = NULL WHERE asset IN (SELECT id FROM community_assets WHERE uid = ?)", s.uid),
+    q("DELETE FROM community_posts WHERE uid = ?", s.uid),
+    q("DELETE FROM community_follows WHERE follower = ? OR followed = ?", s.uid, s.uid),
+    q("DELETE FROM community_assets WHERE uid = ?", s.uid),
+    q("DELETE FROM community_profiles WHERE uid = ?", s.uid),
+  ];
+  const conta = [
+    q("DELETE FROM account_roles WHERE uid = ?", s.uid),
+    q("DELETE FROM sessions WHERE uid = ?", s.uid),
+    q("DELETE FROM user_reports WHERE email = ? OR email LIKE ?", s.email, `${s.email} (%`),
+    q("DELETE FROM users WHERE id = ?", s.uid),
+    q("UPDATE counters SET value = MAX(value - 1, 0) WHERE name = 'users'"),
+  ];
+  try {
+    await db.batch([...comunidade, ...conta]);
+  } catch {
+    // Sem as tabelas da comunidade/papéis (migrações antigas): só a conta.
+    try {
+      await db.batch([
+        q("DELETE FROM sessions WHERE uid = ?", s.uid),
+        q("DELETE FROM users WHERE id = ?", s.uid),
+        q("UPDATE counters SET value = MAX(value - 1, 0) WHERE name = 'users'"),
+      ]);
+    } catch {
+      console.error("contas: exclusao falhou no D1");
+      return json({ error: "contas_indisponiveis" }, 503);
+    }
+  }
+  if (env.AUREA_KV) await env.AUREA_KV.delete("sess:" + s.hash).catch(() => {});
+  esquecerMemo();
+  return json({ ok: true, deleted: true });
+}
+
 async function estatisticas(env) {
   const agora = Date.now();
   if (memo.valor < 0 || agora > memo.ate) {
@@ -355,5 +434,6 @@ export async function rotaDeContas(req, env, ctx, url) {
   if (rota === "/api/auth/login" && req.method === "POST") return entrar(req, env, ctx);
   if (rota === "/api/auth/session" && req.method === "GET") return sessao(req, env);
   if (rota === "/api/auth/logout" && req.method === "POST") return sair(req, env);
+  if (rota === "/api/auth/delete" && req.method === "POST") return excluirConta(req, env);
   return json({ error: "nao_encontrado" }, 404);
 }

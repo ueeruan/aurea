@@ -26,11 +26,14 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 extra;    // eixo, estado (rad), instabilidade (px), distância focal (px)
     vec4 center;   // centro (px), tamanho natural da camada
     vec4 texel;    // texels por px (x, y), px por texel
+    vec4 dst;      // região da SAÍDA (px da camada): as bolas saem da caixa
+    vec4 light;    // direção da luz (vetor normalizado, z para a câmera)
 } p;
 
 layout(location = 0) out vec2 v_local;          // |v_local| = 1 na borda da bola
 layout(location = 1) flat out vec4 v_color;     // cor (sem pré-multiplicar) e alfa
 layout(location = 2) flat out float v_radius;   // raio na tela, em texels
+layout(location = 3) flat out vec3 v_light;     // direção da luz
 
 float hash1(uint x) {
     x ^= x >> 16;
@@ -58,6 +61,7 @@ void main() {
     v_local = q;
     v_radius = 0.0;
     v_color = vec4(0.0);
+    v_light = p.light.xyz;
     if (c.a < 0.004 || p.grid.w <= 0.0) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);   // fora do recorte: nenhum fragmento
         return;
@@ -108,7 +112,7 @@ void main() {
     const float rad = p.grid.w * k;
     const float margin = max(p.texel.z, 1e-3);   // um texel, em px
     const vec2 at = screen + q * (rad + margin);
-    const vec2 ndc = (at - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0;
+    const vec2 ndc = (at - p.dst.xy) / max(p.dst.zw, vec2(1e-4)) * 2.0 - 1.0;
     // Z reverso (perto = maior), sempre dentro de (0, 1).
     const float z = clamp(0.5 + pos.z / (4.0 * F), 0.001, 0.999);
     gl_Position = vec4(ndc, z, 1.0);

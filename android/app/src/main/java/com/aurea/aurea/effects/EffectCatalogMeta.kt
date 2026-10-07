@@ -185,6 +185,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.transition.venetian_blinds", EffectMeta(R.string.fx_desc_transition_venetian_blinds, AllTargets))
     put("aurea.blur.radial", EffectMeta(R.string.fx_desc_blur_radial, AllTargets))
     put("aurea.distort.mirror", EffectMeta(R.string.fx_desc_distort_mirror, AllTargets))
+    put("aurea.distort.puppet", EffectMeta(R.string.fx_desc_puppet, AllTargets,
+        "fantoche puppet pino pin marionete rig personagem deformar"))
     put("aurea.transform.crop", EffectMeta(R.string.fx_desc_transform_crop, AllTargets))
     put("aurea.stylize.vignette", EffectMeta(R.string.fx_desc_stylize_vignette, AllTargets))
     put("aurea.stylize.mosaic", EffectMeta(R.string.fx_desc_stylize_mosaic, AllTargets))
@@ -247,6 +249,9 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.stylize.ball_grid", EffectMeta(R.string.afx_desc_balls,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao),
         "bolas esferas balls spheres grade particulas explodir dispersar"))
+    put("aurea.transition.disintegrate", EffectMeta(R.string.afx_desc_disintegrate,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao),
+        "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao"))
     put("aurea.generate.particular", EffectMeta(R.string.afx_desc_particular, AllTargets,
         "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh"))
     put("aurea.shape3d.layout", EffectMeta(R.string.fx_desc_shape3d_layout, listOf(EffectTarget.Cena3D),

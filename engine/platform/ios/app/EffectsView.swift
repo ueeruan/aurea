@@ -283,8 +283,11 @@ struct EffectsView: View {
                     if !effect.known { PanelNotice(AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao")) }
                     else if effect.typeId == fxEffectTypeId("aurea.time.remap") { TimeRemapEffectEditor(effectId: effect.effectId) }
                     else {
+                        if effect.typeId == fxEffectTypeId("aurea.distort.mesh_warp") { MeshWarpCardTools(effectId: effect.effectId) }
+                        if effect.typeId == fxEffectTypeId("aurea.distort.puppet") { PuppetCardTools(effectId: effect.effectId) }
                         if effect.typeId == fxEffectTypeId("aurea.key.rotobrush") {
                             PanelNotice(AureaText.t("roto_note"))
+                            RotoPaintCardTools(effectId: effect.effectId)
                         }
                         let localAiBit: UInt32 = effect.typeId == fxEffectTypeId("aurea.ai.depth_map") ? 1 : effect.typeId == fxEffectTypeId("aurea.key.rotobrush") ? 2 : 0
                         if effect.enabled && localAiBit != 0 {

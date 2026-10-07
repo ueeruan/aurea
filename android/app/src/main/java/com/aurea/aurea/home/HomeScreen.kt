@@ -46,6 +46,7 @@ fun HomeScreen(store: EditorStore) {
     // O mesmo ViewModel da MainActivity (mesmo dono, mesma chave).
     val conta: ContaViewModel = viewModel()
     var confirmLogout by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val projects = rememberTabListState(vm, HomeViewModel.PROJECTS_TAB)
     val settings = rememberTabListState(vm, HomeViewModel.SETTINGS_TAB)
     var menu by remember { mutableStateOf(false) }
@@ -98,6 +99,8 @@ fun HomeScreen(store: EditorStore) {
         SheetAction(stringResource(R.string.settings_group_about)) { about = true },
         SheetAction(stringResource(R.string.licenses_title)) { licenses = true },
         SheetAction(stringResource(R.string.conta_sair), destructive = true) { confirmLogout = true },
+        // Google Play e App Store exigem excluir a conta de dentro do app.
+        SheetAction(stringResource(R.string.conta_excluir), destructive = true) { confirmDelete = true },
     ))
     if (reportProblem) ReportProblemSheet(sessao = { conta.sessao() }, onResult = { store.showToast(it) }) { reportProblem = false }
     store.quarantinePrompt?.let { q -> QuarantineDialog(store, q) }
@@ -109,6 +112,22 @@ fun HomeScreen(store: EditorStore) {
         onConfirm = { confirmLogout = false; conta.sair() },
         onDismiss = { confirmLogout = false },
     )
+    if (confirmDelete) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        AureaAlert(
+            title = stringResource(R.string.conta_excluir),
+            message = stringResource(R.string.conta_excluir_mensagem),
+            confirmLabel = stringResource(R.string.conta_excluir),
+            destructive = true,
+            onConfirm = {
+                confirmDelete = false
+                conta.excluirConta { ok ->
+                    store.showToast(context.getString(if (ok) R.string.conta_excluida else R.string.conta_excluir_falhou))
+                }
+            },
+            onDismiss = { confirmDelete = false },
+        )
+    }
     if (about || licenses) AlertDialog(onDismissRequest = { about = false; licenses = false },
         title = { Text(stringResource(if (licenses) R.string.licenses_title else R.string.settings_group_about)) },
         text = { Text(if (licenses) stringResource(R.string.licenses_ai_body) else

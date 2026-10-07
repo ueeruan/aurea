@@ -934,15 +934,16 @@ struct AppearancePanel: View {
     // Divide 18, Vivid Light 19, Linear Dodge 20 e Linear Burn 21 vieram do
     // editor antigo; entram nos mesmos grupos do AE (escurecer / clarear /
     // contraste) e a lista `modes` segue indexada pelo valor de BlendMode.
-    private static let groups: [[Int]] = [[0], [6, 3, 9, 21, 18], [7, 4, 8, 1, 20], [5, 11, 10, 19], [12, 13, 2], [14, 15, 16, 17]]
-    private static let titles = ["panel_normal", "pn_blend_darken", "pn_blend_lighten", "pn_blend_cat_contrast", "pn_blend_difference", "pn_blend_color"]
+    // Máscara 22 / Excluir 23: a máscara do Alight Motion (recorta / fura as de baixo).
+    private static let groups: [[Int]] = [[0], [6, 3, 9, 21, 18], [7, 4, 8, 1, 20], [5, 11, 10, 19], [12, 13, 2], [14, 15, 16, 17], [22, 23]]
+    private static let titles = ["panel_normal", "pn_blend_darken", "pn_blend_lighten", "pn_blend_cat_contrast", "pn_blend_difference", "pn_blend_color", "pn_blend_cat_mask"]
     static let modes = ["panel_normal", "pn_blend_add", "pn_blend_subtract", "pn_blend_multiply", "pn_blend_screen", "pn_blend_overlay",
         "pn_blend_darken", "pn_blend_lighten", "pn_blend_color_dodge", "pn_blend_color_burn", "pn_blend_hard_light", "pn_blend_soft_light",
         "pn_blend_difference", "pn_blend_exclusion", "pn_blend_hue", "pn_blend_saturation", "pn_blend_color", "pn_blend_luminosity",
-        "pn_blend_divide", "pn_blend_vivid_light", "pn_blend_linear_dodge", "pn_blend_linear_burn"]
+        "pn_blend_divide", "pn_blend_vivid_light", "pn_blend_linear_dodge", "pn_blend_linear_burn", "pn_blend_mask", "pn_blend_exclude"]
     private static let previews: [GraphicsContext.BlendMode] = [.normal, .plusLighter, .normal, .multiply, .screen, .overlay, .darken, .lighten,
         .colorDodge, .colorBurn, .hardLight, .softLight, .difference, .exclusion, .hue, .saturation, .color, .luminosity,
-        .normal, .normal, .plusLighter, .normal]
+        .normal, .normal, .plusLighter, .normal, .destinationIn, .destinationOut]
     private func write(_ value: Float) { model.editTransform(12, value: value.clamped(to: 0...100) / 100) }
     private func key() {
         model.mutate { core in
@@ -1028,12 +1029,14 @@ struct AppearancePanel: View {
             model.mutate { $0.setLayer(id, blendMode: UInt32(value)) }; model.refreshModel(force: true)
         } label: {
             VStack(spacing: 4) {
+                if value >= 22 { BlendCutThumb(exclude: value == 23) } else {
                 Canvas { context, size in
                     let r = size.height * 0.46
                     context.fill(Path(ellipseIn: CGRect(x: size.width * 0.38 - r, y: size.height / 2 - r, width: r * 2, height: r * 2)), with: .color(AureaColors.blendThumbBottom))
                     context.blendMode = Self.previews[value]
                     context.fill(Path(ellipseIn: CGRect(x: size.width * 0.62 - r, y: size.height / 2 - r, width: r * 2, height: r * 2)), with: .color(AureaColors.blendThumbTop))
                 }.frame(width: 34, height: 22).drawingGroup()
+                }
                 Text(AureaText.t(Self.modes[value])).font(.aurea(size: 9.5)).foregroundStyle(mode == UInt32(value) ? AureaColors.accent : AureaColors.text).lineLimit(1).padding(.horizontal, 4)
             }.padding(.vertical, 8).frame(width: 74).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(mode == UInt32(value) ? AureaColors.accent : .clear, lineWidth: 2))

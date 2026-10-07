@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -175,11 +176,12 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                         GIZMO_SCALE -> R.string.gizmo_tool_scale
                         else -> R.string.gizmo_tool_move
                     })
+                    val trackballHint = trackballHint(store)
                     androidx.compose.material3.TextButton(
                         onClick = store::cycleGizmoTool,
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                         modifier = Modifier.width(48.dp).heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
-                            .testTag("gizmo.tool").semantics { contentDescription = "$toolLabel: $toolName" },
+                            .testTag("gizmo.tool").semantics { contentDescription = "$toolLabel: $toolName"; trackballHint?.let { stateDescription = it } },
                     ) {
                         CupertinoIcon(when (store.gizmoTool) {
                             GIZMO_ROTATE -> CupertinoGlyph.ArrowCounterclockwise
@@ -476,7 +478,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
             val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .22f) }
             drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), 1.dp.toPx())
         }
-        store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
+        store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
         return
     }
     // Rig 2D: o palco é do esqueleto (juntas e ossos), sem alças da camada.
@@ -484,8 +486,23 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawRigOverlay(store, m)
         return
     }
+    // Malha de deformação (cartão do efeito aberto): grade e vértices (MeshWarpStage.kt).
+    if (meshWarpActive(store)) {
+        drawMeshWarpOverlay(store, m)
+        return
+    }
+    // Fantoche no modo de pinos: malha deformada e pinos (PuppetStage.kt).
+    if (puppetActive(store)) {
+        drawPuppetOverlay(store, m)
+        return
+    }
     // Forma 3D com parte escolhida: um ponto no centro de cada parte (o gizmo segue abaixo).
     if (shapePartActive(store)) drawShapePartOverlay(store, m)
+    // Roto Brush: o traço ao vivo no lugar das alças da camada.
+    if (rotoPaintActive(store)) {
+        drawRotoOverlay(m)
+        return
+    }
     // Modo vetorial (pontos / mão livre): o palco é do caminho, sem alças da camada.
     if (store.vectorTool != 0) {
         drawVectorOverlay(store, m)
@@ -592,7 +609,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         return
     }
     // Camada no espaço 3D: as setas do mundo (têm prioridade no toque).
-    store.gizmo?.let { drawGizmo(m, it, store.gizmoTool) }
+    store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
     if (!chrome || store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
     val anchor = m.scratch
     val gizmo = store.gizmo
@@ -1139,6 +1156,19 @@ private suspend fun PointerInputScope.stageGestures(
             rigGesture(store, m, down)
             return@awaitEachGesture
         }
+        if (meshWarpActive(store)) {
+            meshWarpGesture(store, m, down)
+            return@awaitEachGesture
+        }
+        if (puppetActive(store)) {
+            puppetGesture(store, m, down)
+            return@awaitEachGesture
+        }
+        // Roto Brush (RotoPaint.kt): o dedo pinta traços de objeto/fundo.
+        if (rotoPaintActive(store)) {
+            rotoGesture(store, m, down)
+            return@awaitEachGesture
+        }
         // Modo vetorial: pontos do caminho ou traço da mão livre.
         if (store.vectorTool != 0) {
             vectorGesture(store, m, down)
@@ -1165,7 +1195,9 @@ private suspend fun PointerInputScope.stageGestures(
 
         // Gizmo 3D: tocar numa alça trava AQUELE eixo até soltar o dedo.
         val gz = store.gizmo
-        if (gz != null && gz.size == 8 && gz.all { it.isFinite() } && store.selection.size == 1 && m.valid) {
+        // Ferramenta Girar: o trackball (TrackballStage.kt) no lugar das alças.
+        if (m.valid && trackballActive(store) && trackballGesture(store, m, down, slop)) return@awaitEachGesture
+        if (gz != null && gz.size == 8 && gz.all { it.isFinite() } && store.selection.size == 1 && m.valid && !trackballActive(store)) {
             val zOff = 44.dp.toPx()
             val tips = gizmoTips(m, gz, zOff)
             val reach = 24.dp.toPx()
@@ -1847,6 +1879,10 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
         "FULL" -> stringResource(R.string.i18n_preview_full)
         else -> l
     }
+    // A reprodução RAW é ferramenta de teste (texto fixo em inglês, sem
+    // tradução): só no build de depuração e no uiTest, que herda dele. O HUD
+    // (toque longo) é recurso de usuário — também está no menu "Diagnóstico na tela".
+    val testeRaw = com.aurea.aurea.BuildConfig.DEBUG
     val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
     Box(modifier) {
         Box(
@@ -1862,8 +1898,10 @@ private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier)
         if (open) com.aurea.aurea.ui.i18n.LocaleDirection {
             val current = store.preview.scaleLabel
             ShellPopupMenu(
-                items = listOf(
-                    PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() },
+                items = listOfNotNull(
+                    // Teste de reprodução crua: só depuração. `store.rawPlayback`
+                    // ligado (impossível no release) ainda mostra a volta.
+                    if (testeRaw || store.rawPlayback) PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() } else null,
                     PopupItem("AUTO", current == "AUTO") { store.setPreviewScale(true) },
                     PopupItem(stringResource(R.string.i18n_preview_full), current == "FULL") { store.setPreviewScale(false, 1, 1) },
                     PopupItem("1/2", current == "1/2") { store.setPreviewScale(false, 1, 2) },

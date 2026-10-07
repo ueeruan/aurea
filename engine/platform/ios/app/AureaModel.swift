@@ -1673,6 +1673,37 @@ final class AureaModel: ObservableObject {
         engine.run { $0.addEffect(type, toLayer: layer, at: UInt32.max) }
     }
 
+    // --- Fantoche no palco (PuppetStage.swift; espelho de EditorStore.puppet*) ---
+    func puppetPins(_ layer: Int64, effect: Int32) -> [Float] { engine.puppetPins(layer, effect: effect).map(\.floatValue) }
+    func puppetMesh(_ layer: Int64, effect: Int32) -> [Float] { engine.puppetMesh(layer, effect: effect).map(\.floatValue) }
+    func puppetAddPin(_ layer: Int64, effect: Int32, u: Float, v: Float) -> Int32 {
+        if status.playing != 0 { playPause() }
+        let pin = engine.puppetAddPin(layer, effect: effect, u: u, v: v)
+        if pin >= 0 { refreshModel(force: true) }
+        return pin
+    }
+    /// Arrasto ao vivo; `continuing` = mesmo gesto (um passo de desfazer); auto-key do palco.
+    func puppetMovePin(_ layer: Int64, effect: Int32, pin: Int32, u: Float, v: Float, continuing: Bool) -> Bool {
+        if status.playing != 0 { playPause() }
+        return engine.puppetMovePin(layer, effect: effect, pin: pin, u: u, v: v, autoKey: autoKeyTransforms, continuing: continuing)
+    }
+    func puppetRemovePin(_ layer: Int64, effect: Int32, pin: Int32) {
+        if engine.puppetRemovePin(layer, effect: effect, pin: pin) { refreshModel(force: true) }
+    }
+    /// A ferramenta Fantoche (a entrada "Rig" da doca): abre o cartão do efeito
+    /// na camada escolhida — cria se ainda não tem — já no modo de pinos.
+    func openPuppetTool() {
+        guard let layer = primarySelection else { return }
+        let type = PuppetStageState.type
+        PuppetStageState.shared.pendingEdit = layer
+        if effects.contains(where: { $0.typeId == type }) {
+            pendingEffectFocus = EffectFocusRequest(layer: layer, type: type, previous: [])
+        } else {
+            addEffectAndFocus(type, layer: layer)
+        }
+        openPanel(.effects)
+    }
+
     var primarySelection: Int64? { selection.first }
 
     /// A camada escolhida, para os painéis.

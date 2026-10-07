@@ -128,6 +128,8 @@ struct PreviewMetalView: UIViewRepresentable {
         private var gizmoAlong: CGFloat = 0
         private var gizmoLastAngle: CGFloat = 0
         private var gizmoDownTime: CFTimeInterval = 0
+        /// Ferramenta Girar: arrasto no trackball (TrackballOverlay.swift) em vez das alças.
+        private var trackball: TrackballSession?
         private var pinchThreeD = false
         private var pinchTracker = StagePinchTracker()
         private var pinchLayer: Int64?
@@ -451,6 +453,7 @@ struct PreviewMetalView: UIViewRepresentable {
             model.stageManipulating = true
         }
         func finishStageEdit() {
+            trackball?.end(); trackball = nil
             markerHold?.cancel(); markerHold = nil
             markerAnchorLayer = nil
             if editBegan { model.endGesture() }
@@ -909,6 +912,11 @@ struct PreviewMetalView: UIViewRepresentable {
         /// Stage.kt gizmoGesture: o eixo tocado fica travado até o dedo subir.
         private func startGizmo(at point: CGPoint, view: UIView) -> Bool {
             guard editableSelection(), let id = model.primarySelection, !ShapeStageGeometry.enabled(model) else { return false }
+            trackball?.end(); trackball = nil
+            if TrackballOverlay.active(model) {
+                trackball = TrackballSession(model: model, point: point) { screenPoint($0, $1, view: view) }
+                return trackball != nil
+            }
             let data = model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
             guard data.count == 8 else { return false }
             let raw = stride(from: 0, to: 8, by: 2).map { screenPoint(data[$0], data[$0 + 1], view: view) }
@@ -944,6 +952,10 @@ struct PreviewMetalView: UIViewRepresentable {
             return true
         }
         private func stepGizmo(_ point: CGPoint, view: UIView) {
+            if let trackball {
+                trackball.step(point, model: model) { label in engage(); beginEdit(label) }
+                return
+            }
             guard let id = model.primarySelection else { return }
             if !gizmoMoved {
                 // Folga de alça (4 pt): um toque parado nunca vira edição.

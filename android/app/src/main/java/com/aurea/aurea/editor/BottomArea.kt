@@ -126,7 +126,7 @@ internal enum class DockSection(val glyph: Char, @StringRes val label: Int, val 
     Presets(CupertinoGlyph.WandStars, R.string.sh_dock_presets, EditorPanel.Presets),
     Effects(CupertinoGlyph.Sparkles, R.string.sh_dock_effects, EditorPanel.Effects),
     // Rig 2D: não abre painel — o palco vira o esqueleto (RigStage.kt).
-    Rig(CupertinoGlyph.PersonCropCircle, R.string.rig_dock, EditorPanel.Transform);
+    Rig(CupertinoGlyph.PersonCropCircle, R.string.fx_name_puppet, EditorPanel.Effects);
 
     /** A ficha usa uma ação curta; o leitor de tela mantém o nome completo. */
     @get:StringRes
@@ -323,7 +323,8 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             ) {
                 sections.forEach { s -> DockTile(s, tileHeight, toolWidth) {
                     if (s == DockSection.EditText) store.openTextContentEditor()
-                    else if (s == DockSection.Rig) RigStage.open(store)
+                    // O antigo Rig abre o Fantoche (pinos); o rig gravado continua desenhando.
+                    else if (s == DockSection.Rig) openPuppetTool(store, ui)
                     else openPanel(store, ui, panelFor(store, s))
                 } }
             }

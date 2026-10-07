@@ -81,6 +81,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "curl roll enrolar cilindro", principal = listOf(0, 1, 2, 3, 6)))
     put("aurea.distort.page_turn", EffectHuman(name = R.string.fx_name_page_turn,
         keywords = "page turn pagina papel", principal = listOf(0, 1, 2, 3, 8)))
+    put("aurea.distort.mesh_warp", EffectHuman(name = R.string.fx_name_mesh_warp,
+        keywords = "mesh warp malha deformacao grade bezier entortar", principal = listOf(0, 1, 2)))
+    put("aurea.distort.puppet", EffectHuman(name = R.string.fx_name_puppet,
+        keywords = "puppet fantoche pino pin marionete rig personagem deformar arap", principal = listOf(0, 1, 2)))
     put("aurea.distort.liquid_glass", EffectHuman(name = R.string.fx_name_liquid_glass,
         keywords = "liquid glass vidro liquido lente refracao glassmorphism", principal = listOf(0, 1, 2, 3, 5)))
     put("aurea.transition.noise_dissolve", EffectHuman(name = R.string.fx_name_noise_dissolve,
@@ -1399,6 +1403,26 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             6 to ParamHuman(label = R.string.afx_p_ball_size, decimals = 0),
             7 to ParamHuman(label = R.string.afx_p_instability_state),
             8 to ParamHuman(label = R.string.afx_p_instability, suffix = "px", decimals = 1),
+            9 to ParamHuman(label = R.string.fx_deform_light_direction),
+            10 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+        ),
+    ))
+    // Desintegrar: a camada se desfaz em fragmentos que voam. Principais:
+    // conclusão, direção, tamanho, aleatoriedade, velocidade e brilho da borda.
+    put("aurea.transition.disintegrate", EffectHuman(
+        name = R.string.afx_name_disintegrate,
+        keywords = "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao",
+        principal = listOf(0, 1, 2, 3, 5, 11),
+        params = mapOf(
+            0 to ParamHuman(decimals = 0),
+            2 to ParamHuman(suffix = "px", decimals = 1),
+            3 to ParamHuman(decimals = 0),
+            5 to ParamHuman(suffix = "px", decimals = 0),
+            6 to ParamHuman(label = R.string.particular_turbulence, suffix = "px", decimals = 0),
+            7 to ParamHuman(suffix = "px", decimals = 0),
+            8 to ParamHuman(decimals = 0),
+            11 to ParamHuman(label = R.string.afx_p_edge_glow, decimals = 0),
+            12 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
         ),
     ))
     // Particular: as partículas do app antigo. Principais: taxa, velocidade,

@@ -34,6 +34,10 @@ object ContaApi {
 
     fun sair(token: String): Resposta = chamar("POST", "/api/auth/logout", JSONObject(), token)
 
+    /** Exclui a conta e os dados dela no servidor (Google Play / App Store). */
+    fun excluir(token: String): Resposta =
+        chamar("POST", "/api/auth/delete", JSONObject().put("confirm", true), token)
+
     fun usuarios(): Resposta = chamar("GET", "/api/stats/users", null, null)
 
     /** "Relatar um problema" (discovery/relato.js). Sessão opcional: dá o e-mail da conta ao relato. */

@@ -51,6 +51,7 @@ add_executable(aurea_tests
     test_cliptime.cpp
     test_beats.cpp
     test_edit.cpp
+    test_trackball.cpp
     test_tracking.cpp
     test_motion_geometry.cpp
     test_motion_extras.cpp
@@ -61,6 +62,7 @@ add_executable(aurea_tests
     test_psd.cpp
     test_grid.cpp
     test_foreground.cpp
+    test_roto.cpp
     test_expr.cpp
     test_keyframe_shape.cpp
     test_vector.cpp

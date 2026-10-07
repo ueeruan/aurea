@@ -86,7 +86,7 @@ fun AureaApp(store: EditorStore, conta: ContaViewModel) {
                     title = stringResource(R.string.model_textures_title),
                     message = stringResource(R.string.model_textures_message, req.names.take(8).joinToString("\n") + if (req.names.size > 8) "\n…" else ""),
                     confirmLabel = stringResource(R.string.model_textures_choose),
-                    onConfirm = { pickTextures.launch(arrayOf("image/*", "application/octet-stream", "*/*")) },
+                    onConfirm = { pickTextures.launch(arrayOf("image/*", "model/mtl", "text/plain", "application/octet-stream", "*/*")) },
                     onDismiss = { store.dismissModelTextures() },
                 )
             }

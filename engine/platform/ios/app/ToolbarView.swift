@@ -228,41 +228,40 @@ struct TransportView: View {
 
     private var buttons: some View {
         GeometryReader { geometry in
-        let compact = geometry.size.width < 408
-        let tiny = geometry.size.width < 352
+        // Nove botões em três grupos (ferramentas | tempo | edição); em telas
+        // estreitas o alvo encolhe junto, nunca some um botão.
+        let side = min(48, (geometry.size.width - 8) / 9)
         HStack(spacing: 0) {
-            undoButton
+            HStack(spacing: 0) { gridButton(side); fastPreviewButton(side); markerButton.frame(width: side) }
             Spacer(minLength: 0)
-            if !tiny { redoButton; Spacer(minLength: 0) }
-            startButton
+            HStack(spacing: 0) { startButton.frame(width: side); playButton.frame(width: side); endButton.frame(width: side) }
             Spacer(minLength: 0)
-            markerButton
-            Spacer(minLength: 0)
-            playButton
-            Spacer(minLength: 0)
-            endButton
-            Spacer(minLength: 0)
-            if compact {
-                Menu {
-                    if tiny { Button(AureaText.t("editor_refazer")) { model.redo() }.disabled(model.status.canRedo == 0) }
-                    Button(AureaText.t("editor_dividir_cabecote")) { model.splitAtPlayhead(Array(model.selection)) }.disabled(model.selection.isEmpty)
-                    Button(AureaText.t("editor_duplicar_camada_segure_copiar")) {
-                        model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
-                    }.disabled(model.selection.isEmpty)
-                    Button(AureaText.t("editor_copiar_colar")) {
-                        if model.status.playing != 0 { model.playPause() }
-                        shell.sheet = .copyPaste
-                    }.accessibilityIdentifier("transport.copyPaste")
-                    Button(AureaText.t(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia")) {
-                        model.fullscreen.toggle(); model.invalidatePreview()
-                    }.accessibilityIdentifier("transport.fullscreen")
-                } label: { CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 22, color: AureaColors.text).frame(width: 48, height: 48) }
-                .accessibilityLabel(AureaText.t("timeline_more"))
-                .accessibilityIdentifier("transport.more")
-            } else { duplicateButton }
-            if !compact { Spacer(minLength: 0); fullscreenButton }
+            HStack(spacing: 0) { layersButton(side); undoButton.frame(width: side); redoButton.frame(width: side) }
         }.padding(.horizontal, 4).frame(height: EditorLayout.transport)
         }
+    }
+
+    private var fastPreview: Bool {
+        guard model.status.previewAuto == 0 else { return false }
+        return max(1, model.status.previewNumerator) < max(1, model.status.previewDenominator)
+    }
+    private func gridButton(_ side: CGFloat) -> some View {
+        ShellBarButton(glyph: CupertinoGlyph.Grid, description: AureaText.t("editor_grade_tercos"), size: 20, width: side, height: 48,
+                       tint: shell.showGrid ? AureaColors.accent : AureaColors.text) { shell.showGrid.toggle() }
+            .accessibilityIdentifier("transport.grid")
+    }
+    private func fastPreviewButton(_ side: CGFloat) -> some View {
+        ShellBarButton(glyph: CupertinoGlyph.Bolt, description: AureaText.t("editor_previa_rapida"), size: 20, width: side, height: 48,
+                       tint: fastPreview ? AureaColors.accent : AureaColors.text) {
+            if fastPreview { model.setPreviewScale(num: 1, den: 1, auto: true) } else { model.setPreviewScale(num: 1, den: 4, auto: false) }
+        }
+            .accessibilityIdentifier("transport.fastPreview")
+    }
+    private func layersButton(_ side: CGFloat) -> some View {
+        ShellBarButton(glyph: CupertinoGlyph.RectangleStack, description: AureaText.t("editor_selecionar_uma_camada"), size: 20, width: side, height: 48) {
+            shell.sheet = .searchLayers
+        }
+            .accessibilityIdentifier("transport.layers")
     }
 
     private var undoButton: some View {
@@ -275,13 +274,13 @@ struct TransportView: View {
     }
     /// Tocar navega por marcas/keyframes; segurar vai ao início.
     private var startButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowLeftToLine, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 24, width: 48, height: 48,
+        ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 22, width: 48, height: 48,
                        onLongPress: { model.seek(toFrame: 0) }, action: { model.stepTransport(-1) })
             .accessibilityIdentifier("transport.previous")
     }
     /// Tocar navega por marcas/keyframes; segurar vai ao fim.
     private var endButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowRightToLine, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 24, width: 48, height: 48,
+        ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 22, width: 48, height: 48,
                        onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { model.stepTransport(1) })
             .accessibilityIdentifier("transport.next")
     }
@@ -303,26 +302,6 @@ struct TransportView: View {
                               tint: marked ? AureaColors.accent : AureaColors.text,
                               onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
             .accessibilityIdentifier("transport.marker")
-    }
-    private var duplicateButton: some View {
-        let empty: Bool = model.selection.isEmpty
-        return ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada_segure_copiar"), size: 22, width: 48, height: 48,
-                              tint: empty ? AureaColors.transportDisabled : AureaColors.text,
-                              onLongPress: {
-                                  if model.status.playing != 0 { model.playPause() }
-                                  shell.sheet = .copyPaste
-                              }, action: {
-                                  guard !model.selection.isEmpty else { return }
-                                  model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) })
-                                  model.refreshModel(force: true)
-                              })
-            .accessibilityIdentifier("transport.duplicate")
-    }
-    private var fullscreenButton: some View {
-        ShellBarButton(glyph: model.fullscreen ? CupertinoGlyph.FullscreenExit : CupertinoGlyph.Fullscreen,
-                       description: AureaText.t(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia"), size: 22, width: 48, height: 48) {
-            model.fullscreen.toggle(); model.invalidatePreview()
-        }
     }
 }
 
@@ -792,7 +771,7 @@ private struct ShellMenuRow: View {
                         Circle().fill(AureaColors.labelPalette[Int(row.label) - 1]).frame(width: 10, height: 10)
                     }
                     if row.selected { CupertinoGlyph.text(CupertinoGlyph.CheckmarkAlt, size: 16, color: AureaColors.accent) }
-                }.padding(.horizontal, 16).frame(height: 56)
+                }.padding(.horizontal, 16).frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(row.name)
         }
     }
@@ -852,9 +831,12 @@ private struct ShellLinkPopup: View {
                 }.frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
                 Text(AureaText.t("editor_vincular_novo_nulo")).font(.aurea(size: 15, weight: .bold)).foregroundStyle(AureaColors.text)
                     .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-            }.padding(.horizontal, 12).frame(height: 56).contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("link.newNull")
+            }.padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("editor_vincular_novo_nulo")).accessibilityIdentifier("link.newNull")
     }
+    /// A LINHA INTEIRA é o alvo (56 pt, largura toda). Sem `contentShape`, o
+    /// fundo `Color.clear` das camadas não escolhidas não recebia toque: só a
+    /// miniatura e as letras do nome vinculavam (o "3 a 5 toques" do beta).
     private func row<Thumb: View>(_ title: String, id: Int64, bold: Bool = false, @ViewBuilder thumb: () -> Thumb) -> some View {
         Button {
             let previous = current; dismiss(); if previous != id { model.setParentMany(ids, parent: id) }
@@ -863,8 +845,11 @@ private struct ShellLinkPopup: View {
                 thumb()
                 Text(title).font(.aurea(size: 15, weight: bold ? .bold : .medium)).foregroundStyle(current == id ? AureaColors.accent : AureaColors.text).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 if current == id { CupertinoGlyph.text(CupertinoGlyph.CheckmarkAlt, size: 16, color: AureaColors.accent) }
-            }.padding(.horizontal, 12).frame(height: 56).background(current == id ? AureaColors.accentDim : bold ? AureaColors.chip : Color.clear)
+            }.padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 56).background(current == id ? AureaColors.accentDim : bold ? AureaColors.chip : Color.clear)
+                .contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityLabel(title).accessibilityAddTraits(current == id ? .isSelected : [])
+            .accessibilityIdentifier("link.row.\(id)")
     }
 }
 

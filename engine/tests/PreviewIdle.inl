@@ -11,7 +11,7 @@ struct IdlePreviewFixture {
         AUREA_CHECK(engine.initialize(config).ok());
         AUREA_CHECK(engine.new_project(64, 64, 30., "idle cache").ok());
         engine.project()->timeline().composition(engine.project()->timeline().current())->set_duration(FrameIndex{90});
-        engine.renderer().set_preview_cache_budget(u64(capacity) * 64 * 64 * 8);
+        engine.renderer().set_preview_cache_budget(u64(capacity) * 64 * 64 * 4);   // RGBA8 sRGB slots
         AUREA_CHECK(engine.attach_surface(&window, 64, 64).ok());
     }
     ~IdlePreviewFixture() { engine.shutdown(); }
@@ -41,11 +41,31 @@ AUREA_TEST(PreviewIdle, WindowRespectsExistingByteBudgetFpsAndEndOfTimeline) {
     AUREA_CHECK_EQ(preview_idle_target(30, preview_cache_capacity(1920, 1080, budget), 300), 3u);
     AUREA_CHECK_EQ(preview_idle_target(30, preview_cache_capacity(960, 540, budget), 300), 12u);
     AUREA_CHECK_EQ(preview_idle_target(30, 30, 300), 30u);
-    AUREA_CHECK_EQ(preview_idle_target(24, 30, 300), 24u);
+    AUREA_CHECK_EQ(preview_idle_target(24, 30, 300), 30u);   // capacity, not one second
+    AUREA_CHECK_EQ(preview_idle_target(30, 120, 300), 120u);
     AUREA_CHECK_EQ(preview_idle_target(120, 30, 2), 2u);
     AUREA_CHECK_EQ(preview_idle_target(30, 0, 300), 0u);
     AUREA_CHECK_EQ(preview_idle_target(30, 30, 0), 0u);
     AUREA_CHECK_EQ(preview_idle_target(std::numeric_limits<double>::infinity(), 30, 300), 30u);
+}
+
+AUREA_TEST(PreviewIdle, RamTieredBudgetHoldsFarMoreThanOneSecond) {
+    constexpr u64 MiB = 1ull << 20, GiB = 1ull << 30;
+    AUREA_CHECK_EQ(preview_cache_budget(2 * GiB, 0), 32 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(3800 * MiB, 0), 64 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(6 * GiB, 0), 320 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(12 * GiB, 0), 512 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(12 * GiB, 1 * GiB), 256 * MiB);     // 1/4 of the process
+    AUREA_CHECK_EQ(preview_cache_budget(6 * GiB, 0, .55f), 160 * MiB);       // pressure shrinks
+    AUREA_CHECK_EQ(preview_cache_budget(6 * GiB, 0, .9f), 0ull);
+    // 6 GB phone, viewport-sized preview (540x960), RGBA8: far beyond 30 frames.
+    const u32 frames = preview_cache_capacity(540, 960, preview_cache_budget(6 * GiB, 0), 4);
+    AUREA_CHECK_EQ(frames, 161u);                                            // 5.4 s at 30 fps
+    AUREA_CHECK_EQ(preview_idle_target(30, frames, 1000), 161u);           // look-ahead fills it
+    AUREA_CHECK_EQ(preview_cache_capacity(540, 960, preview_cache_budget(12 * GiB, 0), 4), 258u);
+    AUREA_CHECK_EQ(preview_cache_capacity(320, 568, preview_cache_budget(12 * GiB, 0), 4), kPreviewCacheMaxFrames);
+    AUREA_CHECK_EQ(preview_cache_capacity(1920, 1080, 320 * MiB, 4), 40u); // still bounded by bytes
+    AUREA_CHECK_EQ(preview_cache_capacity(1920, 1080, 320 * MiB, 8), 20u);
 }
 
 AUREA_TEST(PreviewIdle, QuietClockParksPendingWorkAndCancelsEveryIdentityChange) {
@@ -188,11 +208,12 @@ AUREA_TEST(PreviewIdle, SeekAndEditDuringPreparationDiscardTheOldGeneration) {
         } else release.set_value();
         AUREA_CHECK(rendering.get().ok());
         fixture.backend->beforeTextureUpload = {};
-        AUREA_CHECK_EQ(fixture.engine.renderer().preview_cached_count(), 0u);
+        // A seek keeps the prepared frame (same revision); an edit discards it.
+        AUREA_CHECK_EQ(fixture.engine.renderer().preview_cached_count(), seek ? 2u : 0u);
         AUREA_CHECK_EQ(fixture.backend->acquires, 1u);
         AUREA_CHECK(fixture.engine.render_frame(true).ok());
         AUREA_CHECK(fixture.engine.renderer().preview_cached(FrameIndex{seek ? 45 : 0}));
-        AUREA_CHECK(!fixture.engine.renderer().preview_cached(FrameIndex{1}));
+        AUREA_CHECK_EQ(fixture.engine.renderer().preview_cached(FrameIndex{1}), seek);
     }
 }
 

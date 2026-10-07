@@ -4,7 +4,7 @@ AUREA_TEST(PreviewBuffer, ComposedFramesReusePixelsAndInvalidateOnEdit) {
     Scene scene(64, 64);
     auto& g = gpu();
     auto& r = g.renderer;
-    r.set_preview_cache_budget(64ull * 64 * 8 * 2);
+    r.set_preview_cache_budget(64ull * 64 * 4 * 2);   // RGBA8 sRGB slots
     RenderSettings settings;
     settings.previewCacheRevision = 1;
     settings.previewCacheComposition = 1;
@@ -70,7 +70,7 @@ AUREA_TEST(PreviewBuffer, CacheRejectsMissingMediaAndFinalExportBypassesIt) {
     AUREA_REQUIRE_GPU();
     Scene scene(32, 32);
     auto& r = gpu().renderer;
-    r.set_preview_cache_budget(32ull * 32 * 8 * 2);
+    r.set_preview_cache_budget(32ull * 32 * 4 * 2);
     RenderSettings settings;
     settings.previewCacheRevision = 1; settings.previewCacheOnly = true;
     AUREA_CHECK_EQ(r.configure_preview_cache(32, 32, settings), 2u);
@@ -161,7 +161,15 @@ AUREA_TEST(PreviewFidelity, NestedProjectedCardsKeepContentAcrossResolutionAndCa
         snapshot.compWidth = 320; snapshot.compHeight = 240; snapshot.time = FrameIndex{15};
         AUREA_CHECK(r.render(snapshot, settings, &display, stats, timings).ok());
         AUREA_CHECK(r.last_preview_cache_hit());
-        AUREA_CHECK(first == read());
+        {
+            // The kept frame is RGBA8 sRGB (4 B/px): the replay matches the live
+            // display within one 8-bit step of the encoded output, never more.
+            const auto replay = read();
+            f32 worst = 0;
+            for (usize i = 0; i < replay.size(); ++i)
+                worst = std::max(worst, std::abs(half_to_float(replay[i]) - half_to_float(first[i])));
+            AUREA_CHECK(worst <= 1.5f / 255.f);
+        }
         r.set_preview_cache_budget(0);
         r.prepare(*scene.comp, scene.project, FrameIndex{15}, nullptr, nullptr, nullptr,
                   settings, denominator + 10, 0, DecodeMode::Still, 1, snapshot);

@@ -242,6 +242,8 @@ final class ShellPresentation: ObservableObject {
     @Published var resolutionAnchor: CGRect?
     @Published var timeInput = ""
     @Published var grabbedHandle = -1
+    /// Grade de terços sobre o quadro (só na prévia, nunca no export).
+    @Published var showGrid = false
     @Published var grabbedShapeHandle = -1
     @Published var snapX: Float?
     @Published var snapY: Float?

@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.ui.ds.AureaModalSheet
 import com.aurea.aurea.ui.ds.ColorPickerSheet
+import com.aurea.aurea.ui.ds.drawChecker
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.NumericKeypadSheet
 import com.aurea.aurea.ui.theme.AureaColors
@@ -72,6 +74,8 @@ internal data class NewProjectSpec(
     val fps: Double,
     val title: String,
     val background: FloatArray = floatArrayOf(0f, 0f, 0f),
+    /** "Transparente": sem fundo (o motor recebe alfa 0; PNG e GIF saem com alfa). */
+    val transparent: Boolean = false,
 )
 
 /** Segmento "Personalizado…" da fileira de fps (nunca é uma taxa de verdade). */
@@ -109,6 +113,7 @@ internal fun NewProjectSheet(
     var resolution by rememberSaveable { mutableIntStateOf(defaultResolution) }
     var fps by rememberSaveable { mutableDoubleStateOf(defaultFps.toDouble()) }
     var background by rememberSaveable { mutableStateOf(floatArrayOf(0f, 0f, 0f)) }
+    var transparent by rememberSaveable { mutableStateOf(false) }
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var pickingBackground by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
@@ -128,7 +133,7 @@ internal fun NewProjectSheet(
     fun create() {
         val title = name.trim().ifEmpty { suggestedName.ifEmpty { untitled } }
         onDismiss()
-        onCreate(NewProjectSpec(frame.width, frame.height, fps, title, background.copyOf()))
+        onCreate(NewProjectSpec(frame.width, frame.height, fps, title, background.copyOf(), transparent))
     }
 
     AureaModalSheet(onDismiss = onDismiss, topRadius = AureaDims.RadiusXl) {
@@ -235,7 +240,13 @@ internal fun NewProjectSheet(
             Spacer(Modifier.height(18.dp))
             CapsLabel(stringResource(R.string.editor_plano_fundo))
             Spacer(Modifier.height(8.dp))
-            BackgroundChoices(background, onPick = { background = it }, onCustom = { pickingBackground = true })
+            BackgroundChoices(
+                background,
+                transparent,
+                onPick = { background = it; transparent = false },
+                onTransparent = { transparent = true },
+                onCustom = { pickingBackground = true },
+            )
             Spacer(Modifier.height(24.dp))
             Box(
                 Modifier
@@ -256,19 +267,26 @@ internal fun NewProjectSheet(
         ColorPickerSheet(
             initial = initial,
             withAlpha = false,
-            onChange = { r, g, b, _ -> background = floatArrayOf(r, g, b) },
+            onChange = { r, g, b, _ -> background = floatArrayOf(r, g, b); transparent = false },
             onDone = { pickingBackground = false },
         )
     }
 }
 
 /**
- * Fundo da composição: preto, branco e "outra cor" (o quadrado colorido abre
- * o seletor do app; com uma cor escolhida, ele mostra a cor).
+ * Fundo da composição: preto, branco, transparente (xadrez) e "outra cor" (o
+ * quadrado colorido abre o seletor do app; com uma cor escolhida, ele mostra a cor).
  */
 @Composable
-private fun BackgroundChoices(current: FloatArray, onPick: (FloatArray) -> Unit, onCustom: () -> Unit) {
-    val preset = NewProjectBackgrounds.firstOrNull { (_, c) -> (0..2).all { kotlin.math.abs(c[it] - current[it]) < 0.01f } }
+private fun BackgroundChoices(
+    current: FloatArray,
+    transparent: Boolean,
+    onPick: (FloatArray) -> Unit,
+    onTransparent: () -> Unit,
+    onCustom: () -> Unit,
+) {
+    val preset = if (transparent) null
+        else NewProjectBackgrounds.firstOrNull { (_, c) -> (0..2).all { kotlin.math.abs(c[it] - current[it]) < 0.01f } }
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         NewProjectBackgrounds.forEach { (res, c) ->
             val name = stringResource(res)
@@ -278,7 +296,13 @@ private fun BackgroundChoices(current: FloatArray, onPick: (FloatArray) -> Unit,
                 description = stringResource(R.string.project_bg_color_desc, name),
             ) { onPick(c.copyOf()) }
         }
-        val custom = preset == null
+        BackgroundSwatch(
+            Modifier.drawBehind { drawChecker() },
+            selected = transparent,
+            description = stringResource(R.string.project_bg_transparent_desc),
+            onClick = onTransparent,
+        )
+        val custom = preset == null && !transparent
         BackgroundSwatch(
             if (custom) Modifier.background(Color(current[0], current[1], current[2]))
             else Modifier.background(Brush.sweepGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red))),

@@ -1203,6 +1203,20 @@ struct StageTouchPoint {
             let placed = StageZoomMath.fit(size: size, composition: CGSize(width: cw, height: ch), zoom: viewZoom.zoom, pan: viewZoom.pan)
             let fit = placed.scale, ox = placed.origin.x, oy = placed.origin.y
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: CGFloat(x) * fit + ox, y: CGFloat(y) * fit + oy) }
+            // Grade de terços + cruz do centro, ligada pela barra do player.
+            if shell.showGrid {
+                let ink = Color.white.opacity(0.35)
+                var grid = Path()
+                for k in 1...2 {
+                    let gx = Float(cw) * Float(k) / 3, gy = Float(ch) * Float(k) / 3
+                    grid.move(to: screen(gx, 0)); grid.addLine(to: screen(gx, Float(ch)))
+                    grid.move(to: screen(0, gy)); grid.addLine(to: screen(Float(cw), gy))
+                }
+                let c = screen(Float(cw) / 2, Float(ch) / 2)
+                grid.move(to: CGPoint(x: c.x - 10, y: c.y)); grid.addLine(to: CGPoint(x: c.x + 10, y: c.y))
+                grid.move(to: CGPoint(x: c.x, y: c.y - 10)); grid.addLine(to: CGPoint(x: c.x, y: c.y + 10))
+                context.stroke(grid, with: .color(ink), lineWidth: 1)
+            }
             if let x = shell.snapX {
                 var p = Path(); p.move(to: screen(x, 0)); p.addLine(to: screen(x, Float(ch)))
                 context.stroke(p, with: .color(Color(hex: 0xFF6B6B).opacity(0.8)), lineWidth: 1.5)

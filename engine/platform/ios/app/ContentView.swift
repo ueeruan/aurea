@@ -27,6 +27,9 @@ struct ContentView: View {
                         .transition(.offset(x: -pageWidth / 3)).zIndex(0)
                 case .editor:
                     EditorView()
+                        // Saiu do editor por qualquer caminho: a reprodução e o
+                        // som param junto (o áudio seguia tocando na Home).
+                        .onDisappear { model.stopPlayback() }
                         // Entra pela borda de "frente" da leitura: `.trailing` é a
                         // direita no LTR e a esquerda em árabe, sem depender de o
                         // `offset(x:)` ser espelhado ou não pelo RTL.

@@ -45,12 +45,10 @@ import UIKit
         _ = try awaitSnapshot("Adding a beat keeps playback running") { $0.playing != 0 && $0.markerCount == before.markerCount + 1 }
         play.tap()
         _ = try awaitSnapshot("Pause remains beside the marker") { $0.playing == 0 }
-        let more = app.buttons["transport.more"].firstMatch
-        if more.exists {
-            more.tap()
-            XCTAssertTrue(app.buttons["transport.copyPaste"].firstMatch.waitForExistence(timeout: 5))
-            XCTAssertTrue(app.buttons["transport.fullscreen"].firstMatch.exists)
-        }
+        // A barra nova: grade, prévia rápida e camadas sempre presentes.
+        XCTAssertTrue(app.buttons["transport.grid"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["transport.fastPreview"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["transport.layers"].firstMatch.exists)
     }
 
     func testTimelineMarkersRemainOverClipsWhenFilteringZoomingAndScrubbing() throws {
@@ -408,15 +406,12 @@ import UIKit
         XCTAssertTrue(copy.waitForExistence(timeout: 5)); copy.tap()
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
-        // The compact phone transport retains clipboard commands in More.
-        let more = app.buttons["transport.more"].firstMatch
-        if more.exists {
-            more.tap()
-            let clipboard = app.buttons["transport.copyPaste"].firstMatch
-            XCTAssertTrue(clipboard.waitForExistence(timeout: 5)); clipboard.tap()
-        } else {
-            app.buttons["transport.duplicate"].firstMatch.press(forDuration: 0.8)
-        }
+        // Copiar e colar mora no menu do projeto (a barra do player só tem
+        // grade, prévia rápida, marcador, tempo, camadas e desfazer/refazer).
+        let projectMenu = app.buttons["editor.projectMenu"].firstMatch
+        XCTAssertTrue(projectMenu.waitForExistence(timeout: 5)); projectMenu.tap()
+        let clipboard = app.buttons["Copy and paste"].firstMatch
+        XCTAssertTrue(clipboard.waitForExistence(timeout: 5)); clipboard.tap()
         // A folha de copiar/colar anima ao abrir: espera a linha existir.
         let paste = app.buttons["Paste effects"].firstMatch
         XCTAssertTrue(paste.waitForExistence(timeout: 5)); paste.tap()

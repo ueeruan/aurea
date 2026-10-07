@@ -516,6 +516,13 @@ final class AureaModel: ObservableObject {
     @Published var selectedMask: UInt32?
     @Published var maskDrawing = false
     @Published var selectedMaskPoint: Int?
+    /// Camadas em que a ferramenta-efeito Máscara foi posta (catálogo, busca). O
+    /// cartão "Máscara" da pilha fica nelas mesmo vazio — sem caminho escolhido —
+    /// até o 🗑 do cartão; antes ele só existia com uma máscara pronta e sumia ao
+    /// fechar o painel. Vale para o projeto aberto (paridade EditorStore.maskToolLayers).
+    @Published private(set) var maskToolLayers: Set<Int64> = []
+    func addMaskTool() { if let id = primarySelection, !maskToolLayers.contains(id) { maskToolLayers.insert(id) } }
+    func dropMaskTool(_ layer: Int64) { if maskToolLayers.contains(layer) { maskToolLayers.remove(layer) } }
 
     // --- Export -------------------------------------------------------------
     @Published var exportOptions = ExportOptions()
@@ -1212,6 +1219,9 @@ final class AureaModel: ObservableObject {
 
     func enterBackground() {
         guard started else { return }
+        // O play não segue soando em segundo plano (o `suspend` abaixo também
+        // cala a saída; este pedido vai antes da gravação, que drena a fila).
+        stopPlayback()
         releaseInterfaceCaches()
         // Grava ANTES de suspender (o motor ainda renderiza a capa) e dentro de
         // uma tarefa de segundo plano: o iOS pode congelar o app logo depois do
@@ -1248,7 +1258,19 @@ final class AureaModel: ObservableObject {
         guard started else { return }
         // Permission sheets and Control Center are transient. Stop playback,
         // but keep an export alive until the app actually enters background.
+        stopPlayback()
+    }
+
+    /// Para a reprodução E o som (sair do editor, app inativo/em segundo
+    /// plano). O motor cala o AVAudioEngine no próprio comando de pausa — não
+    /// espera um quadro de render, que não vem com o palco fora da tela.
+    /// Idempotente: pausar parado não faz nada.
+    func stopPlayback() {
+        guard started else { return }
+        pendingPlayhead = nil
         engine.run { $0.pause() }
+        status.playing = 0
+        followPlayback(false)
     }
 
     /// Sair do editor / do app: grava só o que mudou (um projeto limpo não é
@@ -2037,7 +2059,8 @@ final class AureaModel: ObservableObject {
         let created: Bool
         if let bg = background, bg.count >= 3 {
             created = engine.newProjectWidth(width, height: height, fps: fps, title: name,
-                                             backgroundR: bg[0], g: bg[1], b: bg[2], a: 1)
+                                             backgroundR: bg[0], g: bg[1], b: bg[2],
+                                             a: bg.count > 3 && bg[3] < 0.5 ? 0 : 1)   // alfa 0 = "Transparente"
         } else {
             created = engine.newProjectWidth(width, height: height, fps: fps, title: name)
         }
@@ -2105,8 +2128,11 @@ final class AureaModel: ObservableObject {
         mediaCreationRequest = UUID()
         textContentRequest = nil
         if sceneEditor { exitSceneEditor() }
+        // Antes da gravação (ela drena a fila): o áudio seguia tocando na Home.
+        stopPlayback()
         guard saveOnLeave(forceThumbnail: true) else { return }
         projectGeneration = UUID()
+        maskToolLayers = []
         engine.clearSelection()
         screen = .home
         fullscreen = false
@@ -2386,6 +2412,16 @@ final class AureaModel: ObservableObject {
     func importModelFiles(urls: [URL]) {
         guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
         guard !urls.isEmpty else { toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo"); return }
+        // Só o .mtl/texturas (o modelo já entrou antes sem eles): religa no
+        // modelo 3D selecionado, pelo mesmo caminho de "Importar texturas".
+        let sideExts: Set<String> = ["mtl", "bin", "png", "jpg", "jpeg", "webp", "tga", "bmp", "ktx2", "dds", "tif", "tiff"]
+        if urls.allSatisfy({ sideExts.contains($0.pathExtension.lowercased()) }),
+           let layer = primarySelection, !engine.modelFolder(layer).isEmpty {
+            let req = MissingModelTextures(layer: layer, names: engine.modelMissingTextures(layer))
+            texturesTarget = req
+            importModelTextures(urls: urls)
+            return
+        }
         NSLog("Aurea model import: copying %ld selected item(s)", urls.count)
         let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
         operationMessage = AureaText.t("ios_importing_media")
@@ -2597,6 +2633,9 @@ final class AureaModel: ObservableObject {
         let folder = URL(fileURLWithPath: folderPath, isDirectory: true)
         var wanted: [String: String] = [:]
         for n in req.names { wanted[n.lowercased()] = n }
+        // O .mtl escolhido com outro nome vira o .mtl que o OBJ procura.
+        let mtlNames = req.names.filter { $0.lowercased().hasSuffix(".mtl") }
+        let missingMtl: String? = mtlNames.count == 1 ? mtlNames[0] : nil
         operationMessage = AureaText.t("msg_texturas") + "…"
         importingMedia = true
         let importer = engine
@@ -2605,14 +2644,19 @@ final class AureaModel: ObservableObject {
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                 let picked = url.lastPathComponent
-                let named = wanted[picked.lowercased()]
+                let named = wanted[picked.lowercased()] ?? (picked.lowercased().hasSuffix(".mtl") ? missingMtl : nil)
                 let target = folder.appendingPathComponent(named ?? picked)
                 // Fora da lista: entra, mas nunca por cima de um arquivo da pasta.
                 if FileManager.default.fileExists(atPath: target.path) {
                     if named == nil { continue }
                     try? FileManager.default.removeItem(at: target)
                 }
-                try? FileManager.default.copyItem(at: url, to: target)
+                // iCloud/provedores: o conteúdo só existe depois da leitura coordenada.
+                var coordinationError: NSError?
+                NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { readable in
+                    try? FileManager.default.copyItem(at: readable, to: target)
+                }
+                if let issue = coordinationError { NSLog("Aurea model textures: copy failed %@", issue.localizedDescription) }
             }
             let left = importer.reloadModelTextures(req.layer)
             let failure = left < 0 ? AureaEngineText.sentence(importer.lastImportError, code: Int(-left)) : ""
@@ -3550,10 +3594,10 @@ final class AureaModel: ObservableObject {
     var previewBufferedFrames: Int { Int(status.previewBufferStatus & 0xff) }
     var previewBufferTarget: Int { Int((status.previewBufferStatus >> 8) & 0xff) }
     var previewBufferLimited: Bool { status.previewBufferStatus & 0x4000_0000 != 0 }
+    /// Só enquanto o play espera o buffer; o "Prévia em memória" saiu do palco
+    /// (atrapalhava) — a faixa da timeline já mostra o cache.
     var previewBufferLabel: String? {
         if previewBuffering { return AureaText.t("preview_buffer_preparing", previewBufferedFrames, previewBufferTarget) }
-        if previewBufferLimited { return AureaText.t("preview_buffer_limited", previewBufferedFrames) }
-        if previewBufferedFrames > 0 { return AureaText.t("preview_buffer_ready", previewBufferedFrames) }
         return nil
     }
 

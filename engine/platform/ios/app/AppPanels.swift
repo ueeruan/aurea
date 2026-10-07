@@ -132,7 +132,10 @@ struct ProjectSettingsPanel: View {
         let values = (model.composition["background"] as? [NSNumber] ?? []).map(\.floatValue)
         return values.count == 4 ? values : [0, 0, 0, 1]
     }
+    /// Alfa 0 = "Transparente" (regra do motor: Composition::set_background_choice).
+    private var backgroundTransparent: Bool { background[3] < 0.5 }
     private var backgroundName: String {
+        if backgroundTransparent { return AureaText.t("sh_bg_transparent") }
         if background.prefix(3).allSatisfy({ abs($0) < 0.01 }) { return AureaText.t("sh_bg_black") }
         if background.prefix(3).allSatisfy({ abs($0 - 1) < 0.01 }) { return AureaText.t("sh_bg_white") }
         return AureaText.t("editor_personalizada")
@@ -191,7 +194,8 @@ struct ProjectSettingsPanel: View {
                                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_duracao"))
                             }
                             settingLine("editor_plano_fundo") {
-                                dropdown(backgroundName, key: "bg", swatch: Color(.sRGB, red: Double(background[0]), green: Double(background[1]), blue: Double(background[2]), opacity: 1))
+                                dropdown(backgroundName, key: "bg", swatch: backgroundTransparent ? Color.clear
+                                         : Color(.sRGB, red: Double(background[0]), green: Double(background[1]), blue: Double(background[2]), opacity: 1))
                             }
                             Spacer().frame(height: 16)
                         }.padding(.bottom, 12)
@@ -249,7 +253,8 @@ struct ProjectSettingsPanel: View {
         Button { menu = key } label: {
             HStack(spacing: 0) {
                 if let swatch {
-                    RoundedRectangle(cornerRadius: 5).fill(swatch).frame(width: 24, height: 24)
+                    // Color.clear = fundo transparente: o xadrez aparece atrás.
+                    AureaColorSwatch(color: swatch).clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: 24, height: 24)
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(AureaColors.border, lineWidth: 1)).padding(.trailing, 10)
                 }
                 Text(value).font(.aurea(size: 15, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
@@ -288,10 +293,14 @@ struct ProjectSettingsPanel: View {
         return [
             MenuItem(label: AureaText.t("sh_bg_black"), checked: backgroundName == AureaText.t("sh_bg_black")) { setBackground([0, 0, 0, 1]) },
             MenuItem(label: AureaText.t("sh_bg_white"), checked: backgroundName == AureaText.t("sh_bg_white")) { setBackground([1, 1, 1, 1]) },
+            // Sem fundo: o motor guarda a cor e exporta PNG/GIF com alfa.
+            MenuItem(label: AureaText.t("sh_bg_transparent"), checked: backgroundTransparent) {
+                setBackground([background[0], background[1], background[2], 0])
+            },
             MenuItem(label: AureaText.t("editor_outra_cor"), checked: backgroundName == AureaText.t("editor_personalizada")) {
                 model.engine.run { $0.beginUndoGroup() }; pickingBackground = true
                 // ProjectSettingsSheet.kt passes composition background as display sRGB.
-                model.colorSheet = ColorSheetRequest(title: AureaText.t("ds_cor"), initial: background, withAlpha: false,
+                model.colorSheet = ColorSheetRequest(title: AureaText.t("ds_cor"), initial: Array(background.prefix(3)) + [1], withAlpha: false,
                     onChange: { r, g, b, _ in setBackground([r, g, b, 1]) }, onDone: finishColor)
             },
         ]
@@ -332,7 +341,9 @@ struct ProjectSettingsPanel: View {
     }
     private func setBackground(_ values: [Float]) {
         guard values.count >= 3 else { return }
-        model.mutate { $0.setComposition(id, backgroundR: values[0], g: values[1], b: values[2], a: 1) }; model.refreshModel(force: true)
+        // Alfa 0 = "Transparente"; qualquer outro valor = cor opaca (regra do motor).
+        let alpha: Float = values.count > 3 && values[3] < 0.5 ? 0 : 1
+        model.mutate { $0.setComposition(id, backgroundR: values[0], g: values[1], b: values[2], a: alpha) }; model.refreshModel(force: true)
     }
     private func finishColor() {
         if pickingBackground { model.engine.run { $0.endUndoGroup() }; pickingBackground = false }

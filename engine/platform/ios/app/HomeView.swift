@@ -479,7 +479,8 @@ struct HomeView: View {
         guard let draft = pendingProject else { return }
         pendingProject = nil
         let created = model.newProject(width: draft.width, height: draft.height,
-                                       fps: draft.fps, title: draft.title, background: draft.background)
+                                       fps: draft.fps, title: draft.title,
+                                       background: Array(draft.background.prefix(3)) + [draft.transparent ? 0 : 1])
         guard created, let url = model.projectURL else {
             // Antes daqui saia calado: o usuario tocava, nada acontecia, e nao
             // havia nem projeto nem explicacao.
@@ -712,6 +713,8 @@ struct HomeRegisteredUsers: View {
 struct NewProjectDraft {
     let width: UInt32; let height: UInt32; let fps: Double; let title: String
     var background: [Float] = [0, 0, 0]
+    /// "Transparente": sem fundo (o motor recebe alfa 0; PNG e GIF saem com alfa).
+    var transparent = false
 }
 
 /// `home/NewProjectSheet.kt`: same format drawings, field order and segments.
@@ -728,6 +731,7 @@ struct NewProjectSheet: View {
     @State private var resolution = 1080
     @State private var fps: Double = 30
     @State private var background: [Float] = [0, 0, 0]
+    @State private var transparent = false
     @State private var name = ""
     @State private var free = false
     @State private var freeWidth = "1080"
@@ -923,27 +927,39 @@ struct NewProjectSheet: View {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = trimmed.isEmpty ? (suggestedName.isEmpty ? AureaText.t("new_project_untitled") : suggestedName) : trimmed
         onCreate(NewProjectDraft(width: UInt32(frame.width), height: UInt32(frame.height), fps: fps, title: title,
-                                 background: background))
+                                 background: background, transparent: transparent))
     }
 
-    /// `NewProjectSheet.kt` BackgroundChoices: preto, branco e "outra cor" (o
-    /// quadrado colorido abre o seletor do app; com cor escolhida, mostra a cor).
+    /// `NewProjectSheet.kt` BackgroundChoices: preto, branco, transparente
+    /// (xadrez) e "outra cor" (o quadrado colorido abre o seletor do app; com
+    /// cor escolhida, mostra a cor).
     private var backgroundChoices: some View {
         let presets: [(String, [Float])] = [("sh_bg_black", [0, 0, 0]), ("sh_bg_white", [1, 1, 1])]
-        let preset = presets.first { p in (0..<3).allSatisfy { abs(p.1[$0] - background[$0]) < 0.01 } }?.0
+        let preset: String? = transparent ? nil
+            : presets.first(where: { p in (0..<3).allSatisfy { abs(p.1[$0] - background[$0]) < 0.01 } })?.0
         return HStack(spacing: 12) {
             ForEach(presets, id: \.0) { key, rgb in
                 backgroundSwatch(AnyShapeStyle(Color(.sRGB, red: Double(rgb[0]), green: Double(rgb[1]), blue: Double(rgb[2]), opacity: 1)),
                                  selected: preset == key,
-                                 label: AureaText.t("project_bg_color_desc", AureaText.t(key))) { background = rgb }
+                                 label: AureaText.t("project_bg_color_desc", AureaText.t(key))) { background = rgb; transparent = false }
             }
-            let custom = preset == nil
+            Button { transparent = true } label: {
+                AureaColorSwatch(color: .clear)
+                    .clipShape(RoundedRectangle(cornerRadius: transparent ? 7 : 10))
+                    .padding(transparent ? 4 : 0)
+                    .frame(width: 40, height: 40)
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(transparent ? AureaColors.accent : AureaColors.muted, lineWidth: transparent ? 2 : 1))
+                    .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityLabel(AureaText.t("project_bg_transparent_desc"))
+                .accessibilityAddTraits(transparent ? .isSelected : [])
+            let custom = preset == nil && !transparent
             backgroundSwatch(custom
                                 ? AnyShapeStyle(Color(.sRGB, red: Double(background[0]), green: Double(background[1]), blue: Double(background[2]), opacity: 1))
                                 : AnyShapeStyle(AngularGradient(gradient: Gradient(colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red]), center: .center)),
                              selected: custom, label: AureaText.t("editor_outra_cor")) {
                 model.colorSheet = ColorSheetRequest(title: AureaText.t("ds_cor"), initial: background + [1], withAlpha: false,
-                                                     onChange: { r, g, b, _ in background = [r, g, b] }, onDone: {})
+                                                     onChange: { r, g, b, _ in background = [r, g, b]; transparent = false }, onDone: {})
             }
             Spacer(minLength: 0)
         }

@@ -306,14 +306,37 @@ struct TransformView: View {
                             }
                             dialLast = nil; previousAngle = nil
                         })
-                    Button {
-                        keypad(AureaText.t("ios_rotation_axis", ["X", "Y", "Z"][rotationAxis]), angle, unit: "°", decimals: 1) { write([property: $0]) }
-                    } label: {
-                        Text(number(angle, decimals: (angle * 10).rounded() / 10 == angle.rounded() ? 0 : 1) + "°")
-                            .font(.aurea(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.accent)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                            .background(AureaColors.dialValueBox, in: RoundedRectangle(cornerRadius: 8))
-                    }.buttonStyle(.plain)
+                    // Como no AE: "2x +30°" (voltas inteiras + resto, mesmo
+                    // sinal; "-1x -45°"). O valor guardado continua em graus;
+                    // cada parte abre o próprio teclado (voltas ou graus).
+                    let split = rotationTurns(angle.isFinite ? angle : 0)
+                    let restText = number(abs(split.rest), decimals: split.rest == split.rest.rounded() ? 0 : 1)
+                    let axisTitle = AureaText.t("ios_rotation_axis", ["X", "Y", "Z"][rotationAxis])
+                    let turnsTitle = axisTitle + " · " + AureaText.t("edt_rotation_turns")
+                    let degreesTitle = axisTitle + " · " + AureaText.t("edt_rotation_degrees")
+                    HStack(spacing: 0) {
+                        Button {
+                            keypad(turnsTitle, Float(split.turns), unit: "x", decimals: 0) { write([property: $0.rounded() * 360 + split.rest]) }
+                        } label: {
+                            Text("\(split.turns)x")
+                                .font(.aurea(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.accent)
+                                .padding(.horizontal, 10).padding(.vertical, 8).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                        .accessibilityLabel(turnsTitle).accessibilityValue("\(split.turns)")
+                        Button {
+                            keypad(degreesTitle, split.rest, unit: "°", decimals: 1) { write([property: Float(split.turns) * 360 + $0]) }
+                        } label: {
+                            Text((split.rest < 0 ? "−" : "+") + restText + "°")
+                                .font(.aurea(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.accent)
+                                .padding(.horizontal, 10).padding(.vertical, 8).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                        .accessibilityLabel(degreesTitle).accessibilityValue((split.rest < 0 ? "-" : "") + restText)
+                    }
+                    .padding(.horizontal, 6)
+                    .background(AureaColors.dialValueBox, in: RoundedRectangle(cornerRadius: 8))
+                    .environment(\.layoutDirection, .leftToRight)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityHint(AureaText.t("edt_rotation_value_a11y", "\(split.turns)", (split.rest < 0 ? "-" : "") + restText))
                 }
             }
         }
@@ -794,6 +817,16 @@ private struct TransformCornerMarks: View {
             context.stroke(path, with: .color(AureaColors.muted.opacity(0.45)), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
         }
     }
+}
+
+/// Rotação em voltas + resto, como o AE mostra ("2x +30°"): as voltas
+/// truncam para o zero e o resto tem o MESMO sinal (−405° = "-1x -45°").
+/// Conta em décimos de grau para 719,99° não virar "1x +360°". Igual ao
+/// `rotationTurns` do Android.
+func rotationTurns(_ angle: Float) -> (turns: Int, rest: Float) {
+    let tenths = Int64((Double(angle) * 10).rounded())
+    let turns = tenths / 3600
+    return (Int(turns), Float(Double(tenths - turns * 3600) / 10))
 }
 
 private struct TransformDial: View {

@@ -95,6 +95,7 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 import kotlin.math.sin
 
 /**
@@ -1077,26 +1078,60 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
             val rad = Math.toRadians(g.toDouble())
             drawCircle(Color.White, knob, Offset(c.x + cos(rad).toFloat() * radius, c.y + sin(rad).toFloat() * radius))
         }
-        // O número no centro: casa decimal só quando existe ("45°", "45,5°").
-        val tenth = (angle * 10f).roundToInt() / 10f
-        val text = "${numeroPtBr(tenth, if (tenth == tenth.roundToInt().toFloat()) 0 else 1)}°"
-        Box(
+        // O número no centro como no AE: "2x +30°" (voltas inteiras + resto,
+        // mesmo sinal; "-1x -45°"). O valor guardado continua em graus. Cada
+        // parte abre o próprio teclado: voltas (inteiro) ou graus.
+        val (turns, rest) = rotationTurns(if (angle.isFinite()) angle else 0f)
+        val restText = numeroPtBr(abs(rest), if (rest == rest.roundToInt().toFloat()) 0 else 1)
+        val turnsTitle = "$rotationLabel · ${stringResource(R.string.edt_rotation_turns)}"
+        val degreesTitle = "$rotationLabel · ${stringResource(R.string.edt_rotation_degrees)}"
+        val a11y = stringResource(R.string.edt_rotation_value_a11y, turns.toString(), (if (rest < 0f) "-" else "") + restText)
+        val valueStyle = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Accent, fontFeatureSettings = "tnum", textDirection = androidx.compose.ui.text.style.TextDirection.Ltr))
+        Row(
             Modifier
                 .clip(RoundedCornerShape(8.dp))
                 .background(AureaColors.DialValueBox)
-                .tocavel(shrink = 1f) {
-                    env.openKeypad(KeypadRequest(rotationLabel, angle, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
-                        store.setTransform(prop, it)
-                    })
-                }
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .semantics(mergeDescendants = false) { contentDescription = a11y }
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text,
-                style = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Accent, fontFeatureSettings = "tnum", textDirection = androidx.compose.ui.text.style.TextDirection.Ltr)),
+                "${turns}x",
+                style = valueStyle,
+                modifier = Modifier
+                    .tocavel(shrink = 1f) {
+                        env.openKeypad(KeypadRequest(turnsTitle, turns.toFloat(), "x", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 0) {
+                            store.setTransform(prop, it.roundToInt() * 360f + rest)
+                        })
+                    }
+                    .semantics { contentDescription = "$turnsTitle: $turns" }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+            )
+            Text(
+                "${if (rest < 0f) "−" else "+"}$restText°",
+                style = valueStyle,
+                modifier = Modifier
+                    .tocavel(shrink = 1f) {
+                        env.openKeypad(KeypadRequest(degreesTitle, rest, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
+                            store.setTransform(prop, turns * 360f + it)
+                        })
+                    }
+                    .semantics { contentDescription = "$degreesTitle: ${if (rest < 0f) "-" else ""}$restText" }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
             )
         }
     }
+}
+
+/**
+ * Rotação em voltas + resto, como o AE mostra ("2x +30°"): as voltas truncam
+ * para o zero e o resto tem o MESMO sinal (−405° = "-1x -45°"). Conta em
+ * décimos de grau para 719,99° não virar "1x +360°".
+ */
+internal fun rotationTurns(angle: Float): Pair<Int, Float> {
+    val tenths = (angle.toDouble() * 10.0).roundToLong()
+    val turns = tenths / 3600L
+    return turns.toInt() to ((tenths - turns * 3600L) / 10.0).toFloat()
 }
 
 // =============================================================================

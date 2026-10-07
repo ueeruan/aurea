@@ -115,7 +115,8 @@ fun ColorWell(color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) 
     }
 }
 
-private fun DrawScope.drawChecker() {
+/** Xadrez de "transparente" (também o swatch do fundo transparente do projeto). */
+internal fun DrawScope.drawChecker() {
     val cell = 6.dp.toPx()
     val a = Color(0xFF3A4150)
     val b = Color(0xFF2A303B)

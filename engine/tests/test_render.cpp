@@ -1967,7 +1967,7 @@ AUREA_TEST(PreviewBuffer, RangesContainOnlyCompletedRunsAndRejectOldCompositionO
     settings.previewCacheRevision = 7; settings.previewCacheComposition = 11;
     settings.previewCacheOnly = true;
     f.renderer.set_preview_cache_budget(48ull << 20);
-    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), 30u);
+    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), kPreviewCacheMaxFrames);
     auto render = [&](i64 time, u32 missing = 0, u32 stale = 0) {
         FrameSnapshot snap; FrameStats stats; RenderTimings timings;
         f.renderer.prepare(*f.comp, f.project, FrameIndex{time}, nullptr, nullptr, nullptr,
@@ -1990,12 +1990,12 @@ AUREA_TEST(PreviewBuffer, RangesContainOnlyCompletedRunsAndRejectOldCompositionO
     AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(8, 11, ranges, 30), 0u);
     AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(7, 12, ranges, 30), 0u);
     settings.previewCacheRevision = 8;
-    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), 30u);
+    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), kPreviewCacheMaxFrames);
     AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(8, 11, ranges, 30), 0u);
     render(40);
     AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(8, 11, ranges, 30), 1u);
     settings.previewDenominator = 2;
-    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), 30u);
+    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), kPreviewCacheMaxFrames);
     AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(8, 11, ranges, 30), 0u);
     render(40);
     f.renderer.set_preview_cache_budget(0);
@@ -2008,7 +2008,7 @@ AUREA_TEST(PreviewBuffer, RangePublicationTracksEvictionWithoutWaitingForGpu) {
     RenderSettings settings;
     settings.previewCacheRevision = 5; settings.previewCacheComposition = 6;
     settings.previewCacheOnly = true;
-    f.renderer.set_preview_cache_budget(32ull * 32 * 8 * 3);
+    f.renderer.set_preview_cache_budget(32ull * 32 * 4 * 3);   // RGBA8 sRGB slots
     AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), 3u);
     auto render = [&](i64 time) {
         FrameSnapshot snap; FrameStats stats; RenderTimings timings;
@@ -2033,15 +2033,61 @@ AUREA_TEST(PreviewBuffer, RangePublicationTracksEvictionWithoutWaitingForGpu) {
     AUREA_CHECK(std::equal(std::begin(expected), std::end(expected), ranges));
     f.backend.beforeWaitFrame = {};
     f.renderer.set_preview_cache_budget(48ull << 20);
-    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), 30u);
+    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), kPreviewCacheMaxFrames);
     for (i64 time = 0; time < 64; time += 2) render(time);
+    // Growing the budget kept frames 1, 4 and 8; with 0..62 that is 33 frames,
+    // more than the old 30-frame/1 s ceiling, all kept: [0,3) then 4, 6, ...
+    AUREA_CHECK_EQ(f.renderer.preview_cached_count(), 33u);
     AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(5, 6, ranges, 30), 30u);
-    for (u32 i = 0; i < 30; ++i) {
-        AUREA_CHECK_EQ(ranges[2 * i], static_cast<i64>(4 + 2 * i));
+    AUREA_CHECK_EQ(ranges[0], 0ll); AUREA_CHECK_EQ(ranges[1], 3ll);
+    for (u32 i = 1; i < 30; ++i) {
+        AUREA_CHECK_EQ(ranges[2 * i], static_cast<i64>(2 + 2 * i));
         AUREA_CHECK_EQ(ranges[2 * i + 1], ranges[2 * i] + 1);
     }
+    i64 all[kPreviewCacheMaxFrames * 2]{};
+    AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(5, 6, all, kPreviewCacheMaxFrames), 31u);
     f.renderer.forget_device();
     AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(5, 6, ranges, 30), 0u);
+}
+
+AUREA_TEST(PreviewCache, BeyondThirtyFramesWithinBudgetAndLocalEditKeepsOtherFrames) {
+    RenderFixture f;
+    f.comp->set_size(32, 32);
+    RenderSettings settings;
+    settings.previewCacheRevision = 9; settings.previewCacheComposition = 3;
+    settings.previewCacheOnly = true;
+    // 120 RGBA8 frames of 32x32 = 480 KiB: the byte budget, not a 30 cap, decides.
+    f.renderer.set_preview_cache_budget(32ull * 32 * 4 * 120);
+    AUREA_CHECK_EQ(f.renderer.configure_preview_cache(32, 32, settings), 120u);
+    auto render = [&](i64 time) {
+        FrameSnapshot snap; FrameStats stats; RenderTimings timings;
+        f.renderer.prepare(*f.comp, f.project, FrameIndex{time}, nullptr, nullptr, nullptr,
+            settings, 1, 0, DecodeMode::Still, 1.f, snap);
+        AUREA_CHECK(f.renderer.render(snap, settings, nullptr, stats, timings).ok());
+    };
+    for (i64 time = 0; time < 90; ++time) render(time);
+    AUREA_CHECK_EQ(f.renderer.preview_cached_count(), 90u);
+    i64 ranges[kPreviewCacheMaxFrames * 2]{};
+    AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(9, 3, ranges, kPreviewCacheMaxFrames), 1u);
+    AUREA_CHECK_EQ(ranges[0], 0ll); AUREA_CHECK_EQ(ranges[1], 90ll);
+    // An edit on a layer living in [40, 60) drops only those frames.
+    f.renderer.invalidate_preview_frames(40, 60);
+    AUREA_CHECK_EQ(f.renderer.preview_cached_count(), 70u);
+    AUREA_CHECK(f.renderer.preview_cached(FrameIndex{39}));
+    AUREA_CHECK(!f.renderer.preview_cached(FrameIndex{40}));
+    AUREA_CHECK(!f.renderer.preview_cached(FrameIndex{59}));
+    AUREA_CHECK(f.renderer.preview_cached(FrameIndex{60}));
+    AUREA_CHECK_EQ(f.renderer.copy_preview_buffer_ranges(9, 3, ranges, kPreviewCacheMaxFrames), 2u);
+    AUREA_CHECK_EQ(ranges[0], 0ll); AUREA_CHECK_EQ(ranges[1], 40ll);
+    AUREA_CHECK_EQ(ranges[2], 60ll); AUREA_CHECK_EQ(ranges[3], 90ll);
+    // Re-rendering the hole reuses the freed slots without evicting kept frames.
+    for (i64 time = 40; time < 60; ++time) render(time);
+    AUREA_CHECK_EQ(f.renderer.preview_cached_count(), 90u);
+    // Growing the budget keeps what is cached; shrinking (pressure) frees it.
+    f.renderer.set_preview_cache_budget(32ull * 32 * 4 * 240);
+    AUREA_CHECK_EQ(f.renderer.preview_cached_count(), 90u);
+    f.renderer.set_preview_cache_budget(32ull * 32 * 4 * 10);
+    AUREA_CHECK_EQ(f.renderer.preview_cached_count(), 0u);
 }
 
 AUREA_TEST(Renderer, TemporalRgbVideoResolvesAllThreeDistantFrames) {
@@ -2901,4 +2947,27 @@ AUREA_TEST(Renderer, PlaybackPrerollsTheNextClipSoTheCutNeverFlashesBlack) {
         AUREA_CHECK(snapshot.layers[0].source.frameExact);
     }
     snapshot.release_video_frames();
+}
+
+// Beta 2140: "Amostras por quadro" alto não mudava nada na prévia (ela lia só
+// o `previewSamples` fixo). A escolha vale na prévia também, reduzida apenas
+// pela folga do aparelho.
+AUREA_TEST(MotionBlur, SamplesPerFrameDrivesThePreviewToo) {
+    using namespace aurea;
+    MotionBlurSettings settings; settings.enabled = true; settings.adaptiveLimit = 128;
+    settings.previewSamples = 16;
+    for (const u32 samples : {2u, 16u, 32u, 64u}) {
+        settings.samples = samples;
+        // Animação interna (texto, partículas): o mínimo é a escolha da pessoa.
+        AUREA_CHECK_EQ(shutter_sample_count(settings, false, 1.0f, 0, true), samples);
+        AUREA_CHECK_EQ(shutter_sample_count(settings, true, 1.0f, 0, true), samples);
+        // Movimento curto: o piso também.
+        AUREA_CHECK_EQ(shutter_sample_count(settings, false, 1.0f, 3.0), std::max(samples, 5u));
+    }
+    // Aparelho quente (qualidade 0,5): metade, nunca abaixo de 2.
+    settings.samples = 64;
+    AUREA_CHECK_EQ(shutter_sample_count(settings, false, 0.5f, 0, true), 32u);
+    // O teto adaptativo ainda manda.
+    settings.adaptiveLimit = 40;
+    AUREA_CHECK_EQ(shutter_sample_count(settings, true, 1.0f, 0, true), 40u);
 }

@@ -502,8 +502,10 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 - (NSArray<NSNumber*>*)previewBufferRanges {
     auto* e = self.engine;
     if (!e) return @[];
-    aurea::i64 pairs[60]{};
-    const aurea::u32 count = std::min<aurea::u32>(30, e->copy_preview_buffer_ranges(pairs, 30));
+    // Up to kPreviewCacheMaxFrames disjoint ranges (300 frames, 10 s at 30 fps).
+    aurea::i64 pairs[aurea::kPreviewCacheMaxFrames * 2]{};
+    const aurea::u32 count = std::min<aurea::u32>(aurea::kPreviewCacheMaxFrames,
+        e->copy_preview_buffer_ranges(pairs, aurea::kPreviewCacheMaxFrames));
     NSMutableArray<NSNumber*>* result = [NSMutableArray arrayWithCapacity:count * 2];
     for (aurea::u32 i = 0; i < count * 2; ++i) [result addObject:@(pairs[i])];
     return result;

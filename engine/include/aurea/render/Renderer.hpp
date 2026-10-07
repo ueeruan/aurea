@@ -28,6 +28,7 @@
 #include "aurea/memory/Arena.hpp"
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/HeavyQuality.hpp"
+#include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/ParticleExtras.hpp"
 #include "aurea/render/ParticleScene.hpp"
 #include "aurea/render/RenderScheduler.hpp"
@@ -153,6 +154,12 @@ struct LayerSource {
 
     // Pré-composição: índice em FrameSnapshot::nested
     u32      nestedIndex = 0;
+    /// Pré-composição com efeito de TEMPO (RGB no tempo, Detectar movimento):
+    /// a filha renderizada em OUTROS instantes, índices em `FrameSnapshot::nested`
+    /// (~0u = ausente). Sem elas, todo "passado" era o quadro de agora — o
+    /// detector dava preto e o RGB no tempo sumia (beta 2140).
+    u32      nestedChannel[3] = {~0u, ~0u, ~0u};
+    u32      nestedHistory = ~0u;
 
     // Texto (GPU): glifos em FrameSnapshot::glyphs. Com desfoque de movimento
     // por letra, `glyphSets` conjuntos seguidos (um por instante do obturador).
@@ -216,11 +223,17 @@ struct RenderLayer {
     bool blurIncludesFold = false;   ///< as amostras já trazem o Transform dobrado de cada instante
     /// Amostras temporais genéricas (eco, RGB no tempo): matriz, peso e
     /// máscara de canal (0 = todos). Com elas, o desfoque fica de fora.
-    struct TemporalSample { Mat4 m; f32 weight = 1.0f; Vec3 mask{0, 0, 0}; };
+    /// `time`: instante da composição da amostra; `nested`: a pré-composição
+    /// renderizada nesse instante (~0u = a mesma fonte da camada). Eco numa
+    /// pré-composição precisa do CONTEÚDO de antes, não só da posição de antes.
+    struct TemporalSample { Mat4 m; f32 weight = 1.0f; Vec3 mask{0, 0, 0}; f64 time = 0.0; u32 nested = ~0u; };
     std::vector<TemporalSample> temporal;
     /// Camada 2D no espaço 3D que vive dentro de um grupo de cena (desenhada
     /// com profundidade pelo grupo, não na composição): índice do grupo, ou −1.
     i32 planeGroup = -1;
+    /// Plano na cena: mundo (px) ← px da camada (a normal e a posição que as
+    /// luzes da composição iluminam).
+    Mat4 worldFromLayer = Mat4::identity();
     /// Máscaras (render/MaskRaster.hpp): bloco em FrameSnapshot::maskData a
     /// partir de `maskFirst`, `maskCount` ativas, cobertura inicial e a chave
     /// do bloco (cache da cobertura).
@@ -322,7 +335,7 @@ struct RenderSettings {
     f32  viewportZoom = 1.0f;
     Vec2 viewportPan{0.0f, 0.0f};
     /// Export: amostras de desfoque de movimento da qualidade final
-    /// (`MotionBlurSettings::samples`); prévia usa `previewSamples`.
+    /// (`MotionBlurSettings::samples`); a prévia também, reduzida pela folga do aparelho.
     bool finalQuality = false;
     /// Exact offscreen captures enqueue cold local AI, then wait without holding
     /// the renderer lock. Export's private renderer keeps synchronous inference.
@@ -429,6 +442,9 @@ public:
     void release_project_resources() noexcept;
 
     void set_preview_cache_budget(u64 bytes) noexcept;
+    [[nodiscard]] u64 preview_cache_budget() const noexcept { return previewCacheBudget_; }
+    /// Edição local: descarta só os quadros guardados em [start, end).
+    void invalidate_preview_frames(i64 start, i64 end) noexcept;
     void clear_preview_cache() noexcept;
     [[nodiscard]] u32 configure_preview_cache(u32 width, u32 height, const RenderSettings& settings) noexcept;
     [[nodiscard]] bool preview_cached(FrameIndex time) const noexcept;
@@ -848,7 +864,7 @@ private:
     bool previewCacheHit_ = false;
     void publish_preview_buffer_ranges() noexcept;
     mutable std::mutex previewRangesMutex_;
-    std::array<i64, 60> previewRangePairs_{};
+    std::array<i64, kPreviewCacheMaxFrames * 2> previewRangePairs_{};
     u32 previewRangeCount_ = 0;
     u64 previewRangeRevision_ = 0, previewRangeComposition_ = 0;
     std::vector<GpuTiming> timingScratch_;

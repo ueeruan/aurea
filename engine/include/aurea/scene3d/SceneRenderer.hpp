@@ -210,6 +210,25 @@ struct DofLens {
 };
 [[nodiscard]] DofLens dof_lens(const SceneCamera& camera, u32 imageHeight) noexcept;
 
+/// LUZES NAS CAMADAS 2D EM 3D ("aceita luzes" do After Effects): o bloco do
+/// `plane.frag` (std140, binding AUREA_PARAMS). Com pelo menos uma camada de
+/// luz visível na composição, o plano recebe Lambert pela normal dele (N·L),
+/// cor/intensidade, alcance e cone do spot, mais as luzes AMBIENTE; sem luz
+/// nenhuma (`cameraPos.w = 0`) ele sai como no 2D — projeto antigo sem luz
+/// não escurece. Intensidade como no AE: 1 = cor cheia de frente para a luz
+/// (sem a queda 1/d² física dos modelos; só a janela do alcance).
+inline constexpr u32 kPlaneMaxLights = 8;
+struct PlaneLightBlock {
+    Mat4 worldFromLayer = Mat4::identity();   ///< mundo (px) ← px da camada
+    Vec4 cameraPos{0, 0, 0, 0};               ///< xyz = câmera (mundo); w = 1 iluminado, 0 sem luz (2D)
+    Vec4 ambient{0, 0, 0, 0};                 ///< rgb = soma das luzes ambiente
+    Vec4 lightCount{0, 0, 0, 0};              ///< x = luzes ativas
+    Vec4 lightPos[kPlaneMaxLights]{};         ///< xyz = posição (ponto/spot) ou direção PARA a luz; w = tipo (0 dir, 1 ponto, 2 spot)
+    Vec4 lightColor[kPlaneMaxLights]{};       ///< rgb × intensidade; w = alcance (0 = infinito)
+    Vec4 lightSpot[kPlaneMaxLights]{};        ///< xyz = direção do feixe; w = cos do cone externo
+    Vec4 lightSpot2[kPlaneMaxLights]{};       ///< x = cos do cone interno
+};
+
 /// Tudo que um grupo 3D precisa para um frame. Montado no prepare (com o
 /// modelo travado), consumido no render (sem trava).
 /// Camada 2D no espaço 3D desenhada dentro da cena (profundidade de verdade
@@ -223,6 +242,8 @@ struct ScenePlane {
     f32  opacity = 1.0f;
     f32  viewDepth = 0.0f;         ///< w do centro (ordem do mais longe para o mais perto)
     u32  sourceLayer = ~0u;        ///< índice da camada no snapshot (desfoque por sub-quadro)
+    /// Luzes da composição e o mundo da camada (a câmera entra no build).
+    PlaneLightBlock light{};
 };
 
 /// Pós do grupo 3D vindo da composição (PostProcessSettings): o que a pessoa
@@ -252,6 +273,9 @@ struct SceneFrame {
     ScenePost post;
     SceneFloor floor;
     std::vector<SceneLight> lights;
+    /// Luzes das camadas 2D desta cena (sem a luz-chave padrão dos modelos):
+    /// o modelo do bloco; cada plano copia e põe o próprio mundo.
+    PlaneLightBlock planeLight{};
     SceneShadowSettings shadow;
     std::vector<SceneInstance> instances;
     /// Desfoque de movimento: a cena em K instantes do obturador (câmera,

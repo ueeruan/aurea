@@ -1285,3 +1285,161 @@ AUREA_TEST(Scene3D, FbxSkinBindPoseMatchesUnskinnedAndUfbx) {
     for (const auto& [g, w] : jump)
         if (g.y < 1e-4f) AUREA_CHECK_NEAR(w.y, 0.05f, 1e-5f);
 }
+
+// -----------------------------------------------------------------------------
+// Modelos do Sketchfab: especular-brilho, WebP, textura ausente, extensões
+// obrigatórias desconhecidas (o modelo entra; nunca "falhou" por um mapa).
+// -----------------------------------------------------------------------------
+namespace {
+
+/// PNG sólido w×h em data URI (base64), para glTF sintético sem arquivos.
+std::string solid_png_uri(u32 w, u32 h, u8 r, u8 g, u8 b, u8 a) {
+    aurea::test::Image8 img;
+    img.width = w;
+    img.height = h;
+    img.rgba.resize(static_cast<usize>(w) * h * 4);
+    for (usize i = 0; i < img.rgba.size(); i += 4) {
+        img.rgba[i] = r; img.rgba[i + 1] = g; img.rgba[i + 2] = b; img.rgba[i + 3] = a;
+    }
+    const std::string tmp = "aurea_teste_png_uri.png";
+    aurea::test::write_png(tmp, img);
+    std::vector<u8> png;
+    if (std::FILE* f = std::fopen(tmp.c_str(), "rb")) {
+        u8 buf[4096];
+        for (usize n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) png.insert(png.end(), buf, buf + n);
+        std::fclose(f);
+    }
+    std::remove(tmp.c_str());
+    return "data:image/png;base64," + base64(png);
+}
+
+const char* kTriangleGeometry =
+    R"("buffers":[{"byteLength":60,"uri":"data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/"}],
+"bufferViews":[{"buffer":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":24}],
+"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+             {"bufferView":1,"componentType":5126,"count":3,"type":"VEC2"}],)";
+
+ImportResult import_json(const std::string& json) {
+    ImportOptions o;
+    return import_gltf_memory(reinterpret_cast<const u8*>(json.data()), json.size(), "", o);
+}
+
+} // namespace
+
+AUREA_TEST(Scene3D, SketchfabSpecGlossConvertsToMetalRough) {
+    // Material 0: difusa quase preta + especular dourado com brilho total por
+    // textura (metal polido). Material 1: só fatores, dielétrico vermelho fosco.
+    const std::string json = std::string(R"({"asset":{"version":"2.0"},
+"extensionsUsed":["KHR_materials_pbrSpecularGlossiness","EXT_extensao_inventada"],
+"extensionsRequired":["KHR_materials_pbrSpecularGlossiness","EXT_extensao_inventada"],)") + kTriangleGeometry +
+R"("images":[{"uri":")" + solid_png_uri(4, 4, 10, 10, 10, 255) + R"("},{"uri":")" + solid_png_uri(4, 4, 255, 200, 80, 255) + R"("}],
+"textures":[{"source":0},{"source":1}],
+"materials":[{"name":"ouro","extensions":{"KHR_materials_pbrSpecularGlossiness":{"diffuseTexture":{"index":0},"specularGlossinessTexture":{"index":1}}}},
+             {"name":"plastico","extensions":{"KHR_materials_pbrSpecularGlossiness":{"diffuseFactor":[0.8,0.05,0.05,1],"specularFactor":[0.04,0.04,0.04],"glossinessFactor":0.3}}}],
+"meshes":[{"primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":0}]},{"primitives":[{"attributes":{"POSITION":0},"material":1}]}],
+"nodes":[{"mesh":0},{"mesh":1}],"scenes":[{"nodes":[0,1]}],"scene":0})";
+    const ImportResult r = import_json(json);
+    AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+    if (!r.ok()) return;
+    const SceneAsset& a = *r.asset;
+    // Extensão obrigatória desconhecida: aviso, não recusa.
+    bool warned = false;
+    for (const std::string& w : a.warnings) warned = warned || w.find("EXT_extensao_inventada") != std::string::npos;
+    AUREA_CHECK(warned);
+    const Material* gold = material_named(a, "ouro");
+    const Material* plastic = material_named(a, "plastico");
+    AUREA_CHECK(gold && plastic);
+    if (!gold || !plastic) return;
+    // O mapa especular/brilho virou metal/rugosidade (antes: ignorado = sem reflexo).
+    AUREA_CHECK(gold->metallicRoughnessTex.valid());
+    AUREA_CHECK(gold->baseColorTex.valid());
+    if (gold->metallicRoughnessTex.valid() && gold->baseColorTex.valid()) {
+        const Image& mr = a.images[static_cast<usize>(gold->metallicRoughnessTex.image)];
+        const Image& base = a.images[static_cast<usize>(gold->baseColorTex.image)];
+        AUREA_CHECK(mr.width == 4 && mr.rgba.size() == 64);
+        AUREA_CHECK(base.width == 4 && base.rgba.size() == 64);
+        if (mr.rgba.size() == 64 && base.rgba.size() == 64) {
+            std::printf("\n    ouro: rug %u metal %u base %u %u %u", mr.rgba[1], mr.rgba[2], base.rgba[0], base.rgba[1], base.rgba[2]);
+            AUREA_CHECK(mr.rgba[1] < 5);                   // brilho total = rugosidade 0
+            AUREA_CHECK(mr.rgba[2] > 200);                 // especular colorido forte = metal
+            AUREA_CHECK(base.rgba[0] > 200 && base.rgba[0] > base.rgba[1] && base.rgba[1] > base.rgba[2]);   // dourado
+        }
+        AUREA_CHECK_NEAR(gold->metallic, 1.0f, 1e-6f);
+        AUREA_CHECK_NEAR(gold->roughness, 1.0f, 1e-6f);
+    }
+    AUREA_CHECK(!plastic->metallicRoughnessTex.valid());
+    AUREA_CHECK_NEAR(plastic->metallic, 0.0f, 1e-3f);
+    AUREA_CHECK_NEAR(plastic->roughness, 0.7f, 1e-4f);
+    AUREA_CHECK(plastic->baseColor.x > 0.7f && plastic->baseColor.y < 0.1f);
+}
+
+AUREA_TEST(Scene3D, SketchfabTextureProblemsDoNotFailImport) {
+    // 0: textura externa ausente; 1: WebP com PNG de reserva; 2: WebP sem reserva;
+    // 3: imagem ilegível (bytes que não são imagem). Com KHR_texture_transform.
+    const std::string json = std::string(R"({"asset":{"version":"2.0"},
+"extensionsUsed":["EXT_texture_webp","KHR_texture_transform"],"extensionsRequired":["EXT_texture_webp"],)") + kTriangleGeometry +
+R"("images":[{"uri":"sumiu.png"},{"uri":")" + solid_png_uri(2, 2, 0, 255, 0, 255) + R"("},{"uri":"cor.webp","mimeType":"image/webp"},
+            {"uri":"data:image/png;base64,AAAAAAAAAAAAAAAA"}],
+"textures":[{"source":0},{"source":1,"extensions":{"EXT_texture_webp":{"source":2}}},{"extensions":{"EXT_texture_webp":{"source":2}}},{"source":3}],
+"materials":[{"name":"ausente","pbrMetallicRoughness":{"baseColorTexture":{"index":0}}},
+             {"name":"reserva","pbrMetallicRoughness":{"baseColorTexture":{"index":1,"extensions":{"KHR_texture_transform":{"offset":[0.5,0],"scale":[2,2]}}}}},
+             {"name":"webp","pbrMetallicRoughness":{"baseColorTexture":{"index":2}}},
+             {"name":"ilegivel","pbrMetallicRoughness":{"baseColorTexture":{"index":3}}}],
+"meshes":[{"primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":0},{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":1},
+                         {"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":2},{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":3}]}],
+"nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0})";
+    const ImportResult r = import_json(json);
+    AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+    if (!r.ok()) return;
+    const SceneAsset& a = *r.asset;
+    AUREA_CHECK_EQ(a.missingTextures.size(), 1u);
+    if (!a.missingTextures.empty()) AUREA_CHECK(a.missingTextures[0] == "sumiu.png");
+    const Material* fallback = material_named(a, "reserva");
+    AUREA_CHECK(fallback && fallback->baseColorTex.valid());
+    if (fallback && fallback->baseColorTex.valid()) {
+        const Image& img = a.images[static_cast<usize>(fallback->baseColorTex.image)];
+        AUREA_CHECK(img.width == 2 && !img.rgba.empty() && img.rgba[1] == 255);
+        AUREA_CHECK_NEAR(fallback->baseColorTex.offset.x, 0.5f, 1e-6f);
+        AUREA_CHECK_NEAR(fallback->baseColorTex.scale.x, 2.0f, 1e-6f);
+    }
+    const Material* webp = material_named(a, "webp");
+    AUREA_CHECK(webp && !webp->baseColorTex.valid());
+    // Ausente e ilegível: a referência fica, a imagem vazia (o render usa branco).
+    const Material* broken = material_named(a, "ilegivel");
+    AUREA_CHECK(broken != nullptr);
+    if (broken && broken->baseColorTex.valid()) AUREA_CHECK(a.images[static_cast<usize>(broken->baseColorTex.image)].rgba.empty());
+    usize warned = 0;
+    for (const std::string& w : a.warnings) warned += w.find("textura ignorada") != std::string::npos || w.find("WebP") != std::string::npos
+                                                      || w.find("webp") != std::string::npos;
+    AUREA_CHECK(warned >= 3);
+}
+
+AUREA_TEST(Scene3D, ObjWithoutMtllibAcceptsMtlChosenLater) {
+    namespace fx = aurea::test_fixtures;
+    ImportOptions o;
+    const std::string folder = fx::fresh_model_folder("aurea_teste_obj_sem_mtllib");
+    const std::string obj = folder + "Cadeira.obj";
+    fx::write_text(obj, "v 0 0 0\nv 1 0 0\nv 1 1 0\nvn 0 0 1\nusemtl Madeira\nf 1//1 2//1 3//1\n");
+    // Sem `mtllib` e sem .mtl: a UI recebe o nome que falta (para escolher depois).
+    ImportResult r = import_scene_file(obj, o);
+    AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+    if (r.ok()) {
+        AUREA_CHECK_EQ(r.asset->missingTextures.size(), 1u);
+        if (!r.asset->missingTextures.empty()) AUREA_CHECK(r.asset->missingTextures[0] == "Cadeira.mtl");
+    }
+    // O .mtl escolhido depois, com outro nome: o único da pasta religa os materiais.
+    fx::write_text(folder + "cadeira_materiais.mtl", "newmtl Madeira\nKd 0.0 0.0 1.0\n");
+    r = import_scene_file(obj, o);
+    AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+    if (r.ok()) {
+        AUREA_CHECK(r.asset->missingTextures.empty());
+        AUREA_CHECK(!r.asset->materials.empty());
+        if (!r.asset->materials.empty()) AUREA_CHECK_NEAR(r.asset->materials[0].baseColor.z, 1.0f, 1e-3f);
+    }
+    // OBJ só de geometria: nada a pedir.
+    const std::string plain = fx::fresh_model_folder("aurea_teste_obj_puro") + "Pedra.obj";
+    fx::write_text(plain, "v 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\n");
+    r = import_scene_file(plain, o);
+    AUREA_CHECK_MSG(r.ok(), r.detail.c_str());
+    if (r.ok()) AUREA_CHECK(r.asset->missingTextures.empty());
+}

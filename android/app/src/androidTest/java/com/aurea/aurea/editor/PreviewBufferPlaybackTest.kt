@@ -48,7 +48,7 @@ class PreviewBufferPlaybackTest {
         assertTrue("A simple composition must not wait seconds for its entire cache ($startupMs ms)", startupMs < 2500)
         assertTrue(store.preview.bufferedFrames <= 255)
         compose.waitForIdle()
-        compose.onNodeWithTag("preview.buffer.status").assertIsDisplayed()
+        compose.onNodeWithTag("preview.buffer.status").assertDoesNotExist()
         compose.onNodeWithTag("timeline.preview.buffer").assertIsDisplayed()
         Thread.sleep(120) // Let SurfaceFlinger display the freshly composed badge before the raw capture.
         stabilityScreenshot("preview-buffer.png")

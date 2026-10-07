@@ -101,6 +101,8 @@ internal class EditorUi {
     var adding by mutableStateOf(false)
     var addTab by mutableStateOf(AddTab.Shape)
     var fullscreen by mutableStateOf(false)
+    /** Grade de terços sobre o quadro (só na prévia, nunca no export). */
+    var showGrid by mutableStateOf(false)
     var effectsBrowser by mutableStateOf(false)
     var exporting by mutableStateOf(false)
     var sheet by mutableStateOf<ShellSheet?>(null)
@@ -213,6 +215,9 @@ fun EditorScreen(store: EditorStore) {
                 store.invalidatePreview()
                 handler.postDelayed({ store.invalidatePreview() }, 350)
             }
+            // App em segundo plano: o play não continua soando por baixo (e
+            // não volta sozinho ao reabrir). Pausar parado não faz nada.
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) store.pause()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
@@ -220,6 +225,9 @@ fun EditorScreen(store: EditorStore) {
             handler.removeCallbacksAndMessages(null)
         }
     }
+    // O editor saiu da tela (voltou aos projetos por qualquer caminho): a
+    // reprodução e o som param junto — o áudio seguia tocando na Home.
+    DisposableEffect(store) { onDispose { store.pause() } }
 
     // A barra de adicionar fica embaixo sem camada escolhida — e também com a
     // camada só "na mão" da timeline (segurada/arrastada sem abrir as opções):

@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import com.aurea.aurea.ui.i18n.AppText
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.aurea.aurea.state.CompositionSettings
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.ColorPickerSheet
+import com.aurea.aurea.ui.ds.drawChecker
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.NumericKeypadSheet
 import com.aurea.aurea.ui.theme.AureaColors
@@ -84,8 +86,11 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
     val shortSide = min(w, h)
     val fpsValue = comp?.fps ?: p.fps.toDouble()
     val bg = comp?.background ?: listOf(0f, 0f, 0f, 1f)
-    val bgName = Backgrounds.firstOrNull { (_, c) -> (0..2).all { abs(c[it] - bg[it]) < 0.01f } }?.first
-        ?.let { stringResource(it) } ?: stringResource(R.string.editor_personalizada)
+    // Alfa 0 = "Transparente" (regra do motor: Composition::set_background_choice).
+    val bgTransparent = bg.getOrElse(3) { 1f } < 0.5f
+    val bgName = if (bgTransparent) stringResource(R.string.sh_bg_transparent)
+        else Backgrounds.firstOrNull { (_, c) -> (0..2).all { abs(c[it] - bg[it]) < 0.01f } }?.first
+            ?.let { stringResource(it) } ?: stringResource(R.string.editor_personalizada)
     val widthLabel = stringResource(R.string.editor_largura)
     val heightLabel = stringResource(R.string.editor_altura)
     val durationLabel = stringResource(R.string.editor_duracao)
@@ -199,13 +204,17 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
         SettingLine(stringResource(R.string.editor_plano_fundo)) {
             Dropdown(
                 bgName,
-                swatch = Color(bg[0], bg[1], bg[2]),
+                swatch = if (bgTransparent) Color.Transparent else Color(bg[0], bg[1], bg[2]),
+                checkerSwatch = bgTransparent,
                 open = menu == "bg",
                 onOpen = { menu = "bg" },
                 onDismiss = { menu = null },
                 items = Backgrounds.map { (res, c) ->
                     val name = stringResource(res)
                     PopupItem(name, name == bgName) { store.setCompositionBackground(c[0], c[1], c[2], 1f) }
+                } + PopupItem(stringResource(R.string.sh_bg_transparent), bgTransparent) {
+                    // Sem fundo: o motor guarda a cor e exporta PNG/GIF com alfa.
+                    store.setCompositionBackground(bg[0], bg[1], bg[2], 0f)
                 } + PopupItem(stringResource(R.string.editor_outra_cor), bgName == stringResource(R.string.editor_personalizada)) { if (comp != null) pickingBackground = true },
             )
         }
@@ -216,7 +225,8 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
     if (pickingBackground && comp != null) {
         // Um passo de desfazer para o seletor inteiro; fecha também se ele
         // sair da tela sem o "Pronto". O fundo já é sRGB no motor.
-        val initial = remember { comp.background.toFloatArray() }
+        // Vindo do "Transparente", o seletor abre com a cor guardada, opaca.
+        val initial = remember { comp.background.toFloatArray().also { if (it.size > 3) it[3] = 1f } }
         DisposableEffect(Unit) {
             store.beginGesture("fundo da composição")
             onDispose { store.endGesture() }
@@ -309,6 +319,8 @@ private fun Dropdown(
     onDismiss: () -> Unit,
     items: List<PopupItem>,
     swatch: Color? = null,
+    /** Xadrez atrás do swatch: o fundo "Transparente". */
+    checkerSwatch: Boolean = false,
 ) {
     Box {
         Row(
@@ -326,6 +338,7 @@ private fun Dropdown(
                     Modifier
                         .size(24.dp)
                         .clip(RoundedCornerShape(5.dp))
+                        .then(if (checkerSwatch) Modifier.drawBehind { drawChecker() } else Modifier)
                         .background(swatch)
                         .border(1.dp, AureaColors.Border, RoundedCornerShape(5.dp)),
                 )

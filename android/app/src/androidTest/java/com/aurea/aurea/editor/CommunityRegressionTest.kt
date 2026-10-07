@@ -81,7 +81,7 @@ class CommunityRegressionTest {
             val original = store.layers.first { it.id !in beforeIds }.id
             compose.waitUntil(5000) { store.primary == original && store.detail?.id == original }
             val before = store.queryDetail(original)!!
-            compose.onNodeWithTag("transport.duplicate").performClick()
+            compose.runOnIdle { store.duplicateLayers() }
             compose.waitUntil(5000) { store.layers.size == beforeIds.size + 2 && store.primary != original && store.detail?.id == store.primary }
             val copy = store.primary!!
             assertEquals(setOf(copy), store.selection)

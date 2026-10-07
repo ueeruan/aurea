@@ -52,7 +52,11 @@ Params params_from(const EffectEval& e) noexcept {
     p.outputX = std::clamp(finite_or(e.f(kOutputWidth), 100.0f) / 100.0f, 0.0f, kMaxOutput);
     p.outputY = std::clamp(finite_or(e.f(kOutputHeight), 100.0f) / 100.0f, 0.0f, kMaxOutput);
     p.mirror = e.b(kMirror);
-    p.legacyClamp = e.count > kLegacyClamp && e.b(kLegacyClamp);
+    // O slot kLegacyClamp ("Esticar bordas" do Motion Tile anterior) não é
+    // lido: ligado, ele trocava a parede por uma borda esticada (sem cópias,
+    // fundo preto em volta de texto/forma, espelho perdido) e, oculto, não
+    // havia como desligar — projeto antigo ficava com o defeito para sempre
+    // (beta 2140). `upgrade_legacy_layout` zera o slot ao abrir.
     p.horizontalPhase = e.b(kHorizontalPhase);
     p.phaseTurns = finite_or(e.f(kPhase), 0.0f) / 360.0f;
     return p;
@@ -126,8 +130,28 @@ bool inside_output(const Params& p, Vec2 uv) noexcept {
 }
 
 bool upgrade_legacy_layout(Layer& layer, EffectInstance& fx) noexcept {
-    if (fx.type != effect_type_id(effect_keys::kMotionTile) || fx.params.size() != kLegacyParamCount) return false;
+    if (fx.type != effect_type_id(effect_keys::kMotionTile)) return false;
     auto track = [&](u32 param) { return layer.tracks.find(TrackProperty::EffectParam, fx.id, param_track_key(param, 0)); };
+
+    // "Esticar bordas" (slot oculto): em QUALQUER disposição salva. Um projeto
+    // de 9 slots convertido pelas builds 2126–2139 já tem 10/11 slots e ainda
+    // carrega o valor; sem controle na tela, nada o desligava. Zera constante,
+    // expressão e keyframes; nada mais da layer muda.
+    bool changed = false;
+    if (fx.params.size() > kLegacyClamp) {
+        ParamSlot& clamp = fx.params[kLegacyClamp];
+        const u32 key = param_track_key(kLegacyClamp, 0);
+        const bool keyed = track(kLegacyClamp) != nullptr;
+        if (clamp.constant.as_bool() || clamp.source != ParamSource::Constant || keyed) {
+            clamp = ParamSlot{};
+            clamp.constant = ParamValue::boolean(false);
+            layer.tracks.remove_if([&](const Track& t) {
+                return t.property == TrackProperty::EffectParam && t.effectIndex == fx.id && t.effectParamIndex == key;
+            });
+            changed = true;
+        }
+    }
+    if (fx.params.size() != kLegacyParamCount) return changed;
 
     // Saída: a anterior nunca recortava (só ampliava uma região que já cobria
     // o quadro), então o desenho antigo é a janela no quadro inteiro.

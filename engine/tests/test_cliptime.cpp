@@ -1176,3 +1176,70 @@ AUREA_TEST(ClipTime, KeepPitchAndInterpolationSurviveSaveAndOldProjectsStayOff) 
     if (c) c->layers().for_each([&](LayerId, const Layer& x) { ++layers; AUREA_CHECK(!x.keepPitch); });
     AUREA_CHECK(layers > 0u);
 }
+
+// Beta 2140: o Remapear tempo numa pré-composição. Apagar o efeito leva as
+// chaves junto (antes a curva ficava guardada e os losangos continuavam na
+// régua "sem informação"); pôr de novo começa limpo; apagar uma chave solta
+// funciona na pré-composição como no vídeo.
+AUREA_TEST(ClipTime, RemapEffectOnPrecompDeletesKeysAndStartsClean) {
+    TimeRig r(cfg_with_audio());
+    const u64 ids[1] = {r.layer.pack()};
+    auto pre = r.e.precompose(ids, 1, "Grupo");
+    AUREA_CHECK(pre.ok());
+    if (!pre.ok()) return;
+    const LayerId p = LayerId::unpack(*pre);
+    auto P = [&]() { return r.comp()->layer(p); };
+    AUREA_CHECK(P() && P()->kind == LayerKind::Composition);
+    auto add_remap = [&]() -> u32 {
+        Command add; add.type = CommandType::EffectAdd;
+        add.effect_add.layer = p;
+        add.effect_add.effectType = effect_type_id(effect_keys::kTimeRemap);
+        add.effect_add.index = kInvalidIndex;
+        AUREA_CHECK(r.e.apply_command(add).ok());
+        return P()->effects.back().id;
+    };
+    u32 effect = add_remap();
+    AUREA_CHECK(P()->timeRemapEnabled);
+    AUREA_CHECK_EQ(P()->timeRemap.keys.size(), usize{2});
+    Command key; key.type = CommandType::KeyframeInsert;
+    key.keyframe.track = TrackRef{p, TrackProperty::EffectParam, effect, 0};
+    key.keyframe.time = FrameIndex{30}; key.keyframe.value = 2.0f;
+    AUREA_CHECK(r.e.apply_command(key).ok());
+    AUREA_CHECK_EQ(P()->timeRemap.keys.size(), usize{3});
+    AUREA_CHECK_NEAR(P()->source_frame(FrameIndex{30}), 60.0, 0.001);
+
+    // Apagar a chave solta (pelo efeito e pela linha da régua).
+    Command del = key; del.type = CommandType::KeyframeDelete;
+    AUREA_CHECK(r.e.apply_command(del).ok());
+    AUREA_CHECK_EQ(P()->timeRemap.keys.size(), usize{2});
+    AUREA_CHECK(r.e.apply_command(key).ok());
+    del.keyframe.track.property = TrackProperty::TimeRemap;
+    AUREA_CHECK(r.e.apply_command(del).ok());
+    AUREA_CHECK_EQ(P()->timeRemap.keys.size(), usize{2});
+    AUREA_CHECK(r.e.apply_command(key).ok());
+    AUREA_CHECK_EQ(P()->timeRemap.keys.size(), usize{3});
+
+    // Apagar o efeito: a curva e as chaves vão junto; a régua fica vazia.
+    Command rem; rem.type = CommandType::EffectRemove;
+    rem.effect_ref.layer = p; rem.effect_ref.effect = EffectId{effect, 0};
+    AUREA_CHECK(r.e.apply_command(rem).ok());
+    AUREA_CHECK(!P()->timeRemapEnabled);
+    AUREA_CHECK(P()->timeRemap.keys.empty());
+    bridge::KeyframeRow rows[8]{};
+    AUREA_CHECK_EQ(r.e.query_keyframes(p.pack(), rows, 8), 0u);
+    AUREA_CHECK_NEAR(P()->source_frame(FrameIndex{30}), 30.0, 0.001);
+
+    // Pôr de novo: a rampa de agora, sem a chave antiga.
+    effect = add_remap();
+    AUREA_CHECK_EQ(P()->timeRemap.keys.size(), usize{2});
+    AUREA_CHECK(P()->timeRemap.find_exact(FrameIndex{30}) == kInvalidIndex);
+    AUREA_CHECK_NEAR(P()->source_frame(FrameIndex{30}), 30.0, 0.001);
+
+    // Desfazer a remoção devolve a curva com as chaves.
+    rem.effect_ref.effect = EffectId{effect, 0};
+    AUREA_CHECK(r.e.apply_command(rem).ok());
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(P()->timeRemap.keys.size(), usize{2});
+    AUREA_CHECK(P()->timeRemapEnabled);
+}

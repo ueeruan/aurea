@@ -41,8 +41,10 @@ struct Params {
     bool mirror = false;
     bool horizontalPhase = false;         ///< fase por coluna (em Y) em vez de por linha (em X)
     f32  phaseTurns = 0.0f;               ///< graus / 360
-    /// "Esticar bordas" do Motion Tile anterior do Aurea. Sem controle na tela:
-    /// só um projeto antigo que o tinha ligado o traz (e continua igual).
+    /// "Esticar bordas" do Motion Tile anterior do Aurea. Nenhum projeto liga
+    /// mais isto: `params_from` não lê o slot e `upgrade_legacy_layout` o zera
+    /// (oculto, era um defeito sem saída nos projetos antigos). Fica só para a
+    /// conta de referência.
     bool legacyClamp = false;
 
     [[nodiscard]] bool identity_params() const noexcept;
@@ -101,7 +103,10 @@ inline constexpr f32 kMaxOutput = 5.0f;
 ///     com a opção): o eixo troca e o sinal inverte, e a coluna/linha vizinha
 ///     fica onde estava (em 180°, o tijolo, o desenho é o mesmo);
 ///   - acrescenta o slot `kLayout`, que marca a conversão como feita.
-/// Devolve true se converteu. Outro tipo de efeito ou já convertido: nada.
+/// Em QUALQUER disposição (também 10/11 slots, já convertidos por builds
+/// anteriores), zera o "Esticar bordas" oculto (`kLegacyClamp`): constante,
+/// expressão e keyframes. Os demais controles da pessoa ficam como estão.
+/// Devolve true se mudou algo. Outro tipo de efeito ou nada a fazer: false.
 bool upgrade_legacy_layout(Layer& layer, EffectInstance& effect) noexcept;
 
 } // namespace aurea::motion_tile

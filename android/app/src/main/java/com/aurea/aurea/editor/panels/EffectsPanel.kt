@@ -268,6 +268,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     }
     // As ferramentas-efeito que a camada usa (cartões no topo da pilha).
     val maskCount by remember(store) { derivedStateOf { store.masks?.takeIf { it.layer == store.primary }?.masks?.size ?: 0 } }
+    val hasMatte by remember(store) { derivedStateOf { store.trackMatte?.let { (it.getOrNull(0) ?: 0L) != 0L && (it.getOrNull(1) ?: 0L) != 0L } == true } }
+    // A Máscara posta pelo catálogo fica na pilha mesmo vazia (o painel fechou sem
+    // caminho): o cartão é a volta para desenhar. Sai só pelo 🗑 dele.
+    val maskPinned by remember(store) { derivedStateOf { store.primary?.let { it in store.maskToolLayers } == true } }
+    val maskTool = maskCount > 0 || hasMatte || maskPinned
     var captionCount by remember(layerId) {
         mutableIntStateOf(if (tabbed && layerId != null) store.engineForStress.captionCount(layerId) else 0)
     }
@@ -288,14 +293,14 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     }
     val tools = buildList {
         if (!tabbed) return@buildList
-        if (maskCount > 0) add(EffectTool.Mask)
+        if (maskTool) add(EffectTool.Mask)
         if (hasCameraTrack) add(EffectTool.CameraTrack)
         if (captionCount > 0) add(EffectTool.Captions)
     }
     // Camada sem nada abre direto na tela "Adicionar efeito"; entrar pelo losango
     // de um parâmetro é editar: abre na pilha.
     var adding by remember(layerId) {
-        mutableStateOf(tabbed && layerId != null && entry == null && effects.isEmpty() && maskCount == 0 && captionCount == 0)
+        mutableStateOf(tabbed && layerId != null && entry == null && effects.isEmpty() && !maskTool && captionCount == 0)
     }
     var toolToRemove by remember { mutableStateOf<EffectTool?>(null) }
     val hasAudio by remember(store) { derivedStateOf { store.detail?.hasAudio == true } }
@@ -483,7 +488,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     ToolStackCard(
                         tool = tool,
                         subtitle = when (tool) {
-                            EffectTool.Mask -> stringResource(R.string.fxui_tool_masks_n, maskCount)
+                            EffectTool.Mask -> when {
+                                maskCount > 0 -> stringResource(R.string.fxui_tool_masks_n, maskCount)
+                                hasMatte -> stringResource(R.string.panel_recorte_outra_camada)
+                                else -> stringResource(R.string.fxui_tool_mask_empty)
+                            }
                             EffectTool.Captions -> stringResource(R.string.fxui_tool_captions_n, captionCount)
                             EffectTool.CameraTrack -> stringResource(R.string.fxui_tool_camera_ready)
                         },
@@ -720,11 +729,15 @@ private fun removeEffectTool(store: EditorStore, tool: EffectTool) {
     val layer = store.primary ?: return
     when (tool) {
         EffectTool.Mask -> {
+            // Tirar o cartão tira tudo o que ele mostra: as máscaras e o recorte por outra camada.
+            store.dropMaskTool(layer)
             val ids = store.masks?.takeIf { it.layer == layer }?.masks?.map { it.id }.orEmpty()
-            if (ids.isEmpty()) return
+            val matte = (store.trackMatte?.getOrNull(0) ?: 0L) != 0L
+            if (ids.isEmpty() && !matte) return
             store.beginGesture("remover máscaras")
             try {
                 ids.forEach { store.deleteMask(it) }
+                if (matte) store.setTrackMatte(0L, 0)
             } finally {
                 store.endGesture()
             }

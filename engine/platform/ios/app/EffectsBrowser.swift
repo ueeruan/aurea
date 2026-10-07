@@ -261,9 +261,13 @@ func fxPickerEntryName(_ entry: EffectCatalogItem) -> String {
 }
 
 /// ABRE uma ferramenta-efeito na camada escolhida: a única porta que o resto do
-/// app precisa (catálogo, pilha da camada, busca de comandos).
+/// app precisa (catálogo, pilha da camada, busca de comandos). A Máscara fica
+/// na pilha da camada desde aqui, mesmo que o painel feche sem caminho nenhum.
 @MainActor
-func fxOpenEffectTool(_ tool: FxEffectTool, in model: AureaModel) { model.openPanel(tool.panel) }
+func fxOpenEffectTool(_ tool: FxEffectTool, in model: AureaModel) {
+    if tool == .mask { model.addMaskTool() }
+    model.openPanel(tool.panel)
+}
 
 // =============================================================================
 //  Os GRUPOS da tela "Adicionar efeito" (espelho de EffectGroup no Android): o

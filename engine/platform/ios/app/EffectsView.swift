@@ -15,6 +15,7 @@ struct EffectsView: View {
     @EnvironmentObject private var model: AureaModel
     @StateObject private var prefs = FxEffectPrefs()
     @State private var maskCount = 0
+    @State private var hasMatte = false
     @State private var captionCount = 0
     @State private var cameraTracked = false
     @State private var about: EffectCatalogItem?
@@ -332,16 +333,23 @@ struct EffectsView: View {
     private var tools: [FxEffectTool] {
         guard tabbed else { return [] }
         var out: [FxEffectTool] = []
-        if maskCount > 0 { out.append(.mask) }
+        if maskTool { out.append(.mask) }
         if cameraTracked { out.append(.cameraTrack) }
         if captionCount > 0 { out.append(.captions) }
         return out
     }
+    /// A Máscara posta pelo catálogo fica na pilha mesmo vazia (o painel fechou
+    /// sem caminho): o cartão é a volta para desenhar. Sai só pelo 🗑 dele.
+    private var maskTool: Bool {
+        maskCount > 0 || hasMatte || (model.primarySelection.map { model.maskToolLayers.contains($0) } ?? false)
+    }
     /// Relê no motor o que a camada tem de cada ferramenta. O rastreio guardado
     /// é restaurado como o painel de rastreio faz ao aparecer.
     private func refreshTools() {
-        guard tabbed, let id = model.primarySelection else { maskCount = 0; captionCount = 0; cameraTracked = false; return }
+        guard tabbed, let id = model.primarySelection else { maskCount = 0; hasMatte = false; captionCount = 0; cameraTracked = false; return }
         maskCount = fxMaskIds(model.engine.maskData(id)).count
+        let matte = model.engine.trackMatte(id)
+        hasMatte = matte.count > 1 && matte[0].int64Value != 0 && matte[1].intValue != 0
         captionCount = Int(model.engine.captionCount(id))
         cameraTracked = model.selectedLayer?.kind == 1 && model.engine.restoreCameraTrack(forLayer: id)
     }
@@ -350,7 +358,9 @@ struct EffectsView: View {
     private func toolCard(_ tool: FxEffectTool) -> some View {
         let subtitle: String
         switch tool {
-        case .mask: subtitle = AureaText.t("fxui_tool_masks_n", maskCount)
+        case .mask:
+            subtitle = maskCount > 0 ? AureaText.t("fxui_tool_masks_n", maskCount)
+                : hasMatte ? AureaText.t("panel_recorte_outra_camada") : AureaText.t("fxui_tool_mask_empty")
         case .captions: subtitle = AureaText.t("fxui_tool_captions_n", captionCount)
         case .cameraTrack: subtitle = AureaText.t("fxui_tool_camera_ready")
         }
@@ -390,10 +400,14 @@ struct EffectsView: View {
         guard let id = model.primarySelection, model.selectedLayer?.locked != true else { return }
         switch tool {
         case .mask:
+            // Tirar o cartão tira tudo o que ele mostra: as máscaras e o recorte por outra camada.
+            model.dropMaskTool(id)
             let ids = fxMaskIds(model.engine.maskData(id))
-            guard !ids.isEmpty else { return }
+            let matte = (model.engine.trackMatte(id).first?.int64Value ?? 0) != 0
+            guard !ids.isEmpty || matte else { refreshTools(); return }
             model.beginGesture("remover máscaras")
             for mask in ids { _ = model.engine.removeMask(id, mask: mask) }
+            if matte { model.engine.setTrackMatteForLayer(id, matte: 0, mode: 0) }
             model.endGesture()
             model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false
         case .captions:

@@ -57,6 +57,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -247,12 +248,15 @@ private fun LinkRow(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    // A LINHA INTEIRA (largura toda, 56 dp) é o alvo, não só a miniatura —
+    // o mesmo do iOS (`ShellLinkPopup.row` com `contentShape`).
     Row(
         modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .heightIn(min = 56.dp)
             .background(if (on) AureaColors.AccentDim else background)
             .tocavel(shrink = 1f, haptic = true, onClick = onClick)
+            .semantics { selected = on }
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

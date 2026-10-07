@@ -328,6 +328,10 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
     opts.use_blender_pbr_material = true;    // rugosidade/metal do Blender
     opts.load_external_files = true;             // .mtl do OBJ
     opts.ignore_missing_external_files = true;   // .mtl ausente: cinza + aviso, não recusa
+    // OBJ sem `mtllib` (ou com o nome gravado errado): procura "<nome>.mtl" —
+    // e, pelo abridor, o ÚNICO .mtl da pasta. É o que deixa o .mtl escolhido
+    // DEPOIS do import religar os materiais.
+    opts.obj_search_mtl_by_filename = true;
     FolderIndex folder;
     folder.dir = dir_of(path);
     ExternalOpener opener;
@@ -663,8 +667,9 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
     }
 
     A.warnings.insert(A.warnings.end(), b.warnings.begin(), b.warnings.end());
-    // .mtl pedido e nenhum aberto: o material inteiro está faltando.
-    if (!opener.mtlOpened && !opener.mtlRequested.empty()) {
+    // .mtl pedido e nenhum aberto: o material inteiro está faltando. Só quando
+    // o OBJ usa materiais (`usemtl`): um OBJ só de geometria não pede .mtl.
+    if (!opener.mtlOpened && !opener.mtlRequested.empty() && scene->materials.count > 0) {
         A.missingTextures.push_back(opener.mtlRequested.front());
         A.warnings.push_back("material ausente: " + opener.mtlRequested.front());
     }

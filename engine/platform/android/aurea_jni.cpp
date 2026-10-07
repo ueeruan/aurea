@@ -3386,10 +3386,10 @@ AUREA_JNI jint AUREA_FN(nativeLocalAiStatus)(JNIEnv*, jclass, jlong handle) {
 AUREA_JNI jint AUREA_FN(nativePreviewBufferRanges)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out) return 0;
-    const auto capacity = static_cast<u32>(std::min<jsize>(30, env->GetArrayLength(out) / 2));
-    i64 ranges[60]{};
+    const auto capacity = static_cast<u32>(std::min<jsize>(aurea::kPreviewCacheMaxFrames, env->GetArrayLength(out) / 2));
+    i64 ranges[aurea::kPreviewCacheMaxFrames * 2]{};
     const u32 count = c->engine.copy_preview_buffer_ranges(ranges, capacity);
-    jlong encoded[60]{};
+    jlong encoded[aurea::kPreviewCacheMaxFrames * 2]{};
     for (u32 i = 0; i < count * 2; ++i) encoded[i] = static_cast<jlong>(ranges[i]);
     if (count) env->SetLongArrayRegion(out, 0, static_cast<jsize>(count * 2), encoded);
     return static_cast<jint>(count);

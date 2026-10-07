@@ -207,7 +207,8 @@ private struct AddLayerPickers: ViewModifier {
         // Some file providers register FBX/OBJ as content, without public.data.
         // Accept file-system items; the importer validates supported extensions.
         case .model: return [.item]
-        case .modelTextures: return [.image, .data]
+        // .mtl (texto) e texturas: alguns provedores não marcam public.data.
+        case .modelTextures: return [.item]
         default: return [.audio]
         }
     }
@@ -1217,7 +1218,6 @@ private struct TextPanelView: View {
     @State private var italic = false
     @State private var fonts: [[String: Any]] = []
     @State private var query = ""
-    @State private var importingFont = false
     private var layerId: Int64 { model.primarySelection ?? 0 }
     private var familyNames: [String] {
         Array(Set(fonts.compactMap { $0["family"] as? String })).filter { query.trimmingCharacters(in: .whitespaces).isEmpty || $0.localizedCaseInsensitiveContains(query) }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -1251,16 +1251,29 @@ private struct TextPanelView: View {
         }.onAppear { load(); fonts = model.engine.availableFonts() }
             .onChange(of: layerId) { _ in dismissEditing(); content = ""; selection = NSRange(location: 0, length: 0); showingFonts = false; load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
-            .fileImporter(isPresented: $importingFont, allowedContentTypes: [UTType(filenameExtension: "ttf") ?? .data, UTType(filenameExtension: "otf") ?? .data]) { result in
-                guard case .success(let url) = result else { return }
-                let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                let target = AureaPaths.mediaDestination(for: url.lastPathComponent)
-                do {
-                    try FileManager.default.copyItem(at: url, to: target)
-                    guard let font = model.engine.importFont(atPath: target.path) else { model.toast = AureaText.t("msg_use_uma_fonte_ttf_ou_otf"); return }
-                    fonts = model.engine.availableFonts(); chooseFont(font)
-                } catch { model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte") }
-            }
+    }
+    /// EditorStore.importFont: TTF/OTF copiado para Documents/Media (pasta que o
+    /// motor varre ao abrir), registrado no CoreText e no motor e aplicado à
+    /// camada que estava escolhida quando o seletor abriu.
+    private func importFont(_ url: URL, target: Int64) {
+        guard ["ttf", "otf"].contains(url.pathExtension.lowercased()) else {
+            model.toast = AureaText.t("msg_use_uma_fonte_ttf_ou_otf"); return
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        AureaPaths.ensureDirectories()
+        let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
+        do { try FileManager.default.copyItem(at: url, to: destination) }
+        catch { model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return }
+        guard let font = model.engine.importFont(atPath: destination.path) else {
+            try? FileManager.default.removeItem(at: destination)
+            model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return
+        }
+        FontImportPicker.registerWithCoreText(destination)
+        query = ""
+        fonts = model.engine.availableFonts()
+        if model.primarySelection == target { chooseFont(font) }
+        model.toast = AureaText.t("msg_fonte_importada", font["family"] as? String ?? "")
     }
     private var spanTools: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -1301,9 +1314,13 @@ private struct TextPanelView: View {
             HStack(spacing: 8) {
                 TextField(AureaText.t("panel_buscar_fonte"), text: $query).font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
                     .padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 40).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
-                Button { importingFont = true } label: {
+                Button {
+                    dismissEditing()
+                    let target = layerId
+                    FontImportPicker.present { url in importFont(url, target: target) }
+                } label: {
                     Text(AureaText.t("panel_importar")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent).padding(.horizontal, 12).padding(.vertical, 10).background(AureaColors.accentDim, in: RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(AureaPressStyle(shrink: 1))
+                }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("text.font.import")
             }
             if selectedStyles.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1357,6 +1374,48 @@ private struct TextPanelView: View {
         let ok = model.engine.setTextFont(forLayer: layerId, family: family, weight: (font?["weight"] as? NSNumber)?.uint32Value ?? 400,
             italic: font?["italic"] as? Bool ?? false, path: path.hasPrefix(AureaPaths.documents.path) ? path : "")
         if ok { model.refreshModel(force: true); load() } else { model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte") }
+    }
+}
+
+/// O seletor de fonte (TTF/OTF) apresentado pelo UIKit, por cima do que
+/// estiver na tela. Antes era um `.fileImporter` dentro do painel de texto,
+/// aninhado sob o `.fileImporter` da raiz do editor (AddLayerPickers); o
+/// SwiftUI não apresenta com confiança um importador abaixo de outro e tocar
+/// em "Importar" não abria nada. O painel 3D (dois importadores encadeados na
+/// mesma view, também sob a raiz) tinha o mesmo defeito.
+enum FontImportPicker {
+    private static var delegate: Delegate?
+    static var types: [UTType] {
+        [UTType.font] + ["ttf", "otf"].compactMap { UTType(filenameExtension: $0) }
+    }
+    static func present(_ picked: @escaping (URL) -> Void) {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        guard var presenter = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else { return }
+        while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
+        // O UIKit guarda o delegate fraco: o dono fica aqui até a escolha.
+        let owner = Delegate { url in
+            FontImportPicker.delegate = nil
+            if let url { picked(url) }
+        }
+        FontImportPicker.delegate = owner
+        picker.delegate = owner
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
+        presenter.present(picker, animated: true)
+    }
+    /// Para a prévia da lista (escrita na própria fonte). Já registrada não é erro.
+    static func registerWithCoreText(_ url: URL) {
+        var error: Unmanaged<CFError>?
+        if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) { _ = error?.takeRetainedValue() }
+    }
+    final class Delegate: NSObject, UIDocumentPickerDelegate {
+        private let done: (URL?) -> Void
+        private var finished = false
+        init(_ done: @escaping (URL?) -> Void) { self.done = done }
+        private func finish(_ url: URL?) { guard !finished else { return }; finished = true; done(url) }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls.first) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
     }
 }
 

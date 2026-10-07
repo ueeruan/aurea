@@ -41,7 +41,11 @@ inline u32 shutter_sample_count(const MotionBlurSettings& settings, bool finalQu
     quality = finalQuality ? 1.f : std::clamp(std::isfinite(quality) ? quality : .25f, .1f, 1.f);
     u32 limit = std::min(resourceLimit, std::clamp(settings.adaptiveLimit, 2u, ShutterPlan::kHardLimit));
     if (!finalQuality) limit = std::min(limit, std::max(2u, static_cast<u32>(std::ceil(limit * quality))));
-    const u32 base = std::clamp(finalQuality ? settings.samples : settings.previewSamples, 2u, 64u);
+    // "Amostras por quadro" é a escolha da pessoa e vale na PRÉVIA também (a
+    // folga do aparelho ainda a reduz por `quality`). A prévia lia só o
+    // `previewSamples` fixo (16): subir para 32/64 não mudava nada na tela
+    // (beta 2140, "não funciona em frequência muito alta").
+    const u32 base = std::clamp(settings.samples, 2u, 64u);
     const u32 minimum = std::min(limit, std::max(2u, static_cast<u32>(std::ceil(base * quality))));
     // Preview changes the spacing in output pixels, not the exposure interval.
     // Final integration stays deterministic regardless of playback/thermal state.

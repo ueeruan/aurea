@@ -27,9 +27,7 @@ struct Panel3DView: View {
     @State private var interior: Int32 = -1
     @ObservedObject private var thumbs = MaterialThumbStore.shared
     @State private var pickingHdri = false
-    @State private var pickingFont = false
     @State private var hdriTarget: Int64?
-    @State private var fontTarget: Int64?
     @State private var pending: Text3DChange?
     @State private var rebuild: DispatchWorkItem?
     @State private var closeTyping: DispatchWorkItem?
@@ -95,9 +93,8 @@ struct Panel3DView: View {
                 model.importMedia(url: url, kind: .hdri, objectHDRI: hdriTarget)
             }
         }
-        .fileImporter(isPresented: $pickingFont, allowedContentTypes: [.data]) { result in
-            if case .success(let url) = result { importFont(url, target: fontTarget) }
-        }
+        // A fonte vem pelo seletor do UIKit (FontImportPicker): um segundo
+        // `.fileImporter` encadeado aqui calava um dos dois.
         .onAppear(perform: load)
         .onChange(of: model.status.modelRevision) { _ in load() }
         .onChange(of: model.localPlayhead) { _ in loadMaterials() }
@@ -184,7 +181,11 @@ struct Panel3DView: View {
             section("ui3d_text")
             HStack(spacing: 6) {
                 chip("t3d_font") { openFonts() }
-                chip("t3d_import_font") { finishEditing(); fontTarget = layerId; pickingFont = true }
+                chip("t3d_import_font") {
+                    finishEditing()
+                    let target = layerId
+                    FontImportPicker.present { url in importFont(url, target: target) }
+                }
             }
             row("panel_alinhamento", height: 48) {
                 HStack(spacing: 6) {

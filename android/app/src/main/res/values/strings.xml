@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Atualização 2140 • 06/10/2026\n\n• Corte entre clipes sem quadro fantasma (prévia e exportação).\n• Exportação não trava mais numa porcentagem: se o celular travar, o app tenta de novo em modo seguro.\n• Light Rays e Lens Flare funcionam em texto.\n• Arrastar a camada depois de keyframes volta a funcionar.\n• Mídia importada entra no cabeçote.\n• Marcador sempre ao lado do play; batidas visíveis na timeline.\n• Botões para ir ao início/fim da camada e mover início/fim para o cabeçote.\n• Novos efeitos: Vidro líquido, Dissolver, Virar página e 8 bits.\n• Copiar e colar Transformar.\n• 9 formas novas: Coração, Selo, Arco, Balão, Raio, Onda, Mancha, Linha e Losango.\n• Turbulent Displace com 9 tipos, ciclo e bordas travadas.\n• 3D: prévia do material e opção Mostrar interior (ver o cubo por dentro).\n• Câmera 3D, fundo 360 e luzes respeitam o corte da camada.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.2 (2141) • 06/10/2026\n\n• Modelos 3D voltam a importar com textura (GLB, glTF, OBJ+MTL e FBX); modelos do Sketchfab com reflexos.\n• Dá para escolher o .mtl depois do OBJ.\n• Camadas 2D em 3D recebem a luz da cena.\n• Exportar PNG e sequência PNG sem fundo: opção Transparente no projeto.\n• Echo, Timewarp RGB e Detectar movimento funcionam em pré-composição.\n• Time Remap: remover o efeito apaga os keyframes.\n• Prévia em memória muito maior (conforme a RAM do celular).\n• Rotação mostra as voltas (2x +30°).\n• Máscara não some ao fechar o painel.\n• Vincular ao nulo com um toque; apagar o nulo mantém o movimento do filho.\n• Áudio para ao sair do editor.\n• Mistura Exclusão correta em imagens.\n• Motion Tile corrigido em projetos antigos.\n• Barra do player nova: grade, prévia rápida, marcador, quadros, camadas, desfazer e refazer.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -3641,4 +3641,12 @@
     <string name="fxo_cross_2">Cruzado</string>
     <string name="fxl_cycle_evolution">Ciclo de evolução</string>
     <string name="fxl_cycle_in_revolutions">Ciclo (em revoluções)</string>
+    <string name="fxui_tool_mask_empty">Vazia — toque para desenhar</string>
+    <string name="editor_grade_tercos">Grade de terços (não exporta)</string>
+    <string name="editor_previa_rapida">Prévia rápida (resolução 1/4)</string>
+    <string name="sh_bg_transparent">Transparente</string>
+    <string name="project_bg_transparent_desc">Fundo transparente: o PNG e o GIF saem sem fundo</string>
+    <string name="edt_rotation_turns">Voltas</string>
+    <string name="edt_rotation_degrees">Graus</string>
+    <string name="edt_rotation_value_a11y">%1$s voltas, %2$s graus</string>
 </resources>

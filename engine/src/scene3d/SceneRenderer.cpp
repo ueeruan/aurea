@@ -1881,7 +1881,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             planeCount = static_cast<u32>(planes->size());
             planeList = arena.alloc_array<ScenePlane>(planeCount);
             if (!planeList) return false;
-            for (u32 i = 0; i < planeCount; ++i) planeList[i] = (*planes)[i];
+            for (u32 i = 0; i < planeCount; ++i) {
+                planeList[i] = (*planes)[i];
+                // A face vista é a iluminada: a câmera DESTE (sub)quadro.
+                PlaneLightBlock& lb = planeList[i].light;
+                lb.cameraPos = Vec4{frame.camera.position.x, frame.camera.position.y, frame.camera.position.z, lb.cameraPos.w};
+            }
             std::sort(planeList, planeList + planeCount, [](const ScenePlane& a, const ScenePlane& b) { return a.viewDepth > b.viewDepth; });
         }
     }
@@ -2051,6 +2056,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 for (u32 k = 0; k < cap.planeCount; ++k) {
                     const ScenePlane& p = cap.planes[k];
                     c.bind_texture(0, pc.texture(p.texture), SamplerHandle{p.sampler});
+                    c.set_uniforms(&p.light, sizeof(p.light));   // luzes da composição (plane.frag)
                     struct { Mat4 m; Vec4 region; Vec4 uv; Vec4 params; } push{p.clipFromLayer, p.region, Vec4{0, 0, 1, 1}, Vec4{p.opacity, static_cast<f32>(phase), 0, 0}};
                     c.push_constants(&push, sizeof(push));
                     c.draw(6);

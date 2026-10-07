@@ -212,16 +212,15 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     }
 }
 
-/** Counts describe rendered frames actually held by the engine, including partial buffers. */
+/**
+ * Só aparece enquanto o play espera o buffer. O "Prévia em memória · N
+ * quadros" saiu do palco (atrapalhava): a faixa da timeline já mostra o cache.
+ */
 @Composable
 private fun PreviewBufferBadge(store: EditorStore, modifier: Modifier = Modifier) {
     val preview = store.preview
-    if (!preview.buffering && preview.bufferedFrames == 0) return
-    val label = when {
-        preview.buffering -> stringResource(R.string.preview_buffer_preparing, preview.bufferedFrames, preview.bufferTarget)
-        preview.bufferLimited -> stringResource(R.string.preview_buffer_limited, preview.bufferedFrames)
-        else -> stringResource(R.string.preview_buffer_ready, preview.bufferedFrames)
-    }
+    if (!preview.buffering) return
+    val label = stringResource(R.string.preview_buffer_preparing, preview.bufferedFrames, preview.bufferTarget)
     Text(
         label,
         style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)),
@@ -447,6 +446,22 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.handlesValid = false
     m.markerAnchorValid = false
     if (!m.valid) return
+    // Grade de terços + cruz do centro, ligada pela barra do player.
+    if (ui.showGrid) {
+        val gridInk = Color.White.copy(alpha = .35f)
+        val gridStroke = 1.dp.toPx()
+        for (k in 1..2) {
+            val gx = m.sx(m.compW * k / 3f)
+            val gy = m.sy(m.compH * k / 3f)
+            drawLine(gridInk, Offset(gx, m.sy(0f)), Offset(gx, m.sy(m.compH)), gridStroke)
+            drawLine(gridInk, Offset(m.sx(0f), gy), Offset(m.sx(m.compW), gy), gridStroke)
+        }
+        val cx = m.sx(m.compW / 2f)
+        val cy = m.sy(m.compH / 2f)
+        val arm = 10.dp.toPx()
+        drawLine(gridInk, Offset(cx - arm, cy), Offset(cx + arm, cy), gridStroke)
+        drawLine(gridInk, Offset(cx, cy - arm), Offset(cx, cy + arm), gridStroke)
+    }
     // Borda do quadro: dá para ver onde a composição termina mesmo com o fundo
     // do projeto da cor da área de trabalho (só na prévia, nunca no export).
     drawRect(Color.White.copy(alpha = .16f), topLeft = Offset(m.sx(0f), m.sy(0f)),

@@ -561,8 +561,8 @@ private fun Model3DTab(store: EditorStore, close: () -> Unit) {
             AddItem(stringResource(R.string.sh_add_model_3d), CupertinoGlyph.Cube, AureaColors.Accent) {
                 // Keep the broad fallback for providers that assign FBX/OBJ a
                 // generic or vendor-specific MIME type. The shared importer validates it.
-                picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj",
-                    "application/x-fbx", "application/zip", "application/octet-stream", "*/*"))
+                picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "model/mtl",
+                    "application/x-fbx", "application/zip", "text/plain", "image/*", "application/octet-stream", "*/*"))
             },
             AddItem(stringResource(R.string.sh_add_text_3d), ShellGlyph.TextformatAlt, ShellColors.Text3D) { store.addText3D(); close() },
             AddItem(stringResource(R.string.scene_workspace), CupertinoGlyph.Cube, AureaColors.Accent) { close(); store.enterSceneEditor() },

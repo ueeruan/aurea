@@ -20,7 +20,8 @@ layout(push_constant) uniform Push {
     mat4 clipFromLayer;
     vec4 region;
     vec4 uvRect;
-    vec4 params;    // x=dither (0/1), y=texels da composição por pixel do display
+    vec4 params;    // x=dither (0/1), y=texels da composição por pixel do display,
+                    // z=lado da casa do xadrez em px (0 = fundo opaco, sem xadrez)
 } pc;
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
@@ -50,7 +51,14 @@ vec4 sample_footprint(vec2 uv) {
 
 void main() {
     vec4 c = sample_footprint(v_uv);
-    vec3 lin = c.rgb + p.background.rgb * (1.0 - c.a);
+    // Composição de fundo transparente: xadrez cinza claro/médio atrás dela
+    // (só na tela — o PNG/GIF exportado guarda o alfa de verdade).
+    vec3 under = p.background.rgb;
+    if (pc.params.z > 0.5) {
+        vec2 cell = floor(gl_FragCoord.xy / pc.params.z);
+        under = mod(cell.x + cell.y, 2.0) < 0.5 ? vec3(0.58) : vec3(0.36);
+    }
+    vec3 lin = c.rgb + under * (1.0 - c.a);
     vec3 enc = linear_to_srgb(lin);
     if (pc.params.x > 0.5) {
         enc += (interleaved_gradient_noise(gl_FragCoord.xy) - 0.5) / 255.0;

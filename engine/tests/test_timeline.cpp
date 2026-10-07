@@ -558,13 +558,14 @@ AUREA_TEST(Timeline, TimeRemapIsAnEffectOverTheLayerCurve) {
         AUREA_CHECK(std::fabs(l2->timeRemap.keys[l2->timeRemap.find_exact(FrameIndex{local60})].value - 30.0f) < 0.01f);
     }
 
-    // Tirar o efeito desliga a curva — mas a curva FICA guardada.
+    // Tirar o efeito desliga a curva e apaga as chaves dela (beta 2140: os
+    // losangos órfãos ficavam na régua e voltavam com o efeito posto de novo).
     Command del;
     del.type = CommandType::EffectRemove;
     del.effect_ref.layer = LayerId::unpack(*vid);
     del.effect_ref.effect = EffectId{effectId, 0};
     AUREA_CHECK(e.apply_command(del).ok());
     AUREA_CHECK(l2 && !l2->timeRemapEnabled);
-    AUREA_CHECK(l2 && !l2->timeRemap.keys.empty());
+    AUREA_CHECK(l2 && l2->timeRemap.keys.empty());
     std::remove(path.c_str());
 }

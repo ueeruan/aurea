@@ -51,9 +51,9 @@ class CompactTransportClipboardTest {
         compose.runOnIdle { store.seek(0) }
         compose.onNodeWithTag("transport.next").performClick()
         compose.waitUntil(5000) { store.playhead == 12 }
-        compose.onNodeWithTag("transport.more").performClick()
-        compose.onNodeWithTag("transport.copyPaste").assertIsDisplayed()
-        compose.onNodeWithTag("transport.fullscreen").assertIsDisplayed()
+        compose.onNodeWithTag("transport.grid").assertIsDisplayed()
+        compose.onNodeWithTag("transport.fastPreview").assertIsDisplayed()
+        compose.onNodeWithTag("transport.layers").assertIsDisplayed()
     }
 
     @Test fun compactMenuCopiesPastesAndOneUndoRestoresLayers() {
@@ -71,8 +71,9 @@ class CompactTransportClipboardTest {
         val original = store.layers.single().id
         compose.onNodeWithTag("transport.duplicate").assertDoesNotExist()
         fun openClipboard() {
-            compose.onNodeWithTag("transport.more").assertIsDisplayed().performClick()
-            compose.onNodeWithTag("transport.copyPaste").assertIsDisplayed().performClick()
+            // Copiar e colar mora no menu do projeto (engrenagem da barra de cima).
+            compose.onNodeWithContentDescription(context.getString(R.string.editor_ajustes_projeto_mais)).performClick()
+            compose.onNodeWithText(context.getString(R.string.editor_copiar_colar)).performScrollTo().performClick()
         }
         openClipboard()
         compose.onNodeWithText(context.getString(R.string.editor_copiar_camada)).performClick()

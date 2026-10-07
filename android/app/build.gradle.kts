@@ -57,8 +57,8 @@ android {
         targetSdk = 36
         // versionCode 2140: novas deformações, partículas 3D, cache ocioso e barra compacta. Um número maior é
         // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2140
-        versionName = "0.0.1"
+        versionCode = 2141
+        versionName = "0.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

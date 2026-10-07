@@ -10,6 +10,8 @@
 #include "TestFramework.hpp"
 
 #include "aurea/export/ImageEncode.hpp"
+#include "aurea/project/Project.hpp"
+#include "aurea/project/Serialization.hpp"
 
 #define STBI_NO_STDIO
 #include "../third_party/stb/stb_image.h"
@@ -407,6 +409,45 @@ AUREA_TEST(ImageEncode, PlanAndEstimateFollowOneRule) {
     AUREA_CHECK_EQ(gif_frame_delay_cs(0, 30.0) + gif_frame_delay_cs(1, 30.0) + gif_frame_delay_cs(2, 30.0), 10u);
 }
 
+// Beta: "sem fundo" nos Ajustes do projeto deixava tudo branco e o PNG nunca
+// saía transparente. A escolha "Transparente" das telas chega como alfa 0; o
+// motor guarda a flag, devolve alfa 0 e grava/lê a flag no arquivo.
+AUREA_TEST(ImageEncode, TransparentBackgroundChoiceRoundTripsAndPlansAlpha) {
+    auto created = Project::create_new(64, 36, 30.0, "fundo");
+    AUREA_CHECK(created.ok());
+    if (!created.ok()) return;
+    Project p = std::move(*created);
+    Composition* root = p.timeline().composition(p.timeline().root());
+    AUREA_CHECK(root != nullptr);
+    if (!root) return;
+    AUREA_CHECK(!root->transparent_background());
+    root->set_background_choice(Color{1, 1, 1, 0});
+    AUREA_CHECK(root->transparent_background());
+    AUREA_CHECK_EQ(root->background_choice().a, 0.0f);
+    AUREA_CHECK_EQ(root->background_choice().r, 1.0f);   // a cor fica guardada
+    const ImageExportPlan plan = plan_image_export(ImageExportSettings{}, 64, 36, 30.0, 30,
+                                                   root->transparent_background());
+    AUREA_CHECK(plan.alpha);
+
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(p, SaveOptions{}, bytes).ok());
+    Project back;
+    AUREA_CHECK(ProjectSerializer::load_bytes(back, bytes.data(), bytes.size(), LoadOptions{}).ok());
+    const Composition* r2 = back.timeline().composition(back.timeline().root());
+    AUREA_CHECK(r2 != nullptr);
+    if (r2) {
+        AUREA_CHECK(r2->transparent_background());
+        AUREA_CHECK_EQ(r2->background_choice().a, 0.0f);
+        AUREA_CHECK_EQ(r2->background_choice().g, 1.0f);
+    }
+
+    // Uma cor opaca escolhida depois volta a valer (alfa 1, sem transparência).
+    root->set_background_choice(Color{0.2f, 0.4f, 0.6f, 1});
+    AUREA_CHECK(!root->transparent_background());
+    AUREA_CHECK_EQ(root->background_choice().a, 1.0f);
+    AUREA_CHECK_EQ(root->background().a, 1.0f);
+}
+
 // =============================================================================
 // Motor inteiro (GPU): o quadro renderizado vira PNG/ZIP/GIF de verdade
 // =============================================================================
@@ -490,6 +531,66 @@ AUREA_TEST(ImageExport, CurrentFramePngKeepsTransparentBackground) {
         std::printf("(dentro %u,%u,%u,%u fora alfa %u) ", in[0], in[1], in[2], in[3], out[3]);
         AUREA_CHECK(in[0] > 240 && in[1] < 10 && in[2] < 10 && in[3] == 255);
         AUREA_CHECK_EQ(out[3], static_cast<u8>(0));
+    }
+    std::error_code ec2;
+    std::filesystem::remove(path, ec2);
+    e.shutdown();
+}
+
+// Beta: com "sem fundo" (fundo branco guardado, alfa 0) o quadro saía branco.
+// O fundo escolhido como Transparente na folha "Novo projeto" (alfa 0) tem de
+// sair com alfa 0 nos cantos e a forma semitransparente com a cor reta certa
+// — sem o branco guardado vazando nas áreas transparentes.
+AUREA_TEST(ImageExport, TransparentChoiceExportsStraightAlphaPng) {
+    if (!image_gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    AUREA_CHECK(e.initialize(ec).ok());
+    const f32 transparentWhite[4] = {1.0f, 1.0f, 1.0f, 0.0f};
+    AUREA_CHECK(e.new_project(64, 36, 30.0, nullptr, transparentWhite).ok());
+    {
+        u64 id = 0; u32 w = 0, h = 0; f64 fps = 0; i64 dur = 0;
+        f32 bg[4]{};
+        AUREA_CHECK(e.query_composition(id, w, h, fps, dur, bg));
+        AUREA_CHECK_EQ(bg[3], 0.0f);   // as telas leem "Transparente"
+    }
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK(comp->transparent_background());
+    const LayerId id = comp->add_layer(LayerKind::Shape, "meia");
+    Layer* l = comp->layer(id);
+    l->shape.bounds = Rect{0, 0, 32, 36};
+    l->shape.fillColor = Vec4{1, 0, 0, 1};
+    l->transform.anchor = Vec3{16, 18, 0};
+    l->transform.position = Vec3{16, 18, 0};
+    l->transform.opacity = 0.5f;
+
+    ImageExportSettings s;
+    s.format = ImageExportFormat::Png;
+    AUREA_CHECK(e.query_image_export_plan(s).alpha);
+    const std::string path = tmp_path("quadro-transparente.png");
+    AUREA_CHECK(e.start_image_export(s, path.c_str()).ok());
+    AUREA_CHECK(wait_export(e));
+    AUREA_CHECK(e.export_progress().result == Errc::Ok);
+    std::vector<u8> rgba;
+    int w = 0, h = 0, ch = 0;
+    AUREA_CHECK(decode_png(read_file(path), rgba, w, h, ch));
+    AUREA_CHECK_EQ(ch, 4);
+    if (rgba.size() == 64u * 36u * 4u) {
+        // A forma cobre a metade esquerda: os cantos da direita e o meio da
+        // direita são fundo — alfa 0 e nada da cor branca guardada.
+        for (const int px : {63, 35 * 64 + 63, 18 * 64 + 56}) {
+            const u8* c = &rgba[static_cast<usize>(px) * 4];
+            AUREA_CHECK_EQ(c[3], static_cast<u8>(0));
+            AUREA_CHECK(c[0] == 0 && c[1] == 0 && c[2] == 0);
+        }
+        const u8* in = &rgba[(18 * 64 + 8) * 4];
+        std::printf("(meia %u,%u,%u,%u) ", in[0], in[1], in[2], in[3]);
+        AUREA_CHECK(in[3] >= 120 && in[3] <= 136);              // 50% de opacidade
+        AUREA_CHECK(in[0] > 240 && in[1] < 10 && in[2] < 10);   // vermelho reto, sem branco somado
     }
     std::error_code ec2;
     std::filesystem::remove(path, ec2);

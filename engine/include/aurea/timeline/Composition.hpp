@@ -207,6 +207,19 @@ public:
     [[nodiscard]] bool transparent_background() const noexcept { return transparent_; }
     void set_transparent_background(bool t) noexcept { transparent_ = t; }
 
+    /// O fundo como as duas telas o escolhem (Ajustes do projeto e "Novo
+    /// projeto"): alfa 0 = "Transparente" (sem fundo; o PNG, a sequência PNG e
+    /// o GIF saem com alfa, o MP4 sai sobre preto); qualquer outro alfa = cor
+    /// opaca. A cor RGB fica guardada mesmo transparente, para voltar a ela.
+    void set_background_choice(Color c) noexcept {
+        transparent_ = !(c.a > 0.5f);
+        background_ = Color{c.r, c.g, c.b, 1.0f};
+    }
+    /// O inverso de `set_background_choice`: RGBA com alfa 0 quando transparente.
+    [[nodiscard]] Color background_choice() const noexcept {
+        return Color{background_.r, background_.g, background_.b, transparent_ ? 0.0f : 1.0f};
+    }
+
     // --- Layers ---------------------------------------------------------------
 
     [[nodiscard]] LayerTable& layers() noexcept { return layers_; }

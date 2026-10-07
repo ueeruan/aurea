@@ -527,6 +527,28 @@ scene3d::DeviceMemoryHint Engine::model_memory_hint(const scene3d::DeviceMemoryH
     return h;
 }
 
+namespace {
+
+/// O espaço do projeto para imagens/modelos (source_asset_room_locked) limita o
+/// que fica RESIDENTE, não o pico do import. A build 2140 apertava o orçamento
+/// inteiro do import nesse espaço: o decode de cada textura (pico transitório,
+/// ~8 bytes/pixel na resolução original) passava do teto e TODAS as texturas
+/// eram puladas — o modelo entrava cinza em quase todo aparelho. Aqui o pico
+/// continua no orçamento do aparelho e o lado máximo das texturas desce até o
+/// conjunto caber em metade do espaço do projeto (nunca abaixo de 256).
+void fit_model_textures_to_room(scene3d::ImportOptions& o, const std::string& path, u64 room) noexcept {
+    const scene3d::ModelCost cost = scene3d::estimate_model_cost(path);
+    const u64 count = cost.textures ? cost.textures : 4u;
+    const u64 average = cost.textures && cost.texturePixels ? std::max<u64>(1, cost.texturePixels / cost.textures)
+                                                            : 2048ull * 2048ull;
+    u32 side = o.maxTextureSize ? o.maxTextureSize : 4096u;
+    const auto resident = [&](u32 s) { return count * std::min<u64>(average, static_cast<u64>(s) * s) * 4u; };
+    while (side > 256u && resident(side) > room / 2) side /= 2;
+    o.maxTextureSize = side;
+}
+
+} // namespace
+
 scene3d::ImportOptions Engine::model_import_options(const std::string& path, scene3d::ModelQuality quality,
                                                     const scene3d::DeviceMemoryHint& memory, bool escalate,
                                                     scene3d::ModelQuality* used, u32 triangleCeiling) const noexcept {
@@ -565,7 +587,9 @@ void Engine::apply_memory_budgets() noexcept {
     // half for reusable intermediate render targets instead of retaining every
     // preview/export resolution until the frame-age timeout.
     renderer_.set_transient_cache_budget(memory_.budget(MemoryClass::RenderedFrames) / 2);
-    renderer_.set_preview_cache_budget(memory_.budget(MemoryClass::RenderedFrames) / 4);
+    // Prévia em memória pela faixa de RAM do aparelho (32/64/320/512 MiB),
+    // limitada pelo orçamento do processo e pela pressão de memória atual.
+    renderer_.set_preview_cache_budget(preview_cache_budget(caps_.cpu().totalMemoryBytes, budget, memory_.pressure()));
     // Aparelho de entrada (§107): cache de decode menor que o da tabela
     // (a fatia da tabela vale para o plano de sempre, 24 %).
     if (const u32 pct = caps_.policy().decodedFramesBudgetPercent; pct != 24) {
@@ -930,8 +954,9 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
         // Cor escolhida na folha "Novo projeto": vale só para a principal.
         const auto unit = [](f32 v) { return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f; };
         if (Composition* root = result->timeline().composition(result->timeline().root())) {
-            root->set_background(Color{unit(backgroundRgba[0]), unit(backgroundRgba[1]),
-                                       unit(backgroundRgba[2]), unit(backgroundRgba[3])});
+            // Alfa 0 = "Transparente" (Composition::set_background_choice).
+            root->set_background_choice(Color{unit(backgroundRgba[0]), unit(backgroundRgba[1]),
+                                              unit(backgroundRgba[2]), unit(backgroundRgba[3])});
         }
     }
 
@@ -1403,7 +1428,7 @@ Status Engine::load_project(const char* path) noexcept {
                                                     const auto wanted = static_cast<scene3d::ModelQuality>(std::min<u8>(q, 2));
                                                     scene3d::ModelQuality usedQuality = wanted;
                                                     scene3d::ImportOptions mo = model_import_options(file, wanted, {}, true, &usedQuality, ceiling);
-                                                    mo.memoryBudget = std::min(mo.memoryBudget, room);
+                                                    fit_model_textures_to_room(mo, file, room);
                                                     if (usedQuality != wanted)
                                                         AUREA_LOG_WARN("modelo 3D do projeto reaberto mais leve (qualidade %u -> %u) para caber neste aparelho",
                                                                        static_cast<u32>(wanted), static_cast<u32>(usedQuality));
@@ -1942,6 +1967,112 @@ void set_local_from(Layer& lay, const Mat4& local, const Vec3* sampledAnchor = n
     set(TrackProperty::RotationX, rotDeg.x); set(TrackProperty::RotationY, rotDeg.y); set(TrackProperty::RotationZ, rotDeg.z);
     set(TrackProperty::ScaleX, sx); set(TrackProperty::ScaleY, sy);
     set(TrackProperty::ScaleZ, l->transform.scale.z);
+}
+
+/// Apagar o pai manda o filho para o avô com o mesmo cozimento (ver
+/// LayerDelete): o LayerSetParent aninhado lê esta marca.
+thread_local bool tKeepParentMotion = false;
+
+/// Pai que SAI (soltar ou apagar o pai) e que se mexia no trecho do filho:
+/// o filho guarda o resultado da tela quadro a quadro (beta 2140: apagar o
+/// nulo no fim da animação fazia o filho pular para o 1º keyframe ou sair do
+/// centro). Para cada quadro f do trecho, local novo(f) = Pnovo(f)⁻¹ · mundo(f)
+/// vira posição / rotação / escala em keyframes lineares, e o otimizador de
+/// keyframes tira os que não mudam o movimento. Devolve false SEM mexer em
+/// nada quando a relação pai antigo → pai novo é a mesma no trecho inteiro:
+/// aí a compensação de um quadro só (a do LayerSetParent) já preserva o
+/// movimento e as curvas do próprio filho.
+bool bake_parent_motion(const Composition& comp, Layer& l, const Layer& oldP, const Layer* newP, FrameIndex now) noexcept {
+    const i64 lo = l.start.value, hi = std::max(l.start.value + 1, l.end.value);
+    const i64 step = std::max<i64>(1, (hi - lo + 1199) / 1200);   // no máximo ~1200 amostras
+    std::vector<i64> frames;
+    for (i64 f = lo; f < hi; f += step) frames.push_back(f);
+    if (frames.back() != hi - 1) frames.push_back(hi - 1);
+    auto relation = [&](FrameIndex f) {
+        const Mat4 o = layer_world_matrix(comp, oldP, f);
+        return newP ? inverse4(layer_world_matrix(comp, *newP, f)) * o : o;
+    };
+    const Mat4 ref = relation(now);
+    bool varies = false;
+    for (const i64 f : frames) {
+        const Mat4 m = relation(FrameIndex{f});
+        for (int c = 0; c < 4 && !varies; ++c) {
+            const f32 tol = c == 3 ? 1e-2f : 1e-4f;
+            varies = std::fabs(m.col[c].x - ref.col[c].x) > tol || std::fabs(m.col[c].y - ref.col[c].y) > tol
+                  || std::fabs(m.col[c].z - ref.col[c].z) > tol;
+        }
+        if (varies) break;
+    }
+    if (!varies) return false;
+
+    struct Sample { FrameIndex t; Vec3 pos; Vec3 rot; f32 sx, sy; };
+    std::vector<Sample> samples;
+    samples.reserve(frames.size());
+    for (const i64 f : frames) {
+        const FrameIndex at{f};
+        const Mat4 world = layer_world_matrix(comp, l, at);
+        const Mat4 local = newP ? inverse4(layer_world_matrix(comp, *newP, at)) * world : world;
+        const FrameIndex lt = l.local_time(at);
+        const Vec3 anc{l.tracks.sample_or(TrackProperty::AnchorX, lt, l.transform.anchor.x),
+                       l.tracks.sample_or(TrackProperty::AnchorY, lt, l.transform.anchor.y),
+                       l.tracks.sample_or(TrackProperty::AnchorZ, lt, l.transform.anchor.z)};
+        // A mesma decomposição do set_local_from.
+        const Mat4 m = local * Mat4::translation(anc);
+        const Vec3 c0{m.col[0].x, m.col[0].y, m.col[0].z};
+        const Vec3 c1{m.col[1].x, m.col[1].y, m.col[1].z};
+        const Vec3 c2{m.col[2].x, m.col[2].y, m.col[2].z};
+        const f32 sx = c0.length() * (c0.dot(c1.cross(c2)) < 0.f ? -1.f : 1.f);
+        const f32 sy = c1.length(), sz = std::max(1e-6f, c2.length());
+        if (!(std::fabs(sx) > 1e-6f && sy > 1e-6f)) return false;   // degenerado: fica a compensação de um quadro
+        const f32 rx = std::atan2(c1.z / sy, c2.z / sz);
+        const f32 ry = std::asin(std::clamp(-c0.z / sx, -1.0f, 1.0f));
+        const f32 rz = std::atan2(c0.y / sx, c0.x / sx);
+        Vec3 rot{rx / kDeg2Rad, ry / kDeg2Rad, rz / kDeg2Rad};
+        // Giro contínuo: cada ângulo fica a menos de meia volta do anterior
+        // (o primeiro, do valor que o filho tinha) — 2 voltas seguem 2 voltas.
+        const Vec3 prevRot = samples.empty()
+            ? Vec3{l.tracks.sample_or(TrackProperty::RotationX, lt, l.transform.rotation.x),
+                   l.tracks.sample_or(TrackProperty::RotationY, lt, l.transform.rotation.y),
+                   l.tracks.sample_or(TrackProperty::RotationZ, lt, l.transform.rotation.z)}
+            : samples.back().rot;
+        rot.x = prevRot.x + std::remainder(rot.x - prevRot.x, 360.0f);
+        rot.y = prevRot.y + std::remainder(rot.y - prevRot.y, 360.0f);
+        rot.z = prevRot.z + std::remainder(rot.z - prevRot.z, 360.0f);
+        if (std::fabs(rot.x) < 1e-3f) rot.x = 0.0f;
+        if (std::fabs(rot.y) < 1e-3f) rot.y = 0.0f;
+        samples.push_back({lt, Vec3{m.col[3].x, m.col[3].y, std::fabs(m.col[3].z) < 1e-3f ? 0.0f : m.col[3].z}, rot, sx, sy});
+    }
+    const FrameIndex localNow = l.local_time(FrameIndex{std::clamp(now.value, lo, hi - 1)});
+    // Grava uma trilha: um keyframe linear por amostra, otimizado; se no fim
+    // ela não varia, vira valor parado. Devolve o valor no quadro atual.
+    auto write = [&](TrackProperty p, f32 tol, auto get) -> f32 {
+        Track& tr = l.tracks.get_or_create(p);
+        tr.clear();
+        for (const Sample& q : samples) (void)tr.set(q.t, get(q), Interpolation::Linear);
+        (void)animation::optimize_track(tr, tol);
+        if (animation::value_range(tr) <= tol) {
+            const f32 v = get(samples.front());
+            tr.clear();
+            tr.staticValue = v;
+            return v;
+        }
+        return tr.sample_keys(localNow);
+    };
+    auto any = [&](auto get) {
+        return std::any_of(samples.begin(), samples.end(), [&](const Sample& q) { return std::fabs(get(q)) > 1e-3f; });
+    };
+    l.transform.position.x = write(TrackProperty::PositionX, 0.05f, [](const Sample& q) { return q.pos.x; });
+    l.transform.position.y = write(TrackProperty::PositionY, 0.05f, [](const Sample& q) { return q.pos.y; });
+    if (l.tracks.find(TrackProperty::PositionZ) || any([](const Sample& q) { return q.pos.z; }))
+        l.transform.position.z = write(TrackProperty::PositionZ, 0.05f, [](const Sample& q) { return q.pos.z; });
+    if (l.tracks.find(TrackProperty::RotationX) || any([](const Sample& q) { return q.rot.x; }))
+        l.transform.rotation.x = write(TrackProperty::RotationX, 0.02f, [](const Sample& q) { return q.rot.x; });
+    if (l.tracks.find(TrackProperty::RotationY) || any([](const Sample& q) { return q.rot.y; }))
+        l.transform.rotation.y = write(TrackProperty::RotationY, 0.02f, [](const Sample& q) { return q.rot.y; });
+    l.transform.rotation.z = write(TrackProperty::RotationZ, 0.02f, [](const Sample& q) { return q.rot.z; });
+    l.transform.scale.x = write(TrackProperty::ScaleX, 5e-4f, [](const Sample& q) { return q.sx; });
+    l.transform.scale.y = write(TrackProperty::ScaleY, 5e-4f, [](const Sample& q) { return q.sy; });
+    return true;
 }
 
 /// Transform parado (posição/rotação/escala sem keyframes)? Só aí dá para
@@ -7495,7 +7626,7 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     // malhas simplificadas por partes, e recusa com motivo antes de passar.
     if (room < 4096) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
     scene3d::ImportOptions options = model_import_options(request.path, request.quality, request.memory, false);
-    options.memoryBudget = std::min(options.memoryBudget, room);
+    fit_model_textures_to_room(options, request.path, room);
     scene3d::ImportResult r = scene3d::import_scene_file(request.path, options, progress);
     if (!r.ok()) {
         if (detail) *detail = r.detail;
@@ -8565,7 +8696,7 @@ Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noex
     scene3d::ImportOptions options = model_import_options(
         file, static_cast<scene3d::ModelQuality>(std::min<u8>(copy.model.importQuality, 2)), {}, true, nullptr,
         copy.model.triangleCount);
-    options.memoryBudget = std::min(options.memoryBudget, room);
+    fit_model_textures_to_room(options, file, room);
     scene3d::ImportResult r = scene3d::import_scene_file(file, options);
     if (!r.ok()) {
         if (detail) *detail = r.detail;
@@ -8936,6 +9067,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         if (cachedPreview && !rs.rawPlayback) {
             snapshot_ = FrameSnapshot{};
             snapshot_.compWidth = comp->width(); snapshot_.compHeight = comp->height(); snapshot_.time = t;
+            // O passe de saída desenha o xadrez atrás de um fundo transparente.
+            if (comp->transparent_background()) snapshot_.background = Vec4{0.0f, 0.0f, 0.0f, 0.0f};
             ++frameCounter_;
         } else if (rs.rawPlayback && rawLayer && rawAsset) {
             renderer_.prepare_raw(rawPlaybackLayer_, *rawLayer, *rawAsset, playback_.current_ns() / 1000, media_, ++frameCounter_,
@@ -9021,7 +9154,11 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         std::lock_guard<std::mutex> lock(modelMutex_);
         const PreviewIdleKey current{projectSession_, modelRevision_.load(std::memory_order_acquire),
             project_ ? project_->timeline().current().pack() : 0, playback_.media_epoch(), playback_.current().value};
-        if (current != idleKey || playback_.mode() != PlaybackMode::Paused) {
+        // Seek/Play during preparation keeps the frame: it was prepared from
+        // this same revision (seek/play only restart the decoder epoch, not
+        // the content). A different project/revision/composition discards it.
+        if (current.session != idleKey.session || current.revision != idleKey.revision
+            || current.composition != idleKey.composition) {
             renderer_.clear_preview_cache();
             previewIdle_.observe(false, {}, now, false);
         } else {
@@ -10040,7 +10177,7 @@ bool Engine::query_composition(u64& id, u32& width, u32& height, f64& fps, i64& 
     height = c->height();
     fps = c->fps();
     durationFrames = c->duration().value;
-    const Color bg = c->background();
+    const Color bg = c->background_choice();   // alfa 0 = fundo transparente
     background[0] = bg.r;
     background[1] = bg.g;
     background[2] = bg.b;
@@ -12075,7 +12212,31 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
 
         case CommandType::LayerDelete: {
             if (!comp) return Errc::InvalidState;
-            if (!need_layer(cmd.layer_ref.layer)) return Errc::NotFound;
+            const Layer* dead = need_layer(cmd.layer_ref.layer);
+            if (!dead) return Errc::NotFound;
+            // Os filhos da camada apagada vão para o avô (ou ficam soltos) e
+            // GUARDAM o que mostravam na tela, inclusive o movimento de um pai
+            // animado (cozido quadro a quadro). Mesmo passo de desfazer.
+            {
+                const LayerId grand = dead->parent;
+                std::vector<LayerId> kids;
+                for (u32 i = 0; i < comp->order().size(); ++i) {
+                    const LayerId id = comp->order().at(i);
+                    if (const Layer* k = comp->layer(id); k && k->parent == cmd.layer_ref.layer) kids.push_back(id);
+                }
+                for (const LayerId kid : kids) {
+                    Command reparent{};
+                    reparent.type = CommandType::LayerSetParent;
+                    reparent.layer_parent.layer = kid;
+                    reparent.layer_parent.parent = grand;
+                    tKeepParentMotion = true;
+                    const Status st = apply_command_internal(reparent, nullptr, false);
+                    tKeepParentMotion = false;
+                    if (!st.ok()) {
+                        if (Layer* k = comp->layer(kid)) k->parent = LayerId{};
+                    }
+                }
+            }
             media_.close_layer(cmd.layer_ref.layer);
             comp->remove_layer(cmd.layer_ref.layer);
             selection_.erase(std::remove(selection_.begin(), selection_.end(), cmd.layer_ref.layer.pack()),
@@ -12230,6 +12391,17 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const Layer* oldP = l->parent.valid() ? comp->layer(l->parent) : nullptr;
             const Mat4 oldPw = oldP ? worldOf(*oldP) : Mat4::identity();
             const Mat4 world = worldOf(*l);
+            // Pai SAINDO (soltar, ou apagar o pai e ir para o avô): com pai
+            // animado o filho guarda o movimento da tela quadro a quadro.
+            // Ganhar/trocar de pai continua compensando só o quadro atual
+            // (como no AE: o filho passa a seguir o pai novo).
+            if ((!parent.valid() || tKeepParentMotion) && oldP && !in3d && !l->hasParentBasis) {
+                const Layer* np = parent.valid() ? comp->layer(parent) : nullptr;
+                if (!(np && np->threeD) && bake_parent_motion(*comp, *l, *oldP, np, now)) {
+                    l->parent = parent;
+                    return OkStatus;
+                }
+            }
             l->parent = parent;
             // Detaching must not switch an inherited 3D plane to the 2D
             // compositor, which would bypass the scene camera and make it jump.
@@ -12755,7 +12927,18 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // Remapear tempo é declarativo: quem age é a curva da camada. Pôr o
             // efeito liga a curva (a rampa equivalente ao tempo de agora), como
             // ligar o remapeamento no painel de velocidade.
-            if (is_time_remap_type(type)) enable_time_remap_curve(*l);
+            // Efeito NOVO começa limpo: uma curva desligada que sobrou (projeto
+            // antigo, remapeamento desligado no painel) não volta com chaves
+            // que ninguém vê — era o "keyframe salvo sem informação" do beta.
+            if (is_time_remap_type(type)) {
+                const usize remaps = static_cast<usize>(std::count_if(l->effects.begin(), l->effects.end(),
+                    [](const EffectInstance& item) { return is_time_remap_type(item.type); }));
+                if (remaps == 1 && !l->timeRemapEnabled) {
+                    l->timeRemap = Track{};
+                    l->timeRemap.property = TrackProperty::TimeRemap;
+                }
+                enable_time_remap_curve(*l);
+            }
             return OkStatus;
         }
         case CommandType::EffectRemove: {
@@ -12772,11 +12955,23 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 Track& tr = l->tracks.at(t);
                 if (tr.property == TrackProperty::EffectParam && tr.effectIndex == id) tr.clear();
             }
-            // Tirar o Remapear tempo desliga a curva — mas ela FICA guardada,
-            // igual a desligar o remapeamento pelo painel de velocidade.
-            if (era_remap) l->timeRemapEnabled = std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& item) {
-                return item.enabled && is_time_remap_type(item.type);
-            });
+            // Tirar o ÚLTIMO Remapear tempo apaga a curva com as chaves dela,
+            // como qualquer efeito leva os próprios keyframes. Guardá-la (como
+            // o painel de velocidade faz ao desligar) deixava losangos órfãos
+            // na régua que nenhuma linha explicava, e o efeito posto de novo
+            // voltava com eles (beta 2140, visto numa pré-composição).
+            if (era_remap) {
+                const bool another = std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& item) {
+                    return is_time_remap_type(item.type);
+                });
+                if (!another) {
+                    l->timeRemap = Track{};
+                    l->timeRemap.property = TrackProperty::TimeRemap;
+                }
+                l->timeRemapEnabled = std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& item) {
+                    return item.enabled && is_time_remap_type(item.type);
+                });
+            }
             return OkStatus;
         }
         case CommandType::EffectReorder: {
@@ -13121,8 +13316,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::CompositionSetBackground: {
             Composition* c = timeline.composition(cmd.comp_background.comp);
             if (!c) return Errc::NotFound;
-            c->set_background(Color{cmd.comp_background.r, cmd.comp_background.g,
-                                    cmd.comp_background.b, cmd.comp_background.a});
+            // Alfa 0 = "Transparente": a regra é do motor, as telas só mandam a escolha.
+            c->set_background_choice(Color{cmd.comp_background.r, cmd.comp_background.g,
+                                           cmd.comp_background.b, cmd.comp_background.a});
             return OkStatus;
         }
         case CommandType::ProjectSetCurrentComposition: {
@@ -13167,12 +13363,18 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::PlaybackPause:
             cancelPreviewBuffer();
             playback_.pause(now);
+            // O som para JÁ, não no próximo render_frame: saindo do editor a
+            // superfície é solta e a thread de render não roda mais — o
+            // `sync_audio_locked` nunca vinha e o áudio seguia na Home.
+            // `audio_.stop()` é idempotente (sem som tocando, não faz nada).
+            audio_.stop();
             sync_timeline();
             return OkStatus;
         case CommandType::PlaybackToggle:
             if (previewBuffering_ || playback_.playing()) {
                 cancelPreviewBuffer();
                 playback_.pause(now);
+                audio_.stop();
                 sync_timeline();
             } else playWithPreviewBuffer();
             return OkStatus;

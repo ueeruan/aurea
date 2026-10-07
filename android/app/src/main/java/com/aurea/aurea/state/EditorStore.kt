@@ -1253,7 +1253,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         statusSlow = false
     }
 
-    private val previewBufferPairs = LongArray(60)
+    // Até 300 quadros guardados (kPreviewCacheMaxFrames) = no máximo 300 trechos.
+    private val previewBufferPairs = LongArray(600)
     private fun readPreviewBufferRanges(): List<PreviewBufferRange> {
         val count = engine.previewBufferRanges(previewBufferPairs).coerceIn(0, previewBufferPairs.size / 2)
         val previous = previewBufferRanges
@@ -1344,7 +1345,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val now = System.nanoTime()
         if (!status.dirty) { unsavedSinceNs = 0L; return }
         if (unsavedSinceNs == 0L) unsavedSinceNs = now
-        if (autosaving || playing || scrubbing || gestureDepth > 0 || exporter.busy) return
+        // Um gesto aberto há muito tempo sem mudar nada é um begin/end
+        // desemparelhado (painel fechado no meio do arrasto): não pode
+        // bloquear o autosave para sempre — a reinstalação/queda perdia tudo.
+        val staleGesture = gestureDepth > 0 && now - lastModelChangeNs > STALE_GESTURE_NS
+        if (autosaving || playing || scrubbing || (gestureDepth > 0 && !staleGesture) || exporter.busy) return
         // Small repeated edits should still get a checkpoint between gestures.
         if ((now - lastModelChangeNs < AUTOSAVE_IDLE_NS && now - unsavedSinceNs < 30_000_000_000L) ||
             now < autosaveRetryAfterNs) return
@@ -3923,6 +3928,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var maskTracking by mutableStateOf(false)
         private set
     private var maskBuf = FloatArray(1024)
+    /**
+     * Camadas em que a ferramenta-efeito Máscara foi posta (catálogo, busca). O
+     * cartão "Máscara" da pilha fica nelas mesmo vazio — sem caminho escolhido —
+     * até o 🗑 do cartão; antes ele só existia com uma máscara pronta e sumia ao
+     * fechar o painel. Vale para o projeto aberto (zera ao fechar).
+     */
+    var maskToolLayers by mutableStateOf<Set<Long>>(emptySet())
+        private set
+    fun addMaskTool() { primary?.let { if (it !in maskToolLayers) maskToolLayers = maskToolLayers + it } }
+    fun dropMaskTool(layer: Long) { if (layer in maskToolLayers) maskToolLayers = maskToolLayers - layer }
 
     private fun refreshMasks() {
         val id = primary
@@ -5926,6 +5941,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val modelPick = picks.firstOrNull { it.second.substringAfterLast('.', "").lowercase() in MODEL_EXTS }
             val zipPick = picks.firstOrNull { it.second.substringAfterLast('.', "").lowercase() == "zip" }
             if (modelPick == null && zipPick == null) {
+                // Só o .mtl/texturas (o modelo já entrou antes sem eles): religa no
+                // modelo 3D selecionado, pelo mesmo caminho de "Importar texturas".
+                val layer = primary
+                val sideOnly = picks.isNotEmpty() && picks.all { it.second.substringAfterLast('.', "").lowercase() in MODEL_SIDE_EXTS }
+                if (sideOnly && layer != null && engine.modelFolder(layer).isNotEmpty()) {
+                    texturesTarget = MissingModelTextures(layer, engine.modelMissingTextures(layer))
+                    relinkModelFiles(picks.map { it.first })
+                    return@launch
+                }
                 errorMessage = appText(R.string.msg_esse_arquivo_nao_e_um_modelo)
                 return@launch
             }
@@ -6032,6 +6056,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun importModelTextures(uris: List<Uri>) {
         if (!acceptsImport()) return
+        relinkModelFiles(uris)
+    }
+
+    /** Copia o .mtl/texturas escolhidos para a pasta do modelo de [texturesTarget] e relê (motor). */
+    private fun relinkModelFiles(uris: List<Uri>) {
         val req = texturesTarget ?: return
         texturesTarget = null
         missingModelTextures = null
@@ -6042,10 +6071,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val left = withContext(Dispatchers.IO) {
                 val folder = engine.modelFolder(req.layer).takeIf { it.isNotEmpty() }?.let(::File) ?: return@withContext -1_000
                 val wanted = req.names.associateBy { it.lowercase() }
+                // O .mtl escolhido com outro nome vira o .mtl que o OBJ procura.
+                val missingMtl = req.names.singleOrNull { it.lowercase().endsWith(".mtl") }
                 var copied = 0
                 for (uri in uris) {
-                    val picked = displayName(uri) ?: continue
+                    val picked = displayName(uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: continue
                     val named = wanted[picked.lowercase()]
+                        ?: missingMtl?.takeIf { picked.lowercase().endsWith(".mtl") }
                     val target = named ?: safeModelFileName(picked) ?: continue
                     // Fora da lista (a textura que o .mtl escolhido agora vai pedir):
                     // entra, mas nunca por cima de um arquivo que já está na pasta.
@@ -6474,8 +6506,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (sceneEditor) exitSceneEditor()
         val path = project.path
         stopScrubIfNeeded()
-        if (playing) pause()
+        // Sempre, não só com `playing`: essa cópia vem do laço de estado e
+        // pode estar atrasada (play recém-tocado, preparo da prévia). Pausar
+        // parado não faz nada; o motor para o som no próprio comando, e a
+        // gravação abaixo drena a fila mesmo sem a superfície da prévia.
+        pause()
         projectGeneration++
+        maskToolLayers = emptySet()
         launchProjectWork launch@{
             if (path != null) {
                 // Save also drains the final queued edit (status.dirty may lag).
@@ -6811,6 +6848,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val IDLE_POLL_MS = 250L
         /** Silêncio depois da última mudança antes do autosave. */
         const val AUTOSAVE_IDLE_NS = 3_000_000_000L
+        /** Gesto aberto e parado por mais que isto = desemparelhado; o autosave grava assim mesmo. */
+        const val STALE_GESTURE_NS = 10_000_000_000L
         /** Espera depois de um autosave que falhou (ex.: armazenamento cheio). */
         const val AUTOSAVE_RETRY_NS = 30_000_000_000L
         const val META_SUFFIX = ".meta.json"

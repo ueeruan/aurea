@@ -203,7 +203,8 @@ internal fun NewProjectSheetFor(store: EditorStore, vm: HomeViewModel, all: List
         defaultFps = vm.defaultFps,
         onCreate = { spec ->
             // fps livre e fundo escolhidos na folha vão direto para o motor (fora do histórico).
-            val background = floatArrayOf(spec.background[0], spec.background[1], spec.background[2], 1f)
+            // Alfa 0 = "Transparente" (o motor decide: Composition::set_background_choice).
+            val background = floatArrayOf(spec.background[0], spec.background[1], spec.background[2], if (spec.transparent) 0f else 1f)
             vm.afterEngine(store) { store.newProject(spec.width, spec.height, spec.fps, spec.title, background) }
         },
         onDismiss = onDismiss,

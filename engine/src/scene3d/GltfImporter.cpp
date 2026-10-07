@@ -13,6 +13,7 @@
 #include "aurea/core/Time.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cctype>
@@ -790,7 +791,50 @@ Wrap to_wrap(cgltf_int w) noexcept {
     return w == 33071 ? Wrap::Clamp : w == 33648 ? Wrap::Mirror : Wrap::Repeat;
 }
 
-Material build_material(const cgltf_material& m, const cgltf_data* data) {
+/// KHR_materials_pbrSpecularGlossiness: o que a conversão por pixel precisa
+/// depois do decode (a textura especular/brilho e os fatores originais).
+struct SpecGlossSource {
+    bool active = false;
+    TextureRef tex;                 ///< specularGlossinessTexture (RGB especular sRGB, A brilho)
+    TextureRef diffuseTex;          ///< diffuseTexture original
+    Vec4 diffuse{1.0f, 1.0f, 1.0f, 1.0f};
+    Vec3 specular{1.0f, 1.0f, 1.0f};
+    f32 glossiness = 1.0f;
+};
+
+constexpr f32 kDielectricSpecular = 0.04f;
+
+f32 perceived_brightness(f32 r, f32 g, f32 b) noexcept {
+    return std::sqrt(0.299f * r * r + 0.587f * g * g + 0.114f * b * b);
+}
+
+/// Metalicidade que reproduz o par difusa/especular (conversão Khronos/Babylon
+/// de especular-brilho para metal-rugosidade).
+f32 solve_metallic(f32 diffuse, f32 specular, f32 oneMinusSpecularStrength) noexcept {
+    if (specular < kDielectricSpecular) return 0.0f;
+    const f32 a = kDielectricSpecular;
+    const f32 b = diffuse * oneMinusSpecularStrength / (1.0f - a) + specular - 2.0f * a;
+    const f32 c = a - specular;
+    const f32 d = std::max(0.0f, b * b - 4.0f * a * c);
+    return std::clamp((-b + std::sqrt(d)) / (2.0f * a), 0.0f, 1.0f);
+}
+
+/// Difusa + especular (lineares) -> cor base (linear) e metal.
+void spec_gloss_to_metal(const f32 diffuse[3], const f32 specular[3], f32 base[3], f32& metallic) noexcept {
+    const f32 specStrength = std::max({specular[0], specular[1], specular[2]});
+    const f32 oneMinus = 1.0f - specStrength;
+    metallic = solve_metallic(perceived_brightness(diffuse[0], diffuse[1], diffuse[2]),
+                              perceived_brightness(specular[0], specular[1], specular[2]), oneMinus);
+    const f32 a = kDielectricSpecular;
+    const f32 t = metallic * metallic;
+    for (int k = 0; k < 3; ++k) {
+        const f32 fromDiffuse = diffuse[k] * oneMinus / (1.0f - a) / std::max(1.0f - metallic, 1e-4f);
+        const f32 fromSpecular = (specular[k] - a * (1.0f - metallic)) / std::max(metallic, 1e-4f);
+        base[k] = std::clamp(fromDiffuse + (fromSpecular - fromDiffuse) * t, 0.0f, 1.0f);
+    }
+}
+
+Material build_material(const cgltf_material& m, const cgltf_data* data, SpecGlossSource* sgOut = nullptr) {
     Material out;
     out.name = m.name ? m.name : "";
     if (m.has_pbr_metallic_roughness) {
@@ -801,14 +845,46 @@ Material build_material(const cgltf_material& m, const cgltf_data* data) {
         out.baseColorTex = texture_ref(p.base_color_texture, data);
         out.metallicRoughnessTex = texture_ref(p.metallic_roughness_texture, data);
     } else if (m.has_pbr_specular_glossiness) {
-        // Legado (KHR_materials_pbrSpecularGlossiness): aproximação honesta
-        // para metal-rugosidade — difusa vira cor base, brilho vira rugosidade.
+        // Legado (KHR_materials_pbrSpecularGlossiness, comum nos exports antigos
+        // do Sketchfab): convertido para metal-rugosidade. Os fatores aqui; a
+        // textura especular/brilho vira mapa de metal/rugosidade (e, com a
+        // difusa do mesmo tamanho, cor base) por pixel depois do decode.
         const cgltf_pbr_specular_glossiness& sg = m.pbr_specular_glossiness;
-        out.baseColor = Vec4{sg.diffuse_factor[0], sg.diffuse_factor[1], sg.diffuse_factor[2], sg.diffuse_factor[3]};
-        out.metallic = 0.0f;
-        out.roughness = 1.0f - sg.glossiness_factor;
-        out.baseColorTex = texture_ref(sg.diffuse_texture, data);
-        out.ignoredExtensions.push_back("KHR_materials_pbrSpecularGlossiness (aproximado)");
+        const f32 diffuse[3] = {sg.diffuse_factor[0], sg.diffuse_factor[1], sg.diffuse_factor[2]};
+        const f32 specular[3] = {sg.specular_factor[0], sg.specular_factor[1], sg.specular_factor[2]};
+        f32 base[3] = {diffuse[0], diffuse[1], diffuse[2]};
+        f32 metallic = 0.0f;
+        const TextureRef diffuseTex = texture_ref(sg.diffuse_texture, data);
+        // Com textura difusa, o fator multiplica a textura: a conversão da cor
+        // fica para o pixel (aqui só o metal estimado com a difusa a meio-tom).
+        if (!diffuseTex.valid()) spec_gloss_to_metal(diffuse, specular, base, metallic);
+        else metallic = solve_metallic(perceived_brightness(diffuse[0], diffuse[1], diffuse[2]) * 0.5f,
+                                       perceived_brightness(specular[0], specular[1], specular[2]),
+                                       1.0f - std::max({specular[0], specular[1], specular[2]}));
+        out.baseColor = Vec4{base[0], base[1], base[2], sg.diffuse_factor[3]};
+        out.metallic = metallic;
+        out.roughness = std::clamp(1.0f - sg.glossiness_factor, 0.0f, 1.0f);
+        out.baseColorTex = diffuseTex;
+        if (sgOut) {
+            sgOut->active = true;
+            sgOut->tex = texture_ref(sg.specular_glossiness_texture, data);
+            sgOut->diffuseTex = diffuseTex;
+            sgOut->diffuse = Vec4{sg.diffuse_factor[0], sg.diffuse_factor[1], sg.diffuse_factor[2], sg.diffuse_factor[3]};
+            sgOut->specular = Vec3{specular[0], specular[1], specular[2]};
+            sgOut->glossiness = sg.glossiness_factor;
+        }
+    }
+    // EXT_texture_webp sem PNG/JPEG de reserva: este decodificador não lê WebP;
+    // o mapa fica de fora com aviso (o modelo entra mesmo assim).
+    for (const cgltf_texture_view* v : {&m.pbr_metallic_roughness.base_color_texture,
+                                        &m.pbr_metallic_roughness.metallic_roughness_texture,
+                                        &m.pbr_specular_glossiness.diffuse_texture,
+                                        &m.pbr_specular_glossiness.specular_glossiness_texture,
+                                        &m.normal_texture, &m.occlusion_texture, &m.emissive_texture}) {
+        if (v->texture && !v->texture->image && !v->texture->has_basisu && v->texture->has_webp) {
+            out.ignoredExtensions.push_back("EXT_texture_webp sem PNG/JPEG (textura ignorada)");
+            break;
+        }
     }
     out.normalTex = texture_ref(m.normal_texture, data);
     out.normalScale = m.normal_texture.texture ? m.normal_texture.scale : 1.0f;
@@ -1063,6 +1139,131 @@ std::vector<Mat4> SceneAsset::rest_world_matrices() const {
     return world;
 }
 
+namespace {
+
+f32 srgb_to_linear_u8(u8 v) noexcept {
+    static const auto lut = [] {
+        std::array<f32, 256> t{};
+        for (int i = 0; i < 256; ++i) {
+            const f32 c = static_cast<f32>(i) / 255.0f;
+            t[static_cast<usize>(i)] = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+        }
+        return t;
+    }();
+    return lut[v];
+}
+
+u8 linear_to_srgb_u8(f32 c) noexcept {
+    c = std::clamp(c, 0.0f, 1.0f);
+    const f32 s = c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+    return static_cast<u8>(std::lround(std::clamp(s, 0.0f, 1.0f) * 255.0f));
+}
+
+/// Especular/brilho por pixel -> mapa de metal (B) e rugosidade (G); com a
+/// difusa do mesmo tamanho, também a cor base. As imagens novas entram no fim
+/// de A.images; as originais que só a conversão usava são liberadas.
+void convert_spec_gloss_textures(SceneAsset& A, const std::vector<SpecGlossSource>& specGloss) {
+    std::vector<u32> refs(A.images.size(), 0);
+    auto count = [&](const TextureRef& t) {
+        if (t.valid() && t.image < static_cast<i32>(refs.size())) ++refs[static_cast<usize>(t.image)];
+    };
+    for (const Material& m : A.materials)
+        for (const TextureRef* t : {&m.baseColorTex, &m.metallicRoughnessTex, &m.normalTex, &m.occlusionTex, &m.emissiveTex}) count(*t);
+    for (const SpecGlossSource& sg : specGloss) if (sg.active) count(sg.tex);
+
+    for (usize mi = 0; mi < specGloss.size() && mi < A.materials.size(); ++mi) {
+        const SpecGlossSource& sg = specGloss[mi];
+        if (!sg.active || !sg.tex.valid() || sg.tex.image >= static_cast<i32>(refs.size())) continue;
+        Material& mat = A.materials[mi];
+        const usize si = static_cast<usize>(sg.tex.image);
+        if (A.images[si].rgba.empty() || !A.images[si].width || !A.images[si].height) continue;
+        const u32 w = A.images[si].width, h = A.images[si].height;
+        const usize px = static_cast<usize>(w) * h;
+        if (A.images[si].rgba.size() < px * 4) continue;
+        // A difusa só entra no pixel quando casa 1:1 com a especular (mesmo
+        // tamanho, UV e transformação); senão fica a textura difusa como cor base.
+        i32 di = -1;
+        if (sg.diffuseTex.valid() && sg.diffuseTex.image < static_cast<i32>(refs.size())) {
+            const Image& d = A.images[static_cast<usize>(sg.diffuseTex.image)];
+            const bool same = d.width == w && d.height == h && d.rgba.size() >= px * 4
+                           && sg.diffuseTex.texCoord == sg.tex.texCoord
+                           && sg.diffuseTex.offset.x == sg.tex.offset.x && sg.diffuseTex.offset.y == sg.tex.offset.y
+                           && sg.diffuseTex.scale.x == sg.tex.scale.x && sg.diffuseTex.scale.y == sg.tex.scale.y
+                           && sg.diffuseTex.rotation == sg.tex.rotation;
+            if (same) di = sg.diffuseTex.image;
+        }
+        Image mr;
+        mr.name = A.images[si].name + " (metal/rugosidade)";
+        mr.width = w;
+        mr.height = h;
+        mr.rgba.assign(px * 4, 255);
+        Image base;
+        if (di >= 0) {
+            base.name = A.images[static_cast<usize>(di)].name + " (cor base)";
+            base.width = w;
+            base.height = h;
+            base.rgba.resize(px * 4);
+            base.hasAlpha = A.images[static_cast<usize>(di)].hasAlpha;
+        }
+        {
+            const std::vector<u8>& S = A.images[si].rgba;
+            const std::vector<u8>* D = di >= 0 ? &A.images[static_cast<usize>(di)].rgba : nullptr;
+            // Sem difusa por pixel: o brilho da difusa vem do fator (meio-tom se
+            // ainda houver textura difusa, que não dá para casar aqui).
+            const f32 k = sg.diffuseTex.valid() ? 0.5f : 1.0f;
+            const f32 flatDiffuse[3] = {sg.diffuse.x * k, sg.diffuse.y * k, sg.diffuse.z * k};
+            for (usize p = 0; p < px; ++p) {
+                const u8* s = &S[p * 4];
+                const f32 spec[3] = {srgb_to_linear_u8(s[0]) * sg.specular.x, srgb_to_linear_u8(s[1]) * sg.specular.y,
+                                     srgb_to_linear_u8(s[2]) * sg.specular.z};
+                f32 diff[3] = {flatDiffuse[0], flatDiffuse[1], flatDiffuse[2]};
+                if (D) {
+                    const u8* d = &(*D)[p * 4];
+                    diff[0] = srgb_to_linear_u8(d[0]) * sg.diffuse.x;
+                    diff[1] = srgb_to_linear_u8(d[1]) * sg.diffuse.y;
+                    diff[2] = srgb_to_linear_u8(d[2]) * sg.diffuse.z;
+                }
+                f32 rgb[3];
+                f32 metallic = 0.0f;
+                spec_gloss_to_metal(diff, spec, rgb, metallic);
+                const f32 gloss = (static_cast<f32>(s[3]) / 255.0f) * sg.glossiness;
+                mr.rgba[p * 4 + 1] = static_cast<u8>(std::lround(std::clamp(1.0f - gloss, 0.0f, 1.0f) * 255.0f));
+                mr.rgba[p * 4 + 2] = static_cast<u8>(std::lround(metallic * 255.0f));
+                if (D) {
+                    base.rgba[p * 4 + 0] = linear_to_srgb_u8(rgb[0]);
+                    base.rgba[p * 4 + 1] = linear_to_srgb_u8(rgb[1]);
+                    base.rgba[p * 4 + 2] = linear_to_srgb_u8(rgb[2]);
+                    base.rgba[p * 4 + 3] = (*D)[p * 4 + 3];
+                }
+            }
+        }
+        A.stats.imageBytes += mr.rgba.size() + base.rgba.size();
+        TextureRef mrRef = sg.tex;
+        mrRef.image = static_cast<i32>(A.images.size());
+        A.images.push_back(std::move(mr));
+        mat.metallicRoughnessTex = mrRef;
+        mat.metallic = 1.0f;    // o mapa já traz o valor final
+        mat.roughness = 1.0f;
+        auto release = [&](usize i) {
+            if (--refs[i] != 0) return;
+            A.stats.imageBytes -= std::min<u64>(A.stats.imageBytes, A.images[i].rgba.size());
+            A.images[i].rgba.clear();
+            A.images[i].rgba.shrink_to_fit();
+        };
+        if (di >= 0) {
+            TextureRef baseRef = sg.diffuseTex;
+            baseRef.image = static_cast<i32>(A.images.size());
+            A.images.push_back(std::move(base));
+            release(static_cast<usize>(di));
+            mat.baseColorTex = baseRef;
+            mat.baseColor = Vec4{1.0f, 1.0f, 1.0f, sg.diffuse.w};
+        }
+        release(si);
+    }
+}
+
+} // namespace
+
 ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& baseDir,
                                 const ImportOptions& options, ImportProgress* progress) {
     const u64 tParse = monotonic_ns();
@@ -1090,17 +1291,23 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
     }
     struct Guard { cgltf_data* d; ~Guard() { cgltf_free(d); } } guard{data};
 
-    // Extensões obrigatórias: sem suporte = não finge.
+    // Extensões obrigatórias: compressão de malha sem suporte = não finge; as
+    // outras viram aviso.
+    std::vector<std::string> requiredWarnings;
     for (cgltf_size i = 0; i < data->extensions_required_count; ++i) {
         const std::string ext = data->extensions_required[i];
         if (ext == "KHR_draco_mesh_compression" || ext == "EXT_meshopt_compression") {
             return fail_result(ImportError::UnsupportedCompression, ext + " (ainda nao suportado)");
         }
         static const char* known[] = {"KHR_texture_transform", "KHR_materials_unlit", "KHR_mesh_quantization",
-                                      "KHR_texture_basisu", "KHR_materials_emissive_strength", "KHR_lights_punctual"};
+                                      "KHR_texture_basisu", "KHR_materials_emissive_strength", "KHR_lights_punctual",
+                                      "KHR_materials_pbrSpecularGlossiness", "EXT_texture_webp"};
         bool ok = false;
         for (const char* k : known) ok = ok || ext == k;
-        if (!ok) return fail_result(ImportError::UnsupportedFeature, "extensao obrigatoria nao suportada: " + ext);
+        // Sketchfab e outros exportadores marcam extensões de material como
+        // obrigatórias: a geometria continua legível, então o modelo entra
+        // com aviso em vez de recusar o arquivo inteiro.
+        if (!ok) requiredWarnings.push_back("extensao obrigatoria nao suportada (ignorada): " + ext);
     }
 
     const std::string loadPath = baseDir + "x.gltf";   // cgltf compõe URIs relativas a partir deste caminho
@@ -1117,6 +1324,7 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
     auto asset = std::make_unique<SceneAsset>();
     SceneAsset& A = *asset;
     A.stats.parseMs = ms_since(tParse);
+    A.warnings = std::move(requiredWarnings);
 
     // --- Nós -------------------------------------------------------------------
     A.nodes.resize(data->nodes_count);
@@ -1206,8 +1414,9 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
     A.stats.geometryMs = ms_since(tGeo);
 
     // --- Materiais e imagens ---------------------------------------------------
+    std::vector<SpecGlossSource> specGloss(data->materials_count);
     for (cgltf_size i = 0; i < data->materials_count; ++i) {
-        A.materials.push_back(build_material(data->materials[i], data));
+        A.materials.push_back(build_material(data->materials[i], data, &specGloss[i]));
         for (const std::string& e : A.materials.back().ignoredExtensions) {
             const std::string w = "material '" + A.materials.back().name + "': " + e + " lido, ainda nao renderizado";
             if (std::find(A.warnings.begin(), A.warnings.end(), w) == A.warnings.end()) A.warnings.push_back(w);
@@ -1231,6 +1440,8 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
             if (t->valid() && t->image < static_cast<i32>(used.size())) used[t->image] = 1;
         }
     }
+    for (const SpecGlossSource& sg : specGloss)
+        if (sg.active && sg.tex.valid() && sg.tex.image < static_cast<i32>(used.size())) used[sg.tex.image] = 1;
     const u64 tImg = monotonic_ns();
     set_phase(progress, ImportPhase::Textures);
     A.images.resize(data->images_count);
@@ -1253,7 +1464,22 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         } else if (!decode_image(data->images[i], opts, baseDir, A.images[i], fail, options.maxTextureSize, transient,
                                  &w0, &h0, &skipped)) {
             if (budget.exceeded) return fail_result(ImportError::TooHeavy, "texturas 3D excedem a memoria disponivel para importar");
-            return fail_result(fail.error, fail.detail);
+            // Textura ausente ou ilegível (WebP, KTX2 sem reserva, arquivo
+            // corrompido): o modelo entra sem ela, com aviso. Antes o import
+            // inteiro falhava e o preview nem abria. A ausente vai para a lista
+            // de "Importar texturas".
+            A.images[i].rgba.clear();
+            A.images[i].width = A.images[i].height = 0;
+            if (fail.error == ImportError::MissingBuffer && !A.images[i].uri.empty()) {
+                const std::string& u = A.images[i].uri;
+                const usize slash = u.find_last_of("/\\");
+                const std::string name = slash == std::string::npos ? u : u.substr(slash + 1);
+                if (std::find(A.missingTextures.begin(), A.missingTextures.end(), name) == A.missingTextures.end())
+                    A.missingTextures.push_back(name);
+            }
+            A.warnings.push_back("textura ignorada: " + fail.detail);
+            fail = {};
+            continue;
         }
         if (skipped) {
             A.images[i].rgba.clear();
@@ -1269,6 +1495,7 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         A.stats.imageBytes += A.images[i].rgba.size();
         set_fraction(progress, static_cast<f32>(i + 1) / static_cast<f32>(data->images_count));
     }
+    convert_spec_gloss_textures(A, specGloss);
     A.stats.imagesMs = ms_since(tImg);
 
     // Tangentes: só onde há mapa de normal (é o único consumidor).

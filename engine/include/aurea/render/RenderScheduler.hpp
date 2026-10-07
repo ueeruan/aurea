@@ -67,7 +67,7 @@ struct FrameBudget {
 /// O motor só expõe os botões; quem gira cada um é o sistema (partículas,
 /// flow, 3D, blur), cada um na sua frente.
 struct PreviewQuality {
-    f32 motionBlurSamples = 1.0f;   ///< fração de `MotionBlurSettings::previewSamples`
+    f32 motionBlurSamples = 1.0f;   ///< fração de `MotionBlurSettings::samples` na prévia
     f32 flowResolution    = 1.0f;   ///< resolução do optical flow
     f32 ssao              = 1.0f;   ///< 0 = desligado no preview
     f32 shadowResolution  = 1.0f;   ///< lado do mapa de sombra

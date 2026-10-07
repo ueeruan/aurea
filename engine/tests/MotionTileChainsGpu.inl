@@ -113,3 +113,94 @@ AUREA_TEST(Gpu, MotionTileMirrorAfterBlurKeepsItsPeriodWhenTheImageMovesOffscree
     std::printf("    blur before mirrored tile, one-period pan: maximum pixel error %.4f\n", worst);
     AUREA_CHECK(worst < 0.015f);
 }
+
+// Beta 2140: "projetos antigos com o Motion Tile bugado não consertam; só os
+// criados nas versões novas". O projeto antigo trazia o "Esticar bordas"
+// ligado (slot oculto 6): a parede virava a borda esticada da layer — sem
+// cópias, preto em volta, espelho perdido — e sem controle para desligar.
+// Aberto hoje, o projeto antigo (9 slots, build <= 2125; ou 10 slots, já
+// convertido e salvo pelas 2126-2139) desenha IGUAL ao mesmo ajuste feito
+// num projeto novo, e os ajustes da pessoa (ladrilho, espelho) ficam.
+AUREA_TEST(Gpu, MotionTileOldProjectRendersLikeTheSameSetupCreatedNew) {
+    AUREA_REQUIRE_GPU();
+    std::error_code ec;
+    std::filesystem::create_directories("build/prompt03", ec);
+    auto layerOf = [](Engine& e, LayerId id) {
+        return e.project()->timeline().composition(e.project()->timeline().current())->layer(id);
+    };
+    auto addTile = [](Engine& e, LayerId& id) {
+        const auto text = e.add_text("Aurea");
+        if (!text.ok()) return false;
+        id = LayerId::unpack(*text);
+        Command add;
+        add.type = CommandType::EffectAdd;
+        add.effect_add.layer = id;
+        add.effect_add.effectType = effect_type_id(effect_keys::kMotionTile);
+        add.effect_add.index = kInvalidIndex;
+        return e.apply_command(add).ok();
+    };
+
+    // O ajuste feito hoje pela tela: ladrilho 34%, espelhado.
+    Scene3DRig fresh(256, 144);
+    LayerId freshId;
+    AUREA_CHECK(addTile(fresh.e, freshId));
+    if (!layerOf(fresh.e, freshId)) return;
+    const u32 freshFx = layerOf(fresh.e, freshId)->effects.back().id;
+    const std::pair<u32, f32> sets[] = {
+        {motion_tile::kTileWidth, 34.0f}, {motion_tile::kTileHeight, 34.0f}, {motion_tile::kMirror, 1.0f}};
+    for (const auto& [param, value] : sets) {
+        Command set;
+        set.type = CommandType::EffectSetParam;
+        set.effect_param.layer = freshId;
+        set.effect_param.effect = EffectId{freshFx, 0};
+        set.effect_param.paramIndex = param;
+        set.effect_param.value = value;
+        AUREA_CHECK(fresh.e.apply_command(set).ok());
+    }
+    const Image8 expected = fresh.capture(256);
+    const f32 tiled = coverage(expected);
+
+    for (const u32 slots : {motion_tile::kLegacyParamCount, motion_tile::kLegacyParamCount + 1}) {
+        Scene3DRig old(256, 144);
+        LayerId oldId;
+        AUREA_CHECK(addTile(old.e, oldId));
+        Layer* l = layerOf(old.e, oldId);
+        if (!l) return;
+        EffectInstance& fx = l->effects.back();
+        fx.params.resize(slots);
+        fx.params[motion_tile::kTileWidth].constant.v[0] = 34.0f;
+        fx.params[motion_tile::kTileHeight].constant.v[0] = 34.0f;
+        fx.params[motion_tile::kMirror].constant = ParamValue::boolean(true);
+        fx.params[motion_tile::kLegacyClamp].constant = ParamValue::boolean(true);
+        l->tracks.get_or_create(TrackProperty::EffectParam, fx.id, param_track_key(motion_tile::kLegacyClamp, 0))
+            .set(FrameIndex{12}, 1.0f);
+        const u32 fxId = fx.id;
+        const std::string path = "build/prompt03/old-motion-tile-clamp-" + std::to_string(slots) + ".aurea";
+        AUREA_CHECK(old.e.save_project(path.c_str()).ok());
+        AUREA_CHECK(old.e.load_project(path.c_str()).ok());
+
+        const Layer* back = layerOf(old.e, oldId);
+        AUREA_CHECK(back != nullptr);
+        if (!back) return;
+        const EffectInstance& loaded = back->effects.back();
+        AUREA_CHECK_EQ(loaded.params.size(), static_cast<usize>(motion_tile::kScale + 1));
+        AUREA_CHECK(!loaded.params[motion_tile::kLegacyClamp].constant.as_bool());
+        AUREA_CHECK(back->tracks.find(TrackProperty::EffectParam, fxId,
+                                      param_track_key(motion_tile::kLegacyClamp, 0)) == nullptr);
+        AUREA_CHECK(loaded.params[motion_tile::kMirror].constant.as_bool());
+        AUREA_CHECK_NEAR(loaded.params[motion_tile::kTileWidth].constant.v[0], 34.0f, 1e-4f);
+
+        const Image8 got = old.capture(256);
+        AUREA_CHECK_EQ(got.width, expected.width);
+        AUREA_CHECK_EQ(got.height, expected.height);
+        if (got.width != expected.width || got.height != expected.height) return;
+        u32 worst = 0;
+        for (u32 y = 0; y < got.height; ++y)
+            for (u32 x = 0; x < got.width; ++x)
+                for (u32 c = 0; c < 3; ++c)
+                    worst = std::max<u32>(worst, static_cast<u32>(std::abs(int(got.at(x, y)[c]) - int(expected.at(x, y)[c]))));
+        std::printf("    old project (%u slots, clamp on) vs new: max diff %u, coverage %.3f vs %.3f\n",
+                    slots, worst, coverage(got), tiled);
+        AUREA_CHECK(worst <= 2u);
+    }
+}

@@ -90,6 +90,20 @@ vec3 divide(vec3 b, vec3 s) {
                 s.b <= 1e-6 ? 1.0 : min(b.b / s.b, 1.0));
 }
 
+// Exclusão na cor CODIFICADA (sRGB), como o AE/Photoshop em 8/16 bits: a
+// fórmula B + S − 2·B·S é uma inversão parcial, e inverter o valor LINEAR
+// lavava a imagem (branco por cima de uma foto dava quase branco em vez do
+// negativo; só os tons mais claros do fundo apareciam — beta 2140, "usa só
+// algumas cores"). Entra e sai do espaço de trabalho linear.
+float srgb_enc1(float c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+float srgb_dec1(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+vec3 srgb_enc(vec3 c) { return vec3(srgb_enc1(c.r), srgb_enc1(c.g), srgb_enc1(c.b)); }
+vec3 srgb_dec(vec3 c) { return vec3(srgb_dec1(c.r), srgb_dec1(c.g), srgb_dec1(c.b)); }
+vec3 exclusion(vec3 b, vec3 s) {
+    const vec3 eb = srgb_enc(b), es = srgb_enc(s);
+    return srgb_dec(clamp(eb + es - 2.0 * eb * es, 0.0, 1.0));
+}
+
 float lum(vec3 c) { return dot(c, kLuma); }
 vec3 clip_color(vec3 c) {
     const float l = lum(c);
@@ -133,7 +147,7 @@ vec3 blend(int mode, vec3 b, vec3 s) {
         case kColorBurn:  return vec3(burn(b.r, s.r), burn(b.g, s.g), burn(b.b, s.b));
         case kHardLight:  return hard_light(b, s);
         case kSoftLight:  return soft_light(b, s);
-        case kExclusion:  return b + s - 2.0 * b * s;
+        case kExclusion:  return exclusion(b, s);   // b e s já presos em [0,1]
         case kHue:        return set_lum(set_sat(s, sat(b)), lum(b));
         case kSaturation: return set_lum(set_sat(b, sat(s)), lum(b));
         case kColor:      return set_lum(s, lum(b));

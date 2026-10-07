@@ -1234,6 +1234,87 @@ AUREA_TEST(Engine, MobileUnlinkKeepsChildrenInPlaceAndUndoes) {
     }
 }
 
+// Beta 2140: apagar o nulo ANIMADO (no fim da animação) fazia o filho pular
+// para o quadro do 1º keyframe ou sair do centro. O filho tem que guardar o
+// resultado da tela em TODOS os quadros (pai cozido por quadro), ao apagar o
+// pai (com e sem avô) e ao soltar; desfazer volta tudo num passo só.
+AUREA_TEST(Engine, RemovingAnAnimatedParentBakesTheChildMotion) {
+    for (u32 mode : {0u, 1u, 2u}) {   // 0 apagar, 1 apagar com avô, 2 soltar
+        Engine e;
+        AUREA_CHECK(e.initialize(headless_config()).ok());
+        AUREA_CHECK(e.new_project(1280, 720, 30, nullptr).ok());
+        const auto grandId = e.add_null(false), parentId = e.add_null(false), childId = e.add_shape(0);
+        AUREA_CHECK(grandId.ok() && parentId.ok() && childId.ok());
+        if (!grandId.ok() || !parentId.ok() || !childId.ok()) continue;
+        auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        auto child = [&] { return comp->layer(LayerId::unpack(*childId)); };
+        auto* grand = comp->layer(LayerId::unpack(*grandId));
+        grand->transform.position = {500, 300, 0};
+        grand->transform.rotation = {0, 0, 20};
+        auto* parent = comp->layer(LayerId::unpack(*parentId));
+        if (mode == 1) parent->parent = LayerId::unpack(*grandId);
+        parent->transform.position = {200, 360, 0};
+        // Anda, dá DUAS voltas e cresce entre os quadros 0 e 30; depois fica.
+        parent->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{0}, 200);
+        parent->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{30}, 900);
+        parent->tracks.get_or_create(TrackProperty::RotationZ).set(FrameIndex{0}, 0);
+        parent->tracks.get_or_create(TrackProperty::RotationZ).set(FrameIndex{30}, 720);
+        for (auto p : {TrackProperty::ScaleX, TrackProperty::ScaleY}) {
+            parent->tracks.get_or_create(p).set(FrameIndex{0}, 1.0f);
+            parent->tracks.get_or_create(p).set(FrameIndex{30}, 1.5f);
+        }
+        child()->parent = LayerId::unpack(*parentId);
+        child()->transform.position = {120, 40, 0};
+        child()->tracks.get_or_create(TrackProperty::RotationZ).set(FrameIndex{0}, 0);
+        child()->tracks.get_or_create(TrackProperty::RotationZ).set(FrameIndex{60}, 90);
+        const FrameIndex probe[] = {FrameIndex{0}, FrameIndex{7}, FrameIndex{15}, FrameIndex{22}, FrameIndex{29}, FrameIndex{30}, FrameIndex{45}};
+        Mat4 before[7];
+        for (u32 i = 0; i < 7; ++i) before[i] = layer_world_matrix(*comp, *child(), probe[i]);
+        // O usuário está no fim da animação.
+        Command seek; seek.type = CommandType::PlaybackSeek; seek.seek.time = tick_at(FrameIndex{30}, 30.0);
+        AUREA_CHECK(e.apply_command(seek).ok());
+        Command cmd{};
+        if (mode < 2) {
+            cmd.type = CommandType::LayerDelete;
+            cmd.layer_ref.layer = LayerId::unpack(*parentId);
+        } else {
+            cmd.type = CommandType::LayerSetParent;
+            cmd.layer_parent = {LayerId::unpack(*childId), LayerId::unpack(0)};
+        }
+        AUREA_CHECK(e.apply_command(cmd).ok());
+        AUREA_CHECK(child() != nullptr);
+        if (!child()) continue;
+        if (mode == 1) AUREA_CHECK(child()->parent == LayerId::unpack(*grandId));
+        else AUREA_CHECK(!child()->parent.valid());
+        f32 worst = 0.0f;
+        for (u32 i = 0; i < 7; ++i) {
+            const Mat4 after = layer_world_matrix(*comp, *child(), probe[i]);
+            for (Vec3 point : {Vec3{0, 0, 0}, Vec3{100, 0, 0}, Vec3{0, 100, 0}})
+                worst = std::max(worst, (before[i].transform_point(point) - after.transform_point(point)).length());
+        }
+        std::printf("    modo %u: pior desvio %.3f px, %zu chaves de rotação ", mode, worst,
+                    child()->tracks.find(TrackProperty::RotationZ) ? child()->tracks.find(TrackProperty::RotationZ)->keys.size() : 0u);
+        AUREA_CHECK(worst < 0.5f);
+        // As duas voltas do pai continuam voltas: quadro a quadro o giro anda
+        // os ~25° do pai, sem pulo de meia volta (desembrulhar errado).
+        if (const Track* rz = child()->tracks.find(TrackProperty::RotationZ)) {
+            AUREA_CHECK(rz->keys.size() >= 2);
+            for (i64 f = 1; f <= 45; ++f)
+                AUREA_CHECK(std::fabs(rz->sample_keys(FrameIndex{f}) - rz->sample_keys(FrameIndex{f - 1})) < 90.0f);
+            AUREA_CHECK(std::fabs(rz->sample_keys(FrameIndex{30}) - rz->sample_keys(FrameIndex{0})) > 700.0f);
+        }
+        Command undo; undo.type = CommandType::Undo;
+        AUREA_CHECK(e.apply_command(undo).ok());
+        AUREA_CHECK(comp->layer(LayerId::unpack(*parentId)) != nullptr);
+        AUREA_CHECK(child() && child()->parent == LayerId::unpack(*parentId));
+        if (child()) {
+            const Mat4 again = layer_world_matrix(*comp, *child(), FrameIndex{15});
+            AUREA_CHECK((again.transform_point(Vec3{0, 0, 0}) - before[2].transform_point(Vec3{0, 0, 0})).length() < 0.05f);
+        }
+        e.shutdown();
+    }
+}
+
 AUREA_TEST(Engine, ParentRowsExposeNestedLinksInDisplayOrder) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

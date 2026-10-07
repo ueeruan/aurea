@@ -26,12 +26,16 @@ internal fun effectToolPanel(tool: EffectTool): EditorPanel = when (tool) {
 
 /**
  * ABRE uma ferramenta-efeito na camada escolhida: a única porta que o resto do
- * app precisa (catálogo, pilha da camada, busca de comandos).
+ * app precisa (catálogo, pilha da camada, busca de comandos). A Máscara fica
+ * na pilha da camada desde aqui, mesmo que o painel feche sem caminho nenhum.
  */
-internal fun openEffectTool(onOpenPanel: (EditorPanel) -> Unit, tool: EffectTool) = onOpenPanel(effectToolPanel(tool))
+internal fun openEffectTool(store: EditorStore, onOpenPanel: (EditorPanel) -> Unit, tool: EffectTool) {
+    if (tool == EffectTool.Mask) store.addMaskTool()
+    onOpenPanel(effectToolPanel(tool))
+}
 
 /** Mesma porta, de dentro de um painel. */
-internal fun openEffectTool(env: PanelEnv, tool: EffectTool) = openEffectTool(env.onOpenPanel, tool)
+internal fun openEffectTool(env: PanelEnv, tool: EffectTool) = openEffectTool(env.store, env.onOpenPanel, tool)
 
 /**
  * A TELA "ADICIONAR EFEITO" pedida de fora do painel Efeitos (o caminho normal
@@ -51,7 +55,7 @@ internal fun EffectsBrowser(store: EditorStore, onOpenPanel: (EditorPanel) -> Un
         },
         onTool = { tool ->
             onDismiss()
-            openEffectTool(onOpenPanel, tool)
+            openEffectTool(store, onOpenPanel, tool)
         },
         onDismiss = onDismiss,
     )

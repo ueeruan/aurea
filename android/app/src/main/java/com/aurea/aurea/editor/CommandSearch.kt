@@ -126,7 +126,7 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
                                 when {
                                     hit.effect != null -> { store.addEffect(hit.effect); store.effectPrefs.addRecent(hit.effect); openPanel(store, ui, EditorPanel.Effects) }
                                     hit.id.startsWith("tool:") -> com.aurea.aurea.effects.EffectTool.entries.firstOrNull { "tool:${it.key}" == hit.id }
-                                        ?.let { tool -> com.aurea.aurea.editor.panels.openEffectTool({ p -> openPanel(store, ui, p) }, tool) }
+                                        ?.let { tool -> com.aurea.aurea.editor.panels.openEffectTool(store, { p -> openPanel(store, ui, p) }, tool) }
                                     else -> executeEditorCommand(hit.id, store, ui)
                                 }
                             }

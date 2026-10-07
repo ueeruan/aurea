@@ -96,6 +96,16 @@ private val BlendCategories = listOf(
             BlendChoice(R.string.pn_blend_vivid_light, 19, BlendMode.SrcOver),
         ),
     ),
+    // Diferença · Exclusão · Subtrair: o grupo tinha sumido no build 2136 (a
+    // Exclusão não aparecia no Android); igual ao iOS ([12, 13, 2]).
+    BlendCategory(
+        R.string.pn_blend_difference,
+        listOf(
+            BlendChoice(R.string.pn_blend_difference, 12, BlendMode.Difference),
+            BlendChoice(R.string.pn_blend_exclusion, 13, BlendMode.Exclusion),
+            BlendChoice(R.string.pn_blend_subtract, 2, BlendMode.SrcOver),
+        ),
+    ),
     BlendCategory(
         R.string.pn_blend_color,
         listOf(

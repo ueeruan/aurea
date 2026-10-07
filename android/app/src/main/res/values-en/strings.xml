@@ -1776,7 +1776,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Update 2140 • 10/06/2026\n\n• Cuts between clips without ghost frames (preview and export).\n• Export no longer stalls at a percentage: if the phone\'s encoder hangs, the app retries in safe mode.\n• Light Rays and Lens Flare work on text.\n• Dragging a layer after keyframing works again.\n• Imported media lands at the playhead.\n• Marker button always next to play; beats visible on the timeline.\n• Buttons to jump to the layer start/end and move its start/end to the playhead.\n• New effects: Liquid glass, Dissolve, Page turn and 8-bit.\n• Copy and paste Transform.\n• 9 new shapes: Heart, Seal, Arc, Speech bubble, Bolt, Wave, Blob, Line and Diamond.\n• Turbulent Displace with 9 types, cycle and locked edges.\n• 3D: material previews and a Show interior option (see inside the cube).\n• 3D camera, 360 background and lights respect the layer\'s cut.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.2 (2141) • 10/06/2026\n\n• 3D models import with textures again (GLB, glTF, OBJ+MTL and FBX); Sketchfab models keep reflections.\n• You can pick the .mtl after the OBJ.\n• 2D layers in 3D receive the scene\'s lights.\n• Export PNG and PNG sequence without background: Transparent option in the project.\n• Echo, Timewarp RGB and Motion detect work in pre-compositions.\n• Time Remap: removing the effect deletes its keyframes.\n• Much larger preview in memory (based on the phone\'s RAM).\n• Rotation shows turns (2x +30°).\n• Mask no longer disappears when closing the panel.\n• Link to a null with one tap; deleting the null keeps the child\'s motion.\n• Audio stops when leaving the editor.\n• Exclusion blend mode correct on images.\n• Motion Tile fixed in old projects.\n• New player bar: grid, fast preview, marker, frames, layers, undo and redo.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -3608,4 +3608,12 @@ to edit the curve.</string>
     <string name="fxo_cross_2">Cross</string>
     <string name="fxl_cycle_evolution">Cycle evolution</string>
     <string name="fxl_cycle_in_revolutions">Cycle (in revolutions)</string>
+    <string name="fxui_tool_mask_empty">Empty — tap to draw</string>
+    <string name="editor_grade_tercos">Rule-of-thirds grid (not exported)</string>
+    <string name="editor_previa_rapida">Fast preview (1/4 resolution)</string>
+    <string name="sh_bg_transparent">Transparent</string>
+    <string name="project_bg_transparent_desc">Transparent background: PNG and GIF export without a background</string>
+    <string name="edt_rotation_turns">Revolutions</string>
+    <string name="edt_rotation_degrees">Degrees</string>
+    <string name="edt_rotation_value_a11y">%1$s revolutions, %2$s degrees</string>
 </resources>

@@ -61,7 +61,7 @@ def main() -> int:
     bridge = (IOS / 'bridge/AureaEngine.mm').read_text(encoding='utf-8')
     theme = (IOS / 'app/Theme.swift').read_text(encoding='utf-8')
     draw = block(timeline, 'private func drawPreviewBuffer(')
-    assert 'copy_preview_buffer_ranges(pairs, 30)' in bridge
+    assert 'copy_preview_buffer_ranges(pairs, aurea::kPreviewCacheMaxFrames)' in bridge
     assert 'let pairs = engine.previewBufferRanges()' in model
     assert 'refreshPreviewBufferRanges()' in block(model, 'private func refreshStatus()')
     assert 'for range in model.previewBufferRanges' in draw

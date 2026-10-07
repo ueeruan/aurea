@@ -75,13 +75,12 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
     }
     val canUndo by remember { derivedStateOf { store.project.canUndo } }
     val canRedo by remember { derivedStateOf { store.project.canRedo } }
-    val hasSelection by remember { derivedStateOf { store.selection.isNotEmpty() } }
     val h = ShellDims.Transport
-    val side = 48.dp
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-    val compact = maxWidth < 408.dp
-    val tiny = maxWidth < 352.dp
-    var more by remember { mutableStateOf(false) }
+    // Nove botões em três grupos (ferramentas | tempo | edição); em telas
+    // estreitas o alvo encolhe junto, nunca some um botão.
+    val side = minOf(48.dp, (maxWidth - 8.dp) / 9)
+    val fast = store.preview.scaleLabel.let { it != "AUTO" && it != "FULL" }
     Row(
         Modifier
             .fillMaxWidth()
@@ -91,77 +90,70 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChromeButton(
-            CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
-            onClick = if (canUndo) ({ store.undo() }) else null,
-            size = 22.dp, width = side, height = side,
-            tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
-        )
-        if (!tiny) ChromeButton(
-            CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
-            onClick = if (canRedo) ({ store.redo() }) else null,
-            size = 22.dp, width = side, height = side,
-            tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
-        )
-        ChromeButton(
-            CupertinoGlyph.ArrowLeftToLine,
-            stringResource(R.string.editor_ir_inicio_segure_anterior),
-            onClick = { store.stepTransport(-1) },
-            size = 24.dp, width = side, height = side,
-            onLongClick = { store.seek(0) },
-            modifier = Modifier.testTag("transport.previous"),
-        )
-        val marked = store.playhead in store.markers.frames
-        ChromeButton(
-            if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
-            stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
-            onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
-            tint = if (marked) AureaColors.Accent else AureaColors.Text,
-            size = 20.dp, width = side, height = side,
-            modifier = Modifier.testTag("transport.marker"),
-        )
-        PlayButton(store)
-        ChromeButton(
-            CupertinoGlyph.ArrowRightToLine,
-            stringResource(R.string.editor_ir_fim_segure_proximo),
-            onClick = { store.stepTransport(1) },
-            size = 24.dp, width = side, height = side,
-            onLongClick = { store.seek(store.project.durationFrames) },
-            modifier = Modifier.testTag("transport.next"),
-        )
-        if (!compact) ChromeButton(
-            CupertinoGlyph.PlusSquareOnSquare,
-            stringResource(R.string.editor_duplicar_camada_segure_copiar),
-            onClick = { if (store.selection.isNotEmpty()) store.duplicateLayers() },
-            size = 22.dp, width = side, height = side,
-            tint = if (hasSelection) AureaColors.Text else AureaColors.EditorIconDisabled,
-            onLongClick = { openSheet(store, ui, ShellSheet.CopyPaste) },
-            modifier = Modifier.testTag("transport.duplicate"),
-        )
-        if (compact) Box {
-            ChromeButton(CupertinoGlyph.Ellipsis, stringResource(R.string.timeline_more), onClick = { more = true },
-                size = 22.dp, width = side, height = side, modifier = Modifier.testTag("transport.more"))
-            DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                if (tiny) DropdownMenuItem(text = { Text(stringResource(R.string.editor_refazer)) }, enabled = canRedo,
-                    onClick = { more = false; store.redo() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.editor_dividir_cabecote)) }, enabled = hasSelection,
-                    onClick = { more = false; store.splitAtPlayhead() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.editor_duplicar_camada_segure_copiar)) }, enabled = hasSelection,
-                    onClick = { more = false; store.duplicateLayers() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.editor_copiar_colar)) },
-                    modifier = Modifier.testTag("transport.copyPaste"),
-                    onClick = { more = false; openSheet(store, ui, ShellSheet.CopyPaste) })
-                DropdownMenuItem(text = { Text(stringResource(if (ui.fullscreen) R.string.editor_sair_tela_cheia else R.string.editor_tela_cheia)) },
-                    modifier = Modifier.testTag("transport.fullscreen"),
-                    onClick = { more = false; ui.fullscreen = !ui.fullscreen })
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ChromeButton(
+                CupertinoGlyph.Grid, stringResource(R.string.editor_grade_tercos),
+                onClick = { ui.showGrid = !ui.showGrid },
+                size = 20.dp, width = side, height = side,
+                tint = if (ui.showGrid) AureaColors.Accent else AureaColors.Text,
+                modifier = Modifier.testTag("transport.grid"),
+            )
+            ChromeButton(
+                CupertinoGlyph.Bolt, stringResource(R.string.editor_previa_rapida),
+                onClick = { if (fast) store.setPreviewScale(true) else store.setPreviewScale(false, 1, 4) },
+                size = 20.dp, width = side, height = side,
+                tint = if (fast) AureaColors.Accent else AureaColors.Text,
+                modifier = Modifier.testTag("transport.fastPreview"),
+            )
+            val marked = store.playhead in store.markers.frames
+            ChromeButton(
+                if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
+                stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
+                onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
+                tint = if (marked) AureaColors.Accent else AureaColors.Text,
+                size = 20.dp, width = side, height = side,
+                modifier = Modifier.testTag("transport.marker"),
+            )
         }
-        if (!compact) ChromeButton(
-            if (ui.fullscreen) CupertinoGlyph.FullscreenExit else CupertinoGlyph.Fullscreen,
-            if (ui.fullscreen) stringResource(R.string.editor_sair_tela_cheia) else stringResource(R.string.editor_tela_cheia),
-            onClick = { ui.fullscreen = !ui.fullscreen },
-            size = 22.dp, width = side, height = side,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ChromeButton(
+                CupertinoGlyph.BackwardEnd,
+                stringResource(R.string.editor_ir_inicio_segure_anterior),
+                onClick = { store.stepTransport(-1) },
+                size = 22.dp, width = side, height = side,
+                onLongClick = { store.seek(0) },
+                modifier = Modifier.testTag("transport.previous"),
+            )
+            PlayButton(store, side)
+            ChromeButton(
+                CupertinoGlyph.ForwardEnd,
+                stringResource(R.string.editor_ir_fim_segure_proximo),
+                onClick = { store.stepTransport(1) },
+                size = 22.dp, width = side, height = side,
+                onLongClick = { store.seek(store.project.durationFrames) },
+                modifier = Modifier.testTag("transport.next"),
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ChromeButton(
+                CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada),
+                onClick = { openSheet(store, ui, ShellSheet.SearchLayers) },
+                size = 20.dp, width = side, height = side,
+                modifier = Modifier.testTag("transport.layers"),
+            )
+            ChromeButton(
+                CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
+                onClick = if (canUndo) ({ store.undo() }) else null,
+                size = 22.dp, width = side, height = side,
+                tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
+            )
+            ChromeButton(
+                CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
+                onClick = if (canRedo) ({ store.redo() }) else null,
+                size = 22.dp, width = side, height = side,
+                tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
+            )
+        }
     }
     }
 }
@@ -172,7 +164,7 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
  * sobre o cromo (bug 27).
  */
 @Composable
-private fun PlayButton(store: EditorStore) {
+private fun PlayButton(store: EditorStore, side: androidx.compose.ui.unit.Dp = 48.dp) {
     val playing = store.playing || store.preview.buffering
     val loop = store.looping
     Box(contentAlignment = Alignment.Center) {
@@ -185,8 +177,8 @@ private fun PlayButton(store: EditorStore) {
             },
             onClick = { if (store.preview.buffering) store.pause() else store.togglePlayback() },
             size = 26.dp,
-            width = 48.dp,
-            height = 48.dp,
+            width = side,
+            height = side,
             tint = if (loop) AureaColors.Accent else AureaColors.Text,
             onLongClick = { store.setLoop(!store.looping) },
             modifier = Modifier.testTag("transport.play"),

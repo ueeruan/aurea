@@ -5593,6 +5593,56 @@ AUREA_TEST(Gpu, RotatedPlaneAlphaDoesNotEraseTheOpaquePlaneBehindIt) {
     AUREA_CHECK(energy > 5.f);
 }
 
+// Beta 2140: camada 2D virada 3D não reagia à luz ("fica chapada em qualquer
+// ângulo"). Como o "aceita luzes" do AE: sem luz na composição o plano sai
+// cheio (projeto antigo não escurece); com luz, Lambert pela normal do plano.
+AUREA_TEST(Gpu, ThreeDLayerPlaneIsLitByCompositionLights) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 128);
+    const auto white = s.image(uniform_image(96, 96, 255, 255, 255), 64, 64);
+    Layer* plane = s.comp->layer(white);
+    plane->threeD = true;
+    const f32 unlit0 = s.render().v(64, 64).x;
+    plane->transform.rotation.y = 70;
+    const f32 unlit70 = s.render().v(64, 64).x;
+    // Luz pontual na frente do centro (a câmera padrão olha para +Z).
+    const LayerId lightId = s.comp->add_layer(LayerKind::Light, "luz pontual");
+    Layer* light = s.comp->layer(lightId);
+    light->start = FrameIndex{0};
+    light->end = s.comp->duration();
+    light->threeD = true;
+    light->light.kind = LightKind::Point;
+    light->light.intensity = 1.0f;
+    light->light.range = 0.0f;
+    light->transform.position = Vec3{64, 64, -100};
+    plane->transform.rotation.y = 0;
+    const f32 lit0 = s.render().v(64, 64).x;
+    plane->transform.rotation.y = 70;
+    const f32 lit70 = s.render().v(64, 64).x;
+    plane->transform.rotation.y = -70;
+    const f32 litMinus70 = s.render().v(64, 64).x;
+    // Luz atrás do plano: a face vista fica no escuro.
+    plane->transform.rotation.y = 0;
+    light->transform.position = Vec3{64, 64, 100};
+    const f32 behind = s.render().v(64, 64).x;
+    // Spot apontado para o plano (+Z) e depois desviado: fora do cone apaga.
+    light->transform.position = Vec3{64, 64, -100};
+    light->light.kind = LightKind::Spot;
+    light->light.coneAngle = 40.0f;
+    const f32 spotOn = s.render().v(64, 64).x;
+    light->transform.rotation.y = 60;
+    const f32 spotOff = s.render().v(64, 64).x;
+    std::printf("    plano 3D: sem luz %.3f / %.3f (70 graus); ponto %.3f de frente, %.3f a 70, %.3f a -70, %.3f atras; spot %.3f, fora do cone %.3f\n",
+                unlit0, unlit70, lit0, lit70, litMinus70, behind, spotOn, spotOff);
+    AUREA_CHECK(unlit0 > .95f && unlit70 > .95f);   // sem luz: cheio, como antes
+    AUREA_CHECK(lit0 > .9f);                        // de frente: cor cheia
+    AUREA_CHECK(lit70 < lit0 * .6f && lit70 > .1f); // cos 70 ≈ 0,34
+    AUREA_CHECK(litMinus70 < lit0 * .6f);
+    AUREA_CHECK(behind < .05f);
+    AUREA_CHECK(spotOn > .9f);
+    AUREA_CHECK(spotOff < .05f);
+}
+
 AUREA_TEST(Gpu, ZoomingANullZoomsItsModelUniformly) {
     AUREA_REQUIRE_GPU();
     const std::string path = gltf_data("DamagedHelmet.glb");
@@ -6023,7 +6073,11 @@ struct BlendRef {
                 const f32 d = b <= 0.25f ? ((16 * b - 12) * b + 4) * b : std::sqrt(b);
                 return b + (2 * s - 1) * (d - b);
             }
-            case BlendMode::Exclusion: return b + s - 2 * b * s;
+            case BlendMode::Exclusion: {
+                // Na cor codificada (sRGB), como o AE: ver blend.frag.
+                const f32 eb = srgb_encode(b), es = srgb_encode(s);
+                return srgb_decode(std::clamp(eb + es - 2 * eb * es, 0.0f, 1.0f));
+            }
             default: return s;
         }
     }
@@ -6099,6 +6153,48 @@ AUREA_TEST(Gpu, EveryBlendModeMatchesTheFormulaPixelForPixel) {
     }
     std::printf("    %u modos x 2 pares, pior erro %.5f (%.2f/255) em %s ",
                 static_cast<u32>(BlendMode::LinearBurn) + 1u, worst, worst * 255.0f, blend_name(worstMode));
+}
+
+AUREA_TEST(Gpu, ExclusionOverAnImageGradientMatchesTheFormula) {
+    AUREA_REQUIRE_GPU();
+    // Beta 2140: "a Exclusão não funciona com imagens, usa só algumas cores".
+    // Fundo = IMAGEM com degradê horizontal (0..255 em R, invertido em G, B
+    // fixo); por cima, branco e cinza em Exclusão. A conta de referência é
+    // B + S − 2·B·S por canal na cor codificada; com branco por cima o
+    // resultado é o negativo da foto (1 − B), não o fundo quase todo branco
+    // da conta no linear.
+    const u32 W = 64, H = 16;
+    ImagePixels grad = uniform_image(W, H, 0, 0, 0);
+    for (u32 y = 0; y < H; ++y)
+        for (u32 x = 0; x < W; ++x) {
+            const usize i = (static_cast<usize>(y) * W + x) * 4;
+            const u8 v = static_cast<u8>(std::lround(x * 255.0 / (W - 1)));
+            grad.rgba[i] = v; grad.rgba[i + 1] = static_cast<u8>(255 - v); grad.rgba[i + 2] = 64; grad.rgba[i + 3] = 255;
+        }
+    const f32 tops[2] = {1.0f, 0.5f};
+    for (const f32 top : tops) {
+        Scene s(W, H);
+        s.image(grad, W * 0.5f, H * 0.5f);
+        const LayerId t = s.solid(static_cast<f32>(W), static_cast<f32>(H), Vec4{top, top, top, 1}, W * 0.5f, H * 0.5f);
+        s.comp->layer(t)->blendMode = BlendMode::Exclusion;
+        const FloatImage img = s.render();
+        f32 worst = 0.0f;
+        for (u32 x = 2; x < W - 2; x += 3) {
+            const f32 er = x / static_cast<f32>(W - 1), eg = 1.0f - er, eb = 64.0f / 255.0f;
+            auto ref = [&](f32 e) { return srgb_decode(e + top - 2.0f * e * top); };
+            const Vec4 got = img.v(x, H / 2);
+            worst = std::max({worst, std::fabs(srgb_encode(got.x) - srgb_encode(ref(er))),
+                              std::fabs(srgb_encode(got.y) - srgb_encode(ref(eg))),
+                              std::fabs(srgb_encode(got.z) - srgb_encode(ref(eb)))});
+        }
+        std::printf("    topo %.1f: pior erro %.2f/255 ", top, worst * 255.0f);
+        AUREA_CHECK(worst <= 4.0f / 255.0f);
+        if (top == 1.0f) {
+            // Meio do degradê (cinza médio codificado) continua cinza médio.
+            const f32 mid = srgb_encode(img.v(W / 2, H / 2).x);
+            AUREA_CHECK(mid > 0.40f && mid < 0.60f);
+        }
+    }
 }
 
 AUREA_TEST(Gpu, BlendModesChainAndLandInTheOffscreenTarget) {
@@ -13022,3 +13118,125 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "LightRaysTextGpu.inl"
 #include "TurbulenceTypesGpu.inl"
 #include "Shapes2DGpu.inl"
+#include "PrecompTemporalGpu.inl"
+
+// -----------------------------------------------------------------------------
+// Build 2140: modelos com textura entravam CINZA em aparelho real. O espaço do
+// projeto para imagens/modelos (~1/3 do orçamento) apertava o orçamento do
+// import inteiro e o pico do decode de cada textura (8 B/pixel) passava do
+// teto: toda textura era pulada. Aqui o orçamento é de celular (96 MB) e as
+// texturas são 2048² — os 4 formatos precisam mostrar o VERDE da textura.
+// -----------------------------------------------------------------------------
+namespace {
+
+bool write_green_png(const std::string& path, u32 side) {
+    Image8 img;
+    img.width = img.height = side;
+    img.rgba.resize(static_cast<usize>(side) * side * 4);
+    for (usize i = 0; i < img.rgba.size(); i += 4) {
+        img.rgba[i] = 0; img.rgba[i + 1] = 255; img.rgba[i + 2] = 0; img.rgba[i + 3] = 255;
+    }
+    return write_png(path, img);
+}
+
+std::string b64_of(const std::vector<u8>& bin) {
+    static const char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string enc;
+    enc.reserve(bin.size() / 3 * 4 + 4);
+    for (usize i = 0; i < bin.size(); i += 3) {
+        const u32 v = (static_cast<u32>(bin[i]) << 16) | (i + 1 < bin.size() ? static_cast<u32>(bin[i + 1]) << 8 : 0u)
+                    | (i + 2 < bin.size() ? bin[i + 2] : 0u);
+        enc += b64[(v >> 18) & 63];
+        enc += b64[(v >> 12) & 63];
+        enc += i + 1 < bin.size() ? b64[(v >> 6) & 63] : '=';
+        enc += i + 2 < bin.size() ? b64[v & 63] : '=';
+    }
+    return enc;
+}
+
+/// Quadrado texturizado (unlit) de frente; imagem externa ou embutida (data URI).
+std::string write_textured_quad_gltf(const std::string& folder, const std::string& imageUri) {
+    const f32 pos[12] = {-0.5f, -0.5f, 0, 0.5f, -0.5f, 0, 0.5f, 0.5f, 0, -0.5f, 0.5f, 0};
+    const f32 uv[8] = {0, 1, 1, 1, 1, 0, 0, 0};
+    const u16 idx[6] = {0, 1, 2, 0, 2, 3};
+    std::vector<u8> bin(48 + 32 + 12);
+    std::memcpy(bin.data(), pos, 48);
+    std::memcpy(bin.data() + 48, uv, 32);
+    std::memcpy(bin.data() + 80, idx, 12);
+    const std::string json = std::string(R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)")
+        + R"("meshes":[{"primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"indices":2,"material":0}]}],)"
+        + R"("materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0},"metallicFactor":0},"extensions":{"KHR_materials_unlit":{}}}],)"
+        + R"("extensionsUsed":["KHR_materials_unlit"],"textures":[{"source":0}],"images":[{"uri":")" + imageUri + R"("}],)"
+        + R"("buffers":[{"byteLength":92,"uri":"data:application/octet-stream;base64,)" + b64_of(bin) + R"("}],)"
+        + R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":48},{"buffer":0,"byteOffset":48,"byteLength":32},{"buffer":0,"byteOffset":80,"byteLength":12}],)"
+        + R"("accessors":[{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3","min":[-0.5,-0.5,0],"max":[0.5,0.5,0]},)"
+        + R"({"bufferView":1,"componentType":5126,"count":4,"type":"VEC2"},{"bufferView":2,"componentType":5123,"count":6,"type":"SCALAR"}]})";
+    const std::string path = folder + (imageUri.rfind("data:", 0) == 0 ? "embutida.gltf" : "externa.gltf");
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (f) { std::fwrite(json.data(), 1, json.size(), f); std::fclose(f); }
+    return path;
+}
+
+} // namespace
+
+AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
+    AUREA_REQUIRE_GPU();
+    namespace fx = aurea::test_fixtures;
+    constexpr u32 kSide = 2048;
+    const char* names[] = {"glTF embutido", "glTF + PNG externo", "OBJ + MTL + PNG", "FBX + PNG"};
+    for (int format = 0; format < 4; ++format) {
+        const std::string folder = fx::fresh_model_folder(
+            format == 0 ? "aurea_teste_tex_orc_emb" : format == 1 ? "aurea_teste_tex_orc_ext"
+            : format == 2 ? "aurea_teste_tex_orc_obj" : "aurea_teste_tex_orc_fbx");
+        std::string path;
+        if (format == 0) {
+            const std::string png = folder + "tmp.png";
+            AUREA_CHECK(write_green_png(png, kSide));
+            std::vector<u8> bytes;
+            if (std::FILE* f = std::fopen(png.c_str(), "rb")) {
+                u8 buf[65536];
+                for (usize n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) bytes.insert(bytes.end(), buf, buf + n);
+                std::fclose(f);
+            }
+            std::remove(png.c_str());
+            path = write_textured_quad_gltf(folder, "data:image/png;base64," + b64_of(bytes));
+        } else if (format == 1) {
+            AUREA_CHECK(write_green_png(folder + "verde.png", kSide));
+            path = write_textured_quad_gltf(folder, "verde.png");
+        } else if (format == 2) {
+            path = fx::write_textured_obj(folder);
+            fx::write_picked_mtl(folder, "Verde.png");
+            AUREA_CHECK(write_green_png(folder + "Verde.png", kSide));
+        } else {
+            path = fx::write_textured_fbx(folder, "Verde.png");
+            AUREA_CHECK(write_green_png(folder + "Verde.png", kSide));
+        }
+        Engine e;
+        EngineConfig ec;
+        ec.backend = new vk::Backend();
+        ec.backendConfig.enableValidation = false;
+        ec.disableAutosave = true;
+        ec.workerCount = 2;
+        ec.memoryBudgetBytes = 96ull << 20;   // orçamento de celular: ~32 MB para imagens/modelos
+        AUREA_CHECK(e.initialize(ec).ok());
+        AUREA_CHECK(e.new_project(256, 144, 30.0, nullptr).ok());
+        ModelImport mi;
+        mi.path = path;
+        std::string detail;
+        const Result<u64> id = e.import_model(mi, nullptr, &detail);
+        AUREA_CHECK_MSG(id.ok(), names[format]);
+        if (id.ok()) {
+            AUREA_CHECK_MSG(e.model_missing_textures(*id).empty(), names[format]);
+            std::vector<u8> rgba;
+            u32 w = 0, h = 0;
+            AUREA_CHECK(e.capture_frame_rgba(256, rgba, w, h).ok());
+            if (w && h && rgba.size() >= static_cast<usize>(w) * h * 4) {
+                const u8* c = &rgba[(static_cast<usize>(h / 2) * w + w / 2) * 4];
+                std::printf("\n    %s: centro %u,%u,%u (%s)", names[format], c[0], c[1], c[2], detail.c_str());
+                // Verde da textura (sem textura: branco/cinza com R alto).
+                AUREA_CHECK_MSG(c[1] > 60 && c[0] * 2 < c[1] && c[2] * 2 < c[1], names[format]);
+            }
+        }
+        e.shutdown();
+    }
+}

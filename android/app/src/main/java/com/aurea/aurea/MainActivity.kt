@@ -204,6 +204,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AureaAdsManager.attach(this)
+        // O WebView do anúncio pode ter gravado o resumo de estado do processo
+        // por cima da nossa etapa enquanto estava na frente.
+        com.aurea.aurea.diagnostics.ExitDiagnostics.reassert(this)
     }
 
     override fun onPause() {

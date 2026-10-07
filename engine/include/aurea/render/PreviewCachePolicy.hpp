@@ -14,12 +14,24 @@ inline constexpr u32 kPreviewCacheMaxFrames = 300;
 // 64 MiB (< 4 GB), 320 MiB (< 8 GB), 512 MiB. Nunca passa de 1/4 do orçamento
 // do processo e encolhe com a pressão de memória (a partir de .85 o cache já é
 // desligado pelo motor; a política aqui só antecipa).
-inline u64 preview_cache_budget(u64 totalRamBytes, u64 processBudgetBytes, f32 pressure = 0.f) noexcept {
+// Aparelho de classe de memória LOW (até 4 GB: Galaxy A15/A16 de 4 GB, realme
+// RMX2020, moto g52): o LMKD do Android mata o app EM PRIMEIRO PLANO por pouca
+// memória (ApplicationExitInfo LOW_MEMORY, importância 100). Ali a prévia
+// guardada nunca passa de 32 MiB, qualquer que seja a faixa de RAM.
+inline constexpr u64 kPreviewCacheLowClassBudget = 32ull << 20;
+// Depois de um aviso de pressão (RUNNING_LOW ou acima) a prévia guardada fica
+// desligada por este tempo: soltar e reencher na mesma hora devolveria a
+// memória que o sistema acabou de pedir. Cada aviso novo renova o prazo.
+inline constexpr u64 kPreviewPressureHoldNs = 20'000'000'000ull;
+
+inline u64 preview_cache_budget(u64 totalRamBytes, u64 processBudgetBytes, f32 pressure = 0.f,
+                                bool lowMemoryClass = false) noexcept {
     constexpr u64 MiB = 1ull << 20, GiB = 1ull << 30;
     u64 tier = !totalRamBytes ? 64 * MiB
              : totalRamBytes < 2560 * MiB ? 32 * MiB
              : totalRamBytes < 4 * GiB ? 64 * MiB
              : totalRamBytes < 8 * GiB ? 320 * MiB : 512 * MiB;
+    if (lowMemoryClass) tier = std::min(tier, kPreviewCacheLowClassBudget);
     if (processBudgetBytes) tier = std::min(tier, processBudgetBytes / 4);
     if (!std::isfinite(pressure) || pressure >= .85f) return 0;
     if (pressure >= .7f) return tier / 4;

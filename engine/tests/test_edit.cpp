@@ -724,6 +724,133 @@ AUREA_TEST(Clipboard, PastedEffectsKeepKeyTimesRelativeToTheLayerStart) {
     AUREA_CHECK(r.L(r.c)->effects.empty());
 }
 
+namespace {
+u32 add_effect_to(EditRig& r, u64 layer, const char* key) {
+    Command fx; fx.type = CommandType::EffectAdd; fx.effect_add.layer = LayerId::unpack(layer);
+    fx.effect_add.effectType = effect_type_id(key); fx.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(r.e.apply_command(fx).ok());
+    const Layer* l = r.L(layer);
+    return l && !l->effects.empty() ? l->effects.back().id : kInvalidIndex;
+}
+/// Distâncias (em quadros da timeline) do início da camada até cada key do
+/// parâmetro 0 do efeito na posição `fxIndex`.
+std::vector<i64> effect_key_offsets(EditRig& r, u64 id, u32 fxIndex) {
+    std::vector<i64> out;
+    const Layer* l = r.L(id);
+    if (!l || fxIndex >= l->effects.size()) return out;
+    const Track* t = l->tracks.find(TrackProperty::EffectParam, l->effects[fxIndex].id, 0);
+    if (t) for (const Keyframe& k : t->keys) out.push_back(l->timeline_time(k.time).value - l->start.value);
+    return out;
+}
+} // namespace
+
+// Beta 0.0.4: colar o efeito noutro clipe espremia/deslocava os losangos.
+// Regra: cada key fica à MESMA distância do início do clipe de destino,
+// qualquer que seja o início, a entrada aparada ou a velocidade dele.
+AUREA_TEST(Clipboard, PastedEffectKeysFollowEachTargetStartTrimAndSpeed) {
+    EditRig r;
+    r.range(r.a, 30, 150, 12);
+    const u32 glow = add_effect_to(r, r.a, effect_keys::kGlow);
+    Layer* src = r.comp()->layer(LayerId::unpack(r.a));
+    Track& gt = src->tracks.get_or_create(TrackProperty::EffectParam, glow, 0);
+    for (i64 rel : {0, 30, 90}) gt.set(src->local_time(FrameIndex{30 + rel}), static_cast<f32>(rel + 1));
+    // B: vídeo a 2× com a entrada aparada de verdade (o aparo da timeline).
+    clip_source(r, r.b, 2.0f);
+    r.range(r.b, 200, 300, 60);
+    AUREA_CHECK(r.e.edit_clip_time(r.b, 0, 230));
+    AUREA_CHECK_EQ(r.L(r.b)->start.value, i64{230});
+    const i64 bOffset = r.L(r.b)->offset.value;
+    // C: imagem parada noutra posição, sem aparo.
+    r.range(r.c, 500, 700, 0);
+
+    AUREA_CHECK_EQ(r.e.copy_effects(r.a), 1u);
+    const u64 both[] = {r.b, r.c};
+    AUREA_CHECK_EQ(r.e.paste_effects(both, 2), 2u);
+    const std::vector<i64> want{0, 30, 90};
+    for (u64 id : both) {
+        const Layer* l = r.L(id);
+        AUREA_CHECK_EQ(l->effects.size(), usize{1});
+        AUREA_CHECK(effect_key_offsets(r, id, 0) == want);
+        // A trilha achada pelo render é a colada (valor no 2º losango).
+        const Track* t = l->tracks.find(TrackProperty::EffectParam, l->effects[0].id, 0);
+        AUREA_CHECK(t && t->value_or(l->local_time(FrameIndex{l->start.value + 30}), -1.0f) == 31.0f);
+    }
+    AUREA_CHECK(effect_key_offsets(r, r.a, 0) == want);
+    // Colar não mexe no tempo dos clipes; desfazer tira de todos de uma vez.
+    AUREA_CHECK(r.at(r.b, 230, 300) && r.L(r.b)->offset.value == bOffset && r.at(r.c, 500, 700));
+    r.undo();
+    AUREA_CHECK(r.L(r.b)->effects.empty() && r.L(r.c)->effects.empty());
+    AUREA_CHECK(r.at(r.b, 230, 300) && r.L(r.b)->offset.value == bOffset);
+    // Refazer o mesmo colar depois do desfazer dá o mesmo resultado.
+    AUREA_CHECK_EQ(r.e.paste_effects(both, 2), 2u);
+    for (u64 id : both) AUREA_CHECK(effect_key_offsets(r, id, 0) == want);
+}
+
+// Apagar um efeito deixa a trilha dele (vazia) na camada. Colar reusava o id
+// e o render achava a órfã antes: os losangos apareciam, a animação não.
+AUREA_TEST(Clipboard, PastedEffectNeverReusesTheIdOfADeletedEffect) {
+    EditRig r;
+    const u32 blur = add_effect_to(r, r.a, effect_keys::kGaussianBlur);
+    Layer* src = r.comp()->layer(LayerId::unpack(r.a));
+    Track& bt = src->tracks.get_or_create(TrackProperty::EffectParam, blur, 0);
+    bt.set(FrameIndex{4}, 3.0f);
+    bt.set(FrameIndex{20}, 30.0f);
+
+    const u32 old = add_effect_to(r, r.b, effect_keys::kGlow);
+    Layer* b = r.comp()->layer(LayerId::unpack(r.b));
+    b->tracks.get_or_create(TrackProperty::EffectParam, old, 0).set(b->local_time(FrameIndex{35}), 77.0f);
+    Command rm; rm.type = CommandType::EffectRemove; rm.effect_ref.layer = LayerId::unpack(r.b);
+    rm.effect_ref.effect = EffectId{old, 0};
+    AUREA_CHECK(r.e.apply_command(rm).ok());
+    AUREA_CHECK(r.L(r.b)->effects.empty());
+
+    AUREA_CHECK_EQ(r.e.copy_effects(r.a), 1u);
+    AUREA_CHECK_EQ(r.e.paste_effects(&r.b, 1), 1u);
+    const Layer* l = r.L(r.b);
+    AUREA_CHECK_EQ(l->effects.size(), usize{1});
+    const u32 pasted = l->effects[0].id;
+    AUREA_CHECK(pasted != old);
+    AUREA_CHECK(l->nextEffectId > pasted);
+    u32 same = 0;
+    for (u32 i = 0; i < l->tracks.size(); ++i) {
+        const Track& t = l->tracks.at(i);
+        if (t.property == TrackProperty::EffectParam && t.effectIndex == pasted && t.effectParamIndex == 0) ++same;
+    }
+    AUREA_CHECK_EQ(same, 1u);
+    AUREA_CHECK(effect_key_offsets(r, r.b, 0) == (std::vector<i64>{4, 20}));
+    const Track* t = l->tracks.find(TrackProperty::EffectParam, pasted, 0);
+    AUREA_CHECK(t && t->value_or(l->local_time(FrameIndex{l->start.value + 20}), -1.0f) == 30.0f);
+    r.undo();
+    AUREA_CHECK(r.L(r.b)->effects.empty());
+}
+
+// Pré-comp/composição com outro fps: o key fica no mesmo SEGUNDO do clipe.
+AUREA_TEST(Clipboard, PastedEffectKeysKeepSecondsAcrossCompositionFps) {
+    EditRig r;
+    r.range(r.a, 0, 60, 0);
+    const u32 glow = add_effect_to(r, r.a, effect_keys::kGlow);
+    Layer* src = r.comp()->layer(LayerId::unpack(r.a));
+    Track& gt = src->tracks.get_or_create(TrackProperty::EffectParam, glow, 0);
+    gt.set(FrameIndex{10}, 1.0f);
+    gt.set(FrameIndex{11}, 2.0f);
+    gt.set(FrameIndex{40}, 4.0f);
+    AUREA_CHECK_EQ(r.e.copy_effects(r.a), 1u);
+    Command fps; fps.type = CommandType::CompositionSetFps;
+    fps.comp_fps.comp = r.e.project()->timeline().current(); fps.comp_fps.fps = 60.0;
+    AUREA_CHECK(r.e.apply_command(fps).ok());
+    AUREA_CHECK_EQ(r.e.paste_effects(&r.b, 1), 1u);
+    AUREA_CHECK(effect_key_offsets(r, r.b, 0) == (std::vector<i64>{20, 22, 80}));
+    // O mesmo que a origem, que a troca de fps reescalou no mesmo segundo.
+    AUREA_CHECK(effect_key_offsets(r, r.a, 0) == effect_key_offsets(r, r.b, 0));
+    // 30 → 24 fps: 10 e 11 caem em 8 e 9; nenhum key se perde nem inverte.
+    AUREA_CHECK_EQ(r.e.copy_effects(r.a), 1u);
+    fps.comp_fps.fps = 24.0;
+    AUREA_CHECK(r.e.apply_command(fps).ok());
+    AUREA_CHECK_EQ(r.e.paste_effects(&r.c, 1), 1u);
+    const std::vector<i64> c = effect_key_offsets(r, r.c, 0);
+    AUREA_CHECK(c.size() == 3 && std::is_sorted(c.begin(), c.end()));
+}
+
 AUREA_TEST(Clipboard, ShiftedTrimmedLayersUseCompositionTime) {
     EditRig r;
     r.range(r.a, 30, 90, 12);

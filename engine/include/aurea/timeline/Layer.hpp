@@ -693,6 +693,12 @@ struct Layer {
     /// build 2138 (as luzes eram só para os modelos) abre com as imagens,
     /// vídeos, textos e formas exatamente como antes. Gravado na v45.
     bool     acceptsLights = false;
+    /// Efeitos de imagem num modelo / texto 3D / forma 3D valem sobre o
+    /// resultado 3D (cena própria). Projeto anterior à v46 abre DESLIGADO:
+    /// ali esses efeitos eram ignorados e o modelo ordenava a profundidade
+    /// com os vizinhos — o projeto fica exatamente como era. Camada nova e
+    /// efeito adicionado agora ligam. Gravado na v46.
+    bool     modelEffects = true;
     /// Camada de ajuste: não desenha conteúdo próprio; os efeitos dela valem
     /// para a composição de TUDO o que está abaixo (no trecho de tempo dela),
     /// no quadro inteiro, misturados pela opacidade da camada.

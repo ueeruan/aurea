@@ -725,9 +725,10 @@ private fun CurveGraph(
                     val k0 = plot(0f, 0f)
                     val k1 = plot(1f, 1f)
                     // Qualquer toque no gráfico pega a alça mais perto de onde ela
-                    // está DESENHADA (afastadas se coincidem) — como no app antigo.
-                    val shown = separatedHandles(p1.x, p1.y, p2.x, p2.y, k0.x, k0.y, k1.x, k1.y, HANDLE_SEPARATION.toPx())
-                    val which = grabHandle(down.position.x, down.position.y, shown)
+                    // está — a posição REAL, a mesma desenhada (nada as afasta);
+                    // uma sobre a outra, o lado do toque decide — como no app antigo.
+                    val shown = floatArrayOf(p1.x, p1.y, p2.x, p2.y)
+                    val which = grabHandle(down.position.x, down.position.y, shown, floatArrayOf(k0.x, k0.y, k1.x, k1.y))
                     down.consume()
                     val first = which == 0
                     activeHandle = which
@@ -783,11 +784,10 @@ private fun CurveGraph(
             val p1 = pt(1f, 1f)
             if (ease.hasHandles) {
                 val hh = ease.handles()
-                val real1 = pt(hh[0], hh[1])
-                val real2 = pt(hh[2], hh[3])
-                val shown = separatedHandles(real1.x, real1.y, real2.x, real2.y, p0.x, p0.y, p1.x, p1.y, HANDLE_SEPARATION.toPx())
-                val h1 = Offset(shown[0], shown[1])
-                val h2 = Offset(shown[2], shown[3])
+                // Cada bolinha EXATAMENTE no valor dela: o dedo leva só a que
+                // pegou; a outra não sai do lugar (nada de se "repelirem").
+                val h1 = pt(hh[0], hh[1])
+                val h2 = pt(hh[2], hh[3])
                 val dash = Color.White.copy(alpha = 0.30f)
                 fun drop(hp: Offset) {
                     var y = min(hp.y, base)
@@ -945,8 +945,6 @@ private fun CurveChip(label: String, active: Boolean = false, tag: String, onTap
 private val CURVE_INSET = 28.dp
 /** Raio do halo da alça no dedo. */
 private val HANDLE_HIT = 28.dp
-/** Distância mínima entre as alças DESENHADAS (as bolas nunca se sobrepõem). */
-private val HANDLE_SEPARATION = 30.dp
 /** Encaixe da alça nas linhas 0 e 1 (x e y). */
 private val CURVE_SNAP = 10.dp
 

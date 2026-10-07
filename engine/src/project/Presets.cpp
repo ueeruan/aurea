@@ -1192,7 +1192,13 @@ bool apply(const Preset& p, Layer& l, i64 anchorLocal, i64 durationFrames, f64 f
                     if (e.params.size() < specs->count()) {
                         EffectInstance d;
                         initialize_instance(d, *specs);
-                        for (usize k = e.params.size(); k < d.params.size(); ++k) e.params.push_back(d.params[k]);
+                        for (usize k = e.params.size(); k < d.params.size(); ++k) {
+                            ParamSlot slot = d.params[k];
+                            if ((specs->at(static_cast<u32>(k)).flags & kParamLegacyZero) != 0) {
+                                slot.constant = ParamValue::scalar(0.0f);   // preset antigo: desenho de antes
+                            }
+                            e.params.push_back(slot);
+                        }
                     }
                 }
                 for (const Track& t : p.effectTracks) {

@@ -55,6 +55,33 @@ AUREA_TEST(PreviewBuffer, BudgetAndRangeAreHardLimits) {
     AUREA_CHECK_EQ(preview_buffer_status(3, 15, true), 0x80000f03u);
     AUREA_CHECK_EQ(preview_buffer_status(3, 15, false, true), 0x40000f03u);
 }
+
+AUREA_TEST(PreviewBuffer, LowMemoryClassCapsTheBudgetAndPressureScalesIt) {
+    using namespace aurea;
+    constexpr u64 MiB = 1ull << 20, GiB = 1ull << 30;
+    // Faixas de sempre (classe não-LOW): nada muda.
+    AUREA_CHECK_EQ(preview_cache_budget(2 * GiB, 0), 32 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(3700 * MiB, 0), 64 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(6 * GiB, 0), 320 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(12 * GiB, 0), 512 * MiB);
+    // Classe LOW (Galaxy A15/A16 de 4 GB, realme RMX2020, moto g52): 32 MiB no
+    // máximo em qualquer faixa, e ainda limitado por 1/4 do processo.
+    AUREA_CHECK_EQ(kPreviewCacheLowClassBudget, 32 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(3700 * MiB, 0, 0.f, true), 32 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(6 * GiB, 0, 0.f, true), 32 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(0, 0, 0.f, true), 32 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(3700 * MiB, 64 * MiB, 0.f, true), 16 * MiB);
+    // moto g52 medido: orcamento_mb=308 → 77 MiB de 1/4, a faixa LOW manda.
+    AUREA_CHECK_EQ(preview_cache_budget(3700 * MiB, 308 * MiB, 0.f, true), 32 * MiB);
+    // Pressão: metade, um quarto, nada.
+    AUREA_CHECK_EQ(preview_cache_budget(3700 * MiB, 0, .5f, true), 16 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(3700 * MiB, 0, .7f, true), 8 * MiB);
+    AUREA_CHECK_EQ(preview_cache_budget(3700 * MiB, 0, .85f, true), 0ull);
+    AUREA_CHECK_EQ(preview_cache_budget(3700 * MiB, 0, std::numeric_limits<f32>::quiet_NaN(), true), 0ull);
+    // 32 MiB a 1/4 de 1080p (480×270 RGBA8): 64 quadros, nunca os 300.
+    AUREA_CHECK_EQ(preview_cache_capacity(480, 270, 32 * MiB, 4), 64u);
+    AUREA_CHECK(kPreviewPressureHoldNs >= 10'000'000'000ull);
+}
 #include "MockBackend.hpp"
 #include "SyntheticVideo.hpp"
 
@@ -2961,8 +2988,16 @@ AUREA_TEST(MotionBlur, SamplesPerFrameDrivesThePreviewToo) {
         // Animação interna (texto, partículas): o mínimo é a escolha da pessoa.
         AUREA_CHECK_EQ(shutter_sample_count(settings, false, 1.0f, 0, true), samples);
         AUREA_CHECK_EQ(shutter_sample_count(settings, true, 1.0f, 0, true), samples);
-        // Movimento curto: o piso também.
-        AUREA_CHECK_EQ(shutter_sample_count(settings, false, 1.0f, 3.0), std::max(samples, 5u));
+        // Movimento curto (beta 2026-10-07, "o motion blur trava"): na prévia
+        // bastam amostras a 0,75 px umas das outras — 3 px = 5 amostras, com
+        // 2 ou com 64 pedidas. O export continua com o piso da pessoa.
+        AUREA_CHECK_EQ(shutter_sample_count(settings, false, 1.0f, 3.0), 5u);
+        AUREA_CHECK_EQ(shutter_sample_count(settings, true, 1.0f, 3.0), std::max(samples, 7u));
+        // Rastro longo: a prévia usa todas as amostras pedidas.
+        AUREA_CHECK(shutter_sample_count(settings, false, 1.0f, 200.0) >= samples);
+        // Sob carga (qualidade 0,5) num rastro médio, a escolha da pessoa ainda
+        // sobe a contagem até o que o rastro pede a 0,75 px.
+        AUREA_CHECK_EQ(shutter_sample_count(settings, false, 0.5f, 30.0), std::max(21u, std::min(samples / 2, 41u)));
     }
     // Aparelho quente (qualidade 0,5): metade, nunca abaixo de 2.
     settings.samples = 64;

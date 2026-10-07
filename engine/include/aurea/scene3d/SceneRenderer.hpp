@@ -473,6 +473,9 @@ public:
     /// AA do 3D ligado (padrão). Desligar (1 amostra, sem FXAA) serve só ao
     /// A/B de teste e benchmark — a referência "sem AA" das medições.
     void set_antialias(bool on) noexcept { antialias_ = on; }
+    /// Teto do lado do mapa de sombra deste quadro (4096; 2048 no preview da
+    /// classe de memória LOW). A GPU continua mandando por baixo.
+    void set_shadow_map_cap(u32 cap) noexcept { shadowCap_ = std::clamp(cap, 256u, 4096u); }
     void set_quality(u32 shadowMapSize, u32 shadowFilter, f32 lodBias, bool lodHysteresis = true) noexcept {
         lodHysteresis_ = lodHysteresis;
         shadowSize_ = std::clamp(shadowMapSize, 256u, 4096u);
@@ -518,6 +521,7 @@ private:
     u32 dofTaps_ = 32;
     [[nodiscard]] PipelineKey shadow_key(bool skinned) const noexcept;
     u32 shadowSize_ = 2048;
+    u32 shadowCap_ = 4096;      ///< set_shadow_map_cap
     u32 shadowFilter_ = 2;
     f32 lodBias_ = 1.0f;
     bool lodHysteresis_ = true;

@@ -235,39 +235,24 @@ func curveSameTrack(_ a: KeyframeItem, _ b: KeyframeItem) -> Bool {
         (a.effectIndex == b.effectIndex && a.paramIndex == b.paramIndex))
 }
 
-/// Onde as duas alças são DESENHADAS e tocadas (CurveMath.kt `separatedHandles`):
-/// as posições reais, afastadas quando ficam mais perto que `minimum` — a alça de
-/// saída e a de chegada nunca viram um borrão só. Coincidentes, abrem na direção
-/// primeira marca → segunda, cada uma para o lado da própria marca.
-func curveSeparatedHandles(_ first: CGPoint, _ second: CGPoint, start: CGPoint, end: CGPoint, minimum: CGFloat) -> (CGPoint, CGPoint) {
-    var dx = second.x - first.x, dy = second.y - first.y
-    var distance = hypot(dx, dy)
-    if distance >= minimum { return (first, second) }
-    var gap = distance
-    if distance < 0.5 {
-        dx = end.x - start.x; dy = end.y - start.y
-        distance = hypot(dx, dy)
-        if distance < 0.001 { dx = 1; dy = 0; distance = 1 }
-        gap = 0
+/// A alça que o toque pega (CurveMath.kt `grabHandle`): a mais perto das duas,
+/// sempre uma. As alças ficam EXATAMENTE onde os valores estão — nada as afasta
+/// (o afastamento antigo de 30 pt fazia as bolinhas "se repelirem" no arrasto).
+/// Uma sobre a outra (empate), decide o lado do toque na direção primeira marca
+/// → segunda: para o lado da segunda, a de chegada; senão, a de saída.
+func curveGrabHandle(_ location: CGPoint, _ shown: (CGPoint, CGPoint), start: CGPoint? = nil, end: CGPoint? = nil) -> Int {
+    let d1 = hypot(location.x - shown.0.x, location.y - shown.0.y)
+    let d2 = hypot(location.x - shown.1.x, location.y - shown.1.y)
+    if let start, let end, abs(d1 - d2) < curveHandleTie {
+        let cx = (shown.0.x + shown.1.x) / 2, cy = (shown.0.y + shown.1.y) / 2
+        let side = (location.x - cx) * (end.x - start.x) + (location.y - cy) * (end.y - start.y)
+        return side > 0 ? 1 : 0
     }
-    let push = (minimum - gap) / 2, ux = dx / distance, uy = dy / distance
-    return (CGPoint(x: first.x - ux * push, y: first.y - uy * push), CGPoint(x: second.x + ux * push, y: second.y + uy * push))
-}
-
-/// A alça sob o dedo: 0 (saída), 1 (chegada) ou −1; a mais perto vence, dentro de `radius`.
-func curveNearestHandle(_ location: CGPoint, _ shown: (CGPoint, CGPoint), radius: CGFloat) -> Int {
-    let d1 = pow(location.x - shown.0.x, 2) + pow(location.y - shown.0.y, 2)
-    let d2 = pow(location.x - shown.1.x, 2) + pow(location.y - shown.1.y, 2)
-    if min(d1, d2) > radius * radius { return -1 }
     return d1 <= d2 ? 0 : 1
 }
 
-/// A alça que o toque pega (CurveMath.kt `grabHandle`): a mais perto das duas, sempre uma.
-func curveGrabHandle(_ location: CGPoint, _ shown: (CGPoint, CGPoint)) -> Int {
-    let d1 = pow(location.x - shown.0.x, 2) + pow(location.y - shown.0.y, 2)
-    let d2 = pow(location.x - shown.1.x, 2) + pow(location.y - shown.1.y, 2)
-    return d1 <= d2 ? 0 : 1
-}
+/// Diferença (pt) abaixo da qual as duas alças empatam no toque (uma sobre a outra).
+let curveHandleTie: CGFloat = 1
 
 /// Faixa vertical das alças (CurveMath.kt): além de 0..1 dá antecipação e overshoot.
 let curveEaseYMin: Float = -2
@@ -424,8 +409,6 @@ func curveQuickTypeEase(_ type: CurveQuickType, current: CurveEase) -> CurveEase
 private let curveInset: CGFloat = 28
 /// Raio do halo da alça no dedo.
 private let curveHandleHit: CGFloat = 28
-/// Distância mínima entre as alças DESENHADAS (as bolas nunca se sobrepõem).
-private let curveHandleSeparation: CGFloat = 30
 /// Encaixe da alça nas linhas 0 e 1 (x e y).
 private let curveHandleSnap: CGFloat = 10
 
@@ -506,7 +489,9 @@ private struct NativeCurveGraph: View {
         let start = point(0, 0), end = point(1, 1)
         if ease.hasHandles {
             let h = ease.handles
-            let (first, second) = curveSeparatedHandles(point(h[0], h[1]), point(h[2], h[3]), start: start, end: end, minimum: curveHandleSeparation)
+            // Cada bolinha EXATAMENTE no valor dela: o dedo leva só a que pegou;
+            // a outra não sai do lugar (nada de se "repelirem").
+            let first = point(h[0], h[1]), second = point(h[2], h[3])
             for p in [first, second] {
                 line(CGPoint(x: p.x, y: min(p.y, base)), CGPoint(x: p.x, y: max(p.y, base)), .white.opacity(0.3), 1, [3, 3])
             }
@@ -526,10 +511,11 @@ private struct NativeCurveGraph: View {
             guard ease.hasHandles else { return }
             let h = ease.handles
             let a = plot(h[0], h[1], size, low, high), b = plot(h[2], h[3], size, low, high)
-            // Qualquer toque no gráfico pega a alça mais perto de onde ela está
-            // DESENHADA (afastadas se coincidem) — como no app antigo.
-            let shown = curveSeparatedHandles(a, b, start: plot(0, 0, size, low, high), end: plot(1, 1, size, low, high), minimum: curveHandleSeparation)
-            drag = HandleDrag(first: curveGrabHandle(value.startLocation, shown) == 0, low: low, high: high,
+            // Qualquer toque no gráfico pega a alça mais perto de onde ela está —
+            // a posição REAL, a mesma desenhada (nada as afasta); uma sobre a
+            // outra, o lado do toque decide — como no app antigo.
+            let which = curveGrabHandle(value.startLocation, (a, b), start: plot(0, 0, size, low, high), end: plot(1, 1, size, low, high))
+            drag = HandleDrag(first: which == 0, low: low, high: high,
                 ease: CurveEase(interpolation: 2, x1: h[0], y1: h[1], x2: h[2], y2: h[3], power: ease.isBezier ? ease.power : 1))
         }
         guard var current = drag else { return }

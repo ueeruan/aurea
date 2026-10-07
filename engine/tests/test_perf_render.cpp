@@ -384,6 +384,73 @@ AUREA_TEST(Perf8C, BenchGpuFrameAndPacing) {
     renderer.shutdown();
     backend.shutdown();
 }
+
+// Beta 2026-10-07 ("o motion blur trava e precisa de otimização"). Cena
+// típica: 1080p, 5 camadas indo e voltando a 3/8/20/45/90 px por quadro, 2
+// delas com efeitos (blur + exposição), desfoque de movimento ligado com 16 e
+// 64 amostras. Mede a GPU do host na prévia e no export e soma as amostras
+// do quadro (cada amostra = um desenho da camada inteira no acumulador).
+AUREA_TEST(Perf8C, BenchMotionBlurTypicalScene) {
+    if (!bench_enabled()) { std::printf("    (pulado: AUREA_BENCH=1 para medir)\n"); return; }
+    vk::Backend backend;
+    BackendConfig cfg;
+    cfg.enableValidation = false;
+    cfg.framesInFlight = 2;
+    if (!backend.initialize(cfg).ok()) { std::printf("    (sem GPU Vulkan)\n"); return; }
+    EffectRegistry effects;
+    register_builtin_effects(effects);
+    Renderer renderer;
+    AUREA_CHECK(renderer.initialize(backend, effects).ok());
+    std::printf("\n    GPU %s: amostras modo res | amostras no quadro (por camada) | prepare | gravacao | GPU ms\n",
+                backend.capabilities().deviceName.c_str());
+    for (const u32 samples : {16u, 64u}) {
+        for (const u32 mode : {0u, 1u, 2u}) {   // 0 prévia cheia, 1 prévia 1/2 (AUTO em 1080p), 2 export
+            BenchScene s(1920, 1080);
+            s.sharedImage = s.image_asset(480, 270);
+            const f32 speeds[5] = {3.f, 8.f, 20.f, 45.f, 90.f};
+            for (u32 i = 0; i < 5; ++i) {
+                const LayerId id = s.image(s.sharedImage, 260.f + 340.f * static_cast<f32>(i), 220.f + 160.f * static_cast<f32>(i), 1.2f);
+                Layer* l = s.comp->layer(id);
+                l->motionBlur = true;
+                Track& px = l->tracks.get_or_create(TrackProperty::PositionX);
+                const f32 x0 = l->transform.position.x;
+                for (i64 k = 0; k <= 12; ++k)   // vai e volta a cada 10 quadros
+                    px.set(FrameIndex{k * 10}, x0 + ((k & 1) ? speeds[i] * 10.f : 0.f));
+                if (i == 1 || i == 3) {
+                    s.add_effect(effects, id, effect_keys::kGaussianBlur).params[0].constant.v[0] = 6.0f;
+                    s.add_effect(effects, id, effect_keys::kExposure).params[0].constant.v[0] = 0.3f;
+                }
+            }
+            MotionBlurSettings& mb = s.comp->motion_blur();
+            mb.enabled = true;
+            mb.samples = samples;
+            mb.adaptiveLimit = 128;
+            RenderSettings rs;
+            rs.finalQuality = mode == 2;
+            if (mode == 1) rs.previewDenominator = 2;
+            FrameSnapshot snap;
+            renderer.prepare(*s.comp, s.project, FrameIndex{35}, &s.media, &BenchScene::lookup, &s, rs, 7000000 + samples * 4 + mode, 1,
+                             DecodeMode::Playback, 1.0f, snap);
+            u32 total = 0;
+            char per[96] = {0};
+            usize used = 0;
+            for (const RenderLayer& rl : snap.layers) {
+                const u32 k = std::max<u32>(1, static_cast<u32>(rl.blurMatrices.size()));
+                total += k;
+                used += static_cast<usize>(std::snprintf(per + used, sizeof(per) - used, used ? "/%u" : "%u", k));
+            }
+            snap.release_video_frames();
+            // run_frames desenha em resolução cheia: a 1/2 só a contagem de amostras.
+            FrameMeasure m;
+            if (mode != 1) m = run_frames(renderer, backend, s, 60, mode == 2);
+            std::printf("    %2u %-9s | %3u (%s) | %6.2f | %6.2f | %6.2f\n", samples,
+                        mode == 0 ? "previa" : mode == 1 ? "previa/2" : "export", total, per, m.prepareMs, m.recordMs, m.gpuMs);
+            renderer.release_project_resources();
+        }
+    }
+    renderer.shutdown();
+    backend.shutdown();
+}
 #endif
 
 // =============================================================================

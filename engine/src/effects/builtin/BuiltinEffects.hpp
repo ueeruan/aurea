@@ -140,4 +140,24 @@ struct BlurRequest {
 [[nodiscard]] Rect spread_region(const Rect& input, f32 extendX, f32 extendY,
                                  const LayerPlacement* placement, f32 margin) noexcept;
 
+/// Brilho em oitavas (GlowEffect.cpp): o algoritmo 1 do Brilho e do Brilho
+/// profundo. Frações em 0..1; raio em px da layer.
+struct OctaveGlow {
+    f32  threshold = 0.4f;   ///< limiar no valor sRGB do canal mais forte
+    f32  softness = 0.4f;    ///< joelho do limiar
+    f32  radius = 55.0f;     ///< alcance: quantas oitavas acendem
+    f32  falloff = 0.15f;    ///< quanto cada oitava larga perde
+    f32  exposure = 1.4f;    ///< multiplica a luz somada
+    Vec4 color{1, 1, 1, 1};  ///< cor (linear)
+    f32  tintAmount = 1.0f;
+    f32  chromatic = 0.0f;
+    bool addMode = false;    ///< soma limitada em vez de tela + mapa de tom
+    bool glowOnly = false;
+};
+/// Margem (px da layer) que o brilho ocupa além da entrada.
+[[nodiscard]] f32 octave_glow_reach(f32 radius) noexcept;
+void octave_glow_pipelines(std::vector<PipelineKey>& out, SurfaceFormat work);
+[[nodiscard]] Status build_octave_glow(EffectBuildContext& ctx, const OctaveGlow& g, const LayerPlacement* placement,
+                                       const LayerImage& input, f32 margin, LayerImage& out);
+
 } // namespace aurea::builtin

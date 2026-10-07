@@ -1368,13 +1368,17 @@ final class AureaModel: ObservableObject {
         guard force || now - memoryCheckAt >= 1 else { return }
         memoryCheckAt = now
         let available = engine.availableMemoryBytes()
+        // Classe de memória LOW (até ~4 GB, o mesmo corte do motor): a reserva
+        // sobe de 128/64 MB para 192/96 MB, como no Android.
+        let reserve: UInt64 = DeviceMemoryClass.low ? 192 * 1024 * 1024 : 128 * 1024 * 1024
+        let critical: UInt64 = DeviceMemoryClass.low ? 96 * 1024 * 1024 : 64 * 1024 * 1024
         // For an app, zero can also mean its allocation limit is already exceeded.
-        if available < 128 * 1024 * 1024 {
-            let level: Int32 = available < 64 * 1024 * 1024 ? 15 : 10
+        if available < reserve {
+            let level: Int32 = available < critical ? 15 : 10
             if !memoryPressureLimited || level > max(memoryTrimLevel, memoryTrimRequestedLevel) || now - memoryTrimAt >= 5 {
                 trimForMemoryPressure(level: level)
             }
-        } else if available >= 192 * 1024 * 1024 || !memoryPressureLimited {
+        } else if available >= reserve + 64 * 1024 * 1024 || !memoryPressureLimited {
             memoryPressureLimited = false
             effectPreviews.resumeMemoryWork()
         }
@@ -4833,4 +4837,12 @@ extension AureaModel {
             }
         }
     }
+}
+
+/// Classe de memória LOW no iOS: RAM física abaixo de 4608 MiB (o corte do
+/// motor, DeviceCapabilities memory_tier). Caches de imagem da UI e o limiar
+/// de pressão seguem a classe — o mesmo que DeviceMemoryClass no Android.
+enum DeviceMemoryClass {
+    static let lowTotalBytes: UInt64 = 4608 * 1024 * 1024
+    static let low: Bool = ProcessInfo.processInfo.physicalMemory < lowTotalBytes
 }

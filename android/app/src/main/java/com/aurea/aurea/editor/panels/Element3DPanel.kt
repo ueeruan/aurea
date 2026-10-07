@@ -278,7 +278,10 @@ private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
                 item { TextButton(onClick = { store.text3d?.let { store.setText3D(it.copy(fontPath = "")) }; fontsOpen = false }) { Text(stringResource(R.string.t3d_default_font)) } }
                 items(store.fonts, key = { it.path }) { font ->
                     TextButton(onClick = { store.text3d?.let { store.setText3D(it.copy(fontPath = font.path)) }; fontsOpen = false }) {
-                        Text("${font.family} ${font.style}", color = if (info.fontPath == font.path) AureaColors.Accent else AureaColors.Text)
+                        // A importada volta do motor como "docs:…" (caminho portátil), como no iOS.
+                        val chosen = info.fontPath == font.path ||
+                            (info.fontPath.startsWith("docs:") && font.path.replace('\\', '/').endsWith("/" + info.fontPath.removePrefix("docs:")))
+                        Text("${font.family} ${font.style}", color = if (chosen) AureaColors.Accent else AureaColors.Text)
                     }
                 }
             }

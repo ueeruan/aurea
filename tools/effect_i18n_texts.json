@@ -3167,5 +3167,53 @@
   "hi": "रूपरेखा",
   "id": "Kontur",
   "ar": "المخطط"
+ },
+ "Suavidade": {
+  "en": "Softness",
+  "es": "Suavidad",
+  "ru": "Мягкость",
+  "hi": "कोमलता",
+  "id": "Kelembutan",
+  "ar": "النعومة"
+ },
+ "Decaimento": {
+  "en": "Falloff",
+  "es": "Atenuación",
+  "ru": "Затухание",
+  "hi": "क्षय",
+  "id": "Peluruhan",
+  "ar": "التلاشي"
+ },
+ "Quantidade da cor": {
+  "en": "Tint amount",
+  "es": "Cantidad de tinte",
+  "ru": "Сила оттенка",
+  "hi": "रंग की मात्रा",
+  "id": "Jumlah warna",
+  "ar": "مقدار اللون"
+ },
+ "Aberração cromática": {
+  "en": "Chromatic aberration",
+  "es": "Aberración cromática",
+  "ru": "Хроматическая аберрация",
+  "hi": "वर्ण विपथन",
+  "id": "Aberasi kromatik",
+  "ar": "الزيغ اللوني"
+ },
+ "Modo somar": {
+  "en": "Add mode",
+  "es": "Modo sumar",
+  "ru": "Режим сложения",
+  "hi": "जोड़ मोड",
+  "id": "Mode tambah",
+  "ar": "وضع الإضافة"
+ },
+ "Só o brilho": {
+  "en": "Glow only",
+  "es": "Solo el brillo",
+  "ru": "Только свечение",
+  "hi": "केवल चमक",
+  "id": "Hanya cahaya",
+  "ar": "التوهج فقط"
  }
 }

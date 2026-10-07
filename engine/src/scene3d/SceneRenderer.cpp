@@ -1512,7 +1512,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const u32 blockerTaps = kBlockerTaps[shadowTier] ? kBlockerTaps[shadowTier] : (frame.shadow.softShadows ? 8u : 0u);
     // O export pede 4096; a GPU manda no teto (maxImageDimension2D) — um
     // mapa maior que ela não é criado e o quadro do export sairia sem 3D.
-    const u32 mapCap = std::clamp(gpu_->capabilities().maxTexture2D, 256u, 4096u);
+    const u32 mapCap = std::min(std::clamp(gpu_->capabilities().maxTexture2D, 256u, 4096u), shadowCap_);
     const u32 mapSize = std::clamp(std::max(shadowSize_, std::min(frame.shadow.mapResolution, 4096u)), 256u, mapCap);
     Vec4 shadowParams2{};
     f32 shadowBiasDepth = 0.0f;

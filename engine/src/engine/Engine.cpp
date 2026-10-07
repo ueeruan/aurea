@@ -590,7 +590,12 @@ void Engine::apply_memory_budgets() noexcept {
     renderer_.set_transient_cache_budget(memory_.budget(MemoryClass::RenderedFrames) / 2);
     // Prévia em memória pela faixa de RAM do aparelho (32/64/320/512 MiB),
     // limitada pelo orçamento do processo e pela pressão de memória atual.
-    renderer_.set_preview_cache_budget(preview_cache_budget(caps_.cpu().totalMemoryBytes, budget, memory_.pressure()));
+    // Classe de memória LOW (até ~4 GB): no máximo 32 MiB, sombra do preview
+    // até 2048 e cache do Roto Brush menor. Nada disso toca o export.
+    const bool lowMemory = low_memory_device();
+    renderer_.set_low_memory_device(lowMemory);
+    renderer_.set_preview_cache_budget(preview_cache_budget(caps_.cpu().totalMemoryBytes, budget, memory_.pressure(),
+                                                            lowMemory));
     // Aparelho de entrada (§107): cache de decode menor que o da tabela
     // (a fatia da tabela vale para o plano de sempre, 24 %).
     if (const u32 pct = caps_.policy().decodedFramesBudgetPercent; pct != 24) {
@@ -717,13 +722,55 @@ Status Engine::suspend() noexcept {
     return OkStatus;
 }
 
+bool Engine::low_memory_device() const noexcept {
+    // Eixo de MEMÓRIA da classe (não a classe inteira: uma GPU fraca num
+    // aparelho de 8 GB não precisa da prévia de 32 MiB).
+    const u64 total = caps_.cpu().totalMemoryBytes;
+    return caps_.device_class().memory == DeviceTier::Low || (total && total < (4608ull << 20));
+}
+
+bool Engine::preview_memory_hold() const noexcept {
+    return monotonic_ns() < previewPressureUntilNs_.load(std::memory_order_acquire);
+}
+
 MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     const TrimStage upTo = trim_stage_for_os_level(osLevel);
     if (upTo == TrimStage::None || state_ == EngineState::Uninitialized) return MemoryManager::TrimReport{};
+    // RUNNING_LOW / RUNNING_CRITICAL / UI_HIDDEN e acima: a prévia guardada
+    // (até 300 quadros na GPU) sai AGORA e o preparo ocioso fica parado por
+    // kPreviewPressureHoldNs — reencher logo depois devolveria a memória que o
+    // LMKD acabou de pedir. Ligado antes de soltar: o render não reenche no meio.
+    const bool previewRelease = static_cast<u8>(upTo) >= static_cast<u8>(TrimStage::UnusedDecodedFrames);
+    if (previewRelease) previewPressureUntilNs_.store(monotonic_ns() + kPreviewPressureHoldNs, std::memory_order_release);
     // 1–3 (e o que mais estiver registrado): os caches de CPU, cada um com o
     // próprio lock. O projeto (Persistent) não é registrável.
     (void)memory_.trim(upTo);
     const u8 st = static_cast<u8>(upTo);
+    // Estágio 3 (RUNNING_LOW, UI_HIDDEN): só a prévia guardada da GPU; o resto
+    // do cache de render fica para o estágio 4. wait_idle roda as destruições
+    // adiadas e devolve ao driver (vkFreeMemory) os blocos que ficaram vazios —
+    // o LMKD da Samsung conta a memória da GPU (dmabuf/mali), não o pool.
+    if (previewRelease && st < static_cast<u8>(TrimStage::OldRenderCache)) {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
+            const GpuMemoryStats before = gpu_->memory_stats();
+            const u32 frames = renderer_.release_preview_cache();
+            if (frames) gpu_->wait_idle();
+            const GpuMemoryStats after = gpu_->memory_stats();
+            {
+                std::lock_guard<std::mutex> pl(perfMutex_);
+                perf_.gpuMemoryBytes = after.usedBytes;
+                perf_.gpuReservedBytes = after.reservedBytes;
+                perf_.gpuAllocations = after.allocationCount;
+            }
+            memory_.note_trim_freed(TrimStage::UnusedDecodedFrames,
+                                    before.usedBytes > after.usedBytes ? before.usedBytes - after.usedBytes : 0);
+            AUREA_LOG_INFO("memoria: previa guardada solta (%u quadros, %llu KB em uso, %llu KB devolvidos ao driver)",
+                           frames,
+                           static_cast<unsigned long long>((before.usedBytes > after.usedBytes ? before.usedBytes - after.usedBytes : 0) / 1024),
+                           static_cast<unsigned long long>((before.reservedBytes > after.reservedBytes ? before.reservedBytes - after.reservedBytes : 0) / 1024));
+        }
+    }
     // Reusable render resources can be reclaimed during export too. Every
     // producer GPU operation holds renderMutex_; waiting for submitted work
     // makes the cache safe to drop between frames. Export targets and mapped
@@ -733,7 +780,8 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
             gpu_->wait_idle();   // fora do caminho quente: é um aviso do sistema
-            const u64 before = gpu_->memory_stats().usedBytes;
+            const GpuMemoryStats beforeStats = gpu_->memory_stats();
+            const u64 before = beforeStats.usedBytes;
             const u32 textures = renderer_.trim_memory(st, frameCounter_);
             gpu_->wait_idle();   // roda as destruições adiadas até o fence
             const GpuMemoryStats retained = gpu_->memory_stats();
@@ -748,8 +796,12 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
                 perf_.gpuAllocations = retained.allocationCount;
             }
             memory_.note_trim_freed(TrimStage::OldRenderCache, before > after ? before - after : 0);
-            AUREA_LOG_INFO("memoria: renderer soltou %u texturas (%llu KB de GPU)", textures,
-                           static_cast<unsigned long long>((before > after ? before - after : 0) / 1024));
+            // "devolvidos": blocos do alocador liberados com vkFreeMemory em
+            // wait_idle (trim_empty_blocks) — é o que o LMKD enxerga.
+            AUREA_LOG_INFO("memoria: renderer soltou %u texturas (%llu KB de GPU, %llu KB devolvidos ao driver)", textures,
+                           static_cast<unsigned long long>((before > after ? before - after : 0) / 1024),
+                           static_cast<unsigned long long>((beforeStats.reservedBytes > retained.reservedBytes
+                               ? beforeStats.reservedBytes - retained.reservedBytes : 0) / 1024));
         }
     }
     // 7: temporários — fontes de vídeo que não entraram no último quadro
@@ -1081,6 +1133,13 @@ u32 rebase_project_paths(Project& project, const std::string& docs) {
     project.for_each_asset([&](AssetId, Asset& a) {
         std::string r = rebase_moved_documents(a.sourcePath, docs);
         if (!r.empty()) { a.sourcePath = std::move(r); ++moved; }
+        // Texto 3D antigo com a fonte importada pelo caminho absoluto do
+        // contêiner anterior: a receita volta a apontar para a cópia de agora.
+        scene3d::Text3DSpec spec;
+        if (scene3d::decode_text3d(a.sourcePath, spec)) {
+            std::string font = rebase_moved_documents(spec.fontPath, docs);
+            if (!font.empty()) { spec.fontPath = std::move(font); a.sourcePath = scene3d::encode_text3d(spec); ++moved; }
+        }
     });
     project.timeline().for_each_composition([&](CompositionId, Composition& c) {
         for (u32 i = 0; i < c.order().size(); ++i) {
@@ -1267,6 +1326,9 @@ Status Engine::load_project(const char* path) noexcept {
                     initialize_instance(defaults, *specs);
                     for (u32 p=static_cast<u32>(effect.params.size()); p<specs->count(); ++p) {
                         auto slot = defaults.params[p];
+                        // "Algoritmo" de um efeito que ganhou desenho novo: a
+                        // instância salva sem o slot fica no desenho de antes.
+                        if ((specs->at(p).flags & kParamLegacyZero) != 0) slot.constant = ParamValue::scalar(0.0f);
                         if (specs->at(p).type == ParamType::Curve) {
                             effect.curves.push_back(defaults.curves[slot.constant.ref]);
                             slot.constant.ref = effect.curves.size()-1;
@@ -1357,6 +1419,12 @@ Status Engine::load_project(const char* path) noexcept {
                     const Layer* l = c.layer(c.order().at(i));
                     if (l && l->kind == LayerKind::Text && !l->text.fontPath.empty()) fonts.push_back(resolve_asset_path(l->text.fontPath));
                 }
+            });
+            // A importada do texto 3D também ("docs:…"; a do sistema não é importada).
+            project_->for_each_asset([&](AssetId, Asset& a) {
+                scene3d::Text3DSpec spec;
+                if (scene3d::decode_text3d(a.sourcePath, spec) && spec.fontPath.rfind("docs:", 0) == 0)
+                    fonts.push_back(resolve_asset_path(spec.fontPath));
             });
         }
         std::sort(fonts.begin(), fonts.end());
@@ -6082,6 +6150,23 @@ void rebase_track(Track& t, i64 delta) noexcept {
     for (Keyframe& k : t.keys) k.time.value += delta;
     t.lastIndex = 0;
 }
+/// Leva as keys de uma camada cujo início local é `srcBase` para uma cujo
+/// início é `dstBase`: mesma distância do início (×`scale` quando o fps da
+/// composição muda — o mesmo instante em segundos). Duas keys que caem no
+/// mesmo quadro depois de arredondar viram uma (fica a última, como `set`).
+void place_track_keys(Track& t, i64 srcBase, i64 dstBase, f64 scale) noexcept {
+    if (scale == 1.0) { rebase_track(t, dstBase - srcBase); return; }
+    for (Keyframe& k : t.keys)
+        k.time.value = dstBase + static_cast<i64>(std::llround(static_cast<f64>(k.time.value - srcBase) * scale));
+    std::vector<Keyframe> unique;
+    unique.reserve(t.keys.size());
+    for (const Keyframe& k : t.keys) {
+        if (!unique.empty() && unique.back().time.value == k.time.value) unique.back() = k;
+        else unique.push_back(k);
+    }
+    t.keys.assign(unique.begin(), unique.end());
+    t.lastIndex = 0;
+}
 /// Troca a pilha de efeitos de `dst` pela de `src` (com os keyframes deles).
 void replace_effects(Layer& dst, const std::vector<EffectInstance>& effects, const TrackSet& srcTracks, i64 delta) {
     dst.tracks.remove_if([](const Track& t) { return t.property == TrackProperty::EffectParam; });
@@ -6179,6 +6264,8 @@ u32 Engine::paste_style(const u64* ids, u32 count) noexcept {
 
 u32 Engine::copy_effects(u64 layerId, u32 effectId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    // Comandos na fila (um keyframe recém-posto) entram ANTES da cópia.
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l) return 0;
@@ -6187,6 +6274,7 @@ u32 Engine::copy_effects(u64 layerId, u32 effectId) noexcept {
     for (const auto& e : l->effects) if (effectId == kInvalidIndex || e.id == effectId) clipboard_.effects.push_back(e);
     clipboard_.effectTracks.clear();
     clipboard_.effectsBase = l->offset.value;
+    clipboard_.effectsFps = comp->fps();
     for (u32 i = 0; i < l->tracks.size(); ++i) {
         const auto& track = l->tracks.at(i);
         if (track.property == TrackProperty::EffectParam && (effectId == kInvalidIndex || track.effectIndex == effectId)) clipboard_.effectTracks.push_back(track);
@@ -6196,8 +6284,14 @@ u32 Engine::copy_effects(u64 layerId, u32 effectId) noexcept {
 
 u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    // Um aparo/movimento ainda na fila muda o `offset` do destino: entra antes.
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || clipboard_.effects.empty()) return 0;
+    // Pré-comp com outro fps: o mesmo instante em SEGUNDOS (1 s a 30 fps = 60
+    // quadros a 60 fps). Sem isso os keyframes chegavam espremidos/esticados.
+    const f64 srcFps = clipboard_.effectsFps, dstFps = comp->fps();
+    const f64 scale = srcFps > 0.0 && dstFps > 0.0 && std::fabs(srcFps - dstFps) > 1e-6 ? dstFps / srcFps : 1.0;
     u32 done = 0;
     for (u32 i = 0; i < count; ++i) {
         Layer* d = comp->layer(LayerId::unpack(ids[i]));
@@ -6207,7 +6301,10 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
             modelRevision_.fetch_add(1, std::memory_order_acq_rel);
         }
         // Ids novos depois do maior da camada: os keyframes seguem pelo id.
-        u32 next = 0;
+        // Começa no contador da camada: um efeito APAGADO deixa a trilha dele
+        // (vazia) para trás, e reusar o id fazia `find` achar a órfã antes da
+        // colada — os losangos apareciam, mas a animação colada não valia.
+        u32 next = d->nextEffectId;
         for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
         for (const EffectInstance& e : clipboard_.effects) {
             if ((e.type == effect_type_id(text::kAnimatorEffect) || e.type == effect_type_id(text::kTransformEffect)) && !supports_text_animation(*d)) continue;
@@ -6219,11 +6316,13 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
             EffectInstance c = e;
             const u32 oldId = e.id;
             c.id = next++;
+            // Nenhuma trilha antiga com este id pode ficar na frente da colada.
+            d->tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::EffectParam && t.effectIndex == c.id; });
             for (const Track& t : clipboard_.effectTracks) {
                 if (t.effectIndex != oldId) continue;
                 Track nt = t;
                 nt.effectIndex = c.id;
-                rebase_track(nt, d->offset.value - clipboard_.effectsBase);
+                place_track_keys(nt, clipboard_.effectsBase, d->offset.value, scale);
                 d->tracks.add(std::move(nt));
             }
             d->effects.push_back(std::move(c));
@@ -8580,8 +8679,12 @@ Status Engine::ensure_text3d_layout(Layer& layer) noexcept {
     return OkStatus;
 }
 
-Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
+Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& requested) noexcept {
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    // Fonte importada: a receita guarda o caminho relativo aos documentos
+    // ("docs:…"), como o texto 2D — a pasta do app muda entre instalações.
+    scene3d::Text3DSpec spec = requested;
+    if (!spec.fontPath.empty() && spec.fontPath.rfind("docs:", 0) != 0) spec.fontPath = store_asset_path(spec.fontPath);
     u64 session = 0; CompositionId composition;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -8628,6 +8731,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& spec) noexcept {
 Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept {
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     scene3d::Text3DSpec edited = spec;
+    if (!edited.fontPath.empty() && edited.fontPath.rfind("docs:", 0) != 0) edited.fontPath = store_asset_path(edited.fontPath);   // ver add_text3d
     AssetId previousScene;
     u64 session = 0; CompositionId composition;
     {
@@ -9027,7 +9131,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
             && !refinePending_ && !refineNow_ && !lastIncomplete_
             && !offscreenReaders_.load(std::memory_order_acquire)
-            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f;
+            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold();
         previewIdle_.observe(idleEligible, idleKey, frameStart, force || !onlyIfChanged);
         const bool unchanged = !force && t.value == lastRenderedFrame_
             && !(lastIncomplete_ && mediaGen != lastMediaGen_);
@@ -9049,7 +9153,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         lastMediaGen_ = mediaGen;
 
         rs = current_render_settings();
-        if (caps_.thermal().severe() || memory_.pressure() >= .85f) rs.previewCacheRevision = 0;
+        if (caps_.thermal().severe() || memory_.pressure() >= .85f || preview_memory_hold()) rs.previewCacheRevision = 0;
         const u32 cacheCapacity = renderer_.configure_preview_cache(comp->width(), comp->height(), rs);
         if (previewBuffering_) {
             previewBufferTarget_ = preview_cache_target(comp->fps(), cacheCapacity,
@@ -9332,7 +9436,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             && !playing && !previewBuffering_ && playback_.mode() == PlaybackMode::Paused
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
             && !offscreenReaders_.load(std::memory_order_acquire)
-            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f;
+            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold();
         // Start the quiet interval after the first complete picture/refinement,
         // rather than polling an already-expired idle deadline on an incomplete one.
         previewIdle_.observe(eligible, current, monotonic_ns(), false);
@@ -10524,6 +10628,9 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
         effect_type_id("aurea.audio.echo"), effect_type_id(effect_keys::kAudioSpectrum),
         // Created together with their controller/membership by create_grid.
         effect_type_id("aurea.layout.grid_builder"), effect_type_id("aurea.layout.grid_item"),
+        // Brilho profundo 2 duplica o Brilho profundo (brilho em oitavas):
+        // projetos que o usam abrem e renderizam igual; não entra mais no menu.
+        effect_type_id(effect_keys::kDeepGlow2),
     };
     u32 cursor = 0, written = 0;
     for (u32 i = 0; i < effectRegistry_.count() && written < capacity; ++i) {
@@ -12940,6 +13047,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::EffectAdd: {
             Layer* l = need_layer(cmd.effect_add.layer);
             if (!l) return Errc::NotFound;
+            // Mexeu nos efeitos: o modelo 3D passa a aplicá-los (projeto antigo
+            // ficava com eles ignorados até aqui).
+            l->modelEffects = true;
             if (l->effects.size() >= kMaxEffectCount) return Errc::OutOfRange;
             const EffectTypeId type = cmd.effect_add.effectType;
             if (type == effect_type_id(effect_keys::kRotobrush) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;

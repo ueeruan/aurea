@@ -51,7 +51,20 @@ inline u32 shutter_sample_count(const MotionBlurSettings& settings, bool finalQu
     // Final integration stays deterministic regardless of playback/thermal state.
     const f64 spacing = finalQuality ? .5 : .75 / quality;
     const f64 wanted = std::isfinite(pathPixels) ? std::ceil(std::max(0.0, pathPixels) / spacing) + 1.0 : limit;
-    return std::clamp(static_cast<u32>(std::min<f64>(wanted, limit)), minimum, limit);
+    // Prévia (beta 2026-10-07, "o motion blur trava"): as amostras da pessoa
+    // são o PISO só enquanto ainda separam o rastro em passos visíveis. Num
+    // rastro curto, a partir de 0,75 px entre amostras (na resolução da
+    // prévia) mais cópias não mudam um pixel — só multiplicam o custo (64
+    // amostras num objeto que anda 3 px eram 64 desenhos de camada inteira).
+    // Rastro longo continua com as amostras pedidas (o pedido do beta 2140);
+    // conteúdo que muda sem trajeto medido (`changing`) também. O export não
+    // passa por aqui: continua determinístico e idêntico.
+    u32 floor = minimum;
+    if (!finalQuality && !changing && std::isfinite(pathPixels)) {
+        const f64 enough = std::ceil(std::max(0.0, pathPixels) / .75) + 1.0;
+        floor = std::min(floor, std::max(2u, static_cast<u32>(std::min<f64>(enough, limit))));
+    }
+    return std::clamp(static_cast<u32>(std::min<f64>(wanted, limit)), floor, limit);
 }
 
 // Measure corner paths, not just the displacement of the center: rotations,

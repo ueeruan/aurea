@@ -478,6 +478,76 @@ AUREA_TEST(Engine, MemoryTrimPublishesDrainedGpuCountersWithoutRedrawing) {
     e.shutdown();
 }
 
+AUREA_TEST(Engine, RunningLowReleasesPreviewCacheToTheDriverAndHoldsRefill) {
+    // Galaxy A15/A16 (LOW_MEMORY em primeiro plano): RUNNING_LOW (10) e
+    // UI_HIDDEN (20) soltam a prévia guardada da GPU na hora — com wait_idle,
+    // que no Vulkan devolve ao driver os blocos vazios (vkFreeMemory) — e o
+    // render não reenche durante kPreviewPressureHoldNs.
+    auto* mock = new aurea::test::MockBackend();
+    Engine e;
+    auto cfg = headless_config(); cfg.backend = mock;
+    auto textureMemory = [&] {
+        GpuMemoryStats result;
+        for (usize i = 0; i < mock->textures.size(); ++i) {
+            if (!mock->textureAlive[i]) continue;
+            result.usedBytes += mock->textures[i].estimated_bytes();
+            ++result.allocationCount;
+        }
+        result.reservedBytes = ((result.usedBytes + 4095) / 4096) * 4096;
+        return result;
+    };
+    mock->queryMemoryStats = textureMemory;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30., "pressure").ok());
+    int window = 0;
+    AUREA_CHECK(e.attach_surface(&window, 64, 64).ok());
+    std::vector<u8> rgba(64 * 64 * 4, 200);
+    AUREA_CHECK(e.import_image(rgba.data(), 64, 64, "pressure image").ok());
+    AUREA_CHECK(e.render_frame(true).ok());
+    AUREA_CHECK(e.renderer().preview_cached(FrameIndex{0}));
+    AUREA_CHECK(!e.preview_memory_hold());
+    const u32 cached = e.renderer().preview_cached_count();
+    AUREA_CHECK(cached > 0u);
+    const GpuMemoryStats before = textureMemory();
+    const u32 idleWaits = mock->idleWaits.load();
+    const u32 submissions = mock->framesSubmitted;
+
+    // RUNNING_MODERATE (5) não toca a prévia.
+    (void)e.trim_memory(5);
+    AUREA_CHECK_EQ(e.renderer().preview_cached_count(), cached);
+    AUREA_CHECK(!e.preview_memory_hold());
+
+    const auto report = e.trim_memory(10);
+    AUREA_CHECK_EQ(report.upTo, TrimStage::UnusedDecodedFrames);
+    AUREA_CHECK_EQ(e.renderer().preview_cached_count(), 0u);
+    AUREA_CHECK(!e.renderer().preview_cached(FrameIndex{0}));
+    AUREA_CHECK(e.preview_memory_hold());
+    AUREA_CHECK(mock->idleWaits.load() > idleWaits);       // destruições adiadas drenadas
+    AUREA_CHECK_EQ(mock->framesSubmitted, submissions);    // sem quadro novo
+    const GpuMemoryStats after = textureMemory();
+    AUREA_CHECK(after.usedBytes < before.usedBytes);
+    AUREA_CHECK(after.reservedBytes < before.reservedBytes);
+    AUREA_CHECK(after.allocationCount < before.allocationCount);
+    AUREA_CHECK(e.memory().last_trim().freed[static_cast<u8>(TrimStage::UnusedDecodedFrames)]
+                >= before.usedBytes - after.usedBytes);
+    bridge::PerfPOD perf{};
+    e.fill_perf(perf);
+    AUREA_CHECK_EQ(perf.gpuMemoryBytes, after.usedBytes);
+
+    // Durante a pausa o quadro na tela continua sendo desenhado, mas nada
+    // volta para a prévia guardada.
+    AUREA_CHECK(e.render_frame(true).ok());
+    AUREA_CHECK_EQ(e.renderer().preview_cached_count(), 0u);
+    AUREA_CHECK(e.preview_memory_hold());
+
+    // UI_HIDDEN (20) é o mesmo estágio: solta e renova a pausa.
+    const auto hidden = e.trim_memory(20);
+    AUREA_CHECK_EQ(hidden.upTo, TrimStage::UnusedDecodedFrames);
+    AUREA_CHECK_EQ(e.renderer().preview_cached_count(), 0u);
+    mock->queryMemoryStats = {};
+    e.shutdown();
+}
+
 AUREA_TEST(Engine, MemoryWarningReleasesHiddenImageUploadsAndRebuildsThem) {
     auto* mock = new aurea::test::MockBackend();
     Engine e;

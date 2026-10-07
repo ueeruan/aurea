@@ -1776,7 +1776,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.0.4 (2143) • 10/07/2026\n\n• Fixed: since 0.0.2, 3D lights started lighting 3D images, videos, texts and shapes and changed the look of older projects. This is now the per-layer \"Accepts lights\" option (off by default), and projects look as before again.\n• Everything from 0.0.3: 3D rotation trackball, Mesh Warp, Disintegrate, Mask/Exclude, Puppet, Rotoscoping, Delete account.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.5 (2144) • 10/07/2026\n\n• Projects from 0.0.1 open the same again: 3D Flare and other lights no longer light 3D images, videos and texts unless you ask (\"Accepts lights\" option on the layer).\n• Light Rays works on 3D text.\n• Pasting an effect onto another clip keeps the keyframes at the right times.\n• Graph handles no longer push each other.\n• Fonts (including imported ones) in 3D text stay after updating the app.\n• Lighter Motion Blur in preview.\n• Fewer out-of-memory crashes on 4 GB phones (Galaxy A15/A16 and others).\n• New Glow and Deep Glow (older projects don\'t change).</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -3662,4 +3662,7 @@ to edit the curve.</string>
     <string name="conta_excluir_falhou">Couldn\'t delete the account. Check your connection and try again.</string>
     <string name="settings_ad_privacy">Ad privacy</string>
     <string name="settings_ad_privacy_note">Review or change your ad consent</string>
+    <string name="fxl_tint_amount_2">Tint amount</string>
+    <string name="fxl_chromatic_aberration">Chromatic aberration</string>
+    <string name="fxl_add_mode_2">Add mode</string>
 </resources>

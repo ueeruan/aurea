@@ -622,14 +622,16 @@ DevicePolicy device_policy(DeviceTier tier, ThermalTier thermal) noexcept {
         case DeviceTier::Low:
             // Perfil de entrada (§107): preview 1/4, metade do custo das
             // operações caras, sombra e partículas menores, proxy para tudo
-            // acima de 720p, um terço a menos de cache de decode, prévias de
+            // acima de 720p, metade do cache de decode, prévias de
             // efeito com metade do lado, pipeline de export raso (memória).
             p.previewInitialDenominator  = 4;
             p.heavyScale                 = 0.5f;
             p.shadowMapSize              = 1024;
             p.particleScale              = 0.5f;
             p.preferProxyAboveShortSide  = 720;
-            p.decodedFramesBudgetPercent = 16;
+            // 12 % (era 16): menos quadros decodificados à frente por fonte.
+            // Galaxy A15/A16 de 4 GB morriam por LOW_MEMORY em primeiro plano.
+            p.decodedFramesBudgetPercent = 12;
             p.effectPreviewMaxSide       = 160;
             p.exportPipelineDepth        = 2;
             break;

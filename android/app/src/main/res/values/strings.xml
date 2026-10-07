@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea Beta 0.0.4 (2143) • 07/10/2026\n\n• Corrigido: desde a 0.0.2, luzes 3D passaram a iluminar imagens, vídeos, textos e formas em 3D e mudaram o visual de projetos antigos. Agora isso é a opção \"Aceita luzes\" de cada camada (desligada por padrão) e os projetos voltam a ficar como antes.\n• Tudo da 0.0.3: trackball na rotação 3D, Mesh Warp, Desintegrar, Máscara/Excluir, Fantoche, Rotoscopia, Excluir conta.</string>
+    <string name="release_notes_body">Aurea Beta 0.0.5 (2144) • 07/10/2026\n\n• Projetos da 0.0.1 voltam a abrir iguais: o Flare 3D e outras luzes não iluminam mais imagens, vídeos e textos em 3D sem você pedir (opção \"Aceita luzes\" na camada).\n• Light Rays funciona em texto 3D.\n• Colar efeito em outro clipe mantém os keyframes no tempo certo.\n• As alças do gráfico não se empurram mais.\n• Fontes (inclusive importadas) no texto 3D continuam depois de atualizar o app.\n• Motion Blur mais leve na prévia.\n• Menos travamentos por falta de memória em celulares de 4 GB (Galaxy A15/A16 e outros).\n• Brilho e Brilho profundo novos (projetos antigos não mudam).</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -3695,4 +3695,7 @@
     <string name="conta_excluir_falhou">Não foi possível excluir a conta. Verifique a conexão e tente de novo.</string>
     <string name="settings_ad_privacy">Privacidade dos anúncios</string>
     <string name="settings_ad_privacy_note">Reveja ou mude o seu consentimento para anúncios</string>
+    <string name="fxl_tint_amount_2">Quantidade da cor</string>
+    <string name="fxl_chromatic_aberration">Aberração cromática</string>
+    <string name="fxl_add_mode_2">Modo somar</string>
 </resources>

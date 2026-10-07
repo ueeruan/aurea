@@ -32,7 +32,8 @@ final class EffectPreviewStore {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("effect-previews/\(version)-photo-v1", isDirectory: true)
-        memory.totalCostLimit = 24 * 1024 * 1024
+        // Classe de memória LOW (até ~4 GB): metade, como no Android.
+        memory.totalCostLimit = DeviceMemoryClass.low ? 12 * 1024 * 1024 : 24 * 1024 * 1024
     }
 
     // A cancelled/offscreen tile must not enqueue more GPU work. Cancellation

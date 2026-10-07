@@ -32,6 +32,8 @@ public:
     using MattePtr = std::shared_ptr<const std::vector<f32>>;
     static constexpr u32 kSize = ForegroundEstimator::kSize;
     static constexpr usize kMaxBytes = 48u * 1024u * 1024u;
+    /// Classe de memória LOW (até ~4 GB de RAM): metade do teto.
+    static constexpr usize kLowMemoryMaxBytes = kMaxBytes / 2;
 
     /// De onde vêm os quadros (cópia: o modelo pode mudar durante o cálculo).
     struct Source {
@@ -73,6 +75,12 @@ public:
     /// Projeto fechado: worker, fila e cache fora.
     void clear() noexcept;
     [[nodiscard]] usize cached_bytes() const;
+    /// Teto do cache em bytes (kMaxBytes; kLowMemoryMaxBytes na classe LOW).
+    /// Encolher despeja já os recortes usados há mais tempo.
+    void set_max_bytes(usize bytes) noexcept;
+    /// Pressão de memória: despeja os recortes usados há mais tempo até sobrar
+    /// no máximo `keepBytes`. O worker segue; devolve os bytes soltos.
+    usize trim_to(usize keepBytes) noexcept;
     [[nodiscard]] u64 computed_frames() const noexcept { return computed_.load(std::memory_order_relaxed); }
 
 private:
@@ -95,6 +103,7 @@ private:
     mutable std::mutex mutex_;
     std::unordered_map<u64, Entry> cache_;
     usize bytes_ = 0;
+    usize maxBytes_ = kMaxBytes;
     u64 stamp_ = 0;
 
     mutable std::mutex queueMutex_;

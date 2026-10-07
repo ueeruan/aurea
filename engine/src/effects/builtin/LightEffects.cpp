@@ -26,40 +26,63 @@ u32 reduction_for(f32 radius, f32 limit) noexcept {
 }
 
 // -----------------------------------------------------------------------------
-// Brilho profundo — dois halos em raios diferentes
+// Brilho profundo
+//
+// Instância nova (algoritmo 1): o brilho em oitavas do Brilho, com exposição
+// mais alta e raio largo de padrão. Instância salva antes (slot "algorithm"
+// ausente = 0): os dois halos abaixo, inalterados; os controles que só o
+// desenho anterior usa ficam ocultos (os valores salvos continuam valendo).
 // -----------------------------------------------------------------------------
 class DeepGlow final : public Effect {
 public:
     enum : u32 { kThreshold = 0, kCoreRadius, kHaloRadius, kCoreIntensity, kHaloIntensity,
                  kColor, kPreserveShadows, kScreen, kTintCore, kTintHalo, kOnlyGlow, kClip,
-                 kOptical, kExposure, kSoftness };
+                 kOptical, kExposure, kSoftness,
+                 // Acrescentados no fim (índices salvos não mudam).
+                 kAlgorithm, kGlowIntensity, kFalloff, kTintAmount, kChromatic, kAddMode };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kDeepGlow, "Brilho profundo", "Luz", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
+        // Padrões e faixas dos slots salvos NÃO mudam (um projeto de 12
+        // slots completa 12..14 com eles). Só o desenho anterior usa os
+        // ocultos (kLegacy): animáveis como antes, fora do card.
+        constexpr u16 kLegacy = kParamAnimatable | kParamHidden;
         p.add_float("threshold", "Limite", 55.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("core_radius", "Raio do núcleo", 12.0f, 0.0f, 400.0f, kParamAnimatable | kParamPixels, "px");
-        p.add_float("halo_radius", "Raio do halo", 70.0f, 0.0f, 800.0f, kParamAnimatable | kParamPixels, "px");
-        p.add_float("core_intensity", "Força do núcleo", 1.4f, 0.0f, 8.0f);
-        p.add_float("halo_intensity", "Força do halo", 0.8f, 0.0f, 8.0f);
+        p.add_float("core_radius", "Raio do núcleo", 12.0f, 0.0f, 400.0f, kLegacy | kParamPixels, "px");
+        p.add_float("halo_radius", "Raio", 70.0f, 0.0f, 800.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("core_intensity", "Força do núcleo", 1.4f, 0.0f, 8.0f, kLegacy);
+        p.add_float("halo_intensity", "Força do halo", 0.8f, 0.0f, 8.0f, kLegacy);
         p.add_color("glow_color", "Cor do brilho", Vec4{1, 1, 1, 1});
-        p.add_bool("preserve_shadows", "Preservar as sombras", false);
-        p.add_bool("screen_halo", "Halo em tela", false);
-        p.add_bool("tint_core", "Tingir o núcleo", false);
-        p.add_bool("tint_halo", "Tingir o halo", true);
+        p.add_bool("preserve_shadows", "Preservar as sombras", false, kLegacy);
+        p.add_bool("screen_halo", "Halo em tela", false, kLegacy);
+        p.add_bool("tint_core", "Tingir o núcleo", false, kLegacy);
+        p.add_bool("tint_halo", "Tingir o halo", true, kLegacy);
         p.add_bool("only_glow", "Só o brilho", false);
-        p.add_float("clip", "Estouro", 100.0f, 10.0f, 400.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("clip", "Estouro", 100.0f, 10.0f, 400.0f, kLegacy | kParamPercent, "%");
         // Append parameters: saved projects keep the original parameter indices.
-        p.add_bool("optical_falloff", "Decaimento óptico", true);
-        p.add_float("exposure", "Exposição", 0.0f, -5.0f, 5.0f, kParamAnimatable, "EV");
+        p.add_bool("optical_falloff", "Decaimento óptico", true, kLegacy);
+        p.add_float("exposure", "Exposição", 0.0f, -5.0f, 5.0f, kLegacy, "EV");
         p.add_float("threshold_softness", "Suavidade do limite", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        // Algoritmo (oculto): 1 = brilho em oitavas; 0 = os dois halos, que um
+        // projeto salvo sem este slot (até a build 2143) mantém.
+        p.add_float("algorithm", "Algoritmo", 1.0f, 0.0f, 1.0f, kParamHidden | kParamLegacyZero);
+        p.add_float("glow_intensity", "Intensidade", 2.2f, 0.0f, 10.0f);
+        p.typed_range(0.0f, 100.0f);
+        p.add_float("falloff", "Decaimento", 15.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("tint_amount", "Quantidade da cor", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("chromatic", "Aberração cromática", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_bool("add_mode", "Modo somar", false);
     }
+    static bool octaves(const EffectEval& e) noexcept { return e.f(kAlgorithm) >= 0.5f; }
     bool is_identity(const EffectEval& e) const noexcept override {
+        if (octaves(e)) return !e.b(kOnlyGlow) && e.f(kGlowIntensity) < 1e-4f;
         return !e.b(kOnlyGlow) && (e.f(kCoreIntensity) < 1e-3f && e.f(kHaloIntensity) < 1e-3f);
     }
     f32 input_margin(const EffectEval& e) const noexcept override {
+        if (octaves(e)) return octave_glow_reach(e.f(kHaloRadius));
         return std::max(e.f(kCoreRadius), e.f(kHaloRadius));
     }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
@@ -67,15 +90,14 @@ public:
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_gaussian_blur_frag, work));
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_downsample_frag, work));
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_deep_glow_combine_frag, work));
+        octave_glow_pipelines(out, work);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         // Calibrado na foto das prévias (clara): limite alto para só as luzes
-        // acenderem; com 48% / 1,6 o card estourava 83% dos pixels.
-        v[kThreshold] = ParamValue::scalar(92.0f);
-        v[kCoreRadius] = ParamValue::scalar(8.0f);
-        v[kHaloRadius] = ParamValue::scalar(40.0f);
-        v[kCoreIntensity] = ParamValue::scalar(0.6f);
-        v[kHaloIntensity] = ParamValue::scalar(0.5f);
+        // acenderem.
+        v[kThreshold] = ParamValue::scalar(85.0f);
+        v[kHaloRadius] = ParamValue::scalar(60.0f);
+        v[kGlowIntensity] = ParamValue::scalar(1.8f);
         v[kColor] = ParamValue::color(0.75f, 0.88f, 1.0f, 1.0f);
         return true;
     }
@@ -173,6 +195,21 @@ public:
 
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
+        if (octaves(e)) {
+            OctaveGlow g;
+            g.threshold = e.f(kThreshold) / 100.0f;
+            g.softness = e.f(kSoftness) / 100.0f;
+            g.radius = e.f(kHaloRadius);
+            g.falloff = e.f(kFalloff) / 100.0f;
+            g.exposure = e.f(kGlowIntensity);
+            g.color = e.color(kColor);
+            g.tintAmount = e.f(kTintAmount) / 100.0f;
+            g.chromatic = e.f(kChromatic) / 100.0f;
+            g.addMode = e.b(kAddMode);
+            g.glowOnly = e.b(kOnlyGlow);
+            return build_octave_glow(ctx, g, e.placement, input, margin, out);
+        }
+        // Algoritmo 0 (projetos salvos até a build 2143): inalterado.
         const f32 coreR = std::max(0.0f, e.f(kCoreRadius));
         const f32 haloR = std::max(0.0f, e.f(kHaloRadius));
         const Rect region = spread_region(input.region, std::max(coreR, haloR), std::max(coreR, haloR),
@@ -385,8 +422,42 @@ public:
     /// (sem recorte) cada lado cresce no máximo max(¼ do lado maior, 512 px):
     /// numa camada pequena os raios saem como no 2D; um vídeo 1080p não vira
     /// uma textura 4K em meio-float.
+    /// Plano na cena 3D (texto com Z, giro em X/Y): o pedaço do plano que a
+    /// tela mostra, em px da camada — os cantos da composição levados de volta
+    /// ao plano z = 0 da camada pela homografia de compFromLayer. false quando
+    /// algum canto não acerta o plano À FRENTE da câmera (o horizonte do plano
+    /// aparece: a parte visível não tem fim) ou a matriz é degenerada.
+    static bool plane_visible_rect(const LayerPlacement& pl, f32 margin, Rect& out) noexcept {
+        if (!pl.compWidth || !pl.compHeight) return false;
+        const Mat4& m = pl.compFromLayer;
+        const f64 a = m.col[0].x, b = m.col[1].x, c = m.col[3].x;
+        const f64 d = m.col[0].y, e = m.col[1].y, f = m.col[3].y;
+        const f64 g = m.col[0].w, h = m.col[1].w, i = m.col[3].w;
+        // Inversa pela adjunta (a escala some na divisão homogênea).
+        const f64 A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+        const f64 D = -(b * i - c * h), E = a * i - c * g, F = -(a * h - b * g);
+        const f64 G = b * f - c * e, H = -(a * f - c * d), I = a * e - b * d;
+        if (!(std::fabs(a * A + b * B + c * C) > 1e-12)) return false;
+        const f64 cw = pl.compWidth, ch = pl.compHeight;
+        const f64 corners[4][2] = {{0, 0}, {cw, 0}, {0, ch}, {cw, ch}};
+        f64 x0 = 1e30, y0 = 1e30, x1 = -1e30, y1 = -1e30;
+        for (const auto& q : corners) {
+            const f64 lz = C * q[0] + F * q[1] + I;
+            if (!(std::fabs(lz) > 1e-12)) return false;
+            const f64 x = (A * q[0] + D * q[1] + G) / lz, y = (B * q[0] + E * q[1] + H) / lz;
+            if (!std::isfinite(x) || !std::isfinite(y) || !(g * x + h * y + i > 1e-4)) return false;
+            x0 = std::min(x0, x); x1 = std::max(x1, x); y0 = std::min(y0, y); y1 = std::max(y1, y);
+        }
+        out = Rect{static_cast<f32>(x0) - margin, static_cast<f32>(y0) - margin,
+                   static_cast<f32>(x1 - x0) + 2.0f * margin, static_cast<f32>(y1 - y0) + 2.0f * margin};
+        return out.w > 0.0f && out.h > 0.0f;
+    }
+
+    /// `wide` = a região passou do teto antigo porque a tela mostra mais do
+    /// plano (build limita os texels).
     static Rect rays_region(const Rect& in, Vec2 light, f32 length, const LayerPlacement* placement,
-                            f32 margin) noexcept {
+                            f32 margin, bool* wide = nullptr) noexcept {
+        if (wide) *wide = false;
         const bool clipped = placement && !placement->inScene3d && !placement->preserveFullExtent
                           && placement->compWidth && placement->compHeight;
         const f32 reach = std::clamp(std::isfinite(length) ? length : 0.0f, 0.0f, 1.0f);
@@ -398,8 +469,22 @@ public:
         f32 top = std::min({in.y, y0, y1}), bottom = std::max({in.y + in.h, y0, y1});
         if (!clipped) {
             const f32 grow = std::max(0.25f * std::max(in.w, in.h), 512.0f);
-            left = std::max(left, in.x - grow); right = std::min(right, in.x + in.w + grow);
-            top = std::max(top, in.y - grow); bottom = std::min(bottom, in.y + in.h + grow);
+            f32 aL = in.x - grow, aR = in.x + in.w + grow, aT = in.y - grow, aB = in.y + in.h + grow;
+            // Texto com Z/perspectiva: perto da câmera a camada aparece
+            // ampliada e o teto de 512 px DA CAMADA cortava os raios dentro
+            // da tela (a borda reta/escada no meio do quadro). O teto passa a
+            // cobrir também tudo do plano que a tela mostra; onde ele já
+            // bastava, nada muda.
+            Rect seen;
+            if (placement && placement->inScene3d && !placement->preserveFullExtent
+                && plane_visible_rect(*placement, margin, seen)) {
+                aL = std::min(aL, seen.x); aR = std::max(aR, seen.x + seen.w);
+                aT = std::min(aT, seen.y); aB = std::max(aB, seen.y + seen.h);
+            }
+            const f32 cl = std::max(left, aL), cr = std::min(right, aR);
+            const f32 ct = std::max(top, aT), cb = std::min(bottom, aB);
+            if (wide) *wide = cl < in.x - grow || cr > in.x + in.w + grow || ct < in.y - grow || cb > in.y + in.h + grow;
+            left = cl; right = cr; top = ct; bottom = cb;
         }
         return spread_region(Rect{left, top, right - left, bottom - top}, 0.0f, 0.0f, placement, margin);
     }
@@ -416,9 +501,22 @@ public:
         const f32 ly = e.placement && e.placement->layerHeight ? 0.0f : input.region.y;
         const Vec2 light{lx + rel.x * lw, ly + rel.y * lh};
         const f32 length = e.f(kLength) / 100.0f;
-        const Rect region = rays_region(input.region, light, length, e.placement, margin);
+        bool wide = false;
+        const Rect region = rays_region(input.region, light, length, e.placement, margin, &wide);
         u32 w = 0, h = 0;
         ctx.region_size(region, input.texel_scale_x(), w, h);
+        if (wide) {
+            // Região alargada pela parte visível do plano: no máximo ~2× os
+            // pixels da composição (mín. 2048²) em meio-float. Os raios são
+            // macios; perto da câmera a densidade da camada já era alta.
+            const f64 cw = e.placement ? e.placement->compWidth : 0, ch = e.placement ? e.placement->compHeight : 0;
+            const f64 budget = std::max(2048.0 * 2048.0, 2.0 * cw * ch);
+            const f64 have = static_cast<f64>(w) * static_cast<f64>(h);
+            if (have > budget) {
+                const f32 scale = input.texel_scale_x() * static_cast<f32>(std::sqrt(budget / have));
+                ctx.region_size(region, scale, w, h);
+            }
+        }
 
         EffectUniforms u;
         u.uvMap = EffectBuildContext::uv_map(region, input.region);

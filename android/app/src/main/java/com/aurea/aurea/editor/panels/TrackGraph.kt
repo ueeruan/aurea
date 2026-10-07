@@ -76,9 +76,12 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
         curves.map { graphCurve(it, view.from.toDouble(), view.to.toDouble(), perFrame, speed, fps) }
     }
     // O cabeçote saiu da janela (scrub, play, outro trecho): a janela vai atrás dele.
+    // Nunca no meio de um arrasto (como no iOS): a janela pulando movia na tela
+    // TODAS as outras bolinhas enquanto o dedo levava uma.
+    var dragging by remember { mutableStateOf(false) }
     LaunchedEffect(layer, groupId) {
         snapshotFlow { store.detail?.localPlayhead }.collect { frame ->
-            if (frame != null && (frame < view.from || frame > view.to)) {
+            if (!dragging && frame != null && (frame < view.from || frame > view.to)) {
                 val half = view.duration / 2f
                 view = view.copy(from = frame - half, to = frame + half)
             }
@@ -150,6 +153,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 val initialPicked = picked
                 val groupKeys = if (multi && key != null) currentTrack.filter { it.time in (if (key.time in picked) picked else setOf(key.time)) } else emptyList()
                 var groupDelta = 0
+                dragging = key != null || handle != null
                 try {
                     while (true) {
                         val event = awaitPointerEvent()
@@ -202,7 +206,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                         }
                         event.changes.forEach { it.consume() }
                     }
-                } finally { if (began) store.endGesture() }
+                } finally { dragging = false; if (began) store.endGesture() }
             }
         }) {
             fun point(frame: Float, value: Float) = Offset((frame - view.from) / view.duration * size.width,

@@ -1027,14 +1027,21 @@ AUREA_TEST(Gpu, GlowAddsLightOnlyAboveThreshold) {
         p[0] = p[1] = p[2] = 255;
     }
     const LayerId bright = s.image(px, 64, 64);
-    s.add_effect(bright, effect_keys::kGlow);
+    // O desenho anterior do Brilho (algoritmo 0, slot 4), com o limiar que ele
+    // gravava (60 %): é o que um projeto antigo abre. O algoritmo novo tem os
+    // testes de LightGlowGoldenGpu.inl.
+    auto legacy = [](EffectInstance& g) {
+        g.params[0].constant = ParamValue::scalar(60.0f);
+        g.params[4].constant = ParamValue::scalar(0.0f);
+    };
+    legacy(s.add_effect(bright, effect_keys::kGlow));
     const FloatImage img = s.render();
     AUREA_CHECK(img.v(64 + 8 + 4, 64).x > 0.02f);    // halo fora do quadrado
     AUREA_CHECK(img.v(64, 64).x >= 1.0f - 1e-3f);    // o brilho só soma
 
     Scene d(64, 64);
     const LayerId dark = d.image(uniform_image(64, 64, 60, 60, 60), 32, 32);
-    d.add_effect(dark, effect_keys::kGlow);
+    legacy(d.add_effect(dark, effect_keys::kGlow));
     const FloatImage dimg = d.render();
     AUREA_CHECK_NEAR(dimg.v(32, 32).x, srgb_decode(60 / 255.0f), 0.002);
 }
@@ -1045,6 +1052,7 @@ AUREA_TEST(Gpu, DeepGlowOpticalHaloSurvivesTransparencyAndExposure) {
     s.comp->set_background(Color{0, 0, 0, 0});
     const LayerId id = s.image(uniform_image(16, 16, 255, 255, 255), 128, 128);
     auto& e = s.add_effect(id, effect_keys::kDeepGlow);
+    e.params[15].constant = ParamValue::scalar(0); // algoritmo 0: os dois halos (projeto antigo)
     e.params[0].constant = ParamValue::scalar(0); // no threshold attenuation
     e.params[2].constant = ParamValue::scalar(80);
     e.params[3].constant = ParamValue::scalar(0); // isolate optical halo
@@ -1255,6 +1263,10 @@ AUREA_TEST(Gpu, GoldenGlow) {
     Scene s(256, 144);
     const LayerId id = s.image(reference_image(128, 72), 128, 72, 1.5f);
     EffectInstance& g = s.add_effect(id, effect_keys::kGlow);
+    // A referência é do desenho anterior (algoritmo 0) com o limiar que ele
+    // gravava (60 %): continua igual para os projetos antigos.
+    g.params[0].constant.v[0] = 60.0f;
+    g.params[4].constant.v[0] = 0.0f;
     g.params[1].constant.v[0] = 20.0f;
     g.params[2].constant.v[0] = 1.5f;
     check_golden("glow", s.render());
@@ -13179,6 +13191,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "MeshWarpGpu.inl"
 #include "PaperStationaryGpu.inl"
 #include "LightRaysTextGpu.inl"
+#include "LightGlowGoldenGpu.inl"
 #include "TurbulenceTypesGpu.inl"
 #include "Shapes2DGpu.inl"
 #include "PrecompTemporalGpu.inl"
@@ -13306,3 +13319,6 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
         e.shutdown();
     }
 }
+
+#include "V2140RegressionScenarios.inl"
+#include "LightRays3DGpu.inl"

@@ -69,6 +69,12 @@ enum EffectI18nTable {
     aurea.light.glow|1|radius|fxl_radius|
     aurea.light.glow|2|intensity|fxl_amount|
     aurea.light.glow|3|color|fxl_color|
+    aurea.light.glow|5|softness|fxl_softness|
+    aurea.light.glow|6|falloff|fxl_falloff|
+    aurea.light.glow|7|tint_amount|fxl_tint_amount_2|
+    aurea.light.glow|8|chromatic|fxl_chromatic_aberration|
+    aurea.light.glow|9|add_mode|fxl_add_mode_2|
+    aurea.light.glow|10|glow_only|fxo_glow_only|
     aurea.stylize.motion_tile|0|tile_center|fx_centro|
     aurea.stylize.motion_tile|1|tile_width|fx_mt_largura_ladrilho|
     aurea.stylize.motion_tile|2|tile_height|fx_mt_altura_ladrilho|
@@ -234,20 +240,15 @@ enum EffectI18nTable {
     aurea.blur.unsharp|3|only_detail|fxl_detail_only|
     aurea.blur.unsharp|4|blend|fx_mistura|
     aurea.light.deep_glow|0|threshold|fx_limite|
-    aurea.light.deep_glow|1|core_radius|fx_raio_nucleo|
     aurea.light.deep_glow|2|halo_radius|fx_raio_halo|
-    aurea.light.deep_glow|3|core_intensity|fx_forca_nucleo|
-    aurea.light.deep_glow|4|halo_intensity|fx_forca_halo|
     aurea.light.deep_glow|5|glow_color|fx_cor_brilho|
-    aurea.light.deep_glow|6|preserve_shadows|fx_preservar_sombras|
-    aurea.light.deep_glow|7|screen_halo|fx_halo_tela|
-    aurea.light.deep_glow|8|tint_core|fxl_tint_core|
-    aurea.light.deep_glow|9|tint_halo|fxl_tint_halo|
     aurea.light.deep_glow|10|only_glow|fx_so_brilho|
-    aurea.light.deep_glow|11|clip|fx_estouro|
-    aurea.light.deep_glow|12|optical_falloff|fxl_optical_falloff|
-    aurea.light.deep_glow|13|exposure|fxl_exposure|
     aurea.light.deep_glow|14|threshold_softness|fxl_threshold_softness|
+    aurea.light.deep_glow|16|glow_intensity|fxl_amount|
+    aurea.light.deep_glow|17|falloff|fxl_falloff|
+    aurea.light.deep_glow|18|tint_amount|fxl_tint_amount_2|
+    aurea.light.deep_glow|19|chromatic|fxl_chromatic_aberration|
+    aurea.light.deep_glow|20|add_mode|fxl_add_mode_2|
     aurea.light.hotspots|0|threshold|fxl_threshold|
     aurea.light.hotspots|1|brightness|fx_brilho|
     aurea.light.hotspots|2|blur_input|fxl_input_blur|

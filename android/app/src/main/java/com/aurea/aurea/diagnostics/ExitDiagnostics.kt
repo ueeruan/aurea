@@ -9,6 +9,8 @@ import android.os.SystemClock
 import com.aurea.aurea.BuildConfig
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -33,14 +35,61 @@ object ExitDiagnostics {
      */
     fun mark(context: Context, phase: Phase, detail: String = "") {
         val extra = cleanDetail(detail)
-        ultimaEtapa = "Aurea build=${BuildConfig.VERSION_CODE} phase=${phase.name}" + (if (extra.isEmpty()) "" else " $extra")
+        ultimaEtapa = "$MARKER_MAGIC${BuildConfig.VERSION_CODE} phase=${phase.name}" + (if (extra.isEmpty()) "" else " $extra")
+        if (Build.VERSION.SDK_INT < 30) return
+        val bytes = marker(phase, BuildConfig.VERSION_CODE, SystemClock.elapsedRealtime(), extra)
+        lastMarker = bytes
+        publish(context, bytes)
+    }
+
+    /**
+     * O resumo de estado é UM por processo e o último a gravar vence: o
+     * WebView do SDK de anúncios grava o dele (versão do Chromium + hash,
+     * binário) por cima do nosso. Regrava a nossa última etapa — na volta para
+     * a frente e antes de soltar memória sob pressão, quando o LMKD pode matar.
+     */
+    fun reassert(context: Context) {
+        if (Build.VERSION.SDK_INT < 30) return
+        lastMarker?.let { publish(context, it) }
+    }
+
+    @Volatile private var lastMarker: ByteArray? = null
+
+    private fun publish(context: Context, bytes: ByteArray) {
         if (Build.VERSION.SDK_INT < 30) return
         runCatching {
-            context.getSystemService(ActivityManager::class.java)?.setProcessStateSummary(
-                marker(phase, BuildConfig.VERSION_CODE, SystemClock.elapsedRealtime(), extra)
-            )
+            context.getSystemService(ActivityManager::class.java)?.setProcessStateSummary(bytes)
         } // An OEM refusing/throttling diagnostics must never break import.
     }
+
+    /** Prefixo mágico do NOSSO marcador (todos os builds desde o diagnóstico de saída). */
+    internal const val MARKER_MAGIC = "Aurea build="
+    /** O que o relatório mostra quando o resumo não é nosso ou não é legível. */
+    const val UNKNOWN_PHASE = "desconhecida"
+    /** Teto do Android para setProcessStateSummary. */
+    internal const val SUMMARY_MAX_BYTES = 128
+
+    /**
+     * A etapa gravada por NÓS, ou null: só vale com o prefixo [MARKER_MAGIC],
+     * UTF-8 válido, até [SUMMARY_MAX_BYTES] e só ASCII imprimível. O resumo de
+     * outro componente do processo (ex.: a versão do Chromium seguida de bytes binários, do
+     * WebView) nunca vira texto no relatório.
+     */
+    internal fun parseSummary(bytes: ByteArray?): String? {
+        if (bytes == null || bytes.isEmpty() || bytes.size > SUMMARY_MAX_BYTES) return null
+        val text = try {
+            Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes)).toString()
+        } catch (_: java.nio.charset.CharacterCodingException) { return null }
+        if (!text.startsWith(MARKER_MAGIC)) return null
+        if (text.any { it.code < 0x20 || it.code > 0x7E }) return null
+        return text
+    }
+
+    /** Para o relatório: a nossa etapa ou [UNKNOWN_PHASE]. */
+    fun phaseLabel(bytes: ByteArray?): String = parseSummary(bytes) ?: UNKNOWN_PHASE
 
     /** Só [A-Za-z0-9=/._-], até 24 caracteres: nunca nome, caminho ou URI. */
     internal fun cleanDetail(detail: String): String =
@@ -72,7 +121,7 @@ object ExitDiagnostics {
             exits(context).firstOrNull()?.let { exit ->
                 val bootWallMs = System.currentTimeMillis() - SystemClock.elapsedRealtime()
                 val crashElapsedMs = (exit.timestamp - bootWallMs).takeIf { it > 0 }
-                crashedDuringVideo(exit.reason, exit.processStateSummary?.toString(Charsets.UTF_8), build, crashElapsedMs)
+                crashedDuringVideo(exit.reason, parseSummary(exit.processStateSummary), build, crashElapsedMs)
             } ?: false
         }.getOrDefault(false)
         if (crashed) prefs.edit().putInt(SAFE_VIDEO_BUILD, build).apply()
@@ -98,7 +147,7 @@ object ExitDiagnostics {
     // O detalhe vai ANTES de uptimeMs: crashedDuringVideo lê o número do fim.
     internal fun marker(phase: Phase, build: Int, uptimeMs: Long, detail: String = ""): ByteArray {
         val extra = cleanDetail(detail)
-        return ("Aurea build=$build phase=${phase.name} " + (if (extra.isEmpty()) "" else "$extra ") + "uptimeMs=$uptimeMs")
+        return ("$MARKER_MAGIC$build phase=${phase.name} " + (if (extra.isEmpty()) "" else "$extra ") + "uptimeMs=$uptimeMs")
             .toByteArray(Charsets.UTF_8)
     }
 
@@ -139,7 +188,7 @@ object ExitDiagnostics {
                 appendLine("timestampMs=${exit.timestamp} process=${exit.processName}")
                 appendLine("  reason=${reason(exit.reason)} (${exit.reason}) status/signal=${exit.status}")
                 appendLine("  PSS=${exit.pss} KB RSS=${exit.rss} KB (última amostra; 0 pode significar não medido)")
-                appendLine("  etapa: ${exit.processStateSummary?.toString(Charsets.UTF_8) ?: "não registrada por esse build"}")
+                appendLine("  etapa: ${if (exit.processStateSummary == null) "não registrada por esse build" else phaseLabel(exit.processStateSummary)}")
             }
             appendLine("Encerramento pelo usuário ou atualização não significa falha. O histórico pode incluir builds anteriores.")
         }.onFailure { appendLine("Histórico indisponível: ${it.javaClass.simpleName}") }

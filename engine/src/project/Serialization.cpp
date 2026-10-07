@@ -928,6 +928,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.f32v(l.shape.seed);
     // v45: "aceita luzes" da camada 2D no espaço 3D.
     w.boolv(l.acceptsLights);
+    // v46: efeitos de imagem valem sobre o resultado 3D do modelo.
+    w.boolv(l.modelEffects);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -957,6 +959,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
 //      grupo fechado para a câmera (o render de sempre).
 // v43: mostrar interior do objeto 3D (Model3DData::interior, um byte no fim
 //      da camada). Antes dela: automático.
+// v46: efeitos de imagem no modelo 3D valem (Layer::modelEffects, um bool no
+//      fim da camada). Antes dela: desligado — os efeitos eram ignorados.
 // v45: "aceita luzes" da camada (Layer::acceptsLights, um bool no fim da
 //      camada). Antes dela: desligado — as luzes não tocam as camadas 2D.
 // v44: parâmetros das formas paramétricas (profundidade, ponta, espessura,
@@ -1525,6 +1529,9 @@ void read_layer(ByteReader& r, Layer& l) {
     // Projeto anterior à v45: a camada não recebe luz (as luzes da composição
     // iluminavam só os modelos 3D) — abre exatamente como foi feito.
     l.acceptsLights = g_readingTimelineVersion >= 45 ? r.boolv() : false;
+    // Projeto anterior à v46: efeitos num modelo 3D eram ignorados — continuam
+    // assim até a pessoa mexer nos efeitos da camada.
+    l.modelEffects = g_readingTimelineVersion >= 46 ? r.boolv() : false;
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap

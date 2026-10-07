@@ -67,7 +67,10 @@ bool Renderer::roto_propagate(const Project& project, const Composition& comp, c
     const Asset* asset = project.asset(layer.source);
     if (!asset || !asset->has_video()) return false;
     if (!foreground_) foreground_ = std::make_unique<ai::DepthMapService>(true);
-    if (!roto_) roto_ = std::make_shared<ai::RotoService>();
+    if (!roto_) {
+        roto_ = std::make_shared<ai::RotoService>();
+        roto_->set_max_bytes(lowMemoryDevice_ ? ai::RotoService::kLowMemoryMaxBytes : ai::RotoService::kMaxBytes);
+    }
     void (*wake)(void*) = nullptr; void* ctx = nullptr;
     media->ready_callback(wake, ctx);
     roto_->set_ready_callback(wake, ctx);
@@ -108,7 +111,10 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
     const Asset* asset = planProject_->asset(l.source);
     if (!asset) return none;
     if (!foreground_) foreground_ = std::make_unique<ai::DepthMapService>(true);
-    if (!roto_) roto_ = std::make_shared<ai::RotoService>();
+    if (!roto_) {
+        roto_ = std::make_shared<ai::RotoService>();
+        roto_->set_max_bytes(lowMemoryDevice_ ? ai::RotoService::kLowMemoryMaxBytes : ai::RotoService::kMaxBytes);
+    }
     if (planMedia_) {
         void (*wake)(void*) = nullptr; void* ctx = nullptr;
         planMedia_->ready_callback(wake, ctx);

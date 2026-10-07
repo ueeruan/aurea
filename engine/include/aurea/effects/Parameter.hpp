@@ -98,6 +98,11 @@ enum ParamFlags : u16 {
     /// Fração do tamanho da layer (0..1), como o centro do Motion Tile.
     kParamRelative    = 1u << 3,
     kParamHidden      = 1u << 4,
+    /// Slot ausente numa instância SALVA (projeto, preset) vale 0, não o
+    /// padrão declarado. É o "algoritmo" dos efeitos que ganharam um desenho
+    /// novo: a instância nova nasce com o padrão (1); a antiga, que não tinha
+    /// o slot, continua no desenho de antes.
+    kParamLegacyZero  = 1u << 5,
 };
 
 /// Marca de "faixa digitada não declarada": vale a faixa do slider.

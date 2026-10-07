@@ -446,6 +446,13 @@ public:
 
     void set_preview_cache_budget(u64 bytes) noexcept;
     [[nodiscard]] u64 preview_cache_budget() const noexcept { return previewCacheBudget_; }
+    /// Pressão de memória (trim RUNNING_LOW+): solta todos os quadros guardados
+    /// da prévia; devolve quantos tinham textura. Com o lock de render.
+    u32 release_preview_cache() noexcept;
+    /// Classe de memória LOW (Engine::low_memory_device): sombra do PREVIEW até
+    /// 2048 e cache do Roto Brush pela metade. O export não muda.
+    void set_low_memory_device(bool low) noexcept;
+    [[nodiscard]] bool low_memory_device() const noexcept { return lowMemoryDevice_; }
     /// Edição local: descarta só os quadros guardados em [start, end).
     void invalidate_preview_frames(i64 start, i64 end) noexcept;
     void clear_preview_cache() noexcept;
@@ -877,6 +884,7 @@ private:
     struct PreviewFrame { i64 time = -1; TextureHandle texture{}; bool complete = false; u64 used = 0, gpuFrame = 0; };
     std::vector<PreviewFrame> previewFrames_;
     u64 previewCacheBudget_ = 0, previewCacheKey_ = 0, previewCacheUse_ = 0;
+    bool lowMemoryDevice_ = false;   ///< set_low_memory_device
     u64 previewCacheRevision_ = 0, previewCacheComposition_ = 0;
     u32 previewCacheCapacity_ = 0;
     bool previewCacheHit_ = false;

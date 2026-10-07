@@ -277,6 +277,12 @@ public:
     /// entram. Qualquer thread. Devolve o relatório (bytes por estágio; os de
     /// GPU medidos no backend).
     MemoryManager::TrimReport trim_memory(i32 osLevel) noexcept;
+    /// Classe de memória LOW (RAM total até ~4 GB): prévia guardada até 32 MiB,
+    /// sombra do preview até 2048, cache do Roto Brush pela metade.
+    [[nodiscard]] bool low_memory_device() const noexcept;
+    /// Um aviso RUNNING_LOW (ou acima) chegou há menos de
+    /// kPreviewPressureHoldNs: prévia guardada desligada e preparo ocioso parado.
+    [[nodiscard]] bool preview_memory_hold() const noexcept;
 
     // --- Superfície (Android: SurfaceView → ANativeWindow) -------------------
     /// Chamadas da thread da UI. `detach_surface` só volta depois que a GPU
@@ -1152,6 +1158,9 @@ public:
     bool copy_transform(u64 layerId) noexcept;
     u32 paste_transform(const u64* ids, u32 count) noexcept;
     /// Efeitos (com os keyframes deles): colar ACRESCENTA ao fim da pilha.
+    /// Os keyframes mantêm a distância do INÍCIO da camada (tempo local; a
+    /// velocidade do clipe não muda isso) e o espaçamento em segundos — numa
+    /// pré-comp com outro fps os quadros são reescalados.
     u32 copy_effects(u64 layerId, u32 effectId = kInvalidIndex) noexcept;
     u32 paste_effects(const u64* ids, u32 count) noexcept;
     /// Keyframes no instante do frame (todas as propriedades com marca ali).
@@ -1734,6 +1743,7 @@ private:
         std::vector<EffectInstance> effects;
         std::vector<Track> effectTracks;            ///< EffectParam dos efeitos copiados
         i64 effectsBase = 0;                        ///< offset da camada de origem (início dela em tempo local)
+        f64 effectsFps = 0.0;                       ///< fps da composição de origem (colar numa pré-comp com outro fps reescala)
         struct Key { TrackProperty property; u32 effectIndex; u32 effectParamIndex; EffectTypeId effectType; Keyframe key; u32 effectOrdinal = 0; };
         std::vector<Key> keys;                       ///< tempo relativo ao instante copiado (0)
         /// Copiar animação: os keyframes de FORMA (morph) da camada vetorial,
@@ -1779,6 +1789,7 @@ private:
     i64  lastRenderedFrame_ = -1;
     PreviewRefill previewRefill_;
     PreviewIdleBuffer previewIdle_;          ///< render thread / renderMutex_
+    std::atomic<u64> previewPressureUntilNs_{0}; ///< trim_memory(>= RUNNING_LOW): prévia guardada pausada até aqui
     std::atomic<u32> offscreenReaders_{0};    ///< idle work must not steal capture decode targets
     // Protected by modelMutex_. The published packed status is lock-free for UI.
     bool previewBuffering_ = false;

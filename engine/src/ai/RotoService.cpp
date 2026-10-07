@@ -46,12 +46,33 @@ void RotoService::store(u64 track, i64 frame, u64 dep, const std::vector<f32>& m
     bytes_ += e.rle.size();
     slot = std::move(e);
     // Limite de memória: sai o recorte usado há mais tempo.
-    while (bytes_ > kMaxBytes && cache_.size() > 1) {
+    while (bytes_ > maxBytes_ && cache_.size() > 1) {
         auto old = std::min_element(cache_.begin(), cache_.end(),
                                     [](const auto& a, const auto& b) { return a.second.stamp < b.second.stamp; });
         bytes_ -= std::min(bytes_, old->second.rle.size());
         cache_.erase(old);
     }
+}
+
+void RotoService::set_max_bytes(usize bytes) noexcept {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        maxBytes_ = std::max<usize>(bytes, 1);
+    }
+    (void)trim_to(maxBytes_);
+}
+
+usize RotoService::trim_to(usize keepBytes) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const usize before = bytes_;
+    while (bytes_ > keepBytes && !cache_.empty()) {
+        auto old = std::min_element(cache_.begin(), cache_.end(),
+                                    [](const auto& a, const auto& b) { return a.second.stamp < b.second.stamp; });
+        bytes_ -= std::min(bytes_, old->second.rle.size());
+        cache_.erase(old);
+    }
+    if (cache_.empty()) bytes_ = 0;
+    return before - bytes_;
 }
 
 usize RotoService::cached_bytes() const {

@@ -1,6 +1,7 @@
 #include "aurea/render/Renderer.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/ShutterPlan.hpp"
+#include "aurea/ai/RotoService.hpp"
 #include <bit>
 #include "aurea/timeline/GridLayout.hpp"
 #include "aurea/render/MaskRaster.hpp"
@@ -1055,6 +1056,18 @@ void Renderer::clear_preview_cache() noexcept {
     previewCacheHit_ = false;
 }
 
+u32 Renderer::release_preview_cache() noexcept {
+    u32 n = 0;
+    for (const auto& frame : previewFrames_) if (frame.texture.valid()) ++n;
+    clear_preview_cache();
+    return n;
+}
+
+void Renderer::set_low_memory_device(bool low) noexcept {
+    lowMemoryDevice_ = low;
+    if (roto_) roto_->set_max_bytes(low ? ai::RotoService::kLowMemoryMaxBytes : ai::RotoService::kMaxBytes);
+}
+
 void Renderer::set_preview_cache_budget(u64 bytes) noexcept {
     // O teto vem da faixa de RAM (preview_cache_budget); 1 GiB só impede um
     // valor absurdo. Crescer não descarta nada; encolher (pressão) libera já.
@@ -1740,6 +1753,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // chapada, sem transform próprio.
         bool cameraThrough = false;
         bool particularSheet = false;   // camada do Particular (ver LayerPlacement::particleSpace)
+        bool sceneFx = false;           // modelo 3D com efeitos de camada (ver LayerKind::Model3D)
         switch (l->kind) {
             case LayerKind::Video: {
                 const Asset* asset = project.asset(l->source);
@@ -1928,7 +1942,25 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 inst.doubleSided = model_interior_visible(l->model.interior, asset->shapeParts);
                 inst.assetKey = l->model.scene.pack();
                 inst.asset = std::move(asset);
-                if (groupOpen && !out.scenes.empty()) {
+                // EFEITOS DA CAMADA (Raios de luz, Brilho, Reflexo de lente...)
+                // num modelo / texto 3D / forma 3D: valem sobre o RESULTADO 3D
+                // desta camada. Ela ganha uma cena só dela (do tamanho da
+                // composição: px da camada = px da composição, como a camada de
+                // ajuste) e os efeitos rodam nessa imagem. Antes o grupo saía
+                // sem plano e os efeitos não faziam nada. Layout de texto/forma
+                // 3D, animadores e ajudantes são identidade no plano: sem efeito
+                // de imagem, o modelo continua no grupo compartilhado como antes.
+                if (effects_ && !l->effects.empty() && l->modelEffects) {
+                    if (out.plans.size() <= used) out.plans.emplace_back();
+                    LayerPlacement pl;
+                    pl.compFromLayer = Mat4::identity();
+                    pl.compWidth = pl.layerWidth = out.compWidth;
+                    pl.compHeight = pl.layerHeight = out.compHeight;
+                    EffectGraph::plan(*l, *effects_, local, previewFactor, pl, this, out.plans[used], fps, &comp);
+                    sceneFx = !out.plans[used].empty() || out.plans[used].hasFold;
+                    if (!sceneFx) out.plans[used].clear();
+                }
+                if (groupOpen && !out.scenes.empty() && !sceneFx) {
                     out.scenes.back().instances.push_back(std::move(inst));
                     continue;   // entra no grupo aberto; nenhuma layer nova na pilha
                 }
@@ -1940,7 +1972,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.source.height = out.compHeight;
                 rl.compFromLayer = Mat4::identity();
                 rl.texelScale = previewFactor;
-                groupOpen = true;
+                // Com efeitos a cena é só desta camada: o 3D seguinte abre outra
+                // (os efeitos não podem pegar os vizinhos).
+                groupOpen = !sceneFx;
                 break;
             }
             case LayerKind::Camera:
@@ -2435,10 +2469,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 continue;   // partículas: fora desta fase
         }
         if (rl.source.kind == LayerSource::Kind::Scene3D) {
-            // O grupo não tem efeitos de layer nesta fase (entram sobre o
-            // resultado do grupo quando o 3D ganhar efeitos compatíveis).
+            // O grupo compartilhado não tem efeitos de layer; o modelo com
+            // efeitos (sceneFx) já planejou os dele sobre a cena só dele.
             if (out.plans.size() <= used) out.plans.emplace_back();
-            out.plans[used].clear();
+            if (!sceneFx) out.plans[used].clear();
             out.layers.push_back(std::move(rl));
             ++used;
             continue;
@@ -4059,6 +4093,10 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         {
             HeavyQuality q = heavyQ_;
             apply_scene3d_quality(q, static_cast<Scene3DQuality>(group.post.quality));
+            // Classe de memória LOW: o PREVIEW não cria mapa de sombra acima de
+            // 2048 (4096² D32 = 64 MB) mesmo que a composição peça mais. O
+            // export segue com o teto cheio (4096 ou o da GPU).
+            scene3d_.set_shadow_map_cap(heavyQ_.exportFrame || !lowMemoryDevice_ ? 4096u : 2048u);
             scene3d_.set_quality(q.shadowMapSize, q.shadowFilter, heavyQ_.lodBias, !heavyQ_.exportFrame);
             scene3d_.set_post_quality(q.msaaSamples, q.fxaa, q.bloomStartDiv, q.bloomLevels);
             // Profundidade de campo: o preview é simplificado (poucas amostras
@@ -6306,6 +6344,9 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
     n += collect_depth(frameNumber, 0);
     if (depth_) depth_->trim();
     if (foreground_) foreground_->trim();
+    // Recortes do Roto Brush (até 48 MB de RLE na CPU): saem sob pressão
+    // crítica (RUNNING_CRITICAL, MODERATE, COMPLETE). Refazem-se pelos traços.
+    if (stage >= 6 && roto_) (void)roto_->trim_to(0);
     particleStatics_.collect(frameNumber, 0);
     particleExtraBufs_.collect(*backend_, frameNumber, 1);
     // Entre quadros nada do pool está em uso: tudo volta a nascer sob demanda.

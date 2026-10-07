@@ -15,6 +15,7 @@
 #include "aurea/render/Renderer.hpp"
 
 #include <chrono>
+#include <filesystem>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -1171,4 +1172,94 @@ AUREA_TEST(Text3D, ScaleZKeyframesAnimateTheExtrusion) {
     AUREA_CHECK_NEAR(depthAt(15) / depthAt(0), 2.0f, 0.15f);
     AUREA_CHECK_NEAR(widthAt(30), widthAt(0), 1e-5f);
     e.shutdown();
+}
+
+// Beta 2026-10-07 ("texto 3D ficou incrível, mas a fonte — inclusive as
+// importadas — não funciona"). O fluxo REAL das duas interfaces: o motor cria
+// o texto, a UI troca a fonte (do sistema e importada, por caminho absoluto
+// como o Android e por "docs:" como o iOS), a malha muda, o projeto é salvo e
+// reaberto com a mesma fonte.
+AUREA_TEST(Text3D, ChosenAndImportedFontsChangeTheMeshAndSurviveReopen) {
+    namespace fs = std::filesystem;
+    std::vector<text::FontEntry> fontes = text::FontManager::instance().list();
+    std::string pathA, pathB, familyA;
+    for (const text::FontEntry& f : fontes) {
+        if (f.italic || f.weight != 400 || f.imported) continue;
+        if (pathA.empty()) { pathA = f.path; familyA = f.family; continue; }
+        if (f.family != familyA) { pathB = f.path; break; }
+    }
+    if (pathA.empty() || pathB.empty()) return;
+    const fs::path docs = fs::temp_directory_path() / "aurea_t3d_fontes_docs";
+    std::error_code ec;
+    fs::remove_all(docs, ec);
+    fs::create_directories(docs / "fontes", ec);
+    const fs::path imported = docs / "fontes" / "importada.ttf";
+    fs::copy_file(fs::u8path(pathB), imported, fs::copy_options::overwrite_existing, ec);
+    AUREA_CHECK(!ec);
+
+    Engine e;
+    EngineConfig ec2;
+    ec2.workerCount = 1;
+    ec2.disableAutosave = true;
+    ec2.documentsDirectory = docs.generic_string();
+    AUREA_CHECK(e.initialize(ec2).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const Result<u64> id = e.add_text3d(receita("Aurea"));
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    auto assinatura = [&]() {
+        Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        const Layer* l = c ? c->layer(LayerId::unpack(*id)) : nullptr;
+        const auto a = l ? e.model_asset(l->model.scene.pack()) : nullptr;
+        if (!a) return std::string("vazio");
+        usize n = 0;
+        for (const Mesh& m : a->meshes) for (const Primitive& p : m.primitives) n += p.positions.size();
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "%zu|%.4f|%.4f", n, double(a->bounds.extent().x), double(a->bounds.extent().y));
+        return std::string(buf);
+    };
+    auto trocar = [&](const std::string& fonte) {
+        scene3d::Text3DSpec s;
+        AUREA_CHECK(e.query_text3d(*id, s));
+        s.fontPath = fonte;
+        return e.set_text3d(*id, s).ok();
+    };
+    const std::string padrao = assinatura();
+    AUREA_CHECK(trocar(pathA));
+    const std::string comA = assinatura();
+    AUREA_CHECK(trocar(pathB));
+    const std::string comB = assinatura();
+    AUREA_CHECK(comA != comB);
+    std::printf("\n    padrao %s | A %s | B %s\n", padrao.c_str(), comA.c_str(), comB.c_str());
+
+    // Importada: registrada pelo motor e aplicada pelo caminho absoluto
+    // (Android) ou pelo "docs:" (iOS) — a mesma malha da fonte original.
+    AUREA_CHECK(e.import_font(imported.generic_string().c_str()).ok());
+    AUREA_CHECK(trocar(pathA));
+    AUREA_CHECK(trocar(imported.generic_string()));
+    AUREA_CHECK_EQ(assinatura(), comB);
+    AUREA_CHECK(trocar(pathA));
+    AUREA_CHECK(trocar("docs:fontes/importada.ttf"));
+    AUREA_CHECK_EQ(assinatura(), comB);
+    // A receita guarda o caminho PORTÁVEL: a pasta do app muda entre
+    // instalações (iOS troca o contêiner a cada atualização).
+    AUREA_CHECK(trocar(imported.generic_string()));
+    scene3d::Text3DSpec guardada;
+    AUREA_CHECK(e.query_text3d(*id, guardada));
+    std::printf("    receita guarda a fonte importada como %s\n", guardada.fontPath.c_str());
+    AUREA_CHECK_EQ(guardada.fontPath, std::string("docs:fontes/importada.ttf"));
+
+    const std::string arquivo = (docs / "fontes3d.aurea").string();
+    AUREA_CHECK(e.save_project(arquivo.c_str()).ok());
+    AUREA_CHECK(e.load_project(arquivo.c_str()).ok());
+    scene3d::Text3DSpec reaberta;
+    AUREA_CHECK(e.query_text3d(*id, reaberta));
+    AUREA_CHECK_EQ(reaberta.fontPath, std::string("docs:fontes/importada.ttf"));
+    AUREA_CHECK_EQ(assinatura(), comB);
+    // A importada usada pelo texto 3D volta ao seletor ao reabrir.
+    bool listada = false;
+    for (const text::FontEntry& f : e.list_fonts()) listada = listada || (f.imported && fs::equivalent(fs::u8path(f.path), imported, ec));
+    AUREA_CHECK(listada);
+    e.shutdown();
+    fs::remove_all(docs, ec);
 }

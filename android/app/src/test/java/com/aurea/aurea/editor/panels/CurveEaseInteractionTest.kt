@@ -77,22 +77,23 @@ class CurveEaseInteractionTest {
         for (t in listOf(.1f, .25f, .5f, .8f)) assertEquals(t, asBezier.transform(t), 1e-4f)
     }
 
-    @Test fun coincidentHandlesAreDrawnApartAndEachStaysGrabbable() {
-        // As duas alças no mesmo ponto (o canto de cima à esquerda).
-        val shown = separatedHandles(40f, 20f, 40f, 20f, 28f, 300f, 372f, 20f, 60f)
-        val gap = kotlin.math.hypot(shown[2] - shown[0], shown[3] - shown[1])
-        assertEquals(60f, gap, 0.01f)
-        // A de saída vai para o lado da primeira marca, a de chegada para o da segunda.
-        assertTrue(shown[0] < shown[2])
-        assertEquals(0, nearestHandle(shown[0], shown[1], shown, 56f))
-        assertEquals(1, nearestHandle(shown[2], shown[3], shown, 56f))
-        // Longe das duas, nenhuma é agarrada.
-        assertEquals(-1, nearestHandle(200f, 200f, shown, 56f))
-        // Afastadas o bastante, ficam onde estão.
-        val apart = separatedHandles(10f, 10f, 200f, 10f, 0f, 0f, 1f, 1f, 60f)
-        assertArrayEquals(floatArrayOf(10f, 10f, 200f, 10f), apart, 0f)
-        // Perto (mas não iguais): abrem ao longo da própria separação.
-        val near = separatedHandles(100f, 100f, 110f, 100f, 0f, 0f, 1f, 1f, 60f)
-        assertArrayEquals(floatArrayOf(75f, 100f, 135f, 100f), near, 1e-4f)
+    @Test fun handlesStayOnTheirValuesAndCoincidentOnesStayGrabbable() {
+        // Nada afasta as alças: elas ficam onde os valores dizem e o toque
+        // compara com essas posições (antes, a 30 dp uma "empurrava" a outra).
+        val keys = floatArrayOf(28f, 300f, 372f, 20f)
+        val apart = floatArrayOf(100f, 100f, 112f, 100f)
+        assertEquals(0, grabHandle(101f, 100f, apart, keys))
+        assertEquals(1, grabHandle(111f, 100f, apart, keys))
+        // As duas no mesmo ponto: o lado do toque (primeira marca → segunda) decide.
+        val same = floatArrayOf(40f, 20f, 40f, 20f)
+        assertEquals(0, grabHandle(40f, 20f, same, keys))      // em cima: a de saída
+        assertEquals(0, grabHandle(30f, 30f, same, keys))      // para o lado da primeira marca
+        assertEquals(1, grabHandle(52f, 14f, same, keys))      // para o lado da segunda marca
+        // Arrastar uma não mexe na outra: o valor da outra fica idêntico.
+        val e = Ease(Interp.BEZIER, .40f, .10f, .41f, .10f)
+        val p = handleAt(200f, 60f, 20f, 400f, 200f, 0f, 1f, 0f)
+        val moved = e.copy(x1 = p[0], y1 = p[1])
+        assertEquals(e.x2, moved.x2, 0f)
+        assertEquals(e.y2, moved.y2, 0f)
     }
 }

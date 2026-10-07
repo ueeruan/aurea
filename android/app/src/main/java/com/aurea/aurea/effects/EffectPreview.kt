@@ -121,7 +121,9 @@ class EffectPreviewStore(
     private fun key(typeId: Int, width: Int, height: Int) = "$typeId@${width}x$height"
 
     private companion object {
-        const val MAX_MEMORY_BYTES = 16 * 1024 * 1024
+        /** 16 MB; 8 MB na classe de memória LOW (aparelhos de até ~4 GB). */
+        val MAX_MEMORY_BYTES = com.aurea.aurea.engine.DeviceMemoryClass.effectPreviewCacheBytes(
+            com.aurea.aurea.engine.DeviceMemoryClass.low)
         /** WebP com perda: o nome novo existe a partir do Android 11. */
         @Suppress("DEPRECATION")
         val WEBP_LOSSY: Bitmap.CompressFormat =

@@ -234,7 +234,9 @@ ParamValue evaluate_param(const TrackSet& tracks, const EffectInstance& effect, 
 ParamValue evaluate_param_f(const TrackSet& tracks, const EffectInstance& effect, u32 paramIndex,
                             const ParamSpec& spec, f64 localTime, bool* usedFallback) noexcept {
     if (usedFallback) *usedFallback = false;
-    if (paramIndex >= effect.params.size()) return spec.defaultValue;
+    if (paramIndex >= effect.params.size()) {
+        return (spec.flags & kParamLegacyZero) != 0 ? ParamValue::scalar(0.0f) : spec.defaultValue;
+    }
     const ParamSlot& slot = effect.params[paramIndex];
 
     ParamValue out = slot.constant;

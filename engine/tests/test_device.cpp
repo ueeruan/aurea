@@ -13,6 +13,7 @@
 #include "aurea/core/Time.hpp"
 #include "aurea/jobs/JobSystem.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
+#include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/platform/AndroidVideoCompatibility.hpp"
 #include "aurea/platform/AndroidVideoPath.hpp"
 
@@ -674,7 +675,12 @@ AUREA_TEST(Thermal, EngineAppliesTierAndThermalToTheLiveKnobs) {
     AUREA_CHECK_EQ(e.caps().tier(), DeviceTier::Low);
     AUREA_CHECK_NEAR(e.preview_heavy_scale(), 0.5f, 1e-6f);
     const u64 budget = e.caps().memory_budget_bytes();
-    AUREA_CHECK_EQ(e.memory().budget(MemoryClass::DecodedFrames), budget * 16 / 100);
+    AUREA_CHECK_EQ(e.memory().budget(MemoryClass::DecodedFrames), budget * 12 / 100);
+    // Classe de memória LOW: prévia guardada até 32 MiB e sombra do preview
+    // até 2048 (o export segue cheio — ver Scene3D/Export).
+    AUREA_CHECK(e.low_memory_device());
+    AUREA_CHECK(e.renderer().low_memory_device());
+    AUREA_CHECK(e.renderer().preview_cache_budget() <= kPreviewCacheLowClassBudget);
 
     e.set_thermal(static_cast<u32>(thermal_state_from_android(1).level), thermal_state_from_android(1).throttling);
     AUREA_CHECK_EQ(e.caps().thermal_tier(), ThermalTier::Warm);

@@ -1004,7 +1004,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun onTrimMemory(level: Int) {
         if (destroyed) return
-        if (level >= TRIM_RUNNING_LOW) com.aurea.aurea.engine.UiImageCaches.trim()
+        if (level >= TRIM_RUNNING_LOW) {
+            // O LMKD pode matar a seguir: a etapa no relatório tem de ser a
+            // nossa, não o resumo que o WebView do SDK de anúncios gravou.
+            com.aurea.aurea.diagnostics.ExitDiagnostics.reassert(getApplication<Application>())
+            com.aurea.aurea.engine.UiImageCaches.trim()
+        }
         when {
             level >= TRIM_UI_HIDDEN || level == TRIM_RUNNING_CRITICAL -> {
                 thumbnails.clear()
@@ -1021,7 +1026,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private val memoryPressurePolicy = com.aurea.aurea.engine.MemoryPressurePolicy()
+    private val memoryPressurePolicy = com.aurea.aurea.engine.MemoryPressurePolicy(
+        com.aurea.aurea.engine.DeviceMemoryClass.low)
     private val pressureInfo = android.app.ActivityManager.MemoryInfo()
     private var pressureCheckInFlight = false
     private var lastPressureCheckMs = 0L
@@ -6986,7 +6992,8 @@ class ThumbnailCache(private val engine: AureaEngine) {
     fun bytes(): Long = cache.size().toLong()
 
     private companion object {
-        val MAX_BYTES: Int = (Runtime.getRuntime().maxMemory() / 16).coerceIn(8L shl 20, 24L shl 20).toInt()
+        val MAX_BYTES: Int = com.aurea.aurea.engine.DeviceMemoryClass.thumbnailCacheBytes(
+            Runtime.getRuntime().maxMemory(), com.aurea.aurea.engine.DeviceMemoryClass.low)
     }
 }
 

@@ -10,4 +10,10 @@ class AureaApplication : Application() {
         // Install before providers and activity startup, in every app process.
         CrashReporter.instalar(this)
     }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Classe de memória LOW (até ~4 GB): caches de bitmap e limiar de pressão.
+        com.aurea.aurea.engine.DeviceMemoryClass.init(this)
+    }
 }

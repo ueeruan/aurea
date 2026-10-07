@@ -145,7 +145,11 @@ object CrashReporter {
                 if (vistos.contem(id)) continue
                 val java = if (exit.reason == ApplicationExitInfo.REASON_CRASH) javas.firstOrNull { it.pid == exit.pid } else null
                 if (java != null) usadas += java.arquivo
-                val etapa = exit.processStateSummary?.toString(Charsets.UTF_8) ?: java?.etapa.orEmpty()
+                // O resumo do processo pode ser de outro componente (WebView do
+                // SDK de anúncios grava binário por cima): só a nossa etapa vale.
+                val etapa = ExitDiagnostics.parseSummary(exit.processStateSummary)
+                    ?: java?.etapa?.takeIf { it.isNotBlank() }
+                    ?: ExitDiagnostics.UNKNOWN_PHASE
                 gravar(app, relatorio(id, motivo, etapa, exit.timestamp, pilhaDaSaida(exit, motivo, java)))
                 vistos.marcar(id)
             }

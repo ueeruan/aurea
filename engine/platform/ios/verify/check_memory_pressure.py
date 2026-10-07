@@ -47,6 +47,13 @@ assert "level > memoryTrimLevel || now - memoryTrimAt >= 5" in model
 assert "memoryTrimRequestedLevel = max(memoryTrimRequestedLevel, level)" in model
 assert "level > max(memoryTrimLevel, memoryTrimRequestedLevel)" in model
 assert "128 * 1024 * 1024" in model and "64 * 1024 * 1024" in model
+# Classe de memória LOW (até ~4 GB): reserva maior, prévias de efeito pela metade.
+assert "enum DeviceMemoryClass" in model and "physicalMemory < lowTotalBytes" in model
+assert "DeviceMemoryClass.low ? 192 * 1024 * 1024 : 128 * 1024 * 1024" in model
+assert "DeviceMemoryClass.low ? 96 * 1024 * 1024 : 64 * 1024 * 1024" in model
+assert "available >= reserve + 64 * 1024 * 1024" in model
+assert "DeviceMemoryClass.low ? 12 * 1024 * 1024 : 24 * 1024 * 1024" in effects
+assert "UIApplication.didReceiveMemoryWarningNotification" in model and "trimForMemoryPressure(level: 15)" in model
 assert "guard available > 0" not in model
 assert "self.requestEpoch() == epoch" in effects and "pressurePaused = true" in effects
 assert "generation == epoch" in cards and "generation == HomeThumbCache.shared.generation" in cards
@@ -88,6 +95,7 @@ final class Native {
     func trimMemory(_ level: Int32) -> Int64 { trims.append(level); return 0 }
 }
 final class Previews { func resumeMemoryWork() {} }
+enum DeviceMemoryClass { static let low = false }
 final class Subject {
     var memoryPressureLimited = false
     var memoryCheckAt: TimeInterval = 0

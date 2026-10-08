@@ -1776,6 +1776,14 @@ final class AureaModel: ObservableObject {
         followPlayback(status.playing != 0)
     }
 
+    /// Pause explicitly even if the last UI snapshot has not caught up yet.
+    func pause() {
+        pendingPlayhead = nil
+        engine.run { $0.pause() }
+        status.playing = 0
+        followPlayback(false)
+    }
+
     /// Liga/desliga o relógio da timeline (um CADisplayLink só enquanto toca).
     private func followPlayback(_ playing: Bool) {
         if playing {

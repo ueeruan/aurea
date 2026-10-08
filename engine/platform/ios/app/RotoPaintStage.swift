@@ -121,8 +121,7 @@ import SwiftUI
                 chip("roto_paint", "fx.roto.paint", false) {
                     // Outra sessão aberta: devolve a visualização dela antes.
                     roto.end(model)
-                    model.engine.run { $0.pause() }
-                    model.status.playing = 0
+                    model.pause()
                     roto.background = false
                     roto.layer = layer
                     roto.effect = effectId

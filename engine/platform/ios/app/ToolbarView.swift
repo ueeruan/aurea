@@ -531,9 +531,9 @@ private struct ShellMenuRow: View {
         }
         .allowsHitTesting(shell.sheet != nil || shell.linkAnchor != nil || shell.resolutionAnchor != nil)
         .sheet(item: $replaceTarget) { target in
-            ShellMediaPicker(filter: .any(of: [.images, .videos])) { url, video in
+            ShellMediaPicker(selectionLimit: 1, filter: .any(of: [.images, .videos])) { items in
                 replaceTarget = nil
-                if let url { model.replaceMedia(layer: target.id, url: url, video: video) }
+                if let (url, video) = items.first { model.replaceMedia(layer: target.id, url: url, video: video) }
             }
         }
         .sheet(item: $infoTarget) { target in MediaInfoSheetView(path: model.layerSourcePath(target.id)) }

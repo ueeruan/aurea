@@ -1958,6 +1958,14 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return out;
 }
 
++ (NSArray<NSString*>*)extractModelArchive:(NSString*)archive to:(NSString*)directory {
+    std::vector<std::string> files;
+    if (!aurea::package::extract_model_archive(to_std(archive), to_std(directory), files).ok()) return nil;
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithCapacity:files.size()];
+    for (const auto& file : files) [out addObject:to_ns(file)];
+    return out;
+}
+
 - (int)importModelProgress {
     const auto phase = static_cast<int>(_importProgress.phase.load());
     const float f = std::clamp(_importProgress.fraction.load(), 0.0f, 0.999f);
@@ -2041,6 +2049,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 
 - (NSString*)playbackReport {
     auto* e = self.engine; return e ? [NSString stringWithUTF8String:e->playback_report().c_str()] : @"";
+}
+- (int64_t)audioPositionNs {
+    auto* e = self.engine; return e ? e->audio().position_ns() : 0;
 }
 - (BOOL)setRawPlayback:(BOOL)enabled {
     auto* e = self.engine; return e && e->set_raw_playback(enabled != NO);

@@ -397,7 +397,8 @@ struct CaptionsPanel: View {
         let code = Locale.current.languageCode ?? ""
         return ["pt", "en", "es"].contains(code) ? code : ""
     }()
-    @State private var importing = false
+    /// O .srt escolhido (DocumentImportPicker: o `.fileImporter` aninhado não abria).
+    @State private var srtPick: URL?
     @State private var busy: String?
     @State private var error: String?
     @State private var job: Task<Void, Never>?
@@ -448,8 +449,10 @@ struct CaptionsPanel: View {
         .onChange(of: id) { _ in open() }
         .onChange(of: model.status.modelRevision) { _ in captionCount = Int(model.engine.captionCount(id)) }
         .onDisappear { _ = model.engine.captionProgress(true); job?.cancel(); loading?.cancel(); persist(); model.captionOptions = options }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "srt") ?? .plainText, .plainText, .data]) { result in
-            importSRT(result)
+        .onChange(of: srtPick) { picked in
+            guard let url = picked else { return }
+            srtPick = nil
+            importSRT(.success(url))
         }
     }
     private var controls: some View {
@@ -463,7 +466,9 @@ struct CaptionsPanel: View {
             CaptionChips(options: languages, selected: languageCodes.firstIndex(of: language) ?? 0) { language = languageCodes[$0] }
             HStack(spacing: 8) {
                 CaptionAction(label: AureaText.t(words.isEmpty ? "panel_gerar_legendas" : "panel_transcrever_novo"), primary: true, enabled: busy == nil, action: transcribe)
-                CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: busy == nil) { importing = true }
+                CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: busy == nil) {
+                    DocumentImportPicker.present(types: [UTType(filenameExtension: "srt") ?? .plainText, .plainText, .data]) { urls in srtPick = urls?.first }
+                }
             }.padding(.vertical, 6)
             label("panel_estilo")
             CaptionChips(options: ["pn_caption_style_classic", "panel_caixa", "pn_caption_style_highlight", "pn_caption_style_neon", "pn_karaoke", "pn_pop", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }, selected: style) { style = $0 }

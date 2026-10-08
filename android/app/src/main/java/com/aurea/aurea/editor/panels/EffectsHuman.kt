@@ -80,7 +80,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.distort.curl", EffectHuman(name = R.string.fx_name_curl,
         keywords = "curl roll enrolar cilindro", principal = listOf(0, 1, 2, 3, 6)))
     put("aurea.distort.page_turn", EffectHuman(name = R.string.fx_name_page_turn,
-        keywords = "page turn pagina papel", principal = listOf(0, 1, 2, 3, 8)))
+        keywords = "page turn pagina papel cc", principal = listOf(0, 1, 2, 3, 8)))
     put("aurea.distort.mesh_warp", EffectHuman(name = R.string.fx_name_mesh_warp,
         keywords = "mesh warp malha deformacao grade bezier entortar", principal = listOf(0, 1, 2)))
     put("aurea.distort.puppet", EffectHuman(name = R.string.fx_name_puppet,
@@ -110,7 +110,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.stylize.bevel_alpha", EffectHuman(name = R.string.bevel_alpha_name,
         keywords = "bevel alpha bisel alfa relevo texto borda", principal = (0..4).toList()))
     put("aurea.color.gradient_map", EffectHuman(name = R.string.gradient_map_name,
-        keywords = "gradient map mapa degrade gradiente texto cor", principal = (0..4).toList()))
+        keywords = "gradient map mapa degrade gradiente texto cor tritone cc toner", principal = (0..4).toList()))
     put("aurea.text3d.layout", EffectHuman(keywords = "letter rotation letras rotacao delay atraso cylinder twist random aleatorio",
         principal = listOf(0, 1, 2, 12, 13, 9, 10)))
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
@@ -166,7 +166,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.color.tint",
         EffectHuman(
             name = R.string.fx_name_tint,
-            keywords = "tint colorir duotone",
+            keywords = "tint colorir duotone cc toner",
             params = mapOf(0 to ParamHuman(label = R.string.fx_cor_sombras), 1 to ParamHuman(label = R.string.fx_cor_luzes)),
         ),
     )
@@ -174,7 +174,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.color.matrix",
         EffectHuman(
             name = R.string.fx_name_color_matrix,
-            keywords = "matriz de cor channel mixer rgb canais",
+            keywords = "matriz de cor channel mixer rgb canais shift channels",
             principal = listOf(0, 5, 10),
             params = (0 until 12).associateWith { i ->
                 // Coluna 3 é o deslocamento (%); as outras, o ganho (×).
@@ -256,7 +256,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.key.chroma",
         EffectHuman(
             name = R.string.fx_name_chroma_key_advanced,
-            keywords = "chave de croma chroma key fundo verde green screen remover cor",
+            keywords = "chave de croma chroma key fundo verde green screen remover cor keylight linear color ultra",
             principal = listOf(0, 1, 2),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_cor_remover),
@@ -301,7 +301,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.stylize.grain",
         EffectHuman(
             name = R.string.fx_name_grain,
-            keywords = "grain grao filme ruido textura analogico",
+            keywords = "grain grao filme ruido textura analogico add noise",
             principal = listOf(0, 1, 2, 4, 7),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
@@ -363,7 +363,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.blur.unsharp",
         EffectHuman(
             name = R.string.fx_name_unsharp,
-            keywords = "unsharp mascara de nitidez sharpen afiar detalhe",
+            keywords = "unsharp mascara de nitidez sharpen afiar detalhe mask",
             principal = listOf(0, 1, 2),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
@@ -377,7 +377,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.blur.lens",
         EffectHuman(
             name = R.string.fx_name_lens_blur,
-            keywords = "lens blur desfoque de lente bokeh iris",
+            keywords = "lens blur desfoque de lente bokeh iris camera",
             principal = listOf(0, 1, 2, 4),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_raio, suffix = "px", decimals = 0),
@@ -415,7 +415,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.distort.turbulence",
         EffectHuman(
             name = R.string.fx_name_turbulence,
-            keywords = "turbulencia displacement deslocamento ruido organico fumaca",
+            keywords = "turbulencia displacement deslocamento ruido organico fumaca turbulent displace",
             principal = listOf(12, 0, 1, 2, 4),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_intensidade, suffix = "px", decimals = 0),
@@ -451,7 +451,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.distort.warp",
         EffectHuman(
             name = R.string.fx_name_warp,
-            keywords = "warp lente distorcer empurrar puxar torcer esfera canto bulge pinch twist",
+            keywords = "warp lente distorcer empurrar puxar torcer esfera canto bulge pinch twist spherize twirl swirl",
             principal = listOf(0, 1, 2, 3),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_modo),
@@ -486,7 +486,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.light.deep_glow",
         EffectHuman(
             name = R.string.fx_name_deep_glow,
-            keywords = "deep glow brilho profundo halo neon luz bloom",
+            keywords = "deep glow brilho profundo halo neon luz bloom deepglow 2",
             principal = listOf(2, 13, 0, 14, 4),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_limite, decimals = 0),
@@ -506,7 +506,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.light.rays",
         EffectHuman(
             name = R.string.fx_name_rays,
-            keywords = "rays raios de luz god rays sol volumetrico spread",
+            keywords = "rays raios de luz god rays sol volumetrico spread cc light",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_intensidade, suffix = "x", decimals = 2),
@@ -524,7 +524,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.light.sweep",
         EffectHuman(
             name = R.string.fx_name_light_sweep,
-            keywords = "light sweep faixa de luz brilho varredura reflexo",
+            keywords = "light sweep faixa de luz brilho varredura reflexo cc",
             principal = listOf(9, 1, 2, 4, 5, 10),
             params = mapOf(
             ),
@@ -859,7 +859,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             // o gráfico do painel de velocidade edita. O "Manter o tom do áudio"
             // do AE não existe aqui porque o motor não faz time-stretch — um
             // interruptor que não faz nada seria pior que a linha que falta.
-            keywords = "remapear tempo time remap curva velocidade camera lenta rampa",
+            keywords = "remapear tempo time remap curva velocidade camera lenta rampa twixtor slow motion",
             principal = listOf(0, 1),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_tempo, suffix = "s", decimals = 2),
@@ -907,7 +907,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.motion.wiggle", EffectHuman(
         name = R.string.fx_name_wiggle,
-        keywords = "wiggle agitar aleatorio tremer mexer posicao rotacao escala",
+        keywords = "wiggle agitar aleatorio tremer mexer posicao rotacao escala wiggler random",
         principal = listOf(0, 1, 2, 3, 4, 5),
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_frequencia, suffix = "Hz", decimals = 2),
@@ -970,7 +970,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.blur.radial", EffectHuman(
         name = R.string.fx_name_radial_blur,
-        keywords = "desfoque radial radial blur zoom blur spin giro rotacional velocidade",
+        keywords = "desfoque radial radial blur zoom blur spin giro rotacional velocidade cc fast",
         principal = listOf(0, 1, 2, 3, 4),
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_tipo),
@@ -999,7 +999,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.stylize.vignette", EffectHuman(
         name = R.string.fx_name_vignette,
-        keywords = "vinheta vignette escurecer bordas cantos",
+        keywords = "vinheta vignette escurecer bordas cantos cc",
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
             1 to ParamHuman(label = R.string.fx_tamanho, decimals = 0),
@@ -1049,7 +1049,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.blur.zoom", EffectHuman(
         name = R.string.fx_name_zoom_blur,
-        keywords = "zoom rastro radial lente empurrar desfoque",
+        keywords = "zoom rastro radial lente empurrar desfoque cc fast blur",
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_centro),
             1 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
@@ -1058,7 +1058,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.distort.bulge", EffectHuman(
         name = R.string.fx_name_bulge,
-        keywords = "bojo bulge pinca estufar puxar lente centro",
+        keywords = "bojo bulge pinca estufar puxar lente centro pinch",
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_centro),
             1 to ParamHuman(label = R.string.fx_raio, suffix = "%", decimals = 0),
@@ -1135,7 +1135,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // --- Geradores e recorte do editor antigo ---
     put("aurea.generate.fractal_noise", EffectHuman(
         name = R.string.fx_name_fractal_noise,
-        keywords = "ruido fractal fractal noise nuvem fumaca textura turbulencia perlin simplex",
+        keywords = "ruido fractal fractal noise nuvem fumaca textura turbulencia perlin simplex turbulent",
         principal = listOf(0, 1, 2, 6, 7, 8),
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_tipo_ruido),
@@ -1391,7 +1391,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     ))
     put("aurea.stylize.ball_grid", EffectHuman(
         name = R.string.afx_name_balls,
-        keywords = "bolas esferas balls spheres grade particulas explodir dispersar torcer",
+        keywords = "bolas esferas balls spheres grade particulas explodir dispersar torcer cc ball cc ball action",
         principal = listOf(0, 1, 2, 3, 4, 5, 6),
         params = mapOf(
             0 to ParamHuman(label = R.string.afx_p_scatter, suffix = "px", decimals = 0),
@@ -1429,9 +1429,18 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // abertura, gravidade, vida, tamanho, opacidade, cores e mistura.
     put("aurea.generate.particular", EffectHuman(
         name = R.string.afx_name_particular,
-        keywords = "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh",
+        keywords = "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh cc rainfall snowfall particle world",
         principal = listOf(0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38),
     ))
+    // Sinônimos de busca (nomes do After Effects / Alight Motion) dos efeitos sem ficha.
+    put("aurea.blur.box", EffectHuman(keywords = "fast box blur"))
+    put("aurea.blur.directional", EffectHuman(keywords = "motion blur"))
+    put("aurea.light.lens_flare", EffectHuman(keywords = "optical flares"))
+    put("aurea.distort.fisheye", EffectHuman(keywords = "cc lens fisheye"))
+    put("aurea.distort.corner_pin", EffectHuman(keywords = "cc power pin"))
+    put("aurea.color.cube_lut", EffectHuman(keywords = "apply color lut"))
+    put("aurea.key.rotobrush", EffectHuman(keywords = "roto brush rotoscope"))
+    put("aurea.color.rgb_split", EffectHuman(keywords = "rgb shift"))
 }
 
 /**

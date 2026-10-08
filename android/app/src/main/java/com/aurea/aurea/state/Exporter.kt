@@ -122,7 +122,7 @@ data class ExportOptions(
     val fps: Double = 0.0,
     val hevc: Boolean = false,
     /** 0 Baixa, 1 Normal, 2 Alta — multiplica a taxa automática do motor (BitratePolicy). */
-    val quality: Int = 1,
+    val quality: Int = 2,
     /** Mbps escolhido à mão (Avançado). 0 = automático pela qualidade. */
     val customMbps: Int = 0,
     val aiUpscale: Int = 0,
@@ -336,6 +336,10 @@ class Exporter internal constructor(
             }
             if (code != 0) {
                 state = state.copy(phase = ExportPhase.Failed, message = startError(code, options))
+                android.util.Log.e("AureaExport", "Export did not start: code=$code safeMode=$safeMode format=${options.format}")
+                com.aurea.aurea.diagnostics.ProblemReport.noteExport(app,
+                    "Android ${Build.VERSION.SDK_INT}: nao iniciou codigo=$code seguranca=$safeMode formato=${options.format} " +
+                        "lado=${options.shortSide} hevc=${options.hevc}")
                 return 0
             }
             if (cancelPending) engine.cancelExport()
@@ -408,6 +412,14 @@ class Exporter internal constructor(
                 // arquivo parcial sai agora — não espera o próximo export.
                 // Sucesso: `publish` já apagou depois de copiar para a galeria.
                 if (progress.result != 0) withContext(Dispatchers.IO) { file.delete() }
+                if (progress.result != 0 && (progress.result != CANCELLED || watchdog.cancelled) && !cancelPending) {
+                    // A causa vai para o log e para o próximo "Relatar um problema".
+                    val cause = "falhou: motivo=${progress.failure} codigo=${progress.result} " +
+                        "quadro=${progress.framesDone}/${progress.framesTotal} seguranca=$safeMode " +
+                        "travou=${watchdog.cancelled} formato=${options.format} motor=\"${progress.message}\""
+                    android.util.Log.e("AureaExport", "Export $cause")
+                    com.aurea.aurea.diagnostics.ProblemReport.noteExport(app, "Android ${Build.VERSION.SDK_INT}: $cause")
+                }
                 break
             }
         }
@@ -462,36 +474,78 @@ class Exporter internal constructor(
                 state = pronto
                 runCatching { com.aurea.aurea.ads.AureaAdsManager.showExportInterstitialIfAvailable { } }
             },
-            onFailure = { state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_gallery_failed)) },
+            onFailure = {
+                android.util.Log.e("AureaExport", "Gallery publish failed", it)
+                com.aurea.aurea.diagnostics.ProblemReport.noteExport(app,
+                    "Android ${Build.VERSION.SDK_INT}: galeria falhou formato=$format ${it.javaClass.simpleName}: ${it.message}")
+                state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_gallery_failed))
+            },
         )
     }
 
     /** Copia para Filmes/Aurea. Devolve a Uri e o texto de onde ficou. */
     private fun copyToGallery(file: File): Pair<Uri, String> {
         check(file.isFile && file.length() > 0L) { "Export produced no file" }
-        val resolver = app.contentResolver
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/Aurea")
-                put(MediaStore.Video.Media.IS_PENDING, 1)
-            }
-            val uri = resolver.insert(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
-                ?: error("MediaStore recusou")
-            try {
-                checkNotNull(resolver.openOutputStream(uri)).use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
-                check(resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null) > 0)
-            } catch (e: Exception) {
-                runCatching { resolver.delete(uri, null, null) }
-                throw e
-            }
+            val uri = insertIntoMediaStore(file, ExportFormat.Video,
+                MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY))
             return uri to text(R.string.app_saved_to_gallery)
         }
-        // Android 8–9: sem permissão de armazenamento, fica na pasta do app.
-        val dir = File(app.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "Aurea").apply { mkdirs() }
+        return copyLegacy(file, ExportFormat.Video, Environment.DIRECTORY_MOVIES, R.string.app_saved_to_gallery)
+    }
+
+    /**
+     * Android 10+: item PENDENTE (com as datas de agora, GalleryPublish), cópia,
+     * publicado. Qualquer falha desfaz o item — nunca fica um pendente órfão
+     * que a galeria esconde.
+     */
+    private fun insertIntoMediaStore(file: File, format: ExportFormat, collection: Uri): Uri {
+        val resolver = app.contentResolver
+        val now = System.currentTimeMillis()
+        val values = ContentValues().apply {
+            GalleryPublish.pendingColumns(file.name, format.mime, GalleryPublish.relativeFolder(format), now,
+                dateTaken = format != ExportFormat.Sequence).forEach { (k, v) ->
+                when (v) { is Int -> put(k, v); is Long -> put(k, v); else -> put(k, v.toString()) }
+            }
+        }
+        val uri = resolver.insert(collection, values) ?: error("MediaStore refused the insert")
+        try {
+            checkNotNull(resolver.openOutputStream(uri)) { "MediaStore output unavailable" }
+                .use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
+            val publish = ContentValues().apply {
+                GalleryPublish.publishColumns(System.currentTimeMillis()).forEach { (k, v) ->
+                    when (v) { is Int -> put(k, v); is Long -> put(k, v); else -> put(k, v.toString()) }
+                }
+            }
+            check(resolver.update(uri, publish, null, null) > 0) { "MediaStore did not publish the item" }
+        } catch (e: Exception) {
+            runCatching { resolver.delete(uri, null, null) }
+            throw e
+        }
+        return uri
+    }
+
+    /**
+     * Android 8–9: com WRITE_EXTERNAL_STORAGE, a pasta PÚBLICA + MediaScanner
+     * (a galeria vê); sem ela, a pasta do app, também passada ao scanner.
+     */
+    private fun copyLegacy(file: File, format: ExportFormat, publicDir: String, @StringRes savedPublic: Int): Pair<Uri, String> {
+        if (GalleryPublish.canWritePublic(app)) {
+            val ok = runCatching {
+                @Suppress("DEPRECATION")
+                val dir = File(Environment.getExternalStoragePublicDirectory(publicDir), "Aurea").apply { mkdirs() }
+                val dst = File(dir, file.name)
+                file.copyTo(dst, overwrite = true)
+                val shared = GalleryPublish.scan(app, dst, format.mime)
+                    ?: FileProvider.getUriForFile(app, "${app.packageName}.exports", dst)
+                shared to text(savedPublic)
+            }.onFailure { android.util.Log.w("AureaExport", "Public folder copy failed; keeping the app folder", it) }
+            ok.getOrNull()?.let { return it }
+        }
+        val dir = File(app.getExternalFilesDir(publicDir), "Aurea").apply { mkdirs() }
         val dst = File(dir, file.name)
         file.copyTo(dst, overwrite = true)
+        runCatching { GalleryPublish.scan(app, dst, format.mime, 3_000) }
         return FileProvider.getUriForFile(app, "${app.packageName}.exports", dst) to text(R.string.app_saved_to_path, dst.absolutePath)
     }
 
@@ -501,34 +555,15 @@ class Exporter internal constructor(
      */
     private fun copyImageOut(file: File, format: ExportFormat): Pair<Uri, String> {
         check(file.isFile && file.length() > 0L) { "Export produced no file" }
-        val resolver = app.contentResolver
         val zip = format == ExportFormat.Sequence
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
-                put(MediaStore.MediaColumns.MIME_TYPE, format.mime)
-                put(MediaStore.MediaColumns.RELATIVE_PATH,
-                    "${if (zip) Environment.DIRECTORY_DOWNLOADS else Environment.DIRECTORY_PICTURES}/Aurea")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
             val collection = if (zip) MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val uri = resolver.insert(collection, values) ?: error("MediaStore recusou")
-            try {
-                checkNotNull(resolver.openOutputStream(uri)).use { out -> file.inputStream().use { it.copyTo(out, 1 shl 20) } }
-                check(resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) > 0)
-            } catch (e: Exception) {
-                runCatching { resolver.delete(uri, null, null) }
-                throw e
-            }
+            val uri = insertIntoMediaStore(file, format, collection)
             return uri to text(if (zip) R.string.exp2_saved_downloads else R.string.exp2_saved_pictures)
         }
-        // Android 8–9: sem permissão de armazenamento, fica na pasta do app.
-        val dir = File(app.getExternalFilesDir(if (zip) Environment.DIRECTORY_DOWNLOADS else Environment.DIRECTORY_PICTURES), "Aurea")
-            .apply { mkdirs() }
-        val dst = File(dir, file.name)
-        file.copyTo(dst, overwrite = true)
-        return FileProvider.getUriForFile(app, "${app.packageName}.exports", dst) to text(R.string.app_saved_to_path, dst.absolutePath)
+        return copyLegacy(file, format, if (zip) Environment.DIRECTORY_DOWNLOADS else Environment.DIRECTORY_PICTURES,
+            if (zip) R.string.exp2_saved_downloads else R.string.exp2_saved_pictures)
     }
 
     /**

@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">движок не готов</string>
     <string name="eng_model_invalid">недопустимый или неполный 3D-файл</string>
     <string name="eng_model_no_geometry">у модели нет геометрии</string>
+    <string name="eng_model_compressed">модель использует сжатие Draco — экспортируйте её заново без сжатия сетки</string>
     <string name="eng_model_too_heavy">модель слишком тяжёлая для этого устройства</string>
     <string name="eng_no_video_track">в файле нет читаемой видеодорожки</string>
     <string name="eng_no_audio_track">в файле нет читаемой аудиодорожки</string>

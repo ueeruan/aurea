@@ -45,6 +45,13 @@ namespace aurea {
 
 namespace {
 
+// Uma trilha sem chaves ainda pode guardar um valor estático antigo. Os
+// setters de transform precisam atualizá-lo junto do valor da camada; senão
+// remover a última chave faz âncora/posição/escala ignorarem novos ajustes.
+void sync_static_transform_track(Layer& layer, TrackProperty property, f32 value) noexcept {
+    if (Track* track = layer.tracks.find(property); track && !track->driven()) track->staticValue = value;
+}
+
 /// O efeito é o Remapear tempo? (ele não desenha: quem age é a curva da camada)
 [[nodiscard]] bool is_time_remap_type(EffectTypeId t) noexcept {
     return t == effect_type_id(effect_keys::kTimeRemap);
@@ -2207,8 +2214,16 @@ Result<u64> Engine::add_light(u32 kind) noexcept {
     if (!layer) return Status{Errc::OutOfMemory};
     layer->threeD = true; layer->end = comp->duration();
     layer->transform.position = Vec3{comp->width() * .5f, comp->height() * .25f, -static_cast<f32>(comp->height())};
+    // Pontual/spot: a 1/4 da altura na frente do plano, no centro. Em −H a luz
+    // ficava a 0,2·H da câmera e o gizmo andava 6× o ponto iluminado (beta
+    // 07/10: "a luz aparece deslocada e não acompanha"). Direcional: a de antes.
+    if (kind == 1 || kind == 2)
+        layer->transform.position = Vec3{comp->width() * .5f, comp->height() * .5f, -.25f * static_cast<f32>(comp->height())};
     layer->light.kind = static_cast<LightKind>(flare ? 1 : kind);
-    layer->light.intensity = kind == 0 ? 3.0f : 8.0f;
+    // Moving a point/spot from one frame height to a quarter height multiplies
+    // inverse-square irradiance by 16. Keep the default illumination comparable
+    // instead of saturating the plane. Existing authored lights keep their value.
+    layer->light.intensity = kind == 0 ? 3.0f : flare ? 8.0f : .5f;
     layer->light.range = comp->height() * 5.0f;
     layer->light.castShadows = kind == 0;
     if (flare) {
@@ -5206,7 +5221,7 @@ bool Engine::query_gizmo(u64 layerId, f32 length, f32* out, bool localSpace) noe
     const FrameIndex now = playback_.current();
     const Mat4 w = layer_world_3d(*comp, *l, now);
     const FrameIndex local = l->local_time(now);
-    const Vec3 a = l->kind == LayerKind::Model3D ? Vec3{0, 0, 0} : Vec3{
+    const Vec3 a = (l->kind == LayerKind::Model3D || l->kind == LayerKind::Light) ? Vec3{0, 0, 0} : Vec3{
         l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
         l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
         l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
@@ -5379,7 +5394,7 @@ bool Engine::query_trackball(u64 layerId, f32* out) noexcept {
     const FrameIndex now = playback_.current();
     const FrameIndex local = l->local_time(now);
     const Mat4 w = layer_world_3d(*comp, *l, now);
-    const Vec3 a = l->kind == LayerKind::Model3D ? Vec3{0, 0, 0} : Vec3{
+    const Vec3 a = (l->kind == LayerKind::Model3D || l->kind == LayerKind::Light) ? Vec3{0, 0, 0} : Vec3{
         l->tracks.sample_or(TrackProperty::AnchorX, local, l->transform.anchor.x),
         l->tracks.sample_or(TrackProperty::AnchorY, local, l->transform.anchor.y),
         l->tracks.sample_or(TrackProperty::AnchorZ, local, l->transform.anchor.z)};
@@ -6924,7 +6939,7 @@ void trim_clip_copy(Layer& l, i64 start, i64 end, f64 sourceLimit = -1) noexcept
 
 bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous, u64 next) noexcept {
     constexpr i64 limit = i64{1} << 31;
-    if (operation > 5 || amount <= -limit || amount >= limit) return false;
+    if (operation > 6 || amount <= -limit || amount >= limit) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -6938,9 +6953,13 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     if (needsNext && (!after || after == layer || after == before || after->locked || after->start != layer->end)) return false;
     if (operation == 2 && (!has_clip_source(*layer) || layer->timeRemap.has_expression())) return false;
     const i64 start = layer->start.value, end = layer->end.value;
+    const i64 length = end - start;
+    if (length <= 0 || length >= limit) return false;
     const i64 target = operation == 0 ? std::clamp(amount, i64{0}, end - 1)
-                     : operation == 1 ? std::max(amount, start + 1) : amount;
-    if ((operation == 0 && target == start) || (operation == 1 && target == end) || (operation > 1 && amount == 0)) return false;
+                     : operation == 1 ? std::max(amount, start + 1)
+                     : operation == 6 ? std::clamp(amount, i64{0}, limit - 1 - length) : amount;
+    if (((operation == 0 || operation == 6) && target == start) || (operation == 1 && target == end) ||
+        (operation > 1 && operation < 6 && amount == 0)) return false;
     Layer edited = *layer;
     Layer left, right;
     if (before) left = *before;
@@ -6957,6 +6976,11 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
             ripple = operation == 0 ? start - target : target - end;
             if (operation == 0) { edited.start.value += ripple; edited.end.value += ripple; }
         }
+    } else if (operation == 6) {
+        // Absolute move: frame zero is valid, and duration, source offset and
+        // local keyframes stay together. Both native quick actions use this.
+        edited.start = FrameIndex{target};
+        edited.end = FrameIndex{target + length};
     } else if (operation == 2) {
         // Change content without moving a single transform/effect key.
         if (!edited.timeRemapEnabled || edited.timeRemap.keys.empty()) {
@@ -6977,7 +7001,7 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     }
     const auto valid = [&](const Layer& item) {
         if (item.start.value < 0 || item.end.value <= item.start.value || item.end.value >= limit) return false;
-        if (!has_clip_source(item)) return true;
+        if (operation == 6 || !has_clip_source(item)) return true;
         const f64 maxSource = clip_source_limit(*project_, *comp, item);
         // Missing media cannot supply a reliable source bound; timeline edits
         // must still work so it can be relinked later.
@@ -7012,7 +7036,7 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
         blocked = true;
     });
     if (blocked) return false;
-    const char* labels[] = {"aparar inicio", "aparar fim", "slip", "roll inicio", "roll fim", "slide"};
+    const char* labels[] = {"aparar inicio", "aparar fim", "slip", "roll inicio", "roll fim", "slide", "mover camada"};
     history_.before_mutation(*comp, project_->timeline().current(), labels[operation]);
     *layer = std::move(edited);
     if (before) *before = std::move(left);
@@ -7687,8 +7711,9 @@ void Engine::sync_audio_locked(const Composition& comp) noexcept {
                 snap->clips.push_back(clip);
                 audio_.cache()->register_asset(clip.asset, audio::AudioAssetRef{resolve_asset_path(asset->sourcePath), clip.end});
             }
-            audio_.set_snapshot(std::move(snap));
-        } else audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this));
+            audio_.set_snapshot(std::move(snap), playback_.playing() ? playback_.current_ns() : -1);
+        } else audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this),
+                                   playback_.playing() ? playback_.current_ns() : -1);
     }
     // Audio remains master at every supported transport rate.
     const bool want = playback_.playing()
@@ -8966,7 +8991,7 @@ void Engine::drain_commands_locked() noexcept {
 
 RenderSettings Engine::current_render_settings() noexcept {
     RenderSettings rs;
-    rs.previewCacheRevision = static_cast<u64>(modelRevision_.load(std::memory_order_acquire)) + 1;
+    rs.previewCacheRevision = preview_cache_revision();
     if (project_) rs.previewCacheComposition = project_->timeline().current().pack();
     rs.sceneEditor = sceneEditor_;
     rs.mediaGeneration = playback_.media_epoch();
@@ -8979,6 +9004,7 @@ RenderSettings Engine::current_render_settings() noexcept {
     // piso térmico do instante (o calor muda entre dois quadros medidos).
     rs.quality = adapt().quality().min(PreviewQuality::level(thermal_heavy_level()));
     rs.heavyScale = preview_heavy_scale();
+    rs.flowPolicyScale = caps_.policy().heavyScale;
     rs.previewNumerator = adapt().current_numerator();
     rs.previewDenominator = adapt().current_denominator();
     if (refineNow_) {
@@ -8995,7 +9021,8 @@ RenderSettings Engine::current_render_settings() noexcept {
         rs.viewportPan = project_->editor_settings().viewportPan;
         if (const Composition* comp = current_composition(); comp && surfaceAttached_) {
             const auto scale = preview_viewport_scale(adapt().auto_mode(), comp->width(), comp->height(),
-                surface_.width, surface_.height, rs.viewportZoom, rs.previewNumerator, rs.previewDenominator);
+                surface_.width, surface_.height, rs.viewportZoom, rs.previewNumerator, rs.previewDenominator,
+                (playback_.playing() || previewBuffering_) && !refineNow_ ? static_cast<f32>(comp->fps()) : 0.0f);
             rs.previewNumerator = scale.numerator;
             rs.previewDenominator = scale.denominator;
         }
@@ -9155,6 +9182,9 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         rs = current_render_settings();
         if (caps_.thermal().severe() || memory_.pressure() >= .85f || preview_memory_hold()) rs.previewCacheRevision = 0;
         const u32 cacheCapacity = renderer_.configure_preview_cache(comp->width(), comp->height(), rs);
+        // Corte/aparar de uma camada: só o trecho dela sai da prévia guardada.
+        for (const auto& [from, to] : pendingPreviewRanges_) renderer_.invalidate_preview_frames(from, to);
+        pendingPreviewRanges_.clear();
         if (previewBuffering_) {
             previewBufferTarget_ = preview_cache_target(comp->fps(), cacheCapacity,
                 comp->duration().value - previewBufferStart_, renderSpeed);
@@ -9508,7 +9538,7 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
     // may present a pending map asynchronously.
     rs.finalQuality = !asPreview;
     rs.deferLocalAi = !asPreview;
-    if (asPreview) rs.heavyScale = preview_heavy_scale();
+    if (asPreview) { rs.heavyScale = preview_heavy_scale(); rs.flowPolicyScale = caps_.policy().heavyScale; }
     OffscreenMeasure m;
     const u64 tStart = monotonic_ns();
     u64 tPrep0 = tStart, tPrep1 = tStart;
@@ -9951,7 +9981,7 @@ u32 Engine::copy_preview_buffer_ranges(i64* outPairs, u32 capacityRanges) noexce
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_ || !current_composition()) return 0;
     return renderer_.copy_preview_buffer_ranges(
-        static_cast<u64>(modelRevision_.load(std::memory_order_acquire)) + 1,
+        preview_cache_revision(),
         project_->timeline().current().pack(), outPairs, capacityRanges);
 }
 
@@ -10693,6 +10723,18 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
     if (!params) return 0;
 
     const FrameIndex local = l->local_time(playback_.current());
+    // Brilho / Brilho profundo salvos antes do brilho em oitavas (slot
+    // "algorithm" = 0, projetos até a 0.0.4): o desenho de antes continua
+    // valendo, então o card mostra OS CONTROLES DELE (núcleo, halo, estouro...)
+    // e esconde os que só o algoritmo novo lê (os slots depois de
+    // "algorithm"). Na 0.0.5 eles sumiam do card — relato do beta "a opção de
+    // brilho do texto 3D sumiu". Instância nova: as flags da declaração.
+    u32 glowAlgorithmSlot = kInvalidIndex;
+    if (inst->type == effect_type_id(effect_keys::kGlow) || inst->type == effect_type_id(effect_keys::kDeepGlow)) {
+        const u32 a = params->find("algorithm");
+        // Slot ausente vale 0 (kParamLegacyZero), como no desenho.
+        if (a < params->count() && (a >= inst->params.size() || inst->params[a].constant.v[0] < 0.5f)) glowAlgorithmSlot = a;
+    }
     u32 cursor = 0, written = 0;
     for (u32 i = 0; i < params->count() && written < capacity; ++i) {
         // Extruded glyphs support geometry, opacity and fill. Raster-only
@@ -10704,6 +10746,10 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         row.index = i;
         row.type = static_cast<u32>(spec.type);
         row.flags = spec.flags;
+        if (glowAlgorithmSlot != kInvalidIndex && i != glowAlgorithmSlot) {
+            if (i > glowAlgorithmSlot) row.flags |= kParamHidden;     // só o algoritmo novo lê
+            else row.flags &= ~static_cast<u32>(kParamHidden);       // desenho de antes: visível
+        }
         row.enumCount = spec.enumCount;
         row.minValue = spec.minValue;
         row.maxValue = spec.maxValue;
@@ -10956,7 +11002,7 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     vc.codec = export_safe_codec(settings.videoCodec, ctx->safeMode);
     // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
     // 1080p30 Normal ≈ 14 Mbps, 4K30 ≈ 40 Mbps; Mbps manual só com teto. No
-    // modo de segurança, menos (alivia o encoder que travou).
+    // modo de segurança, o bitrate continua sendo o solicitado.
     vc.bitrateBps = export_safe_bitrate_bps(
         export_video_bitrate_bps(ctx->outputWidth, ctx->outputHeight, ctx->fps, vc.codec,
                                  static_cast<ExportQuality>(std::min<u32>(settings.quality, 2u)),
@@ -11183,7 +11229,14 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // cost a minute — the export looked frozen at a percentage.
     const ExportSourceWait wait = export_source_wait(c.consecutiveFallbacks);
     ProgressDeadline deadline(t0, wait.patienceNs, wait.hardCapNs);
+    // Camada sem imagem nenhuma: o prazo dela renova com o TRABALHO do decoder
+    // (quadros descartados a caminho do alvo contam) e não cai com os
+    // aproximados (export_missing_source_wait).
+    const ExportSourceWait missingWait = export_missing_source_wait();
+    ProgressDeadline missingDeadline(t0, missingWait.patienceNs, missingWait.hardCapNs);
     u64 lastGen = mediaReadyGen_.load(std::memory_order_acquire);
+    u64 lastWork = media_.decode_work();
+    u64 notedWork = lastWork, notedNs = t0;
     bool drainedGpu = false;
     std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
     auto prepare = [&]() -> Status {
@@ -11206,7 +11259,9 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         media_.collect(frameCounter_, kExportIdleFrames);
         return OkStatus;
     };
-    u64 resourceDeadline = 0;
+    ProgressDeadline resourceDeadline;
+    bool resourceStarted = false;
+    u64 resourceGen = 0;
     for (;;) {
         const u64 attemptStart = monotonic_ns();
         for (;;) {
@@ -11215,8 +11270,24 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
             if (const Status s = prepare(); !s.ok()) return s;
             if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) { c.consecutiveFallbacks = 0; break; }
             const u64 now = monotonic_ns();
-            if (gen != lastGen) { lastGen = gen; deadline.progress(now); }
-            if (deadline.expired(now)) {
+            const u64 work = media_.decode_work();
+            if (gen != lastGen || work != lastWork) {
+                lastGen = gen;
+                lastWork = work;
+                deadline.progress(now);
+                missingDeadline.progress(now);
+            }
+            if (export_liveness_due(now, notedNs, work, notedWork)) {
+                // A tela vê o decoder trabalhando (ExportStallWatchdog.kt /
+                // ExportStallWatch no iOS comparam a mensagem).
+                notedWork = work;
+                notedNs = now;
+                std::lock_guard<std::mutex> pl(c.mutex);
+                std::snprintf(c.progress.message, sizeof(c.progress.message), "decodificando: quadro %lld (%llu)",
+                              static_cast<long long>(t.value), static_cast<unsigned long long>(work));
+            }
+            const bool anyMissing = snapshot_.missingVideoFrames > 0;
+            if (anyMissing ? missingDeadline.expired(now) : deadline.expired(now)) {
                 const u32 missing = snapshot_.missingVideoFrames, stale = snapshot_.staleVideoFrames;
                 if (missing > 0) {
                     snapshot_.release_video_frames();
@@ -11245,7 +11316,9 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
                 const Status ready = wait_export_gpu(gpu_->last_submitted_frame());
                 if (!ready.ok()) return ready;
                 // GPU work from the previous blurred frame is not decoder latency.
-                deadline.exclude(monotonic_ns() - waitStart);
+                const u64 gpuNs = monotonic_ns() - waitStart;
+                deadline.exclude(gpuNs);
+                missingDeadline.exclude(gpuNs);
                 drainedGpu = true;
             }
             rl.unlock();
@@ -11287,9 +11360,23 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         snapshot_.release_video_frames();
         if (const Status ready = wait_export_gpu(gpuFrame); !ready.ok()) return ready;
         const u64 now = monotonic_ns();
-        if (!resourceDeadline) resourceDeadline = now + 4'000'000'000ull;
-        else if (now >= resourceDeadline)
+        // Prazo SEM PROGRESSO (export_resource_wait): decoder/serviço que
+        // ainda entrega algo renova; nada mudando, falha em 4 s como antes.
+        const u64 resGen = mediaReadyGen_.load(std::memory_order_acquire) + media_.decode_work();
+        if (!resourceStarted) {
+            const ExportSourceWait rw = export_resource_wait();
+            resourceDeadline = ProgressDeadline(now, rw.patienceNs, rw.hardCapNs);
+            resourceStarted = true;
+            resourceGen = resGen;
+        } else if (resGen != resourceGen) {
+            resourceGen = resGen;
+            resourceDeadline.progress(now);
+        }
+        if (resourceDeadline.expired(now)) {
+            AUREA_LOG_ERROR("export: quadro %lld com recurso de GPU pendente apos %.1f s",
+                            static_cast<long long>(t.value), static_cast<f64>(now - t0) / 1e9);
             return Status{Errc::InvalidState, "recursos de GPU indisponiveis para renderizar todas as camadas"};
+        }
         rl.unlock();
         if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
         std::unique_lock<std::mutex> wake(exportWakeMutex_);
@@ -11303,7 +11390,8 @@ namespace {
 /// O mixer lê do cache de export, decodificando o que faltar na hora.
 class ExportBlocks final : public audio::BlockSource {
 public:
-    ExportBlocks(audio::AudioBlockCache& c, const std::atomic<bool>& cancel) : cache_(c), cancel_(cancel) {}
+    ExportBlocks(audio::AudioBlockCache& c, const std::atomic<bool>& cancel, std::atomic<u64>* beat = nullptr)
+        : cache_(c), cancel_(cancel), beat_(beat) {}
     const audio::AudioBlock* block(u64 asset, i64 b) override {
         if (cancel_.load(std::memory_order_acquire)) { status_ = Errc::Cancelled; return nullptr; }
         if (!status_.ok()) return nullptr;
@@ -11316,6 +11404,9 @@ public:
                 : Status{Errc::DecodeFailed, "nao foi possivel decodificar o audio solicitado"};
             return nullptr;
         }
+        // Um bloco de áudio decodificado é progresso do worker (watchdog): um
+        // mix longo (muitos clipes, MP3 sem índice) não é encoder travado.
+        if (beat_) beat_->store(monotonic_ns(), std::memory_order_release);
         recent_.push_back(Held{asset, b, p});
         if (recent_.size() > 16) recent_.erase(recent_.begin());
         return recent_.back().ptr.get();
@@ -11330,13 +11421,14 @@ private:
     };
     audio::AudioBlockCache& cache_;
     const std::atomic<bool>& cancel_;
+    std::atomic<u64>* beat_ = nullptr;
     Status status_{};
     std::vector<Held> recent_;
 };
 } // namespace
 
 Status Engine::write_export_audio(ExportContext& ctx, i64 untilSample) noexcept {
-    ExportBlocks blocks(*ctx.audioCache, ctx.cancelRequested);
+    ExportBlocks blocks(*ctx.audioCache, ctx.cancelRequested, &ctx.encoderBeatNs);
     constexpr u32 kChunk = 4096;
     ctx.audioMix.resize(static_cast<usize>(kChunk) * audio::kMixChannels);
     ctx.audioPcm.resize(ctx.audioMix.size());
@@ -12157,6 +12249,38 @@ bool finite_all(std::initializer_list<f32> vs) noexcept {
 bool frame_ok(FrameIndex f) noexcept { return f.value > -kMaxCommandFrame && f.value < kMaxCommandFrame; }
 bool track_ok(const TrackRef& t) noexcept { return static_cast<u16>(t.property) < static_cast<u16>(TrackProperty::_Count); }
 
+// Beta 0.0.5 ("lento só de cortar clipes"): cortar/aparar/mover UMA camada
+// muda só os quadros em que ela aparece. Devolve esse trecho (tempo da
+// composição atual, a mesma régua da prévia guardada) ou nada quando algo na
+// composição pode olhar para ela em OUTRO instante — efeito temporal,
+// expressão, parâmetro de camada, pai/matte/emissor, partículas — e aí a
+// prévia guardada inteira é descartada, como antes.
+std::optional<std::pair<i64, i64>> preview_local_range(const Composition& comp, LayerId id,
+                                                       const EffectRegistry& registry) noexcept {
+    const Layer* edited = comp.layer(id);
+    if (!edited || edited->kind == LayerKind::ParticleSystem) return std::nullopt;
+    bool safe = true;
+    comp.layers().for_each([&](LayerId, const Layer& l) {
+        if (!safe) return;
+        if (l.kind == LayerKind::ParticleSystem || l.parent == id || l.matteSource == id
+            || l.cameraTrackSource == id) { safe = false; return; }
+        for (u32 i = 0; i < l.tracks.size() && safe; ++i) if (l.tracks.at(i).has_expression()) safe = false;
+        for (const EffectInstance& e : l.effects) {
+            if (!safe) return;
+            const Effect* fx = registry.find(e.type);
+            if (!fx || fx->effect_class() == EffectClass::Temporal) { safe = false; return; }
+            if (const auto* specs = registry.params(e.type)) {
+                for (u32 p = 0; p < specs->count(); ++p)
+                    if (specs->at(p).type == ParamType::LayerReference) { safe = false; return; }
+            }
+        }
+    });
+    if (!safe) return std::nullopt;
+    // Um quadro de folga dos dois lados: desfoque de movimento e o quadro
+    // de borda do corte amostram o vizinho.
+    return std::pair<i64, i64>{edited->start.value - 1, edited->end.value + 1};
+}
+
 bool command_valid(const Command& c) noexcept {
     switch (c.type) {
         case CommandType::LayerCreate:
@@ -12322,7 +12446,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
     if (mutates_model(cmd.type) || cmd.type == CommandType::Undo || cmd.type == CommandType::Redo) {
         previewBuffering_ = false;
         previewBufferStatus_.store(0);
-        modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        // Beta 08/10: esconder/travar/renomear não muda o som. Reconstruir o
+        // mix durante o play descartava a fila e reancorava o relógio do áudio
+        // ("esconder qualquer camada faz o áudio voltar para o começo").
+        if (cmd.type == CommandType::LayerSetVisible || cmd.type == CommandType::LayerSetLocked ||
+            cmd.type == CommandType::LayerSetName) bump_revision_without_audio_locked();
+        else modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     }
 
     auto cancelPreviewBuffer = [&] {
@@ -12689,6 +12818,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             l->transform.rotation = Vec3{cmd.transform.rx, cmd.transform.ry, cmd.transform.rz};
             l->transform.anchor   = Vec3{cmd.transform.ax, cmd.transform.ay, cmd.transform.az};
             l->transform.opacity  = clampf(cmd.transform.opacity, 0.0f, 1.0f);
+            const f32 values[]{cmd.transform.x, cmd.transform.y, cmd.transform.z,
+                cmd.transform.sx, cmd.transform.sy, cmd.transform.sz,
+                cmd.transform.rx, cmd.transform.ry, cmd.transform.rz,
+                cmd.transform.ax, cmd.transform.ay, cmd.transform.az, l->transform.opacity};
+            for (u32 p = 0; p < 13; ++p) sync_static_transform_track(*l, static_cast<TrackProperty>(p), values[p]);
             return OkStatus;
         }
         case CommandType::LayerSetMaterialParam: {
@@ -12822,7 +12956,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (scalar) *scalar = next;
             else if (axis == 0) vector->x = next; else if (axis == 1) vector->y = next; else vector->z = next;
             if (track) {
-                track->staticValue = static_cast<f32>(mapped(track->staticValue));
+                // Empty tracks evaluate from the transform in the renderer.
+                // Keep their stored scalar equal to that transform as well,
+                // including stale values loaded from an older project.
+                track->staticValue = track->keys.empty() ? next : static_cast<f32>(mapped(track->staticValue));
                 for (auto& key : track->keys) {
                     key.value = static_cast<f32>(mapped(key.value));
                     key.tangentIn = static_cast<f32>(key.tangentIn * gain);
@@ -12835,30 +12972,43 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.position.layer);
             if (!l) return Errc::NotFound;
             l->transform.position = Vec3{cmd.position.x, cmd.position.y, cmd.position.z};
+            sync_static_transform_track(*l, TrackProperty::PositionX, cmd.position.x);
+            sync_static_transform_track(*l, TrackProperty::PositionY, cmd.position.y);
+            sync_static_transform_track(*l, TrackProperty::PositionZ, cmd.position.z);
             return OkStatus;
         }
         case CommandType::LayerSetScale: {
             Layer* l = need_layer(cmd.scale.layer);
             if (!l) return Errc::NotFound;
             l->transform.scale = Vec3{cmd.scale.sx, cmd.scale.sy, cmd.scale.sz};
+            sync_static_transform_track(*l, TrackProperty::ScaleX, cmd.scale.sx);
+            sync_static_transform_track(*l, TrackProperty::ScaleY, cmd.scale.sy);
+            sync_static_transform_track(*l, TrackProperty::ScaleZ, cmd.scale.sz);
             return OkStatus;
         }
         case CommandType::LayerSetRotation: {
             Layer* l = need_layer(cmd.rotation.layer);
             if (!l) return Errc::NotFound;
             l->transform.rotation = Vec3{cmd.rotation.rx, cmd.rotation.ry, cmd.rotation.rz};
+            sync_static_transform_track(*l, TrackProperty::RotationX, cmd.rotation.rx);
+            sync_static_transform_track(*l, TrackProperty::RotationY, cmd.rotation.ry);
+            sync_static_transform_track(*l, TrackProperty::RotationZ, cmd.rotation.rz);
             return OkStatus;
         }
         case CommandType::LayerSetAnchor: {
             Layer* l = need_layer(cmd.anchor.layer);
             if (!l) return Errc::NotFound;
             l->transform.anchor = Vec3{cmd.anchor.ax, cmd.anchor.ay, cmd.anchor.az};
+            sync_static_transform_track(*l, TrackProperty::AnchorX, cmd.anchor.ax);
+            sync_static_transform_track(*l, TrackProperty::AnchorY, cmd.anchor.ay);
+            sync_static_transform_track(*l, TrackProperty::AnchorZ, cmd.anchor.az);
             return OkStatus;
         }
         case CommandType::LayerSetOpacity: {
             Layer* l = need_layer(cmd.opacity.layer);
             if (!l) return Errc::NotFound;
             l->transform.opacity = clampf(cmd.opacity.opacity, 0.0f, 1.0f);
+            sync_static_transform_track(*l, TrackProperty::Opacity, l->transform.opacity);
             return OkStatus;
         }
         case CommandType::LayerSetSkew: {
@@ -12866,6 +13016,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             l->transform.skewX = cmd.skew.skewX;
             l->transform.skewY = cmd.skew.skewY;
+            sync_static_transform_track(*l, TrackProperty::SkewX, cmd.skew.skewX);
+            sync_static_transform_track(*l, TrackProperty::SkewY, cmd.skew.skewY);
             return OkStatus;
         }
 

@@ -180,11 +180,25 @@ public:
     // usado no Android de produção: lá os shaders são os embutidos.
     u32 reload_changed(const char* spvDirectory) noexcept;
 
+    /// Shaders que o backend recusou na inicialização (ex.: driver GLES que
+    /// não compila um shader novo). O resto do motor segue: só os passes que
+    /// pedem esse shader ficam sem pipeline e são pulados.
+    [[nodiscard]] u32 missing_shaders() const noexcept { return missingShaders_; }
+
+    /// TESTE: todo pipeline que usa `id` falha como se o driver o recusasse
+    /// (sem tocar no cache). `ShaderId::Count` desliga.
+    void set_test_failing_shader(ShaderId id) noexcept { testFailing_ = id; }
+
 private:
     GPUBackend* backend_ = nullptr;
+    ShaderId testFailing_ = ShaderId::Count;
+    u32 missingShaders_ = 0;
     ShaderHandle shaders_[kShaderCount]{};
     SamplerHandle samplers_[static_cast<u32>(CommonSampler::Count)]{};
     std::unordered_map<PipelineKey, PipelineHandle, PipelineKeyHash> pipelines_;
+    /// Pipelines que falharam → pedidos restantes até tentar de novo.
+    static constexpr u32 kRetryAfter = 240;
+    std::unordered_map<PipelineKey, u32, PipelineKeyHash> failedKeys_;
 
     /// SPIR-V recarregado do disco (substitui o embutido enquanto viver).
     std::vector<std::vector<u32>> overrides_;

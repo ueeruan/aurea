@@ -114,6 +114,8 @@ object EngineText {
         "buffer do modelo ausente" to R.string.eng_model_invalid,
         "objeto 3d nao encontrado" to R.string.eng_model_invalid,
         "modelo sem geometria" to R.string.eng_model_no_geometry,
+        "modelo comprimido com draco: exporte sem compressao" to R.string.eng_model_compressed,
+        "modelo comprimido com meshopt (khr): exporte sem compressao" to R.string.eng_model_compressed,
         "forma 3d sem geometria" to R.string.eng_model_no_geometry,
         "arquivo sem trilha de video decodificavel" to R.string.eng_no_video_track,
         "sem trilha de video" to R.string.eng_no_video_track,

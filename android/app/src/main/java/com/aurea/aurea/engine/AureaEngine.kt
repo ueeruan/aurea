@@ -667,6 +667,7 @@ class AureaEngine private constructor() {
     /** [erro (0 = ok), título, versão do app, religadas, ausentes]. */
     fun importProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String> =
         nativeImportProjectPackage(pkg, projectOut, mediaDir) ?: arrayOf("10", "", "", "0", "0")
+    fun extractModelArchive(archive: String, directory: String): Array<String>? = nativeExtractModelArchive(archive, directory)
     fun createCaptions(layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int =
         nativeWork.run(-5) { nativeCreateCaptions(nativeHandle, layer, texts, times, ints, floats) }
     fun removeCaptions(layer: Long): Int = nativeRemoveCaptions(nativeHandle, layer)
@@ -841,6 +842,7 @@ class AureaEngine private constructor() {
     fun rippleDelete(ids: LongArray): Boolean = nativeRippleDelete(nativeHandle, ids)
     /** Fecha todos os espaços vazios. Devolve os frames removidos. */
     fun removeGaps(): Long = nativeRemoveGaps(nativeHandle)
+    /** 0/1 trim absoluto, 2 slip, 3/4 roll, 5 slide; 6 move ao quadro absoluto. */
     fun editClipTime(layer: Long, operation: Int, amount: Long, previous: Long = 0, next: Long = 0): Boolean =
         nativeEditClipTime(nativeHandle, layer, operation, amount, previous, next)
     fun trimComposition(frame: Long): Boolean = nativeTrimComposition(nativeHandle, frame)
@@ -877,6 +879,9 @@ class AureaEngine private constructor() {
 
     /** Nulo 2D ou 3D no centro. Id ≥ 0 ou −Errc. */
     fun playbackReport(): String = nativePlaybackReport(nativeHandle)
+    /** Position actually presented by the audio output, for playback diagnostics. */
+    fun audioPositionNs(): Long = nativeAudioPositionNs(nativeHandle)
+    private external fun nativeAudioPositionNs(handle: Long): Long
     private external fun nativePlaybackReport(handle: Long): String
     fun setRawPlayback(enabled: Boolean): Boolean = nativeSetRawPlayback(nativeHandle, enabled)
     private external fun nativeSetRawPlayback(handle: Long, enabled: Boolean): Boolean
@@ -945,7 +950,7 @@ class AureaEngine private constructor() {
      * código de erro do motor (0 = começou).
      */
     fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int = 0, trimToContent: Boolean = false,
-                    quality: Int = 1, rateMode: Int = 1, safeMode: Int = 0): Int =
+                    quality: Int = 2, rateMode: Int = 1, safeMode: Int = 0): Int =
         nativeWork.run(5) { nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent, quality, rateMode, safeMode) }
 
     fun exportDuration(trimToContent: Boolean = true): Long = nativeExportDuration(nativeHandle, trimToContent)
@@ -1108,6 +1113,7 @@ class AureaEngine private constructor() {
     private external fun nativeProjectFileMedia(handle: Long, path: String): Array<String>?
     private external fun nativeExportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>): IntArray?
     private external fun nativeImportProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String>?
+    private external fun nativeExtractModelArchive(archive: String, directory: String): Array<String>?
     private external fun nativeCreateCaptions(handle: Long, layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int
     private external fun nativeRemoveCaptions(handle: Long, layer: Long): Int
     private external fun nativeCaptionCount(handle: Long, layer: Long): Int

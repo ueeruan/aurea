@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -130,11 +131,22 @@ fun RotoPaintControls(store: EditorStore, effectId: Int, view: Int) {
     val s = RotoPaint.session
     if (s == null || s.layer != layer || s.effectId != effectId) {
         RotoChip(stringResource(R.string.roto_paint), "fx.roto.paint", false) {
+            // Outra sessão aberta (outra layer/instância): encerra antes, senão
+            // a sobreposição dela ficava ligada para sempre.
+            rotoEnd(store)
+            store.pause()
+            RotoPaint.background = false
             RotoPaint.session = RotoSession(layer, effectId, view)
             store.engineForStress.rotoSetView(layer, effectId, 2)
             store.rotoChanged()
         }
         return
+    }
+    // Fechar o painel, apagar o efeito ou trocar de projeto encerra o modo
+    // pintar (como Malha/Fantoche): o palco deixa de comer toques e a
+    // sobreposição volta à visualização anterior.
+    DisposableEffect(layer, effectId) {
+        onDispose { if (RotoPaint.session?.let { it.layer == layer && it.effectId == effectId } == true) rotoEnd(store) }
     }
     var status by remember { mutableStateOf(LongArray(6)) }
     LaunchedEffect(s) {

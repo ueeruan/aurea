@@ -474,7 +474,12 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
     }
     CardGrid(
         listOf(
-            AddItem(stringResource(R.string.editor_musica_ou_som), CupertinoGlyph.MusicNote, AureaColors.Accent) { files.launch(arrayOf("audio/*")) },
+            AddItem(stringResource(R.string.editor_musica_ou_som), CupertinoGlyph.MusicNote, AureaColors.Accent) {
+                // SAF (sem READ_MEDIA_AUDIO desde a 0.0.3): provedores que marcam o
+                // .mp3/.m4a/.opus baixado como genérico ou como vídeo MP4 não ficam
+                // cinza. O motor diz "áudio ilegível" se não for som.
+                files.launch(arrayOf("audio/*", "application/ogg", "video/mp4", "application/octet-stream"))
+            },
             AddItem(stringResource(R.string.sh_add_video_sound), CupertinoGlyph.Film) {
                 videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
             },
@@ -627,7 +632,7 @@ private fun VectorTab(store: EditorStore, ui: EditorUi) {
             AddItem(stringResource(R.string.editor_elipse), draw = { drawVectorIcon(2) }) { start(2) },
             AddItem(stringResource(R.string.editor_poligono), draw = { drawVectorIcon(3) }) { start(3) },
             AddItem(stringResource(R.string.editor_estrela), draw = { drawVectorIcon(4) }) { start(4) },
-            AddItem(stringResource(R.string.editor_importar_svg), CupertinoGlyph.DocText) { svgPicker.launch(arrayOf("image/svg+xml")) },
+            AddItem(stringResource(R.string.editor_importar_svg), CupertinoGlyph.DocText) { svgPicker.launch(arrayOf("image/svg+xml", "text/xml", "application/xml", "application/octet-stream")) },
             AddItem(stringResource(R.string.psd_import), CupertinoGlyph.PhotoOnRectangle) { psdPicker.launch(arrayOf("*/*")) },
         ),
         hint = stringResource(R.string.editor_vetor_contorno_pontos_voce_arrasta_curva),

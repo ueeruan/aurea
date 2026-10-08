@@ -928,7 +928,7 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
 ) {
     val degPerPx = 0.35f / 1.dp.toPx()
     val picked = store.scenePick(m.cx(down.position.x), m.cy(down.position.y), 36.dp.toPx() / m.fit)
-        ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind) }
+        ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind, LayerType.Light.kind) }
     var mode = 0            // 0 pendente, 1 órbita, 2 objeto, 3 pinça
     var last = down.position
     var span0 = 1f
@@ -1334,9 +1334,10 @@ private suspend fun PointerInputScope.stageGestures(
             }
         }
 
-        // Nulls and the active camera have no visible surface to hit.
+        // Nulls, the active camera and lights have no visible surface to hit:
+        // one finger moves the selected light (beta 07/10, light "doesn't follow").
         if (target == TARGET_EMPTY && store.selection.size == 1 &&
-            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind) &&
+            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind, LayerType.Light.kind) &&
             store.primary?.let { store.previewGestureBasis(it) } != null) {
             target = TARGET_LAYER; targetLayer = store.primary ?: 0L
         }

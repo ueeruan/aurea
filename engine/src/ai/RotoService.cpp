@@ -242,7 +242,12 @@ void RotoService::thread_main() noexcept {
             if (generation_.load(std::memory_order_relaxed) == gen) progress_.done = ++done;
         };
         for (i64 f = base; f <= job->last && ok; ++f) { step(f); if ((f - base) % 8 == 7) notify(); }
+        // Um quadro que falhou adiante não impede os quadros antes da base
+        // (só o cancelamento, que troca a geração, para tudo).
+        const bool forwardOk = ok;
+        if (!ok && generation_.load(std::memory_order_relaxed) == gen) ok = true;
         for (i64 f = base - 1; f >= job->first && ok; --f) { step(f); if ((base - f) % 8 == 0) notify(); }
+        ok = ok && forwardOk;
         {
             std::lock_guard<std::mutex> lock(queueMutex_);
             if (generation_.load(std::memory_order_relaxed) == gen) {

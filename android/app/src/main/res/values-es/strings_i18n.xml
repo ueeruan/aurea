@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">el motor no está listo</string>
     <string name="eng_model_invalid">archivo 3D no válido o incompleto</string>
     <string name="eng_model_no_geometry">el modelo no tiene geometría</string>
+    <string name="eng_model_compressed">el modelo usa compresión Draco — expórtalo de nuevo sin compresión de malla</string>
     <string name="eng_model_too_heavy">el modelo es demasiado pesado para este dispositivo</string>
     <string name="eng_no_video_track">el archivo no tiene una pista de vídeo legible</string>
     <string name="eng_no_audio_track">el archivo no tiene una pista de audio legible</string>

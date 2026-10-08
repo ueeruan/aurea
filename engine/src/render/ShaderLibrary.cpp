@@ -114,10 +114,15 @@ Status ShaderLibrary::initialize(GPUBackend& backend) noexcept {
         desc.debugName = kShaderNames[i];
         auto created = backend.create_shader(desc);
         if (!created.ok()) {
+            // Um shader recusado (driver GLES sem suporte a algo de um efeito
+            // novo) não derruba o motor inteiro: sem ele, só os passes que o
+            // pedem ficam sem pipeline e são pulados (bypass do efeito).
             lastError_ = std::string("shader nao criado: ") + kShaderNames[i];
             AUREA_LOG_ERROR("%s", lastError_.c_str());
             ++failures_;
-            return created.status();
+            ++missingShaders_;
+            shaders_[i] = ShaderHandle{};
+            continue;
         }
         shaders_[i] = *created;
     }
@@ -146,6 +151,8 @@ void ShaderLibrary::shutdown() noexcept {
 
 void ShaderLibrary::forget_device() noexcept {
     pipelines_.clear();
+    failedKeys_.clear();
+    missingShaders_ = 0;
     for (ShaderHandle& s : shaders_) s = ShaderHandle{};
     for (SamplerHandle& s : samplers_) s = SamplerHandle{};
     backend_ = nullptr;
@@ -163,7 +170,34 @@ SamplerHandle ShaderLibrary::sampler(CommonSampler s) const noexcept {
 
 Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "biblioteca de shaders sem backend"};
+    if (testFailing_ != ShaderId::Count
+        && (key.vertex == testFailing_ || key.fragment == testFailing_ || key.compute == testFailing_)) {
+        return Status{Errc::PipelineCompileFailed, "teste: pipeline recusado"};
+    }
     if (const auto it = pipelines_.find(key); it != pipelines_.end()) return it->second;
+    // Falhou há pouco: não recompila (nem loga) a cada quadro — um link
+    // recusado no GLES custa dezenas de ms. Tenta de novo depois de
+    // kRetryAfter pedidos (falta de memória passa; recusa do driver volta).
+    if (const auto it = failedKeys_.find(key); it != failedKeys_.end()) {
+        if (--it->second > 0) return Status{Errc::PipelineCompileFailed};
+        failedKeys_.erase(it);
+    }
+    {
+        // Shader que o backend recusou na inicialização: o pipeline não existe.
+        const bool missing = key.is_compute()
+            ? !shader(key.compute).valid()
+            : (!shader(key.vertex).valid() || (key.fragment != ShaderId::Count && !shader(key.fragment).valid()));
+        if (missing) {
+            ++failures_;
+            const ShaderId named = key.is_compute() ? key.compute
+                                 : key.fragment != ShaderId::Count ? key.fragment : key.vertex;
+            lastError_ = std::string("pipeline sem shader: ")
+                       + (static_cast<u32>(named) < kShaderCount ? kShaderNames[static_cast<u32>(named)] : "?");
+            AUREA_LOG_ERROR("%s", lastError_.c_str());
+            failedKeys_[key] = kRetryAfter;
+            return Status{Errc::ShaderCompileFailed};
+        }
+    }
 
     PipelineDesc desc;
     desc.isCompute = key.is_compute();
@@ -202,6 +236,7 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
         ++failures_;
         lastError_ = std::string("pipeline nao compilou: ") + (desc.debugName ? desc.debugName : "?");
         AUREA_LOG_ERROR("%s", lastError_.c_str());
+        failedKeys_[key] = kRetryAfter;
         return created.status();
     }
     if (steady_) {
@@ -283,6 +318,7 @@ u32 ShaderLibrary::reload_changed(const char* spvDirectory) noexcept {
             }
         }
         ++reloaded;
+        failedKeys_.clear();   // o shader novo pode compilar o que falhou
         AUREA_LOG_INFO("shader recarregado: %s", kShaderNames[i]);
     }
     return reloaded;

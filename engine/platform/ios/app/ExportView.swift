@@ -15,6 +15,7 @@ struct ExportView: View {
     @State private var cancelled = false
     @State private var sharing = false
     @State private var viewing = false
+    @State private var savingToFiles = false
     @State private var advancedOpen = false
     /// Teclado do fps livre quando a tela está em tela cheia (fullScreenCover
     /// fica acima do overlay do ContentView).
@@ -77,6 +78,7 @@ struct ExportView: View {
         .preferredColorScheme(.dark).interactiveDismissDisabled(model.exporting)
         .overlay { if let request = fpsKeypad { NumericKeypadSheet(request: request) { fpsKeypad = nil }.id(request.id) } }
         .sheet(isPresented: $sharing) { if let url = model.exportedURL { ExportShareSheet(url: url) } }
+        .sheet(isPresented: $savingToFiles) { if let url = model.exportedURL { ExportFilesPicker(url: url) } }
         .sheet(isPresented: $viewing) {
             if let url = model.exportedURL {
                 // Vídeo no player; PNG, GIF e .zip na Visualização Rápida do sistema.
@@ -88,7 +90,7 @@ struct ExportView: View {
                 model.exportOptions = ExportOptions()
                 model.exportOptions.shortSide = min(1080, max(720, min(model.compositionWidth, model.compositionHeight)))
                 model.exportOptions.bitrateMbps = 0
-                model.exportOptions.quality = 1
+                model.exportOptions.quality = 2
             }
             let project = model.projectGeneration
             if let frame = await model.capturePreviewFrame(640),
@@ -276,7 +278,7 @@ struct ExportView: View {
         let labels = [AureaText.t("exp2_quality_low"), AureaText.t("exp2_quality_normal"), AureaText.t("exp2_quality_high")]
         return VStack(alignment: .leading, spacing: 0) {
             chips(labels, selected: model.exportOptions.bitrateMbps > 0 ? nil : labels[Int(min(2, model.exportOptions.quality))]) { picked in
-                model.exportOptions.quality = UInt32(labels.firstIndex(of: picked) ?? 1)
+                model.exportOptions.quality = UInt32(labels.firstIndex(of: picked) ?? 2)
                 model.exportOptions.bitrateMbps = 0
             }
             Text(AureaText.t("exp2_estimated_line", estimatedSize, formatMbps(estimatedMbps)))
@@ -409,6 +411,12 @@ struct ExportView: View {
             Text(AureaText.t(Self.doneKey(model.exportedKind))).font(.aurea(size: 22, weight: .bold)).padding(.top, 10)
             Text(model.exportMessage ?? url.lastPathComponent).font(.aurea(size: 14)).foregroundStyle(AureaColors.muted)
                 .multilineTextAlignment(.center).padding(.top, 6)
+            // Fora do Fotos (permissão negada, .zip, ou quem prefere): uma cópia em Arquivos.
+            Button { savingToFiles = true } label: {
+                Text(AureaText.t("ios_export_save_files")).font(.aurea(size: 15, weight: .semibold))
+                    .foregroundStyle(AureaColors.accent).padding(.vertical, 8)
+            }.buttonStyle(.plain).padding(.top, 6)
+                .accessibilityLabel(AureaText.t("ios_export_save_files"))
         }.frame(maxWidth: .infinity)
     }
     private var footer: some View {
@@ -668,6 +676,16 @@ private struct PixelAnimatorView: View {
         .accessibilityLabel(AureaText.t("exp2_animator_a11y"))
         .accessibilityAddTraits(.isImage)
     }
+}
+
+/// "Salvar em Arquivos": o seletor do sistema exporta uma CÓPIA (o original
+/// fica no Documents do app para abrir/compartilhar).
+private struct ExportFilesPicker: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+    }
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
 }
 
 private struct ExportShareSheet: UIViewControllerRepresentable {

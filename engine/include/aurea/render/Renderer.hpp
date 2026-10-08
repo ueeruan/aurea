@@ -348,6 +348,10 @@ struct RenderSettings {
     /// 1 = completo; ≤ 0,25 também troca o movimento de pixels pela mistura.
     /// O export sempre usa 1.
     f32  heavyScale = 1.0f;
+    /// Piso do APARELHO (calor/tier) só, sem o AUTO. O Smooth Motion do preview
+    /// cai para a mistura por ele: com o AUTO no piso, o fluxo ligava/desligava
+    /// a cada medição (beta 08/10, "Smooth Motion não funciona direito").
+    f32  flowPolicyScale = 1.0f;
     /// Botões do preview AUTO 2.0 (Fase 8C): cada sistema lê o seu pelo
     /// `Renderer::preview_quality()`. O efetivo é o menor entre isto e
     /// `heavyScale`; com `finalQuality` tudo volta a 1 (o export não muda).
@@ -557,7 +561,7 @@ public:
     /// 0..1) no quadro `frame` da fonte; nulo = ainda não há (o Fantoche usa
     /// como contorno da malha).
     [[nodiscard]] std::shared_ptr<const std::vector<f32>> roto_cached_matte(const Composition* comp, const Layer& layer,
-                                                                            const EffectInstance& instance, i64 frame) noexcept;
+                                                                            const EffectInstance& instance, i64 frame, const Asset* asset) noexcept;
     /// "Propagar clipe": todos os quadros da fonte da camada no worker do Roto.
     bool roto_propagate(const Project& project, const Composition& comp, const Layer& layer,
                         const EffectInstance& instance, MediaManager* media) noexcept;

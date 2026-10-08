@@ -141,9 +141,6 @@ struct EditorView: View {
 private struct AddLayerPickers: ViewModifier {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject var shell: ShellPresentation
-    @State private var importing = false
-    @State private var importingModel = false
-    @State private var fileKind = ShellAddPicker.model
     @State private var choosingPhotos = false
     @State private var photoKind = ShellAddPicker.gallery
     @State private var pickerProject = UUID()
@@ -153,42 +150,8 @@ private struct AddLayerPickers: ViewModifier {
                 guard let request else { return }
                 pickerProject = model.projectGeneration
                 shell.addPicker = nil
-                if request == .model { fileKind = request; importingModel = true }
-                else if request.isFile { fileKind = request; importing = true }
+                if request.isFile { presentFilePicker(request) }
                 else { photoKind = request; choosingPhotos = true }
-            }
-            .fullScreenCover(isPresented: $importingModel) {
-                ModelDocumentPicker { urls in
-                    guard pickerProject == model.projectGeneration else { importingModel = false; return }
-                    // Start the owned copy while the picker URLs are still valid.
-                    if let urls { model.importModelFiles(urls: urls) }
-                    importingModel = false
-                }.ignoresSafeArea()
-            }
-            // O ÚNICO `.fileImporter` da raiz: dois na mesma view e o SwiftUI só
-            // atende um — o do modelo 3D ficava mudo (as texturas vêm por aqui também).
-            .fileImporter(isPresented: $importing, allowedContentTypes: fileTypes,
-                          allowsMultipleSelection: fileKind == .model || fileKind == .modelTextures) { result in
-                guard pickerProject == model.projectGeneration else { return }
-                if case .failure(let error) = result {
-                    let issue = error as NSError
-                    if issue.domain != NSCocoaErrorDomain || issue.code != NSUserCancelledError {
-                        model.toast = AureaText.t("ios_import_copy_failed", error.localizedDescription)
-                    }
-                    return
-                }
-                guard case .success(let urls) = result, let url = urls.first else {
-                    model.toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo")
-                    return
-                }
-                switch fileKind {
-                // Seleção múltipla/pasta: o FBX/OBJ vem com as texturas e o .mtl.
-                case .model: model.importModelFiles(urls: urls)
-                case .modelTextures: model.importModelTextures(urls: urls)
-                case .svg: model.importSvg(url: url)
-                case .psd: model.importPsd(url: url)
-                default: model.importMedia(url: url, kind: .audio)
-                }
             }
             .sheet(isPresented: $choosingPhotos) {
                 ShellMediaPicker(filter: photoKind == .photo ? .images : ((photoKind == .video || photoKind == .audioFromVideo) ? .videos : .any(of: [.images, .videos]))) { url, video in
@@ -200,56 +163,36 @@ private struct AddLayerPickers: ViewModifier {
                 }
             }
     }
-    private var fileTypes: [UTType] {
-        switch fileKind {
-        case .svg: return [UTType(filenameExtension: "svg") ?? .data]
-        case .psd: return [.item]
-        // Some file providers register FBX/OBJ as content, without public.data.
-        // Accept file-system items; the importer validates supported extensions.
-        case .model: return [.item]
-        // .mtl (texto) e texturas: alguns provedores não marcam public.data.
-        case .modelTextures: return [.item]
-        default: return [.audio]
+    /// Arquivo (modelo 3D, texturas/.mtl, SVG, PSD, áudio): seletor do UIKit
+    /// pelo controlador do topo (DocumentImportPicker). Antes o modelo vinha
+    /// num seletor embutido num `fullScreenCover` e o resto no `.fileImporter`
+    /// da raiz — no iPhone com iOS 26/27 o embutido fechava sozinho ao escolher
+    /// e "nada importava"; o `.fileImporter` da raiz calava os de baixo.
+    private func presentFilePicker(_ kind: ShellAddPicker) {
+        let project = pickerProject
+        let model = self.model
+        let multiple = kind == .model || kind == .modelTextures
+        DocumentImportPicker.present(types: Self.fileTypes(kind), multiple: multiple) { urls in
+            guard project == model.projectGeneration, let urls, let url = urls.first else { return }
+            switch kind {
+            // Seleção múltipla/pasta: o FBX/OBJ/glTF vem com as texturas, o .bin e o .mtl.
+            case .model: model.importModelFiles(urls: urls)
+            case .modelTextures: model.importModelTextures(urls: urls)
+            case .svg: model.importSvg(url: url)
+            case .psd: model.importPsd(url: url)
+            default: model.importMedia(url: url, kind: .audio)
+            }
         }
     }
-}
-
-/// A stable UIKit delegate owns the model selection until completion. Present
-/// full screen on iPad too, rather than a provider popover nested in SwiftUI.
-private struct ModelDocumentPicker: UIViewControllerRepresentable {
-    let onSelection: ([URL]?) -> Void
-    static let types: [UTType] = [
-        UTType(importedAs: "com.autodesk.fbx", conformingTo: .data),
-        UTType(importedAs: "com.aurea.import.obj", conformingTo: .data),
-        UTType(importedAs: "com.aurea.import.glb", conformingTo: .data),
-        UTType(importedAs: "com.aurea.import.gltf", conformingTo: .data),
-        UTType(importedAs: "com.aurea.import.mtl", conformingTo: .data),
-        .data, .content, .zip, .folder
-    ]
-    func makeCoordinator() -> Coordinator { Coordinator(onSelection) }
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: Self.types, asCopy: true)
-        picker.delegate = context.coordinator
-        picker.allowsMultipleSelection = true
-        picker.shouldShowFileExtensions = true
-        picker.modalPresentationStyle = .fullScreen
-        NSLog("Aurea model picker: %ld declared/fallback types, multi-select", Self.types.count)
-        return picker
-    }
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {
-        context.coordinator.onSelection = onSelection
-    }
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        var onSelection: ([URL]?) -> Void
-        private var completed = false
-        init(_ onSelection: @escaping ([URL]?) -> Void) { self.onSelection = onSelection }
-        private func finish(_ urls: [URL]?) {
-            guard !completed else { return }; completed = true
-            NSLog("Aurea model picker: %@, %ld item(s)", urls == nil ? "cancelled" : "selected", urls?.count ?? 0)
-            onSelection(urls)
+    private static func fileTypes(_ kind: ShellAddPicker) -> [UTType] {
+        switch kind {
+        case .svg: return [UTType(filenameExtension: "svg") ?? .data, .data]
+        case .psd: return [UTType(filenameExtension: "psd") ?? .data, .data]
+        case .model: return DocumentImportPicker.modelTypes
+        // .mtl (texto), .bin e texturas: alguns provedores não marcam public.data.
+        case .modelTextures: return DocumentImportPicker.modelTypes + [.image, .text]
+        default: return [.audio, .movie, .data]
         }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls) }
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
     }
 }
 
@@ -1270,7 +1213,7 @@ private struct TextPanelView: View {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         AureaPaths.ensureDirectories()
         let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
-        do { try FileManager.default.copyItem(at: url, to: destination) }
+        do { try AureaPaths.copyImport(url, to: destination) }
         catch { model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return }
         guard let font = model.engine.importFont(atPath: destination.path) else {
             try? FileManager.default.removeItem(at: destination)
@@ -1424,6 +1367,67 @@ enum FontImportPicker {
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls.first) }
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
     }
+}
+
+/// Seletor de ARQUIVOS do app inteiro (modelo 3D, texturas/.mtl, áudio, SVG,
+/// PSD, HDRI, LUT, legenda, Alight Motion): o `UIDocumentPickerViewController`
+/// apresentado pelo UIKit a partir do controlador do topo — nunca um
+/// `.fileImporter` aninhado (o SwiftUI só atende UM por hierarquia; os de
+/// baixo ficavam mudos) nem um seletor embutido num `fullScreenCover` (no
+/// iOS 26/27 o seletor embutido se fecha sozinho ao escolher e a capa do
+/// SwiftUI fica presa: o segundo import não abria nada). `asCopy` = o arquivo
+/// já chega copiado no sandbox (iCloud/Drive materializados pelo sistema);
+/// quem chama ainda copia para a pasta do projeto.
+enum DocumentImportPicker {
+    private static var delegate: Delegate?
+    /// `picked(nil)` = cancelado; lista vazia nunca chega.
+    static func present(types: [UTType], multiple: Bool = false, _ picked: @escaping ([URL]?) -> Void) {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        guard var presenter = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else {
+            NSLog("Aurea file picker: sem janela para apresentar")
+            picked(nil); return
+        }
+        while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+        // `.item` no fim: provedor que não marca public.data (FBX/OBJ/MTL/GLB
+        // sem tipo registrado) não fica cinza no seletor; o import valida.
+        var all = types
+        if !all.contains(.item) { all.append(.item) }
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: all, asCopy: true)
+        // O UIKit guarda o delegate fraco: o dono fica aqui até a escolha.
+        let owner = Delegate { urls in
+            DocumentImportPicker.delegate = nil
+            NSLog("Aurea file picker: %@, %ld item(s)", urls == nil ? "cancelled" : "selected", urls?.count ?? 0)
+            picked(urls?.isEmpty == true ? nil : urls)
+        }
+        DocumentImportPicker.delegate = owner
+        picker.delegate = owner
+        picker.allowsMultipleSelection = multiple
+        picker.shouldShowFileExtensions = true
+        // Tela cheia também no iPad: sem popover de provedor preso ao SwiftUI.
+        picker.modalPresentationStyle = .fullScreen
+        presenter.present(picker, animated: true)
+    }
+    final class Delegate: NSObject, UIDocumentPickerDelegate {
+        private let done: ([URL]?) -> Void
+        private var finished = false
+        init(_ done: @escaping ([URL]?) -> Void) { self.done = done }
+        private func finish(_ urls: [URL]?) {
+            guard !finished else { return }; finished = true
+            DispatchQueue.main.async { self.done(urls) }
+        }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
+    }
+    /// glTF/GLB/FBX/OBJ (+ .mtl, .zip e pastas): tipos declarados no Info.plist
+    /// e os genéricos de reserva.
+    static let modelTypes: [UTType] = [
+        UTType(importedAs: "com.autodesk.fbx", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.obj", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.glb", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.gltf", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.mtl", conformingTo: .data),
+        .data, .content, .zip, .folder, .item
+    ]
 }
 
 private enum NativeFontPreview {

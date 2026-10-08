@@ -125,8 +125,10 @@ bool load_image(const char* source, ImagePixels& out, void*) {
                 env->GetByteArrayRegion(arr, 0, 8, reinterpret_cast<jbyte*>(header));
                 const u32 w = header[0] | (header[1] << 8) | (header[2] << 16) | (static_cast<u32>(header[3]) << 24);
                 const u32 h = header[4] | (header[5] << 8) | (header[6] << 16) | (static_cast<u32>(header[7]) << 24);
-                const usize bytes = static_cast<usize>(w) * h * 4;
-                if (w && h && static_cast<usize>(n) == bytes + 8) {
+                // Em u64: no armeabi-v7a o usize é de 32 bits e w*h*4 daria a volta.
+                const u64 bytes64 = static_cast<u64>(w) * h * 4;
+                const usize bytes = static_cast<usize>(bytes64);
+                if (w && h && bytes64 + 8 == static_cast<u64>(n)) {
                     out.width = w;
                     out.height = h;
                     out.rgba.resize(bytes);
@@ -430,6 +432,8 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.exportSinkFactory = &android::make_mediacodec_export_sink;
     config.audioOutput = &c->audioOut;
     config.defaultFontPath = config.cacheDirectory + "/Roboto-Regular.ttf";
+    // The shared text engine finds the bundled Japanese fallback beside Roboto,
+    // exactly as on iOS; it does not depend on the device's system font inventory.
     config.imageLoader = &load_image;
     config.enableTelemetry = true;
 
@@ -2182,6 +2186,12 @@ AUREA_JNI jobjectArray AUREA_FN(nativeImportProjectPackage)(JNIEnv* env, jclass,
                               std::to_string(r.relinked), std::to_string(r.missing)});
 }
 
+AUREA_JNI jobjectArray AUREA_FN(nativeExtractModelArchive)(JNIEnv* env, jclass, jstring archive, jstring directory) {
+    std::vector<std::string> files;
+    if (!package::extract_model_archive(to_string(env, archive), to_string(env, directory), files).ok()) return nullptr;
+    return string_array(env, files);
+}
+
 /// Legendas: palavras (texto + [início, fim] em segundos da mídia) e opções.
 /// ints = modo, palavras, caracteres, linhas, estilo, destaque, maiúsculas,
 /// quebrar nas pausas, tirar vícios; floats = pausa, y, tamanho, cor (rgb).
@@ -3087,6 +3097,10 @@ AUREA_JNI jlong AUREA_FN(nativeDetectBeats)(JNIEnv* env, jclass, jlong handle, j
 AUREA_JNI jstring AUREA_FN(nativePlaybackReport)(JNIEnv* env, jclass, jlong handle) {
     auto* c = ctx_of(handle);
     return env->NewStringUTF(c ? c->engine.playback_report().c_str() : "");
+}
+AUREA_JNI jlong AUREA_FN(nativeAudioPositionNs)(JNIEnv*, jclass, jlong handle) {
+    auto* c = ctx_of(handle);
+    return c ? c->engine.audio().position_ns() : 0;
 }
 AUREA_JNI jboolean AUREA_FN(nativeSetRawPlayback)(JNIEnv*, jclass, jlong handle, jboolean enabled) {
     auto* c = ctx_of(handle); return c && c->engine.set_raw_playback(enabled == JNI_TRUE);

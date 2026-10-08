@@ -163,7 +163,7 @@ struct ExportOptions: Equatable {
     var shortSide: UInt32 = 1080
     var bitrateMbps: UInt32 = 0   // 0 = automático pela qualidade (BitratePolicy do motor)
     /// 0 Baixa, 1 Normal, 2 Alta.
-    var quality: UInt32 = 1
+    var quality: UInt32 = 2
     var audioBitrateKbps: UInt32 = 192
     var aiUpscale: UInt32 = 0
     var trimToContent = true
@@ -211,6 +211,22 @@ enum AureaPaths {
     }
     static var media: URL { documents.appendingPathComponent("Media", isDirectory: true) }
     static var thumbs: URL { documents.appendingPathComponent("Thumbs", isDirectory: true) }
+
+    /// File providers may need to download the file before its bytes exist.
+    /// Callers hold security-scoped access for the complete coordinated read.
+    static func readImport<T>(_ source: URL, _ read: (URL) throws -> T) throws -> T {
+        var result: Result<T, Error> = .failure(NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError))
+        var coordinationError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
+            result = Result { try read(readable) }
+        }
+        if let error = coordinationError { throw error }
+        return try result.get()
+    }
+
+    static func copyImport(_ source: URL, to destination: URL) throws {
+        try readImport(source) { try FileManager.default.copyItem(at: $0, to: destination) }
+    }
 
     static func ensureDirectories() {
         for url in [media, thumbs] {
@@ -322,7 +338,16 @@ final class AureaModel: ObservableObject {
     private(set) var projectGeneration = UUID()
     // Closing the editor invalidates its UI requests, but may still finish the
     // current project's cover. Replacing the document invalidates both.
-    private var projectContentGeneration = UUID()
+    private var projectContentGeneration = UUID() { didSet { thumbOwners.removeAll() } }
+    /// Pedaço de um corte → camada dona das miniaturas da timeline (o
+    /// `ThumbnailCache.alias` do Android). Os dois lados de um split mostram a
+    /// mesma mídia no mesmo lugar: o pedaço novo usa os ladrilhos do original em
+    /// vez de pedir a tira inteira de novo ao motor (cada pedido no lock do
+    /// modelo + uma UIImage na main — o "cortar fica lento" no aparelho fraco).
+    /// Não é @Published: mudar não redesenha nada.
+    private var thumbOwners: [Int64: Int64] = [:]
+    private var pendingSplit: (before: Set<Int64>, targets: [LayerItem], at: Int32)?
+    func thumbOwner(_ layer: Int64) -> Int64 { thumbOwners[layer] ?? layer }
     private var thumbnailRequest = UUID()
     private var thumbnailTask: Task<Void, Never>?
     private var beatDetectionRequest: UUID?
@@ -1476,6 +1501,8 @@ final class AureaModel: ObservableObject {
         let saver = engine
         autosaveQueue.async { [weak self] in
             let saved = saver.autosaveProject()
+            // O `fileExists` também fora da main (disco lento em aparelho de entrada).
+            let missingCard = saved && !FileManager.default.fileExists(atPath: homeMetaURL(url).path)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.autosaving = false
@@ -1484,7 +1511,7 @@ final class AureaModel: ObservableObject {
                     self.homeCardStale = true
                     // Projeto novo ainda sem ficha: o app morto antes de sair do
                     // editor deixava o cartão da Home sem medida nem capa.
-                    if !FileManager.default.fileExists(atPath: homeMetaURL(url).path) {
+                    if missingCard {
                         self.writeProjectThumbnail(name: url.deletingPathExtension().lastPathComponent)
                     }
                     self.autosaveRetryAfter = 0
@@ -1560,6 +1587,7 @@ final class AureaModel: ObservableObject {
                       trackId: (row["trackId"] as? NSNumber)?.uint32Value ?? 0)
         }
         if nextLayers != layers { layers = nextLayers }
+        resolvePendingSplit()
         if let data = engine.captionTracks().data(using: .utf8), let tracks = try? JSONDecoder().decode([NativeCaptionTrack].self, from: data), tracks != captionTracks { captionTracks = tracks }
         let nextSelection = Set(layers.filter(\.selected).map(\.id))
         if nextSelection != selection { selection = nextSelection }
@@ -2391,7 +2419,7 @@ final class AureaModel: ObservableObject {
             var result: Int64 = -1
             var failure = ""
             do {
-                try FileManager.default.copyItem(at: url, to: destination)
+                try AureaPaths.copyImport(url, to: destination)
                 switch kind {
                 case .video: result = importer.importVideo(destination.path, name: name)
                 case .audio: result = importer.importAudio(destination.path, name: name)
@@ -2449,7 +2477,7 @@ final class AureaModel: ObservableObject {
         guard !urls.isEmpty else { toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo"); return }
         // Só o .mtl/texturas (o modelo já entrou antes sem eles): religa no
         // modelo 3D selecionado, pelo mesmo caminho de "Importar texturas".
-        let sideExts: Set<String> = ["mtl", "bin", "png", "jpg", "jpeg", "webp", "tga", "bmp", "ktx2", "dds", "tif", "tiff"]
+        let sideExts: Set<String> = ["mtl", "bin", "png", "jpg", "jpeg", "webp", "tga", "bmp", "psd", "gif", "ktx2", "dds", "tif", "tiff"]
         if urls.allSatisfy({ sideExts.contains($0.pathExtension.lowercased()) }),
            let layer = primarySelection, !engine.modelFolder(layer).isEmpty {
             let req = MissingModelTextures(layer: layer, names: engine.modelMissingTextures(layer))
@@ -2483,22 +2511,25 @@ final class AureaModel: ObservableObject {
                 for source in urls {
                     let target = folder.appendingPathComponent(source.lastPathComponent)
                     guard !fm.fileExists(atPath: target.path) else { continue }
-                    var coordinationError: NSError?
-                    var copyError: Error?
-                    // File providers (including iCloud) materialize the content for this read.
-                    NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
-                        do { try fm.copyItem(at: readable, to: target) }
-                        catch { copyError = error }
-                    }
-                    if let error = coordinationError { throw error }
-                    if let error = copyError { throw error }
+                    try AureaPaths.copyImport(source, to: target)
                     var isDir: ObjCBool = false
                     if fm.fileExists(atPath: target.path, isDirectory: &isDir), isDir.boolValue {
                         if let walk = fm.enumerator(at: target, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
                             let files = walk.allObjects.compactMap { $0 as? URL }.filter { modelExts.contains($0.pathExtension.lowercased()) }
                             candidates.append(contentsOf: files.sorted { $0.path < $1.path })
                         }
+                    } else if target.pathExtension.lowercased() == "zip" {
+                        let extracted = folder.appendingPathComponent("archive-\(UUID().uuidString)", isDirectory: true)
+                        guard let files = AureaEngine.extractModelArchive(target.path, to: extracted.path) else {
+                            throw NSError(domain: "AureaModelImport", code: 10,
+                                userInfo: [NSLocalizedDescriptionKey: AureaText.t("msg_nao_consegui_ler_esse_arquivo")])
+                        }
+                        candidates.append(contentsOf: files.map { URL(fileURLWithPath: $0) }
+                            .filter { modelExts.contains($0.pathExtension.lowercased()) })
                     } else if modelExts.contains(target.pathExtension.lowercased()) { candidates.append(target) }
+                    else if target.pathExtension.isEmpty && ModelPlanInfo(importer.inspectModel(target.path)).valid {
+                        candidates.append(target)
+                    }
                 }
                 if let modelURL = candidates.first {
                     // Plano do motor ANTES do import (só cabeçalhos e contagens):
@@ -2675,6 +2706,8 @@ final class AureaModel: ObservableObject {
         importingMedia = true
         let importer = engine
         mediaQueue.async { [weak self] in
+            var copied = 0
+            var copyFailure = ""
             for url in urls {
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -2683,27 +2716,37 @@ final class AureaModel: ObservableObject {
                 let target = folder.appendingPathComponent(named ?? picked)
                 // Fora da lista: entra, mas nunca por cima de um arquivo da pasta.
                 if FileManager.default.fileExists(atPath: target.path) {
-                    if named == nil { continue }
-                    try? FileManager.default.removeItem(at: target)
+                    if named == nil { copied += 1; continue }
                 }
-                // iCloud/provedores: o conteúdo só existe depois da leitura coordenada.
-                var coordinationError: NSError?
-                NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { readable in
-                    try? FileManager.default.copyItem(at: readable, to: target)
+                let staged = folder.appendingPathComponent(".texture-\(UUID().uuidString).pending")
+                defer { try? FileManager.default.removeItem(at: staged) }
+                do {
+                    try AureaPaths.copyImport(url, to: staged)
+                    let size = try staged.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                    guard size > 0 else { throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadCorruptFileError) }
+                    if FileManager.default.fileExists(atPath: target.path) {
+                        _ = try FileManager.default.replaceItemAt(target, withItemAt: staged)
+                    } else { try FileManager.default.moveItem(at: staged, to: target) }
+                    copied += 1
+                } catch {
+                    copyFailure = AureaText.t("ios_import_copy_failed", error.localizedDescription)
+                    NSLog("Aurea model textures: copy failed %@", error.localizedDescription)
                 }
-                if let issue = coordinationError { NSLog("Aurea model textures: copy failed %@", issue.localizedDescription) }
             }
-            let left = importer.reloadModelTextures(req.layer)
-            let failure = left < 0 ? AureaEngineText.sentence(importer.lastImportError, code: Int(-left)) : ""
+            let left = copied > 0 ? importer.reloadModelTextures(req.layer) : -1
+            let failure = copied == 0 ? (copyFailure.isEmpty ? AureaText.t("msg_nao_consegui_ler_esse_arquivo") : copyFailure)
+                : left < 0 ? AureaEngineText.sentence(importer.lastImportError, code: Int(-left)) : copyFailure
             let still = left > 0 ? importer.modelMissingTextures(req.layer) : []
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
                 self.refreshModel(force: true)
-                if !failure.isEmpty { self.toast = failure; return }
-                if still.isEmpty { self.toast = AureaText.t("model_textures_done") }
-                else { self.promptModelTextures(layer: req.layer, names: still) }
-                _ = self.saveProject(writeThumbnail: false)
+                if left >= 0 {
+                    _ = self.saveProject(writeThumbnail: false)
+                    if !still.isEmpty { self.promptModelTextures(layer: req.layer, names: still) }
+                }
+                if !failure.isEmpty { self.toast = failure }
+                else if still.isEmpty { self.toast = AureaText.t("model_textures_done") }
             }
         }
     }
@@ -3532,6 +3575,12 @@ final class AureaModel: ObservableObject {
                         self.exporting = false
                         if !self.exportCancelled {
                             let message = self.exportProgress["message"] as? String ?? ""
+                            // A causa no log (o relato do problema lê o log do app).
+                            let failure = (self.exportProgress[AureaExportFailure] as? NSNumber)?.intValue ?? 0
+                            let done = (self.exportProgress["framesDone"] as? NSNumber)?.intValue ?? 0
+                            let total = (self.exportProgress["framesTotal"] as? NSNumber)?.intValue ?? 0
+                            NSLog("%@", "AureaExport: falhou motivo=\(failure) codigo=\(result) quadro=\(done)/\(total) " +
+                                  "seguranca=\(self.exportSafeMode) travou=\(self.exportStalled) motor=\(message)")
                             // O motivo (código estável do motor) vira texto do
                             // catálogo; a frase crua do motor (português) não
                             // vai para a tela.
@@ -3583,7 +3632,10 @@ final class AureaModel: ObservableObject {
                 Task { @MainActor in
                     self?.exportSavedToPhotos = saved
                     self?.exportPublishing = false; self?.exporting = false
-                    self?.exportMessage = saved ? nil : (error?.localizedDescription ?? AureaText.t("ios_export_photos_failed"))
+                    // Confirmação visível: o vídeo está no Fotos (ou o porquê de não estar).
+                    if !saved { NSLog("AureaExport: Photos save failed: %@", error?.localizedDescription ?? "-") }
+                    self?.exportMessage = saved ? AureaText.t("ios_export_saved_photos")
+                        : AureaText.t("ios_export_photos_failed") + (error.map { " (\($0.localizedDescription))" } ?? "")
                     self?.toast = AureaText.t(readyKey)
                     AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }
@@ -3979,10 +4031,38 @@ final class AureaModel: ObservableObject {
     func splitAtPlayhead(_ ids: [Int64]) {
         let frame = Int32(clamping: status.playhead)
         let targets = layers.filter { ids.contains($0.id) && frame > $0.startFrame && frame < $0.endFrame }
-        guard !targets.isEmpty else { return }
+        guard !targets.isEmpty, started else { return }
+        pendingSplit = (Set(layers.map(\.id)), targets, frame)
         mutate { engine in for row in targets { engine.splitLayer(row.id, atFrame: frame) } }
-        refreshModel(force: true)
+        // Sem `refreshModel(force:)` aqui: o corte só vale no próximo quadro do
+        // motor, e a releitura imediata lia o modelo VELHO (camadas, keyframes e
+        // composição inteiros pela ponte, logo quando o corte invalida o cache
+        // do preview). Uma leitura de status ~2 quadros depois pega a revisão
+        // nova antes do timer de 0,2 s; se ainda não chegou, o timer pega.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 34_000_000)
+            self?.refreshStatus()
+        }
     }
+
+    /// Pedaço novo de um corte → dono das miniaturas do original (mesma mídia, mesma origem).
+    private func resolvePendingSplit() {
+        guard let p = pendingSplit else { return }
+        let created = layers.filter { !p.before.contains($0.id) }
+        guard !created.isEmpty else { return }
+        pendingSplit = nil
+        for piece in created where piece.startFrame == p.at {
+            guard let from = p.targets.first(where: { o in
+                o.kind == piece.kind && o.trackId == piece.trackId && o.endFrame == piece.endFrame &&
+                    o.startFrame &- o.offsetFrames == piece.startFrame &- piece.offsetFrames
+            }) else { continue }
+            if thumbOwners.count >= 4096 { thumbOwners.removeAll() }
+            thumbOwners[piece.id] = thumbOwner(from.id)
+        }
+    }
+
+    /// O tempo da camada mudou (velocidade, rampa, ao contrário): volta a pedir as miniaturas dela.
+    func unaliasThumbs(_ layer: Int64) { thumbOwners.removeValue(forKey: layer) }
 
     /// Trim do INÍCIO para `frame`: o conteúdo fica parado e só a borda anda.
     @discardableResult func trimStart(_ layerId: Int64, at frame: Int64) -> Bool {
@@ -3996,14 +4076,7 @@ final class AureaModel: ObservableObject {
     /// cabeçote" da fileira rápida — aparar come a borda, dividir corta em dois,
     /// isto só move (e é justamente para quem está FORA do cabeçote).
     func moveToPlayhead(_ layerId: Int64) {
-        guard let row = layers.first(where: { $0.id == layerId }), !row.locked else { return }
-        let duration = max(Int64(1), Int64(row.endFrame) - Int64(row.startFrame))
-        let target = min(max(0, status.playhead), max(0, Int64(Int32.max) - duration))
-        guard target != Int64(row.startFrame) else { return }
-        engine.run {
-            $0.setLayer(layerId, startFrame: Int32(clamping: target), endFrame: Int32(clamping: target + duration),
-                        offsetFrames: row.offsetFrames, setOffset: false)
-        }
+        _ = engine.editClipTime(layerId, operation: 6, amount: status.playhead, previous: 0, next: 0)
         refreshModel(force: true)
     }
 
@@ -4514,7 +4587,7 @@ extension AureaModel {
             var result: Int64 = -1
             var failure = ""
             do {
-                try FileManager.default.copyItem(at: url, to: destination)
+                try AureaPaths.copyImport(url, to: destination)
                 result = video ? importer.replaceLayer(layer, withVideo: destination.path, name: name)
                                : importer.replaceLayer(layer, withImageFile: destination.path, name: name)
                 if result < 0 {
@@ -4618,7 +4691,7 @@ extension AureaModel {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             var r: [String] = ["10", "", "", "0", "0"]
             do {
-                try FileManager.default.copyItem(at: url, to: temporary)
+                try AureaPaths.copyImport(url, to: temporary)
                 r = AureaEngine.importProjectPackage(temporary.path, project: project.path, mediaDir: mediaDir.path)
             } catch {}
             try? FileManager.default.removeItem(at: temporary)

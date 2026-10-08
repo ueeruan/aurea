@@ -113,6 +113,30 @@ std::string uri_decode(const char* uri) {
     return s;
 }
 
+/// O arquivo de nome `basename(path)` dentro de `dir` (sem diferenciar
+/// maiúsculas), ou vazio. Para o .bin/textura de um .gltf achatado pelo seletor.
+std::string flat_companion(const std::string& dir, const std::string& path) {
+    const usize slash = path.find_last_of("/\\");
+    const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    if (name.empty() || name == "." || name == "..") return {};
+    std::error_code ec;
+    const auto utf8 = [](const std::filesystem::path& p) { const auto u = p.u8string(); return std::string(u.begin(), u.end()); };
+    const std::filesystem::path folder = std::filesystem::u8path(dir);
+    const std::filesystem::path direct = folder / std::filesystem::u8path(name);
+    if (std::filesystem::is_regular_file(direct, ec)) return utf8(direct);
+    auto lower = [](std::string s) {
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    const std::string wanted = lower(name);
+    u32 scanned = 0;
+    for (std::filesystem::directory_iterator it(folder, ec), end; !ec && it != end && scanned < 4096; it.increment(ec), ++scanned) {
+        if (!it->is_regular_file(ec)) continue;
+        if (lower(utf8(it->path().filename())) == wanted) return utf8(it->path());
+    }
+    return {};
+}
+
 // --- Leitura de recursos externos pelo leitor da plataforma --------------------
 struct ParseBudget {
     u64 limit = 0, held = 0;
@@ -160,6 +184,16 @@ cgltf_result file_read(const cgltf_memory_options* memory, const cgltf_file_opti
         ok = ctx->options->reader(rel.c_str(), bytes, ctx->options->readerUser);
     } else {
         ok = read_file(path, bytes, limit, &ctx->budget->exceeded);
+        // .gltf escolhido no celular junto com o .bin e as texturas: os apps
+        // copiam tudo para UMA pasta, com o nome do seletor — a URI gravada
+        // ("textures/Pele.png", "../buffers/cena.bin") não existe ali. Mesma
+        // regra do FBX/OBJ: o nome do arquivo na pasta do modelo, sem a pasta
+        // gravada e sem diferenciar maiúsculas. Só quando o caminho original
+        // falhou: o que já abria continua igual.
+        if (!ok && !ctx->budget->exceeded && !ctx->baseDir.empty()) {
+            const std::string flat = flat_companion(ctx->baseDir, path);
+            if (!flat.empty() && flat != path) ok = read_file(flat, bytes, limit, &ctx->budget->exceeded);
+        }
     }
     if (ctx->budget->exceeded || (limit && bytes.size() > limit)) {
         ctx->budget->exceeded = true; return cgltf_result_out_of_memory;
@@ -185,7 +219,8 @@ bool unpack(const cgltf_accessor* a, std::vector<T>& out, cgltf_size components,
         fail = {ImportError::InvalidAccessor, std::string(what) + " com tipo inesperado"};
         return false;
     }
-    if (a->buffer_view && !a->buffer_view->buffer->data && !a->is_sparse) {
+    // cgltf_buffer_view_data: o view descomprimido (meshopt) tem dados próprios.
+    if (a->buffer_view && !cgltf_buffer_view_data(a->buffer_view) && !a->is_sparse) {
         fail = {ImportError::MissingBuffer, std::string(what) + ": buffer nao carregado"};
         return false;
     }
@@ -1296,10 +1331,15 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
     std::vector<std::string> requiredWarnings;
     for (cgltf_size i = 0; i < data->extensions_required_count; ++i) {
         const std::string ext = data->extensions_required[i];
-        if (ext == "KHR_draco_mesh_compression" || ext == "EXT_meshopt_compression") {
-            return fail_result(ImportError::UnsupportedCompression, ext + " (ainda nao suportado)");
-        }
-        static const char* known[] = {"KHR_texture_transform", "KHR_materials_unlit", "KHR_mesh_quantization",
+        // Draco: o decodificador não está no app. Mensagem que diz o que fazer
+        // (as apps traduzem pela frase: EngineText / AureaEngineText).
+        if (ext == "KHR_draco_mesh_compression")
+            return fail_result(ImportError::UnsupportedCompression, "modelo comprimido com draco: exporte sem compressao");
+        // KHR_meshopt_compression (a versão ratificada) o cgltf daqui não lê.
+        if (ext == "KHR_meshopt_compression")
+            return fail_result(ImportError::UnsupportedCompression, "modelo comprimido com meshopt (khr): exporte sem compressao");
+        // EXT_meshopt_compression: decodificado abaixo (meshoptimizer já vem no app).
+        static const char* known[] = {"EXT_meshopt_compression", "KHR_texture_transform", "KHR_materials_unlit", "KHR_mesh_quantization",
                                       "KHR_texture_basisu", "KHR_materials_emissive_strength", "KHR_lights_punctual",
                                       "KHR_materials_pbrSpecularGlossiness", "EXT_texture_webp"};
         bool ok = false;
@@ -1316,6 +1356,43 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         if (budget.exceeded) return fail_result(ImportError::TooHeavy, "buffers 3D excedem a memoria disponivel para importar");
         return fail_result(from_cgltf(r), r == cgltf_result_file_not_found ? "arquivo .bin do modelo ausente"
                                                                            : "buffers do modelo ilegiveis");
+    }
+    // EXT_meshopt_compression (gltfpack, gltf.report, exports "otimizados para
+    // web"): cada buffer view comprimido vira dados normais antes de validar e
+    // ler os acessores. A memória vem do alocador do parser (orçamento) e o
+    // cgltf_free a devolve.
+    for (cgltf_size i = 0; i < data->buffer_views_count; ++i) {
+        cgltf_buffer_view& view = data->buffer_views[i];
+        if (!view.has_meshopt_compression || view.data) continue;
+        const cgltf_meshopt_compression& mc = view.meshopt_compression;
+        if (!mc.buffer || !mc.buffer->data || mc.offset + mc.size > mc.buffer->size || !mc.count || !mc.stride)
+            return fail_result(ImportError::MissingBuffer, "buffer comprimido (meshopt) ausente");
+        if (mc.count > (std::numeric_limits<cgltf_size>::max)() / mc.stride)
+            return fail_result(ImportError::InvalidAccessor, "buffer comprimido (meshopt) invalido");
+        void* out = data->memory.alloc_func(data->memory.user_data, mc.count * mc.stride);
+        if (!out) {
+            if (budget.exceeded) return fail_result(ImportError::TooHeavy, "buffers 3D excedem a memoria disponivel para importar");
+            return fail_result(ImportError::OutOfMemory, "sem memoria para descomprimir o modelo");
+        }
+        view.data = out;   // dono: cgltf_free
+        const unsigned char* src = static_cast<const unsigned char*>(mc.buffer->data) + mc.offset;
+        int rc = -1;
+        switch (mc.mode) {
+            case cgltf_meshopt_compression_mode_attributes:
+                rc = meshopt_decodeVertexBuffer(out, mc.count, mc.stride, src, mc.size); break;
+            case cgltf_meshopt_compression_mode_triangles:
+                rc = meshopt_decodeIndexBuffer(out, mc.count, mc.stride, src, mc.size); break;
+            case cgltf_meshopt_compression_mode_indices:
+                rc = meshopt_decodeIndexSequence(out, mc.count, mc.stride, src, mc.size); break;
+            default: break;
+        }
+        if (rc != 0) return fail_result(ImportError::InvalidAccessor, "buffer comprimido (meshopt) ilegivel");
+        switch (mc.filter) {
+            case cgltf_meshopt_compression_filter_octahedral: meshopt_decodeFilterOct(out, mc.count, mc.stride); break;
+            case cgltf_meshopt_compression_filter_quaternion: meshopt_decodeFilterQuat(out, mc.count, mc.stride); break;
+            case cgltf_meshopt_compression_filter_exponential: meshopt_decodeFilterExp(out, mc.count, mc.stride); break;
+            default: break;
+        }
     }
     r = cgltf_validate(data);
     if (r != cgltf_result_success) return fail_result(ImportError::InvalidAccessor, "acessores ou indices invalidos");

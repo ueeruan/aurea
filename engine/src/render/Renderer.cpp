@@ -3031,7 +3031,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         rl.source.blendT = blendT;
                         // Aparelho em estado crítico: o preview mistura em vez de
                         // calcular o movimento de pixels (o export mantém o modo).
-                        rl.source.blendMode = (l->frameBlend == 2 && !settings.finalQuality && settings.heavyScale <= 0.25f) ? 1 : l->frameBlend;
+                        rl.source.blendMode = (l->frameBlend == 2 && !settings.finalQuality && settings.flowPolicyScale <= 0.25f) ? 1 : l->frameBlend;
                         // Flow spans this actual source pair, not one timeline
                         // frame. Normalize the remapped shutter by its PTS span
                         // so VFR, different frame rates, ramps and freezes agree.
@@ -3967,7 +3967,10 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
         fc.tex[slot] = *t;
         heavyStats_.flowCacheBytes += static_cast<u64>(lw) * lh * 8;   // RGBA16F
     }
-    fc.key[slot] = pairKey;
+    // A chave só vale com os passes gravados: um fluxo que falhou não pode
+    // ser servido do cache como válido nos quadros seguintes.
+    fc.key[slot] = 0;
+    bool recorded = true;
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, 4096);
     FGTexture levels[6];
     u32 sizes[6][2];
@@ -3975,15 +3978,15 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     sizes[0][0] = lw;
     sizes[0][1] = lh;
     const Vec4 lumaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0};
-    ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
-                        {PassTexture{a}, PassTexture{b}}, &lumaParams, sizeof(lumaParams));
+    recorded &= ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
+                                    {PassTexture{a}, PassTexture{b}}, &lumaParams, sizeof(lumaParams)) != kInvalidIndex;
     u32 n = 1;
     while (n < 6 && std::min(lw, lh) >= 12) {
         const u32 nw = (lw + 1) / 2, nh = (lh + 1) / 2;
         struct { Vec4 uvMap; Vec4 texel; } dp{Vec4{1, 1, 0, 0}, Vec4{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0}};
         levels[n] = ctx.texture("flow-nivel", nw, nh);
-        ctx.fullscreen_pass("flow-reduz", PassStage::Decode, levels[n], ShaderId::effects_downsample_frag,
-                            {PassTexture{levels[n - 1]}}, &dp, sizeof(dp));
+        recorded &= ctx.fullscreen_pass("flow-reduz", PassStage::Decode, levels[n], ShaderId::effects_downsample_frag,
+                                        {PassTexture{levels[n - 1]}}, &dp, sizeof(dp)) != kInvalidIndex;
         sizes[n][0] = lw = nw;
         sizes[n][1] = lh = nh;
         ++n;
@@ -3995,11 +3998,13 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
         struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, 0, 0}};
         // O nível base vai direto para a textura do cache.
         const FGTexture f = i == 0 ? graph_.import_texture("flow-cache", fc.tex[slot], fd) : ctx.texture("flow", sizes[i][0], sizes[i][1]);
-        ctx.fullscreen_pass("flow-lk", PassStage::Decode, f, ShaderId::video_flow_lk_frag,
-                            {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp));
+        recorded &= ctx.fullscreen_pass("flow-lk", PassStage::Decode, f, ShaderId::video_flow_lk_frag,
+                                        {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp)) != kInvalidIndex;
         flow = f;
         haveFlow = true;
     }
+    if (!recorded) return FGTexture{};
+    fc.key[slot] = pairKey;
     return flow;
 }
 
@@ -4332,13 +4337,19 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                         pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
                     flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, baseW, baseH, frameNumber);
                 }
-                if (layer.source.blendT > 0.0f && layer.source.blendMode == 2) {
+                // Smooth Motion sem fluxo válido (passe não compilou, textura do
+                // cache não criou) cai na mistura: antes a layer ia preta/lixo.
+                bool warped = false;
+                if (layer.source.blendT > 0.0f && layer.source.blendMode == 2 && flow.valid()) {
                     const FGTexture moved = graph_.create_texture("layer-video-movimento", d);
                     const Vec4 wp{layer.source.blendT, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 0};
-                    ctx.fullscreen_pass("flow-deforma", PassStage::Decode, moved, ShaderId::video_flow_warp_frag,
-                                        {PassTexture{out.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp));
-                    out.texture = moved;
-                } else if (layer.source.blendT > 0.0f && layer.source.blendMode == 1) {
+                    if (ctx.fullscreen_pass("flow-deforma", PassStage::Decode, moved, ShaderId::video_flow_warp_frag,
+                                            {PassTexture{out.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp)) != kInvalidIndex) {
+                        out.texture = moved;
+                        warped = true;
+                    }
+                }
+                if (!warped && layer.source.blendT > 0.0f && layer.source.blendMode >= 1) {
                     // Mistura: alvo novo que LÊ os dois (vídeo opaco: A·(1−t) + B·t).
                     auto pNormal = shaders_.pipeline(PipelineKey::graphics(
                         ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
@@ -4368,7 +4379,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                         out.texture = mix;
                     }
                 }
-                if (layer.source.vectorBlur > 0.0f) {
+                if (layer.source.vectorBlur > 0.0f && flow.valid()) {
                     // Borrão ao longo do vetor de cada pixel, obturador centrado no quadro.
                     const FGTexture blurred = graph_.create_texture("layer-video-desfoque-vetorial", d);
                     // Export uses 64 samples; preview follows its adaptive budget.

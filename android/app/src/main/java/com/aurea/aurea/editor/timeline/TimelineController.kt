@@ -697,7 +697,9 @@ internal class TimelineController(
             if (d.getDistance() < metrics.axisSlop) continue
             val time = Press.timeEdit(d.x, d.y)
             when (kind) {
-                HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
+                HitKind.KEYFRAME -> if (time) keyframeDrag(r, hit.keyIndex, down)
+                    else if (state.compact) compactStep(down.id, ch.position)
+                    else scroll(down.id, ch.position, tracker)
                 HitKind.HEADER -> if (!time && !state.compact) reorderDrag(hit.lane ?: r, hit.rowIndex, down, grabbed = null) else consumeUntilUp()
                 // Segurar de propósito levanta o TRECHO: claramente na pilha ele sobe
                 // ou desce SOZINHO (como no Alight Motion — a linha não vai junto;
@@ -758,7 +760,7 @@ internal class TimelineController(
         val edit = Press.timeEdit(d.x, d.y)
         val r = hit.row
         when {
-            r != null && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
+            r != null && edit && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
             r != null && edit && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
             r != null && edit && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
             // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha

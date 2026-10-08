@@ -26,7 +26,6 @@ struct Panel3DView: View {
     /// Mostrar interior: 1/0; −1 = não é objeto 3D (câmera).
     @State private var interior: Int32 = -1
     @ObservedObject private var thumbs = MaterialThumbStore.shared
-    @State private var pickingHdri = false
     @State private var hdriTarget: Int64?
     @State private var pending: Text3DChange?
     @State private var rebuild: DispatchWorkItem?
@@ -86,13 +85,8 @@ struct Panel3DView: View {
             .accessibilityIdentifier("text3d.materialScroll")
         }
         .background(AureaColors.background)
-        .fileImporter(isPresented: $pickingHdri,
-                      allowedContentTypes: [UTType(filenameExtension: "hdr") ?? .data, UTType(filenameExtension: "exr") ?? .data, .zip, .image, .data]) { result in
-            if case .success(let url) = result {
-                if model.selectedLayer?.kind == 8 { _ = model.engine.setEnvironmentBackground(true) }
-                model.importMedia(url: url, kind: .hdri, objectHDRI: hdriTarget)
-            }
-        }
+        // HDRI pelo seletor do UIKit (DocumentImportPicker, em pickHdri): o
+        // `.fileImporter` daqui ficava sob o da raiz do editor e não abria.
         // A fonte vem pelo seletor do UIKit (FontImportPicker): um segundo
         // `.fileImporter` encadeado aqui calava um dos dois.
         .onAppear(perform: load)
@@ -618,7 +612,14 @@ struct Panel3DView: View {
         refresh()
     }
     private func pickHdri(object: Bool) {
-        finishEditing(); hdriTarget = object ? layerId : nil; pickingHdri = true
+        finishEditing(); hdriTarget = object ? layerId : nil
+        let target = hdriTarget, model = self.model
+        let types: [UTType] = [UTType(filenameExtension: "hdr") ?? .data, UTType(filenameExtension: "exr") ?? .data, .zip, .image, .data]
+        DocumentImportPicker.present(types: types) { urls in
+            guard let url = urls?.first else { return }
+            if model.selectedLayer?.kind == 8 { _ = model.engine.setEnvironmentBackground(true) }
+            model.importMedia(url: url, kind: .hdri, objectHDRI: target)
+        }
     }
     private func openFonts() {
         finishEditing()
@@ -704,7 +705,7 @@ struct Panel3DView: View {
         AureaPaths.ensureDirectories()
         let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
         do {
-            try FileManager.default.copyItem(at: url, to: destination)
+            try AureaPaths.copyImport(url, to: destination)
             guard let font = model.engine.importFont(atPath: destination.path) else {
                 try? FileManager.default.removeItem(at: destination)
                 model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return

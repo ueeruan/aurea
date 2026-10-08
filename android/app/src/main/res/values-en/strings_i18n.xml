@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">the engine isn\'t ready</string>
     <string name="eng_model_invalid">invalid or incomplete 3D file</string>
     <string name="eng_model_no_geometry">the model has no geometry</string>
+    <string name="eng_model_compressed">the model uses Draco compression — export it again without mesh compression</string>
     <string name="eng_model_too_heavy">the model is too heavy for this device</string>
     <string name="eng_no_video_track">the file has no readable video track</string>
     <string name="eng_no_audio_track">the file has no readable audio track</string>

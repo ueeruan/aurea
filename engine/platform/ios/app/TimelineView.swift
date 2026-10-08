@@ -1023,7 +1023,7 @@ struct TimelineView: View {
             let left = max(x0, 0), right = min(x1, size.width)
             guard right > left else { continue }
             if row.hasThumbs {
-                let tileWidth = m.bar * thumbCache.aspect(row.id)
+                let tileWidth = m.bar * thumbCache.aspect(model, row.id)
                 let origin = x(Double(row.start) - Double(row.offset), width: size.width)
                 let start = max(0, Int(floor((left - origin) / tileWidth))), end = Int(floor((right - origin) / tileWidth))
                 var tiles: [MediaTile] = []
@@ -1435,7 +1435,7 @@ struct TimelineView: View {
             // Editar (losango, alça, mover) exige eixo claro, 2:1.
             let edit = TimelinePress.timeEdit(dx, dy)
             let mode: Mode
-            if touched.kind == .key { mode = .key }
+            if edit && touched.kind == .key { mode = .key }
             else if edit && touched.kind == .trimStart { mode = .trimStart }
             else if edit && touched.kind == .trimEnd { mode = .trimEnd }
             // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha o
@@ -1470,7 +1470,7 @@ struct TimelineView: View {
                 let mode: Mode
                 if boxStarts(g.row, g.hit) { mode = .box }
                 else if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal ? .scrub : (compact ? .step : .scroll) }
-                else if g.hit.kind == .key { mode = .key }
+                else if g.hit.kind == .key { mode = time ? .key : (compact ? .step : .scroll) }
                 else if g.hit.kind == .header { mode = !time && !compact ? .reorder : .blocked }
                 else if time || compact { mode = .move }
                 // Na pilha, o TRECHO sobe/desce sozinho (como no Alight Motion);

@@ -372,7 +372,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         else if (openId != null && openId !in ids) openId = null
     }
     // O cartão aberto escolhe a sua primeira linha PRINCIPAL (se a escolhida não é dele).
-    LaunchedEffect(openId, effects) {
+    LaunchedEffect(openId, effects, openId?.let { store.effectParams[it] }) {
         val id = openId
         if (id == null) {
             selected = null
@@ -380,7 +380,9 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         }
         if (selected?.effectId == id) return@LaunchedEffect
         val visible = store.effectParams[id].orEmpty().map { ParamSlot.of(it) }.filter { !it.hidden }
-        val first = splitPrincipal(store.typeOf(id), visible).first.firstOrNull { it.components > 0 }
+        val groups = splitPrincipal(store.typeOf(id), visible)
+        val first = (groups.first + groups.second).firstOrNull { it.animatable }
+            ?: groups.first.firstOrNull { it.components > 0 }
         selected = first?.let { ParamKey(id, it.index, 0) }
     }
 
@@ -555,6 +557,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         val anyOn = effects.any { it.enabled }
         AureaActionSheet(
             title = stringResource(R.string.panel_efeitos_camada),
+            message = stringResource(R.string.am_import_hint),
             actions = buildList {
                 // "Meus presets" saiu (pedido de 2026-10-01: ninguém usa); o motor
                 // continua lendo os presets dos projetos antigos.
@@ -971,7 +974,8 @@ private fun EffectCardItem(
         }
         if (effect.typeId == effectTypeId("aurea.key.rotobrush")) {
             PanelNotice(stringResource(R.string.roto_note))
-            com.aurea.aurea.editor.RotoPaintControls(store, effect.effectId, 0)
+            val previousView = store.effectParams[id]?.firstOrNull { it.index == 10 }?.value?.firstOrNull()?.toInt() ?: 0
+            com.aurea.aurea.editor.RotoPaintControls(store, effect.effectId, previousView.coerceIn(0, 2))
         }
         val localAiBit = when (effect.typeId) {
             effectTypeId("aurea.ai.depth_map") -> 1

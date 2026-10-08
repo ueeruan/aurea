@@ -87,6 +87,12 @@ bool ios_load_image(const char* sourcePath, ImagePixels& out, void* ctx);
 /// procura sozinho (FontManager já varre /System/Library/Fonts).
 [[nodiscard]] const char* ios_default_font_path();
 
+/// Reserva de fontes do sistema para o texto do motor (beta 08/10: japonês em
+/// caixinhas). Liga o CoreText (CTFontCreateForString) como último elo da
+/// cadeia de reserva — o iOS não deixa ler as fontes CJK por caminho fixo — e
+/// passa o idioma do aparelho (forma regional do ideograma han).
+void ios_install_text_fallback();
+
 // -----------------------------------------------------------------------------
 // Batch — o bloco de comandos de um frame.
 //

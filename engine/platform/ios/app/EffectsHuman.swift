@@ -79,7 +79,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.bender", FxEffectHuman(name: "fx_name_bender", keywords: "bender bend curve curvar pontos", principal: [0, 1, 2, 3])),
     ("aurea.distort.bend", FxEffectHuman(name: "fx_name_bend", keywords: "bend fold dobra papel", principal: [0, 1, 2, 5])),
     ("aurea.distort.curl", FxEffectHuman(name: "fx_name_curl", keywords: "curl roll enrolar cilindro", principal: [0, 1, 2, 3, 6])),
-    ("aurea.distort.page_turn", FxEffectHuman(name: "fx_name_page_turn", keywords: "page turn pagina papel", principal: [0, 1, 2, 3, 8])),
+    ("aurea.distort.page_turn", FxEffectHuman(name: "fx_name_page_turn", keywords: "page turn pagina papel cc", principal: [0, 1, 2, 3, 8])),
     ("aurea.distort.mesh_warp", FxEffectHuman(name: "fx_name_mesh_warp", keywords: "mesh warp malha deformacao grade bezier entortar", principal: [0, 1, 2])),
     ("aurea.distort.puppet", FxEffectHuman(name: "fx_name_puppet", keywords: "puppet fantoche pino pin marionete rig personagem deformar arap", principal: [0, 1, 2])),
     ("aurea.distort.liquid_glass", FxEffectHuman(name: "fx_name_liquid_glass", keywords: "liquid glass vidro liquido lente refracao glassmorphism", principal: [0, 1, 2, 3, 5])),
@@ -93,7 +93,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.text.transform", FxEffectHuman(name: "text_transform_name", keywords: "text transform texto transformar letras palavras linhas intervalo fase", principal: Array(0...17))),
     ("aurea.text.animator", FxEffectHuman(name: "text_animator_name", keywords: "text animator animador texto letras palavras linhas cor blur desfoque random aleatorio", principal: Array(0...23))),
     ("aurea.stylize.bevel_alpha", FxEffectHuman(name: "bevel_alpha_name", keywords: "bevel alpha bisel alfa relevo texto borda", principal: Array(0...4))),
-    ("aurea.color.gradient_map", FxEffectHuman(name: "gradient_map_name", keywords: "gradient map mapa degrade gradiente texto cor", principal: Array(0...4))),
+    ("aurea.color.gradient_map", FxEffectHuman(name: "gradient_map_name", keywords: "gradient map mapa degrade gradiente texto cor tritone cc toner", principal: Array(0...4))),
     ("aurea.text3d.layout", FxEffectHuman(keywords: "letter rotation letras rotacao delay atraso cylinder twist random aleatorio",
         principal: [0, 1, 2, 12, 13, 9, 10])),
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
@@ -127,14 +127,14 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         params: [0: FxParamHuman(decimals: 0)])),
     ("aurea.color.tint", FxEffectHuman(
         name: "fx_name_tint",
-        keywords: "tint colorir duotone",
+        keywords: "tint colorir duotone cc toner",
         params: [
             0: FxParamHuman(label: "fx_cor_sombras"),
             1: FxParamHuman(label: "fx_cor_luzes"),
         ])),
     ("aurea.color.matrix", FxEffectHuman(
         name: "fx_name_color_matrix",
-        keywords: "matriz de cor channel mixer rgb canais",
+        keywords: "matriz de cor channel mixer rgb canais shift channels",
         principal: [0, 5, 10],
         params: (0..<12).reduce(into: [Int: FxParamHuman]()) { out, i in
             // Coluna 3 é o deslocamento (%); as outras, o ganho (×).
@@ -196,7 +196,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.key.chroma", FxEffectHuman(
         name: "fx_name_chroma_key_advanced",
-        keywords: "chave de croma chroma key fundo verde green screen remover cor",
+        keywords: "chave de croma chroma key fundo verde green screen remover cor keylight linear color ultra",
         principal: [0, 1, 2],
         params: [
             0: FxParamHuman(label: "fx_cor_remover"),
@@ -227,7 +227,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.stylize.grain", FxEffectHuman(
         name: "fx_name_grain",
-        keywords: "grain grao filme ruido textura analogico",
+        keywords: "grain grao filme ruido textura analogico add noise",
         principal: [0, 1, 2, 4, 7],
         params: [
             0: FxParamHuman(label: "fx_intensidade", decimals: 0),
@@ -276,7 +276,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.blur.unsharp", FxEffectHuman(
         name: "fx_name_unsharp",
-        keywords: "unsharp mascara de nitidez sharpen afiar detalhe",
+        keywords: "unsharp mascara de nitidez sharpen afiar detalhe mask",
         principal: [0, 1, 2],
         params: [
             0: FxParamHuman(label: "fx_intensidade", decimals: 0),
@@ -286,7 +286,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.blur.lens", FxEffectHuman(
         name: "fx_name_lens_blur",
-        keywords: "lens blur desfoque de lente bokeh iris",
+        keywords: "lens blur desfoque de lente bokeh iris camera",
         principal: [0, 1, 2, 4],
         params: [
             0: FxParamHuman(label: "fx_raio", suffix: "px", decimals: 0),
@@ -314,7 +314,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.distort.turbulence", FxEffectHuman(
         name: "fx_name_turbulence",
-        keywords: "turbulencia displacement deslocamento ruido organico fumaca",
+        keywords: "turbulencia displacement deslocamento ruido organico fumaca turbulent displace",
         principal: [12, 0, 1, 2, 4],
         params: [
             0: FxParamHuman(label: "fx_intensidade", suffix: "px", decimals: 0),
@@ -342,7 +342,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.distort.warp", FxEffectHuman(
         name: "fx_name_warp",
-        keywords: "warp lente distorcer empurrar puxar torcer esfera canto bulge pinch twist",
+        keywords: "warp lente distorcer empurrar puxar torcer esfera canto bulge pinch twist spherize twirl swirl",
         principal: [0, 1, 2, 3],
         params: [
             0: FxParamHuman(label: "fx_modo"),
@@ -369,7 +369,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.light.deep_glow", FxEffectHuman(
         name: "fx_name_deep_glow",
-        keywords: "deep glow brilho profundo halo neon luz bloom",
+        keywords: "deep glow brilho profundo halo neon luz bloom deepglow 2",
         principal: [2, 13, 0, 14, 4],
         params: [
             0: FxParamHuman(label: "fx_limite", decimals: 0),
@@ -385,7 +385,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.light.rays", FxEffectHuman(
         name: "fx_name_rays",
-        keywords: "rays raios de luz god rays sol volumetrico spread",
+        keywords: "rays raios de luz god rays sol volumetrico spread cc light",
         principal: [0, 1, 2, 3, 4],
         params: [
             0: FxParamHuman(label: "fx_intensidade", suffix: "x", decimals: 2),
@@ -399,7 +399,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.light.sweep", FxEffectHuman(
         name: "fx_name_light_sweep",
-        keywords: "light sweep faixa de luz brilho varredura reflexo",
+        keywords: "light sweep faixa de luz brilho varredura reflexo cc",
         principal: [9, 1, 2, 4, 5, 10],
         params: [:])),
     ("aurea.color.colorama", FxEffectHuman(
@@ -672,7 +672,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         // O parâmetro Tempo É a curva de remapeamento da camada. O "Manter o tom
         // do áudio" do AE não existe aqui porque o motor não faz time-stretch:
         // um interruptor que não faz nada seria pior que a linha que falta.
-        keywords: "remapear tempo time remap curva velocidade camera lenta rampa",
+        keywords: "remapear tempo time remap curva velocidade camera lenta rampa twixtor slow motion",
         principal: [0, 1],
         params: [
             0: FxParamHuman(label: "fx_tempo", suffix: "s", decimals: 2),
@@ -718,7 +718,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.motion.wiggle", FxEffectHuman(
         name: "fx_name_wiggle",
-        keywords: "wiggle agitar aleatorio tremer mexer posicao rotacao escala",
+        keywords: "wiggle agitar aleatorio tremer mexer posicao rotacao escala wiggler random",
         principal: [0, 1, 2, 3, 4, 5],
         params: [
             0: FxParamHuman(label: "fx_frequencia", suffix: "Hz", decimals: 2),
@@ -781,7 +781,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.blur.radial", FxEffectHuman(
         name: "fx_name_radial_blur",
-        keywords: "desfoque radial radial blur zoom blur spin giro rotacional velocidade",
+        keywords: "desfoque radial radial blur zoom blur spin giro rotacional velocidade cc fast",
         principal: [0, 1, 2, 3, 4],
         params: [
             0: FxParamHuman(label: "fx_tipo"),
@@ -810,7 +810,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.stylize.vignette", FxEffectHuman(
         name: "fx_name_vignette",
-        keywords: "vinheta vignette escurecer bordas cantos",
+        keywords: "vinheta vignette escurecer bordas cantos cc",
         params: [
             0: FxParamHuman(label: "fx_intensidade", decimals: 0),
             1: FxParamHuman(label: "fx_tamanho", decimals: 0),
@@ -860,7 +860,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.blur.zoom", FxEffectHuman(
         name: "fx_name_zoom_blur",
-        keywords: "zoom rastro radial lente empurrar desfoque",
+        keywords: "zoom rastro radial lente empurrar desfoque cc fast blur",
         params: [
             0: FxParamHuman(label: "fx_centro"),
             1: FxParamHuman(label: "fx_intensidade", decimals: 0),
@@ -869,7 +869,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.distort.bulge", FxEffectHuman(
         name: "fx_name_bulge",
-        keywords: "bojo bulge pinca estufar puxar lente centro",
+        keywords: "bojo bulge pinca estufar puxar lente centro pinch",
         params: [
             0: FxParamHuman(label: "fx_centro"),
             1: FxParamHuman(label: "fx_raio", suffix: "%", decimals: 0),
@@ -946,7 +946,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     // --- Geradores e recorte do editor antigo ---
     ("aurea.generate.fractal_noise", FxEffectHuman(
         name: "fx_name_fractal_noise",
-        keywords: "ruido fractal fractal noise nuvem fumaca textura turbulencia perlin simplex",
+        keywords: "ruido fractal fractal noise nuvem fumaca textura turbulencia perlin simplex turbulent",
         principal: [0, 1, 2, 6, 7, 8],
         params: [
             0: FxParamHuman(label: "fx_tipo_ruido"),
@@ -1191,7 +1191,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.stylize.ball_grid", FxEffectHuman(
         name: "afx_name_balls",
-        keywords: "bolas esferas balls spheres grade particulas explodir dispersar torcer",
+        keywords: "bolas esferas balls spheres grade particulas explodir dispersar torcer cc ball action",
         principal: [0, 1, 2, 3, 4, 5, 6],
         params: [
             0: FxParamHuman(label: "afx_p_scatter", suffix: "px", decimals: 0),
@@ -1225,8 +1225,17 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     // Particular: as partículas do app antigo.
     ("aurea.generate.particular", FxEffectHuman(
         name: "afx_name_particular",
-        keywords: "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh",
+        keywords: "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh cc rainfall snowfall particle world",
         principal: [0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38])),
+    // Sinônimos de busca (nomes do After Effects / Alight Motion) dos efeitos sem ficha.
+    ("aurea.blur.box", FxEffectHuman(keywords: "fast box blur")),
+    ("aurea.blur.directional", FxEffectHuman(keywords: "motion blur")),
+    ("aurea.light.lens_flare", FxEffectHuman(keywords: "optical flares")),
+    ("aurea.distort.fisheye", FxEffectHuman(keywords: "cc lens fisheye")),
+    ("aurea.distort.corner_pin", FxEffectHuman(keywords: "cc power pin")),
+    ("aurea.color.cube_lut", FxEffectHuman(keywords: "apply color lut")),
+    ("aurea.key.rotobrush", FxEffectHuman(keywords: "roto brush rotoscope")),
+    ("aurea.color.rgb_split", FxEffectHuman(keywords: "rgb shift")),
 ]
 
 /// A tabela indexada pelo `typeId`, e a posição declarada (para ordenar sem
@@ -1468,6 +1477,15 @@ func fxEffectCategoryLabel(_ category: String) -> String {
     case "texto": return AureaText.t("panel_texto")
     case "rastreio": return AureaText.t("panel_rastreio")
     case "mascara": return AureaText.t("sh_dock_mask")
+    // Efeitos mais novos publicam a categoria em inglês: traduz igual.
+    case "distort": return AureaText.t("cat_distort")
+    case "light": return AureaText.t("cat_light")
+    case "color": return AureaText.t("cat_colour")
+    case "stylize": return AureaText.t("cat_stylize")
+    case "generate": return AureaText.t("cat_generate")
+    case "keying": return AureaText.t("cat_cutout")
+    case "text": return AureaText.t("panel_texto")
+    case "transform": return AureaText.t("panel_transformar")
     default: return category
     }
 }
@@ -1617,7 +1635,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.audio.tone", "afx_desc_tone", FxAllTargets, "tom tone gerador seno onda quadrada bip nota acorde audio")
     put("aurea.generate.audio_waveform", "afx_desc_audio_waveform", FxAllTargets, "forma de onda waveform audio osciloscopio som visualizador")
     put("aurea.generate.spectrum_analyzer", "afx_desc_spectrum", FxAllTargets, "espectro spectrum audio barras frequencias visualizador equalizador")
-    put("aurea.stylize.ball_grid", "afx_desc_balls", FxVisualTargets, "bolas esferas balls spheres grade particulas explodir dispersar")
+    put("aurea.stylize.ball_grid", "afx_desc_balls", FxVisualTargets, "bolas esferas balls spheres grade particulas explodir dispersar torcer cc ball cc ball action")
     put("aurea.transition.disintegrate", "afx_desc_disintegrate", FxVisualTargets, "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao")
     put("aurea.shape3d.layout", "fx_desc_shape3d_layout", [.cena3D], "forma 3d shape partes parts girar espalhar explodir atraso aleatorio")
     put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")

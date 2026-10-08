@@ -626,7 +626,7 @@ internal class TimelinePainter(
         cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
     ): Boolean {
         val heightPx = m.bar.roundToInt().coerceIn(1, THUMB_MAX_PX)
-        val tile = heightPx * thumbs.aspect(r.id)
+        val tile = heightPx * thumbs.aspect(cache, r.id)
         val origin = TimeAxis.xOf((r.start - r.offset).toDouble(), view, ppf, cx)
         val visL = max(x0, 0f)
         val visR = min(x1, w)

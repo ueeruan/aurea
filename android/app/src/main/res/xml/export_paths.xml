@@ -3,4 +3,8 @@
     <external-files-path name="exported_video" path="Movies/Aurea/"/>
     <external-files-path name="exported_images" path="Pictures/Aurea/"/>
     <external-files-path name="exported_sequences" path="Download/Aurea/"/>
+    <!-- Android 8–9 com permissão: pasta pública (GalleryPublish). -->
+    <external-path name="public_video" path="Movies/Aurea/"/>
+    <external-path name="public_images" path="Pictures/Aurea/"/>
+    <external-path name="public_sequences" path="Download/Aurea/"/>
 </paths>

@@ -279,16 +279,19 @@ constexpr const char* kFallbackPaths[] = {
     "C:/Windows/Fonts/msyh.ttc",                                                                 // 9 CJK (Windows)
     "C:/Windows/Fonts/seguisym.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",     // 10, 11 símbolos
     "",   // 12 árabe EMBARCADA: NotoNaskhArabic-Regular.ttf ao lado da fonte padrão (ver bundled_arabic_path)
+    "",   // 13 japonês embarcado: funciona também no sandbox do iOS.
 };
 constexpr usize kFallbackCount = sizeof(kFallbackPaths) / sizeof(kFallbackPaths[0]);
 constexpr u8 kBundledArabic = 12;
-static_assert(kBundledArabic + 1 == kFallbackCount, "a reserva embarcada e a ultima");
+constexpr u8 kBundledJapanese = 13;
+static_assert(kBundledJapanese + 1 == kFallbackCount, "a reserva embarcada e a ultima");
 std::mutex g_fallbackMutex;
 /// O app traz a Noto Naskh Arabic (OFL 1.1) na MESMA pasta da fonte padrão:
 /// `Fonts/` do bundle no iOS (o iOS não deixa ler as fontes árabes do sistema
 /// por caminho) e o cache no Android (copiada dos assets). Assim um título em
 /// árabe desenha igual nos dois aparelhos, com ou sem fonte árabe do sistema.
 std::string g_bundledArabicPath;
+std::string g_bundledJapanesePath;
 std::shared_ptr<const Font> g_fallbacks[kFallbackCount];
 bool g_fallbackTried[kFallbackCount] = {};
 u32 g_fallbackLoads = 0;
@@ -296,7 +299,7 @@ u64 g_fallbackBytes = 0;
 
 /// Ordem de busca pela escrita do caractere (índices de kFallbackPaths).
 void fallback_order(u32 cp, u8 (&order)[kFallbackCount], usize& n) {
-    static constexpr u8 kArabic[] = {kBundledArabic, 0, 1}, kHebrew[] = {2}, kDeva[] = {3}, kThai[] = {4}, kCjk[] = {5, 9, 6},
+    static constexpr u8 kArabic[] = {kBundledArabic, 0, 1}, kHebrew[] = {2}, kDeva[] = {3}, kThai[] = {4}, kCjk[] = {kBundledJapanese, 5, 9, 6},
                         kGeneral[] = {7, 8, 10, 11, 6};
     const u8* first = kGeneral;
     usize nf = sizeof(kGeneral);
@@ -352,7 +355,8 @@ const Font::Impl* fallback_for(const u32* chars, usize count) {
         const u8 i = order[k];
         if (!g_fallbackTried[i]) {
             g_fallbackTried[i] = true;
-            const std::string path = i == kBundledArabic ? g_bundledArabicPath : std::string(kFallbackPaths[i]);
+            const std::string path = i == kBundledArabic ? g_bundledArabicPath
+                                   : i == kBundledJapanese ? g_bundledJapanesePath : std::string(kFallbackPaths[i]);
             if (!path.empty()) g_fallbacks[i] = Font::load(path);
             if (g_fallbacks[i]) {
                 ++g_fallbackLoads;
@@ -751,9 +755,11 @@ void set_default_font_path(const std::string& path) {
     const usize slash = path.find_last_of("/\\");
     std::lock_guard<std::mutex> lock(g_fallbackMutex);
     g_bundledArabicPath = slash == std::string::npos ? std::string() : path.substr(0, slash + 1) + "NotoNaskhArabic-Regular.ttf";
+    g_bundledJapanesePath = slash == std::string::npos ? std::string() : path.substr(0, slash + 1) + "NotoSansJP-Regular.otf";
     // Já carregada fica (glifos posicionados apontam para ela); só uma
     // tentativa que falhou é refeita com o caminho novo.
     if (!g_fallbacks[kBundledArabic]) g_fallbackTried[kBundledArabic] = false;
+    if (!g_fallbacks[kBundledJapanese]) g_fallbackTried[kBundledJapanese] = false;
 }
 
 std::shared_ptr<const Font> default_font() {

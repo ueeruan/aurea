@@ -660,7 +660,7 @@ struct PreviewMetalView: UIViewRepresentable {
             else if model.selection.count >= 2, let hit = hitSelected(c) { targetLayer = hit }
             else { targetLayer = hitLayer(c, slack: 0, includeLocked: true) }
             if targetLayer == nil, let row = model.selectedLayer, model.selection.count == 1,
-               (row.kind == 6 || row.kind == 8), !model.engine.previewGestureBasis(row.id).isEmpty {
+               (row.kind == 6 || row.kind == 8 || row.kind == 9), !model.engine.previewGestureBasis(row.id).isEmpty {
                 targetLayer = row.id
             }
         }

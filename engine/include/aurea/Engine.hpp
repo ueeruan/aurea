@@ -1241,6 +1241,7 @@ public:
     bool trim_composition(i64 frame) noexcept;
     /// Shared NLE edits: 0 trim-in, 1 trim-out (absolute timeline frame),
     /// 2 slip, 3 roll-in, 4 roll-out, 5 slide (signed frame delta).
+    /// 6 moves any layer to an absolute frame, preserving duration/source/keys.
     /// Neighbours are explicit IDs; invalid/locked edits leave history untouched.
     /// Slip changes source time only. Roll/slide never ripple unrelated layers.
     bool edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous = 0, u64 next = 0) noexcept;
@@ -1767,6 +1768,17 @@ private:
     SceneEditorView sceneEditor_{}; ///< modelMutex protected, never serialized
     std::vector<u64> selection_;
     std::atomic<u32> modelRevision_{1};   ///< a UI relê listas quando muda
+    /// Subidas de `modelRevision_` que mudam só um TRECHO da composição atual
+    /// (cortar/aparar/mover uma camada sem ninguém olhando para ela em outro
+    /// instante). A chave da prévia guardada é `modelRevision_ - isto`: essas
+    /// edições não descartam o cache inteiro; o trecho vai em
+    /// `pendingPreviewRanges_` (modelMutex) e sai no próximo quadro.
+    std::atomic<u32> previewRangeEdits_{0};
+    std::vector<std::pair<i64, i64>> pendingPreviewRanges_;
+    [[nodiscard]] u64 preview_cache_revision() const noexcept {
+        return static_cast<u64>(modelRevision_.load(std::memory_order_acquire)
+                                - previewRangeEdits_.load(std::memory_order_acquire)) + 1;
+    }
 
     // --- Sincronização --------------------------------------------------------
     /// Protege projeto, timeline, playback, seleção e imagens.

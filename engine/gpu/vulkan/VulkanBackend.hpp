@@ -123,9 +123,12 @@ public:
     void shutdown() noexcept;
 
     /// `required`: propriedades obrigatórias; `preferred`: desejáveis.
+    /// `hostPointer`: o chamador usa `Allocation::mapped` (buffers, staging).
+    /// Imagens passam false: em 32 bits a memória delas não é mapeada no
+    /// processo (AddressSpace.hpp); em 64 bits nada muda.
     [[nodiscard]] Allocation allocate(const VkMemoryRequirements& req, VkMemoryPropertyFlags required,
                                       VkMemoryPropertyFlags preferred, bool dedicated,
-                                      const char* debugName) noexcept;
+                                      const char* debugName, bool hostPointer = true) noexcept;
     void free(const Allocation& a) noexcept;
     /// Release unused slabs after deferred resource destruction. Live block
     /// indices stay stable because Allocation stores them.

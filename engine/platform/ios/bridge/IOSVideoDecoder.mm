@@ -36,6 +36,8 @@
 #import <CoreVideo/CoreVideo.h>
 #import <ImageIO/ImageIO.h>
 #import <VideoToolbox/VideoToolbox.h>
+#import <CoreText/CoreText.h>
+#include "aurea/text/Text.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -2073,6 +2075,96 @@ const char* ios_default_font_path() {
         if (access(path, R_OK) == 0) return path;
     }
     return "";   // o motor procura sozinho (FontManager varre /System/Library/Fonts)
+}
+
+namespace {
+/// Fonte do CoreText → arquivo sfnt na memória, tabela por tabela
+/// (CTFontCopyTable). Funciona até para fontes do sistema que o app não pode
+/// abrir por caminho (as CJK baixadas pelo sistema ficam fora do sandbox).
+std::vector<u8> ios_sfnt_bytes(CTFontRef font) {
+    std::vector<u8> out;
+    CFArrayRef tags = CTFontCopyAvailableTables(font, kCTFontTableOptionNoOptions);
+    if (!tags) return out;
+    struct Table { u32 tag; CFDataRef data; };
+    std::vector<Table> tables;
+    bool hasOutline = false;
+    for (CFIndex i = 0, n = CFArrayGetCount(tags); i < n; ++i) {
+        const auto tag = static_cast<CTFontTableTag>(reinterpret_cast<uintptr_t>(CFArrayGetValueAtIndex(tags, i)));
+        CFDataRef d = CTFontCopyTable(font, tag, kCTFontTableOptionNoOptions);
+        if (!d) continue;
+        if (tag == kCTFontTableGlyf || tag == kCTFontTableCFF) hasOutline = true;
+        tables.push_back({tag, d});
+    }
+    CFRelease(tags);
+    bool cff = false;
+    for (const Table& t : tables) cff = cff || t.tag == kCTFontTableCFF;
+    if (hasOutline && !tables.empty()) {
+        std::sort(tables.begin(), tables.end(), [](const Table& a, const Table& b) { return a.tag < b.tag; });
+        auto put32 = [&](usize at, u32 v) { out[at] = u8(v >> 24); out[at + 1] = u8(v >> 16); out[at + 2] = u8(v >> 8); out[at + 3] = u8(v); };
+        auto put16 = [&](usize at, u16 v) { out[at] = u8(v >> 8); out[at + 1] = u8(v); };
+        const u16 count = static_cast<u16>(tables.size());
+        u16 sel = 0;
+        while ((2u << sel) <= count) ++sel;
+        usize offset = 12 + 16 * static_cast<usize>(count);
+        out.resize(offset);
+        put32(0, cff ? 0x4F54544Fu : 0x00010000u);
+        put16(4, count);
+        put16(6, static_cast<u16>(16u << sel));
+        put16(8, sel);
+        put16(10, static_cast<u16>(count * 16u - (16u << sel)));
+        for (usize i = 0; i < tables.size(); ++i) {
+            const usize len = static_cast<usize>(CFDataGetLength(tables[i].data));
+            const u8* bytes = CFDataGetBytePtr(tables[i].data);
+            u32 sum = 0;
+            for (usize k = 0; k < len; k += 4) {
+                u32 word = 0;
+                for (usize b = 0; b < 4; ++b) word = (word << 8) | (k + b < len ? bytes[k + b] : 0u);
+                sum += word;
+            }
+            put32(12 + 16 * i, tables[i].tag);
+            put32(12 + 16 * i + 4, sum);
+            put32(12 + 16 * i + 8, static_cast<u32>(offset));
+            put32(12 + 16 * i + 12, static_cast<u32>(len));
+            out.insert(out.end(), bytes, bytes + len);
+            out.resize((out.size() + 3) & ~static_cast<usize>(3), 0);
+            offset = out.size();
+        }
+    }
+    for (const Table& t : tables) CFRelease(t.data);
+    return out;
+}
+
+std::shared_ptr<const text::Font> ios_fallback_font(const u32* chars, usize count, const std::string& lang) {
+    @autoreleasepool {
+        NSString* s = [[NSString alloc] initWithBytes:chars length:count * sizeof(u32) encoding:NSUTF32LittleEndianStringEncoding];
+        if (s.length == 0) return nullptr;
+        NSString* languageName = lang.empty() ? nil : [NSString stringWithUTF8String:lang.c_str()];   // forte: vive até o fim
+        CFStringRef language = (__bridge CFStringRef)languageName;
+        CTFontRef base = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, 64.0, language);
+        if (!base) base = CTFontCreateWithName(CFSTR("Helvetica"), 64.0, nullptr);
+        if (!base) return nullptr;
+        CTFontRef font = CTFontCreateForString(base, (__bridge CFStringRef)s, CFRangeMake(0, static_cast<CFIndex>(s.length)));
+        CFRelease(base);
+        if (!font) return nullptr;
+        // Sem fonte que cubra, o CoreText devolve a própria base: confere.
+        std::vector<UniChar> units(s.length);
+        [s getCharacters:units.data() range:NSMakeRange(0, s.length)];
+        std::vector<CGGlyph> glyphs(units.size());
+        const bool covers = CTFontGetGlyphsForCharacters(font, units.data(), glyphs.data(), static_cast<CFIndex>(units.size()));
+        std::vector<u8> bytes = covers ? ios_sfnt_bytes(font) : std::vector<u8>();
+        CFRelease(font);
+        if (bytes.empty()) return nullptr;
+        return text::Font::load_memory(std::move(bytes), 0);
+    }
+}
+} // namespace
+
+void ios_install_text_fallback() {
+    @autoreleasepool {
+        NSString* preferred = [NSLocale preferredLanguages].firstObject;
+        text::set_fallback_locale(preferred ? std::string(preferred.UTF8String) : std::string());
+    }
+    text::set_fallback_font_provider(&ios_fallback_font);
 }
 
 } // namespace aurea::ios

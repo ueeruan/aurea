@@ -27,5 +27,10 @@ void main() {
     for (int i = 0; i < 3; ++i) f = texture(u_flow, v_uv - t * f).xy * p.blend.yz;
     vec4 a = texture(u_a, v_uv - t * f);
     vec4 b = texture(u_b, v_uv + (1.0 - t) * f);
-    o_color = mix(a, b, t);
+    // Oclusão ou fluxo errado: as duas amostras discordam. Ali a média dava
+    // fantasma/rasgo (beta 08/10, "Smooth Motion não funciona direito"); vale
+    // o quadro mais próximo no tempo. Onde o fluxo acerta, a ≈ b e nada muda.
+    vec3 gap = abs(a.rgb - b.rgb);
+    float wrong = smoothstep(0.12, 0.35, max(max(gap.r, gap.g), gap.b));
+    o_color = mix(a, b, mix(t, step(0.5, t), wrong));
 }

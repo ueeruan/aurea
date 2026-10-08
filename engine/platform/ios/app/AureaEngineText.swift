@@ -106,6 +106,8 @@ enum AureaEngineText {
         ("buffer do modelo ausente", "eng_model_invalid"),
         ("objeto 3d nao encontrado", "eng_model_invalid"),
         ("modelo sem geometria", "eng_model_no_geometry"),
+        ("modelo comprimido com draco: exporte sem compressao", "eng_model_compressed"),
+        ("modelo comprimido com meshopt (khr): exporte sem compressao", "eng_model_compressed"),
         ("forma 3d sem geometria", "eng_model_no_geometry"),
         ("arquivo sem trilha de video decodificavel", "eng_no_video_track"),
         ("sem trilha de video", "eng_no_video_track"),

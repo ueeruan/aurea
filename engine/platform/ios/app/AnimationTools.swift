@@ -654,7 +654,7 @@ struct NativeCurvePanel: View {
             if expanded {
                 ZStack {
                     if let request = model.actionSheet {
-                        AureaActionSheet(title: request.title, actions: request.actions) { model.actionSheet = nil }
+                        AureaActionSheet(title: request.title, message: request.message, actions: request.actions) { model.actionSheet = nil }
                     }
                     if let request = model.namePrompt {
                         AureaNamePrompt(title: request.title, initial: request.initial, onConfirm: request.onConfirm,
@@ -1059,6 +1059,7 @@ struct TimeRemapEffectEditor: View {
                 }
                 toggleRow("remap_ao_contrario", checked: flags & 256 != 0) { _ in
                     model.mutate { _ = $0.reverseTimeRemap(forLayer: id) }
+                    model.unaliasThumbs(id)   // o tempo do pedaço mudou: a tira dele é outra
                     refresh()
                 }
                 Text(AureaText.t("remap_dica_lista")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)

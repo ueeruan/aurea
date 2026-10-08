@@ -599,6 +599,8 @@ NS_SWIFT_NAME(AureaEngine)
 /// 7 texturas · 8 maior lado · 9 orçamento · 10..12 cabe · 13..15 pico ·
 /// 16..18 triângulos que ficam · 19..21 teto de textura (por qualidade).
 - (NSArray<NSNumber*>*)inspectModel:(NSString*)path;
+/// Shared ZIP extraction; destination must not exist. Relative paths and CRCs are preserved.
++ (nullable NSArray<NSString*>*)extractModelArchive:(NSString*)archive to:(NSString*)directory;
 /// Etapa (ImportPhase) × 1000 + fração × 1000 do import em curso.
 - (int)importModelProgress;
 - (void)cancelModelImport;
@@ -617,6 +619,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)addShape:(uint32_t)preset;
 - (long long)addText:(nullable NSString*)content;
 - (NSString*)playbackReport;
+/// Position actually presented by the audio output, in timeline nanoseconds.
+- (int64_t)audioPositionNs;
 - (BOOL)setRawPlayback:(BOOL)enabled;
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance;
 - (NSArray<NSNumber*>*)sceneGuides;
@@ -857,6 +861,7 @@ NS_SWIFT_NAME(AureaEngine)
 /// A bola de um material pronto do texto 3D (0..6), no mesmo formato.
 - (nullable NSData*)text3DPresetPreview:(uint32_t)preset size:(uint32_t)size;
 - (int64_t)removeGaps;
+/// 0/1 trim absoluto, 2 slip, 3/4 roll, 5 slide; 6 move ao quadro absoluto.
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next;
 - (BOOL)trimComposition:(int64_t)frame;
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));

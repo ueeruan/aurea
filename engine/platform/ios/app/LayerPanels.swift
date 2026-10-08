@@ -254,6 +254,19 @@ private struct NativePanelRuler: View {
 
 
 // PresetsPanel.kt / PresetLibrary.kt. JSON belongs to the shared engine.
+/// Nome traduzido dos presets embutidos (Resources/presets/<tipo>.json), na
+/// ordem do arquivo — mesma tabela do Android (`BuiltinPresetNames`). Os de
+/// marca ("CC · Detail", "Omino · Diffusion") ficam com o nome do arquivo.
+let builtinPresetNameKeys: [String: [String]] = [
+    "animacao": ["app_preset_anim_appear", "app_preset_anim_vanish", "app_preset_anim_enter_left", "app_preset_anim_rise",
+                 "app_preset_anim_zoom_in", "app_preset_anim_pulse", "app_preset_anim_spin_in"],
+    "curva": ["app_preset_curve_cubic", "app_preset_curve_strong_inout", "app_preset_curve_expo_out", "app_preset_curve_expo_in",
+              "app_preset_curve_back_out", "app_preset_curve_back_in"],
+    "efeitos": ["app_preset_fx_soft_blur", "app_preset_fx_focus_in", "app_preset_fx_neon_glow", "app_preset_fx_bw",
+                "app_preset_fx_strong_contrast", "app_preset_fx_sepia", "app_preset_fx_dream", "app_preset_fx_turbulence"],
+    "legenda": ["app_preset_caption_viral", "app_preset_caption_karaoke", "app_preset_caption_subtle", "pack_text_4", "pack_text_5"],
+]
+
 enum PanelPresetKind: String, CaseIterable {
     case effects = "efeitos", text = "texto", animation = "animacao", caption = "legenda", curve = "curva"
     var engineId: UInt32 {
@@ -308,7 +321,9 @@ extension PanelPresetEntry {
                       let data = try? Data(contentsOf: url), let objects = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
                 for (index, object) in objects.enumerated() {
                     if let bytes = AureaJSONData(object, false), let json = String(data: bytes, encoding: .utf8) {
-                        let name = object["name"] as? String ?? ""
+                        // Nome no idioma do app (o JSON fala pt-BR); sem recurso, o do arquivo.
+                        let keys = builtinPresetNameKeys[kind.rawValue] ?? []
+                        let name = index < keys.count ? AureaText.t(keys[index]) : object["name"] as? String ?? ""
                         result.append(PanelPresetEntry(id: "b:\(kind.rawValue):\(index)", name: name.isEmpty ? AureaText.t("pn_preset_n", index + 1) : name, kind: kind, json: json))
                     }
                 }

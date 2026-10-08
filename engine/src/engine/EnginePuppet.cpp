@@ -121,7 +121,7 @@ bool Engine::puppet_capture_outline(const Composition& comp, const Layer& l, Fra
             const f64 src = l.source_frame(l.timeline_time(local));
             frame = std::isfinite(src) ? static_cast<i64>(std::max(0.0, std::floor(src / fps * srcFps + 1e-3))) : 0;
         }
-        const auto matte = renderer_.roto_cached_matte(&comp, l, inst, frame);
+        const auto matte = renderer_.roto_cached_matte(&comp, l, inst, frame, a);
         constexpr u32 k = ai::RotoService::kSize;
         if (matte && matte->size() >= static_cast<usize>(k) * k) {
             puppet::outline_rows(matte->data(), k, k, 0.5f, rows);

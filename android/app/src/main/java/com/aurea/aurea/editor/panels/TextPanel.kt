@@ -26,6 +26,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
@@ -159,7 +162,7 @@ internal fun TextPanel(env: PanelEnv) {
             0.1f, 0f, 60f, stringResource(R.string.panel_contorno_texto)) { store.setTextStrokeWidth(it) }
         TextStyleSections(env)
         TextPathSection(env)
-        TextAnimSection(env)
+        AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
     }
 }
 
@@ -184,7 +187,7 @@ private fun TextStyleSections(env: PanelEnv) {
             store.setTextStyleValue(18, it / 100)
         }
         TextRuler(env, stringResource(R.string.text_letter_spacing), { store.textStyle?.get(19) ?: 0f },
-            "${v[19].roundToInt()} px", 0.25f, -1000f, 1000f, stringResource(R.string.text_letter_spacing)) {
+            "${v[19].roundToInt()} ‰ em", 0.25f, -1000f, 1000f, stringResource(R.string.text_letter_spacing), keyProperty = com.aurea.aurea.engine.TrackProperty.TEXT_TRACKING) {
             store.setTextStyleValue(19, it)
         }
     }
@@ -261,6 +264,7 @@ private fun TextRuler(
     min: Float,
     max: Float,
     gesture: String,
+    keyProperty: Int? = null,
     onValue: (Float) -> Unit,
 ) {
     val store = env.store
@@ -285,10 +289,27 @@ private fun TextRuler(
             }
             Spacer(Modifier.width(8.dp))
             ValueBox(text, onTap = {
-                env.openKeypad(KeypadRequest(label, value(), if (text.endsWith("%")) "%" else "px", min, max, 1) {
+                env.openKeypad(KeypadRequest(label, value(), when { text.endsWith("%") -> "%"; text.endsWith("‰ em") -> "‰ em"; else -> "px" }, min, max, 1) {
                     store.beginGesture(gesture); onValue(it.coerceIn(min, max)); store.endGesture()
                 })
             })
+            if (keyProperty != null) {
+                val id = store.primary
+                val row = store.layers.firstOrNull { it.id == id }
+                val local = store.playhead - (row?.startFrame ?: 0) + (row?.offsetFrames ?: 0)
+                val keys = store.keyframes[id].orEmpty().filter { it.property == keyProperty }
+                val look = when {
+                    keys.any { it.time == local } -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
+                    keys.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
+                    else -> com.aurea.aurea.ui.ds.KeyframeLook.None
+                }
+                val action = stringResource(if (look == com.aurea.aurea.ui.ds.KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
+                Box(Modifier.width(48.dp).height(48.dp).testTag("text.tracking.key")
+                    .semantics { contentDescription = "$action · $label" }
+                    .tocavel(enabled = row?.locked == false) { store.toggleTransformKeyframe(intArrayOf(keyProperty)) }, contentAlignment = Alignment.Center) {
+                    com.aurea.aurea.ui.ds.KeyframeDiamondIcon(look, enabled = row?.locked == false)
+                }
+            }
         }
     }
 }

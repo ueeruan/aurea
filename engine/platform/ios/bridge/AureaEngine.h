@@ -794,7 +794,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)isFillerWord:(NSString*)word NS_SWIFT_NAME(isFillerWord(_:));
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options;
 - (uint32_t)captionCount:(long long)layerId;
-- (NSArray<NSDictionary<NSString*, id>*>* _Nullable)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language error:(NSError* _Nullable * _Nullable)error;
+- (NSArray<NSDictionary<NSString*, id>*>* _Nullable)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language translateEnglish:(BOOL)translateEnglish error:(NSError* _Nullable * _Nullable)error;
 - (int)captionProgress:(BOOL)cancel;
 - (NSString*)captionTracks;
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name;

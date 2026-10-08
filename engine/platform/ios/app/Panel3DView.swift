@@ -75,7 +75,7 @@ struct Panel3DView: View {
                     case .light:
                         lightSceneTab
                     case .anim:
-                        if isText { TextAnimationSection(showAnimatorEffect: false, beforeAnimation: finishEditing) }
+                        if isText { NativePanelChip(AureaText.t("la_animators")) { finishEditing(); model.transformTab = 6; model.openPanel(.transform) } }
                         else if isShape { Text3DAnimSection(layerId: layerId, parts: true) }
                     }
                 }
@@ -178,7 +178,7 @@ struct Panel3DView: View {
                 chip("t3d_import_font") {
                     finishEditing()
                     let target = layerId
-                    FontImportPicker.present { url in importFont(url, target: target) }
+                    FontImportPicker.presentMultiple { urls in for url in urls { importFont(url, target: urls.count == 1 ? target : nil) } }
                 }
             }
             row("panel_alinhamento", height: 48) {
@@ -321,8 +321,9 @@ struct Panel3DView: View {
                     }
                     section("scene_tonemap")
                     horizontal {
-                        T3DChip(label: "PBR Neutral", on: sceneSettings[3] == 0) { setScene(3, 0) }
-                        T3DChip(label: "AgX", on: sceneSettings[3] == 1) { setScene(3, 1) }
+                        ForEach(Array(["PBR Neutral", "AgX", "AgX Punchy", "AgX Golden", "Uchimura", "ACES SDR"].enumerated()), id: \.offset) { i, label in
+                            T3DChip(label: label, on: Int(sceneSettings[3]) == i) { setScene(3, Float(i)) }
+                        }
                     }
                     sceneRow("scene_exposure", value: Swift.min(4, Swift.max(0.01, sceneSettings[4])) * 100, range: 1...400, unit: "%", reset: 100, gesture: nil) {
                         setScene(4, $0 / 100)

@@ -62,11 +62,45 @@ Params params_from(const EffectEval& e) noexcept {
     return p;
 }
 
+Rect projected_region(const LayerPlacement& pl) noexcept {
+    if (!pl.inScene3d) return visible_layer_rect(pl);
+    if (!pl.compWidth || !pl.compHeight) return {};
+    const Mat4& m = pl.compFromLayer;
+    f64 minX = 1e30, minY = 1e30, maxX = -1e30, maxY = -1e30;
+    for (const f64 qy : {0.0, static_cast<f64>(pl.compHeight)}) {
+        for (const f64 qx : {0.0, static_cast<f64>(pl.compWidth)}) {
+            const f64 a = m.col[0].x - qx * m.col[0].w;
+            const f64 b = m.col[0].y - qy * m.col[0].w;
+            const f64 c = m.col[1].x - qx * m.col[1].w;
+            const f64 d = m.col[1].y - qy * m.col[1].w;
+            const f64 tx = qx * m.col[3].w - m.col[3].x;
+            const f64 ty = qy * m.col[3].w - m.col[3].y;
+            const f64 det = a * d - b * c;
+            if (!std::isfinite(det) || std::fabs(det) < 1e-12) return {};
+            const f64 x = (d * tx - c * ty) / det;
+            const f64 y = (a * ty - b * tx) / det;
+            const f64 w = m.col[0].w * x + m.col[1].w * y + m.col[3].w;
+            if (!std::isfinite(x) || !std::isfinite(y) || !(w > 1e-6)) return {};
+            minX = std::min(minX, x); maxX = std::max(maxX, x);
+            minY = std::min(minY, y); maxY = std::max(maxY, y);
+        }
+    }
+    return {static_cast<f32>(minX), static_cast<f32>(minY),
+            static_cast<f32>(maxX - minX), static_cast<f32>(maxY - minY)};
+}
+
 Vec2 coverage_factors(const Params&, const LayerPlacement& pl) noexcept {
     const Vec2 none{1.0f, 1.0f};
     const f32 w = static_cast<f32>(pl.layerWidth);
     const f32 h = static_cast<f32>(pl.layerHeight);
     if (w <= 0.0f || h <= 0.0f || pl.compWidth == 0 || pl.compHeight == 0) return none;
+    if (pl.inScene3d) {
+        const Rect visible = projected_region(pl);
+        if (visible.w <= 0 || visible.h <= 0) return {kMaxCoverage, kMaxCoverage};
+        const f32 x = std::max(std::fabs(visible.x - w * .5f), std::fabs(visible.x + visible.w - w * .5f));
+        const f32 y = std::max(std::fabs(visible.y - h * .5f), std::fabs(visible.y + visible.h - h * .5f));
+        return {std::clamp(2 * x / w, 1.f, kMaxCoverage), std::clamp(2 * y / h, 1.f, kMaxCoverage)};
+    }
 
     // A INVERSA DA TRANSFORMAÇÃO, e não uma aproximação. A layer vai à
     // composição por q = M p; para a região cobrir o quadro, os QUATRO CANTOS
@@ -291,7 +325,7 @@ public:
             // infinita: a região cresce até cobrir isso tudo,
             // em vez de parar no quadro — senão o desfoque depois
             // do Motion Tile puxava transparente da borda e escurecia o quadro.
-            Rect vis = visible_layer_rect(*e.placement);
+            Rect vis = motion_tile::projected_region(*e.placement);
             if (vis.w > 0.0f && vis.h > 0.0f) {
                 // + folga: o canto do quadro cai na borda da caixa visível e o
                 // filtro bilinear da composição leria transparente ali.
@@ -504,6 +538,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_mesh_warp_effect(registry);
     // Fantoche (Distorcer). No fim.
     builtin::register_puppet_effect(registry);
+    builtin::register_move_along_path_effect(registry);
 }
 
 } // namespace aurea

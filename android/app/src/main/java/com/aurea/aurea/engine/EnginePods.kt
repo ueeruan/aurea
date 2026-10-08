@@ -863,6 +863,7 @@ object TrackProperty {
     const val FOCUS_DISTANCE = 17
     const val APERTURE = 18
     const val TIME_REMAP = 30
+    const val TEXT_TRACKING = 29
     const val EFFECT_PARAM = 31
     const val AUDIO_VOLUME = 32
     const val TEXT_ANIM_PARAM = 33

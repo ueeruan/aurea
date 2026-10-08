@@ -198,7 +198,7 @@ internal class TimelinePainter(
         }
         drawRuler(w, view, ppf, cx, fps, st.pps)
         drawPreviewBuffer(store.previewBufferRanges, w, view, ppf, cx)
-        drawMarkers(store.markers, w, h, view, ppf, cx)
+        drawMarkers(store.markers, w, view, ppf, cx)
         drawTimecode(cx, store.playhead, fps)
         if (thumbs.starved) c.requestRedraw()
         // Uma origem temporal para clipes, losangos e fio, inclusive na seleção.
@@ -990,8 +990,8 @@ internal class TimelinePainter(
         drawPath(majorPath, AureaTimeline.TickMajor, style = majorStroke)
     }
 
-    /** Composition guides remain visible over clips even when compact controls cover the ruler. */
-    private fun DrawScope.drawMarkers(mk: com.aurea.aurea.state.EditorStore.Markers, w: Float, h: Float, view: Double, ppf: Float, cx: Float) {
+    /** Markers belong to the ruler; only the playhead crosses the clip area. */
+    private fun DrawScope.drawMarkers(mk: com.aurea.aurea.state.EditorStore.Markers, w: Float, view: Double, ppf: Float, cx: Float) {
         if (mk.size == 0) return
         val half = m.tickBottom * 0.28f
         for (i in 0 until mk.size) {
@@ -1008,18 +1008,6 @@ internal class TimelinePainter(
             markerPath.close()
             drawPath(markerPath, color)
             drawLine(color, Offset(x, s * 1.4f), Offset(x, m.tickBottom), strokeWidth = m.density)
-            if (h > m.rowsTop) {
-                // Draw after the clips, using the same time axis; never filter
-                // this by selected rows, audio visibility or compact mode.
-                drawLine(Color.Black.copy(alpha = .35f), Offset(x, m.rowsTop), Offset(x, h), strokeWidth = 3f * m.density)
-                drawLine(color.copy(alpha = .7f), Offset(x, m.rowsTop), Offset(x, h), strokeWidth = m.density)
-                markerPath.reset()
-                markerPath.moveTo(x - s, m.rowsTop)
-                markerPath.lineTo(x + s, m.rowsTop)
-                markerPath.lineTo(x, m.rowsTop + s * 1.4f)
-                markerPath.close()
-                drawPath(markerPath, color)
-            }
         }
     }
     private val markerPath = androidx.compose.ui.graphics.Path()

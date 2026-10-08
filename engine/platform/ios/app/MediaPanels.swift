@@ -392,6 +392,7 @@ struct CaptionsPanel: View {
     @State private var words: [CaptionWord] = []
     @State private var sourcePath = ""
     @State private var transcriptSource: String?
+    @State private var translateEnglish = false
     @State private var hasKey = false
     @State private var language: String = {
         let code = Locale.current.languageCode ?? ""
@@ -464,6 +465,8 @@ struct CaptionsPanel: View {
             if busy != nil { CaptionAction(label: AureaText.t("common_cancel")) { _ = model.engine.captionProgress(true); job?.cancel() } }
             label("panel_idioma_fala")
             CaptionChips(options: languages, selected: languageCodes.firstIndex(of: language) ?? 0) { language = languageCodes[$0] }
+            Toggle(AureaText.t("beta_translate_english"), isOn: $translateEnglish)
+                .frame(minHeight: 44).disabled(busy != nil)
             HStack(spacing: 8) {
                 CaptionAction(label: AureaText.t(words.isEmpty ? "panel_gerar_legendas" : "panel_transcrever_novo"), primary: true, enabled: busy == nil, action: transcribe)
                 CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: busy == nil) {
@@ -615,7 +618,7 @@ struct CaptionsPanel: View {
     }
     private func transcribe() {
         guard busy == nil else { return }
-        let sourceId = id, engine = model.engine, selectedLanguage = language, project = model.projectGeneration
+        let sourceId = id, engine = model.engine, selectedLanguage = language, translate = translateEnglish, project = model.projectGeneration
         guard !path.isEmpty else { error = AureaText.t("ios_no_audio_media"); return }
         busy = AureaText.t("ios_whisper_preparing"); error = nil
         let revision = UUID(); jobRevision = revision
@@ -639,7 +642,7 @@ struct CaptionsPanel: View {
                 defer { ticker.cancel() }
                 let result = try await withTaskCancellationHandler {
                     try await Task.detached(priority: .utility) {
-                        try engine.transcribeLocal(sourceId, model: modelFile.path, language: selectedLanguage).compactMap(CaptionWord.init)
+                        try engine.transcribeLocal(sourceId, model: modelFile.path, language: selectedLanguage, translateEnglish: translate).compactMap(CaptionWord.init)
                     }.value
                 } onCancel: { _ = engine.captionProgress(true) }
                 try Task.checkCancellation()

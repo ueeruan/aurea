@@ -1316,5 +1316,11 @@ enum EffectI18nTable {
     aurea.distort.puppet|0|triangles|fxl_triangles|
     aurea.distort.puppet|1|expansion|fxl_expansion|
     aurea.distort.puppet|2|rigidity|fxl_rigidity|
+    aurea.move.path|0|path_layer|fxl_path_layer_2|
+    aurea.move.path|1|progress|fx_progresso|
+    aurea.move.path|2|duration|fxl_duration|
+    aurea.move.path|3|automatic|fxl_automatic_movement|
+    aurea.move.path|4|orient|fxl_orient_along_path|
+    aurea.move.path|5|loop|fxo_repeat|
     """
 }

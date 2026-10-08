@@ -219,7 +219,6 @@ struct TimelineView: View {
                 drawRows(&context, size: canvasSize)
                 drawRuler(&context, size: canvasSize)
                 drawPreviewBuffer(&context, size: canvasSize)
-                drawMarkerGuides(&context, size: canvasSize)
                 drawPlayhead(&context, size: canvasSize)
             }
             .accessibilityChildren {
@@ -470,25 +469,6 @@ struct TimelineView: View {
         drawTimecode(&context, size: size)
     }
 
-    /// Composition guides stay above clips in both compact and expanded timelines.
-    private func drawMarkerGuides(_ context: inout GraphicsContext, size: CGSize) {
-        guard size.height > m.rowsTop else { return }
-        let half: CGFloat = 3.5
-        for marker in markers {
-            let px = x(Double(marker.frame), width: size.width)
-            guard px >= -half && px <= size.width + half else { continue }
-            let color = markerTint(marker.packedColor)
-            var line = Path()
-            line.move(to: CGPoint(x: px, y: m.rowsTop)); line.addLine(to: CGPoint(x: px, y: size.height))
-            context.stroke(line, with: .color(.black.opacity(0.35)), lineWidth: 3)
-            context.stroke(line, with: .color(color.opacity(0.7)), lineWidth: 1)
-            var head = Path()
-            head.move(to: CGPoint(x: px - half, y: m.rowsTop))
-            head.addLine(to: CGPoint(x: px + half, y: m.rowsTop))
-            head.addLine(to: CGPoint(x: px, y: m.rowsTop + half * 1.4)); head.closeSubpath()
-            context.fill(head, with: .color(color))
-        }
-    }
 
     private func drawPreviewBuffer(_ context: inout GraphicsContext, size: CGSize) {
         for range in model.previewBufferRanges {

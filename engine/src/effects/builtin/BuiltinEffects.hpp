@@ -54,6 +54,7 @@ void register_audio_pack_effects(EffectRegistry& r);
 void register_particular_effect(EffectRegistry& r);
 // Tremor em trancos (do app antigo). Depois de todos.
 void register_twitch_effect(EffectRegistry& r);
+void register_move_along_path_effect(EffectRegistry& r);
 /// Shape 3D Layout (PatternEffects.cpp): o Text 3D Layout das formas 3D.
 void register_shape3d_layout_effect(EffectRegistry& r);
 /// Detectar movimento (MotionDetectEffect.cpp). Sempre no fim.

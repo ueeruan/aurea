@@ -1296,12 +1296,14 @@ bool layer_sounds_at(const Layer& l, const Project& project, FrameIndex t) noexc
 
 } // namespace
 
-std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase) noexcept {
+std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase, u64 guideId) noexcept {
     std::vector<Vec4> result;
     if (!planComp_ || !host || count == 0) return result;
     const auto& comp=*planComp_;
     const auto& order=comp.order(); const Layer* guide=nullptr;
-    for(u32 i=1;i<order.size();++i) if(comp.layer(order.at(i))==host) { guide=comp.layer(order.at(i-1)); break; }
+    if (guideId) guide = comp.layer(LayerId::unpack(guideId));
+    else for(u32 i=1;i<order.size();++i) if(comp.layer(order.at(i))==host) { guide=comp.layer(order.at(i-1)); break; }
+    if (guide == host) return result;
     if(!guide) return result;
     vector::Contour contour;
     if(guide->kind==LayerKind::Shape) {
@@ -2007,6 +2009,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         captionTracks.add(std::move(track));
                     }
                     textData = &captionText; textTracks = &captionTracks;
+                }
+                TextData evaluatedTracking;
+                if (const Track* tracking = textTracks->find(TrackProperty::TextTracking); tracking && tracking->driven()) {
+                    evaluatedTracking = *textData;
+                    evaluatedTracking.tracking = std::clamp(tracking->value_or(local, textData->tracking), -1000.f, 1000.f);
+                    textData = &evaluatedTracking;
                 }
                 const auto font = text::FontManager::instance().font_for(*textData);
                 if (!font || textData->content.empty() || (textData->color.w <= 0.0f && textData->strokeWidth <= 0.0f)) continue;
@@ -3576,7 +3584,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     // Pós do grupo (v31): exposição, tone map, bloom e o nível de qualidade.
     const PostProcessSettings& pp = comp.post_process();
     scene3d::ScenePost post;
-    post.toneMapper = std::min(pp.toneMapper, 1u);
+    post.toneMapper = std::min(pp.toneMapper, 5u);
     post.bloom = pp.bloom;
     post.bloomIntensity = std::clamp(pp.bloomIntensity, 0.0f, 4.0f);
     post.bloomThreshold = std::max(0.0f, pp.bloomThreshold);

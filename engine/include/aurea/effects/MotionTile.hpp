@@ -80,6 +80,10 @@ inline constexpr f32 kMaxOutput = 5.0f;
 /// de kMaxCoverage. A janela de saída não mexe nisto: ela só recorta.
 [[nodiscard]] Vec2 coverage_factors(const Params& p, const LayerPlacement& placement) noexcept;
 
+/// Visible part of a projected plane, in source pixels. Empty at a horizon or
+/// behind the camera; callers retain their bounded fallback in that case.
+[[nodiscard]] Rect projected_region(const LayerPlacement& placement) noexcept;
+
 /// A região ladrilhada, em pixels da layer: centrada no CENTRO da layer, do
 /// tamanho dos fatores de cobertura. A cópia central continua em
 /// (0,0)–(largura,altura).

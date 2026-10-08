@@ -3686,4 +3686,14 @@ untuk mengedit kurvanya.</string>
     <string name="edt_cmdx_redo">Ulangi</string>
     <string name="edt_cmdx_redo_d">Menerapkan lagi suntingan yang dibatalkan</string>
     <string name="am_import_hint">Pilih layer di Aurea, lalu pilih XML, .amproj atau ZIP yang diekspor dari Alight Motion. Impor mengonversi efek yang kompatibel dari layer pertama yang memiliki efek; bukan seluruh proyek atau medianya. File dengan item yang tidak didukung ditolak agar pengaturan tidak hilang.</string>
+    <string name="beta_select_media">Pilih beberapa</string>
+    <string name="beta_add_media">Tambahkan (%1$d)</string>
+    <string name="beta_extend_clip">Perpanjang hingga akhir sumber</string>
+    <string name="beta_translate_english">Terjemahkan ucapan ke bahasa Inggris</string>
+    <string name="beta_overlap">Tumpang tindih unit</string>
+    <string name="fxl_path_layer_2">Lapisan jalur</string>
+    <string name="fxl_duration">Durasi</string>
+    <string name="fxl_automatic_movement">Gerakan otomatis</string>
+    <string name="fxl_orient_along_path">Arahkan sepanjang jalur</string>
+    <string name="beta_move_path">Gerakkan sepanjang jalur</string>
 </resources>

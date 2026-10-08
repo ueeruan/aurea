@@ -2408,6 +2408,43 @@ final class AureaModel: ObservableObject {
     /// Copia o arquivo escolhido para o sandbox (Media/) e importa. O motor
     /// guarda o caminho RELATIVO a Documents — é o que faz o mesmo .aurea
     /// abrir no Android e no iOS.
+    /// Sequential media imports keep peak decoder/image memory bounded.
+    func importMediaBatch(_ items: [(URL, Bool)]) {
+        guard !items.isEmpty, !importingMedia else { return }
+        importingMedia = true
+        operationMessage = AureaText.t("ios_importing_media")
+        pause()
+        let importer = engine
+        let scoped = items.map(\.0).filter { $0.startAccessingSecurityScopedResource() }
+        mediaQueue.async { [weak self] in
+            defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
+            var imported: [Int64] = [], failures = 0
+            for (url, video) in items {
+                let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
+                do {
+                    try AureaPaths.copyImport(url, to: destination)
+                    let name = url.deletingPathExtension().lastPathComponent
+                    let result = video ? importer.importVideo(destination.path, name: name)
+                        : importer.importImageFile(destination.path, name: name)
+                    if result >= 0 { imported.append(result) }
+                    else { failures += 1; try? FileManager.default.removeItem(at: destination) }
+                } catch { failures += 1 }
+            }
+            let ids = imported, failed = failures
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if !ids.isEmpty {
+                    self.engine.selectLayers(ids.map { NSNumber(value: $0) })
+                    self.selection = Set(ids)
+                    self.refreshModel(force: true)
+                    _ = self.saveProject(writeThumbnail: false)
+                }
+                if failed > 0 { self.toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo") }
+            }
+        }
+    }
+
     /// `atPlayhead`: o clipe entra no cabeçote (o vídeo gerado pela IA), não no zero.
     func importMedia(url: URL, kind: ImportKind, objectHDRI: Int64? = nil, atPlayhead: Bool = false) {
         guard !importingMedia else { return }

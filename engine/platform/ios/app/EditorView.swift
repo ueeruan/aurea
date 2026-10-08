@@ -154,12 +154,12 @@ private struct AddLayerPickers: ViewModifier {
                 else { photoKind = request; choosingPhotos = true }
             }
             .sheet(isPresented: $choosingPhotos) {
-                ShellMediaPicker(filter: photoKind == .photo ? .images : ((photoKind == .video || photoKind == .audioFromVideo) ? .videos : .any(of: [.images, .videos]))) { url, video in
+                ShellMediaPicker(selectionLimit: photoKind == .audioFromVideo ? 1 : 0, filter: photoKind == .photo ? .images : ((photoKind == .video || photoKind == .audioFromVideo) ? .videos : .any(of: [.images, .videos]))) { items in
                     choosingPhotos = false
                     guard pickerProject == model.projectGeneration else { return }
-                    guard let url else { return }
-                    let kind: AureaModel.ImportKind = photoKind == .audioFromVideo ? .audio : (video ? .video : .image)
-                    model.importMedia(url: url, kind: kind)
+                    if photoKind == .audioFromVideo, let first = items.first {
+                        model.importMedia(url: first.0, kind: .audio)
+                    } else { model.importMediaBatch(items) }
                 }
             }
     }
@@ -1205,7 +1205,7 @@ private struct TextPanelView: View {
     /// EditorStore.importFont: TTF/OTF copiado para Documents/Media (pasta que o
     /// motor varre ao abrir), registrado no CoreText e no motor e aplicado à
     /// camada que estava escolhida quando o seletor abriu.
-    private func importFont(_ url: URL, target: Int64) {
+    private func importFont(_ url: URL, target: Int64, apply: Bool = true) {
         guard ["ttf", "otf"].contains(url.pathExtension.lowercased()) else {
             model.toast = AureaText.t("msg_use_uma_fonte_ttf_ou_otf"); return
         }
@@ -1222,7 +1222,7 @@ private struct TextPanelView: View {
         FontImportPicker.registerWithCoreText(destination)
         query = ""
         fonts = model.engine.availableFonts()
-        if model.primarySelection == target { chooseFont(font) }
+        if apply && model.primarySelection == target { chooseFont(font) }
         model.toast = AureaText.t("msg_fonte_importada", font["family"] as? String ?? "")
     }
     private var spanTools: some View {
@@ -1267,7 +1267,7 @@ private struct TextPanelView: View {
                 Button {
                     dismissEditing()
                     let target = layerId
-                    FontImportPicker.present { url in importFont(url, target: target) }
+                    FontImportPicker.presentMultiple { urls in for url in urls { importFont(url, target: target, apply: urls.count == 1) } }
                 } label: {
                     Text(AureaText.t("panel_importar")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent).padding(.horizontal, 12).padding(.vertical, 10).background(AureaColors.accentDim, in: RoundedRectangle(cornerRadius: 10))
                 }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("text.font.import")
@@ -1338,19 +1338,19 @@ enum FontImportPicker {
     static var types: [UTType] {
         [UTType.font] + ["ttf", "otf"].compactMap { UTType(filenameExtension: $0) }
     }
-    static func present(_ picked: @escaping (URL) -> Void) {
+    static func presentMultiple(_ picked: @escaping ([URL]) -> Void) {
         let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
         guard var presenter = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else { return }
         while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
         // O UIKit guarda o delegate fraco: o dono fica aqui até a escolha.
-        let owner = Delegate { url in
+        let owner = Delegate { urls in
             FontImportPicker.delegate = nil
-            if let url { picked(url) }
+            picked(urls)
         }
         FontImportPicker.delegate = owner
         picker.delegate = owner
-        picker.allowsMultipleSelection = false
+        picker.allowsMultipleSelection = true
         picker.shouldShowFileExtensions = true
         presenter.present(picker, animated: true)
     }
@@ -1360,12 +1360,12 @@ enum FontImportPicker {
         if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) { _ = error?.takeRetainedValue() }
     }
     final class Delegate: NSObject, UIDocumentPickerDelegate {
-        private let done: (URL?) -> Void
+        private let done: ([URL]) -> Void
         private var finished = false
-        init(_ done: @escaping (URL?) -> Void) { self.done = done }
-        private func finish(_ url: URL?) { guard !finished else { return }; finished = true; done(url) }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls.first) }
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
+        init(_ done: @escaping ([URL]) -> Void) { self.done = done }
+        private func finish(_ urls: [URL]) { guard !finished else { return }; finished = true; done(urls) }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish([]) }
     }
 }
 
@@ -1588,8 +1588,8 @@ private struct AddLayerSheet: View {
             AureaColors.hairline.frame(height: 1)
             if tab == 0 { shapeGrid }
             else if tab == 1 {
-                EditorMediaGallery(openFiles: { photos($0 ? .video : .photo) }, openAI: { model.openPanel(.aiVideo) }) { url, video in
-                    model.importMedia(url: url, kind: video ? .video : .image); close()
+                EditorMediaGallery(openFiles: { photos($0 ? .video : .photo) }, openAI: { model.openPanel(.aiVideo) }) { items in
+                    model.importMediaBatch(items); close()
                 }
             } else if tab == ShellAddCategories.textPresets {
                 TextPresetPicker(onAdded: close)
@@ -1788,9 +1788,11 @@ private struct EditorMediaGallery: View {
     @State private var importing = false
     @State private var failure = false
     @State private var importRequest = UUID()
+    @State private var selecting = false
+    @State private var selectedAssets: [PHAsset] = []
     let openFiles: (Bool) -> Void
     let openAI: () -> Void
-    let picked: (URL, Bool) -> Void
+    let picked: ([(URL, Bool)]) -> Void
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -1813,6 +1815,16 @@ private struct EditorMediaGallery: View {
             }
             Text(AureaText.t("gallery_recent")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 12).padding(.bottom, 6)
+            HStack {
+                Button(AureaText.t(selecting ? "editor_cancelar" : "beta_select_media")) {
+                    selecting.toggle(); if !selecting { selectedAssets.removeAll() }
+                }.frame(minHeight: 48).accessibilityIdentifier("gallery.select")
+                Spacer()
+                if selecting {
+                    Button(AureaText.t("beta_add_media", selectedAssets.count)) { importAssets(selectedAssets) }
+                        .frame(minHeight: 48).disabled(selectedAssets.isEmpty).accessibilityIdentifier("gallery.addSelected")
+                }
+            }.padding(.horizontal, 12)
             ZStack {
                 if library.loading || importing { ProgressView().tint(AureaColors.accent) }
                 else if library.status != .authorized && library.status != .limited {
@@ -1827,8 +1839,18 @@ private struct EditorMediaGallery: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 3)], spacing: 3) {
                             ForEach(0..<assets.count, id: \.self) { index in
                                 let asset = assets.object(at: index)
-                                Button { importAsset(asset) } label: { EditorPhotoThumbnail(asset: asset) }
+                                let chosen = selectedAssets.firstIndex { $0.localIdentifier == asset.localIdentifier }
+                                Button {
+                                    if selecting {
+                                        if let chosen { selectedAssets.remove(at: chosen) } else { selectedAssets.append(asset) }
+                                    } else { importAssets([asset]) }
+                                } label: {
+                                    EditorPhotoThumbnail(asset: asset).overlay(alignment: .topTrailing) {
+                                        if let chosen { Text("✓ \(chosen + 1)").padding(6).background(AureaColors.chip).foregroundStyle(AureaColors.accent) }
+                                    }
+                                }
                                     .buttonStyle(.plain).id(asset.localIdentifier)
+                                    .accessibilityAddTraits(chosen == nil ? [] : [.isSelected])
                                     .accessibilityLabel(AureaText.t(video ? "editor_video" : "editor_foto") + " " + (asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? ""))
                             }
                         }.padding(3)
@@ -1842,19 +1864,25 @@ private struct EditorMediaGallery: View {
             .onDisappear { importRequest = UUID() }
             .disabled(importing)
     }
-    private func importAsset(_ asset: PHAsset) {
-        guard !importing else { return }
-        let request = UUID(), project = model.projectGeneration
-        importRequest = request
+    private func importAssets(_ assets: [PHAsset]) {
+        guard !importing, !assets.isEmpty else { return }
+        importRequest = UUID(); importing = true; failure = false
+        prepareAsset(assets, index: 0, ready: [], request: importRequest, project: model.projectGeneration)
+    }
+    private func prepareAsset(_ assets: [PHAsset], index: Int, ready: [(URL, Bool)], request: UUID, project: UUID) {
+        guard importRequest == request, model.projectGeneration == project else { return }
+        if index == assets.count { importing = false; if !ready.isEmpty { picked(ready) }; return }
+        let asset = assets[index]
         let isVideo = asset.mediaType == .video
         let resources = PHAssetResource.assetResources(for: asset)
         let primary: PHAssetResourceType = isVideo ? .fullSizeVideo : .fullSizePhoto
         let fallback: PHAssetResourceType = isVideo ? .video : .photo
-        guard let resource = resources.first(where: { $0.type == primary }) ?? resources.first(where: { $0.type == fallback }) else { failure = true; return }
-        importing = true; failure = false
+        guard let resource = resources.first(where: { $0.type == primary }) ?? resources.first(where: { $0.type == fallback }) else {
+            failure = true; prepareAsset(assets, index: index + 1, ready: ready, request: request, project: project); return
+        }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        catch { importing = false; failure = true; return }
+        catch { failure = true; prepareAsset(assets, index: index + 1, ready: ready, request: request, project: project); return }
         let destination = folder.appendingPathComponent(resource.originalFilename)
         let options = PHAssetResourceRequestOptions(); options.isNetworkAccessAllowed = true
         PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options) { error in
@@ -1863,9 +1891,10 @@ private struct EditorMediaGallery: View {
                     try? FileManager.default.removeItem(at: folder)
                     return
                 }
-                importing = false
+                var next = ready
                 if error != nil { try? FileManager.default.removeItem(at: folder); failure = true }
-                else { picked(destination, isVideo) }
+                else { next.append((destination, isVideo)) }
+                prepareAsset(assets, index: index + 1, ready: next, request: request, project: project)
             }
         }
     }
@@ -1895,33 +1924,42 @@ private struct EditorPhotoThumbnail: View {
 }
 
 struct ShellMediaPicker: UIViewControllerRepresentable {
+    var selectionLimit = 0
     let filter: PHPickerFilter
-    let picked: (URL?, Bool) -> Void
+    let picked: ([(URL, Bool)]) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(picked: picked) }
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration()
-        configuration.selectionLimit = 1; configuration.filter = filter
+        configuration.selectionLimit = selectionLimit; configuration.filter = filter
+        configuration.selection = .ordered
         configuration.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = context.coordinator; return picker
     }
     func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let picked: (URL?, Bool) -> Void
-        init(picked: @escaping (URL?, Bool) -> Void) { self.picked = picked }
+        let picked: ([(URL, Bool)]) -> Void
+        init(picked: @escaping ([(URL, Bool)]) -> Void) { self.picked = picked }
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            guard let provider = results.first?.itemProvider else { picked(nil, false); return }
+            load(results, index: 0, ready: [])
+        }
+        private func load(_ results: [PHPickerResult], index: Int, ready: [(URL, Bool)]) {
+            guard index < results.count else { DispatchQueue.main.async { self.picked(ready) }; return }
+            let provider = results[index].itemProvider
             let video = provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
             let type = video ? UTType.movie.identifier : UTType.image.identifier
-            provider.loadFileRepresentation(forTypeIdentifier: type) { [picked] source, _ in
-                guard let source else { DispatchQueue.main.async { picked(nil, video) }; return }
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-                do {
-                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    let target = directory.appendingPathComponent(source.lastPathComponent)
-                    try FileManager.default.copyItem(at: source, to: target)
-                    DispatchQueue.main.async { picked(target, video) }
-                } catch { DispatchQueue.main.async { picked(nil, video) } }
+            provider.loadFileRepresentation(forTypeIdentifier: type) { source, _ in
+                var next = ready
+                if let source {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                    do {
+                        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                        let target = directory.appendingPathComponent(source.lastPathComponent)
+                        try FileManager.default.copyItem(at: source, to: target)
+                        next.append((target, video))
+                    } catch { try? FileManager.default.removeItem(at: directory) }
+                }
+                self.load(results, index: index + 1, ready: next)
             }
         }
     }

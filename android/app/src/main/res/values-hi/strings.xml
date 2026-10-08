@@ -3692,4 +3692,14 @@
     <string name="edt_cmdx_redo">फिर से करें</string>
     <string name="edt_cmdx_redo_d">पूर्ववत किया गया संपादन फिर लागू करता है</string>
     <string name="am_import_hint">Aurea में एक लेयर चुनें, फिर Alight Motion से एक्सपोर्ट की गई XML, .amproj या ZIP फ़ाइल चुनें। पहली प्रभाव वाली लेयर के संगत प्रभाव बदले जाते हैं; पूरा प्रोजेक्ट या उसका मीडिया आयात नहीं होता। सेटिंग खोने से बचाने के लिए असंगत आइटम वाली फ़ाइलें अस्वीकार की जाती हैं।</string>
+    <string name="beta_select_media">कई चुनें</string>
+    <string name="beta_add_media">जोड़ें (%1$d)</string>
+    <string name="beta_extend_clip">स्रोत के अंत तक बढ़ाएँ</string>
+    <string name="beta_translate_english">बोली का अंग्रेज़ी में अनुवाद करें</string>
+    <string name="beta_overlap">इकाइयों का ओवरलैप</string>
+    <string name="fxl_path_layer_2">पथ लेयर</string>
+    <string name="fxl_duration">अवधि</string>
+    <string name="fxl_automatic_movement">स्वचालित गति</string>
+    <string name="fxl_orient_along_path">पथ की ओर घुमाएँ</string>
+    <string name="beta_move_path">पथ पर चलाएँ</string>
 </resources>

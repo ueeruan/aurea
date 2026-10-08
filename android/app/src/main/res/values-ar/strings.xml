@@ -3734,4 +3734,14 @@
     <string name="edt_cmdx_redo">إعادة</string>
     <string name="edt_cmdx_redo_d">يعيد تطبيق التعديل الملغى</string>
     <string name="am_import_hint">حدد طبقة في Aurea، ثم اختر ملف XML أو .amproj أو ZIP تم تصديره من Alight Motion. يحوّل الاستيراد التأثيرات المتوافقة من أول طبقة تحتوي على تأثيرات، ولا يستورد المشروع بأكمله أو وسائطه. تُرفض الملفات التي تحتوي على عناصر غير مدعومة لتجنب فقدان الإعدادات.</string>
+    <string name="beta_select_media">تحديد عدة ملفات</string>
+    <string name="beta_add_media">إضافة (%1$d)</string>
+    <string name="beta_extend_clip">تمديد حتى نهاية المصدر</string>
+    <string name="beta_translate_english">ترجمة الكلام إلى الإنجليزية</string>
+    <string name="beta_overlap">تداخل الوحدات</string>
+    <string name="fxl_path_layer_2">طبقة المسار</string>
+    <string name="fxl_duration">المدة</string>
+    <string name="fxl_automatic_movement">الحركة التلقائية</string>
+    <string name="fxl_orient_along_path">التوجيه على المسار</string>
+    <string name="beta_move_path">التحريك على المسار</string>
 </resources>

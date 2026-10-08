@@ -244,7 +244,7 @@ class EffectResources {
 public:
     virtual ~EffectResources() = default;
     // Equal-distance positions (xy) and tangent (z, radians), in host-layer pixels.
-    [[nodiscard]] virtual std::vector<Vec4> repeat_path(const Layer*, u32, f32) noexcept { return {}; }
+    [[nodiscard]] virtual std::vector<Vec4> repeat_path(const Layer*, u32, f32, u64 guide = 0) noexcept { (void)guide; return {}; }
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
     [[nodiscard]] virtual TextureHandle cube_lut(AssetId) noexcept { return {}; }

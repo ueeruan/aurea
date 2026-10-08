@@ -85,6 +85,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "mesh warp malha deformacao grade bezier entortar", principal = listOf(0, 1, 2)))
     put("aurea.distort.puppet", EffectHuman(name = R.string.fx_name_puppet,
         keywords = "puppet fantoche pino pin marionete rig personagem deformar arap", principal = listOf(0, 1, 2)))
+    put("aurea.move.path", EffectHuman(name = R.string.beta_move_path,
+        keywords = "move along path caminho vetor trajetória percurso orientar", principal = listOf(0, 1, 2, 3, 4, 5)))
     put("aurea.distort.liquid_glass", EffectHuman(name = R.string.fx_name_liquid_glass,
         keywords = "liquid glass vidro liquido lente refracao glassmorphism", principal = listOf(0, 1, 2, 3, 5)))
     put("aurea.transition.noise_dissolve", EffectHuman(name = R.string.fx_name_noise_dissolve,

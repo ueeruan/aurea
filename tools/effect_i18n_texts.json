@@ -3215,5 +3215,37 @@
   "hi": "केवल चमक",
   "id": "Hanya cahaya",
   "ar": "التوهج فقط"
+ },
+ "Camada do caminho": {
+  "en": "Path layer",
+  "es": "Capa de trayectoria",
+  "ru": "Слой пути",
+  "hi": "पथ लेयर",
+  "id": "Lapisan jalur",
+  "ar": "طبقة المسار"
+ },
+ "Duração": {
+  "en": "Duration",
+  "es": "Duración",
+  "ru": "Длительность",
+  "hi": "अवधि",
+  "id": "Durasi",
+  "ar": "المدة"
+ },
+ "Movimento automático": {
+  "en": "Automatic movement",
+  "es": "Movimiento automático",
+  "ru": "Автоматическое движение",
+  "hi": "स्वचालित गति",
+  "id": "Gerakan otomatis",
+  "ar": "الحركة التلقائية"
+ },
+ "Orientar no caminho": {
+  "en": "Orient along path",
+  "es": "Orientar según la trayectoria",
+  "ru": "Ориентировать по пути",
+  "hi": "पथ की ओर घुमाएँ",
+  "id": "Arahkan sepanjang jalur",
+  "ar": "التوجيه على المسار"
  }
 }

@@ -3704,4 +3704,14 @@
     <string name="edt_cmdx_redo">Повторить</string>
     <string name="edt_cmdx_redo_d">Возвращает отменённую правку</string>
     <string name="am_import_hint">Выберите слой в Aurea, затем XML, .amproj или ZIP, экспортированный из Alight Motion. Импорт преобразует совместимые эффекты первого слоя с эффектами, а не весь проект или его медиафайлы. Файлы с неподдерживаемыми элементами отклоняются, чтобы не потерять настройки.</string>
+    <string name="beta_select_media">Выбрать несколько</string>
+    <string name="beta_add_media">Добавить (%1$d)</string>
+    <string name="beta_extend_clip">Продлить до конца исходника</string>
+    <string name="beta_translate_english">Перевести речь на английский</string>
+    <string name="beta_overlap">Перекрытие единиц</string>
+    <string name="fxl_path_layer_2">Слой пути</string>
+    <string name="fxl_duration">Длительность</string>
+    <string name="fxl_automatic_movement">Автоматическое движение</string>
+    <string name="fxl_orient_along_path">Ориентировать по пути</string>
+    <string name="beta_move_path">Движение по пути</string>
 </resources>

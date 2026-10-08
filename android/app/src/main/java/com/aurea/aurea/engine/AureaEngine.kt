@@ -673,8 +673,8 @@ class AureaEngine private constructor() {
     fun removeCaptions(layer: Long): Int = nativeRemoveCaptions(nativeHandle, layer)
     fun captionCount(layer: Long): Int = nativeCaptionCount(nativeHandle, layer)
     fun parseSrt(srt: String): String? = nativeParseSrt(srt)
-    fun transcribeLocal(layer: Long, model: String, language: String): String =
-        nativeWork.run("") { nativeTranscribeLocal(nativeHandle, layer, model.toByteArray(Charsets.UTF_8), language.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8) }
+    fun transcribeLocal(layer: Long, model: String, language: String, translateEnglish: Boolean = false): String =
+        nativeWork.run("") { nativeTranscribeLocal(nativeHandle, layer, model.toByteArray(Charsets.UTF_8), language.toByteArray(Charsets.UTF_8), translateEnglish).toString(Charsets.UTF_8) }
     fun captionProgress(cancel: Boolean = false): Int = nativeWork.run(0) { nativeCaptionProgress(nativeHandle, cancel) }
     fun captionTracks(): String = nativeCaptionTracks(nativeHandle).toString(Charsets.UTF_8)
     fun saveCaptionBundle(layer: Long, name: String): String = nativeSaveCaptionBundle(nativeHandle, layer, name.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
@@ -684,7 +684,7 @@ class AureaEngine private constructor() {
     fun editCaptionTrack(layer: Long, command: String): Boolean = nativeEditCaptionTrack(nativeHandle, layer, command.toByteArray(Charsets.UTF_8))
     private external fun nativeCaptionTracks(handle: Long): ByteArray
     private external fun nativeEditCaptionTrack(handle: Long, layer: Long, command: ByteArray): Boolean
-    private external fun nativeTranscribeLocal(handle: Long, layer: Long, model: ByteArray, language: ByteArray): ByteArray
+    private external fun nativeTranscribeLocal(handle: Long, layer: Long, model: ByteArray, language: ByteArray, translateEnglish: Boolean): ByteArray
     private external fun nativeCaptionProgress(handle: Long, cancel: Boolean): Int
     fun isFillerWord(word: String): Boolean = nativeIsFillerWord(word)
     fun addTextAnimator(layer: Long, props: Int): Int = nativeAddTextAnimator(nativeHandle, layer, props)

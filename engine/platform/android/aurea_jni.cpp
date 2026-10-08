@@ -2243,9 +2243,9 @@ std::string utf8_of(JNIEnv* env, jbyteArray a);
 jbyteArray bytes_of(JNIEnv* env, const std::string& s);
 }
 
-AUREA_JNI jbyteArray AUREA_FN(nativeTranscribeLocal)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray model, jbyteArray language) {
+AUREA_JNI jbyteArray AUREA_FN(nativeTranscribeLocal)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray model, jbyteArray language, jboolean translateEnglish) {
     auto* c = ctx_of(handle); if (!c) return nullptr;
-    auto result = c->engine.transcribe_local(static_cast<u64>(layer), utf8_of(env, model), utf8_of(env, language));
+    auto result = c->engine.transcribe_local(static_cast<u64>(layer), utf8_of(env, model), utf8_of(env, language), translateEnglish == JNI_TRUE);
     if (!result) { env->ThrowNew(env->FindClass("java/io/IOException"), std::string(result.status().detail()).c_str()); return nullptr; }
     std::string output;
     for (const auto& word : *result) output += std::to_string(word.start) + "\t" + std::to_string(word.end) + "\t" + word.text + "\n";

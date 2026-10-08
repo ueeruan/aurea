@@ -76,6 +76,7 @@ private let FxMatrixLabels = [
 /// idioma — ordenar pelo nome traduzido reordenaria a lista ao trocar de
 /// língua).
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
+    ("aurea.move.path", FxEffectHuman(name: "beta_move_path", keywords: "move along path caminho vetor trajetória percurso orientar", principal: [0, 1, 2, 3, 4, 5])),
     ("aurea.distort.bender", FxEffectHuman(name: "fx_name_bender", keywords: "bender bend curve curvar pontos", principal: [0, 1, 2, 3])),
     ("aurea.distort.bend", FxEffectHuman(name: "fx_name_bend", keywords: "bend fold dobra papel", principal: [0, 1, 2, 5])),
     ("aurea.distort.curl", FxEffectHuman(name: "fx_name_curl", keywords: "curl roll enrolar cilindro", principal: [0, 1, 2, 3, 6])),

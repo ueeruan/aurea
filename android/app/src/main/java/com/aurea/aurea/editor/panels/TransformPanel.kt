@@ -269,7 +269,12 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                 TransformTab.Desfoque -> MotionBlurFace(env)
                 TransformTab.Animadores -> Column(
                     Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp),
-                ) { LayerAnimSection(env) }
+                ) {
+                    LayerAnimSection(env)
+                    if (store.detail?.kind == LayerType.Text.kind || store.text3d != null) {
+                        TextAnimSection(env, showAnimatorEffect = false)
+                    }
+                }
                 TransformTab.Lente -> LensFace(env)
             }
             Spacer(Modifier.height(10.dp))

@@ -2988,6 +2988,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         TrackProperty.OPACITY -> d.opacity
         TrackProperty.SKEW_X -> d.skew[0]
         TrackProperty.SKEW_Y -> d.skew[1]
+        TrackProperty.TEXT_TRACKING -> textStyle?.getOrNull(19) ?: 0f
         else -> 0f
     }
 
@@ -3368,6 +3369,54 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 Log.w(TAG, "project operation failed", failure)
                 if (!destroyed) errorMessage = appText(R.string.msg_nao_foi_possivel_abrir_o_projeto, humanError(ERRC_IO))
             } finally { projectWork = false }
+        }
+    }
+
+    /** One bounded import job, retaining selection order without parallel decoders. */
+    fun importMediaBatch(uris: List<Uri>) {
+        if (uris.isEmpty() || !acceptsImport()) return
+        val app = getApplication<Application>()
+        val requested = uris.distinct()
+        val imported = mutableListOf<Long>()
+        busyMessage = appText(R.string.ios_importing_media)
+        pause()
+        launchImport {
+            try {
+                for ((index, uri) in requested.withIndex()) {
+                    busyMessage = "${appText(R.string.ios_importing_media)} ${index + 1}/${requested.size}"
+                    try {
+                        val id = withContext(Dispatchers.IO) {
+                            takePermission(uri)
+                            val display = displayName(uri) ?: uri.lastPathSegment.orEmpty()
+                            val mime = app.contentResolver.getType(uri) ?: android.webkit.MimeTypeMap.getSingleton()
+                                .getMimeTypeFromExtension(display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT))
+                            val video = mime?.startsWith("video/") == true
+                            val name = display.ifEmpty { appText(if (video) R.string.target_video else R.string.target_image) }
+                            if (video) engine.importVideo(uri.toString(), name)
+                            else {
+                                val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -1L
+                                try {
+                                    val buf = directBuffer(bmp.width * bmp.height * 4)
+                                    bmp.copyPixelsToBuffer(buf); buf.rewind()
+                                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString())
+                                } finally { bmp.recycle() }
+                            }
+                        }
+                        if (id >= 0) imported.add(id)
+                        else errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        Log.w(TAG, "batch media item failed", failure)
+                        errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    }
+                }
+                refreshNow()
+                if (imported.isNotEmpty()) {
+                    selection = imported.toCollection(LinkedHashSet())
+                    engine.setSelection(imported.toLongArray())
+                    refreshNow()
+                }
+            } finally { busyMessage = null }
         }
     }
 
@@ -5178,30 +5227,33 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** TTF/OTF do seletor do sistema: copiado para o projeto, registrado e aplicado. */
     fun importFont(uri: Uri, forText3d: Boolean = false) {
+        importFonts(listOf(uri), forText3d)
+    }
+
+    fun importFonts(uris: List<Uri>, forText3d: Boolean = false) {
+        if (uris.isEmpty()) return
         if (!acceptsImport()) return
         val targetLayer = primary
-        val name = displayName(uri) ?: "fonte.ttf"
-        val ext = name.substringAfterLast('.', "ttf").lowercase()
-        if (ext != "ttf" && ext != "otf") {
-            errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf)
-            return
-        }
         launchImport launch@{
-            val line = withContext(Dispatchers.IO) {
-                val file = copyToDir(uri, "fontes", ext) ?: return@withContext null
-                engine.importFont(file.absolutePath)
+            for (uri in uris.distinct()) {
+                val ext = (displayName(uri) ?: "fonte.ttf").substringAfterLast('.', "ttf").lowercase()
+                if (ext != "ttf" && ext != "otf") {
+                    errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf); continue
+                }
+                val line = withContext(Dispatchers.IO) {
+                    val file = copyToDir(uri, "fontes", ext) ?: return@withContext null
+                    engine.importFont(file.absolutePath)
+                }
+                val item = line?.let { parseFont(it) }
+                if (item == null) { errorMessage = appText(R.string.msg_nao_deu_para_ler_essa_fonte); continue }
+                fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
+                // Importing a library must not repeatedly change the selected text.
+                if (uris.size == 1 && primary == targetLayer) {
+                    if (forText3d) text3d?.let { setText3D(it.copy(fontPath = item.path)) }
+                    else applyTextFont(item)
+                }
+                showToast(appText(R.string.msg_fonte_importada, item.family))
             }
-            val item = line?.let { parseFont(it) }
-            if (item == null) {
-                errorMessage = appText(R.string.msg_nao_deu_para_ler_essa_fonte)
-                return@launch
-            }
-            fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
-            if (primary == targetLayer) {
-                if (forText3d) text3d?.let { setText3D(it.copy(fontPath = item.path)) }
-                else applyTextFont(item)
-            }
-            showToast(appText(R.string.msg_fonte_importada, item.family))
         }
     }
 

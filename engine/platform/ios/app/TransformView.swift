@@ -118,7 +118,12 @@ struct TransformView: View {
                     case 3: opacityFace
                     case 4: moveFace(pivot: true)
                     case 5: motionBlurFace
-                    case 6: ScrollView { LayerAnimatorSection().padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 16) }
+                    case 6: ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            LayerAnimatorSection()
+                            if model.selectedLayer?.kind == 4 || text3D { TextAnimationSection(showAnimatorEffect: false) }
+                        }.padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 16)
+                    }
                     default: lensFace
                     }
                     Spacer().frame(height: 10)

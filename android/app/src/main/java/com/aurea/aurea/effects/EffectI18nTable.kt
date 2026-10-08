@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(2598).apply {
+        HashMap<Long, IntArray>(2610).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -1352,6 +1352,12 @@ internal object EffectI18nTable {
         m.put("aurea.distort.puppet", 0, /* triangles */ intArrayOf(R.string.fxl_triangles))
         m.put("aurea.distort.puppet", 1, /* expansion */ intArrayOf(R.string.fxl_expansion))
         m.put("aurea.distort.puppet", 2, /* rigidity */ intArrayOf(R.string.fxl_rigidity))
+        m.put("aurea.move.path", 0, /* path_layer */ intArrayOf(R.string.fxl_path_layer_2))
+        m.put("aurea.move.path", 1, /* progress */ intArrayOf(R.string.fx_progresso))
+        m.put("aurea.move.path", 2, /* duration */ intArrayOf(R.string.fxl_duration))
+        m.put("aurea.move.path", 3, /* automatic */ intArrayOf(R.string.fxl_automatic_movement))
+        m.put("aurea.move.path", 4, /* orient */ intArrayOf(R.string.fxl_orient_along_path))
+        m.put("aurea.move.path", 5, /* loop */ intArrayOf(R.string.fxo_repeat))
     }
 
     private fun HashMap<Long, IntArray>.put(key: String, index: Int, ids: IntArray) {

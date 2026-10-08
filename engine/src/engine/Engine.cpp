@@ -5691,7 +5691,7 @@ u32 Engine::scene3d_quality() noexcept {
 bool Engine::set_scene3d_tonemap(u32 op, f32 exposure) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
-    if (!comp || op > 1u || !std::isfinite(exposure)) return false;
+    if (!comp || op > 5u || !std::isfinite(exposure)) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "tone map 3D");
     comp->post_process().toneMapper = op;
     comp->post_process().exposure = std::clamp(exposure, 0.01f, 64.0f);
@@ -6078,6 +6078,99 @@ u32 Engine::precomp_depth() noexcept {
 // =============================================================================
 // Copiar e colar
 // =============================================================================
+void Engine::capture_clipboard_media_locked(ClipboardMedia& bundle, const std::vector<Layer>& layers) {
+    bundle = {};
+    bundle.session = projectSession_;
+    std::unordered_set<u64> assets, compositions;
+    const auto retain = [&](u64 id) {
+        if (!id || !assets.insert(id).second) return;
+        if (const Asset* original = project_->asset(AssetId::unpack(id))) {
+            Asset asset = *original;
+            if (!asset.sourcePath.empty()) asset.sourcePath = resolve_asset_path(asset.sourcePath);
+            if (!asset.proxyPath.empty()) asset.proxyPath = resolve_asset_path(asset.proxyPath);
+            bundle.assets.emplace(id, std::move(asset));
+        }
+        if (const auto it = images_.find(id); it != images_.end()) bundle.images.emplace(id, it->second);
+        if (const auto it = models_.find(id); it != models_.end()) bundle.models.emplace(id, it->second);
+        if (const auto it = hdris_.find(id); it != hdris_.end()) bundle.hdris.emplace(id, it->second);
+        if (const auto it = cubeLuts_.find(id); it != cubeLuts_.end()) bundle.luts.emplace(id, it->second);
+    };
+    std::function<void(const Layer&, u32)> visit = [&](const Layer& layer, u32 depth) {
+        if (depth > 64) return;
+        retain(layer.source.pack()); retain(layer.model.scene.pack());
+        retain(layer.environmentAsset); retain(layer.particles.textureAsset);
+        for (const auto& effect : layer.effects) {
+            if (const auto* specs = effectRegistry_.params(effect.type)) {
+                for (u32 p = 0; p < std::min(specs->count(), static_cast<u32>(effect.params.size())); ++p)
+                    if (specs->at(p).type == ParamType::TextureReference) retain(effect.params[p].constant.ref);
+            }
+        }
+        if (layer.kind == LayerKind::Composition && compositions.insert(layer.nested.composition.pack()).second) {
+            if (const auto* child = project_->timeline().composition(layer.nested.composition)) {
+                bundle.compositions.emplace(layer.nested.composition.pack(), child->clone());
+                child->layers().for_each([&](LayerId, const Layer& member) { visit(member, depth + 1); });
+            }
+        }
+    };
+    for (const auto& layer : layers) visit(layer, 0);
+}
+
+void Engine::restore_clipboard_media_locked(const ClipboardMedia& bundle, std::vector<Layer>& layers) {
+    if (bundle.session == projectSession_) return;
+    std::unordered_map<u64, AssetId> assets;
+    std::unordered_map<u64, CompositionId> compositions;
+    const auto remapAsset = [&](u64 old) -> AssetId {
+        if (!old) return {};
+        if (const auto known = assets.find(old); known != assets.end()) return known->second;
+        const auto source = bundle.assets.find(old);
+        if (source == bundle.assets.end()) return {};
+        Asset copy = source->second;
+        copy.thumbnailPath.clear(); copy.waveformPath.clear();
+        const AssetId fresh = project_->add_asset(std::move(copy));
+        assets.emplace(old, fresh);
+        const u64 key = fresh.pack();
+        if (const auto it = bundle.images.find(old); it != bundle.images.end()) images_[key] = it->second;
+        if (const auto it = bundle.models.find(old); it != bundle.models.end()) models_[key] = it->second;
+        if (const auto it = bundle.hdris.find(old); it != bundle.hdris.end()) hdris_[key] = it->second;
+        if (const auto it = bundle.luts.find(old); it != bundle.luts.end()) cubeLuts_[key] = it->second;
+        return fresh;
+    };
+    std::function<void(Layer&, u32)> restore = [&](Layer& layer, u32 depth) {
+        layer.source = remapAsset(layer.source.pack());
+        layer.model.scene = remapAsset(layer.model.scene.pack());
+        layer.environmentAsset = remapAsset(layer.environmentAsset).pack();
+        layer.particles.textureAsset = remapAsset(layer.particles.textureAsset).pack();
+        for (auto& effect : layer.effects) {
+            if (const auto* specs = effectRegistry_.params(effect.type))
+                for (u32 p = 0; p < std::min(specs->count(), static_cast<u32>(effect.params.size())); ++p)
+                    if (specs->at(p).type == ParamType::TextureReference)
+                        effect.params[p].constant.ref = remapAsset(effect.params[p].constant.ref).pack();
+        }
+        if (layer.kind != LayerKind::Composition || depth > 64) return;
+        const u64 old = layer.nested.composition.pack();
+        if (const auto known = compositions.find(old); known != compositions.end()) {
+            layer.nested.composition = known->second; return;
+        }
+        const auto saved = bundle.compositions.find(old);
+        const Composition* source = saved == bundle.compositions.end() ? nullptr : saved->second.get();
+        if (!source) { layer.nested.composition = {}; return; }
+        const CompositionId fresh = project_->timeline().create_composition(source->name(), source->width(), source->height(), source->fps());
+        if (!fresh.valid()) { layer.nested.composition = {}; return; }
+        compositions.emplace(old, fresh);
+        project_->timeline().composition(fresh)->restore_from(*source);
+        // Pool insertion may relocate a Composition, so do not retain its
+        // address across recursively importing another composition.
+        const auto order = source->order();
+        for (u32 i = 0; i < order.size(); ++i) {
+            Layer member = *source->layer(order.at(i));
+            restore(member, depth + 1);
+            *project_->timeline().composition(fresh)->layer(order.at(i)) = std::move(member);
+        }
+        layer.nested.composition = fresh;
+    };
+    for (auto& layer : layers) restore(layer, 0);
+}
+
 u32 Engine::copy_layers(const u64* ids, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -6094,6 +6187,10 @@ u32 Engine::copy_layers(const u64* ids, u32 count) noexcept {
     std::sort(clipboard_.layers.begin(), clipboard_.layers.end(), [comp](const auto& a, const auto& b) {
         return comp->z_index_of(LayerId::unpack(a.first)) < comp->z_index_of(LayerId::unpack(b.first));
     });
+    clipboard_.layersFps = comp->fps();
+    std::vector<Layer> copied;
+    for (const auto& entry : clipboard_.layers) copied.push_back(entry.second);
+    capture_clipboard_media_locked(clipboard_.layerMedia, copied);
     return static_cast<u32>(clipboard_.layers.size());
 }
 
@@ -6103,7 +6200,21 @@ u32 Engine::paste_layers(i64 frame) noexcept {
     if (!comp || clipboard_.layers.empty()) return 0;
     history_.before_mutation(*comp, project_->timeline().current(), "colar camadas");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-    const i64 delta = std::max<i64>(0, frame) - clipboard_.layersAnchor;
+    const bool crossProject = clipboard_.layerMedia.session != projectSession_;
+    const f64 fpsScale = clipboard_.layersFps > 0 ? comp->fps() / clipboard_.layersFps : 1.;
+    Composition retimed("clipboard"); retimed.set_fps(clipboard_.layersFps);
+    std::vector<LayerId> retimedIds;
+    for (const auto& entry : clipboard_.layers) {
+        const auto id = retimed.add_layer(entry.second.kind, entry.second.name);
+        *retimed.layer(id) = entry.second; retimedIds.push_back(id);
+    }
+    retimed.retime(comp->fps());
+    std::vector<Layer> copied;
+    for (const auto id : retimedIds) copied.push_back(*retimed.layer(id));
+    restore_clipboard_media_locked(clipboard_.layerMedia, copied);
+    // Importing nested compositions may relocate the destination pool.
+    comp = current_composition();
+    const i64 delta = std::max<i64>(0, frame) - static_cast<i64>(std::llround(clipboard_.layersAnchor * fpsScale));
     std::vector<std::pair<u64, LayerId>> made;
     std::vector<std::pair<u32, u32>> tracks;   // (linha no recorte, linha nova aqui)
     const auto pastedTrack = [&](u32 from) -> u32 {
@@ -6112,8 +6223,9 @@ u32 Engine::paste_layers(i64 frame) noexcept {
         tracks.emplace_back(from, comp->new_track_id());
         return tracks.back().second;
     };
-    for (const auto& [oldPack, src] : clipboard_.layers) {
-        // Mídia de outro projeto não existe aqui: essa camada não entra.
+    for (usize copyIndex = 0; copyIndex < copied.size(); ++copyIndex) {
+        const u64 oldPack = clipboard_.layers[copyIndex].first;
+        const Layer& src = copied[copyIndex];
         if (src.source.valid() && !project_->asset(src.source)) continue;
         if (src.kind == LayerKind::Composition && !project_->timeline().composition(src.nested.composition)) continue;
         const LayerId lid = comp->add_layer(src.kind, src.name);
@@ -6133,8 +6245,25 @@ u32 Engine::paste_layers(i64 frame) noexcept {
         if (!dst || !dst->parent.valid()) continue;
         LayerId np{};
         for (const auto& [op, nl] : made) if (op == dst->parent.pack()) np = nl;
-        if (!np.valid() && comp->layer(dst->parent)) np = dst->parent;
+        if (!np.valid() && !crossProject && comp->layer(dst->parent)) np = dst->parent;
         dst->parent = np;
+    }
+    const auto remapLayer = [&](u64 old) -> u64 {
+        for (const auto& [before, after] : made) if (before == old) return after.pack();
+        return !crossProject && comp->layer(LayerId::unpack(old)) ? old : 0;
+    };
+    for (const auto& entry : made) {
+        Layer* layer = comp->layer(entry.second);
+        layer->matteSource = LayerId::unpack(remapLayer(layer->matteSource.pack()));
+        layer->cameraTrackSource = LayerId::unpack(remapLayer(layer->cameraTrackSource.pack()));
+        layer->text.pathLayer = remapLayer(layer->text.pathLayer);
+        layer->text.captionSource = remapLayer(layer->text.captionSource);
+        layer->particles.emitterSource = remapLayer(layer->particles.emitterSource);
+        layer->particles.meshSource = remapLayer(layer->particles.meshSource);
+        for (auto& effect : layer->effects) if (const auto* specs = effectRegistry_.params(effect.type))
+            for (u32 p = 0; p < std::min(specs->count(), static_cast<u32>(effect.params.size())); ++p)
+                if (specs->at(p).type == ParamType::LayerReference)
+                    effect.params[p].constant.ref = remapLayer(effect.params[p].constant.ref);
     }
     comp->rebuild_draw_order();
     selection_.clear();
@@ -6290,6 +6419,9 @@ u32 Engine::copy_effects(u64 layerId, u32 effectId) noexcept {
     clipboard_.effectTracks.clear();
     clipboard_.effectsBase = l->offset.value;
     clipboard_.effectsFps = comp->fps();
+    Layer mediaHolder;
+    mediaHolder.effects = clipboard_.effects;
+    capture_clipboard_media_locked(clipboard_.effectMedia, {mediaHolder});
     for (u32 i = 0; i < l->tracks.size(); ++i) {
         const auto& track = l->tracks.at(i);
         if (track.property == TrackProperty::EffectParam && (effectId == kInvalidIndex || track.effectIndex == effectId)) clipboard_.effectTracks.push_back(track);
@@ -6307,6 +6439,16 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
     // quadros a 60 fps). Sem isso os keyframes chegavam espremidos/esticados.
     const f64 srcFps = clipboard_.effectsFps, dstFps = comp->fps();
     const f64 scale = srcFps > 0.0 && dstFps > 0.0 && std::fabs(srcFps - dstFps) > 1e-6 ? dstFps / srcFps : 1.0;
+    Layer mediaHolder;
+    mediaHolder.effects = clipboard_.effects;
+    std::vector<Layer> holders{mediaHolder};
+    restore_clipboard_media_locked(clipboard_.effectMedia, holders);
+    const auto& copiedEffects = holders.front().effects;
+    if (clipboard_.effectMedia.session != projectSession_) {
+        for (auto& effect : holders.front().effects) if (const auto* specs = effectRegistry_.params(effect.type))
+            for (u32 p = 0; p < std::min(specs->count(), static_cast<u32>(effect.params.size())); ++p)
+                if (specs->at(p).type == ParamType::LayerReference) effect.params[p].constant.ref = 0;
+    }
     u32 done = 0;
     for (u32 i = 0; i < count; ++i) {
         Layer* d = comp->layer(LayerId::unpack(ids[i]));
@@ -6321,7 +6463,7 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
         // colada — os losangos apareciam, mas a animação colada não valia.
         u32 next = d->nextEffectId;
         for (const EffectInstance& e : d->effects) if (e.id != kInvalidIndex) next = std::max(next, e.id + 1);
-        for (const EffectInstance& e : clipboard_.effects) {
+        for (const EffectInstance& e : copiedEffects) {
             if ((e.type == effect_type_id(text::kAnimatorEffect) || e.type == effect_type_id(text::kTransformEffect)) && !supports_text_animation(*d)) continue;
             if ((e.type == effect_type_id(effect_keys::kText3DLayout) ||
                  ((e.type == effect_type_id(text::kAnimatorEffect) || e.type == effect_type_id(text::kTransformEffect)) && d->kind == LayerKind::Model3D)) &&
@@ -6939,7 +7081,7 @@ void trim_clip_copy(Layer& l, i64 start, i64 end, f64 sourceLimit = -1) noexcept
 
 bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous, u64 next) noexcept {
     constexpr i64 limit = i64{1} << 31;
-    if (operation > 6 || amount <= -limit || amount >= limit) return false;
+    if (operation > 7 || amount <= -limit || amount >= limit) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -6961,6 +7103,39 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     if (((operation == 0 || operation == 6) && target == start) || (operation == 1 && target == end) ||
         (operation > 1 && operation < 6 && amount == 0)) return false;
     Layer edited = *layer;
+    i64 restoredEnd = end;
+    if (operation == 7) {
+        if (!has_clip_source(edited)) {
+            restoredEnd = std::max(end, comp->duration().value);
+        } else {
+            const f64 sourceLimit = clip_source_limit(*project_, *comp, edited);
+            if (sourceLimit < 0 || edited.timeRemap.has_expression() || edited.speed_track()) return false;
+            if (!edited.timeRemapEnabled && edited.reversed) materialize_clip_time(edited, start, end, sourceLimit);
+            const auto available = [&](i64 frame) {
+                const f64 sampled = edited.source_frame(FrameIndex{frame});
+                return std::isfinite(sampled) && sampled >= -0.001 && sampled <= sourceLimit + 0.001;
+            };
+            // A held remap has no remaining source handle: extending it would
+            // silently freeze the final frame instead of restoring the clip.
+            if (edited.timeRemapEnabled && !edited.timeRemap.keys.empty()) {
+                const auto& last = edited.timeRemap.keys.back();
+                const i64 lastTimeline = last.time.value + start - edited.offset.value;
+                if (lastTimeline < end || available(lastTimeline)) return false;
+            }
+            if (!available(end - 1)) return false;
+            i64 lo = end - 1, hi = end, step = 1;
+            while (hi < limit - 2 && available(hi)) {
+                lo = hi; step = std::min(step * 2, limit / 2);
+                hi = std::min(limit - 2, hi + step);
+            }
+            while (hi - lo > 1) {
+                const i64 mid = lo + (hi - lo) / 2;
+                if (available(mid)) lo = mid; else hi = mid;
+            }
+            restoredEnd = lo + 1;
+        }
+        if (restoredEnd <= end) return false;
+    }
     Layer left, right;
     if (before) left = *before;
     if (after) right = *after;
@@ -6970,7 +7145,10 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     const bool magnetic = layer->magneticTrack || comp->edit_mode();
     i64 ripple = 0;
     const auto trim = [&](Layer& item, i64 s, i64 e) { trim_clip_copy(item, s, e, clip_source_limit(*project_, *comp, item)); };
-    if (operation <= 1) {
+    if (operation == 7) {
+        trim(edited, start, restoredEnd);
+        if (magnetic) ripple = restoredEnd - end;
+    } else if (operation <= 1) {
         trim(edited, operation == 0 ? target : start, operation == 1 ? target : end);
         if (magnetic) {
             ripple = operation == 0 ? start - target : target - end;
@@ -7036,7 +7214,7 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
         blocked = true;
     });
     if (blocked) return false;
-    const char* labels[] = {"aparar inicio", "aparar fim", "slip", "roll inicio", "roll fim", "slide", "mover camada"};
+    const char* labels[] = {"aparar inicio", "aparar fim", "slip", "roll inicio", "roll fim", "slide", "mover camada", "estender clipe"};
     history_.before_mutation(*comp, project_->timeline().current(), labels[operation]);
     *layer = std::move(edited);
     if (before) *before = std::move(left);
@@ -7916,9 +8094,10 @@ bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, b
 
 bool Engine::set_text_style(u64 layerId, const f32* v, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text || !v || count < 18) return false;
+    if (!l || l->locked || l->kind != LayerKind::Text || !v || count < 18) return false;
     for (u32 i = 0; i < std::min(count, 20u); ++i) if (!std::isfinite(v[i])) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "estilo do texto");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
@@ -7937,7 +8116,13 @@ bool Engine::set_text_style(u64 layerId, const f32* v, u32 count) noexcept {
     t.shadowBlur = std::clamp(v[17], 0.0f, 200.0f);
     if (count >= 20) {
         t.lineHeight = std::clamp(v[18], 0.1f, 10.0f);
-        t.tracking = std::clamp(v[19], -1000.0f, 1000.0f);
+        const f32 desired = std::clamp(v[19], -1000.0f, 1000.0f);
+        Track* tracking = l->tracks.find(TrackProperty::TextTracking);
+        if (tracking && !tracking->keys.empty()) {
+            const FrameIndex local = l->local_time(playback_.current());
+            if (std::fabs(tracking->value_or(local, t.tracking) - desired) > 1e-5f)
+                (void)tracking->set(local, desired, Interpolation::Linear);
+        } else t.tracking = desired;
     }
     recenter_text(*l);
     project_->mark_dirty();
@@ -7947,6 +8132,7 @@ bool Engine::set_text_style(u64 layerId, const f32* v, u32 count) noexcept {
 
 bool Engine::query_text_style(u64 layerId, f32* v, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text || !v || capacity < 18) return false;
@@ -7955,7 +8141,10 @@ bool Engine::query_text_style(u64 layerId, f32* v, u32 capacity) noexcept {
                        t.backgroundColor.z, t.backgroundColor.w, t.backgroundPadding, t.backgroundRadius, t.shadow ? 1.0f : 0.0f,
                        t.shadowColor.x, t.shadowColor.y, t.shadowColor.z, t.shadowColor.w, t.shadowOffset.x, t.shadowOffset.y, t.shadowBlur};
     std::copy(o, o + 18, v);
-    if (capacity >= 20) { v[18] = t.lineHeight; v[19] = t.tracking; }
+    if (capacity >= 20) {
+        v[18] = t.lineHeight;
+        v[19] = l->tracks.sample_or(TrackProperty::TextTracking, l->local_time(playback_.current()), t.tracking);
+    }
     return true;
 }
 
@@ -8514,7 +8703,7 @@ u32 drop_captions(Composition& comp, u64 src) {
 }
 } // namespace
 
-Result<std::vector<text::CaptionWord>> Engine::transcribe_local(u64 layerId, const std::string& model, const std::string& language) noexcept {
+Result<std::vector<text::CaptionWord>> Engine::transcribe_local(u64 layerId, const std::string& model, const std::string& language, bool translateEnglish) noexcept {
     // Acquire before resetting the shared cancellation flag. A rejected second
     // request must not resurrect a transcription that the user just cancelled.
     static std::mutex transcription;
@@ -8545,7 +8734,7 @@ Result<std::vector<text::CaptionWord>> Engine::transcribe_local(u64 layerId, con
             std::lock_guard<std::mutex> lock(modelMutex_);
             if (current()) captionProgress.store(value);
             else captionCancelled.store(true);
-        });
+        }, 0, 0, translateEnglish);
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!current() || captionCancelled.load()) return Status{Errc::Cancelled, "transcricao cancelada"};
     return result;

@@ -663,7 +663,7 @@ public:
     /// Arquivo de mídia da camada de vídeo/áudio (caminho ou content://), para
     /// o provedor de transcrição ler o áudio. Vazio = não tem mídia.
     [[nodiscard]] std::string layer_media_path(u64 layerId) noexcept;
-    [[nodiscard]] Result<std::vector<text::CaptionWord>> transcribe_local(u64 layerId, const std::string& model, const std::string& language) noexcept;
+    [[nodiscard]] Result<std::vector<text::CaptionWord>> transcribe_local(u64 layerId, const std::string& model, const std::string& language, bool translateEnglish = false) noexcept;
     std::atomic<int> captionProgress{0};
     std::atomic<bool> captionCancelled{false};
     [[nodiscard]] std::string caption_tracks() noexcept;
@@ -1143,8 +1143,8 @@ public:
     [[nodiscard]] std::string current_composition_name() noexcept;
 
     // --- Copiar e colar -----------------------------------------------------------
-    /// Área de transferência do motor (vive enquanto o app vive; colar em outro
-    /// projeto só leva camadas cuja mídia exista lá).
+    /// Session clipboard; pasting into another project imports its media and
+    /// nested compositions with fresh handles.
     u32 copy_layers(const u64* ids, u32 count) noexcept;
     /// Cola no frame (o começo da mais cedo cai nele; as outras mantêm a
     /// distância). As coladas ficam escolhidas. Devolve quantas entraram.
@@ -1242,6 +1242,7 @@ public:
     /// Shared NLE edits: 0 trim-in, 1 trim-out (absolute timeline frame),
     /// 2 slip, 3 roll-in, 4 roll-out, 5 slide (signed frame delta).
     /// 6 moves any layer to an absolute frame, preserving duration/source/keys.
+    /// 7 extends the out-point to the remaining source handle (amount ignored).
     /// Neighbours are explicit IDs; invalid/locked edits leave history untouched.
     /// Slip changes source time only. Roll/slide never ripple unrelated layers.
     bool edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous = 0, u64 next = 0) noexcept;
@@ -1734,7 +1735,20 @@ private:
     void join_motion_track() noexcept;
     static std::shared_ptr<const scene3d::HdriPixels> hdri_lookup(void* self, AssetId id);
     static std::shared_ptr<const CubeLut> cube_lookup(void* self, AssetId id);
+    struct ClipboardMedia {
+        u64 session = 0;
+        std::unordered_map<u64, Asset> assets;
+        std::unordered_map<u64, std::shared_ptr<const Composition>> compositions;
+        std::unordered_map<u64, ImagePixels> images;
+        std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models;
+        std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris;
+        std::unordered_map<u64, std::shared_ptr<const CubeLut>> luts;
+    };
+    void capture_clipboard_media_locked(ClipboardMedia& bundle, const std::vector<Layer>& layers);
+    void restore_clipboard_media_locked(const ClipboardMedia& bundle, std::vector<Layer>& layers);
     struct Clipboard {
+        ClipboardMedia layerMedia, effectMedia;
+        f64 layersFps = 0;
         std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia
         i64 layersAnchor = 0;
         bool hasStyle = false;

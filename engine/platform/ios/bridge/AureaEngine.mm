@@ -2858,9 +2858,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if ([options[@"removeFillers"] boolValue]) parsed = aurea::text::remove_filler_words(parsed);
     return e->create_captions(layerId, parsed, o).ok() ? @"" : @"Não foi possível gerar legendas. Confira os tempos e o áudio da camada.";
 }
-- (NSArray<NSDictionary<NSString*, id>*>*)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language error:(NSError**)error {
+- (NSArray<NSDictionary<NSString*, id>*>*)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language translateEnglish:(BOOL)translateEnglish error:(NSError**)error {
     auto* e = self.engine; if (!e) return nil;
-    auto result = e->transcribe_local(layerId, to_std(model), to_std(language));
+    auto result = e->transcribe_local(layerId, to_std(model), to_std(language), translateEnglish);
     if (!result) {
         if (error) *error = [NSError errorWithDomain:@"AureaWhisper" code:(NSInteger)result.code() userInfo:@{NSLocalizedDescriptionKey: to_ns(std::string(result.status().detail()))}];
         return nil;

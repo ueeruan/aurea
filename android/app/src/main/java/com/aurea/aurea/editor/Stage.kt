@@ -1317,7 +1317,8 @@ private suspend fun PointerInputScope.stageGestures(
                 val d = store.detail
                 val cx = m.cx(downX)
                 val cy = m.cy(downY)
-                if (d != null && store.selection.size == 1 && activeAt(d, store.playhead) && LayerGeometry.contains(d, cx, cy, 0f)) {
+                val selectedSlack = if (d?.kind == LayerType.Model3D.kind && m.fit > 0f) hitSlack * (20f / 12f) / m.fit else 0f
+                if (d != null && store.selection.size == 1 && activeAt(d, store.playhead) && LayerGeometry.contains(d, cx, cy, selectedSlack)) {
                     target = TARGET_LAYER
                     targetLayer = d.id
                 } else {
@@ -1457,7 +1458,10 @@ private suspend fun PointerInputScope.stageGestures(
         if (mode == MODE_PENDING && !multi && target != TARGET_HANDLE && m.valid) {
             val cx = m.cx(downX)
             val cy = m.cy(downY)
-            val hit = hitLayer(store, cx, cy, 0f, includeLocked = false)
+            val selected3D = store.detail?.takeIf { it.kind == LayerType.Model3D.kind && store.selection.size == 1
+                && activeAt(it, store.playhead) && store.layers.any { row -> row.id == it.id && row.visible && !row.locked }
+                && LayerGeometry.contains(it, cx, cy, if (m.fit > 0f) hitSlack * (20f / 12f) / m.fit else 0f) }?.id
+            val hit = selected3D ?: hitLayer(store, cx, cy, 0f, includeLocked = false)
                 ?: hitLayer(store, cx, cy, if (m.fit > 0f) hitSlack / m.fit else 0f, includeLocked = false)
             if (hit != null) {
                 if (store.primary != hit || store.selection.size != 1) store.select(hit)

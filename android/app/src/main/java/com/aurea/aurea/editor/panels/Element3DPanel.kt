@@ -124,7 +124,7 @@ internal fun Element3DPanel(env: PanelEnv) {
                 }
                 Tab3D.Light -> LightSceneTab(env, objectSettings = !camera)
                 Tab3D.Anim -> when {
-                    text != null -> TextAnimSection(env, showAnimatorEffect = false)
+                    text != null -> AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
                     shape != null -> Text3DAnimSection(env, parts = true)
                 }
             }
@@ -254,8 +254,8 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
 private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
     val store = env.store
     var fontsOpen by remember { mutableStateOf(false) }
-    val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) store.importFont(uri, forText3d = true)
+    val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        store.importFonts(uris, forText3d = true)
     }
     KitTitle(stringResource(R.string.ui3d_text))
     ChipRow {
@@ -519,8 +519,9 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
             }
             KitTitle(stringResource(R.string.scene_tonemap))
             ChipRow {
-                KitChip("PBR Neutral", on = settings[3] == 0f) { change(3, 0f) }
-                KitChip("AgX", on = settings[3] == 1f) { change(3, 1f) }
+                listOf("PBR Neutral", "AgX", "AgX Punchy", "AgX Golden", "Uchimura", "ACES SDR").forEachIndexed { i, label ->
+                    KitChip(label, on = settings[3].toInt() == i) { change(3, i.toFloat()) }
+                }
             }
             SceneRow(env, stringResource(R.string.scene_exposure), settings[4].coerceIn(.01f, 4f) * 100f, 1f, 1f, 400f, "%", 100f, null) {
                 change(4, it / 100f)

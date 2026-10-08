@@ -3696,4 +3696,14 @@ para editar la curva.</string>
     <string name="edt_cmdx_redo">Rehacer</string>
     <string name="edt_cmdx_redo_d">Vuelve a aplicar la edición deshecha</string>
     <string name="am_import_hint">Selecciona una capa en Aurea y elige un XML, .amproj o ZIP exportado por Alight Motion. Se convierten los efectos compatibles de la primera capa con efectos; no se importa todo el proyecto ni sus archivos multimedia. Los archivos con elementos sin equivalente se rechazan para evitar perder ajustes.</string>
+    <string name="beta_select_media">Seleccionar varias</string>
+    <string name="beta_add_media">Añadir (%1$d)</string>
+    <string name="beta_extend_clip">Extender hasta el final del archivo</string>
+    <string name="beta_translate_english">Traducir el habla al inglés</string>
+    <string name="beta_overlap">Solapamiento entre unidades</string>
+    <string name="fxl_path_layer_2">Capa de trayectoria</string>
+    <string name="fxl_duration">Duración</string>
+    <string name="fxl_automatic_movement">Movimiento automático</string>
+    <string name="fxl_orient_along_path">Orientar según la trayectoria</string>
+    <string name="beta_move_path">Mover por la trayectoria</string>
 </resources>

@@ -3734,4 +3734,14 @@ to edit the curve.</string>
     <string name="edt_cmdx_redo">Redo</string>
     <string name="edt_cmdx_redo_d">Reapplies the undone edit</string>
     <string name="am_import_hint">Select an Aurea layer, then choose an XML, .amproj or ZIP exported by Alight Motion. Import converts compatible effects from the first layer with effects; it does not import the whole project or its media. Files with unsupported items are rejected to avoid losing settings.</string>
+    <string name="beta_select_media">Select multiple</string>
+    <string name="beta_add_media">Add (%1$d)</string>
+    <string name="beta_extend_clip">Extend to source end</string>
+    <string name="beta_translate_english">Translate speech into English</string>
+    <string name="beta_overlap">Unit overlap</string>
+    <string name="fxl_path_layer_2">Path layer</string>
+    <string name="fxl_duration">Duration</string>
+    <string name="fxl_automatic_movement">Automatic movement</string>
+    <string name="fxl_orient_along_path">Orient along path</string>
+    <string name="beta_move_path">Move Along Path</string>
 </resources>

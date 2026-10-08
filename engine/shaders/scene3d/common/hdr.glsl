@@ -71,7 +71,7 @@ vec3 aurea_tonemap_neutral(vec3 color) {
 }
 
 // AgX, look base (aproximação polinomial de 6ª ordem da curva do Blender).
-vec3 aurea_tonemap_agx(vec3 color) {
+vec3 aurea_tonemap_agx(vec3 color, float look) {
     const mat3 inset = mat3(0.842479062253094, 0.0423282422610123, 0.0423756549057051,
                             0.0784335999999992, 0.878468636469772, 0.0784336,
                             0.0792237451477643, 0.0791661274605434, 0.879142973793104);
@@ -86,13 +86,38 @@ vec3 aurea_tonemap_agx(vec3 color) {
     vec3 v2 = v * v;
     vec3 v4 = v2 * v2;
     v = 15.5 * v4 * v2 - 40.14 * v4 * v + 31.96 * v4 - 6.868 * v2 * v + 0.4298 * v2 + 0.1191 * v - 0.00232;
+    // CDL look parameters, specified by the AgX author's config. Apply in
+    // AgX's encoded base space before the outset/linear conversion.
+    if (look > 1.5) {
+        vec3 slope = look > 2.5 ? vec3(1.0, 0.9, 0.5) : vec3(1.0);
+        float power = look > 2.5 ? 0.8 : 1.35;
+        float saturation = look > 2.5 ? 1.3 : 1.4;
+        v = pow(max(v * slope, vec3(0.0)), vec3(power));
+        float luma = dot(v, vec3(0.2126, 0.7152, 0.0722));
+        v = mix(vec3(luma), v, saturation);
+    }
     v = outset * v;
     // A curva sai codificada (≈ gama 2,2): o compositor quer linear.
     return pow(clamp(v, 0.0, 1.0), vec3(2.2));
 }
 
 vec3 aurea_tonemap(vec3 color, float op) {
-    return op > 0.5 ? aurea_tonemap_agx(color) : aurea_tonemap_neutral(color);
+    vec3 x = max(color, vec3(0.0));
+    if (op > 4.5) {
+        // ACES SDR rational fit, rather than a full ACES color pipeline.
+        return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+    }
+    if (op > 3.5) {
+        // Uchimura 2017: power toe, linear middle and exponential shoulder.
+        const float m = 0.22;
+        const float shoulder = 0.532;
+        vec3 toe = m * pow(x / m, vec3(1.33));
+        vec3 high = 1.0 - (1.0 - shoulder) * exp(-(x - shoulder) / (1.0 - shoulder));
+        vec3 toeWeight = 1.0 - smoothstep(vec3(0.0), vec3(m), x);
+        vec3 highWeight = step(vec3(shoulder), x);
+        return clamp(toe * toeWeight + x * (1.0 - toeWeight - highWeight) + high * highWeight, 0.0, 1.0);
+    }
+    return op > 0.5 ? aurea_tonemap_agx(x, op) : aurea_tonemap_neutral(x);
 }
 
 float aurea_luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }

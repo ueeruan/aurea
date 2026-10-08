@@ -3767,4 +3767,14 @@
     <string name="edt_cmdx_redo">Refazer</string>
     <string name="edt_cmdx_redo_d">Reaplica a edição desfeita</string>
     <string name="am_import_hint">Selecione uma camada no Aurea e escolha um XML, .amproj ou ZIP exportado pelo Alight Motion. A importação converte os efeitos compatíveis da primeira camada que tiver efeitos; não importa o projeto inteiro nem a mídia. Se houver itens sem equivalente, o arquivo é recusado para evitar perda de ajustes.</string>
+    <string name="beta_select_media">Selecionar várias</string>
+    <string name="beta_add_media">Adicionar (%1$d)</string>
+    <string name="beta_extend_clip">Estender até o fim da fonte</string>
+    <string name="beta_translate_english">Traduzir a fala para inglês</string>
+    <string name="beta_overlap">Overlap entre unidades</string>
+    <string name="fxl_path_layer_2">Camada do caminho</string>
+    <string name="fxl_duration">Duração</string>
+    <string name="fxl_automatic_movement">Movimento automático</string>
+    <string name="fxl_orient_along_path">Orientar no caminho</string>
+    <string name="beta_move_path">Mover pelo caminho</string>
 </resources>

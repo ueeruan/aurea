@@ -72,7 +72,7 @@ struct TextAppearanceControls: View {
     private var trackingRow: some View {
         let keys = (model.keyframes[id] ?? []).filter { $0.property == 29 && $0.effectIndex == UInt32.max }
         let here = keys.contains { $0.time == model.localPlayhead }
-        return NativePanelRuler(label: AureaText.t("text_letter_spacing"), value: style[19], step: .25,
+        return NativePanelRuler(label: AureaText.t("text_letter_spacing"), value: style[19], step: 0.25,
             range: -1000...1000, unit: "‰ em", keypad: true, look: here ? .keyHere : keys.isEmpty ? .none : .animated, toggleKey: {
                 guard !(model.selectedLayer?.locked ?? false) else { return }
                 model.mutate { engine in
@@ -2242,7 +2242,7 @@ private struct NativeLayerAnimatorCard: View {
             ForEach(NativeLayerAnimParam.strength) { ruler($0) }
             if isText && unit != 0 {
                 ruler(NativeLayerAnimParam.delay)
-                NativePanelRuler(label: AureaText.t("beta_overlap"), value: values[28], step: .5,
+                NativePanelRuler(label: AureaText.t("beta_overlap"), value: values[28], step: 0.5,
                     range: 0...100, unit: "%", keypad: true) { set([28: $0]) }
             }
             groupLabel("la_from")

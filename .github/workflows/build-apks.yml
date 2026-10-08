@@ -1,6 +1,16 @@
 name: Build Android APKs
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/beta-2146-compile']
+    paths:
+      - '.github/workflows/build-apks.yml'
+      - 'android/**'
+      - 'engine/src/**'
+      - 'engine/include/**'
+      - 'engine/shaders/**'
+      - 'engine/gpu/**'
+      - 'engine/platform/android/**'
 permissions:
   contents: read
 concurrency:

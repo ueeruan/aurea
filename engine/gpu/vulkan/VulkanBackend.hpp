@@ -331,6 +331,7 @@ struct FrameContext {
     std::vector<VkCommandBuffer> commandBuffers;
     u32 commandBufferCount = 0;
     u32 passesInCommandBuffer = 0;
+    bool offscreen = false;
     VkFence         fence = VK_NULL_HANDLE;
     VkSemaphore     acquired = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> descriptorPools;

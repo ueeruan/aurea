@@ -5,6 +5,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 
 namespace aurea::vk {
@@ -791,6 +792,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         }
     }
     f.submitted = false;
+    f.offscreen = !withSurface;
     f.frameNumber = ++frameNumber_;
     for (VkDescriptorPool p : f.descriptorPools)
         if (const VkResult r = vkResetDescriptorPool(device_, p, 0); r != VK_SUCCESS)
@@ -931,6 +933,13 @@ Status Backend::end_frame() noexcept {
         return fail_recording(r, "vkEndCommandBuffer frame");
 
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    // Export's final fence already permits dense 3D work for up to 120 s.
+    // Intermediate fences must use the same allowance: the preview's 2 s
+    // limit aborted Project 8 at frame 184 despite no device-loss result.
+    // Share one finite deadline across all prefixes, rather than granting
+    // another full timeout to every command buffer. Never drop samples.
+    const auto submitDeadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(f.offscreen ? 120 : 2);
     for (u32 batch = 0; batch < f.commandBufferCount; ++batch) {
         if (const VkResult r = vkResetFences(device_, 1, &f.fence); r != VK_SUCCESS)
             return fail_recording(r, "vkResetFences frame batch");
@@ -955,7 +964,11 @@ Status Backend::end_frame() noexcept {
         // one driver job. Complete the prefix before admitting another batch;
         // only the final fence remains asynchronous for export readback.
         if (!last) {
-            const VkResult ready = vkWaitForFences(device_, 1, &f.fence, VK_TRUE, 2'000'000'000ull);
+            const auto remaining = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                submitDeadline - std::chrono::steady_clock::now()).count();
+            const VkResult ready = remaining > 0
+                ? vkWaitForFences(device_, 1, &f.fence, VK_TRUE, static_cast<u64>(remaining))
+                : VK_TIMEOUT;
             if (ready != VK_SUCCESS) return fail_recording(ready, "vkWaitForFences frame batch");
         }
     }

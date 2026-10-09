@@ -61,8 +61,9 @@ class Particle3DMotionBlurExportTest {
         }
         compose.waitUntil(30000) { ready && store.engineReady }
         val engine = store.engineForStress
-        val imported = File(folder, "Project8-copy.aurea")
-        val packageResult = engine.importProjectPackage(source.absolutePath, imported.absolutePath, File(folder, "media").absolutePath)
+        val runId = SystemClock.elapsedRealtime()
+        val imported = File(folder, "Project8-copy-$runId.aurea")
+        val packageResult = engine.importProjectPackage(source.absolutePath, imported.absolutePath, File(folder, "media-$runId").absolutePath)
         assertEquals("Portable project must import successfully", "0", packageResult.getOrNull(0))
         assertEquals("All original media must resolve", "0", packageResult.getOrNull(4))
         compose.runOnIdle { store.openProject(imported.absolutePath) }
@@ -126,7 +127,7 @@ class Particle3DMotionBlurExportTest {
                     assertTrue(engine.queryLayerDetail(id, detail))
                     assertTrue("Read back blur on layer $id at depth $depth", LayerDetail.read(detail).motionBlur)
                     verifiedLayers++
-                    if (kind == 10 || flags and 32 != 0) verified3d++
+                    if (kind == 10 || (flags and 32) != 0) verified3d++
                     if (kind == 12) {
                         assertTrue(engine.openPrecomp(id))
                         try { enableComposition(depth + 1) } finally { assertTrue(engine.closePrecomp()) }

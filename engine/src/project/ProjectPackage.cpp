@@ -412,20 +412,38 @@ Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noex
     Project p;
     if (const Status s = load_project(p, aureaPath); !s.ok()) return s;
     std::set<std::string> seen;
+    const auto add = [&](AssetKind kind, const std::string& path, const std::string& name) {
+        if (path.empty() || !seen.insert(path).second) return;
+        MediaRef ref;
+        ref.kind = kind;
+        ref.stored = ref.resolved = path;
+        ref.name = name.empty() ? safe_file_name(path) : name;
+        out.push_back(std::move(ref));
+    };
     p.for_each_asset([&](AssetId, const Asset& a) {
         // Procedural 3D source strings are complete recipes stored in the
         // project, not external files. Counting them as missing media made
         // portable projects with many 3D shapes/texts report false losses.
-        if (a.kind == AssetKind::Model3D &&
-            (a.sourcePath.rfind(scene3d::kShape3DScheme, 0) == 0 ||
-             a.sourcePath.rfind(scene3d::kText3DScheme, 0) == 0)) return;
-        if (!packable(a.kind) || a.sourcePath.empty() || !seen.insert(a.sourcePath).second) return;
-        MediaRef r;
-        r.kind = a.kind;
-        r.stored = a.sourcePath;
-        r.resolved = a.sourcePath;
-        r.name = a.originalFilename.empty() ? a.name : a.originalFilename;
-        out.push_back(std::move(r));
+        if (a.kind == AssetKind::Model3D) {
+            scene3d::Text3DSpec text;
+            if (scene3d::decode_text3d(a.sourcePath, text)) {
+                add(AssetKind::Font, text.fontPath, {});
+                return;
+            }
+            scene3d::Shape3DSpec shape;
+            if (scene3d::decode_shape3d(a.sourcePath, shape)) {
+                for (const auto& part : shape.parts) add(AssetKind::Image, part.image, {});
+                return;
+            }
+            if (a.sourcePath.rfind(scene3d::kShape3DScheme, 0) == 0 ||
+                a.sourcePath.rfind(scene3d::kText3DScheme, 0) == 0) return;
+        }
+        if (packable(a.kind)) add(a.kind, a.sourcePath, a.originalFilename.empty() ? a.name : a.originalFilename);
+    });
+    p.timeline().for_each_composition([&](CompositionId, const Composition& composition) {
+        composition.layers().for_each([&](LayerId, const Layer& layer) {
+            if (layer.kind == LayerKind::Text) add(AssetKind::Font, layer.text.fontPath, {});
+        });
     });
     return OkStatus;
 }
@@ -494,17 +512,39 @@ Status relink_media(const std::string& aureaPath,
     if (const Status s = load_project(p, aureaPath); !s.ok()) return s;
     std::map<std::string, std::string> map(storedToNew.begin(), storedToNew.end());
     u32 n = 0;
+    const auto relink = [&](std::string& path) {
+        const auto it = map.find(path);
+        if (it == map.end()) return false;
+        path = it->second;
+        ++n;
+        return true;
+    };
     p.for_each_asset([&](AssetId, Asset& a) {
-        const auto it = map.find(a.sourcePath);
-        if (it == map.end()) return;
-        a.sourcePath = it->second;
+        bool changed = relink(a.sourcePath);
+        if (a.kind == AssetKind::Model3D) {
+            scene3d::Text3DSpec text;
+            scene3d::Shape3DSpec shape;
+            if (scene3d::decode_text3d(a.sourcePath, text) && relink(text.fontPath)) {
+                a.sourcePath = scene3d::encode_text3d(text);
+                changed = true;
+            } else if (scene3d::decode_shape3d(a.sourcePath, shape)) {
+                bool partsChanged = false;
+                for (auto& part : shape.parts) partsChanged = relink(part.image) || partsChanged;
+                if (partsChanged) { a.sourcePath = scene3d::encode_shape3d(shape); changed = true; }
+            }
+        }
+        if (!changed) return;
         // Proxy, miniatura e waveform eram do outro aparelho: refeitos aqui.
         a.proxyPath.clear();
         a.proxyWidth = a.proxyHeight = 0;
         a.thumbnailPath.clear();
         a.waveformPath.clear();
         a.waveformBuckets = 0;
-        ++n;
+    });
+    p.timeline().for_each_composition([&](CompositionId, Composition& composition) {
+        composition.layers().for_each([&](LayerId, Layer& layer) {
+            if (layer.kind == LayerKind::Text) (void)relink(layer.text.fontPath);
+        });
     });
     if (n > 0) {
         SaveOptions o;

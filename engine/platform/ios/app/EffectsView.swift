@@ -450,7 +450,7 @@ struct EffectsView: View {
             customRow(param, effect: effect) { choiceBox(param, effect: effect) }
         case fxParamColor:
             customRow(param, effect: effect) { colorControl(param, effect: effect) }
-        case 8:
+        case fxParamCurve:
             if let layer = model.primarySelection { ColorCurveEditor(layer: layer, effect: effect, param: param.index) }
         case fxParamTextureRef:
             if let layer = model.primarySelection { CubeLutImportRow(layer: layer, effect: effect) }

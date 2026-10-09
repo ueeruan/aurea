@@ -1161,6 +1161,8 @@ enum CupertinoFont {
 /// Os codepoints usados pela UI (nomes do pacote cupertino_icons, os MESMOS do
 /// `CupertinoGlyph`/`ShellGlyph` do Kotlin).
 enum CupertinoGlyph {
+    /// Reserved for Aurea's own vector; matches the Android drawing.
+    static let MotionBlur: Character = "\u{E000}"
     // --- Navegação e ações ----------------------------------------------------
     static let AddCircled: Character = "\u{F48A}"
     static let Arrow2Squarepath: Character = "\u{F4E6}"
@@ -1345,11 +1347,27 @@ enum CupertinoGlyph {
     /// O glifo desenhado no tamanho pedido — a mesma conta do Android (caixa
     /// N×N com `fontSize = N`). É o helper que qualquer tela usa quando não
     /// quer um `CupertinoIcon` inteiro.
-    static func text(_ codepoint: Character, size: CGFloat,
-                     color: Color = AureaColors.text) -> Text {
-        Text(String(codepoint))
-            .font(CupertinoFont.font(size))
-            .foregroundColor(color)
+    @ViewBuilder static func text(_ codepoint: Character, size: CGFloat,
+                     color: Color = AureaColors.text) -> some View {
+        if codepoint == MotionBlur {
+            Canvas { context, dimensions in
+                let unit = min(dimensions.width, dimensions.height) / 24
+                context.stroke(Path(ellipseIn: CGRect(x: 11.6 * unit, y: 6.6 * unit,
+                    width: 10.8 * unit, height: 10.8 * unit)), with: .color(color), lineWidth: 1.8 * unit)
+                let trails: [(CGFloat, CGFloat, Double)] = [(2, 7, 0.55), (1, 12, 0.85), (3, 17, 0.55)]
+                for (x, y, alpha) in trails {
+                    var path = Path()
+                    path.move(to: CGPoint(x: x * unit, y: y * unit))
+                    path.addLine(to: CGPoint(x: 9 * unit, y: y * unit))
+                    context.stroke(path, with: .color(color.opacity(alpha)),
+                        style: StrokeStyle(lineWidth: 1.8 * unit, lineCap: .round))
+                }
+            }.frame(width: size, height: size)
+        } else {
+            Text(String(codepoint))
+                .font(CupertinoFont.font(size))
+                .foregroundColor(color)
+        }
     }
 }
 

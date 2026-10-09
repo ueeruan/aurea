@@ -619,6 +619,11 @@ public:
     /// Persistently opt a flat layer into the scene camera without altering
     /// its transform or keyframes. Undoable; retained when saving the project.
     bool enable_layer_3d(u64 layerId) noexcept;
+    /// Toggle a flat layer's 3D participation without changing its animation.
+    bool set_layer_3d(u64 layerId, bool on) noexcept;
+    /// Opt-in editing policy: all navigation stops at the last layer's end.
+    void set_content_bounded_playback(bool on) noexcept;
+    [[nodiscard]] i64 query_navigation_end() noexcept;
     /// −1 = camada sem essa opção (câmera, luz, modelo 3D, áudio, nulo); 0/1.
     [[nodiscard]] i32 query_layer_accepts_lights(u64 layerId) noexcept;
     /// Põe as camadas dentro do grupo `groupLayerId` (mesma composição), com
@@ -1531,6 +1536,14 @@ public:
     u32 query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRow* out, u32 capacity,
                             char* blob, u32 blobCapacity) noexcept;
 
+    /// Curves: canal 0 = RGB, 1..3 = R/G/B. Pontos xy ou amostras da spline.
+    u32 query_effect_curve(u64 layerId, u32 effectId, u32 param, u32 channel,
+                           bool samples, f32* out, u32 capacity) noexcept;
+    /// 0 mover, 1 inserir, 2 excluir, 3 identidade. Retorna índice ou -1.
+    /// Ordem, limites e extremos são regras compartilhadas pelo Android/iOS.
+    i32 edit_effect_curve(u64 layerId, u32 effectId, u32 param, u32 channel,
+                          u32 action, u32 point, f32 x, f32 y) noexcept;
+
     /// Declaração dos parâmetros de um TIPO de efeito, sem precisar de layer:
     /// a ficha do catálogo (nome, tipo, faixa, unidade). `value` sai com o
     /// padrão da declaração e `animated` sai 0 — não há instância por trás.
@@ -1666,8 +1679,9 @@ private:
     void drain_commands_locked() noexcept;
     [[nodiscard]] Composition* current_composition() noexcept;
     [[nodiscard]] Status recover_device_locked() noexcept;
+    [[nodiscard]] Status ensure_gpu_healthy_locked() noexcept;
     // renderMutex_: a failed export may leave a real submission in flight.
-    [[nodiscard]] Status poll_export_gpu_locked() noexcept;
+    [[nodiscard]] Status poll_export_gpu_locked(u64 timeoutNs = 0) noexcept;
     void retain_failed_export_gpu_locked() noexcept;
     void render_thread_main() noexcept;
     void update_perf(const FrameStats& stats, const RenderTimings& timings,
@@ -1711,6 +1725,7 @@ private:
     std::unique_ptr<GPUBackend> gpu_;
     u64                pendingExportGpuFrame_ = 0, pendingExportGpuGeneration_ = 0; ///< renderMutex_
     u64                gpuGeneration_ = 0; ///< under renderMutex_; survives backend/device recreation
+    bool               gpuRecoveryPending_ = false; ///< renderMutex_; failed rebuild remains retryable
     Renderer           renderer_;
     MediaManager       media_;
     ThumbnailService   thumbs_;
@@ -1843,6 +1858,9 @@ private:
     bool refinePending_ = false;              ///< último quadro saiu reduzido
     bool refineNow_ = false;                  ///< este quadro é o refino
     u64 refineDueNs_ = 0;                     ///< prazo absoluto; vsync sem mudança não o adia
+    bool contentBoundedPlayback_ = false;
+    void configure_playback_locked(const Composition* comp, i64 rawDuration = -1) noexcept;
+    [[nodiscard]] i64 navigation_end_locked(const Composition* comp) const noexcept;
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};
     std::atomic<bool> playingHint_{false};

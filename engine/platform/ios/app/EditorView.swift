@@ -653,7 +653,7 @@ private struct ContextSheet: View {
             // ContextArea.kt: faixa VAZIA de 12; painel aberto começa no seu
             // próprio cabeçalho, sem puxador ou faixa adicionais.
             Rectangle().fill(AureaColors.border).frame(height: 1)
-            if model.sheetContent != .panel && model.sheetContent != .curve {
+            if !EditorTimelineRefresh.enabled && model.sheetContent != .panel && model.sheetContent != .curve {
                 AureaColors.editorPanelHigh.frame(height: StageDim.sheetHandle)
             }
 
@@ -726,9 +726,17 @@ private struct BatchToolsView: View {
                 tool(CupertinoGlyph.Scissors, "editor_dividir_cabecote") { split() }
                 tool(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote") { trim(start: false) }
                 AureaColors.border.frame(width: 1, height: 24)
+                if EditorTimelineRefresh.enabled {
+                    tool(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas") { model.groupSelection() }
+                    tool(CupertinoGlyph.DocOnDoc, "editor_copiar_camada") { model.engine.copyLayers(selected.map { NSNumber(value: $0.id) }) }
+                    tool(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar_camada") {
+                        model.engine.duplicateLayers(selected.map { NSNumber(value: $0.id) }); model.refreshModel(force: true)
+                    }
+                } else {
                 vectorTool("automirrored.rounded.FormatAlignLeft", "editor_alinhar_inicios") { model.arrangeLayerTimes(0) }
                 vectorTool("rounded.Stairs", "editor_escada_comeca_quando_cima_termina") { model.arrangeLayerTimes(1) }
                 vectorTool("automirrored.rounded.FormatAlignRight", "editor_alinhar_fins") { model.arrangeLayerTimes(2) }
+                }
             }.frame(height: 52).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
             HStack(spacing: 0) {
                 tool(CupertinoGlyph.ArrowLeftToLine, "editor_alinhar_esquerda_tela", size: 18) { align(0) }
@@ -829,9 +837,11 @@ private struct DockView: View {
         // Máscara, rastreio de câmera e legendas automáticas viraram EFEITOS
         // (seletor de efeitos); os presets de vídeo/imagem saíram. Os presets de
         // TEXTO voltaram (2026-10-03): ficha só no texto 2D/3D.
-        case color, shape, vector, editText, text, text3DOptions, particles, audio, move, rig, blend, environment, presets, effects
+        case enterGroup, mask, color, shape, vector, editText, text, text3DOptions, particles, audio, move, rig, blend, environment, presets, effects
         var label: String {
             switch self {
+            case .enterGroup: return "editor_entrar_grupo"
+            case .mask: return "panel_mascara_recorte"
             case .color: return "sh_dock_color_fill"
             case .shape: return "sh_dock_edit_shape"
             case .vector: return "sh_dock_edit_vector"
@@ -850,6 +860,7 @@ private struct DockView: View {
         /// Short visible action; accessibility continues to use the full label.
         var shortLabel: String {
             switch self {
+            case .mask: return "sh_dock_mask"
             case .move: return "gizmo_tool_move"
             case .blend: return "panel_misturar"
             default: return label
@@ -857,6 +868,8 @@ private struct DockView: View {
         }
         var glyph: Character {
             switch self {
+            case .enterGroup: return CupertinoGlyph.ArrowDownRightSquare
+            case .mask: return CupertinoGlyph.Crop
             case .color: return CupertinoGlyph.Paintbrush
             case .shape: return ShellGlyph.SliderHorizontalBelowRectangle
             case .vector: return CupertinoGlyph.PencilOutline
@@ -873,6 +886,8 @@ private struct DockView: View {
         }
         var panel: AureaModel.PanelKind {
             switch self {
+            case .enterGroup: return .transform
+            case .mask: return .mask
             case .color: return .shape
             case .shape: return .shapeEdit
             case .vector: return .vector
@@ -899,6 +914,12 @@ private struct DockView: View {
         guard let layer = model.selectedLayer else { return [] }
         let hasAudio = ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0
         if layer.adjustment || layer.kind == 7 { return [.effects, .blend] }
+        if EditorTimelineRefresh.enabled && layer.kind == 12 { return [.enterGroup, .move, .mask, .effects, .blend] }
+        if EditorTimelineRefresh.enabled && ![3, 6, 8, 9, 10].contains(layer.kind) {
+            let edit: Section? = layer.kind == 5 ? (model.isVectorLayer ? .vector : .shape)
+                : layer.kind == 4 ? .editText : layer.kind == 11 ? .particles : nil
+            return (edit.map { [$0] } ?? []) + [.move, .mask, .effects, .blend]
+        }
         // Frequent actions stay before the horizontally scrollable extras.
         let common: [Section] = [.move, .effects, .blend]
         switch layer.kind {
@@ -938,57 +959,50 @@ private struct DockView: View {
                             layerTimeAction(CupertinoGlyph.ArrowRightToLine, "timeline_extend_right", "editor_extend_end_to_playhead", "timeline.extend.end", enabled: !layer.locked) {
                                 extendEdit(layer, start: false)
                             }
-                        } else if actions != 0 {
+                        } else if actions != 0 || EditorTimelineRefresh.enabled {
                             trimAction(.start, "editor_aparar_inicio_cabecote") { timeEdit(layer) { if !model.trimStart(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                             dockDivider
                             trimAction(.split, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
                             dockDivider
                             trimAction(.end, "editor_aparar_fim_cabecote") { timeEdit(layer) { if !model.trimEnd(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                         }
+                        if EditorTimelineRefresh.enabled {
+                            dockDivider
+                            quickAction(CupertinoGlyph.Trash, "editor_excluir_camada", tint: AureaColors.danger) { model.deleteSelectedLayers() }
+                        }
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+                        .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: EditorTimelineRefresh.enabled ? 24 : 10))
                 }.frame(height: EditorLayout.dockQuick)
                 GeometryReader { geometry in
-                    let minimum = CGFloat(76) + 28 * (min(max(fontScale, 1), 2) - 1)
-                    let fitted = (geometry.size.width - 8 * CGFloat(max(0, sections.count - 1))) / CGFloat(max(1, sections.count))
+                    let gap: CGFloat = EditorTimelineRefresh.enabled ? 4 : 8
+                    let minimum = CGFloat(EditorTimelineRefresh.enabled ? 60 : 76) + 28 * (min(max(fontScale, 1), 2) - 1)
+                    let available = geometry.size.width - (EditorTimelineRefresh.enabled ? 49 + gap : 0)
+                    let fitted = (available - gap * CGFloat(max(0, sections.count - 1))) / CGFloat(max(1, sections.count))
                     let toolWidth = min(max(fitted, minimum), 160)
                     ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: gap) {
+                        if EditorTimelineRefresh.enabled {
+                            Button { model.clearSelection() } label: {
+                                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 20, color: AureaColors.text)
+                                    .frame(width: 48, height: EditorLayout.dockTileHeight(fontScale: fontScale))
+                            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_limpar_selecao"))
+                                .accessibilityIdentifier("trial.layer.deselect")
+                            dockDivider
+                        }
                         ForEach(sections, id: \.rawValue) { section in
-                            Button {
-                                if section == .editText { model.openTextContentEditor() }
-                                // O antigo Rig abre o Fantoche (pinos); o rig gravado continua desenhando.
-                                else if section == .rig { model.openPuppetTool() }
-                                else { model.openPanel(section.panel) }
-                            } label: {
-                                VStack(spacing: 4) {
-                                    if section == .move {
-                                        MaterialGlyph("rounded.OpenWith", size: 20, color: StageInk.dockTileIcon)
-                                    } else {
-                                        CupertinoGlyph.text(section.glyph, size: 20, color: StageInk.dockTileIcon)
-                                    }
-                                    Text(AureaText.t(section.shortLabel))
-                                        .font(.aurea(size: 12 * min(max(fontScale, 1), 2)))
-                                        .foregroundStyle(StageInk.dockTileContent).lineLimit(2).multilineTextAlignment(.center)
-                                }
-                                .padding(.horizontal, 6).padding(.vertical, 4).frame(width: toolWidth, height: EditorLayout.dockTileHeight(fontScale: fontScale))
-                                .background(StageInk.dockSheet, in: RoundedRectangle(cornerRadius: 10))
-                                .contentShape(RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain)
-                                .accessibilityLabel(AureaText.t(section.label))
-                                .accessibilityIdentifier("dock.tool.\(section.rawValue)")
+                            sectionTile(section, width: toolWidth, fontScale: fontScale)
                         }
                     }
                     }
                     .id(layer.id)
                     .accessibilityIdentifier("dock.tools")
                 }
-                .frame(height: EditorLayout.dockTileHeight(fontScale: fontScale))
+                .frame(height: CGFloat(Self.tileRows(model)) * EditorLayout.dockTileHeight(fontScale: fontScale) + CGFloat(Self.tileRows(model) - 1) * 8)
             }
             .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(StageInk.dockSheet, in: DockSheetShape(radius: 12))
+            .background(EditorTimelineRefresh.enabled ? AureaColors.editorCanvas : StageInk.dockSheet, in: DockSheetShape(radius: 12))
             .padding(.top, 4)
         } else {
             Text(AureaText.t("editor_toque_num_objeto_tela_editar"))
@@ -997,6 +1011,33 @@ private struct DockView: View {
                 .background(AureaColors.editorPanel)
         }
     }
+
+    private func sectionTile(_ section: Section, width: CGFloat, fontScale: CGFloat) -> some View {
+        Button {
+            if section == .enterGroup, let layer = model.selectedLayer { model.openGroup(layer.id) }
+            else if section == .editText { model.openTextContentEditor() }
+            // O antigo Rig abre o Fantoche (pinos); o rig gravado continua desenhando.
+            else if section == .rig { model.openPuppetTool() }
+            else { model.openPanel(section.panel) }
+        } label: {
+            VStack(spacing: 4) {
+                if section == .move {
+                    MaterialGlyph("rounded.OpenWith", size: 20, color: StageInk.dockTileIcon)
+                } else {
+                    CupertinoGlyph.text(section.glyph, size: 20, color: StageInk.dockTileIcon)
+                }
+                Text(AureaText.t(section.shortLabel))
+                    .font(.aurea(size: 12 * min(max(fontScale, 1), 2)))
+                    .foregroundStyle(StageInk.dockTileContent).lineLimit(2).multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 4).frame(width: width, height: EditorLayout.dockTileHeight(fontScale: fontScale))
+            .background(EditorTimelineRefresh.enabled ? AureaColors.editorCanvas : StageInk.dockSheet, in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }.buttonStyle(.plain)
+            .accessibilityLabel(AureaText.t(section.label))
+            .accessibilityIdentifier("dock.tool.\(section.rawValue)")
+    }
+
 
     /// Quadrado da fileira rápida para uma ferramenta sozinha (velocidade, mudo, grupo).
     private func dockSquare<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -1054,8 +1095,8 @@ private struct DockView: View {
             context.stroke(mid, with: .color(AureaColors.text), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
         }
         .frame(width: 22, height: 22)
-        Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
-            .font(.aurea(size: 10)).lineLimit(1)
+        if !EditorTimelineRefresh.enabled { Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
+            .font(.aurea(size: 10)).lineLimit(1) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         .onTapGesture(perform: action)

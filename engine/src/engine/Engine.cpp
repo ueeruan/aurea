@@ -431,6 +431,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
     if (++gpuGeneration_ == 0) ++gpuGeneration_;
     gpu_.reset(config.backend);
+    gpuRecoveryPending_ = false;
     renderer_.set_model_lookup(&Engine::model_lookup, this);
     renderer_.set_hdri_lookup(&Engine::hdri_lookup, this);
     renderer_.set_cube_lookup(&Engine::cube_lookup, this);
@@ -1062,7 +1063,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     if (Composition* c = current_composition()) {
         adapt().configure(c->width(), c->height(), static_cast<f32>(c->fps()));
         playback_ = PlaybackController{};
-        playback_.configure(c->fps(), c->duration());
+        configure_playback_locked(c);
     }
     frameScheduler_.reset();
     state_ = EngineState::Ready;
@@ -1365,7 +1366,7 @@ Status Engine::load_project(const char* path) noexcept {
             playback_ = PlaybackController{};
             previewBuffering_ = false;
             previewBufferStatus_.store(0, std::memory_order_release);
-            playback_.configure(c->fps(), c->duration());
+            configure_playback_locked(c);
         }
         // Recuperado de cópia/parcial: está sujo (o principal ainda é o ruim).
         if (mainFileSuspect_) project_->mark_dirty();
@@ -1766,7 +1767,7 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     l->transform.scale = Vec3{fit, fit, 1.0f};
 
     adapt().configure(comp->width(), comp->height(), static_cast<f32>(comp->fps()));
-    playback_.configure(comp->fps(), comp->duration());
+    configure_playback_locked(comp);
     project_->mark_dirty();
     request_render();
     AUREA_LOG_INFO("video importado: %ux%u %.3f fps, %lld us, cor %s", dispW, dispH, v.fps,
@@ -1826,7 +1827,7 @@ Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
     l->source = assetId;
     l->start = FrameIndex{insertionFrame};
     l->end = FrameIndex{endFrame};
-    playback_.configure(comp->fps(), comp->duration());
+    configure_playback_locked(comp);
     project_->mark_dirty();
     request_render();
     AUREA_LOG_INFO("audio importado: %u Hz, %u canais, %lld us", probe.audioSampleRate, probe.audioChannels,
@@ -1919,7 +1920,7 @@ Result<u64> Engine::freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcep
     i64 maxEnd = comp->duration().value;
     comp->layers().for_each([&](LayerId, const Layer& o) { maxEnd = std::max(maxEnd, o.end.value); });
     if (maxEnd > comp->duration().value) comp->set_duration(FrameIndex{maxEnd});
-    playback_.configure(comp->fps(), comp->duration());
+    configure_playback_locked(comp);
     project_->mark_dirty();
     request_render();
     return hold.pack();
@@ -1973,7 +1974,7 @@ Result<u64> Engine::add_text(const char* content) noexcept {
     l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
-        playback_.configure(comp->fps(), comp->duration());
+        configure_playback_locked(comp);
     }
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     recenter_text(*l);
@@ -2222,7 +2223,7 @@ Result<u64> Engine::add_light(u32 kind) noexcept {
     layer->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
     layer->end = FrameIndex{std::max(layer->start.value + 1, comp->duration().value)};
     if (layer->end.value > comp->duration().value) {
-        comp->set_duration(layer->end); playback_.configure(comp->fps(), comp->duration());
+        comp->set_duration(layer->end); configure_playback_locked(comp);
     }
     layer->transform.position = Vec3{comp->width() * .5f, comp->height() * .25f, -static_cast<f32>(comp->height())};
     // Pontual/spot: a 1/4 da altura na frente do plano, no centro. Em −H a luz
@@ -2387,7 +2388,7 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
-        playback_.configure(comp->fps(), comp->duration());
+        configure_playback_locked(comp);
     }
     l->transform.anchor = Vec3{50.0f, 50.0f, 0.0f};   // caixa virtual de 100 px (alças no palco)
     // No centro — e, se outro nulo já está parado ali, um degrau na diagonal:
@@ -2623,7 +2624,7 @@ Result<u32> Engine::arrange_layer_times(const u64* layerIds, u32 count,
     comp->touch();
     if (duration > comp->duration().value) {
         comp->set_duration(FrameIndex{duration});
-        playback_.configure(comp->fps(), comp->duration());
+        configure_playback_locked(comp);
     }
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     project_->mark_dirty();
@@ -4215,7 +4216,7 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
-        playback_.configure(comp->fps(), comp->duration());
+        configure_playback_locked(comp);
     }
     l->transform.anchor = Vec3{w * 0.5f, h * 0.5f, 0};
     l->transform.position = Vec3{w * 0.5f, h * 0.5f, 0};
@@ -6053,7 +6054,7 @@ bool Engine::open_precomp(u64 layerId) noexcept {
     tl.set_current(l->nested.composition);
     selection_.clear();
     if (Composition* child = current_composition()) {
-        playback_.configure(child->fps(), child->duration());
+        configure_playback_locked(child);
         playback_.seek(FrameIndex{std::clamp<i64>(static_cast<i64>(f), 0, child->duration().value - 1)}, monotonic_ns());
     }
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
@@ -6070,7 +6071,7 @@ bool Engine::close_precomp() noexcept {
     if (!tl.composition(back)) return false;
     tl.set_current(back);
     selection_.clear();
-    if (Composition* c = current_composition()) playback_.configure(c->fps(), c->duration());
+    if (Composition* c = current_composition()) configure_playback_locked(c);
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     request_render();
     return true;
@@ -7252,7 +7253,7 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     }
     i64 duration = comp->duration().value;
     comp->layers().for_each([&](LayerId, const Layer& item) { duration = std::max(duration, item.end.value); });
-    if (duration != comp->duration().value) { comp->set_duration(FrameIndex{duration}); playback_.configure(comp->fps(), comp->duration()); }
+    if (duration != comp->duration().value) { comp->set_duration(FrameIndex{duration}); configure_playback_locked(comp); }
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     project_->mark_dirty();
     request_render();
@@ -7302,7 +7303,7 @@ bool Engine::reorder_clip(u64 layerId, i64 targetFrame) noexcept {
     comp->rebuild_draw_order();
     i64 duration = comp->duration().value;
     comp->layers().for_each([&](LayerId, const Layer& item) { duration = std::max(duration, item.end.value); });
-    if (duration != comp->duration().value) { comp->set_duration(FrameIndex{duration}); playback_.configure(comp->fps(), comp->duration()); }
+    if (duration != comp->duration().value) { comp->set_duration(FrameIndex{duration}); configure_playback_locked(comp); }
     project_->mark_dirty();
     request_render();
     return true;
@@ -7771,7 +7772,7 @@ Result<u64> Engine::add_shape(u32 preset) noexcept {
     l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
-        playback_.configure(comp->fps(), comp->duration());
+        configure_playback_locked(comp);
     }
     l->transform.anchor = Vec3{sh.bounds.w * 0.5f, sh.bounds.h * 0.5f, 0.0f};
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
@@ -8063,7 +8064,7 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     l->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
     l->end = FrameIndex{std::max(l->start.value + 1, comp->duration().value)};
     if (l->end.value > comp->duration().value) {
-        comp->set_duration(l->end); playback_.configure(comp->fps(), comp->duration());
+        comp->set_duration(l->end); configure_playback_locked(comp);
     }
     // Enquadramento: a silhueta vista de frente (largura/altura; a
     // profundidade pesa menos) ocupa ~55% do lado menor da composição,
@@ -8965,7 +8966,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& requested) noexcept {
     l->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
     l->end = FrameIndex{std::max(l->start.value + 1, comp->duration().value)};
     if (l->end.value > comp->duration().value) {
-        comp->set_duration(l->end); playback_.configure(comp->fps(), comp->duration());
+        comp->set_duration(l->end); configure_playback_locked(comp);
     }
     l->model.animationClip = -1; // Text 3D moves only through user-authored layer transforms.
     l->text.content = spec.content;
@@ -9274,13 +9275,13 @@ RenderSettings Engine::current_render_settings() noexcept {
     return rs;
 }
 
-Status Engine::poll_export_gpu_locked() noexcept {
+Status Engine::poll_export_gpu_locked(u64 timeoutNs) noexcept {
     if (!pendingExportGpuFrame_) return OkStatus;
     if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
         pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
         return OkStatus; // Normal device-loss handling owns actual recovery.
     }
-    const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, 0);
+    const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, timeoutNs);
     if (ready.ok()) pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
     return ready;
 }
@@ -9299,20 +9300,43 @@ Status Engine::recover_device_locked() noexcept {
     // Dispositivo perdido (driver reiniciou, GPU resetou): tudo que o driver
     // tinha morreu. O PROJETO não — ele mora na CPU. Recria o backend, o
     // renderer e a superfície, e o próximo frame sai normal.
-    AUREA_LOG_WARN("dispositivo de GPU perdido: recriando");
+    if (!gpuRecoveryPending_) {
+        if (const Status ready = gpu_->prepare_reinitialization(0); !ready.ok()) return ready;
+        gpuRecoveryPending_ = true;
+    }
+    AUREA_LOG_WARN("GPU indisponivel: recriando recursos sem alterar o projeto");
     if (++gpuGeneration_ == 0) ++gpuGeneration_;
     media_.close_all();   // os frames importados pertenciam ao dispositivo morto
     renderer_.forget_device();
+    surfaceAttached_ = false;
     gpu_->shutdown();
-    if (const Status s = gpu_->initialize(config_.backendConfig); !s.ok()) return s;
+    if (const Status s = gpu_->initialize(config_.backendConfig); !s.ok()) {
+        gpu_->shutdown();
+        return s;
+    }
     renderer_.set_model_lookup(&Engine::model_lookup, this);
-    if (const Status s = renderer_.initialize(*gpu_, effectRegistry_); !s.ok()) return s;
+    renderer_.set_hdri_lookup(&Engine::hdri_lookup, this);
+    renderer_.set_cube_lookup(&Engine::cube_lookup, this);
+    if (const Status s = renderer_.initialize(*gpu_, effectRegistry_); !s.ok()) {
+        renderer_.forget_device(); gpu_->shutdown();
+        return s;
+    }
     if (surface_.nativeWindow) {
         const Status s = gpu_->attach_surface(surface_);
         surfaceAttached_ = s.ok();
-        if (!s.ok()) return s;
+        if (!s.ok()) { renderer_.forget_device(); gpu_->shutdown(); return s; }
     }
+    gpuRecoveryPending_ = false;
     return OkStatus;
+}
+
+Status Engine::ensure_gpu_healthy_locked() noexcept {
+    if (!gpu_ || (!gpuRecoveryPending_ && !gpu_->requires_reinitialization())) return OkStatus;
+    const Status result = recover_device_locked();
+    forceRender_.store(true, std::memory_order_release);
+    nextFrameDueNs_ = monotonic_ns() + 50'000'000ull;
+    if (!result.ok() && result.code() != Errc::Timeout) set_last_error(result, "recuperar GPU");
+    return result;
 }
 
 Status Engine::render_frame(bool onlyIfChanged) noexcept {
@@ -9333,6 +9357,11 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         return ready;
     }
 
+    if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) {
+        { std::lock_guard<std::mutex> lock(modelMutex_); drain_commands_locked(); }
+        lastSkipped_ = true;
+        return healthy;
+    }
     if (const u64 size = pendingSurfaceSize_.exchange(0, std::memory_order_acq_rel)) {
         const u32 width = static_cast<u32>(size >> 32), height = static_cast<u32>(size);
         if (width != surface_.width || height != surface_.height) {
@@ -9370,7 +9399,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         // Keep timeline controls in project-frame units. RAW scheduling below
         // uses source PTS directly, independently of the composition frame grid.
         const FrameIndex rawDuration{rawAsset ? static_cast<i64>(std::ceil(rawAsset->video.frameCount.value * comp->fps() / std::max(1.0, rawAsset->video.fps))) : 0};
-        playback_.configure(comp->fps(), rawAsset ? rawDuration : comp->duration());
+        configure_playback_locked(comp, rawAsset ? rawDuration.value : -1);
         // Antes do update: um seek/play desta leva recomeça o som no ponto
         // novo (senão o relógio do áudio ainda diria o instante antigo).
         sync_audio_locked(*comp);
@@ -9384,9 +9413,6 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         if (playingHint_.exchange(busyPreview) != busyPreview) media_.proxies().set_pause_reason(PreviewProxyService::Playback, busyPreview);
 
         if (!gpu_ || !renderer_.ready()) return OkStatus;   // sem GPU: só o modelo avança
-        if (gpu_->is_device_lost()) {
-            if (const Status s = recover_device_locked(); !s.ok()) return s;
-        }
 
         // Nada mudou desde o último frame apresentado? Então não há o que
         // redesenhar: mesmo frame do playhead, nenhum comando/superfície nova,
@@ -9768,7 +9794,13 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
     // thread de render esperavam a captura da miniatura — no Galaxy S22 isso
     // deu ANR ("Input dispatching timed out") ao sair do editor.
     std::unique_lock<std::mutex> rl(renderMutex_);
-    if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+    if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
+    const u64 previousGeneration = gpuGeneration_;
+    if (!exportActive_.load(std::memory_order_acquire)) {
+        if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        if (previousGeneration != gpuGeneration_) return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+    }
+    if (!renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     if (!expectedGpuGeneration) expectedGpuGeneration = gpuGeneration_;
     if (expectedGpuGeneration != gpuGeneration_) return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
@@ -9823,7 +9855,7 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
             if (asPreview && (projectChanged || positionChanged)) boundCapture = false;
             else if (projectChanged) return Status{Errc::Cancelled, "o projeto mudou durante a captura"};
             else if (positionChanged) return Status{Errc::Cancelled, "a posicao de reproducao mudou durante a captura"};
-            playback_.configure(comp->fps(), comp->duration());
+            configure_playback_locked(comp);
             const FrameIndex t = boundCapture ? captureTime : playback_.update(monotonic_ns());
             if (!boundCapture) {
                 captureSession = projectSession_;
@@ -9985,6 +10017,7 @@ Status Engine::capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, 
         if (!gpu_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
             return Status{Errc::InvalidState, "sem GPU"};
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+        if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         captureGpu = gpu_.get();
         captureGeneration = gpuGeneration_;
         auto created = gpu_->create_texture(d);
@@ -10424,6 +10457,11 @@ u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) 
             row.value = k.value;
             row.interpolation = static_cast<u32>(k.interp);
             row.paramIndex = track.effectParamIndex;
+            const i64 timelineFrame = k.time.value + l.start.value - l.offset.value;
+            // Rendering uses [start, end), but an authored animation endpoint
+            // at end is a valid, editable timeline anchor. Hide only beyond it.
+            if (timelineFrame < l.start.value || timelineFrame > l.end.value)
+                row.timelineFlags |= bridge::kKeyframeTimelineHidden;
             out[written++] = row;
         }
     };
@@ -10956,6 +10994,77 @@ u32 Engine::query_layer_effects(u64 layerId, bridge::LayerEffectRow* out, u32 ca
     return written;
 }
 
+namespace {
+CurveData* editable_tone_curve(Composition* comp, u64 layer, u32 effect, u32 param) {
+    Layer* l = comp ? comp->layer(LayerId::unpack(layer)) : nullptr;
+    EffectInstance* inst = l ? l->find_effect(EffectId{effect, 0}) : nullptr;
+    if (!inst || inst->type != effect_type_id(effect_keys::kCurves) || param >= inst->params.size()) return nullptr;
+    const u64 ref = inst->params[param].constant.ref;
+    return ref < inst->curves.size() ? &inst->curves[static_cast<size_t>(ref)] : nullptr;
+}
+}
+
+u32 Engine::query_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
+                               bool samples, f32* out, u32 capacity) noexcept {
+    if (channel > 3 || !out || capacity < 2) return 0;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    CurveData* curve = editable_tone_curve(project_ ? current_composition() : nullptr, layer, effect, param);
+    if (!curve) return 0;
+    if (samples) {
+        const u32 count = std::min(capacity, 256u);
+        for (u32 i = 0; i < count; ++i) out[i] = curve->evaluate(channel, static_cast<f32>(i) / (count - 1));
+        return count;
+    }
+    const auto& points = curve->channel[channel];
+    const u32 count = std::min(static_cast<u32>(points.size()), capacity / 2);
+    for (u32 i = 0; i < count; ++i) { out[i * 2] = points[i].x; out[i * 2 + 1] = points[i].y; }
+    return count * 2;
+}
+
+i32 Engine::edit_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
+                              u32 action, u32 point, f32 x, f32 y) noexcept {
+    if (channel > 3 || action > 3 || !std::isfinite(x) || !std::isfinite(y)) return -1;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    CurveData* curve = editable_tone_curve(comp, layer, effect, param);
+    if (!curve) return -1;
+    auto next = curve->channel[channel];
+    constexpr f32 gap = 1.0f / 4096.0f;
+    x = std::clamp(x, 0.0f, 1.0f); y = std::clamp(y, 0.0f, 1.0f);
+    if (action == 3) { next = {{0, 0}, {1, 1}}; point = 0; }
+    else if (action == 1) {
+        auto at = std::lower_bound(next.begin(), next.end(), x, [](const auto& p, f32 v) { return p.x < v; });
+        // A touch near an existing input selects that point; it never creates
+        // a duplicate x or changes the endpoints' input coordinates.
+        if (at != next.end() && std::abs(at->x - x) < gap) return static_cast<i32>(at - next.begin());
+        if (at != next.begin() && std::abs((at - 1)->x - x) < gap) return static_cast<i32>(at - next.begin() - 1);
+        if (next.size() >= 64 || at == next.begin() || at == next.end()) return -1;
+        point = static_cast<u32>(at - next.begin()); next.insert(at, {x, y});
+    } else {
+        if (point >= next.size() || next.size() < 2) return -1;
+        if (action == 2) {
+            if (point == 0 || point + 1 == next.size()) return -1;
+            next.erase(next.begin() + point); point = std::min(point, static_cast<u32>(next.size() - 1));
+        } else {
+            const f32 lo = point == 0 ? 0.0f : next[point - 1].x + gap;
+            const f32 hi = point + 1 == next.size() ? 1.0f : next[point + 1].x - gap;
+            if (lo > hi) return -1;
+            next[point] = {point == 0 ? 0.0f : point + 1 == next.size() ? 1.0f : std::clamp(x, lo, hi), y};
+        }
+    }
+    const auto& old = curve->channel[channel];
+    bool same = next.size() == old.size();
+    for (size_t i = 0; same && i < next.size(); ++i) same = next[i].x == old[i].x && next[i].y == old[i].y;
+    if (same) return static_cast<i32>(point);
+    history_.before_mutation(*comp, project_->timeline().current(), "curva de cor");
+    curve->channel[channel] = std::move(next);
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    project_->mark_dirty(); request_render();
+    return static_cast<i32>(point);
+}
+
 u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRow* out, u32 capacity,
                                 char* blob, u32 blobCapacity) noexcept {
     if (!out) return 0;
@@ -11135,6 +11244,37 @@ bool Engine::is_selected(u64 layerId) const noexcept {
 // =============================================================================
 // Export
 // =============================================================================
+i64 Engine::navigation_end_locked(const Composition* comp) const noexcept {
+    i64 end = 0;
+    if (comp) comp->layers().for_each([&](LayerId, const Layer& layer) {
+        end = std::max(end, layer.end.value);
+    });
+    return end;
+}
+
+void Engine::configure_playback_locked(const Composition* comp, i64 rawDuration) noexcept {
+    if (!comp) return;
+    const bool bounded = contentBoundedPlayback_ && rawDuration < 0;
+    const i64 end = bounded ? navigation_end_locked(comp) : 0;
+    playback_.set_navigation_end(FrameIndex{bounded ? end : -1});
+    playback_.configure(comp->fps(), FrameIndex{rawDuration >= 0 ? rawDuration
+        : bounded ? std::max<i64>(1, end) : comp->duration().value});
+}
+
+void Engine::set_content_bounded_playback(bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    contentBoundedPlayback_ = on;
+    configure_playback_locked(project_ ? current_composition() : nullptr);
+    if (project_) project_->timeline().set_playhead(playback_.current());
+    request_render();
+}
+
+i64 Engine::query_navigation_end() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    return navigation_end_locked(project_ ? current_composition() : nullptr);
+}
+
 i64 Engine::query_export_duration(bool trimToContent) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
@@ -11164,9 +11304,12 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         exportCtx_->thread.join();
     }
     retire_abandoned_export_locked();
+    // A failed new attempt must never expose retry flags from an older export.
+    { std::lock_guard<std::mutex> context(exportContextMutex_); exportCtx_.reset(); }
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+        if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
+        if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
     }
 
     auto ctx = std::make_unique<ExportContext>();
@@ -11302,12 +11445,54 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
         }
         ctx->outputDir = dir;
     }
+    // Transfer renderer ownership BEFORE opening the encoder. Its input/output
+    // buffers are part of the allocation peak too. The previous path kept the
+    // preview's transient texture pool alive until after the codec was opened.
+    // Failed startup releases ownership so preview can resume normally.
+    struct ExportStartupOwnership {
+        std::atomic<bool>& active;
+        Engine& engine;
+        bool committed = false;
+        ~ExportStartupOwnership() {
+            if (!committed) {
+                active.store(false, std::memory_order_release);
+                engine.request_render();
+            }
+        }
+    } startupOwnership{exportActive_, *this};
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+        if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        exportActive_.store(true, std::memory_order_release);
+        gpu_->wait_idle();
+        const GpuMemoryStats before = gpu_->memory_stats();
+        const u32 released = renderer_.trim_memory(static_cast<u8>(TrimStage::OldRenderCache), frameCounter_);
+        gpu_->wait_idle(); // Return deferred allocations to the driver before codec.start.
+        const GpuMemoryStats after = gpu_->memory_stats();
+        AUREA_LOG_INFO("export: startup released %u reusable textures (%llu bytes used, %llu bytes reserved)",
+                       released,
+                       static_cast<unsigned long long>(before.usedBytes > after.usedBytes ? before.usedBytes - after.usedBytes : 0),
+                       static_cast<unsigned long long>(before.reservedBytes > after.reservedBytes ? before.reservedBytes - after.reservedBytes : 0));
+    }
     if (const Status s = ctx->sink->open(outputPath, vc, withAudio ? &ac : nullptr); !s.ok()) {
         // Status borrows its diagnostic. Platform sinks keep it in their own
         // storage, which is destroyed with this local context on return.
         static thread_local char detail[256];
         std::snprintf(detail, sizeof(detail), "%s", s.detail().empty() ? s.message().data() : s.detail().data());
-        return Status{s.code(), detail};
+        const Errc code = s.code();
+        const ExportFailure failure = export_failure_reason(ExportStage::Open, code);
+        ctx->progress.running = false;
+        ctx->progress.finished = true;
+        ctx->progress.result = code;
+        ctx->progress.failure = static_cast<u32>(failure);
+        ctx->progress.flags = (ctx->progress.flags & ~kExportRetryMask) |
+            (export_retry_safe_mode(failure, ctx->safeMode) << kExportRetryShift);
+        ctx->set_message(detail);
+        ctx->sink->abort();
+        ctx->sink.reset();
+        { std::lock_guard<std::mutex> context(exportContextMutex_); exportCtx_ = std::move(ctx); }
+        return Status{code, detail};
     }
 
     // O encoder que o sink REALMENTE abriu. Quando o sink não sabe dizer (host,
@@ -11430,6 +11615,7 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     exportActive_.store(true, std::memory_order_release);
     media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     proxyPause.started = true;
+    startupOwnership.committed = true;
     exportCtx_->thread = std::thread([this] { export_thread_main(); });
     return OkStatus;
 }
@@ -12214,7 +12400,8 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
     retire_abandoned_export_locked();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+        if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
+        if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
     }
 
     auto ctx = std::make_unique<ExportContext>();
@@ -12266,6 +12453,14 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         }
         ctx->outputDir = dir;
     }
+    struct ImageStartupOwnership {
+        std::atomic<bool>& active;
+        Engine& engine;
+        bool committed = false;
+        ~ImageStartupOwnership() {
+            if (!committed) { active.store(false, std::memory_order_release); engine.request_render(); }
+        }
+    } startupOwnership{exportActive_, *this};
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         TextureDesc cd;
@@ -12277,6 +12472,8 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         cd.transferSrc = true;
         cd.debugName = "export-imagem";
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+        if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        exportActive_.store(true, std::memory_order_release);
         renderer_.clear_preview_cache();
         gpu_->wait_idle();
         auto c = gpu_->create_texture(cd);
@@ -12307,6 +12504,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
     exportActive_.store(true, std::memory_order_release);
     media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     proxyPause.started = true;
+    startupOwnership.committed = true;
     exportCtx_->thread = std::thread([this] { image_export_thread_main(); });
     return OkStatus;
 }
@@ -12474,7 +12672,7 @@ void Engine::after_history_restore_locked() noexcept {
     Composition* comp = current_composition();
     if (!comp) return;
     std::erase_if(selection_, [&](u64 id) { return comp->layer(LayerId::unpack(id)) == nullptr; });
-    playback_.configure(comp->fps(), comp->duration());
+    configure_playback_locked(comp);
     adapt().configure(comp->width(), comp->height(), static_cast<f32>(comp->fps()));
     project_->mark_dirty();
     request_render();
@@ -12711,7 +12909,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         previewBufferStatus_.store(0);
     };
     auto playWithPreviewBuffer = [&] {
-        if (comp) playback_.configure(comp->fps(), comp->duration());
+        if (comp) configure_playback_locked(comp);
         playback_.play(now); // applies normal end-of-timeline restart semantics
         if (gpu_ && surfaceAttached_ && !rawPlaybackLayer_.valid() && comp
             && playback_.speed() > 0 && !caps_.thermal().severe() && memory_.pressure() < .85f) {
@@ -12829,7 +13027,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 comp->layers().for_each([&](LayerId, const Layer& item) { end = std::max(end, item.end.value); });
                 if (end > comp->duration().value) {
                     comp->set_duration(FrameIndex{end});
-                    playback_.configure(comp->fps(), comp->duration());
+                    configure_playback_locked(comp);
                     sync_timeline();
                 }
             };
@@ -13667,9 +13865,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             l->end = FrameIndex{l->start.value + frames};
             if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
-        playback_.configure(comp->fps(), comp->duration());
+        configure_playback_locked(comp);
     }
-            playback_.configure(comp->fps(), comp->duration());
+            configure_playback_locked(comp);
             return OkStatus;
         }
         case CommandType::ShapeSetFill:
@@ -13869,7 +14067,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 timeline.clock().set_fps(newFps);
                 // O cabeçote fica no mesmo SEGUNDO.
                 const FrameIndex at{static_cast<i64>(std::llround(static_cast<f64>(playback_.current().value) * k))};
-                playback_.configure(c->fps(), c->duration());
+                configure_playback_locked(c);
                 playback_.seek(at, now);
                 sync_timeline();
                 adapt().configure(c->width(), c->height(), static_cast<f32>(c->fps()));
@@ -13881,7 +14079,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!c) return Errc::NotFound;
             c->set_duration(cmd.comp_duration.duration);
             if (c == comp) {
-                playback_.configure(c->fps(), c->duration());
+                configure_playback_locked(c);
                 sync_timeline();
             }
             return OkStatus;
@@ -13955,7 +14153,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (cmd.seek.time.value < 0) return Errc::InvalidArgument;
             cancelPreviewBuffer();
             const f64 fps = comp ? comp->fps() : 30.0;
-            if (comp) playback_.configure(comp->fps(), comp->duration());
+            if (comp) configure_playback_locked(comp);
             playback_.seek(frame_at(cmd.seek.time, fps), now);
             sync_timeline();
             return OkStatus;
@@ -13969,7 +14167,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (cmd.seek.time.value < 0) return Errc::InvalidArgument;
             cancelPreviewBuffer();
             const f64 fps = comp ? comp->fps() : 30.0;
-            if (comp) playback_.configure(comp->fps(), comp->duration());
+            if (comp) configure_playback_locked(comp);
             playback_.scrub(frame_at(cmd.seek.time, fps), now);
             sync_timeline();
             return OkStatus;
@@ -13980,7 +14178,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             return OkStatus;
         case CommandType::PlaybackStep:
             cancelPreviewBuffer();
-            if (comp) playback_.configure(comp->fps(), comp->duration());
+            if (comp) configure_playback_locked(comp);
             playback_.step(cmd.step.frames, now);
             sync_timeline();
             return OkStatus;

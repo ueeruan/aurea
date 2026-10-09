@@ -30,19 +30,19 @@ struct TimelineMetrics {
 
     // --- Régua e linhas (redesenho 2026-09-29) -----------------------------------
     /// Riscos em 0..14; relógio e sublinhado logo abaixo.
-    var rulerTicks: CGFloat { dp(AureaTimeline.rulerTicks) }
+    var rulerTicks: CGFloat { dp(EditorTimelineRefresh.enabled ? 18 + 12 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.rulerTicks) }
     /// Primeira linha em 44; pílula em 48 e barra em 50, como no Android.
-    var rowsTop: CGFloat { dp(AureaTimeline.rulerTicks + AureaTimeline.rulerGap) }
+    var rowsTop: CGFloat { EditorTimelineRefresh.enabled ? rulerTicks + dp(4) : dp(AureaTimeline.rulerTicks + AureaTimeline.rulerGap) }
     /// Passo da fileira: pílula 28 + 4 de vão.
-    var row: CGFloat { dp(AureaTimeline.row) }
+    var row: CGFloat { dp(EditorTimelineRefresh.enabled ? 24 + 24 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.row) }
     /// Topo da pílula dentro da fileira (o vão de 4 fica em cima).
-    var pillTop: CGFloat { dp(4) }
-    var pillHeight: CGFloat { dp(28) }
-    var pillRadius: CGFloat { dp(14) }
+    var pillTop: CGFloat { dp(EditorTimelineRefresh.enabled ? 0 : 4) }
+    var pillHeight: CGFloat { EditorTimelineRefresh.enabled ? bar : dp(28) }
+    var pillRadius: CGFloat { dp(EditorTimelineRefresh.enabled ? 4 : 14) }
     /// Topo da barra dentro da fileira: 2 abaixo do topo da pílula.
-    var barTop: CGFloat { pillTop + dp(2) }
-    var bar: CGFloat { dp(AureaTimeline.bar) }
-    var barRadius: CGFloat { dp(AureaTimeline.barRadius) }
+    var barTop: CGFloat { pillTop + dp(EditorTimelineRefresh.enabled ? 0 : 2) }
+    var bar: CGFloat { dp(EditorTimelineRefresh.enabled ? 23 + 20 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.bar) }
+    var barRadius: CGFloat { dp(EditorTimelineRefresh.enabled ? 4 : AureaTimeline.barRadius) }
     var barMinWidth: CGFloat { dp(40) }
     var track: CGFloat { dp(11) }
     /// Começo da faixa dos losangos (medido do topo da barra).
@@ -52,7 +52,7 @@ struct TimelineMetrics {
 
     // --- Pílula da fileira (olho + quadradinho do glifo, colada à esquerda) -------
     /// Largura da pílula; as barras passam por BAIXO dela (ela é opaca).
-    var headerColumn: CGFloat { dp(AureaTimeline.headerColumn) }
+    var headerColumn: CGFloat { dp(EditorTimelineRefresh.enabled ? 28 : AureaTimeline.headerColumn) }
     /// Olho de 20 centrado em x 16; x < 28 é o toque do olho.
     let eyeIcon: CGFloat = 20
     var eyeCx: CGFloat { dp(16) }
@@ -118,9 +118,9 @@ struct TimelineMetrics {
 
     // --- Alça de trim (16 × (barra − 4), top 2, DENTRO das pontas) ------------------
     var trimWidth: CGFloat { dp(16) }
-    var trimTop: CGFloat { dp(2) }
-    var trimInsetStart: CGFloat { dp(3) }
-    var trimInsetEnd: CGFloat { dp(13) }
+    var trimTop: CGFloat { dp(EditorTimelineRefresh.enabled ? 0 : 2) }
+    var trimInsetStart: CGFloat { dp(EditorTimelineRefresh.enabled ? 16 : 3) }
+    var trimInsetEnd: CGFloat { dp(EditorTimelineRefresh.enabled ? 0 : 13) }
     var trimRadius: CGFloat { dp(4) }
     var gripWidth: CGFloat { dp(2) }
     var gripHeight: CGFloat { dp(14) }
@@ -128,7 +128,7 @@ struct TimelineMetrics {
     var trimTouchOut: CGFloat { dp(13) }
 
     // --- Losango ------------------------------------------------------------------
-    var diamond: CGFloat { dp(9) }
+    var diamond: CGFloat { dp(EditorTimelineRefresh.enabled ? 10 : 9) }
     var diamondRadius: CGFloat { dp(2) }
     var diamondStroke: CGFloat { dp(1.2) }
     /// Centro do losango: 22 abaixo do topo da barra (pode passar um pouco da base dela).
@@ -153,7 +153,7 @@ struct TimelineMetrics {
     // --- Cabeçote e relógio ----------------------------------------------------------
     /// Cabeçote branco de 1 pt, de y 36 (abaixo do relógio) até o fim.
     var playhead: CGFloat { dp(AureaTimeline.playhead) }
-    var playheadTop: CGFloat { dp(36) }
+    var playheadTop: CGFloat { dp(EditorTimelineRefresh.enabled ? 14 : 36) }
     /// Compacto (painel aberto): o cabeçote vermelho de antes, de cima a baixo.
     var compactPlayhead: CGFloat { dp(1.6) }
     var knob: CGFloat { dp(8) }
@@ -297,7 +297,9 @@ struct TimelineRow {
 }
 
 func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
-    let keys = all.sorted { $0.time < $1.time }
+    // The shared flag includes an animation key exactly at the clip's end.
+    // Never reapply the render interval's exclusive end to editable anchors.
+    let keys = all.filter { $0.timelineVisible }.sorted { $0.time < $1.time }
     var instants: [Int32] = []
     var groups: [[KeyframeItem]] = []
     var from = 0

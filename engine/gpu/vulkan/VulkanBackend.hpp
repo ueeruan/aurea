@@ -413,6 +413,8 @@ public:
     [[nodiscard]] static u32 validation_warnings() noexcept;
     [[nodiscard]] u32 read_gpu_timings(GpuTiming* out, u32 capacity, f32* totalMs) noexcept override;
     [[nodiscard]] bool is_device_lost() const noexcept override { return deviceLost_; }
+    [[nodiscard]] bool requires_reinitialization() const noexcept override { return deviceLost_ || !recordingStatus_.ok(); }
+    [[nodiscard]] Status prepare_reinitialization(u64 timeoutNs) noexcept override;
     [[nodiscard]] u32 frames_in_flight() const noexcept override { return framesInFlight_; }
     [[nodiscard]] GpuMemoryStats memory_stats() const noexcept override;
     void save_pipeline_cache() noexcept override;
@@ -504,6 +506,7 @@ private:
     // loss: older submissions must still retain their fences and resources.
     // Stop new work until shutdown/reinitialize instead of guessing layouts.
     Status recordingStatus_{};
+    VkFence recoveryFence_ = VK_NULL_HANDLE;
     // Bound temporal 3D batches without changing resolution or sample count.
     // end_frame completes each primary before admitting the next GPU batch.
     u32 passesPerCommandBuffer_ = 8;

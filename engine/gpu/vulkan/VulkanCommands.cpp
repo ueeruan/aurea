@@ -748,6 +748,31 @@ Status Backend::fail_recording(VkResult result, const char* operation) noexcept 
     return recordingStatus_;
 }
 
+Status Backend::prepare_reinitialization(u64 timeoutNs) noexcept {
+    if (deviceLost_) return OkStatus;
+    if (!device_) return Status{Errc::InvalidState};
+    if (recordingStatus_.ok()) return OkStatus;
+    if (!recoveryFence_) {
+        VkFenceCreateInfo info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkResult result = vkCreateFence(device_, &info, nullptr, &recoveryFence_);
+        if (note_device_lost(result)) return OkStatus;
+        if (result != VK_SUCCESS) return check(result, "vkCreateFence recovery");
+        // Fence signal scope covers every earlier submission, including
+        // uploads and a partially submitted frame. No invalid layouts reused.
+        result = vkQueueSubmit(queue_, 0, nullptr, recoveryFence_);
+        if (note_device_lost(result)) return OkStatus;
+        if (result != VK_SUCCESS) {
+            vkDestroyFence(device_, recoveryFence_, nullptr);
+            recoveryFence_ = VK_NULL_HANDLE;
+            return check(result, "vkQueueSubmit recovery");
+        }
+    }
+    const VkResult result = vkWaitForFences(device_, 1, &recoveryFence_, VK_TRUE, timeoutNs);
+    if (note_device_lost(result)) return OkStatus;
+    if (result == VK_TIMEOUT) return Status{Errc::Timeout, "GPU atrasada"};
+    return check(result, "vkWaitForFences recovery");
+}
+
 Status Backend::begin_frame(FrameBegin& out) noexcept {
     return begin_frame_impl(out, true);
 }

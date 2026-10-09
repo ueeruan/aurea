@@ -90,6 +90,7 @@ struct KeyframeItem: Identifiable, Equatable {
     var time: Int32
     var value: Float
     var interpolation: UInt32
+    var timelineVisible: Bool = true
     var id: String { "\(property)-\(effectIndex)-\(paramIndex)-\(time)" }
 }
 
@@ -1605,7 +1606,8 @@ final class AureaModel: ObservableObject {
                              effectIndex: (key["effectIndex"] as? NSNumber)?.uint32Value ?? 0,
                              time: (key["time"] as? NSNumber)?.int32Value ?? 0,
                              value: (key["value"] as? NSNumber)?.floatValue ?? 0,
-                             interpolation: (key["interpolation"] as? NSNumber)?.uint32Value ?? 0)
+                             interpolation: (key["interpolation"] as? NSNumber)?.uint32Value ?? 0,
+                             timelineVisible: (key["timelineVisible"] as? NSNumber)?.boolValue ?? true)
             }
         }
         if byLayer != keyframes { keyframes = byLayer }
@@ -1812,7 +1814,9 @@ final class AureaModel: ObservableObject {
         }
     }
 
-    func seek(toFrame frame: Int64) {
+    var navigationEnd: Int64 { EditorTimelineRefresh.enabled ? engine.navigationEnd() : Int64.max }
+    func seek(toFrame requested: Int64) {
+        let frame = min(max(0, requested), navigationEnd)
         pendingPlayhead = frame
         pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
         engine.run { $0.seek(toFrame: frame) }; status.playhead = frame
@@ -1834,13 +1838,15 @@ final class AureaModel: ObservableObject {
     /// releitura dos painéis ficam para o fim do gesto (`optimisticPlayhead`).
     /// Publicar 60 vezes por segundo redesenhava o app inteiro e a pinça
     /// engasgava. Exige `scrubBegin` aberto.
-    func timelineScrub(_ frame: Int64) {
+    func timelineScrub(_ requested: Int64) {
+        let frame = min(max(0, requested), navigationEnd)
         pendingPlayhead = frame
         pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
         engine.run { $0.scrub(toFrame: frame) }
         if playheadClock.frame != frame { playheadClock.frame = frame }
     }
-    func optimisticPlayhead(_ frame: Int64) {
+    func optimisticPlayhead(_ requested: Int64) {
+        let frame = min(max(0, requested), navigationEnd)
         pendingPlayhead = frame
         pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
         guard status.playhead != frame else { return }
@@ -2190,6 +2196,7 @@ final class AureaModel: ObservableObject {
     }
 
     func enterEditor() {
+        engine.setContentBoundedPlayback(EditorTimelineRefresh.enabled)
         timelineOnlySelection = []
         timelineLayerSelectMode = false
         panel = .none
@@ -3441,7 +3448,11 @@ final class AureaModel: ObservableObject {
         }
         let ok = startVideoExport(url, safeMode: 0)
         guard ok else {
-            exportMessage = AureaText.t("ios_export_could_not_start")
+            let progress = engine.exportProgress()
+            let message = progress["message"] as? String ?? ""
+            let code = (progress["result"] as? NSNumber)?.intValue ?? 0
+            exportMessage = message.isEmpty ? AureaText.t("ios_export_could_not_start")
+                : AureaEngineText.sentence(message, code: code)
             toast = exportMessage
             return
         }
@@ -3453,14 +3464,25 @@ final class AureaModel: ObservableObject {
     /// O vídeo no motor. `safeMode` > 0 só quando o motor sugeriu refazer depois
     /// de o encoder travar (H.264 Baseline em múltiplos de 16, taxa menor).
     private func startVideoExport(_ url: URL, safeMode: UInt32) -> Bool {
-        engine.startExport(to: url.path,
+        var level = safeMode
+        while true {
+            let ok = engine.startExport(to: url.path,
                            codec: exportOptions.codec,
                            height: exportOptions.shortSide,
                            fps: exportOptions.fps,
                            bitrateMbps: exportOptions.bitrateMbps,
                            audioBitrateKbps: exportOptions.audioBitrateKbps,
                            aiUpscale: exportOptions.aiUpscale, trimToContent: exportOptions.trimToContent,
-                           quality: exportOptions.quality, safeMode: safeMode)
+                           quality: exportOptions.quality, safeMode: level)
+            if ok { exportSafeMode = level; return true }
+            guard !exportCancelled else { return false }
+            let progress = engine.exportProgress()
+            let flags = (progress["flags"] as? NSNumber)?.uint32Value ?? 0
+            let next = ExportStallWatch.nextSafeMode(current: level,
+                suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
+            guard next > 0 else { return false }
+            level = next
+        }
     }
 
     /// O plano do export como imagem pela regra do motor (dimensões, quadros, bytes).
@@ -3613,7 +3635,6 @@ final class AureaModel: ObservableObject {
                         let next = ExportStallWatch.nextSafeMode(current: self.exportSafeMode,
                                                                  suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
                         if next > 0 && self.startVideoExport(url, safeMode: next) {
-                            self.exportSafeMode = next
                             self.exportWatch = ExportStallWatch()
                             self.exportProgress = [:]
                             self.startExportPolling()
@@ -4017,7 +4038,7 @@ final class AureaModel: ObservableObject {
         guard let id = primarySelection, let d = engine.layerDetail(id),
               let start = (d["startFrame"] as? NSNumber)?.int64Value,
               let offset = (d["offsetFrames"] as? NSNumber)?.int64Value else { return false }
-        let times = Set((keyframes[id] ?? []).map { Int64($0.time) + start - offset }).sorted()
+        let times = Set((keyframes[id] ?? []).filter { $0.timelineVisible }.map { Int64($0.time) + start - offset }).sorted()
         let now = status.playhead
         let target = direction > 0 ? times.first { $0 > now } : times.last { $0 < now }
         guard let target else { return false }

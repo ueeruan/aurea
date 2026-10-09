@@ -81,6 +81,7 @@ struct BenchCapture {
     std::atomic<bool>* allowWrite = nullptr;
     Status writeFailure{};              ///< fault injection at the platform boundary
     Status openFailure{};
+    std::function<Status()> beforeOpen;
     Status finishFailure{};
     bool invalidateDiagnosticOnDestroy = false;
     char platformDiagnostic[192]{};
@@ -145,6 +146,7 @@ public:
     Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
         if (c_->openEntered) c_->openEntered->store(true, std::memory_order_release);
         if (c_->openDelayUs) std::this_thread::sleep_for(std::chrono::microseconds(c_->openDelayUs));
+        if (c_->beforeOpen) { const Status s = c_->beforeOpen(); if (!s.ok()) return s; }
         if (!c_->openFailure.ok()) return c_->openFailure;
         c_->video = v;
         c_->hasAudio = a != nullptr;
@@ -1224,6 +1226,54 @@ AUREA_TEST(Export, PersistentMissingGpuTextBufferFailsInsteadOfSavingIncompleteV
     AUREA_CHECK(r.cap.hashes.empty());
 }
 
+AUREA_TEST(ExportStartupRecovery, OpeningFailurePublishesFreshRecoveryAndNeverRetriesMemoryOrStorage) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 1, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    for (Errc failure : {Errc::EncodeFailed, Errc::OutOfMemory, Errc::StorageFull, Errc::NotSupported, Errc::IoError}) {
+        r.cap.openFailure = Status{failure, "injected startup failure"};
+        ExportSettings settings; settings.height = 36;
+        AUREA_CHECK_EQ(r.e.start_export(settings, "nao-usado.mp4").code(), failure);
+        const auto progress = r.e.export_progress();
+        AUREA_CHECK(progress.finished && !progress.running);
+        AUREA_CHECK_EQ(progress.result, failure);
+        AUREA_CHECK_EQ(export_retry_from_flags(progress.flags), failure == Errc::EncodeFailed ? 1u : 0u);
+        AUREA_CHECK(std::strcmp(progress.message, "injected startup failure") == 0);
+    }
+    r.cap.openFailure = OkStatus;
+    const Outcome o = run_export(r, 36, 30, false, 5);
+    AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+}
+
+AUREA_TEST(ExportStartupMemory, PreviewTemporariesAreReleasedBeforeCodecAllocationAndFailureResumesPreview) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.add_shape(1).ok());
+    AUREA_CHECK(r.e.attach_surface(reinterpret_cast<void*>(1), 128, 72).ok());
+    AUREA_CHECK(r.e.render_frame().ok());
+    const u32 waits = backend->idleWaits.load();
+    bool checked = false;
+    r.cap.beforeOpen = [&]() -> Status {
+        checked = true;
+        AUREA_CHECK(backend->texturesDestroyed > 0);
+        AUREA_CHECK(backend->idleWaits.load() >= waits + 2);
+        return Status{Errc::OutOfMemory, "injected codec allocation failure"};
+    };
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK_EQ(r.e.start_export(settings, "nao-usado.mp4").code(), Errc::OutOfMemory);
+    AUREA_CHECK(checked);
+    const u32 submitted = backend->framesSubmitted;
+    AUREA_CHECK(r.e.render_frame().ok());
+    AUREA_CHECK(backend->framesSubmitted > submitted);
+    // Releasing startup ownership must also allow a subsequent export.
+    r.cap.beforeOpen = {};
+    const Outcome o = run_export(r, 72, 30, false, 5);
+    AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+    AUREA_CHECK(r.cap.finished && r.cap.hashes.size() == 3);
+}
+
 AUREA_TEST(Export, CriticalMemoryTrimReleasesCachesWhileEncoderKeepsItsFrame) {
     SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
@@ -1686,6 +1736,41 @@ AUREA_TEST(ExportPendingGpu, CancelledSubmittedFrameBlocksNewGpuWorkUntilItsFenc
     AUREA_CHECK(backend->framesSubmitted > submitted); AUREA_CHECK(backend->acquires > acquires);
     backend->destroy_texture(*target);
     std::remove(path.c_str()); std::remove((path + ".bak").c_str());
+}
+
+AUREA_TEST(ExportPendingGpu, RestartWaitsForACancelledFrameToCompleteWithoutReplacingTheDevice) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72; cfg.frameCount = 3;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> waiting{false}, releaseOnWait{false}, completed{false};
+    backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
+        if (!frame || completed.load()) return OkStatus;
+        if (timeout && releaseOnWait.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            completed = true;
+            return OkStatus;
+        }
+        if (timeout) { waiting = true; std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+        return Status{Errc::Timeout};
+    };
+    Rig r(cfg, 30, 3, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    struct CompleteOnExit { std::atomic<bool>& done; ~CompleteOnExit() { done = true; } } complete{completed};
+    r.comp()->layer(r.video_layer())->visible = false;
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK(r.e.start_export(settings, "cancelled-frame.mp4").ok());
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!waiting.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(waiting.load());
+    r.e.cancel_export();
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(r.e.export_progress().finished);
+    releaseOnWait = true;
+    const Outcome o = run_export(r, 72, 30, false, 5);
+    AUREA_CHECK(completed.load());
+    AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+    AUREA_CHECK(!backend->deviceLost && r.cap.finished);
 }
 
 AUREA_TEST(ExportPendingGpu, CancelWithCompletedFenceImmediatelyResumesPreview) {

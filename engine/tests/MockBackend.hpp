@@ -56,6 +56,11 @@ public:
     /// Recusa só o shader com este nome (driver GLES que não compila um shader).
     const char* failShader = nullptr;
     bool deviceLost = false;
+    bool recordingFault = false;
+    bool recoveryReady = true;
+    u32 initializations = 0;
+    u32 failInitializations = 0;
+    u32 recoveryPolls = 0;
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
@@ -77,7 +82,12 @@ public:
     // --- GPUBackend -----------------------------------------------------------
     const char* name() const noexcept override { return "Mock"; }
     const GPUCapabilities& capabilities() const noexcept override { return caps; }
-    Status initialize(const BackendConfig&) noexcept override { deviceLost = false; return OkStatus; }
+    Status initialize(const BackendConfig&) noexcept override {
+        ++initializations;
+        if (failInitializations) { --failInitializations; return Errc::OutOfMemory; }
+        deviceLost = recordingFault = false;
+        return OkStatus;
+    }
     void shutdown() noexcept override {}
     Status attach_surface(const SurfaceDesc&) noexcept override {
         surfaceAttached = true;
@@ -202,6 +212,12 @@ public:
     }
     u32 read_gpu_timings(GpuTiming*, u32, f32*) noexcept override { return 0; }
     bool is_device_lost() const noexcept override { return deviceLost; }
+    bool requires_reinitialization() const noexcept override { return deviceLost || recordingFault; }
+    Status prepare_reinitialization(u64 timeout) noexcept override {
+        ++recoveryPolls;
+        if (timeout != 0) return Errc::InvalidArgument;
+        return deviceLost || recoveryReady ? OkStatus : Status{Errc::Timeout};
+    }
     u32 frames_in_flight() const noexcept override { return 2; }
     GpuMemoryStats memory_stats() const noexcept override { return queryMemoryStats ? queryMemoryStats() : GpuMemoryStats{}; }
     void save_pipeline_cache() noexcept override {}

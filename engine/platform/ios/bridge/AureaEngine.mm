@@ -243,6 +243,7 @@ NSDictionary<NSString*, id>* keyframe_row_dict(const aurea::bridge::KeyframeRow&
         AureaKeyframeTime:          @(k.time),
         AureaKeyframeValue:         @(k.value),
         AureaKeyframeInterpolation: @(k.interpolation),
+        @"timelineVisible": @((k.timelineFlags & aurea::bridge::kKeyframeTimelineHidden) == 0),
     };
 }
 
@@ -2390,6 +2391,19 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return out;
 }
 
+- (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples {
+    auto* e = self.engine; if (!e) return @[];
+    float values[256]{};
+    const u32 n = e->query_effect_curve(layerId, effect, param, channel, samples, values, samples ? 256 : 128);
+    NSMutableArray<NSNumber*>* result = [NSMutableArray arrayWithCapacity:n];
+    for (u32 i = 0; i < n; ++i) [result addObject:@(values[i])];
+    return result;
+}
+- (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y {
+    auto* e = self.engine;
+    return e ? e->edit_effect_curve(layerId, effect, param, channel, action, point, x, y) : -1;
+}
+
 - (NSArray<NSDictionary<NSString*, id>*>*)effectSpecs:(uint32_t)typeId {
     auto* e = self.engine;
     if (!e) return @[];
@@ -3439,6 +3453,17 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (BOOL)setLayerAcceptsLights:(BOOL)on forLayer:(long long)layerId {
     if (auto* e = self.engine) return e->set_layer_accepts_lights(static_cast<aurea::u64>(layerId), on != NO);
+    return NO;
+}
+- (void)setContentBoundedPlayback:(BOOL)on {
+    if (auto* e = self.engine) e->set_content_bounded_playback(on != NO);
+}
+- (long long)navigationEnd {
+    if (auto* e = self.engine) return e->query_navigation_end();
+    return 0;
+}
+- (BOOL)setLayer3D:(BOOL)on forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->set_layer_3d(static_cast<aurea::u64>(layerId), on != NO);
     return NO;
 }
 - (BOOL)enableLayer3D:(long long)layerId {

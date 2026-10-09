@@ -85,6 +85,8 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
 void Backend::shutdown() noexcept {
     if (!device_ && !instance_) return;
     if (device_) vkDeviceWaitIdle(device_);
+    if (device_ && recoveryFence_) vkDestroyFence(device_, recoveryFence_, nullptr);
+    recoveryFence_ = VK_NULL_HANDLE;
     if (device_) collect_immediate(true);
 
     for (u32 i = 0; i < 3; ++i) run_deferred(frames_[i]);

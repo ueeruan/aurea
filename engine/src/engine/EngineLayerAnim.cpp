@@ -558,15 +558,21 @@ bool Engine::set_layer_accepts_lights(u64 layerId, bool on) noexcept {
 }
 
 bool Engine::enable_layer_3d(u64 layerId) noexcept {
+    return set_layer_3d(layerId, true);
+}
+
+bool Engine::set_layer_3d(u64 layerId, bool on) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return false;
     drain_commands_locked();
     Composition* comp = current_composition();
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || l->kind == LayerKind::Audio) return false;
-    if (l->threeD) return true;
-    history_.before_mutation(*comp, project_->timeline().current(), "ativar camada 3D");
-    l->threeD = true;
+    // Intrinsic 3D objects cannot be flattened with the layer switch.
+    if (!on && (l->kind == LayerKind::Camera || l->kind == LayerKind::Light || l->kind == LayerKind::Model3D)) return false;
+    if (l->threeD == on) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), on ? "ativar camada 3D" : "desativar camada 3D");
+    l->threeD = on;
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     project_->mark_dirty();
     request_render();

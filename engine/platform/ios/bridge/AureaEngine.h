@@ -522,6 +522,9 @@ NS_SWIFT_NAME(AureaEngine)
 /// "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição.
 - (BOOL)setLayerAcceptsLights:(BOOL)on forLayer:(long long)layerId;
 /// Opt into the scene camera without changing the layer's transform.
+- (void)setContentBoundedPlayback:(BOOL)on;
+- (long long)navigationEnd;
+- (BOOL)setLayer3D:(BOOL)on forLayer:(long long)layerId;
 - (BOOL)enableLayer3D:(long long)layerId;
 /// −1 = camada sem a opção (câmera, luz, modelo 3D, áudio, nulo); 0/1.
 - (int32_t)layerAcceptsLights:(long long)layerId;
@@ -877,6 +880,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSDictionary<NSString*, id>*>*)effectCatalog;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectsForLayer:(long long)layerId;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectParamsForLayer:(long long)layerId effectId:(uint32_t)effectId;
+- (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples NS_SWIFT_NAME(effectCurve(_:effect:param:channel:samples:));
+- (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y NS_SWIFT_NAME(editEffectCurve(_:effect:param:channel:action:point:x:y:));
 /// Declaração dos parâmetros de um TIPO (o catálogo, sem camada).
 - (NSArray<NSDictionary<NSString*, id>*>*)effectSpecs:(uint32_t)typeId;
 /// Curva de uma propriedade: `count` amostras entre `from` e `to` (frames).

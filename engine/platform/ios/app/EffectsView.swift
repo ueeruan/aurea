@@ -450,6 +450,8 @@ struct EffectsView: View {
             customRow(param, effect: effect) { choiceBox(param, effect: effect) }
         case fxParamColor:
             customRow(param, effect: effect) { colorControl(param, effect: effect) }
+        case 8:
+            if let layer = model.primarySelection { ColorCurveEditor(layer: layer, effect: effect, param: param.index) }
         case fxParamTextureRef:
             if let layer = model.primarySelection { CubeLutImportRow(layer: layer, effect: effect) }
         case fxParamLayerRef:
@@ -1168,5 +1170,114 @@ private struct EffectStackThumb: View {
             let loaded = await store.image(for: typeId)
             if !Task.isCancelled { image = loaded }
         }
+    }
+}
+
+
+@MainActor
+private struct ColorCurveEditor: View {
+    let layer: Int64
+    let effect: UInt32
+    let param: UInt32
+    @EnvironmentObject private var model: AureaModel
+    @State private var channel: UInt32 = 0
+    @State private var selected = 0
+    @State private var points: [Float] = []
+    @State private var samples: [Float] = []
+    @State private var gesturing = false
+    private var labels: [String] { ["RGB", AureaText.t("curve_color_red"), AureaText.t("curve_color_green"), AureaText.t("curve_color_blue")] }
+    private var tint: Color { [AureaColors.text, Color(red: 1, green: 0.45, blue: 0.45), Color(red: 0.41, green: 0.84, blue: 0.61), Color(red: 0.45, green: 0.72, blue: 1)][Int(channel)] }
+    private func reload() {
+        points = model.engine.effectCurve(layer, effect: effect, param: param, channel: channel, samples: false).map { $0.floatValue }
+        samples = model.engine.effectCurve(layer, effect: effect, param: param, channel: channel, samples: true).map { $0.floatValue }
+        selected = min(max(0, selected), max(0, points.count / 2 - 1))
+    }
+    private func begin() { if !gesturing { gesturing = true; model.beginGesture("curva de cor") } }
+    private func finish() { if gesturing { gesturing = false; model.endGesture(); reload() } }
+    private func edit(_ action: UInt32, x: Float = 0, y: Float = 0) {
+        let result = model.engine.editEffectCurve(layer, effect: effect, param: param, channel: channel, action: action, point: UInt32(selected), x: x, y: y)
+        if result >= 0 { selected = Int(result) }; reload()
+    }
+    private func axis(_ index: Int) -> some View {
+        let label = AureaText.t(index == 0 ? "curve_color_input" : "curve_color_output")
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(label + " \(Int((points[selected * 2 + index] * 255).rounded()))").font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+            Slider(value: Binding(get: { Double(points[selected * 2 + index]) }, set: { value in
+                begin(); edit(0, x: index == 0 ? Float(value) : points[selected * 2], y: index == 1 ? Float(value) : points[selected * 2 + 1])
+            }), in: 0...1, onEditingChanged: { active in if active { begin() } else { finish() } })
+                .disabled(index == 0 && (selected == 0 || selected + 1 == points.count / 2))
+                .accessibilityLabel(label).accessibilityIdentifier("fx.curve.axis.\(index)")
+        }
+    }
+    private var graph: some View {
+        GeometryReader { geo in
+            let pad: CGFloat = 18
+            let w = max(1, geo.size.width - 2 * pad); let h = max(1, geo.size.height - 2 * pad)
+            let at: (Float, Float) -> CGPoint = { x, y in CGPoint(x: pad + CGFloat(x) * w, y: pad + CGFloat(1 - y) * h) }
+            Canvas { context, _ in
+                var grid = Path()
+                for i in 0...4 { let v = Float(i) / 4; grid.move(to: at(v, 0)); grid.addLine(to: at(v, 1)); grid.move(to: at(0, v)); grid.addLine(to: at(1, v)) }
+                context.stroke(grid, with: .color(AureaColors.muted.opacity(0.18)), lineWidth: 1)
+                var diagonal = Path(); diagonal.move(to: at(0, 0)); diagonal.addLine(to: at(1, 1))
+                context.stroke(diagonal, with: .color(AureaColors.muted.opacity(0.35)), lineWidth: 1)
+                var path = Path()
+                for i in samples.indices { let p = at(Float(i) / Float(max(1, samples.count - 1)), samples[i]); if i == 0 { path.move(to: p) } else { path.addLine(to: p) } }
+                context.stroke(path, with: .color(tint), lineWidth: 2)
+                for i in 0..<points.count / 2 {
+                    let p = at(points[i * 2], points[i * 2 + 1]); let r: CGFloat = i == selected ? 7 : 5
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(i == selected ? AureaColors.accent : tint))
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)), with: .color(AureaColors.chip))
+                }
+            }.background(AureaColors.chip).contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    let x = Float((value.location.x - pad) / w); let y = Float(1 - (value.location.y - pad) / h)
+                    if !gesturing {
+                        begin()
+                        let hit = (0..<points.count / 2).min { a, b in
+                            let pa = at(points[a * 2], points[a * 2 + 1]); let pb = at(points[b * 2], points[b * 2 + 1])
+                            return hypot(pa.x - value.location.x, pa.y - value.location.y) < hypot(pb.x - value.location.x, pb.y - value.location.y)
+                        }
+                        if let hit, hypot(at(points[hit * 2], points[hit * 2 + 1]).x - value.location.x, at(points[hit * 2], points[hit * 2 + 1]).y - value.location.y) <= 24 { selected = hit }
+                        else { edit(1, x: x, y: y) }
+                    } else { edit(0, x: x, y: y) }
+                }.onEnded { _ in finish() })
+                .accessibilityLabel(AureaText.t("curve_color_graph")).accessibilityHint(AureaText.t("curve_color_hint"))
+                .accessibilityIdentifier("fx.curve.graph")
+        }.frame(height: 190)
+    }
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(0..<4, id: \.self) { i in
+                    Button { finish(); channel = UInt32(i); selected = 0; reload() } label: {
+                        Text(["RGB", "R", "G", "B"][i]).font(.aurea(size: 13)).frame(maxWidth: .infinity, minHeight: 44)
+                            .background(channel == UInt32(i) ? AureaColors.accent.opacity(0.18) : AureaColors.chip).clipShape(RoundedRectangle(cornerRadius: 8))
+                    }.buttonStyle(.plain).foregroundStyle(channel == UInt32(i) ? AureaColors.accent : AureaColors.text)
+                        .accessibilityLabel(labels[i]).accessibilityAddTraits(channel == UInt32(i) ? .isSelected : [])
+                        .accessibilityIdentifier("fx.curve.channel.\(i)")
+                }
+            }
+            graph
+            Text(AureaText.t("curve_color_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(0..<points.count / 2, id: \.self) { i in
+                        Button { finish(); selected = i } label: {
+                            Text("\(i + 1)").font(.aurea(size: 13)).frame(minWidth: 44, minHeight: 44)
+                                .background(selected == i ? AureaColors.accent.opacity(0.18) : AureaColors.chip).clipShape(RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain).foregroundStyle(AureaColors.text)
+                            .accessibilityLabel(AureaText.t("curve_color_point") + " \(i + 1)")
+                            .accessibilityAddTraits(selected == i ? .isSelected : []).accessibilityIdentifier("fx.curve.point.\(i)")
+                    }
+                }
+            }
+            if points.count >= 4 { axis(0); axis(1) }
+            HStack {
+                Button(AureaText.t("panel_redefinir")) { finish(); edit(3); model.refreshModel(force: true) }.frame(minHeight: 44).accessibilityIdentifier("fx.curve.reset")
+                Spacer()
+                Button(AureaText.t("common_delete")) { finish(); edit(2); model.refreshModel(force: true) }.frame(minHeight: 44)
+                    .disabled(selected == 0 || selected + 1 >= points.count / 2).accessibilityIdentifier("fx.curve.delete")
+            }.font(.aurea(size: 13)).tint(AureaColors.accent)
+        }.onAppear { reload() }.onChange(of: model.status.modelRevision) { _ in if !gesturing { reload() } }.onDisappear { finish() }
     }
 }

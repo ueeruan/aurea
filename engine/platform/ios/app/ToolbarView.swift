@@ -115,6 +115,24 @@ struct TopBarView: View {
                 model.mutate { $0.setLayer(row.id, name: value) }; model.refreshModel(force: true)
             }
             .id(row.id)
+            if EditorTimelineRefresh.enabled {
+                if row.kind != 3 {
+                    let intrinsic = [8, 9, 10].contains(row.kind)
+                    let threeD = row.threeD || intrinsic
+                    let motion = ((model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0) & 2 != 0
+                    ShellBarButton(glyph: CupertinoGlyph.Cube, description: AureaText.t("sh_add_tab_3d"), width: 48,
+                                   tint: threeD ? AureaColors.accent : AureaColors.text) {
+                        _ = model.engine.setLayer3D(!threeD, forLayer: row.id); model.refreshModel(force: true)
+                    }.disabled(row.locked || intrinsic).accessibilityValue(AureaText.t(threeD ? "common_on" : "common_off"))
+                        .accessibilityIdentifier("trial.layer.3d")
+                    ShellBarButton(glyph: CupertinoGlyph.MotionBlur, description: AureaText.t("editor_desfoque_movimento"), width: 48,
+                                   tint: motion ? AureaColors.accent : AureaColors.text) {
+                        model.engine.setMotionBlur(!motion, forLayer: row.id); model.refreshModel(force: true)
+                    }.disabled(row.locked).accessibilityValue(AureaText.t(motion ? "common_on" : "common_off"))
+                        .accessibilityIdentifier("trial.layer.motionBlur")
+                }
+                linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
+            } else {
             // Esconder/mostrar a caixa da seleção no preview (ela tampa o que está por baixo).
             ShellBarButton(glyph: model.hideSelectionBox ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Square,
                            description: AureaText.t(model.hideSelectionBox ? "editor_mostrar_caixa_selecao" : "editor_esconder_caixa_selecao"),
@@ -123,6 +141,7 @@ struct TopBarView: View {
             searchButton()
             linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 44) { removeSelection() }
+            }
             Button { open(.layerMenu) } label: { MaterialGlyph("filled.MoreHoriz", size: 22, color: AureaColors.text).frame(width: 44, height: 44) }
                 .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_acoes_camada"))
         }.padding(.trailing, 4)
@@ -703,12 +722,12 @@ private struct ShellMenuRow: View {
             }
             ShellMenuSection("editor_movimento")
             let timeFlags = (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0
-            ShellMenuRow(CupertinoGlyph.Speedometer, "editor_desfoque_movimento", checked: timeFlags & 2 != 0,
+            ShellMenuRow(CupertinoGlyph.MotionBlur, "editor_desfoque_movimento", checked: timeFlags & 2 != 0,
                          detail: "editor_borra_direcao_movimento_obturador_nas_configuracoes") {
                 act { model.mutate { $0.setMotionBlur(timeFlags & 2 == 0, forLayer: row.id) }; model.refreshModel(force: true) }
             }
             if row.kind == 1 {
-                ShellMenuRow(CupertinoGlyph.Speedometer, "editor_desfoque_movimento_video", checked: timeFlags & 32 != 0,
+                ShellMenuRow(CupertinoGlyph.MotionBlur, "editor_desfoque_movimento_video", checked: timeFlags & 32 != 0,
                              detail: "editor_borra_mexe_dentro_video_pelos_vetores") {
                     act { model.mutate { $0.setVectorBlur(forLayer: row.id, amount: timeFlags & 32 == 0 ? 1 : 0) }; model.refreshModel(force: true) }
                 }
@@ -740,7 +759,7 @@ private struct ShellMenuRow: View {
         ShellMenuSection("editor_reproducao_previa")
         ShellMenuRow(CupertinoGlyph.Repeat, "editor_reproducao_loop", checked: model.looping) { act { model.setLooping(!model.looping) } }
         ShellMenuRow(CupertinoGlyph.Fullscreen, model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia") { act { model.fullscreen.toggle() } }
-        ShellMenuRow(CupertinoGlyph.Speedometer, "editor_desfoque_movimento_composicao", checked: model.compMotionBlur, detail: "editor_camadas_desfoque_movimento_so_borram_isto") { model.setCompositionMotionBlur(!model.compMotionBlur) }
+        ShellMenuRow(CupertinoGlyph.MotionBlur, "editor_desfoque_movimento_composicao", checked: model.compMotionBlur, detail: "editor_camadas_desfoque_movimento_so_borram_isto") { model.setCompositionMotionBlur(!model.compMotionBlur) }
         if model.compMotionBlur {
             ShellMenuRow(CupertinoGlyph.CircleLefthalfFill, "sh_menu_shutter", title: AureaText.t("sh_menu_shutter", String(Int(model.shutterAngle))), detail: "editor_toque_trocar_90_180_270_360") {
                 model.changeShutterAngle([Float(90), 180, 270, 360].first(where: { $0 > model.shutterAngle }) ?? 90)

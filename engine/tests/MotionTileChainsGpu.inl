@@ -1,6 +1,24 @@
 // Motion Tile is a wall, including when another effect reads outside the
 // original image. Use asymmetric image pixels: a solid cannot detect a lost
 // mirror flag or a tile that has silently become a stretched edge.
+AUREA_TEST(Gpu, MotionTileWallSurvivesSqueezeAtStrongAndRotatedSettings) {
+    AUREA_REQUIRE_GPU();
+    for (f32 strength : {-90.0f, 25.0f, 75.0f, 95.0f}) {
+        for (f32 axis : {0.0f, 45.0f, 90.0f}) {
+            Scene s(160, 90);
+            const LayerId id = s.image(uniform_image(160, 90, 200, 200, 200), 80, 45);
+            s.comp->layer(id)->transform.scale = Vec3{.25f, .25f, 1};
+            s.add_effect(id, effect_keys::kMotionTile).params[motion_tile::kMirror].constant.v[0] = 1;
+            auto& squeeze = s.add_effect(id, "aurea.distort.squeeze");
+            squeeze.params[0].constant.v[0] = strength;
+            squeeze.params[2].constant.v[0] = axis;
+            const WallHoles holes = wall_holes(s.render(), srgb_decode(200.0f / 255.0f));
+            std::printf("    tile + squeeze %.0f / %.0f: %u holes, min %.4f\n", strength, axis, holes.holes, holes.darkest);
+            AUREA_CHECK_EQ(holes.holes, 0u);
+        }
+    }
+}
+
 AUREA_TEST(Gpu, MotionTileMirrorSurvivesAddingAnImageEffect) {
     AUREA_REQUIRE_GPU();
     for (int kind = 0; kind < 5; ++kind) {

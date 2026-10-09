@@ -692,6 +692,10 @@ final class AureaModel: ObservableObject {
             } else if scene == "android-hdri", started {
                 hdriProbe = await prepareParityHDRI()
             } else if scene == "export-render", started {
+                // Viewport checks need the production MTKView attached. Creating
+                // the fixture through the model opens the editor before the
+                // probe replaces its core compositions; Home has no surface.
+                _ = newProject(width: 1920, height: 1080, fps: 30, title: "Parity viewport")
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 refreshModel(force: true); enterEditor()
                 if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
@@ -721,6 +725,7 @@ final class AureaModel: ObservableObject {
             } else if ["video-move", "playback-stress", "clip-edit"].contains(scene), started {
                 // Reuse the real H.264 export fixture, then import through the
                 // production decoder. The UI test operates only the visible dock.
+                _ = newProject(width: 1920, height: 1080, fps: 30, title: "Parity viewport")
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 if exportProbe["passed"] as? Bool == true,
                    let movie = exportProbe["movieFile"] as? String,

@@ -299,14 +299,6 @@ private struct ModelOptimizePrompt: ViewModifier {
                     model.vectorFreehand = false; model.vectorEditingPoints = false; model.maskDrawing = false; model.freehandPoints = []
                 }.padding(.bottom, 10).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .bottom)
             }
-            if !model.fullscreen && !model.sceneEditor {
-                Text(previewLabel).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
-                    .padding(.horizontal, 10).padding(.vertical, 8).background(StageInk.resolutionChip, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay { GeometryReader { bounds in
-                        Color.clear.contentShape(Rectangle()).onTapGesture { shell.resolutionAnchor = bounds.frame(in: .global) }.onLongPressGesture(minimumDuration: 0.5) { model.toggleHud() }
-                    }}.accessibilityLabel(AureaText.t("editor_resolucao_previa_segure_diagnostico"))
-                    .padding(4).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            }
             if !model.fullscreen && !model.rawPlayback, model.selection.count == 1, let id = model.primarySelection {
                 HStack(spacing: 6) {
                     let hasGizmo = !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty

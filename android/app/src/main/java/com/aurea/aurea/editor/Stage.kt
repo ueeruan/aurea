@@ -163,7 +163,6 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         LockBanner(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         RigModeBar(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
-        ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
         PreviewBufferBadge(store, Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 8.dp))
         StageZoomChip(store, Modifier.align(Alignment.BottomEnd).padding(8.dp))
         // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
@@ -1870,56 +1869,6 @@ private fun hitLayer(store: EditorStore, cx: Float, cy: Float, slack: Float, inc
 // =============================================================================
 // Chip de resolução e HUD
 // =============================================================================
-
-/**
- * "Full" no canto sup-dir (0xCC171D25, raio 6, 12 sp). Toque: resolução da
- * prévia (só sessão, nunca o export). Toque longo: HUD de desempenho (DEV).
- * Some na tela cheia — ficava embaixo do "Voltar ao editor".
- */
-@Composable
-private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier) {
-    // Na cena 3D o canto é do desfazer/refazer flutuante.
-    if (ui.fullscreen || store.sceneEditor) return
-    var open by remember { mutableStateOf(false) }
-    val label = if (store.rawPlayback) "RAW" else when (val l = store.preview.scaleLabel) {
-        "FULL" -> stringResource(R.string.i18n_preview_full)
-        else -> l
-    }
-    // A reprodução RAW é ferramenta de teste (texto fixo em inglês, sem
-    // tradução): só no build de depuração e no uiTest, que herda dele. O HUD
-    // (toque longo) é recurso de usuário — também está no menu "Diagnóstico na tela".
-    val testeRaw = com.aurea.aurea.BuildConfig.DEBUG
-    val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
-    Box(modifier) {
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(6.dp))
-                .background(ShellColors.ResolutionChip)
-                .semantics { contentDescription = chipDescription }
-                .tocavel(haptic = true, onLongClick = { store.toggleHud() }) { open = true }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-        ) {
-            Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
-        }
-        if (open) com.aurea.aurea.ui.i18n.LocaleDirection {
-            val current = store.preview.scaleLabel
-            ShellPopupMenu(
-                items = listOfNotNull(
-                    // Teste de reprodução crua: só depuração. `store.rawPlayback`
-                    // ligado (impossível no release) ainda mostra a volta.
-                    if (testeRaw || store.rawPlayback) PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() } else null,
-                    PopupItem("AUTO", current == "AUTO") { store.setPreviewScale(true) },
-                    PopupItem(stringResource(R.string.i18n_preview_full), current == "FULL") { store.setPreviewScale(false, 1, 1) },
-                    PopupItem("1/2", current == "1/2") { store.setPreviewScale(false, 1, 2) },
-                    PopupItem("1/4", current == "1/4") { store.setPreviewScale(false, 1, 4) },
-                    PopupItem("1/8", current == "1/8") { store.setPreviewScale(false, 1, 8) },
-                ),
-                onDismiss = { open = false },
-                width = 160.dp,
-            )
-        }
-    }
-}
 
 /** HUD de desempenho (Fase 2, DEV): monoespaçado, canto sup-esq, semitransparente. */
 @Composable

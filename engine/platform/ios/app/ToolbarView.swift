@@ -212,7 +212,7 @@ private struct ShellInlineName: View {
 }
 
 /// Transporte de 48 pt, com marcador ao lado do play.
-/// Segurar duplicar também abre copiar e colar.
+/// Grade, resolução e marca | tempo | camadas, desfazer e refazer.
 struct TransportView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
@@ -230,75 +230,85 @@ struct TransportView: View {
         GeometryReader { geometry in
         // Nove botões em três grupos (ferramentas | tempo | edição); em telas
         // estreitas o alvo encolhe junto, nunca some um botão.
-        let side = min(48, (geometry.size.width - 8) / 9)
+        let side = min(40, (geometry.size.width - 24) / 9)
         HStack(spacing: 0) {
-            HStack(spacing: 0) { gridButton(side); fastPreviewButton(side); markerButton.frame(width: side) }
+            HStack(spacing: 0) { gridButton(side); resolutionButton(side); markerButton(side) }
             Spacer(minLength: 0)
-            HStack(spacing: 0) { startButton.frame(width: side); playButton.frame(width: side); endButton.frame(width: side) }
+            HStack(spacing: 0) { startButton(side); playButton(side); endButton(side) }
             Spacer(minLength: 0)
-            HStack(spacing: 0) { layersButton(side); undoButton.frame(width: side); redoButton.frame(width: side) }
+            HStack(spacing: 0) { layersButton(side); undoButton(side); redoButton(side) }
         }.padding(.horizontal, 4).frame(height: EditorLayout.transport)
         }
     }
 
-    private var fastPreview: Bool {
-        guard model.status.previewAuto == 0 else { return false }
-        return max(1, model.status.previewNumerator) < max(1, model.status.previewDenominator)
+    private var previewLabel: String {
+        if model.rawPlayback { return "RAW" }
+        if model.status.previewAuto != 0 { return "AUTO" }
+        let n = max(1, model.status.previewNumerator), d = max(1, model.status.previewDenominator)
+        return n == d ? AureaText.t("i18n_preview_full") : "\(n)/\(d)"
     }
     private func gridButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.Grid, description: AureaText.t("editor_grade_tercos"), size: 20, width: side, height: 48,
+        ShellBarButton(glyph: CupertinoGlyph.Grid, description: AureaText.t("editor_grade_tercos"), size: 18, width: side, height: 48,
                        tint: shell.showGrid ? AureaColors.accent : AureaColors.text) { shell.showGrid.toggle() }
             .accessibilityIdentifier("transport.grid")
     }
-    private func fastPreviewButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.Bolt, description: AureaText.t("editor_previa_rapida"), size: 20, width: side, height: 48,
-                       tint: fastPreview ? AureaColors.accent : AureaColors.text) {
-            if fastPreview { model.setPreviewScale(num: 1, den: 1, auto: true) } else { model.setPreviewScale(num: 1, den: 4, auto: false) }
-        }
-            .accessibilityIdentifier("transport.fastPreview")
+    private func resolutionButton(_ side: CGFloat) -> some View {
+        Text(previewLabel).font(.aurea(size: 11)).foregroundStyle(AureaColors.text)
+            .lineLimit(1).minimumScaleFactor(0.7)
+            .frame(width: max(1, side - 6), height: 26)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(AureaColors.border, lineWidth: 1))
+            .frame(width: side, height: 48)
+            .overlay { GeometryReader { bounds in
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { shell.resolutionAnchor = bounds.frame(in: .global) }
+                    .onLongPressGesture(minimumDuration: 0.5) { model.toggleHud() }
+            }}
+            .accessibilityLabel(AureaText.t("editor_resolucao_previa_segure_diagnostico"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("transport.resolution")
     }
     private func layersButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.RectangleStack, description: AureaText.t("editor_selecionar_uma_camada"), size: 20, width: side, height: 48) {
+        ShellBarButton(glyph: CupertinoGlyph.RectangleStack, description: AureaText.t("editor_selecionar_uma_camada"), size: 18, width: side, height: 48) {
             shell.sheet = .searchLayers
         }
             .accessibilityIdentifier("transport.layers")
     }
 
-    private var undoButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 22, width: 48, height: 48,
+    private func undoButton(_ side: CGFloat) -> some View {
+        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 20, width: side, height: 48,
                        enabled: model.status.canUndo != 0, disabledTint: AureaColors.transportDisabled) { model.undo() }
     }
-    private var redoButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 22, width: 48, height: 48,
+    private func redoButton(_ side: CGFloat) -> some View {
+        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 20, width: side, height: 48,
                        enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
     }
     /// Tocar navega por marcas/keyframes; segurar vai ao início.
-    private var startButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 22, width: 48, height: 48,
+    private func startButton(_ side: CGFloat) -> some View {
+        ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 20, width: side, height: 48,
                        onLongPress: { model.seek(toFrame: 0) }, action: { model.stepTransport(-1) })
             .accessibilityIdentifier("transport.previous")
     }
     /// Tocar navega por marcas/keyframes; segurar vai ao fim.
-    private var endButton: some View {
-        ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 22, width: 48, height: 48,
+    private func endButton(_ side: CGFloat) -> some View {
+        ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 20, width: side, height: 48,
                        onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { model.stepTransport(1) })
             .accessibilityIdentifier("transport.next")
     }
-    private var playButton: some View {
+    private func playButton(_ side: CGFloat) -> some View {
         ZStack(alignment: .bottomTrailing) {
             ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
                            description: AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" : (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")),
-                           size: 26, width: 48, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
+                           size: 22, width: side, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
                            onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
                 .accessibilityIdentifier("transport.play")
             if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false) }
         }
     }
     /// Marcar o instante atual continua acessível durante a reprodução.
-    private var markerButton: some View {
+    private func markerButton(_ side: CGFloat) -> some View {
         let marked = model.markerFrames.contains(model.status.playhead)
         return ShellBarButton(glyph: marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
-                              description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 20, width: 48, height: 48,
+                              description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 18, width: side, height: 48,
                               tint: marked ? AureaColors.accent : AureaColors.text,
                               onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
             .accessibilityIdentifier("transport.marker")

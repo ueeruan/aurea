@@ -2,6 +2,13 @@ package com.aurea.aurea.editor
 
 import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.size
+import com.aurea.aurea.ui.theme.tocavel
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -55,9 +62,9 @@ import kotlin.math.roundToInt
 // =============================================================================
 
 /**
- * ↶ ↷ · ⇤ ▶ ⇥ · duplicar · tela cheia (mockup `Editor.dc.html`). Nada da
- * barra antiga se perdeu: tocar ⇤/⇥ anda de marca/keyframe/quadro e segurar
- * vai ao início/fim. Segurar duplicar abre Copiar e colar.
+ * Grade · resolução · marca | ⇤ ▶ ⇥ | camadas · ↶ ↷.
+ * Tocar ⇤/⇥ anda de marca/keyframe/quadro; segurar vai ao início/fim.
+ * Os três grupos seguem a referência do usuário com os glifos do AUREA.
  * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
  */
 @Composable
@@ -79,8 +86,7 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
     // Nove botões em três grupos (ferramentas | tempo | edição); em telas
     // estreitas o alvo encolhe junto, nunca some um botão.
-    val side = minOf(48.dp, (maxWidth - 8.dp) / 9)
-    val fast = store.preview.scaleLabel.let { it != "AUTO" && it != "FULL" }
+    val side = minOf(40.dp, (maxWidth - 24.dp) / 9)
     Row(
         Modifier
             .fillMaxWidth()
@@ -94,24 +100,18 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             ChromeButton(
                 CupertinoGlyph.Grid, stringResource(R.string.editor_grade_tercos),
                 onClick = { ui.showGrid = !ui.showGrid },
-                size = 20.dp, width = side, height = side,
+                size = 18.dp, width = side, height = h,
                 tint = if (ui.showGrid) AureaColors.Accent else AureaColors.Text,
                 modifier = Modifier.testTag("transport.grid"),
             )
-            ChromeButton(
-                CupertinoGlyph.Bolt, stringResource(R.string.editor_previa_rapida),
-                onClick = { if (fast) store.setPreviewScale(true) else store.setPreviewScale(false, 1, 4) },
-                size = 20.dp, width = side, height = side,
-                tint = if (fast) AureaColors.Accent else AureaColors.Text,
-                modifier = Modifier.testTag("transport.fastPreview"),
-            )
+            PreviewResolutionButton(store, side)
             val marked = store.playhead in store.markers.frames
             ChromeButton(
                 if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
                 stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
                 onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
                 tint = if (marked) AureaColors.Accent else AureaColors.Text,
-                size = 20.dp, width = side, height = side,
+                size = 18.dp, width = side, height = h,
                 modifier = Modifier.testTag("transport.marker"),
             )
         }
@@ -120,7 +120,7 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
                 CupertinoGlyph.BackwardEnd,
                 stringResource(R.string.editor_ir_inicio_segure_anterior),
                 onClick = { store.stepTransport(-1) },
-                size = 22.dp, width = side, height = side,
+                size = 20.dp, width = side, height = h,
                 onLongClick = { store.seek(0) },
                 modifier = Modifier.testTag("transport.previous"),
             )
@@ -129,7 +129,7 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
                 CupertinoGlyph.ForwardEnd,
                 stringResource(R.string.editor_ir_fim_segure_proximo),
                 onClick = { store.stepTransport(1) },
-                size = 22.dp, width = side, height = side,
+                size = 20.dp, width = side, height = h,
                 onLongClick = { store.seek(store.project.durationFrames) },
                 modifier = Modifier.testTag("transport.next"),
             )
@@ -138,19 +138,19 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             ChromeButton(
                 CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada),
                 onClick = { openSheet(store, ui, ShellSheet.SearchLayers) },
-                size = 20.dp, width = side, height = side,
+                size = 18.dp, width = side, height = h,
                 modifier = Modifier.testTag("transport.layers"),
             )
             ChromeButton(
                 CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
                 onClick = if (canUndo) ({ store.undo() }) else null,
-                size = 22.dp, width = side, height = side,
+                size = 20.dp, width = side, height = h,
                 tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
             )
             ChromeButton(
                 CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
                 onClick = if (canRedo) ({ store.redo() }) else null,
-                size = 22.dp, width = side, height = side,
+                size = 20.dp, width = side, height = h,
                 tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
             )
         }
@@ -158,8 +158,59 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
     }
 }
 
+/** Qualidade da prévia na barra; não altera a exportação. Segurar abre o HUD. */
+@Composable
+private fun PreviewResolutionButton(store: EditorStore, side: androidx.compose.ui.unit.Dp) {
+    var open by remember { mutableStateOf(false) }
+    val label = if (store.rawPlayback) "RAW" else when (val l = store.preview.scaleLabel) {
+        "FULL" -> stringResource(R.string.i18n_preview_full)
+        else -> l
+    }
+    // A reprodução RAW é ferramenta de teste (texto fixo em inglês, sem
+    // tradução): só no build de depuração e no uiTest, que herda dele. O HUD
+    // (toque longo) é recurso de usuário — também está no menu "Diagnóstico na tela".
+    val testeRaw = com.aurea.aurea.BuildConfig.DEBUG
+    val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
+    Box(Modifier.width(side).height(ShellDims.Transport)) {
+        Box(
+            Modifier
+                .fillMaxWidth().height(ShellDims.Transport)
+                .testTag("transport.resolution")
+                .semantics { contentDescription = chipDescription }
+                .tocavel(haptic = true, onLongClick = { store.toggleHud() }) { open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier.padding(horizontal = 3.dp).fillMaxWidth().height(26.dp)
+                    .border(1.dp, AureaColors.Border, RoundedCornerShape(4.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Text)))
+            }
+        }
+        if (open) com.aurea.aurea.ui.i18n.LocaleDirection {
+            val current = store.preview.scaleLabel
+            ShellPopupMenu(
+                items = listOfNotNull(
+                    // Teste de reprodução crua: só depuração. `store.rawPlayback`
+                    // ligado (impossível no release) ainda mostra a volta.
+                    if (testeRaw || store.rawPlayback) PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() } else null,
+                    PopupItem("AUTO", current == "AUTO") { store.setPreviewScale(true) },
+                    PopupItem(stringResource(R.string.i18n_preview_full), current == "FULL") { store.setPreviewScale(false, 1, 1) },
+                    PopupItem("1/2", current == "1/2") { store.setPreviewScale(false, 1, 2) },
+                    PopupItem("1/4", current == "1/4") { store.setPreviewScale(false, 1, 4) },
+                    PopupItem("1/8", current == "1/8") { store.setPreviewScale(false, 1, 8) },
+                ),
+                onDismiss = { open = false },
+                width = 160.dp,
+            )
+        }
+    }
+}
+
 /**
- * Play/pausa (ícone 26, alvo 52). Com repetição ligada o play fica em
+ * Play/pausa (ícone 22, altura de toque 48). Com repetição ligada o play fica em
  * destaque e ganha o selinho do laço — a A.01 usava `acao`, sem contraste
  * sobre o cromo (bug 27).
  */
@@ -176,9 +227,9 @@ private fun PlayButton(store: EditorStore, side: androidx.compose.ui.unit.Dp = 4
                 else -> stringResource(R.string.editor_reproduzir_segure_repetir)
             },
             onClick = { if (store.preview.buffering) store.pause() else store.togglePlayback() },
-            size = 26.dp,
+            size = 22.dp,
             width = side,
-            height = side,
+            height = ShellDims.Transport,
             tint = if (loop) AureaColors.Accent else AureaColors.Text,
             onLongClick = { store.setLoop(!store.looping) },
             modifier = Modifier.testTag("transport.play"),

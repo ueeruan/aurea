@@ -58,7 +58,7 @@ class CompactTransportClipboardTest {
         compose.onNodeWithTag("transport.next").performClick()
         compose.waitUntil(5000) { store.playhead == 12 }
         compose.onNodeWithTag("transport.grid").assertIsDisplayed()
-        compose.onNodeWithTag("transport.fastPreview").assertIsDisplayed()
+        compose.onNodeWithTag("transport.resolution").assertIsDisplayed()
         compose.onNodeWithTag("transport.layers").assertIsDisplayed()
     }
 

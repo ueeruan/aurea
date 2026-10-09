@@ -446,6 +446,9 @@ Outcome run_export(Rig& r, u32 shortSide, f64 fps, bool dither = true, int timeo
     }
     o.seconds = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
     o.p = r.e.export_progress();
+    if (o.p.result != Errc::Ok)
+        std::printf("\n    export failure code=%u reason=%u frames=%u/%u: %s\n",
+            static_cast<u32>(o.p.result), o.p.failure, o.p.framesDone, o.p.framesTotal, o.p.message);
     return o;
 }
 
@@ -1755,6 +1758,7 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "ExportAudioProgress.inl"
 #include "CutFrameGpu.inl"
 #include "ExportWatchdog.inl"
+#include "ExportSlowMedia.inl"
 
 #endif // AUREA_TEST_VULKAN
 
@@ -1889,11 +1893,11 @@ AUREA_TEST(ExportWatchdogRules, SafeModeLadderAndItsVideoRecipe) {
     // Sempre H.264 no modo de segurança.
     AUREA_CHECK(export_safe_codec(ExportCodec::HEVC, 1) == ExportCodec::H264);
     AUREA_CHECK(export_safe_codec(ExportCodec::HEVC, 0) == ExportCodec::HEVC);
-    // Taxa menor, nunca abaixo de 0,5 Mbps (nem sobe o que já era menor).
+    // A recuperação preserva o bitrate solicitado, inclusive Alta e Mbps manual.
     AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 0), 14'000'000u);
-    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 1), 10'500'000u);
-    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 2), 8'400'000u);
-    AUREA_CHECK_EQ(export_safe_bitrate_bps(600'000u, 2), 500'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 1), 14'000'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 2), 14'000'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(600'000u, 2), 600'000u);
     AUREA_CHECK_EQ(export_safe_bitrate_bps(300'000u, 1), 300'000u);
     // Os dois lados em múltiplo de 16, para baixo (nunca acima do teto do aparelho).
     const u32 cases[][5] = {

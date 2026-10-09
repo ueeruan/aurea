@@ -77,6 +77,7 @@ add_executable(aurea_tests
     test_memory.cpp
     test_perf_render.cpp
     test_device.cpp
+    test_address_space.cpp
     test_startup.cpp
     test_heavy.cpp
     test_i18n.cpp

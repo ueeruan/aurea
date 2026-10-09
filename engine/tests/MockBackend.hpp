@@ -10,6 +10,7 @@
 
 #include "aurea/render/GPUBackend.hpp"
 
+#include <cstring>
 #include <vector>
 #include <functional>
 #include <unordered_map>
@@ -52,6 +53,8 @@ public:
     bool surfaceAttached = false;
     bool frameOpen = false;
     bool failPipelines = false;
+    /// Recusa só o shader com este nome (driver GLES que não compila um shader).
+    const char* failShader = nullptr;
     bool deviceLost = false;
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
@@ -140,6 +143,7 @@ public:
     Result<SamplerHandle> create_sampler(const SamplerDesc&) noexcept override { return SamplerHandle{++ids_}; }
     Result<ShaderHandle> create_shader(const ShaderDesc& d) noexcept override {
         if (!d.spirv || d.spirvBytes < 20) return Status{Errc::InvalidArgument};
+        if (failShader && d.debugName && std::strcmp(failShader, d.debugName) == 0) return Status{Errc::ShaderCompileFailed};
         ++shadersCreated;
         return ShaderHandle{++ids_};
     }

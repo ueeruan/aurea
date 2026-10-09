@@ -26,8 +26,8 @@ struct Panel3DView: View {
     /// Mostrar interior: 1/0; −1 = não é objeto 3D (câmera).
     @State private var interior: Int32 = -1
     @ObservedObject private var thumbs = MaterialThumbStore.shared
-    @State private var pickingHdri = false
     @State private var hdriTarget: Int64?
+    @State private var pickingTextTexture = false
     @State private var pending: Text3DChange?
     @State private var rebuild: DispatchWorkItem?
     @State private var closeTyping: DispatchWorkItem?
@@ -76,7 +76,7 @@ struct Panel3DView: View {
                     case .light:
                         lightSceneTab
                     case .anim:
-                        if isText { TextAnimationSection(showAnimatorEffect: false, beforeAnimation: finishEditing) }
+                        if isText { NativePanelChip(AureaText.t("la_animators")) { finishEditing(); model.transformTab = 6; model.openPanel(.transform) } }
                         else if isShape { Text3DAnimSection(layerId: layerId, parts: true) }
                     }
                 }
@@ -86,13 +86,14 @@ struct Panel3DView: View {
             .accessibilityIdentifier("text3d.materialScroll")
         }
         .background(AureaColors.background)
-        .fileImporter(isPresented: $pickingHdri,
-                      allowedContentTypes: [UTType(filenameExtension: "hdr") ?? .data, UTType(filenameExtension: "exr") ?? .data, .zip, .image, .data]) { result in
-            if case .success(let url) = result {
-                if model.selectedLayer?.kind == 8 { _ = model.engine.setEnvironmentBackground(true) }
-                model.importMedia(url: url, kind: .hdri, objectHDRI: hdriTarget)
+        .sheet(isPresented: $pickingTextTexture) {
+            ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
+                pickingTextTexture = false
+                if let (url, _) = items.first { model.setShapePartImage(layerId, part: -1, url: url, textTexture: true) }
             }
         }
+        // HDRI pelo seletor do UIKit (DocumentImportPicker, em pickHdri): o
+        // `.fileImporter` daqui ficava sob o da raiz do editor e não abria.
         // A fonte vem pelo seletor do UIKit (FontImportPicker): um segundo
         // `.fileImporter` encadeado aqui calava um dos dois.
         .onAppear(perform: load)
@@ -135,6 +136,21 @@ struct Panel3DView: View {
 
     private var textMaterialTab: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Text(AureaText.t("environment_texture")).font(.aurea(size: 13))
+                Spacer()
+                let hasTexture = !(text3D["texturePath"] as? String ?? "").isEmpty
+                NativePanelChip(AureaText.t(hasTexture ? "shape3d_image_change" : "shape3d_image_pick")) {
+                    finishEditing(); pickingTextTexture = true
+                }.accessibilityIdentifier("text3d.texture.pick")
+                if hasTexture {
+                    NativePanelChip(AureaText.t("shape3d_image_clear")) {
+                        finishEditing()
+                        _ = model.engine.setText3D(forLayer: layerId, property: "texturePath", stringValue: "", numberValue: 0)
+                        refresh()
+                    }.accessibilityIdentifier("text3d.texture.clear")
+                }
+            }.frame(minHeight: 48)
             section("ui3d_ready_materials")
             horizontal {
                 ForEach([6, 0, 1, 2, 3, 4, 5], id: \.self) { index in
@@ -184,7 +200,7 @@ struct Panel3DView: View {
                 chip("t3d_import_font") {
                     finishEditing()
                     let target = layerId
-                    FontImportPicker.present { url in importFont(url, target: target) }
+                    FontImportPicker.presentMultiple { urls in for url in urls { importFont(url, target: urls.count == 1 ? target : nil) } }
                 }
             }
             row("panel_alinhamento", height: 48) {
@@ -327,8 +343,9 @@ struct Panel3DView: View {
                     }
                     section("scene_tonemap")
                     horizontal {
-                        T3DChip(label: "PBR Neutral", on: sceneSettings[3] == 0) { setScene(3, 0) }
-                        T3DChip(label: "AgX", on: sceneSettings[3] == 1) { setScene(3, 1) }
+                        ForEach(Array(["PBR Neutral", "AgX", "AgX Punchy", "AgX Golden", "Uchimura", "ACES SDR"].enumerated()), id: \.offset) { i, label in
+                            T3DChip(label: label, on: Int(sceneSettings[3]) == i) { setScene(3, Float(i)) }
+                        }
                     }
                     sceneRow("scene_exposure", value: Swift.min(4, Swift.max(0.01, sceneSettings[4])) * 100, range: 1...400, unit: "%", reset: 100, gesture: nil) {
                         setScene(4, $0 / 100)
@@ -618,7 +635,14 @@ struct Panel3DView: View {
         refresh()
     }
     private func pickHdri(object: Bool) {
-        finishEditing(); hdriTarget = object ? layerId : nil; pickingHdri = true
+        finishEditing(); hdriTarget = object ? layerId : nil
+        let target = hdriTarget, model = self.model
+        let types: [UTType] = [UTType(filenameExtension: "hdr") ?? .data, UTType(filenameExtension: "exr") ?? .data, .zip, .image, .data]
+        DocumentImportPicker.present(types: types) { urls in
+            guard let url = urls?.first else { return }
+            if model.selectedLayer?.kind == 8 { _ = model.engine.setEnvironmentBackground(true) }
+            model.importMedia(url: url, kind: .hdri, objectHDRI: target)
+        }
     }
     private func openFonts() {
         finishEditing()
@@ -704,7 +728,7 @@ struct Panel3DView: View {
         AureaPaths.ensureDirectories()
         let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
         do {
-            try FileManager.default.copyItem(at: url, to: destination)
+            try AureaPaths.copyImport(url, to: destination)
             guard let font = model.engine.importFont(atPath: destination.path) else {
                 try? FileManager.default.removeItem(at: destination)
                 model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return

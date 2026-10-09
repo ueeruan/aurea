@@ -331,6 +331,87 @@ AUREA_TEST(CameraRegressionGpu, DumpScenarios) {
     }
 }
 
+// User video VN20261009_124648: opening XYZ controls must be distinguished
+// from opting a flat media layer into the scene. A real 3D plane needs no
+// compensating tilt when the camera is parented directly to a fresh null.
+AUREA_TEST(CameraRegressionGpu, FlatMediaRespondsToNullCameraOnlyWhenIn3D) {
+    AUREA_REQUIRE_GPU();
+    using namespace camreg;
+    for (bool video : {false, true}) {
+        Rig r;
+        AUREA_CHECK(r.e.new_project(kW, kH, 30.0, nullptr).ok());
+        const u64 media = video ? add_video(r) : add_image(r);
+        Layer* plane = r.layer(media);
+        AUREA_CHECK(plane != nullptr);
+        if (!plane) continue;
+        plane->transform.rotation = Vec3{0, 0, 0};
+        plane->transform.position.z = 0;
+        plane->threeD = false;
+        const auto camera = r.e.add_camera();
+        const auto null = r.e.add_null(true);
+        AUREA_CHECK(camera.ok() && null.ok());
+        if (!camera.ok() || !null.ok()) continue;
+        plane = r.layer(media);
+        const Image8 flat = r.capture(0);
+        set_parent(r, *camera, *null);
+        AUREA_CHECK(diff(flat, r.capture(0)).mean < 0.05);
+        r.layer(*null)->transform.rotation.y = 25;
+        const Image8 ignored = r.capture(0);
+        const Diff bypass = diff(flat, ignored);
+        AUREA_CHECK(!wants_layer_3d(*r.comp(), *plane, FrameIndex{0}));
+        AUREA_CHECK(bypass.mean < 0.05);
+
+        // This is the workaround seen in the video: any nonzero X/Y tilt
+        // routes otherwise-flat media through the scene camera.
+        plane->transform.rotation.y = 0.01f;
+        const Image8 tilted = r.capture(0);
+        AUREA_CHECK(wants_layer_3d(*r.comp(), *plane, FrameIndex{0}));
+        AUREA_CHECK(diff(flat, tilted).mean > 2);
+
+        // Persistent 3D works at exactly zero tilt/depth, including when the
+        // camera is attached to a null. The flag survives save/reload.
+        plane->transform.rotation.y = 0;
+        AUREA_CHECK(r.e.enable_layer_3d(media));
+        AUREA_CHECK(r.e.enable_layer_3d(media)); // idempotent: no second undo step
+        const Image8 explicit3d = r.capture(0);
+        const Diff orbit = diff(flat, explicit3d);
+        AUREA_CHECK(wants_layer_3d(*r.comp(), *plane, FrameIndex{0}));
+        AUREA_CHECK(orbit.mean > 2);
+        const Diff tinyTilt = diff(tilted, explicit3d);
+        std::printf("    tiny tilt versus explicit 3D: %.4f\n", tinyTilt.mean);
+        AUREA_CHECK(tinyTilt.mean < 1);
+        Command history;
+        history.type = CommandType::Undo;
+        AUREA_CHECK(r.e.apply_command(history).ok());
+        AUREA_CHECK(!r.layer(media)->threeD);
+        AUREA_CHECK(diff(flat, r.capture(0)).mean < 0.05);
+        history.type = CommandType::Redo;
+        AUREA_CHECK(r.e.apply_command(history).ok());
+        plane = r.layer(media);
+        AUREA_CHECK(plane->threeD);
+        AUREA_CHECK(plane->transform.rotation.length_sq() == 0);
+        AUREA_CHECK(plane->transform.position.z == 0);
+        AUREA_CHECK(diff(explicit3d, r.capture(0)).mean < 0.05);
+        r.layer(*null)->transform.rotation.y = 0;
+        const Image8 rest = r.capture(0);
+        AUREA_CHECK(diff(flat, rest).mean < 0.1);
+        r.layer(*null)->transform.rotation.y = 25;
+        const std::string dir = env_dir("AUREA_CAMREG_DIR");
+        const std::string stem = video ? "flat_video_null" : "flat_image_null";
+        const std::string path = (dir.empty() ? std::string(".") : dir) + "/" + stem + ".aurea";
+        AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+        AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+        AUREA_CHECK(r.layer(media)->threeD);
+        AUREA_CHECK(diff(explicit3d, r.capture(0)).mean < 0.05);
+        std::printf("    %s: flat camera bypass %.4f; zero-tilt 3D orbit %.4f\n",
+                    video ? "video" : "image", bypass.mean, orbit.mean);
+        if (!dir.empty()) {
+            AUREA_CHECK(write_png(dir + "/" + stem + "_2d.png", ignored));
+            AUREA_CHECK(write_png(dir + "/" + stem + "_3d.png", explicit3d));
+        } else std::remove(path.c_str());
+    }
+}
+
 // O que funcionava no 2138 continua igual: cada cenário marcado contra a
 // referência gravada por aquele build (160 px). Tolerância só para a borda
 // antialiasada (o pior quadro medido entre 2138 e 0.0.3: média 0,05).

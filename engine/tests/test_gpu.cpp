@@ -8424,6 +8424,38 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
 }
 
 // A foto do app como base das prévias: o efeito é mostrado sobre ela.
+AUREA_TEST(Gpu, EffectPreviewComparisonPreservesTheOriginalHalf) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    constexpr u32 w = 160, h = 100;
+    std::vector<u8> photo(w * h * 4);
+    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+        u8* p = &photo[(y * w + x) * 4];
+        p[0] = 180; p[1] = 60; p[2] = 20; p[3] = 255;
+    }
+    g.renderer.set_effect_preview_source(photo, w, h);
+    std::vector<u8> raw, comparison;
+    const auto id = effect_type_id(effect_keys::kSaturation);
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, id, w, h, raw).ok());
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, id, w, h, comparison, true).ok());
+    AUREA_CHECK_EQ(comparison.size(), photo.size());
+    usize originalErrors = 0, effectErrors = 0, changed = 0, transparent = 0;
+    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+        const usize i = (y * w + x) * 4;
+        if (comparison[i + 3] != 255) ++transparent;
+        for (u32 c = 0; c < 3; ++c) {
+            if (x < w / 2 - 2 && std::abs(int(comparison[i+c]) - int(photo[i+c])) > 1) ++originalErrors;
+            if (x > w / 2 + 2 && std::abs(int(comparison[i+c]) - int(raw[i+c])) > 1) ++effectErrors;
+            if (x > w / 2 + 2 && std::abs(int(comparison[i+c]) - int(photo[i+c])) > 10) ++changed;
+        }
+    }
+    AUREA_CHECK_EQ(originalErrors, 0u);
+    AUREA_CHECK_EQ(effectErrors, 0u);
+    AUREA_CHECK_EQ(transparent, 0u);
+    AUREA_CHECK(changed > 1000);
+    g.renderer.set_effect_preview_source({}, 0, 0);
+}
+
 AUREA_TEST(Gpu, EffectPreviewUsesThePhotoWhenGiven) {
     AUREA_REQUIRE_GPU();
     Gpu& g = gpu();
@@ -12369,7 +12401,8 @@ AUREA_TEST(Gpu, NewToolsGridVisibleAndMorphChangesFrame) {
 }
 AUREA_TEST(Gpu, NewToolsPsdGroupsAndMasksSurviveRenderingAndReload) {
     AUREA_REQUIRE_GPU(); Scene3DRig rig(8,4,true);
-    auto r=rig.e.import_psd("engine/tests/fixtures/psd/groups-mask-8-2.psd","PSD");
+    const std::string fixture = std::string(AUREA_TEST_DATA_DIR) + "/../fixtures/psd/groups-mask-8-2.psd";
+    auto r=rig.e.import_psd(fixture.c_str(),"PSD");
     AUREA_CHECK(r.ok());if(!r.ok())return;
     seek_frame(rig.e,0);const auto before=rig.capture(8);
     AUREA_CHECK(before.at(1,1)[0]>90);AUREA_CHECK(before.at(1,1)[1]<8);
@@ -13198,6 +13231,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "MaskBlendGpu.inl"
 #include "PuppetGpu.inl"
 #include "DisintegrateBallsGpu.inl"
+#include "GlesFallbackGpu.inl"
 
 // -----------------------------------------------------------------------------
 // Build 2140: modelos com textura entravam CINZA em aparelho real. O espaço do
@@ -13322,3 +13356,7 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 
 #include "V2140RegressionScenarios.inl"
 #include "LightRays3DGpu.inl"
+#include "BetaEffects1007Gpu.inl"
+#include "ProceduralWipesGpu.inl"
+#include "CellAndStarGpu.inl"
+#include "DitherGlitchDisplaceGpu.inl"

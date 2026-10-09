@@ -85,6 +85,12 @@ struct ImportResult {
 [[nodiscard]] Status read_package(const std::string& packagePath, const std::string& projectOut,
                                   const std::string& mediaDir, ImportResult& out) noexcept;
 
+/// Extract model ZIPs (stored/deflate) into a NEW directory. Relative paths are
+/// preserved; unsafe names, CRC errors and excessive memory/disk costs fail
+/// without leaving partial files. Native pickers call the same implementation.
+[[nodiscard]] Status extract_model_archive(const std::string& archivePath, const std::string& directory,
+                                          std::vector<std::string>& files) noexcept;
+
 /// Troca o caminho das mídias do `.aurea` (chave = caminho gravado). Devolve
 /// quantos assets mudaram. Usado pelo `read_package`; exposto para teste.
 [[nodiscard]] Status relink_media(const std::string& aureaPath,

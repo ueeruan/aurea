@@ -6,7 +6,7 @@
     <string name="expfail_encoder_stalled">the video encoder stopped responding; close other apps and try again</string>
     <string name="expfail_render">the phone\'s GPU couldn\'t render the video; try a lower resolution</string>
     <string name="expfail_memory">there isn\'t enough memory for this resolution; try a lower one</string>
-    <string name="expfail_media">a media file in the project couldn\'t be read</string>
+    <string name="expfail_media">a media file in the project couldn\'t be read; check that the video is still on the device or replace it, then try again</string>
     <string name="expfail_file">the video file couldn\'t be saved</string>
     <string name="expfail_unsupported">this phone can\'t export at this resolution or format</string>
     <string name="expfail_stuck">the export stopped making progress for minutes and was stopped; close other apps and try again</string>

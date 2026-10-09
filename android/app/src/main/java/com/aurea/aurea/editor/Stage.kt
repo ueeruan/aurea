@@ -96,7 +96,8 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     val insetPx = 0f
     // Pontos do rastreio de câmera no vídeo (painel de Rastreio aberto).
     val showTrack = ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking
-    androidx.compose.runtime.LaunchedEffect(store.playhead, showTrack, store.cameraTrack, store.primary) { store.refreshCameraFeatures(showTrack) }
+    val showCamera = showTrack && store.cameraTrackerVisible
+    androidx.compose.runtime.LaunchedEffect(store.playhead, showCamera, store.cameraTrack, store.primary) { store.refreshCameraFeatures(showCamera) }
     // Zoom da vista: cada projeto abre no encaixe (o motor pode trazer um zoom
     // salvo no arquivo; aqui a vista e o motor voltam juntos a 100 %).
     androidx.compose.runtime.LaunchedEffect(store) {
@@ -110,7 +111,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 .pointerInput(store) { stageGestures(store, ui, mapper, haptic) }
                 .drawBehind { drawStageOverlay(store, ui, mapper, insetPx) },
         )
-        if (showTrack && store.cameraFeatures != null && store.pointPick == null) {
+        if (showCamera && store.cameraFeatures != null && store.pointPick == null) {
             Spacer(Modifier.fillMaxSize().pointerInput(store, showTrack) {
                 detectTapGestures(
                     onTap = { point -> store.selectCameraPoint(mapper.cx(point.x), mapper.cy(point.y), 24.dp.toPx() / mapper.fit) },
@@ -928,7 +929,7 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
 ) {
     val degPerPx = 0.35f / 1.dp.toPx()
     val picked = store.scenePick(m.cx(down.position.x), m.cy(down.position.y), 36.dp.toPx() / m.fit)
-        ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind) }
+        ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind, LayerType.Light.kind) }
     var mode = 0            // 0 pendente, 1 órbita, 2 objeto, 3 pinça
     var last = down.position
     var span0 = 1f
@@ -1317,7 +1318,8 @@ private suspend fun PointerInputScope.stageGestures(
                 val d = store.detail
                 val cx = m.cx(downX)
                 val cy = m.cy(downY)
-                if (d != null && store.selection.size == 1 && activeAt(d, store.playhead) && LayerGeometry.contains(d, cx, cy, 0f)) {
+                val selectedSlack = if (d?.kind == LayerType.Model3D.kind && m.fit > 0f) hitSlack * (20f / 12f) / m.fit else 0f
+                if (d != null && store.selection.size == 1 && activeAt(d, store.playhead) && LayerGeometry.contains(d, cx, cy, selectedSlack)) {
                     target = TARGET_LAYER
                     targetLayer = d.id
                 } else {
@@ -1334,9 +1336,10 @@ private suspend fun PointerInputScope.stageGestures(
             }
         }
 
-        // Nulls and the active camera have no visible surface to hit.
+        // Nulls, the active camera and lights have no visible surface to hit:
+        // one finger moves the selected light (beta 07/10, light "doesn't follow").
         if (target == TARGET_EMPTY && store.selection.size == 1 &&
-            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind) &&
+            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind, LayerType.Light.kind) &&
             store.primary?.let { store.previewGestureBasis(it) } != null) {
             target = TARGET_LAYER; targetLayer = store.primary ?: 0L
         }
@@ -1456,7 +1459,10 @@ private suspend fun PointerInputScope.stageGestures(
         if (mode == MODE_PENDING && !multi && target != TARGET_HANDLE && m.valid) {
             val cx = m.cx(downX)
             val cy = m.cy(downY)
-            val hit = hitLayer(store, cx, cy, 0f, includeLocked = false)
+            val selected3D = store.detail?.takeIf { it.kind == LayerType.Model3D.kind && store.selection.size == 1
+                && activeAt(it, store.playhead) && store.layers.any { row -> row.id == it.id && row.visible && !row.locked }
+                && LayerGeometry.contains(it, cx, cy, if (m.fit > 0f) hitSlack * (20f / 12f) / m.fit else 0f) }?.id
+            val hit = selected3D ?: hitLayer(store, cx, cy, 0f, includeLocked = false)
                 ?: hitLayer(store, cx, cy, if (m.fit > 0f) hitSlack / m.fit else 0f, includeLocked = false)
             if (hit != null) {
                 if (store.primary != hit || store.selection.size != 1) store.select(hit)

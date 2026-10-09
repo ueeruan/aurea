@@ -542,7 +542,9 @@ data class EffectCatalogEntry(
     val paramCount: Int,
     val name: String,
     val category: String,
+    val flags: Int = 0,
 ) {
+    val isNew get() = flags and 1 != 0
     companion object {
         const val ROW_BYTES = 32
 
@@ -554,6 +556,7 @@ data class EffectCatalogEntry(
                 paramCount = rows.getInt(b + 8),
                 name = blob.utf8(rows.getInt(b + 12), rows.getInt(b + 16)),
                 category = blob.utf8(rows.getInt(b + 20), rows.getInt(b + 24)),
+                flags = rows.getInt(b + 28),
             )
         }
     }
@@ -863,6 +866,7 @@ object TrackProperty {
     const val FOCUS_DISTANCE = 17
     const val APERTURE = 18
     const val TIME_REMAP = 30
+    const val TEXT_TRACKING = 29
     const val EFFECT_PARAM = 31
     const val AUDIO_VOLUME = 32
     const val TEXT_ANIM_PARAM = 33

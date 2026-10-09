@@ -1404,6 +1404,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             if (!inst.asset) continue;
             const std::vector<Node>& nodes = inst.asset->nodes;
             for (usize n = 0; n < nodes.size(); ++n) {
+                if (!nodes[n].inScene) continue;
                 const i32 mi = nodes[n].mesh;
                 if (mi < 0 || mi >= static_cast<i32>(inst.asset->meshes.size())) continue;
                 const Mesh& mesh = inst.asset->meshes[static_cast<usize>(mi)];
@@ -1536,6 +1537,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             if (!gm) { incomplete_ = true; continue; }
             const std::vector<Node>& nodes = inst.asset->nodes;
             for (usize n = 0; n < nodes.size(); ++n) {
+                if (!nodes[n].inScene) continue;
                 const i32 mi = nodes[n].mesh;
                 if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
                 if (n < inst.pose().nodeOpacity.size() && inst.pose().nodeOpacity[n] < 0.5f) continue;   // letra sumindo não projeta
@@ -1649,6 +1651,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         const std::vector<Node>& nodes = inst.asset->nodes;
         std::unordered_map<const SceneBlock*, const SceneBlock*> sampleBlocks;
         for (usize n = 0; n < nodes.size(); ++n) {
+            if (!nodes[n].inScene) continue;
             const i32 mi = nodes[n].mesh;
             if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
             const f32 nodeAlpha = n < inst.pose().nodeOpacity.size() ? inst.pose().nodeOpacity[n] : 1.0f;

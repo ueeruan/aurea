@@ -68,16 +68,18 @@ struct SheetAction {
 /// Android — a mão aprende a posição, não o texto.
 struct AureaActionSheet: View {
     private let title: String
+    private let message: String?
     private let items: [SheetAction]
     private let onDismiss: () -> Void
 
-    init(title: String, items: [(String, () -> Void)], onDismiss: @escaping () -> Void) {
+    init(title: String, message: String? = nil, items: [(String, () -> Void)], onDismiss: @escaping () -> Void) {
         self.title = title
+        self.message = message
         self.items = items.map { SheetAction($0.0, onClick: $0.1) }
         self.onDismiss = onDismiss
     }
-    init(title: String, actions: [SheetAction], onDismiss: @escaping () -> Void) {
-        self.title = title; self.items = actions; self.onDismiss = onDismiss
+    init(title: String, message: String? = nil, actions: [SheetAction], onDismiss: @escaping () -> Void) {
+        self.title = title; self.message = message; self.items = actions; self.onDismiss = onDismiss
     }
 
     var body: some View {
@@ -94,6 +96,11 @@ struct AureaActionSheet: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, AureaDims.dialogPadH)
                             .padding(.vertical, 13.5)
+                        divider
+                    }
+                    if let message, !message.isEmpty {
+                        Text(message).font(.aurea(size: 13)).foregroundStyle(AureaColors.actionSheetText)
+                            .multilineTextAlignment(.center).padding(.horizontal, AureaDims.dialogPadH).padding(.vertical, 12)
                         divider
                     }
                     ForEach(Array(items.enumerated()), id: \.offset) { index, item in
@@ -451,11 +458,12 @@ struct NumericKeypadSheet: View {
 struct ActionSheetRequest: Identifiable {
     let id = UUID()
     let title: String
+    let message: String?
     let actions: [SheetAction]
-    init(title: String, items: [(String, () -> Void)]) {
-        self.title = title; self.actions = items.map { SheetAction($0.0, onClick: $0.1) }
+    init(title: String, message: String? = nil, items: [(String, () -> Void)]) {
+        self.title = title; self.message = message; self.actions = items.map { SheetAction($0.0, onClick: $0.1) }
     }
-    init(title: String, actions: [SheetAction]) { self.title = title; self.actions = actions }
+    init(title: String, message: String? = nil, actions: [SheetAction]) { self.title = title; self.message = message; self.actions = actions }
 }
 
 struct NamePromptRequest: Identifiable {

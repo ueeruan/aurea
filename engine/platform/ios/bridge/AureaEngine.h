@@ -521,6 +521,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)groupCameraPassThrough:(long long)layerId;
 /// "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição.
 - (BOOL)setLayerAcceptsLights:(BOOL)on forLayer:(long long)layerId;
+/// Opt into the scene camera without changing the layer's transform.
+- (BOOL)enableLayer3D:(long long)layerId;
 /// −1 = camada sem a opção (câmera, luz, modelo 3D, áudio, nulo); 0/1.
 - (int32_t)layerAcceptsLights:(long long)layerId;
 /// "" = deu certo; senão o motivo da recusa.
@@ -599,6 +601,8 @@ NS_SWIFT_NAME(AureaEngine)
 /// 7 texturas · 8 maior lado · 9 orçamento · 10..12 cabe · 13..15 pico ·
 /// 16..18 triângulos que ficam · 19..21 teto de textura (por qualidade).
 - (NSArray<NSNumber*>*)inspectModel:(NSString*)path;
+/// Shared ZIP extraction; destination must not exist. Relative paths and CRCs are preserved.
++ (nullable NSArray<NSString*>*)extractModelArchive:(NSString*)archive to:(NSString*)directory;
 /// Etapa (ImportPhase) × 1000 + fração × 1000 do import em curso.
 - (int)importModelProgress;
 - (void)cancelModelImport;
@@ -617,6 +621,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)addShape:(uint32_t)preset;
 - (long long)addText:(nullable NSString*)content;
 - (NSString*)playbackReport;
+/// Position actually presented by the audio output, in timeline nanoseconds.
+- (int64_t)audioPositionNs;
 - (BOOL)setRawPlayback:(BOOL)enabled;
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance;
 - (NSArray<NSNumber*>*)sceneGuides;
@@ -790,7 +796,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)isFillerWord:(NSString*)word NS_SWIFT_NAME(isFillerWord(_:));
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options;
 - (uint32_t)captionCount:(long long)layerId;
-- (NSArray<NSDictionary<NSString*, id>*>* _Nullable)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language error:(NSError* _Nullable * _Nullable)error;
+- (NSArray<NSDictionary<NSString*, id>*>* _Nullable)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language translateEnglish:(BOOL)translateEnglish error:(NSError* _Nullable * _Nullable)error;
 - (int)captionProgress:(BOOL)cancel;
 - (NSString*)captionTracks;
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name;
@@ -857,7 +863,9 @@ NS_SWIFT_NAME(AureaEngine)
 /// A bola de um material pronto do texto 3D (0..6), no mesmo formato.
 - (nullable NSData*)text3DPresetPreview:(uint32_t)preset size:(uint32_t)size;
 - (int64_t)removeGaps;
+/// 0/1 trim absoluto, 2 slip, 3/4 roll, 5 slide; 6 move ao quadro absoluto.
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next;
+- (uint32_t)queryClipTimeActions:(long long)layerId frame:(int64_t)frame;
 - (BOOL)trimComposition:(int64_t)frame;
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));
 /// [enabled, shutterAngle, shutterPhase, samples, adaptiveLimit, previewSamples].

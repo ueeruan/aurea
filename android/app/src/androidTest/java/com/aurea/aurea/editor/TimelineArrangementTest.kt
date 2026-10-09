@@ -15,7 +15,7 @@ import org.junit.Test
 class TimelineArrangementTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun distributeUnequalClipsAndUndoThroughTheActualToolbar() {
+    @Test fun compactSelectionKeepsAlignmentAndTrimWithOneUndo() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))
         lateinit var store: EditorStore
@@ -38,33 +38,17 @@ class TimelineArrangementTest {
             store.selectAll()
         }
         compose.waitUntil(5000) { store.selection.size == 3 && store.layers.map { it.startFrame } == listOf(10, 12, 71) }
-        compose.onNodeWithTag("timeline.arrange.3").performScrollTo().performClick()
-        compose.waitUntil(5000) { store.layers.map { it.startFrame } == listOf(10, 41, 71) }
-        compose.runOnIdle {
-            assertEquals(ids, store.layers.map { it.id })
-            assertEquals(listOf(10, 25, 7), store.layers.map { it.endFrame - it.startFrame })
-            store.undo()
-        }
-        compose.waitUntil(5000) { store.layers.map { it.startFrame } == listOf(10, 12, 71) }
-        compose.onNodeWithTag("timeline.arrange.4").performScrollTo().performClick()
-        compose.waitUntil(5000) { store.layers.map { it.startFrame } == listOf(10, 33, 71) }
-        compose.runOnIdle { store.undo() }
-        compose.waitUntil(5000) { store.layers.map { it.startFrame } == listOf(10, 12, 71) }
-        compose.runOnIdle { store.seek(100) }
-        compose.waitUntil(5000) { store.playhead == 100 }
-        compose.onNodeWithTag("timeline.arrange.6").performScrollTo().performClick()
-        compose.waitUntil(5000) { store.layers.all { it.endFrame == 100 } }
-        compose.runOnIdle {
-            assertEquals(listOf(90, 75, 93), store.layers.map { it.startFrame })
-            store.undo()
-        }
-        compose.waitUntil(5000) { store.layers.map { it.startFrame } == listOf(10, 12, 71) }
-        compose.onNodeWithTag("timeline.arrange.5").performScrollTo().performClick()
-        compose.waitUntil(5000) { store.layers.all { it.startFrame == 100 } }
-        compose.runOnIdle {
-            assertEquals(listOf(10, 25, 7), store.layers.map { it.endFrame - it.startFrame })
-            store.undo()
-        }
-        compose.waitUntil(5000) { store.layers.map { it.startFrame } == listOf(10, 12, 71) }
+        compose.onNodeWithTag("timeline.batch.tools").assertIsDisplayed()
+        for (mode in 3..6) compose.onNodeWithTag("timeline.arrange.$mode").assertDoesNotExist()
+        compose.onNodeWithTag("stagger_row").assertDoesNotExist()
+        val align = com.aurea.aurea.ui.i18n.AppText.get(context, com.aurea.aurea.R.string.editor_alinhar_inicios)
+        compose.onNodeWithContentDescription(align).performClick()
+        compose.waitUntil(5000) { store.layers.all { it.startFrame == 10 } }
+        compose.runOnIdle { assertEquals(listOf(10, 25, 7), store.layers.map { it.endFrame - it.startFrame }); store.seek(15) }
+        val trim = com.aurea.aurea.ui.i18n.AppText.get(context, com.aurea.aurea.R.string.editor_aparar_inicio_cabecote)
+        compose.onNodeWithContentDescription(trim).performClick()
+        compose.waitUntil(5000) { store.layers.all { it.startFrame == 15 } }
+        compose.runOnIdle { assertEquals(listOf(20, 35, 17), store.layers.map { it.endFrame }); store.undo() }
+        compose.waitUntil(5000) { store.layers.all { it.startFrame == 10 } }
     }
 }

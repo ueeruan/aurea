@@ -2,6 +2,7 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/media/PreviewBuffer.hpp"
+#include "aurea/timeline/Layer.hpp"
 #include <limits>
 
 using namespace aurea;
@@ -81,4 +82,33 @@ AUREA_TEST(MotionExtras, BufferRespectsDecoderAndMemoryCapacity) {
     AUREA_CHECK_EQ(preview_buffer_frames(33333,-1,20),6u);
     AUREA_CHECK_EQ(preview_buffer_frames(33333,1,0),0u);
     AUREA_CHECK_EQ(preview_buffer_frames(0,1,20),0u);
+}
+
+AUREA_TEST(MotionExtras, MoveAlongPathUsesClipClockAndExplicitGuide) {
+    struct PathResources : EffectResources {
+        f32 phase = -1; u64 guide = 0;
+        TextureHandle curve_lut(const CurveData&) noexcept override { return {}; }
+        std::vector<Vec4> repeat_path(const Layer*, u32 count, f32 progress, u64 id) noexcept override {
+            AUREA_CHECK_EQ(count, 1u); phase = progress; guide = id;
+            return {{100 * progress, 40, kDeg2Rad * 90, 0}};
+        }
+    } resources;
+    MotionFixture f("aurea.move.path"); Layer layer; layer.offset = FrameIndex{45};
+    f.eval.layer = &layer; f.eval.resources = &resources;
+    f.values[0].ref = 123;
+    f.eval.localTime = FrameIndex{75}; f.eval.framesPerSecond = 30;
+    f.eval.effect->resolve_resources(f.eval);
+    AUREA_CHECK_NEAR(resources.phase, .5f, 1e-6); AUREA_CHECK_EQ(resources.guide, 123u);
+    f32 opacity = 0; const auto m = f.matrix(75, 30, opacity);
+    const auto center = m * Vec4{50, 40, 0, 1};
+    AUREA_CHECK_NEAR(center.x, 50, 1e-5); AUREA_CHECK_NEAR(center.y, 40, 1e-5);
+    AUREA_CHECK_NEAR(m.col[0].y, 1, 1e-5);
+    f.eval.localTime = FrameIndex{165}; f.eval.effect->resolve_resources(f.eval);
+    AUREA_CHECK_NEAR(resources.phase, 1, 1e-6);
+    f.values[5] = ParamValue::scalar(1); f.eval.effect->resolve_resources(f.eval);
+    AUREA_CHECK_NEAR(resources.phase, 0, 1e-6);
+    f.values[3] = ParamValue::scalar(0); f.values[1] = ParamValue::scalar(25);
+    f.eval.effect->resolve_resources(f.eval); AUREA_CHECK_NEAR(resources.phase, .25f, 1e-6);
+    f.eval.pathSamples.reset(); const auto identity = f.matrix(75, 30, opacity);
+    AUREA_CHECK_EQ(identity.col[3], Mat4::identity().col[3]);
 }

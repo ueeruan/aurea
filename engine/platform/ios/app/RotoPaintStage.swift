@@ -10,6 +10,7 @@ import SwiftUI
     @Published var layer: Int64 = 0
     @Published var effect: UInt32 = 0
     @Published var active = false
+    var previousView: UInt32 = 0
     @Published var background = false
     /// Raio do pincel em px da composição.
     @Published var radius: CGFloat = 24
@@ -18,6 +19,14 @@ import SwiftUI
     @Published var status: [Int64] = [0, 0, 0, 0, 0, 0]
 
     func painting(_ model: AureaModel) -> Bool { active && model.primarySelection == layer }
+
+    func end(_ model: AureaModel) {
+        guard active else { return }
+        _ = model.engine.rotoSetView(previousView, effect: effect, layer: layer)
+        active = false
+        live = []
+        model.refreshModel(force: true)
+    }
 
     func refresh(_ model: AureaModel) {
         status = model.engine.rotoStatus(effect: effect, layer: layer).map { $0.int64Value }
@@ -86,6 +95,7 @@ import SwiftUI
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var roto = RotoPaintState.shared
     let effectId: UInt32
+    let previousView: UInt32
     private let timer = Timer.publish(every: 0.3, on: .main, in: .common).autoconnect()
 
     private func chip(_ key: String, _ id: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
@@ -109,8 +119,13 @@ import SwiftUI
         VStack(alignment: .leading, spacing: 6) {
             if !mine {
                 chip("roto_paint", "fx.roto.paint", false) {
+                    // Outra sessão aberta: devolve a visualização dela antes.
+                    roto.end(model)
+                    model.pause()
+                    roto.background = false
                     roto.layer = layer
                     roto.effect = effectId
+                    roto.previousView = previousView
                     roto.active = true
                     _ = model.engine.rotoSetView(2, effect: effectId, layer: layer)
                     roto.refresh(model)
@@ -144,10 +159,7 @@ import SwiftUI
                         roto.refresh(model)
                     }
                     chip("roto_done", "fx.roto.done", false) {
-                        _ = model.engine.rotoSetView(0, effect: effectId, layer: layer)
-                        roto.active = false
-                        roto.live = []
-                        model.refreshModel(force: true)
+                        roto.end(model)
                     }
                 }
                 if roto.status[2] != 0 && roto.status[1] > 0 {
@@ -161,5 +173,10 @@ import SwiftUI
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 6)
         .onReceive(timer) { _ in if mine { roto.refresh(model) } }
+        // Fechar o painel encerra o modo pintar (Stage Android: DisposableEffect):
+        // o palco deixa de comer toques e a sobreposição não fica no preview.
+        .onDisappear {
+            if roto.active && roto.layer == layer && roto.effect == effectId { roto.end(model) }
+        }
     }
 }

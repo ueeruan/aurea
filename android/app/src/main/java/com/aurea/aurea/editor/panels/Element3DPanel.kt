@@ -124,7 +124,7 @@ internal fun Element3DPanel(env: PanelEnv) {
                 }
                 Tab3D.Light -> LightSceneTab(env, objectSettings = !camera)
                 Tab3D.Anim -> when {
-                    text != null -> TextAnimSection(env, showAnimatorEffect = false)
+                    text != null -> AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
                     shape != null -> Text3DAnimSection(env, parts = true)
                 }
             }
@@ -191,7 +191,22 @@ private val FinishLabels = listOf(
 @Composable
 private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
     val store = env.store
+    val hasTexture = remember(store.primary, store.detail, store.curveRevision) { store.hasText3DTexture() }
+    val texturePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) store.setShapePartImage(-1, uri, textTexture = true)
+    }
     var advanced by rememberSaveable { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.environment_texture), modifier = Modifier.weight(1f), style = AureaType.BodySmall)
+        Box(Modifier.testTag("text3d.texture.pick")) {
+            KitChip(stringResource(if (hasTexture) R.string.shape3d_image_change else R.string.shape3d_image_pick), on = hasTexture) {
+                texturePicker.launch(arrayOf("image/*"))
+            }
+        }
+        if (hasTexture) Box(Modifier.testTag("text3d.texture.clear")) {
+            KitChip(stringResource(R.string.shape3d_image_clear), on = false) { store.clearText3DTexture() }
+        }
+    }
     KitTitle(stringResource(R.string.ui3d_ready_materials))
     ChipRow {
         (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
@@ -254,8 +269,8 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
 private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
     val store = env.store
     var fontsOpen by remember { mutableStateOf(false) }
-    val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) store.importFont(uri, forText3d = true)
+    val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        store.importFonts(uris, forText3d = true)
     }
     KitTitle(stringResource(R.string.ui3d_text))
     ChipRow {
@@ -519,8 +534,9 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
             }
             KitTitle(stringResource(R.string.scene_tonemap))
             ChipRow {
-                KitChip("PBR Neutral", on = settings[3] == 0f) { change(3, 0f) }
-                KitChip("AgX", on = settings[3] == 1f) { change(3, 1f) }
+                listOf("PBR Neutral", "AgX", "AgX Punchy", "AgX Golden", "Uchimura", "ACES SDR").forEachIndexed { i, label ->
+                    KitChip(label, on = settings[3].toInt() == i) { change(3, i.toFloat()) }
+                }
             }
             SceneRow(env, stringResource(R.string.scene_exposure), settings[4].coerceIn(.01f, 4f) * 100f, 1f, 1f, 400f, "%", 100f, null) {
                 change(4, it / 100f)

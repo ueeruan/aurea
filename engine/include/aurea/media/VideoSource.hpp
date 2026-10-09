@@ -139,6 +139,14 @@ public:
     /// para acordar o render quando estava esperando por ele.
     void set_ready_callback(void (*fn)(void*), void* ctx) noexcept;
 
+    /// Contador de TRABALHO do decoder (MediaManager::decode_work): +1 a cada
+    /// quadro decodificado, inclusive os descartados a caminho do alvo depois
+    /// de um seek. Um quadro entregue acorda o render; andar um GOP longo não
+    /// entrega nada e mesmo assim é progresso — o export não pode dar a mídia
+    /// como perdida enquanto o decoder trabalha (ExportWatchdog.hpp). Antes do
+    /// start(); o contador vive mais que a fonte.
+    void set_work_counter(std::atomic<u64>* counter) noexcept { workCounter_ = counter; }
+
     /// Espera (teste/export) até o frame exato estar no cache ou o tempo
     /// acabar. Nunca chamado no preview.
     [[nodiscard]] bool wait_for(i64 targetUs, u32 timeoutMs) noexcept;
@@ -203,6 +211,7 @@ private:
 
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
+    std::atomic<u64>* workCounter_ = nullptr;   ///< set_work_counter (só a thread de decode incrementa)
 
     mutable std::mutex statsMutex_;
     Stats stats_{};

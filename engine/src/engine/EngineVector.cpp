@@ -407,6 +407,7 @@ static_assert(Engine::kShapeParamCount == shape::kParamTotal, "parâmetros da fo
 
 u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || !out || capacity < kShapeParamFloats) return 0;
@@ -432,6 +433,7 @@ u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
 
 bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;
@@ -459,6 +461,7 @@ bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing)
 
 bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;
@@ -480,6 +483,7 @@ bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
 
 bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;

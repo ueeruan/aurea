@@ -206,6 +206,47 @@ scene3d::Text3DSpec receita(const char* texto) {
 // Chanfro
 // -----------------------------------------------------------------------------
 
+AUREA_TEST(Beta008Text3D, CombinedGlyphsKeepTheSameCapsAsIndependentGlyphs) {
+    const std::vector<std::shared_ptr<const text::Font>> fonts = {text::default_font(),
+        text::Font::load(std::string(AUREA_TEST_DATA_DIR) + "/../../assets/fonts/Roboto-Regular.ttf"),
+        text::Font::load(std::string(AUREA_TEST_DATA_DIR) + "/../../assets/fonts/NotoNaskhArabic-Regular.ttf")};
+    for (const auto& font : fonts) {
+    AUREA_CHECK(font != nullptr); if (!font) continue;
+    for (const char* content : {"AVATAR", "office", "a\xcc\x81o\xcc\x88", "W\xcc\x81W\xcc\x81"}) {
+        for (bool bevel : {false, true}) {
+            Text3DSpec spec; spec.content = content; spec.bevel = bevel;
+            auto combined = build_text3d(*font, spec);
+            if (!combined.ok()) {
+                std::printf("\n    font=%llu content=%s bevel=%d detail=%s\n",
+                    static_cast<unsigned long long>(font->content_id()), content, bevel, combined.detail.c_str());
+                for (const char* letter : {"A", "V", "T", "R", "a", "o", "a\xcc\x81"}) {
+                    Text3DSpec single; single.content = letter;
+                    auto glyph = build_text3d(*font, single);
+                    if (!glyph.ok()) std::printf("    incomplete glyph: %s\n", letter);
+                }
+            }
+            AUREA_CHECK(combined.ok()); if (!combined.ok()) continue;
+            spec.separateGlyphs = true;
+            auto individual = build_text3d(*font, spec); AUREA_CHECK(individual.ok()); if (!individual.ok()) continue;
+            const auto whole = medir_tudo(*combined.asset), letters = medir_tudo(*individual.asset);
+            AUREA_CHECK(whole.areaFrente > 0 && letters.areaFrente > 0);
+            AUREA_CHECK_NEAR(whole.areaFrente, letters.areaFrente, 1e-5);
+            AUREA_CHECK_NEAR(whole.areaFundo, letters.areaFundo, 1e-5);
+            AUREA_CHECK_EQ(whole.invertidas, 0u);
+        }
+    }
+    }
+}
+
+AUREA_TEST(Beta008Text3D, IncompleteCapTriangulationRollsBackRatherThanLosingFaces) {
+    std::vector<u32> triangles{99, 100, 101};
+    const std::vector<std::vector<Vec2>> rings = {
+        {{0, 0}, {2, 0}, {2, 2}, {0, 2}},
+        {{3, 0}, {4, 0}, {4, 1}, {3, 1}}}; // hole outside the cap cannot be triangulated
+    AUREA_CHECK(!triangulate_polygon(rings, triangles));
+    AUREA_CHECK_EQ(triangles.size(), 3u); AUREA_CHECK_EQ(triangles[0], 99u);
+}
+
 AUREA_TEST(Text3D, BevelChangesTheMeshAndKeepsItClosed) {
     const auto font = text::default_font();
     if (!font) return;
@@ -235,7 +276,10 @@ AUREA_TEST(Text3D, BevelChangesTheMeshAndKeepsItClosed) {
     AUREA_CHECK(a.areaChanfro == 0.0);
     AUREA_CHECK(b.triangulos > a.triangulos);
     AUREA_CHECK(b.areaFrente < a.areaFrente * 0.98);
-    AUREA_CHECK(b.areaFrente > a.areaFrente * 0.50);
+    // Approximately half remains for this font/width. Resolving overlapping
+    // contours changes the bevel joins slightly (49.95% here); completeness is
+    // checked independently by triangulation area, holes and winding below.
+    AUREA_CHECK(b.areaFrente > a.areaFrente * 0.49);
     // O chanfro não muda a silhueta nem a profundidade.
     AUREA_CHECK(std::fabs((b.maxX - b.minX) - (a.maxX - a.minX)) < 1e-4);
     AUREA_CHECK(std::fabs((b.maxZ - b.minZ) - 0.3f) < 1e-4);

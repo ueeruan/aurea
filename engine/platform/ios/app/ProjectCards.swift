@@ -562,6 +562,40 @@ struct HomeContinueCard: View {
 }
 /// O cartão da grade: miniatura (raio 12), o nome, a ficha e as reticências.
 /// Escolhendo vários, o toque marca em vez de abrir.
+struct HomeProjectRow: View {
+    let entry: HomeProjectEntry
+    let selecting: Bool
+    let marked: Bool
+    let onOpen: () -> Void
+    let onMenu: () -> Void
+    let onMark: () -> Void
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                ZStack {
+                    HomeThumbnail(url: entry.thumbnailURL, stamp: entry.modified, maxPx: 256, ratio: homeProjectRatio(entry))
+                    if selecting {
+                        CupertinoGlyph.text(marked ? CupertinoGlyph.CheckmarkCircleFill : CupertinoGlyph.Circle,
+                            size: 28, color: marked ? AureaColors.accent : AureaColors.text)
+                    }
+                }.frame(width: 84, height: 84).clipped().clipShape(RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.title).font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.text).lineLimit(2)
+                    Text(homeProjectSpec(entry)).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).lineLimit(2)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Button(action: selecting ? onMark : onMenu) {
+                    CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 20, color: AureaColors.muted)
+                        .frame(width: 48, height: 48).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("home_menu_content"))
+            }.padding(.horizontal, HomeDims.gutter).padding(.vertical, 12).frame(minHeight: 112)
+                .background(selecting && marked ? AureaColors.accentDim : AureaColors.background)
+                .contentShape(Rectangle()).homeTapOrLong(selecting ? onMark : onOpen, long: selecting ? onMark : onMenu)
+                .accessibilityAddTraits(selecting && marked ? .isSelected : [])
+            AureaColors.border.frame(height: 0.5).padding(.leading, 120).padding(.trailing, HomeDims.gutter)
+        }
+    }
+}
+
 struct HomeProjectCard: View {
     let entry: HomeProjectEntry
     let selecting: Bool
@@ -703,7 +737,7 @@ struct HomeBarButton: View {
     var body: some View {
         Button(action: action) {
             CupertinoGlyph.text(glyph, size: 19, color: AureaColors.muted)
-                .padding(HomeDims.s2)
+                .frame(width: 48, height: 48)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

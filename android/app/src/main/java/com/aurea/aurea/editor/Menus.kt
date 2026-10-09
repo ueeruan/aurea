@@ -105,8 +105,11 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
     ShellMenuSheet(onDismiss) {
         MenuSection(stringResource(R.string.editor_camada))
         // Sem o que já está à vista (nada duas vezes): renomear é o nome no
-        // topo, excluir é a lixeira do topo, aparar/dividir/velocidade/volume
-        // moram na doca, entrar/desagrupar grupo na fileira rápida.
+        // topo, excluir é a lixeira do topo, aparar/dividir moram na doca.
+        // Velocidade e ações de grupo ficam neste menu contextual.
+        if (type == LayerType.Video || type == LayerType.Audio) {
+            MenuItemRow(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), act { openPanel(store, ui, EditorPanel.Speed) })
+        }
         // O cadeado não fecha a folha: o rótulo troca na hora.
         MenuItemRow(
             if (row.locked) ShellGlyph.LockOpenFill else CupertinoGlyph.LockFill,
@@ -212,6 +215,8 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             if (type != LayerType.Group) {
                 MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_converter_grupo), act { store.precompose(listOf(id)) })
             } else {
+                MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), act { store.openPrecomp(id) })
+                MenuItemRow(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), act { store.ungroupPrecomp(id) })
                 MenuItemRow(
                     CupertinoGlyph.Camera,
                     stringResource(R.string.la_group_camera),
@@ -286,7 +291,7 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
             // Rastreio de PONTO e estabilização (o rastreio de câmera virou efeito).
             MenuSection(stringResource(R.string.editor_rastreio))
             // O painel inteiro (ponto, planar, cantos, estabilizador) sem já pedir o ponto.
-            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.dock2_tracking_tools), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking) },
+            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.dock2_tracking_tools), act { store.select(id); store.cameraTrackerVisible = false; openPanel(store, ui, EditorPanel.Tracking) },
                 detail = stringResource(R.string.dock2_tracking_tools_detail))
             MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_rastrear_ponto), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking); store.beginPointPick(false) },
                 detail = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras))

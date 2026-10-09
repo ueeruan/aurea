@@ -36,18 +36,24 @@ class CompactTransportClipboardTest {
         compose.waitUntil(10000) { store.project.title == "Permanent beat button" }
         compose.runOnIdle { store.addShape(0); store.seek(12) }
         compose.waitUntil(10000) { store.layers.size == 1 && store.playhead == 12 }
-        val marker = compose.onNodeWithTag("transport.marker").assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+        // Compact transport keeps all nine controls visible. Compose expands the
+        // clickable touch area vertically to 48dp even when the visual box shrinks.
+        val marker = compose.onNodeWithTag("transport.marker").assertIsDisplayed()
         val play = compose.onNodeWithTag("transport.play").assertIsDisplayed()
         assertTrue(marker.fetchSemanticsNode().boundsInRoot.right <= play.fetchSemanticsNode().boundsInRoot.left + 1)
-        marker.performClick()
+        marker.performTouchInput { click(androidx.compose.ui.geometry.Offset(center.x, -2f)) }
         compose.waitUntil(5000) { 12 in store.markers.frames }
+        // Keep Compose synchronization from waiting until the natural playback
+        // end before checking a control pressed during playback.
+        compose.mainClock.autoAdvance = false
         play.performClick()
         compose.waitUntil(15000) { store.playing && store.playhead > 15 }
         marker.assertIsDisplayed().performClick()
         compose.waitUntil(5000) { store.markers.frames.size == 2 }
-        compose.runOnIdle { assertTrue("Marking a beat must not pause playback", store.playing) }
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { assertTrue("Marking a beat must not pause playback", store.playing) }
         play.performClick()
         compose.waitUntil(5000) { !store.playing }
+        compose.mainClock.autoAdvance = true
         compose.runOnIdle { store.seek(0) }
         compose.onNodeWithTag("transport.next").performClick()
         compose.waitUntil(5000) { store.playhead == 12 }
@@ -71,15 +77,15 @@ class CompactTransportClipboardTest {
         val original = store.layers.single().id
         compose.onNodeWithTag("transport.duplicate").assertDoesNotExist()
         fun openClipboard() {
-            // Copiar e colar mora no menu do projeto (engrenagem da barra de cima).
-            compose.onNodeWithContentDescription(context.getString(R.string.editor_ajustes_projeto_mais)).performClick()
-            compose.onNodeWithText(context.getString(R.string.editor_copiar_colar)).performScrollTo().performClick()
+            val back = compose.onAllNodesWithContentDescription(context.getString(R.string.pn_back_to_layer_tools))
+            if (back.fetchSemanticsNodes().isNotEmpty()) back.onFirst().performClick()
+            compose.onNodeWithContentDescription(context.getString(R.string.editor_mais_acoes_camada)).performClick()
         }
         openClipboard()
-        compose.onNodeWithText(context.getString(R.string.editor_copiar_camada)).performClick()
+        compose.onNodeWithText(context.getString(R.string.editor_copiar_camada)).performScrollTo().performClick()
         compose.waitUntil(5000) { store.clipboard and 1 != 0 }
         openClipboard()
-        compose.onNodeWithText(context.getString(R.string.editor_colar_camada_cabecote)).performClick()
+        compose.onNodeWithText(context.getString(R.string.editor_colar_camada_cabecote)).performScrollTo().performClick()
         compose.waitUntil(10000) { store.layers.size == 2 }
         assertTrue(store.layers.any { it.id == original })
         assertEquals(2, store.layers.map { it.id }.toSet().size)

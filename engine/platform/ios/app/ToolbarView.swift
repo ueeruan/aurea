@@ -531,9 +531,9 @@ private struct ShellMenuRow: View {
         }
         .allowsHitTesting(shell.sheet != nil || shell.linkAnchor != nil || shell.resolutionAnchor != nil)
         .sheet(item: $replaceTarget) { target in
-            ShellMediaPicker(filter: .any(of: [.images, .videos])) { url, video in
+            ShellMediaPicker(selectionLimit: 1, filter: .any(of: [.images, .videos])) { items in
                 replaceTarget = nil
-                if let url { model.replaceMedia(layer: target.id, url: url, video: video) }
+                if let (url, video) = items.first { model.replaceMedia(layer: target.id, url: url, video: video) }
             }
         }
         .sheet(item: $infoTarget) { target in MediaInfoSheetView(path: model.layerSourcePath(target.id)) }
@@ -579,8 +579,11 @@ private struct ShellMenuRow: View {
             let inside = model.status.playhead > Int64(row.startFrame) && model.status.playhead < Int64(row.endFrame)
             ShellMenuSection("editor_camada")
             // Sem o que já está à vista (nada duas vezes): renomear é o nome no
-            // topo, excluir é a lixeira do topo, aparar/dividir/velocidade/volume
-            // moram na doca, entrar/desagrupar grupo na fileira rápida.
+            // topo, excluir é a lixeira do topo, aparar/dividir moram na doca.
+            // Velocidade e ações de grupo ficam neste menu contextual.
+            if row.kind == 1 || row.kind == 3 {
+                ShellMenuRow(CupertinoGlyph.Speedometer, "editor_velocidade") { act { model.openPanel(.speed) } }
+            }
             ShellMenuRow(row.locked ? ShellGlyph.LockOpenFill : CupertinoGlyph.LockFill, row.locked ? "editor_desbloquear_camada" : "editor_bloquear_camada",
                          detail: row.locked ? "editor_volta_aceitar_movimento_edicao" : "editor_nao_aceita_movimento_corte_nem_edicao") { model.mutate { $0.setLayer(row.id, locked: !row.locked) }; model.refreshModel(force: true) }
             ShellMenuRow(row.visible ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, row.visible ? "editor_ocultar_camada" : "editor_mostrar_camada") { model.mutate { $0.setLayer(row.id, visible: !row.visible) }; model.refreshModel(force: true) }
@@ -640,6 +643,8 @@ private struct ShellMenuRow: View {
             if row.kind != 3 {
                 ShellMenuSection("editor_grupo")
                 if row.kind == 12 {
+                    ShellMenuRow(CupertinoGlyph.ArrowDownRightSquare, "editor_entrar_grupo") { act { model.openGroup(row.id) } }
+                    ShellMenuRow(ShellGlyph.SquareSplit2x2, "editor_desagrupar") { act { model.ungroup(row.id) } }
                     let through = model.engine.groupCameraPassThrough(row.id) == 1
                     ShellMenuRow(CupertinoGlyph.Camera, "la_group_camera", checked: through, detail: "la_group_camera_hint") {
                         if model.engine.setGroupCameraPassThrough(!through, forLayer: row.id) {
@@ -707,7 +712,7 @@ private struct ShellMenuRow: View {
                 // Rastreio de PONTO e estabilização (o rastreio de câmera virou efeito).
                 ShellMenuSection("editor_rastreio")
                 // O painel inteiro (ponto, planar, cantos, estabilizador) sem já pedir o ponto.
-                ShellMenuRow(ShellGlyph.Viewfinder, "dock2_tracking_tools", detail: "dock2_tracking_tools_detail") { act { model.select(layerId: row.id); model.openPanel(.tracking) } }
+                ShellMenuRow(ShellGlyph.Viewfinder, "dock2_tracking_tools", detail: "dock2_tracking_tools_detail") { act { model.select(layerId: row.id); model.cameraTrackerVisible = false; model.openPanel(.tracking) } }
                 ShellMenuRow(ShellGlyph.Viewfinder, "editor_rastrear_ponto", detail: "editor_cria_nulo_segue_ponto_ligue_outras") { act { model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: false) } }
                 ShellMenuRow(ShellGlyph.Viewfinder, "editor_estabilizar_pelo_ponto", detail: "editor_move_video_ponto_ficar_parado_tela") { act { model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: true) } }
             }

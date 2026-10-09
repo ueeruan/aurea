@@ -462,7 +462,7 @@ struct EffectCatalogRow {
     u32 nameLength      = 0;   // +16
     u32 categoryOffset  = 0;   // +20
     u32 categoryLength  = 0;   // +24
-    u32 reserved        = 0;   // +28
+    u32 reserved        = 0;   // +28 catalog flags: bit 0 = new in this release
 };
 static_assert(sizeof(EffectCatalogRow) == 32, "EffectCatalogRow e contrato de ABI");
 

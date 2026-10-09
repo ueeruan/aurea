@@ -36,6 +36,7 @@
 #import <CoreVideo/CoreVideo.h>
 #import <ImageIO/ImageIO.h>
 #import <VideoToolbox/VideoToolbox.h>
+#include "aurea/text/Text.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -2073,6 +2074,13 @@ const char* ios_default_font_path() {
         if (access(path, R_OK) == 0) return path;
     }
     return "";   // o motor procura sozinho (FontManager varre /System/Library/Fonts)
+}
+
+void ios_install_text_fallback() {
+    // The shared engine discovers bundled Noto Japanese and Arabic beside
+    // Roboto, exactly as Android does. Use its existing API instead of a
+    // platform provider that is not implemented by the shared text engine.
+    text::set_default_font_path(ios_default_font_path());
 }
 
 } // namespace aurea::ios

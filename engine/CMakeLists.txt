@@ -124,6 +124,13 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/GlitchEffects.cpp
     src/effects/builtin/TemporalEffects.cpp
     src/effects/builtin/TransitionEffects.cpp
+    src/effects/builtin/ProceduralWipeEffects.cpp
+    src/effects/builtin/LensGradientEffect.cpp
+    src/effects/builtin/PixelEncoderEffect.cpp
+    src/effects/builtin/StarglowEffect.cpp
+    src/effects/builtin/PixDitherEffect.cpp
+    src/effects/builtin/VideoGlitchEffect.cpp
+    src/effects/builtin/DisplaceTransformEffect.cpp
     src/effects/builtin/OpticalEffects.cpp
     src/effects/builtin/CornerPinEffect.cpp
     src/effects/builtin/MediaLabEffects.cpp

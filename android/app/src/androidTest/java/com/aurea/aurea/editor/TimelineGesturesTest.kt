@@ -162,7 +162,14 @@ class TimelineGesturesTest {
             assertTrue(store.selection.isEmpty())
             assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
         }
-        timeline().performTouchInput { click(Offset(width * .72f, 54 * density)) }
+        stabilityScreenshot("timeline-diagonal-scrolled.png")
+        // Inertia can leave the first row clipped or its inter-row gap at the
+        // probe coordinate; stopping it and probing a neighboring row is valid.
+        for (y in listOf(54f, 72f, 90f)) {
+            timeline().performTouchInput { advanceEventTime(150); click(Offset(width * .72f, y * density)) }
+            compose.waitForIdle()
+            if (store.primary != null) break
+        }
         compose.runOnIdle {
             val index = before.indexOfFirst { it.first == store.primary }
             assertTrue("A tilted swipe up should reveal lower layers, index=$index", index >= 2)
@@ -448,8 +455,12 @@ class TimelineGesturesTest {
 
         // --- Excluir -----------------------------------------------------------------------
         selectPositionAndScale()
-        compose.onNodeWithTag("timeline.keys.delete").performClick()
-        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 2 }
+        compose.onNodeWithTag("timeline.keys.delete").performScrollTo().performClick()
+        try { compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 2 } }
+        catch (error: Throwable) {
+            stabilityScreenshot("timeline-delete-failure.png")
+            throw AssertionError("Delete must remove both chosen keys. Keys=${store.keyframes[id]} Selection=${store.keySelection}", error)
+        }
         compose.runOnIdle {
             val keys = store.keyframes[id].orEmpty()
             assertTrue(keys.any { it.property == 0 && it.time == 0 })
@@ -461,7 +472,7 @@ class TimelineGesturesTest {
 
         // --- Duplicar: cópia 1 frame depois do último (anc. 30 → 46) ------------------------
         selectPositionAndScale()
-        compose.onNodeWithTag("timeline.keys.duplicate").performClick()
+        compose.onNodeWithTag("timeline.keys.duplicate").performScrollTo().performClick()
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 6 }
         compose.runOnIdle {
             val keys = store.keyframes[id].orEmpty()

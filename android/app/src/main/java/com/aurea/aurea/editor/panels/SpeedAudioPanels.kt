@@ -88,6 +88,8 @@ internal fun ClipEditPanel(env: PanelEnv) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(row.name, color = AureaColors.Text, fontSize = 15.sp)
         Text(stringResource(R.string.edt_clip_range, row.startFrame, row.endFrame, row.durationFrames), color = AureaColors.Muted, fontSize = 12.sp)
+        TextButton(onClick = { store.editClipTime(7, 0) }, enabled = !row.locked,
+            modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(stringResource(R.string.beta_extend_clip)) }
         listOf(2 to stringResource(R.string.i18n_clip_slip), 3 to stringResource(R.string.edt_clip_roll_start), 4 to stringResource(R.string.edt_clip_roll_end), 5 to stringResource(R.string.i18n_clip_slide)).chunked(2).forEach { choices ->
             Row(Modifier.fillMaxWidth()) {
                 choices.forEach { (value, name) ->

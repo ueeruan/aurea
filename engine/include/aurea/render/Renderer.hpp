@@ -348,6 +348,10 @@ struct RenderSettings {
     /// 1 = completo; ≤ 0,25 também troca o movimento de pixels pela mistura.
     /// O export sempre usa 1.
     f32  heavyScale = 1.0f;
+    /// Piso do APARELHO (calor/tier) só, sem o AUTO. O Smooth Motion do preview
+    /// cai para a mistura por ele: com o AUTO no piso, o fluxo ligava/desligava
+    /// a cada medição (beta 08/10, "Smooth Motion não funciona direito").
+    f32  flowPolicyScale = 1.0f;
     /// Botões do preview AUTO 2.0 (Fase 8C): cada sistema lê o seu pelo
     /// `Renderer::preview_quality()`. O efetivo é o menor entre isto e
     /// `heavyScale`; com `finalQuality` tudo volta a 1 (o export não muda).
@@ -490,7 +494,7 @@ public:
     /// (finalQuality) ignora.
     void set_rig_setup_layer(u64 layerId) noexcept { rigSetupLayer_.store(layerId, std::memory_order_relaxed); }
     [[nodiscard]] Status render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
-                                               u32 width, u32 height, std::vector<u8>& outRgba) noexcept;
+                                               u32 width, u32 height, std::vector<u8>& outRgba, bool comparison = false) noexcept;
 
     /// De onde vêm os modelos 3D (o motor guarda os SceneAsset).
     using ModelLookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
@@ -520,6 +524,7 @@ public:
     /// memória pode baixar sob pressão). Acima dele sai a camada mais antiga.
     void set_flow_cache_budget(u64 bytes) noexcept { flowCacheBudget_ = bytes; }
     void set_transient_cache_budget(u64 bytes) noexcept { pool_.set_budget(bytes); }
+    void set_transient_allocation_limit(u64 bytes) noexcept { pool_.set_allocation_limit(bytes); }
     [[nodiscard]] f32 effect_quality() const noexcept override { return heavyQ_.effects; }
 
     // --- EffectResources -----------------------------------------------------
@@ -530,7 +535,7 @@ public:
     /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
     [[nodiscard]] TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept override;
-    [[nodiscard]] std::vector<Vec4> repeat_path(const Layer* host, u32 count, f32 phase) noexcept override;
+    [[nodiscard]] std::vector<Vec4> repeat_path(const Layer* host, u32 count, f32 phase, u64 guide = 0) noexcept override;
     /// Mapa de profundidade da fonte da camada no instante do `prepare` em
     /// curso (render/RendererDepth.cpp). Imagem: síncrono, uma vez. Vídeo: o
     /// export espera o quadro; o preview agenda e mostra o último pronto.
@@ -557,7 +562,7 @@ public:
     /// 0..1) no quadro `frame` da fonte; nulo = ainda não há (o Fantoche usa
     /// como contorno da malha).
     [[nodiscard]] std::shared_ptr<const std::vector<f32>> roto_cached_matte(const Composition* comp, const Layer& layer,
-                                                                            const EffectInstance& instance, i64 frame) noexcept;
+                                                                            const EffectInstance& instance, i64 frame, const Asset* asset) noexcept;
     /// "Propagar clipe": todos os quadros da fonte da camada no worker do Roto.
     bool roto_propagate(const Project& project, const Composition& comp, const Layer& layer,
                         const EffectInstance& instance, MediaManager* media) noexcept;

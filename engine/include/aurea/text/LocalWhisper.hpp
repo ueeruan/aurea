@@ -9,5 +9,5 @@ namespace aurea::text {
 Result<std::vector<CaptionWord>> transcribe_local(
     VideoSourceFactory& factory, const std::string& source, const std::string& model,
     const std::string& language, std::atomic<bool>& cancelled,
-    const std::function<void(int)>& progress, double start = 0, double end = 0) noexcept;
+    const std::function<void(int)>& progress, double start = 0, double end = 0, bool translateEnglish = false) noexcept;
 }

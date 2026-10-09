@@ -33,6 +33,12 @@ TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     if (!backend_) return TextureHandle{};
 
     trim_for(desc.estimated_bytes());
+    const u64 limit = allocationLimit_.load(std::memory_order_relaxed);
+    const u64 incoming = desc.estimated_bytes();
+    if (stats_.bytes > limit || incoming > limit - stats_.bytes) {
+        AUREA_LOG_WARN("pool: limite de memoria do quadro antes de criar %ux%u", desc.width, desc.height);
+        return TextureHandle{};
+    }
 
     auto created = backend_->create_texture(desc);
     if (!created.ok()) {

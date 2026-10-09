@@ -30,6 +30,7 @@
 
 #define STBI_NO_STDIO
 #include "stb_image.h"
+#include "ufbx.h"
 #include "tinyexr.h"
 
 namespace aurea::scene3d {
@@ -422,9 +423,13 @@ HdriDecode decode_zip(const u8* bytes, usize size, f32 ldrGain, u64 room) {
         return fail(HdriStatus::UnsupportedFormat);
     if (bestRaw >= room) return fail(HdriStatus::TooLarge);
     std::vector<u8> raw(bestRaw);
-    const int got = stbi_zlib_decode_noheader_buffer(reinterpret_cast<char*>(raw.data()), static_cast<int>(raw.size()),
-                                                     reinterpret_cast<const char*>(bytes + data), static_cast<int>(bestComp));
-    if (got != static_cast<int>(bestRaw)) return fail(HdriStatus::Corrupt);
+    ufbx_inflate_input source{};
+    source.total_size = source.data_size = bestComp;
+    source.data = bytes + data;
+    source.no_header = source.no_checksum = true;
+    ufbx_inflate_retain retain{};
+    const ptrdiff_t got = ufbx_inflate(raw.data(), raw.size(), &source, &retain);
+    if (got != static_cast<ptrdiff_t>(bestRaw)) return fail(HdriStatus::Corrupt);
     return decode_any(raw.data(), raw.size(), ldrGain, false, room - bestRaw);
 }
 

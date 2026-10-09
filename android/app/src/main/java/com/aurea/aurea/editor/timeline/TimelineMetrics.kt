@@ -111,7 +111,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val trimTouchOut = dp(13f)
 
     // --- Losango ------------------------------------------------------------------
-    val diamond = dp(11f)
+    val diamond = dp(9f)
     val diamondRadius = dp(2f)
     val diamondStroke = dp(1.2f)
     /** O losango inteiro cabe na barra; X continua vindo exclusivamente do tempo. */
@@ -122,7 +122,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val keyHitHalf = dp(24f)
     /** Histerese do arrasto de losango: o frame só troca depois de passar meio frame + isto. */
     val keyDragHysteresis = dp(3f)
-    val keyGlyphHalf = dp(7f)       // o próprio desenho (diagonal ≈ 15,5)
+    val keyGlyphHalf = dp(6f)       // desenho compacto; alvo de toque continua 48 dp
     val keyTouchTop = 0f
     val keyMergeGap = dp(4f)        // instantes a menos que isso viram pílula
     val keyPillHeight = dp(10f)

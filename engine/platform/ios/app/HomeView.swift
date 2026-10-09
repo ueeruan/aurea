@@ -277,7 +277,7 @@ struct HomeView: View {
     @State private var showReleaseNotes = false
     @State private var showDonationPrompt = false
     private var releaseNotesEdition: String {
-        "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"):2123-1"
+        "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"):\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown")"
     }
     @State private var dialog: HomeProjectDialog?
     @State private var pendingProject: NewProjectDraft?
@@ -289,10 +289,8 @@ struct HomeView: View {
         VStack(spacing: 0) {
             LiveNoticeBanners()
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("aurea").font(.aurea(size: 32, weight: .bold)).tracking(-1)
-                    if let usuarios: Int = conta.usuarios { HomeRegisteredUsers(count: usuarios) }
-                }
+                HomeBrandLogo().frame(width: 28, height: 28)
+                Text("AUREA").font(.aurea(size: 22, weight: .semibold)).tracking(1).padding(.vertical, 12)
                 Spacer()
                 Button(AureaText.t("release_notes_title")) { showReleaseNotes = true }
                     .font(.aurea(size: 13)).frame(minHeight: 44)
@@ -523,16 +521,14 @@ private struct HomeDock: View {
             tab(.projects, CupertinoGlyph.RectangleStack, "home_tab_projects", "home.projects")
             Button(action: onCreate) {
                 CupertinoGlyph.text(CupertinoGlyph.Plus, size: 30, color: AureaColors.onAccent)
-                    .frame(width: 64, height: 64).background(AureaColors.accent, in: Circle())
+                    .frame(width: 56, height: 56).background(AureaColors.accent, in: Circle())
                     .contentShape(Circle())
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t("home_new_project"))
                 .accessibilityIdentifier("home.create")
             tab(.start, CupertinoGlyph.CaptionsBubble, "social_community", "home.community")
             tab(.profile, CupertinoGlyph.PersonCropCircle, "social_profile", "home.profile")
-        }.padding(.horizontal, 4).padding(.vertical, 10)
-            .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 28))
-            .overlay { RoundedRectangle(cornerRadius: 28).stroke(AureaColors.border, lineWidth: 1).allowsHitTesting(false) }
-            .padding(.horizontal, 12).padding(.vertical, 8)
+        }.padding(.horizontal, 8).padding(.vertical, 8)
+            .background(AureaColors.navigationBar)
     }
     private func utility(_ glyph: Character, _ label: String, _ tag: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -546,10 +542,10 @@ private struct HomeDock: View {
                 CupertinoGlyph.text(glyph, size: 23, color: selected == kind ? AureaColors.accent : AureaColors.muted)
                 Text(AureaText.t(label)).font(.caption).multilineTextAlignment(.center)
                     .foregroundStyle(selected == kind ? AureaColors.text : AureaColors.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1).truncationMode(.tail)
                 Capsule().fill(selected == kind ? AureaColors.accent : AureaColors.surface).frame(width: 16, height: 2)
             }.padding(.vertical, 8).frame(minWidth: 0, maxWidth: .infinity, minHeight: 64).contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityIdentifier(tag)
+        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(label)).accessibilityIdentifier(tag)
             .accessibilityAddTraits(selected == kind ? .isSelected : [])
     }
 }
@@ -1398,8 +1394,8 @@ struct HomeProjectsTab: View {
         ZStack(alignment: .bottom) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    Text(AureaText.t("home_title_projects")).aureaFont(.headlineLarge)
-                        .padding(.horizontal, HomeDims.gutter).padding(.top, HomeDims.s5)
+                    Text(AureaText.t("home_title_projects")).font(.aurea(size: 28, weight: .bold))
+                        .padding(.horizontal, HomeDims.gutter).padding(.top, HomeDims.s3)
                     HomeProjectListBar(count: arranged.count, selecting: !selection.isEmpty,
                                        selectedCount: selection.count, searching: searching || !defaults.query.isEmpty,
                                        query: $defaults.query, onOpenSearch: { searching = true },
@@ -1410,14 +1406,14 @@ struct HomeProjectsTab: View {
                         HomeProjectsEmptyState(message: AureaText.t(defaults.query.isEmpty ? "home_empty_hint" : "home_no_results"))
                     }
                     HomeProjectGrid(entries: arranged, selection: $selection, selectable: true, onDialog: onDialog)
-                }.padding(.bottom, HomeDims.listEndSpace)
+                }.padding(.bottom, selection.isEmpty ? 24 : 96)
                     .background { HomeBackdropSource(tab: .projects).allowsHitTesting(false) }
             }
             if !selection.isEmpty {
                 HomeBatchBar(count: selection.count, onDuplicate: {
                     for entry in library.all where selection.contains(entry.id) { _ = duplicateHomeProject(entry) }
                     selection = []; library.refresh()
-                }, onDelete: { onDialog(.batchDelete(selection)) }).padding(.bottom, HomeDims.tabBar)
+                }, onDelete: { onDialog(.batchDelete(selection)) }).padding(.bottom, 8)
             }
         }.foregroundStyle(AureaColors.text)
     }
@@ -1430,6 +1426,18 @@ private struct HomeProjectGrid: View {
     let selectable: Bool
     let onDialog: (HomeProjectDialog) -> Void
     var body: some View {
+        if homeGridColumns() <= 2 {
+            LazyVStack(spacing: 0) {
+                ForEach(entries) { entry in
+                    HomeProjectRow(entry: entry, selecting: selectable && !selection.isEmpty,
+                        marked: selection.contains(entry.id), onOpen: { model.open(entry.file) },
+                        onMenu: { onDialog(.menu(entry)) }, onMark: {
+                            guard selectable else { return }
+                            if selection.contains(entry.id) { selection.remove(entry.id) } else { selection.insert(entry.id) }
+                        })
+                }
+            }
+        } else {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: HomeDims.s3), count: homeGridColumns()), spacing: HomeDims.s4) {
             ForEach(entries) { entry in
                 HomeProjectCard(entry: entry, selecting: selectable && !selection.isEmpty,
@@ -1440,6 +1448,7 @@ private struct HomeProjectGrid: View {
                 })
             }
         }.padding(.horizontal, HomeDims.gutter)
+        }
     }
 }
 

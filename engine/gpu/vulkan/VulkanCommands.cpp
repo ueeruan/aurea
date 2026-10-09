@@ -5,6 +5,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 
 namespace aurea::vk {
@@ -635,9 +636,8 @@ Status CommandListImpl::finish_pass() noexcept {
         || frame_->passesInCommandBuffer < backend_->passesPerCommandBuffer_
         || inRenderPass_ || labelDepth_ || !frame_->timerStack.empty()) return OkStatus;
 
-    // A large primary buffer stalls some mobile drivers with many independent
-    // 3D temporal passes. Split only recording, never quality or submissions.
-    // The one final submit/fence owns every primary and all per-frame storage.
+    // Keep every pass/sample, but bound the work admitted in each GPU batch.
+    // All primaries still own the same frame's descriptors and staging data.
     FrameContext& f = *frame_;
     if (const VkResult r = vkEndCommandBuffer(cmd_); r != VK_SUCCESS)
         return backend_->fail_recording(r, "vkEndCommandBuffer checkpoint");
@@ -658,6 +658,13 @@ Status CommandListImpl::finish_pass() noexcept {
         return backend_->fail_recording(r, "vkBeginCommandBuffer checkpoint");
     cmd_ = f.cmd;
     f.passesInCommandBuffer = 0;
+    // The graph aliases transient images. This dependency also covers accesses
+    // across primaries when the logical resources happen to retain a layout.
+    VkMemoryBarrier memory{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    memory.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    memory.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memory, 0, nullptr, 0, nullptr);
 
     // Layouts use the same complete push-constant range. Preserve the tail
     // after a caller overwrites only a prefix, as the unsplit buffer does.
@@ -732,9 +739,9 @@ Status Backend::fail_recording(VkResult result, const char* operation) noexcept 
         (void)note_device_lost(result);
         AUREA_LOG_ERROR("vulkan: recording stopped until reinitialize: %s (%s)", operation, result_name(result));
     }
-    // Nothing from this frame was submitted. Its tracked layouts may already
-    // have changed, so do not reuse them. Keep deferred releases until a real
-    // wait_idle/shutdown drains older submissions; never fake device loss.
+    // A prefix of a chunked frame may already be submitted. Its tracked layouts
+    // cannot be reused. Keep deferred releases until wait_idle/shutdown drains
+    // every submitted prefix; never fake device loss for a recording failure.
     if (current_) current_->timersWritten = false;
     current_ = nullptr;
     commands_.bind_frame(this, nullptr, VK_NULL_HANDLE);
@@ -785,6 +792,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         }
     }
     f.submitted = false;
+    f.offscreen = !withSurface;
     f.frameNumber = ++frameNumber_;
     for (VkDescriptorPool p : f.descriptorPools)
         if (const VkResult r = vkResetDescriptorPool(device_, p, 0); r != VK_SUCCESS)
@@ -924,24 +932,46 @@ Status Backend::end_frame() noexcept {
     if (const VkResult r = vkEndCommandBuffer(f.cmd); r != VK_SUCCESS)
         return fail_recording(r, "vkEndCommandBuffer frame");
 
-    if (const VkResult r = vkResetFences(device_, 1, &f.fence); r != VK_SUCCESS)
-        return fail_recording(r, "vkResetFences frame");
-    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.commandBufferCount = f.commandBufferCount;
-    si.pCommandBuffers = f.commandBuffers.data();
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    if (imageAcquired_) {
-        // Espera a imagem só no estágio de SAÍDA DE COR: os passes anteriores
-        // (conversão de vídeo, efeitos) começam antes de o display liberar a
-        // imagem — é paralelismo de graça.
-        si.waitSemaphoreCount = 1;
-        si.pWaitSemaphores = &f.acquired;
-        si.pWaitDstStageMask = &waitStage;
-        si.signalSemaphoreCount = 1;
-        si.pSignalSemaphores = &renderDone_[imageIndex_];
+    // Export's final fence already permits dense 3D work for up to 120 s.
+    // Intermediate fences must use the same allowance: the preview's 2 s
+    // limit aborted Project 8 at frame 184 despite no device-loss result.
+    // Share one finite deadline across all prefixes, rather than granting
+    // another full timeout to every command buffer. Never drop samples.
+    const auto submitDeadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(f.offscreen ? 120 : 2);
+    for (u32 batch = 0; batch < f.commandBufferCount; ++batch) {
+        if (const VkResult r = vkResetFences(device_, 1, &f.fence); r != VK_SUCCESS)
+            return fail_recording(r, "vkResetFences frame batch");
+        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &f.commandBuffers[batch];
+        if (imageAcquired_ && batch == 0) {
+            si.waitSemaphoreCount = 1;
+            si.pWaitSemaphores = &f.acquired;
+            si.pWaitDstStageMask = &waitStage;
+        }
+        const bool last = batch + 1 == f.commandBufferCount;
+        if (imageAcquired_ && last) {
+            si.signalSemaphoreCount = 1;
+            si.pSignalSemaphores = &renderDone_[imageIndex_];
+        }
+        const VkResult r = vkQueueSubmit(queue_, 1, &si, f.fence);
+        if (r != VK_SUCCESS) return fail_recording(r, "vkQueueSubmit frame batch");
+        f.submitted = true;
+        lastSubmitted_ = &f;
+        // Splitting recording alone still admits the entire temporal frame in
+        // one driver job. Complete the prefix before admitting another batch;
+        // only the final fence remains asynchronous for export readback.
+        if (!last) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                submitDeadline - std::chrono::steady_clock::now()).count();
+            const VkResult ready = remaining > 0
+                ? vkWaitForFences(device_, 1, &f.fence, VK_TRUE, static_cast<u64>(remaining))
+                : VK_TIMEOUT;
+            if (ready != VK_SUCCESS) return fail_recording(ready, "vkWaitForFences frame batch");
+        }
     }
-    const VkResult r = vkQueueSubmit(queue_, 1, &si, f.fence);
-    if (r != VK_SUCCESS) return fail_recording(r, "vkQueueSubmit frame");
     current_ = nullptr;
     commands_.bind_frame(this, nullptr, VK_NULL_HANDLE);
     frameCursor_ = (frameCursor_ + 1) % framesInFlight_;

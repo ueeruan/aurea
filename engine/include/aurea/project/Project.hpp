@@ -80,7 +80,7 @@ struct ExportSettings {
     bool trimToContent = false;
     /// Qualidade da sessão (0 Baixa, 1 Normal, 2 Alta) para a taxa automática
     /// (export/BitratePolicy.hpp). Só vale com videoBitrateMbps == 0. Não persiste.
-    u32 quality = 1;
+    u32 quality = 2;
     /// Modo de segurança da sessão (export/ExportWatchdog.hpp): 0 = o pedido,
     /// 1 = H.264 Baseline em múltiplos de 16 com taxa menor, 2 = o mesmo no
     /// encoder de software. A tela só passa o nível que o motor sugeriu depois

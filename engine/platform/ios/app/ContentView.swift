@@ -83,7 +83,7 @@ struct ContentView: View {
         .overlay {
             if let request = model.liveNoticePopup { LiveNoticePopup(request: request) }
             if model.showProjectSettings { ProjectSettingsPanel(onDismiss: { model.showProjectSettings = false }) }
-            if let request = model.actionSheet { AureaActionSheet(title: request.title, actions: request.actions) { model.actionSheet = nil } }
+            if let request = model.actionSheet { AureaActionSheet(title: request.title, message: request.message, actions: request.actions) { model.actionSheet = nil } }
             if let request = model.colorSheet { ColorPickerSheet(request: request) { model.colorSheet = nil; request.onDone() }.id(request.id) }
             if let request = model.expressionSheet { ExpressionSheet(request: request) { model.expressionSheet = nil }.id(request.id) }
             if let request = model.text3DFontSheet { T3DFontSheet(request: request) { model.text3DFontSheet = nil }.id(request.id) }

@@ -10,6 +10,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -40,6 +41,7 @@ EngineConfig headless_config() {
 #include "ProjectLifecycle.inl"
 #include "CaptureResources.inl"
 #include "PreviewIdle.inl"
+#include "Beta008Scenarios.inl"
 
 AUREA_TEST(TextOutline, NonTextTargetPreservesAnchorAnimationAndProjectState) {
     Engine e;
@@ -1308,8 +1310,8 @@ AUREA_TEST(Engine, MobileUnlinkKeepsChildrenInPlaceAndUndoes) {
 // para o quadro do 1º keyframe ou sair do centro. O filho tem que guardar o
 // resultado da tela em TODOS os quadros (pai cozido por quadro), ao apagar o
 // pai (com e sem avô) e ao soltar; desfazer volta tudo num passo só.
-AUREA_TEST(Engine, RemovingAnAnimatedParentBakesTheChildMotion) {
-    for (u32 mode : {0u, 1u, 2u}) {   // 0 apagar, 1 apagar com avô, 2 soltar
+AUREA_TEST(Engine, ExplicitUnlinkBakesTheAnimatedParentMotion) {
+    for (u32 mode : {2u}) {   // Explicit unlink keeps the existing world-motion contract.
         Engine e;
         AUREA_CHECK(e.initialize(headless_config()).ok());
         AUREA_CHECK(e.new_project(1280, 720, 30, nullptr).ok());

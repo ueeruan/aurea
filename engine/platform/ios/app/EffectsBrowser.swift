@@ -5,11 +5,11 @@ import SwiftUI
 import UIKit
 
 private enum EffectPickerLayout {
-    static let cardMin: CGFloat = 100
+    static let cardMin: CGFloat = 152
     static let rowCard: CGFloat = 92
     static let previewAspect: CGFloat = 1.6
     static let favoriteBadge: CGFloat = 22
-    static let nameSize: CGFloat = 12
+    static let nameSize: CGFloat = 14
     static let nameLineHeight: CGFloat = 14.4
     static let fieldGap: CGFloat = 6
     static let longPress: Double = 0.45
@@ -266,6 +266,7 @@ func fxPickerEntryName(_ entry: EffectCatalogItem) -> String {
 @MainActor
 func fxOpenEffectTool(_ tool: FxEffectTool, in model: AureaModel) {
     if tool == .mask { model.addMaskTool() }
+    if tool == .cameraTrack { model.cameraTrackerVisible = true }
     model.openPanel(tool.panel)
 }
 
@@ -419,19 +420,14 @@ struct EffectSearchRequest: Identifiable {
     var onTool: ((FxEffectTool) -> Void)? = nil
 }
 
-private enum EffectAddLayout {
-    static let featuredCard: CGFloat = 148
-    static let smallMax = 8
-    static let tileAspect: CGFloat = 2.2
-    static let allGroup = fxAllCategoriesId
-}
-
 struct EffectAddSheet: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject var prefs: FxEffectPrefs
     let request: EffectSearchRequest
     let close: () -> Void
     @State private var groupId: String?
+    @State private var section = 0
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var searching: Bool
 
     init(request: EffectSearchRequest, close: @escaping () -> Void) {
@@ -466,75 +462,88 @@ struct EffectAddSheet: View {
         let sorted = request.sorted
         let groups = fxGroupEntries(sorted)
         let group = groups.first { $0.group.id == groupId }
-        let showingAll = groupId == EffectAddLayout.allGroup
-        let featured = fxFeaturedEntries(sorted)
-        let recents = fxRecentEffects(prefs.recents, sorted)
-        let favorites = fxFavoriteEffects(prefs.favorites, sorted)
-        let title = showingAll ? AureaText.t("effects_all_effects") : group?.group.label ?? AureaText.t("panel_adicionar_efeito")
+        let shown: [EffectCatalogItem] = {
+            switch section {
+            case 1: return sorted.filter { $0.isNew }
+            case 2: return fxFavoriteEffects(prefs.favorites, sorted)
+            case 3: return fxRecentEffects(prefs.recents, sorted)
+            default: return group?.entries ?? sorted
+            }
+        }()
         return VStack(spacing: 0) {
-            topBar(title: title, inGroup: showingAll || group != nil)
+            topBar(title: group?.group.label ?? AureaText.t("panel_adicionar_efeito"), inGroup: groupId != nil)
+            Button { searching = true } label: {
+                HStack(spacing: 8) {
+                    CupertinoGlyph.text(CupertinoGlyph.Search, size: 20, color: AureaColors.muted)
+                    Text(AureaText.t("effect_buscar_glitch_vhs_desfoque_cor")).font(.aurea(size: 14))
+                        .foregroundStyle(AureaColors.muted).lineLimit(1)
+                    Spacer(minLength: 0)
+                }.padding(.horizontal, 12).frame(height: 48)
+                    .background(AureaColors.fieldFilled, in: RoundedRectangle(cornerRadius: AureaDims.radiusChip))
+            }.buttonStyle(AureaPressStyle(shrink: 1)).padding(.horizontal, 16)
+                .accessibilityIdentifier("effects.search.bar")
+            sectionTabs
+            if section == 0 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 8) {
+                        categoryChip(AureaText.t("effects_all_effects"), id: "all", active: groupId == nil) { groupId = nil }
+                        ForEach(groups.map { $0.group }, id: \.self) { category in
+                            categoryChip(category.label, id: category.id, active: groupId == category.id) { groupId = category.id }
+                        }
+                    }.padding(.horizontal, 16)
+                }.accessibilityIdentifier("effects.categories")
+            }
+            Text(AureaText.t("fx_browser_count", shown.count)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 12)
+                .accessibilityIdentifier("effects.count")
             ScrollViewReader { proxy in
                 ScrollView {
-                    Color.clear.frame(height: .zero).id("topo")
-                    if showingAll || group != nil {
-                        let shown = showingAll ? sorted : group?.entries ?? []
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: EffectPickerLayout.cardMin), spacing: AureaDims.s2, alignment: .top)],
-                                  alignment: .leading, spacing: AureaDims.s3) {
-                            ForEach(shown) { entry in card(entry, prefix: "effects.card.") }
-                        }.padding(.horizontal, AureaDims.s3).padding(.top, AureaDims.s2).padding(.bottom, AureaDims.s5)
-                    } else {
-                        home(featured: featured, recents: recents, favorites: favorites, groups: groups)
+                    Color.clear.frame(height: 0).id("topo")
+                    if shown.isEmpty {
+                        Text(AureaText.t(section == 2 ? "effects_favorites_hint" : "effect_empty_category"))
+                            .font(.aurea(size: 14)).foregroundStyle(AureaColors.muted).multilineTextAlignment(.center).padding(24)
                     }
-                }
-                .accessibilityIdentifier(showingAll || group != nil ? "effects.grid" : "effects.home")
-                .onChange(of: groupId) { _ in proxy.scrollTo("topo", anchor: .top) }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: typeSize > .large ? 184 : 152), spacing: 12, alignment: .top)], spacing: 12) {
+                        ForEach(shown) { entry in card(entry, prefix: "effects.card.", nameSize: 14) }
+                    }.padding(.horizontal, 16).padding(.bottom, 24)
+                }.accessibilityIdentifier(groupId == nil ? "effects.home" : "effects.grid")
+                    .onChange(of: groupId) { _ in proxy.scrollTo("topo", anchor: .top) }
+                    .onChange(of: section) { _ in proxy.scrollTo("topo", anchor: .top) }
             }.frame(maxHeight: .infinity)
-        }
-        .foregroundStyle(AureaColors.text).background(AureaColors.editorPanel.ignoresSafeArea())
+        }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel.ignoresSafeArea())
     }
 
-    private func home(featured: [EffectCatalogItem], recents: [EffectCatalogItem], favorites: [EffectCatalogItem],
-                      groups: [(group: FxEffectGroup, entries: [EffectCatalogItem])]) -> some View {
-        let four = Array(repeating: GridItem(.flexible(), spacing: AureaDims.s2, alignment: .top), count: 4)
-        let two = Array(repeating: GridItem(.flexible(), spacing: AureaDims.s2, alignment: .top), count: 2)
-        let entriesByGroup = Dictionary(uniqueKeysWithValues: groups.map { ($0.group, $0.entries) })
-        return VStack(alignment: .leading, spacing: AureaDims.s2) {
-            if !featured.isEmpty {
-                sectionTitle(AureaText.t("fxui_featured"))
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: AureaDims.s3) {
-                        ForEach(featured) { entry in
-                            card(entry, prefix: "effects.featured.", aspect: 1, nameSize: 13).frame(width: EffectAddLayout.featuredCard)
-                        }
-                    }
-                }
+    @ViewBuilder private var sectionTabs: some View {
+        let keys = ["fx_browser_all", "fx_browser_new", "effect_favoritos", "effect_recentes"]
+        let ids = ["all", "new", "favorites", "recent"]
+        let tabs = HStack(spacing: 0) {
+            ForEach(0..<keys.count, id: \.self) { index in
+                Button { section = index; groupId = nil } label: {
+                    Text(AureaText.t(keys[index])).font(.aurea(size: 13, weight: .semibold)).lineLimit(1)
+                        .foregroundStyle(section == index ? AureaColors.accent : AureaColors.muted)
+                        .frame(minWidth: typeSize > .large ? 124 : nil, maxWidth: .infinity, minHeight: 48)
+                        .background(section == index ? AureaColors.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: AureaDims.radiusChip))
+                }.buttonStyle(AureaPressStyle(shrink: 1))
+                    .accessibilityIdentifier("effects.tab." + ids[index])
+                    .accessibilityAddTraits(section == index ? .isSelected : [])
             }
-            if !recents.isEmpty {
-                sectionTitle(AureaText.t("effect_recentes"))
-                LazyVGrid(columns: four, alignment: .leading, spacing: AureaDims.s2) {
-                    ForEach(Array(recents.prefix(EffectAddLayout.smallMax))) { entry in card(entry, prefix: "effects.recent.", aspect: 1, nameSize: 11) }
-                }
-            }
-            if !favorites.isEmpty {
-                sectionTitle(AureaText.t("effect_favoritos"))
-                LazyVGrid(columns: four, alignment: .leading, spacing: AureaDims.s2) {
-                    ForEach(Array(favorites.prefix(EffectAddLayout.smallMax))) { entry in card(entry, prefix: "effects.favorite.", aspect: 1, nameSize: 11) }
-                }
-            } else {
-                Text(AureaText.t("effects_favorites_hint")).font(HomeType.cardSpec).foregroundStyle(AureaColors.muted)
-                    .padding(.top, AureaDims.s1)
-            }
-            sectionTitle(AureaText.t("fxui_categories"))
-            LazyVGrid(columns: two, alignment: .leading, spacing: AureaDims.s2) {
-                EffectGroupTile(label: AureaText.t("effects_all_effects"), id: EffectAddLayout.allGroup,
-                                banner: featured.first { fxEffectToolOf($0.typeId) == nil }, glyph: CupertinoGlyph.SquareGrid2x2,
-                                store: model.effectPreviews) { groupId = EffectAddLayout.allGroup }
-                ForEach(groups.map { $0.group }, id: \.self) { group in
-                    EffectGroupTile(label: group.label, id: group.id, banner: fxGroupBannerEntry(group, entriesByGroup[group] ?? []),
-                                    glyph: group.glyph, store: model.effectPreviews) { groupId = group.id }
-                }
-            }
-        }.padding(.horizontal, AureaDims.s3).padding(.top, AureaDims.s1).padding(.bottom, AureaDims.s5)
+        }
+        if typeSize > .large {
+            ScrollView(.horizontal, showsIndicators: false) { tabs }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+        } else {
+            tabs.padding(.horizontal, 12).padding(.vertical, 8)
+        }
+    }
+
+    private func categoryChip(_ label: String, id: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.aurea(size: 13, weight: .semibold)).lineLimit(1)
+                .foregroundStyle(active ? AureaColors.text : AureaColors.muted)
+                .padding(.horizontal, 14).frame(minHeight: 48)
+                .background(active ? AureaColors.editorPanelHigh : AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: AureaDims.radiusChip))
+        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("effects.category." + id)
+            .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     /// ✕ (ou ‹ dentro de um grupo) · título · 🔍 — `effects.close`, `effects.back`, `effects.search`.
@@ -559,12 +568,6 @@ struct EffectAddSheet: View {
         }.padding(.horizontal, AureaDims.s1).frame(height: AureaDims.topBar + AureaDims.s2)
     }
 
-    private func sectionTitle(_ text: String) -> some View {
-        Text(text).font(AureaTextSpec.section.font).tracking(aureaTracking(0.3)).foregroundStyle(AureaColors.muted)
-            .padding(.top, AureaDims.s3).padding(.bottom, AureaDims.s1)
-            .accessibilityAddTraits(.isHeader)
-    }
-
     private func card(_ entry: EffectCatalogItem, prefix: String, aspect: CGFloat = EffectPickerLayout.previewAspect, nameSize: CGFloat = EffectPickerLayout.nameSize) -> some View {
         EffectPickerCard(entry: entry, store: model.effectPreviews, favorite: prefs.isFavorite(entry.typeId),
                          identifier: prefix + fxEffectCardId(entry.typeId), aspect: aspect, nameSize: nameSize,
@@ -574,44 +577,6 @@ struct EffectAddSheet: View {
 
 /// O LADRILHO de um grupo: a prévia real de um efeito dele, escurecida, e o nome
 /// em branco, em negrito, no meio (`effects.category.<id>`).
-private struct EffectGroupTile: View {
-    let label: String
-    let id: String
-    let banner: EffectCatalogItem?
-    let glyph: Character
-    let store: EffectPreviewStore
-    let action: () -> Void
-    @State private var image: UIImage?
-
-    var body: some View {
-        Button(action: action) {
-            Color.clear.aspectRatio(EffectAddLayout.tileAspect, contentMode: .fit)
-                .overlay {
-                    if let image {
-                        Image(uiImage: image).resizable().interpolation(.low).scaledToFill()
-                    } else {
-                        FxToolPlate(glyph: glyph, glyphSize: 30, opacity: 0.35)
-                    }
-                }
-                .overlay { Color.black.opacity(0.52) }
-                .overlay {
-                    Text(label).font(.aurea(size: 15, weight: .heavy)).foregroundStyle(.white)
-                        .multilineTextAlignment(.center).lineLimit(2).padding(.horizontal, AureaDims.s2)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: AureaDims.radiusCard))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(AureaPressStyle(shrink: 0.97))
-        .accessibilityLabel(AureaText.t("fxui_a11y_category", label))
-        .accessibilityIdentifier("effects.category." + id)
-        .task(id: banner?.typeId) {
-            guard let typeId = banner?.typeId else { image = nil; return }
-            let loaded = await store.image(for: typeId)
-            if !Task.isCancelled { image = loaded }
-        }
-    }
-}
-
 /// Cartela das ferramentas (e dos grupos sem prévia): degradê do Aurea e o glifo no meio.
 struct FxToolPlate: View {
     let glyph: Character
@@ -655,6 +620,7 @@ struct EffectPickerSearch: View {
                         .mirrorsInRtl()
                         .frame(width: EffectPickerLayout.backTarget, height: AureaDims.minTap).contentShape(Rectangle())
                 }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("common_close"))
+                    .accessibilityIdentifier("effects.search.back")
                 HStack(spacing: 0) {
                     CupertinoGlyph.text(CupertinoGlyph.Search, size: AureaDims.iconSm, color: AureaColors.muted)
                         .padding(.trailing, EffectPickerLayout.fieldGap)
@@ -726,10 +692,20 @@ private struct EffectPickerCard: View {
                             .background(.black.opacity(0.45), in: Circle()).padding(AureaDims.s1)
                     }
                 }
-            Text(name).font(.aurea(size: nameSize, weight: .semibold)).tracking(aureaTracking(-0.1)).lineLimit(2)
-                .frame(height: nameSize * 1.2 * 2, alignment: .topLeading)
+                .overlay(alignment: .topLeading) {
+                    if entry.isNew {
+                        Text(AureaText.t("fx_browser_badge")).font(.aurea(size: 11, weight: .bold)).foregroundStyle(AureaColors.editorPanel)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 6)).padding(6)
+                    }
+                }
+            Text(name).font(.aurea(size: nameSize, weight: .semibold)).tracking(aureaTracking(-0.1)).lineLimit(3)
+                .frame(minHeight: nameSize * 1.2 * 2, alignment: .topLeading).padding(.horizontal, 10)
+            Text(fxEffectGroupOf(entry).label).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                .lineLimit(1).padding(.horizontal, 10).padding(.bottom, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AureaColors.editorPanelHigh, in: RoundedRectangle(cornerRadius: AureaDims.radiusCard))
         .contentShape(Rectangle())
         // O toque vem antes do toque longo: assim a rolagem da grade continua livre.
         .onTapGesture {
@@ -754,12 +730,20 @@ private struct EffectBrowserPreview: View {
     let store: EffectPreviewStore
     var aspect: CGFloat = EffectPickerLayout.previewAspect
     @State private var image: UIImage?
+    @State private var finished = false
 
     var body: some View {
         GeometryReader { geometry in
             if let image {
-                Image(uiImage: image).resizable().interpolation(.low).scaledToFill()
+                Image(uiImage: image).resizable().interpolation(.medium).scaledToFit()
                     .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                    .overlay(alignment: .bottom) {
+                        HStack {
+                            previewLabel("fx_browser_before")
+                            Spacer()
+                            previewLabel("fx_browser_after")
+                        }.padding(6).environment(\.layoutDirection, .leftToRight)
+                    }
             } else {
                 // Same labelled loading/unavailable plate as Android, never a fake effect.
                 Canvas { context, size in
@@ -774,13 +758,24 @@ private struct EffectBrowserPreview: View {
                 }.overlay(alignment: .bottomTrailing) {
                     CupertinoGlyph.text(fxCategoryGlyph(entry.category), size: AureaDims.iconSm, color: .white.opacity(0.85)).padding(AureaDims.s2)
                 }
+                .overlay {
+                    Text(AureaText.t(entry.effectClass == 3 || entry.effectClass == 4 ? "fx_browser_timeline_preview" : finished ? "fx_browser_preview_unavailable" : "fx_browser_loading"))
+                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.text).multilineTextAlignment(.center).padding(8)
+                }
             }
         }.aspectRatio(aspect, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: AureaDims.radiusCard))
             .task(id: entry.typeId) {
+                image = nil; finished = false
                 let loaded = await store.image(for: entry.typeId)
-                if !Task.isCancelled { image = loaded }
+                if !Task.isCancelled { image = loaded; finished = true }
             }
+    }
+
+    private func previewLabel(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 10.5, weight: .semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 

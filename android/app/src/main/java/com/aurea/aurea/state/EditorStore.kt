@@ -777,6 +777,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                     check(pending.renameTo(arabic)) { "Could not install Arabic fallback font" }
                 }.onFailure { android.util.Log.w("AureaFonts", "Bundled Arabic fallback unavailable; using system fonts", it) }
+                // Mesma fonte de reserva japonesa do bundle iOS; carga de glifos
+                // continua sob demanda no motor, sem depender das fontes do OEM.
+                runCatching {
+                    val japanese = File(dirs.cache, "NotoSansJP-Regular.otf")
+                    val pending = File(dirs.cache, "NotoSansJP-Regular.otf.tmp")
+                    app.assets.open("NotoSansJP-Regular.otf").use { input ->
+                        pending.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    check(pending.renameTo(japanese)) { "Could not install Japanese fallback font" }
+                }.onFailure { android.util.Log.w("AureaFonts", "Bundled Japanese fallback unavailable; using system fonts", it) }
                 val debug = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 // Sondagem do aparelho: medida UMA vez (primeira abertura ou SO
                 // novo) e guardada; o motor decide orçamento, workers, teto de
@@ -805,7 +815,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         // Abertura (Fase 8I §59–63): a foto das prévias NÃO é
                         // decodificada aqui (era JPEG + cópia de 1,6 MB no main
                         // thread em toda abertura); sobe na primeira prévia.
-                        effectPreviews = EffectPreviewStore(dirs.cache, installStamp(), ::renderEffectPreview)
+                        effectPreviews = EffectPreviewStore(dirs.cache, installStamp() + "-compare-v2", ::renderEffectPreview)
                         startStatusLoop()
                     } else {
                         errorMessage = appText(R.string.msg_nao_foi_possivel_iniciar_o_motor) +
@@ -1381,10 +1391,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 homeCardStale = true   // o autosave não refaz capa/sidecar; sair do editor refaz
                 // Projeto novo ainda sem ficha: o app morto antes de sair do editor
                 // deixava o cartão da Home sem medida nem capa ("16:9 · 30 fps").
-                if (!File(path + META_SUFFIX).exists()) {
-                    withContext(Dispatchers.IO) { writeHomeCard(path, withThumbnail = false) }
-                    homeCardStale = true
-                }
+                // O `exists` também fora da main (disco lento em aparelho de entrada).
+                val missingCard = withContext(Dispatchers.IO) { !File(path + META_SUFFIX).exists() }
+                if (missingCard) withContext(Dispatchers.IO) { writeHomeCard(path, withThumbnail = false) }
+                homeCardStale = true
             }
             lastAutosaveError = code
         }
@@ -1419,6 +1429,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 engine.setSelection(selection.toLongArray())
             }
         }
+        resolvePendingSplit()
         val alive = layers.map { it.id }.toSet()
         if (!alive.containsAll(selection)) {
             selection = selection.filter { it in alive }.toCollection(LinkedHashSet())
@@ -2129,14 +2140,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * 2048 px e gravada em `projetos/formas3d/` — o projeto guarda o caminho
      * relativo e a imagem viaja com ele.
      */
-    fun setShapePartImage(part: Int, uri: Uri) {
+    fun setShapePartImage(part: Int, uri: Uri, textTexture: Boolean = false) {
         if (!acceptsImport()) return
         val id = primary ?: return
         busyMessage = appText(R.string.app_importing_image)
         launchImport launch@{
             val ok = withContext(Dispatchers.IO) {
                 val file = saveShapeImage(uri) ?: return@withContext false
-                engine.setShape3dPartStyle(id, part, null, file.absolutePath)
+                val applied = if (textTexture) engine.setText3dTexture(id, file.absolutePath)
+                    else engine.setShape3dPartStyle(id, part, null, file.absolutePath)
+                if (!applied) file.delete()
+                applied
             }
             busyMessage = null
             if (!ok) errorMessage = appText(R.string.msg_nao_foi_possivel_importar_a_imagem)
@@ -2149,6 +2163,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         engine.setShape3dPartStyle(id, part, null, "")
         refreshNow()
     }
+
+    fun clearText3DTexture() {
+        primary?.let { engine.setText3dTexture(it, "") }
+        refreshNow()
+    }
+
+    fun hasText3DTexture(): Boolean = primary?.let { engine.queryText3dTexture(it).isNotEmpty() } ?: false
 
     private fun saveShapeImage(uri: Uri): File? = try {
         val app = getApplication<Application>()
@@ -2686,8 +2707,39 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun splitAtPlayhead(ids: Collection<Long> = selection) {
         val t = playhead
         val targets = layers.filter { it.id in ids && t > it.startFrame && t < it.endFrame }
-        if (targets.isEmpty()) return
-        group("dividir") { targets.forEach { splitLayer(it.id, t) } }
+        if (targets.isEmpty() || destroyed || !ready) return
+        pendingSplit = PendingSplit(layers.mapTo(HashSet()) { it.id }, targets, t)
+        // Sem a releitura imediata do `group`: o corte só vale no próximo quadro do
+        // motor, e ela relia o modelo VELHO (dezenas de consultas JNI no lock que o
+        // preview segura, logo quando o corte invalida o cache dele) — e relia de
+        // novo quando a revisão mudava. O laço de estado volta ao vsync e relê uma
+        // vez, quando a revisão do modelo mudar.
+        engine.beginCommandBatch()
+        batch.beginUndoGroup("dividir")
+        targets.forEach { batch.splitLayer(it.id, t) }
+        batch.endUndoGroup()
+        engine.submitCommands()
+        wakeStatusLoop()
+    }
+
+    /** Corte enviado e ainda não lido: os pedaços novos herdam as miniaturas do original. */
+    private class PendingSplit(val before: Set<Long>, val targets: List<LayerRow>, val at: Int)
+    private var pendingSplit: PendingSplit? = null
+
+    /** Pedaço novo de um corte → [ThumbnailCache.alias] do original (mesma mídia, mesma origem). */
+    private fun resolvePendingSplit() {
+        val p = pendingSplit ?: return
+        val created = layers.filter { it.id !in p.before }
+        if (created.isEmpty()) return
+        pendingSplit = null
+        for (piece in created) {
+            if (piece.startFrame != p.at) continue
+            val from = p.targets.firstOrNull { o ->
+                o.kind == piece.kind && o.trackId == piece.trackId && o.endFrame == piece.endFrame &&
+                    o.startFrame - o.offsetFrames == piece.startFrame - piece.offsetFrames
+            } ?: continue
+            thumbnails.alias(piece.id, from.id)
+        }
     }
 
     /**
@@ -2711,10 +2763,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * rápida — aparar come a borda, dividir corta em dois, isto só move.
      */
     fun moveToPlayhead(layer: Long) {
-        val d = detailOf(layer) ?: return
-        val start = max(0, playhead)
-        if (start == d.startFrame) return
-        send { setLayerTimeRange(layer, start, start + (d.endFrame - d.startFrame)) }
+        engine.editClipTime(layer, 6, playhead.toLong())
         refreshNow()
     }
 
@@ -2736,6 +2785,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun trimStart(layer: Long, newStart: Int): Boolean {
         val changed = engine.editClipTime(layer, 0, newStart.toLong())
+        refreshNow()
+        return changed
+    }
+
+    fun clipTimeActions(layer: Long): Int = engine.queryClipTimeActions(layer, playhead.toLong())
+
+    fun extendToPlayhead(layer: Long, start: Boolean): Boolean {
+        val changed = engine.editClipTime(layer, if (start) 8 else 9, playhead.toLong())
         refreshNow()
         return changed
     }
@@ -2949,6 +3006,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         TrackProperty.OPACITY -> d.opacity
         TrackProperty.SKEW_X -> d.skew[0]
         TrackProperty.SKEW_Y -> d.skew[1]
+        TrackProperty.TEXT_TRACKING -> textStyle?.getOrNull(19) ?: 0f
         else -> 0f
     }
 
@@ -3285,7 +3343,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     internal var projectGeneration by androidx.compose.runtime.mutableLongStateOf(0L)
         private set
 
-    private fun acceptsImport(): Boolean = !destroyed && ready && !projectWork && activeImports == 0 && !exporter.busy
+    private fun acceptsImport(): Boolean {
+        val ok = !destroyed && ready && !projectWork && activeImports == 0 && !exporter.busy
+        // A recusa calada parecia "o arquivo não entra" (beta: "não importa nada"):
+        // o seletor fechava e nada acontecia. Agora diz o porquê.
+        if (!ok && !destroyed && ready) showToast(appText(
+            if (exporter.busy) R.string.msg_aguarde_a_exportacao_terminar else R.string.ios_importing_media))
+        return ok
+    }
 
     private fun launchImport(work: suspend CoroutineScope.() -> Unit) {
         checkMemoryPressure()
@@ -3322,6 +3387,54 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 Log.w(TAG, "project operation failed", failure)
                 if (!destroyed) errorMessage = appText(R.string.msg_nao_foi_possivel_abrir_o_projeto, humanError(ERRC_IO))
             } finally { projectWork = false }
+        }
+    }
+
+    /** One bounded import job, retaining selection order without parallel decoders. */
+    fun importMediaBatch(uris: List<Uri>) {
+        if (uris.isEmpty() || !acceptsImport()) return
+        val app = getApplication<Application>()
+        val requested = uris.distinct()
+        val imported = mutableListOf<Long>()
+        busyMessage = appText(R.string.ios_importing_media)
+        pause()
+        launchImport {
+            try {
+                for ((index, uri) in requested.withIndex()) {
+                    busyMessage = "${appText(R.string.ios_importing_media)} ${index + 1}/${requested.size}"
+                    try {
+                        val id = withContext(Dispatchers.IO) {
+                            takePermission(uri)
+                            val display = displayName(uri) ?: uri.lastPathSegment.orEmpty()
+                            val mime = app.contentResolver.getType(uri) ?: android.webkit.MimeTypeMap.getSingleton()
+                                .getMimeTypeFromExtension(display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT))
+                            val video = mime?.startsWith("video/") == true
+                            val name = display.ifEmpty { appText(if (video) R.string.target_video else R.string.target_image) }
+                            if (video) engine.importVideo(uri.toString(), name)
+                            else {
+                                val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -1L
+                                try {
+                                    val buf = directBuffer(bmp.width * bmp.height * 4)
+                                    bmp.copyPixelsToBuffer(buf); buf.rewind()
+                                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString())
+                                } finally { bmp.recycle() }
+                            }
+                        }
+                        if (id >= 0) imported.add(id)
+                        else errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        Log.w(TAG, "batch media item failed", failure)
+                        errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    }
+                }
+                refreshNow()
+                if (imported.isNotEmpty()) {
+                    selection = imported.toCollection(LinkedHashSet())
+                    engine.setSelection(imported.toLongArray())
+                    refreshNow()
+                }
+            } finally { busyMessage = null }
         }
     }
 
@@ -3864,6 +3977,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (pointPick != null) motionAutoApply = if (stabilize) 3 else 0
     }
     fun beginMotionPick(tool: Int) {
+        cameraTrackerVisible = false
         val id = primary ?: return
         if (layers.firstOrNull { it.id == id }?.kind != com.aurea.aurea.ui.theme.LayerType.Video.kind) {
             showToast(appText(R.string.msg_escolha_uma_camada_de_video)); return
@@ -4314,6 +4428,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun applySpeedRamp(preset: Int) {
         val id = primary ?: return
         if (preset < 0) engine.setTimeRemap(id, false) else engine.applySpeedRamp(id, preset)
+        thumbnails.unalias(id)   // o tempo do pedaço mudou: a tira dele é outra
         refreshNow()
     }
 
@@ -4335,6 +4450,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun reverseRemap() {
         val id = primary ?: return
         engine.reverseTimeRemap(id)
+        thumbnails.unalias(id)
         refreshNow()
     }
 
@@ -4427,6 +4543,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var cameraSelectionFrame: Long = -1
     var cameraFeatures by mutableStateOf<FloatArray?>(null)
         private set
+    var cameraTrackerVisible by mutableStateOf(true)
     private val featureBuf = FloatArray(6 * 1500)
 
     /** Chamado a cada atualização: mostra os pontos enquanto o painel de rastreio está aberto. */
@@ -4988,6 +5105,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    fun enableLayer3D() {
+        val id = primary ?: return
+        if (engine.enableLayer3D(id)) {
+            refreshNow()
+            refreshDetail()
+        }
+    }
+
     /** Põe as camadas escolhidas (ou [layer]) dentro do grupo [group]. */
     fun addToGroup(group: Long, layers: Collection<Long> = selection.ifEmpty { listOfNotNull(primary) }) {
         val ids = layers.filter { it != group }
@@ -5130,30 +5255,33 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** TTF/OTF do seletor do sistema: copiado para o projeto, registrado e aplicado. */
     fun importFont(uri: Uri, forText3d: Boolean = false) {
+        importFonts(listOf(uri), forText3d)
+    }
+
+    fun importFonts(uris: List<Uri>, forText3d: Boolean = false) {
+        if (uris.isEmpty()) return
         if (!acceptsImport()) return
         val targetLayer = primary
-        val name = displayName(uri) ?: "fonte.ttf"
-        val ext = name.substringAfterLast('.', "ttf").lowercase()
-        if (ext != "ttf" && ext != "otf") {
-            errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf)
-            return
-        }
         launchImport launch@{
-            val line = withContext(Dispatchers.IO) {
-                val file = copyToDir(uri, "fontes", ext) ?: return@withContext null
-                engine.importFont(file.absolutePath)
+            for (uri in uris.distinct()) {
+                val ext = (displayName(uri) ?: "fonte.ttf").substringAfterLast('.', "ttf").lowercase()
+                if (ext != "ttf" && ext != "otf") {
+                    errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf); continue
+                }
+                val line = withContext(Dispatchers.IO) {
+                    val file = copyToDir(uri, "fontes", ext) ?: return@withContext null
+                    engine.importFont(file.absolutePath)
+                }
+                val item = line?.let { parseFont(it) }
+                if (item == null) { errorMessage = appText(R.string.msg_nao_deu_para_ler_essa_fonte); continue }
+                fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
+                // Importing a library must not repeatedly change the selected text.
+                if (uris.size == 1 && primary == targetLayer) {
+                    if (forText3d) text3d?.let { setText3D(it.copy(fontPath = item.path)) }
+                    else applyTextFont(item)
+                }
+                showToast(appText(R.string.msg_fonte_importada, item.family))
             }
-            val item = line?.let { parseFont(it) }
-            if (item == null) {
-                errorMessage = appText(R.string.msg_nao_deu_para_ler_essa_fonte)
-                return@launch
-            }
-            fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
-            if (primary == targetLayer) {
-                if (forText3d) text3d?.let { setText3D(it.copy(fontPath = item.path)) }
-                else applyTextFont(item)
-            }
-            showToast(appText(R.string.msg_fonte_importada, item.family))
         }
     }
 
@@ -5847,6 +5975,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         // Com keyframe, mexer grava/atualiza o keyframe no cabeçote (como o volume).
         if (d != null && d.speedAnimated) send { insertKeyframe(id, TrackProperty.SPEED, -1, 0, d.localFrame(playhead), v) }
         else send { setLayerSpeed(id, v) }
+        thumbnails.unalias(id)
         refreshNow()
     }
 
@@ -5941,7 +6070,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private val MODEL_EXTS = setOf("glb", "gltf", "fbx", "obj")
     /** O que acompanha um modelo (texturas, .mtl, .bin): nunca é "adivinhado" como modelo. */
-    private val MODEL_SIDE_EXTS = setOf("mtl", "bin", "png", "jpg", "jpeg", "webp", "tga", "bmp", "ktx2", "dds", "tif", "tiff")
+    private val MODEL_SIDE_EXTS = setOf("mtl", "bin", "png", "jpg", "jpeg", "webp", "tga", "bmp", "psd", "gif", "ktx2", "dds", "tif", "tiff")
 
     /** "Importar texturas": a layer do modelo e os arquivos que ele referencia e não achou (só o nome). */
     data class MissingModelTextures(val layer: Long, val names: List<String>)
@@ -6140,6 +6269,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         busyMessage = appText(R.string.msg_texturas) + "…"
         launchImport launch@{
             val detail = arrayOfNulls<String>(1)
+            var copyFailed = false
             val left = withContext(Dispatchers.IO) {
                 val folder = engine.modelFolder(req.layer).takeIf { it.isNotEmpty() }?.let(::File) ?: return@withContext -1_000
                 val wanted = req.names.associateBy { it.lowercase() }
@@ -6154,7 +6284,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     // Fora da lista (a textura que o .mtl escolhido agora vai pedir):
                     // entra, mas nunca por cima de um arquivo que já está na pasta.
                     if (named == null && File(folder, target).exists()) { copied++; continue }
-                    if (copyUriTo(uri, File(folder, target))) copied++
+                    if (copyUriTo(uri, File(folder, target))) copied++ else copyFailed = true
                 }
                 if (copied == 0) return@withContext -1_000
                 engine.reloadModelTextures(req.layer, detail)
@@ -6166,8 +6296,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 else -> {
                     refreshNow()
                     val still = engine.modelMissingTextures(req.layer)
-                    if (still.isEmpty()) showToast(appText(R.string.model_textures_done))
-                    else promptModelTextures(MissingModelTextures(req.layer, still))
+                    if (still.isEmpty() && !copyFailed) showToast(appText(R.string.model_textures_done))
+                    else if (still.isNotEmpty()) promptModelTextures(MissingModelTextures(req.layer, still))
+                    if (copyFailed) errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
                 }
             }
         }
@@ -6176,12 +6307,16 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /**
      * Copia o que veio do seletor para o sandbox. Devolve (arquivo do modelo,
      * nome da layer); modelo nulo = nenhum modelo entre os arquivos (nem no .zip);
-     * null = a cópia falhou. glTF/GLB continuam em `modelos/<hash>.<ext>`;
-     * FBX/OBJ ganham a pasta `modelos/<hash>/` com as texturas ao lado.
+     * null = a cópia falhou. Um glTF/GLB sem companheiros fica em
+     * `modelos/<hash>.<ext>`; com companheiros, FBX/OBJ/glTF/GLB ganham
+     * a pasta `modelos/<hash>/` com os arquivos auxiliares ao lado.
      */
     /** Nome do arquivo escolhido; sem extensão conhecida, ganha a do formato lido nos primeiros bytes. */
     private fun modelPickName(uri: Uri): String {
-        val name = displayName(uri) ?: ""
+        // Some document/file providers omit DISPLAY_NAME. Preserve a usable
+        // URI filename (including ZIP and companions) before sniffing content.
+        val name = displayName(uri)?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.substringAfterLast('/').orEmpty()
         val ext = name.substringAfterLast('.', "").lowercase()
         if (ext in MODEL_EXTS || ext == "zip" || ext in MODEL_SIDE_EXTS) return name
         val head = try {
@@ -6199,37 +6334,47 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun stageModel(picks: List<Pair<Uri, String>>): Pair<File?, String>? {
         val app = getApplication<Application>()
         val root = File(File(app.filesDir, "projetos"), "modelos").apply { mkdirs() }
-        val unzipDir = File(root, "importando-zip")
+        val unzipDir = File(root, "importando-zip-${java.util.UUID.randomUUID()}")
         try {
             // (nome, abrir) de cada arquivo: os escolhidos e o conteúdo dos .zip.
-            val sources = mutableListOf<Pair<String, () -> java.io.InputStream?>>()
+            // Keep each archive's identity: another ZIP's texture with the same
+            // filename must not overwrite the selected model's companions.
+            val sources = mutableListOf<Triple<String, () -> java.io.InputStream?, String?>>()
+            val archiveHashes = mutableMapOf<String, ByteArray>()
             for ((uri, name) in picks) {
                 if (name.substringAfterLast('.', "").lowercase() != "zip") {
-                    sources += name to { app.contentResolver.openInputStream(uri) }
+                    sources += Triple(name, { app.contentResolver.openInputStream(uri) }, null)
                     continue
                 }
-                unzipDir.deleteRecursively()
-                unzipDir.mkdirs()
-                app.contentResolver.openInputStream(uri)?.use { raw ->
-                    java.util.zip.ZipInputStream(raw).use { zip ->
-                        while (true) {
-                            val entry = zip.nextEntry ?: break
-                            // Só o nome (a pasta do zip não importa; "../" nunca sai daqui).
-                            val file = safeModelFileName(entry.name.substringAfterLast('/').substringAfterLast('\\'))
-                            if (entry.isDirectory || file == null || entry.name.contains("__MACOSX")) continue
-                            val out = File(unzipDir, file)
-                            if (out.exists()) continue
-                            FileOutputStream(out).use { zip.copyTo(it) }
-                            sources += file to { out.inputStream() }
-                        }
+                check(unzipDir.exists() || unzipDir.mkdirs())
+                val archiveDir = File(unzipDir, java.util.UUID.randomUUID().toString())
+                val archive = File(unzipDir, "${archiveDir.name}.zip")
+                check(copyUriStreamTo(app.contentResolver.openInputStream(uri), archive))
+                val archiveDigest = java.security.MessageDigest.getInstance("SHA-1")
+                archive.inputStream().use { input ->
+                    val buffer = ByteArray(1 shl 16)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count <= 0) break
+                        archiveDigest.update(buffer, 0, count)
                     }
-                } ?: throw IllegalStateException("sem stream")
+                }
+                archiveHashes[archiveDir.name] = archiveDigest.digest()
+                val extracted = engine.extractModelArchive(archive.absolutePath, archiveDir.absolutePath)
+                    ?: throw IllegalStateException("Could not extract model archive")
+                for (path in extracted) {
+                    val out = File(path)
+                    sources += Triple(out.relativeTo(archiveDir).invariantSeparatorsPath, { out.inputStream() }, archiveDir.name)
+                }
             }
             val model = sources.firstOrNull { it.first.substringAfterLast('.', "").lowercase() in MODEL_EXTS }
                 ?: return null to ""
             val ext = model.first.substringAfterLast('.').lowercase()
             val tmp = File(root, "importando.$ext")
             val digest = java.security.MessageDigest.getInstance("SHA-1")
+            // Identical geometry with different archived textures gets a distinct
+            // resource folder, so importing it cannot change an existing layer.
+            model.third?.let { archiveHashes[it]?.let(digest::update) }
             (model.second() ?: throw IllegalStateException("sem stream")).use { input ->
                 FileOutputStream(tmp).use { out ->
                     val buf = ByteArray(1 shl 16)
@@ -6241,22 +6386,33 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
+            check(tmp.length() > 0) { "Empty model file" }
             val hash = digest.digest().joinToString("") { "%02x".format(it) }
-            val name = model.first.substringBeforeLast('.').ifBlank { appText(R.string.sh_add_model_3d) }
-            if (ext != "fbx" && ext != "obj") {
+            val name = model.first.substringAfterLast('/').substringBeforeLast('.').ifBlank { appText(R.string.sh_add_model_3d) }
+            // .gltf escolhido junto com o .bin/texturas (ou num .zip): pasta própria
+            // com os companheiros, como FBX/OBJ — antes só o .gltf era copiado e o
+            // import falhava com "arquivo .bin do modelo ausente". O motor acha o
+            // .bin/textura pelo nome na pasta (GltfImporter flat_companion).
+            val gltfWithCompanions = ext in setOf("gltf", "glb") && sources.size > 1
+            if (ext != "fbx" && ext != "obj" && !gltfWithCompanions) {
                 val dst = File(root, "$hash.$ext")
-                if (dst.exists()) tmp.delete() else tmp.renameTo(dst)
+                if (dst.exists()) tmp.delete() else check(tmp.renameTo(dst)) { "Could not store model" }
                 return dst to name
             }
             val folder = File(root, hash).apply { mkdirs() }
-            val dst = File(folder, "$hash.$ext")
+            val dst = File(folder, if (model.third != null) model.first else "$hash.$ext")
+            check(dst.parentFile?.let { it.exists() || it.mkdirs() } == true)
             if (dst.exists()) tmp.delete() else if (!tmp.renameTo(dst)) throw IllegalStateException("rename")
             for (companion in sources) {
                 if (companion === model) continue
+                if (model.third != null && companion.third != null && companion.third != model.third) continue
                 val cext = companion.first.substringAfterLast('.', "").lowercase()
                 if (cext in MODEL_EXTS || cext == "zip") continue
-                val target = safeModelFileName(companion.first) ?: continue
-                (companion.second() ?: continue).use { input -> FileOutputStream(File(folder, target)).use { input.copyTo(it) } }
+                val target = if (companion.third == model.third && model.third != null) companion.first
+                    else safeModelFileName(companion.first) ?: continue
+                val destination = File(folder, target)
+                check(destination.parentFile?.let { it.exists() || it.mkdirs() } == true)
+                check(copyUriStreamTo(companion.second(), destination)) { "Could not store companion" }
             }
             return dst to name
         } catch (e: Exception) {
@@ -6285,9 +6441,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
             }
         } ?: throw IllegalStateException("sem stream")
+        check(tmp.length() > 0) { "Empty environment file" }
         val hash = digest.digest().joinToString("") { "%02x".format(it) }
         val dst = File(dir, "$hash.$ext")
-        if (dst.exists()) tmp.delete() else tmp.renameTo(dst)
+        if (dst.exists()) tmp.delete() else check(tmp.renameTo(dst)) { "Could not store environment" }
         dst
     } catch (e: Exception) {
         // Temporário tem dono (§52): a cópia pela metade (disco cheio, stream cortado) sai.
@@ -6297,13 +6454,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun copyUriTo(uri: Uri, dst: File): Boolean = try {
-        getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(dst).use { input.copyTo(it) }
-        } != null
+        copyUriStreamTo(getApplication<Application>().contentResolver.openInputStream(uri), dst)
     } catch (e: Exception) {
         Log.w(TAG, "copia da textura falhou: ${e.javaClass.simpleName}: ${e.message}")
-        dst.delete()
         false
+    }
+
+    /** Não trunca uma textura já usada pelo projeto se a leitura falhar. */
+    private fun copyUriStreamTo(stream: java.io.InputStream?, dst: File): Boolean {
+        if (stream == null) return false
+        val pending = File(dst.parentFile, ".texture-${java.util.UUID.randomUUID()}.pending")
+        return try {
+            stream.use { input -> FileOutputStream(pending).use { input.copyTo(it) } }
+            check(pending.length() > 0) { "Empty companion file" }
+            java.nio.file.Files.move(pending.toPath(), dst.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "copia da textura falhou: ${e.javaClass.simpleName}: ${e.message}")
+            false
+        } finally { pending.delete() }
     }
 
     /** Nome de arquivo seguro para a pasta do modelo (sem pasta, sem oculto); null = inválido. */
@@ -6968,9 +7138,31 @@ class ThumbnailCache(private val engine: AureaEngine) {
     private val buffer: ByteBuffer = directBuffer(512 * 512 * 4)
     private val width = IntArray(1)
 
+    /**
+     * Pedaço de um corte → camada dona das miniaturas. Os dois lados de um
+     * split mostram a MESMA mídia no MESMO lugar (a origem `início − deslocamento`
+     * não muda), então o pedaço novo usa os ladrilhos já prontos do original:
+     * cortar não refaz a tira inteira (eram dezenas de consultas ao motor, cada
+     * uma no lock do modelo que o preview segura, mais um Bitmap por ladrilho na
+     * thread da UI — o engasgo do "cortar fica lento" em aparelho de 3 GB).
+     */
+    private val owners = HashMap<Long, Long>()
+
+    fun ownerOf(layer: Long): Long = owners[layer] ?: layer
+
+    /** O pedaço [piece] de um corte passa a ler as miniaturas de [original]. */
+    fun alias(piece: Long, original: Long) {
+        if (piece == original) return
+        if (owners.size >= MAX_OWNERS) owners.clear()   // só perde o compartilhamento
+        owners[piece] = ownerOf(original)
+    }
+
+    /** O tempo da camada mudou (velocidade, rampa, ao contrário): volta a pedir as dela. */
+    fun unalias(layer: Long) { owners.remove(layer) }
+
     /** Quem chama arredonda o frame para a grade de 250 ms do motor (a timeline pede um frame por balde). */
     fun get(layer: Long, timelineFrame: Int, heightPx: Int): Bitmap? {
-        val key = Key(layer, timelineFrame, heightPx)
+        val key = Key(ownerOf(layer), timelineFrame, heightPx)
         cache.get(key)?.let { return it }
         buffer.clear()
         val bytes = engine.queryThumbnail(layer, timelineFrame, heightPx, buffer, width)
@@ -6984,7 +7176,7 @@ class ThumbnailCache(private val engine: AureaEngine) {
         } catch (_: OutOfMemoryError) { clear(); null }
     }
 
-    fun clear() { epoch++; cache.evictAll() }
+    fun clear() { epoch++; cache.evictAll(); owners.clear() }
 
     /** Pressão de memória: fica só a fração mais recente (o que está na tela). */
     fun trimTo(fraction: Float) { epoch++; cache.trimToSize((cache.size() * fraction).toInt()) }
@@ -6994,6 +7186,7 @@ class ThumbnailCache(private val engine: AureaEngine) {
     private companion object {
         val MAX_BYTES: Int = com.aurea.aurea.engine.DeviceMemoryClass.thumbnailCacheBytes(
             Runtime.getRuntime().maxMemory(), com.aurea.aurea.engine.DeviceMemoryClass.low)
+        const val MAX_OWNERS = 4096
     }
 }
 

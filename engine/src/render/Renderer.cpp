@@ -693,6 +693,7 @@ bool ray_hits_model_layer(const Composition& comp, const Layer& l, FrameIndex ti
     std::vector<Vec3> pts;
     for (usize n = 0; n < asset.nodes.size(); ++n) {
         const scene3d::Node& node = asset.nodes[n];
+        if (!node.inScene) continue;
         if (node.mesh < 0 || static_cast<usize>(node.mesh) >= asset.meshes.size()) continue;
         const Mat4 m = inst.world * (n < inst.nodeWorld.size() ? inst.nodeWorld[n] : Mat4::identity());
         const bool skinNode = node.skin >= 0 && static_cast<usize>(node.skin) < inst.skinJointOffset.size();
@@ -1296,12 +1297,14 @@ bool layer_sounds_at(const Layer& l, const Project& project, FrameIndex t) noexc
 
 } // namespace
 
-std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase) noexcept {
+std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase, u64 guideId) noexcept {
     std::vector<Vec4> result;
     if (!planComp_ || !host || count == 0) return result;
     const auto& comp=*planComp_;
     const auto& order=comp.order(); const Layer* guide=nullptr;
-    for(u32 i=1;i<order.size();++i) if(comp.layer(order.at(i))==host) { guide=comp.layer(order.at(i-1)); break; }
+    if (guideId) guide = comp.layer(LayerId::unpack(guideId));
+    else for(u32 i=1;i<order.size();++i) if(comp.layer(order.at(i))==host) { guide=comp.layer(order.at(i-1)); break; }
+    if (guide == host) return result;
     if(!guide) return result;
     vector::Contour contour;
     if(guide->kind==LayerKind::Shape) {
@@ -1616,10 +1619,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (!l || !l->contains_time(time)) continue;
             for (const EffectInstance& inst : l->effects) {
                 const Effect* fx = inst.enabled ? effects_->find(inst.type) : nullptr;
-                const i32 k = fx ? fx->input_layer_param() : -1;
-                if (k < 0 || static_cast<u32>(k) >= inst.params.size()) continue;
-                const u64 ref = inst.params[static_cast<u32>(k)].constant.ref;
-                if (ref && ref != order.at(i).pack()) inputLayers.push_back(ref);
+                for (u32 slot = 0; fx && slot < fx->input_layer_count(); ++slot) {
+                    const i32 k = fx->input_layer_param_at(slot);
+                    if (k < 0 || static_cast<u32>(k) >= inst.params.size()) continue;
+                    const u64 ref = inst.params[static_cast<u32>(k)].constant.ref;
+                    if (ref && ref != order.at(i).pack()) inputLayers.push_back(ref);
+                }
             }
         }
     }
@@ -2007,6 +2012,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         captionTracks.add(std::move(track));
                     }
                     textData = &captionText; textTracks = &captionTracks;
+                }
+                TextData evaluatedTracking;
+                if (const Track* tracking = textTracks->find(TrackProperty::TextTracking); tracking && tracking->driven()) {
+                    evaluatedTracking = *textData;
+                    evaluatedTracking.tracking = std::clamp(tracking->value_or(local, textData->tracking), -1000.f, 1000.f);
+                    textData = &evaluatedTracking;
                 }
                 const auto font = text::FontManager::instance().font_for(*textData);
                 if (!font || textData->content.empty() || (textData->color.w <= 0.0f && textData->strokeWidth <= 0.0f)) continue;
@@ -2685,7 +2696,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // fonte nesse instante é buscada no bloco de vídeo (o decoder); a
         // comparação acontece na cadeia de efeitos (EffectGraph::build).
         i64 motionDelay = 0;
-        if (effects_ && (motionDetectType_ || datamoshType_)
+        if (effects_
             && (l->kind == LayerKind::Video || rl.source.kind == LayerSource::Kind::Nested)) {
             const ParameterRegistry* mp = effects_->params(motionDetectType_);
             const ParameterRegistry* dp = datamoshType_ ? effects_->params(datamoshType_) : nullptr;
@@ -2699,6 +2710,24 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const i64 hold = std::isfinite(q) ? std::clamp<i64>(std::llround(q), 1, kDatamoshMaxHold) : 12;
                     motionDelay = ((local.value % hold) + hold) % hold + 1;
                     break;
+                }
+                const Effect* temporal=inst.enabled ? effects_->find(inst.type) : nullptr;
+                if (temporal && temporal->wants_history() && inst.type!=motionDetectType_ && inst.type!=datamoshType_) {
+                    const ParameterRegistry* specs=effects_->params(inst.type);
+                    if (specs) {
+                        std::vector<ParamValue> values;
+                        values.reserve(specs->count());
+                        for (u32 p=0;p<specs->count();++p) values.push_back(evaluate_param(l->tracks,inst,p,specs->at(p),local));
+                        EffectEval evaluation;
+                        evaluation.effect=temporal;evaluation.instance=&inst;evaluation.layer=l;
+                        evaluation.values=values.data();evaluation.count=specs->count();
+                        evaluation.localTime=local;evaluation.framesPerSecond=fps;
+                        const f64 delay=temporal->history_delay_frames(evaluation);
+                        if (std::isfinite(delay) && delay>=1.0) {
+                            motionDelay=std::clamp<i64>(static_cast<i64>(std::floor(delay)),1,1200);
+                            break;
+                        }
+                    }
                 }
                 if (!inst.enabled || inst.type != motionDetectType_ || !mp || mp->count() < 1) continue;
                 const f32 d = evaluate_param(l->tracks, inst, 0, mp->at(0), local).v[0];
@@ -3031,7 +3060,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         rl.source.blendT = blendT;
                         // Aparelho em estado crítico: o preview mistura em vez de
                         // calcular o movimento de pixels (o export mantém o modo).
-                        rl.source.blendMode = (l->frameBlend == 2 && !settings.finalQuality && settings.heavyScale <= 0.25f) ? 1 : l->frameBlend;
+                        rl.source.blendMode = (l->frameBlend == 2 && !settings.finalQuality && settings.flowPolicyScale <= 0.25f) ? 1 : l->frameBlend;
                         // Flow spans this actual source pair, not one timeline
                         // frame. Normalize the remapped shutter by its PTS span
                         // so VFR, different frame rates, ramps and freezes agree.
@@ -3341,6 +3370,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const u64 jointBytes = in.pose().jointMatrices.size() * sizeof(Mat4);
                 if (jointBytes) bytesPerSample += std::max<u64>(4096, jointBytes);
                 if (in.asset) for (const auto& node : in.asset->nodes) {
+                    if (!node.inScene) continue;
                     if (node.mesh < 0 || static_cast<usize>(node.mesh) >= in.asset->meshes.size()) continue;
                     for (const auto& primitive : in.asset->meshes[static_cast<usize>(node.mesh)].primitives) {
                         bytesPerSample += 4096; // draw lists, instance matrices, material/camera uniforms, shadow/reflection state
@@ -3576,7 +3606,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     // Pós do grupo (v31): exposição, tone map, bloom e o nível de qualidade.
     const PostProcessSettings& pp = comp.post_process();
     scene3d::ScenePost post;
-    post.toneMapper = std::min(pp.toneMapper, 1u);
+    post.toneMapper = std::min(pp.toneMapper, 5u);
     post.bloom = pp.bloom;
     post.bloomIntensity = std::clamp(pp.bloomIntensity, 0.0f, 4.0f);
     post.bloomThreshold = std::max(0.0f, pp.bloomThreshold);
@@ -3967,7 +3997,10 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
         fc.tex[slot] = *t;
         heavyStats_.flowCacheBytes += static_cast<u64>(lw) * lh * 8;   // RGBA16F
     }
-    fc.key[slot] = pairKey;
+    // A chave só vale com os passes gravados: um fluxo que falhou não pode
+    // ser servido do cache como válido nos quadros seguintes.
+    fc.key[slot] = 0;
+    bool recorded = true;
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, 4096);
     FGTexture levels[6];
     u32 sizes[6][2];
@@ -3975,15 +4008,15 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
     sizes[0][0] = lw;
     sizes[0][1] = lh;
     const Vec4 lumaParams{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0};
-    ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
-                        {PassTexture{a}, PassTexture{b}}, &lumaParams, sizeof(lumaParams));
+    recorded &= ctx.fullscreen_pass("flow-luma", PassStage::Decode, levels[0], ShaderId::video_flow_luma_frag,
+                                    {PassTexture{a}, PassTexture{b}}, &lumaParams, sizeof(lumaParams)) != kInvalidIndex;
     u32 n = 1;
     while (n < 6 && std::min(lw, lh) >= 12) {
         const u32 nw = (lw + 1) / 2, nh = (lh + 1) / 2;
         struct { Vec4 uvMap; Vec4 texel; } dp{Vec4{1, 1, 0, 0}, Vec4{1.0f / static_cast<f32>(lw), 1.0f / static_cast<f32>(lh), 0, 0}};
         levels[n] = ctx.texture("flow-nivel", nw, nh);
-        ctx.fullscreen_pass("flow-reduz", PassStage::Decode, levels[n], ShaderId::effects_downsample_frag,
-                            {PassTexture{levels[n - 1]}}, &dp, sizeof(dp));
+        recorded &= ctx.fullscreen_pass("flow-reduz", PassStage::Decode, levels[n], ShaderId::effects_downsample_frag,
+                                        {PassTexture{levels[n - 1]}}, &dp, sizeof(dp)) != kInvalidIndex;
         sizes[n][0] = lw = nw;
         sizes[n][1] = lh = nh;
         ++n;
@@ -3995,11 +4028,13 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
         struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, 0, 0}};
         // O nível base vai direto para a textura do cache.
         const FGTexture f = i == 0 ? graph_.import_texture("flow-cache", fc.tex[slot], fd) : ctx.texture("flow", sizes[i][0], sizes[i][1]);
-        ctx.fullscreen_pass("flow-lk", PassStage::Decode, f, ShaderId::video_flow_lk_frag,
-                            {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp));
+        recorded &= ctx.fullscreen_pass("flow-lk", PassStage::Decode, f, ShaderId::video_flow_lk_frag,
+                                        {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp)) != kInvalidIndex;
         flow = f;
         haveFlow = true;
     }
+    if (!recorded) return FGTexture{};
+    fc.key[slot] = pairKey;
     return flow;
 }
 
@@ -4332,13 +4367,19 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                         pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
                     flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, baseW, baseH, frameNumber);
                 }
-                if (layer.source.blendT > 0.0f && layer.source.blendMode == 2) {
+                // Smooth Motion sem fluxo válido (passe não compilou, textura do
+                // cache não criou) cai na mistura: antes a layer ia preta/lixo.
+                bool warped = false;
+                if (layer.source.blendT > 0.0f && layer.source.blendMode == 2 && flow.valid()) {
                     const FGTexture moved = graph_.create_texture("layer-video-movimento", d);
                     const Vec4 wp{layer.source.blendT, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 0};
-                    ctx.fullscreen_pass("flow-deforma", PassStage::Decode, moved, ShaderId::video_flow_warp_frag,
-                                        {PassTexture{out.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp));
-                    out.texture = moved;
-                } else if (layer.source.blendT > 0.0f && layer.source.blendMode == 1) {
+                    if (ctx.fullscreen_pass("flow-deforma", PassStage::Decode, moved, ShaderId::video_flow_warp_frag,
+                                            {PassTexture{out.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp)) != kInvalidIndex) {
+                        out.texture = moved;
+                        warped = true;
+                    }
+                }
+                if (!warped && layer.source.blendT > 0.0f && layer.source.blendMode >= 1) {
                     // Mistura: alvo novo que LÊ os dois (vídeo opaco: A·(1−t) + B·t).
                     auto pNormal = shaders_.pipeline(PipelineKey::graphics(
                         ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
@@ -4368,7 +4409,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                         out.texture = mix;
                     }
                 }
-                if (layer.source.vectorBlur > 0.0f) {
+                if (layer.source.vectorBlur > 0.0f && flow.valid()) {
                     // Borrão ao longo do vetor de cada pixel, obturador centrado no quadro.
                     const FGTexture blurred = graph_.create_texture("layer-video-desfoque-vetorial", d);
                     // Export uses 64 samples; preview follows its adaptive budget.
@@ -5125,8 +5166,10 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         std::vector<u64> wanted;
         for (u32 i = 0; i < snap.plans.size() && i < snap.layers.size(); ++i) {
             for (const EffectEval& ev : snap.plans[i].evals) {
-                const i32 k = ev.effect ? ev.effect->input_layer_param() : -1;
-                if (k >= 0 && static_cast<u32>(k) < ev.count && ev.values[k].ref) wanted.push_back(ev.values[k].ref);
+                for (u32 slot = 0; ev.effect && slot < ev.effect->input_layer_count(); ++slot) {
+                    const i32 k = ev.effect->input_layer_param_at(slot);
+                    if (k >= 0 && static_cast<u32>(k) < ev.count && ev.values[k].ref) wanted.push_back(ev.values[k].ref);
+                }
             }
         }
         for (u32 i = 0; i < snap.layers.size() && !wanted.empty(); ++i) {
@@ -5905,7 +5948,7 @@ void Renderer::set_effect_preview_source(std::vector<u8> rgba, u32 width, u32 he
 }
 
 Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
-                                       u32 width, u32 height, std::vector<u8>& outRgba) noexcept {
+                                       u32 width, u32 height, std::vector<u8>& outRgba, bool comparison) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
     if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
     const Effect* effect = effects.find(type);
@@ -6040,6 +6083,7 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     eval.count = static_cast<u32>(values.size());
     eval.effectIndex = 0;
     eval.localTime = FrameIndex{0};
+    if (comparison) { eval.localTime = FrameIndex{18}; eval.clipProgress = 0.5f; }
     eval.texelScale = 1.0f;
     eval.placement = &placement;
     // Recurso resolvido fora do grafo (o mapa de profundidade da foto das
@@ -6141,9 +6185,14 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     {
         const Vec4 uvMap = EffectBuildContext::uv_map(Rect{0.0f, 0.0f, static_cast<f32>(width), static_cast<f32>(height)},
                                                       result.region);
-        if (ctx.fullscreen_pass("previa", PassStage::Output, shown, ShaderId::common_copy_frag,
-                                {PassTexture{result.texture, {}, CommonSampler::LinearClamp}},
-                                &uvMap, sizeof(uvMap)) == kInvalidIndex) {
+        struct PreviewMap { Vec4 effectMap; Vec4 size; };
+        const PreviewMap compare{uvMap, Vec4{static_cast<f32>(width), static_cast<f32>(height), 0, 0}};
+        const auto copy = comparison
+            ? ctx.fullscreen_pass("previa-comparada", PassStage::Output, shown, ShaderId::effects_preview_compare_frag,
+                {PassTexture{input.texture, {}, CommonSampler::LinearClamp}, PassTexture{result.texture, {}, CommonSampler::LinearClamp}}, &compare, sizeof(compare))
+            : ctx.fullscreen_pass("previa", PassStage::Output, shown, ShaderId::common_copy_frag,
+                {PassTexture{result.texture, {}, CommonSampler::LinearClamp}}, &uvMap, sizeof(uvMap));
+        if (copy == kInvalidIndex) {
             graph_.release(pool_);
             pool_.end_frame();
             (void)backend_->end_frame();

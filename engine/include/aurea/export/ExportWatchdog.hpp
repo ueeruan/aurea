@@ -24,7 +24,7 @@
 //
 //  4) MODO DE SEGURANÇA (export_retry_safe_mode e afins). Quando o encoder
 //     trava ou recusa no meio, a tela refaz o export num modo mais compatível:
-//     nível 1 = H.264 Baseline, lados em múltiplos de 16, taxa menor; nível 2 =
+//     nível 1 = H.264 Baseline, lados em múltiplos de 16, bitrate preservado; nível 2 =
 //     o mesmo no encoder de SOFTWARE (Android). Quem decide o próximo nível é o
 //     motor (vai nos bits 16..17 de `flags` do progresso); as telas só obedecem.
 //
@@ -90,6 +90,34 @@ inline constexpr u32 kExportFallbackStreak = 8;
     if (consecutiveFallbacks == 0) return {4'000'000'000ull, 60'000'000'000ull};
     if (consecutiveFallbacks < kExportFallbackStreak) return {1'000'000'000ull, 4'000'000'000ull};
     return {250'000'000ull, 1'000'000'000ull};
+}
+
+/// Camada SEM NENHUMA imagem (nem aproximada): não há o que gravar — mas
+/// decoder LENTO não é mídia quebrada (beta 0.0.2/0.0.3: "não consigo
+/// exportar" com vídeo). A paciência conta tempo SEM TRABALHO do decoder
+/// (quadro entregue OU decodificado e descartado a caminho do alvo, codec que
+/// terminou de abrir) e o teto é o da GPU — nunca o teto curto dos aproximados
+/// de `export_source_wait`: antes, depois de alguns quadros aproximados no fim
+/// de um clipe o teto caía para 1 s e o clipe SEGUINTE (codec abrindo, seek
+/// num GOP longo) falhava como "mídia indisponível".
+[[nodiscard]] inline ExportSourceWait export_missing_source_wait() noexcept {
+    return {4'000'000'000ull, 120'000'000'000ull};
+}
+
+/// Recurso de GPU do quadro pendente (Renderer::take_incomplete): espera sem
+/// progresso por 4 s, renovando enquanto decoders/serviços entregam algo, com
+/// teto de 30 s. Persistente sem nenhum progresso continua falhando em 4 s.
+[[nodiscard]] inline ExportSourceWait export_resource_wait() noexcept {
+    return {4'000'000'000ull, 30'000'000'000ull};
+}
+
+/// Sinal de vida da UI enquanto o produtor espera o decoder trabalhar: a
+/// mensagem do progresso muda (no máximo 1×/s) SÓ quando houve trabalho real —
+/// o vigia da tela (kExportUiStallSeconds) não cancela um decoder lento, e
+/// continua vendo o travamento de verdade (nada muda).
+inline constexpr u64 kExportLivenessIntervalNs = 1'000'000'000ull;
+[[nodiscard]] inline bool export_liveness_due(u64 nowNs, u64 lastNoteNs, u64 work, u64 notedWork) noexcept {
+    return work != notedWork && nowNs >= lastNoteNs + kExportLivenessIntervalNs;
 }
 
 // -----------------------------------------------------------------------------
@@ -172,12 +200,11 @@ inline constexpr u32 kExportProfileBaseline = 1;  ///< sem B-quadros nem CABAC: 
     return level > 0 ? ExportCodec::H264 : requested;
 }
 
-/// Taxa menor alivia o encoder (nível 1: 75%, nível 2: 60%), nunca abaixo de
-/// 0,5 Mbps.
+/// Compatibility retries change the encoder/profile, preserving the requested
+/// bitrate. A stalled device must not silently turn a High export into Low.
 [[nodiscard]] inline u32 export_safe_bitrate_bps(u32 bps, u32 level) noexcept {
-    if (level == 0) return bps;
-    const f64 k = level == 1 ? 0.75 : 0.60;
-    return std::max<u32>(std::min<u32>(bps, 500'000u), static_cast<u32>(static_cast<f64>(bps) * k));
+    (void)level;
+    return bps;
 }
 
 /// Tamanho no modo de segurança: a regra de sempre e depois OS DOIS lados para

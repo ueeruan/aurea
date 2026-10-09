@@ -128,7 +128,7 @@ struct TimelineMetrics {
     var trimTouchOut: CGFloat { dp(13) }
 
     // --- Losango ------------------------------------------------------------------
-    var diamond: CGFloat { dp(11) }
+    var diamond: CGFloat { dp(9) }
     var diamondRadius: CGFloat { dp(2) }
     var diamondStroke: CGFloat { dp(1.2) }
     /// Centro do losango: 22 abaixo do topo da barra (pode passar um pouco da base dela).
@@ -139,7 +139,7 @@ struct TimelineMetrics {
     var keyHitHalf: CGFloat { dp(24) }
     /// Histerese do arrasto de losango: o frame só troca depois de meio frame + isto.
     var keyDragHysteresis: CGFloat { dp(3) }
-    var keyGlyphHalf: CGFloat { dp(7) }
+    var keyGlyphHalf: CGFloat { dp(6) }
     var keyTouchTop: CGFloat { 0 }
     var keyMergeGap: CGFloat { dp(4) }
     var keyPillHeight: CGFloat { dp(10) }
@@ -589,8 +589,9 @@ enum TimelineRowOrder {
     private var misses: [Key: Int] = [:]
     private var aspects: [Int64: CGFloat] = [:]
 
-    /// Largura/altura da miniatura da camada (16:9 até a primeira chegar).
-    func aspect(_ layer: Int64) -> CGFloat { aspects[layer] ?? 16.0 / 9.0 }
+    /// Largura/altura da miniatura da camada (16:9 até a primeira chegar). Pela
+    /// DONA (`AureaModel.thumbOwner`): o pedaço de um corte usa a medida do original.
+    func aspect(_ model: AureaModel, _ layer: Int64) -> CGFloat { aspects[model.thumbOwner(layer)] ?? 16.0 / 9.0 }
 
     /**
      * Perguntas ao motor que ainda cabem neste quadro. A que acerta cria uma
@@ -607,7 +608,9 @@ enum TimelineRowOrder {
 
     func get(_ model: AureaModel, layer: Int64, bucket: Int32, timelineFrame: Int32, heightPx: Int, generation: UInt32) -> UIImage? {
         guard model.thumbnailWorkAllowed else { starved = true; return nil }
-        let key = Key(layer: layer, bucket: bucket, height: heightPx)
+        // Os dois lados de um corte dividem a chave (mesma mídia, mesma origem).
+        let owner = model.thumbOwner(layer)
+        let key = Key(layer: owner, bucket: bucket, height: heightPx)
         if let hit = hits[key] { return hit }
         if let missed = misses[key], missed == Int(generation) { return nil }
         if budget <= 0 { starved = true; return nil }
@@ -627,8 +630,8 @@ enum TimelineRowOrder {
         }
         order.append(key)
         hits[key] = image
-        if aspects[layer] == nil, image.size.height > 0 {
-            aspects[layer] = min(max(image.size.width / image.size.height, 0.3), 4)
+        if aspects[owner] == nil, image.size.height > 0 {
+            aspects[owner] = min(max(image.size.width / image.size.height, 0.3), 4)
         }
         return image
     }

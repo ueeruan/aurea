@@ -69,6 +69,10 @@ struct TrackingPanel: View {
     @State private var cameraMotion: UInt32 = 0
     @State private var knownFov: Float = 0
     @State private var distanceText = "100"
+    @State private var pointDisplay = false
+    @State private var calibration = false
+    @State private var objectKind: UInt32 = 1
+    private let objectTitles = ["cam_create_null_anchor", "cam_create_camera_shape", "cam_create_camera_text", "cam_create_camera_solid"]
     private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
     private var state: Int { (status["state"] as? NSNumber)?.intValue ?? 0 }
     var body: some View {
@@ -76,9 +80,12 @@ struct TrackingPanel: View {
             PanelHeader(title: AureaText.t("panel_rastreio"), onBack: { model.panel = .none })
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    MotionTrackingSection()
-                    Spacer().frame(height: 18)
-                    cameraSection
+                    Picker(AureaText.t("panel_rastreio"), selection: $model.cameraTrackerVisible) {
+                        Text(AureaText.t("cam_mode_2d")).tag(false)
+                        Text(AureaText.t("panel_camera_3d")).tag(true)
+                    }.pickerStyle(.segmented).frame(minHeight: 44)
+                    Spacer().frame(height: 16)
+                    if model.cameraTrackerVisible { cameraSection } else { MotionTrackingSection() }
                 }.padding(.init(top: 12, leading: 18, bottom: 24, trailing: 18))
             }
         }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
@@ -87,18 +94,9 @@ struct TrackingPanel: View {
             .onDisappear { model.cameraFeatures = []; model.cameraSelection = nil }
     }
     @ViewBuilder private var cameraSection: some View {
-        Text(AureaText.t("panel_camera_3d")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+        Text(AureaText.t(state == 2 ? "cam_step_place" : "cam_step_analyze")).font(.aurea(size: 17, weight: .bold))
         Spacer().frame(height: 6)
-        HStack(spacing: 6) {
-            ForEach(Array(["panel_rapido", "panel_equilibrado", "panel_alta_qualidade"].enumerated()), id: \.offset) { index, key in
-                Button { mode = UInt32(index) } label: {
-                    Text(AureaText.t(key)).font(.aurea(size: 12))
-                        .foregroundStyle(mode == UInt32(index) ? AureaColors.accent : AureaColors.text)
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(mode == UInt32(index) ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                }.buttonStyle(AureaPressStyle())
-            }
-        }
+        if state != 1 && state != 2 { qualityPicker }
         Spacer().frame(height: 8)
         if state == 1 {
             let progress = number("progress").clamped(to: 0...1)
@@ -119,13 +117,30 @@ struct TrackingPanel: View {
             Spacer().frame(height: 4)
             let quality = AureaText.t(number("solved") != number("frames") || number("error") > 2 ? "cam_quality_poor" : number("error") > 1 ? "cam_quality_fair" : number("error") > 0.5 ? "cam_quality_good" : "cam_quality_excellent")
             note(AureaText.t("cam_solve_quality", quality, model.cameraSelectedCount))
-            Toggle(AureaText.t("cam_multi_select"), isOn: $model.cameraMultiSelect).font(.aurea(size: 13)).tint(AureaColors.accent)
-            Toggle(AureaText.t("cam_good_points"), isOn: $model.cameraGoodPointsOnly).font(.aurea(size: 13)).tint(AureaColors.accent)
-            Toggle(AureaText.t("cam_drag_surface_toggle"), isOn: $model.cameraTargetMode).font(.aurea(size: 13)).tint(AureaColors.accent)
-            HStack { Text(AureaText.t("fx_tamanho_ponto")).font(.aurea(size: 12)); Slider(value: $model.cameraPointSize, in: 2...8).tint(AureaColors.accent) }
             Spacer().frame(height: 8)
             action("panel_criar_camera", "cam_create_camera_desc") { model.createTrackedObject(0); reload() }
-            if model.cameraSelectedCount > 0 {
+            if !flag("rotationOnly") {
+                note(AureaText.t("cam_tap_hint")).padding(.top, 12)
+            }
+            Toggle(AureaText.t("cam_multi_select"), isOn: $model.cameraMultiSelect).font(.aurea(size: 13)).tint(AureaColors.accent)
+            if !flag("rotationOnly") {
+                Menu {
+                    ForEach(Array(objectTitles.enumerated()), id: \.offset) { index, title in
+                        Button(AureaText.t(title)) { objectKind = UInt32(index + 1) }
+                    }
+                } label: {
+                    HStack { Text(AureaText.t(objectTitles[Int(objectKind) - 1])); Image(systemName: "chevron.down") }
+                        .font(.aurea(size: 14)).frame(minHeight: 44)
+                }
+                action("cam_place_selected", "cam_place_on_points", enabled: model.cameraSelectedCount > 0) { model.createTrackedObject(objectKind); reload() }
+            }
+            DisclosureGroup(AureaText.t("cam_point_display"), isExpanded: $pointDisplay) {
+                Toggle(AureaText.t("cam_good_points"), isOn: $model.cameraGoodPointsOnly).font(.aurea(size: 13)).tint(AureaColors.accent)
+                Toggle(AureaText.t("cam_drag_surface_toggle"), isOn: $model.cameraTargetMode).font(.aurea(size: 13)).tint(AureaColors.accent)
+                HStack { Text(AureaText.t("fx_tamanho_ponto")).font(.aurea(size: 12)); Slider(value: $model.cameraPointSize, in: 2...8).tint(AureaColors.accent) }
+            }.padding(.vertical, 12)
+            if model.cameraSelectedCount > 0 && !flag("rotationOnly") {
+                DisclosureGroup(AureaText.t("cam_reference_controls"), isExpanded: $calibration) {
                 Button(AureaText.t("cam_set_origin")) { model.calibrateCamera(0) }.padding(.vertical, 12)
                 if model.cameraSelectedCount >= 3 { Button(AureaText.t("cam_set_ground")) { model.calibrateCamera(1) }.padding(.vertical, 12) }
                 if model.cameraSelectedCount == 2 {
@@ -135,18 +150,12 @@ struct TrackingPanel: View {
                 ForEach(model.layers.filter { $0.kind == 10 }) { layer in
                     Button(AureaText.t("cam_place_3d", layer.name)) { model.placeTrackedModel(layer.id) }.padding(.vertical, 12)
                 }
-            }
-            if !flag("rotationOnly") && model.cameraSelectedCount > 0 {
-                ForEach(Array(["cam_create_null_anchor", "cam_create_camera_shape", "cam_create_camera_text", "cam_create_camera_solid"].enumerated()), id: \.offset) { index, title in
-                    Spacer().frame(height: 8)
-                    action(title, "cam_place_on_points") { model.createTrackedObject(UInt32(index + 1)); reload() }
-                }
-            } else if !flag("rotationOnly") {
-                note(AureaText.t("cam_tap_hint"))
+                }.padding(.vertical, 12)
             }
             Button(AureaText.t(advanced ? "cam_hide_advanced" : "panel_avancado")) { advanced.toggle() }.padding(.vertical, 12)
             if advanced { note(AureaText.t("cam_stats_short", Int(number("solved")), Int(number("frames")), String(format: "%.2f", number("error")), Int(number("fovDeg").rounded()))) }
             if advanced {
+                qualityPicker
                 Picker(AureaText.t("cam_camera"), selection: $cameraMotion) { Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("cam_free")).tag(UInt32(1)); Text(AureaText.t("cam_tripod")).tag(UInt32(2)) }
                 Button(knownFov == 0 ? AureaText.t("cam_fov_auto") : AureaText.t("cam_fov_value", Int(knownFov))) { knownFov = knownFov == 0 ? Float(number("fovDeg")).clamped(to: 10...120) : 0 }
                 if knownFov > 0 { Slider(value: $knownFov, in: 10...120).tint(AureaColors.accent) }
@@ -154,9 +163,9 @@ struct TrackingPanel: View {
                 if model.cameraSelectedCount > 0 {
                     action("cam_delete_resolve", "cam_delete_resolve_desc") { _ = model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov); model.cameraSelectedCount = 0; reload() }
                 }
+                Spacer().frame(height: 8)
+                action("panel_analisar_novo", "panel_modo_escolhido_acima", run: analyze)
             }
-            Spacer().frame(height: 8)
-            action("panel_analisar_novo", "panel_modo_escolhido_acima", run: analyze)
         } else {
             if state == 3 || state == 4 {
                 note(state == 4 ? AureaText.t("panel_analise_cancelada") : AureaText.t("ios_camera_solve_failed", AureaEngineText.reason(status["message"] as? String)))
@@ -173,7 +182,7 @@ struct TrackingPanel: View {
     private func reload() {
         guard sourceLayer == model.primarySelection else { status = [:]; model.cameraFeatures = []; return }
         status = model.engine.cameraTrackingStatus()
-        if state == 2 { model.refreshCameraTrackPoints() } else { model.cameraFeatures = []; model.cameraTarget = [] }
+        if state == 2 && model.cameraTrackerVisible { model.refreshCameraTrackPoints() } else { model.cameraFeatures = []; model.cameraTarget = [] }
     }
     private func restore() {
         guard let id = model.primarySelection else { sourceLayer = nil; return }
@@ -184,14 +193,26 @@ struct TrackingPanel: View {
         sourceLayer = id
         model.engine.setCameraTrack(mode, forLayer: id); reload()
     }
-    private func action(_ title: String, _ subtitle: String, run: @escaping () -> Void) -> some View {
+    private var qualityPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(["panel_rapido", "panel_equilibrado", "panel_alta_qualidade"].enumerated()), id: \.offset) { index, key in
+                Button { mode = UInt32(index) } label: {
+                    Text(AureaText.t(key)).font(.aurea(size: 12)).multilineTextAlignment(.center)
+                        .foregroundStyle(mode == UInt32(index) ? AureaColors.accent : AureaColors.text)
+                        .padding(8).frame(maxWidth: .infinity, minHeight: 44)
+                        .background(mode == UInt32(index) ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(mode == UInt32(index) ? .isSelected : [])
+            }
+        }
+    }
+    private func action(_ title: String, _ subtitle: String, enabled: Bool = true, run: @escaping () -> Void) -> some View {
         Button(action: run) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(AureaText.t(title)).font(.aurea(size: 14, weight: .semibold))
                 Text(AureaText.t(subtitle)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 12)
                 .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(AureaPressStyle())
+        }.buttonStyle(AureaPressStyle()).disabled(!enabled)
     }
 }
 
@@ -392,12 +413,14 @@ struct CaptionsPanel: View {
     @State private var words: [CaptionWord] = []
     @State private var sourcePath = ""
     @State private var transcriptSource: String?
+    @State private var translateEnglish = false
     @State private var hasKey = false
     @State private var language: String = {
         let code = Locale.current.languageCode ?? ""
         return ["pt", "en", "es"].contains(code) ? code : ""
     }()
-    @State private var importing = false
+    /// O .srt escolhido (DocumentImportPicker: o `.fileImporter` aninhado não abria).
+    @State private var srtPick: URL?
     @State private var busy: String?
     @State private var error: String?
     @State private var job: Task<Void, Never>?
@@ -448,8 +471,10 @@ struct CaptionsPanel: View {
         .onChange(of: id) { _ in open() }
         .onChange(of: model.status.modelRevision) { _ in captionCount = Int(model.engine.captionCount(id)) }
         .onDisappear { _ = model.engine.captionProgress(true); job?.cancel(); loading?.cancel(); persist(); model.captionOptions = options }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "srt") ?? .plainText, .plainText, .data]) { result in
-            importSRT(result)
+        .onChange(of: srtPick) { picked in
+            guard let url = picked else { return }
+            srtPick = nil
+            importSRT(.success(url))
         }
     }
     private var controls: some View {
@@ -461,9 +486,13 @@ struct CaptionsPanel: View {
             if busy != nil { CaptionAction(label: AureaText.t("common_cancel")) { _ = model.engine.captionProgress(true); job?.cancel() } }
             label("panel_idioma_fala")
             CaptionChips(options: languages, selected: languageCodes.firstIndex(of: language) ?? 0) { language = languageCodes[$0] }
+            Toggle(AureaText.t("beta_translate_english"), isOn: $translateEnglish)
+                .frame(minHeight: 44).disabled(busy != nil)
             HStack(spacing: 8) {
                 CaptionAction(label: AureaText.t(words.isEmpty ? "panel_gerar_legendas" : "panel_transcrever_novo"), primary: true, enabled: busy == nil, action: transcribe)
-                CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: busy == nil) { importing = true }
+                CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: busy == nil) {
+                    DocumentImportPicker.present(types: [UTType(filenameExtension: "srt") ?? .plainText, .plainText, .data]) { urls in srtPick = urls?.first }
+                }
             }.padding(.vertical, 6)
             label("panel_estilo")
             CaptionChips(options: ["pn_caption_style_classic", "panel_caixa", "pn_caption_style_highlight", "pn_caption_style_neon", "pn_karaoke", "pn_pop", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }, selected: style) { style = $0 }
@@ -610,7 +639,7 @@ struct CaptionsPanel: View {
     }
     private func transcribe() {
         guard busy == nil else { return }
-        let sourceId = id, engine = model.engine, selectedLanguage = language, project = model.projectGeneration
+        let sourceId = id, engine = model.engine, selectedLanguage = language, translate = translateEnglish, project = model.projectGeneration
         guard !path.isEmpty else { error = AureaText.t("ios_no_audio_media"); return }
         busy = AureaText.t("ios_whisper_preparing"); error = nil
         let revision = UUID(); jobRevision = revision
@@ -634,7 +663,7 @@ struct CaptionsPanel: View {
                 defer { ticker.cancel() }
                 let result = try await withTaskCancellationHandler {
                     try await Task.detached(priority: .utility) {
-                        try engine.transcribeLocal(sourceId, model: modelFile.path, language: selectedLanguage).compactMap(CaptionWord.init)
+                        try engine.transcribeLocal(sourceId, model: modelFile.path, language: selectedLanguage, translateEnglish: translate).compactMap(CaptionWord.init)
                     }.value
                 } onCancel: { _ = engine.captionProgress(true) }
                 try Task.checkCancellation()

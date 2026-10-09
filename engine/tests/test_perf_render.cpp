@@ -1100,3 +1100,82 @@ AUREA_TEST(PreviewGesture, IdleVsyncCannotStarvePreviewRefinement) {
     AUREA_CHECK_EQ(e.read_telemetry().previewDenominator, denominator);
     e.shutdown();
 }
+
+// =============================================================================
+// Beta 0.0.5 ("trava em 2K/4K a 60 fps; a 30 fps fica normal"): custo do
+// quadro de PRÉVIA na resolução que o AUTO escolhe — controlador (escala
+// inicial pela composição e fps) ∩ teto da área visível (viewport). Mede o
+// host (GPU de mesa) em 1080p30, 1440p60 e 2160p60 com 10 camadas com
+// efeitos, numa área de prévia de celular em pé (1080×608) e em tela cheia
+// deitada (2400×1080). Os números são do HOST, não de celular.
+// =============================================================================
+#if defined(AUREA_TEST_VULKAN)
+#include "aurea/render/PreviewViewport.hpp"
+#include "aurea/render/RenderScheduler.hpp"
+AUREA_TEST(Perf8C, BenchPreviewAutoBySizeAndFps) {
+    if (!bench_enabled()) { std::printf("    (pulado: AUREA_BENCH=1 para medir)\n"); return; }
+    vk::Backend backend;
+    BackendConfig cfg;
+    cfg.enableValidation = false;
+    cfg.framesInFlight = 2;
+    if (!backend.initialize(cfg).ok()) { std::printf("    (sem GPU Vulkan)\n"); return; }
+    EffectRegistry effects;
+    register_builtin_effects(effects);
+    Renderer renderer;
+    AUREA_CHECK(renderer.initialize(backend, effects).ok());
+    std::printf("\n    GPU %s: projeto | area | previa WxH | prepare | gravacao | GPU ms | orcamento ms\n",
+                backend.capabilities().deviceName.c_str());
+    struct P { u32 w, h; f64 fps; const char* name; };
+    struct S { u32 w, h; const char* name; };
+    for (const P p : {P{1920, 1080, 30.0, "1080p30"}, P{2560, 1440, 60.0, "1440p60"}, P{3840, 2160, 60.0, "2160p60"}}) {
+        for (const S sv : {S{1080, 608, "editor"}, S{2400, 1080, "cheia"}}) {
+            DeviceCapabilities caps;
+            AdaptiveResolutionController c(caps);
+            c.configure(p.w, p.h, static_cast<f32>(p.fps));
+            const auto vs = preview_viewport_scale(true, p.w, p.h, sv.w, sv.h, 1.0f, c.current_numerator(),
+                                                   c.current_denominator(), static_cast<f32>(p.fps));
+            const u32 pw = std::max(1u, p.w * vs.numerator / vs.denominator);
+            const u32 ph = std::max(1u, p.h * vs.numerator / vs.denominator);
+            BenchScene s(p.w, p.h, p.fps);
+            s.populate(effects, 10, true);
+            // run_frames desenha no tamanho da composição: a prévia usa um alvo do tamanho escolhido.
+            TextureDesc d;
+            d.width = pw; d.height = ph;
+            d.format = SurfaceFormat::RGBA16F;
+            d.renderTarget = true; d.sampled = true; d.transferSrc = true;
+            const TextureHandle target = *backend.create_texture(d);
+            OffscreenTarget off{target, pw, ph};
+            RenderSettings rs;
+            rs.dither = false;
+            rs.gpuTimers = true;
+            rs.previewNumerator = vs.numerator;
+            rs.previewDenominator = vs.denominator;
+            FrameSnapshot snap;
+            std::vector<f64> prep, rec, gpu;
+            static u64 frameNo = 9000000;
+            for (u32 f = 0; f < 60; ++f) {
+                const auto t0 = std::chrono::steady_clock::now();
+                renderer.prepare(*s.comp, s.project, FrameIndex{static_cast<i64>(f)}, &s.media, &BenchScene::lookup, &s, rs,
+                                 ++frameNo, 1, DecodeMode::Playback, 1.0f, snap);
+                const f64 tp = ms_since(t0);
+                FrameStats st;
+                RenderTimings tm;
+                const auto t1 = std::chrono::steady_clock::now();
+                (void)renderer.render(snap, rs, &off, st, tm);
+                if (f >= 30) {
+                    prep.push_back(tp);
+                    rec.push_back(ms_since(t1));
+                    if (tm.gpuMeasured) gpu.push_back(tm.gpuTotalMs);
+                }
+            }
+            backend.wait_idle();
+            backend.destroy_texture(target);
+            std::printf("    %-7s | %-6s | %4ux%-4u | %6.2f | %6.2f | %6.2f | %5.1f\n", p.name, sv.name, pw, ph, median(prep),
+                        median(rec), median(gpu), 1000.0 / p.fps);
+            renderer.release_project_resources();
+        }
+    }
+    renderer.shutdown();
+    backend.shutdown();
+}
+#endif

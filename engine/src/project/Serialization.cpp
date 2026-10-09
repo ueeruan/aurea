@@ -2084,7 +2084,7 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
         if (g_readingTimelineVersion >= 5) c->set_edit_mode(r.boolv());
         if (g_readingTimelineVersion >= 31) {
             pp.quality3d = std::min<u32>(r.u32v(), 4u);
-            pp.toneMapper = std::min<u32>(r.u32v(), 1u);
+            pp.toneMapper = std::min<u32>(r.u32v(), 5u);
             const f32 ev = r.f32v();
             pp.exposure = std::isfinite(ev) ? std::clamp(ev, 0.01f, 64.0f) : 1.0f;
         }

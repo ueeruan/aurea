@@ -551,7 +551,12 @@ struct PreviewMetalView: UIViewRepresentable {
                         model.toggleMarkerAt(model.status.playhead)
                     } else {
                         let point = compositionPoint(stageDown, view: view)
-                        let hit = hitLayer(point, slack: 0, includeLocked: false) ?? hitLayer(point, slack: scaleFactor(view) * 12, includeLocked: false)
+                        let selected3D = model.selectedLayer.flatMap { row -> Int64? in
+                            guard row.kind == 10, row.visible, !row.locked, model.selection.count == 1, active(row),
+                                  StageGeom.contains(model.detail, point.x, point.y, slack: scaleFactor(view) * 20) else { return nil }
+                            return row.id
+                        }
+                        let hit = selected3D ?? hitLayer(point, slack: 0, includeLocked: false) ?? hitLayer(point, slack: scaleFactor(view) * 12, includeLocked: false)
                         if let hit {
                             if model.primarySelection != hit || model.selection.count != 1 { model.select(layerId: hit, additive: false) }
                         } else { model.clearSelection() }
@@ -654,13 +659,13 @@ struct PreviewMetalView: UIViewRepresentable {
                 if handle >= 0 { return }
             }
             let c = compositionPoint(point, view: view)
-            if model.selection.count == 1, let row = model.selectedLayer, active(row), StageGeom.contains(model.detail, c.x, c.y, slack: 0) { targetLayer = row.id }
+            if model.selection.count == 1, let row = model.selectedLayer, active(row), StageGeom.contains(model.detail, c.x, c.y, slack: row.kind == 10 ? scaleFactor(view) * 20 : 0) { targetLayer = row.id }
             // Seleção múltipla: dentro de uma das escolhidas vale ela (o arrasto
             // leva o grupo), mesmo com outra por cima.
             else if model.selection.count >= 2, let hit = hitSelected(c) { targetLayer = hit }
             else { targetLayer = hitLayer(c, slack: 0, includeLocked: true) }
             if targetLayer == nil, let row = model.selectedLayer, model.selection.count == 1,
-               (row.kind == 6 || row.kind == 8), !model.engine.previewGestureBasis(row.id).isEmpty {
+               (row.kind == 6 || row.kind == 8 || row.kind == 9), !model.engine.previewGestureBasis(row.id).isEmpty {
                 targetLayer = row.id
             }
         }

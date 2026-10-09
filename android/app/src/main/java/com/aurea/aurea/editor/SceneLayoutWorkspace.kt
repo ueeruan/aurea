@@ -38,6 +38,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.text.input.KeyboardType
@@ -68,17 +69,17 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     }
     if (lights) Dialog(onDismissRequest = { lights = false }) {
         Surface { Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            val light = remember(store.primary, store.sceneSettingsRevision, store.playhead) { store.lightInfo() }
+            val light = remember(store.primary, store.curveRevision, store.detail, store.sceneSettingsRevision, store.playhead) { store.lightInfo() }
             light?.let { values ->
                 for (param in 1..5) {
                     if (param == 5 && values[0] == 0f) continue
                     val label = listOf("", stringResource(R.string.panel_intensidade), "R", "G", "B", stringResource(R.string.scene_light_range))[param]
                     Row {
-                        SceneNumberField(values[param], label, "light:${store.primary}:$param", { store.setLightParam(param, it) }, Modifier.weight(1f))
+                        SceneNumberField(values[param], label, "light:${store.primary}:$param", { store.setLightParam(param, it) }, Modifier.weight(1f).testTag("scene.light.$param"))
                         if (param < 5) TextButton(onClick = { store.toggleLightKey(param, values[param]) }) { Text(if (store.detail?.hasKeyAtPlayhead(20 + param) == true) "◆" else "◇") }
                     }
                 }
-                if (values[0] == 0f) Row { Text(stringResource(R.string.scene_light_shadows)); Switch(values[8] >= .5f, { store.setLightParam(8, if (it) 1f else 0f) }) }
+                if (values[0] == 0f) Row { Text(stringResource(R.string.scene_light_shadows)); Switch(values[8] >= .5f, { store.setLightParam(8, if (it) 1f else 0f) }, modifier = Modifier.testTag("scene.light.shadows")) }
                 if (values[0] == 0f && values[8] >= .5f) {
                     val label = stringResource(R.string.scene_shadow_strength)
                     Text("$label: ${(values[10] * 100).toInt()}%")

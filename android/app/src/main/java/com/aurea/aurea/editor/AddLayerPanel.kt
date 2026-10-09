@@ -102,13 +102,13 @@ internal enum class AddTab(@StringRes val label: Int, val glyph: Char) {
 @Composable
 internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
     val close = { ui.adding = false }
-    Column(Modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
+    Column(Modifier.fillMaxWidth().background(AureaColors.EditorPanel).testTag("editor.addPanel")) {
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
             val title = if (ui.addTab == AddTab.TextPresets) R.string.tp_title else ui.addTab.label
             Text(stringResource(title), modifier = Modifier.weight(1f).padding(start = 16.dp), color = AureaColors.Text)
             ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar_adicionar), onClick = close)
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f, fill = false).fillMaxWidth()) {
             when (ui.addTab) {
                 AddTab.Shape -> ShapesTab(store, close)
                 AddTab.Media -> MediaTab(store, ui, close)
@@ -199,7 +199,7 @@ private class AddItem(
 private fun CardGrid(items: List<AddItem>, hint: String? = null) {
     Column(
         Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -474,7 +474,12 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
     }
     CardGrid(
         listOf(
-            AddItem(stringResource(R.string.editor_musica_ou_som), CupertinoGlyph.MusicNote, AureaColors.Accent) { files.launch(arrayOf("audio/*")) },
+            AddItem(stringResource(R.string.editor_musica_ou_som), CupertinoGlyph.MusicNote, AureaColors.Accent) {
+                // SAF (sem READ_MEDIA_AUDIO desde a 0.0.3): provedores que marcam o
+                // .mp3/.m4a/.opus baixado como genérico ou como vídeo MP4 não ficam
+                // cinza. O motor diz "áudio ilegível" se não for som.
+                files.launch(arrayOf("audio/*", "application/ogg", "video/mp4", "application/octet-stream"))
+            },
             AddItem(stringResource(R.string.sh_add_video_sound), CupertinoGlyph.Film) {
                 videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
             },
@@ -627,7 +632,7 @@ private fun VectorTab(store: EditorStore, ui: EditorUi) {
             AddItem(stringResource(R.string.editor_elipse), draw = { drawVectorIcon(2) }) { start(2) },
             AddItem(stringResource(R.string.editor_poligono), draw = { drawVectorIcon(3) }) { start(3) },
             AddItem(stringResource(R.string.editor_estrela), draw = { drawVectorIcon(4) }) { start(4) },
-            AddItem(stringResource(R.string.editor_importar_svg), CupertinoGlyph.DocText) { svgPicker.launch(arrayOf("image/svg+xml")) },
+            AddItem(stringResource(R.string.editor_importar_svg), CupertinoGlyph.DocText) { svgPicker.launch(arrayOf("image/svg+xml", "text/xml", "application/xml", "application/octet-stream")) },
             AddItem(stringResource(R.string.psd_import), CupertinoGlyph.PhotoOnRectangle) { psdPicker.launch(arrayOf("*/*")) },
         ),
         hint = stringResource(R.string.editor_vetor_contorno_pontos_voce_arrasta_curva),
@@ -694,7 +699,7 @@ internal fun AddLayerOverlay(store: EditorStore, ui: EditorUi) {
     val close = { ui.adding = false }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         BoxWithConstraints(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            Box(Modifier.widthIn(max = 380.dp).fillMaxWidth().height((maxHeight * .55f).coerceIn(180.dp, 390.dp))
+            Box(Modifier.widthIn(max = 380.dp).fillMaxWidth().heightIn(max = minOf(maxHeight, 390.dp))
                 .clip(RoundedCornerShape(20.dp)).border(1.dp, AureaColors.Action, RoundedCornerShape(20.dp))) {
                 AddLayerPanel(store, ui)
             }

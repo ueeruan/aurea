@@ -20,7 +20,9 @@ struct EffectsView: View {
     @State private var cameraTracked = false
     @State private var about: EffectCatalogItem?
     @State private var pendingPick: UInt32?
-    @State private var importingAM = false
+    /// Arquivo do Alight Motion escolhido (DocumentImportPicker; o `.fileImporter`
+    /// daqui ficava sob o da raiz do editor e não abria).
+    @State private var amPick: URL?
     @State private var importTask: Task<Void, Never>?
     @State private var creatorMode = -1
     @State private var openId: UInt32?
@@ -126,25 +128,28 @@ struct EffectsView: View {
         .onChange(of: model.status.modelRevision) { _ in refreshExpressions(); refreshTools() }
         .onChange(of: model.status.playhead) { _ in refreshExpressions() }
         // Alight Motion: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
-        .fileImporter(isPresented: $importingAM, allowedContentTypes: [.data, .xml, .zip]) { result in
-            guard case .success(let url) = result else { return }
+        .onChange(of: amPick) { picked in
+            guard let url = picked else { return }
+            amPick = nil
             let target = model.primarySelection
             importTask?.cancel()
             importTask = Task {
                 let data = await Task.detached(priority: .userInitiated) { () -> Data? in
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    guard let stream = InputStream(url: url) else { return nil }
-                    stream.open()
-                    defer { stream.close() }
-                    var result = Data()
-                    var buffer = [UInt8](repeating: 0, count: 8192)
-                    while true {
-                        let count = stream.read(&buffer, maxLength: buffer.count)
-                        if count < 0 { return nil }
-                        if count == 0 { return result }
-                        guard count <= 64 * 1024 * 1024 - result.count else { return nil }
-                        result.append(contentsOf: buffer.prefix(count))
+                    return try? AureaPaths.readImport(url) { readable -> Data? in
+                        guard let stream = InputStream(url: readable) else { return nil }
+                        stream.open()
+                        defer { stream.close() }
+                        var result = Data()
+                        var buffer = [UInt8](repeating: 0, count: 8192)
+                        while true {
+                            let count = stream.read(&buffer, maxLength: buffer.count)
+                            if count < 0 { return nil }
+                            if count == 0 { return result }
+                            guard count <= 64 * 1024 * 1024 - result.count else { return nil }
+                            result.append(contentsOf: buffer.prefix(count))
+                        }
                     }
                 }.value
                 guard !Task.isCancelled else { return }
@@ -207,7 +212,10 @@ struct EffectsView: View {
         guard let layer = model.primarySelection else { return }
         openId = id; model.loadParams(layerId: layer, effectId: id)
         if selected?.effect != id {
-            selected = parameterGroups(id).main.first(where: { fxComponentCount(Int($0.type)) > 0 }).map { EffectParamSelection(effect: id, param: $0.index, component: 0) }
+            let groups = parameterGroups(id)
+            let first = (groups.main + groups.rest).first(where: { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 })
+                ?? groups.main.first(where: { fxComponentCount(Int($0.type)) > 0 })
+            selected = first.map { EffectParamSelection(effect: id, param: $0.index, component: 0) }
         }
         refreshExpressions()
     }
@@ -287,7 +295,8 @@ struct EffectsView: View {
                         if effect.typeId == fxEffectTypeId("aurea.distort.puppet") { PuppetCardTools(effectId: effect.effectId) }
                         if effect.typeId == fxEffectTypeId("aurea.key.rotobrush") {
                             PanelNotice(AureaText.t("roto_note"))
-                            RotoPaintCardTools(effectId: effect.effectId)
+                            RotoPaintCardTools(effectId: effect.effectId,
+                                previousView: UInt32(max(0, min(2, Int(model.effectParams.first { $0.index == 10 }?.scalar ?? 0)))))
                         }
                         let localAiBit: UInt32 = effect.typeId == fxEffectTypeId("aurea.ai.depth_map") ? 1 : effect.typeId == fxEffectTypeId("aurea.key.rotobrush") ? 2 : 0
                         if effect.enabled && localAiBit != 0 {
@@ -768,7 +777,7 @@ struct EffectsView: View {
         // "Meus presets" saiu (pedido de 2026-10-01: ninguém usa); o motor
         // continua lendo os presets dos projetos antigos.
         var actions: [(String, () -> Void)] = [(AureaText.t("panel_adicionar_efeito"), { showAdd() })]
-        actions.append((AureaText.t("am_import_action"), { importingAM = true }))
+        actions.append((AureaText.t("am_import_action"), { DocumentImportPicker.present(types: [.data, .xml, .zip]) { urls in amPick = urls?.first } }))
         if !model.effects.isEmpty { actions.append((AureaText.t("panel_copiar_efeitos"), { if let layer = model.primarySelection { model.engine.copyEffects(layer) } })) }
         if model.engine.clipboardState & 4 != 0 {
             actions.append((AureaText.t("panel_colar_efeitos"), {
@@ -784,7 +793,7 @@ struct EffectsView: View {
                 model.endGesture()
             }))
         }
-        model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_efeitos_camada"), items: actions)
+        model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_efeitos_camada"), message: AureaText.t("am_import_hint"), items: actions)
     }
     private func effectMenu(_ effect: EffectItem) {
         var actions: [(String, () -> Void)] = []
@@ -906,7 +915,8 @@ private struct CubeLutImportRow: View {
     let layer: Int64
     let effect: UInt32
     @EnvironmentObject private var model: AureaModel
-    @State private var picking = false
+    /// O .cube escolhido (DocumentImportPicker: o `.fileImporter` aninhado não abria).
+    @State private var lutPick: URL?
     @State private var busy = false
     @State private var filename = ""
     var body: some View {
@@ -914,14 +924,17 @@ private struct CubeLutImportRow: View {
             if !filename.isEmpty {
                 Text(filename).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
             }
-            Button(AureaText.t(busy ? "lut_importing" : "lut_import")) { picking = true }
+            Button(AureaText.t(busy ? "lut_importing" : "lut_import")) {
+                DocumentImportPicker.present(types: [UTType(filenameExtension: "cube") ?? .data, .data]) { urls in lutPick = urls?.first }
+            }
                 .frame(maxWidth: .infinity, minHeight: 44).disabled(busy)
                 .accessibilityIdentifier("effect.lut.import")
         }
         .onAppear { filename = model.engine.colorLutName(layer, effect: effect) }
         .onChange(of: model.effects) { _ in filename = model.engine.colorLutName(layer, effect: effect) }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
+        .onChange(of: lutPick) { picked in
+            guard let url = picked else { return }
+            lutPick = nil
             guard url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t("lut_invalid"); return }
             busy = true
             let engine = model.engine

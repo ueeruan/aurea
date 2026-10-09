@@ -17,6 +17,7 @@
 #include "aurea/core/Handle.hpp"
 #include "aurea/media/VideoSource.hpp"
 #include "aurea/media/PreviewProxy.hpp"
+#include "aurea/platform/AddressSpace.hpp"
 #include "aurea/project/Asset.hpp"
 
 #include <memory>
@@ -92,7 +93,15 @@ public:
                                           u64 frameNumber, bool finalQuality = false);
 
     /// Retira fontes ociosas; a fila de encerramento fecha codecs fora do render.
+    /// Em 32 bits o prazo da prévia encolhe (address_space::source_idle_frames).
     void collect(u64 frameNumber, u32 idleFrames = 180);
+
+    /// Largura de ponteiro da política de endereçamento (AddressSpace.hpp):
+    /// em 32 bits, teto de decoders vivos e prazo de ocioso menor. O build
+    /// decide; o teste do host passa 32 para exercitar o ramo do aparelho.
+    void set_pointer_bits(u32 bits) noexcept;
+    /// Fontes (abertas ou abrindo, sem as que falharam) ainda na lista.
+    [[nodiscard]] u32 live_sources() const;
 
     /// Marca a fonte (se já existe) da layer como usada agora, sem abrir nada:
     /// uma camada ainda no seu trecho da timeline mas invisível neste quadro
@@ -113,6 +122,11 @@ public:
     /// O mesmo callback, para outro trabalho de fundo que o quadro espera (o
     /// mapa de profundidade de um vídeo) acordar o render do mesmo jeito.
     void ready_callback(void (*&fn)(void*), void*& ctx) const noexcept;
+
+    /// Quadros decodificados por TODAS as fontes desde a criação (entregues e
+    /// descartados a caminho do alvo): o sinal de vida do decoder que o export
+    /// usa para não dar como perdida a mídia de um decoder lento.
+    [[nodiscard]] u64 decode_work() const noexcept { return decodeWork_.load(std::memory_order_acquire); }
 
     struct Stats {
         u32 sources = 0;
@@ -153,7 +167,9 @@ private:
     std::vector<Entry> entries_;
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
+    std::atomic<u64> decodeWork_{0};   ///< decode_work(); as fontes incrementam
     bool suspended_ = false;
+    u32 pointerBits_ = kPointerBits;   ///< guarded by mutex_; AddressSpace.hpp
     PreviewProxyService proxies_;
     u32 originalSourceLeases_ = 0; // guarded by mutex_; never cleared by project teardown
     void release_original_sources() noexcept;

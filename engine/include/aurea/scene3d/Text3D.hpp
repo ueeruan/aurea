@@ -25,6 +25,7 @@
 
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace aurea::text { class Font; }
 namespace aurea { struct Layer; struct LayerAnimator; }
@@ -45,6 +46,7 @@ struct Text3DMaterial {
 struct Text3DSpec {
     std::string content = "Texto";
     std::string fontPath;
+    std::string texturePath;             ///< Portable custom base-colour image; empty = material only.
     u32 animation = 0;                  ///< 0 parado, 1 onda, 2 giro X, 3 giro Y, 4 giro Z
     f32 animationDuration = 2.0f;
     f32 animationStagger = 0.12f;
@@ -127,7 +129,9 @@ bool triangulate_polygon(const std::vector<std::vector<Vec2>>& rings, std::vecto
 
 /// Gera a malha do texto. Unidades: 1 = a altura da fonte; Y para cima,
 /// frente olhando para +Z (convenção glTF).
-[[nodiscard]] ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec);
+[[nodiscard]] ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec,
+    const std::function<std::string(const std::string&)>& resolvePath = {},
+    u32 maxTextureSize = 2048, u64 memoryBudget = 64ull << 20);
 
 /// User-keyframed glyph transforms, shared by preview, shadows and export.
 void apply_text3d_layout(const SceneAsset& asset, const Layer& layer, f64 localTime, std::vector<Mat4>& nodeWorld);

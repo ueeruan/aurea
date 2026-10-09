@@ -219,7 +219,6 @@ struct TimelineView: View {
                 drawRows(&context, size: canvasSize)
                 drawRuler(&context, size: canvasSize)
                 drawPreviewBuffer(&context, size: canvasSize)
-                drawMarkerGuides(&context, size: canvasSize)
                 drawPlayhead(&context, size: canvasSize)
             }
             .accessibilityChildren {
@@ -470,25 +469,6 @@ struct TimelineView: View {
         drawTimecode(&context, size: size)
     }
 
-    /// Composition guides stay above clips in both compact and expanded timelines.
-    private func drawMarkerGuides(_ context: inout GraphicsContext, size: CGSize) {
-        guard size.height > m.rowsTop else { return }
-        let half: CGFloat = 3.5
-        for marker in markers {
-            let px = x(Double(marker.frame), width: size.width)
-            guard px >= -half && px <= size.width + half else { continue }
-            let color = markerTint(marker.packedColor)
-            var line = Path()
-            line.move(to: CGPoint(x: px, y: m.rowsTop)); line.addLine(to: CGPoint(x: px, y: size.height))
-            context.stroke(line, with: .color(.black.opacity(0.35)), lineWidth: 3)
-            context.stroke(line, with: .color(color.opacity(0.7)), lineWidth: 1)
-            var head = Path()
-            head.move(to: CGPoint(x: px - half, y: m.rowsTop))
-            head.addLine(to: CGPoint(x: px + half, y: m.rowsTop))
-            head.addLine(to: CGPoint(x: px, y: m.rowsTop + half * 1.4)); head.closeSubpath()
-            context.fill(head, with: .color(color))
-        }
-    }
 
     private func drawPreviewBuffer(_ context: inout GraphicsContext, size: CGSize) {
         for range in model.previewBufferRanges {
@@ -1023,7 +1003,7 @@ struct TimelineView: View {
             let left = max(x0, 0), right = min(x1, size.width)
             guard right > left else { continue }
             if row.hasThumbs {
-                let tileWidth = m.bar * thumbCache.aspect(row.id)
+                let tileWidth = m.bar * thumbCache.aspect(model, row.id)
                 let origin = x(Double(row.start) - Double(row.offset), width: size.width)
                 let start = max(0, Int(floor((left - origin) / tileWidth))), end = Int(floor((right - origin) / tileWidth))
                 var tiles: [MediaTile] = []
@@ -1435,7 +1415,7 @@ struct TimelineView: View {
             // Editar (losango, alça, mover) exige eixo claro, 2:1.
             let edit = TimelinePress.timeEdit(dx, dy)
             let mode: Mode
-            if touched.kind == .key { mode = .key }
+            if edit && touched.kind == .key { mode = .key }
             else if edit && touched.kind == .trimStart { mode = .trimStart }
             else if edit && touched.kind == .trimEnd { mode = .trimEnd }
             // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha o
@@ -1470,7 +1450,7 @@ struct TimelineView: View {
                 let mode: Mode
                 if boxStarts(g.row, g.hit) { mode = .box }
                 else if (g.row?.track != nil && g.hit.kind != .key) || g.row == nil || g.hit.kind == .none || g.hit.kind == .ruler || g.hit.kind == .eye { mode = horizontal ? .scrub : (compact ? .step : .scroll) }
-                else if g.hit.kind == .key { mode = .key }
+                else if g.hit.kind == .key { mode = time ? .key : (compact ? .step : .scroll) }
                 else if g.hit.kind == .header { mode = !time && !compact ? .reorder : .blocked }
                 else if time || compact { mode = .move }
                 // Na pilha, o TRECHO sobe/desce sozinho (como no Alight Motion);

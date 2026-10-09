@@ -616,6 +616,9 @@ public:
     /// "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição
     /// (Layer::acceptsLights; desligado por padrão, como os projetos antigos).
     bool set_layer_accepts_lights(u64 layerId, bool on) noexcept;
+    /// Persistently opt a flat layer into the scene camera without altering
+    /// its transform or keyframes. Undoable; retained when saving the project.
+    bool enable_layer_3d(u64 layerId) noexcept;
     /// −1 = camada sem essa opção (câmera, luz, modelo 3D, áudio, nulo); 0/1.
     [[nodiscard]] i32 query_layer_accepts_lights(u64 layerId) noexcept;
     /// Põe as camadas dentro do grupo `groupLayerId` (mesma composição), com
@@ -663,7 +666,7 @@ public:
     /// Arquivo de mídia da camada de vídeo/áudio (caminho ou content://), para
     /// o provedor de transcrição ler o áudio. Vazio = não tem mídia.
     [[nodiscard]] std::string layer_media_path(u64 layerId) noexcept;
-    [[nodiscard]] Result<std::vector<text::CaptionWord>> transcribe_local(u64 layerId, const std::string& model, const std::string& language) noexcept;
+    [[nodiscard]] Result<std::vector<text::CaptionWord>> transcribe_local(u64 layerId, const std::string& model, const std::string& language, bool translateEnglish = false) noexcept;
     std::atomic<int> captionProgress{0};
     std::atomic<bool> captionCancelled{false};
     [[nodiscard]] std::string caption_tracks() noexcept;
@@ -1143,8 +1146,8 @@ public:
     [[nodiscard]] std::string current_composition_name() noexcept;
 
     // --- Copiar e colar -----------------------------------------------------------
-    /// Área de transferência do motor (vive enquanto o app vive; colar em outro
-    /// projeto só leva camadas cuja mídia exista lá).
+    /// Session clipboard; pasting into another project imports its media and
+    /// nested compositions with fresh handles.
     u32 copy_layers(const u64* ids, u32 count) noexcept;
     /// Cola no frame (o começo da mais cedo cai nele; as outras mantêm a
     /// distância). As coladas ficam escolhidas. Devolve quantas entraram.
@@ -1241,9 +1244,17 @@ public:
     bool trim_composition(i64 frame) noexcept;
     /// Shared NLE edits: 0 trim-in, 1 trim-out (absolute timeline frame),
     /// 2 slip, 3 roll-in, 4 roll-out, 5 slide (signed frame delta).
+    /// 6 moves any layer to an absolute frame, preserving duration/source/keys.
+    /// 7 extends the out-point to the remaining source handle (amount ignored).
+    /// 8/9 extend in/out to an outside playhead, keeping the opposite edge
+    /// and neighbouring layers fixed even when magnetic editing is enabled.
     /// Neighbours are explicit IDs; invalid/locked edits leave history untouched.
     /// Slip changes source time only. Roll/slide never ripple unrelated layers.
     bool edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous = 0, u64 next = 0) noexcept;
+    /// Contextual dock actions: trim-in=1, split=2, trim-out=4,
+    /// extend-in to playhead=8, extend-out to playhead=16. At either edge
+    /// the three cuts remain visible; edits still require a nonempty interval.
+    [[nodiscard]] u32 query_clip_time_actions(u64 layerId, i64 frame) noexcept;
 
     // --- Marcas e batidas -------------------------------------------------------
     /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
@@ -1312,6 +1323,7 @@ public:
     [[nodiscard]] Result<u64> add_text3d(const scene3d::Text3DSpec& spec) noexcept;
     /// Troca texto/profundidade/cor/alinhamento (a malha é gerada de novo; desfazível).
     Status set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept;
+    Status set_text3d_texture(u64 layerId, const std::string& path) noexcept;
     /// Receita do texto 3D da camada (falso = não é texto 3D).
     bool query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept;
 
@@ -1733,7 +1745,20 @@ private:
     void join_motion_track() noexcept;
     static std::shared_ptr<const scene3d::HdriPixels> hdri_lookup(void* self, AssetId id);
     static std::shared_ptr<const CubeLut> cube_lookup(void* self, AssetId id);
+    struct ClipboardMedia {
+        u64 session = 0;
+        std::unordered_map<u64, Asset> assets;
+        std::unordered_map<u64, std::shared_ptr<const Composition>> compositions;
+        std::unordered_map<u64, ImagePixels> images;
+        std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models;
+        std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris;
+        std::unordered_map<u64, std::shared_ptr<const CubeLut>> luts;
+    };
+    void capture_clipboard_media_locked(ClipboardMedia& bundle, const std::vector<Layer>& layers);
+    void restore_clipboard_media_locked(const ClipboardMedia& bundle, std::vector<Layer>& layers);
     struct Clipboard {
+        ClipboardMedia layerMedia, effectMedia;
+        f64 layersFps = 0;
         std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia
         i64 layersAnchor = 0;
         bool hasStyle = false;
@@ -1767,6 +1792,17 @@ private:
     SceneEditorView sceneEditor_{}; ///< modelMutex protected, never serialized
     std::vector<u64> selection_;
     std::atomic<u32> modelRevision_{1};   ///< a UI relê listas quando muda
+    /// Subidas de `modelRevision_` que mudam só um TRECHO da composição atual
+    /// (cortar/aparar/mover uma camada sem ninguém olhando para ela em outro
+    /// instante). A chave da prévia guardada é `modelRevision_ - isto`: essas
+    /// edições não descartam o cache inteiro; o trecho vai em
+    /// `pendingPreviewRanges_` (modelMutex) e sai no próximo quadro.
+    std::atomic<u32> previewRangeEdits_{0};
+    std::vector<std::pair<i64, i64>> pendingPreviewRanges_;
+    [[nodiscard]] u64 preview_cache_revision() const noexcept {
+        return static_cast<u64>(modelRevision_.load(std::memory_order_acquire)
+                                - previewRangeEdits_.load(std::memory_order_acquire)) + 1;
+    }
 
     // --- Sincronização --------------------------------------------------------
     /// Protege projeto, timeline, playback, seleção e imagens.

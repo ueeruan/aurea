@@ -453,6 +453,8 @@ void VideoSource::thread_main() noexcept {
                 break;
             }
             decoderPosUs_ = pts;
+            // Batida de trabalho: entregue OU descartado a caminho do alvo.
+            if (workCounter_) workCounter_->fetch_add(1, std::memory_order_acq_rel);
             {
                 std::lock_guard<std::mutex> st(statsMutex_);
                 stats_.decodeMsAvg = stats_.decodeMsAvg == 0.0f ? ms : stats_.decodeMsAvg * 0.9f + ms * 0.1f;

@@ -1,0 +1,8 @@
+{
+  "source": "https://github.com/notofonts/noto-cjk/blob/Sans2.004/Sans/SubsetOTF/JP/NotoSansJP-Regular.otf",
+  "version": "Sans2.004",
+  "license": "OFL-1.1",
+  "licenseFile": "LICENSE-NotoSansJP.txt",
+  "sha256": "dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073",
+  "use": "Reserva japonesa do motor compartilhado para texto 2D e 3D; carregada sob demanda, nao registrada em UIAppFonts"
+}

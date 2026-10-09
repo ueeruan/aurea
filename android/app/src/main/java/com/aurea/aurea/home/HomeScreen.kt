@@ -66,10 +66,9 @@ fun HomeScreen(store: EditorStore) {
     Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()) {
         LiveNoticeBanners(vm.notices)
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("aurea", style = AureaType.HeadlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-1).sp))
-                RegisteredUsersLine(conta.usuarios)
-            }
+            AureaLogo(28.dp)
+            Text("AUREA", modifier = Modifier.weight(1f).padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
+                style = AureaType.TitleLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp))
             ReleaseNotesEntry()
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -184,9 +183,8 @@ internal fun RegisteredUsersLine(count: Int?) {
 internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> Unit,
                       onCreate: () -> Unit, onMenu: () -> Unit, onImport: () -> Unit,
                       onProfile: () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-        .clip(RoundedCornerShape(28.dp)).background(AureaColors.Surface)
-        .border(1.dp, AureaColors.Border, RoundedCornerShape(28.dp)).padding(horizontal = 4.dp, vertical = 10.dp),
+    Row(Modifier.fillMaxWidth().background(AureaColors.NavigationBar)
+        .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             DockUtility(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_tab_settings), "home.menu", onMenu)
@@ -194,7 +192,7 @@ internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> 
         DockTab(CupertinoGlyph.RectangleStack, stringResource(R.string.home_tab_projects), selected == HomeViewModel.PROJECTS_TAB,
             Modifier.weight(1f).testTag("home.projects"), onProjects)
         val createLabel = stringResource(R.string.home_new_project)
-        Box(Modifier.size(64.dp).clip(CircleShape).background(AureaColors.Accent)
+        Box(Modifier.size(56.dp).clip(CircleShape).background(AureaColors.Accent)
             .testTag("home.create").semantics { contentDescription = createLabel }
             .clickable(role = Role.Button, onClick = onCreate), contentAlignment = Alignment.Center) {
             CupertinoIcon(CupertinoGlyph.Plus, 30.dp, AureaColors.OnAccent)
@@ -217,11 +215,12 @@ private fun DockUtility(icon: Char, label: String, tag: String, onClick: () -> U
 @Composable
 private fun DockTab(icon: Char, label: String, active: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Column(modifier.heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
-        .semantics { selected = active }.clickable(role = Role.Tab, onClick = onClick).padding(vertical = 8.dp),
+        .semantics { selected = active; contentDescription = label }.clickable(role = Role.Tab, onClick = onClick).padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
         CupertinoIcon(icon, 23.dp, if (active) AureaColors.Accent else AureaColors.Muted)
         Text(label, style = AureaType.BodySmall.copy(fontSize = 12.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal),
-            color = if (active) AureaColors.Text else AureaColors.Muted, textAlign = TextAlign.Center)
+            color = if (active) AureaColors.Text else AureaColors.Muted, textAlign = TextAlign.Center,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         Box(Modifier.size(width = 16.dp, height = 2.dp).background(if (active) AureaColors.Accent else AureaColors.Surface, CircleShape))
     }
 }

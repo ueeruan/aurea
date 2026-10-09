@@ -122,6 +122,9 @@ public:
     /// Soft retention budget: required live textures are never evicted.
     /// Applied on the render thread; safe to update from device policy callbacks.
     void set_budget(u64 bytes) noexcept { budget_.store(bytes, std::memory_order_relaxed); }
+    /// Admission limit for a live frame. Refuse new targets before the driver
+    /// allocates an unbounded effect chain; callers receive OutOfDeviceMemory.
+    void set_allocation_limit(u64 bytes) noexcept { allocationLimit_.store(bytes, std::memory_order_relaxed); }
 
     /// Destrói tudo. Fechar projeto, perder o dispositivo, encerrar.
     void clear() noexcept;
@@ -151,6 +154,7 @@ private:
     u32 idleFrames_ = 120;
     Stats stats_{};
     std::atomic<u64> budget_{128ull << 20};
+    std::atomic<u64> allocationLimit_{~u64{0}};
     void trim_for(u64 incomingBytes) noexcept;
 };
 

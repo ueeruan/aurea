@@ -614,6 +614,24 @@ AUREA_TEST(FrameGraph, PoolBudgetRetiresOldResolutionsWithoutBreakingCurrentPass
     pool.release(third); pool.end_frame(); pool.clear();
 }
 
+AUREA_TEST(Beta008Memory, EffectGraphAdmissionFailureReleasesTargetsAndCanRecover) {
+    MockBackend backend; TransientTexturePool pool; FrameGraph graph;
+    const auto size = rt(256, 256); pool.set_allocation_limit(size.estimated_bytes());
+    pool.begin_frame(backend, 1);
+    const auto input = graph.create_texture("source", size), tinted = graph.create_texture("tint", size);
+    graph.add_raster_pass("source", PassStage::Upload, input, LoadOp::Clear, {}, [](PassContext&) {});
+    const auto pass = graph.add_raster_pass("tint", PassStage::Effects, tinted, LoadOp::Clear, {}, [](PassContext&) {});
+    graph.read(pass, input); graph.set_output(tinted, ResourceState::ShaderRead);
+    AUREA_CHECK(graph.compile(pool).code() == Errc::OutOfDeviceMemory);
+    AUREA_CHECK_EQ(backend.texturesCreated, 1u);
+    AUREA_CHECK(pool.stats().bytes <= size.estimated_bytes());
+    graph.release(pool); pool.end_frame(); AUREA_CHECK_EQ(pool.stats().inUse, 0u);
+    // A reduced frame can reuse retained targets after a failed effect frame.
+    pool.set_budget(0); pool.begin_frame(backend, 2);
+    const auto smaller = pool.acquire(rt(64, 64)); AUREA_CHECK(smaller.valid());
+    pool.release(smaller); pool.end_frame(); pool.clear();
+}
+
 // =============================================================================
 // EffectGraph — planejamento
 // =============================================================================
@@ -836,6 +854,37 @@ AUREA_TEST(EffectParams, TypedRangeAlwaysContainsTheSliderRange) {
     AUREA_CHECK(widened >= 20);
 }
 
+AUREA_TEST(EffectParams, CatalogueEnumsHaveKeyframesAndHoldTheirChoicesUntilTheNextKey) {
+    EffectRegistry registry;
+    register_builtin_effects(registry);
+    u32 checked = 0;
+    for (u32 i = 0; i < registry.count(); ++i) {
+        const ParameterRegistry& params = registry.params_at(i);
+        EffectInstance effect;
+        effect.id = 7;
+        initialize_instance(effect, params);
+        for (u32 p = 0; p < params.count(); ++p) {
+            const ParamSpec& spec = params.at(p);
+            if (spec.type != ParamType::Enum || (spec.flags & kParamHidden) != 0) continue;
+            AUREA_CHECK_MSG(spec.animatable(), spec.id);
+            if (spec.enumCount < 2) continue;
+            TrackSet tracks;
+            Track& track = tracks.get_or_create(TrackProperty::EffectParam, effect.id, param_track_key(p, 0));
+            const f32 last = static_cast<f32>(spec.enumCount - 1);
+            (void)track.set(FrameIndex{0}, 0, Interpolation::Linear);
+            (void)track.set(FrameIndex{30}, last, Interpolation::Linear);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, -1).v[0], 0.0f);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, 15).v[0], 0.0f);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, 29.9).v[0], 0.0f);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, 30).v[0], last);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, 60).v[0], last);
+            ++checked;
+        }
+    }
+    AUREA_CHECK(checked > 20);
+    std::printf("(%u discrete catalogue parameters) ", checked);
+}
+
 AUREA_TEST(EffectParams, TypedRangeApiOnlyWidensContinuousNumbers) {
     ParameterRegistry p;
     const u32 f = p.add_float("r", "R", 10.0f, 0.0f, 100.0f);
@@ -1038,6 +1087,33 @@ AUREA_TEST(MotionTile, At100PercentTheRegionIsTheLayer) {
     const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 1.0f));
     AUREA_CHECK_NEAR(f.x, 1.0f, 1e-4);
     AUREA_CHECK_NEAR(f.y, 1.0f, 1e-4);
+}
+
+AUREA_TEST(MotionTile, ProjectedCoverageUsesHomogeneousCoordinates) {
+    LayerPlacement pl;
+    pl.compWidth = 200; pl.compHeight = 120;
+    pl.layerWidth = 100; pl.layerHeight = 60;
+    pl.inScene3d = true;
+    pl.compFromLayer = Mat4::identity();
+    pl.compFromLayer.col[0] = {2.f, 0, 0, .001f};
+    pl.compFromLayer.col[1] = {0, 2.f, 0, .002f};
+    pl.compFromLayer.col[3] = {0, 0, 0, 1};
+    const Rect visible = motion_tile::projected_region(pl);
+    AUREA_CHECK(visible.w > 100.f);
+    AUREA_CHECK(visible.h > 60.f);
+    for (const f32 cy : {0.f, 120.f}) for (const f32 cx : {0.f, 200.f}) {
+        const f64 a = 2. - cx * .001, c = -cx * .002;
+        const f64 b = -cy * .001, d = 2. - cy * .002;
+        const f64 det = a * d - b * c;
+        const f64 x = (d * cx - c * cy) / det;
+        const f64 y = (a * cy - b * cx) / det;
+        AUREA_CHECK(x >= visible.x - .001 && x <= visible.x + visible.w + .001);
+        AUREA_CHECK(y >= visible.y - .001 && y <= visible.y + visible.h + .001);
+    }
+    pl.compFromLayer.col[3].w = -1;
+    AUREA_CHECK_EQ(motion_tile::projected_region(pl).w, 0.f);
+    const Vec2 fallback = motion_tile::coverage_factors({}, pl);
+    AUREA_CHECK(std::isfinite(fallback.x) && std::isfinite(fallback.y));
 }
 
 AUREA_TEST(MotionTile, At50PercentTheRegionDoubles) {
@@ -1445,6 +1521,65 @@ AUREA_TEST(ShaderLibrary, FailureIsReportedNotHidden) {
     AUREA_CHECK(!p.ok());
     AUREA_CHECK_EQ(lib.compile_failures(), static_cast<u32>(1));
     AUREA_CHECK(!lib.last_error().empty());
+}
+
+// Beta "nem vejo a prévia": no OpenGL ES (aparelho sem Vulkan) cada shader é
+// compilado pelo driver na abertura; UM shader novo recusado derrubava o
+// renderer inteiro (sem GPU = sem prévia). Agora só os passes dele somem.
+AUREA_TEST(ShaderLibrary, RejectedNewShaderDoesNotTakeDownTheRenderer) {
+    const ShaderId newShaders[] = {
+        ShaderId::effects_disintegrate_vert, ShaderId::effects_disintegrate_frag,
+        ShaderId::effects_disintegrate_compose_frag, ShaderId::effects_glow_octave_prefilter_frag,
+        ShaderId::effects_glow_octave_down_frag, ShaderId::effects_glow_octave_up_frag,
+        ShaderId::effects_glow_octave_composite_frag, ShaderId::effects_mesh_warp_vert,
+        ShaderId::effects_mesh_warp_frag, ShaderId::effects_puppet_vert, ShaderId::effects_puppet_frag,
+        ShaderId::effects_ball_grid_vert, ShaderId::effects_ball_grid_frag, ShaderId::effects_rotobrush_frag,
+        ShaderId::scene3d_plane_frag, ShaderId::composite_blend_frag,
+    };
+    for (const ShaderId id : newShaders) {
+        MockBackend b;
+        b.failShader = kShaderNames[static_cast<u32>(id)];
+        ShaderLibrary lib;
+        AUREA_CHECK_MSG(lib.initialize(b).ok(), b.failShader);
+        AUREA_CHECK_EQ(lib.missing_shaders(), 1u);
+        AUREA_CHECK(!lib.shader(id).valid());
+        // O pipeline que pede o shader recusado falha sem chegar ao backend…
+        const PipelineKey bad = PipelineKey::graphics(
+            kShaderStages[static_cast<u32>(id)] == ShaderStage::Vertex ? id : ShaderId::common_fullscreen_vert,
+            kShaderStages[static_cast<u32>(id)] == ShaderStage::Vertex ? ShaderId::common_copy_frag : id,
+            SurfaceFormat::RGBA16F);
+        const u32 created = b.pipelinesCreated;
+        AUREA_CHECK(!lib.pipeline(bad).ok());
+        AUREA_CHECK(!lib.pipeline(bad).ok());
+        AUREA_CHECK_EQ(b.pipelinesCreated, created);
+        AUREA_CHECK_EQ(lib.compile_failures(), 2u);   // 1 shader + 1 pipeline: o 2º pedido não reloga
+        // …e o resto segue.
+        AUREA_CHECK(lib.pipeline(PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F)).ok());
+        lib.shutdown();
+
+        // O renderer sobe (antes: renderer nao inicializou → Engine sem GPU).
+        MockBackend rb;
+        rb.failShader = kShaderNames[static_cast<u32>(id)];
+        EffectRegistry reg;
+        register_builtin_effects(reg);
+        Renderer r;
+        AUREA_CHECK_MSG(r.initialize(rb, reg).ok(), rb.failShader);
+        AUREA_CHECK_EQ(r.shaders().missing_shaders(), 1u);
+        r.shutdown();
+    }
+}
+
+AUREA_TEST(ShaderLibrary, TestHookFailsOnlyPipelinesOfThatShaderAndRecovers) {
+    MockBackend b;
+    ShaderLibrary lib;
+    AUREA_CHECK(lib.initialize(b).ok());
+    const PipelineKey k = PipelineKey::fullscreen(ShaderId::effects_glow_octave_up_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK(lib.pipeline(k).ok());
+    lib.set_test_failing_shader(ShaderId::effects_glow_octave_up_frag);
+    AUREA_CHECK(!lib.pipeline(k).ok());   // mesmo em cache
+    AUREA_CHECK(lib.pipeline(PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F)).ok());
+    lib.set_test_failing_shader(ShaderId::Count);
+    AUREA_CHECK(lib.pipeline(k).ok());
 }
 
 // =============================================================================

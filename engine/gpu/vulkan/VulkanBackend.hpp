@@ -123,9 +123,12 @@ public:
     void shutdown() noexcept;
 
     /// `required`: propriedades obrigatórias; `preferred`: desejáveis.
+    /// `hostPointer`: o chamador usa `Allocation::mapped` (buffers, staging).
+    /// Imagens passam false: em 32 bits a memória delas não é mapeada no
+    /// processo (AddressSpace.hpp); em 64 bits nada muda.
     [[nodiscard]] Allocation allocate(const VkMemoryRequirements& req, VkMemoryPropertyFlags required,
                                       VkMemoryPropertyFlags preferred, bool dedicated,
-                                      const char* debugName) noexcept;
+                                      const char* debugName, bool hostPointer = true) noexcept;
     void free(const Allocation& a) noexcept;
     /// Release unused slabs after deferred resource destruction. Live block
     /// indices stay stable because Allocation stores them.
@@ -328,6 +331,7 @@ struct FrameContext {
     std::vector<VkCommandBuffer> commandBuffers;
     u32 commandBufferCount = 0;
     u32 passesInCommandBuffer = 0;
+    bool offscreen = false;
     VkFence         fence = VK_NULL_HANDLE;
     VkSemaphore     acquired = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> descriptorPools;
@@ -500,10 +504,9 @@ private:
     // loss: older submissions must still retain their fences and resources.
     // Stop new work until shutdown/reinitialize instead of guessing layouts.
     Status recordingStatus_{};
-    // Adreno's Full-HD temporal 3D path stalls with 128-pass primaries even
-    // when lower-resolution frames complete. Smaller primaries preserve every
-    // pass/sample and still share one submission and one completion fence.
-    u32 passesPerCommandBuffer_ = 64;
+    // Bound temporal 3D batches without changing resolution or sample count.
+    // end_frame completes each primary before admitting the next GPU batch.
+    u32 passesPerCommandBuffer_ = 8;
     bool debugUtils_ = false;
     bool timersEnabled_ = false;
     f32 timestampPeriod_ = 1.0f;

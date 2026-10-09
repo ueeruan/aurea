@@ -21,6 +21,13 @@ namespace {
 
 constexpr u32 kMaxLayerAnimators = 32;
 
+f32 progress_duration_ms(const Layer& layer, u32 index, f64 fps) noexcept {
+    const Track* track = layer.tracks.find(TrackProperty::LayerAnimParam, index, layeranim::kProgress);
+    if (!track || track->keys.size() < 2) return 1000;
+    return static_cast<f32>(std::max<i64>(1, track->keys.back().time.value - track->keys.front().time.value)
+        * 1000. / std::max(1., fps));
+}
+
 /// Progresso padrão: 0 → 100 % em 1 s a partir do começo da camada (ou até o
 /// fim dela, se for mais curta).
 void seed_progress(Layer& l, u32 index, f64 fps) {
@@ -114,6 +121,9 @@ u32 Engine::query_layer_animators(u64 layerId, f32* out, u32 capacity) noexcept 
         v[25] = static_cast<f32>(keyed);
         v[26] = has_units(*project_, *l) ? 1.0f : 0.0f;
         v[27] = a.loop ? 1.0f : 0.0f;
+        v[29] = progress_duration_ms(*l, i, comp->fps());
+        v[28] = std::clamp(100.f * (1.f - v[8] / v[29]), 0.f, 100.f);
+        v[30] = 2146; // extension marker: legacy 32-float callers leave this zero
     }
     return n;
 }
@@ -122,7 +132,7 @@ i32 Engine::add_layer_animator(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->layerAnimators.size() >= kMaxLayerAnimators || l->kind == LayerKind::Camera || l->kind == LayerKind::Light)
+    if (!l || l->locked || l->layerAnimators.size() >= kMaxLayerAnimators || l->kind == LayerKind::Camera || l->kind == LayerKind::Light)
         return -1;
     history_.before_mutation(*comp, project_->timeline().current(), "novo animador");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
@@ -148,7 +158,7 @@ bool Engine::remove_layer_animator(u64 layerId, u32 index) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || index >= l->layerAnimators.size()) return false;
+    if (!l || l->locked || index >= l->layerAnimators.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "remover animador");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     l->layerAnimators.erase(l->layerAnimators.begin() + index);
@@ -164,13 +174,24 @@ bool Engine::remove_layer_animator(u64 layerId, u32 index) noexcept {
 
 bool Engine::set_layer_animator(u64 layerId, u32 index, const f32* v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || !v || index >= l->layerAnimators.size()) return false;
+    if (!l || l->locked || !v || index >= l->layerAnimators.size()) return false;
     for (u32 i = 0; i < 6; ++i) if (!std::isfinite(v[i])) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "animador");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     LayerAnimator& a = l->layerAnimators[index];
+    const f32 duration = progress_duration_ms(*l, index, comp->fps());
+    const FrameIndex local = l->local_time(playback_.current());
+    const f32 delay = layeranim::param_at(l->tracks, index, layeranim::kDelay, local.value, a.delayMs);
+    const f32 overlap = std::clamp(100.f * (1.f - delay / duration), 0.f, 100.f);
+    if (v[30] == 2146 && std::isfinite(v[28]) && std::fabs(v[28] - overlap) > .001f) {
+        const f32 desired = duration * (1.f - std::clamp(v[28], 0.f, 100.f) / 100.f);
+        Track* delayTrack = l->tracks.find(TrackProperty::LayerAnimParam, index, layeranim::kDelay);
+        if (delayTrack && !delayTrack->keys.empty()) (void)delayTrack->set(local, desired, Interpolation::Bezier);
+        else a.delayMs = desired;
+    }
     a.enabled = v[0] > 0.5f;
     a.unit = static_cast<u8>(std::clamp(v[1], 0.0f, 3.0f));
     const bool exit = v[2] > 0.5f;
@@ -190,7 +211,7 @@ bool Engine::set_layer_anim_param(u64 layerId, u32 index, u32 param, f32 value) 
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || index >= l->layerAnimators.size() || !std::isfinite(value)) return false;
+    if (!l || l->locked || index >= l->layerAnimators.size() || !std::isfinite(value)) return false;
     f32* r = layeranim::param_ref(l->layerAnimators[index], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "valor do animador");
@@ -216,7 +237,7 @@ bool Engine::toggle_layer_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || index >= l->layerAnimators.size()) return false;
+    if (!l || l->locked || index >= l->layerAnimators.size()) return false;
     f32* r = layeranim::param_ref(l->layerAnimators[index], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe do animador");
@@ -270,7 +291,7 @@ u32 Engine::paste_layer_animators(const u64* ids, u32 count) noexcept {
     u32 pasted = 0;
     for (u32 n = 0; n < count; ++n) {
         Layer* l = comp->layer(LayerId::unpack(ids[n]));
-        if (!l || l->kind == LayerKind::Camera || l->kind == LayerKind::Light) continue;
+        if (!l || l->locked || l->kind == LayerKind::Camera || l->kind == LayerKind::Light) continue;
         const u32 base = static_cast<u32>(l->layerAnimators.size());
         if (base + clipboard_.layerAnimators.size() > kMaxLayerAnimators) continue;
         if (!captured) {
@@ -531,6 +552,22 @@ bool Engine::set_layer_accepts_lights(u64 layerId, bool on) noexcept {
     history_.before_mutation(*comp, project_->timeline().current(), "aceita luzes");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     l->acceptsLights = on;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::enable_layer_3d(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return false;
+    drain_commands_locked();
+    Composition* comp = current_composition();
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || l->kind == LayerKind::Audio) return false;
+    if (l->threeD) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "ativar camada 3D");
+    l->threeD = true;
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     project_->mark_dirty();
     request_render();
     return true;

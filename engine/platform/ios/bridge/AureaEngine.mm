@@ -1435,6 +1435,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e->query_text3d(static_cast<aurea::u64>(layerId), spec)) return nil;
     return @{ @"content": [NSString stringWithUTF8String:spec.content.c_str()] ?: @"",
               @"fontPath": [NSString stringWithUTF8String:spec.fontPath.c_str()] ?: @"",
+              @"texturePath": [NSString stringWithUTF8String:spec.texturePath.c_str()] ?: @"",
               @"surfaceFinish": @(spec.surfaceFinish), @"separateGlyphs": @(spec.separateGlyphs),
               @"depth": @(spec.depth), @"animation": @(spec.animation),
               @"animationDuration": @(spec.animationDuration), @"animationStagger": @(spec.animationStagger),
@@ -1447,6 +1448,8 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e) return NO;
     aurea::scene3d::Text3DSpec spec;
     if (!e->query_text3d(static_cast<aurea::u64>(layerId), spec)) return NO;
+    if ([property isEqualToString:@"texturePath"])
+        return e->set_text3d_texture(static_cast<aurea::u64>(layerId), stringValue.UTF8String ?: "").ok();
     if ([property isEqualToString:@"content"]) spec.content = stringValue.UTF8String ?: "";
     else if ([property isEqualToString:@"fontPath"]) spec.fontPath = stringValue.UTF8String ?: "";
     else if ([property isEqualToString:@"surfaceFinish"]) spec.surfaceFinish = static_cast<aurea::u32>(std::clamp(numberValue, 0.f, 4.f));
@@ -1532,6 +1535,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (int64_t)removeGaps { auto* e = self.engine; return e ? e->remove_gaps() : 0; }
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next {
     auto* e = self.engine; return e && e->edit_clip_time(layerId, operation, amount, previous, next);
+}
+- (uint32_t)queryClipTimeActions:(long long)layerId frame:(int64_t)frame {
+    auto* e = self.engine; return e ? e->query_clip_time_actions(layerId, frame) : 0;
 }
 - (BOOL)trimComposition:(int64_t)frame { auto* e = self.engine; return e && e->trim_composition(frame); }
 
@@ -1958,6 +1964,14 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return out;
 }
 
++ (NSArray<NSString*>*)extractModelArchive:(NSString*)archive to:(NSString*)directory {
+    std::vector<std::string> files;
+    if (!aurea::package::extract_model_archive(to_std(archive), to_std(directory), files).ok()) return nil;
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithCapacity:files.size()];
+    for (const auto& file : files) [out addObject:to_ns(file)];
+    return out;
+}
+
 - (int)importModelProgress {
     const auto phase = static_cast<int>(_importProgress.phase.load());
     const float f = std::clamp(_importProgress.fraction.load(), 0.0f, 0.999f);
@@ -2041,6 +2055,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 
 - (NSString*)playbackReport {
     auto* e = self.engine; return e ? [NSString stringWithUTF8String:e->playback_report().c_str()] : @"";
+}
+- (int64_t)audioPositionNs {
+    auto* e = self.engine; return e ? e->audio().position_ns() : 0;
 }
 - (BOOL)setRawPlayback:(BOOL)enabled {
     auto* e = self.engine; return e && e->set_raw_playback(enabled != NO);
@@ -2323,6 +2340,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     for (u32 i = 0; i < written; ++i) {
         [out addObject:@{
             @"effectClass":        @(rows[i].effectClass),
+            @"flags":              @(rows[i].reserved),
             AureaEffectTypeId:     @(rows[i].typeId),
             AureaEffectName:       slice(blob, rows[i].nameOffset, rows[i].nameLength),
             AureaEffectCategory:   slice(blob, rows[i].categoryOffset, rows[i].categoryLength),
@@ -2847,9 +2865,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if ([options[@"removeFillers"] boolValue]) parsed = aurea::text::remove_filler_words(parsed);
     return e->create_captions(layerId, parsed, o).ok() ? @"" : @"Não foi possível gerar legendas. Confira os tempos e o áudio da camada.";
 }
-- (NSArray<NSDictionary<NSString*, id>*>*)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language error:(NSError**)error {
+- (NSArray<NSDictionary<NSString*, id>*>*)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language translateEnglish:(BOOL)translateEnglish error:(NSError**)error {
     auto* e = self.engine; if (!e) return nil;
-    auto result = e->transcribe_local(layerId, to_std(model), to_std(language));
+    auto result = e->transcribe_local(layerId, to_std(model), to_std(language), translateEnglish);
     if (!result) {
         if (error) *error = [NSError errorWithDomain:@"AureaWhisper" code:(NSInteger)result.code() userInfo:@{NSLocalizedDescriptionKey: to_ns(std::string(result.status().detail()))}];
         return nil;
@@ -3421,6 +3439,10 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (BOOL)setLayerAcceptsLights:(BOOL)on forLayer:(long long)layerId {
     if (auto* e = self.engine) return e->set_layer_accepts_lights(static_cast<aurea::u64>(layerId), on != NO);
+    return NO;
+}
+- (BOOL)enableLayer3D:(long long)layerId {
+    if (auto* e = self.engine) return e->enable_layer_3d(static_cast<aurea::u64>(layerId));
     return NO;
 }
 - (int32_t)layerAcceptsLights:(long long)layerId {

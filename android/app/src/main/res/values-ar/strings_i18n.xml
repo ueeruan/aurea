@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">المحرك غير جاهز</string>
     <string name="eng_model_invalid">ملف ثلاثي الأبعاد غير صالح أو غير مكتمل</string>
     <string name="eng_model_no_geometry">النموذج لا يحتوي على بيانات هندسية</string>
+    <string name="eng_model_compressed">النموذج يستخدم ضغط Draco — صدّره مرة أخرى بدون ضغط الشبكة</string>
     <string name="eng_model_too_heavy">النموذج ثقيل جدًا على هذا الجهاز</string>
     <string name="eng_no_video_track">لا يحتوي الملف على مسار فيديو مقروء</string>
     <string name="eng_no_audio_track">لا يحتوي الملف على مسار صوت مقروء</string>

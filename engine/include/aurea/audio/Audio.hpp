@@ -522,7 +522,11 @@ public:
 
     /// Troca o que está na timeline (depois de uma edição). Tocando, vale a
     /// partir do próximo bloco mixado (~10 ms).
-    void set_snapshot(std::shared_ptr<const AudioMixSnapshot> snap);
+    /// `transportNs` (>= 0): onde o transporte/vídeo está. Se o relógio do
+    /// som estiver parado num ponto velho (saída sem apresentar, contador da
+    /// plataforma atrás), a mixagem segue do transporte — nunca volta ao
+    /// ponto do play.
+    void set_snapshot(std::shared_ptr<const AudioMixSnapshot> snap, i64 transportNs = -1);
 
     /// Começa a tocar do instante `ns` da timeline (play, seek tocando, loop).
     void play(i64 ns, f64 rate = 1.0);

@@ -18,6 +18,8 @@ import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.engine.MotionBlurSettings
+import com.aurea.aurea.engine.LayerDetail
+import com.aurea.aurea.engine.PodLayout
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ExportOptions
@@ -98,7 +100,42 @@ class Particle3DMotionBlurExportTest {
         compose.runOnIdle { store.seek(0) }
         var particlesId = 0L
         if (forced) compose.runOnIdle {
-            for (layer in store.layers) assertTrue(engine.setMotionBlur(layer.id, true))
+            // queryLayers addresses the current composition. Traverse precomps
+            // explicitly, otherwise their 3D children retain the original state.
+            var verifiedLayers = 0
+            var verified3d = 0
+            fun enableComposition(depth: Int) {
+                assertTrue("Precomposition nesting must be bounded", depth <= 64)
+                var capacity = 256
+                var rows = ByteBuffer.allocateDirect(capacity * PodLayout.LAYER_ROW_BYTES).order(ByteOrder.nativeOrder())
+                val names = ByteBuffer.allocateDirect(1024 * 1024)
+                var count = engine.queryLayers(rows, capacity, names)
+                while (count >= capacity) {
+                    capacity *= 2
+                    rows = ByteBuffer.allocateDirect(capacity * PodLayout.LAYER_ROW_BYTES).order(ByteOrder.nativeOrder())
+                    count = engine.queryLayers(rows, capacity, names)
+                }
+                val ids = List(count) { index ->
+                    val offset = index * PodLayout.LAYER_ROW_BYTES
+                    Triple(rows.getLong(offset), rows.getInt(offset + 8), rows.getInt(offset + 28))
+                }
+                assertTrue(engine.setMotionBlurSettings(MotionBlurSettings(true, 360f, -180f, 8, 16, 4)))
+                val detail = ByteBuffer.allocateDirect(LayerDetail.BYTES).order(ByteOrder.nativeOrder())
+                for ((id, kind, flags) in ids) {
+                    assertTrue("Enable blur on layer $id at depth $depth", engine.setMotionBlur(id, true))
+                    assertTrue(engine.queryLayerDetail(id, detail))
+                    assertTrue("Read back blur on layer $id at depth $depth", LayerDetail.read(detail).motionBlur)
+                    verifiedLayers++
+                    if (kind == 10 || flags and 32 != 0) verified3d++
+                    if (kind == 12) {
+                        assertTrue(engine.openPrecomp(id))
+                        try { enableComposition(depth + 1) } finally { assertTrue(engine.closePrecomp()) }
+                    }
+                }
+                assertTrue(engine.queryMotionBlurSettings()!!.enabled)
+            }
+            enableComposition(0)
+            note("BLUR_VERIFIED originalLayers=$verifiedLayers original3d=$verified3d; includes nested compositions; shutter=360 samples=8 adaptive=16")
             for (index in 0 until 8) {
                 val objectId = engine.addShape3d(index % 3, "Animated 3D $index")
                 assertTrue(objectId > 0)
@@ -115,6 +152,9 @@ class Particle3DMotionBlurExportTest {
                 commands.insertKeyframe(objectId, TrackProperty.ROTATION_Z, -1, 0, totalFrames - 1, 160f)
                 assertTrue(engine.submitCommands() > 0)
                 assertTrue(engine.setMotionBlur(objectId, true))
+                val detail = ByteBuffer.allocateDirect(LayerDetail.BYTES).order(ByteOrder.nativeOrder())
+                assertTrue(engine.queryLayerDetail(objectId, detail))
+                assertTrue("Added 3D object $index must have blur enabled", LayerDetail.read(detail).motionBlur)
             }
             val particles = engine.addShape(0)
             particlesId = particles

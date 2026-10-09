@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor
 
 import android.app.Application
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -8,6 +9,7 @@ import android.media.MediaMetadataRetriever
 import android.os.Debug
 import android.os.Process
 import android.os.SystemClock
+import android.provider.MediaStore
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -18,6 +20,8 @@ import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.engine.MotionBlurSettings
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.state.ExportOptions
+import com.aurea.aurea.state.ExportPhase
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
 import org.junit.Rule
@@ -68,6 +72,30 @@ class Particle3DMotionBlurExportTest {
         val originalFps = original[2]
         assertTrue(totalFrames > 0 && originalFps > 0)
         note("IMPORTED width=${original[0]} height=${original[1]} fps=$originalFps frames=$totalFrames rootLayers=${store.layers.size}")
+        compose.runOnIdle { store.pause() }
+        var visibleCaptures = 0
+        for (frame in listOf(0, totalFrames / 4, totalFrames / 2, totalFrames * 3 / 4, totalFrames - 1).distinct()) {
+            compose.runOnIdle { store.seek(frame) }
+            compose.waitUntil(30000) { store.playhead == frame }
+            val rgba = ByteBuffer.allocateDirect(320 * maxOf(320, kotlin.math.ceil(320 * original[1] / original[0]).toInt() + 4) * 4)
+            val dimensions = IntArray(2)
+            val bytes = engine.captureFrame(320, rgba, dimensions)
+            assertTrue("Original project must render frame $frame", bytes > 0)
+            val bitmap = Bitmap.createBitmap(dimensions[0], dimensions[1], Bitmap.Config.ARGB_8888)
+            try {
+                rgba.rewind(); bitmap.copyPixelsFromBuffer(rgba)
+                File(folder, "original-frame-$frame.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                var lit = 0
+                for (y in 0 until bitmap.height step 2) for (x in 0 until bitmap.width step 2) {
+                    val pixel = bitmap.getPixel(x, y)
+                    if (maxOf(Color.red(pixel), Color.green(pixel), Color.blue(pixel)) > 35) lit++
+                }
+                if (lit > 100) visibleCaptures++
+                note("PREVIEW frame=$frame lit=$lit")
+            } finally { bitmap.recycle() }
+        }
+        assertTrue("The ready original edit must render visible content", visibleCaptures > 0)
+        compose.runOnIdle { store.seek(0) }
         var particlesId = 0L
         if (forced) compose.runOnIdle {
             for (layer in store.layers) assertTrue(engine.setMotionBlur(layer.id, true))
@@ -127,8 +155,11 @@ class Particle3DMotionBlurExportTest {
         val requestedCodec = arguments.getString("aureaExportCodec")?.toInt() ?: 0
         for ((height, fps, codec) in listOf(Triple(requestedHeight, requestedFps, requestedCodec))) {
             val output = File(folder, "stress-${height}p-${fps.toInt()}fps-${if (codec == 0) "avc" else "hevc"}.mp4")
-            assertEquals("$height/$fps/$codec must configure at High quality", 0,
-                engine.startExport(output.absolutePath, height, fps, codec, 0, quality = 2))
+            compose.runOnIdle {
+                store.exporter.start("Project8 test $label ${if (Process.is64Bit()) 64 else 32}bit",
+                    original[0].toInt(), original[1].toInt(), originalFps,
+                    ExportOptions(shortSide = height, fps = fps, hevc = codec == 1, quality = 2, trimToContent = false))
+            }
             val progress = ExportProgress()
             val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
             var lastFrame = -1
@@ -136,6 +167,7 @@ class Particle3DMotionBlurExportTest {
             val deadline = lastProgress + 5400000
             try {
                 do {
+                    assertNotEquals("Export startup/publication must succeed: ${store.exporter.state.message}", ExportPhase.Failed, store.exporter.state.phase)
                     assertTrue(engine.exportProgress(buffer)); progress.readFrom(buffer)
                     if (progress.framesDone != lastFrame) {
                         lastFrame = progress.framesDone; lastProgress = SystemClock.elapsedRealtime()
@@ -148,8 +180,19 @@ class Particle3DMotionBlurExportTest {
                 assertTrue("Export deadline exceeded", progress.finished)
                 assertEquals(progress.message, 0, progress.result)
                 assertFalse("Full quality must not use approximate frame fallback", progress.frameFallback)
-                val expectedFrames = kotlin.math.ceil(totalFrames * fps / originalFps).toInt()
+                val expectedFrames = kotlin.math.ceil(totalFrames * fps / originalFps - 1e-6).toInt()
                 assertEquals(expectedFrames, progress.framesDone)
+                val publishDeadline = SystemClock.elapsedRealtime() + 120000
+                while (store.exporter.state.phase !in listOf(ExportPhase.Done, ExportPhase.Failed) && SystemClock.elapsedRealtime() < publishDeadline) {
+                    SystemClock.sleep(100)
+                }
+                assertEquals("The complete edit must appear in the gallery: ${store.exporter.state.message}", ExportPhase.Done, store.exporter.state.phase)
+                val published = checkNotNull(store.exporter.state.outputUri)
+                context.contentResolver.query(published, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null)!!.use {
+                    assertTrue(it.moveToFirst()); assertEquals("Gallery item must be published", 0, it.getInt(0))
+                }
+                context.contentResolver.openInputStream(published)!!.use { input -> output.outputStream().use { input.copyTo(it) } }
+                note("GALLERY uri=$published bytes=${output.length()}")
                 val extractor = MediaExtractor()
                 try {
                     extractor.setDataSource(output.absolutePath)
@@ -189,7 +232,7 @@ class Particle3DMotionBlurExportTest {
                     assertTrue("The original edit must produce independently decoded visible content", visibleFrames > 0)
                 } finally { reader.release() }
                 note("PASS $height/$fps/$codec frames=$expectedFrames bytes=${output.length()} fallback=false")
-            } finally { if (!progress.finished) engine.cancelExport() }
+            } finally { if (store.exporter.busy) compose.runOnIdle { store.exporter.cancel() } }
         }
         note("PASS COMPLETE PROJECT EXPORT forced=$forced")
     }

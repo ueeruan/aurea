@@ -12,6 +12,8 @@
 #include "aurea/platform/AddressSpace.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/project/Serialization.hpp"
+#include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 #include "ufbx.h"
 
 #include <algorithm>
@@ -411,6 +413,12 @@ Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noex
     if (const Status s = load_project(p, aureaPath); !s.ok()) return s;
     std::set<std::string> seen;
     p.for_each_asset([&](AssetId, const Asset& a) {
+        // Procedural 3D source strings are complete recipes stored in the
+        // project, not external files. Counting them as missing media made
+        // portable projects with many 3D shapes/texts report false losses.
+        if (a.kind == AssetKind::Model3D &&
+            (a.sourcePath.rfind(scene3d::kShape3DScheme, 0) == 0 ||
+             a.sourcePath.rfind(scene3d::kText3DScheme, 0) == 0)) return;
         if (!packable(a.kind) || a.sourcePath.empty() || !seen.insert(a.sourcePath).second) return;
         MediaRef r;
         r.kind = a.kind;

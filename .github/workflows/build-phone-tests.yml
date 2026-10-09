@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/build-phone-tests.yml'
       - 'android/app/src/androidTest/java/com/aurea/aurea/editor/Particle3DMotionBlurExportTest.kt'
+      - 'engine/src/project/ProjectPackage.cpp'
 permissions:
   contents: read
 concurrency:
@@ -37,8 +38,11 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/app/.cxx
+            build/android/app/intermediates/cxx
           key: phone-${{ matrix.abi }}-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: android-${{ matrix.abi }}-${{ runner.os }}-
+          restore-keys: |
+            phone-${{ matrix.abi }}-${{ runner.os }}-
+            android-${{ matrix.abi }}-${{ runner.os }}-
       - name: Compile isolated physical-device app and tests
         working-directory: android
         run: |

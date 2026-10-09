@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
+import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.ExportProgress
 import com.aurea.aurea.engine.MotionBlurSettings
@@ -33,9 +34,14 @@ class Particle3DMotionBlurExportTest {
         org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("aureaStress") == "true")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         check(context.packageName == "com.aurea.aurea.uitest")
-        val folder = File(context.filesDir, "particle-3d-motionblur-export").apply { mkdirs() }
+        val arguments = InstrumentationRegistry.getArguments()
+        val forced = arguments.getString("aureaForcedBlur") == "true"
+        val source = File(checkNotNull(arguments.getString("aureaProjectPath")) { "The user's portable project is required" })
+        assertTrue("Push the original project into the isolated test app first", source.isFile)
+        val label = if (forced) "forced" else "original"
+        val folder = File(context.filesDir, "project8-$label").apply { mkdirs() }
         val report = File(folder, "progress.txt")
-        report.writeText("Native ${if (Process.is64Bit()) 64 else 32}-bit process; forced shutter=360; samples=8 adaptive=16; quality=High\n")
+        report.writeText("Project 8; native ${if (Process.is64Bit()) 64 else 32}-bit process; forced=$forced; quality=High; complete original timeline\n")
         fun note(message: String) {
             val memory = Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }
             report.appendText("$message pssKB=${memory.totalPss}\n")
@@ -48,48 +54,78 @@ class Particle3DMotionBlurExportTest {
             AureaTheme { EditorScreen(store) }
         }
         compose.waitUntil(30000) { ready && store.engineReady }
-        compose.runOnIdle { store.newProject(1920, 1080, 30f, "Particles + eight 3D + forced blur") }
-        compose.waitUntil(15000) { store.project.title == "Particles + eight 3D + forced blur" && !store.projectOperationBusy }
         val engine = store.engineForStress
-        compose.runOnIdle {
+        val imported = File(folder, "Project8-copy.aurea")
+        val packageResult = engine.importProjectPackage(source.absolutePath, imported.absolutePath, File(folder, "media").absolutePath)
+        assertEquals("Portable project must import successfully", "0", packageResult.getOrNull(0))
+        assertEquals("All original media must resolve", "0", packageResult.getOrNull(4))
+        compose.runOnIdle { store.openProject(imported.absolutePath) }
+        compose.waitUntil(120000) { store.project.path == imported.absolutePath && !store.projectOperationBusy && store.layers.isNotEmpty() }
+        assertEquals("Project must open without corruption, partial-load or missing-media flags", 0, engine.loadNotice() and 11)
+        val original = DoubleArray(8)
+        assertTrue(engine.queryComposition(original) != 0L)
+        val totalFrames = original[3].toInt()
+        val originalFps = original[2]
+        assertTrue(totalFrames > 0 && originalFps > 0)
+        note("IMPORTED width=${original[0]} height=${original[1]} fps=$originalFps frames=$totalFrames rootLayers=${store.layers.size}")
+        var particlesId = 0L
+        if (forced) compose.runOnIdle {
+            for (layer in store.layers) assertTrue(engine.setMotionBlur(layer.id, true))
             for (index in 0 until 8) {
                 val objectId = engine.addShape3d(index % 3, "Animated 3D $index")
                 assertTrue(objectId > 0)
                 engine.beginCommandBatch()
                 val commands = CommandBatch(engine)
-                commands.setLayerTimeRange(objectId, 0, 24)
+                commands.setLayerTimeRange(objectId, 0, totalFrames)
                 commands.setScale(objectId, .55f, .55f, .55f)
-                commands.setPosition(objectId, 280f + index % 4 * 420f, 280f + index / 4 * 480f, 0f)
-                commands.insertKeyframe(objectId, TrackProperty.POSITION_X, -1, 0, 0, 280f + index % 4 * 420f)
-                commands.insertKeyframe(objectId, TrackProperty.POSITION_X, -1, 0, 23, 420f + index % 4 * 420f)
+                val x = original[0].toFloat() * (.15f + index % 4 * .23f)
+                val y = original[1].toFloat() * (.25f + index / 4 * .5f)
+                commands.setPosition(objectId, x, y, 0f)
+                commands.insertKeyframe(objectId, TrackProperty.POSITION_X, -1, 0, 0, x)
+                commands.insertKeyframe(objectId, TrackProperty.POSITION_X, -1, 0, totalFrames - 1, x + original[0].toFloat() * .07f)
                 commands.insertKeyframe(objectId, TrackProperty.ROTATION_Z, -1, 0, 0, 0f)
-                commands.insertKeyframe(objectId, TrackProperty.ROTATION_Z, -1, 0, 23, 160f)
+                commands.insertKeyframe(objectId, TrackProperty.ROTATION_Z, -1, 0, totalFrames - 1, 160f)
                 assertTrue(engine.submitCommands() > 0)
                 assertTrue(engine.setMotionBlur(objectId, true))
             }
-            val particles = engine.addParticles(0)
+            val particles = engine.addShape(0)
+            particlesId = particles
             assertTrue(particles > 0)
-            // Native Particular controls, including its own velocity blur.
-            for ((parameter, value) in listOf(0 to 600f, 1 to 1.5f, 9 to 350f,
-                22 to 2f, 24 to 12f, 38 to 1f, 39 to 360f)) {
-                assertTrue(engine.setParticleParam(particles, parameter, value))
-            }
             engine.beginCommandBatch()
             val commands = CommandBatch(engine)
-            commands.setLayerTimeRange(particles, 0, 24)
-            commands.setPosition(particles, 960f, 540f, 0f)
+            commands.setLayerTimeRange(particles, 0, totalFrames)
+            commands.setPosition(particles, original[0].toFloat() * .5f, original[1].toFloat() * .5f, 0f)
+            commands.setScale(particles, 8f, 8f, 1f)
+            commands.addEffect(particles, effectTypeId("aurea.generate.particular"))
             assertTrue(engine.submitCommands() > 0)
             assertTrue(engine.setMotionBlur(particles, true))
-            store.setCompositionDuration(24)
             assertTrue(engine.setMotionBlurSettings(MotionBlurSettings(true, 360f, -180f, 8, 16, 4)))
             store.clearSelection()
         }
-        compose.waitUntil(10000) { store.project.durationFrames == 24 }
+        if (forced) {
+        val particles = particlesId
+        val effectRows = ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder())
+        val effectNames = ByteBuffer.allocateDirect(1024)
+        compose.waitUntil(15000) { engine.queryLayerEffects(particles, effectRows, 1, effectNames) == 1 }
+        val effectId = effectRows.getInt(0)
+        compose.runOnIdle {
+            engine.beginCommandBatch()
+            val commands = CommandBatch(engine)
+            // Particular uses milliseconds for pre-roll and lifetime.
+            for ((parameter, value) in listOf(0 to 600f, 1 to 1500f, 5 to 120f,
+                6 to 80f, 9 to 350f, 22 to 2000f, 24 to 12f, 38 to 1f, 39 to 360f)) {
+                commands.setEffectParam(particles, effectId, parameter, value)
+            }
+            assertEquals(9, engine.submitCommands())
+        }
         assertTrue(engine.queryMotionBlurSettings()!!.enabled)
+        }
         val capabilities = checkNotNull(engine.deviceReport())
-        note("READY objects=8 Particular=600/sec; encoderLimit=${capabilities.maxExportWidth}x${capabilities.maxExportHeight}")
-        for ((height, fps, codec) in listOf(Triple(720, 30.0, 0), Triple(1080, 30.0, 0),
-            Triple(1080, 60.0, 0), Triple(1080, 30.0, 1))) {
+        note("READY forced=$forced; encoderLimit=${capabilities.maxExportWidth}x${capabilities.maxExportHeight}")
+        val requestedHeight = arguments.getString("aureaExportHeight")?.toInt() ?: 1080
+        val requestedFps = arguments.getString("aureaExportFps")?.toDouble() ?: originalFps
+        val requestedCodec = arguments.getString("aureaExportCodec")?.toInt() ?: 0
+        for ((height, fps, codec) in listOf(Triple(requestedHeight, requestedFps, requestedCodec))) {
             val output = File(folder, "stress-${height}p-${fps.toInt()}fps-${if (codec == 0) "avc" else "hevc"}.mp4")
             assertEquals("$height/$fps/$codec must configure at High quality", 0,
                 engine.startExport(output.absolutePath, height, fps, codec, 0, quality = 2))
@@ -97,7 +133,7 @@ class Particle3DMotionBlurExportTest {
             val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
             var lastFrame = -1
             var lastProgress = SystemClock.elapsedRealtime()
-            val deadline = lastProgress + 900000
+            val deadline = lastProgress + 5400000
             try {
                 do {
                     assertTrue(engine.exportProgress(buffer)); progress.readFrom(buffer)
@@ -112,15 +148,17 @@ class Particle3DMotionBlurExportTest {
                 assertTrue("Export deadline exceeded", progress.finished)
                 assertEquals(progress.message, 0, progress.result)
                 assertFalse("Full quality must not use approximate frame fallback", progress.frameFallback)
-                val expectedFrames = (24 * fps / 30).toInt()
+                val expectedFrames = kotlin.math.ceil(totalFrames * fps / originalFps).toInt()
                 assertEquals(expectedFrames, progress.framesDone)
                 val extractor = MediaExtractor()
                 try {
                     extractor.setDataSource(output.absolutePath)
                     val track = (0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
                     val format = extractor.getTrackFormat(track)
-                    assertEquals(height, format.getInteger(MediaFormat.KEY_HEIGHT))
-                    assertEquals(height * 16 / 9, format.getInteger(MediaFormat.KEY_WIDTH))
+                    val outputHeight = format.getInteger(MediaFormat.KEY_HEIGHT)
+                    val outputWidth = format.getInteger(MediaFormat.KEY_WIDTH)
+                    assertEquals(height, minOf(outputHeight, outputWidth))
+                    assertEquals(original[0] / original[1], outputWidth.toDouble() / outputHeight, 2.0 / outputHeight)
                     assertEquals(if (codec == 0) "video/avc" else "video/hevc", format.getString(MediaFormat.KEY_MIME))
                     extractor.selectTrack(track)
                     var frames = 0; var previousTime = -1L
@@ -135,7 +173,9 @@ class Particle3DMotionBlurExportTest {
                 val reader = MediaMetadataRetriever()
                 try {
                     reader.setDataSource(output.absolutePath)
-                    for (time in listOf(0L, 400000L, 766000L)) {
+                    var visibleFrames = 0
+                    val durationUs = totalFrames * 1000000.0 / originalFps
+                    for (time in listOf(0L, (durationUs * .25).toLong(), (durationUs * .5).toLong(), (durationUs * .75).toLong())) {
                         val bitmap = checkNotNull(reader.getScaledFrameAtTime(time, MediaMetadataRetriever.OPTION_CLOSEST, 320, 180))
                         try {
                             var visible = 0
@@ -143,13 +183,14 @@ class Particle3DMotionBlurExportTest {
                                 val pixel = bitmap.getPixel(x, y)
                                 if (maxOf(Color.red(pixel), Color.green(pixel), Color.blue(pixel)) > 35) visible++
                             }
-                            assertTrue("Encoded 3D/particles must be visible at $time", visible > 100)
+                            if (visible > 100) visibleFrames++
                         } finally { bitmap.recycle() }
                     }
+                    assertTrue("The original edit must produce independently decoded visible content", visibleFrames > 0)
                 } finally { reader.release() }
                 note("PASS $height/$fps/$codec frames=$expectedFrames bytes=${output.length()} fallback=false")
             } finally { if (!progress.finished) engine.cancelExport() }
         }
-        note("PASS ALL EXPORTS WITH FORCED BLUR")
+        note("PASS COMPLETE PROJECT EXPORT forced=$forced")
     }
 }

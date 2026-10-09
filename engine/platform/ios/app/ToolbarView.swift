@@ -243,9 +243,9 @@ struct TransportView: View {
 
     private var previewLabel: String {
         if model.rawPlayback { return "RAW" }
-        if model.status.previewAuto != 0 { return "AUTO" }
+        if model.status.previewAuto != 0 { return "Auto" }
         let n = max(1, model.status.previewNumerator), d = max(1, model.status.previewDenominator)
-        return n == d ? AureaText.t("i18n_preview_full") : "\(n)/\(d)"
+        return n == d ? "Full" : "\(n)/\(d)"
     }
     private func gridButton(_ side: CGFloat) -> some View {
         ShellBarButton(glyph: CupertinoGlyph.Grid, description: AureaText.t("editor_grade_tercos"), size: 18, width: side, height: 48,

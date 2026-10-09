@@ -163,7 +163,8 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
 private fun PreviewResolutionButton(store: EditorStore, side: androidx.compose.ui.unit.Dp) {
     var open by remember { mutableStateOf(false) }
     val label = if (store.rawPlayback) "RAW" else when (val l = store.preview.scaleLabel) {
-        "FULL" -> stringResource(R.string.i18n_preview_full)
+        "FULL" -> "Full"
+        "AUTO" -> "Auto"
         else -> l
     }
     // A reprodução RAW é ferramenta de teste (texto fixo em inglês, sem

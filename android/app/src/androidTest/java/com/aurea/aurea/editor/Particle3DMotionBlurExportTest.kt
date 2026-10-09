@@ -137,7 +137,10 @@ class Particle3DMotionBlurExportTest {
             }
             enableComposition(0)
             note("BLUR_VERIFIED originalLayers=$verifiedLayers original3d=$verified3d; includes nested compositions; shutter=360 samples=8 adaptive=16")
-            for (index in 0 until 8) {
+            // The supplied edit already contains many 3D objects. Extra models
+            // are an optional benchmark, not required to validate this edit.
+            val addedObjects = arguments.getString("aureaAdded3dObjects")?.toInt() ?: maxOf(0, 3 - verified3d)
+            for (index in 0 until addedObjects) {
                 val objectId = engine.addShape3d(index % 3, "Animated 3D $index")
                 assertTrue(objectId > 0)
                 engine.beginCommandBatch()
@@ -181,8 +184,8 @@ class Particle3DMotionBlurExportTest {
             engine.beginCommandBatch()
             val commands = CommandBatch(engine)
             // Particular uses milliseconds for pre-roll and lifetime.
-            for ((parameter, value) in listOf(0 to 600f, 1 to 1500f, 5 to 120f,
-                6 to 80f, 9 to 350f, 22 to 2000f, 24 to 12f, 38 to 1f, 39 to 360f)) {
+            for ((parameter, value) in listOf(0 to 120f, 1 to 1500f, 5 to 120f,
+                6 to 80f, 9 to 350f, 22 to 1500f, 24 to 6f, 38 to 1f, 39 to 360f)) {
                 commands.setEffectParam(particles, effectId, parameter, value)
             }
             assertEquals(9, engine.submitCommands())

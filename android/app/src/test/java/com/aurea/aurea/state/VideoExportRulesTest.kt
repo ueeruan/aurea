@@ -4,14 +4,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * O espelho em Kotlin de `export_frame_size` (ExportRules.hpp). Os MESMOS casos
- * do teste do motor ExportRules.FrameSizeAlignsLongSideTo16AndKeepsShortSideEven —
- * se um lado mudar, os dois testes mudam juntos.
+ * Kotlin mirror of export_frame_size_v2. Picture dimensions must remain
+ * independent of an encoder's internal storage alignment.
  */
 class VideoExportRulesTest {
     @Test fun sameSizesAsTheEngine() {
         val cases = listOf(
-            intArrayOf(1920, 1080, 480, 854, 480),   // Vivo Y30: era 854×480
+            intArrayOf(1920, 1080, 480, 854, 480),
             intArrayOf(1920, 1080, 720, 1280, 720),
             intArrayOf(1920, 1080, 1080, 1920, 1080),
             intArrayOf(1920, 1080, 1440, 2560, 1440),

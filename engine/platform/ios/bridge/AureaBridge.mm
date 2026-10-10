@@ -11,6 +11,7 @@
 //  verdade (o Engine, a saída de áudio, a fábrica de mídia) é C++.
 // =============================================================================
 #include "AureaBridge.h"
+#import <Foundation/Foundation.h>
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"

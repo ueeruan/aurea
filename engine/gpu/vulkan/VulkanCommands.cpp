@@ -796,6 +796,9 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
                 && vkWaitForFences(device_, 1, &done.fence, VK_TRUE, 0) == VK_SUCCESS)
             run_deferred(done);
     }
+    // Completed upload/readback retirements can leave large empty blocks.
+    // Return only genuinely unused backing before next-frame admission.
+    allocator_.trim_empty_blocks();
 
     FrameContext& f = frames_[frameCursor_];
     if (f.submitted) {
@@ -1089,6 +1092,7 @@ Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
             if (&done != current_ && done.submitted && done.frameNumber <= frameNumber)
                 run_deferred(done);
         }
+        allocator_.trim_empty_blocks();
         return OkStatus;
     }
     return OkStatus;

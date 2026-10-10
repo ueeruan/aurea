@@ -12405,8 +12405,16 @@ void Engine::export_thread_main() noexcept {
         // Calor (§37): um quadro em voo só — menos CPU e GPU ao mesmo tempo.
         // Resolução, fps, efeitos e amostras NÃO mudam.
         const bool hot = thermalDegrade_.load(std::memory_order_acquire);
-        const u32 allowed = ctx.scheduler.admission_limit(memory_.pressure(), preview_memory_hold(),
-                                                         hot, monotonic_ns());
+        u32 allowed = ctx.scheduler.admission_limit(memory_.pressure(), preview_memory_hold(),
+                                                    hot, monotonic_ns());
+        if (ctx.v2 && config_.enableTrackedGpuAdmission) {
+            // Reclaim completed uploads before admitting another expensive
+            // scene. This changes concurrency, never shadows/blur or pixels.
+            const auto residency = gpu_->memory_stats();
+            const u64 budget = DeviceCapabilities::process_budget_limit(
+                config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+            if (residency.reservedBytes > budget * 3 / 4) allowed = 1;
+        }
         if (allowed != previousAdmission) {
             AUREA_LOG_INFO("export: scheduler permite %u quadros em voo (pressao %.2f, qualidade igual)",
                            allowed, static_cast<double>(memory_.pressure()));

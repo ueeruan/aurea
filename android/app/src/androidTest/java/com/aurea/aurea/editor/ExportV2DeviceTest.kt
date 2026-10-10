@@ -203,14 +203,14 @@ class ExportV2DeviceTest {
             }
         } finally { reader.release() }
     }
-    @Test fun colonInLocalFileUriExportsAllFrames() {
+    @Test fun colonInLocalFilePathExportsAllFrames() {
         initialize(); project(480, 320, 30f, "V2 local filename colon")
         val source = File(context.filesDir, "v2-source:clip.mp4")
         InstrumentationRegistry.getInstrumentation().context.assets.open("motion-fixture.mp4").use { input ->
             source.outputStream().use { input.copyTo(it) }
         }
         compose.runOnIdle {
-            assertTrue(store.engineForStress.importVideo(android.net.Uri.fromFile(source).toString(), "Colon filename") > 0)
+            assertTrue(store.engineForStress.importVideo(source.absolutePath, "Colon filename") > 0)
             store.setCompositionDuration(60)
         }
         compose.waitUntil(15000) { store.project.durationFrames == 60 }

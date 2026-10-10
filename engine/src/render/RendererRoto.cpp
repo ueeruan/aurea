@@ -39,14 +39,18 @@ u64 rhash(const std::string& s) noexcept {
 
 /// A trilha do Roto: (camada, instância). A mesma conta do preview, do export
 /// e do "Propagar clipe".
-u64 roto_track(const Composition* comp, const Layer& layer, const EffectInstance* instance) noexcept {
+u64 roto_track(const Composition* comp, const Layer& layer, const EffectInstance* instance, const Asset* asset) noexcept {
     u64 layerKey = static_cast<u64>(reinterpret_cast<uintptr_t>(&layer));
     if (comp) {
         const OrderedIds<LayerId>& order = comp->order();
         for (u32 i = 0; i < order.size(); ++i)
             if (comp->layer(order.at(i)) == &layer) { layerKey = order.at(i).pack(); break; }
     }
-    return rmix(rmix(layerKey, instance ? instance->id : 0u), 0x7070);
+    // Replacing media preserves layer/effect IDs and strokes. Its matte must
+    // still be recomputed for the new source instead of reusing the old person.
+    u64 source = layer.source.pack();
+    if (asset) source = rmix(source, rhash(asset->sourcePath) ^ asset->contentHash);
+    return rmix(rmix(rmix(layerKey, instance ? instance->id : 0u), source), 0x7070);
 }
 
 /// Fonte da camada para o Roto (quadro da fonte que a camada mostra agora).
@@ -96,7 +100,7 @@ bool Renderer::roto_propagate(const Project& project, const Composition& comp, c
     if (a > b) std::swap(a, b);
     // Os traços sempre entram no trecho propagado.
     for (const ai::RotoStroke& s : strokes) { a = std::min(a, s.frame); b = std::max(b, s.frame); }
-    roto_->propagate(roto_track(&comp, layer, &instance), strokes, src, std::max<i64>(0, a), std::min(total - 1, b));
+    roto_->propagate(roto_track(&comp, layer, &instance, asset), strokes, src, std::max<i64>(0, a), std::min(total - 1, b));
     return true;
 } catch (...) {
     return false;
@@ -159,7 +163,7 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
         src.layerW = static_cast<f32>(asset->video.width);
         src.layerH = static_cast<f32>(asset->video.height);
     }
-    const u64 track = roto_track(planComp_, l, request.instance);
+    const u64 track = roto_track(planComp_, l, request.instance, asset);
     const f32 chatter = std::clamp(request.smoothing, 0.0f, 1.0f);
     auto tex_key = [&](i64 f) {
         const u64 k = rmix(rmix(track, static_cast<u64>(f)), ai::roto_dependency(strokes, f));
@@ -205,6 +209,17 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
         it->second.lastFrame = frameNumber_;
         tex = it->second.texture;
     } else {
+        // Use the same bounded GPU map cache as automatic foreground/depth.
+        // Propagated mattes can be reconstructed from the bounded CPU cache;
+        // keeping one GPU texture for every visited frame grows without limit.
+        if (depthTex_.size() >= 24) {
+            for (auto old = depthTex_.begin(); old != depthTex_.end();) {
+                if (old->second.lastFrame + 8 < frameNumber_) {
+                    backend_->destroy_texture(old->second.texture);
+                    old = depthTex_.erase(old);
+                } else { ++old; }
+            }
+        }
         TextureDesc d;
         d.width = kSize; d.height = kSize; d.format = SurfaceFormat::R16F;
         d.sampled = true; d.transferDst = true; d.debugName = "roto-recorte";
@@ -228,11 +243,11 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
 }
 
 std::shared_ptr<const std::vector<f32>> Renderer::roto_cached_matte(const Composition* comp, const Layer& layer,
-                                                                   const EffectInstance& instance, i64 frame) noexcept try {
+                                                                   const EffectInstance& instance, i64 frame, const Asset* asset) noexcept try {
     if (!roto_) return nullptr;
     std::vector<ai::RotoStroke> strokes;
     if (!ai::roto_instance_strokes(instance, strokes) || strokes.empty()) return nullptr;
-    return roto_->cached(roto_track(comp, layer, &instance), strokes, std::max<i64>(0, frame));
+    return roto_->cached(roto_track(comp, layer, &instance, asset), strokes, std::max<i64>(0, frame));
 } catch (...) {
     return nullptr;
 }

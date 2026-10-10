@@ -1,9 +1,8 @@
 // =============================================================================
 //  Aurea / platform / ios / app / ContaView.swift
 //
-//  A tela da conta obrigatória (par de android/.../conta/ContaScreen.kt):
-//  cadastro na primeira abertura, entrada depois (sair, reinstalar, sessão
-//  expirada). Cobre o app inteiro até a pessoa estar dentro.
+//  Cadastro/entrada opcionais, abertos pelo menu e fecháveis sem autenticar.
+//  Par de android/.../conta/ContaScreen.kt.
 //
 //  A senha fica num @State local: não vai para UserDefaults, log ou restauração.
 // =============================================================================

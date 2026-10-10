@@ -69,32 +69,58 @@ i64 roto_source_frame(const Project& project, const Composition& comp, const Lay
 bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 radius, const f32* xy, u32 count) noexcept try {
     if (!xy || count == 0 || !(radius > 0.0f) || !std::isfinite(radius)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     EffectInstance* e = roto_instance(comp, layerId, effectId, l);
     const ParameterRegistry* specs = e ? effectRegistry_.params(e->type) : nullptr;
-    if (!e || !specs) return false;
+    if (!e || !specs || l->locked) return false;
     bridge::LayerDetailPOD pod{};
     if (!fill_layer_detail_locked(layerId, pod) || pod.sourceWidth == 0 || pod.sourceHeight == 0) return false;
     const FrameIndex t = playback_.current();
-    // Composição → camada: o inverso da matriz 2D que o render usa.
-    const Mat4 w = layer_comp_matrix(*comp, *l, t);
-    const f32 a = w.col[0].x, b = w.col[0].y, c = w.col[1].x, d = w.col[1].y, tx = w.col[3].x, ty = w.col[3].y;
-    const f32 det = a * d - b * c;
-    if (!(std::fabs(det) > 1e-12f)) return false;
+    // Invert the projected source plane, including its homogeneous W. An
+    // affine inverse of a 3D/camera transform puts strokes away from the finger.
+    bool perspective = false;
+    Mat4 w = layer_comp_matrix(*comp, *l, t, &perspective);
+    if (perspective && sceneEditor_.enabled)
+        w = scene_editor_projection(comp->width(), comp->height(), sceneEditor_) * layer_world_3d(*comp, *l, t);
+    const auto unproject = [&](f32 x, f32 y, Vec2& point, f32& scale) noexcept {
+        if (!std::isfinite(x) || !std::isfinite(y)) return false;
+        const f64 a = f64(w.col[0].x) - f64(x) * w.col[0].w;
+        const f64 b = f64(w.col[0].y) - f64(y) * w.col[0].w;
+        const f64 c = f64(w.col[1].x) - f64(x) * w.col[1].w;
+        const f64 d = f64(w.col[1].y) - f64(y) * w.col[1].w;
+        const f64 det = a * d - b * c;
+        if (!std::isfinite(det) || std::fabs(det) < 1e-12) return false;
+        const f64 rx = f64(x) * w.col[3].w - w.col[3].x;
+        const f64 ry = f64(y) * w.col[3].w - w.col[3].y;
+        point = Vec2{static_cast<f32>((d * rx - c * ry) / det), static_cast<f32>((a * ry - b * rx) / det)};
+        const f64 q = f64(w.col[0].w) * point.x + f64(w.col[1].w) * point.y + w.col[3].w;
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(q) || q <= 1e-6) return false;
+        // Area-equivalent brush radius at the touched point; also works for
+        // ordinary 2D transforms and nonuniform scales.
+        scale = static_cast<f32>(std::sqrt(std::fabs(det)) / q);
+        return std::isfinite(scale) && scale > 1e-9f;
+    };
     const f32 sw = static_cast<f32>(pod.sourceWidth), sh = static_cast<f32>(pod.sourceHeight);
-    const f32 scale = std::sqrt(std::fabs(det));
     ai::RotoStroke stroke;
     stroke.background = background;
     stroke.frame = roto_source_frame(*project_, *comp, *l, t);
-    stroke.radius = std::clamp(radius / scale / std::min(sw, sh), 0.002f, 0.5f);
-    // Pontos com um passo mínimo de ¼ do raio: o traço cabe no teto do canal.
-    const f32 minStep = 0.25f * stroke.radius * std::min(sw, sh);
+    // Pontos com um passo mínimo de ½ raio: o rasterizador preenche entre os
+    // pontos, e com ¼ o teto do canal (4000 pontos) acabava em ~20 traços.
+    f32 minStep = 0.0f;
     Vec2 last{-1e9f, -1e9f};
     for (u32 i = 0; i < count; ++i) {
-        const f32 cx = xy[i * 2] - tx, cy = xy[i * 2 + 1] - ty;
-        if (!std::isfinite(cx) || !std::isfinite(cy)) continue;
-        const f32 lx = (d * cx - c * cy) / det, ly = (-b * cx + a * cy) / det;
+        Vec2 point;
+        f32 scale = 0.0f;
+        if (!unproject(xy[i * 2], xy[i * 2 + 1], point, scale)) continue;
+        if (stroke.points.empty()) {
+            stroke.radius = std::clamp(radius / scale / std::min(sw, sh), 0.002f, 0.5f);
+            minStep = 0.5f * stroke.radius * std::min(sw, sh);
+        }
+        const f32 margin = stroke.radius * std::min(sw, sh);
+        if (point.x < -margin || point.x > sw + margin || point.y < -margin || point.y > sh + margin) continue;
+        const f32 lx = point.x, ly = point.y;
         const bool end = i + 1 == count;
         if (!end && std::hypot(lx - last.x, ly - last.y) < minStep && !stroke.points.empty()) continue;
         last = Vec2{lx, ly};
@@ -140,8 +166,10 @@ bool Engine::roto_undo_stroke(u64 layerId, u32 effectId) noexcept try {
     ai::RotoStrokes strokes;
     if (!curve || !ai::roto_decode(*curve, strokes) || strokes.empty()) return false;
     const i64 frame = roto_source_frame(*project_, *comp, *l, playback_.current());
-    usize at = strokes.size() - 1;
+    // Só o traço DESTE quadro: desfazer não apaga um traço invisível de outro.
+    usize at = strokes.size();
     for (usize i = strokes.size(); i-- > 0;) if (strokes[i].frame == frame) { at = i; break; }
+    if (at == strokes.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "desfazer traço");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     strokes.erase(strokes.begin() + static_cast<std::ptrdiff_t>(at));
@@ -202,6 +230,7 @@ void Engine::roto_cancel() noexcept {
 
 bool Engine::roto_set_view(u64 layerId, u32 effectId, u32 mode) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = nullptr;
     EffectInstance* e = roto_instance(comp, layerId, effectId, l);
@@ -210,6 +239,9 @@ bool Engine::roto_set_view(u64 layerId, u32 effectId, u32 mode) noexcept {
     constexpr u32 kView = 10;
     e->params[kView].constant = ParamValue::scalar(static_cast<f32>(std::min(mode, 2u)));
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // Salva: sem isso, "Concluir" (volta a Final) não marcava o projeto e a
+    // sobreposição vermelha reabria no projeto.
+    project_->mark_dirty();
     request_render();
     return true;
 }

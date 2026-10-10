@@ -521,6 +521,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)groupCameraPassThrough:(long long)layerId;
 /// "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição.
 - (BOOL)setLayerAcceptsLights:(BOOL)on forLayer:(long long)layerId;
+/// Opt into the scene camera without changing the layer's transform.
+- (void)setContentBoundedPlayback:(BOOL)on;
+- (long long)navigationEnd;
+- (BOOL)setLayer3D:(BOOL)on forLayer:(long long)layerId;
+- (BOOL)enableLayer3D:(long long)layerId;
 /// −1 = camada sem a opção (câmera, luz, modelo 3D, áudio, nulo); 0/1.
 - (int32_t)layerAcceptsLights:(long long)layerId;
 /// "" = deu certo; senão o motivo da recusa.
@@ -599,6 +604,8 @@ NS_SWIFT_NAME(AureaEngine)
 /// 7 texturas · 8 maior lado · 9 orçamento · 10..12 cabe · 13..15 pico ·
 /// 16..18 triângulos que ficam · 19..21 teto de textura (por qualidade).
 - (NSArray<NSNumber*>*)inspectModel:(NSString*)path;
+/// Shared ZIP extraction; destination must not exist. Relative paths and CRCs are preserved.
++ (nullable NSArray<NSString*>*)extractModelArchive:(NSString*)archive to:(NSString*)directory;
 /// Etapa (ImportPhase) × 1000 + fração × 1000 do import em curso.
 - (int)importModelProgress;
 - (void)cancelModelImport;
@@ -617,6 +624,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)addShape:(uint32_t)preset;
 - (long long)addText:(nullable NSString*)content;
 - (NSString*)playbackReport;
+/// Position actually presented by the audio output, in timeline nanoseconds.
+- (int64_t)audioPositionNs;
 - (BOOL)setRawPlayback:(BOOL)enabled;
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance;
 - (NSArray<NSNumber*>*)sceneGuides;
@@ -746,6 +755,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)startMotionTrack:(long long)layer tool:(uint32_t)tool model:(uint32_t)model backward:(BOOL)backward points:(NSArray<NSNumber*>*)points feature:(float)feature search:(float)search;
 - (void)cancelMotionTrack;
 - (BOOL)restoreMotionTrack:(long long)layer;
+- (long long)motionTrackSource;
 - (NSDictionary<NSString*, id>*)motionTrackStatus;
 - (NSString*)applyMotionTrack:(long long)target apply:(uint32_t)apply lock:(BOOL)lock smooth:(float)smooth maxScale:(float)maxScale crop:(uint32_t)crop;
 - (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length NS_SWIFT_NAME(gizmo(_:length:));
@@ -790,7 +800,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)isFillerWord:(NSString*)word NS_SWIFT_NAME(isFillerWord(_:));
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options;
 - (uint32_t)captionCount:(long long)layerId;
-- (NSArray<NSDictionary<NSString*, id>*>* _Nullable)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language error:(NSError* _Nullable * _Nullable)error;
+- (NSArray<NSDictionary<NSString*, id>*>* _Nullable)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language translateEnglish:(BOOL)translateEnglish error:(NSError* _Nullable * _Nullable)error;
 - (int)captionProgress:(BOOL)cancel;
 - (NSString*)captionTracks;
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name;
@@ -857,7 +867,9 @@ NS_SWIFT_NAME(AureaEngine)
 /// A bola de um material pronto do texto 3D (0..6), no mesmo formato.
 - (nullable NSData*)text3DPresetPreview:(uint32_t)preset size:(uint32_t)size;
 - (int64_t)removeGaps;
+/// 0/1 trim absoluto, 2 slip, 3/4 roll, 5 slide; 6 move ao quadro absoluto.
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next;
+- (uint32_t)queryClipTimeActions:(long long)layerId frame:(int64_t)frame;
 - (BOOL)trimComposition:(int64_t)frame;
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));
 /// [enabled, shutterAngle, shutterPhase, samples, adaptiveLimit, previewSamples].
@@ -869,6 +881,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSDictionary<NSString*, id>*>*)effectCatalog;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectsForLayer:(long long)layerId;
 - (NSArray<NSDictionary<NSString*, id>*>*)effectParamsForLayer:(long long)layerId effectId:(uint32_t)effectId;
+/// Metadados built-in versionados de propriedades 3D; leituras/escritas continuam nas APIs atuais.
+- (NSString*)builtinPropertySchemaJSON NS_SWIFT_NAME(builtinPropertySchemaJSON());
+- (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples NS_SWIFT_NAME(effectCurve(_:effect:param:channel:samples:));
+- (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y NS_SWIFT_NAME(editEffectCurve(_:effect:param:channel:action:point:x:y:));
 /// Declaração dos parâmetros de um TIPO (o catálogo, sem camada).
 - (NSArray<NSDictionary<NSString*, id>*>*)effectSpecs:(uint32_t)typeId;
 /// Curva de uma propriedade: `count` amostras entre `from` e `to` (frames).
@@ -907,10 +923,13 @@ NS_SWIFT_NAME(AureaEngine)
 /// thumbnailGeneration` avisa quando chega). `outWidth` recebe a largura.
 - (nullable NSData*)thumbnailForLayer:(long long)layerId frame:(int32_t)frame
                                height:(uint32_t)height outWidth:(nullable uint32_t*)outWidth;
-/// Frame do playhead em RGBA8 sRGB com o lado maior em `maxDim` (capa do
-/// projeto na Home). NUNCA o preview: o preview é o CAMetalLayer.
+/// Captura final do playhead em RGBA8 sRGB com o lado maior em `maxDim`.
 - (nullable NSData*)captureFrame:(uint32_t)maxDim outWidth:(nullable uint32_t*)outWidth
                         outHeight:(nullable uint32_t*)outHeight;
+/// Miniatura atual com a política de prévia, dimensionada antes dos efeitos.
+/// Não altera a captura final nem a saída de exportação.
+- (nullable NSData*)capturePreviewFrame:(uint32_t)maxDim outWidth:(nullable uint32_t*)outWidth
+                               outHeight:(nullable uint32_t*)outHeight;
 /// Prévia de um efeito (ficha do catálogo) em RGBA8 sRGB.
 - (nullable NSData*)effectPreview:(uint32_t)typeId width:(uint32_t)width height:(uint32_t)height
                           outSize:(nullable CGSize*)outSize;

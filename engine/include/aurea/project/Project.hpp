@@ -41,7 +41,7 @@ struct ExportSettings {
     f64  fps    = 0.0;    ///< 0 = o da composição
 
     ExportCodec videoCodec = ExportCodec::H264;
-    u32  videoBitrateMbps  = 20;
+    u32  videoBitrateMbps  = 0;   ///< automático pela resolução, fps e qualidade
     /// Modo de taxa: 0 = CBR, 1 = VBR, 2 = qualidade constante (quando o
     /// encoder de hardware suporta).
     u32  rateMode = 1;

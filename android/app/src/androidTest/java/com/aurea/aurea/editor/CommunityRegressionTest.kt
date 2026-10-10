@@ -117,13 +117,13 @@ class CommunityRegressionTest {
         assertEquals(abs(fit[0]), abs(fit[1]), .00001f)
         assertEquals("relative depth stays unchanged", 1f, fit[2], .00001f)
         assertEquals("effective depth follows width", abs(fit[0]), abs(fit[0] * fit[2]), .00001f)
-        compose.onNodeWithText(context.getString(R.string.sh_dock_transform)).performClick()
+        compose.onNodeWithTag("dock.tool.Move").performScrollTo().performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.panel_escala)).performClick()
         for (auto in listOf(false, true)) {
             compose.runOnIdle { store.autoKeyTransforms = auto; store.setScale3(floatArrayOf(.05f, .1f, .15f)); store.scaleAxesLinked = true }
             compose.waitUntil(5000) { store.detail!!.scale == listOf(.05f, .1f, .15f) }
             compose.onNodeWithTag("transform.scale.x").performTouchInput {
-                down(center); moveBy(Offset(-32f, 0f), 80); moveBy(Offset(-5f, 0f), 80); up()
+                down(center); moveBy(Offset(32f, 0f), 80); moveBy(Offset(5f, 0f), 80); up()
             }
             compose.waitUntil(5000) { abs(store.detail!!.scale[0] - .05f) > .00001f }
             val scale = store.detail!!.scale
@@ -181,13 +181,13 @@ class CommunityRegressionTest {
             launch()
             compose.runOnIdle { store.importVideo(android.net.Uri.fromFile(video)) }
             compose.waitUntil(20000) { store.detail?.kind == 1 }
-            compose.onNodeWithText(context.getString(R.string.sh_dock_transform)).performClick()
+            compose.onNodeWithTag("dock.tool.Move").performScrollTo().performClick()
             compose.onNodeWithContentDescription(context.getString(R.string.panel_escala)).performClick()
             for (auto in listOf(false, true)) for (axis in listOf("x", "y")) {
                 compose.runOnIdle { store.autoKeyTransforms = auto; store.setScale3(floatArrayOf(.05f, .1f, 1f)); store.scaleAxesLinked = true }
                 compose.waitUntil(5000) { store.detail!!.scale == listOf(.05f, .1f, 1f) }
                 compose.onNodeWithTag("transform.scale.$axis").performTouchInput {
-                    down(center); moveBy(Offset(-32f, 0f), 80); moveBy(Offset(-5f, 0f), 80); up()
+                    down(center); moveBy(Offset(32f, 0f), 80); moveBy(Offset(5f, 0f), 80); up()
                 }
                 compose.waitUntil(5000) { store.detail!!.scale[0] < .05f }
                 val scale = store.detail!!.scale

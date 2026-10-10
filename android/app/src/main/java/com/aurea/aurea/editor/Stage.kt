@@ -96,7 +96,8 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     val insetPx = 0f
     // Pontos do rastreio de câmera no vídeo (painel de Rastreio aberto).
     val showTrack = ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking
-    androidx.compose.runtime.LaunchedEffect(store.playhead, showTrack, store.cameraTrack, store.primary) { store.refreshCameraFeatures(showTrack) }
+    val showCamera = showTrack && store.cameraTrackerVisible
+    androidx.compose.runtime.LaunchedEffect(store.playhead, showCamera, store.cameraTrack, store.primary) { store.refreshCameraFeatures(showCamera) }
     // Zoom da vista: cada projeto abre no encaixe (o motor pode trazer um zoom
     // salvo no arquivo; aqui a vista e o motor voltam juntos a 100 %).
     androidx.compose.runtime.LaunchedEffect(store) {
@@ -110,7 +111,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 .pointerInput(store) { stageGestures(store, ui, mapper, haptic) }
                 .drawBehind { drawStageOverlay(store, ui, mapper, insetPx) },
         )
-        if (showTrack && store.cameraFeatures != null && store.pointPick == null) {
+        if (showCamera && store.cameraFeatures != null && store.pointPick == null) {
             Spacer(Modifier.fillMaxSize().pointerInput(store, showTrack) {
                 detectTapGestures(
                     onTap = { point -> store.selectCameraPoint(mapper.cx(point.x), mapper.cy(point.y), 24.dp.toPx() / mapper.fit) },
@@ -162,7 +163,6 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         LockBanner(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         RigModeBar(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
-        ResolutionChip(store, ui, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp))
         PreviewBufferBadge(store, Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 8.dp))
         StageZoomChip(store, Modifier.align(Alignment.BottomEnd).padding(8.dp))
         // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
@@ -928,7 +928,7 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
 ) {
     val degPerPx = 0.35f / 1.dp.toPx()
     val picked = store.scenePick(m.cx(down.position.x), m.cy(down.position.y), 36.dp.toPx() / m.fit)
-        ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind) }
+        ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind, LayerType.Light.kind) }
     var mode = 0            // 0 pendente, 1 órbita, 2 objeto, 3 pinça
     var last = down.position
     var span0 = 1f
@@ -1317,7 +1317,8 @@ private suspend fun PointerInputScope.stageGestures(
                 val d = store.detail
                 val cx = m.cx(downX)
                 val cy = m.cy(downY)
-                if (d != null && store.selection.size == 1 && activeAt(d, store.playhead) && LayerGeometry.contains(d, cx, cy, 0f)) {
+                val selectedSlack = if (d?.kind == LayerType.Model3D.kind && m.fit > 0f) hitSlack * (20f / 12f) / m.fit else 0f
+                if (d != null && store.selection.size == 1 && activeAt(d, store.playhead) && LayerGeometry.contains(d, cx, cy, selectedSlack)) {
                     target = TARGET_LAYER
                     targetLayer = d.id
                 } else {
@@ -1334,9 +1335,10 @@ private suspend fun PointerInputScope.stageGestures(
             }
         }
 
-        // Nulls and the active camera have no visible surface to hit.
+        // Nulls, the active camera and lights have no visible surface to hit:
+        // one finger moves the selected light (beta 07/10, light "doesn't follow").
         if (target == TARGET_EMPTY && store.selection.size == 1 &&
-            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind) &&
+            store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind, LayerType.Light.kind) &&
             store.primary?.let { store.previewGestureBasis(it) } != null) {
             target = TARGET_LAYER; targetLayer = store.primary ?: 0L
         }
@@ -1456,7 +1458,10 @@ private suspend fun PointerInputScope.stageGestures(
         if (mode == MODE_PENDING && !multi && target != TARGET_HANDLE && m.valid) {
             val cx = m.cx(downX)
             val cy = m.cy(downY)
-            val hit = hitLayer(store, cx, cy, 0f, includeLocked = false)
+            val selected3D = store.detail?.takeIf { it.kind == LayerType.Model3D.kind && store.selection.size == 1
+                && activeAt(it, store.playhead) && store.layers.any { row -> row.id == it.id && row.visible && !row.locked }
+                && LayerGeometry.contains(it, cx, cy, if (m.fit > 0f) hitSlack * (20f / 12f) / m.fit else 0f) }?.id
+            val hit = selected3D ?: hitLayer(store, cx, cy, 0f, includeLocked = false)
                 ?: hitLayer(store, cx, cy, if (m.fit > 0f) hitSlack / m.fit else 0f, includeLocked = false)
             if (hit != null) {
                 if (store.primary != hit || store.selection.size != 1) store.select(hit)
@@ -1864,56 +1869,6 @@ private fun hitLayer(store: EditorStore, cx: Float, cy: Float, slack: Float, inc
 // =============================================================================
 // Chip de resolução e HUD
 // =============================================================================
-
-/**
- * "Full" no canto sup-dir (0xCC171D25, raio 6, 12 sp). Toque: resolução da
- * prévia (só sessão, nunca o export). Toque longo: HUD de desempenho (DEV).
- * Some na tela cheia — ficava embaixo do "Voltar ao editor".
- */
-@Composable
-private fun ResolutionChip(store: EditorStore, ui: EditorUi, modifier: Modifier) {
-    // Na cena 3D o canto é do desfazer/refazer flutuante.
-    if (ui.fullscreen || store.sceneEditor) return
-    var open by remember { mutableStateOf(false) }
-    val label = if (store.rawPlayback) "RAW" else when (val l = store.preview.scaleLabel) {
-        "FULL" -> stringResource(R.string.i18n_preview_full)
-        else -> l
-    }
-    // A reprodução RAW é ferramenta de teste (texto fixo em inglês, sem
-    // tradução): só no build de depuração e no uiTest, que herda dele. O HUD
-    // (toque longo) é recurso de usuário — também está no menu "Diagnóstico na tela".
-    val testeRaw = com.aurea.aurea.BuildConfig.DEBUG
-    val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
-    Box(modifier) {
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(6.dp))
-                .background(ShellColors.ResolutionChip)
-                .semantics { contentDescription = chipDescription }
-                .tocavel(haptic = true, onLongClick = { store.toggleHud() }) { open = true }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-        ) {
-            Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
-        }
-        if (open) com.aurea.aurea.ui.i18n.LocaleDirection {
-            val current = store.preview.scaleLabel
-            ShellPopupMenu(
-                items = listOfNotNull(
-                    // Teste de reprodução crua: só depuração. `store.rawPlayback`
-                    // ligado (impossível no release) ainda mostra a volta.
-                    if (testeRaw || store.rawPlayback) PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() } else null,
-                    PopupItem("AUTO", current == "AUTO") { store.setPreviewScale(true) },
-                    PopupItem(stringResource(R.string.i18n_preview_full), current == "FULL") { store.setPreviewScale(false, 1, 1) },
-                    PopupItem("1/2", current == "1/2") { store.setPreviewScale(false, 1, 2) },
-                    PopupItem("1/4", current == "1/4") { store.setPreviewScale(false, 1, 4) },
-                    PopupItem("1/8", current == "1/8") { store.setPreviewScale(false, 1, 8) },
-                ),
-                onDismiss = { open = false },
-                width = 160.dp,
-            )
-        }
-    }
-}
 
 /** HUD de desempenho (Fase 2, DEV): monoespaçado, canto sup-esq, semitransparente. */
 @Composable

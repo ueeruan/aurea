@@ -22,6 +22,7 @@ import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.rememberScrollState
@@ -32,12 +33,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.window.Dialog
 import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.editor.panels.PanelContent
+import com.aurea.aurea.editor.panels.AureaPropertyPanel
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.text.input.KeyboardType
@@ -67,31 +70,11 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
         Surface { PanelContent(store = store, panel = materialPanel, onClose = { materials = false }, onOpenPanel = { materialPanel = it }, onOpenEffectsBrowser = { ui.effectsBrowser = true }, modifier = Modifier.fillMaxWidth().fillMaxHeight(.85f)) }
     }
     if (lights) Dialog(onDismissRequest = { lights = false }) {
-        Surface { Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            val light = remember(store.primary, store.sceneSettingsRevision, store.playhead) { store.lightInfo() }
-            light?.let { values ->
-                for (param in 1..5) {
-                    if (param == 5 && values[0] == 0f) continue
-                    val label = listOf("", stringResource(R.string.panel_intensidade), "R", "G", "B", stringResource(R.string.scene_light_range))[param]
-                    Row {
-                        SceneNumberField(values[param], label, "light:${store.primary}:$param", { store.setLightParam(param, it) }, Modifier.weight(1f))
-                        if (param < 5) TextButton(onClick = { store.toggleLightKey(param, values[param]) }) { Text(if (store.detail?.hasKeyAtPlayhead(20 + param) == true) "◆" else "◇") }
-                    }
-                }
-                if (values[0] == 0f) Row { Text(stringResource(R.string.scene_light_shadows)); Switch(values[8] >= .5f, { store.setLightParam(8, if (it) 1f else 0f) }) }
-                if (values[0] == 0f && values[8] >= .5f) {
-                    val label = stringResource(R.string.scene_shadow_strength)
-                    Text("$label: ${(values[10] * 100).toInt()}%")
-                    var editing by remember { mutableStateOf(false) }
-                    DisposableEffect(store) { onDispose { if (editing) store.endGesture() } }
-                    Slider(value = values[10], onValueChange = {
-                        if (!editing) { editing = true; store.beginGesture("shadow strength") }
-                        store.setLightParam(10, it)
-                    }, onValueChangeFinished = {
-                        if (editing) { editing = false; store.endGesture() }
-                    }, modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = label })
-                }
-            }
+        Surface { Column(Modifier.fillMaxWidth().heightIn(max = 600.dp).verticalScroll(rememberScrollState()).padding(12.dp)) {
+            val light = remember(store.primary, store.curveRevision, store.detail, store.sceneSettingsRevision, store.playhead) { store.lightInfo() }
+            light?.let { values -> AureaPropertyPanel(store, "light", values, onOpenCurve = {
+                lights = false; materialPanel = EditorPanel.Curve; materials = true
+            }) }
         } }
     }
     val selected = store.layers.firstOrNull { it.id == store.primary }
@@ -139,6 +122,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                         PopupItem(stringResource(R.string.sh_add_null_3d), false) { addMenu = false; store.addNull(true) },
                         PopupItem(stringResource(R.string.scene_light_directional), false) { addMenu = false; store.addLight(0) },
                         PopupItem(stringResource(R.string.scene_light_point), false) { addMenu = false; store.addLight(1) },
+                        PopupItem(stringResource(R.string.scene_light_spot), false) { addMenu = false; store.addLight(2) },
                         PopupItem(stringResource(R.string.sh_add_model_3d) + "…", false) { addMenu = false; ui.addTab = AddTab.Model3D; ui.adding = true },
                     ), onDismiss = { addMenu = false }, width = 220.dp)
                 }

@@ -170,6 +170,7 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     config.exportSinkFactory = &make_export_sink;
     config.audioOutput = audioOut_.get();
     config.defaultFontPath = ios_default_font_path();
+    ios_install_text_fallback();
     config.imageLoader = &ios_load_image;
     config.enableTelemetry = true;
 

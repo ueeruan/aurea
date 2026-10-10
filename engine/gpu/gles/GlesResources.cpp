@@ -61,6 +61,28 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
 void Backend::destroy_texture(TextureHandle h) noexcept {
     auto& d = *impl_; Impl::Scope scope(d);
     auto it = d.textures.find(h.id); if (!scope.valid || it == d.textures.end()) return;
+    // The draw/read FBOs outlive project and capture textures. Detach their
+    // references before deleting/reusing a GL name, including an FBO that is
+    // currently unbound. This also avoids stale attachment metadata in GLES
+    // drivers when a thumbnail follows a project transition.
+    const GLuint texture = it->second.id;
+    if (d.readAttachment == texture) {
+        GLint saved = 0; glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &saved);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, d.readFramebuffer);
+        glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+        d.readAttachment = 0;
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(saved));
+    }
+    if (std::find(std::begin(d.drawAttachments), std::end(d.drawAttachments), texture) != std::end(d.drawAttachments)) {
+        GLint saved = 0; glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &saved);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, d.framebuffer);
+        constexpr GLenum attachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_DEPTH_ATTACHMENT};
+        for (u32 i = 0; i < 3; ++i) if (d.drawAttachments[i] == texture) {
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, attachments[i], GL_TEXTURE_2D, 0, 0);
+            d.drawAttachments[i] = 0;
+        }
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(saved));
+    }
     // GL retains objects referenced by queued commands until their execution.
     glDeleteTextures(1, &it->second.id);
     d.bytesTextures -= std::min(d.bytesTextures, it->second.desc.estimated_bytes());

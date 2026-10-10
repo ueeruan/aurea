@@ -46,7 +46,7 @@ class TextManualPreviewTest {
         }
         compose.waitUntil(5000) { store.effects.size == 1 }
         val effect = store.effects.single().effectId
-        compose.onNodeWithText(context.getString(R.string.sh_dock_effects)).performClick()
+        compose.onNodeWithTag("dock.tool.Effects").performScrollTo().performClick()
         compose.waitUntil(5000) { store.paramOf(effect, 9) != null }
 
         fun image(name: String): DoubleArray {
@@ -81,7 +81,7 @@ class TextManualPreviewTest {
                 val previous=store.paramOf(effect,9)!!.value[0]
                 compose.onNodeWithTag("effects.param.$effect.9.0").performScrollTo().performTouchInput {
                     val start=Offset(width*.53f,center.y)
-                    down(start); moveTo(start-Offset(65f,0f),250); up()
+                    down(start); moveTo(start+Offset(65f,0f),250); up()
                 }
                 compose.waitUntil(5000) { store.paramOf(effect,9)!!.value[0]<previous }
             }

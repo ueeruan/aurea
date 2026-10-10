@@ -260,6 +260,7 @@ struct Node {
     i32 light = -1;
     std::vector<i32> materials;     ///< Per-instance FBX material bindings; empty for glTF.
     std::vector<f32> morphWeights;    ///< vazio = os da malha
+    bool inScene = true;             ///< Reachable from the selected scene roots; joints remain available.
 
     [[nodiscard]] Mat4 local_matrix() const noexcept {
         return Mat4::translation(translation) * Mat4::from_quat(rotation) * Mat4::scale(scale);

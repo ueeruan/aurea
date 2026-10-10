@@ -30,8 +30,14 @@ add_executable(aurea_tests
     test_ai.cpp
     test_upscale_color.cpp
     test_yuv_layout.cpp
+    test_p010_upload.cpp
+    test_export_sink_startup.cpp
+    test_aac_output_integrity.cpp
     test_gpu.cpp
     test_scene3d.cpp
+    test_scene_environment_jobs.cpp
+    test_morph_deformation.cpp
+    test_ground_placement.cpp
     test_model_budget.cpp
     test_text3d.cpp
     test_text3d_anim.cpp
@@ -43,6 +49,7 @@ add_executable(aurea_tests
     test_beta_heavy.cpp
     test_camera_lens.cpp
     test_scene_param_keys.cpp
+    test_builtin_property_schema.cpp
     test_effect3d_sweep.cpp
     test_audio.cpp
     test_audio_fx.cpp
@@ -69,6 +76,8 @@ add_executable(aurea_tests
     test_vector_gpu.cpp
     test_editing_tools.cpp
     test_export.cpp
+    test_export_recovery.cpp
+    test_export_scheduler.cpp
     test_image_export.cpp
     test_project_settings.cpp
     test_perf.cpp
@@ -77,6 +86,7 @@ add_executable(aurea_tests
     test_memory.cpp
     test_perf_render.cpp
     test_device.cpp
+    test_address_space.cpp
     test_startup.cpp
     test_heavy.cpp
     test_i18n.cpp

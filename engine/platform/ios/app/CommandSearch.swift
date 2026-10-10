@@ -151,11 +151,18 @@ struct CommandSearchView: View {
     }
 
     private func load() {
+        // Título e detalhe no idioma do app (`edt_cmdx_<id>`, como no Android); o
+        // texto pt do JSON é reserva para comando sem recurso e entra na busca.
+        func localized(_ key: String, _ fallback: String) -> String {
+            let text = AureaText.t(key)
+            return text == key ? fallback : text
+        }
         hits = EditorCommand.catalog.map {
-            CommandHit(id: $0.id, title: $0.title, detail: $0.detail, search: fxNormalizeSearch("\($0.title) \($0.detail) \($0.keywords)"), category: "Ações", requires: $0.requires)
+            let title = localized("edt_cmdx_\($0.id)", $0.title), detail = localized("edt_cmdx_\($0.id)_d", $0.detail)
+            return CommandHit(id: $0.id, title: title, detail: detail, search: fxNormalizeSearch("\(title) \($0.title) \(detail) \($0.detail) \($0.keywords)"), category: "Ações", requires: $0.requires)
         }
         hits += model.effectCatalog.filter { $0.typeId != fxEffectTypeId("aurea.motion.oscillate") }.map {
-            CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: AureaText.t("edt_cmd_add_effect", $0.category), search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : $0.typeId == fxEffectTypeId("aurea.shape3d.layout") ? "shape3d" : "selection", effect: $0.typeId)
+            CommandHit(id: "effect:\($0.typeId)", title: fxEffectDisplayName($0.typeId, $0.name), detail: AureaText.t("edt_cmd_add_effect", fxEffectCategoryLabel($0.category)), search: fxEffectSearchText($0.typeId, $0.name, $0.category), category: "Efeitos", requires: $0.typeId == fxEffectTypeId("aurea.text3d.layout") ? "text3d" : $0.typeId == fxEffectTypeId("aurea.shape3d.layout") ? "shape3d" : "selection", effect: $0.typeId)
         }
         // Os presets saíram da busca (o navegador de presets não tem mais entrada);
         // máscara, legendas e rastreio de câmera chegam como FERRAMENTAS-EFEITO

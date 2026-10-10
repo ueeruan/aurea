@@ -92,6 +92,7 @@ fun PanelContent(
             openKeypad = { keypad = it },
             openColor = { color = it },
             returnTo = { returnTo },
+            onOpenAnimators = { transformTab = TransformTab.Animadores; open(EditorPanel.Transform) },
         )
     }
     // Só a existência da camada importa aqui — não o detalhe que muda a cada quadro.

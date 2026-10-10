@@ -86,6 +86,7 @@ std::shared_ptr<const Font> Font::load(const std::string& path) {
     const unsigned upem = hb_face_get_upem(impl->face);
     hb_font_set_scale(impl->hb, static_cast<int>(upem), static_cast<int>(upem));
     auto font = std::shared_ptr<Font>(new Font());
+    font->sourcePath_ = path;
     font->impl_ = std::move(impl);
     // Identidade pelos BYTES (uma passada na carga): o cache de geometria não
     // pode depender do endereço do objeto, que o alocador reaproveita.
@@ -279,16 +280,19 @@ constexpr const char* kFallbackPaths[] = {
     "C:/Windows/Fonts/msyh.ttc",                                                                 // 9 CJK (Windows)
     "C:/Windows/Fonts/seguisym.ttf", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",     // 10, 11 símbolos
     "",   // 12 árabe EMBARCADA: NotoNaskhArabic-Regular.ttf ao lado da fonte padrão (ver bundled_arabic_path)
+    "",   // 13 japonês embarcado: funciona também no sandbox do iOS.
 };
 constexpr usize kFallbackCount = sizeof(kFallbackPaths) / sizeof(kFallbackPaths[0]);
 constexpr u8 kBundledArabic = 12;
-static_assert(kBundledArabic + 1 == kFallbackCount, "a reserva embarcada e a ultima");
+constexpr u8 kBundledJapanese = 13;
+static_assert(kBundledJapanese + 1 == kFallbackCount, "a reserva embarcada e a ultima");
 std::mutex g_fallbackMutex;
 /// O app traz a Noto Naskh Arabic (OFL 1.1) na MESMA pasta da fonte padrão:
 /// `Fonts/` do bundle no iOS (o iOS não deixa ler as fontes árabes do sistema
 /// por caminho) e o cache no Android (copiada dos assets). Assim um título em
 /// árabe desenha igual nos dois aparelhos, com ou sem fonte árabe do sistema.
 std::string g_bundledArabicPath;
+std::string g_bundledJapanesePath;
 std::shared_ptr<const Font> g_fallbacks[kFallbackCount];
 bool g_fallbackTried[kFallbackCount] = {};
 u32 g_fallbackLoads = 0;
@@ -296,7 +300,7 @@ u64 g_fallbackBytes = 0;
 
 /// Ordem de busca pela escrita do caractere (índices de kFallbackPaths).
 void fallback_order(u32 cp, u8 (&order)[kFallbackCount], usize& n) {
-    static constexpr u8 kArabic[] = {kBundledArabic, 0, 1}, kHebrew[] = {2}, kDeva[] = {3}, kThai[] = {4}, kCjk[] = {5, 9, 6},
+    static constexpr u8 kArabic[] = {kBundledArabic, 0, 1}, kHebrew[] = {2}, kDeva[] = {3}, kThai[] = {4}, kCjk[] = {kBundledJapanese, 5, 9, 6},
                         kGeneral[] = {7, 8, 10, 11, 6};
     const u8* first = kGeneral;
     usize nf = sizeof(kGeneral);
@@ -352,7 +356,8 @@ const Font::Impl* fallback_for(const u32* chars, usize count) {
         const u8 i = order[k];
         if (!g_fallbackTried[i]) {
             g_fallbackTried[i] = true;
-            const std::string path = i == kBundledArabic ? g_bundledArabicPath : std::string(kFallbackPaths[i]);
+            const std::string path = i == kBundledArabic ? g_bundledArabicPath
+                                   : i == kBundledJapanese ? g_bundledJapanesePath : std::string(kFallbackPaths[i]);
             if (!path.empty()) g_fallbacks[i] = Font::load(path);
             if (g_fallbacks[i]) {
                 ++g_fallbackLoads;
@@ -751,9 +756,11 @@ void set_default_font_path(const std::string& path) {
     const usize slash = path.find_last_of("/\\");
     std::lock_guard<std::mutex> lock(g_fallbackMutex);
     g_bundledArabicPath = slash == std::string::npos ? std::string() : path.substr(0, slash + 1) + "NotoNaskhArabic-Regular.ttf";
+    g_bundledJapanesePath = slash == std::string::npos ? std::string() : path.substr(0, slash + 1) + "NotoSansJP-Regular.otf";
     // Já carregada fica (glifos posicionados apontam para ela); só uma
     // tentativa que falhou é refeita com o caminho novo.
     if (!g_fallbacks[kBundledArabic]) g_fallbackTried[kBundledArabic] = false;
+    if (!g_fallbacks[kBundledJapanese]) g_fallbackTried[kBundledJapanese] = false;
 }
 
 std::shared_ptr<const Font> default_font() {
@@ -801,14 +808,31 @@ TextExtent measure(const Font& font, const TextData& t) {
     return TextExtent{std::max(1.0f, std::ceil(p.width)), std::max(1.0f, std::ceil(p.height))};
 }
 
-bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours, i32 glyphIndex) {
+std::vector<std::string> source_dependencies(const Font& font, const TextData& t) {
+    Placed placed;
+    place(font.impl(), t, 1.0f, placed);
+    std::vector<std::string> result{font.source_path()};
+    std::lock_guard<std::mutex> lock(g_fallbackMutex);
+    for (const auto& fallback : g_fallbacks) {
+        if (!fallback) continue;
+        if (std::any_of(placed.glyphs.begin(), placed.glyphs.end(), [&](const Glyph& g) { return g.font == &fallback->impl(); }) &&
+            std::find(result.begin(), result.end(), fallback->source_path()) == result.end())
+            result.push_back(fallback->source_path());
+    }
+    return result;
+}
+
+bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours, i32 glyphIndex,
+             std::vector<u32>* contourGlyphs) {
     Placed p;
     place(font.impl(), t, 1.0f, p);
     const int steps = std::clamp(static_cast<int>(std::max(1.0f, t.size) / 8.0f), 4, 16);
     contours.clear();
+    if (contourGlyphs) contourGlyphs->clear();
     i32 placedIndex = 0;
     for (const Glyph& gl : p.glyphs) {
-        if (glyphIndex >= 0 && placedIndex++ != glyphIndex) continue;
+        const u32 owner = static_cast<u32>(placedIndex++);
+        if (glyphIndex >= 0 && owner != static_cast<u32>(glyphIndex)) continue;
         stbtt_vertex* v = nullptr;
         const int n = stbtt_GetGlyphShape(&gl.font->info, gl.id, &v);
         const f32 fs = gl.fs;
@@ -819,6 +843,7 @@ bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>
             const Vec2 to = P(e.x, e.y);
             if (e.type == STBTT_vmove) {
                 contours.emplace_back();
+                if (contourGlyphs) contourGlyphs->push_back(owner);
                 contours.back().push_back(to);
             } else if (!contours.empty()) {
                 std::vector<Vec2>& c = contours.back();
@@ -847,8 +872,11 @@ bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>
     for (std::vector<Vec2>& c : contours) {
         while (c.size() > 1 && std::fabs(c.back().x - c.front().x) < 1e-4f && std::fabs(c.back().y - c.front().y) < 1e-4f) c.pop_back();
     }
-    contours.erase(std::remove_if(contours.begin(), contours.end(), [](const std::vector<Vec2>& c) { return c.size() < 3; }),
-                   contours.end());
+    for (usize i = contours.size(); i-- > 0;) {
+        if (contours[i].size() >= 3) continue;
+        contours.erase(contours.begin() + static_cast<std::ptrdiff_t>(i));
+        if (contourGlyphs) contourGlyphs->erase(contourGlyphs->begin() + static_cast<std::ptrdiff_t>(i));
+    }
     return !contours.empty();
 }
 

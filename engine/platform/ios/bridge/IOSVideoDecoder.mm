@@ -36,6 +36,7 @@
 #import <CoreVideo/CoreVideo.h>
 #import <ImageIO/ImageIO.h>
 #import <VideoToolbox/VideoToolbox.h>
+#include "aurea/text/Text.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -56,6 +57,7 @@
 #include <cstdio>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -205,9 +207,79 @@ public:
         if (pixel && cpuLocked) CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
         if (pixel) CFRelease(pixel);
     }
+    // Preserve the primary IOSurface path. Materialize CPU pixels only when
+    // requested by a CPU decoder or when this buffer cannot be imported by
+    // Metal. The frame owns both the lock and converted bytes until its last
+    // FrameRef/GPU reference is released.
+    [[nodiscard]] bool prepare_cpu_planes() noexcept override {
+        std::lock_guard<std::mutex> lock(cpuMutex);
+        if (planeCount && planes[0]) return true;
+        if (!pixel || !width || !height) return false;
+        const OSType type = CVPixelBufferGetPixelFormatType(pixel);
+        const bool rgb = type == kCVPixelFormatType_32BGRA || type == kCVPixelFormatType_32RGBA;
+        const bool tenBit = type == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+                         || type == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange;
+        const bool nv12 = type == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                       || type == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
+        if (!rgb && !tenBit && !nv12) return false;
+        if (CVPixelBufferLockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) return false;
+        cpuLocked = true;
+        auto reject = [&] {
+            CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
+            cpuLocked = false;
+            return false;
+        };
+        const size_t count = CVPixelBufferGetPlaneCount(pixel);
+        const u8* source[2]{};
+        u32 pitch[2]{};
+        if (rgb) {
+            const size_t stride = CVPixelBufferGetBytesPerRow(pixel);
+            source[0] = static_cast<const u8*>(CVPixelBufferGetBaseAddress(pixel));
+            if (count || !source[0] || static_cast<u64>(width) * 4 > stride
+                || stride > std::numeric_limits<u32>::max()) return reject();
+            pitch[0] = static_cast<u32>(stride);
+            if (type == kCVPixelFormatType_32BGRA) {
+                const u64 row = static_cast<u64>(width) * 4;
+                if (row > std::numeric_limits<u32>::max()
+                    || row > std::numeric_limits<size_t>::max() / height) return reject();
+                try { rgba.resize(static_cast<size_t>(row) * height); }
+                catch (const std::bad_alloc&) { return reject(); }
+                for (u32 y = 0; y < height; ++y) {
+                    const u8* src = source[0] + static_cast<size_t>(y) * pitch[0];
+                    u8* dst = rgba.data() + static_cast<size_t>(y) * row;
+                    for (u32 x = 0; x < width; ++x) {
+                        dst[x*4] = src[x*4+2]; dst[x*4+1] = src[x*4+1];
+                        dst[x*4+2] = src[x*4]; dst[x*4+3] = src[x*4+3];
+                    }
+                }
+                source[0] = rgba.data(); pitch[0] = static_cast<u32>(row);
+            }
+        } else {
+            if (count != 2) return reject();
+            for (u32 p = 0; p < 2; ++p) {
+                const size_t planeWidth = CVPixelBufferGetWidthOfPlane(pixel, p);
+                const size_t planeHeight = CVPixelBufferGetHeightOfPlane(pixel, p);
+                const size_t stride = CVPixelBufferGetBytesPerRowOfPlane(pixel, p);
+                const u64 neededWidth = p ? (static_cast<u64>(width) + 1) / 2 : width;
+                const u64 neededHeight = p ? (static_cast<u64>(height) + 1) / 2 : height;
+                const u64 row = neededWidth * (p ? 2u : 1u) * (tenBit ? 2u : 1u);
+                source[p] = static_cast<const u8*>(CVPixelBufferGetBaseAddressOfPlane(pixel, p));
+                if (!source[p] || planeWidth < neededWidth || planeHeight < neededHeight
+                    || stride < row || stride > std::numeric_limits<u32>::max()) return reject();
+                pitch[p] = static_cast<u32>(stride);
+            }
+        }
+        // Publish a complete layout atomically with respect to other fallback
+        // requests. Never let a partial conversion appear as a ready frame.
+        planes[0] = source[0]; strides[0] = pitch[0];
+        planes[1] = source[1]; strides[1] = pitch[1];
+        planeCount = rgb ? 1u : 2u;
+        return true;
+    }
     CVPixelBufferRef pixel = nullptr;
     bool cpuLocked = false;
     std::vector<u8> rgba;
+    std::mutex cpuMutex;
 };
 
 /// Identidade do CVPixelBuffer retido pelo frame e pela textura importada.
@@ -481,7 +553,13 @@ Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 deliv
         case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
         case kCVPixelFormatType_420YpCbCr10BiPlanarFullRange:
             frame->format = PixelFormat::P010; break;
-        default:                                         frame->format = PixelFormat::NV12; break;
+        case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
+        case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
+            frame->format = PixelFormat::NV12; break;
+        default:
+            AUREA_LOG_WARN("videotoolbox: formato de pixels inesperado 0x%08x", static_cast<unsigned>(type));
+            delete frame;
+            return Status{Errc::UnsupportedFormat, "formato de pixels decodificado nao suportado"};
     }
     frame->color = info_.color;
     // Faixa: o metadado do ARQUIVO vale para YCbCr; um buffer RGB já é de faixa
@@ -495,34 +573,9 @@ Status AVFoundationVideoDecoder::wrap_sample(CMSampleBufferRef sample, i64 deliv
     // Quando o backend não importa CVPixelBuffer, o frame sai sem ele e o
     // renderer cai no caminho de planos (a CPU lê os planos do mesmo buffer).
     frame->hardwareBuffer = zeroCopy_ && rgbBuffer ? (void*)frame->pixel : nullptr;
-    if (!frame->hardwareBuffer) {
-        if (CVPixelBufferLockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) {
-            delete frame;
-            return Status{Errc::DecodeFailed, "CVPixelBufferLockBaseAddress"};
-        }
-        frame->cpuLocked = true;
-        const size_t count = CVPixelBufferGetPlaneCount(pixel);
-        frame->planeCount = count ? static_cast<u32>(std::min<size_t>(count, 3)) : 1;
-        for (u32 i = 0; i < frame->planeCount; ++i) {
-            frame->planes[i] = static_cast<const u8*>(count ? CVPixelBufferGetBaseAddressOfPlane(pixel, i)
-                                                         : CVPixelBufferGetBaseAddress(pixel));
-            frame->strides[i] = static_cast<u32>(count ? CVPixelBufferGetBytesPerRowOfPlane(pixel, i)
-                                                      : CVPixelBufferGetBytesPerRow(pixel));
-        }
-    }
-    if (!frame->hardwareBuffer && type == kCVPixelFormatType_32BGRA) {
-        // The shared CPU upload/thumbnail path consumes RGBA, not BGRA.
-        frame->rgba.resize(static_cast<usize>(frame->width) * frame->height * 4);
-        for (u32 y = 0; y < frame->height; ++y) {
-            const u8* src = frame->planes[0] + static_cast<usize>(y) * frame->strides[0];
-            u8* dst = frame->rgba.data() + static_cast<usize>(y) * frame->width * 4;
-            for (u32 x = 0; x < frame->width; ++x) {
-                dst[x*4] = src[x*4+2]; dst[x*4+1] = src[x*4+1];
-                dst[x*4+2] = src[x*4]; dst[x*4+3] = src[x*4+3];
-            }
-        }
-        frame->planes[0] = frame->rgba.data();
-        frame->strides[0] = frame->width * 4;
+    if (!frame->hardwareBuffer && !frame->prepare_cpu_planes()) {
+        delete frame;
+        return Status{Errc::DecodeFailed, "planos de pixels decodificados invalidos"};
     }
     frame->bufferId = buffer_identity(pixel);
     // `adopt` TOMA a referencia inicial do frame recem-criado (refs_ = 1):
@@ -946,6 +999,19 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
             }
             decoder->suspend();
             if (!matches(retained, expected.front())) return failure(@"Retained frame changed after suspend");
+            if (zeroCopy) {
+                // Exercise the exact lazy path used after a rejected Metal
+                // import, including a retained buffer whose reader is gone.
+                if (retained->planeCount || !retained->prepare_cpu_planes()
+                    || retained->planeCount != 1 || !retained->planes[0]
+                    || hashPixels(retained->planes[0], retained->width, retained->height,
+                        retained->strides[0], false) != expected.front().hash)
+                    return failure(@"IOSurface CPU fallback pixels differ after suspend");
+                const u8* fallbackPixels = retained->planes[0];
+                if (!retained->prepare_cpu_planes() || retained->planes[0] != fallbackPixels)
+                    return failure(@"IOSurface CPU fallback does not reuse its owned pixels");
+                checks += 2;
+            }
             if (!decoder->resume().ok()) return failure(@"Resume failed");
             bool found = false;
             const auto& middle = expected[expected.size()/2];
@@ -956,7 +1022,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
             if (!found) return failure(@"Resume returned wrong pixels/PTS");
         }
         return @{ @"passed": @YES, @"frames": @(expected.size()), @"pixelChecks": @(checks),
-                  @"cpuAndIOSurface": @YES, @"seekAndResume": @YES };
+                  @"cpuAndIOSurface": @YES, @"lazyCpuFallback": @YES, @"seekAndResume": @YES };
     }
 }
 #endif
@@ -966,6 +1032,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
 /// Batida de vida do watchdog do motor (export/ExportWatchdog.hpp).
 - (void)setHeartbeat:(std::atomic<uint64_t>*)beat;
 - (void)pulse;
+- (void)pulseLocked;
 - (BOOL)openURL:(NSURL*)url
           video:(const VideoStreamConfig&)video
           audio:(const AudioStreamConfig*)audio
@@ -1085,6 +1152,14 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 /// o watchdog do motor só desiste de quem fica PRESO dentro do VideoToolbox
 /// ou do AVAssetWriter.
 - (void)pulse {
+    [_state lock];
+    [self pulseLocked];
+    [_state unlock];
+}
+
+/// Caller holds _state, including the condition-variable wait loops. Detach
+/// cannot race a load/store through a borrowed engine/startup atomic.
+- (void)pulseLocked {
     if (_beat) _beat->store(aurea::monotonic_ns(), std::memory_order_release);
 }
 
@@ -1250,7 +1325,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             break;
         }
         [_state waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:std::min(remaining, 0.1)]];
-        [self pulse];
+        [self pulseLocked];
     }
     healthy = [self healthyLocked];
     [_state unlock];
@@ -1605,7 +1680,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                 break;
             }
             [_state waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:std::min(remaining, 0.1)]];
-            [self pulse];
+            [self pulseLocked];
         }
         if (!_cancelled && !_firstError && _submittedVideo != _appendedVideo)
             [self failLocked:nil message:@"o numero de quadros gravados difere dos quadros enviados"];
@@ -1727,6 +1802,8 @@ public:
                 AUREA_LOG_ERROR("export: encoder recusado (%s)",
                                 error.localizedDescription.UTF8String ? error.localizedDescription.UTF8String : "?");
                 const Status failure = error_status(error, "o encoder recusou o arquivo");
+                [host setCancelFlag:nullptr];
+                [host setHeartbeat:nullptr];
                 [host abort];
                 return failure;
             }
@@ -1767,6 +1844,8 @@ public:
             if (!host) return Status{Errc::InvalidState, "export nao aberto"};
             const BOOL ok = [host finish];
             const Status result = ok ? OkStatus : error_status([host failureError], "o arquivo nao foi finalizado");
+            [host setCancelFlag:nullptr];
+            [host setHeartbeat:nullptr];
             // Solta o host (o ARC libera writer, inputs e sessão).
             (void)(__bridge_transfer AureaExportHost*)release_host();
             return result;
@@ -1777,6 +1856,8 @@ public:
         @autoreleasepool {
             AureaExportHost* host = host_ref();
             if (!host) return;
+            [host setCancelFlag:nullptr];
+            [host setHeartbeat:nullptr];
             [host abort];
             (void)(__bridge_transfer AureaExportHost*)release_host();
         }
@@ -2073,6 +2154,13 @@ const char* ios_default_font_path() {
         if (access(path, R_OK) == 0) return path;
     }
     return "";   // o motor procura sozinho (FontManager varre /System/Library/Fonts)
+}
+
+void ios_install_text_fallback() {
+    // The shared engine discovers bundled Noto Japanese and Arabic beside
+    // Roboto, exactly as Android does. Use its existing API instead of a
+    // platform provider that is not implemented by the shared text engine.
+    text::set_default_font_path(ios_default_font_path());
 }
 
 } // namespace aurea::ios

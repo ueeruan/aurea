@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
@@ -161,6 +162,10 @@ internal fun ShapeEditPanel(env: PanelEnv) {
     // Estado de animação dos parâmetros (valores + bits) no cabeçote.
     val sp by remember(store) { derivedStateOf { store.shapeParams } }
     val sel = ShapeEditState.param
+    androidx.compose.runtime.DisposableEffect(store, store.primary, sel) {
+        store.timelineFocus = shapePanelTimelineFocus(sel)
+        onDispose { store.timelineFocus = null }
+    }
     val curveKeys = curveTrack((listOf(sel) + listOf(5, 6, 1, 2, 3, 4) + (7..14)).distinct()
         .map { store.primaryKeys().shapeTrack(it) })
     val animBits = shapeAnimBits(sp)
@@ -195,9 +200,9 @@ internal fun ShapeEditPanel(env: PanelEnv) {
         Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(top = 6.dp, end = 10.dp, bottom = 16.dp)) {
             ShapeSwitcher(store, type)
             Spacer(Modifier.height(4.dp))
-            SizeRow(env, detail.sourceWidth.toFloat(), detail.sourceHeight.toFloat())
-            val w = detail.sourceWidth.toFloat()
-            val h = detail.sourceHeight.toFloat()
+            val w = sp?.getOrNull(5) ?: detail.sourceWidth.toFloat()
+            val h = sp?.getOrNull(6) ?: detail.sourceHeight.toFloat()
+            SizeRow(env, w, h)
             // Valor no cabeçote dos parâmetros 7..14 (o motor já resolve o padrão da forma).
             fun pv(param: Int, fallback: Float): Float = sp?.getOrNull(param) ?: fallback
             when (type) {
@@ -355,15 +360,16 @@ private fun SizeRow(env: PanelEnv, w: Float, h: Float) {
                 .weight(1f)
                 .fillMaxHeight()
                 .padding(vertical = 6.dp)
+                .testTag("shape.size.ruler")
                 .valueDrag(
                     enabled = true,
-                    start = { if (axis == 0) (store.detail?.sourceWidth ?: 1).toFloat() else (store.detail?.sourceHeight ?: 1).toFloat() },
+                    start = { store.shapeParams?.getOrNull(if (axis == 0) 5 else 6) ?: if (axis == 0) w else h },
                     unitsPerDp = { 1f },
                     min = 1f,
                     max = 16384f,
                     onStart = {
-                        startW[0] = (store.detail?.sourceWidth ?: 1).toFloat()
-                        startW[1] = (store.detail?.sourceHeight ?: 1).toFloat()
+                        startW[0] = store.shapeParams?.getOrNull(5) ?: w
+                        startW[1] = store.shapeParams?.getOrNull(6) ?: h
                         live = if (axis == 0) startW[0] else startW[1]
                         dragging = true
                         store.beginGesture("tamanho da forma")

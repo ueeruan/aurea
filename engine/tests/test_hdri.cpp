@@ -11,6 +11,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/scene3d/Environment.hpp"
+#include "aurea/export/ImageEncode.hpp"
 
 #include "tinyexr.h"
 
@@ -131,19 +132,13 @@ std::vector<u8> make_exr(u32 w, u32 h, bool half) {
 void put16(std::vector<u8>& v, u32 x) { v.push_back(static_cast<u8>(x)); v.push_back(static_cast<u8>(x >> 8)); }
 void put32(std::vector<u8>& v, u32 x) { put16(v, x & 0xffff); put16(v, x >> 16); }
 
-/// Zip de um arquivo: `deflate` = método 8 com blocos "stored" (um deflate válido).
+/// Zip com DEFLATE comprimido de verdade, inclusive códigos Huffman.
 std::vector<u8> make_zip(const std::string& name, const std::vector<u8>& data, bool deflate) {
     std::vector<u8> body = data;
     if (deflate) {
-        body.clear();
-        for (usize i = 0; i < data.size() || i == 0;) {
-            const usize len = std::min<usize>(65535, data.size() - i);
-            body.push_back(i + len >= data.size() ? 1 : 0);
-            put16(body, static_cast<u32>(len)); put16(body, static_cast<u32>(~len & 0xffff));
-            body.insert(body.end(), data.begin() + static_cast<std::ptrdiff_t>(i), data.begin() + static_cast<std::ptrdiff_t>(i + len));
-            i += len;
-            if (len == 0) break;
-        }
+        std::vector<u8> compressed;
+        zlib_compress(data.data(), data.size(), compressed);
+        body.assign(compressed.begin() + 2, compressed.end() - 4);
     }
     std::vector<u8> z;
     // Um arquivo-isca antes (pasta do macOS): precisa ser ignorado.

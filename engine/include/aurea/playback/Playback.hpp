@@ -63,6 +63,8 @@ enum class PlaybackMode : u8 { Paused = 0, Playing, Scrubbing };
 class PlaybackController {
 public:
     void configure(f64 fps, FrameIndex duration) noexcept;
+    /// Inclusive editing boundary; negative restores unrestricted navigation.
+    void set_navigation_end(FrameIndex end) noexcept { navigationEnd_ = end; }
 
     void play(u64 nowNs) noexcept;
     void pause(u64 nowNs) noexcept;
@@ -116,6 +118,7 @@ private:
     PlaybackMode mode_ = PlaybackMode::Paused;
     f64 fps_ = 30.0;
     FrameIndex duration_{1};
+    FrameIndex navigationEnd_{-1};
     FrameIndex current_{0};
     i64 currentNs_ = 0;
     f32 speed_ = 1.0f;

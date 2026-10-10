@@ -3,7 +3,7 @@
      Os 7 catálogos têm as MESMAS chaves; o iOS lê daqui via tools/_ios_strings.py. -->
 <resources>
     <string name="eng_encoder_buffer_small">المخزن المؤقت للمُرمِّز أصغر من الإطار</string>
-    <string name="eng_encoder_format">المُرمِّز لا يقبل هذه الدقة أو الصيغة</string>
+    <string name="eng_encoder_format">المُرمِّز لا يقبل هذا الجمع بين الدقة وFPS والصيغة. جرّب دقة أو FPS أقل.</string>
     <string name="eng_audio_encoder">فشل مُرمِّز الصوت AAC على هذا الجهاز</string>
     <string name="eng_video_encoder_start">لم يبدأ مُرمِّز الفيديو</string>
     <string name="eng_video_encoder_stalled">توقف مُرمِّز الفيديو عن الاستجابة</string>
@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">المحرك غير جاهز</string>
     <string name="eng_model_invalid">ملف ثلاثي الأبعاد غير صالح أو غير مكتمل</string>
     <string name="eng_model_no_geometry">النموذج لا يحتوي على بيانات هندسية</string>
+    <string name="eng_model_compressed">النموذج يستخدم ضغط Draco — صدّره مرة أخرى بدون ضغط الشبكة</string>
     <string name="eng_model_too_heavy">النموذج ثقيل جدًا على هذا الجهاز</string>
     <string name="eng_no_video_track">لا يحتوي الملف على مسار فيديو مقروء</string>
     <string name="eng_no_audio_track">لا يحتوي الملف على مسار صوت مقروء</string>

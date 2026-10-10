@@ -57,6 +57,7 @@ internal object RowHit {
         // Pílula: o olho no começo (esconde/mostra); o resto é a miniatura do
         // tipo (tocar abre/fecha as trilhas, segurar trava/reordena).
         if (x < m.headerColumn) return if (x < m.eyeHitRight) HitKind.HEADER_EYE else HitKind.HEADER
+        if (m.referenceTrial && x >= width - 28f * m.density) return HitKind.HEADER
 
         // Alvo de toque centrado no mesmo ponto usado pelo desenho. Dois anéis
         // (beta "difícil mover o keyframe"): o NÚCLEO de 28 ganha de tudo; a
@@ -92,8 +93,8 @@ internal object RowHit {
         }
         if (inStart) return HitKind.TRIM_START
         if (inEnd) return HitKind.TRIM_END
-        if (compact && overBar && x >= capLeft(m, x0) && x < x0) return HitKind.CAP_BACK
-        if (overBar && x >= x0 && x <= x1 && compact) {
+        if (!m.referenceTrial && compact && overBar && x >= capLeft(m, x0) && x < x0) return HitKind.CAP_BACK
+        if (!m.referenceTrial && overBar && x >= x0 && x <= x1 && compact) {
             // Redesenho 2026-09-29: a tampa branca "‹" na ponta esquerda
             // volta (sai da seção); as setas de trocar de camada ‹ › moram
             // juntas na ponta direita (não disputam com a tampa).

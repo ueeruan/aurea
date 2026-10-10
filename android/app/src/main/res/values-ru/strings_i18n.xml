@@ -3,7 +3,7 @@
      Os 7 catálogos têm as MESMAS chaves; o iOS lê daqui via tools/_ios_strings.py. -->
 <resources>
     <string name="eng_encoder_buffer_small">буфер кодировщика меньше кадра</string>
-    <string name="eng_encoder_format">кодировщик не поддерживает это разрешение или формат</string>
+    <string name="eng_encoder_format">Кодировщик не поддерживает это сочетание разрешения, FPS и формата. Попробуйте уменьшить разрешение или FPS.</string>
     <string name="eng_audio_encoder">аудиокодировщик AAC не сработал на этом устройстве</string>
     <string name="eng_video_encoder_start">видеокодировщик не запустился</string>
     <string name="eng_video_encoder_stalled">видеокодировщик перестал отвечать</string>
@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">движок не готов</string>
     <string name="eng_model_invalid">недопустимый или неполный 3D-файл</string>
     <string name="eng_model_no_geometry">у модели нет геометрии</string>
+    <string name="eng_model_compressed">модель использует сжатие Draco — экспортируйте её заново без сжатия сетки</string>
     <string name="eng_model_too_heavy">модель слишком тяжёлая для этого устройства</string>
     <string name="eng_no_video_track">в файле нет читаемой видеодорожки</string>
     <string name="eng_no_audio_track">в файле нет читаемой аудиодорожки</string>

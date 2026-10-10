@@ -47,6 +47,10 @@ internal fun ShapePanel(env: PanelEnv) {
     val store = env.store
     val d by remember(store) { derivedStateOf { store.detail } }
     val detail = d ?: return
+    androidx.compose.runtime.DisposableEffect(store, store.primary) {
+        store.timelineFocus = shapePanelTimelineFocus(4)
+        onDispose { store.timelineFocus = null }
+    }
     val fill = rgba8(detail.shapeFill)
     val stroke = rgba8(detail.shapeStroke)
     val filled = fill.alpha > 0f

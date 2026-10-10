@@ -5,6 +5,8 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -25,7 +28,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -35,6 +37,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -53,6 +56,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -63,12 +67,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -88,33 +94,14 @@ import com.aurea.aurea.ui.theme.tocavel
 import java.util.Locale
 
 // =============================================================================
-//  A TELA "ADICIONAR EFEITO" (redesenho 2026-10-01, referência de layout: a tela
-//  de mesmo nome de um editor de vídeo móvel conhecido; cores e medidas do Aurea).
-//
-//  Folha de tela cheia, de cima para baixo:
-//   · barra: ✕ fecha · "Adicionar efeito" · 🔍 abre a busca em tela cheia;
-//   · DESTAQUES: faixa que rola de lado com cartões grandes de prévia;
-//   · RECENTES (e FAVORITOS): grade de miniaturas, 4 por linha;
-//   · CATEGORIAS: ladrilhos 2 por linha com a prévia de um efeito do grupo,
-//     escurecida, e o nome em branco no meio. "Todos os efeitos" vem primeiro.
-//  Tocar num ladrilho abre a grade daquele grupo (‹ volta). UM toque num cartão
-//  adiciona o efeito e abre os controles dele; SEGURAR põe ou tira dos
-//  favoritos. As ferramentas-efeito (legendas, rastreio de câmera, máscara)
-//  são cartões como os outros: o toque abre a ferramenta. A lógica (grupos,
-//  busca, áudio, recentes) mora em EffectPickerLogic.kt.
+//  Catálogo de efeitos: busca visível, abas Todos/Novos/Favoritos/Recentes,
+//  categorias horizontais e cartões com comparação Antes/Depois do motor.
+//  Um toque adiciona; segurar favorita. Ferramentas abrem seus próprios painéis.
 // =============================================================================
 
-/** Tamanho em que a prévia é gerada (o mesmo do cache em disco de antes). */
 private const val PREVIEW_W = 320
 private const val PREVIEW_H = 200
-
-/** Largura mínima de uma coluna da grade de um grupo (3 colunas num celular de 360 dp). */
-private val CardMin = 100.dp
-/** Largura dos cartões grandes dos Destaques. */
-private val FeaturedCard = 148.dp
-/** Quantas miniaturas de Recentes/Favoritos (duas linhas de 4). */
-private const val SMALL_ROWS_MAX = 8
-/** Id do ladrilho "Todos os efeitos" (`effects.category.all`). */
+private val CardMin = 152.dp
 private const val ALL_GROUP = ALL_CATEGORIES_ID
 
 /**
@@ -165,142 +152,101 @@ private fun EffectAddSheetBody(
         arrangeCatalog(all, effectCategories(all))
     }
     val groups = remember(sorted) { groupEntries(sorted) }
-    // Grupo que sumiu (camada sem som e era "Áudio") volta para a tela inicial.
     val group = groups.firstOrNull { it.first.id == groupId }
-    val showingAll = groupId == ALL_GROUP
+    var section by rememberSaveable { mutableStateOf(0) }
     var searching by remember { mutableStateOf(false) }
     val recents = remember(prefs.recents, sorted) { recentEffects(prefs.recents, sorted) }
     val favorites = remember(prefs.favorites, sorted) { favoriteEffects(prefs.favorites, sorted) }
-    val featured = remember(sorted) { featuredEntries(sorted) }
+    val newlyAdded = remember(sorted) { sorted.filter { it.isNew } }
     val onFavorite = rememberFavoriteToggle(store)
     val pick: (EffectCatalogEntry) -> Unit = { e ->
         prefs.addRecent(e.typeId)
         val tool = effectToolOf(e.typeId)
         if (tool != null) onTool(tool) else onPick(e)
     }
+    val shown = when (section) {
+        1 -> newlyAdded
+        2 -> favorites
+        3 -> recents
+        else -> group?.second ?: sorted
+    }
     val grid = rememberLazyGridState()
-    LaunchedEffect(groupId) { grid.scrollToItem(0) }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(AureaColors.EditorPanel)
-            .windowInsetsPadding(WindowInsets.safeDrawing),
-    ) {
-        val title = when {
-            showingAll -> stringResource(R.string.effects_all_effects)
-            group != null -> stringResource(effectGroupLabelRes(group.first))
-            else -> stringResource(R.string.panel_adicionar_efeito)
-        }
+    LaunchedEffect(groupId, section) { grid.scrollToItem(0) }
+    Column(Modifier.fillMaxSize().background(AureaColors.EditorPanel).windowInsetsPadding(WindowInsets.safeDrawing)) {
         SheetTopBar(
-            title = title,
-            inGroup = showingAll || group != null,
-            onBack = { onGroup(null) },
-            onClose = onDismiss,
-            onSearch = { searching = true },
+            title = group?.let { stringResource(effectGroupLabelRes(it.first)) } ?: stringResource(R.string.panel_adicionar_efeito),
+            inGroup = groupId != null,
+            onBack = { onGroup(null) }, onClose = onDismiss, onSearch = { searching = true },
         )
-        if (showingAll || group != null) {
-            val shown = if (showingAll) sorted else group!!.second
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(CardMin),
-                state = grid,
-                contentPadding = PaddingValues(start = AureaDims.S3, end = AureaDims.S3, top = AureaDims.S2, bottom = AureaDims.S5),
-                horizontalArrangement = Arrangement.spacedBy(AureaDims.S2),
-                verticalArrangement = Arrangement.spacedBy(AureaDims.S3),
-                modifier = Modifier.fillMaxWidth().weight(1f).testTag("effects.grid"),
-            ) {
-                if (shown.isEmpty()) {
-                    item(key = "vazio", span = { GridItemSpan(maxLineSpan) }) { EmptyLine(stringResource(R.string.effect_empty_category)) }
-                }
-                items(shown, key = { it.typeId }, contentType = { "efeito" }) { e ->
-                    EffectPickCard(e, store.effectPreviews, e.typeId in prefs.favorites, "effects.card.", pick, onFavorite)
-                }
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(88.dp),
-                state = grid,
-                contentPadding = PaddingValues(start = AureaDims.S3, end = AureaDims.S3, top = AureaDims.S1, bottom = AureaDims.S5),
-                horizontalArrangement = Arrangement.spacedBy(AureaDims.S2),
-                verticalArrangement = Arrangement.spacedBy(AureaDims.S2),
-                modifier = Modifier.fillMaxWidth().weight(1f).testTag("effects.home"),
-            ) {
-                if (featured.isNotEmpty()) {
-                    sectionTitle("t.destaques", R.string.fxui_featured)
-                    item(key = "destaques", span = { GridItemSpan(maxLineSpan) }) {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(AureaDims.S3)) {
-                            items(featured, key = { it.typeId }) { e ->
-                                EffectPickCard(
-                                    e, store.effectPreviews, e.typeId in prefs.favorites, "effects.featured.", pick, onFavorite,
-                                    Modifier.width(FeaturedCard), aspect = 1f, nameSize = 13f,
-                                )
-                            }
-                        }
-                    }
-                }
-                if (recents.isNotEmpty()) {
-                    sectionTitle("t.recentes", R.string.effect_recentes)
-                    items(recents.take(SMALL_ROWS_MAX), key = { "r" + it.typeId }) { e ->
-                        EffectPickCard(e, store.effectPreviews, e.typeId in prefs.favorites, "effects.recent.", pick, onFavorite, aspect = 1f, nameSize = 11f)
-                    }
-                }
-                if (favorites.isNotEmpty()) {
-                    sectionTitle("t.favoritos", R.string.effect_favoritos)
-                    items(favorites.take(SMALL_ROWS_MAX), key = { "f" + it.typeId }) { e ->
-                        EffectPickCard(e, store.effectPreviews, true, "effects.favorite.", pick, onFavorite, aspect = 1f, nameSize = 11f)
-                    }
-                } else {
-                    item(key = "dica", span = { GridItemSpan(maxLineSpan) }) {
-                        Text(stringResource(R.string.effects_favorites_hint), style = AureaType.CardSpec, modifier = Modifier.padding(top = AureaDims.S1))
-                    }
-                }
-                sectionTitle("t.categorias", R.string.fxui_categories)
-                item(key = "g.all", span = { GridItemSpan(2) }) {
-                    GroupTile(
-                        label = stringResource(R.string.effects_all_effects),
-                        id = ALL_GROUP,
-                        banner = featured.firstOrNull { effectToolOf(it.typeId) == null },
-                        glyph = CupertinoGlyph.SquareGrid2x2,
-                        previews = store.effectPreviews,
-                        onClick = { onGroup(ALL_GROUP) },
-                    )
-                }
-                items(groups, key = { "g." + it.first.id }, span = { GridItemSpan(2) }) { (g, entries) ->
-                    GroupTile(
-                        label = stringResource(effectGroupLabelRes(g)),
-                        id = g.id,
-                        banner = groupBannerEntry(g, entries),
-                        glyph = effectGroupGlyph(g),
-                        previews = store.effectPreviews,
-                        onClick = { onGroup(g.id) },
-                    )
+        // Search is always visible; the existing multilingual index searches the whole catalog.
+        Row(
+            Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(48.dp)
+                .clip(AureaShape.Chip).background(AureaColors.FieldFilled)
+                .testTag("effects.search.bar").semantics { role = Role.Button }
+                .tocavel(shrink = 1f, onClick = { searching = true }).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CupertinoIcon(CupertinoGlyph.Search, 20.dp, AureaColors.Muted)
+            Text(stringResource(R.string.effect_buscar_glitch_vhs_desfoque_cor),
+                style = AureaType.of(14f, color = AureaColors.Muted), maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp))
+        }
+        val configuration = LocalConfiguration.current
+        val scrollTabs = configuration.fontScale > 1.2f || configuration.screenWidthDp < 360
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("effects.tabs")
+            .then(if (scrollTabs) Modifier.horizontalScroll(rememberScrollState()) else Modifier)) {
+            val labels = listOf(R.string.fx_browser_all, R.string.fx_browser_new, R.string.effect_favoritos, R.string.effect_recentes)
+            val ids = listOf("all", "new", "favorites", "recent")
+            labels.forEachIndexed { index, res ->
+                val active = section == index
+                val tabWidth = if (scrollTabs) Modifier.width((96f * configuration.fontScale.coerceAtLeast(1f)).dp) else Modifier.weight(1f)
+                Box(tabWidth.height(48.dp).clip(AureaShape.Chip)
+                    .background(if (active) AureaColors.AccentDim else Color.Transparent)
+                    .testTag("effects.tab." + ids[index]).semantics { selected = active; role = Role.Tab }
+                    .tocavel(shrink = 1f, onClick = { section = index; onGroup(null) }), contentAlignment = Alignment.Center) {
+                    Text(stringResource(res), style = AureaType.of(13f, FontWeight.W600,
+                        color = if (active) AureaColors.Accent else AureaColors.Muted), maxLines = 1)
                 }
             }
         }
+        if (section == 0) {
+            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().testTag("effects.categories")) {
+                item(key = "all") {
+                    CategoryChip(stringResource(R.string.effects_all_effects), "all", groupId == null || groupId == ALL_GROUP) { onGroup(null) }
+                }
+                items(groups, key = { it.first.id }) { (g, entries) ->
+                    CategoryChip(stringResource(effectGroupLabelRes(g)), g.id, groupId == g.id) { onGroup(g.id) }
+                }
+            }
+        }
+        Text(stringResource(R.string.fx_browser_count, shown.size), style = AureaType.of(12f, color = AureaColors.Muted),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).testTag("effects.count"))
+        val minWidth = if (LocalConfiguration.current.fontScale > 1.2f) 184.dp else 152.dp
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minWidth), state = grid,
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f).testTag(if (groupId != null) "effects.grid" else "effects.home"),
+        ) {
+            if (shown.isEmpty()) item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
+                EmptyLine(stringResource(if (section == 2) R.string.effects_favorites_hint else R.string.effect_empty_category))
+            }
+            items(shown, key = { it.typeId }, contentType = { "effect" }) { e ->
+                EffectPickCard(e, store.effectPreviews, e.typeId in prefs.favorites, "effects.card.", pick, onFavorite, nameSize = 14f)
+            }
+        }
     }
-
-    if (searching) {
-        EffectSearchSheet(
-            store = store,
-            sorted = sorted,
-            favorites = prefs.favorites,
-            onPick = {
-                searching = false
-                pick(it)
-            },
-            onFavorite = onFavorite,
-            onDismiss = { searching = false },
-        )
-    }
+    if (searching) EffectSearchSheet(store, sorted, prefs.favorites, { searching = false; pick(it) }, onFavorite, { searching = false })
 }
 
-private fun LazyGridScope.sectionTitle(key: String, res: Int) {
-    item(key = key, span = { GridItemSpan(maxLineSpan) }) {
-        Text(
-            stringResource(res),
-            style = AureaType.Section,
-            modifier = Modifier.padding(top = AureaDims.S3, bottom = AureaDims.S1).semantics { heading() },
-        )
+@Composable
+private fun CategoryChip(label: String, id: String, active: Boolean, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 48.dp).clip(AureaShape.Chip)
+        .background(if (active) AureaColors.EditorPanelHigh else AureaColors.SurfaceHigh)
+        .testTag("effects.category.$id").semantics { selected = active; role = Role.Button }
+        .tocavel(shrink = 1f, onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
+        Text(label, style = AureaType.of(13f, FontWeight.W600, color = if (active) AureaColors.Text else AureaColors.Muted), maxLines = 1)
     }
 }
 
@@ -344,49 +290,6 @@ private fun SheetTopBar(title: String, inGroup: Boolean, onBack: () -> Unit, onC
         ) {
             CupertinoIcon(CupertinoGlyph.Search, AureaDims.IconLg, AureaColors.Text)
         }
-    }
-}
-
-/**
- * O LADRILHO de um grupo: a prévia real de um efeito dele, escurecida, e o nome
- * em branco, em negrito, no meio. Sem prévia (Texto, 3D, Áudio), a cartela com
- * o glifo do grupo. testTag `effects.category.<id>`.
- */
-@Composable
-private fun GroupTile(
-    label: String,
-    id: String,
-    banner: EffectCatalogEntry?,
-    glyph: Char,
-    previews: EffectPreviewStore?,
-    onClick: () -> Unit,
-) {
-    val a11y = stringResource(R.string.fxui_a11y_category, label)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(2.2f)
-            .clip(AureaShape.Card)
-            .testTag("effects.category.$id")
-            .semantics { contentDescription = a11y; role = Role.Button }
-            .tocavel(shrink = 0.97f, haptic = true, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        val preview = if (banner != null) rememberEffectPreview(previews, banner.typeId, PREVIEW_W, PREVIEW_H) else null
-        if (preview != null) {
-            Image(preview, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
-        } else {
-            ToolPlate(glyph, glyphSize = 30.dp, alpha = 0.35f)
-        }
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.52f)))
-        Text(
-            label,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            style = AureaType.of(15f, FontWeight.W800, color = Color.White, lineHeight = 1.15f),
-            modifier = Modifier.padding(horizontal = AureaDims.S2),
-        )
     }
 }
 
@@ -440,7 +343,7 @@ private fun EffectPickCard(
     onFavorite: (EffectCatalogEntry, String) -> Unit,
     modifier: Modifier = Modifier,
     aspect: Float = 1.6f,
-    nameSize: Float = 12f,
+    nameSize: Float = 14f,
 ) {
     val name = pickerEntryName(entry)
     val tool = effectToolOf(entry.typeId)
@@ -448,6 +351,7 @@ private fun EffectPickCard(
     val favoriteLabel = stringResource(if (favorite) R.string.effect_tirar_favoritos else R.string.effect_nos_favoritos)
     Column(
         modifier
+            .clip(AureaShape.Card).background(AureaColors.EditorPanelHigh)
             .testTag(tagPrefix + effectCardId(entry.typeId))
             .semantics {
                 contentDescription = addLabel
@@ -459,12 +363,29 @@ private fun EffectPickCard(
             if (tool != null) {
                 ToolPlate(toolGlyph(tool))
             } else {
-                val preview = rememberEffectPreview(previews, entry.typeId, PREVIEW_W, PREVIEW_H)
+                val state = rememberEffectPreviewState(previews, entry.typeId, PREVIEW_W, PREVIEW_H)
+                val preview = state.image
                 if (preview != null) {
-                    Image(preview, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
+                    Image(preview, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, filterQuality = FilterQuality.Medium)
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            PreviewLabel(stringResource(R.string.fx_browser_before))
+                            PreviewLabel(stringResource(R.string.fx_browser_after))
+                        }
+                    }
                 } else {
                     GenericPlate(categoryGlyph(entry.category))
+                    Text(stringResource(when {
+                        entry.effectClass == 3 || entry.effectClass == 4 -> R.string.fx_browser_timeline_preview
+                        state.loading -> R.string.fx_browser_loading
+                        else -> R.string.fx_browser_preview_unavailable
+                    }), style = AureaType.of(12f, color = AureaColors.Text), textAlign = TextAlign.Center,
+                        modifier = Modifier.align(Alignment.Center).padding(8.dp))
                 }
+            }
+            if (entry.isNew) {
+                Text(stringResource(R.string.fx_browser_badge), style = AureaType.of(11f, FontWeight.W700, color = AureaColors.EditorPanel),
+                    modifier = Modifier.align(Alignment.TopStart).padding(6.dp).clip(AureaShape.Chip).background(AureaColors.Accent).padding(horizontal = 6.dp, vertical = 3.dp))
             }
             if (favorite) {
                 Box(
@@ -483,12 +404,21 @@ private fun EffectPickCard(
         Spacer(Modifier.height(AureaDims.S1))
         Text(
             name,
-            maxLines = 2,
+            maxLines = 3,
             minLines = 2,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.of(nameSize, FontWeight.W600, lineHeight = 1.2f),
+            modifier = Modifier.padding(horizontal = 10.dp),
         )
+        Text(stringResource(effectGroupLabelRes(effectGroupOf(entry))), style = AureaType.of(12f, color = AureaColors.Muted),
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 10.dp))
     }
+}
+
+@Composable
+private fun PreviewLabel(text: String) {
+    Text(text, style = AureaType.of(10.5f, FontWeight.W600, color = Color.White),
+        modifier = Modifier.clip(AureaShape.Chip).background(Color.Black.copy(alpha = 0.75f)).padding(horizontal = 5.dp, vertical = 2.dp))
 }
 
 /**
@@ -541,7 +471,7 @@ private fun SearchSheetBody(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.size(AureaDims.MinTap + AureaDims.S1, AureaDims.MinTap).semantics { contentDescription = back }.tocavel(shrink = 1f, onClick = onDismiss),
+                Modifier.size(AureaDims.MinTap + AureaDims.S1, AureaDims.MinTap).testTag("effects.search.back").semantics { contentDescription = back }.tocavel(shrink = 1f, onClick = onDismiss),
                 contentAlignment = Alignment.Center,
             ) {
                 CupertinoIcon(CupertinoGlyph.ChevronBack, AureaDims.IconLg, AureaColors.Text)

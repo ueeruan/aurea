@@ -37,6 +37,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,6 +62,37 @@ private val PlaceholderBrush = Brush.linearGradient(listOf(AureaColors.SurfaceHi
 
 /** Scrim do hero: transparente até 45 %, preto 70 % no fim. */
 private val HeroScrimBrush = Brush.verticalGradient(0.45f to Color.Transparent, 1f to AureaColors.ImageScrim)
+
+/** A compact project library: real thumbnail, readable title and explicit menu. */
+@Composable
+internal fun ProjectListRow(entry: ProjectEntry, thumbs: HomeThumbnails, selecting: Boolean, marked: Boolean,
+                           onOpen: () -> Unit, onMenu: () -> Unit, onMark: () -> Unit) {
+    val image = rememberProjectThumbnail(thumbs, entry, 256)
+    Row(Modifier.fillMaxWidth().heightIn(min = 112.dp)
+        .background(if (selecting && marked) AureaColors.AccentDim else AureaColors.Background)
+        .semantics { if (selecting) selected = marked }
+        .tocavel(onLongClick = if (selecting) onMark else onMenu, onClick = if (selecting) onMark else onOpen)
+        .padding(horizontal = AureaDims.Gutter, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Box(Modifier.size(84.dp).clip(AureaShape.Sm).background(AureaColors.Surface), contentAlignment = Alignment.Center) {
+            if (image != null) Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, filterQuality = FilterQuality.Low)
+            else FormatPlaceholder(projectRatio(entry))
+            if (selecting) CupertinoIcon(if (marked) CupertinoGlyph.CheckmarkCircleFill else CupertinoGlyph.Circle,
+                28.dp, if (marked) AureaColors.Accent else AureaColors.Text)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(entry.title, style = AureaType.TitleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(projectSpec(entry), style = AureaType.BodySmall, color = AureaColors.Muted,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        }
+        val menuLabel = stringResource(R.string.home_menu_content)
+        Box(Modifier.size(48.dp).semantics { contentDescription = menuLabel }
+            .tocavel(onClick = if (selecting) onMark else onMenu), contentAlignment = Alignment.Center) {
+            CupertinoIcon(CupertinoGlyph.Ellipsis, 20.dp, AureaColors.Muted)
+        }
+    }
+    Box(Modifier.fillMaxWidth().padding(start = 120.dp, end = AureaDims.Gutter).height(0.5.dp).background(AureaColors.Border))
+}
 
 /**
  * A saudação pela hora do aparelho (05–11 dia, 12–17 tarde, resto noite).
@@ -267,7 +300,8 @@ private fun BarButton(glyph: Char, description: String, onClick: () -> Unit) {
         Modifier
             .semantics { contentDescription = description }
             .tocavel(onClick = onClick)
-            .padding(AureaDims.S2),
+            .size(48.dp),
+        contentAlignment = Alignment.Center,
     ) {
         CupertinoIcon(glyph, 19.dp, AureaColors.Muted)
     }

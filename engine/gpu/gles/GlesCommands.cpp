@@ -8,6 +8,12 @@ GLenum topology(Topology t) {
 }
 }
 void Backend::Impl::attach(GLenum target, Texture* color, Texture* depth, Texture* color1) {
+    if (target == GL_READ_FRAMEBUFFER) readAttachment = color ? color->id : 0;
+    else {
+        drawAttachments[0] = color ? color->id : 0;
+        drawAttachments[1] = color1 ? color1->id : 0;
+        drawAttachments[2] = depth ? depth->id : 0;
+    }
     glFramebufferTexture2D(target, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color ? color->id : 0, 0);
     // MRT do 3D (cena HDR no segundo alvo). O framebuffer é compartilhado:
     // passes de um alvo só desligam o anexo 1 de novo.

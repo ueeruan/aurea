@@ -101,6 +101,28 @@ constexpr u32 kBit(TrackProperty p) { return 1u << static_cast<u32>(p); }
 
 } // namespace
 
+AUREA_TEST(Transform3D, StaticTracksFollowAnchorAndPositionEditsOnNull) {
+    Rig rig;
+    AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    auto* layer = comp->layer(rig.id);
+    layer->kind = LayerKind::Null;
+    layer->tracks.get_or_create(TrackProperty::AnchorX).staticValue = -77;
+    layer->tracks.get_or_create(TrackProperty::PositionX).staticValue = -99;
+    Command anchor; anchor.type = CommandType::LayerSetAnchor;
+    anchor.anchor.layer = rig.id; anchor.anchor.ax = 13; anchor.anchor.ay = 17; anchor.anchor.az = 23;
+    AUREA_CHECK(rig.e.apply_command(anchor).ok());
+    AUREA_CHECK_NEAR(detalhe(rig.e, rig.id.pack()).anchor[0], 13, 1e-5);
+    Command position; position.type = CommandType::LayerSetPosition;
+    position.position.layer = rig.id; position.position.x = 180; position.position.y = 90; position.position.z = 30;
+    AUREA_CHECK(rig.e.apply_command(position).ok());
+    AUREA_CHECK_NEAR(detalhe(rig.e, rig.id.pack()).position[0], 180, 1e-5);
+    AUREA_CHECK_NEAR(layer->tracks.find(TrackProperty::PositionX)->staticValue, 180, 1e-5);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(rig.e.apply_command(undo).ok());
+    AUREA_CHECK_NEAR(detalhe(rig.e, rig.id.pack()).anchor[0], 13, 1e-5);
+}
+
 AUREA_TEST(Transform3D, TwoKeysKeepTheFirstPoseAndInterpolate) {
     Rig rig;
     if (!rig.ok) return;

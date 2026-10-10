@@ -35,14 +35,14 @@ struct TextAppearanceControls: View {
             NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px", keypad: true) { model.engine.setText(id, strokeWidth: $0); refresh() }
             if style.count >= 20 { styleSections }
             NativeTextPathSection()
-            TextAnimationSection()
+            NativePanelChip(AureaText.t("la_animators")) { model.transformTab = 6; model.openPanel(.transform) }
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
     }
     private var styleSections: some View {
         VStack(alignment: .leading, spacing: 0) {
             NativePanelRuler(label: AureaText.t("text_line_spacing"), value: style[18] * 100, step: 0.5, range: 10...1000, unit: "%", keypad: true) { set(18, $0 / 100) }
-            styleRow("text_letter_spacing", 19, 0.25, -1000...1000)
+            trackingRow
             section("panel_caixa")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -69,6 +69,19 @@ struct TextAppearanceControls: View {
         }
     }
     private func section(_ key: String) -> some View { Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6) }
+    private var trackingRow: some View {
+        let keys = (model.keyframes[id] ?? []).filter { $0.property == 29 && $0.effectIndex == UInt32.max }
+        let here = keys.contains { $0.time == model.localPlayhead }
+        return NativePanelRuler(label: AureaText.t("text_letter_spacing"), value: style[19], step: 0.25,
+            range: -1000...1000, unit: "‰ em", keypad: true, look: here ? .keyHere : keys.isEmpty ? .none : .animated, toggleKey: {
+                guard !(model.selectedLayer?.locked ?? false) else { return }
+                model.mutate { engine in
+                    if here { engine.deleteKeyframe(forLayer: id, property: 29, time: model.localPlayhead) }
+                    else { engine.insertKeyframe(forLayer: id, property: 29, time: model.localPlayhead, value: style[19]) }
+                }
+                refresh()
+            }) { set(19, $0) }.accessibilityIdentifier("text.tracking.key")
+    }
     private func styleRow(_ key: String, _ slot: Int, _ step: Float, _ range: ClosedRange<Float>) -> some View {
         NativePanelRuler(label: AureaText.t(key), value: style[slot], step: step, range: range, unit: "px", keypad: true) { set(slot, $0) }
     }
@@ -202,7 +215,7 @@ struct NativePanelColorWell: View {
         Button(action: action) { AureaColorSwatch(color: color).frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6)) }.buttonStyle(.plain)
     }
 }
-private struct NativePanelRuler: View {
+struct NativePanelRuler: View {
     @EnvironmentObject private var model: AureaModel
     let label: String
     let value: Float
@@ -220,6 +233,13 @@ private struct NativePanelRuler: View {
     var selected = false
     var onSelect: (() -> Void)? = nil
     var compactUnit = false
+    /// Shared property metadata distinguishes the finger range from precise typing.
+    var typedRange: ClosedRange<Float>? = nil
+    var identifier = ""
+    var controlHeight: CGFloat = 40
+    var accessibilityName: String? = nil
+    /// Panels presented as native sheets host their own precise input above that sheet.
+    var presentKeypad: ((KeypadRequest) -> Void)? = nil
     let set: (Float) -> Void
     @State private var dragging = false
     @State private var live: Float = 0
@@ -233,27 +253,58 @@ private struct NativePanelRuler: View {
                     .onLongPressGesture(minimumDuration: 0.5) { onExpression?() }
             }
             Color.clear.frame(width: plainLabelWidth != nil ? 0 : keypad ? 6 : 8)
-            TickRuler(value: { shown }, unitsPerDp: step, active: true).frame(maxWidth: .infinity).frame(height: 40)
+            TickRuler(value: { shown }, unitsPerDp: step, active: true, height: controlHeight).frame(maxWidth: .infinity).frame(height: controlHeight)
                 .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
                            onStart: { live = value; dragging = true; model.beginGesture(label) }, onValue: { live = $0; set($0) }, onEnd: { dragging = false; model.endGesture() })
+                .accessibilityElement()
+                .accessibilityLabel(accessibilityName ?? label)
+                .accessibilityValue(comUnidade(numeroPtBr(shown, casas: decimals), unit))
+                .accessibilityAdjustableAction { direction in
+                    let delta = step * 10 * (direction == .increment ? 1 : direction == .decrement ? -1 : 0)
+                    guard delta != 0 else { return }
+                    model.beginGesture(label); set((value + delta).clamped(to: range)); model.endGesture()
+                }
+                .accessibilityIdentifier(identifier)
             Color.clear.frame(width: keypad ? 6 : 8)
             ValueBox(compactUnit ? numeroPtBr(shown, casas: decimals) + unit : comUnidade(numeroPtBr(shown, casas: decimals), unit), onTap: keypad ? openKeypad : nil)
+                .accessibilityLabel(accessibilityName ?? label)
+                .accessibilityValue(comUnidade(numeroPtBr(shown, casas: decimals), unit))
+                .accessibilityIdentifier(identifier.isEmpty ? "" : identifier + ".value")
             if let reset {
                 Button { set(reset) } label: { CupertinoGlyph.text(CupertinoGlyph.ArrowCounterclockwise, size: 16, color: AureaColors.muted).frame(width: 34, height: 44) }
                     .buttonStyle(.plain).opacity(abs(shown - reset) > 0.001 * max(1, abs(reset)) ? 1 : 0).disabled(abs(shown - reset) <= 0.001 * max(1, abs(reset)))
             }
             if let toggleKey {
                 Color.clear.frame(width: 4)
-                Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: true).frame(width: 40, height: 44) }.buttonStyle(.plain)
+                Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: true).frame(width: max(40, controlHeight), height: 44) }.buttonStyle(.plain)
                     .accessibilityLabel(AureaText.t(look == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui") + " · " + label)
             }
         }.frame(height: 48).onDisappear { if dragging { dragging = false; model.endGesture() } }
     }
-    private func openKeypad() { model.numericKeypad = KeypadRequest(title: label, value: value, unit: unit, min: range.lowerBound, max: range.upperBound, decimals: decimals) { set($0.clamped(to: range)) } }
+    private func openKeypad() {
+        let limits = typedRange ?? range
+        let request = KeypadRequest(title: label, value: value, unit: unit, min: limits.lowerBound, max: limits.upperBound, decimals: decimals, percentBase: range.upperBound) {
+            model.beginGesture(label); set($0.clamped(to: limits)); model.endGesture()
+        }
+        if let presentKeypad { presentKeypad(request) } else { model.numericKeypad = request }
+    }
 }
 
 
 // PresetsPanel.kt / PresetLibrary.kt. JSON belongs to the shared engine.
+/// Nome traduzido dos presets embutidos (Resources/presets/<tipo>.json), na
+/// ordem do arquivo — mesma tabela do Android (`BuiltinPresetNames`). Os de
+/// marca ("CC · Detail", "Omino · Diffusion") ficam com o nome do arquivo.
+let builtinPresetNameKeys: [String: [String]] = [
+    "animacao": ["app_preset_anim_appear", "app_preset_anim_vanish", "app_preset_anim_enter_left", "app_preset_anim_rise",
+                 "app_preset_anim_zoom_in", "app_preset_anim_pulse", "app_preset_anim_spin_in"],
+    "curva": ["app_preset_curve_cubic", "app_preset_curve_strong_inout", "app_preset_curve_expo_out", "app_preset_curve_expo_in",
+              "app_preset_curve_back_out", "app_preset_curve_back_in"],
+    "efeitos": ["app_preset_fx_soft_blur", "app_preset_fx_focus_in", "app_preset_fx_neon_glow", "app_preset_fx_bw",
+                "app_preset_fx_strong_contrast", "app_preset_fx_sepia", "app_preset_fx_dream", "app_preset_fx_turbulence"],
+    "legenda": ["app_preset_caption_viral", "app_preset_caption_karaoke", "app_preset_caption_subtle", "pack_text_4", "pack_text_5"],
+]
+
 enum PanelPresetKind: String, CaseIterable {
     case effects = "efeitos", text = "texto", animation = "animacao", caption = "legenda", curve = "curva"
     var engineId: UInt32 {
@@ -308,7 +359,9 @@ extension PanelPresetEntry {
                       let data = try? Data(contentsOf: url), let objects = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
                 for (index, object) in objects.enumerated() {
                     if let bytes = AureaJSONData(object, false), let json = String(data: bytes, encoding: .utf8) {
-                        let name = object["name"] as? String ?? ""
+                        // Nome no idioma do app (o JSON fala pt-BR); sem recurso, o do arquivo.
+                        let keys = builtinPresetNameKeys[kind.rawValue] ?? []
+                        let name = index < keys.count ? AureaText.t(keys[index]) : object["name"] as? String ?? ""
                         result.append(PanelPresetEntry(id: "b:\(kind.rawValue):\(index)", name: name.isEmpty ? AureaText.t("pn_preset_n", index + 1) : name, kind: kind, json: json))
                     }
                 }
@@ -973,7 +1026,12 @@ struct AppearancePanel: View {
                 }
             }
         }.foregroundStyle(AureaColors.text)
-            .onAppear { openCategories = Set(Self.groups.indices.filter { Self.groups[$0].contains(Int(mode)) }) }
+            .onAppear {
+                openCategories = Set(Self.groups.indices.filter { Self.groups[$0].contains(Int(mode)) })
+                model.timelineFocus = [TimelineTrack(property: 12)]
+            }
+            .onChange(of: id) { _ in model.timelineFocus = [TimelineTrack(property: 12)] }
+            .onDisappear { model.timelineFocus = nil }
     }
     private var opacityBody: some View {
         VStack(spacing: 6) {
@@ -1073,6 +1131,8 @@ struct ClipEditPanel: View {
                     if let row = model.selectedLayer {
                         Text(row.name).font(.aurea(size: 15))
                         Text(AureaText.t("ios_clip_range_frames", "\(row.startFrame)", "\(row.endFrame)", "\(row.duration)")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                        Button(AureaText.t("beta_extend_clip")) { model.editClipTime(7, amount: 0) }
+                            .frame(maxWidth: .infinity, minHeight: 48).disabled(row.locked)
                     }
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
                         ForEach(2..<6) { value in
@@ -1347,11 +1407,17 @@ struct ShapePanel: View {
                 } else { editBody }
             } else { fillBody }
         }.foregroundStyle(AureaColors.text)
-            .onAppear { load(); if geometry { model.shapeSelectedParam = axis == 0 ? 5 : 6 } }
-            .onChange(of: id) { _ in finishGesture(); load() }
+            .onAppear { load(); if geometry { model.shapeSelectedParam = axis == 0 ? 5 : 6 }; updateTimelineFocus() }
+            .onChange(of: id) { _ in finishGesture(); load(); updateTimelineFocus() }
+            .onChange(of: model.shapeSelectedParam) { _ in updateTimelineFocus() }
             .onChange(of: model.status.modelRevision) { _ in load() }
             .onChange(of: model.status.playhead) { _ in load() }
-            .onDisappear { finishGesture() }
+            .onDisappear { finishGesture(); model.timelineFocus = nil }
+    }
+
+    private func updateTimelineFocus() {
+        let params = geometry ? ((selected == 5 || selected == 6) ? [5, 6] : [selected]) : [4]
+        model.timelineFocus = params.filter { (1...14).contains($0) }.map { TimelineTrack(property: 35, effect: 0, param: UInt32($0)) }
     }
 
     private var fillBody: some View {
@@ -1937,11 +2003,11 @@ struct TextAnimationSection: View {
                 model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator"), layer: id)
                 refresh(); model.openPanel(.effects)
             }.accessibilityIdentifier("text.animator.add") }
-            NativePanelChip(AureaText.t("text_transform_add")) {
+            if showAnimatorEffect { NativePanelChip(AureaText.t("text_transform_add")) {
                 beforeAnimation()
                 model.addEffectAndFocus(fxEffectTypeId("aurea.text.transform"), layer: id)
                 refresh(); model.openPanel(.effects)
-            }.accessibilityIdentifier("text.transform.add")
+            }.accessibilityIdentifier("text.transform.add") }
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }.onChange(of: model.status.playhead) { _ in load() }
             .alert(AureaText.t("ios_text_anim_title"), isPresented: $animationError) {
@@ -2080,7 +2146,7 @@ private struct NativeTextAnimRuler: View {
     }
 }
 
-private struct NativeAnimationTrackActions: View {
+struct NativeAnimationTrackActions: View {
     @EnvironmentObject private var model: AureaModel
     let track: TimelineTrack
     let curveTag: String
@@ -2210,7 +2276,11 @@ private struct NativeLayerAnimatorCard: View {
             choices("la_ease", ["la_ease_linear", "la_ease_smooth", "la_ease_inout", "la_ease_back"], slot: 3)
             groupLabel("la_strength_delay")
             ForEach(NativeLayerAnimParam.strength) { ruler($0) }
-            if isText && unit != 0 { ruler(NativeLayerAnimParam.delay) }
+            if isText && unit != 0 {
+                ruler(NativeLayerAnimParam.delay)
+                NativePanelRuler(label: AureaText.t("beta_overlap"), value: values[28], step: 0.5,
+                    range: 0...100, unit: "%", keypad: true) { set([28: $0]) }
+            }
             groupLabel("la_from")
             ForEach(NativeLayerAnimParam.from.filter { ($0.id != 7 || values[4] > 0.5) && ($0.id != 11 || (isText && unit != 0)) }) { ruler($0) }
             toggleLine("la_scale_separate", hint: nil, checked: values[4] > 0.5) { set([4: $0 ? 1 : 0]) }

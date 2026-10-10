@@ -1,10 +1,10 @@
 // =============================================================================
 //  Aurea / platform / ios / app / Conta.swift
 //
-//  A conta obrigatória — par de android/.../conta/ContaLogica.kt, ContaApi.kt e
+//  A conta opcional — par de android/.../conta/ContaLogica.kt, ContaApi.kt e
 //  ContaViewModel.kt. As regras são as MESMAS nas duas plataformas:
 //
-//   · sem sessão guardada, o app inteiro é a tela de conta (ContaView.swift);
+//   · sem sessão guardada, projetos e editor continuam disponíveis;
 //   · com sessão guardada, o app abre direto, mesmo offline;
 //   · revalidação com rede: só um 401 derruba; sem rede ou servidor fora, segue;
 //   · no aparelho ficam SÓ o token de sessão e o e-mail, no Keychain
@@ -212,7 +212,7 @@ final class ContaModel: ObservableObject {
     init() {
         let padroes: UserDefaults = UserDefaults.standard
         // O Keychain do iOS sobrevive à desinstalação; os dados do Android não.
-        // Para as duas plataformas agirem igual, instalação nova pede login.
+        // Instalação nova começa sem conta nas duas plataformas.
         if !padroes.bool(forKey: ContaModel.chaveInstalada) {
             ContaKeychain.apagar("token")
             ContaKeychain.apagar("email")
@@ -221,10 +221,6 @@ final class ContaModel: ObservableObject {
         let guardada: ContaSessao? = ContaModel.lerSessao()
         email = guardada?.email
         usuarios = padroes.object(forKey: ContaModel.chaveUsuarios) as? Int
-        #if DEBUG
-        // Só a captura de paridade da CI (build Debug do simulador) pula a conta.
-        if guardada == nil, ProcessInfo.processInfo.environment["AUREA_PARITY_SCENE"] != nil { email = "ci@aurea.test" }
-        #endif
     }
 
     static func lerSessao() -> ContaSessao? {

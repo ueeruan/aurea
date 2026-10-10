@@ -75,6 +75,10 @@ void Engine::cancel_motion_track() noexcept {
 bool Engine::restore_motion_track(u64 id) noexcept {
     if(motionTrack_&&!motionTrack_->finished.load())return false;
     join_motion_track();
+    // A failed restore for another layer must not leave the previous layer's
+    // completed result available for an accidental Apply. Saved layer caches
+    // remain intact; an active worker was excluded above.
+    motionTrack_.reset();
     std::lock_guard<std::mutex> guard(modelMutex_);
     const auto* comp=project_?current_composition():nullptr;
     const auto* layer=comp?comp->layer(LayerId::unpack(id)):nullptr;
@@ -228,11 +232,21 @@ Engine::MotionTrackStatus Engine::motion_track_status() noexcept {
     if(auto d=j->result){s.tool=static_cast<u32>(d->tool);s.frames=static_cast<u32>(d->path.size());s.lost=d->lost;s.reacquired=d->reacquired;s.memoryBytes=d->memory_bytes();for(auto& p:d->path)if(p.valid){++s.validFrames;s.confidence+=p.confidence;s.errorPx+=p.rms;}if(s.validFrames){s.confidence/=s.validFrames;s.errorPx/=s.validFrames;}}
     return s;
 }
+u64 Engine::motion_track_source() noexcept {
+    auto job=motionTrack_;if(!job)return 0;
+    std::lock_guard<std::mutex> guard(modelMutex_);
+    const auto* comp=project_&&projectSession_==job->session&&project_->timeline().current()==job->composition?current_composition():nullptr;
+    const auto* source=comp?comp->layer(LayerId::unpack(job->layer)):nullptr;
+    return source&&source->source==job->source?job->layer:0;
+}
 u32 Engine::motion_track_features(i64 frame,f32* out,u32 capacity) noexcept {
     auto j=motionTrack_;if(!j||!out||!capacity)return 0;
     std::shared_ptr<const MotionTrackData>d;{std::lock_guard<std::mutex>g(j->mutex);d=j->result;}if(!d)return 0;
     std::lock_guard<std::mutex>g(modelMutex_);auto* comp=project_&&projectSession_==j->session?current_composition():nullptr;
-    auto* layer=comp&&project_->timeline().current()==j->composition?comp->layer(LayerId::unpack(j->layer)):nullptr;if(!layer)return 0;
+    auto* layer=comp&&project_->timeline().current()==j->composition?comp->layer(LayerId::unpack(j->layer)):nullptr;
+    if(!layer||layer->source!=j->source||layer->motionTrack!=d||
+       d->sourceSignature!=source_signature(project_->asset(layer->source))||
+       !timing_matches(*layer,*d,comp->fps())||d->points.size()!=d->path.size())return 0;
     auto it=std::find(d->localFrames.begin(),d->localFrames.end(),frame-layer->start.value);if(it==d->localFrames.end())return 0;
     const usize k=static_cast<usize>(it-d->localFrames.begin());const auto matrix=layer_comp_matrix(*comp,*layer,FrameIndex{frame});
     const u32 n=std::min(capacity,d->pointCount);for(u32 p=0;p<n;++p){const auto q=projected(matrix,d->points[k][p]);out[p*3]=q.x;out[p*3+1]=q.y;out[p*3+2]=d->path[k].valid?d->path[k].confidence:0;}return n;

@@ -21,9 +21,30 @@ import android.view.Choreographer
  * relógio do sistema. É esse valor que o motor recebe como tempo de áudio
  * quando não há áudio tocando, e é o que mantém o preview estável.
  */
-class RenderLoop(private val onFrame: (frameTimeNanos: Long) -> Unit) {
+class RenderLoop internal constructor(
+    private val onFrame: (frameTimeNanos: Long) -> Unit,
+    private val scheduler: Scheduler,
+) {
+    constructor(onFrame: (frameTimeNanos: Long) -> Unit) : this(onFrame, VsyncScheduler())
+
+    internal interface Scheduler {
+        fun post(callback: Choreographer.FrameCallback, delayMs: Long)
+        fun remove(callback: Choreographer.FrameCallback)
+    }
+
+    private class VsyncScheduler : Scheduler {
+        override fun post(callback: Choreographer.FrameCallback, delayMs: Long) {
+            val choreographer = Choreographer.getInstance()
+            if (delayMs > 0L) choreographer.postFrameCallbackDelayed(callback, delayMs)
+            else choreographer.postFrameCallback(callback)
+        }
+        override fun remove(callback: Choreographer.FrameCallback) {
+            Choreographer.getInstance().removeFrameCallback(callback)
+        }
+    }
 
     private var running = false
+    private var dispatching = false
     private var lastFrameNanos = 0L
 
     /**
@@ -54,7 +75,12 @@ class RenderLoop(private val onFrame: (frameTimeNanos: Long) -> Unit) {
             }
             lastFrameNanos = frameTimeNanos
 
-            onFrame(frameTimeNanos)
+            dispatching = true
+            try {
+                onFrame(frameTimeNanos)
+            } finally {
+                dispatching = false
+            }
 
             // Reagenda SEMPRE, mesmo que o frame tenha demorado. Deixar de
             // reagendar por causa de um frame lento transformaria um engasgo
@@ -62,9 +88,9 @@ class RenderLoop(private val onFrame: (frameTimeNanos: Long) -> Unit) {
             if (running) {
                 if (idleDelayMs > 0L) {
                     lastFrameNanos = 0L   // o intervalo ocioso não entra na média de cadência
-                    Choreographer.getInstance().postFrameCallbackDelayed(this, idleDelayMs)
+                    scheduler.post(this, idleDelayMs)
                 } else {
-                    Choreographer.getInstance().postFrameCallback(this)
+                    scheduler.post(this, 0L)
                 }
             }
         }
@@ -74,22 +100,24 @@ class RenderLoop(private val onFrame: (frameTimeNanos: Long) -> Unit) {
         if (running) return
         running = true
         lastFrameNanos = 0L
-        Choreographer.getInstance().postFrameCallback(callback)
+        if (!dispatching) scheduler.post(callback, 0L)
     }
 
     /** Sai do modo ocioso já (o callback agendado com atraso é trocado pelo do próximo vsync). */
     fun wake() {
         if (!running || idleDelayMs == 0L) return
         idleDelayMs = 0L
-        val c = Choreographer.getInstance()
-        c.removeFrameCallback(callback)
-        c.postFrameCallback(callback)
+        // updateIdle may wake us from inside onFrame. Its trailing post already
+        // targets the next vsync; posting here too permanently doubled polling.
+        if (dispatching) return
+        scheduler.remove(callback)
+        scheduler.post(callback, 0L)
     }
 
     fun stop() {
         if (!running) return
         running = false
-        Choreographer.getInstance().removeFrameCallback(callback)
+        scheduler.remove(callback)
     }
 
     val isRunning: Boolean get() = running

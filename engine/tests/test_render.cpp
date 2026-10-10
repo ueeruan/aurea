@@ -6,6 +6,7 @@
 #include "TestFramework.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/ShutterPlan.hpp"
+#include "aurea/render/MotionBlurBounds.hpp"
 #include <limits>
 
 AUREA_TEST(MotionBlur, ExposurePhaseAdaptivePathAndMemoryLimits) {
@@ -31,6 +32,30 @@ AUREA_TEST(MotionBlur, ExposurePhaseAdaptivePathAndMemoryLimits) {
     AUREA_CHECK(travel > 200);
     settings.shutterAngle = std::numeric_limits<f32>::quiet_NaN();
     AUREA_CHECK_EQ(shutter_window(settings).duration, 0.);
+}
+
+AUREA_TEST(MotionBlur, CroppedExposureKeepsThePixelGridAndFallsBackAtTheCameraPlane) {
+    using namespace aurea;
+    const std::array<Mat4, 2> samples{Mat4::translation(Vec3{10.25f, 20.5f, 0}),
+        Mat4::translation(Vec3{20.75f, 25.25f, 0})};
+    for (u32 den : {1u, 2u}) {
+        const auto crop = motion_blur_bounds(Rect{0,0,80,40}, samples, Mat4::identity(), 1920,1080,1920/den,1080/den);
+        AUREA_CHECK(crop.width < 110 / den + 4);
+        AUREA_CHECK(crop.height < 60 / den + 4);
+        AUREA_CHECK_NEAR(crop.region.x / den, std::floor(crop.region.x / den), 1e-6);
+        AUREA_CHECK_NEAR(crop.region.y / den, std::floor(crop.region.y / den), 1e-6);
+        AUREA_CHECK_NEAR(crop.region.w / den, crop.width, 1e-6);
+        AUREA_CHECK_NEAR(crop.region.h / den, crop.height, 1e-6);
+        AUREA_CHECK(crop.region.x <= 10.25f - 2 * den);
+        AUREA_CHECK(crop.region.x + crop.region.w >= 100.75f + 2 * den);
+    }
+    auto crossing = Mat4::identity(); crossing.col[0].w = -.1f;
+    const std::array<Mat4, 1> invalid{crossing};
+    const auto full = motion_blur_bounds(Rect{0,0,80,40}, invalid, Mat4::identity(),1920,1080,960,540);
+    AUREA_CHECK_EQ(full.width,960u); AUREA_CHECK_EQ(full.height,540u);
+    const auto shifted = motion_blur_bounds(Rect{-15,-10,30,20}, samples,
+        Mat4::translation(Vec3{100,100,0}),1920,1080,1920,1080);
+    AUREA_CHECK(shifted.region.x > 90); AUREA_CHECK(shifted.region.y > 105);
 }
 
 AUREA_TEST(PreviewBuffer, BudgetAndRangeAreHardLimits) {
@@ -83,7 +108,9 @@ AUREA_TEST(PreviewBuffer, LowMemoryClassCapsTheBudgetAndPressureScalesIt) {
     AUREA_CHECK(kPreviewPressureHoldNs >= 10'000'000'000ull);
 }
 #include "MockBackend.hpp"
+#include "P010VideoFixture.hpp"
 #include "SyntheticVideo.hpp"
+#include "RgbaVideoFixture.hpp"
 
 #include "aurea/audio/Spectrum.hpp"
 #include "aurea/effects/EffectGraph.hpp"
@@ -614,6 +641,26 @@ AUREA_TEST(FrameGraph, PoolBudgetRetiresOldResolutionsWithoutBreakingCurrentPass
     pool.release(third); pool.end_frame(); pool.clear();
 }
 
+AUREA_TEST(Beta008Memory, EffectGraphAdmissionFailureReleasesTargetsAndCanRecover) {
+    MockBackend backend; TransientTexturePool pool; FrameGraph graph;
+    const auto size = rt(256, 256); pool.set_allocation_limit(size.estimated_bytes());
+    pool.begin_frame(backend, 1);
+    const auto input = graph.create_texture("source", size), tinted = graph.create_texture("tint", size);
+    graph.add_raster_pass("source", PassStage::Upload, input, LoadOp::Clear, {}, [](PassContext&) {});
+    const auto pass = graph.add_raster_pass("tint", PassStage::Effects, tinted, LoadOp::Clear, {}, [](PassContext&) {});
+    graph.read(pass, input); graph.set_output(tinted, ResourceState::ShaderRead);
+    AUREA_CHECK(graph.compile(pool).code() == Errc::OutOfDeviceMemory);
+    AUREA_CHECK_EQ(backend.texturesCreated, 1u);
+    AUREA_CHECK(pool.stats().bytes <= size.estimated_bytes());
+    graph.release(pool); pool.end_frame(); AUREA_CHECK_EQ(pool.stats().inUse, 0u);
+    // A reduced frame can reuse retained targets after a failed effect frame.
+    pool.set_budget(0); pool.begin_frame(backend, 2);
+    const auto smaller = pool.acquire(rt(64, 64)); AUREA_CHECK(smaller.valid());
+    pool.release(smaller); pool.end_frame(); pool.clear();
+}
+
+#include "TrackedResourceAdmissionTests.inl"
+
 // =============================================================================
 // EffectGraph — planejamento
 // =============================================================================
@@ -836,6 +883,37 @@ AUREA_TEST(EffectParams, TypedRangeAlwaysContainsTheSliderRange) {
     AUREA_CHECK(widened >= 20);
 }
 
+AUREA_TEST(EffectParams, CatalogueEnumsHaveKeyframesAndHoldTheirChoicesUntilTheNextKey) {
+    EffectRegistry registry;
+    register_builtin_effects(registry);
+    u32 checked = 0;
+    for (u32 i = 0; i < registry.count(); ++i) {
+        const ParameterRegistry& params = registry.params_at(i);
+        EffectInstance effect;
+        effect.id = 7;
+        initialize_instance(effect, params);
+        for (u32 p = 0; p < params.count(); ++p) {
+            const ParamSpec& spec = params.at(p);
+            if (spec.type != ParamType::Enum || (spec.flags & kParamHidden) != 0) continue;
+            AUREA_CHECK_MSG(spec.animatable(), spec.id);
+            if (spec.enumCount < 2) continue;
+            TrackSet tracks;
+            Track& track = tracks.get_or_create(TrackProperty::EffectParam, effect.id, param_track_key(p, 0));
+            const f32 last = static_cast<f32>(spec.enumCount - 1);
+            (void)track.set(FrameIndex{0}, 0, Interpolation::Linear);
+            (void)track.set(FrameIndex{30}, last, Interpolation::Linear);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, -1).v[0], 0.0f);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, 15).v[0], 0.0f);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, 29.9).v[0], 0.0f);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, 30).v[0], last);
+            AUREA_CHECK_EQ(evaluate_param_f(tracks, effect, p, spec, 60).v[0], last);
+            ++checked;
+        }
+    }
+    AUREA_CHECK(checked > 20);
+    std::printf("(%u discrete catalogue parameters) ", checked);
+}
+
 AUREA_TEST(EffectParams, TypedRangeApiOnlyWidensContinuousNumbers) {
     ParameterRegistry p;
     const u32 f = p.add_float("r", "R", 10.0f, 0.0f, 100.0f);
@@ -1038,6 +1116,33 @@ AUREA_TEST(MotionTile, At100PercentTheRegionIsTheLayer) {
     const Vec2 f = motion_tile::coverage_factors(p, tile_placement(1920, 1080, 1920, 1080, 960, 540, 1.0f));
     AUREA_CHECK_NEAR(f.x, 1.0f, 1e-4);
     AUREA_CHECK_NEAR(f.y, 1.0f, 1e-4);
+}
+
+AUREA_TEST(MotionTile, ProjectedCoverageUsesHomogeneousCoordinates) {
+    LayerPlacement pl;
+    pl.compWidth = 200; pl.compHeight = 120;
+    pl.layerWidth = 100; pl.layerHeight = 60;
+    pl.inScene3d = true;
+    pl.compFromLayer = Mat4::identity();
+    pl.compFromLayer.col[0] = {2.f, 0, 0, .001f};
+    pl.compFromLayer.col[1] = {0, 2.f, 0, .002f};
+    pl.compFromLayer.col[3] = {0, 0, 0, 1};
+    const Rect visible = motion_tile::projected_region(pl);
+    AUREA_CHECK(visible.w > 100.f);
+    AUREA_CHECK(visible.h > 60.f);
+    for (const f32 cy : {0.f, 120.f}) for (const f32 cx : {0.f, 200.f}) {
+        const f64 a = 2. - cx * .001, c = -cx * .002;
+        const f64 b = -cy * .001, d = 2. - cy * .002;
+        const f64 det = a * d - b * c;
+        const f64 x = (d * cx - c * cy) / det;
+        const f64 y = (a * cy - b * cx) / det;
+        AUREA_CHECK(x >= visible.x - .001 && x <= visible.x + visible.w + .001);
+        AUREA_CHECK(y >= visible.y - .001 && y <= visible.y + visible.h + .001);
+    }
+    pl.compFromLayer.col[3].w = -1;
+    AUREA_CHECK_EQ(motion_tile::projected_region(pl).w, 0.f);
+    const Vec2 fallback = motion_tile::coverage_factors({}, pl);
+    AUREA_CHECK(std::isfinite(fallback.x) && std::isfinite(fallback.y));
 }
 
 AUREA_TEST(MotionTile, At50PercentTheRegionDoubles) {
@@ -1445,6 +1550,65 @@ AUREA_TEST(ShaderLibrary, FailureIsReportedNotHidden) {
     AUREA_CHECK(!p.ok());
     AUREA_CHECK_EQ(lib.compile_failures(), static_cast<u32>(1));
     AUREA_CHECK(!lib.last_error().empty());
+}
+
+// Beta "nem vejo a prévia": no OpenGL ES (aparelho sem Vulkan) cada shader é
+// compilado pelo driver na abertura; UM shader novo recusado derrubava o
+// renderer inteiro (sem GPU = sem prévia). Agora só os passes dele somem.
+AUREA_TEST(ShaderLibrary, RejectedNewShaderDoesNotTakeDownTheRenderer) {
+    const ShaderId newShaders[] = {
+        ShaderId::effects_disintegrate_vert, ShaderId::effects_disintegrate_frag,
+        ShaderId::effects_disintegrate_compose_frag, ShaderId::effects_glow_octave_prefilter_frag,
+        ShaderId::effects_glow_octave_down_frag, ShaderId::effects_glow_octave_up_frag,
+        ShaderId::effects_glow_octave_composite_frag, ShaderId::effects_mesh_warp_vert,
+        ShaderId::effects_mesh_warp_frag, ShaderId::effects_puppet_vert, ShaderId::effects_puppet_frag,
+        ShaderId::effects_ball_grid_vert, ShaderId::effects_ball_grid_frag, ShaderId::effects_rotobrush_frag,
+        ShaderId::scene3d_plane_frag, ShaderId::composite_blend_frag,
+    };
+    for (const ShaderId id : newShaders) {
+        MockBackend b;
+        b.failShader = kShaderNames[static_cast<u32>(id)];
+        ShaderLibrary lib;
+        AUREA_CHECK_MSG(lib.initialize(b).ok(), b.failShader);
+        AUREA_CHECK_EQ(lib.missing_shaders(), 1u);
+        AUREA_CHECK(!lib.shader(id).valid());
+        // O pipeline que pede o shader recusado falha sem chegar ao backend…
+        const PipelineKey bad = PipelineKey::graphics(
+            kShaderStages[static_cast<u32>(id)] == ShaderStage::Vertex ? id : ShaderId::common_fullscreen_vert,
+            kShaderStages[static_cast<u32>(id)] == ShaderStage::Vertex ? ShaderId::common_copy_frag : id,
+            SurfaceFormat::RGBA16F);
+        const u32 created = b.pipelinesCreated;
+        AUREA_CHECK(!lib.pipeline(bad).ok());
+        AUREA_CHECK(!lib.pipeline(bad).ok());
+        AUREA_CHECK_EQ(b.pipelinesCreated, created);
+        AUREA_CHECK_EQ(lib.compile_failures(), 2u);   // 1 shader + 1 pipeline: o 2º pedido não reloga
+        // …e o resto segue.
+        AUREA_CHECK(lib.pipeline(PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F)).ok());
+        lib.shutdown();
+
+        // O renderer sobe (antes: renderer nao inicializou → Engine sem GPU).
+        MockBackend rb;
+        rb.failShader = kShaderNames[static_cast<u32>(id)];
+        EffectRegistry reg;
+        register_builtin_effects(reg);
+        Renderer r;
+        AUREA_CHECK_MSG(r.initialize(rb, reg).ok(), rb.failShader);
+        AUREA_CHECK_EQ(r.shaders().missing_shaders(), 1u);
+        r.shutdown();
+    }
+}
+
+AUREA_TEST(ShaderLibrary, TestHookFailsOnlyPipelinesOfThatShaderAndRecovers) {
+    MockBackend b;
+    ShaderLibrary lib;
+    AUREA_CHECK(lib.initialize(b).ok());
+    const PipelineKey k = PipelineKey::fullscreen(ShaderId::effects_glow_octave_up_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK(lib.pipeline(k).ok());
+    lib.set_test_failing_shader(ShaderId::effects_glow_octave_up_frag);
+    AUREA_CHECK(!lib.pipeline(k).ok());   // mesmo em cache
+    AUREA_CHECK(lib.pipeline(PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F)).ok());
+    lib.set_test_failing_shader(ShaderId::Count);
+    AUREA_CHECK(lib.pipeline(k).ok());
 }
 
 // =============================================================================
@@ -1883,6 +2047,138 @@ AUREA_TEST(MemoryPressure, IdlePrecompAndObjectEnvironmentsAreReleasedAndRebuilt
     AUREA_CHECK(scene.resident_bytes() > 0);
     AUREA_CHECK_EQ(scene.environment_uploads(), uploads + 1);
     AUREA_CHECK_EQ(scene.environment_key(), a.hdriKey);
+}
+
+#include "P010VideoRender.inl"
+
+AUREA_TEST(VideoPreview, NativeRgbaFailureUsesLazyOwnedPlanesAndRetriesFailedUploads) {
+    RenderFixture f;
+    f.comp->set_size(32, 16);
+    f.solid("fallback video", Vec4{1,1,1,1}, 16, 8);
+    FrameSnapshot snapshot; f.prepare(snapshot);
+    auto& layer = snapshot.layers[0];
+    layer.source.kind = LayerSource::Kind::Video;
+    layer.source.width = 32; layer.source.height = 16;
+    layer.compFromLayer = Mat4::identity();
+    auto* raw = new test::RgbaVideoFrame(true);
+    FrameRef frame = FrameRef::adopt(raw);
+    u32 uploads = 0;
+    bool failUpload = true;
+    f.backend.beforeTextureUpload = [&](TextureHandle texture, const void* bytes, u32 stride) {
+        const auto desc = f.backend.texture_desc(texture);
+        if (!desc.debugName || std::string_view(desc.debugName) != "plano-de-video") return OkStatus;
+        ++uploads;
+        AUREA_CHECK(desc.format == SurfaceFormat::RGBA8);
+        AUREA_CHECK_EQ(desc.width, raw->width); AUREA_CHECK_EQ(desc.height, raw->height);
+        AUREA_CHECK_EQ(stride, raw->rowStride);
+        AUREA_CHECK(bytes == raw->bytes.data());
+        return failUpload ? Status{Errc::OutOfDeviceMemory} : OkStatus;
+    };
+    RenderSettings settings;
+    settings.previewCacheRevision = settings.previewCacheComposition = 1;
+    settings.previewCacheOnly = true;
+    f.renderer.set_preview_cache_budget(48ull << 20);
+    AUREA_CHECK(f.renderer.configure_preview_cache(32, 16, settings) > 0);
+    FrameStats stats; RenderTimings timings;
+    layer.source.frame = frame;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK_EQ(uploads, 1u); AUREA_CHECK_EQ(raw->prepareCalls, 1u);
+    AUREA_CHECK(f.renderer.take_incomplete());
+    AUREA_CHECK(!f.renderer.preview_cached(FrameIndex{0}));
+    failUpload = false;
+    layer.source.frame = frame;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK_EQ(uploads, 2u);
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK(f.renderer.preview_cached(FrameIndex{0}));
+    AUREA_CHECK_EQ(stats.layersRendered, 1u);
+    // Re-render without composition caching: same immutable decoded content
+    // reuses the uploaded plane, even though native import still fails.
+    settings.previewCacheOnly = false; settings.previewCacheRevision = settings.previewCacheComposition = 0;
+    layer.source.frame = frame;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK_EQ(uploads, 2u); AUREA_CHECK(!f.renderer.take_incomplete());
+}
+
+AUREA_TEST(VideoPreview, WorkingNativeImportDoesNotMaterializeCpuPlanes) {
+    RenderFixture f;
+    f.solid("native video", Vec4{1,1,1,1});
+    FrameSnapshot snapshot; f.prepare(snapshot);
+    auto* raw = new test::RgbaVideoFrame(true);
+    FrameRef frame = FrameRef::adopt(raw);
+    auto& source = snapshot.layers[0].source;
+    source.kind = LayerSource::Kind::Video; source.width = 32; source.height = 16; source.frame = frame;
+    TextureDesc desc; desc.width = raw->width; desc.height = raw->height; desc.format = SurfaceFormat::RGBA8;
+    const auto texture = f.backend.create_texture(desc);
+    f.backend.beforeImportExternalImage = [&](const ExternalImageDesc& ext) -> Result<ExternalTexture> {
+        AUREA_CHECK(ext.nativeHandle == raw->hardwareBuffer);
+        ExternalTexture imported; imported.texture = *texture; imported.sampler = SamplerHandle{123}; imported.rgb = true;
+        return imported;
+    };
+    u32 uploads = 0;
+    f.backend.beforeTextureUpload = [&](TextureHandle texture, const void*, u32) {
+        const auto uploaded = f.backend.texture_desc(texture);
+        if (uploaded.debugName && std::string_view(uploaded.debugName) == "plano-de-video") ++uploads;
+        return OkStatus;
+    };
+    FrameStats stats; RenderTimings timings; RenderSettings settings;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(raw->prepareCalls, 0u); AUREA_CHECK_EQ(raw->planeCount, 0u); AUREA_CHECK_EQ(uploads, 0u);
+    AUREA_CHECK(f.renderer.last_frame_zero_copy());
+}
+
+AUREA_TEST(VideoPreview, ShortRgbaRowsAreRejectedBeforeDriverUploadAndRecover) {
+    RenderFixture f;
+    f.solid("short rows", Vec4{1,1,1,1});
+    FrameSnapshot snapshot; f.prepare(snapshot);
+    auto* raw = new DecodedFrame;
+    auto pixels = std::vector<u8>(48 * 32 * 4, 127);
+    raw->width = 48; raw->height = 32; raw->format = PixelFormat::RGBA8;
+    raw->planes[0] = pixels.data(); raw->planeCount = 1; raw->strides[0] = 191;
+    FrameRef frame = FrameRef::adopt(raw);
+    auto& source = snapshot.layers[0].source;
+    source.kind = LayerSource::Kind::Video; source.width = 48; source.height = 32; source.frame = frame;
+    u32 uploads = 0;
+    f.backend.beforeTextureUpload = [&](TextureHandle texture, const void*, u32) {
+        const auto uploaded = f.backend.texture_desc(texture);
+        if (uploaded.debugName && std::string_view(uploaded.debugName) == "plano-de-video") ++uploads;
+        return OkStatus;
+    };
+    FrameStats stats; RenderTimings timings; RenderSettings settings;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK(f.renderer.take_incomplete()); AUREA_CHECK_EQ(uploads, 0u);
+    raw->strides[0] = 192; source.frame = frame;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete()); AUREA_CHECK_EQ(uploads, 1u);
+}
+
+AUREA_TEST(VideoPreview, RawPlaybackRetainsNativePixelsUntilGpuCompletion) {
+    RenderFixture f;
+    f.solid("raw native video", Vec4{1,1,1,1});
+    FrameSnapshot snapshot; f.prepare(snapshot);
+    u32 deaths = 0;
+    auto* raw = new test::RgbaVideoFrame(true); raw->deaths = &deaths;
+    auto& source = snapshot.layers[0].source;
+    source.kind = LayerSource::Kind::Video; source.width = 32; source.height = 16;
+    source.frame = FrameRef::adopt(raw);
+    TextureDesc desc; desc.width = raw->width; desc.height = raw->height; desc.format = SurfaceFormat::RGBA8;
+    const auto texture = f.backend.create_texture(desc);
+    f.backend.beforeImportExternalImage = [&](const ExternalImageDesc&) -> Result<ExternalTexture> {
+        ExternalTexture imported; imported.texture = *texture; imported.sampler = SamplerHandle{123}; imported.rgb = true;
+        return imported;
+    };
+    std::vector<std::pair<void (*)(void*), void*>> submitted;
+    f.backend.beforeDeferUntilGpuDone = [&](void (*release)(void*), void* pixels) { submitted.emplace_back(release, pixels); };
+    FrameStats stats; RenderTimings timings; RenderSettings settings; settings.rawPlayback = true;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK(!source.frame); // the snapshot has relinquished its reference
+    AUREA_CHECK_EQ(deaths, 0u); // the decoder still cannot recycle its buffer
+    AUREA_CHECK_EQ(submitted.size(), 1u);
+    for (auto [release, pixels] : submitted) release(pixels);
+    submitted.clear();
+    AUREA_CHECK_EQ(deaths, 1u);
 }
 
 AUREA_TEST(PreviewBuffer, FailedImageUploadIsRetriedBeforeTheFrameCanBeCached) {
@@ -2372,6 +2668,90 @@ AUREA_TEST(MemoryPressure, DenseMotionBlurCompositesReleaseEarlierLayerTargets) 
                 if (frame == 3) AUREA_CHECK_EQ(f.renderer.pool_stats().createdThisFrame, 0u);
             }
         }
+    }
+}
+
+#include "NormalCompositeLivenessTests.inl"
+#include "MaterialOverrideTests.inl"
+#include "SceneTargetTests.inl"
+#include "MinimaxPlan.inl"
+
+AUREA_TEST(MotionBlur, SmallMovingLayersUseSmallAccumulatorsWithoutDroppingSamples) {
+    for (const u32 den : {1u,2u}) {
+        RenderFixture f;
+        const auto id = f.solid("small moving overlay", Vec4{.3f,.6f,.9f,.5f});
+        auto* layer = f.comp->layer(id);
+        layer->shape.bounds = Rect{0,0,80,60}; layer->transform.anchor = Vec3{40,30,0};
+        layer->motionBlur = true;
+        auto& x = layer->tracks.get_or_create(TrackProperty::PositionX);
+        x.set(FrameIndex{0},800); x.set(FrameIndex{60},1000);
+        auto& mb = f.comp->motion_blur(); mb.enabled = true; mb.samples = mb.adaptiveLimit = 64;
+        RenderSettings settings; settings.previewDenominator = den; settings.finalQuality = true;
+        FrameSnapshot snapshot;
+        f.renderer.prepare(*f.comp,f.project,FrameIndex{30},nullptr,nullptr,nullptr,
+            settings,1,0,DecodeMode::Still,1,snapshot);
+        AUREA_CHECK_EQ(snapshot.layers[0].blurMatrices.size(),64u);
+        FrameStats stats; RenderTimings timings;
+        f.renderer.set_motion_blur_crop_enabled(false);
+        AUREA_CHECK(f.renderer.render(snapshot,settings,nullptr,stats,timings).ok());
+        const auto fullBytes = f.renderer.graph_stats().transientBytes;
+        f.renderer.set_motion_blur_crop_enabled(true);
+        AUREA_CHECK(f.renderer.render(snapshot,settings,nullptr,stats,timings).ok());
+        AUREA_CHECK(!f.renderer.take_incomplete());
+        const auto croppedBytes = f.renderer.graph_stats().transientBytes;
+        const u64 fullTargetBytes = u64(1920/den)*(1080/den)*8;
+        AUREA_CHECK(fullBytes - croppedBytes > fullTargetBytes * 99 / 100);
+        AUREA_CHECK_EQ(snapshot.layers[0].blurMatrices.size(),64u);
+        std::printf("    crop 1080p/den%u: %llu -> %llu transient bytes, 64 samples\n",den,
+            static_cast<unsigned long long>(fullBytes),static_cast<unsigned long long>(croppedBytes));
+    }
+}
+
+AUREA_TEST(MotionBlur, MissingIntegrationPipelineCannotCompleteASharpExportFrame) {
+    RenderFixture f;
+    const auto id = f.solid("requested motion blur",Vec4{1,1,1,1});
+    auto* layer = f.comp->layer(id); layer->motionBlur = true;
+    layer->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{0},800);
+    layer->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{60},1000);
+    f.comp->motion_blur().enabled = true;
+    FrameSnapshot snapshot; f.prepare(snapshot,FrameIndex{30});
+    AUREA_CHECK(!snapshot.layers[0].blurMatrices.empty());
+    RenderSettings settings; settings.finalQuality = true;
+    FrameStats stats; RenderTimings timings;
+    f.renderer.shaders().set_test_failing_shader(ShaderId::composite_layer_frag);
+    AUREA_CHECK(f.renderer.render(snapshot,settings,nullptr,stats,timings).ok());
+    AUREA_CHECK(f.renderer.take_incomplete());
+    f.renderer.shaders().set_test_failing_shader(ShaderId::Count);
+    AUREA_CHECK(f.renderer.render(snapshot,settings,nullptr,stats,timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+}
+
+AUREA_TEST(MotionBlur, RejectedVectorBlurPassRetainsAValidSourceAndRecovers) {
+    for (const auto failedShader : {ShaderId::video_flow_vblur_frag,ShaderId::video_flow_lk_frag}) {
+        RenderFixture f;
+        const auto id = f.solid("footage blur",Vec4{1,1,1,1});
+        FrameSnapshot snapshot; f.prepare(snapshot);
+        auto& source = snapshot.layers[0].source;
+        test::SyntheticConfig config; config.pattern = test::SyntheticPattern::FastSquare;
+        test::SyntheticDecoder decoder(config);
+        i64 pts = 0; bool eos = false;
+        AUREA_CHECK(decoder.next_frame(0,source.frame,pts,eos).ok());
+        AUREA_CHECK(decoder.next_frame(0,source.frameB,pts,eos).ok());
+        const FrameRef current = source.frame, next = source.frameB;
+        source.kind = LayerSource::Kind::Video;
+        source.width = config.width; source.height = config.height; source.vectorBlur = .5f;
+        RenderSettings settings; settings.finalQuality = true;
+        FrameStats stats; RenderTimings timings;
+        f.renderer.shaders().set_test_failing_shader(failedShader);
+        AUREA_CHECK(f.renderer.render(snapshot,settings,nullptr,stats,timings).ok());
+        AUREA_CHECK(f.renderer.take_incomplete());
+        // A rejected pass must not publish an unwritten transient texture.
+        // The graph still contains the valid footage conversion/composition.
+        AUREA_CHECK_EQ(stats.layersRendered,1u);
+        f.renderer.shaders().set_test_failing_shader(ShaderId::Count);
+        source.frame = current; source.frameB = next;
+        AUREA_CHECK(f.renderer.render(snapshot,settings,nullptr,stats,timings).ok());
+        AUREA_CHECK(!f.renderer.take_incomplete());
     }
 }
 
@@ -3006,3 +3386,5 @@ AUREA_TEST(MotionBlur, SamplesPerFrameDrivesThePreviewToo) {
     settings.adaptiveLimit = 40;
     AUREA_CHECK_EQ(shutter_sample_count(settings, true, 1.0f, 0, true), 40u);
 }
+
+#include "RaysFootprintPlan.inl"

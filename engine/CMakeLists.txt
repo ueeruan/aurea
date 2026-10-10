@@ -65,6 +65,7 @@ set(AUREA_CORE_SOURCES
     src/core/Time.cpp
     src/core/MiniXml.cpp
     src/core/Thread.cpp
+    src/ui/BuiltinPropertySchema.cpp
     src/memory/MemoryManager.cpp
     src/jobs/JobSystem.cpp
     src/command/History.cpp
@@ -89,6 +90,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/GridLayoutEffect.cpp
     src/project/ProjectPackage.cpp
     src/export/ImageEncode.cpp
+    src/export/ExportRecovery.cpp
+    src/export/ExportSinkStartup.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
@@ -124,6 +127,13 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/GlitchEffects.cpp
     src/effects/builtin/TemporalEffects.cpp
     src/effects/builtin/TransitionEffects.cpp
+    src/effects/builtin/ProceduralWipeEffects.cpp
+    src/effects/builtin/LensGradientEffect.cpp
+    src/effects/builtin/PixelEncoderEffect.cpp
+    src/effects/builtin/StarglowEffect.cpp
+    src/effects/builtin/PixDitherEffect.cpp
+    src/effects/builtin/VideoGlitchEffect.cpp
+    src/effects/builtin/DisplaceTransformEffect.cpp
     src/effects/builtin/OpticalEffects.cpp
     src/effects/builtin/CornerPinEffect.cpp
     src/effects/builtin/MediaLabEffects.cpp
@@ -150,6 +160,7 @@ set(AUREA_CORE_SOURCES
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
+    src/media/P010Upload.cpp
     src/media/VideoSource.cpp
     src/media/MediaManager.cpp
     src/media/ThumbnailService.cpp
@@ -191,7 +202,9 @@ set(AUREA_CORE_SOURCES
     src/scene3d/GltfImporter.cpp
     src/scene3d/ModelBudget.cpp
     src/scene3d/SceneRenderer.cpp
+    src/scene3d/GroundPlacement.cpp
     src/scene3d/Environment.cpp
+    src/scene3d/EnvironmentJob.cpp
     src/scene3d/HdriImage.cpp
     src/scene3d/StudioEnvironment.cpp
     src/scene3d/Animation.cpp
@@ -297,7 +310,9 @@ set(AUREA_IMPORT_BOUNDARIES
     src/command/History.cpp
     src/timeline/Composition.cpp
     src/timeline/Timeline.cpp
+    src/scene3d/EnvironmentJob.cpp
 )
+list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportSinkStartup.cpp)
 if(MSVC)
     set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
@@ -425,6 +440,12 @@ if(AUREA_PLATFORM_ANDROID)
         add_executable(aurea_export_probe tests/android_export_probe.cpp platform/android/MediaCodecExport.cpp)
         target_include_directories(aurea_export_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
         target_link_libraries(aurea_export_probe PRIVATE aurea_core android log mediandk)
+        add_executable(aurea_encoder_eos_probe tests/android_encoder_eos_probe.cpp
+                       platform/android/MediaCodecExport.cpp)
+        target_include_directories(aurea_encoder_eos_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
+        target_link_libraries(aurea_encoder_eos_probe PRIVATE aurea_core android log mediandk)
+        target_link_options(aurea_encoder_eos_probe PRIVATE
+            -Wl,--wrap=AMediaCodec_dequeueOutputBuffer,--wrap=fsync,--wrap=close)
     endif()
     add_library(aurea SHARED
         platform/android/aurea_jni.cpp
@@ -449,6 +470,52 @@ if(AUREA_PLATFORM_ANDROID)
     # padrão no arm64; explícito para não depender do padrão do NDK e cobrir
     # também o armeabi-v7a.
     target_link_options(aurea PRIVATE -Wl,-z,max-page-size=16384)
+
+    option(AUREA_ANDROID_SCENE_BENCHMARK "Build isolated on-device Vulkan/GLES scene performance probes" OFF)
+    if(AUREA_ANDROID_SCENE_BENCHMARK)
+        foreach(_backend IN ITEMS vulkan gles)
+            if(_backend STREQUAL "gles" AND NOT AUREA_GPU_GLES)
+                continue()
+            endif()
+            set(_probe_target "aurea_scene_${_backend}_probe")
+            add_executable(${_probe_target} tests/android_scene_performance_probe.cpp)
+            target_link_libraries(${_probe_target} PRIVATE aurea_${_backend} android log mediandk aaudio EGL GLESv3)
+            target_compile_options(${_probe_target} PRIVATE -fno-rtti -fno-exceptions)
+            if(_backend STREQUAL "vulkan")
+                target_compile_definitions(${_probe_target} PRIVATE AUREA_PROBE_VULKAN=1)
+            endif()
+        endforeach()
+    endif()
+
+    option(AUREA_ANDROID_RUNTIME_TESTS "Build native Vulkan/GLES regression tests for a connected device" OFF)
+    if(AUREA_ANDROID_RUNTIME_TESTS)
+        set(_aurea_runtime_tests
+            tests/main.cpp tests/test_gpu.cpp tests/test_motion_blur.cpp tests/test_render.cpp
+            tests/test_media.cpp tests/test_engine.cpp tests/test_motion_geometry.cpp
+            tests/test_export.cpp tests/test_export_scheduler.cpp
+            tests/test_export_recovery.cpp tests/test_export_sink_startup.cpp tests/test_aac_output_integrity.cpp
+            tests/test_scene_environment_jobs.cpp tests/test_morph_deformation.cpp
+            tests/test_ground_placement.cpp tests/test_yuv_layout.cpp tests/test_p010_upload.cpp tests/test_memory.cpp
+            tests/test_proxy.cpp platform/android/MediaCodecSource.cpp
+            platform/android/GlVideoBridge.cpp platform/android/MediaCodecExport.cpp)
+        foreach(_backend IN ITEMS vulkan gles)
+            if(_backend STREQUAL "gles" AND NOT AUREA_GPU_GLES)
+                continue()
+            endif()
+            set(_test_target "aurea_${_backend}_runtime_tests")
+            add_executable(${_test_target} ${_aurea_runtime_tests})
+            target_include_directories(${_test_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
+            target_link_libraries(${_test_target} PRIVATE aurea_${_backend} android log mediandk aaudio EGL GLESv3)
+            target_compile_options(${_test_target} PRIVATE -fno-rtti -fno-exceptions)
+            target_compile_definitions(${_test_target} PRIVATE AUREA_TEST_VULKAN=1
+                AUREA_GOLDEN_DIR="/data/local/tmp/aurea-codex/tests/golden"
+                AUREA_TEST_DATA_DIR="/data/local/tmp/aurea-codex/tests/data"
+                AUREA_APP_PRESETS_DIR="/data/local/tmp/aurea-codex/tests/presets")
+            if(_backend STREQUAL "gles")
+                target_compile_definitions(${_test_target} PRIVATE AUREA_TEST_GLES=1)
+            endif()
+        endforeach()
+    endif()
 endif()
 
 # -----------------------------------------------------------------------------

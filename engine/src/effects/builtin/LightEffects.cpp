@@ -531,14 +531,32 @@ public:
         u.p2 = Vec4{e.b(kKeepSource) ? 1.0f : 0.0f, e.f(kColorShift), 0.0f, 0.0f};
         u.color = e.color(kColor);
 
-        out = LayerImage{ctx.texture("raios", w, h), region, w, h};
-        // Borda transparente: fora da entrada não há luz (Clamp repetia a
-        // última coluna do texto por toda a região alargada).
-        if (ctx.fullscreen_pass("raios", PassStage::Effects, out.texture, ShaderId::effects_rays_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
-                                &u, sizeof(u)) == kInvalidIndex) {
-            return Errc::PipelineCompileFailed;
+        // Integrate thresholded native texels, rather than sparsely sampling
+        // the original image. One transparent texel around the auxiliary image
+        // permits ClampToEdge anisotropy even on GLES without native border.
+        // A device without anisotropy (or without room for the pad) integrates
+        // that same radiance explicitly, with <= 1 native texel between taps.
+        FGTexture radiance = input.texture;
+        const f32 anisotropy = ctx.max_sampler_anisotropy();
+        const bool padded = anisotropy > 1.0f && input.width <= ctx.max_texture_size() - std::min(2u, ctx.max_texture_size())
+                         && input.height <= ctx.max_texture_size() - std::min(2u, ctx.max_texture_size());
+        if (padded) {
+            const u32 rw = input.width + 2u, rh = input.height + 2u;
+            radiance = ctx.texture("raios-radiancia", rw, rh);
+            EffectUniforms extract = u;
+            extract.p2.z = 1.0f;
+            if (ctx.fullscreen_pass("raios-radiancia", PassStage::Effects, radiance, ShaderId::effects_rays_frag,
+                                    {PassTexture{input.texture, {}, CommonSampler::NearestClamp},
+                                     PassTexture{input.texture, {}, CommonSampler::NearestClamp}},
+                                    &extract, sizeof(extract)) == kInvalidIndex) return Errc::PipelineCompileFailed;
         }
+        u.p2.z = padded ? 2.0f : 0.0f;
+        u.p2.w = padded ? anisotropy : 1.0f;
+        out = LayerImage{ctx.texture("raios", w, h), region, w, h};
+        if (ctx.fullscreen_pass("raios", PassStage::Effects, out.texture, ShaderId::effects_rays_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder},
+                                 PassTexture{radiance, {}, padded ? CommonSampler::LinearAnisotropicClamp : CommonSampler::NearestClamp}},
+                                &u, sizeof(u)) == kInvalidIndex) return Errc::PipelineCompileFailed;
         return OkStatus;
     }
 };

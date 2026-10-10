@@ -141,9 +141,6 @@ struct EditorView: View {
 private struct AddLayerPickers: ViewModifier {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject var shell: ShellPresentation
-    @State private var importing = false
-    @State private var importingModel = false
-    @State private var fileKind = ShellAddPicker.model
     @State private var choosingPhotos = false
     @State private var photoKind = ShellAddPicker.gallery
     @State private var pickerProject = UUID()
@@ -153,103 +150,49 @@ private struct AddLayerPickers: ViewModifier {
                 guard let request else { return }
                 pickerProject = model.projectGeneration
                 shell.addPicker = nil
-                if request == .model { fileKind = request; importingModel = true }
-                else if request.isFile { fileKind = request; importing = true }
+                if request.isFile { presentFilePicker(request) }
                 else { photoKind = request; choosingPhotos = true }
             }
-            .fullScreenCover(isPresented: $importingModel) {
-                ModelDocumentPicker { urls in
-                    guard pickerProject == model.projectGeneration else { importingModel = false; return }
-                    // Start the owned copy while the picker URLs are still valid.
-                    if let urls { model.importModelFiles(urls: urls) }
-                    importingModel = false
-                }.ignoresSafeArea()
-            }
-            // O ÚNICO `.fileImporter` da raiz: dois na mesma view e o SwiftUI só
-            // atende um — o do modelo 3D ficava mudo (as texturas vêm por aqui também).
-            .fileImporter(isPresented: $importing, allowedContentTypes: fileTypes,
-                          allowsMultipleSelection: fileKind == .model || fileKind == .modelTextures) { result in
-                guard pickerProject == model.projectGeneration else { return }
-                if case .failure(let error) = result {
-                    let issue = error as NSError
-                    if issue.domain != NSCocoaErrorDomain || issue.code != NSUserCancelledError {
-                        model.toast = AureaText.t("ios_import_copy_failed", error.localizedDescription)
-                    }
-                    return
-                }
-                guard case .success(let urls) = result, let url = urls.first else {
-                    model.toast = AureaText.t("msg_esse_arquivo_nao_e_um_modelo")
-                    return
-                }
-                switch fileKind {
-                // Seleção múltipla/pasta: o FBX/OBJ vem com as texturas e o .mtl.
-                case .model: model.importModelFiles(urls: urls)
-                case .modelTextures: model.importModelTextures(urls: urls)
-                case .svg: model.importSvg(url: url)
-                case .psd: model.importPsd(url: url)
-                default: model.importMedia(url: url, kind: .audio)
-                }
-            }
             .sheet(isPresented: $choosingPhotos) {
-                ShellMediaPicker(filter: photoKind == .photo ? .images : ((photoKind == .video || photoKind == .audioFromVideo) ? .videos : .any(of: [.images, .videos]))) { url, video in
+                ShellMediaPicker(selectionLimit: photoKind == .audioFromVideo ? 1 : 0, filter: photoKind == .photo ? .images : ((photoKind == .video || photoKind == .audioFromVideo) ? .videos : .any(of: [.images, .videos]))) { items in
                     choosingPhotos = false
                     guard pickerProject == model.projectGeneration else { return }
-                    guard let url else { return }
-                    let kind: AureaModel.ImportKind = photoKind == .audioFromVideo ? .audio : (video ? .video : .image)
-                    model.importMedia(url: url, kind: kind)
+                    if photoKind == .audioFromVideo, let first = items.first {
+                        model.importMedia(url: first.0, kind: .audio)
+                    } else { model.importMediaBatch(items) }
                 }
             }
     }
-    private var fileTypes: [UTType] {
-        switch fileKind {
-        case .svg: return [UTType(filenameExtension: "svg") ?? .data]
-        case .psd: return [.item]
-        // Some file providers register FBX/OBJ as content, without public.data.
-        // Accept file-system items; the importer validates supported extensions.
-        case .model: return [.item]
-        // .mtl (texto) e texturas: alguns provedores não marcam public.data.
-        case .modelTextures: return [.item]
-        default: return [.audio]
+    /// Arquivo (modelo 3D, texturas/.mtl, SVG, PSD, áudio): seletor do UIKit
+    /// pelo controlador do topo (DocumentImportPicker). Antes o modelo vinha
+    /// num seletor embutido num `fullScreenCover` e o resto no `.fileImporter`
+    /// da raiz — no iPhone com iOS 26/27 o embutido fechava sozinho ao escolher
+    /// e "nada importava"; o `.fileImporter` da raiz calava os de baixo.
+    private func presentFilePicker(_ kind: ShellAddPicker) {
+        let project = pickerProject
+        let model = self.model
+        let multiple = kind == .model || kind == .modelTextures
+        DocumentImportPicker.present(types: Self.fileTypes(kind), multiple: multiple) { urls in
+            guard project == model.projectGeneration, let urls, let url = urls.first else { return }
+            switch kind {
+            // Seleção múltipla/pasta: o FBX/OBJ/glTF vem com as texturas, o .bin e o .mtl.
+            case .model: model.importModelFiles(urls: urls)
+            case .modelTextures: model.importModelTextures(urls: urls)
+            case .svg: model.importSvg(url: url)
+            case .psd: model.importPsd(url: url)
+            default: model.importMedia(url: url, kind: .audio)
+            }
         }
     }
-}
-
-/// A stable UIKit delegate owns the model selection until completion. Present
-/// full screen on iPad too, rather than a provider popover nested in SwiftUI.
-private struct ModelDocumentPicker: UIViewControllerRepresentable {
-    let onSelection: ([URL]?) -> Void
-    static let types: [UTType] = [
-        UTType(importedAs: "com.autodesk.fbx", conformingTo: .data),
-        UTType(importedAs: "com.aurea.import.obj", conformingTo: .data),
-        UTType(importedAs: "com.aurea.import.glb", conformingTo: .data),
-        UTType(importedAs: "com.aurea.import.gltf", conformingTo: .data),
-        UTType(importedAs: "com.aurea.import.mtl", conformingTo: .data),
-        .data, .content, .zip, .folder
-    ]
-    func makeCoordinator() -> Coordinator { Coordinator(onSelection) }
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: Self.types, asCopy: true)
-        picker.delegate = context.coordinator
-        picker.allowsMultipleSelection = true
-        picker.shouldShowFileExtensions = true
-        picker.modalPresentationStyle = .fullScreen
-        NSLog("Aurea model picker: %ld declared/fallback types, multi-select", Self.types.count)
-        return picker
-    }
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {
-        context.coordinator.onSelection = onSelection
-    }
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        var onSelection: ([URL]?) -> Void
-        private var completed = false
-        init(_ onSelection: @escaping ([URL]?) -> Void) { self.onSelection = onSelection }
-        private func finish(_ urls: [URL]?) {
-            guard !completed else { return }; completed = true
-            NSLog("Aurea model picker: %@, %ld item(s)", urls == nil ? "cancelled" : "selected", urls?.count ?? 0)
-            onSelection(urls)
+    private static func fileTypes(_ kind: ShellAddPicker) -> [UTType] {
+        switch kind {
+        case .svg: return [UTType(filenameExtension: "svg") ?? .data, .data]
+        case .psd: return [UTType(filenameExtension: "psd") ?? .data, .data]
+        case .model: return DocumentImportPicker.modelTypes
+        // .mtl (texto), .bin e texturas: alguns provedores não marcam public.data.
+        case .modelTextures: return DocumentImportPicker.modelTypes + [.image, .text]
+        default: return [.audio, .movie, .data]
         }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls) }
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
     }
 }
 
@@ -342,7 +285,7 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { PuppetStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RotoPaintStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }
-            if model.panel == .tracking && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
+            if model.panel == .tracking && model.cameraTrackerVisible && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
                 ShellStageBanner(label: AureaText.t("editor_camada_bloqueada"), button: AureaText.t("editor_desbloquear"), icon: CupertinoGlyph.LockFill) {
                     model.mutate { $0.setLayer(layer.id, locked: false) }; model.refreshModel(force: true)
@@ -355,14 +298,6 @@ private struct ModelOptimizePrompt: ViewModifier {
                 ShellStageBanner(label: vectorHint, button: AureaText.t("editor_concluir")) {
                     model.vectorFreehand = false; model.vectorEditingPoints = false; model.maskDrawing = false; model.freehandPoints = []
                 }.padding(.bottom, 10).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .bottom)
-            }
-            if !model.fullscreen && !model.sceneEditor {
-                Text(previewLabel).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
-                    .padding(.horizontal, 10).padding(.vertical, 8).background(StageInk.resolutionChip, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay { GeometryReader { bounds in
-                        Color.clear.contentShape(Rectangle()).onTapGesture { shell.resolutionAnchor = bounds.frame(in: .global) }.onLongPressGesture(minimumDuration: 0.5) { model.toggleHud() }
-                    }}.accessibilityLabel(AureaText.t("editor_resolucao_previa_segure_diagnostico"))
-                    .padding(4).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
             if !model.fullscreen && !model.rawPlayback, model.selection.count == 1, let id = model.primarySelection {
                 HStack(spacing: 6) {
@@ -718,7 +653,7 @@ private struct ContextSheet: View {
             // ContextArea.kt: faixa VAZIA de 12; painel aberto começa no seu
             // próprio cabeçalho, sem puxador ou faixa adicionais.
             Rectangle().fill(AureaColors.border).frame(height: 1)
-            if model.sheetContent != .panel && model.sheetContent != .curve {
+            if !EditorTimelineRefresh.enabled && model.sheetContent != .panel && model.sheetContent != .curve {
                 AureaColors.editorPanelHigh.frame(height: StageDim.sheetHandle)
             }
 
@@ -791,11 +726,18 @@ private struct BatchToolsView: View {
                 tool(CupertinoGlyph.Scissors, "editor_dividir_cabecote") { split() }
                 tool(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote") { trim(start: false) }
                 AureaColors.border.frame(width: 1, height: 24)
+                if EditorTimelineRefresh.enabled {
+                    tool(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas") { model.groupSelection() }
+                    tool(CupertinoGlyph.DocOnDoc, "editor_copiar_camada") { model.engine.copyLayers(selected.map { NSNumber(value: $0.id) }) }
+                    tool(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar_camada") {
+                        model.engine.duplicateLayers(selected.map { NSNumber(value: $0.id) }); model.refreshModel(force: true)
+                    }
+                } else {
                 vectorTool("automirrored.rounded.FormatAlignLeft", "editor_alinhar_inicios") { model.arrangeLayerTimes(0) }
                 vectorTool("rounded.Stairs", "editor_escada_comeca_quando_cima_termina") { model.arrangeLayerTimes(1) }
                 vectorTool("automirrored.rounded.FormatAlignRight", "editor_alinhar_fins") { model.arrangeLayerTimes(2) }
+                }
             }.frame(height: 52).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
-            timingArrangementRow
             HStack(spacing: 0) {
                 tool(CupertinoGlyph.ArrowLeftToLine, "editor_alinhar_esquerda_tela", size: 18) { align(0) }
                 tool(CupertinoGlyph.ArrowLeftRight, "editor_centralizar_horizontal", size: 18) { align(1) }
@@ -809,56 +751,9 @@ private struct BatchToolsView: View {
                 tool(CupertinoGlyph.FullscreenExit, "editor_ajustar_tela", size: 18) { pause(); model.fitToCanvas(selected.map(\.id), fill: false) }
                 tool(CupertinoGlyph.Fullscreen, "editor_preencher_tela", size: 18) { pause(); model.fitToCanvas(selected.map(\.id), fill: true) }
             }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
-            staggerRow
             Spacer(minLength: 0)
         }.padding(.horizontal, 10).padding(.top, 4)
         }.accessibilityIdentifier("timeline.batch.tools")
-    }
-    private var timingArrangementRow: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            HStack(spacing: 0) {
-                timingAction(3, "timeline_distribute_starts")
-                timingAction(4, "timeline_distribute_gaps")
-                timingAction(5, "timeline_starts_at_playhead")
-                timingAction(6, "timeline_ends_at_playhead")
-            }
-        }.background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
-            .accessibilityIdentifier("timeline.arrange.scroll")
-    }
-    private func timingAction(_ mode: UInt32, _ key: String) -> some View {
-        let enabled = selected.filter { !$0.locked }.count >= (mode <= 4 ? 3 : 1)
-        return Button { model.arrangeLayerTimes(mode) } label: {
-            Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).lineLimit(1)
-                .foregroundStyle(enabled ? AureaColors.accent : AureaColors.disabled)
-                .padding(.horizontal, 14).frame(minWidth: 44, minHeight: 48).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(!enabled).accessibilityIdentifier("timeline.arrange.\(mode)")
-    }
-    /// "Escalonar" (par do StaggerRow do Android): − N + quadros e dois toques
-    /// que aplicam — camadas inteiras ou só keyframes — em cascata na ordem da timeline.
-    @State private var staggerStep: Int = StaggerPlan.defaultStep
-    private var staggerRow: some View {
-        HStack(spacing: 0) {
-            Text(AureaText.t("editor_escalonar")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted)
-                .lineLimit(1).padding(.leading, 12).padding(.trailing, 4)
-            tool(CupertinoGlyph.Minus, "editor_escalonar_menos", size: 16) { staggerStep = StaggerPlan.step(staggerStep, -1) }
-            Text(AureaText.t("editor_escalonar_quadros", String(staggerStep))).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.text)
-                .lineLimit(1).frame(width: 52).accessibilityIdentifier("stagger.step")
-            tool(CupertinoGlyph.Plus, "editor_escalonar_mais", size: 16) { staggerStep = StaggerPlan.step(staggerStep, 1) }
-            AureaColors.border.frame(width: 1, height: 24)
-            staggerApply("editor_escalonar_camadas", id: "stagger.layers") { model.staggerSelection(step: staggerStep, keysOnly: false) }
-            staggerApply("editor_escalonar_keyframes", id: "stagger.keys") { model.staggerSelection(step: staggerStep, keysOnly: true) }
-        }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
-    }
-    private func staggerApply(_ key: String, id: String, action: @escaping () -> Void) -> some View {
-        // Alvo de dedo: a altura mínima mora no próprio botão (só o texto media
-        // 14 pt, e o toque/leitor de tela usavam essa caixa).
-        Button(action: action) {
-            Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.accent).lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: 44, maxHeight: .infinity)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).frame(maxWidth: .infinity, minHeight: 44)
-        .accessibilityLabel(AureaText.t(key)).accessibilityIdentifier(id)
     }
     private func tool(_ glyph: Character, _ key: String, size: CGFloat = 20, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) { CupertinoGlyph.text(glyph, size: size, color: enabled ? AureaColors.text : AureaColors.disabled).frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -942,9 +837,11 @@ private struct DockView: View {
         // Máscara, rastreio de câmera e legendas automáticas viraram EFEITOS
         // (seletor de efeitos); os presets de vídeo/imagem saíram. Os presets de
         // TEXTO voltaram (2026-10-03): ficha só no texto 2D/3D.
-        case color, shape, vector, editText, text, text3DOptions, particles, audio, move, rig, blend, environment, presets, effects
+        case enterGroup, mask, color, shape, vector, editText, text, text3DOptions, particles, audio, mute, speed, move, rig, blend, environment, presets, effects
         var label: String {
             switch self {
+            case .enterGroup: return "editor_entrar_grupo"
+            case .mask: return "panel_mascara_recorte"
             case .color: return "sh_dock_color_fill"
             case .shape: return "sh_dock_edit_shape"
             case .vector: return "sh_dock_edit_vector"
@@ -952,6 +849,8 @@ private struct DockView: View {
             case .text, .text3DOptions: return "text_options"
             case .particles: return "sh_dock_particles"
             case .audio: return "sh_add_tab_audio"
+            case .mute: return "editor_mute_audio"
+            case .speed: return "editor_velocidade"
             case .move: return "sh_dock_transform"
             case .rig: return "fx_name_puppet"
             case .blend: return "sh_dock_opacity_blend"
@@ -963,6 +862,7 @@ private struct DockView: View {
         /// Short visible action; accessibility continues to use the full label.
         var shortLabel: String {
             switch self {
+            case .mask: return "sh_dock_mask"
             case .move: return "gizmo_tool_move"
             case .blend: return "panel_misturar"
             default: return label
@@ -970,6 +870,8 @@ private struct DockView: View {
         }
         var glyph: Character {
             switch self {
+            case .enterGroup: return CupertinoGlyph.ArrowDownRightSquare
+            case .mask: return CupertinoGlyph.Crop
             case .color: return CupertinoGlyph.Paintbrush
             case .shape: return ShellGlyph.SliderHorizontalBelowRectangle
             case .vector: return CupertinoGlyph.PencilOutline
@@ -977,6 +879,8 @@ private struct DockView: View {
             case .text, .text3DOptions: return ShellGlyph.SliderHorizontalBelowRectangle
             case .particles, .effects: return CupertinoGlyph.Sparkles
             case .audio: return CupertinoGlyph.Speaker2
+            case .mute: return CupertinoGlyph.SpeakerSlash
+            case .speed: return CupertinoGlyph.Speedometer
             case .move: return CupertinoGlyph.Move
             case .rig: return CupertinoGlyph.PersonCropCircle
             case .blend: return CupertinoGlyph.CircleLefthalfFill
@@ -986,13 +890,16 @@ private struct DockView: View {
         }
         var panel: AureaModel.PanelKind {
             switch self {
+            case .enterGroup: return .transform
+            case .mask: return .mask
             case .color: return .shape
             case .shape: return .shapeEdit
             case .vector: return .vector
             case .editText, .text: return .text
             case .text3DOptions: return .layer3D
             case .particles: return .particles
-            case .audio: return .audio
+            case .audio, .mute: return .audio
+            case .speed: return .speed
             case .move, .rig: return .transform   // rig: não abre painel (RigStage.swift)
             case .blend: return .appearance
             case .environment: return .layer3D
@@ -1005,25 +912,35 @@ private struct DockView: View {
     private var muted: Bool { ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 1 != 0 }
     /// As fichas do TIPO, enxutas e na ordem de uso (par do `sectionsFor` do
     /// Android): o que é próprio do tipo primeiro, depois Transformar, Efeitos e
-    /// Opacidade/mesclagem. Velocidade, aparar, dividir e mudo moram na fileira
-    /// rápida; o raro (duplicar, estilo, grupo, rastrear ponto…) no ⋯ do topo.
+    /// Opacidade/mesclagem. Aparar e dividir moram na fileira rápida;
+    /// som e velocidade ficam visíveis na mídia; as operações raras ficam no ⋯.
     private var sections: [Section] { Self.sections(model) }
     fileprivate static func sections(_ model: AureaModel) -> [Section] {
         guard let layer = model.selectedLayer else { return [] }
         let hasAudio = ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0
+        let media: [Section] = layer.kind == 3 ? [.mute, .speed]
+            : layer.kind == 1 ? (hasAudio ? [.mute, .speed] : [.speed]) : []
         if layer.adjustment || layer.kind == 7 { return [.effects, .blend] }
+        if EditorTimelineRefresh.enabled && layer.kind == 12 { return [.enterGroup, .move, .mask, .effects, .blend] }
+        if EditorTimelineRefresh.enabled && ![3, 6, 8, 9, 10].contains(layer.kind) {
+            let edit: Section? = layer.kind == 5 ? (model.isVectorLayer ? .vector : .shape)
+                : layer.kind == 4 ? .editText : layer.kind == 11 ? .particles : nil
+            let content: [Section] = layer.kind == 4 ? [.editText, .text] : (edit.map { [$0] } ?? [])
+            return media + content + [.move, .mask, .effects, .blend] +
+                (layer.kind == 1 && hasAudio ? [.audio] : []) + (layer.kind == 4 ? [.presets] : [])
+        }
         // Frequent actions stay before the horizontally scrollable extras.
         let common: [Section] = [.move, .effects, .blend]
         switch layer.kind {
         case 5: return model.isVectorLayer ? [Section.vector] + common : [Section.shape] + common + [Section.color]
-        case 4: return [Section.editText] + common + [Section.text, Section.presets]
-        case 1: return hasAudio ? common + [Section.audio] : common
+        case 4: return [Section.editText, Section.text] + common + [Section.presets]
+        case 1: return media + common + (hasAudio ? [.audio] : [])
         case 2: return common + [Section.rig]
         case 12: return common
-        case 3: return [.audio, .effects]
+        case 3: return media + [.audio, .effects]
         case 10: return (model.engine.text3D(forLayer: layer.id) ?? [:]).isEmpty
             ? [.move, .environment, .effects, .blend]
-            : [Section.editText] + common + [Section.text3DOptions, Section.presets]
+            : [Section.editText, Section.text3DOptions] + common + [Section.presets]
         case 8: return [.move, .environment]
         case 11: return [Section.particles] + common
         case 9: return layer.effectCount > 0 ? common : [.move]
@@ -1031,9 +948,8 @@ private struct DockView: View {
         default: return []
         }
     }
-    /// Fileira de tempo (início/fim) + fileira rolável de ferramentas: reserva de
-    /// duas fileiras, senão as ferramentas ficam abaixo da tela com fonte grande.
-    fileprivate static func tileRows(_ model: AureaModel) -> Int { model.selectedLayer == nil ? 1 : 2 }
+    /// Três cortes contextuais e uma fileira rolável de ferramentas.
+    fileprivate static func tileRows(_ model: AureaModel) -> Int { 1 }
 
     var body: some View {
         if let layer = model.selectedLayer {
@@ -1042,99 +958,60 @@ private struct DockView: View {
             ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    if layer.kind == 12 {
-                        // As portas do grupo no lugar da velocidade: entrar e desagrupar.
-                        dockSquare { quickAction(CupertinoGlyph.ArrowDownRightSquare, "editor_entrar_grupo", size: 20) { model.openGroup(layer.id) } }
-                        dockSquare { quickAction(ShellGlyph.SquareSplit2x2, "editor_desagrupar", size: 20) { model.ungroup(layer.id) } }
-                    } else {
-                        // Velocidade sempre no mesmo lugar; apagada quando o tipo não tem tempo de mídia.
-                        let speedOk = layer.kind == 1 || layer.kind == 3
-                        dockSquare {
-                            quickAction(CupertinoGlyph.Speedometer, "editor_velocidade", size: 22,
-                                        tint: speedOk ? AureaColors.text : StageInk.dockDisabled) {
-                                if speedOk { model.openPanel(.speed) } else { model.toast = AureaText.t("dock2_media_only") }
-                            }
-                        }
-                    }
-                    // O tempo num bloco só, com os colchetes do AM: a parte tracejada é a que sai.
+                    let actions = model.engine.queryClipTimeActions(layer.id, frame: model.status.playhead)
                     HStack(spacing: 0) {
-                        trimAction(.start, "editor_aparar_inicio_cabecote") { timeEdit(layer) { if !model.trimStart(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
-                        dockDivider
-                        trimAction(.split, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
-                        dockDivider
-                        trimAction(.end, "editor_aparar_fim_cabecote") { timeEdit(layer) { if !model.trimEnd(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
-                    // Som: sempre no canto direito; apagado sem áudio. Toque liga/desliga; segurar abre o volume.
-                    dockSquare {
-                        quickAction(muted || !hasAudio ? CupertinoGlyph.SpeakerSlash : CupertinoGlyph.Speaker2,
-                                    muted ? "editor_som_desligado_toque_ligar_segure_volume" : "editor_desligar_som_segure_volume",
-                                    size: 22, tint: !hasAudio ? StageInk.dockDisabled : (muted ? AureaColors.accent : AureaColors.text),
-                                    hold: hasAudio ? { model.openPanel(.audio) } : nil) {
-                            guard hasAudio else { model.toast = AureaText.t("dock2_media_only"); return }
-                            guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
-                            model.mutate { $0.setLayer(layer.id, audioMuted: !muted) }; model.refreshModel(force: true)
+                        if actions & 8 != 0 {
+                            layerTimeAction(CupertinoGlyph.ArrowLeftToLine, "timeline_extend_left", "editor_extend_start_to_playhead", "timeline.extend.start", enabled: !layer.locked) {
+                                extendEdit(layer, start: true)
+                            }
+                        } else if actions & 16 != 0 {
+                            layerTimeAction(CupertinoGlyph.ArrowRightToLine, "timeline_extend_right", "editor_extend_end_to_playhead", "timeline.extend.end", enabled: !layer.locked) {
+                                extendEdit(layer, start: false)
+                            }
+                        } else if actions != 0 || EditorTimelineRefresh.enabled {
+                            trimAction(.start, "editor_aparar_inicio_cabecote") { timeEdit(layer) { if !model.trimStart(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
+                            dockDivider
+                            trimAction(.split, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
+                            dockDivider
+                            trimAction(.end, "editor_aparar_fim_cabecote") { timeEdit(layer) { if !model.trimEnd(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                         }
-                    }
-                }
-                .frame(height: EditorLayout.dockQuick)
-                HStack(spacing: 0) {
-                    layerTimeAction(CupertinoGlyph.ArrowLeftToLine, "panel_inicio", "editor_go_layer_start", "timeline.layer.start") {
-                        model.seek(toFrame: Int64(layer.startFrame))
-                    }
-                    layerTimeAction(CupertinoGlyph.ArrowRightToLine, "panel_fim", "editor_go_layer_end", "timeline.layer.end") {
-                        model.seek(toFrame: Int64(max(layer.startFrame, layer.endFrame - 1)))
-                    }
-                    dockDivider
-                    layerTimeAction(CupertinoGlyph.ChevronRight, "timeline_starts_at_playhead", "editor_move_layer_start_here", "timeline.layer.moveStart", enabled: !layer.locked) {
-                        model.arrangeLayerTimes(5)
-                    }
-                    layerTimeAction(CupertinoGlyph.ChevronLeft, "timeline_ends_at_playhead", "editor_move_layer_end_here", "timeline.layer.moveEnd", enabled: !layer.locked) {
-                        model.arrangeLayerTimes(6)
-                    }
-                }.frame(height: 48).background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+                        if EditorTimelineRefresh.enabled {
+                            dockDivider
+                            quickAction(CupertinoGlyph.Trash, "editor_excluir_camada", tint: AureaColors.danger) { model.deleteSelectedLayers() }
+                        }
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: EditorTimelineRefresh.enabled ? 24 : 10))
+                }.frame(height: EditorLayout.dockQuick)
                 GeometryReader { geometry in
-                    let minimum = CGFloat(76) + 28 * (min(max(fontScale, 1), 2) - 1)
-                    let fitted = (geometry.size.width - 8 * CGFloat(max(0, sections.count - 1))) / CGFloat(max(1, sections.count))
+                    let gap: CGFloat = EditorTimelineRefresh.enabled ? 4 : 8
+                    let minimum = CGFloat(EditorTimelineRefresh.enabled ? 60 : 76) + 28 * (min(max(fontScale, 1), 2) - 1)
+                    let available = geometry.size.width - (EditorTimelineRefresh.enabled ? 49 + gap : 0)
+                    let fitted = (available - gap * CGFloat(max(0, sections.count - 1))) / CGFloat(max(1, sections.count))
                     let toolWidth = min(max(fitted, minimum), 160)
                     ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: gap) {
+                        if EditorTimelineRefresh.enabled {
+                            Button { model.clearSelection() } label: {
+                                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 20, color: AureaColors.text)
+                                    .frame(width: 48, height: EditorLayout.dockTileHeight(fontScale: fontScale))
+                            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_limpar_selecao"))
+                                .accessibilityIdentifier("trial.layer.deselect")
+                            dockDivider
+                        }
                         ForEach(sections, id: \.rawValue) { section in
-                            Button {
-                                if section == .editText { model.openTextContentEditor() }
-                                // O antigo Rig abre o Fantoche (pinos); o rig gravado continua desenhando.
-                                else if section == .rig { model.openPuppetTool() }
-                                else { model.openPanel(section.panel) }
-                            } label: {
-                                VStack(spacing: 4) {
-                                    if section == .move {
-                                        MaterialGlyph("rounded.OpenWith", size: 20, color: StageInk.dockTileIcon)
-                                    } else {
-                                        CupertinoGlyph.text(section.glyph, size: 20, color: StageInk.dockTileIcon)
-                                    }
-                                    Text(AureaText.t(section.shortLabel))
-                                        .font(.aurea(size: 12 * min(max(fontScale, 1), 2)))
-                                        .foregroundStyle(StageInk.dockTileContent).lineLimit(2).multilineTextAlignment(.center)
-                                }
-                                .padding(.horizontal, 6).padding(.vertical, 4).frame(width: toolWidth, height: EditorLayout.dockTileHeight(fontScale: fontScale))
-                                .background(StageInk.dockSheet, in: RoundedRectangle(cornerRadius: 10))
-                                .contentShape(RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain)
-                                .accessibilityLabel(AureaText.t(section.label))
-                                .accessibilityIdentifier("dock.tool.\(section.rawValue)")
+                            sectionTile(section, width: toolWidth, fontScale: fontScale)
                         }
                     }
                     }
                     .id(layer.id)
                     .accessibilityIdentifier("dock.tools")
                 }
-                .frame(height: EditorLayout.dockTileHeight(fontScale: fontScale))
+                .frame(height: CGFloat(Self.tileRows(model)) * EditorLayout.dockTileHeight(fontScale: fontScale) + CGFloat(Self.tileRows(model) - 1) * 8)
             }
             .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(StageInk.dockSheet, in: DockSheetShape(radius: 12))
+            .background(EditorTimelineRefresh.enabled ? AureaColors.editorCanvas : StageInk.dockSheet, in: DockSheetShape(radius: 12))
             .padding(.top, 4)
         } else {
             Text(AureaText.t("editor_toque_num_objeto_tela_editar"))
@@ -1143,6 +1020,44 @@ private struct DockView: View {
                 .background(AureaColors.editorPanel)
         }
     }
+
+    private func sectionTile(_ section: Section, width: CGFloat, fontScale: CGFloat) -> some View {
+        let isMute = section == .mute
+        let title = isMute && muted ? "editor_unmute_audio" : section.label
+        return Button {
+            if isMute {
+                guard let layer = model.selectedLayer else { return }
+                guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
+                let next = !muted
+                model.mutate { $0.setLayer(layer.id, audioMuted: next) }
+                model.refreshModel(force: true)
+            }
+            else if section == .enterGroup, let layer = model.selectedLayer { model.openGroup(layer.id) }
+            else if section == .editText { model.openTextContentEditor() }
+            // O antigo Rig abre o Fantoche (pinos); o rig gravado continua desenhando.
+            else if section == .rig { model.openPuppetTool() }
+            else { model.openPanel(section.panel) }
+        } label: {
+            VStack(spacing: 4) {
+                if section == .move {
+                    MaterialGlyph("rounded.OpenWith", size: 20, color: StageInk.dockTileIcon)
+                } else {
+                    CupertinoGlyph.text(isMute && !muted ? CupertinoGlyph.Speaker2 : section.glyph,
+                        size: 20, color: isMute && muted ? AureaColors.accent : StageInk.dockTileIcon)
+                }
+                Text(AureaText.t(isMute ? title : section.shortLabel))
+                    .font(.aurea(size: 12 * min(max(fontScale, 1), 2)))
+                    .foregroundStyle(StageInk.dockTileContent).lineLimit(2).multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 4).frame(width: width, height: EditorLayout.dockTileHeight(fontScale: fontScale))
+            .background(EditorTimelineRefresh.enabled ? AureaColors.editorCanvas : StageInk.dockSheet, in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }.buttonStyle(.plain)
+            .accessibilityLabel(AureaText.t(title))
+            .accessibilityValue(isMute ? AureaText.t(muted ? "panel_mudo" : "editor_audio_enabled") : "")
+            .accessibilityIdentifier("dock.tool.\(section.rawValue)")
+    }
+
 
     /// Quadrado da fileira rápida para uma ferramenta sozinha (velocidade, mudo, grupo).
     private func dockSquare<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -1166,6 +1081,12 @@ private struct DockView: View {
             .accessibilityLabel(AureaText.t(description)).accessibilityIdentifier(id)
     }
 
+    private func extendEdit(_ layer: LayerItem, start: Bool) {
+        guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
+        if model.status.playing != 0 { model.playPause() }
+        let changed = model.extendToPlayhead(layer.id, start: start)
+        if !changed { model.toast = AureaText.t("timeline_cut_failed") }
+    }
     private func timeEdit(_ layer: LayerItem, action: () -> Void) {
         guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
         guard model.status.playhead > Int64(layer.startFrame), model.status.playhead < Int64(layer.endFrame) else { model.toast = AureaText.t("sh_playhead_into_layer"); return }
@@ -1194,8 +1115,8 @@ private struct DockView: View {
             context.stroke(mid, with: .color(AureaColors.text), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
         }
         .frame(width: 22, height: 22)
-        Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
-            .font(.aurea(size: 10)).lineLimit(1)
+        if !EditorTimelineRefresh.enabled { Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
+            .font(.aurea(size: 10)).lineLimit(1) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         .onTapGesture(perform: action)
@@ -1262,7 +1183,7 @@ private struct TextPanelView: View {
     /// EditorStore.importFont: TTF/OTF copiado para Documents/Media (pasta que o
     /// motor varre ao abrir), registrado no CoreText e no motor e aplicado à
     /// camada que estava escolhida quando o seletor abriu.
-    private func importFont(_ url: URL, target: Int64) {
+    private func importFont(_ url: URL, target: Int64, apply: Bool = true) {
         guard ["ttf", "otf"].contains(url.pathExtension.lowercased()) else {
             model.toast = AureaText.t("msg_use_uma_fonte_ttf_ou_otf"); return
         }
@@ -1270,7 +1191,7 @@ private struct TextPanelView: View {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         AureaPaths.ensureDirectories()
         let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
-        do { try FileManager.default.copyItem(at: url, to: destination) }
+        do { try AureaPaths.copyImport(url, to: destination) }
         catch { model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return }
         guard let font = model.engine.importFont(atPath: destination.path) else {
             try? FileManager.default.removeItem(at: destination)
@@ -1279,7 +1200,7 @@ private struct TextPanelView: View {
         FontImportPicker.registerWithCoreText(destination)
         query = ""
         fonts = model.engine.availableFonts()
-        if model.primarySelection == target { chooseFont(font) }
+        if apply && model.primarySelection == target { chooseFont(font) }
         model.toast = AureaText.t("msg_fonte_importada", font["family"] as? String ?? "")
     }
     private var spanTools: some View {
@@ -1324,7 +1245,7 @@ private struct TextPanelView: View {
                 Button {
                     dismissEditing()
                     let target = layerId
-                    FontImportPicker.present { url in importFont(url, target: target) }
+                    FontImportPicker.presentMultiple { urls in for url in urls { importFont(url, target: target, apply: urls.count == 1) } }
                 } label: {
                     Text(AureaText.t("panel_importar")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent).padding(.horizontal, 12).padding(.vertical, 10).background(AureaColors.accentDim, in: RoundedRectangle(cornerRadius: 10))
                 }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityIdentifier("text.font.import")
@@ -1395,19 +1316,19 @@ enum FontImportPicker {
     static var types: [UTType] {
         [UTType.font] + ["ttf", "otf"].compactMap { UTType(filenameExtension: $0) }
     }
-    static func present(_ picked: @escaping (URL) -> Void) {
+    static func presentMultiple(_ picked: @escaping ([URL]) -> Void) {
         let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
         guard var presenter = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else { return }
         while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
         // O UIKit guarda o delegate fraco: o dono fica aqui até a escolha.
-        let owner = Delegate { url in
+        let owner = Delegate { urls in
             FontImportPicker.delegate = nil
-            if let url { picked(url) }
+            picked(urls)
         }
         FontImportPicker.delegate = owner
         picker.delegate = owner
-        picker.allowsMultipleSelection = false
+        picker.allowsMultipleSelection = true
         picker.shouldShowFileExtensions = true
         presenter.present(picker, animated: true)
     }
@@ -1417,13 +1338,74 @@ enum FontImportPicker {
         if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) { _ = error?.takeRetainedValue() }
     }
     final class Delegate: NSObject, UIDocumentPickerDelegate {
-        private let done: (URL?) -> Void
+        private let done: ([URL]) -> Void
         private var finished = false
-        init(_ done: @escaping (URL?) -> Void) { self.done = done }
-        private func finish(_ url: URL?) { guard !finished else { return }; finished = true; done(url) }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls.first) }
+        init(_ done: @escaping ([URL]) -> Void) { self.done = done }
+        private func finish(_ urls: [URL]) { guard !finished else { return }; finished = true; done(urls) }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish([]) }
+    }
+}
+
+/// Seletor de ARQUIVOS do app inteiro (modelo 3D, texturas/.mtl, áudio, SVG,
+/// PSD, HDRI, LUT, legenda, Alight Motion): o `UIDocumentPickerViewController`
+/// apresentado pelo UIKit a partir do controlador do topo — nunca um
+/// `.fileImporter` aninhado (o SwiftUI só atende UM por hierarquia; os de
+/// baixo ficavam mudos) nem um seletor embutido num `fullScreenCover` (no
+/// iOS 26/27 o seletor embutido se fecha sozinho ao escolher e a capa do
+/// SwiftUI fica presa: o segundo import não abria nada). `asCopy` = o arquivo
+/// já chega copiado no sandbox (iCloud/Drive materializados pelo sistema);
+/// quem chama ainda copia para a pasta do projeto.
+enum DocumentImportPicker {
+    private static var delegate: Delegate?
+    /// `picked(nil)` = cancelado; lista vazia nunca chega.
+    static func present(types: [UTType], multiple: Bool = false, _ picked: @escaping ([URL]?) -> Void) {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        guard var presenter = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else {
+            NSLog("Aurea file picker: sem janela para apresentar")
+            picked(nil); return
+        }
+        while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+        // `.item` no fim: provedor que não marca public.data (FBX/OBJ/MTL/GLB
+        // sem tipo registrado) não fica cinza no seletor; o import valida.
+        var all = types
+        if !all.contains(.item) { all.append(.item) }
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: all, asCopy: true)
+        // O UIKit guarda o delegate fraco: o dono fica aqui até a escolha.
+        let owner = Delegate { urls in
+            DocumentImportPicker.delegate = nil
+            NSLog("Aurea file picker: %@, %ld item(s)", urls == nil ? "cancelled" : "selected", urls?.count ?? 0)
+            picked(urls?.isEmpty == true ? nil : urls)
+        }
+        DocumentImportPicker.delegate = owner
+        picker.delegate = owner
+        picker.allowsMultipleSelection = multiple
+        picker.shouldShowFileExtensions = true
+        // Tela cheia também no iPad: sem popover de provedor preso ao SwiftUI.
+        picker.modalPresentationStyle = .fullScreen
+        presenter.present(picker, animated: true)
+    }
+    final class Delegate: NSObject, UIDocumentPickerDelegate {
+        private let done: ([URL]?) -> Void
+        private var finished = false
+        init(_ done: @escaping ([URL]?) -> Void) { self.done = done }
+        private func finish(_ urls: [URL]?) {
+            guard !finished else { return }; finished = true
+            DispatchQueue.main.async { self.done(urls) }
+        }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finish(urls) }
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finish(nil) }
     }
+    /// glTF/GLB/FBX/OBJ (+ .mtl, .zip e pastas): tipos declarados no Info.plist
+    /// e os genéricos de reserva.
+    static let modelTypes: [UTType] = [
+        UTType(importedAs: "com.autodesk.fbx", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.obj", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.glb", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.gltf", conformingTo: .data),
+        UTType(importedAs: "com.aurea.import.mtl", conformingTo: .data),
+        .data, .content, .zip, .folder, .item
+    ]
 }
 
 private enum NativeFontPreview {
@@ -1546,10 +1528,17 @@ private struct NativeTextInput: UIViewRepresentable {
 // =============================================================================
 // Adicionar camada (as abas do "＋" da casca)
 // =============================================================================
+private struct AddCardsHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 100
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 private struct AddLayerSheet: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     var tab = 0
+    var maxCardHeight: CGFloat = 340
+    @State private var cardContentHeight: CGFloat = 100
     /// Aberto como `.sheet` (cena 3D): o seletor espera a folha fechar antes de subir.
     var inSheet = false
     /// Aba 3D mostrando a grade "Formas 3D" (Shape3DViews.swift).
@@ -1584,8 +1573,8 @@ private struct AddLayerSheet: View {
             AureaColors.hairline.frame(height: 1)
             if tab == 0 { shapeGrid }
             else if tab == 1 {
-                EditorMediaGallery(openFiles: { photos($0 ? .video : .photo) }, openAI: { model.openPanel(.aiVideo) }) { url, video in
-                    model.importMedia(url: url, kind: video ? .video : .image); close()
+                EditorMediaGallery(openFiles: { photos($0 ? .video : .photo) }, openAI: { model.openPanel(.aiVideo) }) { items in
+                    model.importMediaBatch(items); close()
                 }
             } else if tab == ShellAddCategories.textPresets {
                 TextPresetPicker(onAdded: close)
@@ -1680,7 +1669,12 @@ private struct AddLayerSheet: View {
                         .accessibilityIdentifier("model3d.risk.warning")
                 }
             }.padding(.horizontal, 12).padding(.vertical, 10)
-        }
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: AddCardsHeightKey.self, value: geometry.size.height)
+                })
+        }.frame(height: min(cardContentHeight, maxCardHeight))
+            .onPreferenceChange(AddCardsHeightKey.self) { cardContentHeight = $0 }
+
     }
     private var hint: String? {
         switch tab {
@@ -1784,9 +1778,11 @@ private struct EditorMediaGallery: View {
     @State private var importing = false
     @State private var failure = false
     @State private var importRequest = UUID()
+    @State private var selecting = false
+    @State private var selectedAssets: [PHAsset] = []
     let openFiles: (Bool) -> Void
     let openAI: () -> Void
-    let picked: (URL, Bool) -> Void
+    let picked: ([(URL, Bool)]) -> Void
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -1809,6 +1805,16 @@ private struct EditorMediaGallery: View {
             }
             Text(AureaText.t("gallery_recent")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 12).padding(.bottom, 6)
+            HStack {
+                Button(AureaText.t(selecting ? "editor_cancelar" : "beta_select_media")) {
+                    selecting.toggle(); if !selecting { selectedAssets.removeAll() }
+                }.frame(minHeight: 48).accessibilityIdentifier("gallery.select")
+                Spacer()
+                if selecting {
+                    Button(AureaText.t("beta_add_media", selectedAssets.count)) { importAssets(selectedAssets) }
+                        .frame(minHeight: 48).disabled(selectedAssets.isEmpty).accessibilityIdentifier("gallery.addSelected")
+                }
+            }.padding(.horizontal, 12)
             ZStack {
                 if library.loading || importing { ProgressView().tint(AureaColors.accent) }
                 else if library.status != .authorized && library.status != .limited {
@@ -1823,8 +1829,18 @@ private struct EditorMediaGallery: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 3)], spacing: 3) {
                             ForEach(0..<assets.count, id: \.self) { index in
                                 let asset = assets.object(at: index)
-                                Button { importAsset(asset) } label: { EditorPhotoThumbnail(asset: asset) }
+                                let chosen = selectedAssets.firstIndex { $0.localIdentifier == asset.localIdentifier }
+                                Button {
+                                    if selecting {
+                                        if let chosen { selectedAssets.remove(at: chosen) } else { selectedAssets.append(asset) }
+                                    } else { importAssets([asset]) }
+                                } label: {
+                                    EditorPhotoThumbnail(asset: asset).overlay(alignment: .topTrailing) {
+                                        if let chosen { Text("✓ \(chosen + 1)").padding(6).background(AureaColors.chip).foregroundStyle(AureaColors.accent) }
+                                    }
+                                }
                                     .buttonStyle(.plain).id(asset.localIdentifier)
+                                    .accessibilityAddTraits(chosen == nil ? [] : [.isSelected])
                                     .accessibilityLabel(AureaText.t(video ? "editor_video" : "editor_foto") + " " + (asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? ""))
                             }
                         }.padding(3)
@@ -1838,19 +1854,25 @@ private struct EditorMediaGallery: View {
             .onDisappear { importRequest = UUID() }
             .disabled(importing)
     }
-    private func importAsset(_ asset: PHAsset) {
-        guard !importing else { return }
-        let request = UUID(), project = model.projectGeneration
-        importRequest = request
+    private func importAssets(_ assets: [PHAsset]) {
+        guard !importing, !assets.isEmpty else { return }
+        importRequest = UUID(); importing = true; failure = false
+        prepareAsset(assets, index: 0, ready: [], request: importRequest, project: model.projectGeneration)
+    }
+    private func prepareAsset(_ assets: [PHAsset], index: Int, ready: [(URL, Bool)], request: UUID, project: UUID) {
+        guard importRequest == request, model.projectGeneration == project else { return }
+        if index == assets.count { importing = false; if !ready.isEmpty { picked(ready) }; return }
+        let asset = assets[index]
         let isVideo = asset.mediaType == .video
         let resources = PHAssetResource.assetResources(for: asset)
         let primary: PHAssetResourceType = isVideo ? .fullSizeVideo : .fullSizePhoto
         let fallback: PHAssetResourceType = isVideo ? .video : .photo
-        guard let resource = resources.first(where: { $0.type == primary }) ?? resources.first(where: { $0.type == fallback }) else { failure = true; return }
-        importing = true; failure = false
+        guard let resource = resources.first(where: { $0.type == primary }) ?? resources.first(where: { $0.type == fallback }) else {
+            failure = true; prepareAsset(assets, index: index + 1, ready: ready, request: request, project: project); return
+        }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        catch { importing = false; failure = true; return }
+        catch { failure = true; prepareAsset(assets, index: index + 1, ready: ready, request: request, project: project); return }
         let destination = folder.appendingPathComponent(resource.originalFilename)
         let options = PHAssetResourceRequestOptions(); options.isNetworkAccessAllowed = true
         PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options) { error in
@@ -1859,9 +1881,10 @@ private struct EditorMediaGallery: View {
                     try? FileManager.default.removeItem(at: folder)
                     return
                 }
-                importing = false
+                var next = ready
                 if error != nil { try? FileManager.default.removeItem(at: folder); failure = true }
-                else { picked(destination, isVideo) }
+                else { next.append((destination, isVideo)) }
+                prepareAsset(assets, index: index + 1, ready: next, request: request, project: project)
             }
         }
     }
@@ -1891,33 +1914,42 @@ private struct EditorPhotoThumbnail: View {
 }
 
 struct ShellMediaPicker: UIViewControllerRepresentable {
+    var selectionLimit = 0
     let filter: PHPickerFilter
-    let picked: (URL?, Bool) -> Void
+    let picked: ([(URL, Bool)]) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(picked: picked) }
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration()
-        configuration.selectionLimit = 1; configuration.filter = filter
+        configuration.selectionLimit = selectionLimit; configuration.filter = filter
+        configuration.selection = .ordered
         configuration.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = context.coordinator; return picker
     }
     func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let picked: (URL?, Bool) -> Void
-        init(picked: @escaping (URL?, Bool) -> Void) { self.picked = picked }
+        let picked: ([(URL, Bool)]) -> Void
+        init(picked: @escaping ([(URL, Bool)]) -> Void) { self.picked = picked }
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            guard let provider = results.first?.itemProvider else { picked(nil, false); return }
+            load(results, index: 0, ready: [])
+        }
+        private func load(_ results: [PHPickerResult], index: Int, ready: [(URL, Bool)]) {
+            guard index < results.count else { DispatchQueue.main.async { self.picked(ready) }; return }
+            let provider = results[index].itemProvider
             let video = provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
             let type = video ? UTType.movie.identifier : UTType.image.identifier
-            provider.loadFileRepresentation(forTypeIdentifier: type) { [picked] source, _ in
-                guard let source else { DispatchQueue.main.async { picked(nil, video) }; return }
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-                do {
-                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    let target = directory.appendingPathComponent(source.lastPathComponent)
-                    try FileManager.default.copyItem(at: source, to: target)
-                    DispatchQueue.main.async { picked(target, video) }
-                } catch { DispatchQueue.main.async { picked(nil, video) } }
+            provider.loadFileRepresentation(forTypeIdentifier: type) { source, _ in
+                var next = ready
+                if let source {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                    do {
+                        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                        let target = directory.appendingPathComponent(source.lastPathComponent)
+                        try FileManager.default.copyItem(at: source, to: target)
+                        next.append((target, video))
+                    } catch { try? FileManager.default.removeItem(at: directory) }
+                }
+                self.load(results, index: index + 1, ready: next)
             }
         }
     }
@@ -1977,6 +2009,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                         Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
                         Button(AureaText.t("scene_light_directional")) { model.addLight(0) }
                         Button(AureaText.t("scene_light_point")) { model.addLight(1) }
+                        Button(AureaText.t("scene_light_spot")) { model.addLight(2) }
                         Button(AureaText.t("sh_add_model_3d") + "…") { model.showAddLayer = true }
                     } label: { pill(CupertinoGlyph.Plus, String(AureaText.t("panel_adicionar").drop(while: { $0 == "+" || $0 == " " }))) }
                     if let layer = model.selectedLayer, layer.kind == 8 || layer.kind == 10 || (layer.kind == 4 && layer.threeD) {
@@ -2014,57 +2047,35 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
 
 @MainActor private struct SceneLightControls: View {
     @EnvironmentObject private var model: AureaModel
-    @State private var editingShadow = false
     var body: some View {
-        ScrollView { VStack {
-            HStack { Button(AureaText.t("scene_light_directional")) { model.addLight(0) }; Button(AureaText.t("scene_light_point")) { model.addLight(1) } }
+        let _ = model.status.modelRevision
+        let _ = model.localPlayhead
+        ScrollView { VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                addLight("scene_light_directional", kind: 0)
+                addLight("scene_light_point", kind: 1)
+                addLight("scene_light_spot", kind: 2)
+            }
             if let id = model.primarySelection {
                 let values = model.engine.lightInfo(id).map(\.floatValue)
                 if values.count >= 11 {
-                    ForEach(Array(1..<(values[0] == 0 ? 5 : 6)), id: \.self) { param in
-                        HStack {
-                            Text(["", AureaText.t("panel_intensidade"), "R", "G", "B", AureaText.t("scene_light_range")][param])
-                            SceneNumberField(value: values[param]) { model.setLightParam(UInt32(param), value: $0) }
-                                .id("light:\(id):\(param)")
-                            if param < 5 {
-                                let here = ((model.detail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0) & (1 << (20 + param)) != 0
-                                Button(here ? "◆" : "◇") { model.toggleLightKey(UInt32(param), value: values[param]) }
-                            }
+                    AureaPropertyPanel(domain: "light", layerId: id, values: values,
+                        projectGeneration: model.projectGeneration,
+                        compositionId: (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value ?? 0) { changes in
+                        model.mutate { core in
+                            for (param, value) in changes { core.setLightParam(id, param: param, value: value) }
                         }
-                    }
-                    if values[0] == 0 { Toggle(AureaText.t("scene_light_shadows"), isOn: Binding(get: { values[8] >= 0.5 }, set: { model.setLightParam(8, value: $0 ? 1 : 0) })) }
-                    if values[0] == 0 && values[8] >= 0.5 {
-                        Text("\(AureaText.t("scene_shadow_strength")): \(Int(values[10] * 100))%")
-                        Slider(value: Binding(get: { values[10] }, set: { model.setLightParam(10, value: $0) }),
-                               in: 0...1, onEditingChanged: { active in
-                            if active && !editingShadow { editingShadow = true; model.beginGesture("shadow strength") }
-                            if !active && editingShadow { editingShadow = false; model.endGesture() }
-                        }).frame(minHeight: 44).accessibilityLabel(AureaText.t("scene_shadow_strength"))
-                            .accessibilityIdentifier("scene.shadow.strength")
-                    }
+                        model.refreshModel(force: true)
+                    }.id("light:\(model.projectGeneration):\(model.composition[AureaCompositionId] ?? ""):\(id)")
                 }
             }
-        }.padding() }.onDisappear { if editingShadow { editingShadow = false; model.endGesture() } }
+        }.padding() }.background(AureaColors.background)
     }
-}
-
-/// Preserve intermediate numeric input and the insertion point across core refreshes.
-@MainActor private struct SceneNumberField: View {
-    let value: Float
-    let onEdit: (Float) -> Void
-    @State private var draft = ""
-    @FocusState private var focused: Bool
-    var body: some View {
-        TextField("", text: $draft)
-            .keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder)
-            .keepLtr()   // número com sinal: "-1.5" não vira "1.5-" no árabe
-            .focused($focused)
-            .onAppear { draft = String(value) }
-            .onChange(of: value) { next in if !focused { draft = String(next) } }
-            .onChange(of: focused) { active in if !active { draft = String(value) } }
-            .onChange(of: draft) { text in
-                if focused, let next = Float(text), next.isFinite { onEdit(next) }
-            }
+    private func addLight(_ key: String, kind: UInt32) -> some View {
+        Button { model.addLight(kind) } label: {
+            Text(AureaText.t(key)).font(.aurea(size: 13, weight: .medium)).lineLimit(1).minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity, minHeight: 44).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(AureaPressStyle()).accessibilityIdentifier("scene.light.add.\(kind)")
     }
 }
 
@@ -2150,8 +2161,11 @@ private struct ShellAddCategoryDialog: View {
         GeometryReader { geometry in
             ZStack {
                 Color.black.opacity(0.18).contentShape(Rectangle()).onTapGesture { model.showAddLayer = false }
-                AddLayerSheet(tab: shell.addCategory)
-                    .frame(width: min(380, max(200, geometry.size.width - 48)), height: min(390, max(180, geometry.size.height * 0.55)))
+                let limit = min(390, max(0, geometry.size.height - 48))
+                let fillsPanel = [0, 1, ShellAddCategories.textPresets].contains(shell.addCategory)
+                AddLayerSheet(tab: shell.addCategory, maxCardHeight: max(0, limit - 49))
+                    .frame(width: min(380, max(200, geometry.size.width - 48)))
+                    .frame(height: fillsPanel ? min(limit, max(180, geometry.size.height * 0.55)) : nil)
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(AureaColors.action, lineWidth: 1))
             }.frame(maxWidth: .infinity, maxHeight: .infinity)

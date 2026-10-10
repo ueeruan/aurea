@@ -59,95 +59,6 @@ struct alignas(16) GroundBlock {
 };
 static_assert(sizeof(GroundBlock) <= binding::kMaxUniformBytes, "bloco do chao maior que o limite de uniform");
 
-/// Onde fica o chão: y do ponto mais baixo (maior Y: "para cima" = −Y), centro
-/// horizontal e raio dos modelos do grupo.
-struct GroundPlacement {
-    bool valid = false;
-    Vec3 center{};
-    f32  radius = 1.0f;
-};
-
-GroundPlacement ground_placement(const SceneFrame& frame) noexcept {
-    GroundPlacement gp;
-    Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
-    auto add = [&](const Aabb& b, const Mat4& m) {
-        if (!b.valid()) return;
-        for (int c = 0; c < 8; ++c) {
-            const Vec3 pt{(c & 1) ? b.max.x : b.min.x, (c & 2) ? b.max.y : b.min.y, (c & 4) ? b.max.z : b.min.z};
-            const Vec3 w = m.transform_point(pt);
-            lo = Vec3{std::min(lo.x, w.x), std::min(lo.y, w.y), std::min(lo.z, w.z)};
-            hi = Vec3{std::max(hi.x, w.x), std::max(hi.y, w.y), std::max(hi.z, w.z)};
-            gp.valid = true;
-        }
-    };
-    // Candidatas ao ponto mais baixo: (y máximo da caixa transformada, malha).
-    // A caixa de uma roda GIRADA no nó desce ~0,4·raio além do pneu — o carro
-    // pareceria flutuar. Por isso o y final sai dos VÉRTICES, só das primitivas
-    // cuja caixa ainda pode vencer (em geral as rodas: poucos milhares).
-    struct Candidate { f32 boxY; const Primitive* prim; Mat4 world; };
-    std::vector<Candidate> cands;
-    for (const SceneInstance& inst : frame.instances) {
-        if (!inst.asset) continue;
-        const SceneAsset& a = *inst.asset;
-        // Por primitiva OPACA, no nó dela: a caixa do asset inteiro inclui o
-        // "plano de sombra" transparente que muitos carros trazem embaixo das
-        // rodas — o chão ficaria abaixo dele e o carro pareceria flutuar.
-        bool any = false;
-        for (usize n = 0; n < a.nodes.size(); ++n) {
-            const i32 mi = a.nodes[n].mesh;
-            if (mi < 0 || mi >= static_cast<i32>(a.meshes.size())) continue;
-            const Mat4 world = a.nodes[n].skin >= 0 ? inst.world
-                             : inst.world * (n < inst.pose().nodeWorld.size() ? inst.pose().nodeWorld[n] : Mat4::identity());
-            for (const Primitive& p : a.meshes[static_cast<usize>(mi)].primitives) {
-                if (p.material >= 0 && p.material < static_cast<i32>(a.materials.size())) {
-                    const Material& m = a.materials[static_cast<usize>(p.material)];
-                    if (m.alphaMode == AlphaMode::Blend || m.transmission > 0.0f) continue;
-                }
-                add(p.bounds, world);
-                any = any || p.bounds.valid();
-                if (p.bounds.valid() && a.nodes[n].skin < 0 && !p.positions.empty()) {
-                    f32 by = -1e30f;
-                    for (int c = 0; c < 8; ++c) {
-                        const Vec3 pt{(c & 1) ? p.bounds.max.x : p.bounds.min.x, (c & 2) ? p.bounds.max.y : p.bounds.min.y,
-                                      (c & 4) ? p.bounds.max.z : p.bounds.min.z};
-                        by = std::max(by, world.transform_point(pt).y);
-                    }
-                    cands.push_back(Candidate{by, &p, world});
-                }
-            }
-        }
-        if (!any) add(a.bounds, inst.world);
-    }
-    if (!gp.valid) return gp;
-    f32 floorY = hi.y;
-    if (!cands.empty()) {
-        std::sort(cands.begin(), cands.end(), [](const Candidate& x, const Candidate& y) { return x.boxY > y.boxY; });
-        // Primitivas skin/sem vértice entram só pela caixa (conservador).
-        f32 exact = -1e30f;
-        f32 boxOnly = -1e30f;
-        for (const SceneInstance& inst : frame.instances) {
-            if (!inst.asset) continue;
-            for (usize n = 0; n < inst.asset->nodes.size(); ++n) {
-                if (inst.asset->nodes[n].skin >= 0 && inst.asset->nodes[n].mesh >= 0) { boxOnly = hi.y; break; }
-            }
-        }
-        usize verts = 0;
-        for (const Candidate& c : cands) {
-            if (c.boxY <= exact || verts > 2000000) break;
-            const Mat4& m = c.world;
-            for (const Vec3& v : c.prim->positions) {
-                exact = std::max(exact, m.col[0].y * v.x + m.col[1].y * v.y + m.col[2].y * v.z + m.col[3].y);
-            }
-            verts += c.prim->positions.size();
-        }
-        if (exact > -1e29f) floorY = std::max(exact, boxOnly);
-    }
-    gp.center = Vec3{(lo.x + hi.x) * 0.5f, floorY, (lo.z + hi.z) * 0.5f};
-    gp.radius = std::max(1.0f, (hi - lo).length() * 0.5f);
-    if (!std::isfinite(gp.radius) || !std::isfinite(gp.center.y)) gp.valid = false;
-    return gp;
-}
-
 PipelineKey ground_key(u32 mode, u32 samples, bool mrt) noexcept {
     PipelineKey k = PipelineKey::graphics(ShaderId::scene3d_ground_vert, ShaderId::scene3d_ground_frag, SurfaceFormat::RGBA16F,
                                           true, BlendMode::Normal);   // pré-multiplicado: o desbotamento mistura
@@ -330,6 +241,7 @@ FGTexture ground_blur(FrameGraph& graph, ShaderLibrary& shaders, FGTexture src, 
 
 struct GroundInputs {
     const SceneFrame* frame = nullptr;
+    std::span<const GpuModel* const> models;
     const SceneBlock* header = nullptr;   ///< luzes, sombra e ambiente do quadro
     Mat4 viewProj = Mat4::identity();
     u32 width = 0, height = 0;
@@ -349,7 +261,7 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
     const SceneFrame& frame = *in.frame;
     const SceneFloor& fl = frame.floor;
     if (fl.mode == 0 || fl.mode > 2 || !in.header) return gd;
-    const GroundPlacement place = ground_placement(frame);
+    const GroundPlacement place = ground_placement(frame, in.models);
     if (!place.valid) return gd;
     const f32 h = place.center.y;
     const f32 R = place.radius;

@@ -139,6 +139,10 @@ private val RenderedBlendModes = (0..23).toSet()
 @Composable
 internal fun AppearancePanel(env: PanelEnv) {
     val store = env.store
+    androidx.compose.runtime.DisposableEffect(store, store.primary) {
+        store.timelineFocus = OpacityKeys
+        onDispose { store.timelineFocus = null }
+    }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val look by remember(store) { derivedStateOf { transformLook(store.detail, intArrayOf(TrackProperty.OPACITY)) } }
     val curveReady by remember(store) { derivedStateOf { store.primaryKeys().transformTrack(TrackProperty.OPACITY).size >= 2 } }

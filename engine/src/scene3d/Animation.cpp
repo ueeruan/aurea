@@ -84,11 +84,18 @@ f32 clip_time(const Animation& clip, f64 layerSeconds) noexcept {
     return static_cast<f32>(t);
 }
 
-void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out) {
+void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWorkspace* workspace) {
     const usize n = asset.nodes.size();
-    std::vector<Vec3> tr(n), sc(n);
-    std::vector<Quat> rot(n);
-    out.morphWeights.assign(n, {});
+    PoseWorkspace temporary;
+    // A pathological hierarchy must not permanently inflate the next project's
+    // working set. Ordinary imported scenes retain scratch between evaluations.
+    constexpr usize maxRetainedNodes = 32768;
+    auto& scratch = workspace && n <= maxRetainedNodes ? *workspace : temporary;
+    if (n <= maxRetainedNodes && scratch.seen.capacity() > maxRetainedNodes) scratch = {};
+    auto& tr = scratch.translations; tr.resize(n);
+    auto& sc = scratch.scales; sc.resize(n);
+    auto& rot = scratch.rotations; rot.resize(n);
+    out.morphWeights.resize(n);
     for (usize i = 0; i < n; ++i) {
         tr[i] = asset.nodes[i].translation;
         rot[i] = asset.nodes[i].rotation;
@@ -119,8 +126,9 @@ void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out) {
     }
     // Mundo: pais antes de filhos, a partir das raízes (mesma ordem do repouso).
     out.nodeWorld.assign(n, Mat4::identity());
-    std::vector<u8> seen(n, 0);
-    std::vector<std::pair<i32, i32>> todo;
+    auto& seen = scratch.seen; seen.assign(n, 0);
+    auto& todo = scratch.todo; todo.clear();
+    todo.reserve(n);
     for (i32 r : asset.roots) todo.push_back({r, -1});
     while (!todo.empty()) {
         auto [i, parent] = todo.back();
@@ -128,7 +136,13 @@ void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out) {
         if (i < 0 || i >= static_cast<i32>(n) || seen[static_cast<usize>(i)]) continue;
         seen[static_cast<usize>(i)] = 1;
         const usize k = static_cast<usize>(i);
-        const Mat4 local = Mat4::translation(tr[k]) * Mat4::from_quat(rot[k]) * Mat4::scale(sc[k]);
+        // TRS has no shear: scale the rotation columns directly instead of
+        // multiplying two general 4x4 matrices for every node of every pose.
+        Mat4 local = Mat4::from_quat(rot[k]);
+        local.col[0] = local.col[0] * sc[k].x;
+        local.col[1] = local.col[1] * sc[k].y;
+        local.col[2] = local.col[2] * sc[k].z;
+        local.col[3] = Vec4{tr[k], 1.f};
         out.nodeWorld[k] = parent >= 0 ? out.nodeWorld[static_cast<usize>(parent)] * local : local;
         for (i32 c : asset.nodes[k].children) todo.push_back({c, i});
     }

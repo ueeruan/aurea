@@ -24,7 +24,7 @@ import java.util.Locale
 fun KeepAppLanguage(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
-    val fixed = remember(configuration) { AppLanguage.override(context, configuration) }
+    val fixed = remember(context, configuration) { AppLanguage.override(context, configuration) }
     if (fixed == null) {
         content()
         return

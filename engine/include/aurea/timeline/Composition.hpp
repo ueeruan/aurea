@@ -91,7 +91,7 @@ struct PostProcessSettings {
     /// 3 ALTO, 4 ULTRA). O export nunca fica abaixo do ALTO.
     u32  quality3d = 0;
     /// Tone map do grupo 3D: 0 = Khronos PBR Neutral (cores de catálogo),
-    /// 1 = AgX (fílmico/cinema).
+    /// 1 = AgX, 2 = AgX Punchy, 3 = AgX Golden, 4 = Uchimura, 5 = ACES SDR.
     u32  toneMapper = 0;
     /// Exposição do grupo 3D (multiplicador linear da luz da cena; 1 = neutro).
     /// Vale para modelos e céu; o 2D dentro da cena não muda.

@@ -1,8 +1,10 @@
 #include "aurea/render/FrameGraph.hpp"
+#include "aurea/render/TrackedResourceBudget.hpp"
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
 #include <cstdio>
+#include <new>
 
 namespace aurea {
 
@@ -25,6 +27,7 @@ void TransientTexturePool::begin_frame(GPUBackend& backend, u64 frameNumber) noe
 TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     for (Entry& e : entries_) {
         if (e.inUse || !e.desc.compatible(desc)) continue;
+        if (!tracked_admission(desc, 0, stats_.bytes)) return TextureHandle{};
         e.inUse = true;
         e.lastUsedFrame = frame_;
         ++stats_.inUse;
@@ -33,11 +36,30 @@ TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     if (!backend_) return TextureHandle{};
 
     trim_for(desc.estimated_bytes());
+    const u64 limit = allocationLimit_.load(std::memory_order_relaxed);
+    const u64 incoming = desc.estimated_bytes();
+    if (stats_.bytes > limit || incoming > limit - stats_.bytes) {
+        AUREA_LOG_WARN("pool: limite de memoria do quadro antes de criar %ux%u (%s): usados=%llu pedido=%llu limite=%llu ativos=%u",
+                       desc.width, desc.height, desc.debugName ? desc.debugName : "?",
+                       static_cast<unsigned long long>(stats_.bytes), static_cast<unsigned long long>(incoming),
+                       static_cast<unsigned long long>(limit), stats_.inUse);
+        return TextureHandle{};
+    }
+
+    if (!tracked_admission(desc, incoming, stats_.bytes)) return TextureHandle{};
 
     auto created = backend_->create_texture(desc);
     if (!created.ok()) {
         AUREA_LOG_ERROR("pool: falha ao criar textura %ux%u (%s)", desc.width, desc.height,
                         desc.debugName ? desc.debugName : "?");
+        return TextureHandle{};
+    }
+    // Driver allocation requirements and Vulkan block granularity can exceed
+    // the logical texture estimate. Recheck actual residency before publishing
+    // the handle. It has never been recorded, but retirement still follows the
+    // backend's fence-safe contract; no early credit is granted for that memory.
+    if (!tracked_admission(desc, 0, stats_.bytes + incoming)) {
+        backend_->retire_texture(*created, 0);
         return TextureHandle{};
     }
     Entry e;
@@ -55,6 +77,20 @@ TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     return e.texture;
 }
 
+bool TransientTexturePool::tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes) const noexcept {
+    const u64 budget = trackedResourceBudget_.load(std::memory_order_relaxed);
+    if (!budget || !backend_) return true;
+    const u64 known = knownResourceUse_ ? knownResourceUse_(knownResourceContext_) : 0;
+    const auto gpu = backend_->memory_stats();
+    if (fits_tracked_resource_budget(budget, poolBytes, gpu.usedBytes, gpu.reservedBytes, known, incomingBytes)) return true;
+    AUREA_LOG_WARN("pool: orcamento de recursos rastreados antes de criar %ux%u (%s): pool=%llu gpu=%llu reservado=%llu caches=%llu pedido=%llu limite=%llu",
+        desc.width, desc.height, desc.debugName ? desc.debugName : "?",
+        static_cast<unsigned long long>(poolBytes), static_cast<unsigned long long>(gpu.usedBytes),
+        static_cast<unsigned long long>(gpu.reservedBytes), static_cast<unsigned long long>(known),
+        static_cast<unsigned long long>(incomingBytes), static_cast<unsigned long long>(budget));
+    return false;
+}
+
 void TransientTexturePool::release(TextureHandle texture) noexcept {
     for (Entry& e : entries_) {
         if (e.texture == texture && e.inUse) {
@@ -63,6 +99,34 @@ void TransientTexturePool::release(TextureHandle texture) noexcept {
             if (stats_.inUse) --stats_.inUse;
             return;
         }
+    }
+}
+
+void TransientTexturePool::retire(TextureHandle texture, u64 lastSubmittedFrame) noexcept {
+    if (!backend_) return;
+    for (usize i = 0; i < entries_.size(); ++i) {
+        const Entry& entry = entries_[i];
+        if (entry.texture != texture) continue;
+        struct Retirement { GPUBackend* backend; TextureHandle texture; u64 frame; };
+        auto* ticket = new (std::nothrow) Retirement{backend_, texture, lastSubmittedFrame};
+        if (!ticket) {
+            // Keep it quarantined until teardown rather than recycle GPU-owned
+            // storage when even a tiny retirement ticket cannot be allocated.
+            if (!entries_[i].inUse) { entries_[i].inUse = true; ++stats_.inUse; }
+            return;
+        }
+        stats_.bytes -= std::min(stats_.bytes, entry.desc.estimated_bytes());
+        if (stats_.alive) --stats_.alive;
+        if (entry.inUse && stats_.inUse) --stats_.inUse;
+        entries_[i] = entries_.back(); entries_.pop_back();
+        // This also protects backends whose retire_texture uses command-ordered
+        // deletion: their allocation accounting stays live until completion.
+        backend_->defer_until_gpu_done([](void* value) {
+            auto* retired = static_cast<Retirement*>(value);
+            retired->backend->retire_texture(retired->texture, retired->frame);
+            delete retired;
+        }, ticket);
+        return;
     }
 }
 
@@ -103,6 +167,22 @@ void TransientTexturePool::trim_for(u64 incomingBytes) noexcept {
         entries_[oldest] = entries_.back();
         entries_.pop_back();
     }
+}
+
+u32 TransientTexturePool::trim_unreferenced(u64 completedFrame) noexcept {
+    if (!backend_) return 0;
+    u32 removed = 0;
+    for (usize i = 0; i < entries_.size();) {
+        const Entry& entry = entries_[i];
+        if (entry.inUse || entry.lastUsedFrame > completedFrame) { ++i; continue; }
+        backend_->retire_texture(entry.texture, entry.lastUsedFrame);
+        stats_.bytes -= std::min(stats_.bytes, entry.desc.estimated_bytes());
+        if (stats_.alive) --stats_.alive;
+        ++stats_.destroyedThisFrame;
+        entries_[i] = entries_.back(); entries_.pop_back();
+        ++removed;
+    }
+    return removed;
 }
 
 void TransientTexturePool::clear() noexcept {
@@ -398,6 +478,15 @@ bool FrameGraph::sort_passes() noexcept {
             if (it != writers_.begin()) {
                 prod = *(it - 1);
             } else {
+                // A first attachment Load of an imported texture reads the
+                // preserved external version. A later writer is not its
+                // producer: that would create Load0 -> Write1 -> Load0.
+                const Pass& pass = passes_[a.pass];
+                const bool attachmentLoad = pass.kind == PassKind::Raster
+                    && ((pass.colorTarget.index == r && pass.load == LoadOp::Load)
+                        || (pass.colorTarget1.index == r && pass.load == LoadOp::Load)
+                        || (pass.depthTarget.index == r && pass.depthLoad == LoadOp::Load));
+                if (resources_[r].imported && attachmentLoad && it != writers_.end() && *it == a.pass) continue;
                 if (it != writers_.end() && *it == a.pass) ++it;
                 if (it != writers_.end()) prod = *it;
             }

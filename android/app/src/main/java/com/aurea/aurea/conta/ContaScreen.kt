@@ -54,9 +54,8 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
 
 /**
- * A tela da conta obrigatória: cadastro na primeira abertura, entrada depois
- * (sair da conta, reinstalar, sessão expirada). Cobre o app inteiro até a
- * pessoa estar dentro. O par no iOS é `ContaView.swift`.
+ * Cadastro/entrada opcionais, abertos pelo menu e fecháveis sem autenticar.
+ * O par no iOS é `ContaView.swift`.
  *
  * A senha fica em `remember` (não em `rememberSaveable`): ela não vai para o
  * estado salvo da Activity.

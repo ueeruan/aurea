@@ -588,3 +588,299 @@ AUREA_TEST(ModelBudget, Scene3DSectionRoundTripsAndOldProjectsStayOriginal) {
         if (a.kind == AssetKind::Model3D) AUREA_CHECK_EQ(static_cast<u32>(a.model.importQuality), 0u);
     });
 }
+
+// =============================================================================
+//  Import 3D num celular de 4 GB (classe LOW), pela MESMA fachada dos apps
+//  (Engine::inspect_model + Engine::import_model, como o JNI e o AureaEngine.mm
+//  chamam). Beta 0.0.5: "FBX, GLB e OBJ não importam, nem os pequenos" e
+//  "uns perdem a textura". Cada fixture do repositório tem de entrar, com
+//  TODAS as texturas que o import sem orçamento lê (nenhuma pulada).
+// =============================================================================
+#include "ModelTextureFixtures.hpp"
+
+#include <algorithm>
+#include <cctype>
+
+namespace {
+
+/// Processo de um Galaxy A15/moto g52 (4 GB, ~1,2 GB livres): o orçamento do
+/// motor é avail/4 ≈ 300 MB (DeviceCapabilities::memory_budget_bytes).
+constexpr u64 kLowProcessBudget = 300ull * 1024 * 1024;
+
+std::vector<std::string> every_model_fixture() {
+    namespace fs = std::filesystem;
+    std::vector<std::string> out;
+    const fs::path data = fs::u8path(AUREA_TEST_DATA_DIR);
+    std::error_code ec;
+    auto take = [&](const fs::path& p) {
+        std::string ext = p.extension().string();
+        for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext == ".glb" || ext == ".gltf" || ext == ".fbx" || ext == ".obj") { const auto u = p.generic_u8string(); out.emplace_back(u.begin(), u.end()); }
+    };
+    for (fs::recursive_directory_iterator it(data / "gltf", ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file()) take(it->path());
+    ec.clear();
+    for (fs::directory_iterator it(data, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file()) take(it->path());
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+u32 decoded_images(const SceneAsset& s) {
+    u32 n = 0;
+    for (const Image& i : s.images) if (!i.pixels().empty() && i.width && i.height) ++n;
+    return n;
+}
+
+std::shared_ptr<const SceneAsset> newest_model(const Engine& e) {
+    u64 newest = 0;
+    e.project()->for_each_asset([&](AssetId id, const Asset& a) {
+        if (a.kind == AssetKind::Model3D) newest = std::max(newest, id.pack());
+    });
+    return newest ? e.model_asset(newest) : nullptr;
+}
+
+/// Plano + import do jeito dos apps: Original quando o plano não acha pesado,
+/// senão a qualidade recomendada (o diálogo "Otimizar" com o padrão).
+Result<u64> import_like_the_apps(Engine& e, const std::string& path, const DeviceMemoryHint& memory,
+                                 std::string& detail) {
+    const ModelPlan plan = e.inspect_model(path, memory);
+    if (plan.tooHeavy) return Status{Errc::BudgetExceeded, "plano recusou (tooHeavy)"};
+    ModelImport req;
+    req.path = path;
+    req.memory = memory;
+    req.quality = plan.heavy ? plan.recommended : ModelQuality::Original;
+    return e.import_model(req, nullptr, &detail);
+}
+
+EngineConfig low_memory_config() {
+    EngineConfig cfg;
+    cfg.workerCount = 2;
+    cfg.memoryBudgetBytes = kLowProcessBudget;
+    cfg.disableAutosave = true;
+    return cfg;
+}
+
+} // namespace
+
+AUREA_TEST(ModelImportLowMemory, EveryFixtureImportsWithItsTexturesOnA4GbPhone) {
+    const std::vector<std::string> fixtures = every_model_fixture();
+    AUREA_CHECK(fixtures.size() >= 10u);
+    // O que o Android manda (ActivityManager.MemoryInfo), o "sem medição"
+    // (zeros) e um aparelho isLowRamDevice de 3 GB: todos têm de importar.
+    const DeviceMemoryHint hints[] = {phone(4, 1200), DeviceMemoryHint{}, phone(3, 700, true)};
+    for (const DeviceMemoryHint& hint : hints) {
+        Engine e;
+        AUREA_CHECK(e.initialize(low_memory_config()).ok());
+        AUREA_CHECK(e.new_project(1080, 1920, 30.0, "modelos").ok());
+        for (const std::string& path : fixtures) {
+            // Referência: o importador sem orçamento nenhum (o que o arquivo tem).
+            const ImportResult ref = import_scene_file(path, ImportOptions{});
+            if (!ref.ok()) {
+                std::printf("\n  [fixture ilegivel mesmo sem orcamento] %s: %s", path.c_str(), ref.detail.c_str());
+                continue;
+            }
+            const u32 refTextures = decoded_images(*ref.asset);
+            std::string detail;
+            const Result<u64> layer = import_like_the_apps(e, path, hint, detail);
+            if (!layer.ok()) std::printf("\n  [falhou] %s (total %llu MB): %s %s", path.c_str(),
+                                         static_cast<unsigned long long>(hint.totalBytes >> 20),
+                                         layer.status().message().data(), detail.c_str());
+            AUREA_CHECK_MSG(layer.ok(), path.c_str());
+            if (!layer.ok()) continue;
+            const auto scene = newest_model(e);
+            AUREA_CHECK(scene != nullptr);
+            if (!scene) continue;
+            const u32 got = decoded_images(*scene);
+            if (got != refTextures) std::printf("\n  [textura perdida] %s: %u de %u (puladas %u)", path.c_str(), got,
+                                                refTextures, scene->stats.texturesSkipped);
+            AUREA_CHECK_MSG(got == refTextures, path.c_str());
+            AUREA_CHECK_EQ(scene->stats.texturesSkipped, 0u);
+        }
+        e.shutdown();
+    }
+}
+
+AUREA_TEST(ModelImportLowMemory, ExternalTextureObjAndFbxImportTexturedOnA4GbPhone) {
+    Engine e;
+    AUREA_CHECK(e.initialize(low_memory_config()).ok());
+    AUREA_CHECK(e.new_project(1080, 1920, 30.0, "obj-fbx").ok());
+    // OBJ com .mtl e textura escolhidos junto (pasta do seletor).
+    const std::string objDir = test_fixtures::fresh_model_folder("aurea_model_budget_tmp/low_obj");
+    const std::string obj = test_fixtures::write_textured_obj(objDir);
+    test_fixtures::write_picked_mtl(objDir, "Tijolo.png");
+    AUREA_CHECK(test_fixtures::write_solid_png(objDir + "Tijolo.png", 200, 40, 30));
+    // FBX ASCII com a textura difusa externa.
+    const std::string fbxDir = test_fixtures::fresh_model_folder("aurea_model_budget_tmp/low_fbx");
+    const std::string fbx = test_fixtures::write_textured_fbx(fbxDir, "Tijolo.png");
+    AUREA_CHECK(test_fixtures::write_solid_png(fbxDir + "Tijolo.png", 30, 200, 40));
+    for (const std::string& path : {obj, fbx}) {
+        std::string detail;
+        const Result<u64> layer = import_like_the_apps(e, path, phone(4, 1200), detail);
+        AUREA_CHECK_MSG(layer.ok(), (path + ": " + detail).c_str());
+        if (!layer.ok()) continue;
+        const auto scene = newest_model(e);
+        AUREA_CHECK(scene != nullptr);
+        if (!scene) continue;
+        AUREA_CHECK_MSG(decoded_images(*scene) >= 1u, path.c_str());
+        AUREA_CHECK(scene->missingTextures.empty());
+    }
+    e.shutdown();
+}
+
+AUREA_TEST(ModelImportLowMemory, ModelStillImportsWhenAProjectPhotoFillsTheImageRoom) {
+    // Projeto com uma foto de 12 MP decodificada (48 MB) num celular de 4 GB:
+    // o espaço de imagens/modelos (orçamento/3 ≈ 100 MB) fica pela metade. O
+    // modelo com textura ainda tem de entrar — as texturas descem de lado
+    // para caber, não somem e o modelo não é recusado.
+    Engine e;
+    AUREA_CHECK(e.initialize(low_memory_config()).ok());
+    AUREA_CHECK(e.new_project(1080, 1920, 30.0, "fotos").ok());
+    {
+        const u32 w = 4000, h = 3000;
+        std::vector<u8> photo(static_cast<usize>(w) * h * 4, 128);
+        AUREA_CHECK(e.import_image(photo.data(), w, h, "foto1", "foto1.jpg").ok());
+    }
+    const std::string helmet = std::string(AUREA_TEST_DATA_DIR) + "/gltf/DamagedHelmet.glb";
+    std::string detail;
+    const Result<u64> layer = import_like_the_apps(e, helmet, phone(4, 1200), detail);
+    if (!layer.ok()) std::printf("\n  [falhou com foto] %s %s", layer.status().message().data(), detail.c_str());
+    AUREA_CHECK_MSG(layer.ok(), detail.c_str());
+    if (layer.ok()) {
+        const auto scene = newest_model(e);
+        AUREA_CHECK(scene != nullptr);
+        if (scene) AUREA_CHECK(decoded_images(*scene) >= 4u);
+    }
+    e.shutdown();
+}
+
+AUREA_TEST(ModelImportLowMemory, GltfPickedWithItsBinAndTexturesInOneFolderImportsTextured) {
+    // O seletor do celular entrega o .gltf, o .bin e as texturas soltos; os
+    // apps copiam tudo para UMA pasta. As URIs gravadas apontam para pastas
+    // que não existem ali ("../buffers/", "textures/") e com outra caixa.
+    namespace fs = std::filesystem;
+    const std::string src = std::string(AUREA_TEST_DATA_DIR) + "/gltf/BoxTextured/";
+    const std::string dir = test_fixtures::fresh_model_folder("aurea_model_budget_tmp/flat_gltf");
+    std::error_code ec;
+    fs::copy_file(fs::u8path(src + "BoxTextured0.bin"), fs::u8path(dir + "BoxTextured0.bin"), ec);
+    AUREA_CHECK(!ec);
+    fs::copy_file(fs::u8path(src + "CesiumLogoFlat.png"), fs::u8path(dir + "CesiumLogoFlat.png"), ec);
+    AUREA_CHECK(!ec);
+    std::string json;
+    {
+        std::FILE* f = std::fopen((src + "BoxTextured.gltf").c_str(), "rb");
+        AUREA_CHECK(f != nullptr);
+        if (!f) return;
+        char buf[4096];
+        for (usize n; (n = std::fread(buf, 1, sizeof(buf), f)) > 0;) json.append(buf, n);
+        std::fclose(f);
+    }
+    auto replace = [&json](const std::string& from, const std::string& to) {
+        const usize at = json.find(from);
+        AUREA_CHECK(at != std::string::npos);
+        if (at != std::string::npos) json.replace(at, from.size(), to);
+    };
+    replace("\"CesiumLogoFlat.png\"", "\"textures/cesiumlogoflat.PNG\"");
+    replace("\"BoxTextured0.bin\"", "\"../buffers/BoxTextured0.bin\"");
+    test_fixtures::write_text(dir + "a9f3.gltf", json.c_str());
+    Engine e;
+    AUREA_CHECK(e.initialize(low_memory_config()).ok());
+    AUREA_CHECK(e.new_project(1080, 1920, 30.0, "gltf-solto").ok());
+    std::string detail;
+    const Result<u64> layer = import_like_the_apps(e, dir + "a9f3.gltf", phone(4, 1200), detail);
+    AUREA_CHECK_MSG(layer.ok(), detail.c_str());
+    if (layer.ok()) {
+        const auto scene = newest_model(e);
+        AUREA_CHECK(scene != nullptr);
+        if (scene) {
+            AUREA_CHECK_EQ(decoded_images(*scene), 1u);
+            AUREA_CHECK(scene->missingTextures.empty());
+        }
+    }
+    e.shutdown();
+}
+
+#include "../third_party/meshoptimizer/src/meshoptimizer.h"
+
+AUREA_TEST(ModelImportLowMemory, MeshoptCompressedGltfImportsAndDracoSaysHowToFix) {
+    // GLB/glTF "otimizado para web" (gltfpack, gltf.report): EXT_meshopt_compression
+    // obrigatório. Antes: recusado ("ainda nao suportado"). Agora: decodificado.
+    const std::string dir = test_fixtures::fresh_model_folder("aurea_model_budget_tmp/meshopt");
+    const f32 positions[12] = {-0.5f, -0.5f, 0, 0.5f, -0.5f, 0, 0.5f, 0.5f, 0, -0.5f, 0.5f, 0};
+    const unsigned int indices[6] = {0, 1, 2, 0, 2, 3};
+    std::vector<unsigned char> vtx(meshopt_encodeVertexBufferBound(4, 12));
+    vtx.resize(meshopt_encodeVertexBuffer(vtx.data(), vtx.size(), positions, 4, 12));
+    std::vector<unsigned char> idx(meshopt_encodeIndexBufferBound(6, 4));
+    idx.resize(meshopt_encodeIndexBuffer(idx.data(), idx.size(), indices, 6));
+    AUREA_CHECK(!vtx.empty() && !idx.empty());
+    std::vector<unsigned char> bin = vtx;
+    while (bin.size() % 4) bin.push_back(0);
+    const usize idxOffset = bin.size();
+    bin.insert(bin.end(), idx.begin(), idx.end());
+    {
+        std::FILE* f = std::fopen((dir + "q.bin").c_str(), "wb");
+        AUREA_CHECK(f != nullptr);
+        if (!f) return;
+        std::fwrite(bin.data(), 1, bin.size(), f);
+        std::fclose(f);
+    }
+    char json[2048];
+    std::snprintf(json, sizeof(json),
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"extensionsUsed\":[\"EXT_meshopt_compression\"],\"extensionsRequired\":[\"EXT_meshopt_compression\"],"
+        "\"buffers\":[{\"uri\":\"q.bin\",\"byteLength\":%zu},"
+        "{\"byteLength\":72,\"extensions\":{\"EXT_meshopt_compression\":{\"fallback\":true}}}],"
+        "\"bufferViews\":["
+        "{\"buffer\":1,\"byteOffset\":0,\"byteLength\":48,\"byteStride\":12,\"extensions\":{\"EXT_meshopt_compression\":"
+        "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":%zu,\"byteStride\":12,\"count\":4,\"mode\":\"ATTRIBUTES\"}}},"
+        "{\"buffer\":1,\"byteOffset\":48,\"byteLength\":24,\"extensions\":{\"EXT_meshopt_compression\":"
+        "{\"buffer\":0,\"byteOffset\":%zu,\"byteLength\":%zu,\"byteStride\":4,\"count\":6,\"mode\":\"TRIANGLES\"}}}],"
+        "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\","
+        "\"min\":[-0.5,-0.5,0],\"max\":[0.5,0.5,0]},"
+        "{\"bufferView\":1,\"componentType\":5125,\"count\":6,\"type\":\"SCALAR\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1}]}],"
+        "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}",
+        bin.size(), vtx.size(), idxOffset, idx.size());
+    test_fixtures::write_text(dir + "q.gltf", json);
+    Engine e;
+    AUREA_CHECK(e.initialize(low_memory_config()).ok());
+    AUREA_CHECK(e.new_project(1080, 1920, 30.0, "meshopt").ok());
+    std::string detail;
+    const Result<u64> layer = import_like_the_apps(e, dir + "q.gltf", phone(4, 1200), detail);
+    AUREA_CHECK_MSG(layer.ok(), detail.c_str());
+    if (layer.ok()) {
+        const auto scene = newest_model(e);
+        AUREA_CHECK(scene != nullptr);
+        if (scene && !scene->meshes.empty() && !scene->meshes[0].primitives.empty()) {
+            const Primitive& p = scene->meshes[0].primitives[0];
+            // No NORMAL accessor: glTF requires flat normals, so the importer
+            // expands the two triangles. Verify decoded geometry, not indexing.
+            AUREA_CHECK_EQ(p.positions.size(), 6u);
+            AUREA_CHECK_EQ(p.indices.size(), 6u);
+            for (usize i = 0; i < p.indices.size(); ++i) {
+                if (p.indices[i] >= p.positions.size()) { AUREA_CHECK(false); continue; }
+                const Vec3& point = p.positions[p.indices[i]];
+                AUREA_CHECK_NEAR(point.x, positions[indices[i] * 3], 1e-6);
+                AUREA_CHECK_NEAR(point.y, positions[indices[i] * 3 + 1], 1e-6);
+                AUREA_CHECK_NEAR(point.z, positions[indices[i] * 3 + 2], 1e-6);
+            }
+        }
+    }
+    // Draco: sem decodificador no app — a mensagem diz o que fazer (as duas
+    // apps traduzem esta frase: eng_model_compressed).
+    std::string draco = json;
+    for (const char* from : {"EXT_meshopt_compression\"],\"extensionsRequired\":[\"EXT_meshopt_compression"}) {
+        const usize at = draco.find(from);
+        AUREA_CHECK(at != std::string::npos);
+        if (at != std::string::npos)
+            draco.replace(at, std::strlen(from), "KHR_draco_mesh_compression\"],\"extensionsRequired\":[\"KHR_draco_mesh_compression");
+    }
+    test_fixtures::write_text(dir + "d.gltf", draco.c_str());
+    ModelImport req;
+    req.path = dir + "d.gltf";
+    std::string why;
+    const Result<u64> refused = e.import_model(req, nullptr, &why);
+    AUREA_CHECK(!refused.ok());
+    AUREA_CHECK_MSG(why == "modelo comprimido com draco: exporte sem compressao", why.c_str());
+    e.shutdown();
+}

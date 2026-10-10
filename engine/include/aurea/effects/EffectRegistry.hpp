@@ -209,6 +209,8 @@ namespace effect_keys {
     // --- Datamosh (Glitch): o quadro antigo arrastado pelo movimento do atual ---
     // Lê a fonte num instante anterior como o Detectar movimento (ver DatamoshEffect.cpp).
     inline constexpr const char* kDatamosh              = "aurea.glitch.datamosh";
+    inline constexpr const char* kWipeFlux              = "aurea.transition.wipe_flux";
+    inline constexpr const char* kWipePlasma            = "aurea.transition.wipe_plasma";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

@@ -47,6 +47,8 @@ fun HomeScreen(store: EditorStore) {
     val conta: ContaViewModel = viewModel()
     var confirmLogout by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var showAccount by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(conta.logado) { if (conta.logado) showAccount = false }
     val projects = rememberTabListState(vm, HomeViewModel.PROJECTS_TAB)
     val settings = rememberTabListState(vm, HomeViewModel.SETTINGS_TAB)
     var menu by remember { mutableStateOf(false) }
@@ -66,10 +68,9 @@ fun HomeScreen(store: EditorStore) {
     Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()) {
         LiveNoticeBanners(vm.notices)
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("aurea", style = AureaType.HeadlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-1).sp))
-                RegisteredUsersLine(conta.usuarios)
-            }
+            AureaLogo(28.dp)
+            Text("AUREA", modifier = Modifier.weight(1f).padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
+                style = AureaType.TitleLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp))
             ReleaseNotesEntry()
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -89,6 +90,17 @@ fun HomeScreen(store: EditorStore) {
     }
     if (newProject) NewProjectSheetFor(store, vm, store.projects) { newProject = false }
     val signedIn = (conta.estado as? ContaEstado.Dentro)?.email
+    if (showAccount) androidx.compose.ui.window.Dialog(
+        onDismissRequest = { showAccount = false },
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()) {
+            TextButton(onClick = { showAccount = false }, modifier = Modifier.align(Alignment.End).testTag("conta.fechar")) {
+                Text(stringResource(R.string.editor_fechar))
+            }
+            Box(Modifier.weight(1f)) { com.aurea.aurea.conta.ContaScreen(conta) }
+        }
+    }
     if (menu) AureaActionSheet(title = "Aurea",
         message = signedIn?.let { stringResource(R.string.conta_conectado, it) },
         onDismiss = { menu = false }, actions = listOf(
@@ -98,8 +110,10 @@ fun HomeScreen(store: EditorStore) {
         SheetAction(stringResource(R.string.report_title)) { reportProblem = true },
         SheetAction(stringResource(R.string.settings_group_about)) { about = true },
         SheetAction(stringResource(R.string.licenses_title)) { licenses = true },
+    ) + if (signedIn == null) listOf(
+        SheetAction(stringResource(R.string.conta_entrar)) { conta.entrando = true; showAccount = true },
+    ) else listOf(
         SheetAction(stringResource(R.string.conta_sair), destructive = true) { confirmLogout = true },
-        // Google Play e App Store exigem excluir a conta de dentro do app.
         SheetAction(stringResource(R.string.conta_excluir), destructive = true) { confirmDelete = true },
     ))
     if (reportProblem) ReportProblemSheet(sessao = { conta.sessao() }, onResult = { store.showToast(it) }) { reportProblem = false }
@@ -184,9 +198,8 @@ internal fun RegisteredUsersLine(count: Int?) {
 internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> Unit,
                       onCreate: () -> Unit, onMenu: () -> Unit, onImport: () -> Unit,
                       onProfile: () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-        .clip(RoundedCornerShape(28.dp)).background(AureaColors.Surface)
-        .border(1.dp, AureaColors.Border, RoundedCornerShape(28.dp)).padding(horizontal = 4.dp, vertical = 10.dp),
+    Row(Modifier.fillMaxWidth().background(AureaColors.NavigationBar)
+        .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             DockUtility(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_tab_settings), "home.menu", onMenu)
@@ -194,7 +207,7 @@ internal fun HomeDock(selected: Int, onProjects: () -> Unit, onCommunity: () -> 
         DockTab(CupertinoGlyph.RectangleStack, stringResource(R.string.home_tab_projects), selected == HomeViewModel.PROJECTS_TAB,
             Modifier.weight(1f).testTag("home.projects"), onProjects)
         val createLabel = stringResource(R.string.home_new_project)
-        Box(Modifier.size(64.dp).clip(CircleShape).background(AureaColors.Accent)
+        Box(Modifier.size(56.dp).clip(CircleShape).background(AureaColors.Accent)
             .testTag("home.create").semantics { contentDescription = createLabel }
             .clickable(role = Role.Button, onClick = onCreate), contentAlignment = Alignment.Center) {
             CupertinoIcon(CupertinoGlyph.Plus, 30.dp, AureaColors.OnAccent)
@@ -217,11 +230,12 @@ private fun DockUtility(icon: Char, label: String, tag: String, onClick: () -> U
 @Composable
 private fun DockTab(icon: Char, label: String, active: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Column(modifier.heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
-        .semantics { selected = active }.clickable(role = Role.Tab, onClick = onClick).padding(vertical = 8.dp),
+        .semantics { selected = active; contentDescription = label }.clickable(role = Role.Tab, onClick = onClick).padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
         CupertinoIcon(icon, 23.dp, if (active) AureaColors.Accent else AureaColors.Muted)
         Text(label, style = AureaType.BodySmall.copy(fontSize = 12.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal),
-            color = if (active) AureaColors.Text else AureaColors.Muted, textAlign = TextAlign.Center)
+            color = if (active) AureaColors.Text else AureaColors.Muted, textAlign = TextAlign.Center,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         Box(Modifier.size(width = 16.dp, height = 2.dp).background(if (active) AureaColors.Accent else AureaColors.Surface, CircleShape))
     }
 }

@@ -46,11 +46,13 @@ public:
     /// objeto não serve — o alocador reaproveita o endereço de uma fonte
     /// liberada para outra fonte, e o cache devolveria a malha da fonte errada.
     [[nodiscard]] u64 content_id() const noexcept { return contentId_; }
+    [[nodiscard]] const std::string& source_path() const noexcept { return sourcePath_; }
 
 private:
     Font() = default;
     std::unique_ptr<Impl> impl_;
     u64 contentId_ = 0;
+    std::string sourcePath_;
 };
 
 /// Fonte padrão do aparelho (Roboto no Android, Segoe/Arial no Windows,
@@ -65,6 +67,9 @@ struct TextExtent {
     f32 height = 0.0f;
 };
 [[nodiscard]] TextExtent measure(const Font& font, const TextData& t);
+/// Files actually used by shaping, including fallback glyphs. Recovery uses
+/// this to verify the same font bytes before replaying an export snapshot.
+[[nodiscard]] std::vector<std::string> source_dependencies(const Font& font, const TextData& t);
 
 struct TextRaster {
     std::vector<u8> rgba;    ///< sRGB, alfa reto
@@ -82,7 +87,8 @@ struct TextRaster {
 /// layout (linhas, alinhamento, entrelinha, espaçamento) da rasterização.
 /// Cada contorno é fechado implicitamente (o último ponto liga no primeiro).
 /// É a base do texto 3D extrudado.
-[[nodiscard]] bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours, i32 glyphIndex = -1);
+[[nodiscard]] bool outline(const Font& font, const TextData& t, std::vector<std::vector<Vec2>>& contours,
+                           i32 glyphIndex = -1, std::vector<u32>* contourGlyphs = nullptr);
 
 /// Um glifo depois do shaping (HarfBuzz): índice na fonte, caractere de
 /// origem (cluster, na linha), posição na linha de base (px da layer) e se

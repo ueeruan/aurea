@@ -31,6 +31,9 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/core/Time.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
+#include "aurea/export/ExportRecovery.hpp"
+#include "aurea/project/FileIO.hpp"
+#include "aurea/audio/AudioEffects.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/project/Project.hpp"
@@ -77,10 +80,15 @@ struct BenchCapture {
     u32 encodeUs = 0;                    ///< latência extra simulada do encoder
     u32 openDelayUs = 0;
     std::atomic<bool>* openEntered = nullptr;
+    std::atomic<bool>* sinkDestroyed = nullptr;
+    std::atomic<bool>* openActive = nullptr;
+    std::atomic<bool>* abortedDuringOpen = nullptr;
+    bool persistFinishMarker = false;
     std::atomic<bool>* writeEntered = nullptr;
     std::atomic<bool>* allowWrite = nullptr;
     Status writeFailure{};              ///< fault injection at the platform boundary
     Status openFailure{};
+    std::function<Status()> beforeOpen;
     Status finishFailure{};
     bool invalidateDiagnosticOnDestroy = false;
     char platformDiagnostic[192]{};
@@ -141,10 +149,20 @@ public:
         // lifetime without making the regression itself read freed memory.
         if (c_->invalidateDiagnosticOnDestroy)
             std::snprintf(c_->platformDiagnostic, sizeof(c_->platformDiagnostic), "diagnostico expirado");
+        if (c_->sinkDestroyed) c_->sinkDestroyed->store(true, std::memory_order_release);
     }
-    Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
+    Status open(const char* path, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
+        struct OpenActivity {
+            std::atomic<bool>* flag;
+            explicit OpenActivity(std::atomic<bool>* f) : flag(f) {
+                if (flag) flag->store(true, std::memory_order_release);
+            }
+            ~OpenActivity() { if (flag) flag->store(false, std::memory_order_release); }
+        } activity{c_->openActive};
+        outputPath_ = path ? path : "";
         if (c_->openEntered) c_->openEntered->store(true, std::memory_order_release);
         if (c_->openDelayUs) std::this_thread::sleep_for(std::chrono::microseconds(c_->openDelayUs));
+        if (c_->beforeOpen) { const Status s = c_->beforeOpen(); if (!s.ok()) return s; }
         if (!c_->openFailure.ok()) return c_->openFailure;
         c_->video = v;
         c_->hasAudio = a != nullptr;
@@ -198,9 +216,17 @@ public:
     Status finish() noexcept override {
         if (c_->hangFinish) return hang();
         c_->finished = true;
+        if (c_->finishFailure.ok() && c_->persistFinishMarker) {
+            const char marker[] = "finished benchmark sink";
+            if (const Status s = fileio::write_atomic(outputPath_, marker, sizeof(marker)); !s.ok()) return s;
+        }
         return c_->finishFailure;
     }
-    void abort() noexcept override { c_->aborted = true; }
+    void abort() noexcept override {
+        if (c_->abortedDuringOpen && c_->openActive && c_->openActive->load(std::memory_order_acquire))
+            c_->abortedDuringOpen->store(true, std::memory_order_release);
+        c_->aborted = true;
+    }
     EncoderInfo encoder_info() const noexcept override {
         EncoderInfo i;
         std::snprintf(i.name, sizeof(i.name), "%s", "stub-do-host");
@@ -209,6 +235,7 @@ public:
     }
 private:
     BenchCapture* c_;
+    std::string outputPath_;
 };
 
 std::unique_ptr<ExportSink> make_bench_sink(void* user) {
@@ -242,15 +269,23 @@ struct Rig {
     Engine e;
     bool ok = false;
     Rig(const SyntheticConfig& cfg, f64 compFps, i64 frames, u32 depth,
-        VideoSourceFactory* mediaFactory = nullptr, GPUBackend* backend = nullptr, u32 workerHangMs = 0) : factory(cfg) {
+        VideoSourceFactory* mediaFactory = nullptr, GPUBackend* backend = nullptr, u32 workerHangMs = 0,
+        bool recovery = false, const char* sourcePath = "sintetico",
+        ExportExecutionProfile profile = ExportExecutionProfile::Balanced, bool startupGate = false,
+        ImageLoaderFn imageLoader = nullptr, void* imageLoaderContext = nullptr) : factory(cfg) {
         EngineConfig ec;
         ec.exportWorkerHangMs = workerHangMs;
+        ec.enableExportRecovery = recovery;
+        ec.enableExportStartupGate = startupGate;
+        ec.imageLoader = imageLoader;
+        ec.imageLoaderContext = imageLoaderContext;
         ec.backend = backend ? backend : new vk::Backend();
         ec.backendConfig.enableValidation = false;
         ec.mediaFactory = mediaFactory ? mediaFactory : &factory;
         ec.exportSinkFactory = &make_bench_sink;
         ec.exportSinkContext = &cap;
         ec.exportPipelineDepth = depth;
+        ec.exportExecutionProfile = profile;
         ec.disableAutosave = true;
         ec.workerCount = 2;
         // Tabela de codecs como a de um aparelho com decode/encode 4K de
@@ -272,7 +307,7 @@ struct Rig {
         if (!e.initialize(ec).ok()) return;
         if (!e.new_project(cfg.width, cfg.height, compFps, nullptr).ok()) return;
         VideoImport vi;
-        vi.sourcePath = "sintetico";
+        vi.sourcePath = sourcePath;
         vi.displayName = "sintetico";
         if (!e.import_video(vi).ok()) return;
         Command fps;
@@ -446,6 +481,9 @@ Outcome run_export(Rig& r, u32 shortSide, f64 fps, bool dither = true, int timeo
     }
     o.seconds = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
     o.p = r.e.export_progress();
+    if (o.p.result != Errc::Ok)
+        std::printf("\n    export failure code=%u reason=%u frames=%u/%u: %s\n",
+            static_cast<u32>(o.p.result), o.p.failure, o.p.framesDone, o.p.framesTotal, o.p.message);
     return o;
 }
 
@@ -492,6 +530,328 @@ bool gpu_ok() {
 // =============================================================================
 // Equivalência: pipeline × serial, bytes idênticos
 // =============================================================================
+AUREA_TEST(ExportStartupGateGpu, PublicCancellationDuringOpenReturnsBeforeLateWorkerAndAllowsNextExport) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string output = "aurea_test_startup_gate_gpu.mp4";
+    struct Cleanup {
+        std::string output;
+        ~Cleanup() { fileio::remove_file(output); }
+    } cleanup{output};
+    SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+    std::atomic<bool> opening{false}, release{false}, destroyed{false}, returned{false};
+    std::atomic<i32> startCode{static_cast<i32>(Errc::InvalidState)};
+    Rig r(cfg, 30, 4, 2, nullptr, nullptr, 0, false, "sintetico", ExportExecutionProfile::Balanced, true);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.cap.sinkDestroyed = &destroyed;
+    r.cap.beforeOpen = [&] {
+        opening.store(true, std::memory_order_release);
+        const u64 deadline = monotonic_ns() + 10'000'000'000ull;
+        while (!release.load(std::memory_order_acquire) && monotonic_ns() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return OkStatus;
+    };
+    ExportSettings settings; settings.height = 64; settings.fps = 30; settings.dither = false;
+    std::thread starter([&] {
+        startCode.store(static_cast<i32>(r.e.start_export(settings, output.c_str()).code()), std::memory_order_release);
+        returned.store(true, std::memory_order_release);
+    });
+    auto waitFlag = [](const std::atomic<bool>& flag, u64 timeoutNs) {
+        const u64 deadline = monotonic_ns() + timeoutNs;
+        while (!flag.load(std::memory_order_acquire) && monotonic_ns() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return flag.load(std::memory_order_acquire);
+    };
+    const bool entered = waitFlag(opening, 5'000'000'000ull);
+    AUREA_CHECK(entered);
+    if (entered) AUREA_CHECK(r.e.cancel_export().ok());
+    const bool returnedBeforeRelease = waitFlag(returned, 2'000'000'000ull);
+    AUREA_CHECK(returnedBeforeRelease);
+    if (returnedBeforeRelease) AUREA_CHECK(!destroyed.load(std::memory_order_acquire));
+    release.store(true, std::memory_order_release);
+    starter.join();
+    AUREA_CHECK_EQ(static_cast<Errc>(startCode.load(std::memory_order_acquire)), Errc::Cancelled);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
+    AUREA_CHECK(r.e.export_progress().finished);
+    const bool cleaned = waitFlag(destroyed, 5'000'000'000ull);
+    AUREA_CHECK(cleaned); if (!cleaned) return;
+    AUREA_CHECK(r.cap.aborted);
+    AUREA_CHECK(!fileio::exists(output));
+
+    // The late worker is fully gone before replacing its stable capture. The
+    // next real GPU export uses the same gate and publishes only after finish.
+    r.cap = BenchCapture{};
+    r.cap.persistFinishMarker = true;
+    AUREA_CHECK(r.e.start_export(settings, output.c_str()).ok());
+    const u64 deadline = monotonic_ns() + 10'000'000'000ull;
+    while (!r.e.export_progress().finished && monotonic_ns() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), usize{4});
+    AUREA_CHECK(r.cap.ptsMonotonic);
+    AUREA_CHECK(fileio::exists(output));
+}
+
+AUREA_TEST(ExportStartupGateGpu, CancellationAfterOpenBeforePublicationReleasesUnsubmittedGpuResources) {
+    const std::string output = "aurea_test_startup_allocation_cancel.mp4";
+    struct Cleanup { const std::string& path; ~Cleanup() { fileio::remove_file(path); } } cleanup{output};
+    SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 4, 2, nullptr, backend, 0, false, "sintetico", ExportExecutionProfile::Balanced, true);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    const usize mappedBefore = backend->mappedBuffers.size();
+    const auto aliveBefore = std::count(backend->textureAlive.begin(), backend->textureAlive.end(), true);
+    r.cap.persistFinishMarker = true;
+    bool allocationEntered = false, openAlreadyReturned = false;
+    Errc cancelCode = Errc::InvalidState;
+    backend->beforeCreateBuffer = [&](const BufferDesc& desc) {
+        if (!allocationEntered && desc.debugName && std::strcmp(desc.debugName, "export-leitura-y") == 0) {
+            allocationEntered = true;
+            openAlreadyReturned = r.cap.opened;
+            cancelCode = r.e.cancel_export().code();
+        }
+        return OkStatus;
+    };
+    ExportSettings settings; settings.height = 64; settings.fps = 30; settings.dither = false;
+    const Status cancelled = r.e.start_export(settings, output.c_str());
+    backend->beforeCreateBuffer = {};
+    AUREA_CHECK(allocationEntered && openAlreadyReturned);
+    AUREA_CHECK_EQ(cancelCode, Errc::Ok);
+    AUREA_CHECK_EQ(cancelled.code(), Errc::Cancelled);
+    AUREA_CHECK(r.cap.aborted && !r.cap.finished);
+    AUREA_CHECK(r.cap.hashes.empty());
+    AUREA_CHECK(!r.e.export_progress().running);
+    AUREA_CHECK(!fileio::exists(output));
+    AUREA_CHECK(backend->mappedBuffers.size() <= mappedBefore);
+    AUREA_CHECK(std::count(backend->textureAlive.begin(), backend->textureAlive.end(), true) <= aliveBefore);
+}
+
+AUREA_TEST(ExportStartupGateGpu, BackgroundLifecycleCancelsOpenBeforeWaitingAndNeverAbortsAnActiveSink) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    for (const bool shutdown : {false, true}) {
+        const std::string output = shutdown ? "aurea_test_gate_shutdown_gpu.mp4" : "aurea_test_gate_suspend_gpu.mp4";
+        struct Cleanup {
+            std::string output;
+            ~Cleanup() { fileio::remove_file(output); }
+        } cleanup{output};
+        SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+        std::atomic<bool> opening{false}, release{false}, destroyed{false}, openActive{false}, abortedDuringOpen{false};
+        std::atomic<bool> startReturned{false}, lifecycleReturned{false};
+        std::atomic<i32> startCode{static_cast<i32>(Errc::InvalidState)}, lifecycleCode{static_cast<i32>(Errc::InvalidState)};
+        Rig r(cfg, 30, 4, 2, nullptr, nullptr, 0, false, "sintetico", ExportExecutionProfile::Balanced, true);
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        r.cap.sinkDestroyed = &destroyed;
+        r.cap.openActive = &openActive;
+        r.cap.abortedDuringOpen = &abortedDuringOpen;
+        r.cap.beforeOpen = [&] {
+            opening.store(true, std::memory_order_release);
+            const u64 deadline = monotonic_ns() + 10'000'000'000ull;
+            while (!release.load(std::memory_order_acquire) && monotonic_ns() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return OkStatus;
+        };
+        ExportSettings settings; settings.height = 64; settings.fps = 30; settings.dither = false;
+        std::thread starter([&] {
+            startCode.store(static_cast<i32>(r.e.start_export(settings, output.c_str()).code()), std::memory_order_release);
+            startReturned.store(true, std::memory_order_release);
+        });
+        auto waitFlag = [](const std::atomic<bool>& flag, u64 timeoutNs) {
+            const u64 deadline = monotonic_ns() + timeoutNs;
+            while (!flag.load(std::memory_order_acquire) && monotonic_ns() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return flag.load(std::memory_order_acquire);
+        };
+        const bool entered = waitFlag(opening, 5'000'000'000ull);
+        AUREA_CHECK(entered);
+        std::thread lifecycle([&] {
+            Errc code = Errc::Ok;
+            if (shutdown) r.e.shutdown(); else code = r.e.suspend().code();
+            lifecycleCode.store(static_cast<i32>(code), std::memory_order_release);
+            lifecycleReturned.store(true, std::memory_order_release);
+        });
+        const bool unwound = waitFlag(lifecycleReturned, 2'000'000'000ull);
+        AUREA_CHECK(unwound);
+        if (unwound) {
+            AUREA_CHECK(startReturned.load(std::memory_order_acquire));
+            AUREA_CHECK(!destroyed.load(std::memory_order_acquire));
+            AUREA_CHECK(!abortedDuringOpen.load(std::memory_order_acquire));
+            AUREA_CHECK(openActive.load(std::memory_order_acquire));
+        }
+        release.store(true, std::memory_order_release);
+        starter.join(); lifecycle.join();
+        AUREA_CHECK_EQ(static_cast<Errc>(startCode.load(std::memory_order_acquire)), Errc::Cancelled);
+        AUREA_CHECK_EQ(static_cast<Errc>(lifecycleCode.load(std::memory_order_acquire)), Errc::Ok);
+        AUREA_CHECK_EQ(r.e.state(), shutdown ? EngineState::Uninitialized : EngineState::Suspended);
+        const bool cleaned = waitFlag(destroyed, 5'000'000'000ull);
+        AUREA_CHECK(cleaned); if (!cleaned) return;
+        AUREA_CHECK(r.cap.aborted);
+        AUREA_CHECK(!abortedDuringOpen.load(std::memory_order_acquire));
+        AUREA_CHECK(!fileio::exists(output));
+        if (!shutdown) {
+            AUREA_CHECK(r.e.resume().ok());
+            r.cap = BenchCapture{}; r.cap.persistFinishMarker = true;
+            AUREA_CHECK(r.e.start_export(settings, output.c_str()).ok());
+            const u64 deadline = monotonic_ns() + 10'000'000'000ull;
+            while (!r.e.export_progress().finished && monotonic_ns() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            AUREA_CHECK(r.e.export_progress().finished);
+            AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Ok);
+            AUREA_CHECK_EQ(r.cap.hashes.size(), usize{4});
+            AUREA_CHECK(fileio::exists(output));
+        }
+    }
+}
+
+AUREA_TEST(ExportRecoveryGpu, EditingDuringAssetReopenCancelsBeforeRecapturingTheChangedDocument) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string source = "aurea_test_recovery_guard_video.bin";
+    const std::string image = "aurea_test_recovery_guard_image.rgba";
+    const std::string first = "aurea_test_recovery_guard_first.mp4";
+    const std::string second = "aurea_test_recovery_guard_second.mp4";
+    struct Cleanup {
+        std::string source, image, first, second;
+        ~Cleanup() {
+            fileio::remove_file(source); fileio::remove_file(image);
+            for (const auto& path : {first, second}) {
+                fileio::remove_file(path); fileio::remove_file(path + ".aurea-export");
+                fileio::remove_file(path + ".aurea-export.project.aurea");
+            }
+        }
+    } cleanup{source, image, first, second};
+    struct Reopen {
+        Engine* engine = nullptr;
+        bool called = false, edited = false;
+        std::vector<u8> pixels = std::vector<u8>(8 * 4 * 4, 255);
+    } reopen;
+    const char payload[] = "stable synthetic video";
+    AUREA_CHECK(fileio::write_atomic(source, payload, sizeof(payload)).ok());
+    AUREA_CHECK(fileio::write_atomic(image, reopen.pixels.data(), reopen.pixels.size()).ok());
+    auto loader = [](const char*, ImagePixels& out, void* opaque) {
+        auto& state = *static_cast<Reopen*>(opaque);
+        out.width = 8; out.height = 4; out.rgba = state.pixels;
+        state.called = true;
+        // A platform loader runs outside modelMutex_. Exercise the public
+        // editing API while the restored Project is visible, before freeze.
+        Command edit; edit.type = CommandType::CompositionSetDuration;
+        edit.comp_duration.comp = state.engine->project()->timeline().current();
+        edit.comp_duration.duration = FrameIndex{9};
+        state.edited = state.engine->apply_command(edit).ok();
+        return true;
+    };
+    SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+    Rig r(cfg, 30, 4, 2, nullptr, nullptr, 0, true, source.c_str(),
+          ExportExecutionProfile::Balanced, false, loader, &reopen);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    reopen.engine = &r.e;
+    AUREA_CHECK(r.e.import_image(reopen.pixels.data(), 8, 4, "guard", image.c_str()).ok());
+    r.cap.finishFailure = Errc::EncodeFailed;
+    ExportSettings settings; settings.height = 64; settings.dither = false;
+    AUREA_CHECK(r.e.start_export(settings, first.c_str()).ok());
+    const u64 deadline = monotonic_ns() + 10'000'000'000ull;
+    while (!r.e.export_progress().finished && monotonic_ns() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(r.e.export_progress().finished);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::EncodeFailed);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    r.cap = BenchCapture{};
+    bool sinkOpened = false;
+    r.cap.beforeOpen = [&] { sinkOpened = true; return OkStatus; };
+    AUREA_CHECK_EQ(r.e.restart_export((first + ".aurea-export").c_str(), second.c_str()).code(), Errc::Cancelled);
+    AUREA_CHECK(reopen.called && reopen.edited);
+    AUREA_CHECK(!sinkOpened); AUREA_CHECK(r.cap.hashes.empty());
+    AUREA_CHECK(!fileio::exists(second + ".aurea-export"));
+    AUREA_CHECK_EQ(r.e.query_export_duration(false), 9);
+}
+
+AUREA_TEST(ExportRecoveryGpu, FailedExportReplaysFrozenDocumentFromZeroWithIdenticalPixels) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string source = "aurea_test_recovery_gpu_source.bin";
+    const std::string first = "aurea_test_recovery_gpu_first.mp4";
+    const std::string second = "aurea_test_recovery_gpu_second.mp4";
+    struct Cleanup {
+        std::string source, first, second;
+        ~Cleanup() {
+            fileio::remove_file(source);
+            for (const auto& path : {first, second}) {
+                fileio::remove_file(path); fileio::remove_file(path + ".aurea-export");
+                fileio::remove_file(path + ".aurea-export.project.aurea");
+            }
+        }
+    } cleanup{source, first, second};
+    const char payload[] = "stable source identity for the synthetic platform decoder";
+    AUREA_CHECK(fileio::write_atomic(source, payload, sizeof(payload)).ok());
+    SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+    cfg.pattern = SyntheticPattern::MovingSquare; cfg.audioRate = 48000; cfg.audioSeconds = 1;
+    Rig r(cfg, 30, 8, 3, nullptr, nullptr, 0, true, source.c_str());
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    const LayerId video = r.video_layer();
+    r.comp()->layer(video)->transform.opacity = .75f;
+    auto& position = r.comp()->layer(video)->tracks.get_or_create(TrackProperty::PositionX);
+    (void)position.set(FrameIndex{0}, 48.f, Interpolation::Linear);
+    (void)position.set(FrameIndex{7}, 56.f, Interpolation::Linear);
+    auto* delay = r.add_effect(video, audio::fx_keys::kDelay);
+    AUREA_CHECK(delay != nullptr); if (!delay) return;
+    delay->params[audio::fxp::kDelayTime].constant.v[0] = 30;
+    delay->params[audio::fxp::kDelayFeedback].constant.v[0] = 70;
+    r.comp()->motion_blur().enabled = true;
+    r.comp()->motion_blur().samples = 4;
+    r.comp()->motion_blur().shutterAngle = 180;
+    r.cap.keepFrames = true;
+    r.cap.finishFailure = Errc::EncodeFailed;
+    r.cap.beforeOpen = [&] {
+        // A direct model mutation previously affected every subsequent export
+        // frame, even though the export claimed its timeline was frozen.
+        r.comp()->layer(video)->transform.opacity = .03f;
+        r.comp()->motion_blur().enabled = false;
+        return OkStatus;
+    };
+    ExportSettings settings; settings.height = 64; settings.fps = 30; settings.dither = false;
+    AUREA_CHECK(r.e.start_export(settings, first.c_str()).ok());
+    auto wait = [&] {
+        for (u32 i = 0; i < 30000; ++i) {
+            if (r.e.export_progress().finished) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return false;
+    };
+    AUREA_CHECK(wait());
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::EncodeFailed);
+    AUREA_CHECK_EQ(r.cap.frames.size(), usize{8});
+    const auto firstFrames = r.cap.frames;
+    const auto firstPts = r.cap.pts;
+    const auto firstAudioHash = r.cap.audioHash;
+    const auto firstAudioFrames = r.cap.audioFrames;
+    export_recovery::Package package; std::unique_ptr<Project> snapshot;
+    AUREA_CHECK(export_recovery::read(first + ".aurea-export", package, snapshot).ok());
+    AUREA_CHECK_EQ(package.state, export_recovery::State::Failed);
+    AUREA_CHECK_EQ(package.acceptedFrames, 8u);
+    if (!snapshot) return;
+    AUREA_CHECK_EQ(snapshot->timeline().composition(package.composition)->layer(video)->transform.opacity, .75f);
+    AUREA_CHECK(snapshot->timeline().composition(package.composition)->motion_blur().enabled);
+    AUREA_CHECK_EQ(r.comp()->layer(video)->transform.opacity, .03f);
+    snapshot.reset();
+    // Finished is published just before exportActive is released. Wait for
+    // the bounded final handoff before explicitly restoring the document.
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    r.cap = BenchCapture{}; r.cap.keepFrames = true;
+    AUREA_CHECK(r.e.restart_export((first + ".aurea-export").c_str(), second.c_str()).ok());
+    AUREA_CHECK(wait());
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Ok);
+    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+    AUREA_CHECK_EQ(r.cap.frames.size(), usize{8});
+    AUREA_CHECK(firstFrames == r.cap.frames);
+    AUREA_CHECK(firstPts == r.cap.pts);
+    AUREA_CHECK_EQ(firstAudioHash, r.cap.audioHash);
+    AUREA_CHECK_EQ(firstAudioFrames, r.cap.audioFrames);
+    AUREA_CHECK(firstAudioFrames > 0 && r.cap.audioContiguous);
+    if (r.cap.pts.empty()) return;
+    AUREA_CHECK_EQ(r.cap.pts.front(), i64{0});
+    AUREA_CHECK_EQ(r.comp()->layer(video)->transform.opacity, .75f);
+    AUREA_CHECK(r.comp()->motion_blur().enabled);
+    AUREA_CHECK(export_recovery::read(second + ".aurea-export", package, snapshot).ok());
+    AUREA_CHECK_EQ(package.state, export_recovery::State::Complete);
+}
+
 AUREA_TEST(Export, TextAnimatorColorsReachExportFramesAndRemainStableAfterReopen) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg; cfg.width = 320; cfg.height = 180;
@@ -1086,6 +1446,52 @@ AUREA_TEST(Export, HeatReducesParallelismNeverQuality) {
     AUREA_CHECK((flags[1] & Engine::kExportThermalReduced) != 0);
 }
 
+AUREA_TEST(Export, MemoryWarningReducesAdmissionWithoutChangingFramesOrAudio) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 320;
+    cfg.height = 180;
+    cfg.pattern = SyntheticPattern::MovingSquare;
+    u64 hashes[2]{}, audioHashes[2]{};
+    for (int pressure = 0; pressure < 2; ++pressure) {
+        Rig r(cfg, 30.0, 30, 4);
+        AUREA_CHECK(r.ok);
+        if (!r.ok) return;
+        build_effects_scene(r);
+        if (pressure) (void)r.e.trim_memory(10);
+        const Outcome o = run_export(r, 180, 0.0, true, 120);
+        AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+        AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(30));
+        AUREA_CHECK_EQ(r.cap.video.width, 320u);
+        AUREA_CHECK_EQ(r.cap.video.height, 180u);
+        AUREA_CHECK(r.cap.ptsMonotonic && r.cap.audioContiguous);
+        AUREA_CHECK_EQ(o.p.pipelineDepth, pressure ? 1u : 4u);
+        hashes[pressure] = combined_hash(r.cap);
+        audioHashes[pressure] = r.cap.audioHash;
+    }
+    AUREA_CHECK_EQ(hashes[0], hashes[1]);
+    AUREA_CHECK_EQ(audioHashes[0], audioHashes[1]);
+}
+
+AUREA_TEST(ExportSchedulerGpu, ProfilesPreserveAllFramesEffectsAndAudio) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg; cfg.width = 320; cfg.height = 180; cfg.pattern = SyntheticPattern::MovingSquare;
+    u64 video[3]{}, audio[3]{};
+    for (u32 profile = 0; profile < 3; ++profile) {
+        Rig r(cfg, 30, 30, 4, nullptr, nullptr, 0, false, "sintetico", static_cast<ExportExecutionProfile>(profile));
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        build_effects_scene(r);
+        const auto outcome = run_export(r, 180, 30, true, 120);
+        AUREA_CHECK(outcome.finished && outcome.p.result == Errc::Ok);
+        AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(30));
+        AUREA_CHECK(r.cap.ptsMonotonic && r.cap.audioContiguous);
+        AUREA_CHECK_EQ(outcome.p.pipelineDepth, profile == 2 ? 1u : 4u);
+        video[profile] = combined_hash(r.cap); audio[profile] = r.cap.audioHash;
+    }
+    AUREA_CHECK_EQ(video[0], video[1]); AUREA_CHECK_EQ(video[0], video[2]);
+    AUREA_CHECK_EQ(audio[0], audio[1]); AUREA_CHECK_EQ(audio[0], audio[2]);
+}
+
 AUREA_TEST(Export, SoftwareEncoderIsFlaggedNotHidden) {
     // §96–97: o encoder que o sink abriu chega à UI. Software = aviso; o
     // export segue com a MESMA saída.
@@ -1219,6 +1625,54 @@ AUREA_TEST(Export, PersistentMissingGpuTextBufferFailsInsteadOfSavingIncompleteV
     AUREA_CHECK_EQ(o.p.failure, 3u); // ExportFailure::Render
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
     AUREA_CHECK(r.cap.hashes.empty());
+}
+
+AUREA_TEST(ExportStartupRecovery, OpeningFailurePublishesFreshRecoveryAndNeverRetriesMemoryOrStorage) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 1, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    for (Errc failure : {Errc::EncodeFailed, Errc::OutOfMemory, Errc::StorageFull, Errc::NotSupported, Errc::IoError}) {
+        r.cap.openFailure = Status{failure, "injected startup failure"};
+        ExportSettings settings; settings.height = 36;
+        AUREA_CHECK_EQ(r.e.start_export(settings, "nao-usado.mp4").code(), failure);
+        const auto progress = r.e.export_progress();
+        AUREA_CHECK(progress.finished && !progress.running);
+        AUREA_CHECK_EQ(progress.result, failure);
+        AUREA_CHECK_EQ(export_retry_from_flags(progress.flags), failure == Errc::EncodeFailed ? 1u : 0u);
+        AUREA_CHECK(std::strcmp(progress.message, "injected startup failure") == 0);
+    }
+    r.cap.openFailure = OkStatus;
+    const Outcome o = run_export(r, 36, 30, false, 5);
+    AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+}
+
+AUREA_TEST(ExportStartupMemory, PreviewTemporariesAreReleasedBeforeCodecAllocationAndFailureResumesPreview) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    AUREA_CHECK(r.e.add_shape(1).ok());
+    AUREA_CHECK(r.e.attach_surface(reinterpret_cast<void*>(1), 128, 72).ok());
+    AUREA_CHECK(r.e.render_frame().ok());
+    const u32 waits = backend->idleWaits.load();
+    bool checked = false;
+    r.cap.beforeOpen = [&]() -> Status {
+        checked = true;
+        AUREA_CHECK(backend->texturesDestroyed > 0);
+        AUREA_CHECK(backend->idleWaits.load() >= waits + 2);
+        return Status{Errc::OutOfMemory, "injected codec allocation failure"};
+    };
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK_EQ(r.e.start_export(settings, "nao-usado.mp4").code(), Errc::OutOfMemory);
+    AUREA_CHECK(checked);
+    const u32 submitted = backend->framesSubmitted;
+    AUREA_CHECK(r.e.render_frame().ok());
+    AUREA_CHECK(backend->framesSubmitted > submitted);
+    // Releasing startup ownership must also allow a subsequent export.
+    r.cap.beforeOpen = {};
+    const Outcome o = run_export(r, 72, 30, false, 5);
+    AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+    AUREA_CHECK(r.cap.finished && r.cap.hashes.size() == 3);
 }
 
 AUREA_TEST(Export, CriticalMemoryTrimReleasesCachesWhileEncoderKeepsItsFrame) {
@@ -1685,6 +2139,41 @@ AUREA_TEST(ExportPendingGpu, CancelledSubmittedFrameBlocksNewGpuWorkUntilItsFenc
     std::remove(path.c_str()); std::remove((path + ".bak").c_str());
 }
 
+AUREA_TEST(ExportPendingGpu, RestartWaitsForACancelledFrameToCompleteWithoutReplacingTheDevice) {
+    SyntheticConfig cfg; cfg.width = 128; cfg.height = 72; cfg.frameCount = 3;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> waiting{false}, releaseOnWait{false}, completed{false};
+    backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
+        if (!frame || completed.load()) return OkStatus;
+        if (timeout && releaseOnWait.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            completed = true;
+            return OkStatus;
+        }
+        if (timeout) { waiting = true; std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+        return Status{Errc::Timeout};
+    };
+    Rig r(cfg, 30, 3, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    struct CompleteOnExit { std::atomic<bool>& done; ~CompleteOnExit() { done = true; } } complete{completed};
+    r.comp()->layer(r.video_layer())->visible = false;
+    ExportSettings settings; settings.height = 72;
+    AUREA_CHECK(r.e.start_export(settings, "cancelled-frame.mp4").ok());
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!waiting.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(waiting.load());
+    r.e.cancel_export();
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(r.e.export_progress().finished);
+    releaseOnWait = true;
+    const Outcome o = run_export(r, 72, 30, false, 5);
+    AUREA_CHECK(completed.load());
+    AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+    AUREA_CHECK(!backend->deviceLost && r.cap.finished);
+}
+
 AUREA_TEST(ExportPendingGpu, CancelWithCompletedFenceImmediatelyResumesPreview) {
     SyntheticConfig cfg; cfg.width = 128; cfg.height = 72; cfg.frameCount = 30;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
@@ -1755,6 +2244,7 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "ExportAudioProgress.inl"
 #include "CutFrameGpu.inl"
 #include "ExportWatchdog.inl"
+#include "ExportSlowMedia.inl"
 
 #endif // AUREA_TEST_VULKAN
 
@@ -1765,12 +2255,23 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 // =============================================================================
 #include "aurea/export/BitratePolicy.hpp"
 
+AUREA_TEST(ExportBitrate, CompactAutoAndExplicitManualUseSeparateCaps) {
+    using namespace aurea;
+    for (const auto codec : {ExportCodec::H264, ExportCodec::HEVC}) {
+        const u32 automatic = export_video_bitrate_bps(7680, 4320, 240, codec, ExportQuality::High);
+        AUREA_CHECK_EQ(automatic, static_cast<u32>(kExportMaxAutoVideoBps));
+        AUREA_CHECK_EQ(export_video_bitrate_bps(1920, 1080, 30, codec, ExportQuality::Normal, 80), 80'000'000u);
+    }
+    const u32 defaultRate = export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Normal);
+    AUREA_CHECK(export_estimated_bytes(defaultRate, 192'000, 30) < 32'000'000ull);
+}
+
 AUREA_TEST(ExportBitrate, OneMinute1080p30NormalStaysSmall) {
     using namespace aurea;
     const u32 v = export_video_bitrate_bps(1920, 1080, 30.0, ExportCodec::H264, ExportQuality::Normal);
-    AUREA_CHECK(v >= 12'000'000u && v <= 16'000'000u);
+    AUREA_CHECK(v >= 7'900'000u && v <= 8'100'000u);
     const u64 bytes = export_estimated_bytes(v, kExportAudioKbps * 1000u, 60.0);
-    AUREA_CHECK_MSG(bytes < 150ull * 1000 * 1000, "1 min 1080p30 Normal deve ficar abaixo de ~150 MB");
+    AUREA_CHECK_MSG(bytes < 65ull * 1000 * 1000, "1 min 1080p30 Normal deve ficar abaixo de ~65 MB");
     AUREA_CHECK(bytes > 60ull * 1000 * 1000);
 }
 
@@ -1780,8 +2281,8 @@ AUREA_TEST(ExportBitrate, ResolutionFpsQualityAndCodecScaleSanely) {
         return export_video_bitrate_bps(w, h, fps, c, q);
     };
     const u32 p720 = bps(1280, 720, 30), p1080 = bps(1920, 1080, 30), p4k = bps(3840, 2160, 30);
-    AUREA_CHECK(p720 >= 6'000'000u && p720 <= 8'000'000u);
-    AUREA_CHECK(p4k >= 35'000'000u && p4k <= 45'000'000u);
+    AUREA_CHECK(p720 >= 4'900'000u && p720 <= 5'100'000u);
+    AUREA_CHECK(p4k >= 31'900'000u && p4k <= 32'100'000u);
     AUREA_CHECK(bps(854, 480, 30) < p720 && p720 < p1080 && p1080 < bps(2560, 1440, 30) && bps(2560, 1440, 30) < p4k);
     // Vertical = mesma quantidade de pixels, mesma taxa.
     AUREA_CHECK_EQ(bps(1080, 1920, 30), p1080);
@@ -1795,9 +2296,9 @@ AUREA_TEST(ExportBitrate, ResolutionFpsQualityAndCodecScaleSanely) {
     AUREA_CHECK(bps(1920, 1080, 30, ExportQuality::Normal, ExportCodec::HEVC) < p1080);
     // Nada passa do teto, nem 4K60 Alta nem Mbps manual absurdo; 1 min nunca 1 GB.
     const u32 worst = bps(3840, 2160, 60, ExportQuality::High);
-    AUREA_CHECK(worst <= static_cast<u32>(kExportMaxVideoBps));
+    AUREA_CHECK(worst <= static_cast<u32>(kExportMaxAutoVideoBps));
     AUREA_CHECK(export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Normal, 900) <= 100'000'000u);
-    AUREA_CHECK(export_estimated_bytes(worst, 192'000u, 60.0) < 800ull * 1000 * 1000);
+    AUREA_CHECK(export_estimated_bytes(worst, 192'000u, 60.0) < 460ull * 1000 * 1000);
     // Mbps manual é respeitado.
     AUREA_CHECK_EQ(export_video_bitrate_bps(1920, 1080, 30, ExportCodec::H264, ExportQuality::Low, 10), 10'000'000u);
     AUREA_CHECK_EQ(export_estimated_bytes(10'000'000u, 0u, 0.0), 0ull);
@@ -1889,11 +2390,11 @@ AUREA_TEST(ExportWatchdogRules, SafeModeLadderAndItsVideoRecipe) {
     // Sempre H.264 no modo de segurança.
     AUREA_CHECK(export_safe_codec(ExportCodec::HEVC, 1) == ExportCodec::H264);
     AUREA_CHECK(export_safe_codec(ExportCodec::HEVC, 0) == ExportCodec::HEVC);
-    // Taxa menor, nunca abaixo de 0,5 Mbps (nem sobe o que já era menor).
+    // A recuperação preserva o bitrate solicitado, inclusive Alta e Mbps manual.
     AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 0), 14'000'000u);
-    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 1), 10'500'000u);
-    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 2), 8'400'000u);
-    AUREA_CHECK_EQ(export_safe_bitrate_bps(600'000u, 2), 500'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 1), 14'000'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(14'000'000u, 2), 14'000'000u);
+    AUREA_CHECK_EQ(export_safe_bitrate_bps(600'000u, 2), 600'000u);
     AUREA_CHECK_EQ(export_safe_bitrate_bps(300'000u, 1), 300'000u);
     // Os dois lados em múltiplo de 16, para baixo (nunca acima do teto do aparelho).
     const u32 cases[][5] = {

@@ -244,7 +244,7 @@ class EffectResources {
 public:
     virtual ~EffectResources() = default;
     // Equal-distance positions (xy) and tangent (z, radians), in host-layer pixels.
-    [[nodiscard]] virtual std::vector<Vec4> repeat_path(const Layer*, u32, f32) noexcept { return {}; }
+    [[nodiscard]] virtual std::vector<Vec4> repeat_path(const Layer*, u32, f32, u64 guide = 0) noexcept { (void)guide; return {}; }
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
     [[nodiscard]] virtual TextureHandle cube_lut(AssetId) noexcept { return {}; }
@@ -297,6 +297,9 @@ struct EffectEval {
     u32                   effectIndex = 0;     ///< posição na layer (painel)
     FrameIndex            localTime{0};
     f64                   framesPerSecond = 30.0;
+    /// Progress through the visible clip, independent of source offset/remapping.
+    /// Captured while the layer is locked; effects may use it during GPU build.
+    f32                   clipProgress = 0.0f;
     /// Texels por pixel de layer na resolução de trabalho. Todo comprimento
     /// em pixel (raio de blur, passo de nitidez) é multiplicado por isto.
     f32                   texelScale = 1.0f;
@@ -308,6 +311,7 @@ struct EffectEval {
     /// da curva no ColorOp. Textura persistente do renderer, fora do grafo.
     TextureHandle         aux{};
     Vec4                  auxInfo{};   ///< o que o efeito quiser anotar junto (nº de faixas...)
+    f64                   auxTimeFrames = std::numeric_limits<f64>::quiet_NaN();
     i64                   foregroundSourceTimeUs = -1;
     std::shared_ptr<const std::vector<Vec4>> pathSamples;
     f64 fractionalTime = std::numeric_limits<f64>::quiet_NaN();
@@ -348,6 +352,7 @@ public:
     [[nodiscard]] EffectResources& resources() noexcept { return resources_; }
     [[nodiscard]] SurfaceFormat work_format() const noexcept { return workFormat_; }
     [[nodiscard]] u32 max_texture_size() const noexcept { return maxTexture_; }
+    [[nodiscard]] f32 max_sampler_anisotropy() const noexcept { return shaders_.max_sampler_anisotropy(); }
 
     /// Textura de trabalho (formato de trabalho, alvo de render + amostrável).
     [[nodiscard]] FGTexture texture(const char* name, u32 width, u32 height) noexcept;
@@ -479,12 +484,19 @@ public:
     /// movimento): o renderer decodifica a fonte nesse instante e o EffectGraph
     /// a leva pelas etapas anteriores até ele (`EffectBuildContext::history`).
     [[nodiscard]] virtual bool wants_history() const noexcept { return false; }
+    /// Optional temporal source request, evaluated while the layer is locked.
+    /// Zero uses the current source. Existing temporal effects retain their
+    /// renderer contracts; new effects can request a deterministic past frame.
+    [[nodiscard]] virtual f64 history_delay_frames(const EffectEval& eval) const noexcept { (void)eval; return 0.0; }
 
     /// Índice do parâmetro (referência a camada) cuja camada o efeito LÊ como
     /// imagem (Mapa de deslocamento); −1 = nenhum. O renderer inclui essa
     /// camada no quadro mesmo com o olho desligado, desenha-a na composição
     /// e a entrega por `EffectBuildContext::layer_input`.
     [[nodiscard]] virtual i32 input_layer_param() const noexcept { return -1; }
+    /// Multi-input effects retain the legacy single-map contract by default.
+    [[nodiscard]] virtual u32 input_layer_count() const noexcept { return input_layer_param() >= 0 ? 1u : 0u; }
+    [[nodiscard]] virtual i32 input_layer_param_at(u32 slot) const noexcept { return slot == 0 ? input_layer_param() : -1; }
 
     /// Margem (px da layer) que o efeito lê em volta de cada pixel. É o que o
     /// EffectGraph soma para recortar a região visível de um efeito anterior

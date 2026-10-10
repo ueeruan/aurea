@@ -31,6 +31,7 @@ internal fun effectToolPanel(tool: EffectTool): EditorPanel = when (tool) {
  */
 internal fun openEffectTool(store: EditorStore, onOpenPanel: (EditorPanel) -> Unit, tool: EffectTool) {
     if (tool == EffectTool.Mask) store.addMaskTool()
+    if (tool == EffectTool.CameraTrack) store.cameraTrackerVisible = true
     onOpenPanel(effectToolPanel(tool))
 }
 

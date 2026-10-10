@@ -20,6 +20,50 @@ import org.junit.Test
 class ExportLifecycleStabilityTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun cancellingPngSequenceRestoresPreviewAndAllowsStillImageRetry() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName.endsWith(".uitest"))
+        lateinit var store: EditorStore
+        var ready = false
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            ready = true
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ready && store.engineReady }
+        compose.runOnIdle { store.newProject(320, 180, 30f, "PNG ownership retry") }
+        compose.waitUntil(10000) { store.project.title == "PNG ownership retry" && !store.projectOperationBusy }
+        compose.runOnIdle { store.addShape(1); store.setCompositionDuration(240) }
+        compose.waitUntil(10000) { store.layers.isNotEmpty() && store.project.durationFrames == 240 }
+        val engine = store.engineForStress
+        val sequence = File(context.filesDir, "cancelled-png-sequence.zip")
+        val still = File(context.filesDir, "png-retry.png")
+        val progress = ExportProgress()
+        val progressBuffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
+        fun poll(): Boolean = engine.exportProgress(progressBuffer).also { if (it) progress.readFrom(progressBuffer) }
+        assertEquals(0, engine.startImageExport(sequence.absolutePath, 1, 180, 0, 30.0, false))
+        try {
+            assertTrue(poll()); assertFalse(progress.finished)
+            assertTrue("A second export must not share image-export GPU targets",
+                engine.startImageExport(still.absolutePath, 0, 180, 0, 0.0, false) != 0)
+        } finally {
+            engine.cancelExport()
+            compose.waitUntil(60000) { poll() && progress.finished }
+        }
+        assertEquals(0, engine.startImageExport(still.absolutePath, 0, 180, 0, 0.0, false))
+        try {
+            compose.waitUntil(60000) { poll() && progress.finished }
+            assertEquals(progress.message, 0, progress.result)
+            val bitmap = checkNotNull(android.graphics.BitmapFactory.decodeFile(still.absolutePath))
+            assertEquals(320, bitmap.width); assertEquals(180, bitmap.height)
+            assertTrue("Retry must publish the visible shape", android.graphics.Color.alpha(bitmap.getPixel(160, 90)) > 0)
+            bitmap.recycle()
+            val pixels = ByteBuffer.allocateDirect(320 * 180 * 4)
+            assertEquals("Preview must regain the renderer after image export", 320 * 180 * 4,
+                engine.captureFrame(320, pixels, IntArray(2)))
+        } finally { if (!progress.finished) engine.cancelExport() }
+    }
+
     @Test fun previewWorkerSleepsWhileVideoExportOwnsTheRenderer() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         check(context.packageName.endsWith(".uitest"))

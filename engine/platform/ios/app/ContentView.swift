@@ -10,31 +10,26 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AureaModel
-    @EnvironmentObject private var conta: ContaModel
     @State private var pageWidth = UIScreen.main.bounds.width
 
     var body: some View {
         ZStack {
             AureaColors.background.ignoresSafeArea()
 
-            // Conta obrigatória: sem sessão guardada, o app inteiro é a ContaView.
-            if !conta.logado {
-                ContaView().zIndex(2)
-            } else {
-                switch model.screen {
-                case .home:
-                    HomeView()
-                        .transition(.offset(x: -pageWidth / 3)).zIndex(0)
-                case .editor:
-                    EditorView()
-                        // Saiu do editor por qualquer caminho: a reprodução e o
-                        // som param junto (o áudio seguia tocando na Home).
-                        .onDisappear { model.stopPlayback() }
-                        // Entra pela borda de "frente" da leitura: `.trailing` é a
-                        // direita no LTR e a esquerda em árabe, sem depender de o
-                        // `offset(x:)` ser espelhado ou não pelo RTL.
-                        .transition(.move(edge: .trailing)).zIndex(1)
-                }
+            // Projetos e editor estão disponíveis mesmo sem sessão de conta.
+            switch model.screen {
+            case .home:
+                HomeView()
+                    .transition(.offset(x: -pageWidth / 3)).zIndex(0)
+            case .editor:
+                EditorView()
+                    // Saiu do editor por qualquer caminho: a reprodução e o
+                    // som param junto (o áudio seguia tocando na Home).
+                    .onDisappear { model.stopPlayback() }
+                    // Entra pela borda de "frente" da leitura: `.trailing` é a
+                    // direita no LTR e a esquerda em árabe, sem depender de o
+                    // `offset(x:)` ser espelhado ou não pelo RTL.
+                    .transition(.move(edge: .trailing)).zIndex(1)
             }
 
             if model.importingMedia {
@@ -83,7 +78,7 @@ struct ContentView: View {
         .overlay {
             if let request = model.liveNoticePopup { LiveNoticePopup(request: request) }
             if model.showProjectSettings { ProjectSettingsPanel(onDismiss: { model.showProjectSettings = false }) }
-            if let request = model.actionSheet { AureaActionSheet(title: request.title, actions: request.actions) { model.actionSheet = nil } }
+            if let request = model.actionSheet { AureaActionSheet(title: request.title, message: request.message, actions: request.actions) { model.actionSheet = nil } }
             if let request = model.colorSheet { ColorPickerSheet(request: request) { model.colorSheet = nil; request.onDone() }.id(request.id) }
             if let request = model.expressionSheet { ExpressionSheet(request: request) { model.expressionSheet = nil }.id(request.id) }
             if let request = model.text3DFontSheet { T3DFontSheet(request: request) { model.text3DFontSheet = nil }.id(request.id) }

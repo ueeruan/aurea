@@ -185,11 +185,24 @@ struct EngineConfig {
     /// o anterior). 0 = automático (3; 1 sob calor). 1 = serial — o teste de
     /// equivalência compara os dois bytes a bytes.
     u32 exportPipelineDepth = 0;
+    ExportExecutionProfile exportExecutionProfile = ExportExecutionProfile::Balanced;
+    /// Staged bounded 3D exposure path, retaining the original route.
+    bool enableBoundedSceneExposure = false;
+    /// Admit transient targets against tracked GPU residency and known cache
+    /// backing within the existing device budget, instead of a fixed half share.
+    /// Other platforms retain the legacy policy until device validation.
+    bool enableTrackedGpuAdmission = false;
     /// Watchdog do worker do encoder (export/ExportWatchdog.hpp): sem batida
     /// da plataforma por isto, o motor desiste do worker travado e conclui o
     /// export com falha (EncoderStalled) em vez de esperar o join para sempre.
     /// 0 = 45 s. Os testes usam menos.
     u32 exportWorkerHangMs = 0;
+    /// Opt-in integrity recovery. A checked, frozen export snapshot is
+    /// persisted before codec open; version 1 restarts from frame zero.
+    bool enableExportRecovery = false;
+    /// Opt-in worker isolation for codec startup. A finite startup deadline
+    /// and unique staging path protect retry from a late native abort.
+    bool enableExportStartupGate = false;
 
     /// Saída de som da plataforma (AAudio no Android). NÃO é assumida a posse.
     /// Nula = preview mudo; o relógio do sistema conduz o playback e o export
@@ -616,6 +629,14 @@ public:
     /// "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição
     /// (Layer::acceptsLights; desligado por padrão, como os projetos antigos).
     bool set_layer_accepts_lights(u64 layerId, bool on) noexcept;
+    /// Persistently opt a flat layer into the scene camera without altering
+    /// its transform or keyframes. Undoable; retained when saving the project.
+    bool enable_layer_3d(u64 layerId) noexcept;
+    /// Toggle a flat layer's 3D participation without changing its animation.
+    bool set_layer_3d(u64 layerId, bool on) noexcept;
+    /// Opt-in editing policy: all navigation stops at the last layer's end.
+    void set_content_bounded_playback(bool on) noexcept;
+    [[nodiscard]] i64 query_navigation_end() noexcept;
     /// −1 = camada sem essa opção (câmera, luz, modelo 3D, áudio, nulo); 0/1.
     [[nodiscard]] i32 query_layer_accepts_lights(u64 layerId) noexcept;
     /// Põe as camadas dentro do grupo `groupLayerId` (mesma composição), com
@@ -663,7 +684,7 @@ public:
     /// Arquivo de mídia da camada de vídeo/áudio (caminho ou content://), para
     /// o provedor de transcrição ler o áudio. Vazio = não tem mídia.
     [[nodiscard]] std::string layer_media_path(u64 layerId) noexcept;
-    [[nodiscard]] Result<std::vector<text::CaptionWord>> transcribe_local(u64 layerId, const std::string& model, const std::string& language) noexcept;
+    [[nodiscard]] Result<std::vector<text::CaptionWord>> transcribe_local(u64 layerId, const std::string& model, const std::string& language, bool translateEnglish = false) noexcept;
     std::atomic<int> captionProgress{0};
     std::atomic<bool> captionCancelled{false};
     [[nodiscard]] std::string caption_tracks() noexcept;
@@ -989,6 +1010,9 @@ public:
         std::string message;
     };
     [[nodiscard]] MotionTrackStatus motion_track_status() noexcept;
+    /// Identity of the active/cached analysis in this project/composition.
+    // Source LayerId, rather than the media asset ID; zero outside its context.
+    [[nodiscard]] u64 motion_track_source() noexcept;
     /// x,y,confidence for the chosen source points, in composition pixels.
     u32 motion_track_features(i64 frame, f32* out3, u32 capacity) noexcept;
     /// Apply: 0 new Null, 1 target transform, 2 target Corner Pin,
@@ -1143,8 +1167,8 @@ public:
     [[nodiscard]] std::string current_composition_name() noexcept;
 
     // --- Copiar e colar -----------------------------------------------------------
-    /// Área de transferência do motor (vive enquanto o app vive; colar em outro
-    /// projeto só leva camadas cuja mídia exista lá).
+    /// Session clipboard; pasting into another project imports its media and
+    /// nested compositions with fresh handles.
     u32 copy_layers(const u64* ids, u32 count) noexcept;
     /// Cola no frame (o começo da mais cedo cai nele; as outras mantêm a
     /// distância). As coladas ficam escolhidas. Devolve quantas entraram.
@@ -1241,9 +1265,17 @@ public:
     bool trim_composition(i64 frame) noexcept;
     /// Shared NLE edits: 0 trim-in, 1 trim-out (absolute timeline frame),
     /// 2 slip, 3 roll-in, 4 roll-out, 5 slide (signed frame delta).
+    /// 6 moves any layer to an absolute frame, preserving duration/source/keys.
+    /// 7 extends the out-point to the remaining source handle (amount ignored).
+    /// 8/9 extend in/out to an outside playhead, keeping the opposite edge
+    /// and neighbouring layers fixed even when magnetic editing is enabled.
     /// Neighbours are explicit IDs; invalid/locked edits leave history untouched.
     /// Slip changes source time only. Roll/slide never ripple unrelated layers.
     bool edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous = 0, u64 next = 0) noexcept;
+    /// Contextual dock actions: trim-in=1, split=2, trim-out=4,
+    /// extend-in to playhead=8, extend-out to playhead=16. At either edge
+    /// the three cuts remain visible; edits still require a nonempty interval.
+    [[nodiscard]] u32 query_clip_time_actions(u64 layerId, i64 frame) noexcept;
 
     // --- Marcas e batidas -------------------------------------------------------
     /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
@@ -1312,6 +1344,7 @@ public:
     [[nodiscard]] Result<u64> add_text3d(const scene3d::Text3DSpec& spec) noexcept;
     /// Troca texto/profundidade/cor/alinhamento (a malha é gerada de novo; desfazível).
     Status set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept;
+    Status set_text3d_texture(u64 layerId, const std::string& path) noexcept;
     /// Receita do texto 3D da camada (falso = não é texto 3D).
     bool query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept;
 
@@ -1425,8 +1458,11 @@ public:
     [[nodiscard]] u32 thermal_heavy_level() const noexcept;
 
     /// O frame do playhead em RGBA8 sRGB (alfa reto), com o lado maior em
-    /// `maxDim`. Miniatura do projeto na Home. Síncrono (espera a GPU).
+    /// `maxDim`. Captura exata, com qualidade final. Síncrono (espera a GPU).
     [[nodiscard]] Status capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept;
+    /// Capa da Home: políticas da prévia e intermediários na escala da capa.
+    /// A captura exata e a exportação mantêm a qualidade final.
+    [[nodiscard]] Status capture_preview_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept;
 
     /// A PRÉVIA DE UM EFEITO (Fase 7.3): o efeito, com os valores padrão, sobre
     /// a cartela de demonstração. RGBA8 sRGB de alfa reto. Não depende de
@@ -1519,6 +1555,14 @@ public:
     u32 query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRow* out, u32 capacity,
                             char* blob, u32 blobCapacity) noexcept;
 
+    /// Curves: canal 0 = RGB, 1..3 = R/G/B. Pontos xy ou amostras da spline.
+    u32 query_effect_curve(u64 layerId, u32 effectId, u32 param, u32 channel,
+                           bool samples, f32* out, u32 capacity) noexcept;
+    /// 0 mover, 1 inserir, 2 excluir, 3 identidade. Retorna índice ou -1.
+    /// Ordem, limites e extremos são regras compartilhadas pelo Android/iOS.
+    i32 edit_effect_curve(u64 layerId, u32 effectId, u32 param, u32 channel,
+                          u32 action, u32 point, f32 x, f32 y) noexcept;
+
     /// Declaração dos parâmetros de um TIPO de efeito, sem precisar de layer:
     /// a ficha do catálogo (nome, tipo, faixa, unidade). `value` sai com o
     /// padrão da declaração e `animated` sai 0 — não há instância por trás.
@@ -1542,6 +1586,10 @@ public:
     // Roda numa thread própria; o preview fica congelado até terminar.
     // =========================================================================
     [[nodiscard]] Status start_export(const ExportSettings& settings, const char* outputPath) noexcept;
+    /// Explicitly restores the checked export document and restarts the normal
+    /// exporter at zero, rebuilding decoder/audio/temporal state. No partial
+    /// video is reused. The caller supplies a fresh output destination.
+    [[nodiscard]] Status restart_export(const char* recoveryPath, const char* outputPath) noexcept;
     [[nodiscard]] Status cancel_export() noexcept;
 
     struct ExportProgress {
@@ -1654,13 +1702,18 @@ private:
     void drain_commands_locked() noexcept;
     [[nodiscard]] Composition* current_composition() noexcept;
     [[nodiscard]] Status recover_device_locked() noexcept;
+    [[nodiscard]] Status ensure_gpu_healthy_locked() noexcept;
     // renderMutex_: a failed export may leave a real submission in flight.
-    [[nodiscard]] Status poll_export_gpu_locked() noexcept;
+    [[nodiscard]] Status poll_export_gpu_locked(u64 timeoutNs = 0) noexcept;
     void retain_failed_export_gpu_locked() noexcept;
     void render_thread_main() noexcept;
     void update_perf(const FrameStats& stats, const RenderTimings& timings,
                      const FrameSnapshot& snap, u64 frameStartNs) noexcept;
     [[nodiscard]] RenderSettings current_render_settings() noexcept;
+    [[nodiscard]] Status render_offscreen_impl(TextureHandle target, u32 width, u32 height, bool asPreview,
+                                               u64 expectedGpuGeneration, bool targetPreviewScale) noexcept;
+    [[nodiscard]] Status capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& width, u32& height,
+                                                bool asPreview) noexcept;
     static const ImagePixels* image_lookup(void* self, AssetId id);
     static void on_frame_ready(void* self);
 
@@ -1678,6 +1731,15 @@ private:
     // --- Gravação / abertura (Fase 8G) ---------------------------------------
     std::mutex         saveMutex_;              ///< uma gravação por vez
     u64                projectSession_ = 0;     ///< under modelMutex_; changes on replacement
+    struct ExportRestartGuard {
+        u64 session = 0, generation = 0;
+        u32 revision = 0;
+        CompositionId composition{};
+    };
+    [[nodiscard]] bool export_restart_matches_locked(const ExportRestartGuard& guard) const noexcept;
+    [[nodiscard]] Status load_project_checked(const char* path, ExportRestartGuard* guard) noexcept;
+    [[nodiscard]] Status start_export_checked(const ExportSettings& settings, const char* outputPath,
+                                              const ExportRestartGuard* guard) noexcept;
     [[nodiscard]] Status save_project_impl(const char* path, bool idleOnly = false, bool dirtyOnly = false,
                                            bool* saved = nullptr) noexcept;
     mutable std::mutex saveStatsMutex_;
@@ -1699,6 +1761,7 @@ private:
     std::unique_ptr<GPUBackend> gpu_;
     u64                pendingExportGpuFrame_ = 0, pendingExportGpuGeneration_ = 0; ///< renderMutex_
     u64                gpuGeneration_ = 0; ///< under renderMutex_; survives backend/device recreation
+    bool               gpuRecoveryPending_ = false; ///< renderMutex_; failed rebuild remains retryable
     Renderer           renderer_;
     MediaManager       media_;
     ThumbnailService   thumbs_;
@@ -1733,7 +1796,20 @@ private:
     void join_motion_track() noexcept;
     static std::shared_ptr<const scene3d::HdriPixels> hdri_lookup(void* self, AssetId id);
     static std::shared_ptr<const CubeLut> cube_lookup(void* self, AssetId id);
+    struct ClipboardMedia {
+        u64 session = 0;
+        std::unordered_map<u64, Asset> assets;
+        std::unordered_map<u64, std::shared_ptr<const Composition>> compositions;
+        std::unordered_map<u64, ImagePixels> images;
+        std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models;
+        std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris;
+        std::unordered_map<u64, std::shared_ptr<const CubeLut>> luts;
+    };
+    void capture_clipboard_media_locked(ClipboardMedia& bundle, const std::vector<Layer>& layers);
+    void restore_clipboard_media_locked(const ClipboardMedia& bundle, std::vector<Layer>& layers);
     struct Clipboard {
+        ClipboardMedia layerMedia, effectMedia;
+        f64 layersFps = 0;
         std::vector<std::pair<u64, Layer>> layers;   ///< id original → cópia
         i64 layersAnchor = 0;
         bool hasStyle = false;
@@ -1767,6 +1843,17 @@ private:
     SceneEditorView sceneEditor_{}; ///< modelMutex protected, never serialized
     std::vector<u64> selection_;
     std::atomic<u32> modelRevision_{1};   ///< a UI relê listas quando muda
+    /// Subidas de `modelRevision_` que mudam só um TRECHO da composição atual
+    /// (cortar/aparar/mover uma camada sem ninguém olhando para ela em outro
+    /// instante). A chave da prévia guardada é `modelRevision_ - isto`: essas
+    /// edições não descartam o cache inteiro; o trecho vai em
+    /// `pendingPreviewRanges_` (modelMutex) e sai no próximo quadro.
+    std::atomic<u32> previewRangeEdits_{0};
+    std::vector<std::pair<i64, i64>> pendingPreviewRanges_;
+    [[nodiscard]] u64 preview_cache_revision() const noexcept {
+        return static_cast<u64>(modelRevision_.load(std::memory_order_acquire)
+                                - previewRangeEdits_.load(std::memory_order_acquire)) + 1;
+    }
 
     // --- Sincronização --------------------------------------------------------
     /// Protege projeto, timeline, playback, seleção e imagens.
@@ -1807,6 +1894,9 @@ private:
     bool refinePending_ = false;              ///< último quadro saiu reduzido
     bool refineNow_ = false;                  ///< este quadro é o refino
     u64 refineDueNs_ = 0;                     ///< prazo absoluto; vsync sem mudança não o adia
+    bool contentBoundedPlayback_ = false;
+    void configure_playback_locked(const Composition* comp, i64 rawDuration = -1) noexcept;
+    [[nodiscard]] i64 navigation_end_locked(const Composition* comp) const noexcept;
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};
     std::atomic<bool> playingHint_{false};
@@ -1856,6 +1946,9 @@ private:
     // or for the lifecycle join, only for publication of a new context.
     mutable std::mutex exportContextMutex_;
     std::unique_ptr<ExportContext> exportCtx_;
+    // Bound from startup context creation through publication when gated. The pointer lock prevents a
+    // public cancellation from racing its scoped removal/context destruction.
+    std::atomic<bool>* exportStartupCancel_ = nullptr;
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).
     std::atomic<bool> exportActive_{false};

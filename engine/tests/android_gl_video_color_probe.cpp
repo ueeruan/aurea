@@ -1,6 +1,7 @@
 // Native Android regression: real YUV AHardwareBuffer -> production EGL bridge.
 // Run on device; a host source audit does not establish EXT_YUV_target behavior.
 #include "GlVideoBridge.hpp"
+#include "aurea/media/DecodedRgbaCopy.hpp"
 
 #include <algorithm>
 #include <array>
@@ -10,6 +11,20 @@
 #include <memory>
 
 using namespace aurea;
+
+static bool read_rgba_target(const std::shared_ptr<const android::GlVideoBridge::Target>& target,
+                             std::vector<u8>& pixels) {
+    if (!target || !target->buffer) return false;
+    AHardwareBuffer_Desc desc{};
+    AHardwareBuffer_describe(target->buffer, &desc);
+    if (desc.format != AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM || desc.stride < target->width) return false;
+    void* mapped = nullptr;
+    if (AHardwareBuffer_lock(target->buffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, nullptr, &mapped) != 0)
+        return false;
+    const bool copied = media::copy_decoded_rgba8(target->width, target->height,
+        static_cast<const u8*>(mapped), size_t(desc.stride) * 4, size_t(desc.stride) * desc.height * 4, pixels);
+    return AHardwareBuffer_unlock(target->buffer, nullptr) == 0 && copied;
+}
 
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -43,7 +58,8 @@ int main() {
         {{255,10,0},{0,225,0},{0,20,255},{211,105,62},{0,0,0},{255,255,255}},
         {{246,23,10},{6,211,6},{14,33,252},{199,106,68},{16,16,16},{235,235,235}}
     };
-    u32 comparisons = 0, failures = 0, maxDelta = 0;
+    u32 comparisons = 0, failures = 0, maxDelta = 0, readableTargets = 0;
+    std::array<std::shared_ptr<const android::GlVideoBridge::Target>, 4> retained;
     for (u32 round = 0; round < 3; ++round) {
         for (u32 sample = 0; sample < 6; ++sample) {
             AHardwareBuffer_Planes planes{};
@@ -75,6 +91,20 @@ int main() {
                         round, sample, profile, decoder, static_cast<u32>(status.code()), pixels.valid);
                     return 3;
                 }
+                AHardwareBuffer_Desc targetDesc{};
+                AHardwareBuffer_describe(target->buffer, &targetDesc);
+                if (targetDesc.usage & AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN) {
+                    std::vector<u8> mapped;
+                    if (!read_rgba_target(target, mapped)) { std::puts("FAIL: RGBA fallback mapping"); return 5; }
+                    ++readableTargets;
+                    for (size_t i = 0; i < mapped.size(); ++i) {
+                        const int golden = i % 4 == 3 ? 255 : expected[profile][sample][i % 4];
+                        if (std::abs(int(mapped[i]) - golden) > 2) {
+                            std::puts("FAIL: native RGBA fallback copy changed pixels"); return 5;
+                        }
+                    }
+                    if (round == 0 && sample == 0 && profile == 0) retained[decoder] = target;
+                }
                 for (u32 p = 0; p < 4; ++p) for (u32 channel = 0; channel < 4; ++channel) {
                     const int golden = channel == 3 ? 255 : expected[profile][sample][channel];
                     const u32 delta = static_cast<u32>(std::abs(int(pixels.rgba[p * 4 + channel]) - golden));
@@ -94,7 +124,19 @@ int main() {
             if (!bridge) { std::puts("FAIL: bridge reopen"); return 4; }
         }
     }
-    std::printf("YUV COLOR RESULT matrices=601,709,2020 ranges=limited,full contexts=4 rounds=3 comparisons=%u maxDelta=%u failures=%u\n",
-        comparisons, maxDelta, failures);
+    // A frame retained by the renderer must survive reuse and destruction of
+    // the bridge that made it. Its lazy CPU fallback remains the original red.
+    for (const auto& target : retained) if (target) {
+        std::vector<u8> mapped;
+        if (!read_rgba_target(target, mapped)) { std::puts("FAIL: retained RGBA fallback mapping"); return 6; }
+        for (size_t i = 0; i < mapped.size(); ++i) {
+            const int golden = i % 4 == 3 ? 255 : expected[0][0][i % 4];
+            if (std::abs(int(mapped[i]) - golden) > 2) {
+                std::puts("FAIL: retained RGBA buffer was overwritten"); return 6;
+            }
+        }
+    }
+    std::printf("YUV COLOR RESULT matrices=601,709,2020 ranges=limited,full contexts=4 rounds=3 comparisons=%u readableTargets=%u maxDelta=%u failures=%u\n",
+        comparisons, readableTargets, maxDelta, failures);
     return failures ? 1 : 0;
 }

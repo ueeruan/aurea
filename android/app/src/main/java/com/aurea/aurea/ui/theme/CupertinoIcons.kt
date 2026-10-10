@@ -1,5 +1,6 @@
 package com.aurea.aurea.ui.theme
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
@@ -7,6 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
@@ -36,6 +40,20 @@ fun CupertinoIcon(
     /** Glifos de sentido de leitura (‹ › ↶ ↷ ▸) espelham em árabe; `false` desliga. */
     autoMirror: Boolean = true,
 ) {
+    if (glyph == CupertinoGlyph.MotionBlur) {
+        // Own vector: a moving object and fading trails, shared with the Swift drawing.
+        Canvas(modifier.size(size)) {
+            val unit = this.size.minDimension / 24f
+            drawCircle(tint, radius = 5.4f * unit, center = Offset(17f * unit, 12f * unit),
+                style = Stroke(width = 1.8f * unit))
+            val trails = listOf(Triple(2f, 7f, .55f), Triple(1f, 12f, .85f), Triple(3f, 17f, .55f))
+            trails.forEach { (x, y, alpha) ->
+                drawLine(tint.copy(alpha = tint.alpha * alpha), Offset(x * unit, y * unit),
+                    Offset(9f * unit, y * unit), strokeWidth = 1.8f * unit, cap = StrokeCap.Round)
+            }
+        }
+        return
+    }
     val fontSize = with(LocalDensity.current) { size.toSp() }
     val mirror = if (autoMirror && glyph in CupertinoGlyph.Directional) Modifier.mirrorInRtl() else Modifier
     Box(modifier.size(size).then(mirror), contentAlignment = Alignment.Center) {
@@ -56,6 +74,8 @@ fun CupertinoIcon(
 
 /** Codepoints usados pela UI (nomes do pacote cupertino_icons). */
 object CupertinoGlyph {
+    /** Reserved for Aurea's own vector; not a font codepoint. */
+    const val MotionBlur = '\uE000'
     const val AddCircled = '\uF48A'
     const val Arrow2Squarepath = '\uF4E6'
     const val ArrowDownRightSquare = '\uF4F7'

@@ -42,9 +42,39 @@ object ProblemReport {
         .put("whatHappened", whatHappened.trim().take(WHAT_HAPPENED_MAX))
         .put("steps", steps.trim().take(STEPS_MAX))
 
+    private const val PREFS = "aurea_problem_report"
+    private const val KEY_LAST_EXPORT = "last_export"
+    private const val LAST_EXPORT_MAX = 600
+
+    /**
+     * A última falha de export (etapa, motivo, código, quadro, modo de
+     * segurança, mensagem do motor) vai junto do próximo relato — "não consigo
+     * exportar" sem detalhe nenhum era tudo o que chegava. Sem caminhos.
+     */
+    fun noteExport(context: Context, summary: String) {
+        runCatching {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_LAST_EXPORT, sanitize(summary).take(LAST_EXPORT_MAX)).apply()
+        }
+    }
+
+    fun lastExport(context: Context): String? =
+        runCatching { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LAST_EXPORT, null) }.getOrNull()
+
+    /** Caminhos de arquivo saem do diagnóstico (nada de mídia ou pasta no relato). */
+    fun sanitize(text: String): String = text.replace(Regex("""(/[^\s/]+){2,}/?"""), "<arquivo>")
+
+    /** Os passos que a pessoa escreveu + a última falha de export, dentro do limite. */
+    fun stepsWithExport(steps: String, lastExport: String?): String {
+        if (lastExport.isNullOrBlank()) return steps
+        val own = steps.trim()
+        val prefix = if (own.isEmpty()) "" else own + "\n\n"
+        return (prefix + "[export] " + lastExport).take(STEPS_MAX)
+    }
+
     /** Envia (IO). A sessão, quando há, dá ao relato o e-mail da conta. */
     fun send(context: Context, sessao: SessaoGuardada?, whatDid: String, whatHappened: String, steps: String): Result {
-        val corpo = body(CrashReporter.installationId(context), whatDid, whatHappened, steps)
+        val corpo = body(CrashReporter.installationId(context), whatDid, whatHappened, stepsWithExport(steps, lastExport(context)))
         if (sessao != null) corpo.put("email", sessao.email)
         val r = ContaApi.relatar(corpo, sessao?.token)
         return when {

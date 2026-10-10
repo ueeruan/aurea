@@ -113,6 +113,45 @@ protected:
 // -----------------------------------------------------------------------------
 // Oscilar — vai e vem numa direção, com giro e pulso de escala em sincronia.
 // -----------------------------------------------------------------------------
+class MoveAlongPath final : public MotionBehavior {
+public:
+    enum : u32 { Guide, Progress, Duration, Automatic, Orient, Loop };
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.move.path", "Move Along Path", "Distorcer", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_layer_ref("path_layer", "Camada do caminho");
+        p.add_float("progress", "Progresso", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("duration", "Duração", 2, .05f, 30, kParamAnimatable, "s");
+        p.typed_range(.01f, 3600);
+        p.add_bool("automatic", "Movimento automático", true);
+        p.add_bool("orient", "Orientar no caminho", true);
+        p.add_bool("loop", "Repetir", false);
+    }
+    void resolve_resources(EffectEval& e) const noexcept override {
+        if (!e.resources || !e.layer) return;
+        f64 phase = finite_or(e.f(Progress), 0) / 100.;
+        if (e.value(Automatic).as_bool()) {
+            const f64 elapsed = (e.time_frames() - e.layer->offset.value) / std::max(1., e.framesPerSecond);
+            phase += std::max(0., elapsed) / std::max(.01f, finite_or(e.f(Duration), 2));
+        }
+        phase = e.value(Loop).as_bool() ? phase - std::floor(phase) : std::clamp(phase, 0., 1.);
+        e.pathSamples = std::make_shared<const std::vector<Vec4>>(
+            e.resources->repeat_path(e.layer, 1, static_cast<f32>(phase), e.value(Guide).ref));
+    }
+protected:
+    Pose pose(const EffectEval& e, f64) const noexcept override {
+        Pose p;
+        if (!e.pathSamples || e.pathSamples->empty()) return p;
+        p.pivot = layer_point(e, {.5f, .5f});
+        const auto point = e.pathSamples->front();
+        p.offset = {point.x - p.pivot.x, point.y - p.pivot.y};
+        if (e.value(Orient).as_bool()) p.rotation = point.z / kDeg2Rad;
+        return p;
+    }
+};
+
 class Oscillate final : public MotionBehavior {
 public:
     enum : u32 { kDirection = 0, kMagnitude, kFrequency, kPhase, kRotation, kScale, kWaveform,
@@ -497,5 +536,6 @@ void register_motion_behavior_effects(EffectRegistry& r) {
 }
 
 void register_twitch_effect(EffectRegistry& r) { (void)r.add(std::make_unique<Twitch>()); }
+void register_move_along_path_effect(EffectRegistry& r) { (void)r.add(std::make_unique<MoveAlongPath>()); }
 
 } // namespace aurea::builtin

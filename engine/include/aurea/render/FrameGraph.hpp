@@ -117,11 +117,30 @@ public:
     void begin_frame(GPUBackend& backend, u64 frameNumber) noexcept;
     [[nodiscard]] TextureHandle acquire(const TextureDesc& desc) noexcept;
     void release(TextureHandle texture) noexcept;
+    /// Quarantine an aborted submission's persistent target. The handle never
+    /// returns to the free pool; native destruction waits for GPU completion.
+    void retire(TextureHandle texture, u64 lastSubmittedFrame) noexcept;
     void end_frame() noexcept;
+    /// Between submissions, after a successful fence: discard only free
+    /// entries whose last use is complete. Backend counters remain authoritative.
+    u32 trim_unreferenced(u64 completedFrame) noexcept;
 
     /// Soft retention budget: required live textures are never evicted.
     /// Applied on the render thread; safe to update from device policy callbacks.
     void set_budget(u64 bytes) noexcept { budget_.store(bytes, std::memory_order_relaxed); }
+    /// Admission limit for a live frame. Refuse new targets before the driver
+    /// allocates an unbounded effect chain; callers receive OutOfDeviceMemory.
+    void set_allocation_limit(u64 bytes) noexcept { allocationLimit_.store(bytes, std::memory_order_relaxed); }
+    using KnownResourceUse = u64 (*)(void*) noexcept;
+    /// Optional shared admission envelope. Configure between frames; the
+    /// callback/context must remain valid until the pool is destroyed. A zero
+    /// budget preserves the legacy admission policy. Counters cover tracked
+    /// resources, not the complete process working set.
+    void set_tracked_resource_budget(u64 bytes, KnownResourceUse knownUse = nullptr, void* context = nullptr) noexcept {
+        knownResourceUse_ = knownUse;
+        knownResourceContext_ = context;
+        trackedResourceBudget_.store(bytes, std::memory_order_relaxed);
+    }
 
     /// Destrói tudo. Fechar projeto, perder o dispositivo, encerrar.
     void clear() noexcept;
@@ -151,6 +170,11 @@ private:
     u32 idleFrames_ = 120;
     Stats stats_{};
     std::atomic<u64> budget_{128ull << 20};
+    std::atomic<u64> allocationLimit_{~u64{0}};
+    std::atomic<u64> trackedResourceBudget_{0};
+    KnownResourceUse knownResourceUse_ = nullptr;
+    void* knownResourceContext_ = nullptr;
+    [[nodiscard]] bool tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes) const noexcept;
     void trim_for(u64 incomingBytes) noexcept;
 };
 

@@ -2,6 +2,9 @@
 #include "TestFramework.hpp"
 #include "aurea/ai/RotoMatte.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/Engine.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/render/Renderer.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -43,6 +46,68 @@ f32 iou(const std::vector<f32>& m, const std::vector<u8>& truth) {
     return uni ? f32(inter) / f32(uni) : 1.f;
 }
 } // namespace
+
+AUREA_TEST(Roto, PaintedObjectExcludesAnotherConfidentAutomaticObject) {
+    std::vector<u8> rgb, truth;
+    scene_frame(200, 170, 45, rgb, &truth);
+    std::vector<f32> prob(N * N, .5f);
+    for (u32 y = 30; y < 80; ++y) for (u32 x = 30; x < 80; ++x) {
+        const usize at = y * N + x;
+        rgb[at * 3] = 20; rgb[at * 3 + 1] = 20; rgb[at * 3 + 2] = 230;
+        prob[at] = .99f;
+    }
+    ai::RotoStrokes s{stroke(0, false, .03f, {{190, 170}, {210, 170}})};
+    std::vector<u8> labels;
+    ai::roto_rasterize(s, 0, N, N, N, labels);
+    std::vector<f32> matte;
+    ai::roto_segment(prob.data(), rgb.data(), labels.data(), nullptr, N, matte);
+    AUREA_CHECK(matte[170 * N + 200] > .99f);
+    AUREA_CHECK(matte[55 * N + 55] < .1f);
+    const f32 selectedIou = iou(matte, truth);
+    std::printf("    painted selection without background strokes IoU %.3f\n", selectedIou);
+    AUREA_CHECK(selectedIou > .9f);
+}
+
+AUREA_TEST(Roto, ProjectedBrushReturnsToTheSourceUnder2DAndPerspectiveTransforms) {
+    Engine engine;
+    EngineConfig config; config.workerCount = 1; config.disableAutosave = true;
+    AUREA_CHECK(engine.initialize(config).ok());
+    AUREA_CHECK(engine.new_project(640, 480, 30, nullptr).ok());
+    std::vector<u8> pixels(160 * 120 * 4, 255);
+    auto imported = engine.import_image(pixels.data(), 160, 120, "Roto plane");
+    AUREA_CHECK(imported.ok()); if (!imported.ok()) return;
+    const LayerId id = LayerId::unpack(*imported);
+    auto* comp = engine.project()->timeline().composition(engine.project()->timeline().current());
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = id;
+    add.effect_add.effectType = effect_type_id(effect_keys::kRotobrush); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(engine.apply_command(add).ok());
+    auto* layer = comp->layer(id);
+    const u32 effect = layer->effects.back().id;
+    for (const bool perspective : {false, true}) {
+        layer->threeD = perspective;
+        layer->transform.position = Vec3{290, 210, perspective ? 20.f : 0.f};
+        layer->transform.anchor = Vec3{80, 60, 0};
+        layer->transform.scale = Vec3{1.3f, .8f, 1};
+        layer->transform.rotation = Vec3{perspective ? 22.f : 0.f, perspective ? 38.f : 0.f, 17};
+        bool projected = false;
+        const Mat4 matrix = layer_comp_matrix(*comp, *layer, FrameIndex{0}, &projected);
+        AUREA_CHECK_EQ(projected, perspective);
+        const Vec4 screen = matrix * Vec4{48, 78, 0, 1};
+        const f32 xy[] = {screen.x / screen.w, screen.y / screen.w};
+        AUREA_CHECK(engine.roto_add_stroke(id.pack(), effect, false, 7, xy, 1));
+        ai::RotoStrokes strokes;
+        AUREA_CHECK(ai::roto_instance_strokes(layer->effects.back(), strokes));
+        AUREA_CHECK(!strokes.empty());
+        if (!strokes.empty()) {
+            AUREA_CHECK_NEAR(strokes.back().points[0].x, .3f, 1e-4);
+            AUREA_CHECK_NEAR(strokes.back().points[0].y, .65f, 1e-4);
+        }
+    }
+    layer->locked = true;
+    const f32 xy[] = {290, 210};
+    AUREA_CHECK(!engine.roto_add_stroke(id.pack(), effect, true, 7, xy, 1));
+    engine.shutdown();
+}
 
 AUREA_TEST(Roto, BackgroundStrokeRemovesWhatTheModelCallsForeground) {
     std::vector<u8> rgb, truth;

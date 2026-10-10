@@ -12,7 +12,7 @@
 namespace aurea::text {
 Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
     const std::string& source, const std::string& model, const std::string& language,
-    std::atomic<bool>& cancelled, const std::function<void(int)>& progress, double start, double end) noexcept {
+    std::atomic<bool>& cancelled, const std::function<void(int)>& progress, double start, double end, bool translateEnglish) noexcept {
     // One model across the process. Do not accumulate multiple 200+ MB contexts.
     static std::mutex inference;
     std::unique_lock lock(inference, std::try_to_lock);
@@ -31,6 +31,8 @@ Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
         std::unique_ptr<whisper_context, decltype(&whisper_free)> ctx(
             whisper_init_from_file_with_params(model.c_str(), cp), whisper_free);
         if (!ctx) return Status{Errc::CorruptData, "modelo Whisper indisponivel"};
+        if (translateEnglish && !whisper_is_multilingual(ctx.get()))
+            return Status{Errc::UnsupportedFormat, "traducao requer modelo Whisper multilingue"};
         const double duration = info.durationUs / 1000000.0;
         const double stop = end > 0 ? std::min(end, duration) : duration;
         if (stop * info.sampleRate >= static_cast<double>(std::numeric_limits<i64>::max() / 4))
@@ -75,7 +77,7 @@ Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
             stereo.clear(); stereo.shrink_to_fit(); resampled.clear(); resampled.shrink_to_fit();
             auto p = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
             p.beam_search.beam_size = 3;
-            p.n_threads = 2; p.translate = false; p.no_context = true;
+            p.n_threads = 4; p.translate = translateEnglish; p.no_context = true;
             p.language = language.empty() ? "auto" : language.c_str();
             p.print_progress = p.print_realtime = p.print_timestamps = p.print_special = false;
             p.token_timestamps = true; p.split_on_word = true; p.max_len = 1;

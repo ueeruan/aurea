@@ -191,6 +191,9 @@ internal fun shellBack(store: EditorStore, ui: EditorUi) {
  */
 @Composable
 fun EditorScreen(store: EditorStore) {
+    LaunchedEffect(store, store.engineReady, EditorTimelineRefresh.enabled) {
+        if (store.engineReady) store.setContentBoundedPlayback(EditorTimelineRefresh.enabled)
+    }
     val ui = rememberSaveable(saver = EditorUi.Saver) { EditorUi() }
     StagePrefs.load(androidx.compose.ui.platform.LocalContext.current)
     val selectionSize by remember { derivedStateOf { store.selection.size } }
@@ -543,7 +546,7 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
             )
             return@Column
         }
-        Spacer(Modifier.height(ShellDims.SheetHandle))
+        if (!EditorTimelineRefresh.enabled) Spacer(Modifier.height(ShellDims.SheetHandle))
         SheetBody {
             when (content) {
                 SheetContent.Adding -> AddLayerPanel(store, ui)

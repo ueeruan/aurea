@@ -13,7 +13,7 @@
 //                   códigos chegam crus em (R=Cr, G=Y, B=Cb).
 //   (sem define)    planos enviados pela CPU — o caminho de fallback quando o
 //                   aparelho não importa AHardwareBuffer, e o caminho dos
-//                   testes no host. NV12, NV21, I420 e P010.
+//                   testes no host. NV12, NV21, I420, P010 ou RGBA.
 //
 //  A conta de cor (faixa, matriz, curva, primárias, tone map) é a mesma função
 //  nos dois casos. Um vídeo tem a mesma cor com ou sem zero-copy — é isso que o
@@ -36,10 +36,29 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 transfer;   // x=curva  y=primárias  z=tone map (0/1)  w=pico HDR (trabalho)
     vec4 crop;       // xy=deslocamento  zw=escala da região visível no quadro codificado
     vec4 rot;        // matriz 2x2 de orientação (xy = coluna 0, zw = coluna 1)
-    vec4 sampling;   // x=layout planar (0 NV12, 1 NV21, 2 I420)  y=escala de código (P010)  z=taps de redução (0/1)
-                     // w=imagem externa já em RGB (0/1): pula a matriz YCbCr
+    vec4 sampling;   // x=layout (0 NV12, 1 NV21, 2 I420, 3 P010 half) y=escala de código z=taps de redução (0/1)
+                     // w=imagem já em RGB (0/1): pula a matriz YCbCr
     vec4 texel;      // xy=tamanho do texel de luma em uv  zw=tamanho do pixel de saída em uv da fonte
 } p;
+
+#ifndef AUREA_EXTERNAL
+vec4 fetch_p010_half(sampler2D plane, vec2 uv) {
+    // The half upload stores every integer code exactly. Hardware half
+    // filtering can round fractional codes back to half precision before the
+    // HDR curve, amplifying a small chroma error. Reconstruct the same bilinear
+    // footprint in float32 without changing storage, crop or chroma siting.
+    ivec2 size = textureSize(plane, 0);
+    vec2 position = uv * vec2(size) - 0.5;
+    ivec2 base = ivec2(floor(position));
+    vec2 weight = fract(position);
+    ivec2 high = size - ivec2(1);
+    vec4 a = texelFetch(plane, clamp(base, ivec2(0), high), 0);
+    vec4 b = texelFetch(plane, clamp(base + ivec2(1, 0), ivec2(0), high), 0);
+    vec4 c = texelFetch(plane, clamp(base + ivec2(0, 1), ivec2(0), high), 0);
+    vec4 d = texelFetch(plane, clamp(base + ivec2(1, 1), ivec2(0), high), 0);
+    return mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y);
+}
+#endif
 
 vec3 fetch_ycc(vec2 uv) {
 #ifdef AUREA_EXTERNAL
@@ -48,9 +67,12 @@ vec3 fetch_ycc(vec2 uv) {
     // buffer já em RGB (sampling.w) volta como está.
     return p.sampling.w > 0.5 ? s.rgb : vec3(s.g, s.b, s.r);
 #else
+    if (p.sampling.w > 0.5) return texture(u_tex0, uv).rgb;
+    int layoutKind = int(p.sampling.x + 0.5);
+    if (layoutKind == 3)
+        return vec3(fetch_p010_half(u_tex0, uv).r, fetch_p010_half(u_tex1, uv).rg) * p.sampling.y;
     float y = texture(u_tex0, uv).r;
     vec2 c;
-    int layoutKind = int(p.sampling.x + 0.5);
     if (layoutKind == 2) {
         c = vec2(texture(u_tex1, uv).r, texture(u_tex2, uv).r);
     } else {

@@ -8,7 +8,6 @@ struct TransformView: View {
     private var animatorTrack: TimelineTrack? { tab == 6 ? model.animatorRailTrack() : nil }
     @State private var axis = 2
     private var linked: Bool { model.scaleAxesLinked }
-    @State private var expand3D = false
     @State private var text3D = false
     @State private var wholeText = false
     @State private var zPicked = false
@@ -33,7 +32,7 @@ struct TransformView: View {
         return [8, 9, 10].contains(kind) || model.selectedLayer?.threeD == true || abs(value(6)) > 0.01 || abs(value(7)) > 0.01
             || abs(value(2)) > 0.01 || [UInt32(6), 7, 2].contains { animatedMask & (1 << $0) != 0 }
     }
-    private var threeD: Bool { expand3D || uses3D }
+    private var threeD: Bool { uses3D }
     private var rotationAxis: Int { threeD ? axis : 2 }
     private var props: [UInt32] {
         switch tab { case 0: return [0, 1]; case 1: return [3, 4]; case 2: return [UInt32(6 + rotationAxis)]
@@ -118,7 +117,12 @@ struct TransformView: View {
                     case 3: opacityFace
                     case 4: moveFace(pivot: true)
                     case 5: motionBlurFace
-                    case 6: ScrollView { LayerAnimatorSection().padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 16) }
+                    case 6: ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            LayerAnimatorSection()
+                            if model.selectedLayer?.kind == 4 || text3D { TextAnimationSection(showAnimatorEffect: false) }
+                        }.padding(.leading, 8).padding(.trailing, 12).padding(.top, 6).padding(.bottom, 16)
+                    }
                     default: lensFace
                     }
                     Spacer().frame(height: 10)
@@ -270,11 +274,11 @@ struct TransformView: View {
                         .accessibilityIdentifier("transform.rotation.axis.\(index)")
                     }
                 } else {
-                    Button { expand3D = true } label: {
+                    Button { model.enableLayer3D() } label: {
                         Text(AureaText.t("panel_girar_3d_x_y")).font(.aurea(size: 12.5, weight: .semibold))
                             .padding(.horizontal, 14).padding(.vertical, 6)
                             .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).accessibilityIdentifier("transform.enable3d")
                 }
             }.frame(height: 44).frame(maxWidth: .infinity).padding(.horizontal, 12)
             GeometryReader { bounds in
@@ -298,7 +302,9 @@ struct TransformView: View {
                             var step = raw - before
                             if step > 180 { step -= 360 }; if step < -180 { step += 360 }
                             guard step != 0 else { return }
-                            beginGesture(); dialTotal += step; write([property: dialTotal])
+                            dialTotal += step
+                            guard gestureOpen || dialWalked >= 4 else { return }
+                            beginGesture(); write([property: dialTotal])
                         }.onEnded { event in
                             if gestureOpen { endGesture() }
                             else if dialWalked < 2, let raw = dialRaw(event.location, center: center) {
@@ -322,6 +328,7 @@ struct TransformView: View {
                                 .font(.aurea(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.accent)
                                 .padding(.horizontal, 10).padding(.vertical, 8).contentShape(Rectangle())
                         }.buttonStyle(.plain)
+                        .accessibilityIdentifier("transform.rotation.turns")
                         .accessibilityLabel(turnsTitle).accessibilityValue("\(split.turns)")
                         Button {
                             keypad(degreesTitle, split.rest, unit: "°", decimals: 1) { write([property: Float(split.turns) * 360 + $0]) }
@@ -330,6 +337,7 @@ struct TransformView: View {
                                 .font(.aurea(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.accent)
                                 .padding(.horizontal, 10).padding(.vertical, 8).contentShape(Rectangle())
                         }.buttonStyle(.plain)
+                        .accessibilityIdentifier("transform.rotation.degrees")
                         .accessibilityLabel(degreesTitle).accessibilityValue((split.rest < 0 ? "-" : "") + restText)
                     }
                     .padding(.horizontal, 6)
@@ -699,8 +707,8 @@ struct TransformView: View {
         }
         if tab < 5 { items.append(HomeSheetAction(AureaText.t("panel_voltar_padrao"), action: reset)) }
         if !props.isEmpty { items.append(HomeSheetAction(AureaText.t(expressionLook == .none ? "panel_adicionar_expressao" : "panel_editar_expressao"), action: openExpression)) }
-        if !uses3D {
-            items.append(HomeSheetAction(AureaText.t(expand3D ? "panel_esconder_x_y_z_3d" : "panel_mostrar_x_y_z_3d")) { expand3D.toggle() })
+        if model.selectedLayer?.threeD == false && ![8, 9, 10].contains(model.selectedLayer?.kind ?? 0) {
+            items.append(HomeSheetAction(AureaText.t("panel_mostrar_x_y_z_3d")) { model.enableLayer3D() })
         }
         return items
     }
@@ -829,7 +837,7 @@ func rotationTurns(_ angle: Float) -> (turns: Int, rest: Float) {
     return (Int(turns), Float(Double(tenths - turns * 3600) / 10))
 }
 
-private struct TransformDial: View {
+struct TransformDial: View {
     let angle: Float
     var body: some View {
         Canvas { context, size in

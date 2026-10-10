@@ -393,9 +393,15 @@ Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad,
             d.height = quad.height;
             d.layers = 1;
             d.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
-            d.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT;
+            d.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT
+                    | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN;
             if (AHardwareBuffer_allocate(&d, &target) != 0 || !target) {
-                return Status{Errc::OutOfMemory, "AHardwareBuffer RGBA nao alocado"};
+                // Normal rendering stays on the GPU. A readable target only
+                // supplies a lazy, owned RGBA copy if native import is rejected.
+                // Devices that cannot allocate both usages retain GPU output.
+                d.usage &= ~uint64_t(AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN);
+                if (AHardwareBuffer_allocate(&d, &target) != 0 || !target)
+                    return Status{Errc::OutOfMemory, "AHardwareBuffer RGBA nao alocado"};
             }
             ++p.live;
         }

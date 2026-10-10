@@ -91,7 +91,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     AUREA_CHECK_EQ(r.cap.video.height % 16, 0u);
     AUREA_CHECK_EQ(r.cap.video.bitrateBps,
                    export_safe_bitrate_bps(export_video_bitrate_bps(r.cap.video.width, r.cap.video.height, 30.0,
-                                                                    ExportCodec::H264, ExportQuality::Normal), 1));
+                                                                    ExportCodec::H264, static_cast<ExportQuality>(s.quality)), 1));
     release_hung(gate.release, gate.returned);
     AUREA_CHECK(gate.returned.load());
 }

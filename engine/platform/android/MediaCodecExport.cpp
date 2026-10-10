@@ -7,6 +7,8 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
+#include "aurea/export/EncoderRateMode.hpp"
+#include "aurea/export/AacOutputIntegrity.hpp"
 #include "aurea/media/YuvLayout.hpp"
 
 #include <media/NdkImage.h>
@@ -113,6 +115,8 @@ public:
         plan_ = media::YuvCopyPlan{};
         videoQueued_ = 0;
         videoOut_ = 0;
+        audioIntegrity_ = {};
+        audioCodecName_[0] = '\0';
         triedSoftwareReopen_ = false;
         lastVideoPts_ = lastAudioPts_ = 0;
         lastAudioInputPts_ = -1;
@@ -265,6 +269,7 @@ public:
                 return codec_error("encoder de audio recusou o PCM", queued);
             }
             lastAudioInputPts_ = pts;
+            audioIntegrity_.accepted_pcm(n);
             done += n;
             deadline = monotonic_ns() + stall_timeout_ns();
         }
@@ -318,15 +323,43 @@ public:
             }
             return fail_status(Status{Errc::Timeout, "encoder nao terminou"});
         }
+        if (cancelled()) return fail_status(Errc::Cancelled);
         if (!muxStarted_) return fail_status(Status{Errc::InvalidState, "nenhum quadro chegou ao arquivo"});
+        // EOS alone is not proof of a complete stream: a broken encoder may
+        // acknowledge the end after silently dropping submitted input frames.
+        if (!export_video_complete_without_eos(videoQueued_, videoOut_))
+            return fail_status(Status{Errc::EncodeFailed, "encoder terminou sem entregar todos os quadros"});
+        if (hasAudio_) {
+            AUREA_LOG_INFO("export AAC: %s, PCM=%llu, buffers=%llu, amostras/AU=%u, capacidade de AU unica=%s",
+                audioCodecName_[0] ? audioCodecName_ : "desconhecido",
+                static_cast<unsigned long long>(audioIntegrity_.accepted_frames()),
+                static_cast<unsigned long long>(audioIntegrity_.data_buffers()), audioIntegrity_.frame_samples(),
+                audioIntegrity_.capacity_known() ? "conhecida" : "desconhecida");
+            // This proves only insufficient encoded capacity, not correct
+            // priming/tail alignment. Never subtract a guessed codec delay.
+            if (audioIntegrity_.proves_insufficient())
+                return fail_status(Status{Errc::EncodeFailed, "encoder terminou sem representar todas as amostras de audio aceitas"});
+        }
         const media_status_t ms = AMediaMuxer_stop(muxer_);
         muxStarted_ = false;
-        release(false);
         if (ms != AMEDIA_OK) {
-            ::unlink(path_.c_str());
-            return codec_error("falha ao finalizar o MP4", ms, true);
+            // Diagnose disk space while the descriptor still exists and before
+            // unlinking a partial file can free the space that caused failure.
+            const Status error = codec_error("falha ao finalizar o MP4", ms, true);
+            release(true);
+            return error;
         }
-        return OkStatus;
+        // A successful muxer stop can still leave delayed filesystem errors.
+        // Flush while this descriptor and its free-space diagnosis are valid,
+        // before a staging proxy can publish the finalized filename.
+        if (::fsync(fd_) != 0) {
+            const Status error = codec_error("falha ao sincronizar o MP4", -errno, true);
+            release(true);
+            return error;
+        }
+        pulse();
+        if (cancelled()) return fail_status(Errc::Cancelled);
+        return release(false);
     }
 
     void abort() noexcept override { release(true); }
@@ -446,20 +479,44 @@ private:
     /// Configura o codec com a MESMA receita (resolução, taxa, GOP, cor) nos
     /// formatos de entrada que o motor sabe entregar. Nada de baixar resolução
     /// ou taxa para "caber": se não aceita, quem chama decide o que fazer.
-    bool configure_video(AMediaCodec* codec, const char* mime) noexcept {
+    bool configure_video(AMediaCodec*& codec, const char* mime, const char* preferredName = nullptr) noexcept {
         // Modo de segurança (ExportWatchdog.hpp): H.264 Baseline — sem
         // B-quadros, o perfil que todo encoder de fabricante implementa. Se o
         // encoder recusar a chave, a mesma receita sem ela.
         const bool baseline = video_.profile == kExportProfileBaseline && video_.codec == ExportCodec::H264;
-        for (int withProfile = baseline ? 1 : 0; withProfile >= 0; --withProfile) {
-            if (configure_video_formats(codec, mime, withProfile != 0)) return true;
+        char name[128]{};
+        if (preferredName) std::snprintf(name, sizeof(name), "%s", preferredName);
+        else (void)codec_name(codec, name, sizeof(name));
+        bool attempted = false;
+        const u32 requestedMode = video_.rateMode == 0 ? 0u : 1u;
+        u32 acceptedMode = requestedMode;
+        const bool configured = configure_encoder_rate_mode(requestedMode, [&](u32 mode) noexcept {
+            for (int withProfile = baseline ? 1 : 0; withProfile >= 0; --withProfile) {
+                if (configure_video_formats(codec, mime, withProfile != 0, name, attempted, mode)) return true;
+            }
+            return false;
+        }, acceptedMode);
+        if (configured) {
+            video_.rateMode = acceptedMode;
+            if (acceptedMode != requestedMode)
+                AUREA_LOG_WARN("export: encoder %s recusou %s; usando %s com os mesmos %u bps", name,
+                    requestedMode == 0 ? "CBR" : "VBR", acceptedMode == 0 ? "CBR" : "VBR", video_.bitrateBps);
         }
-        return false;
+        return configured;
     }
 
-    bool configure_video_formats(AMediaCodec* codec, const char* mime, bool baselineProfile) noexcept {
+    bool configure_video_formats(AMediaCodec*& codec, const char* mime, bool baselineProfile,
+                                 const char* name, bool& attempted, u32 rateMode) noexcept {
         const i32 order[] = {kColorFormatNv12, kColorFormatI420, kColorFormatFlexible};
         for (i32 cf : order) {
+            // configure() can leave a vendor codec in its error state. Each
+            // format/profile retry starts with a new instance of the same codec.
+            if (attempted) {
+                if (codec) AMediaCodec_delete(codec);
+                codec = name[0] ? AMediaCodec_createCodecByName(name) : AMediaCodec_createEncoderByType(mime);
+                if (!codec) return false;
+            }
+            attempted = true;
             AMediaFormat* f = AMediaFormat_new();
             // MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline = 1.
             if (baselineProfile) AMediaFormat_setInt32(f, "profile", 1);
@@ -475,7 +532,7 @@ private:
             // MediaCodecInfo.EncoderCapabilities: 0 = CQ, 1 = VBR, 2 = CBR. CQ nunca:
             // ignora a taxa (era o "1 minuto = 1 GB"). CBR quando o encoder do
             // aparelho não anuncia VBR (o app confere no MediaCodecList).
-            AMediaFormat_setInt32(f, "bitrate-mode", video_.rateMode == 0 ? 2 : 1);
+            AMediaFormat_setInt32(f, "bitrate-mode", rateMode == 0 ? 2 : 1);
             // Etiqueta de cor: BT.709, faixa limitada, SDR (MediaFormat.COLOR_*).
             AMediaFormat_setInt32(f, "color-standard", video_.color.matrix == 9 ? 6 : video_.color.matrix == 6 ? 4 : 1);
             AMediaFormat_setInt32(f, "color-range", video_.color.fullRange ? 1 : 2);
@@ -502,7 +559,7 @@ private:
             const char* name = names[k];
             AMediaCodec* sw = AMediaCodec_createCodecByName(name);
             if (!sw) continue;
-            if (configure_video(sw, mime)) {
+            if (configure_video(sw, mime, name)) {
                 video__.codec = sw;
                 std::snprintf(info_.name, sizeof(info_.name), "%s", name);
                 info_.acceleration = Acceleration::Software;
@@ -511,7 +568,7 @@ private:
                                hwName, motivo, video_.width, video_.height, video_.fps, name);
                 return true;
             }
-            AMediaCodec_delete(sw);
+            if (sw) AMediaCodec_delete(sw);
         }
         return false;
     }
@@ -572,11 +629,14 @@ private:
             info_ = EncoderInfo{};
         }
         video__.codec = AMediaCodec_createEncoderByType(mime);
+        bool configured = false;
         if (!video__.codec) {
-            return fail(Errc::NotSupported, hevc ? "este aparelho nao codifica HEVC" : "este aparelho nao codifica H.264");
+            configured = open_software_video(mime, "(indisponivel)", "nao abriu");
+            if (!configured)
+                return fail(Errc::NotSupported, hevc ? "este aparelho nao codifica HEVC" : "este aparelho nao codifica H.264");
         }
         note_codec(video__.codec);
-        bool configured = configure_video(video__.codec, mime);
+        if (!configured) configured = configure_video(video__.codec, mime);
         if (!configured && info_.acceleration != Acceleration::Software) {
             // O de hardware recusou a receita (resolução/fps acima do bloco do
             // aparelho). Fallback: o encoder de software do sistema, com a MESMA
@@ -625,6 +685,9 @@ private:
         AMediaFormat_delete(f);
         if (ms != AMEDIA_OK) return fail(Errc::NotSupported, "encoder AAC recusou a configuracao");
         if (AMediaCodec_start(audio__.codec) != AMEDIA_OK) return fail(Errc::IoError, "encoder AAC nao iniciou");
+        // createEncoderByType does not request an alias: getName identifies
+        // the allocated component. Unknown/older APIs disable strict counting.
+        (void)codec_name(audio__.codec, audioCodecName_, sizeof(audioCodecName_));
         return OkStatus;
     }
 
@@ -672,6 +735,17 @@ private:
                 if (t.formatKnown) return Status{Errc::EncodeFailed, "encoder mudou o formato durante a exportacao"};
                 AMediaFormat* f = AMediaCodec_getOutputFormat(t.codec);
                 if (!f) return Status{Errc::EncodeFailed, "encoder nao entregou o formato de saida"};
+                if (t.audio) {
+                    void* asc = nullptr;
+                    size_t ascBytes = 0;
+                    (void)AMediaFormat_getBuffer(f, "csd-0", &asc, &ascBytes);
+                    i32 maxBatch = -1, threshold = -1;
+                    const bool maxKnown = AMediaFormat_getInt32(f, "buffer-batch-max-output-size", &maxBatch);
+                    const bool thresholdKnown = AMediaFormat_getInt32(f, "buffer-batch-threshold-output-size", &threshold);
+                    const bool singleAu = aac_c2_single_au_contract(audioCodecName_, maxKnown, maxBatch, thresholdKnown, threshold);
+                    audioIntegrity_.set_format(asc ? std::span<const u8>{static_cast<const u8*>(asc), ascBytes}
+                                                  : std::span<const u8>{}, audio_.sampleRate, audio_.channels, singleAu);
+                }
                 t.muxIndex = static_cast<i32>(AMediaMuxer_addTrack(muxer_, f));
                 AMediaFormat_delete(f);
                 if (t.muxIndex < 0) return codec_error("muxer recusou a trilha", t.muxIndex);
@@ -686,14 +760,19 @@ private:
             size_t cap = 0;
             u8* data = AMediaCodec_getOutputBuffer(t.codec, static_cast<size_t>(idx), &cap);
             const bool config = (info.flags & AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) != 0;
-            if (info.size > 0 && !config) {
-                ++progressGeneration_;
-                if (!data || info.offset < 0 || static_cast<size_t>(info.offset) > cap ||
-                    static_cast<size_t>(info.size) > cap - static_cast<size_t>(info.offset)) {
+            if (info.size != 0 && !config) {
+                // NDK already adjusted data to the valid sample. Applying its
+                // old BufferInfo.offset again skips bytes, and its pre-36
+                // reported capacity cannot be used to reject a valid packet.
+                if (!normalize_codec_output_packet(data, cap, info)) {
                     AMediaCodec_releaseOutputBuffer(t.codec, static_cast<size_t>(idx), false);
-                    return Status{Errc::EncodeFailed, "encoder entregou pacote fora do buffer"};
+                    return Status{Errc::EncodeFailed, "encoder entregou pacote invalido"};
                 }
-                if (t.audio) lastAudioPts_ = std::max<i64>(lastAudioPts_, info.presentationTimeUs);
+                ++progressGeneration_;
+                if (t.audio) {
+                    lastAudioPts_ = std::max<i64>(lastAudioPts_, info.presentationTimeUs);
+                    audioIntegrity_.encoded_buffer(static_cast<u64>(info.size), info.flags, info.presentationTimeUs);
+                }
                 else ++videoOut_;
                 if (muxStarted_) {
                     const media_status_t ms = write_muxer_packet(muxer_, static_cast<size_t>(t.muxIndex), data, cap, info);
@@ -714,12 +793,14 @@ private:
                     }
                     Pending p;
                     p.audio = t.audio;
-                    p.data.assign(data + info.offset, data + info.offset + info.size);
+                    p.data.assign(data, data + cap);
                     p.info = info;
                     p.info.offset = 0;
                     pendingBytes_ += p.data.size();
                     pending_.push_back(std::move(p));
                 }
+            } else if (t.audio) {
+                audioIntegrity_.encoded_buffer(0, info.flags, info.presentationTimeUs);
             }
             AMediaCodec_releaseOutputBuffer(t.codec, static_cast<size_t>(idx), false);
             if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) {
@@ -769,7 +850,8 @@ private:
         return s;
     }
 
-    void release(bool deleteFile) noexcept {
+    Status release(bool deleteFile) noexcept {
+        Status closed = OkStatus;
         for (Track* t : {&video__, &audio__}) {
             if (t->codec) {
                 AMediaCodec_stop(t->codec);
@@ -784,12 +866,17 @@ private:
             muxStarted_ = false;
         }
         if (fd_ >= 0) {
-            ::close(fd_);
+            const int closeError = ::close(fd_) == 0 ? 0 : errno;
             fd_ = -1;
-            if (deleteFile && !path_.empty()) ::unlink(path_.c_str());
+            if ((deleteFile || closeError) && !path_.empty()) ::unlink(path_.c_str());
+            // Preserve an earlier encode/mux/flush diagnostic during abort.
+            // A successful finish, however, must surface a deferred close error.
+            if (closeError && !deleteFile)
+                closed = codec_error("falha ao fechar o MP4", -closeError, true);
         }
         pending_.clear();
         pendingBytes_ = 0;
+        return closed;
     }
 
     std::string path_;
@@ -814,6 +901,8 @@ private:
     /// Pacotes de vídeo que saíram do encoder (um por quadro): fecha o MP4
     /// mesmo se a marca de fim se perder (export_video_complete_without_eos).
     u64 videoOut_ = 0;
+    AacOutputIntegrity audioIntegrity_{};
+    char audioCodecName_[64]{};
     std::atomic<u64>* beat_ = nullptr;
     bool triedSoftwareReopen_ = false;
     i64 lastVideoPts_ = 0;

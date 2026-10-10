@@ -14,12 +14,18 @@
 #include "SyntheticVideo.hpp"
 
 #include "aurea/Engine.hpp"
+#include "aurea/render/UploadRingPolicy.hpp"
 #include "aurea/jobs/JobSystem.hpp"
 #include "aurea/media/VideoSource.hpp"
 #include "aurea/memory/MemoryManager.hpp"
 
 #if defined(AUREA_TEST_VULKAN)
+#if defined(AUREA_TEST_GLES)
+#include "GlesBackend.hpp"
+namespace aurea { namespace vk = gles; }
+#else
 #include "VulkanBackend.hpp"
+#endif
 #include "aurea/export/ExportSink.hpp"
 #endif
 
@@ -923,3 +929,17 @@ AUREA_TEST(Perf8B, OsTrimLevelsReleaseMemoryAndKeepTheProject) {
 }
 #endif
 #endif   // AUREA_TEST_VULKAN
+
+AUREA_TEST(UploadRingMemory, HeavyFramesKeepCapacityAndLightFramesReturnToBaseline) {
+    u32 quiet = 0;
+    constexpr u64 floor = 256ull * 1024, large = 16ull * 1024 * 1024;
+    for (u32 i = 0; i < 31; ++i) AUREA_CHECK_EQ(upload_ring_shrink_target(large, 64 * 1024, floor, quiet), 0ull);
+    AUREA_CHECK_EQ(upload_ring_shrink_target(large, 64 * 1024, floor, quiet), floor);
+    AUREA_CHECK_EQ(quiet, 0u);
+    for (u32 i = 0; i < 10; ++i) (void)upload_ring_shrink_target(large, 64 * 1024, floor, quiet);
+    AUREA_CHECK_EQ(upload_ring_shrink_target(large, large / 2, floor, quiet), 0ull);
+    AUREA_CHECK_EQ(quiet, 0u);
+    for (u32 i = 0; i < 31; ++i) (void)upload_ring_shrink_target(large, 512 * 1024, floor, quiet);
+    AUREA_CHECK_EQ(upload_ring_shrink_target(large, 512 * 1024, floor, quiet), 1024ull * 1024);
+    AUREA_CHECK_EQ(upload_ring_shrink_target(floor, 0, floor, quiet), 0ull);
+}

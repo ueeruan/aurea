@@ -14,6 +14,11 @@
 // =============================================================================
 import SwiftUI
 
+/// Native editor refresh approved for the official Android and iOS apps.
+enum EditorTimelineRefresh {
+    static let enabled = true
+}
+
 // =============================================================================
 // Cores (ShellTokens.kt + as privadas de Stage.kt)
 // =============================================================================

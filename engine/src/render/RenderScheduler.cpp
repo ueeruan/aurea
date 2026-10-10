@@ -3,8 +3,63 @@
 #include "aurea/core/Math.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace aurea {
+
+Status AureaRenderScheduler::configure(u32 frames, f64 outputFps,
+                                       f64 compositionFps, u32 availableSlots,
+                                       ExportExecutionProfile profile) noexcept {
+    if (!frames || !availableSlots || !std::isfinite(outputFps) || outputFps <= 0.0
+        || !std::isfinite(compositionFps) || compositionFps <= 0.0
+        || static_cast<u32>(profile) > static_cast<u32>(ExportExecutionProfile::HighQuality))
+        return Errc::InvalidArgument;
+    const f64 seconds = static_cast<f64>(frames) / outputFps;
+    // Bound before integer conversion; leave a margin for rounding.
+    const f64 integerLimit = static_cast<f64>(std::numeric_limits<i64>::max()) - 4096.0;
+    if (!std::isfinite(seconds) || seconds * 1e6 >= integerLimit
+        || seconds * compositionFps >= integerLimit)
+        return Errc::InvalidArgument;
+    frames_ = frames;
+    outputFps_ = outputFps;
+    compositionFps_ = compositionFps;
+    profile_ = profile;
+    capacity_ = profile == ExportExecutionProfile::HighQuality ? 1u : std::clamp(availableSlots, 1u, 4u);
+    memoryLimit_ = capacity_;
+    headroomSinceNs_ = 0;
+    return OkStatus;
+}
+
+Result<ExportFramePlan> AureaRenderScheduler::frame(u32 index) const noexcept {
+    if (index >= frames_) return Status{Errc::InvalidArgument};
+    // Derive each time from its absolute index. Slow render/encode calls and
+    // fractional rates cannot accumulate a clock drift or skip an output frame.
+    const f64 seconds = static_cast<f64>(index) / outputFps_;
+    return ExportFramePlan{FrameIndex{static_cast<i64>(std::floor(seconds * compositionFps_ + 1e-6))},
+                           static_cast<i64>(std::llround(seconds * 1e6))};
+}
+
+u32 AureaRenderScheduler::admission_limit(f32 pressure, bool osMemoryWarning,
+                                          bool hot, u64 nowNs) noexcept {
+    if (osMemoryWarning || !std::isfinite(pressure) || pressure >= 0.95f) {
+        memoryLimit_ = 1;
+        headroomSinceNs_ = 0;
+    } else if (pressure >= 0.85f) {
+        memoryLimit_ = std::min(memoryLimit_, std::max(1u, capacity_ / 2));
+        headroomSinceNs_ = 0;
+    } else if (pressure < (profile_ == ExportExecutionProfile::Fast ? 0.70f : 0.65f) && memoryLimit_ < capacity_) {
+        if (!headroomSinceNs_ || nowNs < headroomSinceNs_) headroomSinceNs_ = nowNs;
+        const u64 recoverNs = profile_ == ExportExecutionProfile::Fast ? 1'000'000'000ull : 2'000'000'000ull;
+        if (nowNs >= headroomSinceNs_ && nowNs - headroomSinceNs_ >= recoverNs) {
+            memoryLimit_ = capacity_;
+            headroomSinceNs_ = 0;
+        }
+    } else {
+        headroomSinceNs_ = 0;
+    }
+    return hot ? 1u : memoryLimit_;
+}
 
 // -----------------------------------------------------------------------------
 // AdaptiveResolutionController

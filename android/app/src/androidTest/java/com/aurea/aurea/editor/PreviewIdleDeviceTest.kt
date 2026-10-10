@@ -100,7 +100,7 @@ class PreviewIdleDeviceTest {
         val warmedMs = SystemClock.elapsedRealtime() - warmStart
         // Give the whole small composition window time to finish. A warm-up
         // accidentally presenting future frames would move this circle right.
-        compose.waitUntil(12000) { store.previewBufferRanges.any { it.startFrame == 0L && it.endFrame == target.toLong() } }
+        compose.waitUntil(12000) { store.previewBufferRanges.any { it.startFrame == 0L && it.endFrame >= target.toLong() } }
         val warmed = visible("paused-warmed")
         assertEquals(0, store.playhead)
         assertFalse(store.playing)

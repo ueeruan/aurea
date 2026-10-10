@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace aurea::audio {
@@ -119,11 +120,16 @@ void AudioEngine::shutdown() {
     ring_.reset();
 }
 
-void AudioEngine::set_snapshot(std::shared_ptr<const AudioMixSnapshot> snap) {
+void AudioEngine::set_snapshot(std::shared_ptr<const AudioMixSnapshot> snap, i64 transportNs) {
     std::lock_guard<std::mutex> lock(mutex_);
     snap_ = std::move(snap);
     if (playing_.load(std::memory_order_acquire)) {
-        const i64 position = position_ns();
+        i64 position = position_ns();
+        // Beta 08/10: o relógio do som pode estar preso no ponto do play (nada
+        // apresentado nesta geração, contador da saída atrás). Reancorar ali
+        // fazia o áudio "voltar para o começo" a cada edição tocando.
+        constexpr i64 kStaleNs = 250'000'000;
+        if (transportNs >= 0 && std::llabs(position - transportNs) > kStaleNs) position = transportNs;
         mixGen_ = gen_.fetch_add(1, std::memory_order_acq_rel) + 1;
         mixPos_ = ns_to_sample(position);
         playStartNs_.store(position, std::memory_order_release);

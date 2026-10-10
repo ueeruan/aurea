@@ -81,12 +81,21 @@ class GizmoToolsTest {
         openNull("Gizmo rotate")
         selectTool(GIZMO_ROTATE)
         val before = store.detail!!
+        lateinit var orientation: FloatArray
+        compose.runOnIdle { orientation = checkNotNull(store.queryTrackball(store.primary!!)) }
         compose.onNodeWithTag("gizmo.stage").performTouchInput {
-            val t = tips()
-            // Transversal à alça X: gira em torno de X.
-            down(Offset(t[2], t[3]))
-            moveBy(Offset(0f, 30f), 60)
-            moveBy(Offset(0f, 30f), 60)
+            val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+            val mapper = StageMapper().apply { update(width.toFloat(), height.toFloat(), 0f, 320, 240, false) }
+            val center = Offset(mapper.sx(orientation[0]), mapper.sy(orientation[1]))
+            val radius = 62f * density
+            // At the initial orientation the X ring projects to a vertical line.
+            // Its lower front segment is away from both the Y and Z rings.
+            val offset = Offset(0f, radius * .6f)
+            assertEquals(0, com.aurea.aurea.engine.AureaEngine.trackballHit(
+                orientation.copyOfRange(2, 11), offset.x, offset.y, radius, 14f * density))
+            down(center + offset)
+            moveBy(Offset(0f, -20f * density), 80)
+            moveBy(Offset(0f, -20f * density), 80)
             up()
         }
         compose.waitUntil(5000) { store.detail!!.rotation[0] != before.rotation[0] }

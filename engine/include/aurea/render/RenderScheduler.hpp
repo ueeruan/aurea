@@ -36,6 +36,40 @@
 
 namespace aurea {
 
+/// Offline frame planning and admission for the existing GPU/encoder queues.
+/// Only the producer mutates admission; slot ownership remains protected by
+/// ExportContext's queue mutex and by the backend's completion fences.
+struct ExportFramePlan {
+    FrameIndex compositionFrame{};
+    i64 ptsUs = 0;
+};
+
+/// Resource policies. All three preserve the selected visual quality.
+/// HighQuality keeps one output frame active to leave room for heavy temporal
+/// effects; it does not silently change the project's sample count.
+enum class ExportExecutionProfile : u8 { Fast = 0, Balanced = 1, HighQuality = 2 };
+
+class AureaRenderScheduler {
+public:
+    [[nodiscard]] Status configure(u32 frames, f64 outputFps, f64 compositionFps,
+                                   u32 availableSlots,
+                                   ExportExecutionProfile profile = ExportExecutionProfile::Balanced) noexcept;
+    [[nodiscard]] Result<ExportFramePlan> frame(u32 index) const noexcept;
+    /// Pressure changes concurrency, never the authored frame or its quality.
+    /// Recover only after sustained headroom (1 s Fast / 2 s Balanced), preventing the
+    /// producer from refilling caches immediately after an OS memory warning.
+    [[nodiscard]] u32 admission_limit(f32 pressure, bool osMemoryWarning,
+                                      bool hot, u64 nowNs) noexcept;
+    [[nodiscard]] u32 capacity() const noexcept { return capacity_; }
+
+private:
+    u32 frames_ = 0;
+    f64 outputFps_ = 30.0, compositionFps_ = 30.0;
+    u32 capacity_ = 1, memoryLimit_ = 1;
+    ExportExecutionProfile profile_ = ExportExecutionProfile::Balanced;
+    u64 headroomSinceNs_ = 0;
+};
+
 /// Orçamento de tempo de um frame, em milissegundos, derivado da taxa real.
 struct FrameBudget {
     f32 targetFps = 60.0f;

@@ -2,10 +2,15 @@
 //  Aurea / scene3d / SceneRenderer.cpp
 // =============================================================================
 #include "aurea/scene3d/SceneRenderer.hpp"
+#include "aurea/scene3d/EnvironmentJob.hpp"
+#include "aurea/scene3d/MorphDeformation.hpp"
+#include "aurea/scene3d/GroundPlacement.hpp"
+#include "aurea/scene3d/MaterialOverrideKey.hpp"
 
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <array>
 #include <deque>
 #include <tuple>
 #include <chrono>
@@ -15,6 +20,32 @@
 
 namespace aurea::scene3d {
 namespace {
+struct ScenePairHash {
+    template<class A, class B>
+    usize operator()(const std::pair<A, B>& key) const noexcept {
+        const usize a = std::hash<A>{}(key.first), b = std::hash<B>{}(key.second);
+        return a ^ (b + 0x9e3779b9u + (a << 6) + (a >> 2));
+    }
+};
+
+// Most mobile scenes use only a handful of materials. Keep those lookups
+// on the stack, then use full-key hashing for large imported models.
+template<class K, class V, class Hash = std::hash<K>>
+class SceneLookup {
+    std::array<std::pair<K, V>, 8> small_{};
+    usize count_ = 0;
+    std::unordered_map<K, V, Hash> overflow_;
+public:
+    const V* find(const K& key) const {
+        for (usize i = 0; i < count_; ++i) if (small_[i].first == key) return &small_[i].second;
+        const auto entry = overflow_.find(key);
+        return entry == overflow_.end() ? nullptr : &entry->second;
+    }
+    void emplace(const K& key, const V& value) {
+        if (count_ < small_.size()) small_[count_++] = {key, value};
+        else overflow_.emplace(key, value);
+    }
+};
 
 // Bloco de parâmetros (std140) — espelho exato de shaders/scene3d/common/scene.glsl.
 struct alignas(16) SceneBlock {
@@ -239,6 +270,18 @@ Status GpuModel::upload(GPUBackend& gpu, const SceneAsset& asset) noexcept {
         }
     }
 
+    drawableNodes.clear();
+    morphNodes.clear();
+    for (usize n = 0; n < asset.nodes.size(); ++n) {
+        const Node& node = asset.nodes[n];
+        if (!node.inScene || node.mesh < 0 || static_cast<usize>(node.mesh) >= meshes.size()
+            || meshes[node.mesh].empty()) continue;
+        drawableNodes.push_back(static_cast<u32>(n));
+        const auto& primitives = asset.meshes[node.mesh].primitives;
+        if (std::any_of(primitives.begin(), primitives.end(), [](const Primitive& p) { return !p.morphTargets.empty(); }))
+            morphNodes.push_back(static_cast<u32>(n));
+    }
+
     auto make = [&](usize bytes, BufferUsage usage, const void* data, const char* name, BufferHandle& out) -> Status {
         BufferDesc d;
         d.bytes = bytes;
@@ -344,6 +387,8 @@ void GpuModel::release(GPUBackend& gpu) noexcept {
     ownedTextures_.clear();
     ownedSamplers_.clear();
     meshes.clear();
+    drawableNodes.clear();
+    morphNodes.clear();
     materials.clear();
 }
 
@@ -400,9 +445,12 @@ Status SceneRenderer::initialize(GPUBackend& gpu, ShaderLibrary& shaders) noexce
 }
 
 void SceneRenderer::release_environment() noexcept {
-    if (!gpu_) return;
     // A finished job from the previous project must never repopulate this cache.
     if (pendingEnv_.valid()) { pendingEnv_.wait(); pendingEnv_ = {}; }
+    if (pendingObjectEnv_.valid()) { pendingObjectEnv_.wait(); pendingObjectEnv_ = {}; }
+    pendingObjectKey_ = ~0ull;
+    pendingObjectSpecTier_ = 0;
+    if (!gpu_) return;
     for (auto& env : sceneEnvironments_) {
         for (TextureHandle t : {env.irradiance, env.prefiltered, env.brdf, env.background})
             if (t.valid()) gpu_->destroy_texture(t);
@@ -604,44 +652,70 @@ EnvironmentMaps build_for(const SceneEnvironment& env, const EnvironmentQuality&
 u64 key_of(const SceneEnvironment& env) noexcept { return env.hdri ? env.hdriKey : 0ull; }
 } // namespace
 
-const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironment& env, u64 frameNumber) noexcept {
+void SceneRenderer::poll_object_environment(u64 frameNumber, bool wait) noexcept {
+    if (!pendingObjectEnv_.valid()
+        || (!wait && pendingObjectEnv_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)) return;
+    const u64 key = pendingObjectKey_;
+    const u32 tier = pendingObjectSpecTier_;
+    pendingObjectKey_ = ~0ull;
+    pendingObjectSpecTier_ = 0;
+    // Upload only on the render thread. Keep older maps alive because earlier
+    // groups/subframes may already have captured their handles this frame.
+    EnvironmentMaps maps;
+    EnvSet next;
+    if (!take_environment_job(pendingObjectEnv_, maps) || !gpu_ || !upload_environment(maps, next).ok()) {
+        incomplete_ = true;
+        return;
+    }
+    next.specularTier = tier;
+    next.lastFrame = frameNumber;
+    envSets_.emplace_back(key, next);
+    trim_scene_environments(frameNumber);
+}
+
+const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironment& env, u64 frameNumber, bool wait) noexcept {
     if (!gpu_) return nullptr;
+    poll_object_environment(frameNumber, wait);
     const u64 key = key_of(env);
-    for (auto& kv : envSets_) {
-        if (kv.first == key) {
-            kv.second.lastFrame = frameNumber;
-            return &kv.second;
-        }
-    }
-    // Reuse inactive entries; maps recently referenced by other objects or
-    // precompositions stay alive and are accounted in resident_bytes().
-    if (envSets_.size() >= kMaxEnvSets) {
-        usize pior = envSets_.size();
-        for (usize i = 0; i < envSets_.size(); ++i) {
-            if (frameNumber > envSets_[i].second.lastFrame && frameNumber - envSets_[i].second.lastFrame > 2
-                && (pior == envSets_.size() || envSets_[i].second.lastFrame < envSets_[pior].second.lastFrame)) pior = i;
-        }
-        // Several precompositions can use more than four maps in one frame.
-        // They must coexist: the earlier draw lists already captured handles.
-        if (pior < envSets_.size()) {
-            for (TextureHandle* t : {&envSets_[pior].second.irradiance, &envSets_[pior].second.prefiltered, &envSets_[pior].second.brdf}) {
-                if (t->valid()) gpu_->destroy_texture(*t);
-            }
-            envSets_.erase(envSets_.begin() + static_cast<ptrdiff_t>(pior));
-        }
-    }
-    // Ambiente por objeto: só luz (sem fundo), na qualidade do preview.
-    EnvironmentQuality q = envPreview_;
+    EnvironmentQuality q = wait ? envFinal_ : envPreview_;
+    // ULTRA may request final-size maps in preview, but must still leave CPU
+    // cores for video decode and interaction. Worker count never changes pixels.
+    if (!wait) q.threads = q.threads ? std::min(q.threads, 2u) : 2u;
     q.backgroundSize = 0;
-    EnvSet novo;
-    if (!upload_environment(build_for(env, q), novo).ok()) { incomplete_ = true; return nullptr; }
-    novo.lastFrame = frameNumber;
-    envSets_.emplace_back(key, novo);
-    return &envSets_.back().second;
+    EnvSet* best = nullptr;
+    for (auto& kv : envSets_) {
+        if (kv.first == key && (!best || kv.second.specularTier > best->specularTier)) best = &kv.second;
+    }
+    if (best) {
+        best->lastFrame = frameNumber;
+        if (best->specularTier >= q.specularSize) return best;
+        q.specularSize = std::max(q.specularSize, best->specularTier);
+    }
+    if (wait) {
+        EnvSet next;
+        if (!upload_environment(build_for(env, q), next).ok()) { incomplete_ = true; return nullptr; }
+        next.specularTier = q.specularSize;
+        next.lastFrame = frameNumber;
+        envSets_.emplace_back(key, next);
+        trim_scene_environments(frameNumber);
+        // The new entry was just touched, so trimming cannot remove it.
+        return &envSets_.back().second;
+    }
+    // One object job in flight for all groups. Its future is never replaced
+    // while busy, so a cold HDRI cannot block the render thread or fan out
+    // into a thread per model. The next requested HDRI starts on a later frame.
+    if (!pendingObjectEnv_.valid() && start_environment_job(pendingObjectEnv_, env.hdri, q)) {
+        pendingObjectKey_ = key;
+        pendingObjectSpecTier_ = q.specularSize;
+    }
+    incomplete_ = true;
+    return best;
 }
 
 void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     if (!gpu_) return;
+    // Drain a finished object job even if its object was removed while it ran.
+    poll_object_environment(statsFrame_ == ~0ull ? 0 : statsFrame_, false);
     const u64 key = key_of(env);
     if (pendingEnv_.valid() && pendingEnv_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         const Status s = set_environment(pendingEnv_.get());
@@ -660,6 +734,7 @@ void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     envRequested_ = true;
     pendingKey_ = key;
     EnvironmentQuality q = envPreview_;
+    q.threads = q.threads ? std::min(q.threads, 2u) : 2u;
     q.specularSize = same ? std::max(envSpecTier_, q.specularSize) : q.specularSize;
     q.backgroundSize = same ? std::max(envBgTier_, wantBg) : wantBg;
     pendingSpecTier_ = q.specularSize;
@@ -802,6 +877,7 @@ u32 SceneRenderer::trim_upload_pools() noexcept {
 
 void SceneRenderer::shutdown() noexcept {
     if (pendingEnv_.valid()) pendingEnv_.wait();
+    if (pendingObjectEnv_.valid()) pendingObjectEnv_.wait();
     if (!gpu_) return;
     drop_upload_pools(true);
     release_all();
@@ -826,6 +902,9 @@ void SceneRenderer::forget_device() noexcept {
     envKey_ = pendingKey_ = ~0ull;
     environmentBytes_ = 0;
     if (pendingEnv_.valid()) { pendingEnv_.wait(); pendingEnv_ = {}; }
+    if (pendingObjectEnv_.valid()) { pendingObjectEnv_.wait(); pendingObjectEnv_ = {}; }
+    pendingObjectKey_ = ~0ull;
+    pendingObjectSpecTier_ = 0;
     gpu_ = nullptr;
 }
 
@@ -1226,97 +1305,130 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     auto env_of = [&](const SceneInstance& inst) -> const EnvSlot* {
         if (!inst.ownEnvironment) return &envSlots[0];
         const u64 k = key_of(inst.environment);
-        for (usize i = 0; i < envCount; ++i) {
+        // Maps are shared by HDRI, but exposure/intensity/rotation/colors are
+        // per object. A matching scene HDRI must not erase an own override.
+        for (usize i = 1; i < envCount; ++i) {
             const EnvSlot& e = envSlots[i];
-            if (e.key == k) return &e;
+            const SceneBlock& b = *e.block;
+            if (e.key == k && b.cameraPos.w == inst.environment.exposure
+                && b.envParams.x == inst.environment.intensity && b.envParams.w == inst.environment.rotation
+                && b.skyColor.x == inst.environment.sky.x && b.skyColor.y == inst.environment.sky.y
+                && b.skyColor.z == inst.environment.sky.z && b.groundColor.x == inst.environment.ground.x
+                && b.groundColor.y == inst.environment.ground.y && b.groundColor.z == inst.environment.ground.z) return &e;
         }
-        const EnvSet* set = environment_set(inst.environment, frameNumber);
-        if (!set) return &envSlots[0];   // sem como subir: cai no do grupo
+        const EnvSet* set = environment_set(inst.environment, frameNumber, environmentWait_);
         auto* b = static_cast<SceneBlock*>(arena.alloc(sizeof(SceneBlock), 16));
         if (!b) return &envSlots[0];
         *b = header;
         b->cameraPos.w = inst.environment.exposure;
-        b->envParams = Vec4{inst.environment.intensity, 1.0f, static_cast<f32>(set->mips), inst.environment.rotation};
+        b->envParams = Vec4{inst.environment.intensity, set ? 1.0f : 0.0f,
+                            set ? static_cast<f32>(set->mips) : 1.0f, inst.environment.rotation};
         b->skyColor = Vec4{inst.environment.sky, 1.0f};
         b->groundColor = Vec4{inst.environment.ground, 1.0f};
-        envSlots[envCount] = EnvSlot{k, b, set->irradiance, set->prefiltered, set->brdf, 0};
+        // Missing maps use this object's analytic sky/ground, never a different
+        // HDRI from the scene or an earlier object while the worker runs.
+        envSlots[envCount] = EnvSlot{k, b, set ? set->irradiance : envCube_,
+                                    set ? set->prefiltered : envCube_, set ? set->brdf : brdfLut_, 0};
         return &envSlots[envCount++];
     };
 
     // Stable per-frame copies change factors only; texture/buffer handles remain shared.
-    auto overriddenMaterials = std::make_shared<std::deque<GpuMaterial>>();
+    std::shared_ptr<std::deque<GpuMaterial>> overriddenMaterials;
+    auto copy_material = [&](const GpuMaterial* source) -> GpuMaterial& {
+        if (!overriddenMaterials) overriddenMaterials = std::make_shared<std::deque<GpuMaterial>>();
+        overriddenMaterials->push_back(*source);
+        return overriddenMaterials->back();
+    };
     // MOSTRAR INTERIOR (SceneInstance::doubleSided): cópia de dupla face por
     // material de ORIGEM — dois objetos iguais com o interior ligado dividem a
     // mesma cópia e continuam instanciados juntos.
-    std::vector<std::pair<const GpuMaterial*, const GpuMaterial*>> twoSidedCopies;
+    SceneLookup<const GpuMaterial*, const GpuMaterial*> twoSidedCopies;
     auto two_sided = [&](const GpuMaterial* source) -> const GpuMaterial* {
         if (source->factors.doubleSided) return source;
-        for (const auto& c : twoSidedCopies) if (c.first == source) return c.second;
-        overriddenMaterials->push_back(*source);
-        auto& mat = overriddenMaterials->back();
+        if (auto found = twoSidedCopies.find(source)) return *found;
+        auto& mat = copy_material(source);
         mat.factors.doubleSided = true;
-        twoSidedCopies.emplace_back(source, &mat);
+        twoSidedCopies.emplace(source, &mat);
         return &mat;
     };
-    std::vector<std::tuple<const SceneInstance*, i32, const GpuMaterial*>> materialCopies;
+    SceneLookup<std::pair<const SceneInstance*, i32>, const GpuMaterial*, ScenePairHash> materialCopies;
+    SceneLookup<MaterialOverrideKey, const GpuMaterial*, MaterialOverrideKeyHash> identicalMaterialCopies;
     auto material_for = [&](const SceneInstance& inst, const GpuModel& model, i32 index) -> const GpuMaterial* {
         const GpuMaterial* source = index >= 0 && index < static_cast<i32>(model.materials.size()) ? &model.materials[index] : &model.defaultMaterial;
-        for (const auto& cached : materialCopies) if (std::get<0>(cached) == &inst && std::get<1>(cached) == index) return std::get<2>(cached);
+        // The common unedited model needs neither a copy nor a per-node lookup.
+        if (inst.pose().materials.empty() && !inst.doubleSided) return source;
+        const auto cacheKey = std::make_pair(&inst, index);
+        if (auto found = materialCopies.find(cacheKey)) return *found;
+        bool hasOverride = false;
+        auto values = MaterialOverrideValues::from(source->factors);
         for (const auto& over : inst.pose().materials) if (index >= 0 && over.materialIndex == static_cast<u32>(index) && over.mask) {
-            overriddenMaterials->push_back(*source);
-            auto& mat = overriddenMaterials->back();
-            if (over.mask & 1) mat.factors.baseColor.x = over.baseColor.x;
-            if (over.mask & 2) mat.factors.baseColor.y = over.baseColor.y;
-            if (over.mask & 4) mat.factors.baseColor.z = over.baseColor.z;
+            if (over.mask & 1) values.factors[0] = over.baseColor.x;
+            if (over.mask & 2) values.factors[1] = over.baseColor.y;
+            if (over.mask & 4) values.factors[2] = over.baseColor.z;
             if (over.mask & 8) {
-                mat.factors.baseColor.w = over.baseColor.w;
+                values.factors[3] = over.baseColor.w;
                 // Opaque glTF factors ignore alpha. An explicit opacity edit
                 // opts this instance into blending, preserving the source mode.
-                if (mat.factors.alphaMode == AlphaMode::Opaque && over.baseColor.w < 1.0f)
-                    mat.factors.alphaMode = AlphaMode::Blend;
+                if (values.alphaMode == AlphaMode::Opaque && over.baseColor.w < 1.0f)
+                    values.alphaMode = AlphaMode::Blend;
             }
-            if (over.mask & 16) mat.factors.metallic = over.metallic;
-            if (over.mask & 32) mat.factors.roughness = over.roughness;
-            if (over.mask & 48) mat.factors.unlit = false; // An explicit PBR edit opts this instance into lighting.
-            source = &mat; break;
+            if (over.mask & 16) values.factors[4] = over.metallic;
+            if (over.mask & 32) values.factors[5] = over.roughness;
+            if (over.mask & 48) values.unlit = false; // An explicit PBR edit opts this instance into lighting.
+            hasOverride = true;
+            break;
         }
-        if (inst.doubleSided) source = two_sided(source);
-        materialCopies.emplace_back(&inst, index, source); return source;
+        if (hasOverride) {
+            values.doubleSided = values.doubleSided || inst.doubleSided;
+            MaterialOverrideKey key, original;
+            const bool cacheable = material_override_key(source, values, key);
+            if (cacheable && material_override_key(source, MaterialOverrideValues::from(source->factors), original)
+                && key == original) {
+                // A neutral override can retain the original immutable material.
+            } else if (const auto* found = cacheable ? identicalMaterialCopies.find(key) : nullptr) {
+                source = *found;
+            } else {
+                auto& mat = copy_material(source);
+                values.apply(mat.factors);
+                source = &mat;
+                if (cacheable) identicalMaterialCopies.emplace(key, source);
+            }
+        } else if (inst.doubleSided) source = two_sided(source);
+        // Copies are immutable and owned by the same per-build deque captured
+        // by GPU readers. Equal overrides share pointers only for this build.
+        materialCopies.emplace(cacheKey, source); return source;
     };
     // Letra do texto 3D sumindo (SceneInstance::nodeOpacity): cópia do
     // material com a opacidade multiplicada, misturada como transparente.
-    std::vector<std::tuple<const GpuMaterial*, u32, const GpuMaterial*>> fadedCopies;
+    SceneLookup<std::pair<const GpuMaterial*, u32>, const GpuMaterial*, ScenePairHash> fadedCopies;
     auto faded = [&](const GpuMaterial* source, f32 alpha) -> const GpuMaterial* {
         const u32 q = static_cast<u32>(std::lround(std::clamp(alpha, 0.0f, 1.0f) * 255.0f));
         if (q >= 255) return source;
-        for (const auto& c : fadedCopies) if (std::get<0>(c) == source && std::get<1>(c) == q) return std::get<2>(c);
-        overriddenMaterials->push_back(*source);
-        auto& mat = overriddenMaterials->back();
+        const auto cacheKey = std::make_pair(source, q);
+        if (auto found = fadedCopies.find(cacheKey)) return *found;
+        auto& mat = copy_material(source);
         mat.factors.baseColor.w *= static_cast<f32>(q) / 255.0f;
         mat.factors.alphaMode = AlphaMode::Blend;
-        fadedCopies.emplace_back(source, q, &mat);
+        fadedCopies.emplace(cacheKey, &mat);
         return &mat;
     };
     std::vector<Draw> opaque, blended;
     auto tinted = [&](const GpuMaterial* source, const Vec4& fill) -> const GpuMaterial* {
         if (fill.w <= 0) return source;
-        overriddenMaterials->push_back(*source);
-        auto& mat = overriddenMaterials->back();
+        auto& mat = copy_material(source);
         const f32 w = std::clamp(fill.w, 0.f, 1.f);
         mat.factors.baseColor.x += (fill.x - mat.factors.baseColor.x) * w;
         mat.factors.baseColor.y += (fill.y - mat.factors.baseColor.y) * w;
         mat.factors.baseColor.z += (fill.z - mat.factors.baseColor.z) * w;
         return &mat;
     };
-    // Chave = (material, ambiente): dois objetos com o mesmo material e
-    // ambientes diferentes NÃO podem dividir o mesmo bloco.
-    std::vector<std::pair<std::pair<const GpuMaterial*, u64>, const SceneBlock*>> blocks;
+    // Equal object profiles share an EnvSlot, but a shared HDRI alone does
+    // not make their lighting parameters equal. Keep those uniform blocks apart.
+    SceneLookup<std::pair<const GpuMaterial*, const EnvSlot*>, const SceneBlock*, ScenePairHash> blocks;
 
     auto block_for = [&](const GpuMaterial* gm, const EnvSlot* env) -> const SceneBlock* {
-        const u64 ek = env->key;
-        for (const auto& kv : blocks) {
-            if (kv.first.first == gm && kv.first.second == ek) return kv.second;
-        }
+        const auto cacheKey = std::make_pair(gm, env);
+        if (auto found = blocks.find(cacheKey)) return *found;
         auto* b = static_cast<SceneBlock*>(arena.alloc(sizeof(SceneBlock), 16));
         if (!b) return nullptr;
         *b = header;
@@ -1356,9 +1468,27 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 b->texMask1[0] = has;
             }
         }
-        blocks.emplace_back(std::make_pair(gm, ek), b);
+        blocks.emplace(cacheKey, b);
         return b;
     };
+
+    // Resolve GPU assets once for this build. Morph, shadow and color share
+    // the result; repeated instances also share the immutable topology lists.
+    auto* instanceModels = arena.alloc_array<const GpuModel*>(frame.instances.size());
+    if (!instanceModels && !frame.instances.empty()) return false;
+    SceneLookup<u64, const GpuModel*> buildModels;
+    for (usize i = 0; i < frame.instances.size(); ++i) {
+        const SceneInstance& inst = frame.instances[i];
+        instanceModels[i] = nullptr;
+        if (!inst.asset) continue;
+        if (auto found = buildModels.find(inst.assetKey)) instanceModels[i] = *found;
+        else {
+            instanceModels[i] = model(inst.assetKey, *inst.asset);
+            buildModels.emplace(inst.assetKey, instanceModels[i]);
+            if (auto it = models_.find(inst.assetKey); it != models_.end()) it->second.lastFrame = frameNumber;
+        }
+        if (!instanceModels[i]) incomplete_ = true;
+    }
 
     // Juntas de todas as instâncias num SSBO só; cada desenho com skin recebe
     // o deslocamento da sua skin no push constant (normalCol[0].w).
@@ -1366,18 +1496,26 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     BufferHandle joints{};
     {
         usize total = 0;
+        std::unordered_map<const SceneInstance*, u32> jointOffsets;
+        std::vector<std::pair<const SceneInstance*, u32>> jointUploads;
         for (usize i = 0; i < frame.instances.size(); ++i) {
-            instJointBase[i] = static_cast<u32>(total);
-            total += frame.instances[i].pose().jointMatrices.size();
+            const auto& pose = frame.instances[i].pose();
+            if (pose.jointMatrices.empty()) continue;
+            auto [entry, fresh] = jointOffsets.try_emplace(&pose, static_cast<u32>(total));
+            instJointBase[i] = entry->second;
+            if (fresh) {
+                jointUploads.emplace_back(&pose, entry->second);
+                total += pose.jointMatrices.size();
+            }
         }
         if (total > 0) {
             const BufferHandle buf = take_upload(jointPool_, total * sizeof(Mat4));
             void* ptr = nullptr;
             if (buf.valid() && gpu_->map_buffer(buf, ptr).ok() && ptr) {
                 auto* dst = static_cast<Mat4*>(ptr);
-                for (usize i = 0; i < frame.instances.size(); ++i) {
-                    const auto& jm = frame.instances[i].pose().jointMatrices;
-                    std::copy(jm.begin(), jm.end(), dst + instJointBase[i]);
+                for (const auto& [pose, offset] : jointUploads) {
+                    const auto& jm = pose->jointMatrices;
+                    std::copy(jm.begin(), jm.end(), dst + offset);
                 }
                 gpu_->unmap_buffer(buf);
                 joints = buf;
@@ -1394,18 +1532,20 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         const std::vector<f32>* weights;
         usize posOffset, shadeOffset;
         Aabb bounds;
+        usize owner = 0;
     };
     std::vector<MorphJob> morphJobs;
     BufferHandle morphBuf{};
     {
         usize bytes = 0;
+        std::unordered_map<std::pair<const Primitive*, const std::vector<f32>*>, usize, ScenePairHash> morphUploads;
         for (usize ii = 0; ii < frame.instances.size(); ++ii) {
             const SceneInstance& inst = frame.instances[ii];
-            if (!inst.asset) continue;
+            const GpuModel* gm = instanceModels[ii];
+            if (!gm) continue;
             const std::vector<Node>& nodes = inst.asset->nodes;
-            for (usize n = 0; n < nodes.size(); ++n) {
+            for (u32 n : gm->morphNodes) {
                 const i32 mi = nodes[n].mesh;
-                if (mi < 0 || mi >= static_cast<i32>(inst.asset->meshes.size())) continue;
                 const Mesh& mesh = inst.asset->meshes[static_cast<usize>(mi)];
                 const std::vector<f32>* w = n < inst.pose().morphWeights.size() && !inst.pose().morphWeights[n].empty()
                                           ? &inst.pose().morphWeights[n] : &mesh.morphWeights;
@@ -1416,6 +1556,14 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     const Primitive& p = mesh.primitives[k];
                     if (p.morphTargets.empty()) continue;
                     MorphJob j{ii, n, k, &p, w, bytes, 0};
+                    auto [entry, fresh] = morphUploads.try_emplace(std::make_pair(&p, w), morphJobs.size());
+                    j.owner = entry->second;
+                    if (!fresh) {
+                        const auto& original = morphJobs[j.owner];
+                        j.posOffset = original.posOffset; j.shadeOffset = original.shadeOffset;
+                        morphJobs.push_back(j);
+                        continue;
+                    }
                     bytes += p.positions.size() * sizeof(Vec3);
                     j.shadeOffset = bytes;
                     bytes += p.positions.size() * sizeof(ShadingVertex);
@@ -1429,22 +1577,18 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             void* ptr = nullptr;
             if (buf.valid() && gpu_->map_buffer(buf, ptr).ok() && ptr) {
                 u8* base = static_cast<u8*>(ptr);
-                for (MorphJob& j : morphJobs) {
+                std::vector<ActiveMorphTarget> activeTargets;
+                for (usize jobIndex = 0; jobIndex < morphJobs.size(); ++jobIndex) {
+                    MorphJob& j = morphJobs[jobIndex];
+                    if (j.owner != jobIndex) { j.bounds = morphJobs[j.owner].bounds; continue; }
                     const Primitive& p = *j.src;
                     auto* pos = reinterpret_cast<Vec3*>(base + j.posOffset);
                     auto* sh = reinterpret_cast<ShadingVertex*>(base + j.shadeOffset);
                     const usize nv = p.positions.size();
-                    const usize nt = std::min(p.morphTargets.size(), j.weights->size());
+                    select_active_morph_targets(p, *j.weights, activeTargets);
                     for (usize v = 0; v < nv; ++v) {
-                        Vec3 P = p.positions[v];
-                        Vec3 N = v < p.normals.size() ? p.normals[v] : Vec3{0, 0, 1};
-                        for (usize t = 0; t < nt; ++t) {
-                            const f32 wt = (*j.weights)[t];
-                            if (wt == 0.0f) continue;
-                            const MorphTarget& mt = p.morphTargets[t];
-                            if (v < mt.positions.size()) P = P + mt.positions[v] * wt;
-                            if (v < mt.normals.size()) N = N + mt.normals[v] * wt;
-                        }
+                        Vec3 P, N;
+                        deform_morph_vertex(p, v, activeTargets, P, N);
                         pos[v] = P;
                         j.bounds.add(P);
                         ShadingVertex s{};
@@ -1469,7 +1613,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
     }
     auto morph_for = [&](usize ii, usize n, usize k) -> const MorphJob* {
-        for (const MorphJob& j : morphJobs) if (j.inst == ii && j.node == n && j.prim == k) return &j;
+        // Jobs are appended in (instance, node, primitive) order. Binary search
+        // avoids a full job scan for each color and shadow draw, without a map.
+        const auto key = std::make_tuple(ii, n, k);
+        const auto found = std::lower_bound(morphJobs.begin(), morphJobs.end(), key,
+            [](const MorphJob& job, const auto& value) { return std::tie(job.inst, job.node, job.prim) < value; });
+        if (found != morphJobs.end() && std::tie(found->inst, found->node, found->prim) == key) return &*found;
         return nullptr;
     };
 
@@ -1532,12 +1681,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
             const SceneInstance& inst = frame.instances[instIndex];
             if (!inst.asset || !inst.castShadows) continue;
-            const GpuModel* gm = model(inst.assetKey, *inst.asset);
-            if (!gm) { incomplete_ = true; continue; }
+            const GpuModel* gm = instanceModels[instIndex];
+            if (!gm) continue;
             const std::vector<Node>& nodes = inst.asset->nodes;
-            for (usize n = 0; n < nodes.size(); ++n) {
+            for (u32 n : gm->drawableNodes) {
                 const i32 mi = nodes[n].mesh;
-                if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
                 if (n < inst.pose().nodeOpacity.size() && inst.pose().nodeOpacity[n] < 0.5f) continue;   // letra sumindo não projeta
                 const i32 skinIndex = nodes[n].skin;
                 const bool skinnedNode = joints.valid() && skinIndex >= 0
@@ -1643,14 +1791,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
         const SceneInstance& inst = frame.instances[instIndex];
         if (!inst.asset) continue;
-        const GpuModel* gm = model(inst.assetKey, *inst.asset);
-        if (auto it = models_.find(inst.assetKey); it != models_.end()) it->second.lastFrame = frameNumber;
-        if (!gm) { incomplete_ = true; continue; }
+        const GpuModel* gm = instanceModels[instIndex];
+        if (!gm) continue;
         const std::vector<Node>& nodes = inst.asset->nodes;
-        std::unordered_map<const SceneBlock*, const SceneBlock*> sampleBlocks;
-        for (usize n = 0; n < nodes.size(); ++n) {
+        SceneLookup<const SceneBlock*, const SceneBlock*> sampleBlocks;
+        for (u32 n : gm->drawableNodes) {
             const i32 mi = nodes[n].mesh;
-            if (mi < 0 || mi >= static_cast<i32>(gm->meshes.size())) continue;
             const f32 nodeAlpha = n < inst.pose().nodeOpacity.size() ? inst.pose().nodeOpacity[n] : 1.0f;
             if (nodeAlpha <= 0.004f) continue;   // letra ainda invisível: nada a desenhar
             // Malha com skin: a pose vem das juntas (já no espaço da cena do
@@ -1667,11 +1813,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             const Vec3 worldY{world.col[1].x, world.col[1].y, world.col[1].z};
             const Vec3 worldZ{world.col[2].x, world.col[2].y, world.col[2].z};
             const bool mirrored = worldX.dot(worldY.cross(worldZ)) < 0.0f;
+            Vec4 normalCols[3]{};
+            bool normalReady = false;
             for (usize primIndex = 0; primIndex < gm->meshes[mi].size(); ++primIndex) {
                 const GpuPrimitive& p = gm->meshes[mi][primIndex];
                 const MorphJob* mj = morph_for(instIndex, n, primIndex);
-                // Com skin (ou morph) a caixa de repouso não vale para a pose: sem recorte.
-                if (!(skinnedNode && p.skinned) && !mj && outside_frustum(clipFromLocal, p.bounds, frame.camera.nearZ)) {
+                // Morph already computed exact deformed bounds above. Skin still
+                // needs its joint-space bounds before it can be safely culled.
+                const Aabb& drawBounds = mj ? mj->bounds : p.bounds;
+                if (!(skinnedNode && p.skinned) && outside_frustum(clipFromLocal, drawBounds, frame.camera.nearZ)) {
                     ++stats_.culledPrimitives;
                     continue;
                 }
@@ -1692,8 +1842,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 const SceneBlock* blk = block_for(mat, env);
                 if (!blk) { incomplete_ = true; continue; }
                 if (inst.cameraOverride) {
-                    const auto found = sampleBlocks.find(blk);
-                    if (found != sampleBlocks.end()) blk = found->second;
+                    if (auto found = sampleBlocks.find(blk)) blk = *found;
                     else {
                         auto* sampled = arena.alloc_array<SceneBlock>(1);
                         if (!sampled) { incomplete_ = true; continue; }
@@ -1711,7 +1860,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 d.block = blk;
                 d.env = env;
                 d.push.model = world;
-                normal_matrix(world, d.push.normalCol);
+                if (!normalReady) { normal_matrix(world, normalCols); normalReady = true; }
+                std::copy(std::begin(normalCols), std::end(normalCols), std::begin(d.push.normalCol));
                 d.skinned = skinDraw;
                 d.morph = mj != nullptr;
                 if (mj) {
@@ -1751,15 +1901,20 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // profundidade, desenho a desenho. O recorte por frustum já aconteceu —
     // instância fora da tela nem entra no grupo.
     std::vector<Mat4> instData;
-    {
+    if (instancing_ && (opaque.size() > 1 || shadowDraws.size() > 1)) {
         auto mix = [](u64 h, u64 v) { return (h ^ v) * 0x100000001B3ull; };
         std::unordered_map<u64, u32> groupOf;
-        std::vector<std::vector<u32>> members;
+        // One flat chain per pass instead of one heap allocation per group.
+        struct Members { u32 head, tail, count; };
+        std::vector<Members> members;
+        std::vector<u32> next(opaque.size(), kInvalidIndex);
         std::vector<Draw> merged;
         merged.reserve(opaque.size());
+        members.reserve(opaque.size());
+        if (!opaque.empty()) groupOf.reserve(opaque.size());
         for (u32 i = 0; i < opaque.size(); ++i) {
             const Draw& d = opaque[i];
-            if (d.skinned || d.morph || !instancing_) { merged.push_back(d); members.emplace_back(); continue; }
+            if (d.skinned || d.morph || !instancing_) { merged.push_back(d); members.push_back({i, i, 1}); continue; }
             u64 h = 0xCBF29CE484222325ull;
             h = mix(h, reinterpret_cast<uintptr_t>(d.model));
             h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
@@ -1768,13 +1923,19 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             h = mix(h, d.pipeline.id);
             h = mix(h, (static_cast<u64>(d.firstIndex) << 32) | d.indexCount);
             auto [it, fresh] = groupOf.try_emplace(h, static_cast<u32>(merged.size()));
-            if (fresh) { merged.push_back(d); members.emplace_back(1, i); }
-            else members[it->second].push_back(i);
+            const Draw* prior = fresh ? nullptr : &merged[it->second];
+            // Hash collisions may miss a batching opportunity, never combine
+            // different meshes, materials, environments or levels of detail.
+            const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->material == d.material
+                && prior->block == d.block && prior->pipeline.id == d.pipeline.id && prior->firstIndex == d.firstIndex
+                && prior->indexCount == d.indexCount;
+            if (fresh || !equal) { merged.push_back(d); members.push_back({i, i, 1}); }
+            else { auto& group = members[it->second]; next[group.tail] = i; group.tail = i; ++group.count; }
         }
         for (u32 g = 0; g < merged.size(); ++g) {
-            if (members[g].size() < 2) continue;
+            if (members[g].count < 2) continue;
             const u32 base = static_cast<u32>(instData.size());
-            for (u32 idx : members[g]) {
+            for (u32 idx = members[g].head; idx != kInvalidIndex; idx = next[idx]) {
                 const Draw& m = opaque[idx];
                 instData.push_back(m.push.model);
                 Mat4 nm;
@@ -1784,7 +1945,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 nm.col[3] = Vec4{0, 0, 0, 0};
                 instData.push_back(nm);
             }
-            merged[g].instanceCount = static_cast<u32>(members[g].size());
+            merged[g].instanceCount = members[g].count;
             merged[g].push.normalCol[0].w = static_cast<f32>(base + 1u);
             ++stats_.instancedDraws;
         }
@@ -1792,24 +1953,30 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
 
         // Sombra: o mesmo, por (malha, primitiva, pipeline).
         std::unordered_map<u64, u32> sgroupOf;
-        std::vector<std::vector<u32>> smembers;
+        std::vector<Members> smembers;
+        std::vector<u32> snext(shadowDraws.size(), kInvalidIndex);
         std::vector<ShadowDraw> smerged;
+        smerged.reserve(shadowDraws.size());
+        smembers.reserve(shadowDraws.size());
+        if (!shadowDraws.empty()) sgroupOf.reserve(shadowDraws.size());
         for (u32 i = 0; i < shadowDraws.size(); ++i) {
             const ShadowDraw& d = shadowDraws[i];
-            if (d.skinned || d.morph || !instancing_) { smerged.push_back(d); smembers.emplace_back(); continue; }
+            if (d.skinned || d.morph || !instancing_) { smerged.push_back(d); smembers.push_back({i, i, 1}); continue; }
             u64 h = 0xCBF29CE484222325ull;
             h = mix(h, reinterpret_cast<uintptr_t>(d.model));
             h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
             h = mix(h, d.pipeline.id);
             auto [it, fresh] = sgroupOf.try_emplace(h, static_cast<u32>(smerged.size()));
-            if (fresh) { smerged.push_back(d); smembers.emplace_back(1, i); }
-            else smembers[it->second].push_back(i);
+            const ShadowDraw* prior = fresh ? nullptr : &smerged[it->second];
+            const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->pipeline.id == d.pipeline.id;
+            if (fresh || !equal) { smerged.push_back(d); smembers.push_back({i, i, 1}); }
+            else { auto& group = smembers[it->second]; snext[group.tail] = i; group.tail = i; ++group.count; }
         }
         for (u32 g = 0; g < smerged.size(); ++g) {
-            if (smembers[g].size() < 2) continue;
+            if (smembers[g].count < 2) continue;
             const u32 base = static_cast<u32>(instData.size());
-            for (u32 idx : smembers[g]) instData.push_back(shadowDraws[idx].push.model);
-            smerged[g].instanceCount = static_cast<u32>(smembers[g].size());
+            for (u32 idx = smembers[g].head; idx != kInvalidIndex; idx = snext[idx]) instData.push_back(shadowDraws[idx].push.model);
+            smerged[g].instanceCount = smembers[g].count;
             smerged[g].push.normalCol[0].y = static_cast<f32>(base + 1u);
         }
         shadowDraws.swap(smerged);
@@ -1945,6 +2112,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     if (frame.floor.mode != 0 && passMrt_) {
         GroundInputs gi;
         gi.frame = &frame;
+        gi.models = std::span<const GpuModel* const>{instanceModels, frame.instances.size()};
         gi.header = &header;
         gi.viewProj = viewProj;
         gi.width = width;
@@ -2170,13 +2338,22 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         outColor = display;
         return true;
     }
-    outColor = finish_exposure(graph, frame, width, height, display, scene);
+    // Unlit surfaces write exactly zero RGB to HDR. Without any lit model,
+    // sky, floor, planes or particles, the bloom pyramid filters only zeros.
+    // Tone mapping and clamping still run, preserving the display result.
+    // Unlit meshes, 2D planes and particles write black RGB to the HDR
+    // attachment. Their display colors still pass through unchanged; only
+    // lit meshes, the sky and the floor can feed the bloom pyramid.
+    bool bloomHasRadiance = frame.environment.showBackground || frame.floor.mode != 0;
+    for (const auto& draw : opaque) bloomHasRadiance |= !draw.material->factors.unlit;
+    for (const auto& draw : blended) bloomHasRadiance |= !draw.material->factors.unlit;
+    outColor = finish_exposure(graph, frame, width, height, display, scene, bloomHasRadiance);
     return outColor.valid();
 }
 
 FGTexture SceneRenderer::finish_exposure(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
-                                        FGTexture display, FGTexture scene) noexcept {
-    FGTexture result = scene.valid() ? build_post(graph, frame, width, height, display, scene) : display;
+                                        FGTexture display, FGTexture scene, bool bloomHasRadiance) noexcept {
+    FGTexture result = scene.valid() ? build_post(graph, frame, width, height, display, scene, bloomHasRadiance) : display;
     if (!result.valid()) { incomplete_ = true; result = display; }
     // Sem MSAA (GLES, nível BAIXO): FXAA na imagem já em espaço de exibição.
     // FXAA: nível BAIXO, ou o aparelho não tem o MSAA pedido (GLES).
@@ -2189,7 +2366,7 @@ FGTexture SceneRenderer::finish_exposure(FrameGraph& graph, const SceneFrame& fr
 }
 
 FGTexture SceneRenderer::build_post(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
-                                    FGTexture display, FGTexture scene) noexcept {
+                                    FGTexture display, FGTexture scene, bool bloomHasRadiance) noexcept {
     const u64 linearClamp = shaders_->sampler(CommonSampler::LinearClamp).id;
     auto tonemapPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_tonemap_frag, SurfaceFormat::RGBA16F));
     if (!tonemapPipe.ok()) return FGTexture{};
@@ -2200,7 +2377,7 @@ FGTexture SceneRenderer::build_post(FrameGraph& graph, const SceneFrame& frame, 
     // média de Karis), subida em tenda somada nível a nível. -----------------
     const ScenePost& post = frame.post;
     const f32 intensity = std::clamp(post.bloomIntensity, 0.0f, 4.0f);
-    const bool bloomOn = post.bloom && intensity > 0.0f;
+    const bool bloomOn = post.bloom && intensity > 0.0f && bloomHasRadiance;
     constexpr u32 kMaxLevels = 8;
     FGTexture levels[kMaxLevels]{};
     u32 lw[kMaxLevels]{}, lh[kMaxLevels]{};

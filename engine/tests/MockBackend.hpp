@@ -10,6 +10,7 @@
 
 #include "aurea/render/GPUBackend.hpp"
 
+#include <cstring>
 #include <vector>
 #include <functional>
 #include <unordered_map>
@@ -52,14 +53,25 @@ public:
     bool surfaceAttached = false;
     bool frameOpen = false;
     bool failPipelines = false;
+    /// Recusa só o shader com este nome (driver GLES que não compila um shader).
+    const char* failShader = nullptr;
     bool deviceLost = false;
+    bool recordingFault = false;
+    bool recoveryReady = true;
+    u32 initializations = 0;
+    u32 failInitializations = 0;
+    u32 recoveryPolls = 0;
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
     std::function<void()> beforeWaitIdle;
+    std::function<Status()> beforeEndFrame;
     std::function<Status(const BufferDesc&)> beforeCreateBuffer;
     std::function<Status(u64, u64)> beforeWaitFrame;
     std::function<Status(TextureHandle, const void*, u32)> beforeTextureUpload;
+    std::function<void(const void*, u32)> beforeSetUniforms;
+    std::function<Result<ExternalTexture>(const ExternalImageDesc&)> beforeImportExternalImage;
+    std::function<void(void (*)(void*), void*)> beforeDeferUntilGpuDone;
     std::function<u32()> beforeTrimExternalImages;
     std::function<GpuMemoryStats()> queryMemoryStats;
     std::atomic<u32> idleWaits{0};
@@ -74,7 +86,12 @@ public:
     // --- GPUBackend -----------------------------------------------------------
     const char* name() const noexcept override { return "Mock"; }
     const GPUCapabilities& capabilities() const noexcept override { return caps; }
-    Status initialize(const BackendConfig&) noexcept override { deviceLost = false; return OkStatus; }
+    Status initialize(const BackendConfig&) noexcept override {
+        ++initializations;
+        if (failInitializations) { --failInitializations; return Errc::OutOfMemory; }
+        deviceLost = recordingFault = false;
+        return OkStatus;
+    }
     void shutdown() noexcept override {}
     Status attach_surface(const SurfaceDesc&) noexcept override {
         surfaceAttached = true;
@@ -119,7 +136,7 @@ public:
         frameHadBackbuffer = false;
         for (auto& d : deferred_) d.fn(d.ctx);
         deferred_.clear();
-        return OkStatus;
+        return beforeEndFrame ? beforeEndFrame() : OkStatus;
     }
 
     Result<TextureHandle> create_texture(const TextureDesc& d) noexcept override {
@@ -140,6 +157,7 @@ public:
     Result<SamplerHandle> create_sampler(const SamplerDesc&) noexcept override { return SamplerHandle{++ids_}; }
     Result<ShaderHandle> create_shader(const ShaderDesc& d) noexcept override {
         if (!d.spirv || d.spirvBytes < 20) return Status{Errc::InvalidArgument};
+        if (failShader && d.debugName && std::strcmp(failShader, d.debugName) == 0) return Status{Errc::ShaderCompileFailed};
         ++shadersCreated;
         return ShaderHandle{++ids_};
     }
@@ -177,14 +195,15 @@ public:
         return beforeTextureUpload ? beforeTextureUpload(texture, data, rowBytes) : OkStatus;
     }
     Status generate_mipmaps(TextureHandle) noexcept override { return OkStatus; }
-    Result<ExternalTexture> import_external_image(const ExternalImageDesc&) noexcept override {
-        return Status{Errc::NotSupported};
+    Result<ExternalTexture> import_external_image(const ExternalImageDesc& desc) noexcept override {
+        return beforeImportExternalImage ? beforeImportExternalImage(desc) : Result<ExternalTexture>{Status{Errc::NotSupported}};
     }
     void release_external_image(TextureHandle) noexcept override {}
     u32 trim_external_images() noexcept override {
         return beforeTrimExternalImages ? beforeTrimExternalImages() : 0;
     }
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override {
+        if (beforeDeferUntilGpuDone) { beforeDeferUntilGpuDone(fn, ctx); return; }
         if (frameOpen) deferred_.push_back({fn, ctx});
         else fn(ctx);
     }
@@ -198,6 +217,12 @@ public:
     }
     u32 read_gpu_timings(GpuTiming*, u32, f32*) noexcept override { return 0; }
     bool is_device_lost() const noexcept override { return deviceLost; }
+    bool requires_reinitialization() const noexcept override { return deviceLost || recordingFault; }
+    Status prepare_reinitialization(u64 timeout) noexcept override {
+        ++recoveryPolls;
+        if (timeout != 0) return Errc::InvalidArgument;
+        return deviceLost || recoveryReady ? OkStatus : Status{Errc::Timeout};
+    }
     u32 frames_in_flight() const noexcept override { return 2; }
     GpuMemoryStats memory_stats() const noexcept override { return queryMemoryStats ? queryMemoryStats() : GpuMemoryStats{}; }
     void save_pipeline_cache() noexcept override {}
@@ -221,7 +246,9 @@ public:
     void bind_storage_image(u32, TextureHandle) noexcept override {}
     void bind_storage_buffer(BufferHandle) noexcept override {}
     void bind_storage_buffer_at(u32, BufferHandle) noexcept override {}
-    void set_uniforms(const void*, u32) noexcept override {}
+    void set_uniforms(const void* bytes, u32 size) noexcept override {
+        if (beforeSetUniforms) beforeSetUniforms(bytes, size);
+    }
     void push_constants(const void*, u32) noexcept override {}
     void set_viewport(f32, f32, f32, f32) noexcept override {}
     void set_scissor(i32, i32, u32, u32) noexcept override {}

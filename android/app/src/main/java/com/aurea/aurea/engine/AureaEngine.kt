@@ -178,6 +178,10 @@ class AureaEngine private constructor() {
     fun startupError(): String = nativeStartupError(nativeHandle)
     private external fun nativeStartupError(handle: Long): String
 
+    /** Static, versioned native metadata; values still use the existing layer queries. */
+    fun builtinPropertySchemaJson(): String = nativeBuiltinPropertySchema()
+    private external fun nativeBuiltinPropertySchema(): String
+
     /** Modo seguro de vídeo: planos YUV pela CPU, sem zero-copy na GPU (decoders abertos depois). */
     fun useReadableVideoPlanes() = nativeUseReadableVideoPlanes(nativeHandle)
     private external fun nativeUseReadableVideoPlanes(handle: Long)
@@ -352,6 +356,14 @@ class AureaEngine private constructor() {
     fun queryEffectParams(layer: Long, effectId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
         nativeQueryEffectParams(nativeHandle, layer, effectId, rows, capacity, blob)
 
+    fun effectCurve(layer: Long, effect: Int, param: Int, channel: Int, samples: Boolean = false): FloatArray {
+        val out = FloatArray(if (samples) 256 else 128)
+        val count = nativeQueryEffectCurve(nativeHandle, layer, effect, param, channel, samples, out)
+        return out.copyOf(count.coerceIn(0, out.size))
+    }
+    fun editEffectCurve(layer: Long, effect: Int, param: Int, channel: Int, action: Int, point: Int, x: Float, y: Float): Int =
+        nativeWork.run(-1) { nativeEditEffectCurve(nativeHandle, layer, effect, param, channel, action, point, x, y) }
+
     /** Declaração dos parâmetros de um TIPO de efeito (a ficha do catálogo). */
     fun queryEffectSpecs(typeId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
         nativeQueryEffectSpecs(nativeHandle, typeId, rows, capacity, blob)
@@ -380,6 +392,10 @@ class AureaEngine private constructor() {
     /** Frame do playhead em RGBA8 sRGB (lado maior = `maxDim`); `outSize` recebe largura/altura. */
     fun captureFrame(maxDim: Int, out: ByteBuffer, outSize: IntArray): Int =
         nativeWork.run(0) { nativeCaptureFrame(nativeHandle, maxDim, out, outSize) }
+
+    /** Capa da Home: escala de miniatura e políticas da prévia, sem render final. */
+    fun capturePreviewFrame(maxDim: Int, out: ByteBuffer, outSize: IntArray): Int =
+        nativeWork.run(0) { nativeCapturePreviewFrame(nativeHandle, maxDim, out, outSize) }
 
     /**
      * A prévia de um efeito: o efeito de verdade rodando sobre a cartela de
@@ -553,6 +569,8 @@ class AureaEngine private constructor() {
     fun setText3d(layer: Long, content: String, fields: FloatArray, fontPath: String = ""): Boolean =
         nativeSetText3d(nativeHandle, layer, content, fields, fontPath)
     fun queryText3dFont(layer: Long): String = nativeQueryText3dFont(nativeHandle, layer) ?: ""
+    fun queryText3dTexture(layer: Long): String = nativeQueryText3dTexture(nativeHandle, layer) ?: ""
+    fun setText3dTexture(layer: Long, path: String): Boolean = nativeSetText3dTexture(nativeHandle, layer, path)
     fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
     fun applyText3dPreset(layer: Long, preset: Int): Boolean = nativeApplyText3dPreset(nativeHandle, layer, preset)
 
@@ -667,13 +685,14 @@ class AureaEngine private constructor() {
     /** [erro (0 = ok), título, versão do app, religadas, ausentes]. */
     fun importProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String> =
         nativeImportProjectPackage(pkg, projectOut, mediaDir) ?: arrayOf("10", "", "", "0", "0")
+    fun extractModelArchive(archive: String, directory: String): Array<String>? = nativeExtractModelArchive(archive, directory)
     fun createCaptions(layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int =
         nativeWork.run(-5) { nativeCreateCaptions(nativeHandle, layer, texts, times, ints, floats) }
     fun removeCaptions(layer: Long): Int = nativeRemoveCaptions(nativeHandle, layer)
     fun captionCount(layer: Long): Int = nativeCaptionCount(nativeHandle, layer)
     fun parseSrt(srt: String): String? = nativeParseSrt(srt)
-    fun transcribeLocal(layer: Long, model: String, language: String): String =
-        nativeWork.run("") { nativeTranscribeLocal(nativeHandle, layer, model.toByteArray(Charsets.UTF_8), language.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8) }
+    fun transcribeLocal(layer: Long, model: String, language: String, translateEnglish: Boolean = false): String =
+        nativeWork.run("") { nativeTranscribeLocal(nativeHandle, layer, model.toByteArray(Charsets.UTF_8), language.toByteArray(Charsets.UTF_8), translateEnglish).toString(Charsets.UTF_8) }
     fun captionProgress(cancel: Boolean = false): Int = nativeWork.run(0) { nativeCaptionProgress(nativeHandle, cancel) }
     fun captionTracks(): String = nativeCaptionTracks(nativeHandle).toString(Charsets.UTF_8)
     fun saveCaptionBundle(layer: Long, name: String): String = nativeSaveCaptionBundle(nativeHandle, layer, name.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
@@ -683,7 +702,7 @@ class AureaEngine private constructor() {
     fun editCaptionTrack(layer: Long, command: String): Boolean = nativeEditCaptionTrack(nativeHandle, layer, command.toByteArray(Charsets.UTF_8))
     private external fun nativeCaptionTracks(handle: Long): ByteArray
     private external fun nativeEditCaptionTrack(handle: Long, layer: Long, command: ByteArray): Boolean
-    private external fun nativeTranscribeLocal(handle: Long, layer: Long, model: ByteArray, language: ByteArray): ByteArray
+    private external fun nativeTranscribeLocal(handle: Long, layer: Long, model: ByteArray, language: ByteArray, translateEnglish: Boolean): ByteArray
     private external fun nativeCaptionProgress(handle: Long, cancel: Boolean): Int
     fun isFillerWord(word: String): Boolean = nativeIsFillerWord(word)
     fun addTextAnimator(layer: Long, props: Int): Int = nativeAddTextAnimator(nativeHandle, layer, props)
@@ -734,6 +753,10 @@ class AureaEngine private constructor() {
     fun queryGroupCameraPassThrough(layer: Long): Int = nativeQueryGroupCameraPassThrough(nativeHandle, layer)
     /** "Aceita luzes": a camada 2D no espaço 3D recebe as luzes da composição. */
     fun setLayerAcceptsLights(layer: Long, on: Boolean): Boolean = nativeSetLayerAcceptsLights(nativeHandle, layer, on)
+    fun setContentBoundedPlayback(on: Boolean) = nativeSetContentBoundedPlayback(nativeHandle, on)
+    fun queryNavigationEnd(): Long = nativeQueryNavigationEnd(nativeHandle)
+    fun setLayer3D(layer: Long, on: Boolean): Boolean = nativeSetLayer3D(nativeHandle, layer, on)
+    fun enableLayer3D(layer: Long): Boolean = nativeEnableLayer3D(nativeHandle, layer)
     /** −1 = camada sem a opção (câmera, luz, modelo 3D, áudio, nulo). */
     fun queryLayerAcceptsLights(layer: Long): Int = nativeQueryLayerAcceptsLights(nativeHandle, layer)
     /** Nulo = deu certo; senão o motivo da recusa. */
@@ -791,12 +814,14 @@ class AureaEngine private constructor() {
     fun startMotionTrack(layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float): Boolean = nativeStartMotionTrack(nativeHandle, layer, tool, model, backward, points, feature, search)
     fun cancelMotionTrack() = nativeCancelMotionTrack(nativeHandle)
     fun restoreMotionTrack(layer: Long): Boolean = nativeRestoreMotionTrack(nativeHandle, layer)
+    fun motionTrackSource(): Long = nativeMotionTrackSource(nativeHandle)
     fun motionTrackStatus(out: FloatArray): String = nativeMotionTrackStatus(nativeHandle, out) ?: ""
     fun applyMotionTrack(target: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int): Long = nativeApplyMotionTrack(nativeHandle, target, apply, lock, smooth, maxScale, crop)
     private external fun nativeStartMotionTrack(handle: Long, layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float): Boolean
     private external fun nativeCancelMotionTrack(handle: Long)
     private external fun nativeRestoreMotionTrack(handle: Long, layer: Long): Boolean
     private external fun nativeMotionTrackStatus(handle: Long, out: FloatArray): String?
+    private external fun nativeMotionTrackSource(handle: Long): Long
     private external fun nativeApplyMotionTrack(handle: Long, target: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int): Long
     fun startCameraTrack(layer: Long, mode: Int): Boolean = nativeStartCameraTrack(nativeHandle, layer, mode)
     fun cancelCameraTrack() = nativeCancelCameraTrack(nativeHandle)
@@ -841,8 +866,10 @@ class AureaEngine private constructor() {
     fun rippleDelete(ids: LongArray): Boolean = nativeRippleDelete(nativeHandle, ids)
     /** Fecha todos os espaços vazios. Devolve os frames removidos. */
     fun removeGaps(): Long = nativeRemoveGaps(nativeHandle)
+    /** 0/1 trim absoluto, 2 slip, 3/4 roll, 5 slide; 6 move ao quadro absoluto. */
     fun editClipTime(layer: Long, operation: Int, amount: Long, previous: Long = 0, next: Long = 0): Boolean =
         nativeEditClipTime(nativeHandle, layer, operation, amount, previous, next)
+    fun queryClipTimeActions(layer: Long, frame: Long): Int = nativeQueryClipTimeActions(nativeHandle, layer, frame)
     fun trimComposition(frame: Long): Boolean = nativeTrimComposition(nativeHandle, frame)
 
     /**
@@ -877,6 +904,9 @@ class AureaEngine private constructor() {
 
     /** Nulo 2D ou 3D no centro. Id ≥ 0 ou −Errc. */
     fun playbackReport(): String = nativePlaybackReport(nativeHandle)
+    /** Position actually presented by the audio output, for playback diagnostics. */
+    fun audioPositionNs(): Long = nativeAudioPositionNs(nativeHandle)
+    private external fun nativeAudioPositionNs(handle: Long): Long
     private external fun nativePlaybackReport(handle: Long): String
     fun setRawPlayback(enabled: Boolean): Boolean = nativeSetRawPlayback(nativeHandle, enabled)
     private external fun nativeSetRawPlayback(handle: Long, enabled: Boolean): Boolean
@@ -1036,6 +1066,8 @@ class AureaEngine private constructor() {
     private external fun nativeQueryCurve(
         handle: Long, layer: Long, property: Int, from: Int, to: Int, out: FloatArray, count: Int,
     ): Int
+    private external fun nativeQueryEffectCurve(handle: Long, layer: Long, effect: Int, param: Int, channel: Int, samples: Boolean, out: FloatArray): Int
+    private external fun nativeEditEffectCurve(handle: Long, layer: Long, effect: Int, param: Int, channel: Int, action: Int, point: Int, x: Float, y: Float): Int
     private external fun nativeQueryEffectCatalog(handle: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int
     private external fun nativeQueryEffectSpecs(
         handle: Long, typeId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer,
@@ -1055,6 +1087,7 @@ class AureaEngine private constructor() {
         handle: Long, layer: Long, frame: Int, height: Int, out: ByteBuffer, outWidth: IntArray,
     ): Int
     private external fun nativeCaptureFrame(handle: Long, maxDim: Int, out: ByteBuffer, outSize: IntArray): Int
+    private external fun nativeCapturePreviewFrame(handle: Long, maxDim: Int, out: ByteBuffer, outSize: IntArray): Int
     private external fun nativeRenderEffectPreview(
         handle: Long, typeId: Int, width: Int, height: Int, out: ByteBuffer, outSize: IntArray,
     ): Boolean
@@ -1108,6 +1141,7 @@ class AureaEngine private constructor() {
     private external fun nativeProjectFileMedia(handle: Long, path: String): Array<String>?
     private external fun nativeExportProjectPackage(project: String, out: String, title: String, appVersion: String, media: Array<String>): IntArray?
     private external fun nativeImportProjectPackage(pkg: String, projectOut: String, mediaDir: String): Array<String>?
+    private external fun nativeExtractModelArchive(archive: String, directory: String): Array<String>?
     private external fun nativeCreateCaptions(handle: Long, layer: Long, texts: Array<String>, times: DoubleArray, ints: IntArray, floats: FloatArray): Int
     private external fun nativeRemoveCaptions(handle: Long, layer: Long): Int
     private external fun nativeCaptionCount(handle: Long, layer: Long): Int
@@ -1149,6 +1183,10 @@ class AureaEngine private constructor() {
     private external fun nativeSetGroupCameraPassThrough(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeQueryGroupCameraPassThrough(handle: Long, layer: Long): Int
     private external fun nativeSetLayerAcceptsLights(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetContentBoundedPlayback(handle: Long, on: Boolean)
+    private external fun nativeQueryNavigationEnd(handle: Long): Long
+    private external fun nativeSetLayer3D(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeEnableLayer3D(handle: Long, layer: Long): Boolean
     private external fun nativeQueryLayerAcceptsLights(handle: Long, layer: Long): Int
     private external fun nativeAddLayersToGroup(handle: Long, ids: LongArray, group: Long): String?
     private external fun nativeRemoveLayerFromGroup(handle: Long, layer: Long): String?
@@ -1187,6 +1225,8 @@ class AureaEngine private constructor() {
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
     private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray, fontPath: String): Boolean
+    private external fun nativeSetText3dTexture(handle: Long, layer: Long, path: String): Boolean
+    private external fun nativeQueryText3dTexture(handle: Long, layer: Long): String?
     private external fun nativeApplyText3dPreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeQueryText3dFont(handle: Long, layer: Long): String?
     private external fun nativeQueryText3d(handle: Long, layer: Long, out: FloatArray): String?
@@ -1292,6 +1332,7 @@ class AureaEngine private constructor() {
     private external fun nativeRippleDelete(handle: Long, ids: LongArray): Boolean
     private external fun nativeRemoveGaps(handle: Long): Long
     private external fun nativeEditClipTime(handle: Long, layer: Long, operation: Int, amount: Long, previous: Long, next: Long): Boolean
+    private external fun nativeQueryClipTimeActions(handle: Long, layer: Long, frame: Long): Int
     private external fun nativeTrimComposition(handle: Long, frame: Long): Boolean
     private external fun nativeSetLayerMagneticTrack(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeLayerMagneticTrack(handle: Long, layer: Long): Boolean

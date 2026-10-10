@@ -3,7 +3,7 @@
      Os 7 catálogos têm as MESMAS chaves; o iOS lê daqui via tools/_ios_strings.py. -->
 <resources>
     <string name="eng_encoder_buffer_small">buffer encoder lebih kecil dari frame</string>
-    <string name="eng_encoder_format">encoder tidak menerima resolusi atau format ini</string>
+    <string name="eng_encoder_format">Encoder tidak menerima kombinasi resolusi, FPS dan format ini. Coba resolusi atau FPS lebih rendah.</string>
     <string name="eng_audio_encoder">encoder audio AAC gagal di perangkat ini</string>
     <string name="eng_video_encoder_start">encoder video tidak mau mulai</string>
     <string name="eng_video_encoder_stalled">encoder video berhenti merespons</string>
@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">mesin belum siap</string>
     <string name="eng_model_invalid">file 3D tidak valid atau tidak lengkap</string>
     <string name="eng_model_no_geometry">model tidak memiliki geometri</string>
+    <string name="eng_model_compressed">model memakai kompresi Draco — ekspor ulang tanpa kompresi mesh</string>
     <string name="eng_model_too_heavy">model terlalu berat untuk perangkat ini</string>
     <string name="eng_no_video_track">file tidak memiliki trek video yang dapat dibaca</string>
     <string name="eng_no_audio_track">file tidak memiliki trek audio yang dapat dibaca</string>

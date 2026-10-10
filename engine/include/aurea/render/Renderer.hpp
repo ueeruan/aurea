@@ -35,6 +35,7 @@ namespace aurea::ai { class RotoService; struct RotoStroke; }
 #include "aurea/render/RenderScheduler.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/scene3d/SceneRenderer.hpp"
+#include "aurea/scene3d/Animation.hpp"
 #include "aurea/timeline/Composition.hpp"
 
 #include <atomic>
@@ -42,6 +43,7 @@ namespace aurea::ai { class RotoService; struct RotoStroke; }
 #include <memory>
 #include <map>
 #include <mutex>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -260,6 +262,11 @@ struct RenderLayer {
 };
 
 struct FrameSnapshot {
+    struct SceneExposureBatch {
+        u32 scene = 0;
+        u32 samplesPerBatch = 0;
+        u64 renderBytesPerSample = 0;
+    };
     VideoStreamInfo playbackStream{};
     VideoSource::Stats playbackDecode{};
     i64 playbackTargetUs = 0, playbackPtsUs = -1, playbackDurationUs = 0;
@@ -274,6 +281,9 @@ struct FrameSnapshot {
     /// Grupos 3D do frame (layers 3D consecutivas da pilha). O RenderLayer do
     /// grupo aponta para cá.
     std::vector<scene3d::SceneFrame> scenes;
+    /// Pure 3D exposures may retire geometry uploads between sample batches.
+    /// All evaluated temporal samples remain immutable in `scenes`.
+    std::vector<SceneExposureBatch> sceneExposureBatches;
     u32  videoLayers = 0;
     u32  staleVideoFrames = 0;         ///< mostrando frame aproximado (scrub)
     u32  missingVideoFrames = 0;       ///< nenhum frame ainda (primeiro decode)
@@ -340,6 +350,15 @@ struct RenderSettings {
     /// Export: amostras de desfoque de movimento da qualidade final
     /// (`MotionBlurSettings::samples`); a prévia também, reduzida pela folga do aparelho.
     bool finalQuality = false;
+    /// Exact captures can finish pure, unblurred groups before their 2D graph.
+    /// Their immutable scene state, shadow resolution and post quality stay exact.
+    bool stageUnblurredScenes = false;
+    /// Incremental, opt-in offline path; authored samples and quality are kept.
+    /// Mixed planes/particles and nested compositions retain the original path.
+    bool boundedSceneExposure = false;
+    u64 sceneExposureBatchBudgetBytes = 32ull << 20;
+    const std::atomic<bool>* cancelFlag = nullptr;
+    u64 sceneExposureFenceTimeoutNs = 120ull * 1000 * 1000 * 1000;
     /// Exact offscreen captures enqueue cold local AI, then wait without holding
     /// the renderer lock. Export's private renderer keeps synchronous inference.
     bool deferLocalAi = false;
@@ -348,6 +367,10 @@ struct RenderSettings {
     /// 1 = completo; ≤ 0,25 também troca o movimento de pixels pela mistura.
     /// O export sempre usa 1.
     f32  heavyScale = 1.0f;
+    /// Piso do APARELHO (calor/tier) só, sem o AUTO. O Smooth Motion do preview
+    /// cai para a mistura por ele: com o AUTO no piso, o fluxo ligava/desligava
+    /// a cada medição (beta 08/10, "Smooth Motion não funciona direito").
+    f32  flowPolicyScale = 1.0f;
     /// Botões do preview AUTO 2.0 (Fase 8C): cada sistema lê o seu pelo
     /// `Renderer::preview_quality()`. O efetivo é o menor entre isto e
     /// `heavyScale`; com `finalQuality` tudo volta a 1 (o export não muda).
@@ -399,6 +422,9 @@ struct RenderTimings {
     f32 videoUploadMs = 0.0f;
     f32 cpuPrepareMs = 0.0f;
     f32 cpuRecordMs = 0.0f;
+    f32 sceneExposureRecordMs = 0.0f;
+    f32 sceneExposureWaitMs = 0.0f;
+    u32 sceneExposureBatches = 0;
     f32 acquireWaitMs = 0.0f;   ///< espera por imagem do swapchain / fence
     f32 presentMs = 0.0f;
     f32 gpuTotalMs = 0.0f;
@@ -440,6 +466,16 @@ public:
     [[nodiscard]] Status render(FrameSnapshot& snapshot, const RenderSettings& settings,
                                 const OffscreenTarget* offscreen, FrameStats& stats,
                                 RenderTimings& timings) noexcept;
+
+    /// Automatic capture phases are bounded to four pure groups, each at most
+    /// 320 x 320. Explicit RenderSettings retain their independent full-quality
+    /// multi-scene path; larger automatic captures use ordinary composition.
+    [[nodiscard]] static bool can_stage_small_scene_capture(const FrameSnapshot& snapshot,
+                                                            u32 width, u32 height) noexcept;
+    /// After a partial graph allocation failure, wait for its submitted uploads
+    /// before discarding only unleased transient targets. A timeout keeps the
+    /// pending frame and blocks the next graph from acquiring those targets.
+    [[nodiscard]] Status reclaim_failed_transients(u64 timeoutNs = 0) noexcept;
 
     /// Descarta texturas de imagem e LUTs (projeto fechado).
     void release_project_resources() noexcept;
@@ -490,7 +526,7 @@ public:
     /// (finalQuality) ignora.
     void set_rig_setup_layer(u64 layerId) noexcept { rigSetupLayer_.store(layerId, std::memory_order_relaxed); }
     [[nodiscard]] Status render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
-                                               u32 width, u32 height, std::vector<u8>& outRgba) noexcept;
+                                               u32 width, u32 height, std::vector<u8>& outRgba, bool comparison = false) noexcept;
 
     /// De onde vêm os modelos 3D (o motor guarda os SceneAsset).
     using ModelLookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
@@ -509,6 +545,7 @@ public:
     [[nodiscard]] bool environment_pending() const noexcept { return scene3d_.environment_pending(); }
     [[nodiscard]] scene3d::SceneRenderer& scene_renderer() noexcept { return scene3d_; }
     [[nodiscard]] u64 scene_resident_bytes() const noexcept { return scene3d_.resident_bytes(); }
+    [[nodiscard]] u64 static_pose_cache_bytes() const noexcept { return staticPoseBytes_; }
     /// Contadores dos sistemas pesados (texto, vetor, máscara, flow, partículas, 3D).
     [[nodiscard]] const HeavyStats& heavy_stats() const noexcept { return heavyStats_; }
     void reset_heavy_stats() noexcept { heavyStats_ = HeavyStats{}; }
@@ -520,6 +557,10 @@ public:
     /// memória pode baixar sob pressão). Acima dele sai a camada mais antiga.
     void set_flow_cache_budget(u64 bytes) noexcept { flowCacheBudget_ = bytes; }
     void set_transient_cache_budget(u64 bytes) noexcept { pool_.set_budget(bytes); }
+    void set_transient_allocation_limit(u64 bytes) noexcept { pool_.set_allocation_limit(bytes); }
+    void set_tracked_resource_budget(u64 bytes, TransientTexturePool::KnownResourceUse knownUse = nullptr, void* context = nullptr) noexcept {
+        pool_.set_tracked_resource_budget(bytes, knownUse, context);
+    }
     [[nodiscard]] f32 effect_quality() const noexcept override { return heavyQ_.effects; }
 
     // --- EffectResources -----------------------------------------------------
@@ -530,7 +571,7 @@ public:
     /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
     [[nodiscard]] TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept override;
-    [[nodiscard]] std::vector<Vec4> repeat_path(const Layer* host, u32 count, f32 phase) noexcept override;
+    [[nodiscard]] std::vector<Vec4> repeat_path(const Layer* host, u32 count, f32 phase, u64 guide = 0) noexcept override;
     /// Mapa de profundidade da fonte da camada no instante do `prepare` em
     /// curso (render/RendererDepth.cpp). Imagem: síncrono, uma vez. Vídeo: o
     /// export espera o quadro; o preview agenda e mostra o último pronto.
@@ -557,7 +598,7 @@ public:
     /// 0..1) no quadro `frame` da fonte; nulo = ainda não há (o Fantoche usa
     /// como contorno da malha).
     [[nodiscard]] std::shared_ptr<const std::vector<f32>> roto_cached_matte(const Composition* comp, const Layer& layer,
-                                                                            const EffectInstance& instance, i64 frame) noexcept;
+                                                                            const EffectInstance& instance, i64 frame, const Asset* asset) noexcept;
     /// "Propagar clipe": todos os quadros da fonte da camada no worker do Roto.
     bool roto_propagate(const Project& project, const Composition& comp, const Layer& layer,
                         const EffectInstance& instance, MediaManager* media) noexcept;
@@ -613,6 +654,7 @@ private:
         TextureHandle plane[3]{};
         u32 width = 0, height = 0;
         PixelFormat format = PixelFormat::Unknown;
+        bool halfP010 = false; ///< exact P010 upload when normalized16 textures are unavailable
         u64 lastFrame = 0;
         u64 contentId = 0;
     };
@@ -678,6 +720,19 @@ private:
     [[nodiscard]] FGTexture draw_to_comp(const CompositeDraw& d, const TextureDesc& compDesc, f32 compW, f32 compH,
                                          const char* name) noexcept;
     void flush_uploads() noexcept;
+    void configure_scene_quality(const scene3d::SceneFrame& group) noexcept;
+    struct StagedSceneTarget {
+        const FrameSnapshot* owner = nullptr;
+        u32 scene = 0;
+        TextureHandle texture{};
+        u64 pendingFrame = 0;
+    };
+    [[nodiscard]] Status render_staged_scene_targets(const FrameSnapshot&, const RenderSettings&,
+        u32 width, u32 height, std::span<StagedSceneTarget> targets,
+        FrameStats& stats, RenderTimings& timings) noexcept;
+    [[nodiscard]] Status render_bounded_scene_exposures(const FrameSnapshot&, const RenderSettings&,
+        u32 width, u32 height, std::span<TextureHandle> textures,
+        FrameStats& stats, RenderTimings& timings) noexcept;
     void collect_resources(u64 frameNumber) noexcept;
     void read_timings(RenderTimings& t) noexcept;
 
@@ -688,6 +743,15 @@ private:
     EffectTypeId datamoshType_ = 0;       ///< Datamosh: a fonte presa por "Quadros segurados"
     ShaderLibrary shaders_;
     scene3d::SceneRenderer scene3d_;
+    scene3d::PoseWorkspace poseWorkspace_;
+    struct StaticPoseEntry {
+        std::weak_ptr<const scene3d::SceneAsset> owner;
+        std::shared_ptr<const scene3d::SceneInstance> pose;
+        u64 bytes = 0, used = 0;
+    };
+    std::unordered_map<const scene3d::SceneAsset*, StaticPoseEntry> staticPoses_;
+    u64 staticPoseBytes_ = 0, staticPoseUse_ = 0;
+    std::shared_ptr<const scene3d::SceneInstance> static_model_pose(const std::shared_ptr<const scene3d::SceneAsset>& asset);
     ModelLookup modelLookup_ = nullptr;
     HdriLookup hdriLookup_ = nullptr;
     CubeLookup cubeLookup_ = nullptr;
@@ -696,6 +760,7 @@ private:
     void* modelCtx_ = nullptr;
     FrameGraph graph_;
     TransientTexturePool pool_;
+    u64 failedGraphFrame_ = 0;
     Arena arena_{64 * 1024};
 
     std::vector<CompositeDraw> draws_;
@@ -807,6 +872,7 @@ private:
     std::vector<std::vector<scene3d::ScenePlane>> groupPlanes_;
     std::vector<scene3d::ScenePlane> blurPlanes_;   ///< planos de um sub-quadro do desfoque 3D
     bool flowCacheEnabled_ = true;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)
+    bool motionBlurCropEnabled_ = true;
     [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
                                        u64 frameNumber) noexcept;
 public:
@@ -814,6 +880,8 @@ public:
     void flow_cache_stats(u32& hits, u32& misses) const noexcept { hits = flowHits_; misses = flowMisses_; }
     /// Benchmark: sem cache, todo quadro calcula o fluxo.
     void set_flow_cache_enabled(bool on) noexcept { flowCacheEnabled_ = on; }
+    /// Optimization toggle for pixel-equivalence tests and memory benchmarks.
+    void set_motion_blur_crop_enabled(bool on) noexcept { motionBlurCropEnabled_ = on; }
     /// Coberturas de máscara reaproveitadas / rasterizadas (testes e HUD).
     void mask_cache_stats(u32& hits, u32& misses) const noexcept { hits = maskHits_; misses = maskMisses_; }
 private:
@@ -897,6 +965,8 @@ private:
     u32 lastGpuPasses_ = 0;
 
     const std::vector<scene3d::SceneFrame>* currentScenes_ = nullptr;
+    std::span<const TextureHandle> boundedSceneTextures_{};
+    std::span<const StagedSceneTarget> stagedSceneTargets_{};
     const FrameSnapshot* currentSnap_ = nullptr;   ///< dono das pré-composições da composição em curso
     u32 prepareDepth_ = 0;                          ///< aninhamento do prepare (guarda de recursão)
     u64 exposureBytesRemaining_ = 0;                ///< one frame budget shared by text, 3D and nested prepares

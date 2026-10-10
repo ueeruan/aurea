@@ -24,6 +24,7 @@
 #include "aurea/playback/Playback.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/scene3d/Animation.hpp"
 
 #if defined(AUREA_TEST_VULKAN)
 #include "VulkanBackend.hpp"
@@ -352,6 +353,279 @@ AUREA_TEST(Perf8C, BenchCpuPrepareAndRecord) {
             }
         }
     }
+}
+
+// Dense imported hierarchies duplicated on the timeline: CPU preparation only,
+// with the same renderer used by both native apps. Never reported as device FPS.
+AUREA_TEST(Optimization, BenchDense3DPreparation) {
+    if (!bench_enabled()) return;
+    CpuRig rig;
+    AUREA_CHECK(rig.ok);
+    auto asset = std::make_shared<scene3d::SceneAsset>();
+    constexpr u32 nodes = 4096, copies = 8;
+    asset->nodes.resize(nodes);
+    asset->roots.push_back(0);
+    for (u32 i = 0; i < nodes; ++i) {
+        auto& node = asset->nodes[i];
+        node.translation = Vec3{.01f, .02f, .03f};
+        if (i + 1 < nodes) node.children.push_back(static_cast<i32>(i + 1));
+    }
+    std::shared_ptr<const scene3d::SceneAsset> source = asset;
+    rig.renderer.set_model_lookup([](void* ctx, AssetId) { return *static_cast<std::shared_ptr<const scene3d::SceneAsset>*>(ctx); }, &source);
+    BenchScene scene(1280, 720);
+    for (u32 i = 0; i < copies; ++i) {
+        auto id = scene.comp->add_layer(LayerKind::Model3D, "dense");
+        auto* layer = scene.comp->layer(id);
+        layer->end = FrameIndex{600};
+        layer->model.animationClip = -1;
+    }
+    FrameSnapshot snapshot;
+    RenderSettings settings;
+    auto prepare = [&](u32 i) { rig.renderer.prepare(*scene.comp, scene.project, FrameIndex{i}, nullptr, nullptr, nullptr,
+        settings, i + 1, 1, DecodeMode::Playback, 1.f, snapshot); };
+    for (u32 i = 0; i < 12; ++i) prepare(i);
+    std::vector<f64> times;
+    times.reserve(80);
+    u64 allocations = 0;
+    for (u32 i = 0; i < 80; ++i) {
+        const auto start = std::chrono::steady_clock::now();
+        { AllocScope scope; prepare(i + 12); allocations += scope.count(); }
+        times.push_back(ms_since(start));
+    }
+    std::printf("\n    dense 3D: %u nodes x %u instances, prepare p50=%.4f ms p95=%.4f ms, allocations/frame=%.1f\n",
+        nodes, copies, median(times), [&] { auto sorted = times; std::sort(sorted.begin(), sorted.end()); return sorted[76]; }(), allocations / 80.0);
+
+    scene3d::Animation animation;
+    scene3d::AnimSampler sampler;
+    sampler.times = {0, 1}; sampler.values = {0, 0, 0, 1, 2, 3};
+    animation.samplers.push_back(std::move(sampler));
+    animation.channels.push_back({0, scene3d::AnimPath::Translation, 0});
+    animation.duration = 1;
+    asset->animations.push_back(std::move(animation));
+    scene3d::Pose pose;
+    scene3d::PoseWorkspace workspace;
+    times.clear(); allocations = 0;
+    for (u32 i = 0; i < 12; ++i) scene3d::evaluate_pose(*asset, 0, i / 80.f, pose, &workspace);
+    for (u32 i = 0; i < 80; ++i) {
+        const auto start = std::chrono::steady_clock::now();
+        { AllocScope scope; scene3d::evaluate_pose(*asset, 0, i / 80.f, pose, &workspace); allocations += scope.count(); }
+        times.push_back(ms_since(start));
+    }
+    std::printf("    animated pose: %u nodes, p50=%.4f ms, allocations/evaluation=%.1f\n", nodes, median(times), allocations / 80.0);
+}
+
+AUREA_TEST(Optimization, BenchSparse3DHierarchyRender) {
+    CpuRig rig; AUREA_CHECK(rig.ok);
+    auto asset = std::make_shared<scene3d::SceneAsset>();
+    const u32 nodes = bench_enabled() ? 32768u : 4096u;
+    constexpr u32 copies = 8;
+    asset->nodes.resize(nodes);
+    asset->roots = {0};
+    for (u32 n = 1; n < nodes; ++n) asset->nodes[0].children.push_back(n);
+    scene3d::Primitive triangle;
+    triangle.positions = {{-50, -50, 0}, {50, -50, 0}, {0, 50, 0}};
+    triangle.indices = {0, 1, 2};
+    for (const auto& p : triangle.positions) triangle.bounds.add(p);
+    asset->bounds = triangle.bounds;
+    asset->meshes.resize(1);
+    asset->meshes[0].primitives.push_back(std::move(triangle));
+    asset->nodes.back().mesh = 0;
+    std::shared_ptr<const scene3d::SceneAsset> source = asset;
+    rig.renderer.set_model_lookup([](void* ctx, AssetId) { return *static_cast<std::shared_ptr<const scene3d::SceneAsset>*>(ctx); }, &source);
+    BenchScene scene(1280, 720);
+    for (u32 i = 0; i < copies; ++i) {
+        const auto id = scene.comp->add_layer(LayerKind::Model3D, "sparse");
+        auto* layer = scene.comp->layer(id);
+        layer->end = FrameIndex{600};
+        layer->transform.position = Vec3{640, 360, 0};
+        layer->model.animationClip = -1;
+    }
+    const auto light = scene.comp->add_layer(LayerKind::Light, "shadow");
+    scene.comp->layer(light)->end = FrameIndex{600};
+    scene.comp->layer(light)->light.castShadows = true;
+    const auto m = run_frames(rig.renderer, *rig.backend, scene, bench_enabled() ? 160 : 8, false, rig.backend);
+    AUREA_CHECK_EQ(rig.renderer.scene_stats().visiblePrimitives, copies);
+    AUREA_CHECK(rig.renderer.scene_stats().shadowMapSize > 0);
+    if (bench_enabled()) std::printf("\n    sparse 3D: %u nodes x %u instances with shadows, prepare=%.4f ms record=%.4f ms allocations/frame=%.1f\n",
+        nodes, copies, m.prepareMs, m.recordMs, m.allocsPerFrame);
+    run_frames(rig.renderer, *rig.backend, scene, 8, true, rig.backend);
+    AUREA_CHECK_EQ(rig.renderer.scene_stats().visiblePrimitives, copies);
+    AUREA_CHECK(rig.renderer.scene_stats().shadowMapSize > 0);
+}
+
+AUREA_TEST(Optimization, MorphCullingUsesDeformedBoundsAndRetainsOffscreenShadows) {
+    for (const auto& offsets : {std::pair<f32, f32>{0.f, 10000.f}, {10000.f, -10000.f}, {0.f, 0.f}, {10000.f, 0.f}}) {
+        CpuRig rig; AUREA_CHECK(rig.ok);
+        rig.backend->mapBuffers = true;
+        auto asset = std::make_shared<scene3d::SceneAsset>();
+        asset->nodes.resize(1); asset->nodes[0].mesh = 0; asset->roots = {0};
+        asset->meshes.resize(1); asset->meshes[0].morphWeights = {1.f};
+        scene3d::Primitive triangle;
+        triangle.positions = {{offsets.first - 50, -50, 0}, {offsets.first + 50, -50, 0}, {offsets.first, 50, 0}};
+        triangle.indices = {0, 1, 2};
+        triangle.morphTargets.resize(1);
+        triangle.morphTargets[0].positions.assign(3, Vec3{offsets.second, 0, 0});
+        for (const auto& p : triangle.positions) triangle.bounds.add(p);
+        asset->bounds = triangle.bounds;
+        asset->meshes[0].primitives.push_back(std::move(triangle));
+        std::shared_ptr<const scene3d::SceneAsset> source = asset;
+        rig.renderer.set_model_lookup([](void* ctx, AssetId) { return *static_cast<std::shared_ptr<const scene3d::SceneAsset>*>(ctx); }, &source);
+        BenchScene scene(1280, 720);
+        const auto model = scene.comp->add_layer(LayerKind::Model3D, "morph");
+        auto* layer = scene.comp->layer(model);
+        layer->end = FrameIndex{600}; layer->model.animationClip = -1;
+        layer->transform.position = Vec3{640, 360, 0};
+        const auto light = scene.comp->add_layer(LayerKind::Light, "shadow");
+        scene.comp->layer(light)->end = FrameIndex{600};
+        scene.comp->layer(light)->light.castShadows = true;
+        run_frames(rig.renderer, *rig.backend, scene, 4, false, rig.backend);
+        const bool visible = offsets.first + offsets.second == 0.f;
+        AUREA_CHECK_EQ(rig.renderer.scene_stats().visiblePrimitives, visible ? 1u : 0u);
+        AUREA_CHECK_EQ(rig.renderer.scene_stats().culledPrimitives, visible ? 0u : 1u);
+        // Camera culling must not remove an offscreen object from the light's pass.
+        AUREA_CHECK_EQ(rig.renderer.scene_stats().shadowDrawCalls, 1u);
+        AUREA_CHECK(rig.renderer.scene_stats().shadowMapSize > 0);
+    }
+}
+
+AUREA_TEST(Optimization, SparseTopologyRetainsMorphsAndSelectedSceneMembership) {
+    MockBackend gpu;
+    scene3d::SceneAsset asset;
+    asset.meshes.resize(3);
+    scene3d::Primitive triangle;
+    triangle.positions = {{-1, -1, 0}, {1, -1, 0}, {0, 1, 0}};
+    triangle.indices = {0, 1, 2};
+    asset.meshes[0].primitives.push_back(triangle);
+    triangle.morphTargets.resize(1);
+    triangle.morphTargets[0].positions = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+    asset.meshes[1].primitives.push_back(triangle);
+    asset.nodes.resize(4096);
+    asset.nodes[3].mesh = 0;
+    asset.nodes[9].mesh = 1;
+    asset.nodes[15].mesh = 1; asset.nodes[15].inScene = false;
+    asset.nodes[30].mesh = 2; // Empty mesh.
+    asset.nodes[40].mesh = 99; // Invalid index is ignored as before.
+    asset.nodes.back().mesh = 1;
+    scene3d::GpuModel model;
+    AUREA_CHECK(model.upload(gpu, asset).ok());
+    AUREA_CHECK(model.drawableNodes == std::vector<u32>({3, 9, 4095}));
+    AUREA_CHECK(model.morphNodes == std::vector<u32>({9, 4095}));
+    model.release(gpu);
+    AUREA_CHECK(model.drawableNodes.empty());
+    AUREA_CHECK(model.morphNodes.empty());
+    // A replacement asset rebuilds the lists instead of retaining old nodes.
+    asset.nodes[9].inScene = false;
+    asset.nodes.back().mesh = 0;
+    AUREA_CHECK(model.upload(gpu, asset).ok());
+    AUREA_CHECK(model.drawableNodes == std::vector<u32>({3, 4095}));
+    AUREA_CHECK(model.morphNodes.empty());
+    model.release(gpu);
+}
+
+AUREA_TEST(Optimization, StaticPosesShareAcrossLayersButKeepTransformsAndEdits) {
+    CpuRig rig; AUREA_CHECK(rig.ok);
+    auto asset = std::make_shared<scene3d::SceneAsset>();
+    asset->nodes.resize(2); asset->roots = {0}; asset->nodes[0].children = {1};
+    asset->nodes[0].translation = Vec3{2, 3, 4};
+    asset->nodes[1].translation = Vec3{5, 6, 7};
+    asset->nodes[1].scale = Vec3{2, -3, .5f};
+    asset->materials.resize(1);
+    std::shared_ptr<const scene3d::SceneAsset> source = asset;
+    rig.renderer.set_model_lookup([](void* ctx, AssetId) { return *static_cast<std::shared_ptr<const scene3d::SceneAsset>*>(ctx); }, &source);
+    BenchScene scene(1280, 720);
+    const auto a = scene.comp->add_layer(LayerKind::Model3D, "a");
+    const auto b = scene.comp->add_layer(LayerKind::Model3D, "b");
+    scene.comp->layer(a)->end = scene.comp->layer(b)->end = FrameIndex{600};
+    scene.comp->layer(a)->transform.position.x = 150;
+    scene.comp->layer(b)->transform.position.x = 350;
+    FrameSnapshot frame;
+    auto prepare = [&](i64 time) { rig.renderer.prepare(*scene.comp, scene.project, FrameIndex{time}, nullptr, nullptr, nullptr,
+        RenderSettings{}, time + 1, 1, DecodeMode::Playback, 1.f, frame); };
+    prepare(0);
+    AUREA_CHECK_EQ(frame.scenes.size(), usize{1}); if (frame.scenes.empty()) return;
+    AUREA_CHECK_EQ(frame.scenes[0].instances.size(), usize{2}); if (frame.scenes[0].instances.size() != 2) return;
+    auto shared = frame.scenes[0].instances[0].sharedPose;
+    AUREA_CHECK(shared != nullptr);
+    AUREA_CHECK(shared == frame.scenes[0].instances[1].sharedPose);
+    AUREA_CHECK(frame.scenes[0].instances[0].world.col[3].x != frame.scenes[0].instances[1].world.col[3].x);
+    scene3d::Pose expected; scene3d::evaluate_pose(*asset, -1, 0, expected);
+    for (const auto& instance : frame.scenes[0].instances) {
+        AUREA_CHECK_EQ(instance.pose().nodeWorld.size(), usize{2});
+        for (u32 n = 0; n < 2; ++n) for (u32 c = 0; c < 4; ++c) for (u32 r = 0; r < 4; ++r)
+            AUREA_CHECK_NEAR((&instance.pose().nodeWorld[n].col[c].x)[r], (&expected.nodeWorld[n].col[c].x)[r], 1e-6f);
+    }
+    prepare(1); AUREA_CHECK(frame.scenes[0].instances[0].sharedPose == shared);
+    MaterialOverride over; over.materialIndex = 0; over.mask = 1; over.baseColor.x = .25f;
+    scene.comp->layer(a)->model.materials.push_back(over);
+    prepare(2);
+    bool edited = false;
+    for (const auto& instance : frame.scenes[0].instances) if (instance.layerKey == a.pack()) {
+        AUREA_CHECK(!instance.sharedPose); AUREA_CHECK_EQ(instance.pose().materials.size(), usize{1});
+        edited = true;
+    }
+    AUREA_CHECK(edited);
+    scene.comp->layer(a)->model.materials.clear();
+    auto replacement = std::make_shared<scene3d::SceneAsset>(*asset);
+    replacement->nodes[0].translation.x = 99;
+    source = replacement; prepare(3);
+    AUREA_CHECK_NEAR(frame.scenes[0].instances[0].pose().nodeWorld[0].col[3].x, 99, 1e-6f);
+    AUREA_CHECK(frame.scenes[0].instances[0].sharedPose != shared);
+    rig.renderer.trim_memory(4, 4); AUREA_CHECK_EQ(rig.renderer.static_pose_cache_bytes(), u64{0});
+    // Previously submitted snapshots retain their pose independently of trim.
+    AUREA_CHECK_EQ(frame.scenes[0].instances[0].pose().nodeWorld.size(), usize{2});
+    prepare(4); AUREA_CHECK(rig.renderer.static_pose_cache_bytes() > 0);
+    rig.renderer.release_project_resources(); AUREA_CHECK_EQ(rig.renderer.static_pose_cache_bytes(), u64{0});
+}
+
+AUREA_TEST(Optimization, PoseCacheIsBoundedAndDoesNotRetainDeletedModels) {
+    CpuRig rig; AUREA_CHECK(rig.ok);
+    BenchScene scene(640, 360);
+    const auto id = scene.comp->add_layer(LayerKind::Model3D, "bounded");
+    scene.comp->layer(id)->end = FrameIndex{600};
+    std::shared_ptr<const scene3d::SceneAsset> source;
+    rig.renderer.set_model_lookup([](void* ctx, AssetId) { return *static_cast<std::shared_ptr<const scene3d::SceneAsset>*>(ctx); }, &source);
+    FrameSnapshot frame;
+    auto prepare = [&] { rig.renderer.prepare(*scene.comp, scene.project, FrameIndex{0}, nullptr, nullptr, nullptr,
+        RenderSettings{}, 1, 1, DecodeMode::Playback, 1.f, frame); };
+    std::vector<std::shared_ptr<const scene3d::SceneAsset>> owners;
+    for (u32 i = 0; i < 12; ++i) {
+        auto asset = std::make_shared<scene3d::SceneAsset>();
+        asset->nodes.resize(16384); asset->roots = {0};
+        source = asset; owners.push_back(source); prepare();
+        AUREA_CHECK(rig.renderer.static_pose_cache_bytes() <= 8ull * 1024 * 1024);
+        AUREA_CHECK(frame.scenes[0].instances[0].sharedPose != nullptr);
+    }
+    const std::weak_ptr<const scene3d::SceneAsset> deleted = source;
+    frame.scenes.clear(); owners.clear(); source.reset();
+    AUREA_CHECK(deleted.expired());
+    auto oversized = std::make_shared<scene3d::SceneAsset>();
+    oversized->nodes.resize(131072); oversized->roots = {0}; source = oversized; prepare();
+    AUREA_CHECK(!frame.scenes[0].instances[0].sharedPose);
+    AUREA_CHECK_EQ(rig.renderer.static_pose_cache_bytes(), u64{0});
+    AUREA_CHECK_EQ(frame.scenes[0].instances[0].pose().nodeWorld.size(), usize{131072});
+}
+
+AUREA_TEST(Optimization, WorkspaceSeekMatchesFreshEvaluationWithoutSteadyAllocations) {
+    scene3d::SceneAsset asset;
+    asset.nodes.resize(128); asset.roots = {0};
+    for (u32 i = 0; i < 127; ++i) {
+        asset.nodes[i].children.push_back(static_cast<i32>(i + 1));
+        asset.nodes[i].rotation = Quat::identity(); asset.nodes[i].scale = Vec3{1.01f, .99f, 1};
+    }
+    scene3d::Animation animation; scene3d::AnimSampler sampler;
+    sampler.times = {0, 1}; sampler.values = {1, 2, 3, 4, 5, 6};
+    animation.samplers.push_back(sampler); animation.channels.push_back({0, scene3d::AnimPath::Translation, 0});
+    asset.animations.push_back(animation);
+    scene3d::Pose reused; scene3d::PoseWorkspace workspace;
+    for (f32 time : {.9f, .1f, .7f, .0f, 1.f}) {
+        scene3d::Pose fresh; scene3d::evaluate_pose(asset, 0, time, fresh);
+        scene3d::evaluate_pose(asset, 0, time, reused, &workspace);
+        for (usize n = 0; n < asset.nodes.size(); ++n) for (u32 c = 0; c < 4; ++c) for (u32 r = 0; r < 4; ++r)
+            AUREA_CHECK_EQ((&reused.nodeWorld[n].col[c].x)[r], (&fresh.nodeWorld[n].col[c].x)[r]);
+    }
+    u64 allocations = 0;
+    { AllocScope scope; for (u32 i = 0; i < 30; ++i) scene3d::evaluate_pose(asset, 0, i / 30.f, reused, &workspace); allocations = scope.count(); }
+    AUREA_CHECK_EQ(allocations, u64{0});
 }
 
 #if defined(AUREA_TEST_VULKAN)
@@ -1100,3 +1374,82 @@ AUREA_TEST(PreviewGesture, IdleVsyncCannotStarvePreviewRefinement) {
     AUREA_CHECK_EQ(e.read_telemetry().previewDenominator, denominator);
     e.shutdown();
 }
+
+// =============================================================================
+// Beta 0.0.5 ("trava em 2K/4K a 60 fps; a 30 fps fica normal"): custo do
+// quadro de PRÉVIA na resolução que o AUTO escolhe — controlador (escala
+// inicial pela composição e fps) ∩ teto da área visível (viewport). Mede o
+// host (GPU de mesa) em 1080p30, 1440p60 e 2160p60 com 10 camadas com
+// efeitos, numa área de prévia de celular em pé (1080×608) e em tela cheia
+// deitada (2400×1080). Os números são do HOST, não de celular.
+// =============================================================================
+#if defined(AUREA_TEST_VULKAN)
+#include "aurea/render/PreviewViewport.hpp"
+#include "aurea/render/RenderScheduler.hpp"
+AUREA_TEST(Perf8C, BenchPreviewAutoBySizeAndFps) {
+    if (!bench_enabled()) { std::printf("    (pulado: AUREA_BENCH=1 para medir)\n"); return; }
+    vk::Backend backend;
+    BackendConfig cfg;
+    cfg.enableValidation = false;
+    cfg.framesInFlight = 2;
+    if (!backend.initialize(cfg).ok()) { std::printf("    (sem GPU Vulkan)\n"); return; }
+    EffectRegistry effects;
+    register_builtin_effects(effects);
+    Renderer renderer;
+    AUREA_CHECK(renderer.initialize(backend, effects).ok());
+    std::printf("\n    GPU %s: projeto | area | previa WxH | prepare | gravacao | GPU ms | orcamento ms\n",
+                backend.capabilities().deviceName.c_str());
+    struct P { u32 w, h; f64 fps; const char* name; };
+    struct S { u32 w, h; const char* name; };
+    for (const P p : {P{1920, 1080, 30.0, "1080p30"}, P{2560, 1440, 60.0, "1440p60"}, P{3840, 2160, 60.0, "2160p60"}}) {
+        for (const S sv : {S{1080, 608, "editor"}, S{2400, 1080, "cheia"}}) {
+            DeviceCapabilities caps;
+            AdaptiveResolutionController c(caps);
+            c.configure(p.w, p.h, static_cast<f32>(p.fps));
+            const auto vs = preview_viewport_scale(true, p.w, p.h, sv.w, sv.h, 1.0f, c.current_numerator(),
+                                                   c.current_denominator(), static_cast<f32>(p.fps));
+            const u32 pw = std::max(1u, p.w * vs.numerator / vs.denominator);
+            const u32 ph = std::max(1u, p.h * vs.numerator / vs.denominator);
+            BenchScene s(p.w, p.h, p.fps);
+            s.populate(effects, 10, true);
+            // run_frames desenha no tamanho da composição: a prévia usa um alvo do tamanho escolhido.
+            TextureDesc d;
+            d.width = pw; d.height = ph;
+            d.format = SurfaceFormat::RGBA16F;
+            d.renderTarget = true; d.sampled = true; d.transferSrc = true;
+            const TextureHandle target = *backend.create_texture(d);
+            OffscreenTarget off{target, pw, ph};
+            RenderSettings rs;
+            rs.dither = false;
+            rs.gpuTimers = true;
+            rs.previewNumerator = vs.numerator;
+            rs.previewDenominator = vs.denominator;
+            FrameSnapshot snap;
+            std::vector<f64> prep, rec, gpu;
+            static u64 frameNo = 9000000;
+            for (u32 f = 0; f < 60; ++f) {
+                const auto t0 = std::chrono::steady_clock::now();
+                renderer.prepare(*s.comp, s.project, FrameIndex{static_cast<i64>(f)}, &s.media, &BenchScene::lookup, &s, rs,
+                                 ++frameNo, 1, DecodeMode::Playback, 1.0f, snap);
+                const f64 tp = ms_since(t0);
+                FrameStats st;
+                RenderTimings tm;
+                const auto t1 = std::chrono::steady_clock::now();
+                (void)renderer.render(snap, rs, &off, st, tm);
+                if (f >= 30) {
+                    prep.push_back(tp);
+                    rec.push_back(ms_since(t1));
+                    if (tm.gpuMeasured) gpu.push_back(tm.gpuTotalMs);
+                }
+            }
+            backend.wait_idle();
+            backend.destroy_texture(target);
+            std::printf("    %-7s | %-6s | %4ux%-4u | %6.2f | %6.2f | %6.2f | %5.1f\n", p.name, sv.name, pw, ph, median(prep),
+                        median(rec), median(gpu), 1000.0 / p.fps);
+            renderer.release_project_resources();
+        }
+    }
+    renderer.shutdown();
+    backend.shutdown();
+}
+#endif

@@ -56,8 +56,10 @@ struct MorphExposureFixture {
         comp->motion_blur().samples = 16; comp->motion_blur().adaptiveLimit = 64;
     }
 
-    void prepare(FrameSnapshot& snapshot, bool finalQuality) {
+    void prepare(FrameSnapshot& snapshot, bool finalQuality, bool bounded = false,
+                 u64 budget = 32ull << 20) {
         RenderSettings settings; settings.finalQuality = finalQuality;
+        settings.boundedSceneExposure = bounded; settings.sceneExposureBatchBudgetBytes = budget;
         renderer.prepare(*comp, project, FrameIndex{15}, nullptr, nullptr, nullptr,
             settings, 1, 0, DecodeMode::Still, 1.f, snapshot);
     }
@@ -90,6 +92,8 @@ struct MorphExposureFixture {
     }
 };
 }
+
+#include "BoundedSceneExposureTests.inl"
 
 AUREA_TEST(MotionBlur, MorphOnlyAnimationEvaluatesEveryExposureTime) {
     MorphExposureFixture f(4);
@@ -130,6 +134,59 @@ AUREA_TEST(MotionBlur, DenseMorphUploadsAreAdmittedBeforeSampleExpansion) {
     const auto& frames = snapshot.scenes[0].blurFrames;
     AUREA_CHECK(frames.size() >= 2);
     AUREA_CHECK(frames.size() <= 5);
+}
+
+AUREA_TEST(MotionBlur, DenseZeroWeightTargetsDoNotReserveDeformationUploads) {
+    for (bool transformClip : {false, true}) {
+        MorphExposureFixture f(100000);
+        auto asset = std::const_pointer_cast<scene3d::SceneAsset>(f.model);
+        auto* layer = f.comp->layer(f.comp->order().at(0));
+        layer->model.animationClip = transformClip ? 0 : -1;
+        if (transformClip) {
+            auto& sampler = asset->animations[0].samplers[0];
+            sampler.components = 3; sampler.values = {0,0,0, 1,0,0};
+            asset->animations[0].channels[0].path = scene3d::AnimPath::Translation;
+        } else {
+            auto& position = layer->tracks.get_or_create(TrackProperty::PositionX);
+            position.set(FrameIndex{0}, 100); position.set(FrameIndex{30}, 200);
+        }
+        FrameSnapshot snapshot; f.prepare(snapshot, true);
+        AUREA_CHECK(!f.renderer.take_incomplete());
+        AUREA_CHECK_EQ(snapshot.scenes.size(), 1u); if (snapshot.scenes.empty()) return;
+        AUREA_CHECK_EQ(snapshot.scenes[0].blurFrames.size(), 16u);
+        for (const auto& frame : snapshot.scenes[0].blurFrames) {
+            AUREA_CHECK_EQ(frame.instances.size(), 1u); if (frame.instances.empty()) return;
+            const auto& pose = frame.instances[0].pose();
+            const auto& weights = !pose.morphWeights[0].empty() ? pose.morphWeights[0] : asset->meshes[0].morphWeights;
+            AUREA_CHECK_EQ(weights.size(), 1u); AUREA_CHECK_NEAR(weights[0], 0.f, .00001f);
+        }
+    }
+}
+
+AUREA_TEST(MotionBlur, StaticNonzeroMorphAndZeroCenterAnimatedMorphKeepTheirUploadAllowance) {
+    for (bool animated : {false, true}) {
+        MorphExposureFixture f(100000);
+        auto asset = std::const_pointer_cast<scene3d::SceneAsset>(f.model);
+        auto* layer = f.comp->layer(f.comp->order().at(0));
+        if (animated) {
+            auto& sampler = asset->animations[0].samplers[0];
+            sampler.times = {.499f, .5f, .501f}; sampler.values = {0,0,1};
+        } else {
+            layer->model.animationClip = -1;
+            asset->meshes[0].morphWeights = {.5f};
+            auto& position = layer->tracks.get_or_create(TrackProperty::PositionX);
+            position.set(FrameIndex{0}, 100); position.set(FrameIndex{30}, 200);
+        }
+        FrameSnapshot snapshot; f.prepare(snapshot, true);
+        AUREA_CHECK(f.renderer.take_incomplete());
+        AUREA_CHECK_EQ(snapshot.scenes.size(), 1u); if (snapshot.scenes.empty()) return;
+        AUREA_CHECK(snapshot.scenes[0].blurFrames.empty());
+        if (animated) {
+            AUREA_CHECK_EQ(snapshot.scenes[0].instances.size(), 1u); if (snapshot.scenes[0].instances.empty()) return;
+            const auto& weights = snapshot.scenes[0].instances[0].pose().morphWeights[0];
+            AUREA_CHECK_EQ(weights.size(), 1u); AUREA_CHECK_NEAR(weights[0], 0.f, .00001f);
+        }
+    }
 }
 
 AUREA_TEST(MotionBlur, NestedExposuresShareOneBudgetAndResetForTheNextFrame) {

@@ -121,7 +121,7 @@ bool Engine::puppet_capture_outline(const Composition& comp, const Layer& l, Fra
             const f64 src = l.source_frame(l.timeline_time(local));
             frame = std::isfinite(src) ? static_cast<i64>(std::max(0.0, std::floor(src / fps * srcFps + 1e-3))) : 0;
         }
-        const auto matte = renderer_.roto_cached_matte(&comp, l, inst, frame);
+        const auto matte = renderer_.roto_cached_matte(&comp, l, inst, frame, a);
         constexpr u32 k = ai::RotoService::kSize;
         if (matte && matte->size() >= static_cast<usize>(k) * k) {
             puppet::outline_rows(matte->data(), k, k, 0.5f, rows);
@@ -151,6 +151,7 @@ bool Engine::puppet_capture_outline(const Composition& comp, const Layer& l, Fra
 
 u32 Engine::query_puppet_mesh(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const EffectInstance* e = puppet_effect(l, effectId);
@@ -171,6 +172,7 @@ u32 Engine::query_puppet_mesh(u64 layerId, u32 effectId, f32* out, u32 capacity)
 
 u32 Engine::query_puppet(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const EffectInstance* e = puppet_effect(l, effectId);
@@ -197,6 +199,7 @@ u32 Engine::query_puppet(u64 layerId, u32 effectId, f32* out, u32 capacity) noex
 
 i32 Engine::puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = puppet_effect(l, effectId);
@@ -244,6 +247,7 @@ i32 Engine::puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept {
 
 bool Engine::puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, bool autoKey, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = puppet_effect(l, effectId);
@@ -257,6 +261,14 @@ bool Engine::puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, b
         Track* t = l->tracks.find(TrackProperty::EffectParam, e->id, param_track_key(param, c));
         if ((t && !t->keys.empty()) || autoKey) {
             Track& tr = t ? *t : l->tracks.get_or_create(TrackProperty::EffectParam, e->id, param_track_key(param, c));
+            // A first drag after seeking must keep the pin's earlier pose.
+            // One key at the destination alone samples that pose at every frame.
+            if (tr.keys.empty()) {
+                const f32 initial = e->params[param].constant.v[c];
+                tr.staticValue = initial;
+                const FrameIndex start = l->local_time(l->start);
+                if (local.value > start.value) (void)tr.set(start, initial, Interpolation::Linear);
+            }
             (void)tr.set(local, value[c]);
         }
         e->params[param].constant.v[c] = value[c];
@@ -268,6 +280,7 @@ bool Engine::puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, b
 
 bool Engine::puppet_remove_pin(u64 layerId, u32 effectId, u32 pin) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     EffectInstance* e = puppet_effect(l, effectId);

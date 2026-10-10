@@ -17,6 +17,16 @@ on:
         required: false
         default: false
         type: boolean
+      skip_ipa:
+        description: 'Run simulator validation without rebuilding an already verified IPA'
+        required: false
+        default: false
+        type: boolean
+      gesture_tests:
+        description: 'Optional comma-separated XCTest method names; empty runs the full gesture suite'
+        required: false
+        default: ''
+        type: string
   push:
     branches: ['codex/native-beta2-ipa']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
@@ -27,7 +37,7 @@ permissions:
   contents: read
 jobs:
   build-ipa:
-    if: github.event_name != 'workflow_dispatch' || !inputs.capture_only
+    if: github.event_name != 'workflow_dispatch' || (!inputs.capture_only && !inputs.skip_ipa)
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -173,8 +183,19 @@ jobs:
           if-no-files-found: ignore
       - name: Run native preview gestures and undo tests
         if: always() && steps.compile_simulator.outcome == 'success' && !inputs.capture_only
+        env:
+          GESTURE_TESTS: ${{ inputs.gesture_tests }}
         run: |
           set -o pipefail
+          TEST_FLAGS=('-only-testing:AureaUITests/AureaStageGestureUITests')
+          if [ -n "$GESTURE_TESTS" ]; then
+            TEST_FLAGS=()
+            IFS=',' read -r -a SELECTED_TESTS <<< "$GESTURE_TESTS"
+            for TEST_NAME in "${SELECTED_TESTS[@]}"; do
+              if [[ ! "$TEST_NAME" =~ ^test[A-Za-z0-9_]+$ ]]; then echo 'Invalid XCTest name'; exit 2; fi
+              TEST_FLAGS+=("-only-testing:AureaUITests/AureaStageGestureUITests/$TEST_NAME")
+            done
+          fi
           SIMULATOR_UDID=$(python3 -c 'import json; print(json.load(open("build/ios-parity/manifest.json"))["device"]["udid"])')
           # Capture subsets may end on a scene that reinstalls the app without
           # decoder fixtures. The video gesture fixture verifies these files.
@@ -191,7 +212,7 @@ jobs:
             -configuration Debug -sdk iphonesimulator ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build/simulator -parallel-testing-enabled NO \
-            -only-testing:AureaUITests/AureaStageGestureUITests \
+            "${TEST_FLAGS[@]}" \
             -resultBundlePath build/ios-gesture-tests.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             2>&1 | tee build-gesture-tests.log

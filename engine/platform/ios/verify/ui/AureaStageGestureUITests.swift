@@ -148,8 +148,13 @@ import UIKit
         XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
         let openExport = app.buttons["Export"].firstMatch
         XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
-        let start = app.buttons["Export"].firstMatch
-        XCTAssertTrue(start.waitForExistence(timeout: 10)); start.tap()
+        // The editor toolbar remains visible above the export sheet. Its Export
+        // button opens the sheet; the wide footer button starts the encoder.
+        // Choosing firstMatch taps the toolbar again and never starts export.
+        let start = app.buttons["Export"].allElementsBoundByIndex.first {
+            $0.isHittable && $0.frame.height >= 50
+        }
+        try XCTUnwrap(start, "The export sheet must expose its wide start button").tap()
         // Fim do render: o app pede "Adicionar a Fotos" (PHPhotoLibrary .addOnly,
         // publishExportToPhotos) e só mostra "Vídeo pronto" depois da resposta.
         // O alerta é do SpringBoard; esperar o texto não o dispensa (CI 2136/2137:

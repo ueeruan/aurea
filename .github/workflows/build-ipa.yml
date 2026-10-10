@@ -216,6 +216,14 @@ jobs:
             -resultBundlePath build/ios-gesture-tests.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             2>&1 | tee build-gesture-tests.log
+      - name: Preserve native engine and export diagnostics
+        if: always() && !inputs.capture_only
+        run: |
+          if [ -f build/ios-parity/manifest.json ]; then
+            SIMULATOR_UDID=$(python3 -c 'import json; print(json.load(open("build/ios-parity/manifest.json"))["device"]["udid"])')
+            xcrun simctl spawn "$SIMULATOR_UDID" log show --last 20m --style compact \
+              --predicate 'subsystem == "com.aurea.aurea" OR process == "Aurea"' > build/ios-native-engine.log
+          fi
       - name: Export native gesture attachments
         if: always() && !inputs.capture_only
         run: |
@@ -230,6 +238,7 @@ jobs:
           path: |
             build/ios-gesture-attachments/
             build-gesture-tests.log
+            build/ios-native-engine.log
           if-no-files-found: ignore
       - name: Save native gesture test diagnostics
         if: always() && !inputs.capture_only
@@ -241,6 +250,7 @@ jobs:
             build/ios-gesture-samples/
             build/ios-gesture-attachments/
             build-gesture-tests.log
+            build/ios-native-engine.log
           if-no-files-found: ignore
       - uses: actions/cache/save@v4
         if: always()

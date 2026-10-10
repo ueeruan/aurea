@@ -203,6 +203,28 @@ class ExportV2DeviceTest {
             }
         } finally { reader.release() }
     }
+    @Test fun fiveExportsInSameEngineKeepMemoryBounded() {
+        initialize(); project(1920, 1080, 30f, "V2 repeated session memory")
+        compose.runOnIdle { store.addShape(1); store.setCompositionDuration(30) }
+        compose.waitUntil(15000) { store.project.durationFrames == 30 && store.layers.size == 1 }
+        val measurements = ArrayList<Pair<Int, Long>>()
+        repeat(5) { n ->
+            export("same-engine-$n", 1080, 30.0, 30)
+            Runtime.getRuntime().gc(); SystemClock.sleep(200)
+            val memory = android.os.Debug.MemoryInfo()
+            android.os.Debug.getMemoryInfo(memory)
+            measurements.add(memory.totalPss to android.os.Debug.getNativeHeapAllocatedSize())
+        }
+        File(context.filesDir, "v2-repeat-memory.txt").writeText(measurements.mapIndexed { n, (pss, heap) ->
+            "export=$n pssKiB=$pss nativeHeapBytes=$heap"
+        }.joinToString("\n"))
+        // Allow driver/cache warm-up; repeated offline sessions must not retain
+        // another full-size pool or decoded history after each successful end.
+        val warmPss = measurements[1].first
+        val warmHeap = measurements[1].second
+        assertTrue("Repeated export PSS grew by another image pool: $measurements", measurements.last().first <= warmPss + 64 * 1024)
+        assertTrue("Repeated export native heap did not stabilize: $measurements", measurements.last().second <= warmHeap + (32L shl 20))
+    }
     @Test fun cancelPreservesPreviousOutputAndNextExportSucceeds() {
         initialize(); project(1920, 1080, 30f, "V2 cancel")
         compose.runOnIdle { store.addShape(1); store.setCompositionDuration(1800) }

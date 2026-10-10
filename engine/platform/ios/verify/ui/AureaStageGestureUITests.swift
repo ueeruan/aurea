@@ -151,7 +151,7 @@ import UIKit
         // The editor toolbar remains visible above the export sheet. Its Export
         // button opens the sheet; the wide footer button starts the encoder.
         // Choosing firstMatch taps the toolbar again and never starts export.
-        let start = app.buttons["Export"].allElementsBoundByIndex.first {
+        let start = app.buttons.matching(identifier: "Export").allElementsBoundByIndex.first {
             $0.isHittable && $0.frame.height >= 50
         }
         try XCTUnwrap(start, "The export sheet must expose its wide start button").tap()
@@ -163,6 +163,11 @@ import UIKit
         let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"].firstMatch
         let deadline = Date().addingTimeInterval(300)
         while !ready.exists && Date() < deadline {
+            let exportError = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Could not export:")).firstMatch
+            if exportError.exists {
+                XCTFail("Native export failed: \(exportError.label)")
+                return
+            }
             if allow.exists { allow.tap() }
             _ = ready.waitForExistence(timeout: 2)
         }

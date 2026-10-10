@@ -161,6 +161,9 @@ struct LayerImage {
     /// o EffectGraph passa pelas etapas anteriores ao efeito que pede e a
     /// entrega pelo contexto (`EffectBuildContext::history`).
     FGTexture history{};
+    /// A cropped source's original transparent canvas. Motion Tile keeps this
+    /// domain for its period instead of treating the occupied crop as a tile.
+    Rect virtualSourceRegion{};
 
     [[nodiscard]] bool valid() const noexcept { return texture.valid() && width && height; }
     /// Texels por pixel de layer.

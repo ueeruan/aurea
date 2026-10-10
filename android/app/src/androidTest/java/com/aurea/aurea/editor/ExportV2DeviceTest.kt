@@ -112,6 +112,20 @@ class ExportV2DeviceTest {
         try { reader.setDataSource(output.absolutePath); assertEquals("yes", reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)) }
         finally { reader.release() }
     }
+    @Test fun animatedTextPresetAndMotionBlurExportAt1080p() {
+        initialize(); project(1920, 1080, 30f, "V2 text blur memory regression")
+        compose.runOnIdle {
+            val engine = store.engineForStress
+            val text = engine.addText("AUREA MOTION BLUR")
+            assertTrue(text > 0)
+            assertTrue(engine.applyTextPreset(text, 11))
+            assertTrue(engine.setMotionBlur(text, true))
+            engine.setCompositionMotionBlur(true)
+            store.setCompositionDuration(60)
+        }
+        compose.waitUntil(15000) { store.project.durationFrames == 60 }
+        export("animated-text-1080", 1080, 30.0, 60)
+    }
     @Test fun twentyFour3DObjectsCameraParticlesEffectsAndMotionBlur() {
         initialize(); project(960, 540, 30f, "V2 full 3D")
         compose.runOnIdle {

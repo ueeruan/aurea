@@ -280,9 +280,13 @@ struct Rig {
         VideoSourceFactory* mediaFactory = nullptr, GPUBackend* backend = nullptr, u32 workerHangMs = 0,
         bool recovery = false, const char* sourcePath = "sintetico",
         ExportExecutionProfile profile = ExportExecutionProfile::Balanced, bool startupGate = false,
-        ImageLoaderFn imageLoader = nullptr, void* imageLoaderContext = nullptr, bool v2 = false) : factory(cfg) {
+        ImageLoaderFn imageLoader = nullptr, void* imageLoaderContext = nullptr, bool v2 = false,
+        u64 trackedBudget = 0, bool boundedText = true) : factory(cfg) {
         EngineConfig ec;
         ec.enableExportEngineV2 = v2;
+        ec.enableBoundedTextSurface = boundedText;
+        ec.memoryBudgetBytes = trackedBudget;
+        if (trackedBudget) ec.enableTrackedGpuAdmission = true;
         ec.exportWorkerHangMs = workerHangMs;
         ec.enableExportRecovery = recovery;
         ec.enableExportStartupGate = startupGate;
@@ -1092,6 +1096,108 @@ AUREA_TEST(Export, MotionBlur3DPipelinedIsByteIdenticalToSerial) {
         if (k == 1) AUREA_CHECK(o.p.pipelineDepth > 1);
     }
     AUREA_CHECK_EQ(hashes[0], hashes[1]);
+}
+
+AUREA_TEST(ExportV2Gpu, FullHdAnimatedTextMotionBlurWithinTrackedBudget) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string source = "aurea_v2_text_budget_source.bin";
+    const char identity[] = "unused synthetic video identity";
+    AUREA_CHECK(fileio::write_atomic(source, identity, sizeof(identity)).ok());
+    struct Cleanup {
+        std::string source;
+        ~Cleanup() {
+            fileio::remove_file(source);
+            for (const auto& p : {"nao-usado.mp4", "nao-usado.mp4.aurea-export", "nao-usado.mp4.aurea-export.project.aurea"}) fileio::remove_file(p);
+        }
+    } cleanup{source};
+    SyntheticConfig cfg; cfg.width = 1920; cfg.height = 1080; cfg.frameCount = 60;
+    Rig r(cfg, 30, 60, 1, nullptr, nullptr, 0, false, source.c_str(),
+          ExportExecutionProfile::Balanced, false, nullptr, nullptr, true, 256ull << 20);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    AUREA_CHECK(r.comp()->remove_layer(r.video_layer()));
+    const auto text = r.e.add_text("AUREA MOTION BLUR");
+    AUREA_CHECK(text.ok()); if (!text.ok()) return;
+    AUREA_CHECK(r.e.apply_text_preset(*text, 11));
+    AUREA_CHECK(r.e.set_motion_blur(*text, true));
+    AUREA_CHECK(r.e.set_composition_motion_blur(true));
+    r.cap.persistFinishMarker = true; r.cap.validateCapturedPlanes = true;
+    const auto result = run_export(r, 1080, 30, false, 120);
+    AUREA_CHECK(result.finished);
+    AUREA_CHECK_EQ(result.p.result, Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), usize{60});
+    // The V2 startup proxy calls abort to release its private staging resources
+    // on destruction even after publication; completion is its validated phase.
+    AUREA_CHECK(r.cap.finished);
+    AUREA_CHECK_EQ((result.p.flags >> 8) & 15u, 6u);
+}
+
+AUREA_TEST(ExportV2Gpu, BoundedTextPreservesTileAndStyledShutterPixels) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string source = "aurea_v2_text_pixels_source.bin";
+    const char identity[] = "synthetic text pixel comparison";
+    AUREA_CHECK(fileio::write_atomic(source, identity, sizeof(identity)).ok());
+    struct Cleanup {
+        std::string source;
+        ~Cleanup() {
+            fileio::remove_file(source);
+            for (const auto& p : {"nao-usado.mp4", "nao-usado.mp4.aurea-export", "nao-usado.mp4.aurea-export.project.aurea"}) fileio::remove_file(p);
+        }
+    } cleanup{source};
+    for (u32 scenario = 0; scenario < 3; ++scenario) {
+        std::vector<std::vector<u8>> reference;
+        std::vector<i64> referencePts;
+        for (const bool bounded : {false, true}) {
+            SyntheticConfig cfg; cfg.width = 640; cfg.height = 360; cfg.frameCount = 30;
+            Rig r(cfg, 30, 30, 1, nullptr, nullptr, 0, false, source.c_str(),
+                  ExportExecutionProfile::Balanced, false, nullptr, nullptr, true, 1ull << 30, bounded);
+            AUREA_CHECK(r.ok); if (!r.ok) return;
+            AUREA_CHECK(r.comp()->remove_layer(r.video_layer()));
+            const auto text = r.e.add_text("AUREA");
+            AUREA_CHECK(text.ok()); if (!text.ok()) return;
+            if (scenario == 1) {
+                AUREA_CHECK(r.e.apply_text_preset(*text, 11));
+            } else {
+                AUREA_CHECK(r.e.add_text_animator(*text, kTextPropPosition) == 0);
+                auto& track = r.comp()->layer(LayerId::unpack(*text))->tracks.get_or_create(TrackProperty::TextAnimParam, 0, text::kPosX);
+                track.set(FrameIndex{0}, -70); track.set(FrameIndex{29}, 70);
+                if (scenario == 2) {
+                    f32 style[18]{};
+                    AUREA_CHECK(r.e.query_text_style(*text, style));
+                    style[3] = 1; style[4] = .15f; style[5] = .4f; style[6] = .8f; style[7] = .8f;
+                    style[8] = 18; style[9] = 7;
+                    style[10] = 1; style[11] = .2f; style[12] = .1f; style[13] = .7f; style[14] = .7f;
+                    style[15] = 12; style[16] = -9; style[17] = 10;
+                    AUREA_CHECK(r.e.set_text_style(*text, style));
+                }
+            }
+            AUREA_CHECK(r.e.set_motion_blur(*text, true));
+            AUREA_CHECK(r.e.set_composition_motion_blur(true));
+            r.cap.keepFrames = true;
+            r.cap.persistFinishMarker = true; r.cap.validateCapturedPlanes = true;
+            const auto result = run_export(r, 360, 30, false, 180);
+            AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+            if (!result.finished || result.p.result != Errc::Ok) return;
+            AUREA_CHECK_EQ(r.cap.frames.size(), usize{30});
+            if (!bounded) { reference = r.cap.frames; referencePts = r.cap.pts; }
+            else {
+                AUREA_CHECK(r.cap.pts == referencePts);
+                u32 maxDiff = 0; u64 changed = 0;
+                for (usize f = 0; f < reference.size(); ++f)
+                    for (usize n = 0; n < reference[f].size(); ++n) {
+                        const u32 diff = static_cast<u32>(std::abs(int(reference[f][n]) - int(r.cap.frames[f][n])));
+                        maxDiff = std::max(maxDiff, diff); changed += diff != 0;
+                    }
+                std::printf("    text scenario=%u: maxByteDiff=%u changedBytes=%llu\n", scenario, maxDiff, static_cast<unsigned long long>(changed));
+                // Moving an otherwise identical raster to a smaller attachment
+                // changes floating-point interpolation rounding. Permit only
+                // one quantization step in less than 0.1% of the output bytes;
+                // missing glyphs, altered tile periods or clipped shadows fail.
+                AUREA_CHECK(maxDiff <= 1);
+                const u64 totalBytes = reference.size() * (reference.empty() ? 0 : reference.front().size());
+                AUREA_CHECK(changed * 1000 < totalBytes);
+            }
+        }
+    }
 }
 
 AUREA_TEST(Regression2134Gpu, FullHdMotionBlurExportsVideoAnimatedTextAnd3D) {

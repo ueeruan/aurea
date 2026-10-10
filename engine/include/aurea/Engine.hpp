@@ -196,6 +196,9 @@ struct EngineConfig {
     /// backing within the existing device budget, instead of a fixed half share.
     /// Other platforms retain the legacy policy until device validation.
     bool enableTrackedGpuAdmission = false;
+    /// Rasterize only occupied glyph texels; retain the virtual canvas for effects.
+    /// The switch exists for native pixel comparison and controlled rollback.
+    bool enableBoundedTextSurface = true;
     /// Watchdog do worker do encoder (export/ExportWatchdog.hpp): sem batida
     /// da plataforma por isto, o motor desiste do worker travado e conclui o
     /// export com falha (EncoderStalled) em vez de esperar o join para sempre.

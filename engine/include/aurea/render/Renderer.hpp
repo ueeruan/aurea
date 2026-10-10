@@ -873,6 +873,7 @@ private:
     std::vector<scene3d::ScenePlane> blurPlanes_;   ///< planos de um sub-quadro do desfoque 3D
     bool flowCacheEnabled_ = true;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)
     bool motionBlurCropEnabled_ = true;
+    bool boundedTextSurfaceEnabled_ = true;
     [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
                                        u64 frameNumber) noexcept;
 public:
@@ -882,6 +883,7 @@ public:
     void set_flow_cache_enabled(bool on) noexcept { flowCacheEnabled_ = on; }
     /// Optimization toggle for pixel-equivalence tests and memory benchmarks.
     void set_motion_blur_crop_enabled(bool on) noexcept { motionBlurCropEnabled_ = on; }
+    void set_bounded_text_surface_enabled(bool on) noexcept { boundedTextSurfaceEnabled_ = on; }
     /// Coberturas de máscara reaproveitadas / rasterizadas (testes e HUD).
     void mask_cache_stats(u32& hits, u32& misses) const noexcept { hits = maskHits_; misses = maskMisses_; }
 private:

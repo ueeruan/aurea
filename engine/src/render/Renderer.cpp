@@ -4579,12 +4579,60 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         case LayerSource::Kind::Text: {
             // Glifos instanciados no atlas SDF, na densidade da layer na tela.
             if (!glyphFrameBuf_.valid() || !glyphAtlas_.valid() || layer.source.glyphCount == 0 || !currentSnap_) return false;
+            bool canCrop = !hasEffects;
+            if (hasEffects && layerIndex < currentSnap_->plans.size()) {
+                const auto& evals = currentSnap_->plans[layerIndex].evals;
+                canCrop = !evals.empty() && evals.front().effect &&
+                    evals.front().effect->type_id() == effect_type_id(effect_keys::kMotionTile);
+            }
+            if (boundedTextSurfaceEnabled_ && canCrop) {
+                // Animator padding is a virtual canvas, not occupied pixels.
+                // Bound ALL shutter instants on the original raster grid, so
+                // every sample has the same reusable physical descriptor.
+                const Rect canvas = out.region;
+                const f32 kx = out.texel_scale_x(), ky = out.texel_scale_y();
+                f32 x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+                bool finite = kx > 0.f && ky > 0.f;
+                const usize begin = layer.source.glyphFirst;
+                const usize count = static_cast<usize>(layer.source.glyphCount) * std::max(1u, layer.source.glyphSets);
+                if (begin > currentSnap_->glyphs.size() || count > currentSnap_->glyphs.size() - begin) finite = false;
+                if (finite) for (usize n = begin; n < begin + count; ++n) {
+                    const GlyphInstance& glyph = currentSnap_->glyphs[n];
+                    const f32 margin = glyph.uv.x >= 0.f ? std::max(0.f, glyph.extra.x * 1.5f) : 0.f;
+                    for (const f32 gy : {glyph.rect.y - margin, glyph.rect.w + margin})
+                        for (const f32 gx : {glyph.rect.x - margin, glyph.rect.z + margin}) {
+                            const Vec4 q = glyph.xform * Vec4{gx, gy, 0, 1};
+                            const f32 f = layer.source.textPersp.z;
+                            const f32 hw = f > 0.f ? std::max(.05f, (f + q.z) / f) : 1.f;
+                            const f32 px = layer.source.textPersp.x + (q.x - layer.source.textPersp.x) / hw;
+                            const f32 py = layer.source.textPersp.y + (q.y - layer.source.textPersp.y) / hw;
+                            if (!std::isfinite(px) || !std::isfinite(py)) { finite = false; continue; }
+                            x0 = std::min(x0, px); y0 = std::min(y0, py);
+                            x1 = std::max(x1, px); y1 = std::max(y1, py);
+                        }
+                }
+                if (finite && x1 >= x0 && y1 >= y0) {
+                    // Two transparent texels retain bilinear sampling at the
+                    // crop edges. Outside the crop still samples transparent.
+                    const u32 left = static_cast<u32>(std::clamp(std::floor(x0 * kx) - 2.f, 0.f, static_cast<f32>(w - 1)));
+                    const u32 top = static_cast<u32>(std::clamp(std::floor(y0 * ky) - 2.f, 0.f, static_cast<f32>(h - 1)));
+                    const u32 right = static_cast<u32>(std::clamp(std::ceil(x1 * kx) + 2.f, static_cast<f32>(left + 1), static_cast<f32>(w)));
+                    const u32 bottom = static_cast<u32>(std::clamp(std::ceil(y1 * ky) + 2.f, static_cast<f32>(top + 1), static_cast<f32>(h)));
+                    if (right - left < w || bottom - top < h) {
+                        d.width = right - left; d.height = bottom - top;
+                        out.virtualSourceRegion = canvas;
+                        out.region = Rect{left / kx, top / ky, d.width / kx, d.height / ky};
+                        out.width = d.width; out.height = d.height;
+                    }
+                }
+            }
             auto pipe = shaders_.pipeline(PipelineKey::graphics(ShaderId::text_glyph_vert, ShaderId::text_glyph_frag, kWorkFormat, true,
                                                                 BlendMode::Normal));
             if (!pipe.ok()) return false;
             const u32 sets = glyphSet == kInvalidIndex ? std::max(1u, layer.source.glyphSets) : 1u;
             struct Cap { PipelineHandle p; TextureHandle atlas; u64 sampler; BufferHandle buf; Mat4 clip; Vec4 params; u32 count; };
-            const Mat4 clip = clip_from_comp(static_cast<f32>(layer.source.width), static_cast<f32>(layer.source.height));
+            const Mat4 clip = clip_from_comp(out.region.w, out.region.h)
+                * Mat4::translation(Vec3{-out.region.x, -out.region.y, 0});
             const Vec4 persp = layer.source.textPersp;
             auto drawSet = [&](FGTexture target, u32 set) {
                 Cap cap{*pipe, glyphAtlas_, shaders_.sampler(CommonSampler::LinearClamp).id, glyphFrameBuf_, clip,

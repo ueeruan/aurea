@@ -639,6 +639,7 @@ ModelImportReport Engine::last_model_import() const noexcept {
 }
 
 void Engine::apply_memory_budgets() noexcept {
+    renderer_.set_bounded_text_surface_enabled(config_.enableBoundedTextSurface);
     // Uma tabela só (kBudgetShare, em MemoryManager.hpp): cada consumidor com o
     // seu pedaço do orçamento medido do aparelho. Ver PHASE_8_REPORT §8B.
     const u64 budget = DeviceCapabilities::process_budget_limit(

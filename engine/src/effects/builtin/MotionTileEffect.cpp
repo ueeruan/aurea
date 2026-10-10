@@ -311,11 +311,12 @@ public:
         // (ou brilho, sombra...) ANTES do Motion Tile alarga a entrada com uma
         // borda transparente, e ladrilhar a entrada inteira punha essa borda
         // entre as cópias — faixas pretas em toda emenda.
-        Rect box = input.region;
+        Rect box = input.virtualSourceRegion.w > 0.f && input.virtualSourceRegion.h > 0.f
+            ? input.virtualSourceRegion : input.region;
         if (e.placement && e.placement->layerWidth > 0 && e.placement->layerHeight > 0) {
             const Rect layerBox{0.0f, 0.0f, static_cast<f32>(e.placement->layerWidth),
                                 static_cast<f32>(e.placement->layerHeight)};
-            const Rect inside = Rect::intersect(layerBox, input.region);
+            const Rect inside = Rect::intersect(layerBox, box);
             if (inside.w > 0.5f && inside.h > 0.5f) box = inside;
         }
         if (e.placement) {

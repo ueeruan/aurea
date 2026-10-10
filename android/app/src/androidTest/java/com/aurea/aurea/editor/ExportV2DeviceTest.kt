@@ -203,6 +203,19 @@ class ExportV2DeviceTest {
             }
         } finally { reader.release() }
     }
+    @Test fun colonInLocalFileUriExportsAllFrames() {
+        initialize(); project(480, 320, 30f, "V2 local filename colon")
+        val source = File(context.filesDir, "v2-source:clip.mp4")
+        InstrumentationRegistry.getInstrumentation().context.assets.open("motion-fixture.mp4").use { input ->
+            source.outputStream().use { input.copyTo(it) }
+        }
+        compose.runOnIdle {
+            assertTrue(store.engineForStress.importVideo(android.net.Uri.fromFile(source).toString(), "Colon filename") > 0)
+            store.setCompositionDuration(60)
+        }
+        compose.waitUntil(15000) { store.project.durationFrames == 60 }
+        export("local-colon", 320, 30.0, 60)
+    }
     @Test fun fiveExportsInSameEngineKeepMemoryBounded() {
         initialize(); project(1920, 1080, 30f, "V2 repeated session memory")
         compose.runOnIdle { store.addShape(1); store.setCompositionDuration(30) }

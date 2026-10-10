@@ -34,7 +34,10 @@ std::string utf8(const std::filesystem::path& p) {
 }
 bool unsupported_uri(const std::string& p) noexcept {
     const auto colon = p.find(':');
-    return colon != std::string::npos && !(colon == 1 && p.size() > 2 &&
+    const auto slash = p.find_first_of("/\\");
+    // A colon inside an absolute file path is a legal filename on Android/iOS,
+    // not a URI scheme. Only a scheme before the first separator is rejected.
+    return colon != std::string::npos && (slash == std::string::npos || colon < slash) && !(colon == 1 && p.size() > 2 &&
         ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')));
 }
 Status add_path(Package& package, std::string& path, const PathResolver& resolve) {

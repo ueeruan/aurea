@@ -27,7 +27,7 @@ enum ParityExportProbe {
         let movie = documents.appendingPathComponent("parity-export-\(token).mp4")
         let frame = documents.appendingPathComponent("parity-export-\(token).png")
         let fixture = documents.appendingPathComponent("parity-export-\(token).aurea")
-        let tone = documents.appendingPathComponent("parity-tone-\(token).wav")
+        let tone = documents.appendingPathComponent("parity-tone:\(token).wav")
         let resultURL = documents.appendingPathComponent("parity-export-ready.json")
         let began = ProcessInfo.processInfo.systemUptime
         var exportStarted = false

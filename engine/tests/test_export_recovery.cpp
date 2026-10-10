@@ -171,6 +171,15 @@ AUREA_TEST(ExportRecovery, UnsupportedEphemeralSourcesFailWithoutChangingEditor)
     AUREA_CHECK(!frozen); AUREA_CHECK_EQ(p.asset(id)->sourcePath, std::string("fd:123"));
 }
 
+AUREA_TEST(ExportRecovery, ColonInLocalFilenameIsNotAnEphemeralUriScheme) {
+    Files files; auto p = project(); Asset a; a.kind = AssetKind::Video;
+    a.sourcePath = std::filesystem::absolute(files.add("clip:source.mp4")).string(); const auto id = p.add_asset(a);
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).ok());
+    AUREA_CHECK(frozen != nullptr); AUREA_CHECK_EQ(package.dependencies.size(), usize{1});
+    AUREA_CHECK_EQ(p.asset(id)->sourcePath, a.sourcePath);
+}
+
 AUREA_TEST(ExportRecovery, EffectiveSystemAndFallbackFontsBecomeVerifiedDependencies) {
     auto font = text::default_font();
     if (!font) { std::printf("(sem fonte da plataforma: pulado) "); return; }

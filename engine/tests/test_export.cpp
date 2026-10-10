@@ -83,7 +83,7 @@ struct BenchCapture {
     std::atomic<bool>* sinkDestroyed = nullptr;
     std::atomic<bool>* openActive = nullptr;
     std::atomic<bool>* abortedDuringOpen = nullptr;
-    bool persistFinishMarker = false;
+    bool persistFinishMarker = false, validateCapturedPlanes = false;
     std::atomic<bool>* writeEntered = nullptr;
     std::atomic<bool>* allowWrite = nullptr;
     Status writeFailure{};              ///< fault injection at the platform boundary
@@ -222,6 +222,14 @@ public:
         }
         return c_->finishFailure;
     }
+    // This host test validates uncompressed planes, not a native MP4. Native
+    // codec/reader validation is exercised separately on Android and iOS.
+    Status validate_output(const ExportOutputValidation& expected) noexcept override {
+        if (!c_->validateCapturedPlanes) return Errc::NotSupported;
+        return c_->finished && c_->hashes.size() == expected.frames &&
+            c_->video.width == expected.width && c_->video.height == expected.height &&
+            c_->ptsMonotonic && c_->audioContiguous && c_->hasAudio == expected.audio ? OkStatus : Status{Errc::CorruptData};
+    }
     void abort() noexcept override {
         if (c_->abortedDuringOpen && c_->openActive && c_->openActive->load(std::memory_order_acquire))
             c_->abortedDuringOpen->store(true, std::memory_order_release);
@@ -272,8 +280,9 @@ struct Rig {
         VideoSourceFactory* mediaFactory = nullptr, GPUBackend* backend = nullptr, u32 workerHangMs = 0,
         bool recovery = false, const char* sourcePath = "sintetico",
         ExportExecutionProfile profile = ExportExecutionProfile::Balanced, bool startupGate = false,
-        ImageLoaderFn imageLoader = nullptr, void* imageLoaderContext = nullptr) : factory(cfg) {
+        ImageLoaderFn imageLoader = nullptr, void* imageLoaderContext = nullptr, bool v2 = false) : factory(cfg) {
         EngineConfig ec;
+        ec.enableExportEngineV2 = v2;
         ec.exportWorkerHangMs = workerHangMs;
         ec.enableExportRecovery = recovery;
         ec.enableExportStartupGate = startupGate;
@@ -947,6 +956,61 @@ AUREA_TEST(Export, NeuralUpscaleKeepsOutputTimingAudioAndDimensions) {
                 AUREA_CHECK_EQ(r.cap.pts[i], static_cast<i64>(std::llround(i * 1e6 / 29.97)));
             if (depth == 1) { serial = r.cap.frames; audioHash = r.cap.audioHash; }
             else { AUREA_CHECK(r.cap.frames == serial); AUREA_CHECK_EQ(r.cap.audioHash, audioHash); }
+        }
+    }
+}
+
+AUREA_TEST(ExportV2Gpu, PlanesAndAudioMatchLegacyWithEffectsAnd3DMotionBlur) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string source = "aurea_v2_pixel_source.bin";
+    struct Cleanup {
+        std::string source;
+        ~Cleanup() {
+            fileio::remove_file(source);
+            for (const auto& path : {"nao-usado.mp4", "nao-usado.mp4.aurea-export", "nao-usado.mp4.aurea-export.project.aurea"}) fileio::remove_file(path);
+        }
+    } cleanup{source};
+    const char identity[] = "stable identity; pixels supplied by SyntheticFactory";
+    AUREA_CHECK(fileio::write_atomic(source, identity, sizeof(identity)).ok());
+    for (bool scene3D : {false, true}) {
+        std::vector<std::vector<u8>> reference;
+        std::vector<i64> referencePts;
+        u64 referenceAudio = 0; i64 referenceSamples = 0;
+        for (u32 mode = 0; mode < 3; ++mode) {
+            SyntheticConfig cfg; cfg.width = 320; cfg.height = 192;
+            cfg.pattern = SyntheticPattern::MovingSquare; cfg.audioRate = 44100; cfg.audioSeconds = 1;
+            Rig r(cfg, 30, 12, mode == 2 ? 3 : 1, nullptr, nullptr, 0, false, source.c_str(),
+                  ExportExecutionProfile::Balanced, false, nullptr, nullptr, mode != 0);
+            AUREA_CHECK(r.ok); if (!r.ok) return;
+            if (scene3D) {
+                AUREA_CHECK(build_3d_scene(r));
+                const auto& order = r.comp()->order();
+                for (u32 i = 0; i < order.size(); ++i) (void)r.e.set_motion_blur(order.at(i).pack(), true);
+            } else {
+                AUREA_CHECK(r.add_effect(r.video_layer(), effect_keys::kGaussianBlur) != nullptr);
+                AUREA_CHECK(r.add_effect(r.video_layer(), effect_keys::kGlow) != nullptr);
+                auto& keys = r.comp()->layer(r.video_layer())->tracks.get_or_create(TrackProperty::PositionX);
+                (void)keys.set(FrameIndex{0}, 130.f, Interpolation::Linear);
+                (void)keys.set(FrameIndex{11}, 180.f, Interpolation::Linear);
+                (void)r.e.set_motion_blur(r.video_layer().pack(), true);
+            }
+            (void)r.e.set_composition_motion_blur(true);
+            r.cap.keepFrames = true;
+            r.cap.persistFinishMarker = mode != 0;
+            r.cap.validateCapturedPlanes = mode != 0;
+            const auto result = run_export(r, 192, 30, false, 60);
+            AUREA_CHECK(result.finished); AUREA_CHECK_EQ(result.p.result, Errc::Ok);
+            AUREA_CHECK_EQ(r.cap.frames.size(), usize{12});
+            if (mode == 0) {
+                reference = r.cap.frames; referencePts = r.cap.pts;
+                referenceAudio = r.cap.audioHash; referenceSamples = r.cap.audioFrames;
+            } else {
+                AUREA_CHECK_EQ((result.p.flags >> 8) & 15u, 6u);
+                AUREA_CHECK(r.cap.frames == reference);
+                AUREA_CHECK(r.cap.pts == referencePts);
+                AUREA_CHECK_EQ(r.cap.audioHash, referenceAudio);
+                AUREA_CHECK_EQ(r.cap.audioFrames, referenceSamples);
+            }
         }
     }
 }

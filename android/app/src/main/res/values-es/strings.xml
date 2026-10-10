@@ -1759,7 +1759,7 @@ para editar la curva.</string>
     <string name="pn_karaoke">Neón</string>
     <string name="pn_mask_n">Máscara %1$d</string>
     <string name="pn_mask_n_open">Máscara %1$d (abierta)</string>
-    <string name="pn_mask_pick_layer_below">Elige la capa de abajo para rellenar con la máscara</string>
+    <string name="pn_mask_pick_layer_below">Elige la capa que se usará como máscara</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Karaoke</string>
     <string name="pn_preset_n">Preset %1$d</string>
@@ -3960,4 +3960,8 @@ para editar la curva.</string>
     <string name="curve_color_green">Verde</string>
     <string name="curve_color_blue">Azul</string>
     <string name="curve_color_point">Punto</string>
+    <string name="pn_mask_source">Máscara: %1$s</string>
+    <string name="pn_mask_target">Capa recortada: %1$s</string>
+    <string name="export_v2_finalizing">Finalizando vídeo y audio…</string>
+    <string name="export_v2_validating">Verificando vídeo y audio…</string>
 </resources>

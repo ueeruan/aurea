@@ -17,7 +17,7 @@ struct Control {
     std::mutex mutex;
     std::condition_variable changed;
     bool release = false, blockOpen = false, progressOpen = false, cancelWrite = false;
-    bool failOpen = false, failFinish = false;
+    bool failOpen = false, failFinish = false, failValidation = false;
     std::atomic<bool> entered{false}, inOpen{false};
     std::atomic<u32> destroyed{0}, aborts{0}, concurrentAborts{0};
     u32 delayMs = 0;
@@ -67,6 +67,9 @@ public:
         return Errc::Timeout;
     }
     Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
+    Status validate_output(const ExportOutputValidation&) noexcept override {
+        return control_->failValidation ? Status{Errc::DecodeFailed, "unreadable finalized file"} : OkStatus;
+    }
     Status finish() noexcept override {
         if (control_->failFinish) return Status{Errc::EncodeFailed, "precise finish failure"};
         std::ofstream complete(control_->staged, std::ios::trunc); complete << control_->payload;
@@ -124,6 +127,30 @@ AUREA_TEST(ExportSinkStartup, OpensStageAndPublishesOnlySuccessfulFinish) {
     AUREA_CHECK(!opened.sink->finish().ok());
     opened.sink.reset();
     AUREA_CHECK_EQ(contents(files.target()), std::string("complete"));
+}
+
+AUREA_TEST(ExportSinkStartup, V2KeepsExistingOutputUntilIndependentValidationSucceeds) {
+    Files files;
+    { std::ofstream previous(files.target()); previous << "previous export"; }
+    VideoStreamConfig video; video.validateBeforePublish = true;
+    auto control = std::make_shared<Control>(); control->failValidation = true;
+    auto failed = open_export_sink_startup(std::make_unique<ControlledSink>(control), files.target().c_str(),
+        video, nullptr, nullptr, nullptr, limits());
+    AUREA_CHECK(failed.status().ok());
+    AUREA_CHECK(failed.sink->finish().ok());
+    AUREA_CHECK_EQ(contents(files.target()), std::string("previous export"));
+    AUREA_CHECK(failed.sink->validate_output({320, 180, 30, 30, false}).code() == Errc::DecodeFailed);
+    failed.sink.reset();
+    AUREA_CHECK_EQ(contents(files.target()), std::string("previous export"));
+    AUREA_CHECK(!std::filesystem::exists(control->staged));
+    auto retry = std::make_shared<Control>(); retry->payload = "verified export";
+    auto opened = open_export_sink_startup(std::make_unique<ControlledSink>(retry), files.target().c_str(),
+        video, nullptr, nullptr, nullptr, limits());
+    AUREA_CHECK(opened.status().ok()); AUREA_CHECK(opened.sink->finish().ok());
+    AUREA_CHECK_EQ(contents(files.target()), std::string("previous export"));
+    AUREA_CHECK(opened.sink->validate_output({320, 180, 30, 30, false}).ok());
+    opened.sink.reset();
+    AUREA_CHECK_EQ(contents(files.target()), std::string("verified export"));
 }
 
 AUREA_TEST(ExportSinkStartup, FailureDiagnosticsSurviveSinkDestructionAndResultMove) {

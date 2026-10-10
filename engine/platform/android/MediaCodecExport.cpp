@@ -3,6 +3,8 @@
 // =============================================================================
 #include "MediaCodecExport.hpp"
 #include "MediaMuxerPacket.hpp"
+#include "ExportOutputValidation.hpp"
+#include "AacPrimingCalibration.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -116,9 +118,15 @@ public:
         videoQueued_ = 0;
         videoOut_ = 0;
         audioIntegrity_ = {};
+        audioPrimingCalibrated_ = false;
+        audioDelaySamples_ = 0;
+        audioContentEndUs_ = -1;
+        audioPadding_ = false;
+        audioSubmittedFrames_ = 0;
         audioCodecName_[0] = '\0';
         triedSoftwareReopen_ = false;
         lastVideoPts_ = lastAudioPts_ = 0;
+        explicitLastVideoDurationUs_ = 0;
         lastAudioInputPts_ = -1;
         pendingBytes_ = 0;
         path_ = outputPath ? outputPath : "";
@@ -231,6 +239,7 @@ public:
         if (ms != AMEDIA_OK) return codec_error("encoder recusou o quadro", ms);
         ++videoQueued_;
         lastVideoPts_ = ptsUs;
+        explicitLastVideoDurationUs_ = 0;
         return drain(video__, false);
     }
 
@@ -269,7 +278,8 @@ public:
                 return codec_error("encoder de audio recusou o PCM", queued);
             }
             lastAudioInputPts_ = pts;
-            audioIntegrity_.accepted_pcm(n);
+            if (!audioPadding_) audioIntegrity_.accepted_pcm(n);
+            audioSubmittedFrames_ += n;
             done += n;
             deadline = monotonic_ns() + stall_timeout_ns();
         }
@@ -280,6 +290,18 @@ public:
         if (!video__.codec || !muxer_) return Status{Errc::InvalidState, "export nao esta aberto"};
         if (const Status s = signal_eos(video__); !s.ok()) return fail_status(s);
         if (hasAudio_) {
+            if (video_.validateBeforePublish && audioIntegrity_.accepted_frames()) {
+                const u64 authored = audioIntegrity_.accepted_frames();
+                audioContentEndUs_ = static_cast<i64>(authored * 1000000ull / audio_.sampleRate);
+                const u32 block = audioIntegrity_.frame_samples();
+                if (!block) return fail_status(Status{Errc::NotSupported, "encoder AAC nao informou tamanho do bloco"});
+                const u32 padding = audioDelaySamples_ + block + static_cast<u32>((block - authored % block) % block);
+                std::vector<i16> zeros(static_cast<usize>(padding) * audio_.channels, 0);
+                audioPadding_ = true;
+                const Status padded = write_audio(zeros.data(), padding, audioContentEndUs_);
+                audioPadding_ = false;
+                if (!padded.ok()) return fail_status(padded);
+            }
             if (const Status s = signal_eos(audio__); !s.ok()) return fail_status(s);
         }
         const u64 hardDeadline = monotonic_ns() + 120'000'000'000ull;
@@ -340,6 +362,26 @@ public:
             if (audioIntegrity_.proves_insufficient())
                 return fail_status(Status{Errc::EncodeFailed, "encoder terminou sem representar todas as amostras de audio aceitas"});
         }
+        if (video_.validateBeforePublish) {
+            // MP4 cannot infer the duration of a single sample. An explicit
+            // empty EOS sample also preserves the final frame at fractional
+            // rates (MediaMuxer contract), instead of duplicating a guessed delta.
+            const u8 empty = 0;
+            AMediaCodecBufferInfo end{};
+            end.flags = AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM;
+            end.presentationTimeUs = explicitLastVideoDurationUs_ > 0
+                ? lastVideoPts_ + explicitLastVideoDurationUs_
+                : static_cast<i64>(std::llround(videoQueued_ * 1e6 / video_.fps));
+            const auto marked = AMediaMuxer_writeSampleData(muxer_, static_cast<size_t>(video__.muxIndex), &empty, &end);
+            pulse();
+            if (marked != AMEDIA_OK) return fail_status(codec_error("muxer recusou duracao do ultimo quadro", marked));
+            if (hasAudio_ && audioContentEndUs_ > 0) {
+                end.presentationTimeUs = audioContentEndUs_;
+                const auto audioMarked = AMediaMuxer_writeSampleData(muxer_, static_cast<size_t>(audio__.muxIndex), &empty, &end);
+                pulse();
+                if (audioMarked != AMEDIA_OK) return fail_status(codec_error("muxer recusou duracao do audio", audioMarked));
+            }
+        }
         const media_status_t ms = AMediaMuxer_stop(muxer_);
         muxStarted_ = false;
         if (ms != AMEDIA_OK) {
@@ -363,6 +405,17 @@ public:
     }
 
     void abort() noexcept override { release(true); }
+
+    Status validate_output(const ExportOutputValidation& expected) noexcept override {
+        if (fd_ >= 0 || muxer_) return Errc::InvalidState;
+        return validate_android_export(path_.c_str(), expected, cancelFlag_, beat_);
+    }
+
+    Status write_video_timed(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 pts, i64 duration) noexcept override {
+        const Status written = write_video(y, ys, uv, uvs, pts);
+        if (written.ok()) explicitLastVideoDurationUs_ = std::max<i64>(0, duration);
+        return written;
+    }
 
 private:
     bool cancelled() const noexcept { return cancelFlag_ && cancelFlag_->load(std::memory_order_acquire); }
@@ -688,6 +741,19 @@ private:
         // createEncoderByType does not request an alias: getName identifies
         // the allocated component. Unknown/older APIs disable strict counting.
         (void)codec_name(audio__.codec, audioCodecName_, sizeof(audioCodecName_));
+        if (video_.validateBeforePublish && !audioPrimingCalibrated_) {
+            const std::string measuredComponent = audioCodecName_;
+            const auto measured = measure_aac_priming(audio__.codec, audio_, cancelFlag_, beat_);
+            AMediaCodec_stop(audio__.codec);
+            AMediaCodec_delete(audio__.codec);
+            audio__.codec = nullptr;
+            if (!measured.ok()) return measured.status();
+            audioDelaySamples_ = *measured;
+            audioPrimingCalibrated_ = true;
+            if (const Status reopened = open_audio(); !reopened.ok()) return reopened;
+            if (!measuredComponent.empty() && measuredComponent != audioCodecName_)
+                return Status{Errc::UnsupportedCodec, "encoder AAC mudou depois da calibracao"};
+        }
         return OkStatus;
     }
 
@@ -713,7 +779,9 @@ private:
         // EOS com o mesmo carimbo do último quadro pode tratá-lo como repetido
         // e nunca devolver a marca (o export "parado" no fim).
         const i64 frameUs = video_.fps > 0.0 ? static_cast<i64>(std::llround(1e6 / video_.fps)) : 33'333;
-        const i64 pts = t.audio ? std::max(lastAudioPts_, lastAudioInputPts_)
+        const i64 pts = t.audio ? (video_.validateBeforePublish
+                                    ? static_cast<i64>(audioSubmittedFrames_ * 1000000ull / audio_.sampleRate)
+                                    : std::max(lastAudioPts_, lastAudioInputPts_))
                                 : (videoQueued_ > 0 ? lastVideoPts_ + frameUs : 0);
         const media_status_t queued = AMediaCodec_queueInputBuffer(t.codec, static_cast<size_t>(idx), 0, 0,
             static_cast<u64>(std::max<i64>(0, pts)), AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
@@ -774,7 +842,14 @@ private:
                     audioIntegrity_.encoded_buffer(static_cast<u64>(info.size), info.flags, info.presentationTimeUs);
                 }
                 else ++videoOut_;
-                if (muxStarted_) {
+                if (t.audio && video_.validateBeforePublish)
+                    info.presentationTimeUs -= static_cast<i64>(std::llround(audioDelaySamples_ * 1e6 / audio_.sampleRate));
+                const bool paddingOnly = t.audio && video_.validateBeforePublish && audioContentEndUs_ >= 0 &&
+                    info.presentationTimeUs >= audioContentEndUs_;
+                if (paddingOnly) {
+                    // Keep drain/EOS accounting, but never extend authored audio
+                    // with the extra PCM needed to flush the encoder's history.
+                } else if (muxStarted_) {
                     const media_status_t ms = write_muxer_packet(muxer_, static_cast<size_t>(t.muxIndex), data, cap, info);
                     if (ms != AMEDIA_OK) {
                         AMediaCodec_releaseOutputBuffer(t.codec, static_cast<size_t>(idx), false);
@@ -880,6 +955,7 @@ private:
     }
 
     std::string path_;
+    i64 explicitLastVideoDurationUs_ = 0;
     char errorDetail_[192]{};
     VideoStreamConfig video_{};
     AudioStreamConfig audio_{};
@@ -902,6 +978,10 @@ private:
     /// mesmo se a marca de fim se perder (export_video_complete_without_eos).
     u64 videoOut_ = 0;
     AacOutputIntegrity audioIntegrity_{};
+    bool audioPrimingCalibrated_ = false, audioPadding_ = false;
+    u32 audioDelaySamples_ = 0;
+    u64 audioSubmittedFrames_ = 0;
+    i64 audioContentEndUs_ = -1;
     char audioCodecName_[64]{};
     std::atomic<u64>* beat_ = nullptr;
     bool triedSoftwareReopen_ = false;

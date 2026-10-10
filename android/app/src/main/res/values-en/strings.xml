@@ -1295,7 +1295,7 @@ to edit the curve.</string>
     <string name="pn_karaoke">Neon</string>
     <string name="pn_mask_n">Mask %1$d</string>
     <string name="pn_mask_n_open">Mask %1$d (open)</string>
-    <string name="pn_mask_pick_layer_below">Pick the layer below to fill with the mask</string>
+    <string name="pn_mask_pick_layer_below">Choose the layer to use as the mask</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Karaoke</string>
     <string name="pn_preset_n">Preset %1$d</string>
@@ -4007,4 +4007,8 @@ to edit the curve.</string>
     <string name="scene_light_penumbra">Penumbra</string>
     <string name="scene_shadow_bias">Shadow bias</string>
     <string name="property_schema_unavailable">Unable to load the controls for this property.</string>
+    <string name="pn_mask_source">Mask: %1$s</string>
+    <string name="pn_mask_target">Masked layer: %1$s</string>
+    <string name="export_v2_finalizing">Finalizing video and audio…</string>
+    <string name="export_v2_validating">Checking video and audio…</string>
 </resources>

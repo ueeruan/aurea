@@ -1794,6 +1794,7 @@ public:
             if (_host) return Status{Errc::InvalidState, "export ja aberto"};
             NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:outputPath]];
             if (!url) return Status{Errc::InvalidArgument, "caminho invalido"};
+            _path = outputPath;
             AureaExportHost* host = [[AureaExportHost alloc] init];
             [host setCancelFlag:_cancelFlag];
             [host setHeartbeat:_beat];
@@ -1852,6 +1853,71 @@ public:
         }
     }
 
+    Status validate_output(const ExportOutputValidation& expected) noexcept override {
+        @autoreleasepool {
+            if (_host || _path.empty() || !expected.frames || !expected.width || !expected.height ||
+                !std::isfinite(expected.fps) || expected.fps <= 0) return Errc::InvalidState;
+            NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:_path.c_str()]];
+            AVURLAsset* asset = [AVURLAsset URLAssetWithURL:url options:nil];
+            const double duration = expected.frames / expected.fps;
+            const double tolerance = std::max(0.1, 2.0 / expected.fps);
+            for (bool audio : {false, true}) {
+                if (audio && !expected.audio) break;
+                AVAssetTrack* track = [asset tracksWithMediaType:audio ? AVMediaTypeAudio : AVMediaTypeVideo].firstObject;
+                if (!track || !CMTIME_IS_NUMERIC(track.timeRange.duration) ||
+                    std::abs(CMTimeGetSeconds(track.timeRange.duration) - duration) > tolerance)
+                    return Status{Errc::EncodeFailed, "validacao: trilha ausente ou duracao incorreta"};
+                NSError* error = nil;
+                AVAssetReader* reader = [[AVAssetReader alloc] initWithAsset:asset error:&error];
+                NSDictionary* settings = audio ? @{
+                    AVFormatIDKey: @(kAudioFormatLinearPCM), AVLinearPCMBitDepthKey: @16,
+                    AVLinearPCMIsFloatKey: @NO, AVLinearPCMIsNonInterleaved: @NO
+                } : @{(id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)};
+                AVAssetReaderTrackOutput* output = [[AVAssetReaderTrackOutput alloc] initWithTrack:track outputSettings:settings];
+                output.alwaysCopiesSampleData = NO;
+                if (!reader || ![reader canAddOutput:output]) return Errc::DecodeFailed;
+                [reader addOutput:output];
+                if (![reader startReading]) return Errc::DecodeFailed;
+                u32 frames = 0; double lastTime = -1, endTime = 0;
+                u64 lastProgress = monotonic_ns();
+                for (;;) {
+                    if (cancelled()) { [reader cancelReading]; return Errc::Cancelled; }
+                    CMSampleBufferRef sample = [output copyNextSampleBuffer];
+                    if (_beat) _beat->store(monotonic_ns(), std::memory_order_release);
+                    if (monotonic_ns() - lastProgress > expected.stallNs) {
+                        if (sample) CFRelease(sample);
+                        [reader cancelReading]; return Errc::Timeout;
+                    }
+                    if (!sample) break;
+                    const CMTime pts = CMSampleBufferGetPresentationTimeStamp(sample);
+                    const double time = CMTimeGetSeconds(pts);
+                    bool valid = CMTIME_IS_NUMERIC(pts) && std::isfinite(time) && time >= 0 && time >= lastTime;
+                    if (!audio) {
+                        CVPixelBufferRef pixel = CMSampleBufferGetImageBuffer(sample);
+                        valid = valid && pixel && CVPixelBufferGetWidth(pixel) == expected.width &&
+                            CVPixelBufferGetHeight(pixel) == expected.height && frames < expected.frames &&
+                            std::abs(time - frames / expected.fps) <= 0.002;
+                        endTime = time + 1.0 / expected.fps;
+                    } else {
+                        auto format = static_cast<CMAudioFormatDescriptionRef>(CMSampleBufferGetFormatDescription(sample));
+                        const AudioStreamBasicDescription* asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format);
+                        const CMItemCount samples = CMSampleBufferGetNumSamples(sample);
+                        valid = valid && asbd && asbd->mSampleRate > 0 && samples > 0;
+                        if (valid) endTime = std::max(endTime, time + samples / asbd->mSampleRate);
+                    }
+                    CFRelease(sample);
+                    if (!valid) { [reader cancelReading]; return Status{Errc::DecodeFailed, "validacao: quadro ou timestamp incorreto"}; }
+                    ++frames; lastTime = time; lastProgress = monotonic_ns();
+                }
+                if (reader.status != AVAssetReaderStatusCompleted || !frames || (!audio && frames != expected.frames) ||
+                    std::abs(endTime - duration) > tolerance)
+                    return Status{Errc::EncodeFailed, "validacao: arquivo truncado ou nao decodificavel"};
+                AUREA_LOG_INFO("export-v2 validated track=%s decoded=%u end_seconds=%.6f", audio ? "audio" : "video", frames, endTime);
+            }
+            return OkStatus;
+        }
+    }
+
     void abort() noexcept override {
         @autoreleasepool {
             AureaExportHost* host = host_ref();
@@ -1903,6 +1969,7 @@ private:
     }
 
     void* _host = nullptr;
+    std::string _path;
     const std::atomic<bool>* _cancelFlag = nullptr;
     std::atomic<u64>* _beat = nullptr;
     char _errorDetail[512]{};

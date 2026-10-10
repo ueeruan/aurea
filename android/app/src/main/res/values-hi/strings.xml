@@ -1761,7 +1761,7 @@
     <string name="pn_karaoke">नियॉन</string>
     <string name="pn_mask_n">मास्क %1$d</string>
     <string name="pn_mask_n_open">मास्क %1$d (खुला)</string>
-    <string name="pn_mask_pick_layer_below">मास्क से भरने के लिए नीचे की लेयर चुनें</string>
+    <string name="pn_mask_pick_layer_below">मास्क के रूप में इस्तेमाल होने वाली लेयर चुनें</string>
     <string name="pn_ok">ठीक है</string>
     <string name="pn_pop">कराओके</string>
     <string name="pn_preset_n">प्रीसेट %1$d</string>
@@ -3956,4 +3956,8 @@
     <string name="curve_color_green">हरा</string>
     <string name="curve_color_blue">नीला</string>
     <string name="curve_color_point">बिंदु</string>
+    <string name="pn_mask_source">मास्क: %1$s</string>
+    <string name="pn_mask_target">मास्क की गई लेयर: %1$s</string>
+    <string name="export_v2_finalizing">वीडियो और ऑडियो पूरा हो रहा है…</string>
+    <string name="export_v2_validating">वीडियो और ऑडियो की जाँच हो रही है…</string>
 </resources>

@@ -1916,6 +1916,26 @@ struct MaskPanel: View {
     private var matteBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             title("panel_1_recortar_pelo")
+            Text(AureaText.t("pn_mask_target", model.layers.first { $0.id == id }?.name ?? ""))
+                .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            if mode != 0, let source = candidates.first(where: { $0.id == matte }) {
+                Text(AureaText.t("pn_mask_source", source.name))
+                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                Canvas { context, size in
+                    let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                    let radius = size.height * 0.36
+                    let circle = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
+                        width: radius * 2, height: radius * 2))
+                    context.fill(circle, with: .color(AureaColors.muted.opacity(0.18)))
+                    var clipped = context
+                    let inverted = mode == 2 || mode == 4
+                    clipped.clip(to: Path(CGRect(x: inverted ? 0 : center.x, y: 0,
+                        width: inverted ? center.x : size.width - center.x, height: size.height)))
+                    clipped.fill(circle, with: .color(AureaColors.accent))
+                    context.stroke(Path(CGRect(x: center.x, y: center.y - radius,
+                        width: radius * 1.4, height: radius * 2)), with: .color(AureaColors.muted), lineWidth: 1)
+                }.frame(height: 64).accessibilityHidden(true)
+            }
             ChoiceChips(["panel_nao_recortar", "panel_pela_forma", "panel_pela_forma_invertido", "panel_pelo_brilho", "panel_pelo_brilho_invertido"].map { AureaText.t($0) }, selected: mode) { value in
                 if value == 0 { write(0, 0) }
                 else {

@@ -22,6 +22,7 @@
 
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Types.hpp"
+#include "aurea/export/ExportOutputValidation.hpp"
 
 namespace aurea {
 
@@ -52,6 +53,9 @@ struct VideoStreamConfig {
     /// Modo de segurança nível 2: abrir direto o encoder de SOFTWARE do sistema
     /// (Android). Plataforma sem essa escolha ignora.
     bool preferSoftware = false;
+    /// V2: finish closes the temporary file; independent validation must
+    /// succeed before the startup gate atomically replaces the destination.
+    bool validateBeforePublish = false;
 };
 
 struct AudioStreamConfig {
@@ -98,6 +102,10 @@ public:
 
     /// Fecha os fluxos (EOS), esvazia os encoders e finaliza o contêiner.
     [[nodiscard]] virtual Status finish() noexcept = 0;
+
+    [[nodiscard]] virtual Status validate_output(const ExportOutputValidation&) noexcept {
+        return Status{Errc::NotSupported, "plataforma sem validacao independente de exportacao"};
+    }
 
     /// Cancelamento: solta tudo e apaga o arquivo parcial.
     virtual void abort() noexcept = 0;

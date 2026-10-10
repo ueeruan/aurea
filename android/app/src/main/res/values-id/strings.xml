@@ -1759,7 +1759,7 @@ untuk mengedit kurvanya.</string>
     <string name="pn_karaoke">Neon</string>
     <string name="pn_mask_n">Masker %1$d</string>
     <string name="pn_mask_n_open">Mask %1$d (terbuka)</string>
-    <string name="pn_mask_pick_layer_below">Pilih layer di bawah untuk diisi dengan mask</string>
+    <string name="pn_mask_pick_layer_below">Pilih layer yang akan digunakan sebagai mask</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Karaoke</string>
     <string name="pn_preset_n">Preset %1$d</string>
@@ -3950,4 +3950,8 @@ untuk mengedit kurvanya.</string>
     <string name="curve_color_green">Hijau</string>
     <string name="curve_color_blue">Biru</string>
     <string name="curve_color_point">Titik</string>
+    <string name="pn_mask_source">Mask: %1$s</string>
+    <string name="pn_mask_target">Layer yang dipotong: %1$s</string>
+    <string name="export_v2_finalizing">Menyelesaikan video dan audio…</string>
+    <string name="export_v2_validating">Memeriksa video dan audio…</string>
 </resources>

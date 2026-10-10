@@ -3813,6 +3813,11 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if (auto* e = self.engine) (void)e->cancel_export();
 }
 
+- (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath {
+    if (auto* e = self.engine) return e->restart_export(recoveryPath.UTF8String, outputPath.UTF8String).raw();
+    return static_cast<int32_t>(aurea::Errc::InvalidState);
+}
+
 static aurea::ImageExportSettings AureaImageSettings(uint32_t format, uint32_t shortSide, uint32_t maxWidth, double fps,
                                                      BOOL trimToContent) {
     aurea::ImageExportSettings s;

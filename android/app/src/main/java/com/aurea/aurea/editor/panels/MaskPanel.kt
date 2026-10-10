@@ -1,5 +1,9 @@
 package com.aurea.aurea.editor.panels
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -242,6 +246,12 @@ private fun TrackMatteTab(store: EditorStore) {
     val me = rows.firstOrNull { it.id == self }
     val candidates = rows.filter { it.id != self && it.kind != LayerType.Audio.kind && it.kind != LayerType.Camera.kind && it.kind != LayerType.Light.kind }
     KitTitle(stringResource(R.string.panel_1_recortar_pelo))
+    KitHint(stringResource(R.string.pn_mask_target, me?.name.orEmpty()))
+    val sourceLayer = rows.firstOrNull { it.id == matte }
+    if (sourceLayer != null && mode != 0) {
+        KitHint(stringResource(R.string.pn_mask_source, sourceLayer.name))
+        MatteRelationDiagram(inverted = mode == 2 || mode == 4)
+    }
     val pickBelowMsg = stringResource(R.string.pn_mask_pick_layer_below)
     val modes = listOf(0 to stringResource(R.string.panel_nao_recortar), 1 to stringResource(R.string.panel_pela_forma), 2 to stringResource(R.string.panel_pela_forma_invertido), 3 to stringResource(R.string.panel_pelo_brilho), 4 to stringResource(R.string.panel_pelo_brilho_invertido))
     ChoiceChips(modes.map { it.second }, modes.indexOfFirst { it.first == mode }, onSelect = { i ->
@@ -267,4 +277,21 @@ private fun TrackMatteTab(store: EditorStore) {
     }
     Spacer(Modifier.height(4.dp))
     KitHint(if (matte != 0L) stringResource(R.string.panel_camada_escolhida_recorta_esta_some_tela) else stringResource(R.string.panel_pela_forma_aparece_onde_outra_camada))
+}
+
+/** Original schematic: circle = this layer, rectangle = mask. */
+@Composable
+private fun MatteRelationDiagram(inverted: Boolean) {
+    val accent = AureaColors.Accent
+    val outline = AureaColors.Muted
+    Canvas(Modifier.fillMaxWidth().height(64.dp)) {
+        val center = Offset(size.width / 2, size.height / 2)
+        val radius = size.height * .36f
+        drawCircle(outline.copy(alpha = .18f), radius, center)
+        clipRect(left = if (inverted) 0f else center.x, right = if (inverted) center.x else size.width) {
+            drawCircle(accent, radius, center)
+        }
+        drawRect(outline, Offset(center.x, center.y - radius), Size(radius * 1.4f, radius * 2),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+    }
 }

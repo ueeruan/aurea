@@ -104,10 +104,21 @@ public:
     }
     Status finish() noexcept override {
         Binding binding(*this);
-        if (published_) return Status{Errc::InvalidState, "export ja foi finalizado"};
+        if (finalized_) return Status{Errc::InvalidState, "export ja foi finalizado"};
         if (const Status status = state_->sink->finish(); !status.ok()) return status;
+        finalized_ = true;
+        if (state_->video.validateBeforePublish) return OkStatus;
         // The shared commit replaces an existing target atomically on Windows
         // and POSIX, preserving its bytes if publication fails.
+        if (const Status status = fileio::commit_file(state_->staged, state_->target); !status.ok()) return status;
+        published_ = true;
+        return OkStatus;
+    }
+    Status validate_output(const ExportOutputValidation& expected) noexcept override {
+        Binding binding(*this);
+        if (!finalized_ || published_ || !state_->video.validateBeforePublish) return Errc::InvalidState;
+        if (const Status status = state_->sink->validate_output(expected); !status.ok()) return status;
+        if (state_->cancel.load(std::memory_order_acquire)) return Errc::Cancelled;
         if (const Status status = fileio::commit_file(state_->staged, state_->target); !status.ok()) return status;
         published_ = true;
         return OkStatus;
@@ -168,7 +179,7 @@ private:
     std::atomic<u64>* desiredBeat_ = nullptr;
     const std::atomic<bool>* boundCancel_ = nullptr;
     std::atomic<u64>* boundBeat_ = nullptr;
-    bool active_ = false, stopping_ = false, published_ = false;
+    bool active_ = false, stopping_ = false, published_ = false, finalized_ = false;
     std::thread monitor_;
 };
 

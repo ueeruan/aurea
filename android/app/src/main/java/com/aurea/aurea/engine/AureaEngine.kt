@@ -993,6 +993,9 @@ class AureaEngine private constructor() {
     fun imageExportPlan(format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): LongArray? =
         nativeImageExportPlan(nativeHandle, format, shortSide, maxWidth, fps, trimToContent)
     fun cancelExport(): Int = nativeWork.run(5) { nativeCancelExport(nativeHandle) }
+    /** Explicit recovery restores the frozen project and restarts at frame zero. */
+    fun restartExport(recoveryPath: String, outputPath: String): Int =
+        nativeWork.run(5) { nativeRestartExport(nativeHandle, recoveryPath, outputPath) }
 
     /**
      * Importa um glTF/GLB (arquivo no sandbox do app). Bloqueia: chamar fora da
@@ -1363,6 +1366,7 @@ class AureaEngine private constructor() {
     private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int, safeMode: Int): Int
     private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
     private external fun nativeCancelExport(handle: Long): Int
+    private external fun nativeRestartExport(handle: Long, recoveryPath: String, outputPath: String): Int
     private external fun nativeStartImageExport(handle: Long, outputPath: String, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): Int
     private external fun nativeImageExportPlan(handle: Long, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): LongArray?
     private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>, quality: Int, memory: LongArray?): Long

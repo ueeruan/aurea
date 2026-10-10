@@ -63,6 +63,20 @@ AUREA_TEST(ExportRecovery, AtomicPackageRestoresNestedSnapshotAndSessionSettings
     AUREA_CHECK_EQ(restored.settings.parallelSegments, 3u); AUREA_CHECK_EQ(restored.settings.scale, .5f);
 }
 
+AUREA_TEST(ExportRecovery, PlatformAutomaticDimensionsAndRateSurviveRestart) {
+    Files files; const auto path = files.add("automatic.arec");
+    auto p = project(); ExportSettings settings;
+    settings.width = 0; settings.height = 0; settings.fps = 0;
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    AUREA_CHECK(recovery::capture(p, p.timeline().current(), settings, {}, frozen, package).ok());
+    AUREA_CHECK(recovery::write(path, package).ok());
+    recovery::Package restored; frozen.reset();
+    AUREA_CHECK(recovery::read(path, restored, frozen).ok());
+    AUREA_CHECK_EQ(restored.settings.width, 0u);
+    AUREA_CHECK_EQ(restored.settings.height, 0u);
+    AUREA_CHECK_EQ(restored.settings.fps, 0.0);
+}
+
 AUREA_TEST(ExportRecovery, WholeSourceHashRejectsSameSizeChangeAndMissingSource) {
     Files files; const auto source = files.add("source.bin"), path = files.add("source.arec");
     AUREA_CHECK(put(source, "original source bytes"));

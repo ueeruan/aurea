@@ -203,6 +203,11 @@ struct EngineConfig {
     /// Opt-in worker isolation for codec startup. A finite startup deadline
     /// and unique staging path protect retry from a late native abort.
     bool enableExportStartupGate = false;
+    /// Independently coordinated offline queue and validate-before-publication.
+    /// Disable for rollback; no project schema or visual renderer changes.
+    bool enableExportEngineV2 = false;
+    /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
+    u32 exportGpuTimeoutMs = 0;
 
     /// Saída de som da plataforma (AAudio no Android). NÃO é assumida a posse.
     /// Nula = preview mudo; o relógio do sistema conduz o playback e o export

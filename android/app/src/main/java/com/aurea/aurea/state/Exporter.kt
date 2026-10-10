@@ -600,13 +600,17 @@ class Exporter internal constructor(
     }
 
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
-        val lines = ArrayList<String>(3)
+        val lines = ArrayList<String>(4)
+        when ((p.flags ushr 8) and 15) {
+            4 -> lines += text(R.string.export_v2_finalizing)
+            5 -> lines += text(R.string.export_v2_validating)
+        }
         if (p.safeMode) {
             lines += text(R.string.app_export_safe_mode)
         }
         if (p.softwareEncoder) {
             // O modo de segurança é sempre H.264 (ExportWatchdog.hpp).
-            val codec = if (options.hevc && !p.safeMode) "HEVC" else "H.264"
+            val codec = if (options.hevc && (!p.safeMode || ((p.flags ushr 8) and 15) != 0)) "HEVC" else "H.264"
             lines += text(R.string.app_export_software_encoder, codec)
         }
         if (p.thermalReduced) {

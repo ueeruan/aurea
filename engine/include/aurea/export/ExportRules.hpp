@@ -74,6 +74,20 @@ struct ExportFrameSize {
     return out;
 }
 
+/// V2 preserves native even dimensions. Codec storage alignment belongs to
+/// YuvLayout, not the displayed picture. Scaling rounds only to a chroma pair.
+[[nodiscard]] inline ExportFrameSize export_frame_size_v2(u32 compW, u32 compH, u32 wantShort) noexcept {
+    if (!compW || !compH) return {};
+    const u32 nativeShort = std::min(compW, compH);
+    if (!wantShort || wantShort == nativeShort) {
+        if ((compW | compH) & 1u) return {}; // Explicit unsupported raster, no silent resize.
+        return {compW, compH};
+    }
+    if (wantShort & 1u) return {};
+    const f64 scale = static_cast<f64>(wantShort) / nativeShort;
+    return {export_align_nearest(compW * scale, 2), export_align_nearest(compH * scale, 2)};
+}
+
 /// Bytes de um quadro NV12/I420 contíguo de `width`×`height` (passo = largura).
 [[nodiscard]] inline usize export_yuv420_bytes(u32 width, u32 height) noexcept {
     return static_cast<usize>(width) * height + 2u * static_cast<usize>((width + 1) / 2) * ((height + 1) / 2);

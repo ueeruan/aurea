@@ -1330,7 +1330,7 @@
     <string name="pn_karaoke">Neon</string>
     <string name="pn_mask_n">Máscara %1$d</string>
     <string name="pn_mask_n_open">Máscara %1$d (aberta)</string>
-    <string name="pn_mask_pick_layer_below">Escolha a camada de baixo para preencher com a máscara</string>
+    <string name="pn_mask_pick_layer_below">Escolha a camada que será usada como máscara</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Karaokê</string>
     <string name="pn_preset_n">Preset %1$d</string>
@@ -4040,4 +4040,8 @@
     <string name="scene_light_penumbra">Penumbra</string>
     <string name="scene_shadow_bias">Deslocamento da sombra</string>
     <string name="property_schema_unavailable">Não foi possível carregar os controles desta propriedade.</string>
+    <string name="pn_mask_source">Máscara: %1$s</string>
+    <string name="pn_mask_target">Camada recortada: %1$s</string>
+    <string name="export_v2_finalizing">Finalizando vídeo e áudio…</string>
+    <string name="export_v2_validating">Verificando vídeo e áudio…</string>
 </resources>

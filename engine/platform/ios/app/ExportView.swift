@@ -447,17 +447,16 @@ struct ExportView: View {
                 .background(filled ? AureaColors.accent : AureaColors.chip, in: RoundedRectangle(cornerRadius: 14))
         }.buttonStyle(.plain)
     }
-    /// ESPELHO de export_frame_size (ExportRules.hpp) e do VideoExportRules.kt:
-    /// lado maior em múltiplo de 16, menor par, quadrado fica
-    /// quadrado ("480p" 16:9 = 848×480; 854 derrubava o encoder MediaTek).
+    /// Mirrors export_frame_size_v2; codec stride does not resize the picture.
     private func sizeFor(_ side: UInt32) -> (UInt32, UInt32) {
         let w = Double(model.compositionWidth), h = Double(model.compositionHeight)
         guard w > 0, h > 0 else { return (0, 0) }
         let shortest = min(w, h)
         let k = Double(side > 0 ? side : UInt32(shortest)) / shortest
         func align(_ v: Double, _ a: Double) -> UInt32 { UInt32(max(a, (v / a + 0.5).rounded(.down) * a)) }
-        if w == h { let s = align(w * k, 2); return (s, s) }
-        return w > h ? (align(w * k, 16), align(h * k, 2)) : (align(w * k, 2), align(h * k, 16))
+        if (side == 0 || Double(side) == shortest), (UInt32(w) % 2 != 0 || UInt32(h) % 2 != 0) { return (0, 0) }
+        if side % 2 != 0 { return (0, 0) }
+        return (align(w * k, 2), align(h * k, 2))
     }
     private func fits(_ size: (UInt32, UInt32)) -> Bool {
         let cap = (model.composition["sizeCap"] as? [NSNumber] ?? []).map(\.uint32Value)
@@ -504,6 +503,11 @@ struct ExportView: View {
     private var progressNotice: String {
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
+        switch (flags >> 8) & 15 {
+        case 4: notices.append(AureaText.t("export_v2_finalizing"))
+        case 5: notices.append(AureaText.t("export_v2_validating"))
+        default: break
+        }
         if flags & AureaExportFlag.safeMode.rawValue != 0 { notices.append(AureaText.t("app_export_safe_mode")) }
         if model.exportOptions.aiUpscale > 0, let message = model.exportProgress["message"] as? String, message.hasPrefix("IA:") {
             notices.append(AureaEngineText.aiProgress(message))

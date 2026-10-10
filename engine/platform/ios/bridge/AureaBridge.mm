@@ -168,6 +168,8 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
 
     config.mediaFactory = media_.get();
     config.exportSinkFactory = &make_export_sink;
+    config.enableExportStartupGate = true;
+    config.enableExportEngineV2 = ![NSProcessInfo.processInfo.arguments containsObject:@"--aurea-export-legacy"];
     config.audioOutput = audioOut_.get();
     config.defaultFontPath = ios_default_font_path();
     ios_install_text_fallback();

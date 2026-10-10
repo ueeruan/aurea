@@ -166,7 +166,9 @@ ExportSettings settings_read(Reader& r) {
     return s;
 }
 bool valid_settings(const ExportSettings& s) noexcept {
-    return s.width > 0 && s.height > 0 && std::isfinite(s.fps) && s.fps >= 0 && std::isfinite(s.scale) && s.scale > 0 &&
+    // The platform APIs use width=0 (derive aspect ratio), height=0 (native
+    // raster), fps=0 (composition rate). These are valid restart settings.
+    return std::isfinite(s.fps) && s.fps >= 0 && std::isfinite(s.scale) && s.scale > 0 &&
         static_cast<u32>(s.videoCodec) <= static_cast<u32>(ExportCodec::HEVC) &&
         (s.aiUpscale == 0 || s.aiUpscale == 2 || s.aiUpscale == 4);
 }

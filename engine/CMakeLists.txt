@@ -92,6 +92,7 @@ set(AUREA_CORE_SOURCES
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp
     src/export/ExportSinkStartup.cpp
+    src/export/AureaExportEngineV2.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp

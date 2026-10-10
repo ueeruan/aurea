@@ -1785,7 +1785,7 @@
     <string name="pn_karaoke">نيون</string>
     <string name="pn_mask_n">القناع %1$d</string>
     <string name="pn_mask_n_open">القناع %1$d (مفتوح)</string>
-    <string name="pn_mask_pick_layer_below">اختر الطبقة التي أسفلها لتعبئتها بالقناع</string>
+    <string name="pn_mask_pick_layer_below">اختر الطبقة التي ستُستخدم كقناع</string>
     <string name="pn_ok">حسنًا</string>
     <string name="pn_pop">كاريوكي</string>
     <string name="pn_preset_n">إعداد مسبق %1$d</string>
@@ -3998,4 +3998,8 @@
     <string name="curve_color_green">أخضر</string>
     <string name="curve_color_blue">أزرق</string>
     <string name="curve_color_point">نقطة</string>
+    <string name="pn_mask_source">القناع: %1$s</string>
+    <string name="pn_mask_target">الطبقة المقصوصة: %1$s</string>
+    <string name="export_v2_finalizing">جارٍ إنهاء الفيديو والصوت…</string>
+    <string name="export_v2_validating">جارٍ التحقق من الفيديو والصوت…</string>
 </resources>

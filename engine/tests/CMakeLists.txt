@@ -78,6 +78,7 @@ add_executable(aurea_tests
     test_export.cpp
     test_export_recovery.cpp
     test_export_scheduler.cpp
+    test_export_v2.cpp
     test_image_export.cpp
     test_project_settings.cpp
     test_perf.cpp

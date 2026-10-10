@@ -403,6 +403,11 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     // Exporter writes app-owned cache files. Bounded startup and atomic publish
     // preserve a previous valid result when a codec stalls or finalization fails.
     config.enableExportStartupGate = true;
+    config.enableExportEngineV2 = true;
+    // Debug device rollback, without changing saved projects or release quality.
+    char exportVersion[PROP_VALUE_MAX]{};
+    if (debug == JNI_TRUE) __system_property_get("debug.aurea.export_v2", exportVersion);
+    if (std::strcmp(exportVersion, "0") == 0) config.enableExportEngineV2 = false;
     config.enableTrackedGpuAdmission = true;
 #if defined(AUREA_GPU_GLES)
     // A debug-only override exercises the real fallback through the app's UI,
@@ -3548,6 +3553,13 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
     settings.safeMode = static_cast<u32>(std::clamp<jint>(safeMode, 0, static_cast<jint>(kExportSafeModeMax)));
     settings.audioBitrateKbps = kExportAudioKbps;
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
+}
+
+AUREA_JNI jint AUREA_FN(nativeRestartExport)(JNIEnv* env, jclass, jlong handle, jstring recoveryPath, jstring outputPath) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
+    const std::string recovery = to_string(env, recoveryPath), output = to_string(env, outputPath);
+    return static_cast<jint>(c->engine.restart_export(recovery.c_str(), output.c_str()).raw());
 }
 
 /// A taxa de vídeo (bps) que o export usaria — a mesma regra do motor, para a

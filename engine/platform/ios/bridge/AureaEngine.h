@@ -971,6 +971,8 @@ NS_SWIFT_NAME(AureaEngine)
                   customMbps:(uint32_t)customMbps;
 - (long long)exportDuration:(BOOL)trimToContent;
 - (void)cancelExport;
+/// Explicitly restores the checked export snapshot, then restarts from zero.
+- (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;
 /// Export como imagem (motor: export/ImageEncode.hpp). `format` 0 = quadro do
 /// playhead em PNG, 1 = sequência PNG num .zip, 2 = GIF. `shortSide` 0 = a
 /// resolução da composição; `maxWidth` = largura máxima do GIF; `fps` 0 =

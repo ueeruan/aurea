@@ -1763,7 +1763,7 @@
     <string name="pn_karaoke">Неон</string>
     <string name="pn_mask_n">Маска %1$d</string>
     <string name="pn_mask_n_open">Маска %1$d (открытая)</string>
-    <string name="pn_mask_pick_layer_below">Выберите слой ниже для заливки маской</string>
+    <string name="pn_mask_pick_layer_below">Выберите слой, который будет маской</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Караоке</string>
     <string name="pn_preset_n">Пресет %1$d</string>
@@ -3968,4 +3968,8 @@
     <string name="curve_color_green">Зелёный</string>
     <string name="curve_color_blue">Синий</string>
     <string name="curve_color_point">Точка</string>
+    <string name="pn_mask_source">Маска: %1$s</string>
+    <string name="pn_mask_target">Обрезаемый слой: %1$s</string>
+    <string name="export_v2_finalizing">Завершение видео и аудио…</string>
+    <string name="export_v2_validating">Проверка видео и аудио…</string>
 </resources>

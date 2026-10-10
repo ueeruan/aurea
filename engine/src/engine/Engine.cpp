@@ -31,6 +31,7 @@
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
 #include "aurea/export/ExportSinkStartup.hpp"
+#include "aurea/export/AureaExportEngineV2.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
@@ -283,6 +284,14 @@ struct Engine::ExportContext {
     std::vector<Slot> slots;
     u32 depth = 1;                     ///< slots em circulação (sem calor)
     AureaRenderScheduler scheduler;
+    std::unique_ptr<AureaExportEngineV2> v2;
+    bool withAudio = false;
+    void publish_v2_phase(const char* message) noexcept {
+        if (!v2) return;
+        std::lock_guard lock(mutex);
+        progress.flags = (progress.flags & ~kExportPhaseMask) | (static_cast<u32>(v2->phase()) << kExportPhaseShift);
+        set_message(message);
+    }
     std::mutex qMutex;                 ///< protege as duas filas e os estados abaixo
     std::condition_variable qCv;
     std::vector<u32> freeSlots;        ///< prontos para a GPU escrever
@@ -11509,6 +11518,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     }
 
     auto ctx = std::make_unique<ExportContext>();
+    if (config_.enableExportEngineV2) ctx->v2 = std::make_unique<AureaExportEngineV2>();
     struct StartupCancellation {
         Engine& engine;
         std::atomic<bool>& flag;
@@ -11523,7 +11533,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             std::lock_guard<std::mutex> lock(engine.exportContextMutex_);
             if (engine.exportStartupCancel_ == &flag) engine.exportStartupCancel_ = nullptr;
         }
-    } startupCancellation{*this, ctx->cancelRequested, config_.enableExportStartupGate};
+    } startupCancellation{*this, ctx->cancelRequested, config_.enableExportStartupGate || config_.enableExportEngineV2};
     ctx->settings = settings;
     ctx->outputPath = outputPath;
     ctx->dither = settings.dither;
@@ -11540,7 +11550,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
         ctx->compFps = comp->fps();
-        if (config_.enableExportRecovery) {
+        if (config_.enableExportRecovery || ctx->v2) {
             u64 imageBytes = 0;
             const u64 room = source_asset_room_locked();
             const u64 limit = std::min<u64>({64ull << 20, std::max<u64>(4ull << 20, caps_.memory_budget_bytes() / 8), room});
@@ -11577,9 +11587,13 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         // (export/ExportRules.hpp): 854×480 virava "buffer do encoder menor
         // que o quadro" no encoder MediaTek; 848×480 cabe em todo encoder.
         // No modo de segurança, os DOIS lados em múltiplo de 16 (para baixo).
-        const ExportFrameSize size = ctx->safeMode > 0
+        const ExportFrameSize size = ctx->v2
+            ? export_frame_size_v2(comp->width(), comp->height(), settings.height)
+            : ctx->safeMode > 0
             ? export_safe_frame_size(comp->width(), comp->height(), settings.height)
             : export_frame_size(comp->width(), comp->height(), settings.height);
+        if (!size.width || !size.height)
+            return Status{Errc::NotSupported, "o codec 4:2:0 requer dimensoes pares; escolha explicitamente outra resolucao"};
         ctx->width = size.width;
         ctx->height = size.height;
         const f64 seconds = static_cast<f64>(comp->export_duration(settings.trimToContent).value) / comp->fps();
@@ -11640,7 +11654,8 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     vc.width = ctx->outputWidth;
     vc.height = ctx->outputHeight;
     vc.fps = ctx->fps;
-    vc.codec = export_safe_codec(settings.videoCodec, ctx->safeMode);
+    vc.codec = ctx->v2 ? settings.videoCodec : export_safe_codec(settings.videoCodec, ctx->safeMode);
+    vc.validateBeforePublish = static_cast<bool>(ctx->v2);
     // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
     // 1080p30 Normal ≈ 8 Mbps, 4K30 ≈ 32 Mbps; Mbps manual só com teto. No
     // modo de segurança, o bitrate continua sendo o solicitado.
@@ -11707,12 +11722,25 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             }
         }
     } startupOwnership{exportActive_, *this};
+    auto drainExportStartup = [&]() -> Status {
+        if (!ctx->v2) { gpu_->wait_idle(); return OkStatus; }
+        const u64 frame = gpu_->last_submitted_frame();
+        if (!frame) return OkStatus;
+        const u64 deadline = monotonic_ns() + (config_.exportGpuTimeoutMs
+            ? static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull : 120'000'000'000ull);
+        for (;;) {
+            if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+            const Status completed = gpu_->wait_frame(frame, 100'000'000ull);
+            if (completed.ok() || completed.code() != Errc::Timeout) return completed;
+            if (monotonic_ns() >= deadline) return Status{Errc::Timeout, "GPU sem resposta ao preparar exportacao"};
+        }
+    };
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         exportActive_.store(true, std::memory_order_release);
-        gpu_->wait_idle();
+        if (const Status drained = drainExportStartup(); !drained.ok()) return drained;
         if (ctx->frozenProject) {
             // Rebuild effect/particle and decode histories from zero. Preview
             // history must not seed the first export or its later restart.
@@ -11722,7 +11750,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         }
         const GpuMemoryStats before = gpu_->memory_stats();
         const u32 released = renderer_.trim_memory(static_cast<u8>(TrimStage::OldRenderCache), frameCounter_);
-        gpu_->wait_idle(); // Return deferred allocations to the driver before codec.start.
+        if (const Status drained = drainExportStartup(); !drained.ok()) return drained; // Return deferred allocations to the driver before codec.start.
         const GpuMemoryStats after = gpu_->memory_stats();
         AUREA_LOG_INFO("export: startup released %u reusable textures (%llu bytes used, %llu bytes reserved)",
                        released,
@@ -11731,7 +11759,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     }
     ExportSinkStartupResult startupResult;
     Status openStatus;
-    if (config_.enableExportStartupGate) {
+    if (config_.enableExportStartupGate || ctx->v2) {
         ExportSinkStartupLimits limits;
         limits.stallNs = ctx->workerHangNs;
         startupResult = open_export_sink_startup(std::move(ctx->sink), outputPath, vc, withAudio ? &ac : nullptr,
@@ -11795,7 +11823,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             return ready;
         }
         renderer_.clear_preview_cache();
-        gpu_->wait_idle(); // Drain deferred cache destruction before export's allocation peak.
+        if (const Status drained = drainExportStartup(); !drained.ok()) return drained; // Drain deferred cache destruction before export's allocation peak.
         TextureDesc cd;
         cd.width = ctx->width;
         cd.height = ctx->height;
@@ -11872,6 +11900,10 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         (void)ctx->scheduler.configure(ctx->frames, ctx->fps, ctx->compFps, ctx->depth,
                                        config_.exportExecutionProfile);
         for (u32 k = 0; k < ctx->depth; ++k) ctx->freeSlots.push_back(ctx->depth - 1 - k);
+        if (ctx->v2) {
+            if (const Status prepared = ctx->v2->prepare(ctx->depth, ctx->frames, &ctx->cancelRequested); !prepared.ok())
+                return prepared;
+        }
         // The cancellation pointer stays bound through post-open allocation,
         // before exportCtx_ is published. These resources were never submitted
         // to the GPU; release them and abort only the already-opened sink.
@@ -11888,10 +11920,12 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         }
     }
 
+    ctx->withAudio = withAudio;
     ctx->progress.running = true;
     ctx->progress.framesTotal = ctx->frames;
     ctx->progress.pipelineDepth = ctx->depth;
     ctx->set_message("exportando");
+    ctx->publish_v2_phase("exportando");
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         previewBuffering_ = false;
@@ -11910,7 +11944,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
 }
 
 Status Engine::restart_export(const char* recoveryPath, const char* outputPath) noexcept {
-    if (!config_.enableExportRecovery) return Status{Errc::NotSupported, "recuperacao de export desativada"};
+    if (!config_.enableExportRecovery && !config_.enableExportEngineV2) return Status{Errc::NotSupported, "recuperacao de export desativada"};
     if (!recoveryPath || !*recoveryPath || !outputPath || !*outputPath) return Errc::InvalidArgument;
     std::unique_lock<std::mutex> lifecycle(exportLifecycleMutex_);
     if (exportActive_.load(std::memory_order_acquire) ||
@@ -11954,7 +11988,8 @@ void Engine::retire_abandoned_export_locked() noexcept {
 
 Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
     if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
-    const u64 deadline = monotonic_ns() + 120'000'000'000ull;
+    const u64 deadline = monotonic_ns() + (config_.exportGpuTimeoutMs
+        ? static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull : 120'000'000'000ull);
     for (;;) {
         if (exportCtx_->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
         const Status s = gpu_->wait_frame(gpuFrame, 100'000'000ull);
@@ -12115,6 +12150,12 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
                     AUREA_LOG_ERROR("export: quadro %lld indisponivel em %u camada(s) de video apos %.1f s",
                         static_cast<long long>(t.value), missing, static_cast<f64>(now - t0) / 1e9);
                     return Status{Errc::DecodeFailed, "midia de video indisponivel para renderizar o quadro"};
+                }
+                if (c.v2) {
+                    snapshot_.release_video_frames();
+                    AUREA_LOG_ERROR("export-v2 decode failure frame=%lld missing=%u stale=%u timestamp_ns=%llu",
+                        static_cast<long long>(t.value), missing, stale, static_cast<unsigned long long>(now));
+                    return Status{Errc::DecodeFailed, "a fonte nao entregou o quadro exato; exportacao interrompida"};
                 }
                 if (c.consecutiveFallbacks < std::numeric_limits<u32>::max()) ++c.consecutiveFallbacks;
                 if (c.fallbackFrames++ < 8 || c.fallbackFrames % 300 == 0) {
@@ -12341,6 +12382,13 @@ void Engine::export_thread_main() noexcept {
         }
         ctx.readNs.fetch_add(monotonic_ns() - r0, std::memory_order_relaxed);
         inflight.pop_front();
+        if (ctx.v2) {
+            const Status published = ctx.v2->publish(si, slot.frame);
+            AUREA_LOG_INFO("export-v2 frame=%u phase=readback timestamp_ns=%llu duration_ns=%llu result=%d",
+                slot.frame, static_cast<unsigned long long>(monotonic_ns()),
+                static_cast<unsigned long long>(monotonic_ns() - r0), published.raw());
+            return published;
+        }
         {
             std::lock_guard<std::mutex> ql(ctx.qMutex);
             ctx.readySlots.push_back(si);
@@ -12379,7 +12427,20 @@ void Engine::export_thread_main() noexcept {
         // limita a memória e segura o ritmo). Esperar o encoder tem watchdog:
         // preso dentro da plataforma, ele não devolveria o slot nunca.
         u32 si = 0;
-        {
+        if (ctx.v2) {
+            for (;;) {
+                const auto acquired = ctx.v2->acquire(allowed);
+                if (acquired.ok()) { si = *acquired; break; }
+                { std::lock_guard lock(ctx.qMutex);
+                    if (ctx.encoderFailed) { result = ctx.encoderStatus; break; }
+                    if (ctx.worker_hung_locked(monotonic_ns())) {
+                        result = ctx.abandon_worker_locked(); abandonedWorker = true; break;
+                    }
+                }
+                if (acquired.code() != Errc::Timeout) { result = acquired.status(); break; }
+            }
+            if (!result.ok()) break;
+        } else {
             std::unique_lock<std::mutex> ql(ctx.qMutex);
             auto slotReady = [&] {
                 return ctx.encoderFailed || cancelled()
@@ -12408,7 +12469,11 @@ void Engine::export_thread_main() noexcept {
         // pelo instante, não pelo índice).
         const auto plan = ctx.scheduler.frame(i);
         if (!plan.ok()) { result = plan.status(); break; }
+        const u64 renderStarted = monotonic_ns();
         result = render_export_frame(plan->compositionFrame, target, slot.gpuFrame);
+        if (ctx.v2) AUREA_LOG_INFO("export-v2 frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
+            i, static_cast<long long>(plan->ptsUs), static_cast<unsigned long long>(monotonic_ns()),
+            static_cast<unsigned long long>(monotonic_ns() - renderStarted), result.raw());
         if (!result.ok()) break;
         inflight.push_back(si);
     }
@@ -12418,6 +12483,7 @@ void Engine::export_thread_main() noexcept {
     // sink acontece nele. Aqui só se espera — com o watchdog. Preso dentro da
     // plataforma (o encoder do aparelho não devolve a chamada), ele é
     // abandonado em vez de segurar este join para sempre: era o "parou em 70%".
+    if (ctx.v2) ctx.v2->end_render(result);
     bool hangResult = abandonedWorker;
     {
         std::unique_lock<std::mutex> ql(ctx.qMutex);
@@ -12521,7 +12587,7 @@ void Engine::export_thread_main() noexcept {
             // Cancellation/device failure must never turn into an unbounded
             // wait for the queue we just stopped waiting on. Poll completed
             // fences; still-busy resources retain their deferred destruction.
-            if (result.ok()) gpu_->wait_idle();
+            if (result.ok() && !ctx.v2) gpu_->wait_idle();
             else retain_failed_export_gpu_locked();
         }
         if (ctx.frozenProject) {
@@ -12536,6 +12602,11 @@ void Engine::export_thread_main() noexcept {
         ctx.progress.running = false;
         ctx.progress.finished = true;
         ctx.progress.result = result.code();
+        if (ctx.v2) {
+            if (!result.ok()) ctx.v2->fail(result);
+            ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
+                | (static_cast<u32>(ctx.v2->phase()) << kExportPhaseShift);
+        }
         const ExportFailure failure = export_failure_reason(stage, result.code());
         ctx.progress.failure = static_cast<u32>(failure);
         // O encoder travou ou recusou: a tela refaz no próximo modo de
@@ -12574,14 +12645,28 @@ void Engine::export_encoder_main() noexcept {
             {
                 std::lock_guard<std::mutex> ql(c.qMutex);
                 abandoned = c.abandoned;
-                finishFile = !abandoned && !c.stop && !c.encoderFailed && c.producerDone && c.readySlots.empty()
+                finishFile = !abandoned && !c.stop && !c.encoderFailed
+                          && (c.v2 ? c.v2->drained() : c.producerDone && c.readySlots.empty())
                           && !c.cancelRequested.load(std::memory_order_acquire);
             }
             Status fin = OkStatus;
             if (!abandoned) {
                 if (finishFile) {
                     c.enter(ExportWorkerPhase::Finish);
-                    fin = c.sink->finish();
+                    if (c.v2) {
+                        fin = c.v2->begin_finalizing();
+                        c.publish_v2_phase("finalizando");
+                    }
+                    if (fin.ok()) fin = c.sink->finish();
+                    if (fin.ok() && c.v2) {
+                        fin = c.v2->begin_validating();
+                        c.publish_v2_phase("validando");
+                        if (fin.ok()) fin = c.sink->validate_output({c.outputWidth, c.outputHeight,
+                            c.frames, c.fps, c.withAudio});
+                        c.v2->validated(fin);
+                        c.publish_v2_phase(fin.ok() ? "concluido" : "falha na validacao");
+                    }
+                    if (!fin.ok()) { if (c.v2) c.v2->fail(fin); c.sink->abort(); }
                 } else {
                     c.enter(ExportWorkerPhase::Abort);
                     c.sink->abort();
@@ -12622,7 +12707,14 @@ void Engine::export_encoder_main() noexcept {
     u64 logWrite = 0, logRead = 0, logRender = 0, logDecode = 0;
     for (;;) {
         u32 si = 0;
-        {
+        if (ctx.v2) {
+            for (;;) {
+                const auto taken = ctx.v2->take();
+                if (taken.ok()) { si = *taken; break; }
+                if (taken.code() == Errc::Timeout) continue;
+                return;
+            }
+        } else {
             std::unique_lock<std::mutex> ql(ctx.qMutex);
             ctx.qCv.wait(ql, [&] {
                 return ctx.stop || ctx.cancelRequested.load(std::memory_order_acquire) || !ctx.readySlots.empty()
@@ -12670,8 +12762,12 @@ void Engine::export_encoder_main() noexcept {
                 const Status temporal = temporalUpscale.process(neuralInput.get(), ctx.width, ctx.height,
                     neuralOutput.get(), ctx.outputWidth, ctx.outputHeight, i);
                 if (!temporal.ok()) {
-                    temporalAvailable = false;
-                    AUREA_LOG_WARN("AI temporal history disabled: memory budget or invalid dimensions");
+                    if (ctx.v2) {
+                        s = Status{temporal.code(), "memoria insuficiente para preservar estabilizacao temporal da IA"};
+                    } else {
+                        temporalAvailable = false;
+                        AUREA_LOG_WARN("AI temporal history disabled: memory budget or invalid dimensions");
+                    }
                 }
             }
             if (s.ok()) {
@@ -12696,10 +12792,17 @@ void Engine::export_encoder_main() noexcept {
             ctx.audioNs.fetch_add(monotonic_ns() - w1, std::memory_order_relaxed);
         }
         ctx.leave();
+        if (ctx.v2) {
+            if (s.ok()) s = ctx.v2->encoded(si, i);
+            else ctx.v2->fail(s);
+            AUREA_LOG_INFO("export-v2 frame=%u pts_us=%lld phase=encode_audio timestamp_ns=%llu duration_ns=%llu result=%d",
+                i, static_cast<long long>(pts), static_cast<unsigned long long>(monotonic_ns()),
+                static_cast<unsigned long long>(monotonic_ns() - w0), s.raw());
+        }
         {
             std::lock_guard<std::mutex> ql(ctx.qMutex);
             if (ctx.abandoned) return;
-            ctx.freeSlots.push_back(si);
+            if (!ctx.v2) ctx.freeSlots.push_back(si);
             if (!s.ok()) {
                 ctx.encoderFailed = true;
                 ctx.encoderStatus = s;
@@ -12752,6 +12855,8 @@ void Engine::export_encoder_main() noexcept {
         const f64 elapsed = static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9;
         std::lock_guard<std::mutex> pl(ctx.mutex);
         ctx.progress.framesDone = done;
+        if (ctx.v2) ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
+            | (static_cast<u32>(ctx.v2->phase()) << kExportPhaseShift);
         ctx.progress.decodeWaitMs = static_cast<f32>(ctx.decodeNs.load(std::memory_order_relaxed) * k);
         ctx.progress.renderMs = static_cast<f32>(ctx.renderNs.load(std::memory_order_relaxed) * k);
         ctx.progress.readbackMs = static_cast<f32>(ctx.readNs.load(std::memory_order_relaxed) * k);

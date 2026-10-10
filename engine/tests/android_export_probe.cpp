@@ -127,12 +127,14 @@ static bool remux_with_offsets(const std::string& path, bool codecOutput = false
 }
 int main(int argc, char** argv) {
     if (argc < 6 || argc > 9) { std::fprintf(stderr, "usage: probe output.mp4 width height hevc audio [default|software|cbr|software-cbr|gate] [frames] [auto]\n"); return 2; }
-    const bool gated = argc >= 7 && std::strcmp(argv[6], "gate") == 0;
+    const bool v2 = argc >= 7 && std::strcmp(argv[6], "v2") == 0;
+    const bool gated = v2 || (argc >= 7 && std::strcmp(argv[6], "gate") == 0);
     const int frames = argc >= 8 ? std::atoi(argv[7]) : 30;
     if (frames <= 0 || frames > 1000000) return 2;
     VideoStreamConfig vc; vc.width = std::atoi(argv[2]); vc.height = std::atoi(argv[3]); vc.fps = 30;
     vc.codec = std::atoi(argv[4]) ? ExportCodec::HEVC : ExportCodec::H264;
     vc.bitrateBps = 12000000;
+    vc.validateBeforePublish = v2;
     if (argc >= 7) {
         if (std::strcmp(argv[6], "software") == 0 || std::strcmp(argv[6], "software-cbr") == 0)
             vc.preferSoftware = true;
@@ -175,7 +177,10 @@ int main(int argc, char** argv) {
         const i64 pts = std::llround(frame * 1e6 / vc.fps);
         if (!check(sink->write_video(y.data(), vc.width, uv.data(), vc.width, pts), "video")) return 4;
         if (audio) {
-            for (int s = 0; s < 1600; ++s) pcm[s * 2] = pcm[s * 2 + 1] = static_cast<i16>(3000 * std::sin((frame * 1600 + s) * 440.0 * 6.283185307 / 48000.0));
+            for (int s = 0; s < 1600; ++s) {
+                const double time = (frame * 1600 + s) / 48000.0;
+                pcm[s * 2] = pcm[s * 2 + 1] = static_cast<i16>(3000 * std::sin(6.283185307 * (220 * time + 20 * time * time)));
+            }
             if (!check(sink->write_audio(pcm.data(), 1600, pts), "audio")) return 5;
         }
         if ((frame + 1) % 300 == 0 || frame + 1 == frames) {
@@ -186,6 +191,7 @@ int main(int argc, char** argv) {
         }
     }
     if (!check(sink->finish(), "finish")) return 6;
+    if (v2 && !check(sink->validate_output({vc.width, vc.height, static_cast<u32>(frames), vc.fps, audio}), "validate")) return 11;
     if (sink->write_video(y.data(), vc.width, uv.data(), vc.width, 1000000).ok() || sink->finish().ok()) return 8;
     if (!verify_video_samples(argv[1], frames, audio)) return 10;
     if (!remux_with_offsets(argv[1]) || !remux_with_offsets(argv[1], true)) return 7;
@@ -201,6 +207,7 @@ int main(int argc, char** argv) {
         !check(sink->write_video(y.data(), vc.width, uv.data(), vc.width, 0), "reopened video") ||
         !check(sink->finish(), "reopened finish")) return 9;
     struct stat output{}; ::stat(argv[1], &output);
+    if (v2 && !check(sink->validate_output({vc.width, vc.height, 1, vc.fps, false}), "reopened validate")) return 11;
     std::printf("PASS real export %ux%u codec=%d audio=%d frames=%d elapsed_seconds=%.3f peak_rss_kib=%zu bytes=%lld gate=%d with nonzero packet offsets\n",
         vc.width, vc.height, static_cast<int>(vc.codec), audio, frames, (monotonic_ns() - started) / 1e9,
         peakRss, static_cast<long long>(output.st_size), int(gated));

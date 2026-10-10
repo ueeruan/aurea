@@ -96,6 +96,21 @@ AUREA_TEST(ExportRecovery, WholeSourceHashRejectsSameSizeChangeAndMissingSource)
     AUREA_CHECK_EQ(recovery::read(path, untouched, result).code(), Errc::MediaSourceMissing);
 }
 
+AUREA_TEST(ExportRecovery, LocalFileUriKeepsPersistentVideoSourceAndEncodedSpaces) {
+    Files files; const auto source = files.add("URI space.bin");
+    AUREA_CHECK(put(source, "persistent media bytes"));
+    const auto absolute = std::filesystem::absolute(source).generic_string();
+    std::string uri = "file:///";
+    if (absolute.front() == '/') uri = "file://";
+    for (const char c : absolute) uri += c == ' ' ? "%20" : std::string(1, c);
+    auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = uri; const auto id = p.add_asset(a);
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).ok());
+    AUREA_CHECK_EQ(package.dependencies.size(), usize{1});
+    AUREA_CHECK(recovery::fingerprint_sources(package).ok());
+    AUREA_CHECK_EQ(p.asset(id)->sourcePath, uri); // The original project is untouched.
+}
+
 AUREA_TEST(ExportRecovery, InterruptedCheckpointWritePreservesPreparedSnapshot) {
     Files files; const auto path = files.add("atomic.arec"); auto p = project();
     recovery::Package package; std::unique_ptr<Project> frozen;

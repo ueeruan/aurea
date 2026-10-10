@@ -39,7 +39,30 @@ bool unsupported_uri(const std::string& p) noexcept {
 }
 Status add_path(Package& package, std::string& path, const PathResolver& resolve) {
     if (path.empty()) return OkStatus;
-    const std::string real = resolve ? resolve(path) : path;
+    std::string real = resolve ? resolve(path) : path;
+    if (real.rfind("file://", 0) == 0) {
+        real.erase(0, 7);
+        if (real.rfind("localhost/", 0) == 0) real.erase(0, 9);
+        if (real.empty() || real.front() != '/') return Errc::NotSupported;
+        std::string decoded;
+        auto hex = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
+        };
+        for (usize i = 0; i < real.size(); ++i) {
+            if (real[i] != '%') { decoded.push_back(real[i]); continue; }
+            if (i + 2 >= real.size()) return Errc::InvalidArgument;
+            const int a = hex(real[i + 1]), b = hex(real[i + 2]);
+            if (a < 0 || b < 0 || !(a * 16 + b)) return Errc::InvalidArgument;
+            decoded.push_back(static_cast<char>(a * 16 + b)); i += 2;
+        }
+#if defined(_WIN32)
+        if (decoded.size() > 3 && decoded[0] == '/' && decoded[2] == ':') decoded.erase(0, 1);
+#endif
+        real = std::move(decoded);
+    }
     if (real.empty() || unsupported_uri(real))
         return Status{Errc::NotSupported, "recuperacao exige fontes em arquivos persistentes"};
     std::error_code ec;

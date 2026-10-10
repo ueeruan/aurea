@@ -101,6 +101,30 @@ AUREA_TEST(TrackedResourceAdmission, ExistingReservedBlockCanHoldFullResolutionS
     pool.end_frame(); pool.clear();
 }
 
+AUREA_TEST(TrackedResourceAdmission, ExistingTextureCanBeReusedWithoutGrowingAnOversizedDriverBlock) {
+    MockBackend backend; TransientTexturePool pool; MemoryManager known;
+    const auto image = rt(256, 256); const u64 bytes = image.estimated_bytes();
+    u64 reserved = bytes;
+    backend.queryMemoryStats = [&] {
+        GpuMemoryStats stats; stats.usedBytes = live_mock_texture_bytes(backend);
+        stats.reservedBytes = reserved; return stats;
+    };
+    pool.set_allocation_limit(bytes * 4);
+    pool.set_tracked_resource_budget(bytes * 4, known_cache_usage, &known);
+    pool.begin_frame(backend, 1);
+    const auto first = pool.acquire(image); AUREA_CHECK(first.valid());
+    pool.release(first); reserved = bytes * 8;
+    const auto created = backend.texturesCreated;
+    AUREA_CHECK_EQ(pool.acquire(image), first);
+    AUREA_CHECK_EQ(backend.texturesCreated, created);
+    AUREA_CHECK(!pool.acquire(image).valid()); // A second backing allocation is still refused.
+    AUREA_CHECK_EQ(backend.texturesCreated, created);
+    pool.release(first);
+    known.commit(MemoryClass::DecodedFrames, static_cast<usize>(bytes * 4));
+    AUREA_CHECK(!pool.acquire(image).valid()); // Live data never bypasses the envelope.
+    pool.clear();
+}
+
 AUREA_TEST(TrackedResourceAdmission, DriverGranuleIsRecheckedBeforePublishingTheNewTexture) {
     MockBackend backend; TransientTexturePool pool;
     backend.queryMemoryStats = [&] {

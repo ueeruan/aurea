@@ -27,7 +27,7 @@ void TransientTexturePool::begin_frame(GPUBackend& backend, u64 frameNumber) noe
 TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     for (Entry& e : entries_) {
         if (e.inUse || !e.desc.compatible(desc)) continue;
-        if (!tracked_admission(desc, 0, stats_.bytes)) return TextureHandle{};
+        if (!tracked_admission(desc, 0, stats_.bytes, true)) return TextureHandle{};
         e.inUse = true;
         e.lastUsedFrame = frame_;
         ++stats_.inUse;
@@ -77,11 +77,12 @@ TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     return e.texture;
 }
 
-bool TransientTexturePool::tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes) const noexcept {
+bool TransientTexturePool::tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes, bool reuse) const noexcept {
     const u64 budget = trackedResourceBudget_.load(std::memory_order_relaxed);
     if (!budget || !backend_) return true;
     const u64 known = knownResourceUse_ ? knownResourceUse_(knownResourceContext_) : 0;
     const auto gpu = backend_->memory_stats();
+    if (reuse && fits_existing_tracked_resource_budget(budget, poolBytes, gpu.usedBytes, known)) return true;
     if (fits_tracked_resource_budget(budget, poolBytes, gpu.usedBytes, gpu.reservedBytes, known, incomingBytes)) return true;
     AUREA_LOG_WARN("pool: orcamento de recursos rastreados antes de criar %ux%u (%s): pool=%llu gpu=%llu reservado=%llu caches=%llu pedido=%llu limite=%llu",
         desc.width, desc.height, desc.debugName ? desc.debugName : "?",

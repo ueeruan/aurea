@@ -11483,7 +11483,10 @@ i64 Engine::query_export_duration(bool trimToContent) noexcept {
 }
 
 Status Engine::start_export(const ExportSettings& settings, const char* outputPath) noexcept {
-    return start_export_checked(settings, outputPath, nullptr);
+    const Status result = start_export_checked(settings, outputPath, nullptr);
+    if (!result.ok()) AUREA_LOG_ERROR("export start failed code=%d detail=%.*s", result.raw(),
+        static_cast<int>(result.detail().size()), result.detail().empty() ? "" : result.detail().data());
+    return result;
 }
 
 Status Engine::start_export_checked(const ExportSettings& settings, const char* outputPath,
@@ -11561,8 +11564,26 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                 imageBytes += px.rgba.size();
             }
             try {
-                if (const Status s = export_recovery::capture(*project_, project_->timeline().current(), settings,
-                    [this](const std::string& p) { return resolve_asset_path(p); }, ctx->frozenProject, ctx->recovery); !s.ok()) return s;
+                Status sourceStatus;
+                std::unordered_map<std::string, std::string> preparedPaths;
+                const Status captured = export_recovery::capture(*project_, project_->timeline().current(), settings,
+                    [&](const std::string& p) {
+                        const auto found = preparedPaths.find(p);
+                        if (found != preparedPaths.end()) return found->second;
+                        std::string resolved = resolve_asset_path(p);
+                        if (config_.exportAssetPathResolver) {
+                            auto persistent = config_.exportAssetPathResolver(resolved, config_.documentsDirectory, &ctx->cancelRequested);
+                            if (!persistent.ok()) {
+                                sourceStatus = Status{persistent.code(), "nao foi possivel preservar a midia para exportacao e recuperacao"};
+                                return std::string{};
+                            }
+                            resolved = std::move(*persistent);
+                        }
+                        preparedPaths.emplace(p, resolved);
+                        return resolved;
+                    }, ctx->frozenProject, ctx->recovery);
+                if (!sourceStatus.ok()) return sourceStatus;
+                if (!captured.ok()) return captured;
                 ctx->frozenImages = images_;
                 ctx->frozenModels = models_;
                 ctx->frozenHdris = hdris_;

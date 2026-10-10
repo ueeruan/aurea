@@ -135,8 +135,12 @@ SurfaceFormat from_vk(VkFormat f) noexcept {
 // corrompendo em GPU que exige a granularidade.
 // =============================================================================
 namespace {
-constexpr VkDeviceSize kDeviceBlock = 64ull * 1024 * 1024;
-constexpr VkDeviceSize kHostBlock   = 16ull * 1024 * 1024;
+// Full-quality mobile scenes often have several image memory types. A 64 MiB
+// block per type left >90 MiB unused and refused an otherwise fitting frame.
+// Small resources share 16 MiB; large shadow/MSAA targets stay dedicated at
+// their exact driver requirement, keeping their resolution/sample count.
+constexpr VkDeviceSize kDeviceBlock = 16ull * 1024 * 1024;
+constexpr VkDeviceSize kHostBlock   = 4ull * 1024 * 1024;
 
 VkDeviceSize align_up(VkDeviceSize v, VkDeviceSize a) noexcept { return a ? (v + a - 1) / a * a : v; }
 } // namespace

@@ -174,7 +174,7 @@ private:
     std::atomic<u64> trackedResourceBudget_{0};
     KnownResourceUse knownResourceUse_ = nullptr;
     void* knownResourceContext_ = nullptr;
-    [[nodiscard]] bool tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes) const noexcept;
+    [[nodiscard]] bool tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes, bool reuse = false) const noexcept;
     void trim_for(u64 incomingBytes) noexcept;
 };
 

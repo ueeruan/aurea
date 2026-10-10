@@ -181,6 +181,10 @@ struct EngineConfig {
     /// indisponível (recusado com NotSupported, nunca fingido).
     ExportSinkFactory exportSinkFactory = nullptr;
     void* exportSinkContext = nullptr;
+    /// Persist platform locators (e.g. Android gallery URI) for a frozen export.
+    /// iOS/local files already resolve to persistent paths and need no adapter.
+    Result<std::string> (*exportAssetPathResolver)(const std::string&, const std::string&,
+        const std::atomic<bool>*) noexcept = nullptr;
     /// Quadros de export em voo (GPU renderizando um enquanto o encoder recebe
     /// o anterior). 0 = automático (3; 1 sob calor). 1 = serial — o teste de
     /// equivalência compara os dois bytes a bytes.

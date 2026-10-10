@@ -82,10 +82,11 @@ enum ParityExportProbe {
             engine.setShape(layer, fillR: 1, g: 1, b: 1, a: 1)
             engine.setPosition(forLayer: layer, x: 960, y: 540, z: 0)
             _ = engine.flush()
-            // The core catalog is not localized: this is GlowEffect::info().name.
+            // Resolve the serialized effect identity; added parameters must not
+            // stop this fixture before the production renderer is exercised.
             guard let glow = engine.effectCatalog().first(where: {
-                ($0[AureaEffectName] as? String) == "Brilho" &&
-                ($0[AureaEffectParamCount] as? NSNumber)?.intValue == 4
+                ($0[AureaEffectTypeId] as? NSNumber)?.uint32Value == fxEffectTypeId("aurea.light.glow") &&
+                (($0[AureaEffectParamCount] as? NSNumber)?.intValue ?? 0) >= 4
             }), let typeID = (glow[AureaEffectTypeId] as? NSNumber)?.uint32Value else {
                 throw Failure(message: "Original Glow effect is absent from the core catalog")
             }

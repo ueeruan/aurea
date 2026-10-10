@@ -1,8 +1,10 @@
 package com.aurea.aurea.editor
 
 import android.app.Application
+import android.content.ContentValues
 import android.media.MediaMetadataRetriever
 import android.os.SystemClock
+import android.provider.MediaStore
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -136,6 +138,70 @@ class ExportV2DeviceTest {
         }
         compose.waitUntil(15000) { store.project.durationFrames == 30 }
         export("3d-24-camera-particles-blur", 540, 30.0, 30)
+    }
+    @Test fun galleryContentUriProducesValidatedVideoAndReusesPersistentCopy() {
+        initialize(); project(480, 320, 30f, "V2 owned gallery URI")
+        val resolver = context.contentResolver
+        val uri = checkNotNull(resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, "aurea-v2-owned-${SystemClock.elapsedRealtime()}.mp4")
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/AureaExportV2Tests")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }))
+        try {
+            resolver.openOutputStream(uri)!!.use { out ->
+                InstrumentationRegistry.getInstrumentation().context.assets.open("motion-fixture.mp4").use { it.copyTo(out) }
+            }
+            resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+            compose.runOnIdle {
+                assertTrue(store.engineForStress.importVideo(uri.toString(), "Owned gallery fixture") > 0)
+                store.setCompositionDuration(60)
+            }
+            compose.waitUntil(15000) { store.project.durationFrames == 60 }
+            export("gallery-uri-first", 320, 30.0, 60)
+            val copies = File(context.filesDir, "projetos/export-sources").listFiles().orEmpty().filter { it.name.endsWith(".media") }.associate { it.name to it.length() }
+            assertTrue("Gallery source must be preserved for recovery", copies.isNotEmpty())
+            export("gallery-uri-repeat", 320, 30.0, 60)
+            val repeated = File(context.filesDir, "projetos/export-sources").listFiles().orEmpty().filter { it.name.endsWith(".media") }.associate { it.name to it.length() }
+            assertEquals("Identical source copies must not accumulate on repeated exports", copies, repeated)
+        } finally { resolver.delete(uri, null, null) } // Only the entry created by this test.
+    }
+    @Test fun sixtySecondsThreeVideoClipsWithTimeRemap() {
+        initialize(); project(480, 320, 30f, "V2 three slow clips")
+        val sources = (0 until 3).map { n ->
+            File(context.filesDir, "v2-slow-clip-$n.mp4").also { file ->
+                InstrumentationRegistry.getInstrumentation().context.assets.open("motion-fixture.mp4").use { input ->
+                    file.outputStream().use { input.copyTo(it) }
+                }
+            }
+        }
+        compose.runOnIdle {
+            val engine = store.engineForStress
+            val layers = sources.mapIndexed { n, file -> engine.importVideo(file.absolutePath, "Slow clip $n").also { assertTrue(it > 0) } }
+            engine.beginCommandBatch()
+            val commands = CommandBatch(engine)
+            layers.forEachIndexed { n, layer -> commands.setLayerTimeRange(layer, n * 600, (n + 1) * 600) }
+            assertTrue(engine.submitCommands() > 0)
+            layers.forEach { layer ->
+                assertTrue(engine.setTimeRemap(layer, true))
+                assertTrue(engine.setTimeRemapValue(layer, 0, 0f))
+                assertTrue(engine.setTimeRemapValue(layer, 599, 59f))
+            }
+            store.setCompositionDuration(1800)
+        }
+        compose.waitUntil(15000) { store.project.durationFrames == 1800 && store.layers.size == 3 }
+        val movie = export("three-clips-remap-60s", 320, 30.0, 1800)
+        val reader = MediaMetadataRetriever()
+        try {
+            reader.setDataSource(movie.absolutePath)
+            for (time in listOf(1_000_000L, 21_000_000L, 41_000_000L)) {
+                val bitmap = checkNotNull(reader.getFrameAtTime(time, MediaMetadataRetriever.OPTION_CLOSEST))
+                val colors = HashSet<Int>()
+                for (y in 0 until bitmap.height step 12) for (x in 0 until bitmap.width step 12) colors.add(bitmap.getPixel(x, y))
+                bitmap.recycle()
+                assertTrue("Clip at $time must contain decoded image detail", colors.size > 20)
+            }
+        } finally { reader.release() }
     }
     @Test fun cancelPreservesPreviousOutputAndNextExportSucceeds() {
         initialize(); project(1920, 1080, 30f, "V2 cancel")

@@ -4,6 +4,17 @@
 
 namespace aurea {
 
+// Reusing an existing physical texture does not allocate backing. A driver
+// block may include unused storage above a soft envelope; that must still
+// prohibit new allocations, without rejecting an unchanged existing frame.
+[[nodiscard]] inline bool fits_existing_tracked_resource_budget(u64 budget, u64 poolBytes,
+    u64 gpuUsedBytes, u64 knownCacheBytes) noexcept {
+    if (!budget) return true;
+    if (knownCacheBytes > budget) return false;
+    const u64 available = budget - knownCacheBytes;
+    return poolBytes <= available && gpuUsedBytes <= available;
+}
+
 // A soft admission envelope for resources whose backing storage is tracked.
 // This is not RSS/PSS: the backend and cache counters do not cover the runtime,
 // driver, application model or every native decoder allocation. Pool bytes are

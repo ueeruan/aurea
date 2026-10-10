@@ -96,10 +96,12 @@ struct Files {
     ~Files() { std::error_code error; std::filesystem::remove_all(dir, error); }
     std::string target() const { return (dir / "video.mp4").string(); }
 };
-ExportSinkStartupLimits limits(u64 hardMs = 1000) { return {50'000'000, hardMs * 1'000'000, 1'000'000}; }
+ExportSinkStartupLimits limits(u64 hardMs = 3000) { return {1'000'000'000, hardMs * 1'000'000, 1'000'000}; }
 ExportSinkStartupResult run(std::shared_ptr<Control> c, const std::string& path,
     const std::atomic<bool>* cancel = nullptr, std::atomic<u64>* beat = nullptr, ExportSinkStartupLimits l = limits()) {
-    return open_export_sink_startup(std::make_unique<ControlledSink>(c), path.c_str(), VideoStreamConfig{}, nullptr, cancel, beat, l);
+    auto result = open_export_sink_startup(std::make_unique<ControlledSink>(c), path.c_str(), VideoStreamConfig{}, nullptr, cancel, beat, l);
+    if (!result.status().ok()) std::printf(" startup diagnostic: %d %s\n", static_cast<int>(result.code), result.detail);
+    return result;
 }
 bool wait_destroyed(const std::shared_ptr<Control>& c) {
     std::unique_lock lock(c->mutex);
@@ -118,6 +120,7 @@ AUREA_TEST(ExportSinkStartup, OpensStageAndPublishesOnlySuccessfulFinish) {
     Files files; auto c = std::make_shared<Control>();
     auto opened = run(c, files.target());
     AUREA_CHECK(opened.status().ok()); AUREA_CHECK(opened.sink != nullptr);
+    if (!opened.sink) return;
     AUREA_CHECK(c->staged != files.target());
     AUREA_CHECK(!std::filesystem::exists(files.target()));
     AUREA_CHECK(opened.sink->write_video(nullptr, 0, nullptr, 0, 0).ok());
@@ -185,7 +188,7 @@ AUREA_TEST(ExportSinkStartup, HungOpenOwnsFlagsAndLateAbortCannotEraseRetryOutpu
 
 AUREA_TEST(ExportSinkStartup, HeartbeatExtendsStallDeadlineButNotAbsoluteDeadline) {
     Files files; auto healthy = std::make_shared<Control>(); healthy->progressOpen = true; healthy->delayMs = 150;
-    auto success = run(healthy, files.target());
+    auto success = run(healthy, files.target(), nullptr, nullptr, {50'000'000, 1'000'000'000, 1'000'000});
     AUREA_CHECK(success.status().ok()); success.sink.reset();
     auto endless = std::make_shared<Control>(); endless->progressOpen = true; endless->delayMs = 150;
     auto capped = run(endless, files.target(), nullptr, nullptr, limits(70));

@@ -171,6 +171,11 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     config.exportSinkFactory = &make_export_sink;
     config.enableExportStartupGate = true;
     config.enableExportEngineV2 = ![NSProcessInfo.processInfo.arguments containsObject:@"--aurea-export-legacy"];
+    if (debug) for (NSString* arg in NSProcessInfo.processInfo.arguments) {
+        if (![arg hasPrefix:@"--aurea-memory-budget-mb="]) continue;
+        const NSInteger mib = [[arg substringFromIndex:25] integerValue];
+        if (mib >= 96 && mib <= 1024) config.memoryBudgetBytes = static_cast<u64>(mib) << 20;
+    }
     config.audioOutput = audioOut_.get();
     config.defaultFontPath = ios_default_font_path();
     ios_install_text_fallback();

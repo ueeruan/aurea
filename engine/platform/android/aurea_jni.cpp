@@ -22,6 +22,7 @@
 #include "AAudioOutput.hpp"
 #include "MediaCodecExport.hpp"
 #include "MediaCodecSource.hpp"
+#include "ExportAssetSource.hpp"
 #include "VulkanBackend.hpp"
 #if defined(AUREA_GPU_GLES)
 #include "GlesBackend.hpp"
@@ -98,6 +99,12 @@ int open_content_fd(const char* uri, void*) {
     // A thread nativa precisa se soltar antes de terminar, ou a ART aborta.
     if (attached) g_vm->DetachCurrentThread();
     return fd;
+}
+
+/// Pede à plataforma os pixels de uma imagem do projeto (reabrir projeto).
+Result<std::string> preserve_export_asset(const std::string& source, const std::string& documents,
+                                        const std::atomic<bool>* cancel) noexcept {
+    return android_export::preserve_asset(source, documents, cancel, &open_content_fd);
 }
 
 /// Pede à plataforma os pixels de uma imagem do projeto (reabrir projeto).
@@ -408,6 +415,10 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     char exportVersion[PROP_VALUE_MAX]{};
     if (debug == JNI_TRUE) __system_property_get("debug.aurea.export_v2", exportVersion);
     if (std::strcmp(exportVersion, "0") == 0) config.enableExportEngineV2 = false;
+    char memoryBudget[PROP_VALUE_MAX]{};
+    if (debug == JNI_TRUE) __system_property_get("debug.aurea.memory_budget_mb", memoryBudget);
+    const auto memoryMiB = std::strtoul(memoryBudget, nullptr, 10);
+    if (memoryMiB >= 96 && memoryMiB <= 1024) config.memoryBudgetBytes = memoryMiB << 20;
     config.enableTrackedGpuAdmission = true;
 #if defined(AUREA_GPU_GLES)
     // A debug-only override exercises the real fallback through the app's UI,
@@ -440,6 +451,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.hasPlatformInfo = hasInfo;
     config.mediaFactory = &c->media;
     config.exportSinkFactory = &android::make_mediacodec_export_sink;
+    config.exportAssetPathResolver = &preserve_export_asset;
     config.audioOutput = &c->audioOut;
     config.defaultFontPath = config.cacheDirectory + "/Roboto-Regular.ttf";
     // The shared text engine finds the bundled Japanese fallback beside Roboto,

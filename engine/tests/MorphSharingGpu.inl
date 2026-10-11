@@ -38,26 +38,36 @@ AUREA_TEST(MorphSharingGpu, IdenticalDeformationMatchesIndependentOriginsIncludi
     };
     // Equal weights return after distinct animated weights, proving the cache
     // belongs to this build and cannot reuse a previous frame's deformation.
-    for (const bool floor : {false, true}) for (const u32 mode : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 0u}) {
+    for (const bool floor : {false, true}) for (const u32 mode : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u, 0u}) {
         const std::shared_ptr<const scene3d::SceneAsset> source = test_fixtures::morph_sharing::asset(mode);
         const auto reference = render(test_fixtures::morph_sharing::frame(source, mode, true, floor), false);
         const auto baseline = renderer.stats();
+        // Use both independent GPU origins and the same immutable model with
+        // batching disabled. This isolates material-address ordering from a
+        // regression caused by gathering non-adjacent compatible draws.
+        const auto unbatched = render(test_fixtures::morph_sharing::frame(source, mode, false, floor), false);
         const auto shared = render(test_fixtures::morph_sharing::frame(source, mode, false, floor), true);
         const auto actual = renderer.stats();
         AUREA_CHECK_EQ(reference.px.size(), usize{320u * 180u * 4u});
         AUREA_CHECK_EQ(reference.px.size(), shared.px.size());
+        AUREA_CHECK_EQ(reference.px.size(), unbatched.px.size());
         if (reference.px.size() != shared.px.size() || shared.px.empty()) continue;
-        f32 maximum = 0; f64 energy = 0; bool finite = true;
+        f32 maximum = 0, sameOriginMaximum = 0; f64 energy = 0; bool finite = true;
         for (usize i = 0; i < shared.px.size(); ++i) {
             finite &= std::isfinite(reference.px[i]) && std::isfinite(shared.px[i]);
             maximum = std::max(maximum, std::fabs(reference.px[i] - shared.px[i]));
+            if (unbatched.px.size() == shared.px.size()) {
+                finite &= std::isfinite(unbatched.px[i]);
+                sameOriginMaximum = std::max(sameOriginMaximum, std::fabs(unbatched.px[i] - shared.px[i]));
+            }
             if (i % 4 != 3) energy += shared.px[i];
         }
-        std::printf("\n    morph mode=%u floor=%u: error=%g energy=%.3f uploads=%u/%u bytes=%llu/%llu color=%u shadow=%u",
-            mode, floor, maximum, energy, actual.morphUploads, baseline.morphUploads,
+        std::printf("\n    morph mode=%u floor=%u: error=%g same_origin_error=%g energy=%.3f uploads=%u/%u bytes=%llu/%llu color=%u shadow=%u",
+            mode, floor, maximum, sameOriginMaximum, energy, actual.morphUploads, baseline.morphUploads,
             static_cast<unsigned long long>(actual.morphUploadBytes), static_cast<unsigned long long>(baseline.morphUploadBytes),
             actual.drawCalls, actual.shadowDrawCalls);
         AUREA_CHECK(finite); AUREA_CHECK(energy > 100); AUREA_CHECK(maximum <= .001f);
+        AUREA_CHECK(sameOriginMaximum <= .001f);
         AUREA_CHECK_EQ(baseline.morphUploads, 24u);
         const u32 uploads = 2 * test_fixtures::morph_sharing::unique_weights(mode);
         AUREA_CHECK_EQ(actual.morphUploads, uploads);

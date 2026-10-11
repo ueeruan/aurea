@@ -6,7 +6,7 @@ AUREA_TEST(MorphSharing, RepeatedPosesShareWorkWhileDistinctWeightsMaterialsAndS
     renderer.set_environment_quality({16, 0, 1}, {16, 0, 1});
     renderer.set_quality(256, 0, 1, false); renderer.set_post_quality(1, false, 2, 0);
     TransientTexturePool pool; u64 number = 1;
-    for (const u32 mode : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 0u}) {
+    for (const u32 mode : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u, 0u}) {
         const std::shared_ptr<const scene3d::SceneAsset> source = test_fixtures::morph_sharing::asset(mode);
         auto frame = test_fixtures::morph_sharing::frame(source, mode);
         for (auto& instance : frame.instances) instance.assetKey += number << 20;
@@ -25,5 +25,30 @@ AUREA_TEST(MorphSharing, RepeatedPosesShareWorkWhileDistinctWeightsMaterialsAndS
         AUREA_CHECK_EQ(actual.shadowDrawCalls, test_fixtures::morph_sharing::shadow_draws(mode));
         graph.release(pool); pool.end_frame(); AUREA_CHECK(fixture.backend.end_frame().ok());
     }
+    pool.clear();
+}
+
+AUREA_TEST(MorphSharing, AdjacentCopiesKeepOneColorAndShadowDrawWithSharedDeformation) {
+    RenderFixture fixture; fixture.backend.mapBuffers = true;
+    auto& renderer = fixture.renderer.scene_renderer();
+    renderer.set_environment_quality({16, 0, 1}, {16, 0, 1});
+    renderer.set_quality(256, 0, 1, false); renderer.set_post_quality(1, false, 2, 0);
+    auto source = test_fixtures::morph_sharing::asset(0);
+    source->meshes[0].primitives.resize(1);
+    auto frame = test_fixtures::morph_sharing::frame(source, 0);
+    const auto repeated = frame.instances.front();
+    frame.instances.resize(100, repeated);
+    FrameGraph graph; Arena arena; FrameBegin begin; TransientTexturePool pool;
+    AUREA_CHECK(fixture.backend.begin_offscreen_frame(begin).ok());
+    FGTexture output; AUREA_CHECK(renderer.build(graph, arena, frame, 320, 180, 1, output));
+    graph.set_output(output, ResourceState::ShaderRead); pool.begin_frame(fixture.backend, 1);
+    AUREA_CHECK(graph.compile(pool).ok()); graph.execute(*begin.commands, false);
+    const auto actual = renderer.stats();
+    AUREA_CHECK_EQ(actual.visiblePrimitives, 100u);
+    AUREA_CHECK_EQ(actual.morphUploads, 1u);
+    AUREA_CHECK_EQ(actual.morphUploadBytes, 256u);
+    AUREA_CHECK_EQ(actual.drawCalls, 1u);
+    AUREA_CHECK_EQ(actual.shadowDrawCalls, 1u);
+    graph.release(pool); pool.end_frame(); AUREA_CHECK(fixture.backend.end_frame().ok());
     pool.clear();
 }

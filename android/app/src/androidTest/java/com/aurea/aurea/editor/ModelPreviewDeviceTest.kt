@@ -14,6 +14,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.EngineStatus
 import com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL
+import com.aurea.aurea.engine.ModelPlan
 import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.PodLayout
 import com.aurea.aurea.engine.TrackProperty
@@ -51,6 +52,9 @@ class ModelPreviewDeviceTest {
         val report = File(folder, "model-preview-report.jsonl")
         report.writeText(JSONObject().put("kind", "actual-editor-model-preview").put("targetBuild", build)
             .put("device", Build.MODEL).put("sdk", Build.VERSION.SDK_INT).put("quality", "ORIGINAL")
+            .put("geometryQuality", "ORIGINAL").put("importEvidenceSchema", 2)
+            .put("texturePolicy", "native device and project budget; reductions are reported separately")
+            .put("mipPolicy", "native generated mipmaps; retained texture dimensions are not exposed by this interface")
             .put("width", 960).put("height", 540).put("measurement", "SurfaceFlinger pixels and native preview statistics")
             .toString() + "\n")
         lateinit var store: EditorStore
@@ -68,7 +72,7 @@ class ModelPreviewDeviceTest {
             assertTrue(engine.readStatus(statusBuffer))
             return EngineStatus().also { it.readFrom(statusBuffer) }
         }
-        fun record(model: String, label: String, elapsed: Long = 0L, extra: JSONObject = JSONObject()) {
+        fun record(model: String, label: String, elapsed: Long = 0L, extra: JSONObject = JSONObject()): EngineStatus {
             assertTrue(engine.readPerf(perfBuffer))
             val perf = PerfStats.read(perfBuffer)
             val state = status()
@@ -86,10 +90,12 @@ class ModelPreviewDeviceTest {
                 .put("gpuReservedBytes", perf.gpuReservedBytes).put("scene3dBytes", perf.scene3dBytes)
                 .put("gpuName", perf.gpuName).put("previewWidth", perf.previewWidth).put("previewHeight", perf.previewHeight)
             report.appendText(extra.toString() + "\n")
+            return state
         }
         fun ui(action: () -> Unit) { instrumentation.runOnMainSync(action) }
         var background = 0
-        fun pixels(model: String, label: String, requireModel: Boolean = true, save: Boolean = false): Boolean {
+        fun pixels(model: String, label: String, requireModel: Boolean = true, save: Boolean = false,
+                   observe: ((Long, Long) -> Unit)? = null): Boolean {
             val began = SystemClock.elapsedRealtime()
             val bounds = compose.onNodeWithTag("editor.stage").fetchSemanticsNode().boundsInWindow
             val screenshot = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
@@ -125,10 +131,11 @@ class ModelPreviewDeviceTest {
                 val flatGreen = green.toDouble() / total.coerceAtLeast(1) > 0.95
                 val valid = if (requireModel) foreground >= maxOf(16, total / 500) && histogram.size >= 3 && !flatGreen
                             else dominantFraction > 0.97 && !flatGreen
-                record(model, label, SystemClock.elapsedRealtime() - began,
+                val observed = record(model, label, SystemClock.elapsedRealtime() - began,
                     JSONObject().put("validPixels", valid).put("samples", total).put("foreground", foreground)
                         .put("colorBins", histogram.size).put("dominantFraction", dominantFraction)
                         .put("flatGreen", flatGreen).put("imageHash", imageHash).put("screenshotMs", screenshotMs))
+                observe?.invoke(imageHash, observed.playhead)
                 if (save || !valid) {
                     val cropped = Bitmap.createBitmap(screenshot, left, top, right - left, bottom - top)
                     try { File(folder, "$model-$label.png").outputStream().use { cropped.compress(Bitmap.CompressFormat.PNG, 100, it) } }
@@ -142,6 +149,8 @@ class ModelPreviewDeviceTest {
             "Fox.glb" to "d97044e701822bac5a62696459b27d7b375aada5de8574ed4362edbba94771f7",
             "AnimatedMorphCube.glb" to "214ee56160a50dbf22543a1d66dbf860986e87f0efac3d89feac1359d0e6aeab",
         )
+        val sourceTextureCounts = mapOf("DamagedHelmet" to 5, "Fox" to 1, "AnimatedMorphCube" to 0)
+        var allTexturesAtSourceResolution = true
         try {
             for ((name, checksum) in fixtures) {
                 val model = name.substringBeforeLast('.')
@@ -149,13 +158,18 @@ class ModelPreviewDeviceTest {
                 instrumentation.context.assets.open("models-preview-owned/$name").use { input -> source.outputStream().use { input.copyTo(it) } }
                 val actualHash = MessageDigest.getInstance("SHA-256").digest(source.readBytes()).joinToString("") { "%02x".format(it) }
                 assertEquals("Fixture must match the licensed benchmark input", checksum, actualHash)
+                val sourcePlan = engine.inspectModel(source.absolutePath, ModelPlan.memoryNow(context))
+                assertTrue("Pinned fixture must have an exact source plan", sourcePlan.valid && sourcePlan.exact)
+                assertEquals("Pinned source texture count changed", sourceTextureCounts.getValue(model), sourcePlan.textures)
                 ui { store.newProject(960, 540, 30f, "Model preview $model") }
                 compose.waitUntil(60000) { store.project.title == "Model preview $model" && !store.projectOperationBusy }
                 ui {
-                    store.setCompositionDuration(180); store.setCompositionBackground(0.012f, 0.005f, 0.025f)
+                    // Keep motion active through the bounded screenshot window;
+                    // slow SurfaceFlinger observations can consume several seconds.
+                    store.setCompositionDuration(360); store.setCompositionBackground(0.012f, 0.005f, 0.025f)
                     store.setPreviewScale(false, 1, 1); store.setLoop(false); store.pause(); store.seek(0)
                 }
-                compose.waitUntil(30000) { status().duration == 180L && status().playhead == 0L && !status().playing }
+                compose.waitUntil(30000) { status().duration == 360L && status().playhead == 0L && !status().playing }
                 var emptyReady = false
                 val emptyDeadline = SystemClock.elapsedRealtime() + 30000
                 while (!emptyReady && SystemClock.elapsedRealtime() < emptyDeadline) {
@@ -172,16 +186,30 @@ class ModelPreviewDeviceTest {
                 val layer = store.layers.single { it.kind == 10 }
                 assertTrue("Imported model lost embedded textures", engine.modelMissingTextures(layer.id).isEmpty())
                 val importReport = engine.lastModelImport()
+                // JNI layout is source triangles, kept triangles, textures
+                // reduced, textures skipped, quality. Slot 2 is NOT imported
+                // textures; ORIGINAL geometry can still hit a texture budget.
+                assertEquals("Model import report layout changed", 5, importReport.size)
+                assertTrue("Model source geometry was empty", importReport[0] > 0L)
+                assertEquals("ORIGINAL import reduced geometry", importReport[0], importReport[1])
+                assertEquals("Source plan and imported geometry disagree", sourcePlan.triangles, importReport[0])
+                assertEquals("Embedded source textures were skipped", 0L, importReport[3])
                 assertEquals("Model quality must stay ORIGINAL", MODEL_QUALITY_ORIGINAL.toLong(), importReport.getOrElse(4) { -1L })
+                allTexturesAtSourceResolution = allTexturesAtSourceResolution && importReport[2] == 0L && importReport[3] == 0L
                 record(model, "import", SystemClock.elapsedRealtime() - importAt,
-                    JSONObject().put("sourceSha256", actualHash).put("sourceBytes", source.length()).put("importReport", JSONArray(importReport.toList())))
+                    JSONObject().put("sourceSha256", actualHash).put("sourceBytes", source.length())
+                        .put("sourceTextures", sourcePlan.textures).put("plannedTextureCap", sourcePlan.textureCap(MODEL_QUALITY_ORIGINAL))
+                        .put("geometryTrianglesUnchanged", importReport[0] == importReport[1])
+                        .put("texturesAtSourceResolution", importReport[2] == 0L && importReport[3] == 0L)
+                        .put("textureClassification", if (importReport[2] == 0L) "SOURCE_UNCHANGED" else "TEXTURES_REDUCED")
+                        .put("importReport", JSONArray(importReport.toList())))
                 ui {
                     store.clearSelection()
                     engine.beginCommandBatch()
                     CommandBatch(engine).apply {
-                        setLayerTimeRange(layer.id, 0, 180)
+                        setLayerTimeRange(layer.id, 0, 360)
                         insertKeyframe(layer.id, TrackProperty.ROTATION_Z, -1, 0, 0, -12f)
-                        insertKeyframe(layer.id, TrackProperty.ROTATION_Z, -1, 0, 179, 12f)
+                        insertKeyframe(layer.id, TrackProperty.ROTATION_Z, -1, 0, 359, 12f)
                     }
                     assertEquals(3, engine.submitCommands())
                     store.seek(0)
@@ -205,15 +233,29 @@ class ModelPreviewDeviceTest {
                     compose.waitUntil(30000) { status().playhead > 0L }
                     record(model, "warm-$round-start", SystemClock.elapsedRealtime() - playAt)
                     var samples = 0
-                    val until = SystemClock.elapsedRealtime() + 3000
+                    val pictureHashes = mutableSetOf<Long>()
+                    val picturePlayheads = mutableSetOf<Long>()
+                    val deadline = playAt + 10000
                     do {
-                        assertTrue("Blank/flat green playback picture: $model round=$round", pixels(model, "play-$round-$samples", save = samples == 0))
+                        assertTrue("Blank/flat green playback picture: $model round=$round",
+                            pixels(model, "play-$round-$samples", save = true, observe = { hash, playhead ->
+                                pictureHashes.add(hash); picturePlayheads.add(playhead)
+                            }))
                         ++samples
-                        SystemClock.sleep(100)
-                    } while (SystemClock.elapsedRealtime() < until)
+                        if (SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100)
+                    } while (SystemClock.elapsedRealtime() < deadline &&
+                        (SystemClock.elapsedRealtime() - playAt < 3000 || samples < 3 ||
+                         pictureHashes.size < 2 || picturePlayheads.size < 3))
                     val advanced = status().playhead
-                    record(model, "warm-$round-played", SystemClock.elapsedRealtime() - playAt,
-                        JSONObject().put("pictureSamples", samples).put("advancedFrames", advanced))
+                    val elapsed = SystemClock.elapsedRealtime() - playAt
+                    record(model, "warm-$round-played", elapsed,
+                        JSONObject().put("pictureSamples", samples).put("advancedFrames", advanced)
+                            .put("distinctPictureHashes", pictureHashes.size).put("timelineSamples", picturePlayheads.size))
+                    assertTrue("Playback observed fewer than three actual displayed pictures", samples >= 3)
+                    assertTrue("Displayed model picture froze while timeline advanced", pictureHashes.size >= 2)
+                    assertTrue("Playback pictures did not span three timeline positions", picturePlayheads.size >= 3)
+                    assertTrue("Playback observation must run for at least three seconds", elapsed >= 3000)
+                    assertTrue("Playback observations exceeded the ten second deadline", elapsed <= 10000)
                     assertTrue("Timeline did not advance through actual playback", advanced >= 3L)
                     ui { store.pause() }
                     for (frame in listOf(45, 5, 90, 15)) {
@@ -238,7 +280,9 @@ class ModelPreviewDeviceTest {
                     record(model, "trim-$round-ready", SystemClock.elapsedRealtime() - trimAt, JSONObject().put("reclaimedBytes", reclaimed))
                 }
             }
-            report.appendText(JSONObject().put("result", "PASS").put("targetBuild", build).toString() + "\n")
+            report.appendText(JSONObject().put("result", "PASS").put("targetBuild", build)
+                .put("scope", "actual editor operations and moving pictures; source texture quality is classified separately")
+                .put("sourceTextureQualityPass", allTexturesAtSourceResolution).toString() + "\n")
         } catch (error: Throwable) {
             report.appendText(JSONObject().put("result", "FAIL").put("targetBuild", build).put("error", error.toString())
                 .put("editorError", store.errorMessage).put("busy", store.busyMessage).toString() + "\n")

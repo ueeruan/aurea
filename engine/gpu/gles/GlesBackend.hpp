@@ -27,6 +27,7 @@ public:
     Result<TextureHandle> create_texture(const TextureDesc&) noexcept override;
     Result<BufferHandle> create_buffer(const BufferDesc&) noexcept override;
     Result<SamplerHandle> create_sampler(const SamplerDesc&) noexcept override;
+    bool defer_shader_creation() const noexcept override { return true; }
     Result<ShaderHandle> create_shader(const ShaderDesc&) noexcept override;
     Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept override;
     void destroy_texture(TextureHandle) noexcept override;

@@ -13188,6 +13188,7 @@ AUREA_TEST(Gpu, Text3DDepthAndBevelEditsReachTheFrame) {
 #include "PreviewCacheGpu.inl"
 #include "TextOutlineGpu.inl"
 #include "ImmediateUploadGpu.inl"
+#include "HostRingGpu.inl"
 #include "TextureRetirementGpu.inl"
 
 AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {

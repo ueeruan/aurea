@@ -89,6 +89,7 @@ bool TransientTexturePool::tracked_admission(const TextureDesc& desc, u64 incomi
         static_cast<unsigned long long>(poolBytes), static_cast<unsigned long long>(gpu.usedBytes),
         static_cast<unsigned long long>(gpu.reservedBytes), static_cast<unsigned long long>(known),
         static_cast<unsigned long long>(incomingBytes), static_cast<unsigned long long>(budget));
+    backend_->log_memory_breakdown();
     return false;
 }
 

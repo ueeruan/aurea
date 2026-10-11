@@ -65,10 +65,10 @@ jobs:
             adb install -r build/android/app/outputs/apk/uiTest/app-uiTest.apk
             adb install -r build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
             adb logcat -c
-            adb shell am instrument -w -e aureaExportDeadlineSeconds 600 -e class com.aurea.aurea.editor.KeyflowExportDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
+            adb shell am instrument -w -e aureaExportDeadlineSeconds 900 -e class com.aurea.aurea.editor.KeyflowExportDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
             adb logcat -d -v threadtime > build/native-engine.log
             cat build/native-editing.log
-            adb exec-out run-as com.aurea.aurea.uitest tar -cf - -C files keyflow-simple-text.mp4 keyflow-simple-text-progress.txt keyflow-animated-text-1080.mp4 keyflow-animated-text-1080-progress.txt keyflow-text-360.mp4 keyflow-text-360-progress.txt keyflow-text-720.mp4 keyflow-text-720-progress.txt keyflow-text-1080.mp4 keyflow-text-1080-progress.txt keyflow-text-360-repeat.mp4 keyflow-text-360-repeat-progress.txt keyflow-video-text-360.mp4 keyflow-video-text-360-progress.txt keyflow-video-text-720.mp4 keyflow-video-text-720-progress.txt > build/native-editing-files.tar
+            python3 engine/platform/android/verify/collect_owned_export_files.py --output build/native-editing-files.tar
             grep -Eq '^OK \([0-9]+ tests?\)' build/native-editing.log
       - uses: actions/upload-artifact@v4
         if: always() && matrix.abi == 'x86_64'

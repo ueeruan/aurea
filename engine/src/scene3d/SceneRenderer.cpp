@@ -1248,7 +1248,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         MeshPush push;
         PipelineHandle pipeline;
         f32 viewDepth;
-        u32 sortKey;
+        i32 materialIndex;           ///< authored index; never a process address
         bool skinned;
         bool morph;
         usize morphPos, morphShade;
@@ -1846,7 +1846,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     continue;
                 }
                 const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
-                const GpuMaterial* mat = faded(material_for(inst, *gm, nodes[n].material_for(primitive)), nodeAlpha);
+                const i32 materialIndex = nodes[n].material_for(primitive);
+                const GpuMaterial* mat = faded(material_for(inst, *gm, materialIndex), nodeAlpha);
                 if (n < inst.pose().nodeFill.size()) mat = tinted(mat, inst.pose().nodeFill[n]);
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:
@@ -1901,17 +1902,20 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     pick_lod(p, world, viewFromLocal, lodKey, d.firstIndex, d.indexCount);
                 }
                 d.viewDepth = viewFromLocal.transform_point(p.bounds.center()).z;
-                d.sortKey = static_cast<u32>(pipe->id & 0xFFFF) << 16 | static_cast<u32>(reinterpret_cast<uintptr_t>(mat) >> 4 & 0xFFFF);
+                d.materialIndex = materialIndex;
                 (drawMode == AlphaMode::Blend ? blended : opaque).push_back(d);
                 ++stats_.visiblePrimitives;
                 stats_.triangles += d.indexCount / 3;
             }
         }
     }
-    // Opacos agrupados por pipeline/material (menos trocas de estado); os
-    // transparentes do mais longe para o mais perto (ordem correta do blend).
-    std::sort(opaque.begin(), opaque.end(), [](const Draw& a, const Draw& b) { return a.sortKey < b.sortKey; });
-    std::sort(blended.begin(), blended.end(), [](const Draw& a, const Draw& b) { return a.viewDepth > b.viewDepth; });
+    // Coplanar depth ties need a deterministic material order even when a
+    // model is imported again or GPU/material addresses change. Preserve the
+    // authored instance/node/primitive order within each pipeline/index pair.
+    std::stable_sort(opaque.begin(), opaque.end(), [](const Draw& a, const Draw& b) {
+        return std::tie(a.pipeline.id, a.materialIndex) < std::tie(b.pipeline.id, b.materialIndex);
+    });
+    std::stable_sort(blended.begin(), blended.end(), [](const Draw& a, const Draw& b) { return a.viewDepth > b.viewDepth; });
 
     // --- Instancing (8E) ------------------------------------------------------
     // Objetos iguais (mesma malha, primitiva, LOD, material e pipeline; sem
@@ -1923,43 +1927,29 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // instância fora da tela nem entra no grupo.
     std::vector<Mat4> instData;
     if (instancing_ && (opaque.size() > 1 || shadowDraws.size() > 1)) {
-        auto mix = [](u64 h, u64 v) { return (h ^ v) * 0x100000001B3ull; };
-        std::unordered_map<u64, u32> groupOf;
-        // One flat chain per pass instead of one heap allocation per group.
+        // Merge adjacent runs only. A/B/A at the same depth must remain A/B/A;
+        // collecting all A draws before B changes the winning opaque surface.
+        // The deformation upload cache above remains shared across all runs.
         struct Members { u32 head, tail, count; };
         std::vector<Members> members;
-        std::vector<u32> next(opaque.size(), kInvalidIndex);
         std::vector<Draw> merged;
         merged.reserve(opaque.size());
         members.reserve(opaque.size());
-        if (!opaque.empty()) groupOf.reserve(opaque.size());
         for (u32 i = 0; i < opaque.size(); ++i) {
             const Draw& d = opaque[i];
-            if (d.skinned || !instancing_) { merged.push_back(d); members.push_back({i, i, 1}); continue; }
-            u64 h = 0xCBF29CE484222325ull;
-            h = mix(h, reinterpret_cast<uintptr_t>(d.model));
-            h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
-            h = mix(h, reinterpret_cast<uintptr_t>(d.material));
-            h = mix(h, reinterpret_cast<uintptr_t>(d.block));
-            h = mix(h, d.pipeline.id);
-            h = mix(h, (static_cast<u64>(d.firstIndex) << 32) | d.indexCount);
-            h = mix(h, d.morph);
-            if (d.morph) { h = mix(h, d.morphPos); h = mix(h, d.morphShade); }
-            auto [it, fresh] = groupOf.try_emplace(h, static_cast<u32>(merged.size()));
-            const Draw* prior = fresh ? nullptr : &merged[it->second];
-            // Hash collisions may miss a batching opportunity, never combine
-            // different meshes, materials, environments or levels of detail.
-            const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->material == d.material
+            const Draw* prior = merged.empty() ? nullptr : &merged.back();
+            const bool equal = !d.skinned && prior && !prior->skinned
+                && prior->model == d.model && prior->prim == d.prim && prior->material == d.material
                 && prior->block == d.block && prior->pipeline.id == d.pipeline.id && prior->firstIndex == d.firstIndex
                 && prior->indexCount == d.indexCount && prior->morph == d.morph
                 && (!d.morph || (prior->morphPos == d.morphPos && prior->morphShade == d.morphShade));
-            if (fresh || !equal) { merged.push_back(d); members.push_back({i, i, 1}); }
-            else { auto& group = members[it->second]; next[group.tail] = i; group.tail = i; ++group.count; }
+            if (!equal) { merged.push_back(d); members.push_back({i, i, 1}); }
+            else { auto& group = members.back(); group.tail = i; ++group.count; }
         }
         for (u32 g = 0; g < merged.size(); ++g) {
             if (members[g].count < 2) continue;
             const u32 base = static_cast<u32>(instData.size());
-            for (u32 idx = members[g].head; idx != kInvalidIndex; idx = next[idx]) {
+            for (u32 idx = members[g].head; idx <= members[g].tail; ++idx) {
                 const Draw& m = opaque[idx];
                 instData.push_back(m.push.model);
                 Mat4 nm;
@@ -1975,34 +1965,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
         opaque.swap(merged);
 
-        // Sombra: o mesmo, por (malha, primitiva, pipeline).
-        std::unordered_map<u64, u32> sgroupOf;
+        // The shadow pass also preserves its original contiguous draw order.
         std::vector<Members> smembers;
-        std::vector<u32> snext(shadowDraws.size(), kInvalidIndex);
         std::vector<ShadowDraw> smerged;
         smerged.reserve(shadowDraws.size());
         smembers.reserve(shadowDraws.size());
-        if (!shadowDraws.empty()) sgroupOf.reserve(shadowDraws.size());
         for (u32 i = 0; i < shadowDraws.size(); ++i) {
             const ShadowDraw& d = shadowDraws[i];
-            if (d.skinned || !instancing_) { smerged.push_back(d); smembers.push_back({i, i, 1}); continue; }
-            u64 h = 0xCBF29CE484222325ull;
-            h = mix(h, reinterpret_cast<uintptr_t>(d.model));
-            h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
-            h = mix(h, d.pipeline.id);
-            h = mix(h, d.morph);
-            if (d.morph) h = mix(h, d.morphPos);
-            auto [it, fresh] = sgroupOf.try_emplace(h, static_cast<u32>(smerged.size()));
-            const ShadowDraw* prior = fresh ? nullptr : &smerged[it->second];
-            const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->pipeline.id == d.pipeline.id
+            const ShadowDraw* prior = smerged.empty() ? nullptr : &smerged.back();
+            const bool equal = !d.skinned && prior && !prior->skinned
+                && prior->model == d.model && prior->prim == d.prim && prior->pipeline.id == d.pipeline.id
                 && prior->morph == d.morph && (!d.morph || prior->morphPos == d.morphPos);
-            if (fresh || !equal) { smerged.push_back(d); smembers.push_back({i, i, 1}); }
-            else { auto& group = smembers[it->second]; snext[group.tail] = i; group.tail = i; ++group.count; }
+            if (!equal) { smerged.push_back(d); smembers.push_back({i, i, 1}); }
+            else { auto& group = smembers.back(); group.tail = i; ++group.count; }
         }
         for (u32 g = 0; g < smerged.size(); ++g) {
             if (smembers[g].count < 2) continue;
             const u32 base = static_cast<u32>(instData.size());
-            for (u32 idx = smembers[g].head; idx != kInvalidIndex; idx = snext[idx]) instData.push_back(shadowDraws[idx].push.model);
+            for (u32 idx = smembers[g].head; idx <= smembers[g].tail; ++idx) instData.push_back(shadowDraws[idx].push.model);
             smerged[g].instanceCount = smembers[g].count;
             smerged[g].push.normalCol[0].y = static_cast<f32>(base + 1u);
         }

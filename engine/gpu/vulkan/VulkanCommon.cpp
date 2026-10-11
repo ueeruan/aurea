@@ -3,6 +3,8 @@
 #include "aurea/platform/AddressSpace.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <utility>
 
 namespace aurea::vk {
 
@@ -323,6 +325,40 @@ void MemoryAllocator::trim_empty_blocks() noexcept {
     }
 }
 
+void MemoryAllocator::log_memory_breakdown() noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    struct Type { u64 reserved = 0; u64 used = 0; u64 largestFree = 0; u32 blocks = 0; };
+    Type types[VK_MAX_MEMORY_TYPES]{};
+    u64 blockReserved = 0, blockUsed = 0;
+    u32 printed = 0, live = 0;
+    for (u32 i = 0; i < blocks_.size(); ++i) {
+        const Block& block = blocks_[i];
+        if (!block.memory) continue;
+        ++live;
+        blockReserved += block.size; blockUsed += block.used;
+        auto& type = types[block.memoryType];
+        type.reserved += block.size; type.used += block.used; ++type.blocks;
+        u64 largest = 0;
+        for (const auto& range : block.free) largest = std::max<u64>(largest, range.size);
+        type.largestFree = std::max(type.largestFree, largest);
+        if (printed++ < 24) AUREA_LOG_WARN("GPU block: index=%u type=%u reserved=%llu used=%llu largest_free=%llu ranges=%zu",
+            i, block.memoryType, static_cast<unsigned long long>(block.size),
+            static_cast<unsigned long long>(block.used), static_cast<unsigned long long>(largest), block.free.size());
+    }
+    AUREA_LOG_WARN("GPU backing: reserved=%llu used=%llu block_reserved=%llu block_used=%llu dedicated_reserved=%llu dedicated_used=%llu live_blocks=%u allocations=%u",
+        static_cast<unsigned long long>(reserved_), static_cast<unsigned long long>(used_),
+        static_cast<unsigned long long>(blockReserved), static_cast<unsigned long long>(blockUsed),
+        static_cast<unsigned long long>(reserved_ - std::min(reserved_, blockReserved)),
+        static_cast<unsigned long long>(used_ - std::min(used_, blockUsed)), live, allocations_);
+    for (u32 i = 0; i < props_.memoryTypeCount; ++i) if (types[i].blocks) {
+        const auto& type = types[i];
+        AUREA_LOG_WARN("GPU memory type: type=%u heap=%u flags=%u reserved=%llu used=%llu largest_free=%llu blocks=%u",
+            i, props_.memoryTypes[i].heapIndex, props_.memoryTypes[i].propertyFlags,
+            static_cast<unsigned long long>(type.reserved), static_cast<unsigned long long>(type.used),
+            static_cast<unsigned long long>(type.largestFree), type.blocks);
+    }
+}
+
 // =============================================================================
 // HostRing
 // =============================================================================
@@ -331,6 +367,8 @@ void HostRing::initialize(Backend* backend, VkDeviceSize capacity, VkBufferUsage
     backend_ = backend;
     usage_ = usage;
     name_ = name;
+    initialCapacity_ = capacity;
+    alignedDemand_ = peakAlignedDemand_ = 0;
     (void)add_chunk(capacity);
 }
 
@@ -363,30 +401,40 @@ void HostRing::shutdown() noexcept {
         backend_->allocator().free(c.alloc);
     }
     chunks_.clear();
-    offset_ = used_ = 0;
+    offset_ = used_ = alignedDemand_ = 0;
 }
 
 void HostRing::reset() noexcept {
-    // Se o frame precisou de mais de um bloco, troca todos por um só do tamanho
-    // do pico: em regime, o anel não cresce mais e não há alocação por frame.
+    // Called only after the owning frame's fence. Consolidate actual aligned
+    // demand; summing geometric chunk capacities promoted unused tails into
+    // permanent backing (4 + 8 MiB became 15 MiB for an 8 MiB workload).
     if (chunks_.size() > 1) {
-        VkDeviceSize total = 0;
-        for (const Chunk& c : chunks_) total += c.size;
-        const VkDeviceSize want = std::max(total, peak_);
+        const VkDeviceSize want = std::max(initialCapacity_, peakAlignedDemand_);
+        const VkDeviceSize extra = std::min(want / 4, std::numeric_limits<VkDeviceSize>::max() - want);
         shutdown();
-        (void)add_chunk(want + want / 4);
+        (void)add_chunk(want + extra);
     }
     offset_ = 0;
-    used_ = 0;
+    used_ = alignedDemand_ = 0;
 }
 
 bool HostRing::allocate(VkDeviceSize size, VkDeviceSize align, VkBuffer& outBuffer,
                         VkDeviceSize& outOffset, void*& outPtr) noexcept {
-    if (chunks_.empty()) return false;
+    const VkDeviceSize alignment = std::max<VkDeviceSize>(1, align);
+    const VkDeviceSize maximum = std::numeric_limits<VkDeviceSize>::max();
+    if (alignedDemand_ > maximum - (alignment - 1)) return false;
+    const VkDeviceSize virtualStart = align_up(alignedDemand_, alignment);
+    if (size > maximum - virtualStart) return false;
+    // A failed consolidation is recoverable on the next allocation attempt.
+    if (chunks_.empty() && (!backend_ || size > maximum - alignment
+            || !add_chunk(std::max(initialCapacity_, size + alignment)))) return false;
     Chunk* c = &chunks_.back();
-    VkDeviceSize start = align_up(offset_, align ? align : 1);
-    if (start + size > c->size) {
-        if (!add_chunk(std::max(size + align, c->size * 2))) return false;
+    if (offset_ > maximum - (alignment - 1)) return false;
+    VkDeviceSize start = align_up(offset_, alignment);
+    if (start > c->size || size > c->size - start) {
+        if (size > maximum - alignment) return false;
+        const VkDeviceSize doubled = c->size <= maximum / 2 ? c->size * 2 : maximum;
+        if (!add_chunk(std::max(size + alignment, doubled))) return false;
         c = &chunks_.back();
         offset_ = 0;
         start = 0;
@@ -396,8 +444,34 @@ bool HostRing::allocate(VkDeviceSize size, VkDeviceSize align, VkBuffer& outBuff
     outPtr = static_cast<u8*>(c->alloc.mapped) + start;
     offset_ = start + size;
     used_ += size;
-    peak_ = std::max(peak_, used_);
+    alignedDemand_ = virtualStart + size;
+    peakAlignedDemand_ = std::max(peakAlignedDemand_, alignedDemand_);
     return true;
+}
+
+HostRing::Stats HostRing::stats() const noexcept {
+    Stats result;
+    result.payloadUsed = used_; result.alignedDemand = alignedDemand_;
+    result.peakAlignedDemand = peakAlignedDemand_; result.chunks = static_cast<u32>(chunks_.size());
+    for (const auto& chunk : chunks_) { result.capacity += chunk.size; result.backing += chunk.alloc.size; }
+    return result;
+}
+
+void Backend::log_memory_breakdown() noexcept {
+    allocator_.log_memory_breakdown();
+    for (u32 i = 0; i < framesInFlight_; ++i) {
+        const auto& frame = frames_[i];
+        for (const auto& item : {std::pair<const char*, const HostRing*>{"uniforms", &frame.uniforms},
+                                 std::pair<const char*, const HostRing*>{"staging", &frame.staging}}) {
+            const auto ring = item.second->stats();
+            AUREA_LOG_WARN("GPU scratch: slot=%u frame=%llu submitted=%u open=%u kind=%s capacity=%llu backing=%llu payload=%llu aligned_demand=%llu peak_aligned_demand=%llu chunks=%u",
+                i, static_cast<unsigned long long>(frame.frameNumber), frame.submitted ? 1u : 0u,
+                &frame == current_ ? 1u : 0u, item.first,
+                static_cast<unsigned long long>(ring.capacity), static_cast<unsigned long long>(ring.backing),
+                static_cast<unsigned long long>(ring.payloadUsed), static_cast<unsigned long long>(ring.alignedDemand),
+                static_cast<unsigned long long>(ring.peakAlignedDemand), ring.chunks);
+        }
+    }
 }
 
 } // namespace aurea::vk

@@ -645,6 +645,9 @@ public:
     [[nodiscard]] virtual Result<TextureHandle>  create_texture(const TextureDesc&) noexcept = 0;
     [[nodiscard]] virtual Result<BufferHandle>   create_buffer(const BufferDesc&) noexcept = 0;
     [[nodiscard]] virtual Result<SamplerHandle>  create_sampler(const SamplerDesc&) noexcept = 0;
+    /// GLES compiles source in the driver; defer unused effect shaders until
+    /// an actual pipeline/prewarm requests them. Other APIs keep eager modules.
+    [[nodiscard]] virtual bool defer_shader_creation() const noexcept { return false; }
     [[nodiscard]] virtual Result<ShaderHandle>   create_shader(const ShaderDesc&) noexcept = 0;
     [[nodiscard]] virtual Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept = 0;
 
@@ -743,6 +746,8 @@ public:
     }
     [[nodiscard]] virtual u32  frames_in_flight() const noexcept = 0;
     [[nodiscard]] virtual GpuMemoryStats memory_stats() const noexcept = 0;
+    /// Optional, failure-only allocation diagnostics. Never changes residency.
+    virtual void log_memory_breakdown() noexcept {}
 
     /// Grava o cache de pipeline. Chamado ao ir para segundo plano — pode
     /// bloquear enquanto o driver serializa, então NUNCA no caminho de frame.

@@ -671,7 +671,7 @@ import UIKit
 
     func testVideoPreviewKeepsVisiblePixelsAcrossPlaybackPauseAndSeek() throws {
         _ = try launch("playback-stress")
-        let play = app.buttons["Repeat on · hold to turn off"].firstMatch
+        let play = app.buttons["transport.play"].firstMatch
         XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
         _ = try awaitSnapshot("Video preview starts on the actual native renderer") { $0.playing != 0 }
         var frames: Set<Int64> = []
@@ -684,7 +684,7 @@ import UIKit
             try assertVisibleVideoPreview("Playing sample \(sample)")
         }
         XCTAssertGreaterThan(frames.count, 2, "The decoder/display must advance rather than retaining one frame forever")
-        let pause = app.buttons["Pause"].firstMatch
+        let pause = app.buttons["transport.play"].firstMatch
         XCTAssertTrue(pause.waitForExistence(timeout: 5)); pause.tap()
         let paused = try awaitSnapshot("Video pauses while keeping the last valid picture") { $0.playing == 0 }
         try assertVisibleVideoPreview("Paused video frame")

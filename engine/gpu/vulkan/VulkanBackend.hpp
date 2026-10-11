@@ -133,6 +133,8 @@ public:
     /// Release unused slabs after deferred resource destruction. Live block
     /// indices stay stable because Allocation stores them.
     void trim_empty_blocks() noexcept;
+    /// Failure-only diagnostics; does not reclaim or change admission policy.
+    void log_memory_breakdown() noexcept;
 
     [[nodiscard]] u64 reserved_bytes() const noexcept { return reserved_; }
     [[nodiscard]] u64 used_bytes() const noexcept { return used_; }
@@ -230,6 +232,15 @@ public:
     [[nodiscard]] bool allocate(VkDeviceSize size, VkDeviceSize align, VkBuffer& outBuffer,
                                 VkDeviceSize& outOffset, void*& outPtr) noexcept;
     [[nodiscard]] VkDeviceSize used() const noexcept { return used_; }
+    struct Stats {
+        VkDeviceSize capacity = 0;
+        VkDeviceSize backing = 0;
+        VkDeviceSize payloadUsed = 0;
+        VkDeviceSize alignedDemand = 0;
+        VkDeviceSize peakAlignedDemand = 0;
+        u32 chunks = 0;
+    };
+    [[nodiscard]] Stats stats() const noexcept;
 
 private:
     struct Chunk { VkBuffer buffer = VK_NULL_HANDLE; Allocation alloc{}; VkDeviceSize size = 0; };
@@ -238,7 +249,11 @@ private:
     std::vector<Chunk> chunks_;
     VkDeviceSize offset_ = 0;
     VkDeviceSize used_ = 0;
-    VkDeviceSize peak_ = 0;
+    // Demand in a hypothetical single buffer, including every alignment gap.
+    // Chunk capacities include discarded tails and are not a workload peak.
+    VkDeviceSize alignedDemand_ = 0;
+    VkDeviceSize peakAlignedDemand_ = 0;
+    VkDeviceSize initialCapacity_ = 0;
     VkBufferUsageFlags usage_ = 0;
     const char* name_ = "";
 };
@@ -419,6 +434,7 @@ public:
     [[nodiscard]] Status prepare_reinitialization(u64 timeoutNs) noexcept override;
     [[nodiscard]] u32 frames_in_flight() const noexcept override { return framesInFlight_; }
     [[nodiscard]] GpuMemoryStats memory_stats() const noexcept override;
+    void log_memory_breakdown() noexcept override;
     void save_pipeline_cache() noexcept override;
     [[nodiscard]] PipelineCacheInfo pipeline_cache_info() const noexcept override { return cacheInfo_; }
 

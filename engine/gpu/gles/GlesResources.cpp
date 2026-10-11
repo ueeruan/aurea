@@ -1,6 +1,7 @@
 #include "GlesInternal.hpp"
 #include "aurea/scene3d/Environment.hpp"
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <filesystem>
 
@@ -187,8 +188,20 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
     if (!source) return Status{Errc::ShaderCompileFailed, "SPIR-V has no matching build-time ES translation"};
     Shader shader; shader.id = glCreateShader(desc.stage == ShaderStage::Vertex ? GL_VERTEX_SHADER
         : desc.stage == ShaderStage::Fragment ? GL_FRAGMENT_SHADER : GL_COMPUTE_SHADER);
+    if (!shader.id) return Status{Errc::ShaderCompileFailed, "GLES shader object creation failed"};
+    const char* tracing = std::getenv("AUREA_GLES_SHADER_TRACE");
+    const bool trace = tracing && std::strcmp(tracing, "1") == 0;
+    if (trace) {
+        AUREA_LOG_INFO("GLES_COMPILE_BEGIN name=%s stage=%u bytes=%zu",
+            desc.debugName ? desc.debugName : "?", static_cast<u32>(desc.stage), std::strlen(source));
+        std::fflush(stderr);
+    }
     glShaderSource(shader.id, 1, &source, nullptr); glCompileShader(shader.id);
     GLint ok = 0; glGetShaderiv(shader.id, GL_COMPILE_STATUS, &ok);
+    if (trace) {
+        AUREA_LOG_INFO("GLES_COMPILE_END name=%s compiled=%d", desc.debugName ? desc.debugName : "?", ok);
+        std::fflush(stderr);
+    }
     if (!ok) {
         char log[8192]{}; glGetShaderInfoLog(shader.id, sizeof(log), nullptr, log);
         AUREA_LOG_ERROR("GLES shader %s: %s", desc.debugName ? desc.debugName : "", log);

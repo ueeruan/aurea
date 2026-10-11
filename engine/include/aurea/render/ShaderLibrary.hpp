@@ -138,7 +138,7 @@ public:
     ShaderLibrary(const ShaderLibrary&) = delete;
     ShaderLibrary& operator=(const ShaderLibrary&) = delete;
 
-    /// Cria os módulos de shader e os samplers comuns.
+    /// Cria os samplers e os módulos (GLES adia módulos até pipeline/prewarm).
     [[nodiscard]] Status initialize(GPUBackend& backend) noexcept;
     /// Destrói tudo (encerramento normal).
     void shutdown() noexcept;
@@ -183,7 +183,7 @@ public:
     // usado no Android de produção: lá os shaders são os embutidos.
     u32 reload_changed(const char* spvDirectory) noexcept;
 
-    /// Shaders que o backend recusou na inicialização (ex.: driver GLES que
+    /// Shaders que o backend recusou ao criar (ex.: driver GLES que
     /// não compila um shader novo). O resto do motor segue: só os passes que
     /// pedem esse shader ficam sem pipeline e são pulados.
     [[nodiscard]] u32 missing_shaders() const noexcept { return missingShaders_; }
@@ -193,10 +193,14 @@ public:
     void set_test_failing_shader(ShaderId id) noexcept { testFailing_ = id; }
 
 private:
+    [[nodiscard]] bool ensure_shader(ShaderId id) noexcept;
     GPUBackend* backend_ = nullptr;
+    bool deferredShaders_ = false;
     ShaderId testFailing_ = ShaderId::Count;
     u32 missingShaders_ = 0;
     ShaderHandle shaders_[kShaderCount]{};
+    u32 shaderRetryRequests_[kShaderCount]{};
+    bool rejectedShaders_[kShaderCount]{};
     SamplerHandle samplers_[static_cast<u32>(CommonSampler::Count)]{};
     std::unordered_map<PipelineKey, PipelineHandle, PipelineKeyHash> pipelines_;
     /// Pipelines que falharam → pedidos restantes até tentar de novo.

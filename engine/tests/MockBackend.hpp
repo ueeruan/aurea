@@ -37,6 +37,9 @@ public:
     u32 texturesDestroyed = 0;
     u32 pipelinesCreated = 0;
     u32 shadersCreated = 0;
+    u32 shadersAttempted = 0;
+    u32 shadersDestroyed = 0;
+    bool deferredShaders = false;
     u32 framesSubmitted = 0;
     u32 framesDiscarded = 0;
     bool supportsFrameDiscard = false;
@@ -166,7 +169,9 @@ public:
         return handle;
     }
     Result<SamplerHandle> create_sampler(const SamplerDesc&) noexcept override { return SamplerHandle{++ids_}; }
+    bool defer_shader_creation() const noexcept override { return deferredShaders; }
     Result<ShaderHandle> create_shader(const ShaderDesc& d) noexcept override {
+        ++shadersAttempted;
         if (!d.spirv || d.spirvBytes < 20) return Status{Errc::InvalidArgument};
         if (failShader && d.debugName && std::strcmp(failShader, d.debugName) == 0) return Status{Errc::ShaderCompileFailed};
         ++shadersCreated;
@@ -183,7 +188,7 @@ public:
     }
     void destroy_buffer(BufferHandle handle) noexcept override { mappedBuffers.erase(handle.id); }
     void destroy_sampler(SamplerHandle) noexcept override {}
-    void destroy_shader(ShaderHandle) noexcept override {}
+    void destroy_shader(ShaderHandle) noexcept override { ++shadersDestroyed; }
     void destroy_pipeline(PipelineHandle) noexcept override {}
     TextureDesc texture_desc(TextureHandle h) const noexcept override {
         return h.id && h.id <= textures.size() ? textures[h.id - 1] : TextureDesc{};

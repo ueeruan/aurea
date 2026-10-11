@@ -1528,6 +1528,78 @@ AUREA_TEST(ShaderLibrary, SameKeySamePipelineCompiledOnce) {
     AUREA_CHECK(!(*lib.pipeline(add) == *lib.pipeline(normal)));
 }
 
+AUREA_TEST(ShaderLibrary, DeferredPrewarmDoesNotCompileUnrelatedEffects) {
+    MockBackend b; b.deferredShaders = true;
+    b.failShader = "effects/pix_diffusion.comp";
+    ShaderLibrary lib;
+    AUREA_CHECK(lib.initialize(b).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 0u);
+    const PipelineKey keys[] = {
+        PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F),
+        PipelineKey::fullscreen(ShaderId::shape_shape_frag, SurfaceFormat::RGBA16F),
+        PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F),
+    };
+    AUREA_CHECK_EQ(lib.prewarm(keys, 3), 2u);
+    AUREA_CHECK_EQ(b.shadersCreated, 3u);  // shared fullscreen vertex + two fragments
+    AUREA_CHECK_EQ(lib.missing_shaders(), 0u);
+    AUREA_CHECK(!lib.shader(ShaderId::effects_pix_diffusion_comp).valid());
+    lib.mark_steady_state();
+    AUREA_CHECK(lib.pipeline(keys[0]).ok());
+    AUREA_CHECK_EQ(lib.compiles_since_mark(), 0u);
+    AUREA_CHECK_EQ(b.shadersAttempted, 3u);
+    lib.shutdown();
+    AUREA_CHECK_EQ(b.shadersDestroyed, 3u);
+}
+
+AUREA_TEST(ShaderLibrary, DeferredShaderRejectionIsPacedAndRecovers) {
+    MockBackend b; b.deferredShaders = true;
+    b.failShader = "effects/pix_diffusion.comp";
+    ShaderLibrary lib;
+    AUREA_CHECK(lib.initialize(b).ok());
+    const auto key = PipelineKey::compute_shader(ShaderId::effects_pix_diffusion_comp);
+    AUREA_CHECK(!lib.pipeline(key).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 1u);
+    AUREA_CHECK_EQ(b.pipelinesCreated, 0u);
+    AUREA_CHECK_EQ(lib.missing_shaders(), 1u);
+    // A different pipeline variant must not re-enter the failed compiler.
+    auto variant = key; variant.format = SurfaceFormat::RGBA8;
+    AUREA_CHECK(!lib.pipeline(variant).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 1u);
+    AUREA_CHECK(lib.pipeline(PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F)).ok());
+    b.failShader = nullptr;
+    for (u32 i = 0; i < 238; ++i) AUREA_CHECK(!lib.pipeline(key).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 3u); // failed compute + unrelated copy shaders
+    AUREA_CHECK(lib.pipeline(key).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 4u);
+    AUREA_CHECK_EQ(lib.missing_shaders(), 0u);
+    AUREA_CHECK_EQ(lib.compile_failures(), 1u);
+    lib.shutdown();
+    AUREA_CHECK_EQ(b.shadersDestroyed, 3u);
+}
+
+AUREA_TEST(ShaderLibrary, DeferredDeviceRecoveryDropsRejectedAndCompiledState) {
+    MockBackend b; b.deferredShaders = true;
+    ShaderLibrary lib;
+    AUREA_CHECK(lib.initialize(b).ok());
+    const auto copy = PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK(lib.pipeline(copy).ok());
+    b.failShader = "effects/pix_diffusion.comp";
+    AUREA_CHECK(!lib.pipeline(PipelineKey::compute_shader(ShaderId::effects_pix_diffusion_comp)).ok());
+    const u32 before = b.shadersAttempted;
+    lib.forget_device();
+    AUREA_CHECK(!lib.ready());
+    AUREA_CHECK_EQ(lib.missing_shaders(), 0u);
+    AUREA_CHECK_EQ(b.shadersDestroyed, 0u); // the lost device already destroyed its objects
+    b.failShader = nullptr;
+    AUREA_CHECK(lib.initialize(b).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, before);
+    AUREA_CHECK(lib.pipeline(copy).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, before + 2);
+    AUREA_CHECK(lib.pipeline(PipelineKey::compute_shader(ShaderId::effects_pix_diffusion_comp)).ok());
+    lib.shutdown();
+    AUREA_CHECK_EQ(b.shadersDestroyed, 3u);
+}
+
 AUREA_TEST(ShaderLibrary, CompilesDuringPlaybackAreCounted) {
     MockBackend b;
     ShaderLibrary lib;

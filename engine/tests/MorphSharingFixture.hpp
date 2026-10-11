@@ -66,6 +66,15 @@ inline scene3d::SceneFrame frame(const std::shared_ptr<const scene3d::SceneAsset
             over.baseColor.x = .2f + .25f * (i % 3);
             instance.materials.push_back(over);
         }
+        if (mode == 7) {
+            // Coplanar A/B/A runs deliberately overlap. A global gather would
+            // move the final A before B and change the visible winning color.
+            instance.world = Mat4::translation(Vec3{160, 90, 0}) * Mat4::scale(Vec3{72, 72, 32});
+            MaterialOverride over; over.materialIndex = 0; over.mask = 1;
+            over.baseColor = source->materials[0].baseColor;
+            over.baseColor.x = i % 3 == 1 ? .8f : .2f;
+            instance.materials.push_back(over);
+        }
         if (mode == 6) {
             instance.skinJointOffset = {0};
             instance.jointMatrices = {Mat4::translation(Vec3{0, .05f * (i % 3), 0})};
@@ -79,7 +88,11 @@ inline scene3d::SceneFrame frame(const std::shared_ptr<const scene3d::SceneAsset
 }
 
 inline u32 unique_weights(u32 mode) { return mode == 1 ? 2 : mode == 2 ? 12 : 1; }
-inline u32 color_draws(u32 mode) { return mode == 3 || mode == 6 ? 24 : mode == 4 ? 4 : 2 * unique_weights(mode); }
-inline u32 shadow_draws(u32 mode) { return mode == 3 ? 0 : mode == 6 ? 24 : 2 * unique_weights(mode); }
+// Only adjacent compatible runs may batch after stable pipeline/material-index
+// ordering. Alternating deformation or overrides keep their original order.
+inline u32 color_draws(u32 mode) {
+    return mode == 1 || mode == 2 || mode == 3 || mode == 6 ? 24 : mode == 4 ? 13 : mode == 7 ? 10 : 2;
+}
+inline u32 shadow_draws(u32 mode) { return mode == 3 ? 0 : mode == 5 ? 48 : 24; }
 
 } // namespace aurea::test_fixtures::morph_sharing

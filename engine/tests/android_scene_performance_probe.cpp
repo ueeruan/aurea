@@ -25,9 +25,11 @@ namespace probe_backend = aurea::gles;
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <sys/resource.h>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -257,6 +259,11 @@ int main(int argc, char** argv) {
     settings.sceneExposureBatchBudgetBytes = static_cast<u64>(batchBudgetMiB) << 20;
 #endif
     std::vector<double> prepare, record, wait, total, gpu, cpuRecord, batchWait;
+    // Read the same completed-frame timestamp queries as the production HUD.
+    // Merge repeated labels within one frame, then report their distribution:
+    // a group with several shadow/post passes must not look artificially cheap.
+    std::map<std::string, std::vector<double>> passGpuMs;
+    u32 sampledGpuFrames = 0;
     u64 peakUsed = 0, peakReserved = 0, peakUpload = 0, peakRss = process_rss_bytes();
     u32 peakSamples = 0, peakBatches = 0, draws = 0, triangles = 0, visible = 0, culled = 0, instancedDraws = 0;
     u32 warmup = 0, measured = 0, pendingFrames = 0;
@@ -337,6 +344,18 @@ int main(int argc, char** argv) {
             batchWait.push_back(timings.sceneExposureWaitMs);
 #endif
             if (timings.gpuMeasured && timings.gpuTotalMs > 0) gpu.push_back(timings.gpuTotalMs);
+            if (timings.gpuMeasured) {
+                const GpuTiming* passes = nullptr;
+                const u32 count = renderer.last_gpu_passes(passes);
+                std::map<std::string, double> framePasses;
+                for (u32 pass = 0; pass < count; ++pass) {
+                    const auto& timing = passes[pass];
+                    if (!timing.label || !std::isfinite(timing.ms) || timing.ms < 0) continue;
+                    framePasses[timing.label] += timing.ms;
+                }
+                if (!framePasses.empty()) ++sampledGpuFrames;
+                for (const auto& [label, ms] : framePasses) passGpuMs[label].push_back(ms);
+            }
             ++measured;
         }
         // Warmup can show a valid fallback while the asynchronous environment
@@ -367,6 +386,16 @@ int main(int argc, char** argv) {
     std::printf("STAGES record_and_submit_wall_p50=%.3f record_and_submit_wall_p95=%.3f record_and_submit_wall_p99=%.3f batch_fence_wait_p50=%.3f batch_fence_wait_p95=%.3f batch_fence_wait_p99=%.3f gpu_timer_scope=%s record_metric=commands_plus_bounded_submit_wall\n",
         percentile(cpuRecord, .5), percentile(cpuRecord, .95), percentile(cpuRecord, .99), percentile(batchWait, .5), percentile(batchWait, .95), percentile(batchWait, .99),
         bounded ? "latest_completed_submission_only" : "whole_frame");
+    std::printf("GPU_PASSES completed_query_frames=%u measured_logical_frames=%u scope=%s aggregation=sum_same_label_per_completed_frame\n",
+        sampledGpuFrames, measured, bounded ? "latest_completed_submission_only" : "whole_frame");
+    for (const auto& [label, samples] : passGpuMs) {
+        std::printf("GPU_PASS label=%s samples=%zu gpu_p50_ms=%.3f gpu_p95_ms=%.3f gpu_p99_ms=%.3f\n",
+            label.c_str(), samples.size(), percentile(samples, .5), percentile(samples, .95), percentile(samples, .99));
+    }
+    std::printf("SCENE_WORK primary_draws=%u shadow_draws=%u shadow_map_size=%u quality=%u shadows_soft=%d shadows_min_pcf=%u shadows_min_map=%u\n",
+        renderer.heavy_stats().lastSceneDrawCalls, renderer.heavy_stats().lastSceneShadowDrawCalls,
+        renderer.heavy_stats().lastShadowMapSize, comp->post_process().quality3d, comp->shadows().softShadows,
+        comp->shadows().pcfSamples, comp->shadows().mapResolution);
     std::printf("SCALING objects=%u materials=%s resolved_measured_frames=%u offscreen_waited_fps=%.3f offscreen_waited_1pct_low_fps=%.3f offscreen_waited_p99_fps=%.3f peak_reserved_gpu_bytes=%llu sampled_peak_rss_bytes=%llu visible_primitives=%u culled_primitives=%u instanced_draws=%u fps_scope=offscreen_prepare_record_explicit_wait_not_ui_playback rss_scope=process_includes_driver_not_cpu_only one_percent_low=reciprocal_mean_slowest_ceil_1pct\n",
         objectCount, materialMode, measured, waited_fps(total), waited_one_percent_low(total),
         percentile(total, .99) > 0 ? 1000 / percentile(total, .99) : 0,
@@ -375,6 +404,12 @@ int main(int argc, char** argv) {
     const auto& sceneStats = renderer.scene_stats();
     std::printf("DEFORMATION unique_morph_uploads=%u deformed_vertices=%llu morph_upload_bytes=%llu scope=last_frame_all_scene_and_shutter_builds\n",
         sceneStats.morphUploads, static_cast<unsigned long long>(sceneStats.morphVertices), static_cast<unsigned long long>(sceneStats.morphUploadBytes));
+#endif
+#if !defined(AUREA_PROBE_BASELINE)
+    if (const char* option = std::getenv("AUREA_PROBE_MEMORY_BREAKDOWN"); option && std::strcmp(option, "1") == 0) {
+        std::printf("MEMORY_BREAKDOWN scope=live_resources_after_final_readback\n");
+        backend.log_memory_breakdown();
+    }
 #endif
     backend.wait_idle(); backend.destroy_texture(*texture); renderer.shutdown(); backend.shutdown();
     if (!finite || lit < 100) { std::printf("FAIL blank or nonfinite rendered image\n"); return 7; }

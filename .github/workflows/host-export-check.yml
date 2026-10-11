@@ -1,4 +1,4 @@
-name: Check shared serial export
+name: Diagnose MorphSharing process teardown
 
 on:
   workflow_dispatch:
@@ -30,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends cmake ninja-build gcc-14 g++-14 \
-            ccache glslc libvulkan-dev mesa-vulkan-drivers vulkan-tools vulkan-validationlayers curl
+            ccache glslc libvulkan-dev mesa-vulkan-drivers vulkan-tools vulkan-validationlayers curl gdb zstd
           mkdir -p build/host-export-results
       - name: Select and verify the software Vulkan driver
         run: |
@@ -97,41 +97,18 @@ jobs:
           set -euo pipefail
           cmake --build build/host-export --target aurea_tests --parallel 2 \
             2>&1 | tee build/host-export-results/build.log
-      - name: Compare serial pixels and audio with legacy and V2
-        working-directory: build/host-export/tests
-        run: |
-          set -euo pipefail
-          timeout 300s ./aurea_tests PlanesAndAudioMatchLegacyWithEffectsAnd3DMotionBlur \
-            2>&1 | tee ../../host-export-results/serial-fidelity.log
-          grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-fidelity.log
-          if grep -Eq 'pulado|skipped' ../../host-export-results/serial-fidelity.log; then exit 1; fi
-      - name: Verify the software retry and validated publication
+      - name: Capture unchanged MorphSharing process exits and all-thread stacks
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         working-directory: build/host-export/tests
         run: |
           set -euo pipefail
-          timeout 120s ./aurea_tests SafeModeTwoPublishesValidatedFramesUsingH264WithoutReducingRequestedBitrate \
-            2>&1 | tee ../../host-export-results/serial-safe-retry.log
-          grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-safe-retry.log
-          if grep -Eq 'pulado|skipped' ../../host-export-results/serial-safe-retry.log; then exit 1; fi
-      - name: Verify preview continuity and exact 3D capture memory
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        working-directory: build/host-export/tests
-        run: |
-          set -euo pipefail
-          FAILED=0
-          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary VulkanReturnsEmptySlabsAndPreservesLiveAllocations VulkanMemoryPackingGpu VulkanMrtGpu SceneWarmupGpu OriginalModelExport FrameGraphSegments PreviewGraphLifecycle PreviewIdle ExportSourceStartupGpu; do
-            # Preserve independent GPU evidence even if another group fails.
-            if ! timeout 180s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
-            if ! grep -Eq '^[1-9][0-9]* testes, [0-9]+ verificacoes, 0 falhas$' "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
-            if grep -Eq 'pulado|skipped' "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
-          done
-          exit "$FAILED"
+          python3 ../../../engine/tests/morph_process_diagnostic.py \
+            --binary ./aurea_tests --output ../../host-export-results
       - name: Preserve host test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: host-serial-export-check
+          name: morph-process-teardown-diagnostic
           path: build/host-export-results/
           if-no-files-found: error
           retention-days: 14

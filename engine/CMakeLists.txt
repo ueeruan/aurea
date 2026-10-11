@@ -384,6 +384,9 @@ elseif(AUREA_PLATFORM_HOST)
 endif()
 
 if(AUREA_HAS_VULKAN)
+    # Isolated crash diagnostic only: line tables retain the original -O3 code.
+    set_source_files_properties(gpu/vulkan/VulkanLoader.cpp gpu/vulkan/VulkanDevice.cpp
+        PROPERTIES COMPILE_OPTIONS "-g1")
     add_library(aurea_vulkan STATIC
         gpu/vulkan/VulkanLoader.cpp
         gpu/vulkan/VulkanCommon.cpp

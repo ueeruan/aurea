@@ -140,6 +140,10 @@ endif()
 
 add_test(NAME aurea_engine_tests COMMAND aurea_tests)
 
+# Isolated diagnostic branch: preserve release behavior, retain line tables for
+# the GPU fixture and shared native teardown stack without rebuilding all code.
+set_source_files_properties(test_gpu.cpp PROPERTIES COMPILE_OPTIONS "-g1")
+
 # Os testes escrevem arquivos temporários no diretório de build, não no
 # diretório do usuário. Rodar daqui deixa os temporários visíveis e apagáveis.
 set_tests_properties(aurea_engine_tests PROPERTIES

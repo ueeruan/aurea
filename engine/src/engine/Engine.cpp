@@ -11883,7 +11883,13 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         // ignorava a tabela e usava 3 em todo celular: um aparelho de 4 GB
         // segurava um slot de leitura a mais do que a política dele manda.
         const u32 policyDepth = caps_.policy().exportPipelineDepth;
-        const u32 want = config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
+        const u64 trackedBudget = DeviceCapabilities::process_budget_limit(
+            config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+        // Small envelopes cannot retain readback buffers for several full-HD
+        // frames beside a large effect target. Serialize instead of changing
+        // output dimensions or shutter samples.
+        const bool limitedBacking = config_.enableTrackedGpuAdmission && trackedBudget < (192ull << 20);
+        const u32 want = limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
             : std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
                                                          : (policyDepth ? policyDepth : 3u), 1u, 4u);
         for (u32 k = 0; k < want; ++k) {
@@ -12057,6 +12063,7 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     u64 lastWork = media_.decode_work();
     u64 notedWork = lastWork, notedNs = t0;
     bool drainedGpu = false;
+    bool reclaimedAllocationFailure = false;
     std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
     // Install only while holding renderMutex_, and restore before any decoder
     // wait unlocks it. Offscreen readers never inherit export-owned callbacks.
@@ -12226,6 +12233,21 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         }
         if (!c.frozenAssetStatus.ok()) s = c.frozenAssetStatus;
         gpuFrame = gpu_->last_submitted_frame();
+        // A changing effect extent can retire a large previous target during
+        // compilation, while its GPU work/backing is still outstanding. One
+        // fence-bounded reclamation rebuilds this exact output frame. A second
+        // allocation failure is final; there is no rescale or endless retry.
+        if (s.code() == Errc::OutOfDeviceMemory && c.v2 && config_.enableTrackedGpuAdmission
+                && !reclaimedAllocationFailure) {
+            reclaimedAllocationFailure = true;
+            snapshot_.release_video_frames();
+            if (const Status ready = wait_export_gpu(gpuFrame); !ready.ok()) return ready;
+            if (const Status reclaimed = renderer_.reclaim_failed_transients(100'000'000ull); !reclaimed.ok()) return reclaimed;
+            AUREA_LOG_INFO("export-v2: backing concluido liberado; reconstruir o mesmo quadro %lld, qualidade igual",
+                static_cast<long long>(t.value));
+            rl.unlock();
+            continue;
+        }
         if (rs.gpuTimers) {
             // O 1º quadro separado: é onde caem o IBL final e os pipelines do export.
             if (c.profiledFrames++ == 0) c.firstFrameMs = timings.cpuRecordMs;
@@ -12435,7 +12457,7 @@ void Engine::export_thread_main() noexcept {
             const auto residency = gpu_->memory_stats();
             const u64 budget = DeviceCapabilities::process_budget_limit(
                 config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
-            if (residency.reservedBytes > budget * 3 / 4) allowed = 1;
+            if (std::max(residency.usedBytes, residency.reservedBytes) > budget * 3 / 4) allowed = 1;
         }
         if (allowed != previousAdmission) {
             AUREA_LOG_INFO("export: scheduler permite %u quadros em voo (pressao %.2f, qualidade igual)",

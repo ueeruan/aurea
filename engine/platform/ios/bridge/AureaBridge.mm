@@ -175,11 +175,13 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     // The legacy half-share rejects a 101 MiB Motion Tile target even when
     // the measured device envelope is larger and live GPU use is below 8 MiB.
     config.enableTrackedGpuAdmission = true;
-    if (debug) for (NSString* arg in NSProcessInfo.processInfo.arguments) {
+#if DEBUG
+    for (NSString* arg in NSProcessInfo.processInfo.arguments) {
         if (![arg hasPrefix:@"--aurea-memory-budget-mb="]) continue;
         const NSInteger mib = [[arg substringFromIndex:25] integerValue];
         if (mib >= 96 && mib <= 1024) config.memoryBudgetBytes = static_cast<u64>(mib) << 20;
     }
+#endif
     config.audioOutput = audioOut_.get();
     config.defaultFontPath = ios_default_font_path();
     ios_install_text_fallback();

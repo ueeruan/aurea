@@ -1100,6 +1100,11 @@ AUREA_TEST(Export, MotionBlur3DPipelinedIsByteIdenticalToSerial) {
 
 AUREA_TEST(ExportV2Gpu, FullHdAnimatedTextMotionBlurWithinTrackedBudget) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    u64 hashes[2]{};
+    u32 budgetIndex = 0;
+    // Vulkan also accounts for allocation-block granularity. Metal's smaller
+    // 163 MiB envelope is checked by the native iOS UI regression.
+    for (const u64 budget : {224ull << 20, 256ull << 20}) {
     const std::string source = "aurea_v2_text_budget_source.bin";
     const char identity[] = "unused synthetic video identity";
     AUREA_CHECK(fileio::write_atomic(source, identity, sizeof(identity)).ok());
@@ -1111,8 +1116,8 @@ AUREA_TEST(ExportV2Gpu, FullHdAnimatedTextMotionBlurWithinTrackedBudget) {
         }
     } cleanup{source};
     SyntheticConfig cfg; cfg.width = 1920; cfg.height = 1080; cfg.frameCount = 60;
-    Rig r(cfg, 30, 60, 1, nullptr, nullptr, 0, false, source.c_str(),
-          ExportExecutionProfile::Balanced, false, nullptr, nullptr, true, 256ull << 20);
+    Rig r(cfg, 30, 60, 3, nullptr, nullptr, 0, false, source.c_str(),
+          ExportExecutionProfile::Balanced, false, nullptr, nullptr, true, budget);
     AUREA_CHECK(r.ok); if (!r.ok) return;
     AUREA_CHECK(r.comp()->remove_layer(r.video_layer()));
     const auto text = r.e.add_text("AUREA MOTION BLUR");
@@ -1129,6 +1134,10 @@ AUREA_TEST(ExportV2Gpu, FullHdAnimatedTextMotionBlurWithinTrackedBudget) {
     // on destruction even after publication; completion is its validated phase.
     AUREA_CHECK(r.cap.finished);
     AUREA_CHECK_EQ((result.p.flags >> 8) & 15u, 6u);
+    hashes[budgetIndex++] = combined_hash(r.cap);
+    }
+    // Memory pressure changes scheduling/retirement, not any output pixel.
+    AUREA_CHECK_EQ(hashes[0], hashes[1]);
 }
 
 AUREA_TEST(ExportV2Gpu, BoundedTextPreservesTileAndStyledShutterPixels) {

@@ -78,7 +78,7 @@ import SwiftUI
         guard now.timeIntervalSince(lastSent) >= 0.025 else { return }
         lastSent = now
         if recording && model.status.playing != 0 {
-            let frame = model.frame
+            let frame = model.status.playhead
             if frame != lastFrame {
                 lastFrame = frame
                 model.realCameraKey(layer, rx: rx, ry: ry, rz: rz)

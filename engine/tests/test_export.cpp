@@ -112,6 +112,7 @@ struct BenchCapture {
     i64 hangWriteAt = -1;                ///< n-ésima chamada de write_video que trava
     bool hangFinish = false;             ///< o finish trava
     bool hangValidation = false;         ///< decode de validacao retorna depois do watchdog
+    bool hangAbort = false;              ///< teardown preso depois de erro real
     std::atomic<bool>* hangEntered = nullptr;
     std::atomic<bool>* hangRelease = nullptr;   ///< solta a chamada presa (fim do teste)
     std::atomic<bool>* hangReturned = nullptr;
@@ -138,7 +139,7 @@ u64 fnv(u64 h, const u8* p, usize n) {
 
 class BenchSink final : public ExportSink {
 public:
-    explicit BenchSink(BenchCapture* c) : c_(c) {}
+    explicit BenchSink(BenchCapture* c) : c_(c), destroyed_(c->sinkDestroyed) {}
     void set_heartbeat(std::atomic<u64>* beatNs) noexcept override { c_->beat = beatNs; }
     void set_cancel_flag(const std::atomic<bool>* flag) noexcept override { cancellation_ = flag; }
     /// Preso na "plataforma": não bate, só volta quando o teste soltar. Ao
@@ -161,7 +162,7 @@ public:
         // lifetime without making the regression itself read freed memory.
         if (c_->invalidateDiagnosticOnDestroy)
             std::snprintf(c_->platformDiagnostic, sizeof(c_->platformDiagnostic), "diagnostico expirado");
-        if (c_->sinkDestroyed) c_->sinkDestroyed->store(true, std::memory_order_release);
+        if (destroyed_) destroyed_->store(true, std::memory_order_release);
     }
     Status open(const char* path, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
         struct OpenActivity {
@@ -244,6 +245,7 @@ public:
             c_->ptsMonotonic && c_->audioContiguous && c_->hasAudio == expected.audio ? OkStatus : Status{Errc::CorruptData};
     }
     void abort() noexcept override {
+        if (c_->hangAbort) { (void)hang(OkStatus); return; }
         if (c_->abortedDuringOpen && c_->openActive && c_->openActive->load(std::memory_order_acquire))
             c_->abortedDuringOpen->store(true, std::memory_order_release);
         c_->aborted = true;
@@ -256,6 +258,7 @@ public:
     }
 private:
     BenchCapture* c_;
+    std::atomic<bool>* destroyed_ = nullptr; // session-owned test flag, unaffected by another retry
     const std::atomic<bool>* cancellation_ = nullptr; // bound per sink, never shared with a retry
     std::string outputPath_;
 };

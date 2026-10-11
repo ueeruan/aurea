@@ -50,7 +50,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=ROOT / "build/reference/astra-ios-offline")
     parser.add_argument("--build-dir", type=Path, default=ROOT / "engine/platform/ios/build/native-export-probe")
     parser.add_argument("--arch", choices=("arm64", "x86_64"), default=platform.machine())
-    parser.add_argument("--ios-min", default="16.0")
+    parser.add_argument("--ios-min", default="16.3")
     parser.add_argument("--jobs", type=int, default=3)
     parser.add_argument("--device", help="Available iOS simulator UDID; otherwise select and boot")
     args = parser.parse_args()

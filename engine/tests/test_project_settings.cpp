@@ -5,6 +5,7 @@
 //  Pedido de beta: "coloca fps ilimitado e escolher a cor do projeto".
 // =============================================================================
 #include "TestFramework.hpp"
+#include "CapturedExportProof.hpp"
 
 #include "aurea/Engine.hpp"
 #include "aurea/timeline/Composition.hpp"
@@ -225,11 +226,12 @@ struct Capture {
 class CountingSink final : public ExportSink {
 public:
     explicit CountingSink(Capture* c) : c_(c) {}
-    Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig*) noexcept override {
+    Status open(const char* path, const VideoStreamConfig& v, const AudioStreamConfig* audio) noexcept override {
         c_->video = v;
-        return OkStatus;
+        return proof_.open(path, v, audio);
     }
-    Status write_video(const u8* y, u32 yStride, const u8*, u32, i64 ptsUs) noexcept override {
+    Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
+        proof_.picture(y, yStride, uv, uvStride, ptsUs);
         if (c_->firstY.empty()) {
             const u8* row = y + static_cast<usize>(c_->video.height / 2) * yStride;
             c_->firstY.assign(row, row + c_->video.width);
@@ -237,11 +239,17 @@ public:
         c_->pts.push_back(ptsUs);
         return OkStatus;
     }
-    Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
-    Status finish() noexcept override { c_->finished = true; return OkStatus; }
+    Status write_audio(const i16* data, u32 frames, i64 pts) noexcept override {
+        proof_.pcm(data, frames, pts); return OkStatus;
+    }
+    Status finish() noexcept override { c_->finished = true; return proof_.finish(); }
+    Status validate_output(const ExportOutputValidation& expected) noexcept override {
+        return proof_.validate(expected);
+    }
     void abort() noexcept override {}
 private:
     Capture* c_;
+    aurea::test::CapturedExportProof proof_;
 };
 
 std::unique_ptr<ExportSink> make_counting_sink(void* user) {

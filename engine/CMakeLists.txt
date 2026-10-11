@@ -95,6 +95,7 @@ set(AUREA_CORE_SOURCES
     src/export/OfflineFrameQueue.cpp
     src/export/OfflineFrameRenderer.cpp
     src/export/OfflineAudioSnapshot.cpp
+    src/export/OfflineAudioBlockSource.cpp
     src/export/FFmpegExportSink.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
@@ -320,7 +321,7 @@ set(AUREA_IMPORT_BOUNDARIES
 )
 list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportSinkStartup.cpp
     src/export/FFmpegExportSink.cpp
-    src/export/OfflineAudioSnapshot.cpp)
+    src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)
 if(MSVC)
     set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS /EHsc)
 else()

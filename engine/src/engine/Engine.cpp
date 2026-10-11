@@ -34,6 +34,7 @@
 #include "aurea/export/OfflineFrameQueue.hpp"
 #include "aurea/export/OfflineFrameRenderer.hpp"
 #include "aurea/export/OfflineAudioSnapshot.hpp"
+#include "aurea/export/OfflineAudioBlockSource.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
@@ -274,6 +275,7 @@ struct Engine::ExportContext {
     std::unique_ptr<OfflineFrameRenderer> offline;
     bool deferredGpuCleanup = false, retainedReadbacks = false;
     u64 deferredGpuFrame = 0, deferredGpuGeneration = 0;
+    u64 resourceGpuGeneration = 0; // mapped readbacks belong only to this device generation
     u64 queueByteLimit = 0;
     bool withAudio = false;
     void publish_export_phase(const char* message) noexcept {
@@ -287,6 +289,16 @@ struct Engine::ExportContext {
     bool producerDone = false;
     bool stop = false;                 ///< encerrar já (cancelamento ou erro)
     Status encoderStatus = OkStatus;   ///< erro do sink (escrito pelo encoder)
+    char encoderDetail[256]{}, finishDetail[256]{}; // owned before native teardown
+    static Status own_status(Status status, char (&detail)[256]) noexcept {
+        if (status.ok()) return OkStatus;
+        const auto text = status.detail().empty() ? status.message() : status.detail();
+        char copied[256]{};
+        std::snprintf(copied, sizeof(copied), "%.*s", static_cast<int>(std::min<usize>(text.size(), sizeof(copied) - 1)), text.data());
+        std::memcpy(detail, copied, sizeof(copied));
+        return Status{status.code(), detail};
+    }
+    void set_encoder_status(Status status) noexcept { encoderStatus = own_status(status, encoderDetail); } // qMutex
     bool encoderFailed = false;
 
     // Medição (ns acumulados na sessão; cada lado escreve só os seus).
@@ -426,7 +438,24 @@ Engine::~Engine() {
     shutdown();
     {
         std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
-        retire_abandoned_export_locked();
+        std::lock_guard<std::mutex> render(renderMutex_);
+        (void)retire_abandoned_export_locked(false);
+        // Only genuinely stuck native calls outlive the Engine. Returned
+        // workers have already closed their sink and are reclaimed above.
+        std::lock_guard<std::mutex> context(exportContextMutex_);
+        for (auto& retired : retiredExports_) {
+            if (!retired) continue;
+            bool exited;
+            { std::lock_guard<std::mutex> queue(retired->qMutex); exited = retired->encoderExited; }
+            if (exited) {
+                release_offline_export(*retired, false);
+                retired.reset();
+            } else {
+                AUREA_LOG_WARN("export: chamada nativa ainda presa no encerramento (%p)",
+                    static_cast<void*>(retired.get()));
+                (void)retired.release(); // at most the two admitted native sessions
+            }
+        }
     }
     delete adaptive_;
     adaptive_ = nullptr;
@@ -11507,7 +11536,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
-        retire_abandoned_export_locked();
+        if (const Status admitted = retire_abandoned_export_locked(); !admitted.ok()) return admitted;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         // Complete retained GPU ownership before replacing the previous session.
         std::lock_guard<std::mutex> context(exportContextMutex_);
@@ -11967,14 +11996,46 @@ Status Engine::restart_export(const char* recoveryPath, const char* outputPath) 
       catch (...) { return Errc::IoError; }
 }
 
-void Engine::retire_abandoned_export_locked() noexcept {
-    // O produtor do contexto já saiu (join feito por quem chama). O worker do
-    // encoder dele pode estar preso na plataforma e voltar a qualquer momento:
-    // o contexto (e o sink, que ele usa) nunca é destruído.
+Status Engine::retire_abandoned_export_locked(bool admitNewSession) noexcept {
     std::lock_guard<std::mutex> context(exportContextMutex_);
-    if (!exportCtx_ || exportCtx_->thread.joinable() || !exportCtx_->abandoned_worker()) return;
-    ExportContext* leaked = exportCtx_.release();
-    AUREA_LOG_WARN("export: contexto com o worker do encoder travado mantido vivo (%p)", static_cast<void*>(leaked));
+    const auto exited = [](ExportContext& session) {
+        std::lock_guard<std::mutex> queue(session.qMutex);
+        return session.encoderExited;
+    };
+    usize retained = 0;
+    for (auto& retired : retiredExports_) {
+        if (!retired) continue;
+        if (exited(*retired)) {
+            // The flag is the worker's final access, after native codec close.
+            // Device generations prevent stale handles from touching a reset GPU.
+            release_offline_export(*retired, false);
+            if (!retired->deferredGpuCleanup) retired.reset();
+        }
+        if (retired) ++retained;
+    }
+    const bool retiring = exportCtx_ && !exportCtx_->thread.joinable() && exportCtx_->abandoned_worker();
+    if (retiring && exited(*exportCtx_)) {
+        release_offline_export(*exportCtx_, false);
+        if (!exportCtx_->deferredGpuCleanup) exportCtx_.reset();
+    }
+    const bool activeRetirement = exportCtx_ && !exportCtx_->thread.joinable() && exportCtx_->abandoned_worker();
+    const usize held = retained + static_cast<usize>(activeRetirement);
+    if (admitNewSession && held >= retiredExports_.size()) {
+        // Preserve the previous progress/error. No third encoder or frame
+        // buffers are created while two native calls remain quarantined.
+        return Status{Errc::BudgetExceeded, "duas sessoes de exportacao ainda presas; aguarde os encoders encerrarem"};
+    }
+    if (activeRetirement) {
+        for (auto& retired : retiredExports_) {
+            if (retired) continue;
+            retired = std::move(exportCtx_);
+            AUREA_LOG_WARN("export: worker nativo mantido na quarentena limitada (%p)",
+                static_cast<void*>(retired.get()));
+            return OkStatus;
+        }
+        return Status{Errc::BudgetExceeded, "limite de sessoes nativas de exportacao atingido"};
+    }
+    return OkStatus;
 }
 
 Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
@@ -11990,6 +12051,7 @@ Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
 }
 
 Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
+    ctx.resourceGpuGeneration = gpuGeneration_;
     ctx.offline = std::make_unique<OfflineFrameRenderer>();
     const u64 renderBudget = std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2);
     if (const Status initialized = ctx.offline->initialize(*gpu_, effectRegistry_, config_.mediaFactory,
@@ -12030,6 +12092,7 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
 
 void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) noexcept {
     bool lostDevice = !gpu_ || gpu_->is_device_lost()
+        || (ctx.resourceGpuGeneration && ctx.resourceGpuGeneration != gpuGeneration_)
         || (ctx.deferredGpuCleanup && ctx.deferredGpuGeneration != gpuGeneration_);
     if (ctx.offline && !lostDevice) {
         const u64 fence = ctx.deferredGpuCleanup ? ctx.deferredGpuFrame : gpu_->last_submitted_frame();
@@ -12082,49 +12145,8 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
     return c.frozenAssetStatus.ok() ? result : c.frozenAssetStatus;
 }
 
-namespace {
-/// O mixer lê do cache de export, decodificando o que faltar na hora.
-class ExportBlocks final : public audio::BlockSource {
-public:
-    ExportBlocks(audio::AudioBlockCache& c, const std::atomic<bool>& cancel, std::atomic<u64>* beat = nullptr)
-        : cache_(c), cancel_(cancel), beat_(beat) {}
-    const audio::AudioBlock* block(u64 asset, i64 b) override {
-        if (cancel_.load(std::memory_order_acquire)) { status_ = Errc::Cancelled; return nullptr; }
-        if (!status_.ok()) return nullptr;
-        for (auto& h : recent_) {
-            if (h.asset == asset && h.block == b) return h.ptr.get();
-        }
-        auto p = cache_.fetch(asset, b, &cancel_);
-        if (!p) {
-            status_ = cancel_.load(std::memory_order_acquire) ? Status{Errc::Cancelled}
-                : Status{Errc::DecodeFailed, "nao foi possivel decodificar o audio solicitado"};
-            return nullptr;
-        }
-        // Um bloco de áudio decodificado é progresso do worker (watchdog): um
-        // mix longo (muitos clipes, MP3 sem índice) não é encoder travado.
-        if (beat_) beat_->store(monotonic_ns(), std::memory_order_release);
-        recent_.push_back(Held{asset, b, p});
-        if (recent_.size() > 16) recent_.erase(recent_.begin());
-        return recent_.back().ptr.get();
-    }
-    Status status() const noexcept { return status_; }
-
-private:
-    struct Held {
-        u64 asset;
-        i64 block;
-        std::shared_ptr<const audio::AudioBlock> ptr;
-    };
-    audio::AudioBlockCache& cache_;
-    const std::atomic<bool>& cancel_;
-    std::atomic<u64>* beat_ = nullptr;
-    Status status_{};
-    std::vector<Held> recent_;
-};
-} // namespace
-
 Status Engine::write_export_audio(ExportContext& ctx, i64 untilSample) noexcept {
-    ExportBlocks blocks(*ctx.audioCache, ctx.cancelRequested, &ctx.encoderBeatNs);
+    OfflineAudioBlockSource blocks(*ctx.audioCache, ctx.cancelRequested, &ctx.encoderBeatNs);
     constexpr u32 kChunk = 4096;
     ctx.audioMix.resize(static_cast<usize>(kChunk) * audio::kMixChannels);
     ctx.audioPcm.resize(ctx.audioMix.size());
@@ -12135,8 +12157,10 @@ Status Engine::write_export_audio(ExportContext& ctx, i64 untilSample) noexcept 
         // do encoder (o motivo se a plataforma prender o worker).
         ctx.enter(ExportWorkerPhase::AudioMix);
         if (!ctx.offlineAudio) return Errc::InvalidState;
+        blocks.begin_chunk();
         const Status mixed = ctx.offlineAudio->mix(ctx.audioWritten, n, blocks, ctx.audioMix.data(),
             nullptr, &ctx.audioFx, &ctx.cancelRequested, &ctx.encoderBeatNs);
+        if (!blocks.status().ok()) return blocks.status();
         if (!mixed.ok()) return mixed;
         ctx.enter(ExportWorkerPhase::AudioWrite);
         // A missing requested block is an actual media failure, not intentional
@@ -12360,8 +12384,8 @@ void Engine::export_thread_main() noexcept {
                       result.detail().empty() ? result.message().data() : result.detail().data());
         result = Status{result.code(), resultDetail};
     }
-    // Worker abandonado: o sink continua dele (e da plataforma travada) — não
-    // é destruído aqui nem depois (retire_abandoned_export_locked).
+    // An abandoned native call still owns its sink. Its worker closes it
+    // before publishing the exit flag; the bounded quarantine then reclaims it.
     if (!abandonedWorker) ctx.sink.reset();
     if (!ctx.recoveryPath.empty()) {
         ctx.recovery.state = result.ok() ? export_recovery::State::Complete : export_recovery::State::Failed;
@@ -12419,15 +12443,22 @@ void Engine::export_encoder_main() noexcept {
     // Saída do worker (qualquer `return` abaixo): ELE fecha o arquivo (finish)
     // ou o aborta — toda chamada ao sink fica nesta thread, e o produtor só
     // espera com o watchdog (ExportWatchdog.hpp). Abandonado (preso na
-    // plataforma e já dado como travado), não toca mais no sink: só avisa que
-    // saiu, no contexto que vazou de propósito.
+    // plataforma e já dado como travado), cancela/fecha o próprio sink quando
+    // voltar, sem publicar arquivo. A quarentena aguarda essa saída final.
     struct WorkerExit {
         ExportContext& c;
         ~WorkerExit() {
             bool finishFile = false, abandoned = false;
             const auto exited = [&] {
-                { std::lock_guard<std::mutex> ql(c.qMutex); c.encoderExited = true; }
+                std::lock_guard<std::mutex> ql(c.qMutex);
                 c.qCv.notify_all();
+                c.encoderExited = true; // final access; reclaim must acquire qMutex
+            };
+            const auto retiredExit = [&] {
+                // Destruction can also block in the native driver. It stays on
+                // this bounded worker, never under Engine/render lifecycle locks.
+                c.sink.reset();
+                exited();
             };
             {
                 std::lock_guard<std::mutex> ql(c.qMutex);
@@ -12437,6 +12468,7 @@ void Engine::export_encoder_main() noexcept {
                           && !c.cancelRequested.load(std::memory_order_acquire);
             }
             Status fin = OkStatus;
+            if (abandoned) { retiredExit(); return; }
             if (!abandoned) {
                 if (finishFile) {
                     c.enter(ExportWorkerPhase::Finish);
@@ -12446,32 +12478,37 @@ void Engine::export_encoder_main() noexcept {
                     }
                     if (fin.ok()) fin = c.sink->finish();
                     // finish/validation can return after the watchdog retired
-                    // this session. Its sink still belongs to that native call;
-                    // no late abort, validation or publication is permitted.
-                    if (c.abandoned_worker()) { exited(); return; }
+                    // this session. No late validation/publication is allowed;
+                    // native close runs only on this worker before its exit.
+                    if (c.abandoned_worker()) { retiredExit(); return; }
                     if (fin.ok() && c.queue) {
                         fin = c.queue->begin_validating();
                         c.publish_export_phase("validando");
                         if (fin.ok()) fin = c.sink->validate_output({c.outputWidth, c.outputHeight,
                             c.frames, c.fps, c.withAudio});
-                        if (c.abandoned_worker()) { exited(); return; }
+                        if (c.abandoned_worker()) { retiredExit(); return; }
                         c.queue->validated(fin);
                         c.publish_export_phase(fin.ok() ? "concluido" : "falha na validacao");
                     }
-                    if (!fin.ok()) { if (c.queue) c.queue->fail(fin); c.sink->abort(); }
+                    if (!fin.ok()) {
+                        fin = ExportContext::own_status(fin, c.finishDetail);
+                        if (c.queue) c.queue->fail(fin);
+                        c.sink->abort();
+                    }
                 } else {
                     c.enter(ExportWorkerPhase::Abort);
                     c.sink->abort();
                 }
                 c.leave();
             }
+            if (c.abandoned_worker()) { retiredExit(); return; }
             {
                 std::lock_guard<std::mutex> ql(c.qMutex);
                 c.finishCalled = finishFile;
                 c.finishStatus = fin;
-                c.encoderExited = true;
+                c.qCv.notify_all();
+                c.encoderExited = true; // final access, including condition-variable notification
             }
-            c.qCv.notify_all();
         }
     } workerExit{ctx};
     std::unique_ptr<ai::Upscaler> upscaler;
@@ -12492,7 +12529,7 @@ void Engine::export_encoder_main() noexcept {
         if (!loaded.ok()) {
             ctx.queue->fail(loaded);
             { std::lock_guard<std::mutex> ql(ctx.qMutex);
-              ctx.encoderStatus = loaded; ctx.encoderFailed = true; ctx.stop = true; }
+              ctx.set_encoder_status(loaded); ctx.encoderFailed = true; ctx.stop = true; }
             ctx.qCv.notify_all();
             return;
         }
@@ -12505,6 +12542,10 @@ void Engine::export_encoder_main() noexcept {
             const auto taken = ctx.queue->take();
             if (taken.ok()) { si = *taken; break; }
             if (taken.code() != Errc::Timeout) return;
+            // A producer Timeout also closes the queue. It is terminal once
+            // stop is published, rather than another empty-queue polling wait.
+            std::lock_guard<std::mutex> ql(ctx.qMutex);
+            if (ctx.stop) return;
         }
         const ExportContext::Slot& slot = ctx.slots[si];
         const u32 i = slot.frame;
@@ -12512,7 +12553,7 @@ void Engine::export_encoder_main() noexcept {
         if (!plan.ok()) {
             ctx.queue->fail(plan.status());
             { std::lock_guard<std::mutex> ql(ctx.qMutex);
-              ctx.encoderStatus = plan.status(); ctx.encoderFailed = true; ctx.stop = true; }
+              ctx.set_encoder_status(plan.status()); ctx.encoderFailed = true; ctx.stop = true; }
             ctx.qCv.notify_all();
             return;
         }
@@ -12581,7 +12622,7 @@ void Engine::export_encoder_main() noexcept {
             if (ctx.abandoned) return;
             if (!s.ok()) {
                 ctx.encoderFailed = true;
-                ctx.encoderStatus = s;
+                ctx.set_encoder_status(s);
                 ctx.stop = true;
             }
         }
@@ -12613,7 +12654,7 @@ void Engine::export_encoder_main() noexcept {
                     {
                         std::lock_guard<std::mutex> ql(ctx.qMutex);
                         ctx.encoderFailed = true;
-                        ctx.encoderStatus = Status{Errc::StorageFull, "armazenamento cheio durante a exportacao"};
+                        ctx.set_encoder_status(Status{Errc::StorageFull, "armazenamento cheio durante a exportacao"});
                         ctx.stop = true;
                     }
                     ctx.qCv.notify_all();
@@ -12709,7 +12750,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
-        retire_abandoned_export_locked();
+        if (const Status admitted = retire_abandoned_export_locked(); !admitted.ok()) return admitted;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
     }
 

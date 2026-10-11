@@ -1,5 +1,7 @@
 #include "TestFramework.hpp"
 #include "NativeExportVerifier.hpp"
+#include "SyntheticVideo.hpp"
+#include "aurea/export/OfflineAudioBlockSource.hpp"
 #include "aurea/export/OfflineAudioSnapshot.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/expr/Expression.hpp"
@@ -246,6 +248,54 @@ AUREA_TEST(OfflineAudio, ReusedNestedCompositionEffectsRemainIndependentAcrossCh
     for(usize i=0;i<big.size();i+=2)stereoDifference+=std::fabs(big[i]-big[i+1]);
     AUREA_CHECK(error<1e-5);AUREA_CHECK(stereoDifference>100);
     AUREA_CHECK(large->stats().peakBlockBytes<=OfflineAudioSnapshot::kDefaultBlockBudget);
+}
+
+AUREA_TEST(OfflineAudio, RealBlockLeasesSurviveCacheEvictionUntilTheChunkEnds) {
+    SyntheticConfig configuration; configuration.audioRate=48000; configuration.audioSeconds=60;
+    SyntheticFactory factory(configuration);
+    audio::AudioBlockCache cache(&factory,kBusBlockBytes,false);
+    cache.register_asset(99,{"owned-synthetic-pcm",2880000});
+    std::atomic<bool> cancelled{false}; std::atomic<u64> heartbeat{0};
+    OfflineAudioBlockSource blocks(cache,cancelled,&heartbeat);
+    blocks.begin_chunk();
+    const auto* first=blocks.block(99,0); AUREA_CHECK(first); if(!first)return;
+    std::weak_ptr<const audio::AudioBlock> lease=cache.find(99,0);
+    const float sample=first->pcm[123];
+    for(i64 index=1;index<=32;++index) AUREA_CHECK(blocks.block(99,index));
+    AUREA_CHECK(!cache.find(99,0));
+    AUREA_CHECK(!lease.expired());
+    if(!lease.expired()) AUREA_CHECK_EQ(first->pcm[123],sample);
+    const auto held=blocks.leased_bytes();
+    AUREA_CHECK_EQ(blocks.block(99,0),first);
+    AUREA_CHECK_EQ(blocks.leased_bytes(),held);
+    AUREA_CHECK(held<=OfflineAudioBlockSource::kDefaultBudget);
+    AUREA_CHECK(heartbeat.load()>0);
+    blocks.begin_chunk();
+    AUREA_CHECK_EQ(blocks.leased_bytes(),0ull);
+    AUREA_CHECK(lease.expired());
+}
+
+AUREA_TEST(OfflineAudio, RealBlockLeaseBudgetCancellationAndMissingSourceAreExplicit) {
+    SyntheticConfig configuration; configuration.audioRate=48000; configuration.audioSeconds=60;
+    SyntheticFactory factory(configuration);
+    audio::AudioBlockCache cache(&factory,kBusBlockBytes,false);
+    cache.register_asset(99,{"owned-synthetic-pcm",2880000});
+    std::atomic<bool> cancelled{false};
+    OfflineAudioBlockSource blocks(cache,cancelled,nullptr,kBusBlockBytes*2);
+    blocks.begin_chunk();
+    AUREA_CHECK(blocks.block(99,0)); AUREA_CHECK(blocks.block(99,1));
+    AUREA_CHECK(blocks.block(99,2)==nullptr);
+    AUREA_CHECK(blocks.status().code()==Errc::BudgetExceeded);
+    AUREA_CHECK_EQ(blocks.leased_bytes(),kBusBlockBytes*2);
+    AUREA_CHECK_EQ(blocks.peak_leased_bytes(),kBusBlockBytes*2);
+    blocks.begin_chunk();
+    AUREA_CHECK(blocks.block(99,2));
+    cancelled.store(true);
+    AUREA_CHECK(blocks.block(99,3)==nullptr);
+    AUREA_CHECK(blocks.status().code()==Errc::Cancelled);
+    cancelled.store(false); blocks.begin_chunk();
+    AUREA_CHECK(blocks.block(100,0)==nullptr);
+    AUREA_CHECK(blocks.status().code()==Errc::DecodeFailed);
 }
 
 #if defined(AUREA_HAS_FFMPEG) && AUREA_HAS_FFMPEG

@@ -58,6 +58,7 @@
 #include "aurea/render/PreviewRefill.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -1959,6 +1960,9 @@ private:
     // or for the lifecycle join, only for publication of a new context.
     mutable std::mutex exportContextMutex_;
     std::unique_ptr<ExportContext> exportCtx_;
+    // Native calls may return after watchdog abandonment. Keep at most two
+    // sessions until their own workers close the sink and publish their exit.
+    std::array<std::unique_ptr<ExportContext>, 2> retiredExports_; ///< lifecycle + renderMutex_
     /// Startup resources held until their submitted GPU fence is terminal.
     std::unique_ptr<ExportContext> pendingExportStartup_; ///< renderMutex_
     // Bound from startup context creation through publication when gated. The pointer lock prevents a
@@ -1975,10 +1979,9 @@ private:
     std::atomic<bool> thermalDegrade_{false};
     void export_thread_main() noexcept;
     void export_encoder_main() noexcept;
-    /// Contexto cujo worker do encoder foi abandonado (travado na plataforma):
-    /// nunca é destruído — o worker pode voltar e tocar nele, e o destrutor do
-    /// sink chamaria a plataforma travada de novo. Vaza de propósito.
-    void retire_abandoned_export_locked() noexcept;
+    /// Reclaims returned workers and bounds retained native sessions before
+    /// another export starts. Called after producer join with renderMutex_.
+    [[nodiscard]] Status retire_abandoned_export_locked(bool admitNewSession = true) noexcept;
     void image_export_thread_main() noexcept;
     [[nodiscard]] Status initialize_offline_export(ExportContext& ctx) noexcept;
     void release_offline_export(ExportContext& ctx, bool retainReadbacks = false) noexcept;

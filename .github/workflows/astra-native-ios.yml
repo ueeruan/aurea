@@ -73,7 +73,7 @@ jobs:
         run: |
           python3 tools/run_ios_offline_composition_probe.py \
             --ffmpeg-root "build/ffmpeg/ios-simulator/$(uname -m)" \
-            --arch "$(uname -m)" --ios-min 16.0 --jobs 3 \
+            --arch "$(uname -m)" --ios-min 16.3 --jobs 3 \
             --output build/reference/astra-ios-offline
       - name: Preserve every exported movie and raw native validation result
         if: always()

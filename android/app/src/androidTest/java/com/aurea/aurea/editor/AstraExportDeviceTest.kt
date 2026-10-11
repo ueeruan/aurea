@@ -291,6 +291,12 @@ class AstraExportDeviceTest {
         assertTrue(engine.setTimeRemap(nested, true))
         assertTrue(engine.setTimeRemapValue(nested, 0, 0f))
         assertTrue(engine.setTimeRemapValue(nested, 30, 60f))
+        engine.beginCommandBatch(); commands = CommandBatch(engine)
+        assertTrue(commands.setCompositionDuration(composition, 30))
+        assertEquals(1, engine.submitCommands())
+        assertEquals(0, engine.saveProject(File(folder, "owned-nested-remap-frozen.aurea").absolutePath))
+        val clock = DoubleArray(8)
+        assertEquals(composition, engine.queryComposition(clock)); assertEquals(30, clock[3].toInt())
         export("headless-nested-remap2x", 30, 320, 180, true)
         File(folder, "nested-audio-expectation.txt").writeText(
             "fps=30 frames=30 sourceToneHz=440,880 decodedToneHz=880,1760 sourcePhaseRadians=0,0\n")

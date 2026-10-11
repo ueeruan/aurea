@@ -183,17 +183,27 @@ set_source_files_properties(bridge/IOSVideoDecoder.mm PROPERTIES COMPILE_OPTIONS
 target_link_libraries(aurea_ios PUBLIC aurea_core)
 # The Xcode app consumes archives directly rather than the CMake executable
 # link graph. Stage the same pinned FFmpeg archives beside libaurea_ios.a.
+set(_aurea_export_archive_commands)
+set(_aurea_export_archive_inputs)
 foreach(_component avformat avcodec swscale swresample avutil openh264 kvazaar)
-    add_custom_command(TARGET aurea_ios POST_BUILD
+    list(APPEND _aurea_export_archive_commands
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${AUREA_FFMPEG_ROOT}/lib/lib${_component}.a"
             "${CMAKE_BINARY_DIR}/lib${_component}.a")
+    list(APPEND _aurea_export_archive_inputs "${AUREA_FFMPEG_ROOT}/lib/lib${_component}.a")
 endforeach()
 if(EXISTS "${AUREA_FFMPEG_ROOT}/lib/libx265.a")
-    add_custom_command(TARGET aurea_ios POST_BUILD
+    list(APPEND _aurea_export_archive_commands
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${AUREA_FFMPEG_ROOT}/lib/libx265.a" "${CMAKE_BINARY_DIR}/libx265.a")
+    list(APPEND _aurea_export_archive_inputs "${AUREA_FFMPEG_ROOT}/lib/libx265.a")
 endif()
+# A dependency-only rebuild must refresh the Xcode archives even when the
+# bridge's own objects do not relink and therefore have no POST_BUILD event.
+add_custom_target(aurea_ios_export_dependencies
+    ${_aurea_export_archive_commands}
+    DEPENDS ${_aurea_export_archive_inputs} VERBATIM)
+add_dependencies(aurea_ios aurea_ios_export_dependencies)
 target_compile_definitions(aurea_ios PRIVATE "$<$<CONFIG:Debug>:DEBUG=1>")
 if(AUREA_GPU_METAL)
     target_link_libraries(aurea_ios PUBLIC aurea_metal)

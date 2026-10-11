@@ -654,6 +654,10 @@ enum ParityExportProbe {
                     throw Failure(message: "Nested source-clock remap could not be set")
                 }
             }
+            engine.setComposition(id, duration: 30)
+            guard engine.saveProject(documents.appendingPathComponent("\(name)-frozen.aurea").path) else {
+                throw Failure(message: "Nested fixture clock could not be frozen")
+            }
             let movie = documents.appendingPathComponent("\(name).mp4")
             let frame = documents.appendingPathComponent("\(name).png")
             var running = false

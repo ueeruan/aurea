@@ -229,3 +229,71 @@ AUREA_TEST(ExportWatchdog, SafeModeLevelTwoAsksForSoftwareAndIsTheLastRetry) {
     AUREA_CHECK(clamped.finished && clamped.p.result == Errc::Ok);
     AUREA_CHECK(r.cap.video.preferSoftware);
 }
+
+AUREA_TEST(ExportWatchdog, TwoStuckSessionsBoundRetriesAndReturnedWorkersReleaseReadbacks) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend, 300); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    const usize baseBuffers = backend->mappedBuffers.size();
+    HungGate first, second;
+    std::atomic<bool> firstDestroyed{false}, secondDestroyed{false}, retryDestroyed{false};
+    first.arm(r.cap); r.cap.hangWriteAt = 0; r.cap.sinkDestroyed = &firstDestroyed;
+    const Outcome one = run_export(r, 36, 30, false, 10);
+    AUREA_CHECK(first.entered.load()); AUREA_CHECK(one.finished);
+    AUREA_CHECK_EQ(one.p.result, Errc::Timeout);
+    second.arm(r.cap); r.cap.writes = 0; r.cap.sinkDestroyed = &secondDestroyed;
+    const Outcome two = run_export(r, 36, 30, false, 10);
+    AUREA_CHECK(second.entered.load()); AUREA_CHECK(two.finished);
+    AUREA_CHECK_EQ(two.p.result, Errc::Timeout);
+    AUREA_CHECK(!firstDestroyed.load() && !secondDestroyed.load());
+    const usize twoHungBuffers = backend->mappedBuffers.size();
+    AUREA_CHECK(twoHungBuffers > baseBuffers);
+    ExportSettings settings; settings.height = 36; settings.fps = 30; settings.dither = false;
+    const auto started = std::chrono::steady_clock::now();
+    const Status refused = r.e.start_export(settings, "nao-usado.mp4");
+    AUREA_CHECK_EQ(refused.code(), Errc::BudgetExceeded);
+    AUREA_CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+    AUREA_CHECK_EQ(backend->mappedBuffers.size(), twoHungBuffers);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Timeout);
+    // Each old sink closes on its own worker. The next admitted export reclaims
+    // that session's GPU readbacks and graph/cache instead of leaking forever.
+    if (first.entered.load()) release_hung(first.release, first.returned);
+    AUREA_CHECK(first.returned.load()); AUREA_CHECK(firstDestroyed.load());
+    AUREA_CHECK(!secondDestroyed.load());
+    r.cap.hangWriteAt = -1; r.cap.writes = 0;
+    r.cap.hashes.clear(); r.cap.pts.clear(); r.cap.finished = r.cap.aborted = false;
+    r.cap.sinkDestroyed = &retryDestroyed;
+    const Outcome resumed = run_export(r, 36, 30, false, 10);
+    AUREA_CHECK(resumed.finished); AUREA_CHECK_EQ(resumed.p.result, Errc::Ok);
+    AUREA_CHECK(retryDestroyed.load());
+    AUREA_CHECK(backend->mappedBuffers.size() < twoHungBuffers);
+    if (second.entered.load()) release_hung(second.release, second.returned);
+    AUREA_CHECK(second.returned.load()); AUREA_CHECK(secondDestroyed.load());
+    r.cap.writes = 0; r.cap.hashes.clear(); r.cap.pts.clear(); r.cap.finished = r.cap.aborted = false;
+    const Outcome clean = run_export(r, 36, 30, false, 10);
+    AUREA_CHECK(clean.finished); AUREA_CHECK_EQ(clean.p.result, Errc::Ok);
+    AUREA_CHECK_EQ(backend->mappedBuffers.size(), baseBuffers);
+}
+
+AUREA_TEST(ExportWatchdog, NativeFailureDetailSurvivesAbandonedCloseAndLateDestruction) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend, 300); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    HungGate gate; gate.arm(r.cap); r.cap.hangAbort = true;
+    constexpr char expected[] = "native encoder rejected exact picture; preserve original detail";
+    std::snprintf(r.cap.platformDiagnostic, sizeof(r.cap.platformDiagnostic), "%s", expected);
+    r.cap.writeFailure = Status{Errc::IoError, r.cap.platformDiagnostic};
+    r.cap.invalidateDiagnosticOnDestroy = true;
+    std::atomic<bool> destroyed{false}; r.cap.sinkDestroyed = &destroyed;
+    const Outcome failed = run_export(r, 36, 30, false, 10);
+    AUREA_CHECK(failed.finished); AUREA_CHECK(gate.entered.load());
+    AUREA_CHECK_EQ(failed.p.result, Errc::IoError);
+    AUREA_CHECK(std::strcmp(failed.p.message, expected) == 0);
+    if (gate.entered.load()) release_hung(gate.release, gate.returned);
+    AUREA_CHECK(gate.returned.load()); AUREA_CHECK(destroyed.load());
+    AUREA_CHECK(std::strcmp(r.cap.platformDiagnostic, "diagnostico expirado") == 0);
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::IoError);
+    AUREA_CHECK(std::strcmp(r.e.export_progress().message, expected) == 0);
+}

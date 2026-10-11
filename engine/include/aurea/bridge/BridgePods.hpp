@@ -127,7 +127,9 @@ struct KeyframeRow {
     f32 value         = 0.0f; // +12
     u32 interpolation = 0;    // +16
     u32 paramIndex    = 0;    // +20  parâmetro de efeito: param*4 + componente
+    u32 timelineFlags = 0;    // +24  hidden outside the current clip; authored key is retained
 };
+inline constexpr u32 kKeyframeTimelineHidden = 1u;
 
 /// Um bloco de legenda da faixa (a UI desenha todos na MESMA linha, em
 /// sequência). Os tempos já vêm na régua da TIMELINE: `local + start - offset`
@@ -228,7 +230,8 @@ static_assert(offsetof(LayerDetailPOD, parentId) == 128);
 static_assert(offsetof(LayerDetailPOD, audioGain) == 136);
 static_assert(offsetof(LayerDetailPOD, audioFlags) == 156);
 
-static_assert(sizeof(KeyframeRow) == 24, "KeyframeRow e contrato de ABI com a UI");
+static_assert(sizeof(KeyframeRow) == 28, "KeyframeRow e contrato de ABI com a UI");
+static_assert(offsetof(KeyframeRow, timelineFlags) == 24);
 static_assert(offsetof(KeyframeRow, property) == 0);
 static_assert(offsetof(KeyframeRow, effectIndex) == 4);
 static_assert(offsetof(KeyframeRow, time) == 8);
@@ -462,7 +465,7 @@ struct EffectCatalogRow {
     u32 nameLength      = 0;   // +16
     u32 categoryOffset  = 0;   // +20
     u32 categoryLength  = 0;   // +24
-    u32 reserved        = 0;   // +28
+    u32 reserved        = 0;   // +28 catalog flags: bit 0 = new in this release
 };
 static_assert(sizeof(EffectCatalogRow) == 32, "EffectCatalogRow e contrato de ABI");
 

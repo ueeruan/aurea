@@ -314,6 +314,29 @@ void Composition::retime(f64 fps) noexcept {
         // O remap guarda frames locais nos VALORES também.
         retime_track(l.timeRemap, k, true);
         for (u32 i = 0; i < l.tracks.size(); ++i) retime_track(l.tracks.at(i), k, false);
+        for (auto& track : l.timeRemapLegacyTracks) retime_track(track, k, false);
+        // Shape/mask/mesh keys store their local frames outside TrackSet.
+        // Keep the same seconds when copying between projects with different FPS.
+        const auto retimePath = [&](auto& keys) {
+            for (auto& key : keys) key.frame = scale(FrameIndex{key.frame}).value;
+            keys.erase(std::unique(keys.begin(), keys.end(),
+                                   [](const auto& a, const auto& b) { return a.frame == b.frame; }), keys.end());
+        };
+        for (auto& mask : l.masks) { retimePath(mask.pathKeys); mask.cacheKey = 0; }
+        for (auto& group : l.shape.vector.groups) for (auto& path : group.paths) retimePath(path.keys);
+        for (auto& effect : l.effects) for (auto& mesh : effect.meshes) retimePath(mesh.keys);
+        i64 previousCaptionEnd = 0;
+        for (auto& caption : l.captions) {
+            caption.start = std::max(previousCaptionEnd, scale(FrameIndex{caption.start}).value);
+            caption.end = std::max(caption.start + 1, scale(FrameIndex{caption.end}).value);
+            previousCaptionEnd = caption.end;
+            i64 previousWordStart = caption.start;
+            for (auto& word : caption.words) {
+                word.start = std::clamp(scale(FrameIndex{word.start}).value, previousWordStart, caption.end - 1);
+                word.end = std::clamp(scale(FrameIndex{word.end}).value, word.start + 1, caption.end);
+                previousWordStart = word.start;
+            }
+        }
     });
     // Marcas ficam no mesmo SEGUNDO; duas que caírem no mesmo frame viram uma.
     std::vector<Marker> kept = std::move(markers_);
@@ -482,6 +505,7 @@ std::unique_ptr<Composition> Composition::clone() const {
     c->shadows_ = shadows_;
     c->environment_ = environment_;
     c->postProcess_ = postProcess_;
+    c->floor_ = floor_;
     c->motionBlur_ = motionBlur_;
     c->scene_ = scene_;
     c->markers_ = markers_;
@@ -509,6 +533,7 @@ void Composition::restore_from(const Composition& snapshot) {
     shadows_ = snapshot.shadows_;
     environment_ = snapshot.environment_;
     postProcess_ = snapshot.postProcess_;
+    floor_ = snapshot.floor_;
     motionBlur_ = snapshot.motionBlur_;
     scene_ = snapshot.scene_;
     markers_ = snapshot.markers_;

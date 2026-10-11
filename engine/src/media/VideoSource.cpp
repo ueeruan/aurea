@@ -118,6 +118,22 @@ void VideoSource::request(const DecodeRequest& r) noexcept {
     wake_.notify_one();
 }
 
+usize VideoSource::reclaim_idle_prefetch() noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Never race an output already being decoded or cancel/restart a codec.
+    // If work is pending, the engine's existing later render can try again.
+    if (!running_ || suspended_ || workerActive_ || requestGen_ == 0
+        || requestGen_ != handledGen_ || retryAfterNs_) return 0;
+    const auto result = cache_.reclaim_unused_for(request_.targetUs, frameUs_ / 2);
+    if (result.freed && result.retainedTarget && requestEpoch_ == epoch_
+        && requestCacheVersion_ == result.versionBefore) {
+        // Only this exact transition is acknowledged. A clear/trim before or
+        // after it must still invalidate coalescing and request fresh pixels.
+        requestCacheVersion_ = result.versionAfter;
+    }
+    return result.freed;
+}
+
 FrameRef VideoSource::frame_for(i64 targetUs, bool* exact, i32 playbackDirection) noexcept {
     if (playbackDirection >= 0) return cache_.find(targetUs, frameUs_ / 2, exact);
     std::lock_guard<std::mutex> lock(mutex_);
@@ -285,7 +301,16 @@ void VideoSource::thread_main() noexcept {
             handledGen_ = gen;
             prefetchAttemptGen = gen;
             requestNs = requestTimeNs_;
+            workerActive_ = true;
         }
+        struct ActiveWorkGuard {
+            std::mutex& mutex;
+            bool& active;
+            ~ActiveWorkGuard() {
+                std::lock_guard<std::mutex> lock(mutex);
+                active = false;
+            }
+        } activeWork{mutex_, workerActive_};
 
         if (applySuspend) {
             // Segundo plano: o codec de hardware é devolvido ao sistema e os
@@ -453,6 +478,8 @@ void VideoSource::thread_main() noexcept {
                 break;
             }
             decoderPosUs_ = pts;
+            // Batida de trabalho: entregue OU descartado a caminho do alvo.
+            if (workCounter_) workCounter_->fetch_add(1, std::memory_order_acq_rel);
             {
                 std::lock_guard<std::mutex> st(statsMutex_);
                 stats_.decodeMsAvg = stats_.decodeMsAvg == 0.0f ? ms : stats_.decodeMsAvg * 0.9f + ms * 0.1f;

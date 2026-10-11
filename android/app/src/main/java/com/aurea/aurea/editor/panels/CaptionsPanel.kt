@@ -78,6 +78,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
     LaunchedEffect(layerId, store.curveRevision) { cap.open(layerId) }
     var language by remember { mutableStateOf<String?>(java.util.Locale.getDefault().language.takeIf { code -> Languages.any { it.first == code } }) }
     var editing by remember { mutableStateOf<Int?>(null) }
+    var translateEnglish by remember { mutableStateOf(false) }
     val srt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { cap.importSrt(it) } }
     val s = cap.settings
     fun set(f: (CaptionSettings) -> CaptionSettings) { cap.settings = f(cap.settings) }
@@ -100,9 +101,13 @@ internal fun CaptionsPanel(env: PanelEnv) {
                 if (cap.busy != null) Action(stringResource(R.string.common_cancel)) { cap.cancelTranscription() }
                 Label(stringResource(R.string.panel_idioma_fala))
                 Chips(Languages.map { it.second ?: stringResource(R.string.pn_caption_lang_auto) }, Languages.indexOfFirst { it.first == language }) { language = Languages[it].first }
+                Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.beta_translate_english), Modifier.weight(1f))
+                    AureaToggle(checked = translateEnglish, onCheckedChange = { translateEnglish = it })
+                }
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Action(if (cap.words.isEmpty()) stringResource(R.string.panel_gerar_legendas) else stringResource(R.string.panel_transcrever_novo), primary = true, enabled = cap.busy == null) {
-                        cap.transcribe(language)
+                        cap.transcribe(language, translateEnglish = translateEnglish)
                     }
                     Action(stringResource(R.string.panel_importar_legenda_srt), enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
                 }

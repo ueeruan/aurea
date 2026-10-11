@@ -299,7 +299,7 @@ private func drawTicks(_ ctx: GraphicsContext, size: CGSize, value: Float,
     // o desenho já está em pontos e 1 ponto é 1 dp — a mesma unidade do Android.
     let perDp = unitsPerDp > 0 ? unitsPerDp : 1
     let v = value.isFinite ? value : 0
-    let base = CGFloat(v / perDp) + center
+    let base = CGFloat(-v / perDp) + center
     let whole = (base / step).rounded(.down)
     var x = base - whole * step - step
     while x <= size.width {
@@ -328,7 +328,7 @@ private func drawTicks(_ ctx: GraphicsContext, size: CGSize, value: Float,
 /// O GESTO de um número: arrasto horizontal que ACUMULA desde o início
 /// (`novo = início + andado × porDp`, preso na faixa). Somar delta a delta
 /// sobre o valor que volta do motor acumularia o arredondamento dele e o
-/// desenho descolaria do dedo. Direita aumenta.
+/// desenho descolaria do dedo. A régua corre sob o indicador: esquerda aumenta.
 ///
 /// O início e o fim do gesto são avisados para quem abre/fecha o passo de
 /// desfazer (um arrasto = um desfazer). Cancelamento também fecha.
@@ -393,7 +393,7 @@ private struct ValueDragModifier: ViewModifier {
                 lastTime = g.time
                 guard dx != 0 else { return }
                 speed = FxParamRowMath.smoothSpeed(previous: speed, dx: dx, dt: dt)
-                walked += dx * FxParamRowMath.scrubGain(pointers: 1, speed: speed)
+                walked -= dx * FxParamRowMath.scrubGain(pointers: 1, speed: speed)
                 let v = FxParamRowMath.scrubValue(from: from, walked: walked, unitsPerDp: unitsPerDp(),
                                                   min: min, max: max)
                 if v.isFinite { onValue(v) }

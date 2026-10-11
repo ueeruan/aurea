@@ -275,6 +275,7 @@ void Backend::shutdown() noexcept {
         release_display(d.display);
     }
     d.context = EGL_NO_CONTEXT; d.window = d.pbuffer = EGL_NO_SURFACE; d.display = EGL_NO_DISPLAY;
+    std::fill(std::begin(d.drawAttachments), std::end(d.drawAttachments), 0); d.readAttachment = 0;
     // If a lost context could not be made current, EGL destruction above is
     // the completion boundary for callbacks whose fences cannot be queried.
     for (auto& f : d.frames) { for (const auto& callback : f.deferred) if (callback.fn) callback.fn(callback.context); f = {}; }

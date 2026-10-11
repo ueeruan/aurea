@@ -94,6 +94,7 @@ internal class PanelEnv(
     val openColor: (ColorRequest) -> Unit,
     /** Painel de onde o editor de curva foi aberto (o ‹ do trilho volta para ele). */
     val returnTo: () -> EditorPanel?,
+    val onOpenAnimators: () -> Unit = { onOpenPanel(EditorPanel.Transform) },
 )
 
 /**

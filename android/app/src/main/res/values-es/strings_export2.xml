@@ -6,7 +6,7 @@
     <string name="expfail_encoder_stalled">el codificador de video dejó de responder; cierra otras apps e inténtalo de nuevo</string>
     <string name="expfail_render">la GPU del teléfono no pudo renderizar el video; prueba una resolución menor</string>
     <string name="expfail_memory">no hay suficiente memoria para esta resolución; prueba una menor</string>
-    <string name="expfail_media">no se pudo leer un archivo multimedia del proyecto</string>
+    <string name="expfail_media">no se pudo leer un archivo multimedia del proyecto; comprueba que el video sigue en el dispositivo o reemplázalo e inténtalo de nuevo</string>
     <string name="expfail_file">no se pudo guardar el archivo de video</string>
     <string name="expfail_unsupported">este teléfono no puede exportar en esta resolución o formato</string>
     <string name="expfail_stuck">la exportación dejó de avanzar durante minutos y se detuvo; cierra otras apps e inténtalo de nuevo</string>

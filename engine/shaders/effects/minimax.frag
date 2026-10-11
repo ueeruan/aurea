@@ -1,73 +1,52 @@
 #version 450
-// =============================================================================
-//  Aurea / shaders / effects / minimax.frag
-//
-//  Filtro morfológico (Fase 7.3 §39): DILATA (pega o maior da vizinhança) ou
-//  ERODE (o menor). Serve para engrossar ou afinar um matte, tirar um pixel de
-//  borda de um recorte, e para estilizar.
-//
-//  O passe devolve a COR do pixel que venceu a comparação, não o valor
-//  comparado: num matte isso não muda nada (o alfa é o que interessa), mas numa
-//  imagem colorida é a diferença entre "achatou as cores" e "engrossou".
-//
-//  Um passe só, com núcleo até ±6 px. Raio maior: o C++ reduz a imagem antes
-//  (um morfológico de raio r na escala 1/k é um de raio r/k em 1/k), e o custo
-//  por pixel fica preso.
-// =============================================================================
 #include "../common/bindings.glsl"
 #include "common.glsl"
-
-layout(location = 0) in vec2 v_uv;
-layout(location = 0) out vec4 o_color;
-
-layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_tex0;
-
-layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
-    vec4 uvMap;
-    vec4 texel;
-    vec4 p0;   // x = raio em texels, y = 1 dilata / 0 erode, z = forma (0 cruz, 1 quadrado, 2 losango), w = mistura
-    vec4 p1;   // x = o que se compara (0 luma×alfa, 1 alfa, 2 RGB, 3 RGBA)
-    vec4 p2;
-    vec4 p3;
-    vec4 color;
+layout(location=0) in vec2 v_uv;
+layout(location=0) out vec4 o_color;
+layout(set=0,binding=AUREA_TEX0) uniform sampler2D u_tex0;
+layout(set=0,binding=AUREA_TEX1) uniform sampler2D u_tex1;
+layout(set=0,binding=AUREA_PARAMS,std140) uniform Params {
+    vec4 uvMap,texel;
+    vec4 p0; // kind: axis/merge/resolve/mix; dilation; comparison channel; amount
+    vec4 p1; // axis direction.xy, inclusive integer low/high
+    vec4 p2; // source-grid offset.xy
+    vec4 p3,color,otherUv;
 } p;
-
-/// O valor que decide quem vence. Num matte é o alfa; numa cor, a magnitude.
-float probe(vec4 s) {
-    const int mode = int(p.p1.x + 0.5);
-    if (mode == 1) return s.a;
-    if (mode == 2) return max(max(s.r, s.g), s.b);
-    if (mode == 3) return max(max(s.r, s.g), max(s.b, s.a));
-    return aurea_luma(s.rgb) * s.a;
+float probe(vec4 raw) {
+    vec4 s=unpremultiply(raw);
+    int channel=int(p.p0.z+.5);
+    if(channel==1)return s.a;
+    if(channel==2)return max(max(s.r,s.g),s.b);
+    if(channel==3)return max(max(s.r,s.g),max(s.b,s.a));
+    return aurea_luma(s.rgb)*s.a;
 }
-
+// A total order is associative across axes/parity branches. Other than center
+// preservation, equal probes previously depended on row traversal order.
+bool better(vec4 a,vec4 b) {
+    float ap=probe(a),bp=probe(b);
+    if(ap!=bp)return p.p0.y>.5 ? ap>bp : ap<bp;
+    for(int c=0;c<4;++c)if(a[c]!=b[c])return a[c]>b[c];
+    return false;
+}
 void main() {
-    const vec2 st = p.texel.xy * max(p.p0.x, 0.0);
-    const int shape = int(p.p0.z + 0.5);
-    const bool dilate = p.p0.y > 0.5;
-
-    const vec2 uv0 = v_uv * p.uvMap.xy + p.uvMap.zw;
-    vec4 best = unpremultiply(texture(u_tex0, uv0));
-    float bestProbe = probe(best);
-
-    for (int dy = -6; dy <= 6; ++dy) {
-        for (int dx = -6; dx <= 6; ++dx) {
-            if (dx == 0 && dy == 0) continue;
-            if (shape == 0 && dx != 0 && dy != 0) continue;                 // cruz
-            if (shape == 2 && (abs(dx) + abs(dy)) > 6) continue;            // losango
-            const float d = max(abs(float(dx)), abs(float(dy)));
-            if (d > p.p0.x + 0.5) continue;                                 // fora do raio
-
-            const vec4 s = unpremultiply(texture(u_tex0, uv0 + vec2(float(dx), float(dy)) * st));
-            const float sp = probe(s);
-            if (dilate ? (sp > bestProbe) : (sp < bestProbe)) {
-                best = s;
-                bestProbe = sp;
-            }
+    int kind=int(p.p0.x+.5);
+    vec2 uv=v_uv*p.uvMap.xy+p.uvMap.zw;
+    if(kind==0) {
+        int low=int(p.p1.z),high=int(p.p1.w);
+        vec4 best=texture(u_tex0,uv+(p.p2.xy+p.p1.xy*float(low))*p.texel.xy);
+        for(int i=low+1;i<=high;++i) {
+            vec4 candidate=texture(u_tex0,uv+(p.p2.xy+p.p1.xy*float(i))*p.texel.xy);
+            if(better(candidate,best))best=candidate;
+        }
+        // Preserve premultiplied winners exactly across intermediate stores.
+        o_color=best;
+    } else {
+        vec4 a=texture(u_tex0,uv),b=texture(u_tex1,v_uv*p.otherUv.xy+p.otherUv.zw);
+        if(kind==1)o_color=better(b,a)?b:a;
+        else if(kind==2)o_color=probe(a)==probe(b)?a:b;
+        else {
+            vec4 s=mix(unpremultiply(a),unpremultiply(b),clamp(p.p0.w,0.,1.));
+            o_color=premultiply(vec4(max(s.rgb,vec3(0)),s.a));
         }
     }
-
-    const vec4 src = unpremultiply(texture(u_tex0, uv0));
-    const vec4 outc = mix(src, best, clamp(p.p0.w, 0.0, 1.0));
-    o_color = premultiply(vec4(max(outc.rgb, vec3(0.0)), outc.a));
 }

@@ -70,9 +70,9 @@ Status Upscaler::load(u32 scale, u32 threads, u32 tileSize, Backend requested) t
     impl_->net.clear();
     impl_->backend = Backend::Cpu;
     impl_->fallback = requested == Backend::Auto;
-    // Baseline is a single CPU worker on every platform. No OpenMP runtime or
-    // graphics-device dependency is injected into the editor's render backend.
-    impl_->net.opt.num_threads = 1;
+    // Sem runtime OpenMP no ncnn (AureaNcnn.cmake) um worker só executa; o
+    // pedido fica registrado para a build que o habilitar.
+    impl_->net.opt.num_threads = static_cast<int>(threads);
     impl_->net.opt.use_vulkan_compute = false;
 #if NCNN_VULKAN
     if (requested != Backend::Cpu && ncnn::get_gpu_count() > 0) {
@@ -87,12 +87,18 @@ Status Upscaler::load(u32 scale, u32 threads, u32 tileSize, Backend requested) t
 #endif
     if (requested == Backend::Vulkan && impl_->backend != Backend::Vulkan)
         return Status{Errc::NotSupported, "Vulkan inference unavailable"};
-    impl_->net.opt.use_fp16_packed = false;
-    impl_->net.opt.use_fp16_storage = false;
+    // GPU: pesos ja sao fp16; armazenar e empacotar em fp16 corta a banda de
+    // memoria pela metade no celular (o maior custo das 18 convolucoes). A
+    // aritmetica fica em fp32: paridade com a CPU (teste Ai.VulkanMatchesCpu)
+    // e sem as faixas que alguns drivers moveis mostram em fp16 puro.
+    // CPU: Winograd nas 3x3 (~40% menos tempo, como no DepthEstimator).
+    const bool vulkan = impl_->backend == Backend::Vulkan;
+    impl_->net.opt.use_fp16_packed = vulkan;
+    impl_->net.opt.use_fp16_storage = vulkan;
     impl_->net.opt.use_fp16_uniform = false;
     impl_->net.opt.use_fp16_arithmetic = false;
     impl_->net.opt.use_bf16_storage = false;
-    impl_->net.opt.use_winograd_convolution = false;
+    impl_->net.opt.use_winograd_convolution = !vulkan;
     impl_->net.opt.lightmode = true;
     const unsigned char* weights = embedded::model_weights();
     ncnn::DataReaderFromMemory reader(weights);

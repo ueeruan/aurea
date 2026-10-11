@@ -33,6 +33,7 @@
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/vector/Vector.hpp"
+#include "aurea/ui/BuiltinPropertySchema.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -243,6 +244,7 @@ NSDictionary<NSString*, id>* keyframe_row_dict(const aurea::bridge::KeyframeRow&
         AureaKeyframeTime:          @(k.time),
         AureaKeyframeValue:         @(k.value),
         AureaKeyframeInterpolation: @(k.interpolation),
+        @"timelineVisible": @((k.timelineFlags & aurea::bridge::kKeyframeTimelineHidden) == 0),
     };
 }
 
@@ -1435,6 +1437,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e->query_text3d(static_cast<aurea::u64>(layerId), spec)) return nil;
     return @{ @"content": [NSString stringWithUTF8String:spec.content.c_str()] ?: @"",
               @"fontPath": [NSString stringWithUTF8String:spec.fontPath.c_str()] ?: @"",
+              @"texturePath": [NSString stringWithUTF8String:spec.texturePath.c_str()] ?: @"",
               @"surfaceFinish": @(spec.surfaceFinish), @"separateGlyphs": @(spec.separateGlyphs),
               @"depth": @(spec.depth), @"animation": @(spec.animation),
               @"animationDuration": @(spec.animationDuration), @"animationStagger": @(spec.animationStagger),
@@ -1447,6 +1450,8 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     if (!e) return NO;
     aurea::scene3d::Text3DSpec spec;
     if (!e->query_text3d(static_cast<aurea::u64>(layerId), spec)) return NO;
+    if ([property isEqualToString:@"texturePath"])
+        return e->set_text3d_texture(static_cast<aurea::u64>(layerId), stringValue.UTF8String ?: "").ok();
     if ([property isEqualToString:@"content"]) spec.content = stringValue.UTF8String ?: "";
     else if ([property isEqualToString:@"fontPath"]) spec.fontPath = stringValue.UTF8String ?: "";
     else if ([property isEqualToString:@"surfaceFinish"]) spec.surfaceFinish = static_cast<aurea::u32>(std::clamp(numberValue, 0.f, 4.f));
@@ -1532,6 +1537,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 - (int64_t)removeGaps { auto* e = self.engine; return e ? e->remove_gaps() : 0; }
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next {
     auto* e = self.engine; return e && e->edit_clip_time(layerId, operation, amount, previous, next);
+}
+- (uint32_t)queryClipTimeActions:(long long)layerId frame:(int64_t)frame {
+    auto* e = self.engine; return e ? e->query_clip_time_actions(layerId, frame) : 0;
 }
 - (BOOL)trimComposition:(int64_t)frame { auto* e = self.engine; return e && e->trim_composition(frame); }
 
@@ -1958,6 +1966,14 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return out;
 }
 
++ (NSArray<NSString*>*)extractModelArchive:(NSString*)archive to:(NSString*)directory {
+    std::vector<std::string> files;
+    if (!aurea::package::extract_model_archive(to_std(archive), to_std(directory), files).ok()) return nil;
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithCapacity:files.size()];
+    for (const auto& file : files) [out addObject:to_ns(file)];
+    return out;
+}
+
 - (int)importModelProgress {
     const auto phase = static_cast<int>(_importProgress.phase.load());
     const float f = std::clamp(_importProgress.fraction.load(), 0.0f, 0.999f);
@@ -2041,6 +2057,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 
 - (NSString*)playbackReport {
     auto* e = self.engine; return e ? [NSString stringWithUTF8String:e->playback_report().c_str()] : @"";
+}
+- (int64_t)audioPositionNs {
+    auto* e = self.engine; return e ? e->audio().position_ns() : 0;
 }
 - (BOOL)setRawPlayback:(BOOL)enabled {
     auto* e = self.engine; return e && e->set_raw_playback(enabled != NO);
@@ -2323,6 +2342,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     for (u32 i = 0; i < written; ++i) {
         [out addObject:@{
             @"effectClass":        @(rows[i].effectClass),
+            @"flags":              @(rows[i].reserved),
             AureaEffectTypeId:     @(rows[i].typeId),
             AureaEffectName:       slice(blob, rows[i].nameOffset, rows[i].nameLength),
             AureaEffectCategory:   slice(blob, rows[i].categoryOffset, rows[i].categoryLength),
@@ -2370,6 +2390,24 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     NSMutableArray<NSDictionary<NSString*, id>*>* out = [NSMutableArray arrayWithCapacity:written];
     for (u32 i = 0; i < written; ++i) [out addObject:param_row_dict(rows[i], blob)];
     return out;
+}
+
+- (NSString*)builtinPropertySchemaJSON {
+    const auto schema = aurea::ui::builtin_property_schema_json();
+    return [[NSString alloc] initWithBytes:schema.data() length:schema.size() encoding:NSUTF8StringEncoding] ?: @"";
+}
+
+- (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples {
+    auto* e = self.engine; if (!e) return @[];
+    float values[256]{};
+    const u32 n = e->query_effect_curve(layerId, effect, param, channel, samples, values, samples ? 256 : 128);
+    NSMutableArray<NSNumber*>* result = [NSMutableArray arrayWithCapacity:n];
+    for (u32 i = 0; i < n; ++i) [result addObject:@(values[i])];
+    return result;
+}
+- (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y {
+    auto* e = self.engine;
+    return e ? e->edit_effect_curve(layerId, effect, param, channel, action, point, x, y) : -1;
 }
 
 - (NSArray<NSDictionary<NSString*, id>*>*)effectSpecs:(uint32_t)typeId {
@@ -2641,6 +2679,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (void)cancelMotionTrack { if(auto* e=self.engine)e->cancel_motion_track(); }
 - (BOOL)restoreMotionTrack:(long long)layer { auto* e=self.engine;return e&&e->restore_motion_track(layer); }
+- (long long)motionTrackSource { auto* e=self.engine;return e?static_cast<long long>(e->motion_track_source()):0; }
 - (NSDictionary<NSString*, id>*)motionTrackStatus {
     auto* e=self.engine;if(!e)return @{};const auto s=e->motion_track_status();
     return @{ @"state":@(s.state), @"progress":@(s.progress), @"tool":@(s.tool), @"frames":@(s.frames), @"validFrames":@(s.validFrames), @"lost":@(s.lost), @"reacquired":@(s.reacquired), @"confidence":@(s.confidence), @"error":@(s.errorPx), @"crop":@(s.cropPercent), @"memoryMB":@(s.memoryBytes/1048576.0), @"message":[NSString stringWithUTF8String:s.message.c_str()]?:@"" };
@@ -2847,9 +2886,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if ([options[@"removeFillers"] boolValue]) parsed = aurea::text::remove_filler_words(parsed);
     return e->create_captions(layerId, parsed, o).ok() ? @"" : @"Não foi possível gerar legendas. Confira os tempos e o áudio da camada.";
 }
-- (NSArray<NSDictionary<NSString*, id>*>*)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language error:(NSError**)error {
+- (NSArray<NSDictionary<NSString*, id>*>*)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language translateEnglish:(BOOL)translateEnglish error:(NSError**)error {
     auto* e = self.engine; if (!e) return nil;
-    auto result = e->transcribe_local(layerId, to_std(model), to_std(language));
+    auto result = e->transcribe_local(layerId, to_std(model), to_std(language), translateEnglish);
     if (!result) {
         if (error) *error = [NSError errorWithDomain:@"AureaWhisper" code:(NSInteger)result.code() userInfo:@{NSLocalizedDescriptionKey: to_ns(std::string(result.status().detail()))}];
         return nil;
@@ -3075,7 +3114,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (BOOL)keyShape:(long long)layerId param:(uint32_t)param {
     auto* e = self.engine;
-    return e && e->ensure_shape_param_key(layerId, param);
+    return e && e->toggle_shape_param_key(layerId, param);
 }
 - (NSArray<NSNumber*>*)trackMatte:(long long)layerId {
     auto* e = self.engine;
@@ -3396,15 +3435,18 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 
 - (NSArray<NSNumber *> *)rotoStatusForEffect:(uint32_t)effectId layer:(long long)layerId {
-    long long v[6] = {0, 0, 0, 0, 0, 0};
+    // [propagados, total, propagando, falhou, traços aqui, traços total,
+    //  quadro atual pronto, quadros do clipe prontos, quadros do clipe, há traços]
+    long long v[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     if (auto* e = self.engine) {
-        aurea::i64 p[4] = {0, 0, 0, 0};
+        aurea::i64 st[8] = {0, 0, 0, 0, 0, 0, 0, 0};
         aurea::u32 info[3] = {0, 0, 0};
-        (void)e->roto_progress(p);
+        (void)e->roto_status(static_cast<aurea::u64>(layerId), effectId, st);
         (void)e->roto_stroke_info(static_cast<aurea::u64>(layerId), effectId, info);
-        v[0] = p[0]; v[1] = p[1]; v[2] = p[2]; v[3] = p[3]; v[4] = info[0]; v[5] = info[1];
+        v[0] = st[0]; v[1] = st[1]; v[2] = st[2]; v[3] = st[3]; v[4] = info[0]; v[5] = info[1];
+        v[6] = st[4]; v[7] = st[5]; v[8] = st[6]; v[9] = st[7];
     }
-    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5])];
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5]), @(v[6]), @(v[7]), @(v[8]), @(v[9])];
 }
 
 - (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId {
@@ -3421,6 +3463,21 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (BOOL)setLayerAcceptsLights:(BOOL)on forLayer:(long long)layerId {
     if (auto* e = self.engine) return e->set_layer_accepts_lights(static_cast<aurea::u64>(layerId), on != NO);
+    return NO;
+}
+- (void)setContentBoundedPlayback:(BOOL)on {
+    if (auto* e = self.engine) e->set_content_bounded_playback(on != NO);
+}
+- (long long)navigationEnd {
+    if (auto* e = self.engine) return e->query_navigation_end();
+    return 0;
+}
+- (BOOL)setLayer3D:(BOOL)on forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->set_layer_3d(static_cast<aurea::u64>(layerId), on != NO);
+    return NO;
+}
+- (BOOL)enableLayer3D:(long long)layerId {
+    if (auto* e = self.engine) return e->enable_layer_3d(static_cast<aurea::u64>(layerId));
     return NO;
 }
 - (int32_t)layerAcceptsLights:(long long)layerId {
@@ -3649,6 +3706,24 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return [NSData dataWithBytes:rgba.data() length:rgba.size()];
 }
 
+- (NSData*)capturePreviewFrame:(uint32_t)maxDim outWidth:(uint32_t*)outWidth outHeight:(uint32_t*)outHeight {
+    auto* e = self.engine;
+    if (!e || maxDim == 0) return nil;
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    const aurea::Status result = e->capture_preview_frame_rgba(maxDim, rgba, w, h);
+#if DEBUG
+    _lastCaptureDiagnostics = @{ @"attempted": @YES, @"previewQuality": @YES,
+        @"ok": @(result.ok() && !rgba.empty()), @"status": @(static_cast<int32_t>(result.code())),
+        @"message": to_ns(std::string(result.message())), @"detail": to_ns(std::string(result.detail())),
+        @"width": @(w), @"height": @(h), @"bytes": @(rgba.size()) };
+#endif
+    if (!result.ok() || rgba.empty()) return nil;
+    if (outWidth) *outWidth = w;
+    if (outHeight) *outHeight = h;
+    return [NSData dataWithBytes:rgba.data() length:rgba.size()];
+}
+
 - (NSData*)effectPreview:(uint32_t)typeId width:(uint32_t)width height:(uint32_t)height outSize:(CGSize*)outSize {
     auto* e = self.engine;
     if (!e || width == 0 || height == 0) return nil;
@@ -3739,6 +3814,11 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 
 - (void)cancelExport {
     if (auto* e = self.engine) (void)e->cancel_export();
+}
+
+- (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath {
+    if (auto* e = self.engine) return e->restart_export(recoveryPath.UTF8String, outputPath.UTF8String).raw();
+    return static_cast<int32_t>(aurea::Errc::InvalidState);
 }
 
 static aurea::ImageExportSettings AureaImageSettings(uint32_t format, uint32_t shortSide, uint32_t maxWidth, double fps,

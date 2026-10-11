@@ -59,7 +59,9 @@ class PreviewBufferPlaybackTest {
         assertTrue(cached.all { it.startFrame >= 0 && it.endFrame > it.startFrame })
         assertTrue(cached.zipWithNext().all { (a, b) -> a.endFrame < b.startFrame })
         val pixels = compose.onNodeWithTag("editor.timeline").captureToImage().toPixelMap()
-        val rulerBottom = (com.aurea.aurea.ui.theme.AureaTimeline.RulerTicks.value * context.resources.displayMetrics.density).toInt() + 1
+        // Capture the actual ruler bounds: the compact timeline has a different
+        // ruler height from the legacy theme constant.
+        val rulerBottom = compose.onNodeWithTag("timeline.preview.buffer").fetchSemanticsNode().boundsInRoot.height.toInt() + 1
         var blue = 0
         for (y in 0 until minOf(rulerBottom, pixels.height)) for (x in 0 until pixels.width) {
             if (pixels[x, y].toArgb() == 0xFF4DA3FF.toInt()) ++blue

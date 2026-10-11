@@ -1,10 +1,10 @@
 package com.aurea.aurea.conta
 
 /**
- * A lógica PURA da conta obrigatória — sem Android, testável na JVM.
+ * A lógica PURA da conta opcional — sem Android, testável na JVM.
  *
  * Regras que não mudam (iguais no iOS, `Conta.swift`):
- *  - sem sessão guardada, o app mostra só a tela de cadastro/entrada;
+ *  - sem sessão guardada, projetos e editor continuam acessíveis;
  *  - com sessão guardada, o app abre DIRETO, mesmo sem rede (ninguém fica
  *    trancado fora por estar offline);
  *  - ao revalidar com rede: 401 derruba a sessão; qualquer outra falha (sem
@@ -13,7 +13,7 @@ package com.aurea.aurea.conta
  *    errada" (quem decide isso é o servidor; aqui só traduzimos o código).
  */
 sealed interface ContaEstado {
-    /** Sem sessão: a tela de conta cobre o app inteiro. */
+    /** Sem sessão: o app continua disponível, com entrada opcional no menu. */
     data object Fora : ContaEstado
 
     /** Sessão guardada (validada ou ainda não — offline também vale). */

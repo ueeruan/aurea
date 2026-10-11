@@ -1,0 +1,11 @@
+{
+  "am_import_hint": {
+    "pt": "Selecione uma camada no Aurea e escolha um XML, .amproj ou ZIP exportado pelo Alight Motion. A importação converte os efeitos compatíveis da primeira camada que tiver efeitos; não importa o projeto inteiro nem a mídia. Se houver itens sem equivalente, o arquivo é recusado para evitar perda de ajustes.",
+    "en": "Select an Aurea layer, then choose an XML, .amproj or ZIP exported by Alight Motion. Import converts compatible effects from the first layer with effects; it does not import the whole project or its media. Files with unsupported items are rejected to avoid losing settings.",
+    "es": "Selecciona una capa en Aurea y elige un XML, .amproj o ZIP exportado por Alight Motion. Se convierten los efectos compatibles de la primera capa con efectos; no se importa todo el proyecto ni sus archivos multimedia. Los archivos con elementos sin equivalente se rechazan para evitar perder ajustes.",
+    "ru": "Выберите слой в Aurea, затем XML, .amproj или ZIP, экспортированный из Alight Motion. Импорт преобразует совместимые эффекты первого слоя с эффектами, а не весь проект или его медиафайлы. Файлы с неподдерживаемыми элементами отклоняются, чтобы не потерять настройки.",
+    "hi": "Aurea में एक लेयर चुनें, फिर Alight Motion से एक्सपोर्ट की गई XML, .amproj या ZIP फ़ाइल चुनें। पहली प्रभाव वाली लेयर के संगत प्रभाव बदले जाते हैं; पूरा प्रोजेक्ट या उसका मीडिया आयात नहीं होता। सेटिंग खोने से बचाने के लिए असंगत आइटम वाली फ़ाइलें अस्वीकार की जाती हैं।",
+    "id": "Pilih layer di Aurea, lalu pilih XML, .amproj atau ZIP yang diekspor dari Alight Motion. Impor mengonversi efek yang kompatibel dari layer pertama yang memiliki efek; bukan seluruh proyek atau medianya. File dengan item yang tidak didukung ditolak agar pengaturan tidak hilang.",
+    "ar": "حدد طبقة في Aurea، ثم اختر ملف XML أو .amproj أو ZIP تم تصديره من Alight Motion. يحوّل الاستيراد التأثيرات المتوافقة من أول طبقة تحتوي على تأثيرات، ولا يستورد المشروع بأكمله أو وسائطه. تُرفض الملفات التي تحتوي على عناصر غير مدعومة لتجنب فقدان الإعدادات."
+  }
+}

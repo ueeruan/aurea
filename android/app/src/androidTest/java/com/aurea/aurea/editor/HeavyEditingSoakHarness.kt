@@ -370,6 +370,9 @@ internal class HeavyEditingSoakHarness(private val compose: ComposeContentTestRu
     private fun cycleSurface() {
         journal.stage.set("surface recreation ${surfaces + 1}")
         seek(45)
+        // A rotated dense mosaic can alias a sparse readiness grid. Check the
+        // identical animation frame before and after the actual Surface cycle.
+        verifyPresentedPreview("surface-before-${surfaces + 1}", true)
         compose.runOnIdle { store.onEnterBackground(); editorVisible = false }
         // Removing EditorScreen disposes the actual SurfaceView, triggering its
         // production surfaceDestroyed callback. No fake native attach/detach.
@@ -451,9 +454,9 @@ internal class HeavyEditingSoakHarness(private val compose: ComposeContentTestRu
         while (SystemClock.elapsedRealtime() - began < 30000) {
             journal.healthy()
             val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
-            var colored = 0; var lit = 0; var samples = 0
-            val cyan = IntArray(3)
-            val magenta = IntArray(3)
+            val sparse = PresentedVideoCounts()
+            val dense = PresentedVideoCounts()
+            var samples = 0
             val colors = IntArray(25 * 41)
             try {
                 // Restrict to the 16:9 composition inside the stage's letterbox.
@@ -463,22 +466,26 @@ internal class HeavyEditingSoakHarness(private val compose: ComposeContentTestRu
                     val px = (stage.center.x - width / 2 + width * x / 40).toInt().coerceIn(0, bitmap.width - 1)
                     val py = (stage.center.y - height / 2 + height * y / 24).toInt().coerceIn(0, bitmap.height - 1)
                     val pixel = bitmap.getPixel(px, py)
-                    val r = Color.red(pixel); val g = Color.green(pixel); val b = Color.blue(pixel)
-                    if (maxOf(r, g, b) > 70) lit++
-                    if (maxOf(r, g, b) - minOf(r, g, b) > 25) colored++
-                    // The synthetic footage contains repeated cyan/magenta
-                    // bands. Generic colored shapes still appear when every
-                    // video is missing, so they cannot be the ready signal.
                     val region = minOf(2, x * 3 / 41)
-                    if (g > 160 && b > 160 && r < 110) cyan[region]++
-                    if (r > 160 && b > 160 && g < 110) magenta[region]++
+                    sparse.add(pixel, region)
                     colors[samples] = pixel
                     samples++
                 }
-                detail = "label=$label colored=$colored lit=$lit samples=$samples videoCyan=${cyan.contentToString()} videoMagenta=${magenta.contentToString()}"
-                val videoPresent = cyan.sum() >= 20 && magenta.sum() >= 20 &&
-                    (0..2).all { cyan[it] >= 4 && magenta[it] >= 4 }
-                if (lit > 20 && colored > 10 && videoPresent) {
+                // Read every screenshot pixel in the same composition ROI;
+                // thresholds are the exact original fractions of 1025 samples.
+                // The sparse samples remain the motion-change signal and are
+                // logged alongside dense counts for before/after evidence.
+                val left = (stage.center.x - width / 2).toInt().coerceIn(0, bitmap.width - 1)
+                val right = (stage.center.x + width / 2).toInt().coerceIn(left, bitmap.width - 1)
+                val top = (stage.center.y - height / 2).toInt().coerceIn(0, bitmap.height - 1)
+                val bottom = (stage.center.y + height / 2).toInt().coerceIn(top, bitmap.height - 1)
+                val row = IntArray(right - left + 1)
+                for (y in top..bottom) {
+                    bitmap.getPixels(row, 0, row.size, left, y, row.size, 1)
+                    for (x in row.indices) dense.add(row[x], minOf(2, x * 3 / row.size))
+                }
+                detail = "label=$label dense[${dense.detail()}] original41x25[${sparse.detail()}]"
+                if (dense.ready()) {
                     if (save) File(journal.folder, "presented-$label.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     journal.note("PRESENTED $detail")
                     return colors

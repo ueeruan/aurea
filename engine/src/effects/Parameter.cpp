@@ -104,7 +104,7 @@ u32 ParameterRegistry::add_enum(const char* id, const char* label, const char* c
                                 u32 count, u32 def) {
     ParamSpec s;
     s.id = id; s.label = label; s.type = ParamType::Enum;
-    s.flags = kParamNone;   // trocar de opção no meio de um frame não é interpolável
+    s.flags = kParamAnimatable;   // discrete choices animate by holding the preceding key
     s.defaultValue = ParamValue::scalar(static_cast<f32>(def));
     s.minValue = 0.0f; s.maxValue = count ? static_cast<f32>(count - 1) : 0.0f;
     s.enumCount = count; s.enumLabels = labels;
@@ -252,7 +252,13 @@ ParamValue evaluate_param_f(const TrackSet& tracks, const EffectInstance& effect
     const u32 comps = spec.animatable() && !fromExpressionSlot ? component_count(spec.type) : 0;
     for (u32 c = 0; c < comps; ++c) {
         const Track* t = tracks.find(TrackProperty::EffectParam, effect.id, param_track_key(paramIndex, c));
-        if (t) out.v[c] = t->value_or_f(localTime, out.v[c]);
+        if (t) {
+            if (spec.type == ParamType::Enum && !t->keys.empty()) {
+                const auto next = std::upper_bound(t->keys.begin(), t->keys.end(), localTime,
+                    [](f64 time, const Keyframe& key) { return time < static_cast<f64>(key.time.value); });
+                out.v[c] = (next == t->keys.begin() ? *next : *(next - 1)).value;
+            } else out.v[c] = t->value_or_f(localTime, out.v[c]);
+        }
     }
     // O efeito só vê valores dentro do contrato do parâmetro (§117). Uma
     // expressão, um keyframe antigo ou um arquivo corrompido podem trazer NaN,

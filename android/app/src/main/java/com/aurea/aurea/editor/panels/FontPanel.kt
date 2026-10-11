@@ -74,8 +74,8 @@ internal fun FontPanel(env: PanelEnv) {
     val fonts by remember(store) { derivedStateOf { store.fonts } }
     val current by remember(store) { derivedStateOf { store.textFont } }
     var query by remember { mutableStateOf("") }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) store.importFont(uri)
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        store.importFonts(uris)
     }
     val families = remember(fonts, query) {
         fonts.groupBy { it.family }

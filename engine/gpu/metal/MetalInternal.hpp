@@ -207,6 +207,8 @@ private:
     usize offset_ = 0;
     usize used_ = 0;
     usize peak_ = 0;
+    usize baseCapacity_ = 0;
+    u32 quietFrames_ = 0;
     const char* name_ = "";
 };
 

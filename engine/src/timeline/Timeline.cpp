@@ -2,6 +2,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <cmath>
+#include <unordered_map>
 
 namespace aurea {
 
@@ -26,6 +27,42 @@ CompositionId Timeline::create_composition(std::string name,
         clock_.set_fps(normalize_fps(fps));
     }
     return id;
+}
+
+Result<CompositionId> Timeline::duplicate_composition_tree(CompositionId source) {
+    if (!composition(source)) return Status{Errc::NotFound};
+    std::unordered_map<u64, CompositionId> copies;
+    std::vector<CompositionId> created;
+    std::function<CompositionId(CompositionId, u32)> duplicate = [&](CompositionId old, u32 depth) -> CompositionId {
+        if (const auto found = copies.find(old.pack()); found != copies.end()) return found->second;
+        const Composition* original = composition(old);
+        if (!original || depth >= kMaxNestingDepth) return {};
+        // Creating a composition may relocate the table. Hold a snapshot before
+        // creating, and reacquire each destination after copying its children.
+        auto snapshot = original->clone();
+        const CompositionId id = create_composition(snapshot->name() + " copia", snapshot->width(), snapshot->height(), snapshot->fps());
+        if (!id.valid()) return {};
+        created.push_back(id);
+        copies.emplace(old.pack(), id);
+        composition(id)->restore_from(*snapshot);
+        composition(id)->set_name(snapshot->name() + " copia");
+        for (u32 i = 0; i < snapshot->order().size(); ++i) {
+            const LayerId lid = snapshot->order().at(i);
+            const Layer* layer = snapshot->layer(lid);
+            if (layer->kind != LayerKind::Composition || !layer->nested.composition.valid()) continue;
+            const CompositionId child = duplicate(layer->nested.composition, depth + 1);
+            if (!child.valid()) return {};
+            composition(id)->layer(lid)->nested.composition = child;
+        }
+        return id;
+    };
+    const CompositionId result = duplicate(source, 0);
+    if (!result.valid()) {
+        for (auto i = created.rbegin(); i != created.rend(); ++i) (void)remove_composition(*i);
+        return Status{Errc::BudgetExceeded, "grupo excede o limite de composicoes ou profundidade"};
+    }
+    mark_dirty();
+    return result;
 }
 
 bool Timeline::remove_composition(CompositionId id) noexcept {

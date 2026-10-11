@@ -210,7 +210,7 @@ struct TextData {
     Vec4        strokeColor{0.0f, 0.0f, 0.0f, 1.0f};
     u32         alignment = 0;         ///< 0 esquerda, 1 centro, 2 direita
     f32         lineHeight = 1.2f;
-    f32         tracking   = 0.0f;
+    f32         tracking   = 0.0f;     ///< thousandths of an em (tracking * size / 1000 pixels)
     bool        rtl        = false;
     bool        autoSize   = true;
     Rect        box{0.0f, 0.0f, 800.0f, 200.0f};   ///< quando autoSize == false

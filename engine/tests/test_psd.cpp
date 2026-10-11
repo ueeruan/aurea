@@ -114,7 +114,7 @@ AUREA_TEST(Psd, ExistingImagesLeaveNoUnbudgetedRoomForAnotherImport) {
 AUREA_TEST(Psd, GroupsMaskUnicodeZipAnd16BitTaggedLayers) {
     for(u32 depth:{8u,16u})for(u32 compression=0;compression<4;++compression) {
         std::vector<u8> bytes;
-        const auto path="engine/tests/fixtures/psd/groups-mask-"+std::to_string(depth)+"-"+std::to_string(compression)+".psd";
+        const auto path=std::string(AUREA_TEST_DATA_DIR)+"/../fixtures/psd/groups-mask-"+std::to_string(depth)+"-"+std::to_string(compression)+".psd";
         PSD_REQUIRE(fileio::read_all(path,bytes,psd::kMaxFileBytes));psd::Document doc;PSD_REQUIRE(psd::read(bytes,doc).ok());
         PSD_REQUIRE(doc.layers.size()==2);AUREA_CHECK(doc.layers[0].group);AUREA_CHECK_NEAR(doc.layers[0].opacity,128.f/255,.001f);
         const auto& child=doc.layers[1];AUREA_CHECK_EQ(child.parent,0);AUREA_CHECK_EQ(child.name,std::string("Coração"));
@@ -125,7 +125,7 @@ AUREA_TEST(Psd, CompositionAndNestingLimitsRefuseWithoutMutation) {
     Engine e;EngineConfig cfg;cfg.disableAutosave=true;cfg.workerCount=2;
     PSD_REQUIRE(e.initialize(cfg).ok());PSD_REQUIRE(e.new_project(8,4,30,nullptr).ok());
     auto& timeline=e.project()->timeline();auto* root=timeline.composition(timeline.root());
-    const auto path="engine/tests/fixtures/psd/groups-mask-8-2.psd";
+    const auto path=std::string(AUREA_TEST_DATA_DIR)+"/../fixtures/psd/groups-mask-8-2.psd";
     root->set_nesting_depth(kMaxNestingDepth-1);
     AUREA_CHECK(!e.import_psd(path,"too deep").ok());AUREA_CHECK(root->order().empty());
     root->set_nesting_depth(0);

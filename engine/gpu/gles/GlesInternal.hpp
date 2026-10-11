@@ -68,6 +68,7 @@ struct Backend::Impl final : CommandList {
     bool frameOpen = false, presenting = false, deviceLost = false, borderClamp = false;
     TextureHandle backbuffer{};
     GLuint vao = 0, framebuffer = 0, readFramebuffer = 0;
+    GLuint drawAttachments[3]{}, readAttachment = 0;
     GLuint dummy2D = 0, dummyCube = 0, dummyBuffer = 0, dummySampler = 0;
     Status frameStatus = OkStatus;
     PFNGLQUERYCOUNTEREXTPROC queryCounter = nullptr;

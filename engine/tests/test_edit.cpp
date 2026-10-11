@@ -578,6 +578,55 @@ AUREA_TEST(Clipboard, PasteIntoAnotherProjectWorksForLayersWithoutMedia) {
     AUREA_CHECK_EQ(r.e.paste_layers(0), 2u);
 }
 
+AUREA_TEST(Clipboard, CrossProjectPasteImportsMediaEvenWhenHandlesCollide) {
+    EditRig r;
+    std::vector<u8> source(16 * 16 * 4, 255);
+    const auto image = r.e.import_image(source.data(), 16, 16, "source image");
+    AUREA_CHECK(image.ok()); if (!image.ok()) return;
+    r.range(*image, 10, 100, 5);
+    Track track; track.property = TrackProperty::PositionX;
+    track.set(FrameIndex{5}, 10.f); track.set(FrameIndex{35}, 90.f);
+    r.comp()->layer(LayerId::unpack(*image))->tracks.add(std::move(track));
+    auto* sourceLayer = r.comp()->layer(LayerId::unpack(*image));
+    Mask mask; mask.id = 0; mask.pathKeys.push_back(MaskPathKey{35, 1, {}});
+    sourceLayer->masks.push_back(std::move(mask));
+    VectorGroup group; VectorPath path; path.keys.push_back(PathKey{35, {}, 1});
+    group.paths.push_back(std::move(path)); sourceLayer->shape.vector.groups.push_back(std::move(group));
+    EffectInstance meshEffect; MeshWarpData mesh; mesh.keys.push_back(MeshWarpKey{35, 1, {}});
+    meshEffect.meshes.push_back(std::move(mesh)); sourceLayer->effects.push_back(std::move(meshEffect));
+    sourceLayer->captions.push_back(text::CaptionSegment{1, 5, 35, "two words", {{"two", 5, 20}, {"words", 20, 35}}});
+    const AssetId old = r.L(*image)->source;
+    AUREA_CHECK_EQ(r.e.copy_layers(&*image, 1), 1u);
+    AUREA_CHECK(r.e.new_project(320, 180, 60.0, nullptr).ok());
+    std::vector<u8> destination(8 * 8 * 4, 64);
+    const auto existing = r.e.import_image(destination.data(), 8, 8, "destination image");
+    AUREA_CHECK(existing.ok()); if (!existing.ok()) return;
+    AUREA_CHECK_EQ(r.L(*existing)->source, old); // numeric handles collide
+    AUREA_CHECK_EQ(r.e.paste_layers(60), 1u);
+    const Layer* pasted = nullptr;
+    r.comp()->layers().for_each([&](LayerId id, const Layer& layer) {
+        if (id.pack() != *existing) pasted = &layer;
+    });
+    AUREA_CHECK(pasted != nullptr); if (!pasted) return;
+    AUREA_CHECK(pasted->source != old);
+    const Asset* asset = r.e.project()->asset(pasted->source);
+    AUREA_CHECK(asset && asset->video.width == 16 && asset->video.height == 16);
+    AUREA_CHECK_EQ(pasted->start.value, 60);
+    AUREA_CHECK_EQ(pasted->end.value, 240);
+    AUREA_CHECK_EQ(pasted->offset.value, 10);
+    const Track* keys = pasted->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(keys && keys->keys[1].time.value == 70);
+    AUREA_CHECK_EQ(pasted->masks[0].pathKeys[0].frame, 70);
+    AUREA_CHECK_EQ(pasted->shape.vector.groups[0].paths[0].keys[0].frame, 70);
+    AUREA_CHECK_EQ(pasted->effects[0].meshes[0].keys[0].frame, 70);
+    AUREA_CHECK_EQ(pasted->captions[0].start, 10);
+    AUREA_CHECK_EQ(pasted->captions[0].words[0].end, 40);
+    AUREA_CHECK_EQ(pasted->captions[0].end, 70);
+    AUREA_CHECK(text::valid_caption_track(pasted->captions));
+    r.undo();
+    AUREA_CHECK_EQ(r.comp()->layers().count(), 1u);
+}
+
 AUREA_TEST(Clipboard, StyleAndEffectsAndKeyframes) {
     EditRig r;
     const u64 s1 = *r.e.add_shape(0);

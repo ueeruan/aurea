@@ -36,6 +36,47 @@ internal fun readEditorCommands(context: Context): List<EditorCommand> {
     } }
 }
 
+/**
+ * Título e detalhe de cada comando no idioma do app (o JSON fala pt-BR: é
+ * identidade e reserva para comando novo sem recurso). Mesma tabela no iOS
+ * (`CommandSearch.swift`, chaves `edt_cmdx_<id>` e `edt_cmdx_<id>_d`).
+ */
+private val CommandText: Map<String, Pair<Int, Int>> = mapOf(
+    "split" to (R.string.edt_cmdx_split to R.string.edt_cmdx_split_d),
+    "duplicate" to (R.string.edt_cmdx_duplicate to R.string.edt_cmdx_duplicate_d),
+    "ripple_delete" to (R.string.edt_cmdx_ripple_delete to R.string.edt_cmdx_ripple_delete_d),
+    "trim_start" to (R.string.edt_cmdx_trim_start to R.string.edt_cmdx_trim_start_d),
+    "trim_end" to (R.string.edt_cmdx_trim_end to R.string.edt_cmdx_trim_end_d),
+    "clip_edit" to (R.string.edt_cmdx_clip_edit to R.string.edt_cmdx_clip_edit_d),
+    "speed" to (R.string.edt_cmdx_speed to R.string.edt_cmdx_speed_d),
+    "freeze" to (R.string.edt_cmdx_freeze to R.string.edt_cmdx_freeze_d),
+    "extract_audio" to (R.string.edt_cmdx_extract_audio to R.string.edt_cmdx_extract_audio_d),
+    "audio" to (R.string.edt_cmdx_audio to R.string.edt_cmdx_audio_d),
+    "transform" to (R.string.edt_cmdx_transform to R.string.edt_cmdx_transform_d),
+    "text" to (R.string.edt_cmdx_text to R.string.edt_cmdx_text_d),
+    "effects" to (R.string.edt_cmdx_effects to R.string.edt_cmdx_effects_d),
+    "appearance" to (R.string.edt_cmdx_appearance to R.string.edt_cmdx_appearance_d),
+    "tracking" to (R.string.edt_cmdx_tracking to R.string.edt_cmdx_tracking_d),
+    "environment" to (R.string.edt_cmdx_environment to R.string.edt_cmdx_environment_d),
+    "particles" to (R.string.edt_cmdx_particles to R.string.edt_cmdx_particles_d),
+    "vector" to (R.string.edt_cmdx_vector to R.string.edt_cmdx_vector_d),
+    "precompose" to (R.string.edt_cmdx_precompose to R.string.edt_cmdx_precompose_d),
+    "enter_precomp" to (R.string.edt_cmdx_enter_precomp to R.string.edt_cmdx_enter_precomp_d),
+    "marker" to (R.string.edt_cmdx_marker to R.string.edt_cmdx_marker_d),
+    "magnetic" to (R.string.edt_cmdx_magnetic to R.string.edt_cmdx_magnetic_d),
+    "remove_gaps" to (R.string.edt_cmdx_remove_gaps to R.string.edt_cmdx_remove_gaps_d),
+    "previous_frame" to (R.string.edt_cmdx_previous_frame to R.string.edt_cmdx_previous_frame_d),
+    "next_frame" to (R.string.edt_cmdx_next_frame to R.string.edt_cmdx_next_frame_d),
+    "add_text" to (R.string.edt_cmdx_add_text to R.string.edt_cmdx_add_text_d),
+    "add_null" to (R.string.edt_cmdx_add_null to R.string.edt_cmdx_add_null_d),
+    "add_null3d" to (R.string.edt_cmdx_add_null3d to R.string.edt_cmdx_add_null3d_d),
+    "add_camera" to (R.string.edt_cmdx_add_camera to R.string.edt_cmdx_add_camera_d),
+    "project_settings" to (R.string.edt_cmdx_project_settings to R.string.edt_cmdx_project_settings_d),
+    "search_layers" to (R.string.edt_cmdx_search_layers to R.string.edt_cmdx_search_layers_d),
+    "undo" to (R.string.edt_cmdx_undo to R.string.edt_cmdx_undo_d),
+    "redo" to (R.string.edt_cmdx_redo to R.string.edt_cmdx_redo_d),
+)
+
 @StringRes
 private fun commandUnavailable(requirement: String, store: EditorStore): Int? {
     val selected = store.layers.filter { it.id in store.selection }
@@ -78,8 +119,14 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
     // Reuse existing catalogs and preference stores; no duplicate effect system.
     // Os presets saíram da busca (o navegador de presets não tem mais entrada);
     // máscara, legendas e rastreio de câmera chegam como efeitos do catálogo.
-    val hits = commands.map { CommandHit(it.id, it.title, it.detail, normalizeSearch("${it.title} ${it.keywords} ${it.detail}"), "Ações", it.requires) } +
-        store.catalog.filter { it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.motion.oscillate") }.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(it.category),
+    // Título e detalhe no idioma do app; a busca acha também pelo texto pt do JSON.
+    val hits = commands.map {
+        val res = CommandText[it.id]
+        val title = res?.let { r -> stringResource(r.first) } ?: it.title
+        val detail = res?.let { r -> stringResource(r.second) } ?: it.detail
+        CommandHit(it.id, title, detail, normalizeSearch("$title ${it.title} ${it.keywords} $detail ${it.detail}"), "Ações", it.requires)
+    } +
+        store.catalog.filter { it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.motion.oscillate") }.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(com.aurea.aurea.effects.effectCategoryLabel(it.category)),
             effectSearchText(it.typeId, it.name, it.category), "Efeitos", when (it.typeId) {
                 effectTypeId("aurea.text3d.layout") -> "text3d"
                 effectTypeId("aurea.shape3d.layout") -> "shape3d"

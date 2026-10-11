@@ -148,8 +148,8 @@ object ParamRowDims {
  * A RÉGUA DE RISCOS, pintada num Canvas só (trinta riscos como widgets seriam
  * trinta nós refeitos a cada quadro do arrasto).
  *
- * Os riscos SEGUEM O DEDO: a posição de cada um é `centro + valor/porDp`, então
- * arrastar para a direita aumenta o valor e os riscos andam para a direita —
+ * Os riscos SEGUEM O DEDO: a posição de cada um é `centro - valor/porDp`, então
+ * arrastar para a esquerda aumenta o valor e os riscos andam para a esquerda —
  * a conta, os riscos e o número concordam. [value] é lido DENTRO do desenho:
  * mudar o valor só repinta, não recompõe. Os riscos acendem perto do centro
  * ([ParamRowMath.tickBrightness]) e a linha do meio é a do destaque.
@@ -178,7 +178,7 @@ private fun DrawScope.drawTicks(value: Float, unitsPerDp: Float, active: Boolean
     val center = size.width / 2f
     // Onde o valor ZERO cai no papel, em px a partir da borda esquerda.
     val perPx = if (unitsPerDp > 0f) unitsPerDp / density else 1f
-    val base = (if (value.isFinite()) value / perPx else 0f) + center
+    val base = (if (value.isFinite()) -value / perPx else 0f) + center
     val whole = floor(base / step)
     var x = base - whole * step - step
     while (x <= size.width) {
@@ -205,7 +205,7 @@ private fun DrawScope.drawTicks(value: Float, unitsPerDp: Float, active: Boolean
  * O GESTO de um número: arrasto horizontal que ACUMULA desde o início
  * (`novo = início + andado × porDp`, preso na faixa). Somar delta a delta
  * sobre o valor que volta do motor acumularia o arredondamento dele e o
- * desenho descolaria do dedo. Direita aumenta.
+ * desenho descolaria do dedo. A régua corre sob o indicador: esquerda aumenta.
  *
  * O início e o fim do gesto são avisados para quem abre/fecha o passo de
  * desfazer (um arrasto = um desfazer). Cancelamento também fecha.
@@ -257,7 +257,7 @@ fun Modifier.valueDrag(
             fun step(dxPx: Float, dtMs: Float, pointers: Int) {
                 val dxDp = dxPx / density
                 speed = ParamRowMath.smoothSpeed(speed, dxDp, dtMs)
-                walked += dxDp * ParamRowMath.scrubGain(pointers, speed)
+                walked -= dxDp * ParamRowMath.scrubGain(pointers, speed)
                 val v = ParamRowMath.scrubValue(from, walked, readUnits(), lo, hi)
                 if (v.isFinite()) send(v)
             }

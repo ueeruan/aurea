@@ -96,6 +96,77 @@ AUREA_TEST(MotionGeometry, AttachmentPreservesAuthoredAnimationAndRejectsChanged
     AUREA_CHECK(!e.restore_motion_track(*imported));AUREA_CHECK(!e.apply_motion_track(id.pack(),1).ok());
     e.shutdown();
 }
+AUREA_TEST(MotionGeometry, TwoSourcesKeepIndependentResultsAndRestoreAfterReload) {
+    test::SyntheticConfig cfg;cfg.width=320;cfg.height=180;cfg.frameCount=30;
+    test::SyntheticFactory factory(cfg);Engine engine;EngineConfig config;
+    config.workerCount=2;config.disableAutosave=true;config.mediaFactory=&factory;
+    AUREA_CHECK(engine.initialize(config).ok());
+    AUREA_CHECK(engine.new_project(320,180,30,"two motion sources").ok());
+    VideoImport input;input.sourcePath="motion-source-A";auto a=engine.import_video(input);
+    input.sourcePath="motion-source-B";auto b=engine.import_video(input);
+    input.sourcePath="motion-source-empty";auto empty=engine.import_video(input);
+    AUREA_CHECK(a.ok()&&b.ok()&&empty.ok());if(!a.ok()||!b.ok()||!empty.ok())return;
+    auto* comp=engine.project()->timeline().composition(engine.project()->timeline().current());
+    auto install=[&](u64 id,Vec2 origin,Vec2 step,const char* name) {
+        auto* layer=comp->layer(LayerId::unpack(id));layer->name=name;
+        auto data=std::make_shared<MotionTrackData>();data->sourceW=320;data->sourceH=180;
+        data->analysisW=320;data->analysisH=180;data->pointCount=1;data->fps=30;
+        data->sourceSignature=source_signature(engine.project()->asset(layer->source));
+        for(int frame=0;frame<3;++frame) {
+            data->localFrames.push_back(frame);data->sourceUs.push_back(static_cast<i64>(std::llround(frame*1e6/30)));
+            MotionFrame result;result.valid=true;result.confidence=1;data->path.push_back(result);
+            std::array<Vec2,4> points{};points[0]=origin+step*static_cast<f32>(frame);data->points.push_back(points);
+        }
+        layer->motionTrack=std::move(data);
+    };
+    install(*a,{100,90},{10,0},"source A");install(*b,{40,50},{0,20},"source B");
+    auto delta=[&](u64 id,TrackProperty property) {
+        const auto* layer=comp->layer(LayerId::unpack(id));
+        const auto* track=layer?layer->tracks.find(property):nullptr;
+        AUREA_CHECK(track!=nullptr);return track?track->value_or(FrameIndex{2},0)-track->value_or(FrameIndex{0},0):0.f;
+    };
+    AUREA_CHECK(engine.restore_motion_track(*a));AUREA_CHECK_EQ(engine.motion_track_source(),*a);
+    f32 featuresA[3]{};AUREA_CHECK_EQ(engine.motion_track_features(1,featuresA,1),1u);
+    auto targetA=engine.apply_motion_track(0,0);AUREA_CHECK(targetA.ok());if(!targetA.ok())return;
+    AUREA_CHECK_NEAR(delta(*targetA,TrackProperty::PositionX),20,.001);
+    AUREA_CHECK_NEAR(delta(*targetA,TrackProperty::PositionY),0,.001);
+    AUREA_CHECK(engine.restore_motion_track(*b));AUREA_CHECK_EQ(engine.motion_track_source(),*b);
+    f32 featuresB[3]{};AUREA_CHECK_EQ(engine.motion_track_features(1,featuresB,1),1u);
+    AUREA_CHECK(std::fabs(featuresA[0]-featuresB[0])>50);
+    auto targetB=engine.apply_motion_track(0,0);AUREA_CHECK(targetB.ok());if(!targetB.ok())return;
+    AUREA_CHECK_NEAR(delta(*targetB,TrackProperty::PositionX),0,.001);
+    AUREA_CHECK_NEAR(delta(*targetB,TrackProperty::PositionY),40,.001);
+    AUREA_CHECK_NEAR(delta(*targetA,TrackProperty::PositionX),20,.001);
+    // An empty selection must clear the active completed result, while both
+    // layers' saved analyses remain available for later restoration.
+    AUREA_CHECK(!engine.restore_motion_track(*empty));AUREA_CHECK_EQ(engine.motion_track_source(),0ull);
+    AUREA_CHECK_EQ(engine.motion_track_status().state,0u);
+    AUREA_CHECK_EQ(engine.motion_track_features(1,featuresB,1),0u);
+    AUREA_CHECK(!engine.apply_motion_track(0,0).ok());
+    AUREA_CHECK(engine.restore_motion_track(*a));
+    // Feature overlays reject a source that changed after the restoration.
+    auto* originalAsset=engine.project()->asset(comp->layer(LayerId::unpack(*a))->source);
+    const auto originalPath=originalAsset->sourcePath;originalAsset->sourcePath="changed source";
+    AUREA_CHECK_EQ(engine.motion_track_features(1,featuresA,1),0u);
+    originalAsset->sourcePath=originalPath;
+    const char* file="aurea_test_two_motion_sources.aurea";
+    AUREA_CHECK(engine.save_project(file).ok());AUREA_CHECK(engine.load_project(file).ok());
+    comp=engine.project()->timeline().composition(engine.project()->timeline().current());
+    u64 restoredA=0,restoredB=0;
+    comp->layers().for_each([&](LayerId id,const Layer& layer) {
+        if(layer.name=="source A")restoredA=id.pack();if(layer.name=="source B")restoredB=id.pack();
+    });
+    AUREA_CHECK(restoredA&&restoredB);
+    AUREA_CHECK(engine.restore_motion_track(restoredB));AUREA_CHECK_EQ(engine.motion_track_source(),restoredB);
+    AUREA_CHECK_EQ(engine.motion_track_features(1,featuresB,1),1u);
+    auto reloadedB=engine.apply_motion_track(0,0);AUREA_CHECK(reloadedB.ok());
+    if(reloadedB.ok())AUREA_CHECK_NEAR(delta(*reloadedB,TrackProperty::PositionY),40,.001);
+    AUREA_CHECK(engine.restore_motion_track(restoredA));AUREA_CHECK_EQ(engine.motion_track_source(),restoredA);
+    auto reloadedA=engine.apply_motion_track(0,0);AUREA_CHECK(reloadedA.ok());
+    if(reloadedA.ok())AUREA_CHECK_NEAR(delta(*reloadedA,TrackProperty::PositionX),20,.001);
+    engine.shutdown();std::remove(file);
+}
+
 AUREA_TEST(MotionGeometry, SimilarityEstimatesScaleRotationAndTranslation) {
     auto a=grid(),b=a;const auto truth=movement(20,-12,.23,1.07);
     for(usize i=0;i<a.size();++i)b[i]=truth.project(a[i]);

@@ -18,7 +18,10 @@ constexpr f32 kColor = 40.0f;
 constexpr f32 kStrokeSeed = 0.0f;
 constexpr f32 kPriorSeed = 0.05f;
 constexpr f32 kModelSeed = 0.6f;
-constexpr f32 kBorderSeed = 1.0f;
+// The border is only an inferred background seed, but its cost must remain
+// comparable to the spatial path across the image (at most about 0.7). A cost
+// of 1 let a single foreground stroke flood low-confidence background regions.
+constexpr f32 kBorderSeed = 0.05f;
 constexpr f32 kDecision = 0.04f;
 constexpr u32 kErode = 3;
 
@@ -270,9 +273,13 @@ void roto_segment(const f32* prob, const u8* rgb, const u8* labels, const f32* p
             else if (eout[i]) { dB[i] = kPriorSeed; band[i] = 0; }
         }
     }
+    const bool paintedObject = labels && std::any_of(labels, labels + count, [](u8 value) { return value == 1; });
     if (prob) for (usize i = 0; i < count; ++i) {
         if (!band[i]) continue;
-        if (prob[i] > 0.8f) dF[i] = std::min(dF[i], kModelSeed);
+        // A green stroke selects the object. Automatic foreground seeds on
+        // unrelated people/objects must not override that selection. During
+        // propagation the selected prior already supplies foreground seeds.
+        if (prob[i] > 0.8f && !paintedObject && !prior) dF[i] = std::min(dF[i], kModelSeed);
         else if (prob[i] < 0.2f) dB[i] = std::min(dB[i], kModelSeed);
     }
     if (labels) for (usize i = 0; i < count; ++i) {

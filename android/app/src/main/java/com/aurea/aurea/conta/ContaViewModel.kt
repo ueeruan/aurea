@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * A conta obrigatória do app: quem está dentro, o número de cadastrados e a
+ * A conta opcional do app: quem está dentro, o número de cadastrados e a
  * tela de cadastro/entrada. A MainActivity e a Home leem o MESMO objeto (o
  * ViewModel da Activity).
  *

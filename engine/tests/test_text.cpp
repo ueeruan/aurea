@@ -893,3 +893,128 @@ AUREA_TEST(TextTransform, FillAlphaFollowsRangeKeysAndEffectStackWithoutChanging
     r.layer.effects[1].enabled = false; r.evaluate(0);
     AUREA_CHECK_NEAR(r.styles[0].fillOpacity, 0, .001);
 }
+
+// -----------------------------------------------------------------------------
+// Fonte de reserva por glifo (beta 08/10: japonês saía em caixinhas) e a
+// GUARDA de não-regressão: o texto latino tem de sair IDÊNTICO ao de antes da
+// ativação da fonte de reserva — pixels, glifos/posições e contornos 3D.
+// Compara duas execuções reais, sem constantes de baseline não preenchidas.
+// -----------------------------------------------------------------------------
+namespace {
+u64 fnv_bytes(u64 h, const void* p, usize n) {
+    const u8* b = static_cast<const u8*>(p);
+    for (usize i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; }
+    return h;
+}
+u64 fnv_i32(u64 h, i32 v) { return fnv_bytes(h, &v, sizeof v); }
+i32 q64(f32 v) { return static_cast<i32>(std::lround(static_cast<f64>(v) * 64.0)); }
+} // namespace
+
+AUREA_TEST(Text, LatinTextIsPixelIdenticalWithBundledFallbackEnabled) {
+    const std::string robotoPath = repo_font("Roboto-Regular.ttf");
+    auto roboto = font_at(robotoPath.c_str());
+    AUREA_CHECK(roboto != nullptr);
+    if (!roboto) return;
+    TextData t;
+    t.content = "Aurea Editor 2026 fi AV Wq\n\xC3\x81\xC3\xA7\xC3\xA3o \xC3\xB1 \xC3\xBC \xE2\x80\x94 \xC2\xABok\xC2\xBB";
+    t.size = 48.0f;
+    t.tracking = 20.0f;
+    t.color = Vec4{1, 1, 1, 1};
+    text::set_default_font_path("");
+    text::TextRaster reference;
+    AUREA_CHECK(text::rasterize(*roboto, t, 1.0f, reference));
+    std::vector<text::ShapedGlyph> referenceGlyphs;
+    text::shaped_glyphs(*roboto, t, referenceGlyphs);
+    std::vector<std::vector<Vec2>> referenceContours;
+    AUREA_CHECK(text::outline(*roboto, t, referenceContours));
+    const auto bundled = std::filesystem::path(__FILE__).parent_path().parent_path() / "platform/ios/app/Fonts/Roboto-Regular.ttf";
+    text::set_default_font_path(bundled.string());
+    text::TextRaster r;
+    const bool ok = text::rasterize(*roboto, t, 1.0f, r);
+    u64 hr = fnv_i32(fnv_i32(1469598103934665603ull, static_cast<i32>(r.width)), static_cast<i32>(r.height));
+    hr = fnv_bytes(hr, r.rgba.data(), r.rgba.size());
+    std::vector<text::ShapedGlyph> g;
+    text::shaped_glyphs(*roboto, t, g);
+    u64 hs = 1469598103934665603ull;
+    u32 fallback = 0;
+    for (const auto& x : g) {
+        hs = fnv_i32(fnv_i32(fnv_i32(fnv_i32(hs, static_cast<i32>(x.glyph)), static_cast<i32>(x.cluster)), q64(x.x)), q64(x.y));
+        fallback += x.fallback ? 1u : 0u;
+    }
+    std::vector<std::vector<Vec2>> contours;
+    const bool okOutline = text::outline(*roboto, t, contours);
+    u64 ho = 1469598103934665603ull;
+    for (const auto& c : contours) {
+        ho = fnv_i32(ho, static_cast<i32>(c.size()));
+        for (const Vec2& p : c) ho = fnv_i32(fnv_i32(ho, q64(p.x)), q64(p.y));
+    }
+    std::printf("    latino: raster %ux%u hash %016llx; shaping %zu glifos hash %016llx; contornos %zu hash %016llx\n", r.width,
+                r.height, static_cast<unsigned long long>(hr), g.size(), static_cast<unsigned long long>(hs), contours.size(),
+                static_cast<unsigned long long>(ho));
+    AUREA_CHECK(ok && okOutline);
+    AUREA_CHECK_EQ(fallback, 0u);
+    AUREA_CHECK_EQ(r.width, reference.width);
+    AUREA_CHECK_EQ(r.height, reference.height);
+    AUREA_CHECK(r.rgba == reference.rgba);
+    AUREA_CHECK_EQ(g.size(), referenceGlyphs.size());
+    for (usize i = 0; i < std::min(g.size(), referenceGlyphs.size()); ++i) {
+        AUREA_CHECK_EQ(g[i].glyph, referenceGlyphs[i].glyph);
+        AUREA_CHECK_EQ(g[i].cluster, referenceGlyphs[i].cluster);
+        AUREA_CHECK_EQ(g[i].x, referenceGlyphs[i].x);
+        AUREA_CHECK_EQ(g[i].y, referenceGlyphs[i].y);
+    }
+    AUREA_CHECK_EQ(contours.size(), referenceContours.size());
+    for (usize i = 0; i < std::min(contours.size(), referenceContours.size()); ++i) {
+        AUREA_CHECK_EQ(contours[i].size(), referenceContours[i].size());
+        for (usize j = 0; j < std::min(contours[i].size(), referenceContours[i].size()); ++j) {
+            AUREA_CHECK_EQ(contours[i][j].x, referenceContours[i][j].x);
+            AUREA_CHECK_EQ(contours[i][j].y, referenceContours[i][j].y);
+        }
+    }
+    text::set_default_font_path("");
+}
+
+// Japonês com fonte só latina (Roboto, a padrão do app): cada caractere vem
+// de uma fonte de reserva que TEM o glifo — nada de .notdef (as caixinhas do
+// relato da beta) —, o raster tem tinta em toda a frase e o texto 3D tem
+// contorno para cada ideograma/kana. Latim no meio continua na Roboto.
+AUREA_TEST(Text, JapaneseFallsBackPerGlyphInsteadOfTofu) {
+    const std::string robotoPath = repo_font("Roboto-Regular.ttf");
+    auto roboto = font_at(robotoPath.c_str());
+    AUREA_CHECK(roboto != nullptr);
+    if (!roboto) return;
+    const auto bundled = std::filesystem::path(__FILE__).parent_path().parent_path() / "platform/ios/app/Fonts/Roboto-Regular.ttf";
+    const auto jpFont = text::Font::load((bundled.parent_path() / "NotoSansJP-Regular.otf").string().c_str());
+    AUREA_CHECK(jpFont != nullptr);
+    if (!jpFont) return;
+    text::set_default_font_path(bundled.string());
+    // "Aurea こんにちは世界 2026": 0-4 latim, 5 espaço, 6-12 japonês, 13 espaço, 14-17 dígitos.
+    const std::string jp = "Aurea \xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF\xE4\xB8\x96\xE7\x95\x8C 2026";
+    const auto g = shape(*roboto, jp, 64.0f);
+    u32 notdef = 0, fromFallback = 0, latinFallback = 0;
+    for (const auto& x : g) {
+        notdef += x.glyph == 0 ? 1u : 0u;
+        if (x.cluster >= 6 && x.cluster <= 12) fromFallback += x.fallback ? 1u : 0u;
+        if (x.cluster <= 4) latinFallback += x.fallback ? 1u : 0u;
+    }
+    TextData t;
+    t.content = jp;
+    t.size = 64.0f;
+    t.color = Vec4{1, 1, 1, 1};
+    text::TextRaster r;
+    const bool ok = text::rasterize(*roboto, t, 1.0f, r);
+    // Tinta por coluna: cada um dos 7 caracteres japoneses ocupa ~64 px; a
+    // faixa deles tem de ter tinta (um .notdef da Roboto é um retângulo vazio).
+    u64 lit = 0;
+    for (usize i = 3; i < r.rgba.size(); i += 4) lit += r.rgba[i] > 128 ? 1u : 0u;
+    std::vector<std::vector<Vec2>> contours;
+    const bool okOutline = text::outline(*roboto, t, contours);
+    std::printf("    japones: %zu glifos, %u .notdef, %u de 7 da reserva, latim na reserva %u; raster %ux%u %llu px; %zu contornos\n",
+                g.size(), notdef, fromFallback, latinFallback, r.width, r.height, static_cast<unsigned long long>(lit), contours.size());
+    AUREA_CHECK_EQ(notdef, 0u);
+    AUREA_CHECK_EQ(fromFallback, 7u);
+    AUREA_CHECK_EQ(latinFallback, 0u);
+    AUREA_CHECK(ok && lit > 3000);
+    AUREA_CHECK(okOutline && contours.size() > 30);
+    text::set_default_font_path("");
+}

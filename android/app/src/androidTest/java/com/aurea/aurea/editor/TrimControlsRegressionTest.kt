@@ -64,20 +64,10 @@ class TrimControlsRegressionTest {
             store.seek(45)
         }
         compose.waitUntil(10000) { store.primary == id && store.playhead == 45 && store.layers.first { it.id==id }.endFrame == 900 }
-        compose.onNodeWithTag("timeline.layer.start").performScrollTo().performClick()
-        compose.waitUntil(5000) { store.playhead == 0 }
-        compose.onNodeWithTag("timeline.layer.end").performClick()
-        compose.waitUntil(5000) { store.playhead == 900 }
-        compose.runOnIdle { store.seek(45) }
-        compose.onNodeWithTag("timeline.layer.moveStart").performClick()
-        compose.waitUntil(5000) { store.layers.first { it.id == id }.startFrame == 45 }
-        compose.runOnIdle { assertEquals(945, store.layers.first { it.id == id }.endFrame); store.undo() }
-        compose.waitUntil(5000) { store.layers.first { it.id == id }.startFrame == 0 }
-        compose.runOnIdle { store.seek(960) }
-        compose.onNodeWithTag("timeline.layer.moveEnd").performClick()
-        compose.waitUntil(5000) { store.layers.first { it.id == id }.endFrame == 960 }
-        compose.runOnIdle { assertEquals(60, store.layers.first { it.id == id }.startFrame); store.undo(); store.seek(45) }
-        compose.waitUntil(5000) { store.layers.first { it.id == id }.startFrame == 0 && store.playhead == 45 }
+        compose.onNodeWithTag("timeline.layer.start").assertDoesNotExist()
+        compose.onNodeWithTag("timeline.layer.moveStart").assertDoesNotExist()
+        compose.onNodeWithTag("timeline.extend.start").assertDoesNotExist()
+        compose.onNodeWithTag("timeline.extend.end").assertDoesNotExist()
         compose.onNodeWithTag("timeline.showAllLayers").assertIsDisplayed().performClick()
         compose.onNodeWithTag("timeline.showAllLayers").performClick()
         compose.onNodeWithTag("timeline.cut.start").performScrollTo().assertIsDisplayed()
@@ -90,6 +80,24 @@ class TrimControlsRegressionTest {
         compose.waitUntil(10000) { store.layers.first { it.id==id }.endFrame == 45 }
         compose.runOnIdle { assertEquals(0,store.layers.first { it.id==id }.startFrame);store.undo() }
         compose.waitUntil(10000) { store.layers.first { it.id==id }.endFrame == 900 }
+        // The fixture has 60 source frames. Extend within its available handles.
+        compose.runOnIdle { store.trimStart(id, 30); store.trimEnd(id, 50); store.seek(10) }
+        compose.waitUntil(5000) { store.playhead == 10 && store.layers.first { it.id == id }.endFrame == 50 }
+        compose.onNodeWithTag("timeline.cut.start").assertDoesNotExist()
+        compose.onNodeWithTag("timeline.cut.split").assertDoesNotExist()
+        compose.onNodeWithTag("timeline.extend.end").assertDoesNotExist()
+        compose.runOnIdle { store.setLayerMagneticTrack(id, true) }
+        compose.onNodeWithTag("timeline.extend.start").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(5000) { store.layers.first { it.id == id }.startFrame == 10 }
+        compose.runOnIdle { assertEquals(50, store.layers.first { it.id == id }.endFrame); store.undo(); store.seek(58) }
+        compose.waitUntil(5000) { store.playhead == 58 && store.layers.first { it.id == id }.startFrame == 30 }
+        compose.onNodeWithTag("timeline.extend.start").assertDoesNotExist()
+        compose.onNodeWithTag("timeline.cut.end").assertDoesNotExist()
+        compose.onNodeWithTag("timeline.extend.end").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(5000) { store.layers.first { it.id == id }.endFrame == 58 }
+        compose.runOnIdle { assertEquals(30, store.layers.first { it.id == id }.startFrame); store.undo(); store.seek(40) }
+        compose.waitUntil(5000) { store.playhead == 40 && store.layers.first { it.id == id }.endFrame == 50 }
+        compose.onNodeWithTag("timeline.cut.start").assertIsDisplayed()
         val size = if (shortScreen) "short" else "tall"
         // Keep a visual record on the disposable test emulator for review.
         instrumentation.uiAutomation.executeShellCommand("screencap -p /sdcard/Download/aurea-timeline-$size.png").use {

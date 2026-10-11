@@ -143,6 +143,18 @@ class EffectPreviewStore(
  * genérica nesse caso. É por isso que a lista nunca "pisca vazia": o cartão
  * tem sempre algo para mostrar.
  */
+data class EffectPreviewResult(val image: ImageBitmap? = null, val loading: Boolean = false)
+
+@Composable
+fun rememberEffectPreviewState(store: EffectPreviewStore?, effectTypeId: Int, width: Int, height: Int): EffectPreviewResult {
+    if (store == null) return EffectPreviewResult()
+    val cached = store.peek(effectTypeId, width, height)
+    val state = produceState(EffectPreviewResult(cached, cached == null), store, effectTypeId, width, height) {
+        value = EffectPreviewResult(store.peek(effectTypeId, width, height) ?: store.load(effectTypeId, width, height))
+    }
+    return state.value
+}
+
 @Composable
 fun rememberEffectPreview(
     store: EffectPreviewStore?,
@@ -150,9 +162,5 @@ fun rememberEffectPreview(
     width: Int,
     height: Int,
 ): ImageBitmap? {
-    if (store == null) return null
-    val state = produceState(store.peek(effectTypeId, width, height), effectTypeId, width, height) {
-        value = store.peek(effectTypeId, width, height) ?: store.load(effectTypeId, width, height)
-    }
-    return state.value
+    return rememberEffectPreviewState(store, effectTypeId, width, height).image
 }

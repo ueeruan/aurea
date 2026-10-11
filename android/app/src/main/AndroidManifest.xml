@@ -26,6 +26,15 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
+    <!-- Só Android 8–9 (API ≤ 28): o export vai para a pasta PÚBLICA
+         (Filmes/Imagens/Downloads › Aurea) para aparecer na galeria — a pasta
+         do app não é indexada nesses sistemas ("o vídeo exportado não aparece
+         na galeria", beta 07/10). Pedida na tela Exportar; negada, o arquivo
+         fica na pasta do app (GalleryPublish.kt). Do Android 10 em diante o
+         MediaStore não pede permissão. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28"/>
 
     <!-- ID de publicidade: os SDKs de anúncio (LevelPlay/Unity Ads, AdMob) o
          usam. Explícito para não depender do merge das bibliotecas; o Play
@@ -34,8 +43,8 @@
 
     <!-- Fase 8I (§185, §195): saíram CAMERA, RECORD_AUDIO (não há captura no
          editor), REQUEST_INSTALL_PACKAGES (não há atualização dentro do app)
-         e WRITE_EXTERNAL_STORAGE (no Android 8–9 o export fica na pasta do
-         próprio app, que não pede permissão — ver Exporter). Permissão
+         e WRITE_EXTERNAL_STORAGE (voltou em 10/2026 só até a API 28, para o
+         export aparecer na galeria do Android 8–9 — ver acima). Permissão
          declarada sem recurso que a use é promessa falsa na loja. -->
 
     <!-- Vulkan is preferred; OpenGL ES 3.1 is the fallback. Floating-point

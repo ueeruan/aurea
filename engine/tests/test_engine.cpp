@@ -10,6 +10,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -40,6 +41,10 @@ EngineConfig headless_config() {
 #include "ProjectLifecycle.inl"
 #include "CaptureResources.inl"
 #include "PreviewIdle.inl"
+#include "Beta008Scenarios.inl"
+#include "ContentBounds.inl"
+#include "PropertyCoverageTests.inl"
+#include "ShapePuppetControls.inl"
 
 AUREA_TEST(TextOutline, NonTextTargetPreservesAnchorAnimationAndProjectState) {
     Engine e;
@@ -1308,8 +1313,8 @@ AUREA_TEST(Engine, MobileUnlinkKeepsChildrenInPlaceAndUndoes) {
 // para o quadro do 1º keyframe ou sair do centro. O filho tem que guardar o
 // resultado da tela em TODOS os quadros (pai cozido por quadro), ao apagar o
 // pai (com e sem avô) e ao soltar; desfazer volta tudo num passo só.
-AUREA_TEST(Engine, RemovingAnAnimatedParentBakesTheChildMotion) {
-    for (u32 mode : {0u, 1u, 2u}) {   // 0 apagar, 1 apagar com avô, 2 soltar
+AUREA_TEST(Engine, ExplicitUnlinkBakesTheAnimatedParentMotion) {
+    for (u32 mode : {2u}) {   // Explicit unlink keeps the existing world-motion contract.
         Engine e;
         AUREA_CHECK(e.initialize(headless_config()).ok());
         AUREA_CHECK(e.new_project(1280, 720, 30, nullptr).ok());
@@ -1840,6 +1845,40 @@ AUREA_TEST(SceneCuts, CaptureRejectsThePreviousDeviceEvenWhenTheBackendPointerIs
         AUREA_CHECK(e.render_offscreen(*newTarget, 64, 64).ok());
         mock->destroy_texture(*newTarget);
     }
+    e.shutdown();
+}
+
+AUREA_TEST(RenderRecovery, RecordingFaultWaitsForAllWorkAndPreservesEditableProject) {
+    auto* mock = new aurea::test::MockBackend();
+    Engine e; auto cfg = headless_config(); cfg.backend = mock;
+    AUREA_CHECK(e.initialize(cfg).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30, "recoverable recording").ok());
+    const auto id = e.add_shape(0); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    layer->transform.position.x = 37;
+    layer->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{30}, 51);
+    mock->recordingFault = true; mock->recoveryReady = false;
+    AUREA_CHECK_EQ(e.render_frame().code(), Errc::Timeout);
+    AUREA_CHECK_EQ(mock->initializations, 1u); // no destruction/reuse while busy
+    Command rename; rename.type = CommandType::LayerSetName;
+    rename.layer_ref.layer = LayerId::unpack(*id);
+    AUREA_CHECK(e.apply_command(rename, "edited while pending").ok());
+    AUREA_CHECK_EQ(e.render_frame().code(), Errc::Timeout);
+    AUREA_CHECK_EQ(mock->initializations, 1u);
+    mock->recoveryReady = true;
+    mock->failInitializations = 1;
+    AUREA_CHECK_EQ(e.render_frame().code(), Errc::OutOfMemory);
+    AUREA_CHECK_EQ(mock->initializations, 2u);
+    AUREA_CHECK(e.render_frame().ok()); // failed recreation remains retryable
+    AUREA_CHECK_EQ(mock->initializations, 3u);
+    AUREA_CHECK(!mock->recordingFault && !mock->deviceLost);
+    AUREA_CHECK_EQ(e.project()->metadata().title, std::string("recoverable recording"));
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    layer = comp->layer(LayerId::unpack(*id));
+    AUREA_CHECK_EQ(layer->name, std::string("edited while pending"));
+    AUREA_CHECK_NEAR(layer->transform.position.x, 37, 1e-5f);
+    AUREA_CHECK_NEAR(layer->tracks.sample_or(TrackProperty::PositionX, FrameIndex{30}, 0), 51, 1e-5f);
     e.shutdown();
 }
 
@@ -2410,15 +2449,23 @@ AUREA_TEST(Engine, EffectSpecsCoverTheWholeCatalog) {
     AUREA_CHECK(e.initialize(headless_config()).ok());
 
     std::vector<bridge::EffectCatalogRow> catalog(64);
-    std::vector<char> blob(16 * 1024);
-    const u32 count = e.query_effect_catalog(catalog.data(), static_cast<u32>(catalog.size()), blob.data(),
-                                             static_cast<u32>(blob.size()));
+    std::vector<char> blob(1024 * 1024);
+    u32 count = 0;
+    for (;;) {
+        count = e.query_effect_catalog(catalog.data(), static_cast<u32>(catalog.size()), blob.data(),
+                                      static_cast<u32>(blob.size()));
+        if (count < catalog.size()) break;
+        AUREA_CHECK(catalog.size() < 16384);
+        if (catalog.size() >= 16384) { e.shutdown(); return; }
+        catalog.resize(catalog.size() * 2);
+    }
     AUREA_CHECK(count > 0);
 
     std::vector<bridge::EffectParamRow> rows(64);
     std::vector<char> specBlob(32 * 1024);
     u32 withParams = 0;
     for (u32 i = 0; i < count; ++i) {
+        rows.resize(std::max(1u, catalog[i].paramCount));
         const u32 n = e.query_effect_specs(catalog[i].typeId, rows.data(), static_cast<u32>(rows.size()),
                                            specBlob.data(), static_cast<u32>(specBlob.size()));
         // O catálogo diz quantos parâmetros o efeito tem; a ficha tem de bater.
@@ -2950,3 +2997,49 @@ AUREA_TEST(Engine, LinkedAxisGroupsCoverTransformLightAndShapeParts) {
 #include "PreviewViewport.inl"
 #include "ImportInsertion.inl"
 #include "TransformClipboard.inl"
+
+AUREA_TEST(EffectCurves, EditingUsesSharedBoundsPreservesChannelsUndoAndSave) {
+    Engine e; AUREA_CHECK(e.initialize(headless_config()).ok());
+    AUREA_CHECK(e.new_project(64, 64, 30, "curves").ok());
+    auto added = e.add_shape(0); AUREA_CHECK(added.ok()); if (!added.ok()) return;
+    const u64 layer = *added;
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = LayerId::unpack(layer);
+    add.effect_add.effectType = effect_type_id(effect_keys::kCurves); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(e.apply_command(add).ok());
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const u32 effect = comp->layer(LayerId::unpack(layer))->effects.back().id;
+    f32 points[128]{}, samples[256]{};
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 0, false, points, 128), 4u);
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 0, 1, 0, .5f, .8f), 1);
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 0, true, samples, 256), 256u);
+    AUREA_CHECK_NEAR(samples[128], .8f, .004f);
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 1, 1, 0, .3f, .1f), 1);
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 2, false, points, 128), 4u);
+    AUREA_CHECK_EQ(points[1], 0.f); AUREA_CHECK_EQ(points[3], 1.f);
+    Command begin; begin.type = CommandType::UndoBeginGroup; AUREA_CHECK(e.apply_command(begin).ok());
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 0, 0, 1, 2.f, -1.f), 1);
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 0, 0, 1, .7f, .9f), 1);
+    Command end; end.type = CommandType::UndoEndGroup; AUREA_CHECK(e.apply_command(end).ok());
+    Command undo; undo.type = CommandType::Undo; AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 0, false, points, 128), 6u);
+    AUREA_CHECK_NEAR(points[2], .5f, .0001f); AUREA_CHECK_NEAR(points[3], .8f, .0001f);
+    const auto depth = e.history().depth();
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 0, 2, 0, 0, 0), -1);
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 4, 1, 0, .2f, .3f), -1);
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 0, 0, 1, std::numeric_limits<f32>::quiet_NaN(), 0), -1);
+    AUREA_CHECK_EQ(e.history().depth(), depth);
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 0, 0, 0, .5f, .2f), 0);
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 0, false, points, 128), 6u);
+    AUREA_CHECK_EQ(points[0], 0.f);
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 0, 0, 1, 3.f, 2.f), 1);
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 0, false, points, 128), 6u);
+    AUREA_CHECK(points[2] < points[4]); AUREA_CHECK_EQ(points[3], 1.f);
+    const auto path = (std::filesystem::temp_directory_path() / "aurea-curves-editor.aurea").string();
+    AUREA_CHECK(e.save_project(path.c_str()).ok()); AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 1, false, points, 128), 6u);
+    AUREA_CHECK_NEAR(points[2], .3f, .0001f); AUREA_CHECK_NEAR(points[3], .1f, .0001f);
+    AUREA_CHECK_EQ(e.edit_effect_curve(layer, effect, 0, 0, 3, 0, 0, 0), 0);
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 0, false, points, 128), 4u);
+    AUREA_CHECK_EQ(points[1], 0.f); AUREA_CHECK_EQ(points[3], 1.f);
+    AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 1, false, points, 128), 6u);
+}

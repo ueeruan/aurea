@@ -40,7 +40,12 @@ HRESULT seek(IMFSourceReader* r, i64 us) {
  apartment(); PROPVARIANT p{}; InitPropVariantFromInt64(std::max<i64>(0,us)*10,&p);
  const auto result=r->SetCurrentPosition(GUID_NULL,p); PropVariantClear(&p); return result;
 }
-struct RGBFrame final : DecodedFrame { std::vector<u8> pixels; };
+struct RGBFrame final : DecodedFrame {
+ std::vector<u8> pixels;
+ bool owns_cpu_backing() const noexcept override {
+  return !pixels.empty() && planes[0] == pixels.data() && pixels.size() >= approx_bytes();
+ }
+};
 class Video final : public VideoDecoderBackend {
  ComPtr<IMFSourceReader> r_; VideoStreamInfo info_{};
 public:

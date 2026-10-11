@@ -10,6 +10,7 @@
 #include "aurea/project/FileIO.hpp"
 #include "aurea/project/ProjectPackage.hpp"
 #include "aurea/project/Serialization.hpp"
+#include "aurea/export/ImageEncode.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -453,4 +454,86 @@ AUREA_TEST(ProjectPackage, FuzzedPackagesFailCleanlyAndStayInsideTheMediaDir) {
     }
     AUREA_CHECK(refused > 0);
     std::printf("(%u pacotes mutados: %u abriram, %u recusados) ", opened + refused, opened, refused);
+}
+
+namespace {
+struct ModelZipFile { std::string name, data; bool deflated; };
+std::string model_zip(const std::vector<ModelZipFile>& files) {
+    std::string out, directory;
+    const auto u16le = [](std::string& bytes, u32 n) { for (int i = 0; i < 2; ++i) bytes += char(n >> (i * 8)); };
+    const auto u32le = [](std::string& bytes, u32 n) { for (int i = 0; i < 4; ++i) bytes += char(n >> (i * 8)); };
+    for (const auto& file : files) {
+        std::string payload = file.data;
+        if (file.deflated) {
+            std::vector<u8> zlib;
+            zlib_compress(reinterpret_cast<const u8*>(file.data.data()), file.data.size(), zlib);
+            payload.assign(reinterpret_cast<const char*>(zlib.data() + 2), zlib.size() - 6);
+        }
+        const u32 crc = crc32_update(0, reinterpret_cast<const u8*>(file.data.data()), file.data.size());
+        const u32 offset = static_cast<u32>(out.size());
+        u32le(out, 0x04034b50); u16le(out, 20); u16le(out, 0x800); u16le(out, file.deflated ? 8 : 0);
+        u32le(out, 0); u32le(out, crc); u32le(out, payload.size()); u32le(out, file.data.size());
+        u16le(out, file.name.size()); u16le(out, 0); out += file.name; out += payload;
+        u32le(directory, 0x02014b50); u16le(directory, 20); u16le(directory, 20);
+        u16le(directory, 0x800); u16le(directory, file.deflated ? 8 : 0); u32le(directory, 0);
+        u32le(directory, crc); u32le(directory, payload.size()); u32le(directory, file.data.size());
+        u16le(directory, file.name.size()); u16le(directory, 0); u16le(directory, 0);
+        u16le(directory, 0); u16le(directory, 0); u32le(directory, 0); u32le(directory, offset);
+        directory += file.name;
+    }
+    const u32 offset = static_cast<u32>(out.size());
+    out += directory;
+    u32le(out, 0x06054b50); u16le(out, 0); u16le(out, 0); u16le(out, files.size());
+    u16le(out, files.size()); u32le(out, directory.size()); u32le(out, offset); u16le(out, 0);
+    return out;
+}
+}
+
+AUREA_TEST(ModelArchive, StoredAndDeflatedPreserveNestedResourcesAndEmptyFiles) {
+    const fs::path dir = scratch("model-zip");
+    const std::string obj = "mtllib material.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    const std::string mtl = "newmtl green\nmap_Kd textures/green.png\n";
+    const std::string texture(32768, '\x52');
+    for (bool deflated : {false, true}) {
+        const fs::path root = dir / (deflated ? "compressed" : "stored");
+        const std::string archive = s8(dir / "models.zip");
+        write_text(archive, model_zip({{"model/plane.obj", obj, deflated}, {"model/material.mtl", mtl, deflated},
+                                       {"model/textures/green.png", texture, deflated}, {"model/empty.txt", "", deflated}}));
+        std::vector<std::string> files;
+        const Status status = package::extract_model_archive(archive, s8(root), files);
+        if (!status.ok()) std::printf("model archive deflated=%d error=%u message=%.*s\n", deflated, unsigned(status.code()), int(status.message().size()), status.message().data());
+        AUREA_CHECK(status.ok());
+        AUREA_CHECK(files.size() == 4);
+        AUREA_CHECK(read_text(s8(root / "model/plane.obj")) == obj);
+        AUREA_CHECK(read_text(s8(root / "model/material.mtl")) == mtl);
+        AUREA_CHECK(read_text(s8(root / "model/textures/green.png")) == texture);
+        AUREA_CHECK(fs::exists(root / "model/empty.txt") && fs::file_size(root / "model/empty.txt") == 0);
+    }
+}
+
+AUREA_TEST(ModelArchive, InvalidNamesAndCorruptPayloadLeaveNoPartialDirectory) {
+    const fs::path dir = scratch("model-zip-invalid");
+    const std::string archive = s8(dir / "models.zip");
+    const fs::path root = dir / "extracted";
+    for (const std::string name : {"../outside.obj", "folder/../../outside.obj", "/outside.obj", "C:\\outside.obj", "a//b.obj"}) {
+        write_text(archive, model_zip({{name, "model", true}}));
+        std::vector<std::string> files;
+        AUREA_CHECK(!package::extract_model_archive(archive, s8(root), files).ok());
+        AUREA_CHECK(files.empty() && !fs::exists(root));
+        AUREA_CHECK(!fs::exists(dir / "outside.obj"));
+    }
+    write_text(archive, model_zip({{"plane.obj", "one", false}, {"Plane.obj", "two", true}}));
+    std::vector<std::string> files;
+    AUREA_CHECK(!package::extract_model_archive(archive, s8(root), files).ok());
+    AUREA_CHECK(!fs::exists(root));
+    // The second stored file fails CRC after the first was successfully written.
+    std::string bytes = model_zip({{"plane.obj", "good", false}, {"material.mtl", "bad-material", false}});
+    bytes[bytes.find("bad-material")] ^= 0x40;
+    write_text(archive, bytes);
+    AUREA_CHECK(!package::extract_model_archive(archive, s8(root), files).ok());
+    AUREA_CHECK(files.empty() && !fs::exists(root));
+    fs::create_directories(root);
+    write_text(s8(root / "keep.txt"), "existing user data");
+    AUREA_CHECK(package::extract_model_archive(archive, s8(root), files).code() == Errc::AlreadyExists);
+    AUREA_CHECK(read_text(s8(root / "keep.txt")) == "existing user data");
 }

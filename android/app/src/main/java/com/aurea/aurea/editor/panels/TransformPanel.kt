@@ -136,9 +136,6 @@ internal fun transformKeyProperties(tab: TransformTab, threeD: Boolean, axis: In
 }
 
 
-/** "Girar em 3D" aberto à mão numa camada 2D (X/Y e profundidade aparecem). */
-private val threeDOpen = androidx.compose.runtime.mutableStateOf(false)
-
 /**
  * X/Y/Z SÓ QUANDO SE APLICA: camada 3D de verdade (objeto 3D, câmera, luz, nulo
  * 3D) ou 2D que JÁ usa a terceira dimensão (inclinada em X/Y, com profundidade
@@ -176,7 +173,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val isCamera = store.detail?.kind == LayerType.Camera.kind
     val tabs = if (isCamera) TransformTab.entries else TransformTab.entries.filter { it != TransformTab.Lente }
     androidx.compose.runtime.LaunchedEffect(isCamera, tab) { if (tab == TransformTab.Lente && !isCamera) onTab(TransformTab.Mover) }
-    val show3D by remember(store) { derivedStateOf { threeDOpen.value || uses3D(store.detail) } }
+    val show3D by remember(store) { derivedStateOf { uses3D(store.detail) } }
     val axis = if (show3D) rotationAxis.intValue else 2
     val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
     // Rotation diamond and timeline focus follow the selected axis.
@@ -259,7 +256,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                     if (show3D) {
                         AxisRow(axis) { rotationAxis.intValue = it }
                     } else {
-                        Open3DRow { threeDOpen.value = true }
+                        Open3DRow { store.enableLayer3D() }
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) { RotationDial(env, axis) }
                 }
@@ -269,7 +266,12 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                 TransformTab.Desfoque -> MotionBlurFace(env)
                 TransformTab.Animadores -> Column(
                     Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp),
-                ) { LayerAnimSection(env) }
+                ) {
+                    LayerAnimSection(env)
+                    if (store.detail?.kind == LayerType.Text.kind || store.text3d != null) {
+                        TextAnimSection(env, showAnimatorEffect = false)
+                    }
+                }
                 TransformTab.Lente -> LensFace(env)
             }
             Spacer(Modifier.height(10.dp))
@@ -293,8 +295,8 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                 if (canKey) add(SheetAction(if (exprLook == com.aurea.aurea.engine.ExpressionLook.None) stringResource(R.string.panel_adicionar_expressao) else stringResource(R.string.panel_editar_expressao)) {
                     store.openExpression(exprTitle, exprKeys, exprScale, exprUnit)
                 })
-                if (!uses3D(store.detail)) {
-                    add(SheetAction(if (threeDOpen.value) stringResource(R.string.panel_esconder_x_y_z_3d) else stringResource(R.string.panel_mostrar_x_y_z_3d)) { threeDOpen.value = !threeDOpen.value })
+                if (store.detail?.let { it.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D == 0 && it.kind !in 8..10 } == true) {
+                    add(SheetAction(stringResource(R.string.panel_mostrar_x_y_z_3d)) { store.enableLayer3D() })
                 }
             },
             onDismiss = { menu = false },
@@ -322,7 +324,7 @@ private fun resetTab(env: PanelEnv, tab: TransformTab, axis: Int) {
     }
 }
 
-/** Camada 2D: a Rotação é só no plano; um toque abre X/Y (inclinar em perspectiva). */
+/** Opt into the scene camera, including at zero rotation and depth. */
 @Composable
 private fun Open3DRow(onOpen: () -> Unit) {
     Row(
@@ -334,6 +336,7 @@ private fun Open3DRow(onOpen: () -> Unit) {
             Modifier
                 .clip(RoundedCornerShape(8.dp))
                 .background(AureaColors.Chip)
+                .testTag("transform.enable3d")
                 .tocavel(onClick = onOpen)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
         ) {
@@ -1007,25 +1010,27 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
     Box(
         Modifier
             .fillMaxSize()
+            .testTag("transform.rotation.dial")
             .pointerInput(store, axis) {
                 awaitEachGesture {
                     val center = Offset(size.width / 2f, size.height / 2f)
                     val dead = DEAD_ZONE_DP * density
                     fun raw(p: Offset) = (atan2(p.y - center.y, p.x - center.x) * 180.0 / Math.PI).toFloat()
-                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = true)
                     var last = down.position
                     var walked = 0f
                     var prevRaw: Float? = if ((down.position - center).getDistance() >= dead) raw(down.position) else null
                     var total = if (current.isFinite()) current else 0f
                     var began = false
+                    var cancelled = false
                     while (true) {
                         val ev = awaitPointerEvent()
                         val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
                         if (!ch.pressed) break
+                        if (ch.isConsumed) { cancelled = true; break }
                         val p = ch.position
                         walked += (p - last).getDistance()
                         last = p
-                        ch.consume()
                         if ((p - center).getDistance() < dead) {
                             prevRaw = null   // sair do miolo recomeça a conta
                             continue
@@ -1038,16 +1043,18 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
                         if (step > 180f) step -= 360f
                         if (step < -180f) step += 360f
                         if (step == 0f) continue
+                        total += step
+                        if (!began && walked < viewConfiguration.touchSlop) continue
+                        ch.consume()
                         if (!began) {
                             began = true
                             store.beginGesture("girar")
                         }
-                        total += step
                         store.setTransform(prop, total)
                     }
                     if (began) {
                         store.endGesture()
-                    } else if (walked < 2f * density && (last - center).getDistance() >= dead) {
+                    } else if (!cancelled && walked < 2f * density && (last - center).getDistance() >= dead) {
                         // Toque seco: o ângulo apontado, na volta atual.
                         val turns = floor(current / 360f)
                         store.setTransform(prop, turns * 360f + raw(last))
@@ -1099,6 +1106,7 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
                 "${turns}x",
                 style = valueStyle,
                 modifier = Modifier
+                    .testTag("transform.rotation.turns")
                     .tocavel(shrink = 1f) {
                         env.openKeypad(KeypadRequest(turnsTitle, turns.toFloat(), "x", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 0) {
                             store.setTransform(prop, it.roundToInt() * 360f + rest)
@@ -1111,6 +1119,7 @@ private fun RotationDial(env: PanelEnv, axis: Int) {
                 "${if (rest < 0f) "−" else "+"}$restText°",
                 style = valueStyle,
                 modifier = Modifier
+                    .testTag("transform.rotation.degrees")
                     .tocavel(shrink = 1f) {
                         env.openKeypad(KeypadRequest(degreesTitle, rest, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
                             store.setTransform(prop, turns * 360f + it)

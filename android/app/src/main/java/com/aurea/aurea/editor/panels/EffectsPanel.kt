@@ -313,8 +313,17 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     var selected by remember(layerId) {
         mutableStateOf(entry?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) })
     }
-    androidx.compose.runtime.DisposableEffect(store, selected) {
-        store.timelineFocus = selected?.let { listOf(TrackKey(31, it.effectId, it.param * 4 + it.component)) } ?: emptyList()
+    val puppet = com.aurea.aurea.editor.PuppetStage
+    val puppetOpen = layerId != null && puppet.layer == layerId && puppet.effect == openId &&
+        effects.any { it.effectId == openId && it.typeId == puppet.TYPE }
+    val activePins = remember(store, layerId, openId, puppetOpen, store.rigRevision, store.curveRevision) {
+        if (puppetOpen && layerId != null && openId != null) store.puppetPins(layerId, openId!!) else FloatArray(0)
+    }
+    val focus = if (puppetOpen && (puppet.editing || selected == null))
+        puppetPanelTimelineFocus(puppet.effect, puppet.selected, activePins)
+    else selected?.let { listOf(TrackKey(31, it.effectId, it.param * 4 + it.component)) } ?: emptyList()
+    androidx.compose.runtime.DisposableEffect(store, layerId, focus) {
+        store.timelineFocus = focus
         onDispose { store.timelineFocus = null }
     }
     var advancedOpen by remember(layerId) {
@@ -372,7 +381,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         else if (openId != null && openId !in ids) openId = null
     }
     // O cartão aberto escolhe a sua primeira linha PRINCIPAL (se a escolhida não é dele).
-    LaunchedEffect(openId, effects) {
+    LaunchedEffect(openId, effects, openId?.let { store.effectParams[it] }) {
         val id = openId
         if (id == null) {
             selected = null
@@ -380,7 +389,9 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         }
         if (selected?.effectId == id) return@LaunchedEffect
         val visible = store.effectParams[id].orEmpty().map { ParamSlot.of(it) }.filter { !it.hidden }
-        val first = splitPrincipal(store.typeOf(id), visible).first.firstOrNull { it.components > 0 }
+        val groups = splitPrincipal(store.typeOf(id), visible)
+        val first = (groups.first + groups.second).firstOrNull { it.animatable }
+            ?: groups.first.firstOrNull { it.components > 0 }
         selected = first?.let { ParamKey(id, it.index, 0) }
     }
 
@@ -555,6 +566,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         val anyOn = effects.any { it.enabled }
         AureaActionSheet(
             title = stringResource(R.string.panel_efeitos_camada),
+            message = stringResource(R.string.am_import_hint),
             actions = buildList {
                 // "Meus presets" saiu (pedido de 2026-10-01: ninguém usa); o motor
                 // continua lendo os presets dos projetos antigos.
@@ -971,7 +983,8 @@ private fun EffectCardItem(
         }
         if (effect.typeId == effectTypeId("aurea.key.rotobrush")) {
             PanelNotice(stringResource(R.string.roto_note))
-            com.aurea.aurea.editor.RotoPaintControls(store, effect.effectId, 0)
+            val previousView = store.effectParams[id]?.firstOrNull { it.index == 10 }?.value?.firstOrNull()?.toInt() ?: 0
+            com.aurea.aurea.editor.RotoPaintControls(store, effect.effectId, previousView.coerceIn(0, 2))
         }
         val localAiBit = when (effect.typeId) {
             effectTypeId("aurea.ai.depth_map") -> 1
@@ -1064,6 +1077,7 @@ private fun ParamRows(
         // Outra camada ("Camada de áudio"): escolhe na lista das camadas.
         ParamType.LAYER_REFERENCE -> EffectLayerRow(env, id, s, label, menu)
         ParamType.TEXTURE_REFERENCE -> CubeLutImportRow(env, id)
+        ParamType.CURVE -> ColorCurveEditor(env, id, s.index)
         // Curva/degradê/textura: o motor tem, o app ainda não edita — sem botão falso.
         else -> PropertyCustomRow(label = label, selected = false, onSelect = {}) {
             Text(

@@ -6,7 +6,7 @@
     <string name="expfail_encoder_stalled">توقف مُرمِّز الفيديو عن الاستجابة؛ أغلق التطبيقات الأخرى وحاول مجددًا</string>
     <string name="expfail_render">تعذّر على معالج الرسومات في الهاتف تصيير الفيديو؛ جرّب دقة أقل</string>
     <string name="expfail_memory">لا توجد ذاكرة كافية لهذه الدقة؛ جرّب دقة أقل</string>
-    <string name="expfail_media">تعذّرت قراءة ملف وسائط في المشروع</string>
+    <string name="expfail_media">تعذّرت قراءة ملف وسائط في المشروع؛ تأكد من أن الفيديو ما زال على الجهاز أو استبدله ثم حاول مجددًا</string>
     <string name="expfail_file">تعذّر حفظ ملف الفيديو</string>
     <string name="expfail_unsupported">لا يستطيع هذا الهاتف التصدير بهذه الدقة أو هذه الصيغة</string>
     <string name="expfail_stuck">توقف التصدير عن التقدّم لعدة دقائق فأُوقف؛ أغلق التطبيقات الأخرى وحاول مرة أخرى</string>

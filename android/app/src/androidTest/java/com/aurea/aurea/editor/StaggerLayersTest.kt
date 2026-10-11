@@ -12,16 +12,11 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
-/**
- * "Escalonar" pela barra de lote: três camadas no mesmo início viram uma
- * cascata de 3 quadros na ordem da timeline (a de cima fica), UM desfazer
- * volta; "Keyframes" anda só a animação. E o interruptor "Keyframes de todas
- * as camadas" do menu da timeline.
- */
+/** Verifies removal of the marked rows and content-sized add panels in the native editor. */
 class StaggerLayersTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun staggerRowCascadesLayersInTimelineOrderAndOneUndoRestores() {
+    @Test fun removedRowsStayHiddenAndAudioPanelFitsItsContent() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))
         lateinit var store: EditorStore
@@ -45,29 +40,20 @@ class StaggerLayersTest {
         }
         compose.waitUntil(5000) { store.selection.size == 3 && store.layers.all { it.startFrame == 0 } }
 
-        compose.onNodeWithTag("stagger_step").assertTextContains("3", substring = true)
-        compose.onNodeWithTag("stagger_layers").performScrollTo().performClick()
-        compose.waitUntil(5000) { store.layers.map { it.startFrame }.toSet().size == 3 }
-        compose.runOnIdle {
-            val starts = ids.map { id -> store.layers.first { it.id == id }.startFrame }
-            // Na ordem da timeline (de cima para baixo): 0, 3, 6.
-            val shown = store.layers.map { it.startFrame }
-            assertEquals(listOf(0, 3, 6), shown)
-            assertEquals(setOf(0, 3, 6), starts.toSet())
-        }
-        compose.runOnIdle { store.undo() }
-        compose.waitUntil(5000) { store.layers.all { it.startFrame == 0 } }
-
-        // Só a animação: as barras ficam.
-        compose.onNodeWithTag("stagger_keys").performScrollTo().performClick()
-        compose.runOnIdle { assertTrue(store.layers.all { it.startFrame == 0 }) }
-
-        // Keyframes só das escolhidas (padrão: todas).
-        compose.runOnIdle {
-            assertTrue(store.showAllKeyframes)
-            store.toggleShowAllKeyframes()
-            assertFalse(store.showAllKeyframes)
-            store.toggleShowAllKeyframes()
+        compose.onNodeWithTag("stagger_step").assertDoesNotExist()
+        compose.onNodeWithTag("stagger_layers").assertDoesNotExist()
+        compose.onNodeWithTag("stagger_keys").assertDoesNotExist()
+        val batch = compose.onNodeWithTag("timeline.batch.tools").fetchSemanticsNode().boundsInRoot
+        val density = context.resources.displayMetrics.density
+        assertTrue("Only the two icon rows should occupy the batch panel", batch.height / density <= 132.1f)
+        compose.runOnIdle { store.clearSelection() }
+        compose.onNodeWithTag("addBar.Audio").assertIsDisplayed().performClick()
+        val audio = compose.onNodeWithTag("editor.addPanel").fetchSemanticsNode().boundsInRoot
+        assertTrue("Audio must end below its single card row", audio.height / density <= 155f)
+        assertTrue("All cards and the close button must fit", audio.height / density >= 140f)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.uiAutomation.executeShellCommand("screencap -p /sdcard/Download/aurea-compact-audio.png").use {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
         }
     }
 }

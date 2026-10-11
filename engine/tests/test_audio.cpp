@@ -574,6 +574,18 @@ AUREA_TEST(Audio, EngineClockFollowsTheSampleAtTheSpeaker) {
     // 4800 puxados, 512 ainda no buffer da saída: soa a amostra 96000 + 4288.
     AUREA_CHECK_EQ(eng.position_ns(), audio::sample_to_ns(96000 + 4800 - 512));
 
+    // Rebuilding a mix while playing must keep the speaker clock moving,
+    // rather than restarting it at the beginning of the current play session.
+    for (u32 edit = 0; edit < 20; ++edit) {
+        const i64 before = eng.position_ns();
+        eng.set_snapshot(std::make_shared<audio::AudioMixSnapshot>(*snap), before);
+        wait_until([&] { return eng.stats().queuedMs >= 100; });
+        eng.debug_render(buf.data(), 480);
+        out.pulled += 480;
+        AUREA_CHECK(eng.position_ns() >= before);
+        AUREA_CHECK(eng.position_ns() < before + 50'000'000);
+    }
+
     // Seek tocando: o que sobrou no anel é descartado sem lock; a primeira
     // amostra nova é a de 5 s.
     eng.play(5'000'000'000);
@@ -583,6 +595,10 @@ AUREA_TEST(Audio, EngineClockFollowsTheSampleAtTheSpeaker) {
     AUREA_CHECK_NEAR(buf[0], synthetic_audio_value(cfg, 0, 5.0), 1e-6);
     AUREA_CHECK_EQ(eng.position_ns(), 5'000'000'000);   // ainda no buffer da saída
     for (int i = 0; i < 4; ++i) {
+        // This fake callback consumes instantly; let the mixer replenish the
+        // new generation instead of simulating a CPU-speed hardware callback.
+        wait_until([&] { return eng.stats().queuedMs >= 100; });
+        AUREA_CHECK(eng.stats().queuedMs >= 100);
         eng.debug_render(buf.data(), 480);
         out.pulled += 480;
     }

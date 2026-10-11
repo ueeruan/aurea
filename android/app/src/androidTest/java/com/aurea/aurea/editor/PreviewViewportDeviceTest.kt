@@ -19,6 +19,37 @@ import java.nio.ByteOrder
 class PreviewViewportDeviceTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun twoKAndFourKAt60FpsStartAndKeepAdvancingOnThePhone() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName.endsWith(".uitest"))
+        lateinit var store: EditorStore
+        var ready = false
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            ready = true
+            AureaTheme { EditorScreen(store) }
+        }
+        compose.waitUntil(30000) { ready && store.engineReady }
+        val journal = StringBuilder()
+        for ((width, height) in listOf(2560 to 1440, 3840 to 2160)) {
+            val title = "Preview ${width}x${height} 60fps"
+            compose.runOnIdle { store.newProject(width, height, 60f, title) }
+            compose.waitUntil(15000) { store.project.title == title }
+            compose.runOnIdle { store.addShape(0); store.setCompositionDuration(600); store.setPreviewScale(true); store.seek(0) }
+            compose.waitUntil(10000) { store.layers.isNotEmpty() && store.playhead == 0 }
+            val began = android.os.SystemClock.elapsedRealtime()
+            compose.runOnIdle { store.play() }
+            compose.waitUntil(15000) { store.playing && !store.preview.buffering && store.playhead >= 30 }
+            val startup = android.os.SystemClock.elapsedRealtime() - began
+            val first = store.playhead
+            compose.waitUntil(10000) { store.playhead >= first + 60 }
+            journal.append("$title startupToFrame30Ms=$startup progressedFrom=$first to=${store.playhead}\n")
+            compose.runOnIdle { store.pause() }
+            compose.waitUntil(5000) { !store.playing && !store.preview.buffering }
+        }
+        File(context.getExternalFilesDir(null), "preview-60fps-result.txt").writeText(journal.toString())
+    }
+
     @Test fun automaticPreviewFitsThePhoneWhileManualAndExactCapturesKeepTheirSize() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         check(context.packageName.endsWith(".uitest"))

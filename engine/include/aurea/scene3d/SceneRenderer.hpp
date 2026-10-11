@@ -64,6 +64,10 @@ public:
     BufferHandle positions{}, shading{}, skin{}, indices{};
     IndexType indexType = IndexType::U32;
     std::vector<std::vector<GpuPrimitive>> meshes;   ///< por malha do asset
+    // Immutable asset topology, prepared once at upload. Hierarchy/joint nodes
+    // remain in the pose, but need no per-frame morph/shadow/draw traversal.
+    std::vector<u32> drawableNodes;
+    std::vector<u32> morphNodes;
     std::vector<GpuMaterial> materials;
     GpuMaterial defaultMaterial;
     u64 geometryBytes = 0;
@@ -140,7 +144,7 @@ struct SceneInstance {
     /// Rigid exposure samples share immutable pose/material state. Only the
     /// transform and camera vary; a dense static glTF is never copied K times.
     std::shared_ptr<const SceneInstance> sharedPose;
-    [[nodiscard]] const SceneInstance& pose() const noexcept { return sharedPose ? *sharedPose : *this; }
+    [[nodiscard]] const SceneInstance& pose() const noexcept { return sharedPose ? sharedPose->pose() : *this; }
     bool cameraOverride = false;
     Mat4 sampleViewProj = Mat4::identity();
     Mat4 sampleView = Mat4::identity();
@@ -395,7 +399,7 @@ public:
                              FGTexture* outDepth = nullptr, FGTexture* outExposureHdr = nullptr) noexcept;
     /// Complete a linear temporal exposure once, after all geometry samples.
     [[nodiscard]] FGTexture finish_exposure(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
-                                            FGTexture display, FGTexture scene) noexcept;
+                                            FGTexture display, FGTexture scene, bool bloomHasRadiance = true) noexcept;
     /// O grupo tem luz de cena (modelo, texto 3D, céu)? Sem ela, planos e
     /// partículas vão num alvo só, sem pós.
     [[nodiscard]] static bool wants_hdr(const SceneFrame& frame) noexcept {
@@ -425,6 +429,7 @@ public:
     struct EnvSet {
         TextureHandle irradiance{}, prefiltered{}, brdf{};
         u32 mips = 0;
+        u32 specularTier = 0; ///< requested quality, even when the source HDRI is small
         u64 lastFrame = 0;
         u64 bytes = 0;
     };
@@ -432,11 +437,12 @@ public:
     /// neutro padrão.
     [[nodiscard]] Status set_environment(const EnvironmentMaps& maps) noexcept;
     [[nodiscard]] Status upload_environment(const EnvironmentMaps& maps, EnvSet& out) noexcept;
-    /// Devolve (subindo se preciso) o conjunto daquele ambiente. Nulo = sem
-    /// como (usa o do grupo).
-    [[nodiscard]] const EnvSet* environment_set(const SceneEnvironment& env, u64 frameNumber) noexcept;
+    /// Preview polls one bounded CPU job; final rendering waits for its maps.
+    /// Only a lower-quality set of the same HDRI may serve as a pending fallback.
+    [[nodiscard]] const EnvSet* environment_set(const SceneEnvironment& env, u64 frameNumber, bool wait = true) noexcept;
+    void set_environment_wait(bool wait) noexcept { environmentWait_ = wait; }
     [[nodiscard]] bool has_environment() const noexcept { return irradiance_.valid(); }
-    [[nodiscard]] bool environment_pending() const noexcept { return pendingEnv_.valid(); }
+    [[nodiscard]] bool environment_pending() const noexcept { return pendingEnv_.valid() || pendingObjectEnv_.valid(); }
     /// Export e captura usam a qualidade final: esperam o ambiente (ou o geram
     /// agora). O preview não chama — segue sem travar.
     void finish_environment(const SceneEnvironment& env) noexcept;
@@ -510,7 +516,7 @@ private:
     /// Pós do grupo: bloom (cadeia descida/subida), tone map e FXAA. Devolve
     /// a textura final do grupo.
     [[nodiscard]] FGTexture build_post(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
-                                       FGTexture display, FGTexture scene) noexcept;
+                                       FGTexture display, FGTexture scene, bool bloomHasRadiance) noexcept;
     [[nodiscard]] FGTexture build_fxaa(FrameGraph& graph, u32 width, u32 height, FGTexture src) noexcept;
     /// Profundidade de campo ANTES do bloom e do tone map (luz HDR linear: o
     /// realce vira bokeh). Dois passes: raio do círculo de confusão por pixel
@@ -535,6 +541,7 @@ private:
 
     GPUBackend* gpu_ = nullptr;
     friend struct SceneUploadPoolTestAccess;
+    friend struct SceneEnvironmentJobTestAccess;
     ShaderLibrary* shaders_ = nullptr;
     std::unordered_map<u64, Entry> models_;
     // Um buffer mapeado por chamada de build: matrizes de junta, vértices de
@@ -562,6 +569,13 @@ private:
     /// Estúdio padrão sendo gerado numa thread de fundo (~0,3 s no desktop):
     /// o primeiro quadro 3D não espera; usa o céu analítico até ficar pronto.
     std::future<EnvironmentMaps> pendingEnv_;
+    // The copy captured by this job owns its HDRI pixels. Never replace a live
+    // std::async future during preview: its destructor would wait on render.
+    std::future<EnvironmentMaps> pendingObjectEnv_;
+    u64 pendingObjectKey_ = ~0ull;
+    u32 pendingObjectSpecTier_ = 0;
+    bool environmentWait_ = false;
+    void poll_object_environment(u64 frameNumber, bool wait) noexcept;
     bool envRequested_ = false;
     u64 envKey_ = ~0ull;       ///< o que está na GPU
     u64 pendingKey_ = ~0ull;   ///< o que está sendo gerado

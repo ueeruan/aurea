@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ProjectEntry
 import com.aurea.aurea.ui.theme.AureaColors
@@ -58,7 +59,8 @@ internal fun ProjectsTab(
 
     val arranged = remember(all, sort, query) { arrangeProjects(all, sort, query) }
     val columns = gridColumns()
-    val rows = (arranged.size + columns - 1) / columns
+    val compact = columns <= 2
+    val rows = if (compact) arranged.size else (arranged.size + columns - 1) / columns
 
     var dialog by remember { mutableStateOf(ProjectDialogState()) }
     val listBackdrop = rememberBackdrop()
@@ -68,14 +70,14 @@ internal fun ProjectsTab(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().backdropSource(listBackdrop),
-            contentPadding = PaddingValues(bottom = AureaDims.ListEndSpace + bottomBar - AureaDims.TabBarHeight),
+            contentPadding = PaddingValues(bottom = if (selecting) 96.dp else 24.dp),
         ) {
             item(key = "titulo") {
                 Column {
                     Text(
                         stringResource(R.string.home_title_projects),
-                        style = AureaType.HeadlineLarge,
-                        modifier = Modifier.padding(start = AureaDims.Gutter, top = AureaDims.S5, end = AureaDims.Gutter),
+                        style = AureaType.HeadlineLarge.copy(fontSize = 28.sp),
+                        modifier = Modifier.padding(start = AureaDims.Gutter, top = AureaDims.S3, end = AureaDims.Gutter),
                     )
                     ProjectListBar(
                         count = arranged.size,
@@ -104,6 +106,12 @@ internal fun ProjectsTab(
                 }
             }
             items(count = rows, key = { "grade-$it" }) { r ->
+                if (compact) {
+                    val e = arranged[r]
+                    ProjectListRow(entry = e, thumbs = vm.thumbnails, selecting = selecting, marked = e.path in selection,
+                        onOpen = { openProject(e) }, onMenu = { dialog.current = ProjectDialog.Menu(e) },
+                        onMark = { vm.toggle(e.path) })
+                } else {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -129,6 +137,7 @@ internal fun ProjectsTab(
                         }
                     }
                 }
+                }
             }
         }
 
@@ -141,7 +150,7 @@ internal fun ProjectsTab(
                     vm.clearSelection()
                 },
                 onDelete = { dialog.current = ProjectDialog.BatchDelete(selection) },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBar),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
             )
         }
     }

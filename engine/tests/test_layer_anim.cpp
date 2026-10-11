@@ -22,6 +22,24 @@
 
 using namespace aurea;
 
+AUREA_TEST(LayerAnim, OverlapPreservesMillisecondsAndLegacyCallers) {
+    Engine e; EngineConfig config; config.disableAutosave = true; config.workerCount = 1;
+    AUREA_CHECK(e.initialize(config).ok()); AUREA_CHECK(e.new_project(320, 180, 60, nullptr).ok());
+    const auto id = e.add_text("AB"); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    AUREA_CHECK_EQ(e.add_layer_animator(*id), 0);
+    f32 values[Engine::kLayerAnimFloats];
+    AUREA_CHECK_EQ(e.query_layer_animators(*id, values, Engine::kLayerAnimFloats), 1u);
+    AUREA_CHECK_NEAR(values[29], 1000, .001); values[28] = 75;
+    AUREA_CHECK(e.set_layer_animator(*id, 0, values));
+    e.query_layer_animators(*id, values, Engine::kLayerAnimFloats);
+    AUREA_CHECK_NEAR(values[8], 250, .001); AUREA_CHECK_NEAR(values[28], 75, .001);
+    values[30] = 0; values[28] = 0; // existing native callers know only slots 0..27
+    AUREA_CHECK(e.set_layer_animator(*id, 0, values));
+    e.query_layer_animators(*id, values, Engine::kLayerAnimFloats);
+    AUREA_CHECK_NEAR(values[8], 250, .001);
+    e.shutdown();
+}
+
 namespace {
 
 EngineConfig headless_anim() {

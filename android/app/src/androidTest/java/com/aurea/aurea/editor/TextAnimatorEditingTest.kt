@@ -112,8 +112,7 @@ class TextAnimatorEditingTest {
         val effect = store.effects.single().effectId
         assertEquals(effectTypeId("aurea.text.transform"), store.effects.single().typeId)
         compose.waitUntil(5000) { store.paramOf(effect, 0) != null }
-        val label = store.paramOf(effect, 0)!!.label
-        compose.onNodeWithText(label, useUnmergedTree = true).performScrollTo().performClick()
+        compose.onNodeWithTag("effects.param.$effect.0.0").performScrollTo().performClick()
         compose.runOnIdle { store.seek(0) }
         compose.waitUntil(5000) { store.detail?.localPlayhead == 0 }
         compose.onNodeWithContentDescription(context.getString(R.string.panel_marcar_keyframe_aqui)).performClick()
@@ -131,7 +130,7 @@ class TextAnimatorEditingTest {
         compose.waitUntil(5000) { store.primaryKeys().first { it.property == 31 && it.time == 0 }.interpolation == 7 }
         val bounce = store.engineForStress.queryKeyframeEasing(store.primary!!, 31, effect, 0, 0)!!
         assertEquals(.5f, bounce[0], .0001f)
-        assertTrue(bounce[1] > .6f); assertEquals(-10f, bounce[3], .0001f)
+        assertTrue("Bounce slider easing=${bounce.contentToString()}", bounce[1] > .6f); assertEquals(-10f, bounce[3], .0001f)
         compose.runOnIdle {
             assertEquals(EditorPanel.Curve, opened)
             assertEquals(TrackProperty.EFFECT_PARAM, store.selectedKeyframe?.second?.property)

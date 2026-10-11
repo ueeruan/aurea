@@ -9,12 +9,17 @@
 #include "aurea/project/ProjectPackage.hpp"
 
 #include "aurea/project/FileIO.hpp"
+#include "aurea/platform/AddressSpace.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/project/Serialization.hpp"
+#include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/Text3D.hpp"
+#include "ufbx.h"
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -58,6 +63,9 @@ bool seek(std::FILE* f, u64 pos) {
 #if defined(_WIN32)
     return _fseeki64(f, static_cast<long long>(pos), SEEK_SET) == 0;
 #else
+    // armeabi-v7a: off_t de 32 bits. Um pacote acima de 2 GB falha aqui em vez
+    // de o cast truncar e ler/escrever no deslocamento errado.
+    if (!address_space::file_offset_fits(pos, static_cast<u32>(sizeof(off_t) * 8))) return false;
     return fseeko(f, static_cast<off_t>(pos), SEEK_SET) == 0;
 #endif
 }
@@ -325,13 +333,14 @@ Status read_directory(std::FILE* f, std::vector<ZipEntry>& out) {
     return p == cdSize ? OkStatus : Status{Errc::CorruptData, "diretorio do pacote"};
 }
 
-Status seek_entry(std::FILE* f, const ZipEntry& e) {
-    if (e.method != 0 || e.compressed != e.size) return Status{Errc::UnsupportedFormat, "entrada comprimida"};
+Status seek_entry(std::FILE* f, const ZipEntry& e, bool allowDeflate = false) {
+    if ((e.method != 0 && !(allowDeflate && e.method == 8)) || (e.method == 0 && e.compressed != e.size))
+        return Status{Errc::UnsupportedFormat, "entrada comprimida"};
     u8 h[30];
     if (!seek(f, e.localOffset) || std::fread(h, 1, 30, f) != 30 || get32(h) != kSigLocal) return Status{Errc::CorruptData, "entrada do pacote"};
     const u64 data = static_cast<u64>(e.localOffset) + 30 + get16(h + 26) + get16(h + 28);
     if (get16(h + 8) != e.method || (get16(h + 6) & ~static_cast<u16>(kFlagUtf8 | 8)) ||
-        data + e.size > e.dataLimit || get16(h + 26) != e.name.size()) return Status{Errc::CorruptData, "entrada do pacote"};
+        data + e.compressed > e.dataLimit || get16(h + 26) != e.name.size()) return Status{Errc::CorruptData, "entrada do pacote"};
     std::string name(e.name.size(), '\0');
     if (std::fread(name.data(), 1, name.size(), f) != name.size() || name != e.name || !seek(f, data))
         return Status{Errc::CorruptData, "entrada do pacote"};
@@ -403,14 +412,39 @@ Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noex
     Project p;
     if (const Status s = load_project(p, aureaPath); !s.ok()) return s;
     std::set<std::string> seen;
+    const auto add = [&](AssetKind kind, const std::string& path, const std::string& name) {
+        if (path.empty() || !seen.insert(path).second) return;
+        MediaRef ref;
+        ref.kind = kind;
+        ref.stored = ref.resolved = path;
+        ref.name = name.empty() ? safe_file_name(path) : name;
+        out.push_back(std::move(ref));
+    };
     p.for_each_asset([&](AssetId, const Asset& a) {
-        if (!packable(a.kind) || a.sourcePath.empty() || !seen.insert(a.sourcePath).second) return;
-        MediaRef r;
-        r.kind = a.kind;
-        r.stored = a.sourcePath;
-        r.resolved = a.sourcePath;
-        r.name = a.originalFilename.empty() ? a.name : a.originalFilename;
-        out.push_back(std::move(r));
+        // Procedural 3D source strings are complete recipes stored in the
+        // project, not external files. Counting them as missing media made
+        // portable projects with many 3D shapes/texts report false losses.
+        if (a.kind == AssetKind::Model3D) {
+            scene3d::Text3DSpec text;
+            if (scene3d::decode_text3d(a.sourcePath, text)) {
+                add(AssetKind::Font, text.fontPath, {});
+                add(AssetKind::Image, text.texturePath, {});
+                return;
+            }
+            scene3d::Shape3DSpec shape;
+            if (scene3d::decode_shape3d(a.sourcePath, shape)) {
+                for (const auto& part : shape.parts) add(AssetKind::Image, part.image, {});
+                return;
+            }
+            if (a.sourcePath.rfind(scene3d::kShape3DScheme, 0) == 0 ||
+                a.sourcePath.rfind(scene3d::kText3DScheme, 0) == 0) return;
+        }
+        if (packable(a.kind)) add(a.kind, a.sourcePath, a.originalFilename.empty() ? a.name : a.originalFilename);
+    });
+    p.timeline().for_each_composition([&](CompositionId, const Composition& composition) {
+        composition.layers().for_each([&](LayerId, const Layer& layer) {
+            if (layer.kind == LayerKind::Text) add(AssetKind::Font, layer.text.fontPath, {});
+        });
     });
     return OkStatus;
 }
@@ -479,17 +513,43 @@ Status relink_media(const std::string& aureaPath,
     if (const Status s = load_project(p, aureaPath); !s.ok()) return s;
     std::map<std::string, std::string> map(storedToNew.begin(), storedToNew.end());
     u32 n = 0;
+    const auto relink = [&](std::string& path) {
+        const auto it = map.find(path);
+        if (it == map.end()) return false;
+        path = it->second;
+        ++n;
+        return true;
+    };
     p.for_each_asset([&](AssetId, Asset& a) {
-        const auto it = map.find(a.sourcePath);
-        if (it == map.end()) return;
-        a.sourcePath = it->second;
+        bool changed = relink(a.sourcePath);
+        if (a.kind == AssetKind::Model3D) {
+            scene3d::Text3DSpec text;
+            scene3d::Shape3DSpec shape;
+            if (scene3d::decode_text3d(a.sourcePath, text)) {
+                const bool fontChanged = relink(text.fontPath);
+                const bool textureChanged = relink(text.texturePath);
+                if (fontChanged || textureChanged) {
+                    a.sourcePath = scene3d::encode_text3d(text);
+                    changed = true;
+                }
+            } else if (scene3d::decode_shape3d(a.sourcePath, shape)) {
+                bool partsChanged = false;
+                for (auto& part : shape.parts) partsChanged = relink(part.image) || partsChanged;
+                if (partsChanged) { a.sourcePath = scene3d::encode_shape3d(shape); changed = true; }
+            }
+        }
+        if (!changed) return;
         // Proxy, miniatura e waveform eram do outro aparelho: refeitos aqui.
         a.proxyPath.clear();
         a.proxyWidth = a.proxyHeight = 0;
         a.thumbnailPath.clear();
         a.waveformPath.clear();
         a.waveformBuckets = 0;
-        ++n;
+    });
+    p.timeline().for_each_composition([&](CompositionId, Composition& composition) {
+        composition.layers().for_each([&](LayerId, Layer& layer) {
+            if (layer.kind == LayerKind::Text) (void)relink(layer.text.fontPath);
+        });
     });
     if (n > 0) {
         SaveOptions o;
@@ -617,6 +677,84 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
     out.relinked = relinked;
     const u32 total = distinct_media(projectOut);
     out.missing = total > static_cast<u32>(relink.size()) ? total - static_cast<u32>(relink.size()) : 0;
+    return OkStatus;
+}
+
+Status extract_model_archive(const std::string& archivePath, const std::string& directory,
+                             std::vector<std::string>& files) noexcept {
+    files.clear();
+    if (directory.empty()) return Errc::InvalidArgument;
+    const fs::path root = fs::u8path(directory);
+    std::error_code ec;
+    if (fs::exists(root, ec) || ec) return Errc::AlreadyExists;
+    File input(fileio::open_file(archivePath, "rb"));
+    if (!input.f) return Errc::IoError;
+    std::vector<ZipEntry> entries;
+    if (const Status s = read_directory(input.f, entries); !s.ok()) return s;
+    // Plan all names and costs before creating anything. Extract one file at a
+    // time; stored entries stream, compressed entries have a bounded scratch peak.
+    constexpr u64 scratchLimit = kAddressSpace32 ? 64ull << 20 : 256ull << 20;
+    constexpr u64 diskLimit = 512ull << 20;
+    u64 total = 0;
+    std::vector<std::pair<const ZipEntry*, fs::path>> plan;
+    std::set<std::string> destinations;
+    for (const ZipEntry& entry : entries) {
+        std::string name = entry.name;
+        std::replace(name.begin(), name.end(), '\\', '/');
+        if (name.empty() || name.front() == '/' || name.find('\0') != std::string::npos)
+            return Errc::CorruptData;
+        if (name.back() == '/') continue;
+        if (name.starts_with("__MACOSX/") || name.find("/._") != std::string::npos || name.starts_with("._")) continue;
+        usize start = 0;
+        while (start < name.size()) {
+            const usize end = name.find('/', start);
+            const std::string_view part(name.data() + start, (end == std::string::npos ? name.size() : end) - start);
+            if (part.empty() || part == "." || part == ".." || part.find_first_of(":*?\"<>|") != std::string_view::npos)
+                return Errc::CorruptData;
+            start = end == std::string::npos ? name.size() : end + 1;
+        }
+        std::string key = name;
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return c < 128 ? char(std::tolower(c)) : char(c); });
+        if (!destinations.insert(key).second) return Errc::CorruptData;
+        if (entry.method != 0 && entry.method != 8) return Errc::UnsupportedFormat;
+        if (entry.size > diskLimit - total || (entry.method == 8 && u64(entry.size) + entry.compressed > scratchLimit))
+            return Errc::BudgetExceeded;
+        total += entry.size;
+        plan.emplace_back(&entry, root / fs::u8path(name));
+    }
+    if (plan.empty()) return Errc::UnsupportedFormat;
+    const bool created = fs::create_directories(root, ec);
+    if (ec) return Errc::IoError;
+    if (!created) return Errc::AlreadyExists;
+    const auto fail = [&](Status status) {
+        std::error_code cleanup;
+        fs::remove_all(root, cleanup); // Only the fresh directory owned by this call.
+        files.clear();
+        return status;
+    };
+    for (const auto& item : plan) {
+        const ZipEntry& entry = *item.first;
+        fs::create_directories(item.second.parent_path(), ec);
+        if (ec) return fail(Errc::IoError);
+        const std::string path = utf8_of(item.second);
+        if (entry.method == 0) {
+            if (const Status s = extract(input.f, entry, path); !s.ok()) return fail(s);
+        } else {
+            if (const Status s = seek_entry(input.f, entry, true); !s.ok()) return fail(s);
+            std::vector<u8> compressed(entry.compressed), decoded(std::max(entry.size, 1u));
+            if (std::fread(compressed.data(), 1, compressed.size(), input.f) != compressed.size()) return fail(Errc::CorruptData);
+            ufbx_inflate_input source{};
+            source.total_size = source.data_size = compressed.size();
+            source.data = compressed.data();
+            source.no_header = source.no_checksum = true; // ZIP carries CRC instead of a zlib wrapper.
+            ufbx_inflate_retain retain{};
+            const ptrdiff_t got = ufbx_inflate(decoded.data(), decoded.size(), &source, &retain);
+            if (got != static_cast<ptrdiff_t>(entry.size) || crc_update(0, decoded.data(), entry.size) != entry.crc)
+                return fail(Errc::CorruptData);
+            if (const Status s = fileio::write_atomic(path, decoded.data(), entry.size); !s.ok()) return fail(s);
+        }
+        files.push_back(path);
+    }
     return OkStatus;
 }
 

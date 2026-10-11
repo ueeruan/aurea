@@ -359,7 +359,8 @@ internal object Keyframes {
     fun toLocal(timeline: Int, start: Int, offset: Int) = timeline - start + offset
 
     /**
-     * Clip bounds only. Neighbor keys may be crossed; the engine atomically
+     * Inclusive clip bounds (the animation endpoint at end is editable).
+     * Neighbor keys may be crossed; the engine atomically
      * rejects an occupied destination without deleting or partially moving keys.
      */
     fun dragLimits(instants: IntArray, index: Int, start: Int, end: Int, out: IntArray) {

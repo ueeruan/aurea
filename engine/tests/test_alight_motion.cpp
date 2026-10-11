@@ -10,6 +10,7 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/project/AlightMotion.hpp"
 #include "aurea/project/Presets.hpp"
+#include "aurea/export/ImageEncode.hpp"
 
 #include <string>
 #include <vector>
@@ -108,7 +109,7 @@ void put32(std::string& s, u32 v) { put16(s, v & 0xFFFF); put16(s, v >> 16); }
 struct ZipEntry {
     std::string name;
     std::string data;
-    bool deflate = false;   ///< método 8 com um bloco "stored" do deflate
+    bool deflate = false;   ///< raw compressed DEFLATE, including Huffman codes
 };
 
 std::string make_zip(const std::vector<ZipEntry>& entries) {
@@ -117,11 +118,9 @@ std::string make_zip(const std::vector<ZipEntry>& entries) {
         std::string payload = z.data;
         u32 method = 0;
         if (z.deflate) {
-            payload.clear();
-            payload.push_back('\x01');   // BFINAL = 1, BTYPE = 00 (sem compressão)
-            put16(payload, static_cast<u32>(z.data.size()));
-            put16(payload, ~static_cast<u32>(z.data.size()) & 0xFFFF);
-            payload += z.data;
+            std::vector<u8> compressed;
+            zlib_compress(reinterpret_cast<const u8*>(z.data.data()), z.data.size(), compressed);
+            payload.assign(reinterpret_cast<const char*>(compressed.data() + 2), compressed.size() - 6);
             method = 8;
         }
         const u32 off = static_cast<u32>(out.size());

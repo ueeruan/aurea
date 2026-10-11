@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -115,6 +116,10 @@ internal enum class DockSection(val glyph: Char, @StringRes val label: Int, val 
     TextOptions(ShellGlyph.SliderHorizontalBelowRectangle, R.string.text_options, EditorPanel.Text),
     Particles(CupertinoGlyph.Sparkles, R.string.sh_dock_particles, EditorPanel.Particles),
     Audio(CupertinoGlyph.Speaker2, R.string.sh_add_tab_audio, EditorPanel.Audio),
+    Mute(CupertinoGlyph.SpeakerSlash, R.string.editor_mute_audio, EditorPanel.Audio),
+    Speed(CupertinoGlyph.Speedometer, R.string.editor_velocidade, EditorPanel.Speed),
+    EnterGroup(CupertinoGlyph.ArrowDownRightSquare, R.string.editor_entrar_grupo, EditorPanel.Transform),
+    Mask(CupertinoGlyph.Crop, R.string.panel_mascara_recorte, EditorPanel.Mask),
     Move(CupertinoGlyph.Move, R.string.sh_dock_transform, EditorPanel.Transform),
     Blend(CupertinoGlyph.CircleLefthalfFill, R.string.sh_dock_opacity_blend, EditorPanel.Appearance),
     Environment(CupertinoGlyph.Lightbulb, R.string.sh_dock_environment, EditorPanel.Element3D),
@@ -131,6 +136,7 @@ internal enum class DockSection(val glyph: Char, @StringRes val label: Int, val 
     /** A ficha usa uma ação curta; o leitor de tela mantém o nome completo. */
     @get:StringRes
     val shortLabel: Int get() = when (this) {
+        Mask -> R.string.sh_dock_mask
         Move -> R.string.gizmo_tool_move
         Blend -> R.string.panel_misturar
         else -> label
@@ -141,9 +147,9 @@ internal enum class DockSection(val glyph: Char, @StringRes val label: Int, val 
  * As fichas do TIPO, enxutas e na ordem de uso: o que é próprio do tipo
  * (editar o texto, a forma, as partículas) primeiro, depois Transformar,
  * Efeitos e Opacidade/mesclagem. O que não se aplica não existe: um som não
- * tem posição na tela, um nulo não tem cor. Velocidade, aparar, dividir e mudo
- * moram na fileira rápida; o raro (duplicar, estilo, grupo, rastrear ponto…)
- * mora no ⋯ do topo — nada aparece duas vezes.
+ * tem posição na tela, um nulo não tem cor. Aparar e dividir moram na
+ * fileira rápida; som e velocidade ficam visíveis nos clipes de mídia.
+ * As operações raras (duplicar, estilo, grupo, rastrear ponto…) ficam no ⋯.
  */
 internal fun sectionsFor(l: DockLayer): List<DockSection> {
     val type = LayerType.of(l.kind)
@@ -156,11 +162,11 @@ internal fun sectionsFor(l: DockLayer): List<DockSection> {
     return when (type) {
         LayerType.Shape -> if (l.vector) listOf(DockSection.EditVector) + common
             else listOf(DockSection.EditShape) + common + DockSection.ColorFill
-        LayerType.Text -> listOf(DockSection.EditText) + common + listOf(DockSection.TextOptions, DockSection.Presets)
-        LayerType.Video -> if (l.hasAudio) common + DockSection.Audio else common
+        LayerType.Text -> listOf(DockSection.EditText, DockSection.TextOptions) + common + DockSection.Presets
+        LayerType.Video -> mediaDockActions(l) + common + if (l.hasAudio) listOf(DockSection.Audio) else emptyList()
         LayerType.Image -> common + DockSection.Rig
-        LayerType.Audio -> listOf(DockSection.Audio, DockSection.Effects)
-        LayerType.Model3D -> if (l.text3D) listOf(DockSection.EditText) + common + listOf(DockSection.TextOptions, DockSection.Presets)
+        LayerType.Audio -> mediaDockActions(l) + listOf(DockSection.Audio, DockSection.Effects)
+        LayerType.Model3D -> if (l.text3D) listOf(DockSection.EditText, DockSection.TextOptions) + common + DockSection.Presets
             else listOf(DockSection.Move, DockSection.Environment, DockSection.Effects, DockSection.Blend)
         LayerType.Particles -> listOf(DockSection.Particles) + common
         LayerType.Group -> common
@@ -169,6 +175,13 @@ internal fun sectionsFor(l: DockLayer): List<DockSection> {
         LayerType.Null -> listOf(DockSection.Move)
         LayerType.Adjustment -> emptyList()
     }
+}
+
+/** Native media controls stay reachable in both timeline presentations. */
+private fun mediaDockActions(l: DockLayer): List<DockSection> = when (LayerType.of(l.kind)) {
+    LayerType.Audio -> listOf(DockSection.Mute, DockSection.Speed)
+    LayerType.Video -> (if (l.hasAudio) listOf(DockSection.Mute) else emptyList()) + DockSection.Speed
+    else -> emptyList()
 }
 
 /** A camada como a doca a vê (ou nula, se ela sumiu). */
@@ -197,9 +210,8 @@ private fun dockLayerOf(store: EditorStore, layerId: Long): DockLayer? {
 internal fun dockTileRowCount(store: EditorStore): Int {
     val id = store.primary ?: return 1
     dockLayerOf(store, id) ?: return 1
-    // Fileira de tempo (início/fim) + fileira rolável de ferramentas: reserva de
-    // duas fileiras, senão as ferramentas ficam abaixo da tela com fonte grande.
-    return 2
+    // Três cortes contextuais e uma fileira rolável de ferramentas.
+    return 1
 }
 
 /**
@@ -207,10 +219,20 @@ internal fun dockTileRowCount(store: EditorStore): Int {
  */
 internal fun dockRows(count: Int): List<Int> = listOf(count)
 
+/** The refreshed timeline must preserve the selected type's content tools. */
+internal fun dockSectionsFor(l: DockLayer, refreshed: Boolean): List<DockSection> {
+    val ordinary = sectionsFor(l)
+    if (!refreshed || l.adjustment || l.kind in listOf(3, 6, 7, 8, 9, 10)) return ordinary
+    if (l.kind == 12) return listOf(DockSection.EnterGroup, DockSection.Move, DockSection.Mask, DockSection.Effects, DockSection.Blend)
+    val content = ordinary.filter { it in listOf(DockSection.EditText, DockSection.TextOptions, DockSection.EditVector, DockSection.EditShape, DockSection.Particles) }
+    return mediaDockActions(l) + content + listOf(DockSection.Move, DockSection.Mask, DockSection.Effects, DockSection.Blend) +
+        ordinary.filter { it == DockSection.Audio || it == DockSection.Presets }
+}
+
 /**
  * Doca da camada sem painel, compacta: a fileira rápida só de ícones
- * (velocidade · aparar início | dividir | aparar fim | puxar · mudo, só o que
- * se aplica ao tipo) e uma fileira rolável de ações contextuais.
+ * (aparar início | dividir | aparar fim, ou esticar a borda até o cabeçote)
+ * e uma fileira rolável de ações contextuais.
  * A altura é a do conteúdo (`EditorLayout.dock`), não uma fração da tela:
  * o que sobra fica para a timeline.
  */
@@ -218,10 +240,10 @@ internal fun dockRows(count: Int): List<Int> = listOf(count)
 internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
     val layer by remember(layerId) { derivedStateOf { dockLayerOf(store, layerId) } }
     val l = layer ?: return
-    val type = LayerType.of(l.kind)
-    val sections = sectionsFor(l)
+    val sections = dockSectionsFor(l, EditorTimelineRefresh.enabled)
     val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 2f)
     val tileHeight = EditorLayout.dockTile(fontScale)
+    val deselectLabel = stringResource(R.string.editor_limpar_selecao)
     // A different layer starts at its primary action, not the previous layer's scroll offset.
     val toolsScroll = androidx.compose.runtime.key(layerId) { rememberScrollState() }
     // Uma única superfície com ações pequenas; o espaço recuperado fica na timeline.
@@ -230,7 +252,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             .fillMaxSize()
             .padding(top = 4.dp)
             .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-            .background(ShellColors.DockSheet)
+            .background(if (EditorTimelineRefresh.enabled) AureaColors.EditorCanvas else ShellColors.DockSheet)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
@@ -239,90 +261,73 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (type == LayerType.Group) {
-                // As portas do grupo no lugar da velocidade: entrar e desagrupar.
-                DockSquare {
-                    DockTool(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), 20) { store.openPrecomp(l.id) }
+            val actions = store.clipTimeActions(l.id)
+            Row(
+                Modifier.fillMaxWidth().fillMaxHeight().clip(RoundedCornerShape(if (EditorTimelineRefresh.enabled) 24.dp else 10.dp)).background(ShellColors.DockRow),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (actions and 8 != 0) {
+                    LayerTimeAction(CupertinoGlyph.ArrowLeftToLine, R.string.timeline_extend_left,
+                        R.string.editor_extend_start_to_playhead, "timeline.extend.start", !l.locked) {
+                        extendEdit(store, l, start = true)
+                    }
+                } else if (actions and 16 != 0) {
+                    LayerTimeAction(CupertinoGlyph.ArrowRightToLine, R.string.timeline_extend_right,
+                        R.string.editor_extend_end_to_playhead, "timeline.extend.end", !l.locked) {
+                        extendEdit(store, l, start = false)
+                    }
+                } else if (actions != 0 || EditorTimelineRefresh.enabled) {
+                    DockTrimTool(TrimGlyph.Start, stringResource(R.string.editor_aparar_inicio_cabecote)) {
+                        timeEdit(store, l) { if (!store.trimStart(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
+                    }
+                    DockDivider()
+                    DockTrimTool(TrimGlyph.Split, stringResource(R.string.editor_dividir_cabecote)) {
+                        timeEdit(store, l) { store.splitAtPlayhead(listOf(l.id)) }
+                    }
+                    DockDivider()
+                    DockTrimTool(TrimGlyph.End, stringResource(R.string.editor_aparar_fim_cabecote)) {
+                        timeEdit(store, l) { if (!store.trimEnd(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
+                    }
                 }
-                DockSquare {
-                    DockTool(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), 20) { store.ungroupPrecomp(l.id) }
-                }
-            } else {
-                // Velocidade sempre no mesmo lugar (como no AM); apagada quando o tipo não tem tempo de mídia.
-                val speedOk = type == LayerType.Video || type == LayerType.Audio
-                DockSquare {
-                    DockTool(
-                        CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 22,
-                        tint = if (speedOk) AureaColors.Text else ShellColors.DockDisabled,
-                    ) {
-                        if (speedOk) openPanel(store, ui, EditorPanel.Speed) else store.toastRes(R.string.dock2_media_only)
+                if (EditorTimelineRefresh.enabled) {
+                    DockDivider()
+                    DockTool(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), 19, tint = AureaColors.Danger) {
+                        LayerOps.delete(store, listOf(l.id))
                     }
                 }
             }
-            // O tempo num bloco só, com os colchetes do AM: a parte tracejada é a que sai.
-            Row(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(ShellColors.DockRow),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DockTrimTool(TrimGlyph.Start, stringResource(R.string.editor_aparar_inicio_cabecote)) {
-                    timeEdit(store, l) { if (!store.trimStart(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
-                }
-                DockDivider()
-                DockTrimTool(TrimGlyph.Split, stringResource(R.string.editor_dividir_cabecote)) {
-                    timeEdit(store, l) { store.splitAtPlayhead(listOf(l.id)) }
-                }
-                DockDivider()
-                DockTrimTool(TrimGlyph.End, stringResource(R.string.editor_aparar_fim_cabecote)) {
-                    timeEdit(store, l) { if (!store.trimEnd(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
-                }
-            }
-            // Som: sempre no canto direito; apagado sem áudio. Toque liga/desliga; segurar abre o volume.
-            DockSquare {
-                DockTool(
-                    if (l.muted || !l.hasAudio) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2,
-                    if (l.muted) stringResource(R.string.editor_som_desligado_toque_ligar_segure_volume) else stringResource(R.string.editor_desligar_som_segure_volume),
-                    22,
-                    tint = when {
-                        !l.hasAudio -> ShellColors.DockDisabled
-                        l.muted -> AureaColors.Accent
-                        else -> AureaColors.Text
-                    },
-                    onLongClick = if (l.hasAudio) ({ openPanel(store, ui, EditorPanel.Audio) }) else null,
-                ) {
-                    if (l.hasAudio) store.setAudioMuted(!l.muted) else store.toastRes(R.string.dock2_media_only)
-                }
-            }
         }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            LayerTimeAction(CupertinoGlyph.ArrowLeftToLine, R.string.panel_inicio,
-                R.string.editor_go_layer_start, "timeline.layer.start") { store.seek(l.start) }
-            LayerTimeAction(CupertinoGlyph.ArrowRightToLine, R.string.panel_fim,
-                R.string.editor_go_layer_end, "timeline.layer.end") { store.seek(maxOf(l.start, l.end - 1)) }
-            DockDivider()
-            LayerTimeAction(CupertinoGlyph.ChevronRight, R.string.timeline_starts_at_playhead,
-                R.string.editor_move_layer_start_here, "timeline.layer.moveStart", !l.locked) { store.arrangeLayerTimes(5) }
-            LayerTimeAction(CupertinoGlyph.ChevronLeft, R.string.timeline_ends_at_playhead,
-                R.string.editor_move_layer_end_here, "timeline.layer.moveEnd", !l.locked) { store.arrangeLayerTimes(6) }
-        }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(if (EditorTimelineRefresh.enabled) 4.dp else 8.dp))
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val minWidth = 76f + 28f * (fontScale - 1f)
-            val fittedWidth = (maxWidth.value - 8f * (sections.size - 1)) / sections.size.coerceAtLeast(1)
+            val gap = if (EditorTimelineRefresh.enabled) 4f else 8f
+            val minWidth = (if (EditorTimelineRefresh.enabled) 60f else 76f) + 28f * (fontScale - 1f)
+            val available = maxWidth.value - if (EditorTimelineRefresh.enabled) 49f + gap else 0f
+            val fittedWidth = (available - gap * (sections.size - 1)) / sections.size.coerceAtLeast(1)
             val toolWidth = fittedWidth.coerceIn(minWidth, 160f)
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(toolsScroll).testTag("dock.tools"),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(gap.dp),
             ) {
-                sections.forEach { s -> DockTile(s, tileHeight, toolWidth) {
-                    if (s == DockSection.EditText) store.openTextContentEditor()
+                if (EditorTimelineRefresh.enabled) {
+                    Column(Modifier.width(48.dp).height(tileHeight.dp)
+                        .testTag("trial.layer.deselect")
+                        .semantics { contentDescription = deselectLabel }
+                        .tocavel { store.clearSelection() },
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        CupertinoIcon(CupertinoGlyph.ChevronLeft, 20.dp, AureaColors.Text)
+                    }
+                    DockDivider()
+                }
+                sections.forEach { s -> DockTile(s, tileHeight, toolWidth, muted = l.muted) {
+                    if (s == DockSection.Mute) {
+                        // A direct native flag edit preserves volume, keyframes and undo.
+                        if (store.primary == l.id) {
+                            if (l.locked) store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar)
+                            else store.setAudioMuted(!l.muted)
+                        }
+                    }
+                    else if (s == DockSection.EnterGroup) store.openPrecomp(l.id)
+                    else if (s == DockSection.EditText) store.openTextContentEditor()
                     // O antigo Rig abre o Fantoche (pinos); o rig gravado continua desenhando.
                     else if (s == DockSection.Rig) openPuppetTool(store, ui)
                     else openPanel(store, ui, panelFor(store, s))
@@ -332,7 +337,7 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
     }
 }
 
-/** Navigation changes only the playhead; moving preserves the complete clip. */
+/** Contextual extension action with a visible label and screen-reader description. */
 @Composable
 private fun RowScope.LayerTimeAction(glyph: Char, @StringRes title: Int, @StringRes description: Int,
     tag: String, enabled: Boolean = true, action: () -> Unit) {
@@ -393,7 +398,7 @@ private fun RowScope.DockTrimTool(kind: TrimGlyph, description: String, onClick:
                 strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round,
             )
         }
-        Text(stringResource(when(kind) {
+        if (!EditorTimelineRefresh.enabled) Text(stringResource(when(kind) {
             TrimGlyph.Start -> R.string.timeline_cut_left
             TrimGlyph.Split -> R.string.dock_short_split
             TrimGlyph.End -> R.string.timeline_cut_right
@@ -471,16 +476,18 @@ private fun RowScope.DockTool(
 }
 
 @Composable
-private fun DockTile(section: DockSection, height: Float, width: Float, onClick: () -> Unit) {
-    val label = stringResource(section.label)
+private fun DockTile(section: DockSection, height: Float, width: Float, muted: Boolean = false, onClick: () -> Unit) {
+    val mute = section == DockSection.Mute
+    val label = stringResource(if (mute && muted) R.string.editor_unmute_audio else section.label)
+    val muteState = stringResource(if (muted) R.string.panel_mudo else R.string.editor_audio_enabled)
     Column(
         Modifier
             .width(width.dp)
             .height(height.dp)
             .testTag("dock.tool.${section.name}")
             .clip(RoundedCornerShape(10.dp))
-            .background(ShellColors.DockSheet)
-            .semantics { contentDescription = label }
+            .background(if (EditorTimelineRefresh.enabled) AureaColors.EditorCanvas else ShellColors.DockSheet)
+            .semantics { contentDescription = label; if (mute) stateDescription = muteState }
             .tocavel(haptic = true, onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -489,10 +496,11 @@ private fun DockTile(section: DockSection, height: Float, width: Float, onClick:
         // Ícone menor, mantendo o nome legível e o alvo inteiro da ficha.
         val iconSize = 20.dp
         if (section == DockSection.Move) DockVector(Icons.Rounded.OpenWith, iconSize)
-        else CupertinoIcon(section.glyph, iconSize, ShellColors.DockTileIcon)
+        else CupertinoIcon(if (mute && !muted) CupertinoGlyph.Speaker2 else section.glyph,
+            iconSize, if (mute && muted) AureaColors.Accent else ShellColors.DockTileIcon)
         Spacer(Modifier.height(4.dp))
         Text(
-            stringResource(section.shortLabel),
+            if (mute) label else stringResource(section.shortLabel),
             modifier = Modifier.clearAndSetSemantics { },
             textAlign = TextAlign.Center,
             maxLines = 2,
@@ -527,7 +535,7 @@ private fun DockVector(icon: ImageVector, size: androidx.compose.ui.unit.Dp) {
 internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER") ui: EditorUi) {
     val count by remember { derivedStateOf { store.selection.size } }
     val intoLayers = stringResource(R.string.editor_leve_cabecote_dentro_camadas)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp)) {
+    Column(Modifier.fillMaxSize().testTag("timeline.batch.tools").verticalScroll(rememberScrollState()).padding(horizontal = 10.dp)) {
         Spacer(Modifier.height(4.dp))
         Row(
             Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
@@ -546,12 +554,16 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
             }
             BatchTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote)) { batchTrim(store, start = false) }
             Box(Modifier.width(1.dp).height(24.dp).background(AureaColors.Border))
+            if (EditorTimelineRefresh.enabled) {
+                BatchTool(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_agrupar_camadas_escolhidas)) { store.precompose() }
+                BatchTool(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_camada)) { store.copyLayers() }
+                BatchTool(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar_camada)) { store.duplicateLayers() }
+            } else {
             BatchTool(Icons.AutoMirrored.Rounded.FormatAlignLeft, stringResource(R.string.editor_alinhar_inicios)) { store.arrangeLayerTimes(0) }
             BatchTool(Icons.Rounded.Stairs, stringResource(R.string.editor_escada_comeca_quando_cima_termina)) { store.arrangeLayerTimes(1) }
             BatchTool(Icons.AutoMirrored.Rounded.FormatAlignRight, stringResource(R.string.editor_alinhar_fins)) { store.arrangeLayerTimes(2) }
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        TimelineArrangementRow(store)
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
@@ -574,67 +586,6 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
             BatchTool(CupertinoGlyph.FullscreenExit, stringResource(R.string.editor_ajustar_tela), 18) { LayerOps.fitToCanvas(store, store.selection, fill = false) }
             BatchTool(CupertinoGlyph.Fullscreen, stringResource(R.string.editor_preencher_tela), 18) { LayerOps.fitToCanvas(store, store.selection, fill = true) }
         }
-        Spacer(Modifier.height(8.dp))
-        StaggerRow(store)
-    }
-}
-
-/**
- * "Escalonar": − N + quadros e dois toques que aplicam — as camadas inteiras
- * ou só os keyframes — em cascata na ordem da timeline (a de cima fica; com
- * passo negativo, a de baixo). Tipografia/AMV: palavra por palavra em 3 q.
- */
-@Composable
-private fun StaggerRow(store: EditorStore) {
-    var step by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(com.aurea.aurea.editor.timeline.Stagger.DEFAULT) }
-    val label = stringResource(R.string.editor_escalonar)
-    Row(
-        Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow)
-            .testTag("stagger_row"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            modifier = Modifier.padding(start = 12.dp, end = 4.dp),
-            maxLines = 1,
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Muted)),
-        )
-        BatchTool(CupertinoGlyph.Minus, stringResource(R.string.editor_escalonar_menos), 16) {
-            step = com.aurea.aurea.editor.timeline.Stagger.step(step, -1)
-        }
-        Text(
-            stringResource(R.string.editor_escalonar_quadros, step),
-            modifier = Modifier.width(52.dp).testTag("stagger_step"),
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)),
-        )
-        BatchTool(CupertinoGlyph.Plus, stringResource(R.string.editor_escalonar_mais), 16) {
-            step = com.aurea.aurea.editor.timeline.Stagger.step(step, 1)
-        }
-        Box(Modifier.width(1.dp).height(24.dp).background(AureaColors.Border))
-        StaggerApply(stringResource(R.string.editor_escalonar_camadas), "stagger_layers") { store.staggerSelection(step, keysOnly = false) }
-        StaggerApply(stringResource(R.string.editor_escalonar_keyframes), "stagger_keys") { store.staggerSelection(step, keysOnly = true) }
-    }
-}
-
-@Composable
-private fun RowScope.StaggerApply(text: String, tag: String, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .weight(1.4f)
-            .fillMaxHeight()
-            .testTag(tag)
-            .semantics { contentDescription = text }
-            .tocavel(haptic = true, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)),
-        )
     }
 }
 
@@ -663,60 +614,28 @@ private fun EditorStore.appText(@StringRes id: Int): String = AppText.get(getApp
 
 private fun EditorStore.toastRes(@StringRes id: Int) = showToast(appText(id))
 
-/** Visible labels and scroll preserve 48 dp targets on narrow phones. */
-@Composable
-private fun TimelineArrangementRow(store: EditorStore) {
-    val unlocked = store.layers.count { it.id in store.selection && !it.locked }
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow)
-            .horizontalScroll(rememberScrollState()),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        listOf(
-            3 to R.string.timeline_distribute_starts,
-            4 to R.string.timeline_distribute_gaps,
-            5 to R.string.timeline_starts_at_playhead,
-            6 to R.string.timeline_ends_at_playhead,
-        ).forEach { (mode, title) ->
-            val enabled = unlocked >= if (mode <= 4) 3 else 1
-            val label = stringResource(title)
-            Box(
-                Modifier.height(48.dp).testTag("timeline.arrange.$mode")
-                    .tocavel(enabled = enabled, haptic = true) { store.arrangeLayerTimes(mode) }
-                    .padding(horizontal = 14.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label, fontSize = 12.sp, maxLines = 1,
-                    color = if (enabled) AureaColors.Accent else AureaColors.Disabled)
-            }
-        }
-    }
+/** Extending keeps the opposite edge fixed; the shared engine validates source handles and history. */
+private fun extendEdit(store: EditorStore, l: DockLayer, start: Boolean) {
+    if (l.locked) { store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar); return }
+    if (store.playing) store.pause()
+    val changed = store.extendToPlayhead(l.id, start)
+    if (!changed) store.toastRes(R.string.timeline_cut_failed)
 }
 
 @Composable
 private fun RowScope.BatchTool(glyph: Char, description: String, size: Int = 20, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
-        Modifier
-            .weight(1f)
-            .fillMaxHeight()
-            .semantics { contentDescription = description }
+        Modifier.weight(1f).fillMaxHeight().semantics { contentDescription = description }
             .tocavel(enabled = enabled, haptic = true, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) {
-        CupertinoIcon(glyph, size.dp, if (enabled) AureaColors.Text else AureaColors.Disabled)
-    }
+    ) { CupertinoIcon(glyph, size.dp, if (enabled) AureaColors.Text else AureaColors.Disabled) }
 }
 
 @Composable
 private fun RowScope.BatchTool(icon: ImageVector, description: String, onClick: () -> Unit) {
     Box(
-        Modifier
-            .weight(1f)
-            .fillMaxHeight()
-            .semantics { contentDescription = description }
+        Modifier.weight(1f).fillMaxHeight().semantics { contentDescription = description }
             .tocavel(haptic = true, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(22.dp))
-    }
+    ) { Icon(icon, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(22.dp)) }
 }

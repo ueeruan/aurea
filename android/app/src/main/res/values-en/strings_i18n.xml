@@ -3,7 +3,7 @@
      Os 7 catálogos têm as MESMAS chaves; o iOS lê daqui via tools/_ios_strings.py. -->
 <resources>
     <string name="eng_encoder_buffer_small">the encoder buffer is smaller than the frame</string>
-    <string name="eng_encoder_format">the encoder doesn\'t accept this resolution or format</string>
+    <string name="eng_encoder_format">The encoder cannot accept this resolution, FPS and format combination. Try a lower resolution or FPS.</string>
     <string name="eng_audio_encoder">the AAC audio encoder failed on this device</string>
     <string name="eng_video_encoder_start">the video encoder didn\'t start</string>
     <string name="eng_video_encoder_stalled">the video encoder stopped responding</string>
@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">the engine isn\'t ready</string>
     <string name="eng_model_invalid">invalid or incomplete 3D file</string>
     <string name="eng_model_no_geometry">the model has no geometry</string>
+    <string name="eng_model_compressed">the model uses Draco compression — export it again without mesh compression</string>
     <string name="eng_model_too_heavy">the model is too heavy for this device</string>
     <string name="eng_no_video_track">the file has no readable video track</string>
     <string name="eng_no_audio_track">the file has no readable audio track</string>

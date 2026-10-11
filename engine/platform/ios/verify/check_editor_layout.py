@@ -62,6 +62,10 @@ let phoneDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false
 check(near(phoneDock.sheet, EditorLayout.dockHeight(rows: 2, fontScale: 1.3)), "doca cabe com fonte 130%")
 check(compactDock.sheet <= 200, "doca padrão deve ser compacta")
 check(largeDock.sheet > compactDock.sheet && largeDock.timeline >= EditorLayout.timelineMin, "fonte grande ganha espaço mantendo timeline")
+let batch = EditorLayout.solve(total: 780, content: .batch, fullscreen: false)
+check(near(batch.sheet, 132), "seleção múltipla ocupa só as duas fileiras de ícones")
+let oneRowDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, dockRows: 1)
+check(near(oneRowDock.sheet, EditorLayout.dockHeight(rows: 1)), "doca usa cortes e uma fileira de ferramentas")
 
 let contents: [SheetContent] = [.none, .addBar, .dock, .panel, .curve, .batch, .adding]
 for (w, h) in portraitTablets {

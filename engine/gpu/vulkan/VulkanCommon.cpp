@@ -1,5 +1,6 @@
 #include "VulkanBackend.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/platform/AddressSpace.hpp"
 
 #include <algorithm>
 
@@ -134,8 +135,12 @@ SurfaceFormat from_vk(VkFormat f) noexcept {
 // corrompendo em GPU que exige a granularidade.
 // =============================================================================
 namespace {
-constexpr VkDeviceSize kDeviceBlock = 64ull * 1024 * 1024;
-constexpr VkDeviceSize kHostBlock   = 16ull * 1024 * 1024;
+// Full-quality mobile scenes often have several image memory types. A 64 MiB
+// block per type left >90 MiB unused and refused an otherwise fitting frame.
+// Small resources share 16 MiB; large shadow/MSAA targets stay dedicated at
+// their exact driver requirement, keeping their resolution/sample count.
+constexpr VkDeviceSize kDeviceBlock = 16ull * 1024 * 1024;
+constexpr VkDeviceSize kHostBlock   = 4ull * 1024 * 1024;
 
 VkDeviceSize align_up(VkDeviceSize v, VkDeviceSize a) noexcept { return a ? (v + a - 1) / a * a : v; }
 } // namespace
@@ -184,7 +189,7 @@ u32 MemoryAllocator::find_type(u32 bits, VkMemoryPropertyFlags required,
 
 Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPropertyFlags required,
                                      VkMemoryPropertyFlags preferred, bool dedicated,
-                                     const char* debugName) noexcept {
+                                     const char* debugName, bool hostPointer) noexcept {
     Allocation out;
     const u32 type = find_type(req.memoryTypeBits, required, preferred);
     if (type == kInvalidIndex) {
@@ -193,6 +198,12 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
     }
     const VkMemoryPropertyFlags flags = props_.memoryTypes[type].propertyFlags;
     const bool hostVisible = (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+    // 32 bits (APK armeabi-v7a): Mali/PowerVR declaram TODA a memória
+    // host-visible; mapear cada bloco e cada textura dedicada (alvo 1080p
+    // RGBA16F = 16 MB, quadro 4K...) esgotava os ~3 GB de endereços do
+    // processo. Lá só se mapeia o que alguém escreve pela CPU.
+    // 64 bits: mapeia tudo que é host-visible, como sempre.
+    const bool mapNow = hostVisible && (hostPointer || address_space::map_gpu_memory_eagerly());
     const VkDeviceSize blockSize = hostVisible ? kHostBlock : kDeviceBlock;
     const VkDeviceSize align = std::max(req.alignment, granularity_);
 
@@ -210,7 +221,7 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
             out.memory = VK_NULL_HANDLE;
             return out;
         }
-        if (hostVisible) (void)vkMapMemory(device_, out.memory, 0, VK_WHOLE_SIZE, 0, &out.mapped);
+        if (mapNow) (void)vkMapMemory(device_, out.memory, 0, VK_WHOLE_SIZE, 0, &out.mapped);
         out.size = req.size;
         out.memoryType = type;
         out.block = kInvalidIndex;
@@ -235,6 +246,10 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
                 b.free.erase(b.free.begin() + static_cast<std::ptrdiff_t>(r));
                 if (after.size) b.free.insert(b.free.begin() + static_cast<std::ptrdiff_t>(r), after);
                 if (before.size) b.free.insert(b.free.begin() + static_cast<std::ptrdiff_t>(r), before);
+                // 32 bits: bloco aberto por uma imagem (sem mapa) servindo agora
+                // um buffer que escreve pela CPU — mapeia o bloco uma vez, aqui.
+                if (mapNow && !b.mapped && !address_space::map_gpu_memory_eagerly())
+                    (void)vkMapMemory(device_, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped);
                 out.memory = b.memory;
                 out.offset = start;
                 out.size = end - start;
@@ -257,7 +272,7 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
                             static_cast<unsigned long long>(blockSize >> 20));
             return out;
         }
-        if (hostVisible) (void)vkMapMemory(device_, nb.memory, 0, VK_WHOLE_SIZE, 0, &nb.mapped);
+        if (mapNow) (void)vkMapMemory(device_, nb.memory, 0, VK_WHOLE_SIZE, 0, &nb.mapped);
         nb.size = blockSize;
         nb.memoryType = type;
         nb.free.push_back(Range{0, blockSize});

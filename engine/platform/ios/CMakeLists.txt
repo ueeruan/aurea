@@ -190,7 +190,7 @@ endif()
 # Frameworks da Apple. VideoToolbox e CoreMedia no decode/encode; AVFoundation
 # no AVAudioEngine e no AVAssetWriter; Metal e QuartzCore no CAMetalLayer.
 foreach(_fw Metal MetalKit QuartzCore CoreVideo CoreMedia VideoToolbox
-            AVFoundation AudioToolbox CoreAudio Foundation UIKit)
+            AVFoundation AudioToolbox CoreAudio CoreText Foundation UIKit)
     target_link_libraries(aurea_ios PUBLIC "-framework ${_fw}")
 endforeach()
 

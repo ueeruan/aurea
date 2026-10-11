@@ -56,6 +56,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -125,6 +126,22 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
                 onRename = { store.renameLayer(h.id, it) },
             )
         }
+        if (EditorTimelineRefresh.enabled && h.kind != LayerType.Audio.kind) {
+            val detail = store.detail?.takeIf { it.id == layerId }
+            val threeD = detail?.flags?.and(com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) != 0 && detail != null
+            val intrinsic = h.kind in 8..10
+            val motionBlur = detail?.motionBlur == true
+            val onLabel = stringResource(R.string.common_on)
+            val offLabel = stringResource(R.string.common_off)
+            ChromeButton(CupertinoGlyph.Cube, stringResource(R.string.sh_add_tab_3d),
+                onClick = if (!h.locked && !intrinsic) ({ store.changeLayer3D(!threeD) }) else null,
+                modifier = Modifier.testTag("trial.layer.3d").semantics { stateDescription = if (threeD || intrinsic) onLabel else offLabel },
+                width = 48.dp, tint = if (threeD || intrinsic) AureaColors.Accent else AureaColors.Text)
+            ChromeButton(CupertinoGlyph.MotionBlur, stringResource(R.string.editor_desfoque_movimento),
+                onClick = if (!h.locked) ({ store.setLayerMotionBlur(h.id, !motionBlur) }) else null,
+                modifier = Modifier.testTag("trial.layer.motionBlur").semantics { stateDescription = if (motionBlur) onLabel else offLabel },
+                width = 48.dp, tint = if (motionBlur) AureaColors.Accent else AureaColors.Text)
+        }
         Box {
             ChromeButton(
                 if (h.parent != 0L) CupertinoGlyph.LinkCircleFill else CupertinoGlyph.Link,
@@ -139,6 +156,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             )
             if (linking) LinkMenu(store, listOf(h.id)) { linking = false }
         }
+        if (!EditorTimelineRefresh.enabled) {
         // Esconder/mostrar a caixa da seleção no preview (ela tampa o que está por baixo).
         ChromeButton(
             if (StagePrefs.hideSelectionBox) CupertinoGlyph.EyeSlash else CupertinoGlyph.Square,
@@ -150,6 +168,7 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
         )
         ChromeButton(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
         ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp, width = 44.dp)
+        }
         ChromeVectorButton(Icons.Filled.MoreHoriz, stringResource(R.string.editor_mais_acoes_camada), onClick = { openSheet(store, ui, ShellSheet.LayerMenu) }, size = 22.dp, width = 44.dp)
     }
 }

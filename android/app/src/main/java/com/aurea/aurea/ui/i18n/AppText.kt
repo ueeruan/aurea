@@ -19,7 +19,9 @@ object AppText {
 
     fun resources(context: Context): Resources {
         val app = context.applicationContext ?: context
-        val tag = AppLanguage.current(app).tag
+        // Seguir o sistema também pode mudar durante a sessão. O catálogo
+        // guardado só pelo tag null deixava descrições/toasts no idioma anterior.
+        val tag = "${AppLanguage.current(app).tag}:${app.resources.configuration.locales.toLanguageTags()}"
         cache?.let { (t, r) -> if (t == tag) return r }
         val res = AppLanguage.wrap(app).resources
         cache = tag to res

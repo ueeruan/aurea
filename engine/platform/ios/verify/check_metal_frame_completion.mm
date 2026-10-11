@@ -68,6 +68,15 @@ int main() {
         ((TestCommandBufferState*)frames[2].cmd).status = MTLCommandBufferStatusCompleted;
         REQUIRE(wait(OkStatus).ok());
         REQUIRE(!frames[2].submitted && frames[2].releases == 1);
+        // begin_frame recycles with no open current frame. A terminal error
+        // releases this slot, so the next begin can submit fresh work.
+        frames[1].submitted = true; frames[1].releases = 0;
+        ((TestCommandBufferState*)frames[1].cmd).status = MTLCommandBufferStatusError;
+        REQUIRE(finish_frame_wait(frames[1], frames, 5, static_cast<TestFrame*>(nullptr),
+            Status{Errc::OutOfDeviceMemory}, release).code() == Errc::OutOfDeviceMemory);
+        REQUIRE(!frames[1].submitted && frames[1].releases == 1);
+        REQUIRE(finish_frame_wait(frames[1], frames, 5, static_cast<TestFrame*>(nullptr),
+            Status{Errc::OutOfDeviceMemory}, release).ok());
         frames[2].submitted = true; frames[2].releases = 0; frames[2].cmd = nil;
         REQUIRE(wait(Status{Errc::InvalidState}).code() == Errc::InvalidState);
         REQUIRE(frames[2].submitted && frames[2].releases == 0); // no actual completion proof

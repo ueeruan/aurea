@@ -34,11 +34,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.foundation.layout.heightIn
 import com.aurea.aurea.ui.i18n.EngineText
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
+import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.theme.CupertinoGlyph
 
 /**
  * RASTREIO do vídeo: escolher um ponto (o próximo toque no palco) e seguir o
@@ -48,9 +54,18 @@ import com.aurea.aurea.ui.theme.tocavel
 internal fun TrackingPanel(env: PanelEnv) {
     val store = env.store
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
-        MotionTrackSection(env)
-        Spacer(Modifier.height(18.dp))
-        CameraTrackSection(env)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(false to R.string.cam_mode_2d, true to R.string.panel_camera_3d).forEach { (camera, label) ->
+                androidx.compose.material3.FilterChip(selected = store.cameraTrackerVisible == camera,
+                    onClick = { store.cameraTrackerVisible = camera }, modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AureaColors.AccentDim, selectedLabelColor = AureaColors.Accent,
+                        containerColor = AureaColors.Background, labelColor = AureaColors.Muted),
+                    label = { Text(stringResource(label)) })
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        if (store.cameraTrackerVisible) CameraTrackSection(env) else MotionTrackSection(env)
     }
 }
 
@@ -62,6 +77,7 @@ private fun MotionTrackSection(env: PanelEnv) {
     var zoom by remember { mutableFloatStateOf(1.15f) }
     var crop by remember { mutableIntStateOf(1) }
     LaunchedEffect(store) { while (true) { store.refreshMotionStatus(); delay(400) } }
+    LaunchedEffect(store.primary) { store.refreshMotionStatus() }
     val s = store.motionStatus
     Text(stringResource(R.string.trk_title), style = AureaType.Base.merge(TextStyle(fontWeight = FontWeight.W700)))
     if (s[0].toInt() != 1 && store.pointPick == null) {
@@ -147,19 +163,15 @@ private fun CameraTrackSection(env: PanelEnv) {
     var cameraMotion by remember { mutableIntStateOf(0) }
     var knownFov by remember { mutableFloatStateOf(0f) }
     var distanceText by remember { mutableStateOf("100") }
-    Text(stringResource(R.string.panel_camera_3d), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+    var pointDisplay by remember { mutableStateOf(false) }
+    var calibration by remember { mutableStateOf(false) }
+    var objectMenu by remember { mutableStateOf(false) }
+    var objectKind by remember { mutableIntStateOf(1) }
+    val objectTitles = listOf(R.string.cam_create_null_anchor, R.string.cam_create_camera_shape, R.string.cam_create_camera_text, R.string.cam_create_camera_solid)
+    Text(stringResource(if (st?.state == 2) R.string.cam_step_place else R.string.cam_step_analyze),
+        style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
     Spacer(Modifier.height(6.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(0 to stringResource(R.string.panel_rapido), 1 to stringResource(R.string.panel_equilibrado), 2 to stringResource(R.string.panel_alta_qualidade)).forEach { (m, label) ->
-            val on = mode == m
-            Box(
-                Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                    .tocavel(onClick = { mode = m }).padding(horizontal = 10.dp, vertical = 6.dp),
-            ) {
-                Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
-            }
-        }
-    }
+    if (st?.state != 1 && st?.state != 2) CameraQualityPicker(mode) { mode = it }
     Spacer(Modifier.height(8.dp))
     val s = st
     when {
@@ -182,15 +194,39 @@ private fun CameraTrackSection(env: PanelEnv) {
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
             Spacer(Modifier.height(8.dp))
+            Action(stringResource(R.string.panel_criar_camera), stringResource(R.string.cam_create_camera_desc)) { store.createCameraTrackObject(0) }
+            if (!s.rotationOnly) Text(stringResource(R.string.cam_tap_hint), modifier = Modifier.padding(top = 12.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.FilterChip(selected = store.cameraMultiSelect, onClick = { store.cameraMultiSelect = !store.cameraMultiSelect }, label = { Text(stringResource(R.string.cam_multi_select)) })
-                androidx.compose.material3.FilterChip(selected = store.cameraGoodPointsOnly, onClick = { store.cameraGoodPointsOnly = !store.cameraGoodPointsOnly }, label = { Text(stringResource(R.string.cam_good_points)) })
             }
+            if (!s.rotationOnly) {
+                Box {
+                    androidx.compose.material3.OutlinedButton(onClick = { objectMenu = true }) {
+                        Text(stringResource(objectTitles[objectKind - 1]))
+                        CupertinoIcon(CupertinoGlyph.ChevronDown, 14.dp, AureaColors.Text)
+                    }
+                    androidx.compose.material3.DropdownMenu(expanded = objectMenu, onDismissRequest = { objectMenu = false }) {
+                        objectTitles.forEachIndexed { index, title ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(title)) },
+                                onClick = { objectKind = index + 1; objectMenu = false })
+                        }
+                    }
+                }
+                Action(stringResource(R.string.cam_place_selected), stringResource(R.string.cam_place_on_points), store.cameraSelectedCount > 0) { store.createCameraTrackObject(objectKind) }
+            }
+            androidx.compose.material3.TextButton(onClick = { pointDisplay = !pointDisplay }) { Text(stringResource(R.string.cam_point_display)) }
+            if (pointDisplay) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilterChip(selected = store.cameraGoodPointsOnly, onClick = { store.cameraGoodPointsOnly = !store.cameraGoodPointsOnly }, label = { Text(stringResource(R.string.cam_good_points)) })
+                }
             androidx.compose.material3.TextButton(onClick = { store.cameraTargetMode = !store.cameraTargetMode }) { Text(stringResource(if (store.cameraTargetMode) R.string.cam_drag_surface else R.string.cam_drag_box)) }
             Text(stringResource(R.string.fx_tamanho_ponto), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp)))
             androidx.compose.material3.Slider(value = store.cameraPointSize, onValueChange = { store.cameraPointSize = it }, valueRange = 2f..8f)
-            Action(stringResource(R.string.panel_criar_camera), stringResource(R.string.cam_create_camera_desc)) { store.createCameraTrackObject(0) }
-            if (store.cameraSelectedCount > 0) {
+            }
+            if (store.cameraSelectedCount > 0 && !s.rotationOnly) {
+                androidx.compose.material3.TextButton(onClick = { calibration = !calibration }) { Text(stringResource(R.string.cam_reference_controls)) }
+                if (calibration) {
                 androidx.compose.material3.TextButton(onClick = { store.calibrateCamera(0) }) { Text(stringResource(R.string.cam_set_origin)) }
                 if (store.cameraSelectedCount >= 3) androidx.compose.material3.TextButton(onClick = { store.calibrateCamera(1) }) { Text(stringResource(R.string.cam_set_ground)) }
                 if (store.cameraSelectedCount == 2) {
@@ -200,18 +236,12 @@ private fun CameraTrackSection(env: PanelEnv) {
                 store.layers.filter { it.kind == 10 }.forEach { layer ->
                     androidx.compose.material3.TextButton(onClick = { store.placeTrackedModel(layer.id) }) { Text(stringResource(R.string.cam_place_3d, layer.name)) }
                 }
-            }
-            if (!s.rotationOnly && store.cameraSelectedCount > 0) {
-                listOf(1 to R.string.cam_create_null_anchor, 2 to R.string.cam_create_camera_shape, 3 to R.string.cam_create_camera_text, 4 to R.string.cam_create_camera_solid).forEach { (kind, title) ->
-                    Spacer(Modifier.height(8.dp))
-                    Action(stringResource(title), stringResource(R.string.cam_place_on_points)) { store.createCameraTrackObject(kind) }
                 }
-            } else if (!s.rotationOnly) {
-                Text(stringResource(R.string.cam_tap_hint), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             }
             androidx.compose.material3.TextButton(onClick = { advanced = !advanced }) { Text(stringResource(if (advanced) R.string.cam_hide_advanced else R.string.panel_avancado)) }
             if (advanced) Text(stringResource(R.string.cam_stats, s.solved, s.frames, s.points, s.tracks, "%.2f".format(s.errorPx), "%.1f".format(s.fovDeg)), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             if (advanced) {
+                CameraQualityPicker(mode) { mode = it }
                 androidx.compose.material3.TextButton(onClick = { cameraMotion = (cameraMotion + 1) % 3 }) { Text(stringResource(R.string.cam_camera_fmt, stringResource(listOf(R.string.trk_auto, R.string.cam_free, R.string.cam_tripod)[cameraMotion]))) }
                 androidx.compose.material3.TextButton(onClick = { knownFov = if (knownFov == 0f) s.fovDeg.coerceIn(10f,120f) else 0f }) { Text(if (knownFov == 0f) stringResource(R.string.cam_fov_auto) else stringResource(R.string.cam_fov_value, knownFov.toInt())) }
                 if (knownFov > 0f) androidx.compose.material3.Slider(value = knownFov, onValueChange = { knownFov = it }, valueRange = 10f..120f)
@@ -220,9 +250,9 @@ private fun CameraTrackSection(env: PanelEnv) {
                     Spacer(Modifier.height(6.dp))
                     Action(stringResource(R.string.cam_delete_resolve), stringResource(R.string.cam_delete_resolve_desc)) { store.refineCamera(true, cameraMotion, knownFov) }
                 }
+                Spacer(Modifier.height(8.dp))
+                Action(stringResource(R.string.panel_analisar_novo), stringResource(R.string.panel_modo_escolhido_acima)) { store.startCameraTrack(mode) }
             }
-            Spacer(Modifier.height(8.dp))
-            Action(stringResource(R.string.panel_analisar_novo), stringResource(R.string.panel_modo_escolhido_acima)) { store.startCameraTrack(mode) }
         }
         else -> {
             if (s != null && (s.state == 3 || s.state == 4)) {
@@ -238,13 +268,28 @@ private fun CameraTrackSection(env: PanelEnv) {
 }
 
 @Composable
-private fun Action(title: String, detail: String, onClick: () -> Unit) {
+private fun Action(title: String, detail: String, enabled: Boolean = true, onClick: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AureaColors.Chip)
-            .tocavel(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+            .tocavel(enabled = enabled, shrink = 1f, onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
-        Text(title, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)))
+        Text(title, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = if (enabled) AureaColors.Text else AureaColors.Muted)))
         Spacer(Modifier.height(2.dp))
         Text(detail, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+    }
+}
+
+@Composable
+private fun CameraQualityPicker(mode: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(R.string.panel_rapido, R.string.panel_equilibrado, R.string.panel_alta_qualidade).forEachIndexed { index, label ->
+            Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(8.dp))
+                .background(if (mode == index) AureaColors.AccentDim else AureaColors.Chip)
+                .semantics { selected = mode == index }
+                .tocavel(shrink = 1f, onClick = { onSelect(index) }).padding(8.dp), contentAlignment = Alignment.Center) {
+                Text(stringResource(label), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp,
+                    color = if (mode == index) AureaColors.Accent else AureaColors.Text)), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
     }
 }

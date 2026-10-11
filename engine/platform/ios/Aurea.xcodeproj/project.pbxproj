@@ -39,6 +39,8 @@
 		AE0000000000000000000041 /* TransformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000009 /* TransformView.swift */; };
 		AE0000000000000000000042 /* Panel3DView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000A /* Panel3DView.swift */; };
 		AE0000000000000000000043 /* ExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000B /* ExportView.swift */; };
+		AE00000000000000000000F2 /* UpscaleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000F1 /* UpscaleView.swift */; };
+		AE00000000000000000000F4 /* RealCameraStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000F3 /* RealCameraStage.swift */; };
 		AE0000000000000000000044 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000C /* Theme.swift */; };
 		AE0000000000000000000045 /* AureaModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000D /* AureaModel.swift */; };
 		AE0000000000000000000046 /* AureaStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000E /* AureaStrings.swift */; };
@@ -62,6 +64,7 @@
 		AE0000000000000000000058 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000025 /* Foundation.framework */; };
 		AE0000000000000000000059 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000026 /* UIKit.framework */; };
 		AE0000000000000000000083 /* LayerPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000082 /* LayerPanels.swift */; };
+		AE00000000000000000027C1 /* AureaPropertyPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000027C0 /* AureaPropertyPanel.swift */; };
 		AE00000000000000B1E0C004 /* PuppetStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000B1E0C003 /* PuppetStage.swift */; };
 		AE00000000000000B1E0C002 /* BlendCutThumb.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000B1E0C001 /* BlendCutThumb.swift */; };
 		AE0000000000000000000085 /* ParticleControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000084 /* ParticleControls.swift */; };
@@ -144,6 +147,8 @@
 		AE0000000000000000000009 /* TransformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformView.swift; sourceTree = "<group>"; };
 		AE000000000000000000000A /* Panel3DView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panel3DView.swift; sourceTree = "<group>"; };
 		AE000000000000000000000B /* ExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportView.swift; sourceTree = "<group>"; };
+		AE00000000000000000000F1 /* UpscaleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpscaleView.swift; sourceTree = "<group>"; };
+		AE00000000000000000000F3 /* RealCameraStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealCameraStage.swift; sourceTree = "<group>"; };
 		AE000000000000000000000C /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		AE000000000000000000000D /* AureaModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaModel.swift; sourceTree = "<group>"; };
 		AE000000000000000000000E /* AureaStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaStrings.swift; sourceTree = "<group>"; };
@@ -172,6 +177,7 @@
 		AE0000000000000000000025 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		AE0000000000000000000026 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		AE0000000000000000000082 /* LayerPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerPanels.swift; sourceTree = "<group>"; };
+		AE00000000000000000027C0 /* AureaPropertyPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaPropertyPanel.swift; sourceTree = "<group>"; };
 		AE00000000000000B1E0C003 /* PuppetStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PuppetStage.swift; sourceTree = "<group>"; };
 		AE00000000000000B1E0C001 /* BlendCutThumb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlendCutThumb.swift; sourceTree = "<group>"; };
 		AE0000000000000000000084 /* ParticleControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticleControls.swift; sourceTree = "<group>"; };
@@ -279,6 +285,7 @@
 				AE0000000000000000000008 /* EffectsView.swift */,
 				AE0000000000000000000009 /* TransformView.swift */,
 				AE0000000000000000000082 /* LayerPanels.swift */,
+				AE00000000000000000027C0 /* AureaPropertyPanel.swift */,
 				AE00000000000000B1E0C003 /* PuppetStage.swift */,
 				AE00000000000000B1E0C001 /* BlendCutThumb.swift */,
 				AE0000000000000000000088 /* MediaPanels.swift */,
@@ -292,6 +299,8 @@
 				AE0000000000000000000084 /* ParticleControls.swift */,
 				AE000000000000000000000A /* Panel3DView.swift */,
 				AE000000000000000000000B /* ExportView.swift */,
+				AE00000000000000000000F1 /* UpscaleView.swift */,
+				AE00000000000000000000F3 /* RealCameraStage.swift */,
 				AD0000000000000000000001 /* AureaAdsManager.swift */,
 				AD0000000000000000000002 /* LevelPlayAdsBackend.swift */,
 				AD0000000000000000000003 /* UmpConsent.swift */,
@@ -551,6 +560,7 @@
 				AE0000000000000000000040 /* EffectsView.swift in Sources */,
 				AE0000000000000000000041 /* TransformView.swift in Sources */,
 				AE0000000000000000000083 /* LayerPanels.swift in Sources */,
+				AE00000000000000000027C1 /* AureaPropertyPanel.swift in Sources */,
 				AE00000000000000B1E0C004 /* PuppetStage.swift in Sources */,
 				AE00000000000000B1E0C002 /* BlendCutThumb.swift in Sources */,
 				AE0000000000000000000089 /* MediaPanels.swift in Sources */,
@@ -562,6 +572,8 @@
 				AE0000000000000000000085 /* ParticleControls.swift in Sources */,
 				AE0000000000000000000042 /* Panel3DView.swift in Sources */,
 				AE0000000000000000000043 /* ExportView.swift in Sources */,
+				AE00000000000000000000F2 /* UpscaleView.swift in Sources */,
+				AE00000000000000000000F4 /* RealCameraStage.swift in Sources */,
 				AD0000000000000000000011 /* AureaAdsManager.swift in Sources */,
 				AD0000000000000000000012 /* LevelPlayAdsBackend.swift in Sources */,
 				AD0000000000000000000013 /* UmpConsent.swift in Sources */,
@@ -658,7 +670,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 2144;
+				CURRENT_PROJECT_VERSION = 2154;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -684,6 +696,8 @@
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
+					"-framework",
+					CoreText,
 					"-laurea_ios",
 					"-laurea_metal",
 					"-laurea_core",
@@ -713,7 +727,7 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 2144;
+				CURRENT_PROJECT_VERSION = 2154;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -739,6 +753,8 @@
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
+					"-framework",
+					CoreText,
 					"-laurea_ios",
 					"-laurea_metal",
 					"-laurea_core",

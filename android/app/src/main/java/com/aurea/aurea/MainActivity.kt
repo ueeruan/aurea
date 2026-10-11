@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
 
     private val store: EditorStore by viewModels()
 
-    /** A conta obrigatória: sem ela a UI inteira é a tela de cadastro/entrada. */
+    /** A conta opcional, compartilhada com a Home. */
     private val conta: ContaViewModel by viewModels()
 
     /**
@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         com.aurea.aurea.home.HomeViewModel.loadTheme(this)
-        setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store, conta) } } } }
+        setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store) } } } }
 
         if (savedInstanceState == null) {
             // Número de cadastrados + revalidação da sessão (com rede; offline, segue dentro).

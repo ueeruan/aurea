@@ -25,6 +25,7 @@
 //      preserva o erro real da GPU, que um evento pode nunca sinalizar.
 // =============================================================================
 #include "MetalInternal.hpp"
+#include "MetalFrameCompletion.hpp"
 
 #include "aurea/core/Log.hpp"
 
@@ -696,11 +697,15 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         // O fence do frame que vai ser reciclado. 2 s: passou disso, a GPU está
         // travada e o frame é pulado em vez de travar o app para sempre.
         const Status status = wait_command_buffer(f.cmd, f.completion, 2'000'000'000ull, "reciclar frame");
-        if (!status.ok()) return status;
-        f.submitted = false;
-        collect_timings(f);
-        run_deferred(f);
+        // A failed command buffer is terminal too. Report its error once,
+        // then retire only buffers whose real Metal status proves completion.
+        // Otherwise this same ring slot would reject every future preview.
+        const Status retired = finish_frame_wait(f, frames, framesInFlight, current, status,
+            [this](FrameContext& done) { run_deferred(done); });
+        if (retired.code() == Errc::DeviceLost) deviceLost = true;
         reclaim_stale_imports();
+        if (!retired.ok()) return retired;
+        collect_timings(f);
     }
     f.frameNumber = ++frameNumber;
     f.uniforms.reset();

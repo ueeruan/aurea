@@ -24,8 +24,12 @@ class TimelineGesturesTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val density get() = context.resources.displayMetrics.density
     private fun timeline() = compose.onNodeWithTag("editor.timeline")
+    private val metrics get() = com.aurea.aurea.editor.timeline.TimelineMetrics(
+        density, context.resources.configuration.fontScale, EditorTimelineRefresh.enabled)
+    private fun rowY(index: Int = 0) = metrics.rowsTop + index * metrics.row + metrics.bar / 2f
 
-    private fun launch(count: Int = 1) {
+
+    private fun launch(count: Int = 1, shape: Boolean = false) {
         assertTrue(context.packageName.endsWith(".uitest"))
         compose.setContent {
             store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
@@ -35,19 +39,170 @@ class TimelineGesturesTest {
         compose.runOnIdle { store.newProject(320, 240, 30f, "Timeline gestures") }
         compose.waitUntil(15000) { store.project.title == "Timeline gestures" }
         repeat(count) {
-            compose.runOnIdle { store.addNull(false) }
+            compose.runOnIdle { if (shape) store.addShape(1) else store.addNull(false) }
             compose.waitUntil(5000) { store.layers.size == it + 1 }
         }
         compose.runOnIdle { store.clearSelection(); store.seek(0) }
         compose.waitForIdle()
     }
 
+
+    @Test fun referenceSelectionControlsAndContentBoundary() {
+        launch(shape = true)
+        val id = store.layers.single().id
+        val end = store.layers.single().endFrame
+        compose.runOnIdle { store.select(id) }
+        compose.onNodeWithTag("trial.layer.3d").performClick()
+        compose.waitUntil(5000) { (store.detail?.flags?.and(com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) ?: 0) != 0 }
+        compose.onNodeWithTag("trial.layer.3d").performClick()
+        compose.waitUntil(5000) { store.detail?.flags?.and(com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) == 0 }
+        compose.onNodeWithTag("trial.layer.motionBlur").performClick()
+        compose.waitUntil(5000) { store.detail?.motionBlur == true && store.compMotionBlur }
+        compose.onNodeWithTag("trial.layer.motionBlur").performClick()
+        compose.waitUntil(5000) { store.detail?.motionBlur == false }
+        compose.onNodeWithTag("dock.tool.Mask").assertExists()
+        compose.runOnIdle { store.seek(end + 9000); assertEquals(end, store.playhead) }
+        compose.waitUntil(5000) { store.playhead == end }
+        compose.runOnIdle { store.scrubStart(end + 90); assertEquals(end, store.playhead); store.scrubTo(-10); assertEquals(0, store.playhead); store.scrubEnd() }
+        compose.runOnIdle { assertTrue(store.trimEnd(id, 90)); store.seek(9999); assertEquals(90, store.playhead) }
+        compose.waitUntil(5000) { store.playhead == 90 }
+        compose.runOnIdle { store.step(100) }
+        compose.waitUntil(5000) { store.playhead == 90 }
+        compose.runOnIdle { store.undo(); store.seek(9999) }
+        compose.waitUntil(5000) { store.playhead == end }
+    }
+
+    @Test fun precompositionHasAVisibleEntryAndCanReturnToItsParent() {
+        launch(2, shape = true)
+        compose.runOnIdle { store.precompose(store.layers.map { it.id }) }
+        compose.waitUntil(5000) { store.layers.size == 1 && store.layers.single().kind == 12 }
+        compose.onNodeWithTag("dock.tool.EnterGroup").assertIsDisplayed().performClick()
+        compose.waitUntil(5000) { store.precompDepth == 1 && store.layers.size == 2 }
+        compose.runOnIdle { assertTrue(store.selection.isEmpty()); store.closePrecomp() }
+        compose.waitUntil(5000) { store.precompDepth == 0 && store.layers.size == 1 }
+        compose.runOnIdle { store.select(store.layers.single().id) }
+        compose.onNodeWithTag("dock.tool.EnterGroup").assertIsDisplayed()
+    }
+
+    @Test fun holdingAClipEntersMultipleSelectionAndTappingAnotherAddsIt() {
+        launch(2, shape = true)
+        val first = store.layers[0].id
+        val second = store.layers[1].id
+        timeline().performTouchInput {
+            down(Offset(width / 2f + 40 * density, rowY()))
+            advanceEventTime(650)
+            up()
+        }
+        compose.waitUntil(5000) { store.layerSelectMode && store.selection.contains(first) }
+        timeline().performTouchInput { click(Offset(width / 2f + 40 * density, rowY(1))) }
+        compose.waitUntil(5000) { store.selection == setOf(first, second) }
+        timeline().performTouchInput { click(Offset(width / 2f + 40 * density, rowY())) }
+        compose.waitUntil(5000) { store.selection == setOf(second) }
+    }
+
+    @Test fun trimmedShapeKeysDisappearFromRowsAndReturnOnUndo() {
+        launch(shape = true)
+        val id = store.layers.single().id
+        compose.runOnIdle {
+            store.select(id)
+            store.toggleTransformKeyframe(intArrayOf(0, 1))
+            store.seek(90)
+            store.toggleTransformKeyframe(intArrayOf(0, 1))
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.time == 90 } == 2 }
+        compose.runOnIdle { assertTrue(store.trimEnd(id, 60)) }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().filter { it.time == 90 }.all { !it.timelineVisible } }
+        compose.runOnIdle {
+            val row = com.aurea.aurea.editor.timeline.buildRow(store.layers.single(), store.keyframes[id].orEmpty())
+            assertFalse(row.instants.contains(90))
+            assertTrue(row.instants.contains(0))
+            store.undo()
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().filter { it.time == 90 }.all { it.timelineVisible } }
+        compose.runOnIdle {
+            assertTrue(com.aurea.aurea.editor.timeline.buildRow(store.layers.single(), store.keyframes[id].orEmpty()).instants.contains(90))
+        }
+    }
+
+    @Test fun keyframeCanReachTheExactEndStayVisibleAndBeDraggedBackWithUndo() {
+        launch(shape = true)
+        val id = store.layers.single().id
+        compose.runOnIdle {
+            store.select(id, openOptions = false)
+            store.showAllKeyframes = true
+            store.snapping = true
+            assertTrue(store.trimEnd(id, 90))
+        }
+        for (frame in listOf(0, 30)) {
+            compose.runOnIdle { store.seek(frame) }
+            compose.waitUntil(5000) { store.playhead == frame }
+            compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(0)) }
+            compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == frame } }
+        }
+        val dpPerFrame = 80f / 30f
+        timeline().performTouchInput {
+            val start = Offset(width / 2f, rowY())
+            down(start)
+            moveTo(start + Offset(12 * density, 0f))
+            moveTo(start + Offset(60 * dpPerFrame * density, 0f))
+            up()
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 90 && it.timelineVisible } }
+        compose.runOnIdle {
+            assertEquals(90, store.layers.single().endFrame)
+            assertTrue(com.aurea.aurea.editor.timeline.buildRow(store.layers.single(), store.keyframes[id].orEmpty()).instants.contains(90))
+            store.seek(90)
+        }
+        compose.waitUntil(5000) { store.playhead == 90 }
+        compose.waitForIdle()
+        // A real second gesture proves the endpoint survives release/refresh
+        // and remains hit-testable, rather than merely retained in the engine.
+        val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        try {
+            java.io.File(context.getExternalFilesDir(null), "keyframe-end-2150.png").outputStream().use {
+                assertTrue(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }
+        } finally { screenshot.recycle() }
+        timeline().performTouchInput {
+            val start = Offset(width / 2f, rowY())
+            down(start)
+            moveTo(start - Offset(12 * density, 0f))
+            moveTo(start - Offset(30 * dpPerFrame * density, 0f))
+            up()
+        }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 60 && it.timelineVisible } }
+        compose.runOnIdle { assertEquals(90, store.layers.single().endFrame); store.undo() }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 90 && it.timelineVisible } }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 30 && it.timelineVisible } }
+    }
+
+    @Test fun shapePositionAndScaleSurviveQueuedSeekAndRefresh() {
+        launch(shape = true)
+        val id = store.layers.single().id
+        compose.runOnIdle {
+            store.select(id)
+            store.seek(45)
+            store.setTransform2(0, 177f, 1, 93f)
+            store.setTransform2(3, 1.7f, 4, .65f)
+        }
+        compose.waitUntil(5000) { store.detail?.position?.get(0) == 177f && store.detail?.scale?.get(0) == 1.7f }
+        compose.runOnIdle { store.seek(0) }
+        compose.waitUntil(5000) { store.detail?.localPlayhead == 0 }
+        compose.runOnIdle {
+            assertEquals(177f, store.detail!!.position[0], .001f)
+            assertEquals(93f, store.detail!!.position[1], .001f)
+            assertEquals(1.7f, store.detail!!.scale[0], .001f)
+            assertEquals(.65f, store.detail!!.scale[1], .001f)
+        }
+    }
+
     @Test fun horizontalSwipeOnClipOnlyScrolls() {
         launch()
         val initial = store.layers.single()
         timeline().performTouchInput {
-            swipe(Offset(width / 2f + 30 * density, 52 * density),
-                Offset(width / 2f - 50 * density, 52 * density), 240)
+            swipe(Offset(width / 2f + 30 * density, rowY()),
+                Offset(width / 2f - 50 * density, rowY()), 240)
         }
         compose.runOnIdle {
             assertEquals(initial.startFrame, store.layers.single().startFrame)
@@ -60,9 +215,9 @@ class TimelineGesturesTest {
         val initial = store.layers.single()
         val height = timeline().fetchSemanticsNode().size.height
         timeline().performTouchInput {
-            down(Offset(width / 2f + 30 * density, 52 * density))
+            down(Offset(width / 2f + 30 * density, rowY()))
             advanceEventTime(600)
-            moveTo(Offset(width / 2f + 100 * density, 52 * density), 240)
+            moveTo(Offset(width / 2f + 100 * density, rowY()), 240)
             up()
         }
         compose.waitUntil(5000) { store.layers.single().startFrame > initial.startFrame }
@@ -74,7 +229,7 @@ class TimelineGesturesTest {
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { store.layers.single().startFrame == initial.startFrame }
         compose.runOnIdle { assertEquals(initial.endFrame, store.layers.single().endFrame) }
-        timeline().performTouchInput { click(Offset(width / 2f + 40 * density, 52 * density)) }
+        timeline().performTouchInput { click(Offset(width / 2f + 40 * density, rowY())) }
         compose.runOnIdle { assertTrue(store.timelineOnlySelection.isEmpty()) }
         assertTrue("A real tap should still open layer options", timeline().fetchSemanticsNode().size.height < height)
     }
@@ -83,9 +238,9 @@ class TimelineGesturesTest {
         launch()
         compose.runOnIdle { store.snapping = false }
         fun drag() = timeline().performTouchInput {
-            down(Offset(width / 2f + 30 * density, 52 * density))
+            down(Offset(width / 2f + 30 * density, rowY()))
             advanceEventTime(600)
-            moveTo(Offset(width / 2f + 100 * density, 52 * density), 240)
+            moveTo(Offset(width / 2f + 100 * density, rowY()), 240)
             up()
         }
         drag()
@@ -117,7 +272,7 @@ class TimelineGesturesTest {
             advanceEventTime(80)
             // Scrolling begins before the deliberate hold used for reordering.
             moveTo(Offset(x, height - 45 * density), 50)
-            moveTo(Offset(x, 54 * density), 250)
+            moveTo(Offset(x, rowY()), 250)
             advanceEventTime(120)
             up()
         }
@@ -126,7 +281,7 @@ class TimelineGesturesTest {
             assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
         }
         assertEquals(height, timeline().fetchSemanticsNode().size.height)
-        timeline().performTouchInput { click(Offset(width * .72f, 54 * density)) }
+        timeline().performTouchInput { click(Offset(width * .72f, rowY())) }
         compose.runOnIdle {
             val index = before.indexOfFirst { it.first == store.primary }
             assertTrue("Vertical scroll should reveal lower layers, index=$index", index >= 2)
@@ -134,10 +289,10 @@ class TimelineGesturesTest {
         // Reverse the same list back to the first layer.
         compose.runOnIdle { store.clearSelection() }
         timeline().performTouchInput {
-            swipe(Offset(width * .72f, 55 * density), Offset(width * .72f, height - 5 * density), 300)
+            swipe(Offset(width * .72f, rowY()), Offset(width * .72f, height - 5 * density), 300)
         }
         compose.waitForIdle()
-        timeline().performTouchInput { click(Offset(width * .72f, 54 * density)) }
+        timeline().performTouchInput { click(Offset(width * .72f, rowY())) }
         compose.runOnIdle { assertEquals(before.first().first, store.primary) }
     }
 
@@ -152,7 +307,7 @@ class TimelineGesturesTest {
             down(Offset(x, y))
             advanceEventTime(60)
             moveTo(Offset(x - 11 * density, y - 9 * density), 40)
-            moveTo(Offset(x - 60 * density, 54 * density), 250)
+            moveTo(Offset(x - 60 * density, rowY()), 250)
             advanceEventTime(120)
             up()
         }
@@ -162,7 +317,14 @@ class TimelineGesturesTest {
             assertTrue(store.selection.isEmpty())
             assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
         }
-        timeline().performTouchInput { click(Offset(width * .72f, 54 * density)) }
+        stabilityScreenshot("timeline-diagonal-scrolled.png")
+        // Inertia can leave the first row clipped or its inter-row gap at the
+        // probe coordinate; stopping it and probing a neighboring row is valid.
+        for (y in listOf(rowY(), rowY(1), rowY(2))) {
+            timeline().performTouchInput { advanceEventTime(150); click(Offset(width * .72f, y)) }
+            compose.waitForIdle()
+            if (store.primary != null) break
+        }
         compose.runOnIdle {
             val index = before.indexOfFirst { it.first == store.primary }
             assertTrue("A tilted swipe up should reveal lower layers, index=$index", index >= 2)
@@ -188,7 +350,7 @@ class TimelineGesturesTest {
             down(Offset(x, y0))
             for (i in 1..5) moveTo(Offset(x, y0 - 1.2f * i * density), 100)
             moveTo(Offset(x, y0 - 40 * density), 60)
-            moveTo(Offset(x, 54 * density), 250)
+            moveTo(Offset(x, rowY()), 250)
             advanceEventTime(120)
             up()
         }
@@ -198,21 +360,21 @@ class TimelineGesturesTest {
             assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
         }
         assertEquals(height, timeline().fetchSemanticsNode().size.height)
-        timeline().performTouchInput { click(Offset(width * .72f, 54 * density)) }
+        timeline().performTouchInput { click(Offset(width * .72f, rowY())) }
         compose.runOnIdle {
             val index = order.indexOf(store.primary)
             assertTrue("A creeping start must still scroll, index=$index", index >= 2)
             store.clearSelection()
         }
         timeline().performTouchInput {
-            swipe(Offset(width * .72f, 55 * density), Offset(width * .72f, height - 5 * density), 300)
+            swipe(Offset(width * .72f, rowY()), Offset(width * .72f, height - 5 * density), 300)
         }
         compose.waitForIdle()
         // (2) Scrub um pouco torto sobre o corpo da 1ª camada (≈ 23°, abaixo do
         // limiar de rolagem Press.SCROLL_RATIO): scrub, sem escolher nem mover.
         timeline().performTouchInput {
             val x = width / 2f + 30 * density
-            val y = 52 * density
+            val y = rowY()
             down(Offset(x, y))
             advanceEventTime(60)
             moveTo(Offset(x - 14 * density, y + 6 * density), 40)
@@ -236,10 +398,10 @@ class TimelineGesturesTest {
         val height = timeline().fetchSemanticsNode().size.height
         timeline().performTouchInput {
             val x = width / 2f + 40 * density
-            down(Offset(x, 52 * density))
+            down(Offset(x, rowY()))
             advanceEventTime(650)
-            moveTo(Offset(x, 75 * density), 50)
-            moveTo(Offset(x, 148 * density), 300)
+            moveTo(Offset(x, rowY(1)), 50)
+            moveTo(Offset(x, rowY(3)), 300)
             up()
         }
         compose.waitUntil(5000) { store.layers.map { it.id } != before }
@@ -270,7 +432,7 @@ class TimelineGesturesTest {
         val height = timeline().fetchSemanticsNode().size.height
         timeline().performTouchInput {
             val x = width / 2f + 40 * density
-            val y = 52 * density
+            val y = rowY()
             down(0, Offset(x, y))
             advanceEventTime(600)
             down(1, Offset(x + 80 * density, y))
@@ -352,10 +514,12 @@ class TimelineGesturesTest {
         compose.waitUntil(5000) { store.playhead == 30 }
         val before = store.keyframes[id].orEmpty()
         // Régua 44, camada 32 (44..76), trilhas de 16: Transform (76..92), Posição X (92..108).
-        val laneY = 100 * density
+        val metrics = com.aurea.aurea.editor.timeline.TimelineMetrics(density, context.resources.configuration.fontScale, EditorTimelineRefresh.enabled)
+        val laneY = metrics.rowsTop + metrics.row + 24 * density
         val dpPerFrame = 80f / 30f
         fun keyX(width: Int, frame: Int) = width / 2f + (frame - 30) * dpPerFrame * density
-        timeline().performTouchInput { click(Offset(46 * density, 60 * density)) }   // glifo do tipo: abre as trilhas
+        timeline().performTouchInput { click(Offset(if (EditorTimelineRefresh.enabled) width - 14 * density else 46 * density,
+            metrics.rowsTop + metrics.bar / 2)) }   // glifo do tipo: abre as trilhas
         compose.waitForIdle()
         timeline().performTouchInput {
             val start = Offset(keyX(width, 30) + 18 * density, laneY)
@@ -399,13 +563,15 @@ class TimelineGesturesTest {
         // Geometria da timeline (dp, redesenho 2026-09-29): régua 44, camada de 32
         // (44..76), trilhas de 16 com o losango no meio. Abertas: Transform (76..92),
         // Position X (92..108), Scale X (108..124).
-        val positionY = 100 * density
-        val scaleY = 116 * density
+        val metrics = com.aurea.aurea.editor.timeline.TimelineMetrics(density, context.resources.configuration.fontScale, EditorTimelineRefresh.enabled)
+        val positionY = metrics.rowsTop + metrics.row + 24 * density
+        val scaleY = positionY + 16 * density
         // A vista É o cabeçote (30): 80 dp/s = 8/3 dp por frame a partir do centro.
         fun keyX(width: Int, frame: Int) = width / 2f + (frame - 30) * 80f / 30f * density
 
         // Abrir as trilhas pelo glifo do tipo na pílula da camada (x 38..58; o olho fica em x < 28).
-        timeline().performTouchInput { click(Offset(46 * density, 60 * density)) }
+        timeline().performTouchInput { click(Offset(if (EditorTimelineRefresh.enabled) width - 14 * density else 46 * density,
+            metrics.rowsTop + metrics.bar / 2)) }
         compose.waitForIdle()
 
         fun selectPositionAndScale() {
@@ -448,8 +614,12 @@ class TimelineGesturesTest {
 
         // --- Excluir -----------------------------------------------------------------------
         selectPositionAndScale()
-        compose.onNodeWithTag("timeline.keys.delete").performClick()
-        compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 2 }
+        compose.onNodeWithTag("timeline.keys.delete").performScrollTo().performClick()
+        try { compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 2 } }
+        catch (error: Throwable) {
+            stabilityScreenshot("timeline-delete-failure.png")
+            throw AssertionError("Delete must remove both chosen keys. Keys=${store.keyframes[id]} Selection=${store.keySelection}", error)
+        }
         compose.runOnIdle {
             val keys = store.keyframes[id].orEmpty()
             assertTrue(keys.any { it.property == 0 && it.time == 0 })
@@ -461,7 +631,7 @@ class TimelineGesturesTest {
 
         // --- Duplicar: cópia 1 frame depois do último (anc. 30 → 46) ------------------------
         selectPositionAndScale()
-        compose.onNodeWithTag("timeline.keys.duplicate").performClick()
+        compose.onNodeWithTag("timeline.keys.duplicate").performScrollTo().performClick()
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().size == 6 }
         compose.runOnIdle {
             val keys = store.keyframes[id].orEmpty()
@@ -479,25 +649,24 @@ class TimelineGesturesTest {
         trimPastEnd(openTransform = false)
     }
 
-    /** Fileira compacta (camada escolhida, doca aberta): o arrasto vertical troca de camada, sem mover nada. */
-    @Test fun verticalSwipeOnCompactRowStepsThroughLayers() {
-        launch(5)
+    /** The official dock retains all rows: scrolling must preserve selection. */
+    @Test fun verticalSwipeWithTheDockOpenScrollsRowsWithoutChangingSelection() {
+        launch(24)
         val before = store.layers.map { Triple(it.id, it.startFrame, it.endFrame) }
         compose.runOnIdle { store.select(before[2].first) }
         compose.waitForIdle()
-        val x = compose.onNodeWithTag("editor.timeline").fetchSemanticsNode().size.width * .72f
-        timeline().performTouchInput { swipe(Offset(x, height - 4 * density), Offset(x, 4 * density), 300) }
+        timeline().performTouchInput {
+            val x = width * .72f
+            swipe(Offset(x, height - 4 * density), Offset(x, rowY()), 300)
+        }
         compose.runOnIdle {
-            val index = before.indexOfFirst { it.first == store.primary }
-            assertTrue("Swipe up should choose a layer below, index=$index", index > 2)
+            assertEquals(before[2].first, store.primary)
             assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
         }
-        val middle = before.indexOfFirst { it.first == store.primary }
-        timeline().performTouchInput { swipe(Offset(x, 4 * density), Offset(x, height - 4 * density), 300) }
+        timeline().performTouchInput { click(Offset(width * .72f, rowY())) }
         compose.runOnIdle {
             val index = before.indexOfFirst { it.first == store.primary }
-            assertTrue("Swipe down should go back up, index=$index", index < middle)
-            assertEquals(before, store.layers.map { Triple(it.id, it.startFrame, it.endFrame) })
+            assertTrue("Scrolling with the dock open reveals later rows, index=$index", index > 2)
         }
     }
 
@@ -521,8 +690,8 @@ class TimelineGesturesTest {
         val height = timeline().fetchSemanticsNode().size.height
         timeline().performTouchInput {
             // At 80 dp/s, ten frames are 26.67 dp from the playhead.
-            val edge = width / 2f + (80f / 3f - 5f) * density
-            swipe(Offset(edge, 50 * density), Offset(width - 15 * density, 50 * density), 350)
+            val edge = width / 2f + (80f / 3f + 6f) * density
+            swipe(Offset(edge, rowY()), Offset(width - 36 * density, rowY()), 350)
         }
         compose.waitUntil(5000) { store.layers.single().endFrame > end }
         compose.runOnIdle { assertTrue(store.project.durationFrames >= store.layers.single().endFrame) }

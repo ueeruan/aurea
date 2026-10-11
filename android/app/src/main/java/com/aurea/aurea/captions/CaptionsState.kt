@@ -184,7 +184,7 @@ class CaptionsState(
         transcription?.cancel()
         engine.captionProgress(true)
     }
-    fun transcribe(language: String?, thenGenerate: Boolean = true) {
+    fun transcribe(language: String?, thenGenerate: Boolean = true, translateEnglish: Boolean = false) {
         if (busy != null) return
         val id = layer ?: return
         if (engine.layerMediaPath(id) == null) { error = AppText.get(app, R.string.app_caption_no_audio_layer); return }
@@ -207,7 +207,7 @@ class CaptionsState(
                         }
                     }
                     try {
-                        engine.transcribeLocal(id, model.absolutePath, language.orEmpty()).lineSequence().mapNotNull { line ->
+                        engine.transcribeLocal(id, model.absolutePath, language.orEmpty(), translateEnglish).lineSequence().mapNotNull { line ->
                             val fields = line.split('\t', limit = 3)
                             if (fields.size != 3) null else Word(fields[2], fields[0].toDouble(), fields[1].toDouble())
                         }.toList()

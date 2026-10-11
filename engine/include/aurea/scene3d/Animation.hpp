@@ -14,6 +14,7 @@
 #include "aurea/scene3d/SceneAsset.hpp"
 
 #include <vector>
+#include <utility>
 
 namespace aurea::scene3d {
 
@@ -24,11 +25,19 @@ struct Pose {
     std::vector<std::vector<f32>> morphWeights;   ///< por nó (vazio = da malha/nó)
 };
 
+/// Per-renderer scratch, independent of the output pose kept by frame snapshots.
+struct PoseWorkspace {
+    std::vector<Vec3> translations, scales;
+    std::vector<Quat> rotations;
+    std::vector<u8> seen;
+    std::vector<std::pair<i32, i32>> todo;
+};
+
 /// Tempo local da layer (s) → tempo do clipe, em laço. Clipe sem duração → 0.
 [[nodiscard]] f32 clip_time(const Animation& clip, f64 layerSeconds) noexcept;
 
 /// Pose do clipe `clip` (−1 = pose de repouso) no instante `t` (s, já no
 /// intervalo do clipe).
-void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out);
+void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWorkspace* workspace = nullptr);
 
 } // namespace aurea::scene3d

@@ -11,6 +11,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -35,6 +36,7 @@ import org.junit.Rule
 import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import java.io.File
 
 /** Production painter/controller and live engine, with a controllable viewport for subframe tests. */
 class TimelineCoordinatesTest {
@@ -135,7 +137,7 @@ class TimelineCoordinatesTest {
         assertPixels(frame, message)
     }
 
-    @Test fun compositionMarkersRemainVisibleOverClipsAcrossSelectionZoomAndScroll() {
+    @Test fun compositionMarkersStayInRulerAcrossSelectionZoomAndScroll() {
         launch(emptyList())
         compose.runOnIdle {
             for (frame in listOf(30, 60, 90))
@@ -164,10 +166,29 @@ class TimelineCoordinatesTest {
                     }
                     if (painted) visibleRows++
                 }
-                assertTrue("Marker at frame60 must remain over the clip area: compact=$compact selected=$selected zoom=$zoom rows=$visibleRows",
-                    visibleRows >= (lastY - firstY) * .9)
+                assertEquals("Marker must not extend through clips or empty rows: compact=$compact selected=$selected zoom=$zoom", 0, visibleRows)
+                val headerY = (metrics.tickBottom * .8f).roundToInt()
+                assertTrue("Marker remains visible in the ruler", ((expectedX - 2 * metrics.density).toInt()..(expectedX + 2 * metrics.density).toInt()).any { x ->
+                    val c = pixels[x.coerceIn(0, pixels.width - 1), headerY]
+                    c.red > .55f && c.blue > .55f && c.green < .25f
+                })
                 assertArrayEquals("Selection/viewport changes must preserve markers", intArrayOf(30, 60, 90), store.markers.frames)
             }
+        compose.runOnIdle {
+            store.deleteLayers(listOf(id), ripple = false)
+            state.compact = false; state.scrollY = 0f; state.heldView = 60.375; state.pps = 80f
+        }
+        compose.waitUntil(5000) { store.layers.isEmpty() }
+        compose.waitForIdle()
+        val empty = surface().captureToImage()
+        val pixels = empty.toPixelMap()
+        for (y in metrics.rowsTop.roundToInt() until pixels.height) for (x in 0 until pixels.width) {
+            val c = pixels[x, y]
+            assertFalse("An empty timeline must not have a full-height marker at ($x,$y)", c.red > .55f && c.blue > .55f && c.green < .25f)
+        }
+        File(context.filesDir, "beta007-marker-empty.png").outputStream().use {
+            assertTrue(empty.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        }
     }
 
     @Test fun compactCapEndsAtTheActualStartAcrossZoomScrollMoveAndTrim() {
@@ -251,9 +272,10 @@ class TimelineCoordinatesTest {
         val y = metrics.rowsTop + metrics.diamondCyCompact
         surface().performTouchInput {
             down(Offset(x, y))
-            moveTo(Offset(x + 5 * ppf, y + 25 * metrics.density), 80)
-            moveTo(Offset(x + 10 * ppf, y + 30 * metrics.density), 80)
-            updatePointerTo(0, Offset(x + 13 * ppf, y + 30 * metrics.density)); up()
+            // Deliberate horizontal drag (2:1 intent), with a small diagonal drift.
+            moveTo(Offset(x + 5 * ppf, y + 5 * metrics.density), 80)
+            moveTo(Offset(x + 10 * ppf, y + 8 * metrics.density), 80)
+            updatePointerTo(0, Offset(x + 13 * ppf, y + 8 * metrics.density)); up()
         }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().count { it.property in 3..4 && it.time == 13 } == 2 }
         compose.runOnIdle { store.seek(17) }

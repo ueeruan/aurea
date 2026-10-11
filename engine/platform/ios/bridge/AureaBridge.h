@@ -87,6 +87,10 @@ bool ios_load_image(const char* sourcePath, ImagePixels& out, void* ctx);
 /// procura sozinho (FontManager já varre /System/Library/Fonts).
 [[nodiscard]] const char* ios_default_font_path();
 
+/// Configura a fonte padrão e as reservas Noto de japonês/árabe embarcadas
+/// ao lado dela, usando a mesma cadeia do motor compartilhado do Android.
+void ios_install_text_fallback();
+
 // -----------------------------------------------------------------------------
 // Batch — o bloco de comandos de um frame.
 //

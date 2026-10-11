@@ -20,6 +20,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -110,6 +113,8 @@ internal fun LayerAnimSection(env: PanelEnv) {
 @Composable
 private fun LayerAnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
     val store = env.store
+    var overlapGesture by remember(index) { mutableStateOf(false) }
+    DisposableEffect(index) { onDispose { if (overlapGesture) store.endGesture() } }
     val isText = v[26] > 0.5f
     val unit = v[1].toInt()
     Spacer(Modifier.height(8.dp))
@@ -139,7 +144,17 @@ private fun LayerAnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
 
         GroupLabel(stringResource(R.string.la_strength_delay))
         StrengthParams.forEach { LayerAnimRuler(env, index, it, v) }
-        if (isText && unit != 0) LayerAnimRuler(env, index, DelayParam, v)
+        if (isText && unit != 0) {
+            LayerAnimRuler(env, index, DelayParam, v)
+            Text(stringResource(R.string.beta_overlap) + " · ${v[28].roundToInt()}%")
+            androidx.compose.material3.Slider(value = v[28], valueRange = 0f..100f,
+                onValueChange = {
+                    if (!overlapGesture) { store.beginGesture("overlap"); overlapGesture = true }
+                    store.setLayerAnimatorValues(index, mapOf(28 to it))
+                },
+                onValueChangeFinished = { if (overlapGesture) { store.endGesture(); overlapGesture = false } },
+                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("layer.anim.$index.overlap"))
+        }
 
         GroupLabel(stringResource(R.string.la_from))
         val separate = v[4] > 0.5f

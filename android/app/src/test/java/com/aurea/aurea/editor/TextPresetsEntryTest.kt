@@ -29,9 +29,20 @@ class TextPresetsEntryTest {
             assertTrue("presets on ${l.kind}", DockSection.Presets in sections)
             assertEquals(EditorPanel.Presets, DockSection.Presets.panel)
             // Frequent actions remain visible; all six tools are reachable in one row.
-            assertEquals(listOf(DockSection.EditText, DockSection.Move, DockSection.Effects, DockSection.Blend), sections.take(4))
+            assertEquals(listOf(DockSection.EditText, DockSection.TextOptions), sections.take(2))
             assertTrue(DockSection.TextOptions in sections)
             assertEquals(listOf(6), dockRows(sections.size))
+        }
+    }
+
+    @Test fun refreshedTimelineKeepsTextOptionsVisibleAndPresetsReachable() {
+        for (l in listOf(layer(LayerType.Text), layer(LayerType.Model3D, text3D = true))) {
+            for (refreshed in listOf(false, true)) {
+                val sections = dockSectionsFor(l, refreshed)
+                assertEquals(listOf(DockSection.EditText, DockSection.TextOptions), sections.take(2))
+                assertTrue(DockSection.Presets in sections)
+                assertEquals(1, sections.count { it == DockSection.TextOptions })
+            }
         }
     }
 
@@ -42,5 +53,25 @@ class TextPresetsEntryTest {
             layer(LayerType.Group), layer(LayerType.Camera), layer(LayerType.Light), layer(LayerType.Null),
         )
         for (l in others) assertFalse("no presets on ${l.kind}", DockSection.Presets in sectionsFor(l))
+    }
+
+    @Test fun mediaMuteAndSpeedRemainVisibleAfterTimelineRefresh() {
+        for (refreshed in listOf(false, true)) {
+            for (media in listOf(layer(LayerType.Audio), layer(LayerType.Video, hasAudio = true))) {
+                val sections = dockSectionsFor(media, refreshed)
+                assertEquals(listOf(DockSection.Mute, DockSection.Speed), sections.take(2))
+                assertEquals(1, sections.count { it == DockSection.Audio })
+                assertEquals(EditorPanel.Speed, DockSection.Speed.panel)
+            }
+            val silentVideo = dockSectionsFor(layer(LayerType.Video), refreshed)
+            assertEquals(DockSection.Speed, silentVideo.first())
+            assertFalse(DockSection.Mute in silentVideo)
+            assertFalse(DockSection.Audio in silentVideo)
+            for (type in listOf(LayerType.Shape, LayerType.Text, LayerType.Image, LayerType.Model3D)) {
+                val sections = dockSectionsFor(layer(type), refreshed)
+                assertFalse(DockSection.Mute in sections)
+                assertFalse(DockSection.Speed in sections)
+            }
+        }
     }
 }

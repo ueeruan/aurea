@@ -353,6 +353,15 @@ fun effectCategoryLabel(category: String): String = when (normalizeSearch(catego
     "texto" -> stringResource(R.string.panel_texto)
     "rastreio" -> stringResource(R.string.panel_rastreio)
     "mascara" -> stringResource(R.string.sh_dock_mask)
+    // Efeitos mais novos publicam a categoria em inglês: traduz igual.
+    "distort" -> stringResource(R.string.cat_distort)
+    "light" -> stringResource(R.string.cat_light)
+    "color" -> stringResource(R.string.cat_colour)
+    "stylize" -> stringResource(R.string.cat_stylize)
+    "generate" -> stringResource(R.string.cat_generate)
+    "keying" -> stringResource(R.string.cat_cutout)
+    "text" -> stringResource(R.string.panel_texto)
+    "transform" -> stringResource(R.string.panel_transformar)
     else -> category
 }
 

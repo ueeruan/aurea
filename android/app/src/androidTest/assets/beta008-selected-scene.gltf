@@ -1,0 +1,103 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Aurea regression fixture"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "nodes": [
+        0
+      ]
+    },
+    {
+      "nodes": [
+        2
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "Selected root",
+      "children": [
+        1
+      ]
+    },
+    {
+      "name": "Selected triangle",
+      "mesh": 0
+    },
+    {
+      "name": "Unused huge alternative",
+      "mesh": 0,
+      "scale": [
+        1000000,
+        1000000,
+        1000000
+      ],
+      "translation": [
+        1000000,
+        1000000,
+        1000000
+      ]
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 36,
+      "uri": "data:application/octet-stream;base64,AAAAvwAAAL8AAAAAAAAAPwAAAL8AAAAAAAAAAAAAAD8AAAAA"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 36,
+      "target": 34962
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3",
+      "min": [
+        -0.5,
+        -0.5,
+        0
+      ],
+      "max": [
+        0.5,
+        0.5,
+        0
+      ]
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0
+          },
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.9,
+          0.3,
+          0.15,
+          1
+        ],
+        "metallicFactor": 0,
+        "roughnessFactor": 0.5
+      }
+    }
+  ]
+}

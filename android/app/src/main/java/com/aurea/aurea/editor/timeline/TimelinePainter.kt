@@ -117,7 +117,7 @@ internal class TimelinePainter(
     // --- Texto ------------------------------------------------------------------------
     private val nameStyle = TextStyle(
         color = Color.White,
-        fontSize = 11.sp,
+        fontSize = (if (m.referenceTrial) 10 else 11).sp,
         fontWeight = FontWeight.W500,
         letterSpacing = aureaTracking(-0.1f),   // nome de camada em árabe: sem tracking
         platformStyle = PlatformTextStyle(includeFontPadding = false),
@@ -130,8 +130,8 @@ internal class TimelinePainter(
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
     private val digitStyle = TextStyle(
-        color = Color.White,
-        fontSize = 16.sp,
+        color = if (m.referenceTrial) AureaColors.OnAccent else Color.White,
+        fontSize = (if (m.referenceTrial) 10 else 16).sp,
         fontWeight = FontWeight.W700,
         letterSpacing = 0.3.sp,
         fontFeatureSettings = "tnum",
@@ -198,11 +198,11 @@ internal class TimelinePainter(
         }
         drawRuler(w, view, ppf, cx, fps, st.pps)
         drawPreviewBuffer(store.previewBufferRanges, w, view, ppf, cx)
-        drawMarkers(store.markers, w, h, view, ppf, cx)
+        drawMarkers(store.markers, w, view, ppf, cx)
         drawTimecode(cx, store.playhead, fps)
         if (thumbs.starved) c.requestRedraw()
         // Uma origem temporal para clipes, losangos e fio, inclusive na seleção.
-        val color = AureaColors.Playhead
+        val color = if (m.referenceTrial) AureaColors.Accent else AureaColors.Playhead
         // Fio de 1 dp interrompido apenas na faixa do relógio.
         drawRect(color, Offset(playheadX - m.playhead / 2f, m.playheadTop), Size(m.playhead, h - m.playheadTop))
         drawRect(color, Offset(playheadX - m.playhead / 2f, 0f), Size(m.playhead, m.rulerTicks))
@@ -429,7 +429,7 @@ internal class TimelinePainter(
         val tone = AureaTimeline.tone(r.type)
         // Camada oculta: os clipes da fileira a 40 %.
         val alpha = if (r.visible) 1f else AureaTimeline.HiddenAlpha
-        val capped = compact && selected
+        val capped = compact && selected && !m.referenceTrial
         val visualLeft = if (capped) RowHit.capLeft(m, x0) else x0
         if (x1 >= -m.barRadius && visualLeft <= w + m.barRadius) {
             // Barra cortada perto da tela: um clipe de minutos não vira um retângulo de 100 mil px.
@@ -465,7 +465,7 @@ internal class TimelinePainter(
                 }) { drawRect(thumbShade, size = Size(1f, m.bar), alpha = alpha) }
             }
             // Trilho dos losangos só quando a linha tem keyframe à vista.
-            if (keysShown && r.instants.isNotEmpty()) {
+            if (!m.referenceTrial && keysShown && r.instants.isNotEmpty()) {
                 drawRect(TRACK_SHADE, Offset(left, top + m.trackTop), Size(right - left, m.track), alpha = alpha)
             }
             if (r.track == null && (r.type == LayerType.Audio || r.type == LayerType.Video)) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx, tone, alpha)
@@ -515,8 +515,8 @@ internal class TimelinePainter(
             }
             if (handles && r.track == null) {
                 // A tampa "‹" já é a alça branca da ponta esquerda (o dedo ali também apara).
-                if (!capped && RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - m.trimInsetStart, top)
-                if (RowHit.endHandleVisible(x1, w)) drawTrimHandle(x1 - m.trimInsetEnd, top)
+                if (!capped && RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - m.trimInsetStart, top, start = true)
+                if (RowHit.endHandleVisible(x1, w)) drawTrimHandle(x1 - m.trimInsetEnd, top, start = false)
             }
         } else if (r.track == null && arrows) {
             // Clipe fora da janela: uma seta na borda diz para que lado ele
@@ -542,7 +542,7 @@ internal class TimelinePainter(
         val cr = RowHit.contentRight(m, x0, x1, w)
         if (cr <= cl) return
         // Sem losangos o conteúdo centra na barra; com eles, sobe para a faixa de cima.
-        val cy = if (r.instants.isEmpty()) top + m.bar / 2f else top + m.trackTop / 2f
+        val cy = if (m.referenceTrial || r.instants.isEmpty()) top + m.bar / 2f else top + m.trackTop / 2f
         val d = m.density
         val arrowInk = ARROW_TINT.copy(alpha = ARROW_TINT.alpha * alpha)
         if (compact) return drawCappedContent(r, cy, x0, x1, w, cr, arrowInk, alpha)
@@ -561,7 +561,7 @@ internal class TimelinePainter(
                 drawText(layout, color = tone.text, alpha = alpha, topLeft = Offset(x, cy - layout.size.height / 2f))
             }
         }
-        if (barW > m.menuMinBar && menuRight <= w + m.menuGlyph * d) {
+        if (!m.referenceTrial && barW > m.menuMinBar && menuRight <= w + m.menuGlyph * d) {
             drawGlyph(CupertinoGlyph.LineHorizontal3, m.menuGlyph, AureaTimeline.ClipGrip.copy(alpha = AureaTimeline.ClipGrip.alpha * alpha), menuRight - m.menuGlyph * d / 2f, top + m.bar / 2f)
         }
     }
@@ -601,7 +601,13 @@ internal class TimelinePainter(
     }
 
     /** Alça de trim da A.01: 16 × 32 branca DENTRO da ponta, risco central escuro. */
-    private fun DrawScope.drawTrimHandle(left: Float, top: Float) {
+    private fun DrawScope.drawTrimHandle(left: Float, top: Float, start: Boolean) {
+        if (m.referenceTrial) {
+            drawRoundRect(AureaTimeline.ClipSelected, Offset(left, top), Size(m.trimWidth, m.bar), CornerRadius(m.trimRadius))
+            drawGlyph(if (start) CupertinoGlyph.ChevronLeft else CupertinoGlyph.ChevronRight, 10f, Color.Black,
+                left + m.trimWidth / 2f, top + m.bar / 2f)
+            return
+        }
         drawRoundRect(
             AureaTimeline.ClipSelected,
             Offset(left, top + m.trimTop),
@@ -626,7 +632,7 @@ internal class TimelinePainter(
         cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
     ): Boolean {
         val heightPx = m.bar.roundToInt().coerceIn(1, THUMB_MAX_PX)
-        val tile = heightPx * thumbs.aspect(r.id)
+        val tile = heightPx * thumbs.aspect(cache, r.id)
         val origin = TimeAxis.xOf((r.start - r.offset).toDouble(), view, ppf, cx)
         val visL = max(x0, 0f)
         val visR = min(x1, w)
@@ -868,6 +874,17 @@ internal class TimelinePainter(
      */
     private fun DrawScope.drawGutter(c: TimelineController, r: RowModel, top: Float, inBatch: Boolean, expanded: Boolean, fps: Float) {
         val pillTop = top - m.pillInset
+        if (m.referenceTrial) {
+            val cy = top + m.bar / 2f
+            drawRect(AureaColors.EditorCanvas, Offset.Zero.copy(y = top), Size(m.headerColumn, m.bar))
+            drawGlyph(if (r.visible) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash, 14f,
+                if (inBatch || expanded) AureaColors.Accent else AureaColors.Text, m.gutterEyeCx, cy)
+            val right = size.width - 28f * m.density
+            drawRect(AureaColors.EditorCanvas, Offset(right, top), Size(28f * m.density, m.bar))
+            drawGlyph(CupertinoGlyph.LineHorizontal3, 14f, if (expanded) AureaColors.Accent else AureaColors.Muted,
+                size.width - 14f * m.density, cy)
+            return
+        }
         translate(0f, pillTop) {
             drawPath(pillPath, AureaColors.EditorRowPill)
             if (inBatch) drawPath(pillPath, AureaColors.Accent, style = glyphRing)
@@ -990,8 +1007,8 @@ internal class TimelinePainter(
         drawPath(majorPath, AureaTimeline.TickMajor, style = majorStroke)
     }
 
-    /** Composition guides remain visible over clips even when compact controls cover the ruler. */
-    private fun DrawScope.drawMarkers(mk: com.aurea.aurea.state.EditorStore.Markers, w: Float, h: Float, view: Double, ppf: Float, cx: Float) {
+    /** Markers belong to the ruler; only the playhead crosses the clip area. */
+    private fun DrawScope.drawMarkers(mk: com.aurea.aurea.state.EditorStore.Markers, w: Float, view: Double, ppf: Float, cx: Float) {
         if (mk.size == 0) return
         val half = m.tickBottom * 0.28f
         for (i in 0 until mk.size) {
@@ -1008,18 +1025,6 @@ internal class TimelinePainter(
             markerPath.close()
             drawPath(markerPath, color)
             drawLine(color, Offset(x, s * 1.4f), Offset(x, m.tickBottom), strokeWidth = m.density)
-            if (h > m.rowsTop) {
-                // Draw after the clips, using the same time axis; never filter
-                // this by selected rows, audio visibility or compact mode.
-                drawLine(Color.Black.copy(alpha = .35f), Offset(x, m.rowsTop), Offset(x, h), strokeWidth = 3f * m.density)
-                drawLine(color.copy(alpha = .7f), Offset(x, m.rowsTop), Offset(x, h), strokeWidth = m.density)
-                markerPath.reset()
-                markerPath.moveTo(x - s, m.rowsTop)
-                markerPath.lineTo(x + s, m.rowsTop)
-                markerPath.lineTo(x, m.rowsTop + s * 1.4f)
-                markerPath.close()
-                drawPath(markerPath, color)
-            }
         }
     }
     private val markerPath = androidx.compose.ui.graphics.Path()
@@ -1061,8 +1066,11 @@ internal class TimelinePainter(
         }
         val colons = if (hourDigits > 0) 3 else 2
         val total = (hourDigits + 4 + ffDigits) * digitWidth + colons * colonWidth
-        val top = m.timecodeBaseline - digitBaseline
+        val pillHeight = max(15f * m.density, digits[0]!!.size.height + 2f * m.density)
+        val top = if (m.referenceTrial) (pillHeight - digits[0]!!.size.height) / 2f else m.timecodeBaseline - digitBaseline
         var x = cx - total / 2f
+        if (m.referenceTrial) drawRoundRect(AureaColors.Accent, Offset(x - 5f * m.density, 0f),
+            Size(total + 10f * m.density, pillHeight), CornerRadius(7f * m.density))
         if (hourDigits > 0) {
             x = drawNumber(tc[0], hourDigits, x, top)
             x = drawColon(x, top)
@@ -1072,7 +1080,7 @@ internal class TimelinePainter(
         x = drawNumber(tc[2], 2, x, top)
         x = drawColon(x, top)
         drawNumber(tc[3], ffDigits, x, top)
-        drawRect(Color.White, Offset(cx - total / 2f, m.underlineTop), Size(total, m.underlineHeight))
+        if (!m.referenceTrial) drawRect(Color.White, Offset(cx - total / 2f, m.underlineTop), Size(total, m.underlineHeight))
     }
 
     private fun DrawScope.drawNumber(value: Int, count: Int, x0: Float, top: Float): Float {

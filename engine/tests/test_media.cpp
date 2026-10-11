@@ -46,6 +46,8 @@ void wait_until(auto&& predicate, u32 timeoutMs = 3000) {
 } // namespace
 
 #include "VideoEpochProgress.inl"
+#include "DecodedExclusivePruneTests.inl"
+#include "PreviewPressurePruneTests.inl"
 
 AUREA_TEST(VideoSource, TightCacheDoesNotDecodeAndSeekForever) {
     SyntheticConfig cfg;

@@ -34,6 +34,10 @@ public:
                                                    u32 width, u32 height, f64 fps);
     bool remove_composition(CompositionId id) noexcept;
 
+    /// Independent editable copy of a group, including nested groups. Assets
+    /// remain shared; layers, tracks, effects and parenting are copied.
+    [[nodiscard]] Result<CompositionId> duplicate_composition_tree(CompositionId source);
+
     [[nodiscard]] Composition* composition(CompositionId id) noexcept {
         return compositions_.get(id);
     }

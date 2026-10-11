@@ -148,8 +148,13 @@ import UIKit
         XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
         let openExport = app.buttons["Export"].firstMatch
         XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
-        let start = app.buttons["Export"].firstMatch
-        XCTAssertTrue(start.waitForExistence(timeout: 10)); start.tap()
+        // The editor toolbar remains visible above the export sheet. Its Export
+        // button opens the sheet; the wide footer button starts the encoder.
+        // Choosing firstMatch taps the toolbar again and never starts export.
+        let start = app.buttons.matching(identifier: "Export").allElementsBoundByIndex.first {
+            $0.isHittable && $0.frame.height >= 50
+        }
+        try XCTUnwrap(start, "The export sheet must expose its wide start button").tap()
         // Fim do render: o app pede "Adicionar a Fotos" (PHPhotoLibrary .addOnly,
         // publishExportToPhotos) e só mostra "Vídeo pronto" depois da resposta.
         // O alerta é do SpringBoard; esperar o texto não o dispensa (CI 2136/2137:
@@ -158,6 +163,11 @@ import UIKit
         let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"].firstMatch
         let deadline = Date().addingTimeInterval(300)
         while !ready.exists && Date() < deadline {
+            let exportError = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Could not export:")).firstMatch
+            if exportError.exists {
+                XCTFail("Native export failed: \(exportError.label)")
+                return
+            }
             if allow.exists { allow.tap() }
             _ = ready.waitForExistence(timeout: 2)
         }
@@ -1678,6 +1688,11 @@ import UIKit
     private func launch(_ scene: String) throws -> Snapshot {
         runID = UUID().uuidString
         app = XCUIApplication(bundleIdentifier: "com.aurea.aurea")
+        if scene == "motion-blur-export" {
+            // Reproduce the measured device budget from the failed Metal run,
+            // independently of the free RAM on this particular CI runner.
+            app.launchArguments.append("--aurea-memory-budget-mb=163")
+        }
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID

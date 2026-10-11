@@ -11,6 +11,7 @@
 //  verdade (o Engine, a saída de áudio, a fábrica de mídia) é C++.
 // =============================================================================
 #include "AureaBridge.h"
+#import <Foundation/Foundation.h>
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
@@ -168,8 +169,22 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
 
     config.mediaFactory = media_.get();
     config.exportSinkFactory = &make_export_sink;
+    config.enableExportStartupGate = true;
+    config.enableExportEngineV2 = ![NSProcessInfo.processInfo.arguments containsObject:@"--aurea-export-legacy"];
+    // Admit against tracked Metal resources within the existing device budget.
+    // The legacy half-share rejects a 101 MiB Motion Tile target even when
+    // the measured device envelope is larger and live GPU use is below 8 MiB.
+    config.enableTrackedGpuAdmission = true;
+#if DEBUG
+    for (NSString* arg in NSProcessInfo.processInfo.arguments) {
+        if (![arg hasPrefix:@"--aurea-memory-budget-mb="]) continue;
+        const NSInteger mib = [[arg substringFromIndex:25] integerValue];
+        if (mib >= 96 && mib <= 1024) config.memoryBudgetBytes = static_cast<u64>(mib) << 20;
+    }
+#endif
     config.audioOutput = audioOut_.get();
     config.defaultFontPath = ios_default_font_path();
+    ios_install_text_fallback();
     config.imageLoader = &ios_load_image;
     config.enableTelemetry = true;
 

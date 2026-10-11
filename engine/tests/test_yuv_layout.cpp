@@ -15,7 +15,10 @@
 
 #include "aurea/media/YuvLayout.hpp"
 #include "aurea/media/DecodedPlaneBounds.hpp"
+#include "aurea/media/DecodedRgbaCopy.hpp"
 #include "aurea/export/ExportRules.hpp"
+#include "aurea/export/CodecOutputPacket.hpp"
+#include "aurea/export/EncoderRateMode.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -25,6 +28,89 @@
 
 using namespace aurea;
 using namespace aurea::media;
+
+AUREA_TEST(EncoderRateMode, ActualEncoderCanRejectOneModeAndNeverTriesCq) {
+    for (const uint32_t requested : {0u, 1u}) for (const int supported : {-1, 0, 1}) {
+        std::vector<uint32_t> attempts;
+        uint32_t accepted = 99;
+        const bool ok = configure_encoder_rate_mode(requested, [&](uint32_t mode) noexcept {
+            attempts.push_back(mode);
+            AUREA_CHECK(mode <= 1);
+            return int(mode) == supported;
+        }, accepted);
+        AUREA_CHECK_EQ(attempts.front(), requested);
+        AUREA_CHECK_EQ(attempts.size(), supported == int(requested) ? size_t{1} : size_t{2});
+        if (supported < 0) { AUREA_CHECK(!ok); AUREA_CHECK_EQ(accepted, 99u); }
+        else { AUREA_CHECK(ok); AUREA_CHECK_EQ(accepted, uint32_t(supported)); }
+        if (attempts.size() == 2) AUREA_CHECK_EQ(attempts.back(), 1u - requested);
+    }
+}
+
+AUREA_TEST(DecodedRgbaCopy, PaddedNativeRowsProduceOwnedVisiblePixels) {
+    const uint8_t source[]{10,20,30,255,40,50,60,255,99,99,99,99,
+                           70,80,90,255,100,110,120,255};
+    const std::vector<uint8_t> expected{10,20,30,255,40,50,60,255,
+                                       70,80,90,255,100,110,120,255};
+    std::vector<uint8_t> output;
+    AUREA_CHECK(copy_decoded_rgba8(2, 2, source, 12, sizeof(source), output));
+    AUREA_CHECK(output == expected);
+    AUREA_CHECK(!copy_decoded_rgba8(2, 2, source, 12, sizeof(source) - 1, output));
+    AUREA_CHECK(!copy_decoded_rgba8(2, 2, source, 7, sizeof(source), output));
+    AUREA_CHECK(!copy_decoded_rgba8(2, 2, nullptr, 12, sizeof(source), output));
+    AUREA_CHECK(!copy_decoded_rgba8(0, 2, source, 12, sizeof(source), output));
+    AUREA_CHECK(!copy_decoded_rgba8(2, 0, source, 12, sizeof(source), output));
+    AUREA_CHECK(!copy_decoded_rgba8(0xffffffffu, 0xffffffffu, source, size_t(-1), size_t(-1), output));
+    AUREA_CHECK(output == expected);
+    AUREA_CHECK(copy_decoded_rgba8(1, 1, source, 4, 4, output));
+    AUREA_CHECK_EQ(output.size(), size_t{4});
+    AUREA_CHECK_EQ(output[0], uint8_t{10});
+    // The native Android frame callback is noexcept and owns a nothrow array.
+    std::unique_ptr<uint8_t[]> nativeOutput;
+    AUREA_CHECK(copy_decoded_rgba8(2, 2, source, 12, sizeof(source), nativeOutput));
+    AUREA_CHECK(std::equal(expected.begin(), expected.end(), nativeOutput.get()));
+    const auto* retained = nativeOutput.get();
+    AUREA_CHECK(!copy_decoded_rgba8(2, 2, source, 12, sizeof(source) - 1, nativeOutput));
+    AUREA_CHECK(!copy_decoded_rgba8(2, 2, nullptr, 12, sizeof(source), nativeOutput));
+    AUREA_CHECK(!copy_decoded_rgba8(0xffffffffu, 2, source, 12, sizeof(source), nativeOutput));
+    AUREA_CHECK(nativeOutput.get() == retained);
+    AUREA_CHECK(std::equal(expected.begin(), expected.end(), nativeOutput.get()));
+    AUREA_CHECK(copy_decoded_rgba8(1, 1, source, 4, 4, nativeOutput));
+    AUREA_CHECK_EQ(nativeOutput[0], uint8_t{10});
+}
+
+AUREA_TEST(CodecOutputPacket, NdkSamplePointerIsAlreadyAdjustedAndSizeIsAuthoritative) {
+    const uint8_t storage[]{99, 99, 99, 1, 2, 3, 4, 99};
+    const uint8_t* sample = storage + 3;
+    const std::vector<uint8_t> expected{1, 2, 3, 4};
+    // Real NDK output already points past the prefix. Old APIs can report an
+    // offset and a capacity that describe neither that pointer nor its range.
+    for (const int32_t reportedOffset : {0, 3, -1, 1000}) {
+        for (const size_t reportedCapacity : {size_t{0}, size_t{2}, size_t{4}, size_t{4096}}) {
+            int32_t offset = reportedOffset;
+            size_t capacity = reportedCapacity;
+            AUREA_CHECK(normalize_codec_output_packet(sample, 4, offset, capacity));
+            AUREA_CHECK_EQ(offset, 0);
+            AUREA_CHECK_EQ(capacity, size_t{4});
+            // This is the exact range queued at startup or handed to the MP4
+            // muxer. Reading the old prefix again would corrupt these bytes.
+            const std::vector<uint8_t> packet(sample + offset, sample + offset + capacity);
+            AUREA_CHECK(packet == expected);
+        }
+    }
+}
+
+AUREA_TEST(CodecOutputPacket, InvalidSamplesAreRejectedAndEmptyEosIsAllowed) {
+    const uint8_t sample[]{1};
+    int32_t offset = 7;
+    size_t capacity = 4096;
+    AUREA_CHECK(!normalize_codec_output_packet(nullptr, 1, offset, capacity));
+    AUREA_CHECK_EQ(capacity, size_t{0});
+    AUREA_CHECK(!normalize_codec_output_packet(sample, -1, offset, capacity));
+    AUREA_CHECK_EQ(capacity, size_t{0});
+    AUREA_CHECK(normalize_codec_output_packet(nullptr, 0, offset, capacity));
+    AUREA_CHECK_EQ(offset, 0);
+    AUREA_CHECK_EQ(capacity, size_t{0});
+}
 
 AUREA_TEST(DecodedPlaneBounds, LastRowPaddingIsOptionalButEverySampleMustFit) {
     // 1080-wide planes on a 1088 stride; no mapped padding on the last row.

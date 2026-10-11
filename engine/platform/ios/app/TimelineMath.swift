@@ -264,9 +264,8 @@ enum Keyframes {
     static func toLocal(_ timeline: Int32, _ start: Int32, _ offset: Int32) -> Int32 { Int32(clamping: Int64(timeline) - Int64(start) + Int64(offset)) }
 
     /**
-     * Limites de arrasto do instante `index` (inclusive): nunca encosta no
-     * vizinho (senão duas marcas da mesma trilha se fundem) e não sai da camada
-     * — a não ser que já estivesse fora (não pula para dentro sozinho).
+     * Limites inclusivos: permite a âncora de animação na borda final.
+     * A colisão com um vizinho é recusada pelo motor sem apagar keys.
      */
     static func dragLimits(_ instants: [Int32], _ index: Int, start: Int32, end: Int32) -> (lo: Int32, hi: Int32) {
         guard index >= 0 && index < instants.count else { return (start, end) }

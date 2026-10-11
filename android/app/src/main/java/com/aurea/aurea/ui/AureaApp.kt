@@ -25,10 +25,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
 import com.aurea.aurea.ui.theme.AureaType
-import com.aurea.aurea.conta.ContaScreen
-import com.aurea.aurea.conta.ContaViewModel
 import com.aurea.aurea.editor.EditorScreen
 import com.aurea.aurea.home.HomeScreen
+import com.aurea.aurea.upscale.UpscaleScreen
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.Screen
 import com.aurea.aurea.ui.ds.AureaAlert
@@ -40,14 +39,14 @@ import com.aurea.aurea.ui.theme.AureaTheme
  * do app antigo (a nova entra da direita, a de baixo recua um terço, 500 ms).
  */
 @Composable
-fun AureaApp(store: EditorStore, conta: ContaViewModel) {
+fun AureaApp(store: EditorStore) {
     AureaTheme {
         Box(Modifier.fillMaxSize().background(AureaColors.Background)) {
             // A página nova entra pelo lado do fim da leitura: direita em LTR,
             // esquerda em árabe (slideInHorizontally usa x absoluto).
             val sign = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1 else 1
-            // Conta obrigatória: sem sessão guardada, o app inteiro é a tela de conta.
-            if (!conta.logado) ContaScreen(conta) else AnimatedContent(
+            // Projetos e editor estão disponíveis mesmo sem sessão de conta.
+            AnimatedContent(
                 targetState = store.screen,
                 transitionSpec = {
                     if (targetState == Screen.Editor) {
@@ -61,6 +60,7 @@ fun AureaApp(store: EditorStore, conta: ContaViewModel) {
                 when (screen) {
                     Screen.Home -> HomeScreen(store)
                     Screen.Editor -> EditorScreen(store)
+                    Screen.Upscale -> UpscaleScreen(store)
                 }
             }
             store.toast?.let { msg ->

@@ -6,6 +6,7 @@
 //  cada tabela. Mudou um formato no motor, o erro aparece nesta tabela.
 // =============================================================================
 #include "MetalInternal.hpp"
+#include "aurea/render/UploadRingPolicy.hpp"
 
 #include "aurea/core/Log.hpp"
 
@@ -231,6 +232,8 @@ usize align_up(usize v, usize a) noexcept { return a ? (v + a - 1) / a * a : v; 
 bool HostRing::initialize(id<MTLDevice> device, usize capacity, const char* name) noexcept {
     device_ = device;
     name_ = name;
+    baseCapacity_ = capacity;
+    quietFrames_ = 0;
     return add_chunk(capacity);
 }
 
@@ -253,17 +256,22 @@ void HostRing::shutdown() noexcept {
 }
 
 void HostRing::reset() noexcept {
-    // Se o frame precisou de mais de um bloco, troca todos por um só do tamanho
-    // do pico: em regime não há mais alocação por frame.
+    // Recycle only after the ring's GPU frame has completed. Compact by actual
+    // occupied bytes, including alignment, instead of all unused chunk tails.
+    usize want = 0;
     if (chunks_.size() > 1) {
-        usize total = 0;
-        for (const Chunk& c : chunks_) total += c.size;
-        const usize want = std::max(total, peak_);
+        want = std::max(baseCapacity_, peak_ + peak_ / 4);
+        quietFrames_ = 0;
+    } else if (!chunks_.empty()) {
+        want = static_cast<usize>(upload_ring_shrink_target(chunks_[0].size, used_, baseCapacity_, quietFrames_));
+    } else { want = baseCapacity_; }
+    if (want) {
         shutdown();
-        (void)add_chunk(want + want / 4);
+        // Under pressure, recover with the baseline instead of permanently
+        // leaving an empty ring after a failed compaction allocation.
+        if (!add_chunk(want) && want != baseCapacity_) (void)add_chunk(baseCapacity_);
     }
-    offset_ = 0;
-    used_ = 0;
+    offset_ = used_ = 0;
 }
 
 bool HostRing::allocate(usize size, usize align, id<MTLBuffer> __strong& outBuffer, u32& outOffset,
@@ -280,8 +288,8 @@ bool HostRing::allocate(usize size, usize align, id<MTLBuffer> __strong& outBuff
     outBuffer = c->buffer;
     outOffset = static_cast<u32>(start);
     outPtr = static_cast<u8*>(c->buffer.contents) + start;
+    used_ += start - offset_ + size;
     offset_ = start + size;
-    used_ += size;
     peak_ = std::max(peak_, used_);
     return true;
 }

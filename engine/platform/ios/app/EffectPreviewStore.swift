@@ -31,7 +31,7 @@ final class EffectPreviewStore {
         self.engine = engine
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("effect-previews/\(version)-photo-v1", isDirectory: true)
+            .appendingPathComponent("effect-previews/\(version)-compare-v2", isDirectory: true)
         // Classe de memória LOW (até ~4 GB): metade, como no Android.
         memory.totalCostLimit = DeviceMemoryClass.low ? 12 * 1024 * 1024 : 24 * 1024 * 1024
     }

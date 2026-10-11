@@ -123,12 +123,18 @@ internal class ThumbStrip : com.aurea.aurea.engine.TrimmableImageCache {
     private val misses = HashMap<Key, Int>()
     private val aspects = LongSparseArray<Float>()
 
-    /** Largura/altura da miniatura da camada (16:9 até a primeira chegar). */
-    fun aspect(layer: Long): Float = aspects.get(layer) ?: DEFAULT_ASPECT
+    /**
+     * Largura/altura da miniatura da camada (16:9 até a primeira chegar). Pela
+     * DONA ([ThumbnailCache.ownerOf]): o pedaço de um corte usa a medida do
+     * original, senão os ladrilhos dele teriam outra largura e outros baldes.
+     */
+    fun aspect(cache: ThumbnailCache, layer: Long): Float = aspects.get(cache.ownerOf(layer)) ?: DEFAULT_ASPECT
 
     fun get(cache: ThumbnailCache, layer: Long, bucket: Int, timelineFrame: Int, heightPx: Int, generation: Int): Bitmap? {
         if (cacheEpoch != cache.epoch) { releaseImages(); cacheEpoch = cache.epoch }
-        probe.set(layer, bucket, heightPx)
+        // Os dois lados de um corte dividem a chave (mesma mídia, mesma origem).
+        val owner = cache.ownerOf(layer)
+        probe.set(owner, bucket, heightPx)
         hits[probe]?.get()?.let { return it }
         val missed = misses[probe]
         if (missed != null && missed == generation) return null
@@ -146,8 +152,8 @@ internal class ThumbStrip : com.aurea.aurea.engine.TrimmableImageCache {
         }
         misses.remove(key)
         hits[key] = java.lang.ref.WeakReference(bmp)
-        if (aspects.get(layer) == null && bmp.height > 0) {
-            aspects.put(layer, (bmp.width.toFloat() / bmp.height).coerceIn(MIN_ASPECT, MAX_ASPECT))
+        if (aspects.get(owner) == null && bmp.height > 0) {
+            aspects.put(owner, (bmp.width.toFloat() / bmp.height).coerceIn(MIN_ASPECT, MAX_ASPECT))
         }
         return bmp
     }

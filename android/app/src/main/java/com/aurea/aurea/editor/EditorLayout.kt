@@ -38,8 +38,8 @@ internal object EditorLayout {
     private const val PANEL_FRACTION = 0.40f
     private const val ADD_BODY = 280f                // abas 54 + 3 fileiras de ladrilhos + paginação
     private const val SHEET_HANDLE = 12f             // ContextSheet.handleHeight
-    /** Lote: 4 + tempo 52 + 8 + tela 48 + 8 + escalonar 48 + respiro (124 cortava o escalonar). */
-    private const val BATCH_BODY = 180f
+    /** Lote: 4 + tempo 52 + 8 + tela 48 + 8 de respiro. */
+    private const val BATCH_BODY = 120f
     private const val HINT_BODY = 30f
     /** A barra fixa de adicionar (sem camada escolhida): 6 + categorias de 64 (ícone 23 + nome 11). */
     const val ADD_BAR = 70f

@@ -337,6 +337,9 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
         e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
         e.texelScale = texelScale;
         e.layer = &layer;
+        e.clipProgress = static_cast<f32>(std::clamp(
+            (globalTime - static_cast<f64>(layer.start.value)) /
+            static_cast<f64>(std::max<i64>(1, layer.duration().value - 1)), 0.0, 1.0));
         // Identidade e recursos medem o quadro com a geometria SEGUINTE: um
         // Motion Tile a 100% numa camada que cobre o quadro deixa de ser
         // neutro quando um Transform depois dele a encolhe.

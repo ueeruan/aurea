@@ -5,7 +5,7 @@
 //  AlightMotion.hpp). Três peças:
 //
 //   1. o pacote: zip mínimo (diretório central, entradas stored/deflate; o
-//      inflate é o do stb_image, que o motor já compila para o PNG);
+//      inflate estrito do ufbx, já usado na importação de modelos);
 //   2. a TABELA: efeito do AM (nome curto) → chave do Aurea, parâmetro a
 //      parâmetro, com a conversão de unidade. Só entra efeito que o Aurea tem
 //      DE VERDADE — um "parecido" daria um visual que o arquivo não pediu;
@@ -24,7 +24,7 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/project/Presets.hpp"
 
-#include "stb_image.h"   // só o inflate (stbi_zlib_decode_noheader_buffer)
+#include "ufbx.h"   // strict raw DEFLATE decoder, shared with model archives
 
 #include <algorithm>
 #include <cctype>
@@ -173,10 +173,13 @@ bool unzip_scene(std::string_view zip, std::string& xmlOut, std::vector<std::str
             if (csize != usize_) { warn("entrada do zip inconsistente: " + name); continue; }
             if (usize_ > 0) std::memcpy(text.data(), d + data, usize_);
         } else if (method == 8) {
-            const int got = usize_ == 0 ? 0
-                : stbi_zlib_decode_noheader_buffer(text.data(), static_cast<int>(usize_),
-                                                   reinterpret_cast<const char*>(d + data), static_cast<int>(csize));
-            if (got != static_cast<int>(usize_)) { warn("entrada do zip nao descompactou: " + name); continue; }
+            ufbx_inflate_input source{};
+            source.total_size = source.data_size = csize;
+            source.data = d + data;
+            source.no_header = source.no_checksum = true;
+            ufbx_inflate_retain retain{};
+            const ptrdiff_t got = usize_ == 0 ? 0 : ufbx_inflate(text.data(), text.size(), &source, &retain);
+            if (got != static_cast<ptrdiff_t>(usize_)) { warn("entrada do zip nao descompactou: " + name); continue; }
         } else {
             warn("compressao do zip nao suportada (" + std::to_string(method) + "): " + name);
             continue;

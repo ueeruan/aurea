@@ -199,7 +199,7 @@ internal class TimelineController(
 
     /** Leva a vista a `v` pelo scrub do motor (o 1º passo abre o scrub e pausa). */
     private fun holdView(v: Double) {
-        val c = TimeAxis.clampView(v, store.project.durationFrames)
+        val c = TimeAxis.clampView(v, store.project.durationFrames).coerceAtMost(store.navigationEnd.toDouble())
         val f = c.toFrame()
         state.heldView = c
         if (!scrubOpen) {
@@ -697,7 +697,9 @@ internal class TimelineController(
             if (d.getDistance() < metrics.axisSlop) continue
             val time = Press.timeEdit(d.x, d.y)
             when (kind) {
-                HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
+                HitKind.KEYFRAME -> if (time) keyframeDrag(r, hit.keyIndex, down)
+                    else if (state.compact) compactStep(down.id, ch.position)
+                    else scroll(down.id, ch.position, tracker)
                 HitKind.HEADER -> if (!time && !state.compact) reorderDrag(hit.lane ?: r, hit.rowIndex, down, grabbed = null) else consumeUntilUp()
                 // Segurar de propósito levanta o TRECHO: claramente na pilha ele sobe
                 // ou desce SOZINHO (como no Alight Motion — a linha não vai junto;
@@ -723,14 +725,15 @@ internal class TimelineController(
             HitKind.KEYFRAME -> keyframeTap(r, hit.keyIndex)
             else -> {
                 // O dedo que só pousou para parar a inércia não escolhe (como no toque).
-                if (state.compact || stoppedFling) return
+                if (stoppedFling) return
                 tick()
                 when {
                     // Escolhendo várias camadas, segurar parado vale o mesmo que tocar.
                     store.layerSelectMode -> store.toggleLayerPick(r.id)
-                    selectionSize() == 0 -> store.select(r.id, openOptions = false)
-                    selectionSize() == 1 && isSelected(r.id) -> {}   // segurar a única escolhida não a solta
-                    else -> store.select(r.id, additive = true, openOptions = false)
+                    else -> {
+                        if (!isSelected(r.id)) store.select(r.id, additive = selectionSize() > 0)
+                        store.changeLayerSelectMode(true)
+                    }
                 }
             }
         }
@@ -758,7 +761,7 @@ internal class TimelineController(
         val edit = Press.timeEdit(d.x, d.y)
         val r = hit.row
         when {
-            r != null && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
+            r != null && edit && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
             r != null && edit && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
             r != null && edit && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
             // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha

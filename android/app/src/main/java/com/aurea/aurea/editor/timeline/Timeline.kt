@@ -87,7 +87,8 @@ fun Timeline(
     timecodeStyle: TimecodeStyle = TimecodeStyle.Underline,
 ) {
     val density = LocalDensity.current
-    val metrics = remember(density.density, density.fontScale) { TimelineMetrics(density.density, density.fontScale) }
+    val referenceTrial = com.aurea.aurea.editor.EditorTimelineRefresh.enabled
+    val metrics = remember(density.density, density.fontScale, referenceTrial) { TimelineMetrics(density.density, density.fontScale, referenceTrial) }
     val measurer = rememberTextMeasurer(cacheSize = 16)
     val haptics = LocalHapticFeedback.current
     val view = androidx.compose.ui.platform.LocalView.current
@@ -105,7 +106,7 @@ fun Timeline(
     }
     // Escolhendo keyframes ou várias camadas, a timeline fica inteira.
     var showAllLayers by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
-    val shownCompact = !showAllLayers && timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode || store.layerSelectMode)
+    val shownCompact = !showAllLayers && timelineCompact(compact, compactDock && !referenceTrial, tracksOpen, store.keySelectMode || store.layerSelectMode)
 
     // Parâmetros entram depois da composição (o desenho e os gestos leem daqui).
     SideEffect {
@@ -133,7 +134,7 @@ fun Timeline(
         Box(
             Modifier
                 .fillMaxSize()
-                .background(com.aurea.aurea.ui.theme.AureaTimeline.Background)
+                .background(if (referenceTrial) AureaColors.EditorCanvas else com.aurea.aurea.ui.theme.AureaTimeline.Background)
                 .onSizeChanged {
                     state.width = it.width
                     state.height = it.height
@@ -150,7 +151,7 @@ fun Timeline(
         // não chega à timeline embaixo dele.
         KeyActionBar(store, shownCompact, Modifier.align(if (shownCompact) Alignment.TopEnd else Alignment.BottomCenter))
         LayerPickBar(store, Modifier.align(Alignment.BottomCenter))
-        if (store.selection.isNotEmpty() && (compact || compactDock)) {
+        if (!referenceTrial && store.selection.isNotEmpty() && (compact || compactDock)) {
             val filterDescription = stringResource(if (showAllLayers) R.string.timeline_selected_only else R.string.timeline_show_all)
             androidx.compose.material3.TextButton(onClick = { showAllLayers = !showAllLayers },
                 modifier = Modifier.align(Alignment.TopStart).width(84.dp).height(44.dp)

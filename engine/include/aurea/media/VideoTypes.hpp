@@ -110,6 +110,11 @@ class DecodedFrame {
 public:
     virtual ~DecodedFrame() = default;
 
+    /// Explicit provider guarantee: published CPU planes own their complete
+    /// backing storage, which is released with this frame's final reference.
+    /// Native imports and borrowed/pool-backed views keep the safe default.
+    [[nodiscard]] virtual bool owns_cpu_backing() const noexcept { return false; }
+
     // Frame content is immutable after publication. Unlike a recycled decoder
     // buffer address or PTS, this identifies a particular decoded result even
     // after a seek/relink, without retaining its CPU planes in GPU caches.
@@ -136,6 +141,14 @@ public:
     u32 strides[3] = {0, 0, 0};
     u32 planeCount = 0;
 
+    /// Materialize an immutable CPU view only if importing the native image
+    /// fails. Native frames keep the mapped/copied storage alive until their
+    /// last reference is released. Called by the render thread, never during
+    /// ordinary zero-copy playback; failures can be retried on a later frame.
+    [[nodiscard]] virtual bool prepare_cpu_planes() noexcept {
+        return planeCount > 0 && planes[0] != nullptr;
+    }
+
     /// Identidade estável do buffer do decoder (para o backend cachear a
     /// importação: o mesmo AHardwareBuffer volta a cada N frames).
     u64 bufferId = 0;
@@ -151,6 +164,12 @@ public:
     }
 
     void add_ref() noexcept { refs_.fetch_add(1, std::memory_order_relaxed); }
+    /// A cache may retire its exclusive reference only while holding the lock
+    /// that serializes acquisition of new cache leases. Existing external
+    /// owners can release concurrently; they can never acquire from zero.
+    [[nodiscard]] u32 reference_count() const noexcept {
+        return refs_.load(std::memory_order_acquire);
+    }
     void release() noexcept {
         if (refs_.fetch_sub(1, std::memory_order_acq_rel) == 1) delete this;
     }

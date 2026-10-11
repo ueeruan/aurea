@@ -358,9 +358,9 @@ struct Shape3DPanelSection: View {
             }
             .padding(.bottom, 14)
             .sheet(isPresented: $picking) {
-                ShellMediaPicker(filter: .images) { url, _ in
+                ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
                     picking = false
-                    if let url { model.setShapePartImage(layerId, part: state.part(model), url: url) }
+                    if let (url, _) = items.first { model.setShapePartImage(layerId, part: state.part(model), url: url) }
                 }
             }
         }

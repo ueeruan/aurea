@@ -1,0 +1,83 @@
+; FBX 7.4.0 project file
+FBXHeaderExtension:  {
+	FBXHeaderVersion: 1003
+	FBXVersion: 7400
+}
+GlobalSettings:  {
+	Version: 1000
+	Properties70:  {
+		P: "UpAxis", "int", "Integer", "",1
+		P: "UpAxisSign", "int", "Integer", "",1
+		P: "FrontAxis", "int", "Integer", "",2
+		P: "FrontAxisSign", "int", "Integer", "",1
+		P: "CoordAxis", "int", "Integer", "",0
+		P: "CoordAxisSign", "int", "Integer", "",1
+		P: "UnitScaleFactor", "double", "Number", "",100
+	}
+}
+Objects:  {
+	Geometry: 1000, "Geometry::Quad", "Mesh" {
+		Vertices: *12 {
+			a: -0.5,-0.5,0,0.5,-0.5,0,0.5,0.5,0,-0.5,0.5,0
+		}
+		PolygonVertexIndex: *4 {
+			a: 0,1,2,-4
+		}
+		GeometryVersion: 124
+		LayerElementUV: 0 {
+			Version: 101
+			Name: "UVMap"
+			MappingInformationType: "ByPolygonVertex"
+			ReferenceInformationType: "IndexToDirect"
+			UV: *8 {
+				a: 0,0,1,0,1,1,0,1
+			}
+			UVIndex: *4 {
+				a: 0,1,2,3
+			}
+		}
+		LayerElementMaterial: 0 {
+			Version: 101
+			Name: ""
+			MappingInformationType: "AllSame"
+			ReferenceInformationType: "IndexToDirect"
+			Materials: *1 {
+				a: 0
+			}
+		}
+		Layer: 0 {
+			Version: 100
+			LayerElement:  {
+				Type: "LayerElementUV"
+				TypedIndex: 0
+			}
+			LayerElement:  {
+				Type: "LayerElementMaterial"
+				TypedIndex: 0
+			}
+		}
+	}
+	Model: 2000, "Model::Quad", "Mesh" {
+		Version: 232
+	}
+	Material: 3000, "Material::Tijolo", "" {
+		Version: 102
+		ShadingModel: "phong"
+		Properties70:  {
+			P: "DiffuseColor", "Color", "", "A",1,1,1
+		}
+	}
+	Texture: 4000, "Texture::Tijolo", "" {
+		Type: "TextureVideoClip"
+		Version: 202
+		TextureName: "Texture::Tijolo"
+		FileName: "C:\Artista\texturas\Verde.png"
+		RelativeFilename: "textures\Verde.png"
+	}
+}
+Connections:  {
+	C: "OO",2000,0
+	C: "OO",1000,2000
+	C: "OO",3000,2000
+	C: "OP",4000,3000, "DiffuseColor"
+}

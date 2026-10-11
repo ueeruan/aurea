@@ -723,6 +723,15 @@ public:
                                                f32* totalMs) noexcept = 0;
 
     [[nodiscard]] virtual bool is_device_lost() const noexcept = 0;
+    /// A recording failure may poison tracked resource layouts while the
+    /// device is still alive. Reinitialize only after pending work is drained.
+    [[nodiscard]] virtual bool requires_reinitialization() const noexcept { return is_device_lost(); }
+    /// Under the render lock. Timeout zero polls without blocking the UI.
+    /// Live-device fault backends must cover ALL earlier queue submissions.
+    [[nodiscard]] virtual Status prepare_reinitialization(u64 timeoutNs) noexcept {
+        (void)timeoutNs;
+        return is_device_lost() ? OkStatus : Status{Errc::InvalidState};
+    }
     [[nodiscard]] virtual u32  frames_in_flight() const noexcept = 0;
     [[nodiscard]] virtual GpuMemoryStats memory_stats() const noexcept = 0;
 

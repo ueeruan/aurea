@@ -33,6 +33,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,6 +84,8 @@ private fun galleryPermissions(): Array<String> = when {
     var items by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var failed by remember { mutableStateOf(false) }
+    var selecting by rememberSaveable { mutableStateOf(false) }
+    val selectedItems = remember { mutableStateListOf<Uri>() }
     val full = remember(revision, video) { context.galleryFull(video) }
     val partial = remember(revision) { context.galleryPartial() }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { revision++ }
@@ -89,7 +93,9 @@ private fun galleryPermissions(): Array<String> = when {
         if (context.contentResolver.getType(uri)?.startsWith("video/") == true) store.importVideo(uri) else store.importImage(uri)
         close()
     }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { importItem(it) } }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+        if (uris.isNotEmpty()) { store.importMediaBatch(uris); close() }
+    }
     LaunchedEffect(Unit) {
         if (!requested && !context.galleryFull(false) && !context.galleryFull(true) && !context.galleryPartial()) {
             requested = true; permissions.launch(galleryPermissions())
@@ -131,6 +137,19 @@ private fun galleryPermissions(): Array<String> = when {
             }
         }
         Text(stringResource(R.string.gallery_recent), color = AureaColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 12.dp, bottom = 6.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { selecting = !selecting; if (!selecting) selectedItems.clear() },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("gallery.select")) {
+                Text(stringResource(if (selecting) R.string.editor_cancelar else R.string.beta_select_media))
+            }
+            if (selecting) {
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { store.importMediaBatch(selectedItems.toList()); close() }, enabled = selectedItems.isNotEmpty(),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("gallery.addSelected")) {
+                    Text(stringResource(R.string.beta_add_media, selectedItems.size))
+                }
+            }
+        }
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             when {
                 loading -> CircularProgressIndicator(Modifier.size(28.dp), color = AureaColors.Accent)
@@ -144,7 +163,18 @@ private fun galleryPermissions(): Array<String> = when {
                 items.isEmpty() -> Text(stringResource(R.string.gallery_empty), color = AureaColors.Muted)
                 else -> LazyVerticalGrid(columns = GridCells.Adaptive(88.dp), modifier = Modifier.fillMaxSize().testTag("gallery.grid"),
                     horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(3.dp), contentPadding = PaddingValues(3.dp)) {
-                    items(items, key = { it.uri.toString() }) { item -> GalleryThumbnail(item, video) { importItem(item.uri) } }
+                    items(items, key = { it.uri.toString() }) { item ->
+                        Box(Modifier.semantics { selected = item.uri in selectedItems }) {
+                            GalleryThumbnail(item, video) {
+                                if (selecting) {
+                                    if (!selectedItems.remove(item.uri)) selectedItems.add(item.uri)
+                                } else importItem(item.uri)
+                            }
+                            if (item.uri in selectedItems) Text("✓ ${selectedItems.indexOf(item.uri) + 1}",
+                                color = AureaColors.Accent, modifier = Modifier.align(Alignment.TopEnd)
+                                    .background(AureaColors.Chip).padding(6.dp))
+                        }
+                    }
                 }
             }
         }

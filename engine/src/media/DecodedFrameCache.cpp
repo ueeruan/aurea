@@ -202,6 +202,53 @@ usize DecodedFrameCache::reclaim(usize targetBytes) noexcept {
     return static_cast<usize>(before - stats_.bytes);
 }
 
+usize DecodedFrameCache::reclaim_unused() noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return reclaim_unused_locked(false, 0, 0).freed;
+}
+
+DecodedFrameCache::ExclusivePruneResult DecodedFrameCache::reclaim_unused_for(i64 targetUs, i64 halfFrameUs) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return reclaim_unused_locked(true, targetUs, std::max<i64>(0, halfFrameUs));
+}
+
+DecodedFrameCache::ExclusivePruneResult DecodedFrameCache::reclaim_unused_locked(bool preserveTarget, i64 targetUs, i64 halfFrameUs) noexcept {
+    ExclusivePruneResult result;
+    result.versionBefore = result.versionAfter = stats_.version;
+    result.retainedTarget = preserveTarget && contains_locked(targetUs, halfFrameUs);
+    if (preserveTarget && !result.retainedTarget) return result;
+    const u64 before = stats_.bytes;
+    for (usize i = frames_.size(); i > 0 && frames_.size() > 1;) {
+        --i;
+        const DecodedFrame* frame = frames_[i].get();
+        if (preserveTarget) {
+            const u64 distance = frame->ptsUs >= targetUs
+                ? static_cast<u64>(frame->ptsUs) - static_cast<u64>(targetUs)
+                : static_cast<u64>(targetUs) - static_cast<u64>(frame->ptsUs);
+            if (frame->covers(targetUs) || (frame->durationUs == 0 && distance <= static_cast<u64>(halfFrameUs))) continue;
+        }
+        // Native import caches and reader pools may retain backing independently.
+        // Only a provider's explicit owned-CPU guarantee proves physical credit;
+        // native eviction needs a separate import-cache retirement path.
+        if (!frame->owns_cpu_backing() || frame->hardwareBuffer || required_locked(frame->ptsUs, frame->durationUs)
+            || frame->reference_count() != 1) continue;
+        const u64 bytes = std::min<u64>(stats_.bytes, frame->approx_bytes());
+        FrameRef retired = std::move(frames_[i]);
+        frames_.erase(frames_.begin() + static_cast<std::ptrdiff_t>(i));
+        // Unlike general eviction, exclusive pruning knows this is the final
+        // owner. Return backing storage before making any admission credit.
+        retired.reset();
+        stats_.bytes -= bytes;
+        if (memory_) memory_->free(MemoryClass::DecodedFrames, static_cast<usize>(bytes));
+        ++stats_.evictions;
+    }
+    stats_.frames = static_cast<u32>(frames_.size());
+    if (before != stats_.bytes) ++stats_.version;
+    result.freed = static_cast<usize>(before - stats_.bytes);
+    result.versionAfter = stats_.version;
+    return result;
+}
+
 bool DecodedFrameCache::metrics(CacheMetrics& out) const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     out.name = "quadros-decodificados";
@@ -249,6 +296,10 @@ FrameRef DecodedFrameCache::find(i64 targetUs, i64 halfFrameUs, bool* exact, boo
 
 bool DecodedFrameCache::contains(i64 targetUs, i64 halfFrameUs) const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
+    return contains_locked(targetUs, halfFrameUs);
+}
+
+bool DecodedFrameCache::contains_locked(i64 targetUs, i64 halfFrameUs) const noexcept {
     auto covering = std::upper_bound(frames_.begin(), frames_.end(), targetUs,
         [](i64 time, const FrameRef& frame) { return time < frame->ptsUs; });
     if (covering != frames_.begin() && (*(covering - 1))->covers(targetUs)) return true;

@@ -3,7 +3,7 @@
      Os 7 catálogos têm as MESMAS chaves; o iOS lê daqui via tools/_ios_strings.py. -->
 <resources>
     <string name="eng_encoder_buffer_small">एनकोडर बफ़र फ़्रेम से छोटा है</string>
-    <string name="eng_encoder_format">एनकोडर यह रिज़ॉल्यूशन या फ़ॉर्मैट स्वीकार नहीं करता</string>
+    <string name="eng_encoder_format">एनकोडर इस रिज़ॉल्यूशन, FPS और फ़ॉर्मैट के संयोजन को स्वीकार नहीं करता। रिज़ॉल्यूशन या FPS कम करके देखें।</string>
     <string name="eng_audio_encoder">इस डिवाइस पर AAC ऑडियो एनकोडर विफल रहा</string>
     <string name="eng_video_encoder_start">वीडियो एनकोडर शुरू नहीं हुआ</string>
     <string name="eng_video_encoder_stalled">वीडियो एनकोडर ने जवाब देना बंद कर दिया</string>
@@ -23,6 +23,7 @@
     <string name="eng_engine_unavailable">इंजन तैयार नहीं है</string>
     <string name="eng_model_invalid">अमान्य या अधूरी 3D फ़ाइल</string>
     <string name="eng_model_no_geometry">मॉडल में कोई ज्योमेट्री नहीं है</string>
+    <string name="eng_model_compressed">मॉडल Draco कम्प्रेशन का उपयोग करता है — इसे मेश कम्प्रेशन के बिना फिर से एक्सपोर्ट करें</string>
     <string name="eng_model_too_heavy">मॉडल इस डिवाइस के लिए बहुत भारी है</string>
     <string name="eng_no_video_track">फ़ाइल में पढ़ने योग्य वीडियो ट्रैक नहीं है</string>
     <string name="eng_no_audio_track">फ़ाइल में पढ़ने योग्य ऑडियो ट्रैक नहीं है</string>

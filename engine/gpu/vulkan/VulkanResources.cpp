@@ -84,7 +84,10 @@ struct PendingBuffer { Backend* backend; Buffer buffer; };
 } // namespace
 
 void Backend::set_object_name(VkObjectType type, u64 handle, const char* name) noexcept {
-    if (!debugUtils_ || !vkSetDebugUtilsObjectNameEXT || !name || !handle) return;
+    // Object labels are validation diagnostics. Some Android emulator drivers
+    // advertise debug utils but crash naming non-dispatchable image handles.
+    // Normal rendering must never depend on this optional diagnostic call.
+    if (!caps_.validationEnabled || !debugUtils_ || !vkSetDebugUtilsObjectNameEXT || !name || !handle) return;
     VkDebugUtilsObjectNameInfoEXT info{VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT};
     info.objectType = type;
     info.objectHandle = handle;
@@ -131,8 +134,11 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
     // Transitório: memória LAZY (só no tile) quando o aparelho tem; alocação
     // dedicada, para o driver não precisar comprometer um bloco inteiro.
     const bool lazy = desc.transient && caps_.lazyAttachments;
+    // Imagem nunca é escrita pela CPU via `mapped` (upload passa por staging):
+    // em 32 bits a memória dela fica fora do espaço de endereços do processo.
     t.alloc = allocator_.allocate(req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                                  lazy ? VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT : 0, lazy, desc.debugName);
+                                  lazy ? VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT : 0, lazy, desc.debugName,
+                                  /*hostPointer=*/false);
     if (!t.alloc.valid()) {
         vkDestroyImage(device_, t.image, nullptr);
         return Status{Errc::OutOfDeviceMemory, "sem memoria para textura"};

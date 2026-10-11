@@ -1243,3 +1243,133 @@ AUREA_TEST(ClipTime, RemapEffectOnPrecompDeletesKeysAndStartsClean) {
     AUREA_CHECK_EQ(P()->timeRemap.keys.size(), usize{2});
     AUREA_CHECK(P()->timeRemapEnabled);
 }
+
+AUREA_TEST(ClipTime, DockActionsExtendOnlyTheEdgeFacingThePlayhead) {
+    TimeRig r(cfg_with_audio());
+    const u64 id = r.layer.pack();
+    AUREA_CHECK(r.e.edit_clip_time(id, 0, 30));
+    AUREA_CHECK(r.e.edit_clip_time(id, 1, 120));
+    AUREA_CHECK_EQ(r.e.query_clip_time_actions(id, 0), u32{8});
+    AUREA_CHECK_EQ(r.e.query_clip_time_actions(id, 29), u32{8});
+    for (i64 frame : {30, 31, 60, 119, 120})
+        AUREA_CHECK_EQ(r.e.query_clip_time_actions(id, frame), u32{7});
+    AUREA_CHECK_EQ(r.e.query_clip_time_actions(id, 121), u32{16});
+    AUREA_CHECK_EQ(r.e.query_clip_time_actions(id, -1), u32{0});
+    AUREA_CHECK_EQ(r.e.query_clip_time_actions(0, 60), u32{0});
+    AUREA_CHECK(!r.e.edit_clip_time(id, 8, 60));
+    AUREA_CHECK(!r.e.edit_clip_time(id, 9, 60));
+    // Extending to an absolute playhead must not turn into a magnetic ripple.
+    AUREA_CHECK(r.e.set_layer_magnetic_track(id, true));
+    const f64 source = r.L()->source_frame(FrameIndex{60});
+    AUREA_CHECK(r.e.edit_clip_time(id, 8, 10));
+    AUREA_CHECK_EQ(r.L()->start.value, 10);
+    AUREA_CHECK_EQ(r.L()->end.value, 120);
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{60}), source, 1e-9);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(r.L()->start.value, 30);
+    AUREA_CHECK(r.e.edit_clip_time(id, 9, 140));
+    AUREA_CHECK_EQ(r.L()->start.value, 30);
+    AUREA_CHECK_EQ(r.L()->end.value, 140);
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{60}), source, 1e-9);
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(r.L()->end.value, 120);
+    r.L()->locked = true;
+    AUREA_CHECK(!r.e.edit_clip_time(id, 8, 10));
+    AUREA_CHECK(!r.e.edit_clip_time(id, 9, 140));
+}
+
+AUREA_TEST(ClipTime, AbsoluteMoveAcceptsZeroAndPreservesTrimmedSourceAndKeys) {
+    TimeRig r(cfg_with_audio());
+    AUREA_CHECK(r.e.edit_clip_time(r.layer.pack(), 0, 30));
+    AUREA_CHECK(r.e.edit_clip_time(r.layer.pack(), 1, 120));
+    const i64 offset = r.L()->offset.value;
+    const f64 source = r.L()->source_frame(r.L()->start);
+    Command key;
+    key.type = CommandType::KeyframeInsert;
+    key.keyframe.track.layer = r.layer;
+    key.keyframe.track.property = TrackProperty::PositionX;
+    key.keyframe.track.effectIndex = kInvalidIndex;
+    key.keyframe.time = FrameIndex{15};
+    key.keyframe.value = 71;
+    AUREA_CHECK(r.e.apply_command(key).ok());
+    AUREA_CHECK(r.e.edit_clip_time(r.layer.pack(), 6, 0));
+    AUREA_CHECK_EQ(r.L()->start.value, 0);
+    AUREA_CHECK_EQ(r.L()->end.value, 90);
+    AUREA_CHECK_EQ(r.L()->offset.value, offset);
+    AUREA_CHECK_NEAR(r.L()->source_frame(r.L()->start), source, 1e-9);
+    AUREA_CHECK_EQ(r.L()->tracks.find(TrackProperty::PositionX)->keys[0].time.value, 15);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(r.L()->start.value, 30);
+    AUREA_CHECK_EQ(r.L()->end.value, 120);
+    AUREA_CHECK_EQ(r.L()->offset.value, offset);
+    r.L()->locked = true;
+    AUREA_CHECK(!r.e.edit_clip_time(r.layer.pack(), 6, 0));
+    AUREA_CHECK_EQ(r.L()->start.value, 30);
+}
+
+// Beta 06–07/10: depois de dividir, as duas partes voltam a esticar até onde a
+// mídia vai (vídeo/áudio) ou sem limite (foto). Nada no corte trava a borda.
+AUREA_TEST(ClipTime, SplitPartsExtendAgainUpToTheSource) {
+    for (int kind = 0; kind < 3; ++kind) {
+        TimeRig r(cfg_with_audio());
+        LayerId id = r.layer;
+        if (kind == 1) {
+            VideoImport ai; ai.sourcePath = "s"; ai.displayName = "som";
+            auto a = r.e.import_audio(ai);
+            AUREA_CHECK(a.ok()); if (!a.ok()) continue;
+            id = LayerId::unpack(*a);
+        } else if (kind == 2) {
+            std::vector<u8> px(4 * 4 * 4, 255);
+            auto p = r.e.import_image(px.data(), 4, 4, "foto");
+            AUREA_CHECK(p.ok()); if (!p.ok()) continue;
+            id = LayerId::unpack(*p);
+        }
+        Layer* l = r.comp()->layer(id);
+        AUREA_CHECK(l != nullptr); if (!l) continue;
+        const i64 s0 = l->start.value, e0 = l->end.value;
+        AUREA_CHECK(e0 - s0 > 20);
+        const i64 at = s0 + (e0 - s0) / 2;
+        Command c; c.type = CommandType::LayerSplit; c.layer_split.layer = id; c.layer_split.at = FrameIndex{at};
+        AUREA_CHECK(r.e.apply_command(c).ok());
+        LayerId second{};
+        r.comp()->layers().for_each([&](LayerId lid, const Layer& x) {
+            if (lid != id && x.start.value == at && x.end.value == e0) second = lid;
+        });
+        AUREA_CHECK(second.valid());
+        // Primeira parte: estica o fim de volta até o fim original da mídia.
+        AUREA_CHECK(r.e.edit_clip_time(id.pack(), 1, e0));
+        AUREA_CHECK_EQ(r.comp()->layer(id)->end.value, e0);
+        // Segunda parte: puxa o começo de volta até o começo original.
+        AUREA_CHECK(r.e.edit_clip_time(second.pack(), 0, s0));
+        AUREA_CHECK_EQ(r.comp()->layer(second)->start.value, s0);
+        if (kind == 2) {   // foto: sem fim de mídia
+            AUREA_CHECK(r.e.edit_clip_time(id.pack(), 1, e0 + 500));
+            AUREA_CHECK_EQ(r.comp()->layer(id)->end.value, e0 + 500);
+        } else {           // vídeo/áudio: nunca além da fonte
+            AUREA_CHECK(!r.e.edit_clip_time(id.pack(), 1, e0 + 500));
+        }
+    }
+}
+
+AUREA_TEST(ClipTime, ExtendButtonRestoresAvailableHandleAndUndo) {
+    for (f32 speed : {1.f, 2.f}) {
+        TimeRig r(cfg_with_audio());
+        r.speed(speed);
+        AUREA_CHECK(r.e.edit_clip_time(r.layer.pack(), 1, 50));
+        Track keyed; keyed.property = TrackProperty::PositionX;
+        keyed.set(FrameIndex{15}, 12.f); r.L()->tracks.add(std::move(keyed));
+        const f64 sampled = r.L()->source_frame(FrameIndex{30});
+        AUREA_CHECK(r.e.edit_clip_time(r.layer.pack(), 7, 0));
+        AUREA_CHECK_EQ(r.L()->end.value, speed == 1.f ? 300 : 150);
+        AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{30}), sampled, 1e-9);
+        AUREA_CHECK_EQ(r.L()->tracks.find(TrackProperty::PositionX)->keys[0].time.value, 15);
+        AUREA_CHECK(!r.e.edit_clip_time(r.layer.pack(), 7, 0));
+        Command undo; undo.type = CommandType::Undo;
+        AUREA_CHECK(r.e.apply_command(undo).ok());
+        AUREA_CHECK_EQ(r.L()->end.value, 50);
+        r.L()->locked = true;
+        AUREA_CHECK(!r.e.edit_clip_time(r.layer.pack(), 7, 0));
+    }
+}

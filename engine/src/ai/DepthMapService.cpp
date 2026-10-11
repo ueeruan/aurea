@@ -5,6 +5,7 @@
 #include "aurea/core/Thread.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/media/ThumbnailService.hpp"
+#include "aurea/platform/AddressSpace.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -379,7 +380,9 @@ void DepthMapService::thread_main() noexcept {
         {
             std::unique_lock<std::mutex> lock(queueMutex_);
             const auto ready = [&] { return !running_ || !pending_.empty(); };
-            if (!wake_.wait_for(lock, std::chrono::milliseconds(kIdleReleaseMs), ready)) {
+            // 32 bits: a rede (~66 MB) sai em 5 s, não em 30 (AddressSpace.hpp).
+            if (!wake_.wait_for(lock, std::chrono::milliseconds(address_space::ai_idle_release_ms(kIdleReleaseMs)),
+                                ready)) {
                 // Ocioso: a rede e o decoder saem da memória; voltam no próximo pedido.
                 lock.unlock();
                 trim();

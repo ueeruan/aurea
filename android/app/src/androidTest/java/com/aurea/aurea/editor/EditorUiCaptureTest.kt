@@ -97,7 +97,7 @@ class EditorUiCaptureTest {
         compose.runOnIdle { store.setTextSize(100f); store.addEffect(effectTypeId("aurea.motion.oscillate.cycles")) }
         compose.waitUntil(5000) { store.effects.size == 1 }
         val effect = store.effects.single().effectId
-        compose.onNodeWithText(context.getString(R.string.sh_dock_effects)).performClick()
+        compose.onNodeWithTag("dock.tool.Effects").performScrollTo().performClick()
         compose.waitUntil(5000) { store.paramOf(effect,2) != null }
         capture("oscillate")
         compose.onNodeWithText(context.getString(R.string.fx_frequencia),useUnmergedTree=true).performScrollTo().performClick()
@@ -145,7 +145,7 @@ class EditorUiCaptureTest {
         compose.runOnIdle { store.setTextAnimParam(0, 6, 0.8f); store.setMaskParam(mask, 0, 40f); store.setMaskParam(mask, 2, 0.6f) }
         seek(0)
         capture("editor")
-        compose.onNodeWithText(context.getString(R.string.text_options)).performClick()
+        compose.onNodeWithTag("dock.tool.TextOptions").performScrollTo().performClick()
         settle()
         compose.onNodeWithTag("text.transform.add").performScrollTo().performClick()
         capture("text-stack")
@@ -160,7 +160,7 @@ class EditorUiCaptureTest {
             store.setLayerRanges(ids, intArrayOf(0, 35, 60), intArrayOf(90, 60, 90))
             store.selectAll(); store.seek(10)
         }
-        compose.onNodeWithTag("timeline.arrange.4").performScrollTo()
+        compose.onNodeWithTag("timeline.batch.tools").assertIsDisplayed()
         capture("layers")
     }
 }

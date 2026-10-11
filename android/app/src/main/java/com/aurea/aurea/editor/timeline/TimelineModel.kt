@@ -151,7 +151,9 @@ internal class RowCache {
 }
 
 internal fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name): RowModel {
-    val keys = all.sortedBy { it.time }
+    // The shared flag includes an animation key exactly at the clip's end.
+    // Never reapply the render interval's exclusive end to editable anchors.
+    val keys = all.filter { it.timelineVisible }.sortedBy { it.time }
     val times = ArrayList<Int>()
     val groups = ArrayList<List<KeyframeRow>>()
     var from = 0

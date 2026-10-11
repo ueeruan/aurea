@@ -66,7 +66,7 @@ class TouchTargetsTest {
             }
         }
         fun drag() = compose.onNodeWithTag("ruler").performTouchInput {
-            swipe(Offset(width * .2f, height / 2f), Offset(width * .8f, height / 2f), 250)
+            swipe(Offset(width * .8f, height / 2f), Offset(width * .2f, height / 2f), 250)
         }
         drag()
         var first = 0f

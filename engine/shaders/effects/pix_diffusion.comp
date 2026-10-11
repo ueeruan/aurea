@@ -1,0 +1,84 @@
+#version 450
+#include "../common/bindings.glsl"
+#include "common.glsl"
+layout(local_size_x=128,local_size_y=1,local_size_z=1) in;
+layout(set=0,binding=AUREA_TEX0) uniform sampler2D src;
+layout(set=0,binding=AUREA_IMG0,rgba32f) coherent volatile uniform image2D errors;
+layout(set=0,binding=AUREA_IMG1,rgba16f) writeonly uniform image2D target;
+layout(set=0,binding=AUREA_PARAMS,std140) uniform Params {vec4 uvMap,texel,p0,p1,p2,p3,color,second;} p;
+#include "pix_palette.glsl"
+vec3 predecessor(ivec2 point,ivec2 size) {
+    if(any(lessThan(point,ivec2(0)))||any(greaterThanEqual(point,size))) return vec3(0);
+    return imageLoad(errors,point).rgb;
+}
+float weight(int method,int dx,int dy) {
+    if(method==1) {
+        if(dy==0) return dx==-1?7.0/16.0:0.0;
+        if(dy==-1) return dx==-1?1.0/16.0:(dx==0?5.0/16.0:(dx==1?3.0/16.0:0.0));
+    }
+    if(method==2) {
+        if(dy==0) return dx==-1?3.0/8.0:0.0;
+        if(dy==-1) return dx==0?3.0/8.0:(dx==-1?2.0/8.0:0.0);
+    }
+    if(method==3) {
+        if(dy==0) return dx==-1?.5:0.0;
+        if(dy==-1) return (dx==0||dx==1)?.25:0.0;
+    }
+    if(method==4||method==5) {
+        if(dy==0) return dx==-1?(method==4?7.0/16.0:.5):0.0;
+        if(dy==-1) {
+            if(method==4) return dx==0?5.0/16.0:(dx==1?3.0/16.0:(dx==2?1.0/16.0:0.0));
+            return dx==0?.25:((dx==1||dx==2)?.125:0.0);
+        }
+    }
+    if(method==6||method==7||method==8) {
+        float divisor=method==6?48.0:(method==7?42.0:32.0);
+        if(dy==0) return (dx==-1?(method==6?7.0:8.0):(dx==-2?(method==6?5.0:4.0):0.0))/divisor;
+        if(dy==-1) return (dx==0?(method==6?7.0:8.0):(abs(dx)==1?(method==6?5.0:4.0):3.0-(method==6?0.0:1.0)))/divisor;
+        if(dy==-2&&method!=8) return (dx==0?(method==6?5.0:4.0):(abs(dx)==1?(method==6?3.0:2.0):1.0))/divisor;
+    }
+    if(method==9||method==10) {
+        float divisor=method==9?32.0:16.0;
+        if(dy==0) return (dx==-1?(method==9?5.0:4.0):(dx==-2?3.0:0.0))/divisor;
+        if(dy==-1) return (dx==0?(method==9?5.0:3.0):(abs(dx)==1?(method==9?4.0:2.0):(method==9?2.0:1.0)))/divisor;
+        if(dy==-2&&method==9) return (dx==0?3.0:(abs(dx)==1?2.0:0.0))/divisor;
+    }
+    if(method==11) {
+        if(dy==0) return (dx==-1||dx==-2)?.125:0.0;
+        if(dy==-1) return abs(dx)<=1?.125:0.0;
+        if(dy==-2) return dx==0?.125:0.0;
+    }
+    return 0.0;
+}
+void main() {
+    ivec2 size=ivec2(p.p1.xy);
+    int method=int(p.p0.x);
+    // Horizontal predecessors belong to this invocation. Keep the two
+    // preceding errors in registers; cross-row dependencies use the image.
+    vec3 previousOne[128],previousTwo[128];
+    for(int row=0;row<128;row++) {previousOne[row]=vec3(0);previousTwo[row]=vec3(0);}
+    // Uniform barrier schedule: no invocation exits early. Every pixel has a
+    // unique wavefront and writer; no atomics, rounding races or tile resets.
+    for(int diagonal=0;diagonal<size.x+3*(size.y-1);++diagonal) {
+        for(int y=int(gl_LocalInvocationID.x);y<size.y;y+=128) {
+            int x=diagonal-3*y;
+            if(x<0||x>=size.x) continue;
+            ivec2 point=ivec2(x,y);
+            vec4 value=texelFetch(src,point,0);
+            vec3 original=aurea_linear_to_srgb(max(unpremultiply(value).rgb,vec3(0)));
+            int row=y/128;
+            vec3 feedback=previousOne[row]*weight(method,-1,0)+previousTwo[row]*weight(method,-2,0);
+            for(int dy=-2;dy<0;dy++) for(int dx=-2;dx<=2;dx++) {
+                float factor=weight(method,dx,dy);
+                if(factor>0.0) feedback+=predecessor(point+ivec2(dx,dy),size)*factor;
+            }
+            vec3 adjusted=original+feedback*p.p0.z;
+            vec3 encoded=quantize(adjusted);
+            vec3 error=value.a>0.0?adjusted-encoded:vec3(0);
+            previousTwo[row]=previousOne[row];previousOne[row]=error;
+            imageStore(errors,point,vec4(error,0));
+            imageStore(target,point,vec4(aurea_srgb_to_linear(encoded)*value.a,value.a));
+        }
+        memoryBarrierImage();barrier();
+    }
+}

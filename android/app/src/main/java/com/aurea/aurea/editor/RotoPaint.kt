@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -56,6 +57,8 @@ data class RotoSession(val layer: Long, val effectId: Int, val previousView: Int
 object RotoPaint {
     var session by mutableStateOf<RotoSession?>(null)
     var background by mutableStateOf(false)
+    /** Visualização DENTRO do modo pintar: 0 final, 1 máscara, 2 sobreposição. */
+    var view by mutableStateOf(2)
     /** Raio do pincel em px da composição. */
     var radius by mutableFloatStateOf(24f)
     /** Traço em curso, em px da tela (desenho ao vivo). */
@@ -130,24 +133,66 @@ fun RotoPaintControls(store: EditorStore, effectId: Int, view: Int) {
     val s = RotoPaint.session
     if (s == null || s.layer != layer || s.effectId != effectId) {
         RotoChip(stringResource(R.string.roto_paint), "fx.roto.paint", false) {
+            // Outra sessão aberta (outra layer/instância): encerra antes, senão
+            // a sobreposição dela ficava ligada para sempre.
+            rotoEnd(store)
+            store.pause()
+            RotoPaint.background = false
+            RotoPaint.view = 2
             RotoPaint.session = RotoSession(layer, effectId, view)
             store.engineForStress.rotoSetView(layer, effectId, 2)
             store.rotoChanged()
         }
         return
     }
-    var status by remember { mutableStateOf(LongArray(6)) }
+    // Fechar o painel, apagar o efeito ou trocar de projeto encerra o modo
+    // pintar (como Malha/Fantoche): o palco deixa de comer toques e a
+    // sobreposição volta à visualização anterior.
+    DisposableEffect(layer, effectId) {
+        onDispose { if (RotoPaint.session?.let { it.layer == layer && it.effectId == effectId } == true) rotoEnd(store) }
+    }
+    var status by remember { mutableStateOf(LongArray(10)) }
     LaunchedEffect(s) {
         while (true) {
             status = store.engineForStress.rotoStatus(layer, effectId)
-            delay(if (status[2] != 0L) 250 else 800)
+            // Propagando ou com o quadro atual pendente: atualiza rápido.
+            delay(if (status[2] != 0L || (status[9] != 0L && status[6] == 0L)) 250 else 800)
         }
     }
+    val muted = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted))
     Column(Modifier.padding(bottom = 6.dp)) {
-        Text(
-            stringResource(R.string.roto_hint),
-            style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)),
-        )
+        Text(stringResource(R.string.roto_hint), style = muted)
+        // O que está acontecendo, SEMPRE visível: este quadro, o clipe, falha.
+        if (status[9] != 0L) {
+            Text(
+                stringResource(if (status[6] != 0L) R.string.roto_frame_ready else R.string.roto_frame_pending),
+                Modifier.padding(top = 6.dp).testTag("fx.roto.frame"),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W600,
+                    color = if (status[6] != 0L) AureaColors.Success else AureaColors.Text)),
+            )
+            if (status[8] > 1) Text(
+                stringResource(R.string.roto_clip_status, status[7].toInt(), status[8].toInt()),
+                Modifier.padding(top = 2.dp).testTag("fx.roto.clip"), style = muted,
+            )
+            if (status[3] != 0L && status[2] == 0L) Text(
+                stringResource(R.string.roto_failed), Modifier.padding(top = 2.dp).testTag("fx.roto.failed"),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Danger)),
+            )
+        }
+        // Ver o resultado sem sair do modo pintar: Final (com as camadas de
+        // baixo), Sobreposição (fundo vermelho translúcido) ou Máscara.
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.roto_view_label), Modifier.padding(top = 10.dp, end = 2.dp), style = muted)
+            for ((mode, res, tag) in listOf(
+                Triple(0, R.string.roto_view_final, "fx.roto.view.final"),
+                Triple(2, R.string.roto_view_overlay, "fx.roto.view.overlay"),
+                Triple(1, R.string.roto_view_mask, "fx.roto.view.mask"),
+            )) RotoChip(stringResource(res), tag, RotoPaint.view == mode) {
+                RotoPaint.view = mode
+                store.engineForStress.rotoSetView(layer, effectId, mode)
+                store.rotoChanged()
+            }
+        }
         Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             RotoChip(stringResource(R.string.roto_object), "fx.roto.object", !RotoPaint.background) { RotoPaint.background = false }
             RotoChip(stringResource(R.string.roto_background), "fx.roto.background", RotoPaint.background) { RotoPaint.background = true }
@@ -164,7 +209,9 @@ fun RotoPaintControls(store: EditorStore, effectId: Int, view: Int) {
             modifier = Modifier.testTag("fx.roto.size").semantics { contentDescription = sizeLabel },
         )
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            RotoChip(stringResource(R.string.roto_propagate), "fx.roto.propagate", status[2] != 0L) {
+            val propagateLabel = if (status[8] > 1) stringResource(R.string.roto_propagate_count, status[8].toInt())
+                                 else stringResource(R.string.roto_propagate)
+            RotoChip(propagateLabel, "fx.roto.propagate", status[2] != 0L) {
                 if (status[2] != 0L) store.engineForStress.rotoCancel()
                 else store.engineForStress.rotoPropagate(layer, effectId)
                 status = store.engineForStress.rotoStatus(layer, effectId)

@@ -9,6 +9,7 @@
 // =============================================================================
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/ModelBudget.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/timeline/Layer.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
@@ -16,6 +17,7 @@
 #include "aurea/text/Text.hpp"
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/text/FontManager.hpp"
+#include "aurea/vector/Vector.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -108,6 +110,8 @@ std::string encode_text3d(const Text3DSpec& s) {
     out += "font=";
     constexpr char hex[] = "0123456789abcdef";
     for (unsigned char c : s.fontPath) { out += hex[c >> 4]; out += hex[c & 15]; }
+    out += ";texture=";
+    for (unsigned char c : s.texturePath) { out += hex[c >> 4]; out += hex[c & 15]; }
     char anim[128];
     std::snprintf(anim, sizeof(anim), ";anim=%u/%.4f/%.4f/%.4f;", s.animation,
         double(s.animationDuration), double(s.animationStagger), double(s.animationAmount));
@@ -127,12 +131,14 @@ bool decode_text3d(const std::string& src, Text3DSpec& out) {
         usize j = head.find(';', i);
         if (j == std::string::npos) j = head.size();
         const std::string kv = head.substr(i, j - i);
-        if (kv.rfind("font=", 0) == 0) {
+        if (kv.rfind("font=", 0) == 0 || kv.rfind("texture=", 0) == 0) {
+            std::string& path = kv.rfind("font=", 0) == 0 ? s.fontPath : s.texturePath;
+            const usize begin = kv.find('=') + 1;
             auto digit = [](char c) -> int { if (c >= '0' && c <= '9') return c - '0'; if (c >= 'a' && c <= 'f') return c - 'a' + 10; return -1; };
-            for (usize k = 5; k + 1 < kv.size(); k += 2) {
+            for (usize k = begin; k + 1 < kv.size(); k += 2) {
                 int a = digit(kv[k]), b = digit(kv[k + 1]);
-                if (a < 0 || b < 0 || (a == 0 && b == 0)) { s.fontPath.clear(); break; }
-                s.fontPath += static_cast<char>((a << 4) | b);
+                if (a < 0 || b < 0 || (a == 0 && b == 0)) { path.clear(); break; }
+                path += static_cast<char>((a << 4) | b);
             }
         } else if (kv.rfind("anim=", 0) == 0) {
             unsigned mode = 0; float duration = 2, stagger = .12f, amount = .3f;
@@ -525,7 +531,23 @@ bool triangulate_polygon(const std::vector<std::vector<Vec2>>& rings, std::vecto
     }
     if (!holes.empty()) outer = e.eliminate_holes(holes, outer);
     e.run(outer, 0);
-    return out.size() > before;
+    std::vector<Vec2> flat;
+    f64 expected = 0;
+    for (usize r = 0; r < rings.size(); ++r) {
+        expected += (r == 0 ? 1 : -1) * std::fabs(signed_area(rings[r]));
+        flat.insert(flat.end(), rings[r].begin(), rings[r].end());
+    }
+    f64 covered = 0;
+    for (usize t = before; t + 2 < out.size(); t += 3) {
+        const Vec2 a = flat[out[t]], b = flat[out[t + 1]], c = flat[out[t + 2]];
+        covered += std::fabs((f64(b.x) - a.x) * (f64(c.y) - a.y) - (f64(b.y) - a.y) * (f64(c.x) - a.x)) * .5;
+    }
+    // A few triangles are not a completed cap. A failed bevel offset retries
+    // at a smaller width instead of accepting a broken glyph with missing faces.
+    if (out.size() == before || expected <= 0 || std::fabs(covered - expected) > std::max(1e-10, expected * 1e-3)) {
+        out.resize(before); return false;
+    }
+    return true;
 }
 
 // -----------------------------------------------------------------------------
@@ -884,10 +906,39 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
     td.size = 100.0f;                 // contorno medido a 100 px e levado a 1 = altura da fonte
     td.alignment = spec.alignment;
     std::vector<std::vector<Vec2>> raw;
-    if (!text::outline(font, td, raw, glyphIndex)) {
+    std::vector<u32> owners;
+    if (!text::outline(font, td, raw, glyphIndex, &owners)) {
         detail = "texto sem letras visiveis";
         return nullptr;
     }
+    // Variable/composite fonts can build one glyph from overlapping filled
+    // contours (Roboto's A has separate stems and a crossbar). Font outlines
+    // use nonzero winding; treating those parts as nested even/odd holes tears
+    // the cap. Resolve each glyph separately with our shared vector clipper.
+    // Work in glyph-relative pixels so grid rounding is independent of kerning
+    // and the glyph's position in the text or separate-letter mode.
+    std::vector<std::vector<Vec2>> clean;
+    std::vector<u32> cleanOwners;
+    for (usize first = 0; first < raw.size();) {
+        usize end = first + 1;
+        while (end < raw.size() && owners[end] == owners[first]) ++end;
+        const Vec2 origin = raw[first][0];
+        std::vector<vector::Contour> input, resolved;
+        input.reserve(end - first);
+        for (usize i = first; i < end; ++i) {
+            vector::Contour contour;
+            contour.pts.reserve(raw[i].size());
+            for (Vec2 point : raw[i]) contour.pts.push_back(point - origin);
+            input.push_back(std::move(contour));
+        }
+        vector::resolve_fill(input, vector::FillRule::NonZero, resolved);
+        for (auto& contour : resolved) {
+            for (Vec2& point : contour.pts) point = point + origin;
+            clean.push_back(std::move(contour.pts)); cleanOwners.push_back(owners[first]);
+        }
+        first = end;
+    }
+    raw = std::move(clean); owners = std::move(cleanOwners);
     // Y para cima, 1 = altura da fonte.
     std::vector<std::vector<Vec2>> cs(raw.size());
     for (usize i = 0; i < raw.size(); ++i) {
@@ -900,7 +951,9 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
     for (usize i = 0; i < n; ++i) areas[i] = signed_area(cs[i]);
     for (usize i = 0; i < n; ++i)
         for (usize j = 0; j < n; ++j)
-            if (i != j && std::fabs(areas[j]) > std::fabs(areas[i]) && point_in(cs[j], cs[i][0])) ++depth[i];
+            // Kerning, combining marks and cursive fonts can overlap glyphs.
+            // A neighbouring glyph must never turn a letter into a hole.
+            if (i != j && owners[i] == owners[j] && std::fabs(areas[j]) > std::fabs(areas[i]) && point_in(cs[j], cs[i][0])) ++depth[i];
 
     // Orientação normalizada: borda anti-horária, furo horário. Com ela a
     // normal da aresta (dy, −dx) sai sempre para fora do material, e o recuo
@@ -916,7 +969,7 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
         if (!(depth[h] & 1u)) continue;
         usize best = n;
         for (usize k = 0; k < n; ++k) {
-            if ((depth[k] & 1u) || depth[k] + 1 != depth[h] || !point_in(cs[k], cs[h][0])) continue;
+            if (owners[k] != owners[h] || (depth[k] & 1u) || depth[k] + 1 != depth[h] || !point_in(cs[k], cs[h][0])) continue;
             if (best == n || std::fabs(areas[k]) < std::fabs(areas[best])) best = k;
         }
         if (best != n) holesOf[best].push_back(static_cast<u32>(h));
@@ -980,7 +1033,10 @@ std::shared_ptr<const TextMesh> build_text_mesh(const text::Font& font, const Te
         }
         if (!ok) {
             TextMesh local;
-            if (emit_group(local, in, o, zf, zb, d, 0.0f, 0, 0.0f, 0.0f, lo, uvSize)) merge(*mesh, local);
+            if (!emit_group(local, in, o, zf, zb, d, 0.0f, 0, 0.0f, 0.0f, lo, uvSize)) {
+                detail = "contorno do texto nao triangulou"; return nullptr;
+            }
+            merge(*mesh, local);
         }
         ++emitted;
     }
@@ -1319,7 +1375,8 @@ bool apply_text3d_material_preset(Text3DSpec& s, u32 preset) noexcept {
     return true;
 }
 
-ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
+ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec,
+    const std::function<std::string(const std::string&)>& resolvePath, u32 maxTextureSize, u64 memoryBudget) {
     ImportResult res;
     const std::string key = geom_key(font, spec);
     std::shared_ptr<const GeomAsset> geom;
@@ -1353,6 +1410,23 @@ ImportResult build_text3d(const text::Font& font, const Text3DSpec& spec) {
         asset->materials.push_back(make_material("texto", spec.front_material()));
     }
     apply_surface_finish(*asset, std::min(spec.surfaceFinish, 4u));
+    if (!spec.texturePath.empty()) {
+        Image image;
+        const std::string path = resolvePath ? resolvePath(spec.texturePath) : spec.texturePath;
+        const u64 held = scene_asset_memory_bytes(*asset);
+        if (held < memoryBudget && load_shape3d_image(path, maxTextureSize, image, memoryBudget - held)) {
+            image.name = "Text texture";
+            const i32 index = static_cast<i32>(asset->images.size());
+            asset->images.push_back(std::move(image));
+            for (auto& material : asset->materials) {
+                material.baseColorTex.image = index;
+                material.baseColorTex.scale = {1, 1};
+            }
+        } else {
+            // Missing companion media must not make the whole text invisible.
+            asset->missingTextures.push_back(spec.texturePath);
+        }
+    }
     asset->bounds = geom->assetBounds;
     if (spec.separateGlyphs) {
         asset->textGlyphLayout = true;

@@ -86,6 +86,8 @@ class PreviewStabilityRegressionTest {
         fun coloredPixels(sample: String, minimum: Int): Int {
             val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
             var colored = 0
+            var cyan = 0
+            var magenta = 0
             try {
                 for (y in bounds.top.toInt().coerceAtLeast(0) until bounds.bottom.toInt().coerceAtMost(image.height) step 3)
                     for (x in bounds.left.toInt().coerceAtLeast(0) until bounds.right.toInt().coerceAtMost(image.width) step 3) {
@@ -93,13 +95,18 @@ class PreviewStabilityRegressionTest {
                         val hi = maxOf(Color.red(pixel), Color.green(pixel), Color.blue(pixel))
                         val lo = minOf(Color.red(pixel), Color.green(pixel), Color.blue(pixel))
                         if (hi - lo > 40 && hi > 100) ++colored
+                        val r = Color.red(pixel); val g = Color.green(pixel); val b = Color.blue(pixel)
+                        if (g > 170 && b > 170 && r < 90) ++cyan
+                        if (r > 170 && b > 170 && g < 90) ++magenta
                     }
-                if (colored <= minimum) {
+                if (sample == "baseline" || colored <= minimum || cyan <= 1 || magenta <= 1) {
                     val captures = File(context.getExternalFilesDir(null), "stability-screenshots").apply { mkdirs() }
-                    File(captures, "preview-failure-$sample.png").outputStream().use {
+                    File(captures, "preview-$sample.png").outputStream().use {
                         image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
                     }
                 }
+                assertTrue("preview lost the fixture's cyan/magenta colors at $sample (cyan=$cyan magenta=$magenta); a flat green frame cannot pass",
+                    cyan > 1 && magenta > 1)
             } finally { image.recycle() }
             return colored
         }

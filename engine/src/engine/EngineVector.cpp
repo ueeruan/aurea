@@ -407,6 +407,7 @@ static_assert(Engine::kShapeParamCount == shape::kParamTotal, "parâmetros da fo
 
 u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || !out || capacity < kShapeParamFloats) return 0;
@@ -432,6 +433,7 @@ u32 Engine::query_shape_params(u64 layerId, f32* out, u32 capacity) noexcept {
 
 bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;
@@ -448,9 +450,15 @@ bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing)
         else (void)tr->set(local, value, Interpolation::Bezier);
     } else {
         *r = value;
-        // Tamanho parado muda em volta do centro (a âncora acompanha a metade).
-        if (param == 5) l->transform.anchor.x = value * 0.5f;
-        if (param == 6) l->transform.anchor.y = value * 0.5f;
+        // Once tracked, the source stays centered even after the last key is
+        // removed. Updating its authored anchor would move custom anchor keys.
+        bool centered = false;
+        for (u32 p = 1; p <= shape::kParamHeight; ++p)
+            centered |= l->tracks.find(TrackProperty::ShapeParam, 0, p) != nullptr;
+        if (!centered) {
+            if (param == 5) l->transform.anchor.x = value * 0.5f;
+            if (param == 6) l->transform.anchor.y = value * 0.5f;
+        }
     }
     project_->mark_dirty();
     request_render();
@@ -459,6 +467,7 @@ bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing)
 
 bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;
@@ -480,6 +489,7 @@ bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
 
 bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = sdf_shape_layer(comp, layerId);
     if (!l || param == 0 || param >= kShapeParamCount) return false;
@@ -491,7 +501,9 @@ bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
     Track& tr = l->tracks.get_or_create(TrackProperty::ShapeParam, 0, param);
     const u32 k = tr.find_exact(local);
     if (k != kInvalidIndex) {
-        if (tr.keys.size() == 1) *r = clamp_shape_param(param, tr.keys[0].value);
+        if (tr.keys.size() == 1) {
+            *r = clamp_shape_param(param, tr.sample(local));
+        }
         (void)tr.remove(local);
     } else {
         (void)tr.set(local, tr.keys.empty() ? shape_param_static(l->shape, param, r) : tr.sample(local), Interpolation::Bezier);

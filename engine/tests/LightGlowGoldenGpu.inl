@@ -270,3 +270,86 @@ AUREA_TEST(LightGlowGoldenGpu, MissingAlgorithmSlotMeansLegacy) {
         AUREA_CHECK_NEAR(evaluate_param_f(tracks, fx, a, specs->at(a), 0.0, nullptr).v[0], 0.0f, 1e-6f);
     }
 }
+
+// Relato do beta 0.0.5 ("a opção de brilho do texto 3D sumiu"): a instância
+// SALVA (algoritmo 0) continua no desenho de antes, então o card dela mostra
+// os controles desse desenho (núcleo, halo, estouro...) e esconde os que só o
+// algoritmo novo lê. A instância nova mostra o contrário. As duas plataformas
+// leem a visibilidade daqui (flag oculta da linha de parâmetro).
+AUREA_TEST(LightGlowGoldenGpu, LegacyInstanceCardShowsItsOwnControls) {
+    AUREA_REQUIRE_GPU();
+    using namespace light_golden;
+    struct Expect { const char* key; u32 savedCount; const char* legacyOnly; const char* newOnly; };
+    for (const Expect& x : {Expect{effect_keys::kDeepGlow, kDeepGlowSavedCount, "core_intensity", "glow_intensity"},
+                            Expect{effect_keys::kGlow, kGlowSavedCount, nullptr, "softness"}}) {
+        if (!has_new_algorithm(x.key)) continue;
+        Scene3DRig rig(160, 90);
+        scene3d::Text3DSpec spec;
+        spec.content = "GLOW";
+        const auto id = rig.e.add_text3d(spec);
+        AUREA_CHECK(id.ok()); if (!id.ok()) continue;
+        // Uma instância nova e uma "salva" (cortada na contagem de antes e
+        // completada como o load completa: slot do algoritmo = 0).
+        Case fresh{x.key, "card", x.savedCount, {}};
+        // O id do primeiro sai antes do segundo EffectAdd (o vetor pode realocar).
+        EffectInstance* a = add_fx(rig, *id, fresh);
+        AUREA_CHECK(a != nullptr); if (!a) continue;
+        const u32 newId = a->id;
+        EffectInstance* b = add_fx(rig, *id, fresh);
+        AUREA_CHECK(b != nullptr); if (!b) continue;
+        const ParameterRegistry* specs = rig.e.effects().params(effect_type_id(x.key));
+        AUREA_CHECK(specs != nullptr); if (!specs) continue;
+        const u32 alg = specs->find("algorithm");
+        b->params.resize(x.savedCount);
+        { EffectInstance d; initialize_instance(d, *specs);
+          for (usize k = b->params.size(); k < d.params.size(); ++k) {
+              ParamSlot s = d.params[k];
+              if (k == alg) s.constant = ParamValue::scalar(0.0f);
+              b->params.push_back(s);
+          } }
+        const u32 oldId = b->id;
+        auto hidden = [&](u32 effectId, const char* param) -> int {
+            bridge::EffectParamRow rows[48]{};
+            char blob[8192]{};
+            const u32 n = rig.e.query_effect_params(*id, effectId, rows, 48, blob, sizeof(blob));
+            const u32 p = specs->find(param);
+            for (u32 r = 0; r < n; ++r) if (rows[r].index == p) return (rows[r].flags & kParamHidden) ? 1 : 0;
+            return -1;   // ausente
+        };
+        std::printf("    %s: novo(alg=%d) / salvo(alg=%d)\n", x.key, hidden(newId, "algorithm"), hidden(oldId, "algorithm"));
+        AUREA_CHECK_EQ(hidden(newId, "algorithm"), 1);
+        AUREA_CHECK_EQ(hidden(oldId, "algorithm"), 1);
+        AUREA_CHECK_EQ(hidden(newId, x.newOnly), 0);
+        AUREA_CHECK_EQ(hidden(oldId, x.newOnly), 1);
+        AUREA_CHECK_EQ(hidden(newId, "threshold"), 0);
+        AUREA_CHECK_EQ(hidden(oldId, "threshold"), 0);
+        if (x.legacyOnly) {
+            AUREA_CHECK_EQ(hidden(newId, x.legacyOnly), 1);
+            AUREA_CHECK_EQ(hidden(oldId, x.legacyOnly), 0);
+        }
+    }
+}
+
+// Brilho profundo (o "glow" que o menu oferece desde que o Deep Glow 2 saiu
+// dele) no texto 3D extrudado: o halo sai em volta das letras.
+AUREA_TEST(LightGlowGoldenGpu, DeepGlowOnText3DLightsAroundTheGlyphs) {
+    AUREA_REQUIRE_GPU();
+    using namespace light_golden;
+    Scene3DRig rig(640, 360);
+    scene3d::Text3DSpec spec;
+    spec.content = "GLOW";
+    const auto id = rig.e.add_text3d(spec);
+    AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    const Image8 original = rig.capture(640);
+    Case deep{effect_keys::kDeepGlow, "deep", kDeepGlowSavedCount, {{"threshold", ParamValue::scalar(20)}}};
+    AUREA_CHECK(add_fx(rig, *id, deep) != nullptr);
+    const Image8 glow = rig.capture(640);
+    u32 halo = 0;
+    for (u32 y = 0; y < glow.height; ++y)
+        for (u32 x = 0; x < glow.width; ++x) {
+            const u8* p = glow.at(x, y); const u8* b = original.at(x, y);
+            halo += std::max({p[0], p[1], p[2]}) > 8 && std::max({b[0], b[1], b[2]}) < 2;
+        }
+    std::printf("    brilho profundo no texto 3D: pixels de halo fora das letras=%u, diferença máx=%u\n", halo, max_diff(original, glow));
+    AUREA_CHECK(halo > 200u);
+}

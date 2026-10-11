@@ -16,6 +16,7 @@
 
 #include "aurea/core/Types.hpp"
 #include "aurea/platform/DevicePolicy.hpp"
+#include "aurea/platform/AddressSpace.hpp"
 
 #include <string>
 
@@ -341,8 +342,9 @@ public:
     [[nodiscard]] u64 memory_budget_bytes() const noexcept;
     /// 32-bit processes cannot use all the physical RAM reported by Android.
     /// Leave address space for the VM/UI, codecs, drivers and fragmentation.
-    [[nodiscard]] static constexpr u64 process_budget_limit(u64 budget, u32 addressBits = sizeof(void*) * 8) noexcept {
-        return addressBits <= 32 && budget > (256ull << 20) ? (256ull << 20) : budget;
+    /// A regra mora em AddressSpace.hpp (política central de 32 bits).
+    [[nodiscard]] static constexpr u64 process_budget_limit(u64 budget, u32 addressBits = kPointerBits) noexcept {
+        return address_space::process_budget(budget, addressBits);
     }
 
     /// Soma de tudo que foi detectado, para o painel de telemetria.

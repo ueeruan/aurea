@@ -80,13 +80,14 @@ internal object PodLayout {
     // =========================================================================
     // KeyframeRow
     // =========================================================================
-    const val KEYFRAME_ROW_BYTES = 24
+    const val KEYFRAME_ROW_BYTES = 28
     const val KF_OFF_PROPERTY = 0         // u32
     const val KF_OFF_EFFECT_INDEX = 4     // u32
     const val KF_OFF_TIME = 8             // i32
     const val KF_OFF_VALUE = 12           // f32
     const val KF_OFF_INTERPOLATION = 16   // u32
     const val KF_OFF_PARAM_INDEX = 20     // u32 (param*4 + componente, efeito)
+    const val KF_OFF_TIMELINE_FLAGS = 24  // bit 0: outside the current clip
 
     // =========================================================================
     // EngineStatusPOD — 256 bytes, quatro linhas de cache.
@@ -282,6 +283,7 @@ data class KeyframeRow(
     val value: Float,
     val interpolation: Int,
     val paramIndex: Int,
+    val timelineVisible: Boolean = true,
 ) {
     companion object {
         internal fun read(buffer: ByteBuffer, index: Int): KeyframeRow {
@@ -293,6 +295,7 @@ data class KeyframeRow(
                 value = buffer.getFloat(b + PodLayout.KF_OFF_VALUE),
                 interpolation = buffer.getInt(b + PodLayout.KF_OFF_INTERPOLATION),
                 paramIndex = buffer.getInt(b + PodLayout.KF_OFF_PARAM_INDEX),
+                timelineVisible = buffer.getInt(b + PodLayout.KF_OFF_TIMELINE_FLAGS) and 1 == 0,
             )
         }
     }
@@ -542,7 +545,9 @@ data class EffectCatalogEntry(
     val paramCount: Int,
     val name: String,
     val category: String,
+    val flags: Int = 0,
 ) {
+    val isNew get() = flags and 1 != 0
     companion object {
         const val ROW_BYTES = 32
 
@@ -554,6 +559,7 @@ data class EffectCatalogEntry(
                 paramCount = rows.getInt(b + 8),
                 name = blob.utf8(rows.getInt(b + 12), rows.getInt(b + 16)),
                 category = blob.utf8(rows.getInt(b + 20), rows.getInt(b + 24)),
+                flags = rows.getInt(b + 28),
             )
         }
     }
@@ -863,6 +869,7 @@ object TrackProperty {
     const val FOCUS_DISTANCE = 17
     const val APERTURE = 18
     const val TIME_REMAP = 30
+    const val TEXT_TRACKING = 29
     const val EFFECT_PARAM = 31
     const val AUDIO_VOLUME = 32
     const val TEXT_ANIM_PARAM = 33

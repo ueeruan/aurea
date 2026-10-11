@@ -365,18 +365,8 @@ private fun Options(
             onChange(options.copy(trimToContent = it == contentRange))
         }
 
-        Label(stringResource(R.string.ai_upscale_title))
-        val off = stringResource(R.string.common_off)
-        Chips(listOf(off, "2×", "4×"), if (options.aiUpscale == 0) off else "${options.aiUpscale}×") { label ->
-            val factor = when (label) { "2×" -> 2; "4×" -> 4; else -> 0 }
-            onChange(options.copy(aiUpscale = factor, shortSide = if (factor > 0) short * factor else min(1080, max(720, short))))
-        }
-        if (options.aiUpscale > 0) {
-            Text(stringResource(R.string.ai_upscale_note), style = muted, modifier = Modifier.padding(top = 8.dp))
-            val factor = options.aiUpscale
-            Text(stringResource(R.string.ai_upscale_dimensions, factor, ((w + factor * 2 - 1) / (factor * 2)) * 2,
-                ((h + factor * 2 - 1) / (factor * 2)) * 2, w, h), style = muted, modifier = Modifier.padding(top = 6.dp))
-        }
+        // Upscale com IA saiu daqui: é a ferramenta própria da Home
+        // (upscale/UpscaleScreen.kt), onde a pessoa escolhe o vídeo e o fator.
 
         Spacer(Modifier.height(12.dp))
         SummaryRow(stringResource(R.string.editor_video), listOf("$w × $h", "${fmt(fps)} fps", codecName).joinToString(" · ") { ltrPlain(it) })
@@ -755,6 +745,12 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
     val st = exporter.state
     val context = LocalContext.current
     val noViewer = stringResource(R.string.editor_nenhum_app_abre_video)
+    val startExport = { exporter.start(store.project.title, compW, compH, compFps, options) }
+    // Android 8–9: a galeria só vê o que está na pasta PÚBLICA (Filmes/Aurea),
+    // e lá só se escreve com WRITE_EXTERNAL_STORAGE. Negada, o export segue e
+    // fica na pasta do app (a mensagem final diz onde).
+    val legacyStorage = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { _ -> startExport() }
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
         when (st.phase) {
             ExportPhase.Running -> WideButton(stringResource(R.string.editor_cancelar), filled = false) { exporter.cancel() }
@@ -771,7 +767,11 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
                 }
             }
             else -> WideButton(stringResource(R.string.editor_exportar), filled = true, tall = true) {
-                exporter.start(store.project.title, compW, compH, compFps, options)
+                if (com.aurea.aurea.state.GalleryPublish.needsLegacyWritePermission(context)) {
+                    legacyStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                } else {
+                    startExport()
+                }
             }
         }
     }

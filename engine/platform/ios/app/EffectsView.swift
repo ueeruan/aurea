@@ -14,13 +14,16 @@ struct EffectsView: View {
     var embedded = false
     @EnvironmentObject private var model: AureaModel
     @StateObject private var prefs = FxEffectPrefs()
+    @ObservedObject private var puppet = PuppetStageState.shared
     @State private var maskCount = 0
     @State private var hasMatte = false
     @State private var captionCount = 0
     @State private var cameraTracked = false
     @State private var about: EffectCatalogItem?
     @State private var pendingPick: UInt32?
-    @State private var importingAM = false
+    /// Arquivo do Alight Motion escolhido (DocumentImportPicker; o `.fileImporter`
+    /// daqui ficava sob o da raiz do editor e não abria).
+    @State private var amPick: URL?
     @State private var importTask: Task<Void, Never>?
     @State private var creatorMode = -1
     @State private var openId: UInt32?
@@ -101,6 +104,12 @@ struct EffectsView: View {
         .onAppear { refreshTools(); enterLayer(); model.refreshSelectedLayer(); refreshExpressions() }
         .onChange(of: model.primarySelection) { _ in refreshTools(); enterLayer() }
         .onChange(of: selected) { _ in updateTimelineFocus() }
+        .onChange(of: openId) { _ in updateTimelineFocus() }
+        .onChange(of: puppet.layer) { _ in updateTimelineFocus() }
+        .onChange(of: puppet.effect) { _ in updateTimelineFocus() }
+        .onChange(of: puppet.editing) { _ in updateTimelineFocus() }
+        .onChange(of: puppet.selected) { _ in updateTimelineFocus() }
+        .onChange(of: puppet.revision) { _ in updateTimelineFocus() }
         .onAppear { updateTimelineFocus() }
         .onDisappear { model.timelineFocus = nil }
         .onChange(of: model.effects.map(\.effectId)) { ids in
@@ -123,28 +132,31 @@ struct EffectsView: View {
             pendingPick = nil
         }
         .sheet(item: $about) { entry in EffectAboutSheet(prefs: prefs, entry: entry).environmentObject(model) }
-        .onChange(of: model.status.modelRevision) { _ in refreshExpressions(); refreshTools() }
+        .onChange(of: model.status.modelRevision) { _ in refreshExpressions(); refreshTools(); updateTimelineFocus() }
         .onChange(of: model.status.playhead) { _ in refreshExpressions() }
         // Alight Motion: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
-        .fileImporter(isPresented: $importingAM, allowedContentTypes: [.data, .xml, .zip]) { result in
-            guard case .success(let url) = result else { return }
+        .onChange(of: amPick) { picked in
+            guard let url = picked else { return }
+            amPick = nil
             let target = model.primarySelection
             importTask?.cancel()
             importTask = Task {
                 let data = await Task.detached(priority: .userInitiated) { () -> Data? in
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    guard let stream = InputStream(url: url) else { return nil }
-                    stream.open()
-                    defer { stream.close() }
-                    var result = Data()
-                    var buffer = [UInt8](repeating: 0, count: 8192)
-                    while true {
-                        let count = stream.read(&buffer, maxLength: buffer.count)
-                        if count < 0 { return nil }
-                        if count == 0 { return result }
-                        guard count <= 64 * 1024 * 1024 - result.count else { return nil }
-                        result.append(contentsOf: buffer.prefix(count))
+                    return try? AureaPaths.readImport(url) { readable -> Data? in
+                        guard let stream = InputStream(url: readable) else { return nil }
+                        stream.open()
+                        defer { stream.close() }
+                        var result = Data()
+                        var buffer = [UInt8](repeating: 0, count: 8192)
+                        while true {
+                            let count = stream.read(&buffer, maxLength: buffer.count)
+                            if count < 0 { return nil }
+                            if count == 0 { return result }
+                            guard count <= 64 * 1024 * 1024 - result.count else { return nil }
+                            result.append(contentsOf: buffer.prefix(count))
+                        }
                     }
                 }.value
                 guard !Task.isCancelled else { return }
@@ -207,7 +219,10 @@ struct EffectsView: View {
         guard let layer = model.primarySelection else { return }
         openId = id; model.loadParams(layerId: layer, effectId: id)
         if selected?.effect != id {
-            selected = parameterGroups(id).main.first(where: { fxComponentCount(Int($0.type)) > 0 }).map { EffectParamSelection(effect: id, param: $0.index, component: 0) }
+            let groups = parameterGroups(id)
+            let first = (groups.main + groups.rest).first(where: { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 })
+                ?? groups.main.first(where: { fxComponentCount(Int($0.type)) > 0 })
+            selected = first.map { EffectParamSelection(effect: id, param: $0.index, component: 0) }
         }
         refreshExpressions()
     }
@@ -287,7 +302,8 @@ struct EffectsView: View {
                         if effect.typeId == fxEffectTypeId("aurea.distort.puppet") { PuppetCardTools(effectId: effect.effectId) }
                         if effect.typeId == fxEffectTypeId("aurea.key.rotobrush") {
                             PanelNotice(AureaText.t("roto_note"))
-                            RotoPaintCardTools(effectId: effect.effectId)
+                            RotoPaintCardTools(effectId: effect.effectId,
+                                previousView: UInt32(max(0, min(2, Int(model.effectParams.first { $0.index == 10 }?.scalar ?? 0)))))
                         }
                         let localAiBit: UInt32 = effect.typeId == fxEffectTypeId("aurea.ai.depth_map") ? 1 : effect.typeId == fxEffectTypeId("aurea.key.rotobrush") ? 2 : 0
                         if effect.enabled && localAiBit != 0 {
@@ -441,6 +457,8 @@ struct EffectsView: View {
             customRow(param, effect: effect) { choiceBox(param, effect: effect) }
         case fxParamColor:
             customRow(param, effect: effect) { colorControl(param, effect: effect) }
+        case fxParamCurve:
+            if let layer = model.primarySelection { ColorCurveEditor(layer: layer, effect: effect, param: param.index) }
         case fxParamTextureRef:
             if let layer = model.primarySelection { CubeLutImportRow(layer: layer, effect: effect) }
         case fxParamLayerRef:
@@ -630,7 +648,23 @@ struct EffectsView: View {
         model.endGesture(); model.commitPendingCommands(); model.refreshModel(force: true)
     }
     private func updateTimelineFocus() {
-        model.timelineFocus = selected.map { [TimelineTrack(property: 31, effect: $0.effect, param: $0.param * 4 + UInt32($0.component))] } ?? []
+        if let layer = model.primarySelection, let effect = openId, puppet.layer == layer,
+           puppet.effect >= 0, UInt32(puppet.effect) == effect,
+           model.effects.contains(where: { $0.effectId == effect && $0.typeId == PuppetStageState.type }),
+           puppet.editing || selected == nil {
+            let pins = model.puppetPins(layer, effect: puppet.effect)
+            let active = stride(from: 0, to: pins.count, by: 4).compactMap { index -> Int? in
+                guard index + 3 < pins.count, pins[index].isFinite, pins[index] >= 0, pins[index] <= 15 else { return nil }
+                let pin = Int(pins[index]); return Float(pin) == pins[index] ? pin : nil
+            }
+            let chosen = active.contains(puppet.selected) ? [puppet.selected] : active
+            model.timelineFocus = chosen.flatMap { pin in
+                let position = UInt32((5 + pin * 3) * 4)
+                return [TimelineTrack(property: 31, effect: effect, param: position), TimelineTrack(property: 31, effect: effect, param: position + 1)]
+            }
+        } else {
+            model.timelineFocus = selected.map { [TimelineTrack(property: 31, effect: $0.effect, param: $0.param * 4 + UInt32($0.component))] } ?? []
+        }
     }
 
     private func openCurve() {
@@ -768,7 +802,7 @@ struct EffectsView: View {
         // "Meus presets" saiu (pedido de 2026-10-01: ninguém usa); o motor
         // continua lendo os presets dos projetos antigos.
         var actions: [(String, () -> Void)] = [(AureaText.t("panel_adicionar_efeito"), { showAdd() })]
-        actions.append((AureaText.t("am_import_action"), { importingAM = true }))
+        actions.append((AureaText.t("am_import_action"), { DocumentImportPicker.present(types: [.data, .xml, .zip]) { urls in amPick = urls?.first } }))
         if !model.effects.isEmpty { actions.append((AureaText.t("panel_copiar_efeitos"), { if let layer = model.primarySelection { model.engine.copyEffects(layer) } })) }
         if model.engine.clipboardState & 4 != 0 {
             actions.append((AureaText.t("panel_colar_efeitos"), {
@@ -784,7 +818,7 @@ struct EffectsView: View {
                 model.endGesture()
             }))
         }
-        model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_efeitos_camada"), items: actions)
+        model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_efeitos_camada"), message: AureaText.t("am_import_hint"), items: actions)
     }
     private func effectMenu(_ effect: EffectItem) {
         var actions: [(String, () -> Void)] = []
@@ -906,7 +940,8 @@ private struct CubeLutImportRow: View {
     let layer: Int64
     let effect: UInt32
     @EnvironmentObject private var model: AureaModel
-    @State private var picking = false
+    /// O .cube escolhido (DocumentImportPicker: o `.fileImporter` aninhado não abria).
+    @State private var lutPick: URL?
     @State private var busy = false
     @State private var filename = ""
     var body: some View {
@@ -914,14 +949,17 @@ private struct CubeLutImportRow: View {
             if !filename.isEmpty {
                 Text(filename).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
             }
-            Button(AureaText.t(busy ? "lut_importing" : "lut_import")) { picking = true }
+            Button(AureaText.t(busy ? "lut_importing" : "lut_import")) {
+                DocumentImportPicker.present(types: [UTType(filenameExtension: "cube") ?? .data, .data]) { urls in lutPick = urls?.first }
+            }
                 .frame(maxWidth: .infinity, minHeight: 44).disabled(busy)
                 .accessibilityIdentifier("effect.lut.import")
         }
         .onAppear { filename = model.engine.colorLutName(layer, effect: effect) }
         .onChange(of: model.effects) { _ in filename = model.engine.colorLutName(layer, effect: effect) }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
+        .onChange(of: lutPick) { picked in
+            guard let url = picked else { return }
+            lutPick = nil
             guard url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t("lut_invalid"); return }
             busy = true
             let engine = model.engine
@@ -1155,5 +1193,114 @@ private struct EffectStackThumb: View {
             let loaded = await store.image(for: typeId)
             if !Task.isCancelled { image = loaded }
         }
+    }
+}
+
+
+@MainActor
+private struct ColorCurveEditor: View {
+    let layer: Int64
+    let effect: UInt32
+    let param: UInt32
+    @EnvironmentObject private var model: AureaModel
+    @State private var channel: UInt32 = 0
+    @State private var selected = 0
+    @State private var points: [Float] = []
+    @State private var samples: [Float] = []
+    @State private var gesturing = false
+    private var labels: [String] { ["RGB", AureaText.t("curve_color_red"), AureaText.t("curve_color_green"), AureaText.t("curve_color_blue")] }
+    private var tint: Color { [AureaColors.text, Color(red: 1, green: 0.45, blue: 0.45), Color(red: 0.41, green: 0.84, blue: 0.61), Color(red: 0.45, green: 0.72, blue: 1)][Int(channel)] }
+    private func reload() {
+        points = model.engine.effectCurve(layer, effect: effect, param: param, channel: channel, samples: false).map { $0.floatValue }
+        samples = model.engine.effectCurve(layer, effect: effect, param: param, channel: channel, samples: true).map { $0.floatValue }
+        selected = min(max(0, selected), max(0, points.count / 2 - 1))
+    }
+    private func begin() { if !gesturing { gesturing = true; model.beginGesture("curva de cor") } }
+    private func finish() { if gesturing { gesturing = false; model.endGesture(); reload() } }
+    private func edit(_ action: UInt32, x: Float = 0, y: Float = 0) {
+        let result = model.engine.editEffectCurve(layer, effect: effect, param: param, channel: channel, action: action, point: UInt32(selected), x: x, y: y)
+        if result >= 0 { selected = Int(result) }; reload()
+    }
+    private func axis(_ index: Int) -> some View {
+        let label = AureaText.t(index == 0 ? "curve_color_input" : "curve_color_output")
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(label + " \(Int((points[selected * 2 + index] * 255).rounded()))").font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+            Slider(value: Binding(get: { Double(points[selected * 2 + index]) }, set: { value in
+                begin(); edit(0, x: index == 0 ? Float(value) : points[selected * 2], y: index == 1 ? Float(value) : points[selected * 2 + 1])
+            }), in: 0...1, onEditingChanged: { active in if active { begin() } else { finish() } })
+                .disabled(index == 0 && (selected == 0 || selected + 1 == points.count / 2))
+                .accessibilityLabel(label).accessibilityIdentifier("fx.curve.axis.\(index)")
+        }
+    }
+    private var graph: some View {
+        GeometryReader { geo in
+            let pad: CGFloat = 18
+            let w = max(1, geo.size.width - 2 * pad); let h = max(1, geo.size.height - 2 * pad)
+            let at: (Float, Float) -> CGPoint = { x, y in CGPoint(x: pad + CGFloat(x) * w, y: pad + CGFloat(1 - y) * h) }
+            Canvas { context, _ in
+                var grid = Path()
+                for i in 0...4 { let v = Float(i) / 4; grid.move(to: at(v, 0)); grid.addLine(to: at(v, 1)); grid.move(to: at(0, v)); grid.addLine(to: at(1, v)) }
+                context.stroke(grid, with: .color(AureaColors.muted.opacity(0.18)), lineWidth: 1)
+                var diagonal = Path(); diagonal.move(to: at(0, 0)); diagonal.addLine(to: at(1, 1))
+                context.stroke(diagonal, with: .color(AureaColors.muted.opacity(0.35)), lineWidth: 1)
+                var path = Path()
+                for i in samples.indices { let p = at(Float(i) / Float(max(1, samples.count - 1)), samples[i]); if i == 0 { path.move(to: p) } else { path.addLine(to: p) } }
+                context.stroke(path, with: .color(tint), lineWidth: 2)
+                for i in 0..<points.count / 2 {
+                    let p = at(points[i * 2], points[i * 2 + 1]); let r: CGFloat = i == selected ? 7 : 5
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(i == selected ? AureaColors.accent : tint))
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)), with: .color(AureaColors.chip))
+                }
+            }.background(AureaColors.chip).contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    let x = Float((value.location.x - pad) / w); let y = Float(1 - (value.location.y - pad) / h)
+                    if !gesturing {
+                        begin()
+                        let hit = (0..<points.count / 2).min { a, b in
+                            let pa = at(points[a * 2], points[a * 2 + 1]); let pb = at(points[b * 2], points[b * 2 + 1])
+                            return hypot(pa.x - value.location.x, pa.y - value.location.y) < hypot(pb.x - value.location.x, pb.y - value.location.y)
+                        }
+                        if let hit, hypot(at(points[hit * 2], points[hit * 2 + 1]).x - value.location.x, at(points[hit * 2], points[hit * 2 + 1]).y - value.location.y) <= 24 { selected = hit }
+                        else { edit(1, x: x, y: y) }
+                    } else { edit(0, x: x, y: y) }
+                }.onEnded { _ in finish() })
+                .accessibilityLabel(AureaText.t("curve_color_graph")).accessibilityHint(AureaText.t("curve_color_hint"))
+                .accessibilityIdentifier("fx.curve.graph")
+        }.frame(height: 190)
+    }
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(0..<4, id: \.self) { i in
+                    Button { finish(); channel = UInt32(i); selected = 0; reload() } label: {
+                        Text(["RGB", "R", "G", "B"][i]).font(.aurea(size: 13)).frame(maxWidth: .infinity, minHeight: 44)
+                            .background(channel == UInt32(i) ? AureaColors.accent.opacity(0.18) : AureaColors.chip).clipShape(RoundedRectangle(cornerRadius: 8))
+                    }.buttonStyle(.plain).foregroundStyle(channel == UInt32(i) ? AureaColors.accent : AureaColors.text)
+                        .accessibilityLabel(labels[i]).accessibilityAddTraits(channel == UInt32(i) ? .isSelected : [])
+                        .accessibilityIdentifier("fx.curve.channel.\(i)")
+                }
+            }
+            graph
+            Text(AureaText.t("curve_color_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(0..<points.count / 2, id: \.self) { i in
+                        Button { finish(); selected = i } label: {
+                            Text("\(i + 1)").font(.aurea(size: 13)).frame(minWidth: 44, minHeight: 44)
+                                .background(selected == i ? AureaColors.accent.opacity(0.18) : AureaColors.chip).clipShape(RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain).foregroundStyle(AureaColors.text)
+                            .accessibilityLabel(AureaText.t("curve_color_point") + " \(i + 1)")
+                            .accessibilityAddTraits(selected == i ? .isSelected : []).accessibilityIdentifier("fx.curve.point.\(i)")
+                    }
+                }
+            }
+            if points.count >= 4 { axis(0); axis(1) }
+            HStack {
+                Button(AureaText.t("panel_redefinir")) { finish(); edit(3); model.refreshModel(force: true) }.frame(minHeight: 44).accessibilityIdentifier("fx.curve.reset")
+                Spacer()
+                Button(AureaText.t("common_delete")) { finish(); edit(2); model.refreshModel(force: true) }.frame(minHeight: 44)
+                    .disabled(selected == 0 || selected + 1 >= points.count / 2).accessibilityIdentifier("fx.curve.delete")
+            }.font(.aurea(size: 13)).tint(AureaColors.accent)
+        }.onAppear { reload() }.onChange(of: model.status.modelRevision) { _ in if !gesturing { reload() } }.onDisappear { finish() }
     }
 }

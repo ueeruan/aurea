@@ -97,6 +97,25 @@ public:
     void clear() noexcept;
     [[nodiscard]] Stats stats() const noexcept;
 
+    /// Retire optional CPU prefetch only when this cache owns its last reference.
+    /// Required temporal samples, external leases and one display entry stay.
+    /// Returns bytes after backing-frame destruction, before callers admit GPU
+    /// resources; it never creates credit for storage still held by a snapshot.
+    /// Providers must explicitly own CPU backing; native and reader-pool views
+    /// remain because their storage can outlive the DecodedFrame owner.
+    [[nodiscard]] usize reclaim_unused() noexcept;
+
+    struct ExclusivePruneResult {
+        usize freed = 0;
+        u32 versionBefore = 0;
+        u32 versionAfter = 0;
+        bool retainedTarget = false;
+    };
+    /// Atomic cache transition for a settled source's pressure pruning. The
+    /// current presentation interval must exist and remains protected even
+    /// when no snapshot lease or required-times registration is present.
+    [[nodiscard]] ExclusivePruneResult reclaim_unused_for(i64 targetUs, i64 halfFrameUs) noexcept;
+
     // IMemoryReclaimable
     [[nodiscard]] MemoryClass memory_class() const noexcept override { return MemoryClass::DecodedFrames; }
     [[nodiscard]] usize reclaim(usize targetBytes) noexcept override;
@@ -106,6 +125,8 @@ public:
 
 private:
     void evict_locked() noexcept;
+    [[nodiscard]] bool contains_locked(i64 targetUs, i64 halfFrameUs) const noexcept;
+    [[nodiscard]] ExclusivePruneResult reclaim_unused_locked(bool preserveTarget, i64 targetUs, i64 halfFrameUs) noexcept;
     /// Tira o frame `i` e desconta os bytes (cache e orçamento).
     void erase_locked(usize i) noexcept;
     [[nodiscard]] usize worst_locked() const noexcept;

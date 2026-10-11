@@ -11,7 +11,7 @@ import SwiftUI
 @main
 struct AureaApp: App {
     @StateObject private var model = AureaModel()
-    /// A conta obrigatória (Conta.swift): sem ela a UI inteira é a ContaView.
+    /// A conta opcional, compartilhada com a Home.
     @StateObject private var conta = ContaModel()
     @Environment(\.scenePhase) private var scenePhase
 

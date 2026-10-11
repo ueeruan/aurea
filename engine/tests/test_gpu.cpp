@@ -20,6 +20,8 @@
 
 #include "ImageIO.hpp"
 #include "SyntheticVideo.hpp"
+#include "RgbaVideoFixture.hpp"
+#include "P010VideoFixture.hpp"
 #include "ModelTextureFixtures.hpp"
 #if defined(AUREA_TEST_GLES)
 #include "GlesBackend.hpp"
@@ -1348,6 +1350,54 @@ AUREA_TEST(MemoryPressureGpu, IncrementalCompositionPreservesEveryBlendedMotionB
     }
 }
 
+AUREA_TEST(MotionBlurGpu, CroppedAccumulatorMatchesEveryFullFramePixel) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(320,180);
+    scene.comp->set_background(Color{.08f,.12f,.2f,.7f});
+    scene.comp->motion_blur().enabled = true;
+    scene.comp->motion_blur().samples = scene.comp->motion_blur().adaptiveLimit = 64;
+    const auto id = scene.image(reference_image(40,30),75,70);
+    auto* layer = scene.comp->layer(id);
+    layer->motionBlur = true; layer->transform.opacity = .45f;
+    layer->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{0},10.25f);
+    layer->tracks.get_or_create(TrackProperty::PositionX).set(FrameIndex{60},120.75f);
+    layer->tracks.get_or_create(TrackProperty::RotationZ).set(FrameIndex{0},-60);
+    layer->tracks.get_or_create(TrackProperty::RotationZ).set(FrameIndex{60},60);
+    scene.add_effect(id,effect_keys::kGaussianBlur).params[0].constant.v[0] = 3;
+    scene.add_effect(id,effect_keys::kTransform).params[3].constant.v[0] = 23;
+    // The static translucent layer behind the trail exposes incorrect crop
+    // placement, opaque clears, repeated opacity and nontransparent padding.
+    scene.solid(32,24,Vec4{.9f,.3f,.1f,.4f},75,70);
+    const auto textId = scene.comp->add_layer(LayerKind::Text,"animated glyph exposure");
+    auto* textLayer = scene.comp->layer(textId);
+    textLayer->text.content = "BLUR"; textLayer->text.size = 24;
+    textLayer->transform.position = Vec3{230,110,0}; textLayer->motionBlur = true;
+    TextAnimator animator; animator.props = kTextPropPosition;
+    textLayer->text.animators.push_back(animator);
+    textLayer->tracks.get_or_create(TrackProperty::TextAnimParam,0,text::kPosX).set(FrameIndex{0},-10);
+    textLayer->tracks.get_or_create(TrackProperty::TextAnimParam,0,text::kPosX).set(FrameIndex{60},10);
+    for (u32 den : {1u,2u}) for (FrameIndex time : {FrameIndex{0},FrameIndex{30},FrameIndex{60}}) {
+        auto& r = gpu().renderer;
+        r.set_motion_blur_crop_enabled(false);
+        const auto full = scene.render(time,den,true);
+        const auto fullBytes = r.graph_stats().transientBytes;
+        AUREA_CHECK(!r.take_incomplete());
+        r.set_motion_blur_crop_enabled(true);
+        const auto cropped = scene.render(time,den,true);
+        AUREA_CHECK(!r.take_incomplete());
+        AUREA_CHECK(r.graph_stats().transientBytes < fullBytes);
+        AUREA_CHECK_EQ(full.px.size(),cropped.px.size());
+        f32 difference = 0;
+        for (usize i = 0; i < full.px.size(); ++i)
+            difference = std::max(difference,std::fabs(full.px[i]-cropped.px[i]));
+        std::printf("    crop den%u frame%lld: max RGBA error %.6f\n",den,
+            static_cast<long long>(time.value),difference);
+        AUREA_CHECK(difference <= .001f);
+    }
+}
+
+#include "BoundedSceneExposureGpu.inl"
+
 AUREA_TEST(Gpu, SteadyPlaybackCreatesNoTexturesAndMeasuresGpu) {
     AUREA_REQUIRE_GPU();
     Scene s(256, 144);
@@ -1622,6 +1672,24 @@ AUREA_TEST(Gpu, Scene3DFrontFaceIsVisibleAndBackFaceIsCulled) {
         // Face de trás, material de um lado só: nada desenhado.
         AUREA_CHECK_NEAR(coverage(rig.capture(256)), 0.0f, 1e-6f);
     }
+}
+
+AUREA_TEST(OptimizationGpu, UnlitModelsSkipBlackBloomAndKeepPixels) {
+    AUREA_REQUIRE_GPU();
+    Scene3DRig rig(320, 180);
+    ModelImport import; import.path = write_triangle_gltf(true, .7f, .3f, .1f);
+    AUREA_CHECK(rig.e.import_model(import).ok());
+    AUREA_CHECK(rig.e.set_scene3d_bloom(true, .6f, 1.25f));
+    const auto on = rig.capture(320);
+    const auto onPasses = rig.e.renderer().graph_stats().passesExecuted;
+    AUREA_CHECK(rig.e.set_scene3d_bloom(false, .6f, 1.25f));
+    const auto off = rig.capture(320);
+    const auto offPasses = rig.e.renderer().graph_stats().passesExecuted;
+    AUREA_CHECK_EQ(on.rgba.size(), off.rgba.size());
+    AUREA_CHECK(on.rgba == off.rgba);
+    AUREA_CHECK_EQ(onPasses, offPasses);
+    AUREA_CHECK(onPasses <= 6);
+    std::printf("\n    unlit 3D: bloom on/off %u/%u passes, pixel-identical\n", onPasses, offPasses);
 }
 
 AUREA_TEST(Gpu, Scene3DPickedTexturesChangeTheRender) {
@@ -4060,6 +4128,8 @@ AUREA_TEST(Gpu, RepeatedProjectResizeKeepsVideoInsideExport) {
     AUREA_CHECK(std::abs(static_cast<int>(rig.cap.y[3][4 * 64 + 4]) - 63) <= 2);
     AUREA_CHECK(std::abs(static_cast<int>(rig.cap.y[3][30 * 64 + 60]) - 235) <= 2);
 }
+
+#include "NormalCompositeGpu.inl"
 
 AUREA_TEST(Gpu, ExportWritesBt709LimitedNv12WithExactTimestamps) {
     Gpu& g = gpu();
@@ -8424,6 +8494,38 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
 }
 
 // A foto do app como base das prévias: o efeito é mostrado sobre ela.
+AUREA_TEST(Gpu, EffectPreviewComparisonPreservesTheOriginalHalf) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    constexpr u32 w = 160, h = 100;
+    std::vector<u8> photo(w * h * 4);
+    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+        u8* p = &photo[(y * w + x) * 4];
+        p[0] = 180; p[1] = 60; p[2] = 20; p[3] = 255;
+    }
+    g.renderer.set_effect_preview_source(photo, w, h);
+    std::vector<u8> raw, comparison;
+    const auto id = effect_type_id(effect_keys::kSaturation);
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, id, w, h, raw).ok());
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, id, w, h, comparison, true).ok());
+    AUREA_CHECK_EQ(comparison.size(), photo.size());
+    usize originalErrors = 0, effectErrors = 0, changed = 0, transparent = 0;
+    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+        const usize i = (y * w + x) * 4;
+        if (comparison[i + 3] != 255) ++transparent;
+        for (u32 c = 0; c < 3; ++c) {
+            if (x < w / 2 - 2 && std::abs(int(comparison[i+c]) - int(photo[i+c])) > 1) ++originalErrors;
+            if (x > w / 2 + 2 && std::abs(int(comparison[i+c]) - int(raw[i+c])) > 1) ++effectErrors;
+            if (x > w / 2 + 2 && std::abs(int(comparison[i+c]) - int(photo[i+c])) > 10) ++changed;
+        }
+    }
+    AUREA_CHECK_EQ(originalErrors, 0u);
+    AUREA_CHECK_EQ(effectErrors, 0u);
+    AUREA_CHECK_EQ(transparent, 0u);
+    AUREA_CHECK(changed > 1000);
+    g.renderer.set_effect_preview_source({}, 0, 0);
+}
+
 AUREA_TEST(Gpu, EffectPreviewUsesThePhotoWhenGiven) {
     AUREA_REQUIRE_GPU();
     Gpu& g = gpu();
@@ -12369,7 +12471,8 @@ AUREA_TEST(Gpu, NewToolsGridVisibleAndMorphChangesFrame) {
 }
 AUREA_TEST(Gpu, NewToolsPsdGroupsAndMasksSurviveRenderingAndReload) {
     AUREA_REQUIRE_GPU(); Scene3DRig rig(8,4,true);
-    auto r=rig.e.import_psd("engine/tests/fixtures/psd/groups-mask-8-2.psd","PSD");
+    const std::string fixture = std::string(AUREA_TEST_DATA_DIR) + "/../fixtures/psd/groups-mask-8-2.psd";
+    auto r=rig.e.import_psd(fixture.c_str(),"PSD");
     AUREA_CHECK(r.ok());if(!r.ok())return;
     seek_frame(rig.e,0);const auto before=rig.capture(8);
     AUREA_CHECK(before.at(1,1)[0]>90);AUREA_CHECK(before.at(1,1)[1]<8);
@@ -13183,6 +13286,8 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "FlowCacheSourceGpu.inl"
 #include "Heavy3DMotionGpu.inl"
 #include "ExternalImportsGpu.inl"
+#include "RgbaVideoGpu.inl"
+#include "P010VideoGpu.inl"
 
 #include "BoundedCommandsGpu.inl"
 #include "ParticleCameraGpu.inl"
@@ -13198,6 +13303,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "MaskBlendGpu.inl"
 #include "PuppetGpu.inl"
 #include "DisintegrateBallsGpu.inl"
+#include "GlesFallbackGpu.inl"
 
 // -----------------------------------------------------------------------------
 // Build 2140: modelos com textura entravam CINZA em aparelho real. O espaço do
@@ -13321,4 +13427,13 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 }
 
 #include "V2140RegressionScenarios.inl"
+#include "MaterialOverrideGpu.inl"
+#include "SceneTargetGpu.inl"
 #include "LightRays3DGpu.inl"
+#include "BetaEffects1007Gpu.inl"
+#include "ProceduralWipesGpu.inl"
+#include "CellAndStarGpu.inl"
+#include "DitherGlitchDisplaceGpu.inl"
+#include "MinimaxGpu.inl"
+
+#include "RaysFootprintGpu.inl"

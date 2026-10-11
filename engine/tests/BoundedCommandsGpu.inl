@@ -239,6 +239,7 @@ AUREA_TEST(BoundedCommandsGpu, RecordingFailuresAbortWithoutPublishingOrReleasin
         AUREA_CHECK_EQ(b.last_submitted_frame(), prior.frameNumber);
         AUREA_CHECK_EQ(dispatch.submitCalls, fault == Fault::Submit ? 1u : 0u);
         AUREA_CHECK(!b.is_device_lost());
+        AUREA_CHECK(b.requires_reinitialization());
         AUREA_CHECK(b.end_frame().code() == status.code());
         FrameBegin retry; AUREA_CHECK(b.begin_offscreen_frame(retry).code() == status.code());
         AUREA_CHECK(retry.commands == nullptr);
@@ -253,6 +254,7 @@ AUREA_TEST(BoundedCommandsGpu, RecordingFailuresAbortWithoutPublishingOrReleasin
         AUREA_CHECK(b.upload_texture(target, pixels.data(), 16 * 8).code() == status.code());
         AUREA_CHECK(!priorReleased); AUREA_CHECK(!abortedReleased);
         observation.release();
+        AUREA_CHECK(b.prepare_reinitialization(2'000'000'000ull).ok());
         b.wait_idle();
         AUREA_CHECK(priorReleased); AUREA_CHECK(abortedReleased);
         AUREA_CHECK_EQ(vk::Backend::validation_errors() - errors, 0u);

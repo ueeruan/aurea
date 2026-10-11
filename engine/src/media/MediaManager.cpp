@@ -181,6 +181,7 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
                     e.source = std::make_unique<VideoSource>(std::move(backend), MediaPriority::Preview);
                     e.source->cache().attach(memory_);
                     e.source->set_ready_callback(readyFn_, readyCtx_);
+                    e.source->set_work_counter(&decodeWork_);
                     e.source->start();
                     if (suspended_) e.source->suspend();
                 }
@@ -189,6 +190,30 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
         }
     }
     if (!factory_) return nullptr;
+
+    // 32 bits (APK armeabi-v7a): cada corte cria uma layer e um decoder novo
+    // (MediaCodec + AImageReader + extractor + cache). Acima do teto, a fonte
+    // há mais tempo sem uso — e ociosa há kSourceEvictIdleFrames, para layers
+    // que aparecem juntas não trocarem de decoder a cada quadro — cede o
+    // lugar; o open novo espera o fechamento dela (logo abaixo), como sempre.
+    // Ponteiro devolvido neste quadro tem lastUsedFrame == frameNumber: nunca
+    // é a vítima. Capturas exatas em curso seguram tudo. 64 bits: sem teto.
+    if (const u32 cap = address_space::max_video_sources(pointerBits_); cap && originalSourceLeases_ == 0) {
+        u32 live = 0;
+        usize victim = entries_.size();
+        for (usize i = 0; i < entries_.size(); ++i) {
+            const Entry& c = entries_[i];
+            if (c.failed) continue;
+            ++live;
+            if (frameNumber <= c.lastUsedFrame + address_space::kSourceEvictIdleFrames) continue;
+            if (victim == entries_.size() || c.lastUsedFrame < entries_[victim].lastUsedFrame) victim = i;
+        }
+        if (live >= cap && victim != entries_.size()) {
+            retire_locked(std::move(entries_[victim]));
+            if (victim + 1 != entries_.size()) entries_[victim] = std::move(entries_.back());
+            entries_.pop_back();
+        }
+    }
 
     {
         std::lock_guard<std::mutex> closing(retireMutex_);
@@ -221,9 +246,23 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     return nullptr;
 }
 
+void MediaManager::set_pointer_bits(u32 bits) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pointerBits_ = bits ? bits : kPointerBits;
+}
+
+u32 MediaManager::live_sources() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    u32 n = 0;
+    for (const Entry& e : entries_) n += e.failed ? 0u : 1u;
+    return n;
+}
+
 void MediaManager::collect(u64 frameNumber, u32 idleFrames) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        // 32 bits: o prazo da prévia (180) cai para 60; o do export (2) fica.
+        idleFrames = address_space::source_idle_frames(idleFrames, pointerBits_);
         for (usize i = 0; i < entries_.size();) {
             if (frameNumber > entries_[i].lastUsedFrame + idleFrames) {
                 retire_locked(std::move(entries_[i]));
@@ -234,6 +273,25 @@ void MediaManager::collect(u64 frameNumber, u32 idleFrames) {
             ++i;
         }
     }
+}
+
+usize MediaManager::reclaim_unused_frames() noexcept {
+    // Lock order matches source selection/statistics: manager, then cache.
+    // Cache accounting uses atomic MemoryManager counters, not its registry
+    // lock. No codec reset, source retirement or request changes occur here.
+    std::lock_guard<std::mutex> lock(mutex_);
+    usize freed = 0;
+    for (Entry& entry : entries_) if (entry.source) freed += entry.source->cache().reclaim_unused();
+    return freed;
+}
+
+usize MediaManager::reclaim_idle_prefetch_frames() noexcept {
+    // Keep sources alive while locking source -> cache, as selection does.
+    // Decode delivery releases both locks before its manager callback.
+    std::lock_guard<std::mutex> lock(mutex_);
+    usize freed = 0;
+    for (Entry& entry : entries_) if (entry.source) freed += entry.source->reclaim_idle_prefetch();
+    return freed;
 }
 
 void MediaManager::touch(LayerId layer, u64 frameNumber) {

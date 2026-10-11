@@ -15,6 +15,7 @@ struct ExportView: View {
     @State private var cancelled = false
     @State private var sharing = false
     @State private var viewing = false
+    @State private var savingToFiles = false
     @State private var advancedOpen = false
     /// Teclado do fps livre quando a tela está em tela cheia (fullScreenCover
     /// fica acima do overlay do ContentView).
@@ -77,6 +78,7 @@ struct ExportView: View {
         .preferredColorScheme(.dark).interactiveDismissDisabled(model.exporting)
         .overlay { if let request = fpsKeypad { NumericKeypadSheet(request: request) { fpsKeypad = nil }.id(request.id) } }
         .sheet(isPresented: $sharing) { if let url = model.exportedURL { ExportShareSheet(url: url) } }
+        .sheet(isPresented: $savingToFiles) { if let url = model.exportedURL { ExportFilesPicker(url: url) } }
         .sheet(isPresented: $viewing) {
             if let url = model.exportedURL {
                 // Vídeo no player; PNG, GIF e .zip na Visualização Rápida do sistema.
@@ -317,7 +319,7 @@ struct ExportView: View {
                         model.exportOptions.trimToContent = $0 == AureaText.t("export_range_content")
                     }
 
-                    upscaleOptions
+                    // Upscale com IA saiu daqui: é a ferramenta própria da Home (UpscaleView.swift).
                     exportSummary
                 }.padding(.horizontal, 14).padding(.bottom, 14)
             }
@@ -409,6 +411,12 @@ struct ExportView: View {
             Text(AureaText.t(Self.doneKey(model.exportedKind))).font(.aurea(size: 22, weight: .bold)).padding(.top, 10)
             Text(model.exportMessage ?? url.lastPathComponent).font(.aurea(size: 14)).foregroundStyle(AureaColors.muted)
                 .multilineTextAlignment(.center).padding(.top, 6)
+            // Fora do Fotos (permissão negada, .zip, ou quem prefere): uma cópia em Arquivos.
+            Button { savingToFiles = true } label: {
+                Text(AureaText.t("ios_export_save_files")).font(.aurea(size: 15, weight: .semibold))
+                    .foregroundStyle(AureaColors.accent).padding(.vertical, 8)
+            }.buttonStyle(.plain).padding(.top, 6)
+                .accessibilityLabel(AureaText.t("ios_export_save_files"))
         }.frame(maxWidth: .infinity)
     }
     private var footer: some View {
@@ -439,17 +447,16 @@ struct ExportView: View {
                 .background(filled ? AureaColors.accent : AureaColors.chip, in: RoundedRectangle(cornerRadius: 14))
         }.buttonStyle(.plain)
     }
-    /// ESPELHO de export_frame_size (ExportRules.hpp) e do VideoExportRules.kt:
-    /// lado maior em múltiplo de 16, menor par, quadrado fica
-    /// quadrado ("480p" 16:9 = 848×480; 854 derrubava o encoder MediaTek).
+    /// Mirrors export_frame_size_v2; codec stride does not resize the picture.
     private func sizeFor(_ side: UInt32) -> (UInt32, UInt32) {
         let w = Double(model.compositionWidth), h = Double(model.compositionHeight)
         guard w > 0, h > 0 else { return (0, 0) }
         let shortest = min(w, h)
         let k = Double(side > 0 ? side : UInt32(shortest)) / shortest
         func align(_ v: Double, _ a: Double) -> UInt32 { UInt32(max(a, (v / a + 0.5).rounded(.down) * a)) }
-        if w == h { let s = align(w * k, 2); return (s, s) }
-        return w > h ? (align(w * k, 16), align(h * k, 2)) : (align(w * k, 2), align(h * k, 16))
+        if (side == 0 || Double(side) == shortest), (UInt32(w) % 2 != 0 || UInt32(h) % 2 != 0) { return (0, 0) }
+        if side % 2 != 0 { return (0, 0) }
+        return (align(w * k, 2), align(h * k, 2))
     }
     private func fits(_ size: (UInt32, UInt32)) -> Bool {
         let cap = (model.composition["sizeCap"] as? [NSNumber] ?? []).map(\.uint32Value)
@@ -496,6 +503,11 @@ struct ExportView: View {
     private var progressNotice: String {
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
+        switch (flags >> 8) & 15 {
+        case 4: notices.append(AureaText.t("export_v2_finalizing"))
+        case 5: notices.append(AureaText.t("export_v2_validating"))
+        default: break
+        }
         if flags & AureaExportFlag.safeMode.rawValue != 0 { notices.append(AureaText.t("app_export_safe_mode")) }
         if model.exportOptions.aiUpscale > 0, let message = model.exportProgress["message"] as? String, message.hasPrefix("IA:") {
             notices.append(AureaEngineText.aiProgress(message))
@@ -670,7 +682,17 @@ private struct PixelAnimatorView: View {
     }
 }
 
-private struct ExportShareSheet: UIViewControllerRepresentable {
+/// "Salvar em Arquivos": o seletor do sistema exporta uma CÓPIA (o original
+/// fica no Documents do app para abrir/compartilhar).
+private struct ExportFilesPicker: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+    }
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+}
+
+struct ExportShareSheet: UIViewControllerRepresentable {
     let url: URL
     func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [url], applicationActivities: nil) }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
@@ -692,7 +714,7 @@ private struct ExportQuickLook: UIViewControllerRepresentable {
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { url as NSURL }
     }
 }
-private struct ExportMoviePlayer: View {
+struct ExportMoviePlayer: View {
     let url: URL
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?

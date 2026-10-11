@@ -150,14 +150,66 @@ public:
         p.add_float("strength","Força",squeeze_?25:60,squeeze_?-95:0,squeeze_?95:160,kParamAnimatable,squeeze_?"%":"°");
         p.add_point2("center","Centro",{.5f,.5f},-1,2,kParamAnimatable|kParamRelative);
         if(squeeze_) p.add_angle("angle","Eixo",0); else p.add_bool("reverse","Inverter distorção",false);
+        // Squeeze novo (beta 07/10: "não parece squeeze"): o antigo era um
+        // esticar uniforme (igual ao Stretch Axis). O novo aperta a cintura no
+        // eixo e estufa no outro, com queda suave até a borda da layer.
+        // Instância salva sem o slot abre com 0 = o esticar de antes.
+        if(squeeze_) p.add_float("algorithm","Algoritmo",1.0f,0.0f,1.0f,kParamHidden|kParamLegacyZero);
     }
     bool is_identity(const EffectEval& e) const noexcept override { return std::abs(e.f(0))<.00001f; }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        if (!squeeze_ || !e.placement || is_identity(e)) return 0;
+        const Rect visible = visible_layer_rect(*e.placement);
+        if (!(visible.w > 0 && visible.h > 0)) return 0;
+        const Vec2 size = size_of(e), center = e.p2(1);
+        const f32 cx = center.x * size.x, cy = center.y * size.y;
+        const f32 dx = std::max(std::fabs(visible.x - cx), std::fabs(visible.x + visible.w - cx));
+        const f32 dy = std::max(std::fabs(visible.y - cy), std::fabs(visible.y + visible.h - cy));
+        // The inverse pinch can read as far as radius/(1-|strength|).
+        // Propagate that reach to Motion Tile instead of sampling its cropped edge.
+        const f32 k = std::clamp(std::fabs(safe(e.f(0))) / 100.f, 0.f, .95f);
+        const f32 factor = e.count > 3 && e.f(3) > .5f ? k / (1.f - k)
+            : std::expm1(std::fabs(safe(e.f(0))) * .02f);
+        return std::hypot(dx, dy) * factor + 2.f;
+    }
     void pipelines(std::vector<PipelineKey>& out,SurfaceFormat f) const override { out.push_back(PipelineKey::fullscreen(ShaderId::effects_lens_extra_frag,f)); }
-    Status build(EffectBuildContext& ctx,const EffectEval& e,const LayerImage& in,float,LayerImage& out) const override {
+    Status build(EffectBuildContext& ctx,const EffectEval& e,const LayerImage& in,float margin,LayerImage& out) const override {
         auto u=base_uniforms(in); const Vec2 sz=size_of(e), c=e.p2(1);
+        if(squeeze_ && e.count>3 && e.f(3)>.5f) return build_pinch(ctx,e,in,sz,c,margin,out);
         u.p0={in.region.x,in.region.y,in.region.w,in.region.h}; u.p1={sz.x,sz.y,c.x*sz.x,c.y*sz.y};
         u.p2={squeeze_?0.f:1.f,safe(e.f(0)),squeeze_?e.f(2)*kDeg2Rad:(e.b(2)?1.f:0.f),0};
         return single_pass(ctx,ShaderId::effects_lens_extra_frag,in,u,info().key,out);
+    }
+private:
+    // Squeeze com queda suave (ver lens_extra.frag, modo 2). Em coordenadas
+    // normalizadas pelo meio-tamanho da layer no eixo girado:
+    //   x' = x·(1 − k·b(y)),  y' = y·(1 + k·b(x)),  b(t) = (1 − t²)² em |t| < 1.
+    // Os cantos não se movem; a cintura entra k e o meio do outro lado sai k,
+    // então a saída cresce até k·meio-tamanho em volta da entrada.
+    Status build_pinch(EffectBuildContext& ctx,const EffectEval& e,const LayerImage& in,Vec2 sz,Vec2 c,float margin,LayerImage& out) const {
+        const float k=std::clamp(safe(e.f(0))/100.f,-.95f,.95f), ang=safe(e.f(2))*kDeg2Rad;
+        const float cs=std::fabs(std::cos(ang)), sn=std::fabs(std::sin(ang));
+        const float rx=std::max(.5f,.5f*(cs*sz.x+sn*sz.y)), ry=std::max(.5f,.5f*(sn*sz.x+cs*sz.y));
+        const float grow=std::fabs(k)*std::max(rx,ry)+2.f;
+        Rect region{in.region.x-grow,in.region.y-grow,in.region.w+2*grow,in.region.h+2*grow};
+        if (e.placement && !e.placement->preserveFullExtent) {
+            const Rect visible = visible_layer_rect(*e.placement);
+            if (visible.w > 0 && visible.h > 0) {
+                const f32 pad = margin + 2.f;
+                const Rect crop = Rect::intersect(region, {visible.x-pad, visible.y-pad, visible.w+2*pad, visible.h+2*pad});
+                if (crop.w > 0 && crop.h > 0) region = crop;
+            }
+        }
+        u32 w=0,h=0; ctx.region_size(region,in.texel_scale_x(),w,h);
+        EffectUniforms u=base_uniforms(in);
+        u.p0={region.x,region.y,region.w,region.h}; u.p1={sz.x,sz.y,c.x*sz.x,c.y*sz.y};
+        u.p2={2.f,k,ang,0}; u.p3={in.region.x,in.region.y,in.region.w,in.region.h}; u.color={rx,ry,0,0};
+        const FGTexture tex=ctx.texture(info().key,w,h);
+        if(ctx.fullscreen_pass(info().key,PassStage::Effects,tex,ShaderId::effects_lens_extra_frag,
+                               {PassTexture{in.texture,{},CommonSampler::LinearClamp}},&u,sizeof(u))==kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        out=LayerImage{tex,region,w,h};
+        return OkStatus;
     }
 };
 }

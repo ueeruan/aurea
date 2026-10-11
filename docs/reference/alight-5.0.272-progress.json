@@ -1,0 +1,62 @@
+{
+  "updated": "2026-09-30",
+  "objective_complete": false,
+  "platform_requirement": "Toda mudança funcional e de interface deve existir em Android e iOS, usando o motor compartilhado.",
+  "direction": "Equivalência funcional e melhoria de UX, preservando a identidade do AUREA e os sistemas existentes. Implementação própria, sem incorporar código ou assets do APK.",
+  "android_artifact": {
+    "path": "output/aurea-motion-arm64-debug.apk",
+    "application_id": "com.aurea.aurea.debug",
+    "version": "2.0.0-beta2-debug (2125)",
+    "abi": "arm64-v8a",
+    "bytes": 82350454,
+    "sha256": "e703a25699027421d78c00b5bb826d311ea7502363d97e4ef3c256445975f92d"
+  },
+  "reference": {
+    "inventory": "alight-5.0.272-inventory.json",
+    "raw_analysis": "build/reference/alight-5.0.272",
+    "dynamic_observation": "APK instalado em emulador isolado. Onboarding e Home observados; o botão de novo projeto não abriu o editor. Não há comparação visual ou comportamental completa do editor em execução.",
+    "interpretation": "315 definições não correspondem necessariamente a 315 efeitos públicos distintos. Ausência de regra de importação não comprova ausência da função no AUREA. Nenhum percentual de paridade foi calculado."
+  },
+  "implemented": [
+    {
+      "area": "Timeline e camadas",
+      "shared_engine": "Alinhar inícios/finais, sequenciar, distribuir inícios, distribuir intervalos e alinhar bordas ao cabeçote. Preserva duração, offset e keyframes locais; ignora camadas bloqueadas; um desfazer por operação.",
+      "android": "Ações na seleção múltipla com painel rolável.",
+      "ios": "Mesmas ações no painel de seleção múltipla."
+    },
+    {
+      "area": "Animadores de texto",
+      "shared_engine": "Duplicar e reordenar a pilha preservando tracks, curvas e expressões. RGB de preenchimento e contorno animáveis. Ordem aleatória de troca de caracteres consistente com o seletor. Seek enfileirado aplicado antes de editar keyframes.",
+      "android": "Cartões recolhíveis; duplicar/subir/descer; ease alto/baixo; seed; entrada numérica; cor animável; selecionar propriedade; anterior/próximo keyframe; abrir a curva correta.",
+      "ios": "Mesmos controles no painel SwiftUI e cenário de teste nativo."
+    },
+    {
+      "area": "Animadores de camada",
+      "shared_engine": "Seek enfileirado aplicado antes da edição de parâmetro ou keyframe.",
+      "android": "Seleção de propriedade, entrada numérica e acesso direto a keyframes e curvas.",
+      "ios": "Mesma navegação e edição no painel SwiftUI."
+    },
+    {
+      "area": "Máscaras",
+      "shared_engine": "Tracks de suavização, expansão e opacidade ligados ao ID estável da máscara. Avaliação no mesmo rasterizador usado por preview e exportação. Serialização, undo, cópia de keyframes e limpeza de tracks ao excluir máscara. Edição usa o tempo local correto depois de seek.",
+      "android": "Losangos por parâmetro, edição numérica, navegação entre keys e curva direta; tocar uma trilha abre a máscara e propriedade correspondentes.",
+      "ios": "Mesmos controles, navegação e cenário de teste nativo."
+    }
+  ],
+  "verification": {
+    "status": "46 testes finais do motor, 2628 verificações, zero falhas. Cinco testes Android passaram no emulador API 35.",
+    "core_suites": {"Mask": 16, "TextAnimatorEditing": 4, "TextAnimatorColorKeys": 1, "TextAnimatorColorsReachExport": 1, "LayerAnim": 10, "TimeArrangement": 7, "ClipEdit": 7},
+    "android_tests": ["MaskAnimationTest", "TextAnimatorEditingTest", "TimelineArrangementTest", "StaggerLayersTest", "MotionAnimationExportTest"],
+    "ios_static": "check_api_swift, check_symbols, check_pbxproj e check_shared_assets: zero problemas. 578 símbolos confirmados; sete recursos compartilhados idênticos.",
+    "ios_execution": "Não executada: ambiente Windows sem Xcode. Auditoria estática não comprova compilação nem execução nativa.",
+    "export_scope": "Host: quadros NV12 idênticos antes/depois de salvar e reabrir. Android: projeto com cor de texto e opacidade de máscara animadas foi salvo/reaberto, exportado em MP4 real de 30 quadros (320x180), e decodificado com MediaMetadataRetriever. Cores inicial/final e redução de intensidade foram verificadas nos pixels. Codec de iOS e hardware de telefone físico ainda não verificados.",
+    "export_artifacts": "build/reference/alight-5.0.272/android-export"
+  },
+  "remaining_review": [
+    "Comparação integral dos fluxos de efeitos, vetores, shapes, hierarquia, composição, presets, blend modes, mattes, transformações e preview com o editor de referência em execução.",
+    "Comparação de parâmetros, limites, defaults, curvas e resultados renderizados de cada candidato da matriz de efeitos.",
+    "Edição temporal e curvas arbitrárias dos keyframes de caminho de máscara: a estrutura existente ainda usa Hold, Linear ou Suave; os novos controles de curva desta entrega cobrem os parâmetros escalares.",
+    "Execução das interfaces iOS e exportação com VideoToolbox em simulador/aparelho.",
+    "Validação de um motion complexo completo nos dois aplicativos, incluindo importação, projeto salvo/reaberto e vídeo final."
+  ]
+}

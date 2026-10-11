@@ -69,5 +69,26 @@ class BuiltinPresets(private val context: Context) {
         }
     }
 
-    fun of(kind: PresetKind): List<PresetEntry> = if (kind == PresetKind.Text) textEntries() else byKind[kind].orEmpty()
+    /** Nome no idioma ATUAL do app (o JSON fala pt-BR); sem recurso, o do arquivo. */
+    fun of(kind: PresetKind): List<PresetEntry> = if (kind == PresetKind.Text) textEntries() else {
+        val names = BuiltinPresetNames[kind].orEmpty()
+        byKind[kind].orEmpty().mapIndexed { i, e -> if (i < names.size) e.copy(name = AppText.get(context, names[i])) else e }
+    }
 }
+
+/**
+ * Nome traduzido dos presets embutidos (assets/presets/<tipo>.json), na ordem
+ * do arquivo — mesma tabela do iOS (`builtinPresetNameKeys`). Os de marca
+ * ("CC · Detail", "Omino · Diffusion") ficam com o nome do arquivo.
+ */
+internal val BuiltinPresetNames: Map<PresetKind, List<Int>> = mapOf(
+    PresetKind.Animation to listOf(R.string.app_preset_anim_appear, R.string.app_preset_anim_vanish, R.string.app_preset_anim_enter_left,
+        R.string.app_preset_anim_rise, R.string.app_preset_anim_zoom_in, R.string.app_preset_anim_pulse, R.string.app_preset_anim_spin_in),
+    PresetKind.Curve to listOf(R.string.app_preset_curve_cubic, R.string.app_preset_curve_strong_inout, R.string.app_preset_curve_expo_out,
+        R.string.app_preset_curve_expo_in, R.string.app_preset_curve_back_out, R.string.app_preset_curve_back_in),
+    PresetKind.Effects to listOf(R.string.app_preset_fx_soft_blur, R.string.app_preset_fx_focus_in, R.string.app_preset_fx_neon_glow,
+        R.string.app_preset_fx_bw, R.string.app_preset_fx_strong_contrast, R.string.app_preset_fx_sepia, R.string.app_preset_fx_dream,
+        R.string.app_preset_fx_turbulence),
+    PresetKind.Caption to listOf(R.string.app_preset_caption_viral, R.string.app_preset_caption_karaoke, R.string.app_preset_caption_subtle,
+        R.string.pack_text_4, R.string.pack_text_5),
+)

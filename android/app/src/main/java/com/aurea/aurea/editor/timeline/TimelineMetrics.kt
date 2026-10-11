@@ -11,16 +11,17 @@ import kotlin.math.min
  * densidade. Classe pura (só floats) para os testes de JVM rodarem com
  * densidade 1.
  */
-internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
+internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, val referenceTrial: Boolean = false) {
     private fun dp(v: Float) = v * density
 
     // --- Régua e linhas -------------------------------------------------------
-    val rulerTicks = dp(AureaTimeline.RulerTicks.value)
+    val rulerTicks = dp(if (referenceTrial) 18f + 12f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.RulerTicks.value)
     /** Topo da primeira barra em 44 dp; a pílula começa 2 dp acima. */
-    val rowsTop = dp(AureaTimeline.RulerTicks.value + AureaTimeline.RulerGap.value)
-    val row = dp(AureaTimeline.Row.value)
-    val bar = dp(AureaTimeline.Bar.value)
-    val barRadius = dp(AureaTimeline.BarRadius.value)
+    val rowsTop = if (referenceTrial) rulerTicks + dp(4f) else dp(AureaTimeline.RulerTicks.value + AureaTimeline.RulerGap.value)
+    // Reference density, expanded for larger system text; drawing and hits share it.
+    val row = dp(if (referenceTrial) 24f + 24f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.Row.value)
+    val bar = dp(if (referenceTrial) 23f + 20f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.Bar.value)
+    val barRadius = dp(if (referenceTrial) 4f else AureaTimeline.BarRadius.value)
     val barMinWidth = dp(AureaTimeline.BarMinWidth.value)
     val track = dp(AureaTimeline.KeyframeTrack.value)
     /** Começo da faixa dos losangos (medido do topo da barra). */
@@ -30,11 +31,11 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
 
     // --- Pílula da fileira (olho + miniatura/tipo), colada à esquerda -----------
     /** Largura da pílula; as barras passam por baixo dela. */
-    val headerColumn = dp(AureaTimeline.HeaderColumn.value)
+    val headerColumn = dp(if (referenceTrial) 28f else AureaTimeline.HeaderColumn.value)
     /** A pílula: 28 de altura, começa 2 dp acima da barra, raio 14 só à direita. */
-    val pillInset = dp(AureaTimeline.RowPillInset.value)
-    val pillHeight = dp(AureaTimeline.RowPillHeight.value)
-    val pillRadius = pillHeight / 2f
+    val pillInset = if (referenceTrial) 0f else dp(AureaTimeline.RowPillInset.value)
+    val pillHeight = if (referenceTrial) bar else dp(AureaTimeline.RowPillHeight.value)
+    val pillRadius = if (referenceTrial) dp(4f) else pillHeight / 2f
     /** Centro vertical da pílula, medido do topo da barra. */
     val pillCy = pillHeight / 2f - pillInset
     /** Chevron das trilhas de propriedade (coluna estreita à esquerda). */
@@ -101,9 +102,9 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
 
     // --- Alça de trim (16 × (barra − 4), top 2, DENTRO das pontas) -------------------
     val trimWidth = dp(16f)
-    val trimTop = dp(2f)
-    val trimInsetStart = dp(3f)     // left = x0 − 3
-    val trimInsetEnd = dp(13f)      // left = x1 − 13
+    val trimTop = dp(if (referenceTrial) 0f else 2f)
+    val trimInsetStart = dp(if (referenceTrial) 16f else 3f)     // left = x0 − 3
+    val trimInsetEnd = dp(if (referenceTrial) 0f else 13f)      // left = x1 − 13
     val trimRadius = dp(4f)
     val gripWidth = dp(2f)
     val gripHeight = dp(10f)
@@ -111,7 +112,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val trimTouchOut = dp(13f)
 
     // --- Losango ------------------------------------------------------------------
-    val diamond = dp(11f)
+    val diamond = dp(if (referenceTrial) 10f else 9f)
     val diamondRadius = dp(2f)
     val diamondStroke = dp(1.2f)
     /** O losango inteiro cabe na barra; X continua vindo exclusivamente do tempo. */
@@ -122,7 +123,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val keyHitHalf = dp(24f)
     /** Histerese do arrasto de losango: o frame só troca depois de passar meio frame + isto. */
     val keyDragHysteresis = dp(3f)
-    val keyGlyphHalf = dp(7f)       // o próprio desenho (diagonal ≈ 15,5)
+    val keyGlyphHalf = dp(6f)       // desenho compacto; alvo de toque continua 48 dp
     val keyTouchTop = 0f
     val keyMergeGap = dp(4f)        // instantes a menos que isso viram pílula
     val keyPillHeight = dp(10f)
@@ -142,7 +143,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     val markerHeight = dp(8f)
     /** Relógio 16 sp bold abaixo dos riscos; sublinhado branco em y 30. */
     val timecodeTop = dp(14f)
-    val timecodeBaseline = dp(28f)
+    val timecodeBaseline = dp(if (referenceTrial) 12f else 28f)
     val underlineTop = dp(30f)
     val underlineHeight = dp(1.5f)
     /** Estilo caixa (camada escolhida / efeitos): 26 de altura, borda 1,5 em destaque, raio 4. */
@@ -154,7 +155,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f) {
     /** Rótulo da régua perto do relógio some (não disputa leitura com ele). */
     val timecodeZoneHalf = dp(44f)
     /** O fio começa abaixo do relógio e atravessa toda a área livre da timeline. */
-    val playheadTop = dp(36f)
+    val playheadTop = dp(if (referenceTrial) 14f else 36f)
 
     // --- Gestos -------------------------------------------------------------------------
     val snapClip = dp(12f)          // ímã de clipe e alça

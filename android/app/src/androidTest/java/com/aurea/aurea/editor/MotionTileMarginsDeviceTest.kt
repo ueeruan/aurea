@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -165,6 +166,28 @@ class MotionTileMarginsDeviceTest {
             set(blur, 0, 24f)
             assertStack("aurea.stylize.motion_tile", "aurea.transform", "aurea.blur.gaussian")
             assertUniform("$label-blur-24")
+        }
+    }
+
+    @Test fun projected3DWallKeepsItsCoverageThroughBlurAndWaveWarp() {
+        launchEditor("projected-3d-wall")
+        for (rotation in listOf(38f, -55f, -65f)) {
+            val label = "projected-3d-${rotation.toInt()}"
+            newSource(label)
+            val tile = add("aurea.stylize.motion_tile")
+            set(tile, 5, 1f)
+            compose.runOnIdle {
+                store.setTransform(TrackProperty.SCALE_X, .55f)
+                store.setTransform(TrackProperty.SCALE_Y, .55f)
+                store.setTransform(TrackProperty.ROTATION_X, rotation)
+            }
+            compose.waitUntil(10000) { store.detail?.rotation?.get(0) == rotation }
+            assertUniform("$label-tile")
+            val blur = add("aurea.blur.gaussian")
+            set(blur, 0, 12f)
+            assertUniform("$label-blur")
+            add("aurea.distort.wave_warp")
+            assertUniform("$label-wave")
         }
     }
 }

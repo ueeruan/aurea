@@ -1,0 +1,8 @@
+{
+  "beta_move_path": {"pt":"Mover pelo caminho", "en":"Move Along Path", "es":"Mover por la trayectoria", "ru":"Движение по пути", "hi":"पथ पर चलाएँ", "id":"Gerakkan sepanjang jalur", "ar":"التحريك على المسار"},
+  "beta_overlap": {"pt":"Overlap entre unidades", "en":"Unit overlap", "es":"Solapamiento entre unidades", "ru":"Перекрытие единиц", "hi":"इकाइयों का ओवरलैप", "id":"Tumpang tindih unit", "ar":"تداخل الوحدات"},
+  "beta_translate_english": {"pt":"Traduzir a fala para inglês", "en":"Translate speech into English", "es":"Traducir el habla al inglés", "ru":"Перевести речь на английский", "hi":"बोली का अंग्रेज़ी में अनुवाद करें", "id":"Terjemahkan ucapan ke bahasa Inggris", "ar":"ترجمة الكلام إلى الإنجليزية"},
+  "beta_select_media": {"pt":"Selecionar várias", "en":"Select multiple", "es":"Seleccionar varias", "ru":"Выбрать несколько", "hi":"कई चुनें", "id":"Pilih beberapa", "ar":"تحديد عدة ملفات"},
+  "beta_add_media": {"pt":"Adicionar (%1$d)", "en":"Add (%1$d)", "es":"Añadir (%1$d)", "ru":"Добавить (%1$d)", "hi":"जोड़ें (%1$d)", "id":"Tambahkan (%1$d)", "ar":"إضافة (%1$d)"},
+  "beta_extend_clip": {"pt":"Estender até o fim da fonte", "en":"Extend to source end", "es":"Extender hasta el final del archivo", "ru":"Продлить до конца исходника", "hi":"स्रोत के अंत तक बढ़ाएँ", "id":"Perpanjang hingga akhir sumber", "ar":"تمديد حتى نهاية المصدر"}
+}

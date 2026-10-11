@@ -191,6 +191,10 @@ inline u8 frame_gray_code(u32 i) { return static_cast<u8>(32 + (i * 7) % 190); }
 class SyntheticFrame final : public DecodedFrame {
 public:
     std::vector<u8> y, uv;
+    bool owns_cpu_backing() const noexcept override {
+        return !y.empty() && planes[0] == y.data() && planes[1] == uv.data()
+            && y.size() + uv.size() >= approx_bytes();
+    }
 };
 
 class SyntheticDecoder final : public VideoDecoderBackend {

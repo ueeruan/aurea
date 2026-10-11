@@ -25,7 +25,7 @@ import com.aurea.aurea.R
 internal fun ReleaseNotesEntry() {
     val context = LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences("aurea.releaseNotes", Context.MODE_PRIVATE) }
-    val edition = "${BuildConfig.VERSION_CODE}:2123-1"
+    val edition = "${BuildConfig.VERSION_NAME}:${BuildConfig.VERSION_CODE}"
     var showing by rememberSaveable(edition) { mutableStateOf(prefs.getString("read", null) != edition) }
     TextButton(onClick = { showing = true }) { Text(stringResource(R.string.release_notes_title)) }
     if (!showing && AureaDonations.launchPromptPending) {

@@ -5,9 +5,11 @@
 #include "GlVideoBridge.hpp"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/export/CodecOutputPacket.hpp"
 #include "aurea/platform/AndroidVideoPath.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/media/DecodedPlaneBounds.hpp"
+#include "aurea/media/DecodedRgbaCopy.hpp"
 #include "aurea/platform/AndroidVideoCompatibility.hpp"
 
 #include <android/hardware_buffer.h>
@@ -258,6 +260,9 @@ struct ReaderState {
 
 class CodecFrame final : public DecodedFrame {
 public:
+    bool owns_cpu_backing() const noexcept override {
+        return !image && !owner && !compact.empty() && planes[0] == compact.data() && compact.size() >= approx_bytes();
+    }
     ~CodecFrame() override {
         if (image) AImage_delete(image);
     }
@@ -271,6 +276,32 @@ public:
 class GlFrame final : public DecodedFrame {
 public:
     std::shared_ptr<const GlVideoBridge::Target> target;
+    bool prepare_cpu_planes() noexcept override {
+        if (planeCount == 1 && planes[0]) return true;
+        if (!target || !target->buffer || format != PixelFormat::RGBA8) return false;
+        AHardwareBuffer_Desc desc{};
+        AHardwareBuffer_describe(target->buffer, &desc);
+        if (desc.format != AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
+            desc.width < width || desc.height < height || desc.stride < width ||
+            !(desc.usage & AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN)) return false;
+        void* mapped = nullptr;
+        if (AHardwareBuffer_lock(target->buffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                                 -1, nullptr, &mapped) != 0) return false;
+        struct Unlock {
+            AHardwareBuffer* buffer;
+            ~Unlock() { (void)AHardwareBuffer_unlock(buffer, nullptr); }
+        } unlock{target->buffer};
+        const size_t stride = size_t(desc.stride) * 4;
+        if (!media::copy_decoded_rgba8(width, height, static_cast<const u8*>(mapped),
+                                      stride, stride * desc.height, rgba_)) return false;
+        planes[0] = rgba_.get();
+        strides[0] = width * 4;
+        planeCount = 1;
+        return true;
+    }
+
+private:
+    std::unique_ptr<u8[]> rgba_;
 };
 
 // Nome do codec: AMediaCodec_getName é da API 28; resolvido em runtime.
@@ -931,7 +962,7 @@ private:
         f->visibleHeight = target->height;
         f->hardwareBuffer = target->buffer;
         f->bufferId = reinterpret_cast<u64>(target->buffer);
-        f->format = PixelFormat::Opaque;
+        f->format = PixelFormat::RGBA8;
         out = FrameRef::adopt(f);
         return OkStatus;
     }
@@ -1206,8 +1237,14 @@ public:
             if (idx < 0) continue;   // TRY_AGAIN / BUFFERS_CHANGED
             size_t cap = 0;
             const u8* data = AMediaCodec_getOutputBuffer(codec_, static_cast<size_t>(idx), &cap);
-            if (data && bi.size > 0) {
-                const u8* p = data + bi.offset;
+            if (!aurea::normalize_codec_output_packet(data, bi.size, bi.offset, cap)) {
+                AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(idx), false);
+                return Status{Errc::DecodeFailed, "decoder de audio entregou pacote invalido"};
+            }
+            if (bi.size > 0) {
+                // NDK output already begins at the valid PCM sample; the old
+                // BufferInfo.offset is not another readable prefix.
+                const u8* p = data;
                 if (pcm_ == kPcmFloat) {
                     const usize n = static_cast<usize>(bi.size) / sizeof(f32);
                     out.resize(n);

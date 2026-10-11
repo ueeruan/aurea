@@ -159,6 +159,47 @@ struct UfbxBuild {
         return index;
     }
 
+    /// Uma imagem G = rugosidade, B = metal a partir dos mapas separados do
+    /// FBX/OBJ (qualquer dos dois pode faltar: entra o fator). -1 = sem mapas.
+    i32 pack_metal_rough(i32 roughIdx, i32 metalIdx, f32 roughFactor, f32 metalFactor) {
+        const Image* r = roughIdx >= 0 && static_cast<usize>(roughIdx) < A->images.size() ? &A->images[static_cast<usize>(roughIdx)] : nullptr;
+        const Image* m = metalIdx >= 0 && static_cast<usize>(metalIdx) < A->images.size() ? &A->images[static_cast<usize>(metalIdx)] : nullptr;
+        if (r && (!r->width || !r->height || r->pixels().size() < static_cast<usize>(r->width) * r->height * 4)) r = nullptr;
+        if (m && (!m->width || !m->height || m->pixels().size() < static_cast<usize>(m->width) * m->height * 4)) m = nullptr;
+        if (!r && !m) return -1;
+        if (r && m && r == m) {
+            // Mesmo arquivo para os dois (exportadores que já gravam G/B): usa direto.
+            return roughIdx;
+        }
+        const u32 w = std::max(r ? r->width : 0u, m ? m->width : 0u);
+        const u32 h = std::max(r ? r->height : 0u, m ? m->height : 0u);
+        const u64 bytes = static_cast<u64>(w) * h * 4;
+        if (!w || !h || bytes > (64ull << 20)) return -1;
+        if (options->memoryBudget && imageBytes + bytes > options->memoryBudget / 2) { ++A->stats.texturesSkipped; return -1; }
+        Image img;
+        img.width = w; img.height = h;
+        img.name = (r ? r->name : std::string("metal")) + "+" + (m ? m->name : std::string("rough"));
+        img.rgba.resize(static_cast<usize>(bytes));
+        const u8 roughConst = static_cast<u8>(std::clamp(roughFactor, 0.0f, 1.0f) * 255.0f + 0.5f);
+        const u8 metalConst = static_cast<u8>(std::clamp(metalFactor, 0.0f, 1.0f) * 255.0f + 0.5f);
+        auto sample = [](const Image& src, u32 x, u32 y, u32 w, u32 h) {
+            const u32 sx = static_cast<u32>(static_cast<u64>(x) * src.width / std::max(1u, w));
+            const u32 sy = static_cast<u32>(static_cast<u64>(y) * src.height / std::max(1u, h));
+            return src.pixels()[(static_cast<usize>(std::min(sy, src.height - 1)) * src.width + std::min(sx, src.width - 1)) * 4];
+        };
+        for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+            u8* px = img.rgba.data() + (static_cast<usize>(y) * w + x) * 4;
+            px[0] = 255;
+            px[1] = r ? sample(*r, x, y, w, h) : roughConst;
+            px[2] = m ? sample(*m, x, y, w, h) : metalConst;
+            px[3] = 255;
+        }
+        imageBytes += img.rgba.size();
+        const i32 index = static_cast<i32>(A->images.size());
+        A->images.push_back(std::move(img));
+        return index;
+    }
+
     i32 image_for(const ufbx_texture* t) {
         if (!t) return -1;
         if (auto it = images.find(t); it != images.end()) return it->second;
@@ -259,6 +300,21 @@ struct UfbxBuild {
         }
         out.roughness = p.roughness.has_value ? std::clamp(static_cast<f32>(p.roughness.value_real), 0.0f, 1.0f) : 0.6f;
         out.metallic = p.metalness.has_value ? std::clamp(static_cast<f32>(p.metalness.value_real), 0.0f, 1.0f) : 0.0f;
+        // Mapas de rugosidade (map_Pr / Roughness) e metal (map_Pm / Metalness):
+        // antes eram ignorados e todo FBX/OBJ saía com metal/rugosidade só do
+        // fator. Empacotados como no glTF (G = rugosidade, B = metal); o fator
+        // vira 1 onde há mapa, porque o shader multiplica fator × textura.
+        const ufbx_texture* roughTex = p.roughness.texture;
+        const ufbx_texture* metalTex = p.metalness.texture;
+        if (roughTex || metalTex) {
+            const i32 ri = image_for(roughTex), mi = image_for(metalTex);
+            const i32 packed = pack_metal_rough(ri, mi, out.roughness, out.metallic);
+            if (packed >= 0) {
+                out.metallicRoughnessTex.image = packed;
+                if (ri >= 0) out.roughness = 1.0f;
+                if (mi >= 0) out.metallic = 1.0f;
+            }
+        }
         if (p.normal_map.texture) out.normalTex.image = image_for(p.normal_map.texture);
         if (p.ambient_occlusion.texture) out.occlusionTex.image = image_for(p.ambient_occlusion.texture);
         if (p.emission_color.has_value) {

@@ -1,0 +1,8 @@
+{
+  "cam_mode_2d": {"pt":"Rastreio 2D","en":"2D tracking","es":"Rastreo 2D","ru":"2D-трекинг","hi":"2D ट्रैकिंग","id":"Pelacakan 2D","ar":"تتبع ثنائي الأبعاد"},
+  "cam_step_analyze": {"pt":"1. Analisar vídeo","en":"1. Analyze video","es":"1. Analizar vídeo","ru":"1. Анализ видео","hi":"1. वीडियो का विश्लेषण करें","id":"1. Analisis video","ar":"1. تحليل الفيديو"},
+  "cam_step_place": {"pt":"2. Posicionar na cena","en":"2. Place in the scene","es":"2. Colocar en la escena","ru":"2. Размещение в сцене","hi":"2. दृश्य में रखें","id":"2. Tempatkan dalam adegan","ar":"2. وضع العناصر في المشهد"},
+  "cam_place_selected": {"pt":"Posicionar objeto","en":"Place object","es":"Colocar objeto","ru":"Разместить объект","hi":"ऑब्जेक्ट रखें","id":"Tempatkan objek","ar":"وضع العنصر"},
+  "cam_point_display": {"pt":"Exibição dos pontos","en":"Point display","es":"Visualización de puntos","ru":"Отображение точек","hi":"बिंदुओं का प्रदर्शन","id":"Tampilan titik","ar":"عرض النقاط"},
+  "cam_reference_controls": {"pt":"Origem e escala","en":"Origin and scale","es":"Origen y escala","ru":"Начало координат и масштаб","hi":"मूल बिंदु और स्केल","id":"Titik asal dan skala","ar":"نقطة الأصل والمقياس"}
+}

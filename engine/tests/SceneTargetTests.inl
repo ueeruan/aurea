@@ -126,10 +126,18 @@ AUREA_TEST(SceneTargets, SubmittedCancellationAndTimeoutDoNotStartTheMainGraph) 
         TextureDesc desc; desc.width = 320; desc.height = 180; desc.renderTarget = true; desc.format = SurfaceFormat::RGBA16F;
         const auto texture = f.backend.create_texture(desc); AUREA_CHECK(texture.ok()); if (!texture) continue;
         RenderSettings settings; settings.finalQuality = settings.stageUnblurredScenes = true;
-        settings.cancelFlag = &cancelled; settings.sceneExposureFenceTimeoutNs = cancel ? 1'000'000'000 : 1;
+        // Cancellation is injected by wait_frame after submitting the stage.
+        // Allow cold environment preparation to reach that callback; the
+        // separate timeout row deliberately expires before its first wait.
+        settings.cancelFlag = &cancelled; settings.sceneExposureFenceTimeoutNs = cancel ? 10'000'000'000 : 1;
         OffscreenTarget target{*texture, 320, 180}; FrameStats stats; RenderTimings timings;
         const u32 destroyed = f.backend.texturesDestroyed;
+        const u64 started = monotonic_ns();
         const auto result = f.renderer.render(snapshot, settings, &target, stats, timings);
+        std::printf("\n    submitted stage stop: cancel=%u result=%u elapsed_ms=%.3f waits=%u submitted=%u\n",
+            cancel ? 1u : 0u, static_cast<u32>(result.code()),
+            static_cast<double>(monotonic_ns() - started) * 1e-6, waits, f.backend.framesSubmitted);
+        if (cancel) AUREA_CHECK(waits > 0);
         AUREA_CHECK_EQ(result.code(), cancel ? Errc::Cancelled : Errc::Timeout);
         AUREA_CHECK_EQ(f.backend.framesSubmitted, 1u); AUREA_CHECK(!f.backend.frameOpen);
         AUREA_CHECK(f.renderer.take_incomplete()); AUREA_CHECK(!pending.empty());

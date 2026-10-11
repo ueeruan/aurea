@@ -335,7 +335,7 @@ jobs:
           copy(scene / 'bin/libc++_shared.so', runtime)
           tools = Path(os.environ['ANDROID_HOME']) / 'ndk' / os.environ['NDK_VERSION'] / 'toolchains/llvm/prebuilt/linux-x86_64/bin'
           dependencies = {}
-          allowed = {'libc++_shared.so', 'libandroid.so', 'liblog.so', 'libmediandk.so', 'libaaudio.so',
+          allowed = {'libc++_shared.so', 'libandroid.so', 'liblog.so', 'libmediandk.so', 'libaaudio.so', 'libjnigraphics.so',
                      'libEGL.so', 'libGLESv3.so', 'libdl.so', 'libm.so', 'libc.so'}
           for path in (binary, runtime):
               header = path.read_bytes()[:64]

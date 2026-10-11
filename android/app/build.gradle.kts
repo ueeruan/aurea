@@ -279,17 +279,33 @@ val ffmpegPrepareTasks = (aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "a
             File(prefix, "lib/libswscale.a"), File(prefix, "lib/libswresample.a"),
             File(prefix, "lib/libavutil.a"), File(prefix, "lib/libopenh264.a"), File(prefix, "lib/libkvazaar.a"),
             File(prefix, "aurea-ffmpeg-build.json"))
+        outputs.dir(File(prefix, "licenses"))
         if (aureaFFmpegWithX265) outputs.file(File(prefix, "lib/libx265.a"))
         workingDir(rootProject.file(".."))
+        val resolvedNdk = requireNotNull(nativeNdkPath) {
+            "Android NDK path is required to build the FFmpeg exporter"
+        }
         commandLine(ffmpegPython, rootProject.file("../tools/build_ffmpeg.py").absolutePath,
-            "--platform", "android", "--arch", abi, "--ndk", nativeNdkPath ?: "",
+            "--platform", "android", "--arch", abi, "--ndk", resolvedNdk,
             "--prefix", prefix.absolutePath)
         if (aureaFFmpegWithX265) args("--with-x265")
-        doFirst { require(nativeNdkPath != null) { "Android NDK path is required to build the FFmpeg exporter" } }
     }
 }
+val nativeExportAssets = layout.buildDirectory.dir("generated/assets/native-export")
+val firstNativeExportAbi = aureaAbi ?: "arm64-v8a"
+val nativeExportLicensePrefix = File(
+    aureaFFmpegRoot ?: rootProject.file("../build/ffmpeg/android").absolutePath,
+    "$firstNativeExportAbi/licenses",
+)
+val stageNativeExportLicenses = tasks.register<Sync>("stageNativeExportLicenses") {
+    dependsOn(ffmpegPrepareTasks)
+    from(nativeExportLicensePrefix)
+    into(nativeExportAssets.map { it.dir("licenses/native-export") })
+}
+android.sourceSets.getByName("main").assets.srcDir(nativeExportAssets)
 tasks.configureEach {
     if (name.startsWith("configureCMake") || name.startsWith("buildCMake")) dependsOn(ffmpegPrepareTasks)
+    if (name.startsWith("merge") && name.endsWith("Assets")) dependsOn(stageNativeExportLicenses)
 }
 
 dependencies {

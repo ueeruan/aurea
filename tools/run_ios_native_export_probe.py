@@ -71,6 +71,7 @@ def main() -> None:
             raise RuntimeError(f"Native iOS export dependency missing: {archive}")
     manifest = prefix / "aurea-ffmpeg-build.json"
     shutil.copy2(manifest, output / "native-dependencies.json")
+    shutil.copytree(prefix / "licenses", output / "licenses", dirs_exist_ok=True)
     sdk = capture(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-path"])
     compiler = capture(["xcrun", "--sdk", "iphonesimulator", "--find", "clang++"])
     source = output / "main.cpp"

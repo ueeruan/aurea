@@ -128,24 +128,38 @@ struct MrtWithoutDepthGpu {
         graph.release(pool); pool.clear();
         return compiled.ok() && waited.ok();
     }
-    bool pixels(const std::vector<u16>& expectDisplay, const std::vector<u16>& expectScene) {
+    bool pixels(const std::vector<u16>& expectDisplay, const std::vector<u16>& expectScene, const char* stage) {
         std::vector<u16> a(expectDisplay.size()), b(expectScene.size());
         const auto read0 = gpu.backend.read_texture(output0, a.data(), width * 8);
         const auto read1 = gpu.backend.read_texture(output1, b.data(), width * 8);
         AUREA_CHECK(read0.ok() && read1.ok());
         if (!read0.ok() || !read1.ok()) return false;
+        u32 mismatches = 0, minX = width, maxX = 0, minY = height, maxY = 0;
         for (usize i = 0; i < a.size(); ++i) {
+            const u32 x = static_cast<u32>(i / 4 % width), y = static_cast<u32>(i / 4 / width);
+            for (u32 output = 0; output < 2; ++output) {
+                const auto actual = output ? b[i] : a[i];
+                const auto expected = output ? expectScene[i] : expectDisplay[i];
+                if (actual == expected) continue;
+                if (mismatches < 8) std::printf("\n    MRT mismatch samples=%u stage=%s output=%u xy=%u,%u channel=%zu actual_half=%u expected_half=%u actual=%.6f expected=%.6f",
+                    samples, stage, output, x, y, i % 4, actual, expected,
+                    half_to_float(actual), half_to_float(expected));
+                ++mismatches; minX = std::min(minX, x); maxX = std::max(maxX, x);
+                minY = std::min(minY, y); maxY = std::max(maxY, y);
+            }
             AUREA_CHECK(std::isfinite(half_to_float(a[i])) && std::isfinite(half_to_float(b[i])));
             AUREA_CHECK_EQ(a[i], expectDisplay[i]); AUREA_CHECK_EQ(b[i], expectScene[i]);
         }
+        std::printf("\n    MRT stage samples=%u stage=%s mismatches=%u bounds=%u,%u..%u,%u full_channels=%zu",
+            samples, stage, mismatches, minX, minY, maxX, maxY, a.size() * 2);
         return a == expectDisplay && b == expectScene;
     }
     bool verify() {
         // Poison both outputs through actual MRT commands. A resolving pass
         // intentionally discards its MSAA storage, so the later Load control
         // first stores both multisampled colors in a pass WITHOUT resolves.
-        if (!draw(true, LoadOp::Clear, false) || !pixels(displayPoison, scenePoison)) return false;
-        if (!draw(false, LoadOp::DontCare, false) || !pixels(displayPixels, scenePixels)) return false;
+        if (!draw(true, LoadOp::Clear, false) || !pixels(displayPoison, scenePoison, "poison-full")) return false;
+        if (!draw(false, LoadOp::DontCare, false) || !pixels(displayPixels, scenePixels, "pattern-full")) return false;
         if (!draw(true, LoadOp::Clear, false, {}, samples == 1)) return false;
         auto expectedDisplay = displayPoison, expectedScene = scenePoison;
         for (u32 y = 0; y < height; ++y) for (u32 x = width / 2; x < width; ++x)
@@ -153,7 +167,7 @@ struct MrtWithoutDepthGpu {
                 const usize i = (y * width + x) * 4 + channel;
                 expectedDisplay[i] = displayPixels[i]; expectedScene[i] = scenePixels[i];
             }
-        if (!draw(false, LoadOp::Load, true) || !pixels(expectedDisplay, expectedScene)) return false;
+        if (!draw(false, LoadOp::Load, true) || !pixels(expectedDisplay, expectedScene, "pattern-partial-load")) return false;
         const Vec4 clear{.25f, .5f, .75f, 1.f};
         expectedDisplay = constant({clear.x, clear.y, clear.z, clear.w}); expectedScene = expectedDisplay;
         for (u32 y = 0; y < height; ++y) for (u32 x = width / 2; x < width; ++x)
@@ -161,7 +175,7 @@ struct MrtWithoutDepthGpu {
                 const usize i = (y * width + x) * 4 + channel;
                 expectedDisplay[i] = displayPixels[i]; expectedScene[i] = scenePixels[i];
             }
-        if (!draw(false, LoadOp::Clear, true, clear) || !pixels(expectedDisplay, expectedScene)) return false;
+        if (!draw(false, LoadOp::Clear, true, clear) || !pixels(expectedDisplay, expectedScene, "pattern-partial-clear")) return false;
         std::vector<u16> original(scenePixels.size());
         AUREA_CHECK(gpu.backend.read_texture(scene, original.data(), width * 8).ok());
         AUREA_CHECK(original == scenePixels);

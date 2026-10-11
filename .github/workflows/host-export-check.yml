@@ -1,4 +1,4 @@
-name: Check shared serial export
+name: Diagnose depthless MRT (diagnostic only)
 
 on:
   workflow_dispatch:
@@ -98,6 +98,7 @@ jobs:
           cmake --build build/host-export --target aurea_tests --parallel 2 \
             2>&1 | tee build/host-export-results/build.log
       - name: Compare serial pixels and audio with legacy and V2
+        if: ${{ false }} # Diagnostic-only: this run cannot qualify export delivery.
         working-directory: build/host-export/tests
         run: |
           set -euo pipefail
@@ -106,7 +107,7 @@ jobs:
           grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-fidelity.log
           if grep -Eq 'pulado|skipped' ../../host-export-results/serial-fidelity.log; then exit 1; fi
       - name: Verify the software retry and validated publication
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ false }} # Diagnostic-only: skip the independent serial validation gate.
         working-directory: build/host-export/tests
         run: |
           set -euo pipefail
@@ -114,13 +115,13 @@ jobs:
             2>&1 | tee ../../host-export-results/serial-safe-retry.log
           grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-safe-retry.log
           if grep -Eq 'pulado|skipped' ../../host-export-results/serial-safe-retry.log; then exit 1; fi
-      - name: Verify preview continuity and exact 3D capture memory
+      - name: Diagnose only depthless MRT pixels (not a full regression gate)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         working-directory: build/host-export/tests
         run: |
           set -euo pipefail
           FAILED=0
-          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary VulkanReturnsEmptySlabsAndPreservesLiveAllocations VulkanMemoryPackingGpu VulkanMrtGpu SceneWarmupGpu OriginalModelExport FrameGraphSegments PreviewGraphLifecycle PreviewIdle ExportSourceStartupGpu; do
+          for FILTER in VulkanMrtGpu; do
             # Preserve independent GPU evidence even if another group fails.
             if ! timeout 180s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
             if ! grep -Eq '^[1-9][0-9]* testes, [0-9]+ verificacoes, 0 falhas$' "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi

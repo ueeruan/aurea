@@ -112,6 +112,7 @@ public:
         if (const Status status = state_->sink->finish(); !status.ok()) return status;
         finalized_ = true;
         if (state_->video.validateBeforePublish) return OkStatus;
+        if (cancelled_before_publication()) return Errc::Cancelled;
         // The shared commit replaces an existing target atomically on Windows
         // and POSIX, preserving its bytes if publication fails.
         if (const Status status = fileio::commit_file(state_->staged, state_->target); !status.ok()) return status;
@@ -122,7 +123,7 @@ public:
         Binding binding(*this);
         if (!finalized_ || published_ || !state_->video.validateBeforePublish) return Errc::InvalidState;
         if (const Status status = state_->sink->validate_output(expected); !status.ok()) return status;
-        if (state_->cancel.load(std::memory_order_acquire)) return Errc::Cancelled;
+        if (cancelled_before_publication()) return Errc::Cancelled;
         if (const Status status = fileio::commit_file(state_->staged, state_->target); !status.ok()) return status;
         published_ = true;
         return OkStatus;
@@ -162,6 +163,15 @@ private:
         if (boundCancel_ && boundCancel_->load(std::memory_order_acquire))
             state_->cancel.store(true, std::memory_order_release);
         if (boundBeat_) boundBeat_->store(state_->beat.load(std::memory_order_acquire), std::memory_order_release);
+    }
+    bool cancelled_before_publication() noexcept {
+        // Native finish/validation may return immediately after the Engine
+        // watchdog cancelled this session, before the polling monitor wakes.
+        // The borrowed flag is valid throughout Binding; refresh it now,
+        // while it is still bound, rather than after committing the file.
+        std::lock_guard lock(bindMutex_);
+        sync_bindings();
+        return state_->cancel.load(std::memory_order_acquire);
     }
     void monitor() noexcept {
         std::unique_lock lock(bindMutex_);

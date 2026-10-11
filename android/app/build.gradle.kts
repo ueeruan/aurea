@@ -302,7 +302,7 @@ val stageNativeExportLicenses = tasks.register<Sync>("stageNativeExportLicenses"
     from(nativeExportLicensePrefix)
     into(nativeExportAssets.map { it.dir("licenses/native-export") })
 }
-android.sourceSets.getByName("main").assets.srcDir(nativeExportAssets)
+android.sourceSets.getByName("main").assets.srcDir(nativeExportAssets.get().asFile)
 tasks.configureEach {
     if (name.startsWith("configureCMake") || name.startsWith("buildCMake")) dependsOn(ffmpegPrepareTasks)
     if (name.startsWith("merge") && name.endsWith("Assets")) dependsOn(stageNativeExportLicenses)

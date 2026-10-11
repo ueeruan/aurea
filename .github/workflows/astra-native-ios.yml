@@ -1,0 +1,89 @@
+name: Astra native iOS offline export
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/astra-export-20261011']
+    paths:
+      - '.github/workflows/astra-native-ios.yml'
+      - 'engine/src/export/**'
+      - 'engine/tests/test_export.cpp'
+      - 'engine/tests/test_offline_audio.cpp'
+      - 'engine/tests/test_ffmpeg_export.cpp'
+      - 'engine/platform/ios/CMakeLists.txt'
+      - 'engine/platform/ios/verify/export/**'
+      - 'tools/build_ffmpeg.py'
+      - 'tools/run_ios_offline_composition_probe.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: astra-native-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-offline-export:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/build/ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          test -n "$XC"
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
+      - name: Install native build tools
+        run: brew install cmake ninja shaderc ccache
+      - name: Identify native export SDK
+        id: sdk
+        run: |
+          echo "version=$(xcrun --sdk iphonesimulator --show-sdk-version)" >> "$GITHUB_OUTPUT"
+          echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: dependencies
+        with:
+          path: |
+            build/ffmpeg/ios-simulator/${{ steps.sdk.outputs.arch }}
+            build/astra-ffmpeg/downloads
+          key: aurea-ffmpeg-ios-simulator-${{ steps.sdk.outputs.arch }}-sdk${{ steps.sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'engine/cmake/AureaFFmpeg.cmake') }}
+      - name: Build pinned native FFmpeg and AVC/HEVC software fallback
+        run: |
+          mkdir -p build/reference/astra-ios-offline
+          set -o pipefail
+          python3 tools/build_ffmpeg.py --platform ios-simulator --arch "$(uname -m)" --jobs 3 \
+            2>&1 | tee build/reference/astra-ios-offline/dependency-build.log
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/ccache
+          key: astra-ios-native-cxx-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            astra-ios-native-cxx-${{ runner.os }}-
+            ios-simulator-${{ runner.os }}-
+      - name: Build host Metal shader translator
+        run: |
+          cmake -S engine/tools/metal-shaders -B build/metal-tools -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/metal-tools --parallel 3
+          echo "AUREA_METAL_COMPILER=$GITHUB_WORKSPACE/build/metal-tools/aurea-metal-compiler" >> "$GITHUB_ENV"
+      - name: Execute Engine and offscreen Metal through native export
+        run: |
+          python3 tools/run_ios_offline_composition_probe.py \
+            --ffmpeg-root "build/ffmpeg/ios-simulator/$(uname -m)" \
+            --arch "$(uname -m)" --ios-min 16.0 --jobs 3 \
+            --output build/reference/astra-ios-offline
+      - name: Preserve every exported movie and raw native validation result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: astra-ios-offline-native-exports
+          path: build/reference/astra-ios-offline/
+          if-no-files-found: ignore
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: build/ccache
+          key: astra-ios-native-cxx-${{ runner.os }}-${{ github.run_id }}

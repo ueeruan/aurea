@@ -15,11 +15,14 @@
 // =============================================================================
 #include "TestFramework.hpp"
 
-#if defined(AUREA_TEST_VULKAN)
+#if defined(AUREA_TEST_VULKAN) || defined(AUREA_TEST_METAL)
 
 #include "SyntheticVideo.hpp"
 #include "MockBackend.hpp"
-#if defined(AUREA_TEST_GLES)
+#if defined(AUREA_TEST_METAL)
+#include "MetalBackend.hpp"
+namespace aurea { namespace vk = mtl; }
+#elif defined(AUREA_TEST_GLES)
 #include "GlesBackend.hpp"
 namespace aurea { namespace vk = gles; }
 #else
@@ -108,10 +111,13 @@ struct BenchCapture {
     // da plataforma — a chamada não volta e ninguém bate o coração.
     i64 hangWriteAt = -1;                ///< n-ésima chamada de write_video que trava
     bool hangFinish = false;             ///< o finish trava
+    bool hangValidation = false;         ///< decode de validacao retorna depois do watchdog
     std::atomic<bool>* hangEntered = nullptr;
     std::atomic<bool>* hangRelease = nullptr;   ///< solta a chamada presa (fim do teste)
     std::atomic<bool>* hangReturned = nullptr;
+    std::atomic<bool>* hangCancelled = nullptr;
     u32 beatingWriteMs = 0;              ///< a 1ª escrita demora isto BATENDO (encoder lento, vivo)
+    u32 heartbeatPulses = 0;
     std::atomic<u64>* beat = nullptr;    ///< o que o motor entregou em set_heartbeat
     u32 writes = 0;
 };
@@ -134,17 +140,21 @@ class BenchSink final : public ExportSink {
 public:
     explicit BenchSink(BenchCapture* c) : c_(c) {}
     void set_heartbeat(std::atomic<u64>* beatNs) noexcept override { c_->beat = beatNs; }
+    void set_cancel_flag(const std::atomic<bool>* flag) noexcept override { cancellation_ = flag; }
     /// Preso na "plataforma": não bate, só volta quando o teste soltar. Ao
     /// voltar não toca em mais nada da captura (o motor já desistiu dele).
-    Status hang() noexcept {
+    Status hang(Status result = Status{Errc::Timeout}) noexcept {
         if (c_->hangEntered) c_->hangEntered->store(true, std::memory_order_release);
         std::atomic<bool>* release = c_->hangRelease;
         std::atomic<bool>* returned = c_->hangReturned;
+        std::atomic<bool>* cancelled = c_->hangCancelled;
+        const std::atomic<bool>* cancellation = cancellation_;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
         while (!(release && release->load(std::memory_order_acquire)) && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (cancelled) cancelled->store(cancellation && cancellation->load(std::memory_order_acquire), std::memory_order_release);
         if (returned) returned->store(true, std::memory_order_release);
-        return Errc::Timeout;
+        return result;
     }
     ~BenchSink() override {
         // Stable test storage models the end of a platform-owned diagnostic
@@ -189,7 +199,7 @@ public:
             // Lento mas vivo: o laço do encoder volta da plataforma e bate.
             const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(c_->beatingWriteMs);
             while (std::chrono::steady_clock::now() < until) {
-                if (c_->beat) c_->beat->store(monotonic_ns(), std::memory_order_release);
+                if (c_->beat) { c_->beat->store(monotonic_ns(), std::memory_order_release); ++c_->heartbeatPulses; }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
         }
@@ -227,6 +237,7 @@ public:
     // This host test validates uncompressed planes, not a native MP4. Native
     // codec/reader validation is exercised separately on Android and iOS.
     Status validate_output(const ExportOutputValidation& expected) noexcept override {
+        if (c_->hangValidation) return hang(OkStatus);
         if (!c_->validateCapturedPlanes) return Errc::NotSupported;
         return c_->finished && c_->hashes.size() == expected.frames &&
             c_->video.width == expected.width && c_->video.height == expected.height &&
@@ -245,6 +256,7 @@ public:
     }
 private:
     BenchCapture* c_;
+    const std::atomic<bool>* cancellation_ = nullptr; // bound per sink, never shared with a retry
     std::string outputPath_;
 };
 
@@ -1030,10 +1042,11 @@ AUREA_TEST(OfflineExportGpu, SerialAndQueuedPlanesAudioMatchWithEffectsAnd3DMoti
 AUREA_TEST(OfflineNativeGpu, CompositionFramesAndStereoReachRealNativeMp4) {
     AUREA_CHECK(gpu_ok()); if (!gpu_ok()) return;
     std::filesystem::create_directories("build/reference/astra-composition");
-    for (bool scene3D : {false, true}) {
-        SyntheticConfig cfg; cfg.width = 320; cfg.height = 192;
-        cfg.pattern = SyntheticPattern::MovingSquare; cfg.audioRate = 44100; cfg.audioSeconds = 1;
-        const i64 frames = scene3D ? 12 : 30;
+    for (u32 scenario = 0; scenario < 3; ++scenario) {
+        const bool scene3D = scenario == 1, longComposition = scenario == 2;
+        SyntheticConfig cfg; cfg.width = longComposition ? 192 : 320; cfg.height = longComposition ? 96 : 192;
+        cfg.pattern = SyntheticPattern::MovingSquare; cfg.audioRate = 44100; cfg.audioSeconds = longComposition ? 120 : 1;
+        const i64 frames = longComposition ? 3600 : scene3D ? 12 : 30;
         Rig r(cfg, 30, frames, 3, nullptr, nullptr, 0, false, "sintetico",
               ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 30000,
               &make_ffmpeg_export_sink);
@@ -1047,14 +1060,15 @@ AUREA_TEST(OfflineNativeGpu, CompositionFramesAndStereoReachRealNativeMp4) {
             AUREA_CHECK(r.add_effect(r.video_layer(), effect_keys::kGaussianBlur) != nullptr);
             AUREA_CHECK(r.add_effect(r.video_layer(), effect_keys::kGlow) != nullptr);
             auto& track = r.comp()->layer(r.video_layer())->tracks.get_or_create(TrackProperty::PositionX);
-            AUREA_CHECK(track.set(FrameIndex{0}, 130.f, Interpolation::Linear) != kInvalidIndex);
-            AUREA_CHECK(track.set(FrameIndex{frames - 1}, 180.f, Interpolation::Linear) != kInvalidIndex);
+            AUREA_CHECK(track.set(FrameIndex{0}, longComposition ? 50.f : 130.f, Interpolation::Linear) != kInvalidIndex);
+            AUREA_CHECK(track.set(FrameIndex{frames - 1}, longComposition ? 100.f : 180.f, Interpolation::Linear) != kInvalidIndex);
         }
-        const std::string movie = scene3D ? "build/reference/astra-composition/offline-3d-blur.mp4"
-                                         : "build/reference/astra-composition/offline-2d-stereo.mp4";
-        ExportSettings settings; settings.height = 192; settings.fps = 30; settings.dither = false;
+        const std::string movie = longComposition ? "build/reference/astra-composition/offline-long-120s.mp4"
+                                : scene3D ? "build/reference/astra-composition/offline-3d-blur.mp4"
+                                          : "build/reference/astra-composition/offline-2d-stereo.mp4";
+        ExportSettings settings; settings.height = cfg.height; settings.fps = 30; settings.dither = false;
         AUREA_CHECK(r.e.start_export(settings, movie.c_str()).ok());
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(5);
         while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         const auto progress = r.e.export_progress();
@@ -1064,7 +1078,7 @@ AUREA_TEST(OfflineNativeGpu, CompositionFramesAndStereoReachRealNativeMp4) {
         AUREA_CHECK((progress.flags & (1u << 3)) == 0);
         AUREA_CHECK(fileio::exists(movie.c_str()));
         if (progress.finished && progress.result == Errc::Ok) {
-            const auto decoded = verify_native_export(movie.c_str(), static_cast<u32>(frames), 320, 192, 30, true);
+            const auto decoded = verify_native_export(movie.c_str(), static_cast<u32>(frames), cfg.width, cfg.height, 30, true);
             AUREA_CHECK(decoded.ok);
             AUREA_CHECK_EQ(decoded.pictures, static_cast<u32>(frames));
             AUREA_CHECK(decoded.contrastingFrames > 0 && decoded.distinctFrameHashes > 1);

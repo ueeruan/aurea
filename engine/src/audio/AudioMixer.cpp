@@ -193,6 +193,7 @@ struct Flatten {
     std::vector<AudioClip>& out;
     /// Só esta camada (análise visual): ignora mudo e solo na raiz.
     u64 only = 0;
+    const ExportNestedAudioSource* exportNested = nullptr;
 
     /// Acrescenta os sons de `comp`. `shift`: amostra da raiz − amostra de
     /// `comp`. [lo, hi): janela visível na raiz (a pré-comp corta o que passa
@@ -224,26 +225,35 @@ struct Flatten {
             std::vector<FxStage> own;
             bool reverse = false;
             layer_stages(l, fps, shift, own, reverse);
+            u64 nestedAsset = 0;
+            i64 nestedLength = 0;
             if (l.kind == LayerKind::Composition && !tone) {
-                const Composition* child = project.timeline().composition(l.nested.composition);
-                if (!child || child == &comp) return;
-                const f64 cfps = child->fps() > 0.0 ? child->fps() : 30.0;
-                // Instante 0 da filha toca em ls − offset (offset na régua da filha).
-                const i64 childShift = shift + ls - frame_to_sample(l.offset.value, cfps);
-                // Os efeitos de áudio da pré-comp valem para o som de dentro:
-                // entram DEPOIS dos de cada camada filha (o Reverso da pré-comp
-                // não se aplica — cada filha tem a sua régua de fonte).
-                std::vector<FxStage> chain;
-                for (FxStage& s : own) if (s.kind != FxKind::Backwards) chain.push_back(std::move(s));
-                chain.insert(chain.end(), inherited.begin(), inherited.end());
-                add(*child, childShift, std::max(lo, ls + shift), std::min(hi, le + shift),
-                    gain * l.gain * volume, depth + 1, chain, key);
-                return;
+                if (exportNested) {
+                    if (!exportNested->resolve ||
+                        !exportNested->resolve(exportNested->user, l, nestedAsset, nestedLength) ||
+                        !nestedAsset || nestedLength <= 0) return;
+                } else {
+                    const Composition* child = project.timeline().composition(l.nested.composition);
+                    if (!child || child == &comp) return;
+                    const f64 cfps = child->fps() > 0.0 ? child->fps() : 30.0;
+                    // Instante 0 da filha toca em ls − offset (offset na régua da filha).
+                    const i64 childShift = shift + ls - frame_to_sample(l.offset.value, cfps);
+                    // Os efeitos de áudio da pré-comp valem para o som de dentro:
+                    // entram DEPOIS dos de cada camada filha (o Reverso da pré-comp
+                    // não se aplica — cada filha tem a sua régua de fonte).
+                    std::vector<FxStage> chain;
+                    for (FxStage& s : own) if (s.kind != FxKind::Backwards) chain.push_back(std::move(s));
+                    chain.insert(chain.end(), inherited.begin(), inherited.end());
+                    add(*child, childShift, std::max(lo, ls + shift), std::min(hi, le + shift),
+                        gain * l.gain * volume, depth + 1, chain, key);
+                    return;
+                }
             }
-            if (!has_sound(l, project) && !tone) return;
+            if (!nestedAsset && !has_sound(l, project) && !tone) return;
             AudioClip c;
-            const Asset* a = tone ? nullptr : project.asset(l.source);
-            if (a && a->has_audio()) {
+            const Asset* a = tone || nestedAsset ? nullptr : project.asset(l.source);
+            if (nestedAsset) c.asset = nestedAsset;
+            else if (a && a->has_audio()) {
                 c.asset = l.source.pack();
                 if (cache) cache->register_asset(c.asset, AudioAssetRef{resolve ? resolve(ctx, a->sourcePath) : a->sourcePath,
                                                                         asset_length(*a)});
@@ -286,7 +296,7 @@ struct Flatten {
                 c.sends.push_back(AudioSend{kind,f(0,0,100)/100,f(1,kind==1?.1f:10.f,kind==1?10.f:500.f)/1000,
                     kind == 1 ? f(2,.01f,5) : .3f, f(kind == 1 ? 3 : 2,0,90)/100});
             }
-            c.sourceLength = a ? asset_length(*a) : 0;
+            c.sourceLength = nestedAsset ? nestedLength : (a ? asset_length(*a) : 0);
             c.gain = gain * l.gain;
             c.pan = std::clamp(l.pan, -1.0f, 1.0f);
             c.envShift = shift;
@@ -367,11 +377,13 @@ inline f32 soft_limit(f32 x) noexcept {
 } // namespace
 
 std::shared_ptr<AudioMixSnapshot> build_snapshot(const Composition& comp, const Project& project, AudioBlockCache* cache,
-                                                 AssetPathResolver resolve, void* resolveCtx) {
+                                                 AssetPathResolver resolve, void* resolveCtx,
+                                                 const ExportNestedAudioSource* exportNested) {
     auto snap = std::make_shared<AudioMixSnapshot>();
     const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
     snap->endSample = frame_to_sample(comp.duration().value, fps);
     Flatten f{project, cache, resolve, resolveCtx, snap->clips};
+    f.exportNested = exportNested;
     // Volume com expressão: avaliado quadro a quadro aqui (sob o lock do modelo).
     const expr::Scope exprScope(project.timeline());
     f.add(comp, 0, 0, snap->endSample, 1.0f, 0, {}, 0);
@@ -413,7 +425,7 @@ f64 clip_source_pos(const AudioClip& c, i64 t) noexcept { return clip_pos(c, t);
 } // namespace detail
 
 void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& blocks, f32* out, MixStats* stats,
-         MixState* state) noexcept {
+         MixState* state, bool limitOutput) noexcept {
     std::fill(out, out + static_cast<usize>(frames) * kMixChannels, 0.0f);
     const i64 stop = start + frames;
     u32 missing = 0;
@@ -579,7 +591,7 @@ void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& block
     }
     f32 peak = 0.0f;
     for (usize i = 0; i < static_cast<usize>(frames) * kMixChannels; ++i) {
-        out[i] = soft_limit(out[i]);
+        if (limitOutput) out[i] = soft_limit(out[i]);
         peak = std::max(peak, std::fabs(out[i]));
     }
     if (stats) {

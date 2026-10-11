@@ -23,6 +23,8 @@ struct Control {
     u32 delayMs = 0;
     std::string staged, payload = "complete";
     const std::atomic<bool>* cancelAddress = nullptr;
+    std::atomic<bool>* cancelOnFinish = nullptr;
+    std::atomic<bool>* cancelOnValidation = nullptr;
 };
 class ControlledSink final : public ExportSink {
 public:
@@ -68,11 +70,13 @@ public:
     }
     Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
     Status validate_output(const ExportOutputValidation&) noexcept override {
+        if (control_->cancelOnValidation) control_->cancelOnValidation->store(true, std::memory_order_release);
         return control_->failValidation ? Status{Errc::DecodeFailed, "unreadable finalized file"} : OkStatus;
     }
     Status finish() noexcept override {
         if (control_->failFinish) return Status{Errc::EncodeFailed, "precise finish failure"};
         std::ofstream complete(control_->staged, std::ios::trunc); complete << control_->payload;
+        if (control_->cancelOnFinish) control_->cancelOnFinish->store(true, std::memory_order_release);
         return complete.good() ? OkStatus : Status{Errc::IoError};
     }
     void abort() noexcept override {
@@ -266,4 +270,33 @@ AUREA_TEST(ExportSinkStartup, FailedAtomicCommitPreservesPreviousOutput) {
     result.sink.reset();
     AUREA_CHECK_EQ(contents(files.target()), std::string("previous complete export"));
     AUREA_CHECK(!std::filesystem::exists(c->staged));
+}
+
+AUREA_TEST(ExportSinkStartup, CancellationAtNativeReturnPreventsBothPublicationPaths) {
+    for (const bool validate : {false, true}) {
+        Files files;
+        { std::ofstream previous(files.target()); previous << "previous complete export"; }
+        std::atomic<bool> cancellation{false};
+        auto control = std::make_shared<Control>();
+        if (validate) control->cancelOnValidation = &cancellation;
+        else control->cancelOnFinish = &cancellation;
+        VideoStreamConfig video; video.validateBeforePublish = validate;
+        // Deliberately slow the monitor. Publication must read the caller's
+        // cancellation synchronously when the native method returns.
+        auto opened = open_export_sink_startup(std::make_unique<ControlledSink>(control),
+            files.target().c_str(), video, nullptr, &cancellation, nullptr,
+            {10'000'000'000, 10'000'000'000, 5'000'000'000});
+        AUREA_CHECK(opened.status().ok());
+        if (!opened.sink) continue;
+        const Status finalized = opened.sink->finish();
+        if (validate) {
+            AUREA_CHECK(finalized.ok());
+            AUREA_CHECK(opened.sink->validate_output({320, 180, 30, 30, false}).code() == Errc::Cancelled);
+        } else AUREA_CHECK(finalized.code() == Errc::Cancelled);
+        AUREA_CHECK(cancellation.load());
+        AUREA_CHECK_EQ(contents(files.target()), std::string("previous complete export"));
+        opened.sink.reset();
+        AUREA_CHECK(!std::filesystem::exists(control->staged));
+        AUREA_CHECK_EQ(contents(files.target()), std::string("previous complete export"));
+    }
 }

@@ -8,9 +8,11 @@ exports; raw inspection data is retained exclusively under build/reference/.
 from __future__ import annotations
 
 import argparse
+import array
 from fractions import Fraction
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -29,6 +31,7 @@ def main() -> int:
     parser.add_argument("--width", type=int, required=True)
     parser.add_argument("--height", type=int, required=True)
     parser.add_argument("--audio", action="store_true")
+    parser.add_argument("--expected-tones", help="Known stereo frequencies after source time mapping, left,right in Hz")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
     parser.add_argument("--output", type=Path, default=Path("build/reference/astra-validation"))
@@ -40,6 +43,14 @@ def main() -> int:
         parser.error("Raw validation files must remain under build/reference/")
     if args.frames <= 0 or args.fps <= 0 or args.width <= 0 or args.height <= 0:
         parser.error("Expected frame count, fps and dimensions must be positive")
+    expected_tones = None
+    if args.expected_tones:
+        try:
+            expected_tones = [float(value) for value in args.expected_tones.split(",")]
+            if not args.audio or len(expected_tones) != 2 or any(not 0 < value < 24000 for value in expected_tones):
+                raise ValueError()
+        except ValueError:
+            parser.error("--expected-tones requires --audio and two positive stereo frequencies below Nyquist")
     destination.mkdir(parents=True, exist_ok=True)
     movie = args.file.resolve()
     stem = movie.stem
@@ -133,6 +144,33 @@ def main() -> int:
             # the native regression tests, where the source is known.
             result["decodedAudioSamples"] = audio_samples
             checks.append("all decoded audio continuity/boundaries")
+            if expected_tones:
+                raw = subprocess.run([args.ffmpeg, "-hide_banner", "-v", "error", "-xerror",
+                    "-i", str(movie), "-map", "0:a:0", "-ac", "2", "-ar", "48000",
+                    "-f", "f32le", "-"], capture_output=True, check=True).stdout
+                (destination / f"{stem}-stereo.f32le").write_bytes(raw)
+                values = array.array("f"); values.frombytes(raw)
+                if sys.byteorder != "little": values.byteswap()
+                begin = int(float(duration) * .25 * 48000)
+                end = int(float(duration) * .75 * 48000)
+                if end <= begin or len(values) < end * 2:
+                    raise ValueError("Decoded PCM does not cover the known source-clock interval")
+                measurements = []
+                for channel, frequency in enumerate(expected_tones):
+                    sine = cosine = power = 0.0
+                    for sample in range(begin, end):
+                        value = values[sample * 2 + channel]
+                        phase = 2 * math.pi * frequency * sample / 48000
+                        sine += value * math.sin(phase); cosine += value * math.cos(phase)
+                        power += value * value
+                    correlation = math.sqrt(2 * (sine * sine + cosine * cosine) / ((end - begin) * power)) if power else 0
+                    phase_error = math.atan2(cosine, sine)
+                    measurements.append({"channel": channel, "expectedHz": frequency,
+                        "correlation": correlation, "phaseRadians": phase_error})
+                    if correlation < .97 or abs(phase_error) > .35:
+                        raise ValueError(f"Stereo channel {channel} does not follow the source clock: {measurements[-1]}")
+                result["sourceClockToneMeasurements"] = measurements
+                checks.append("known stereo frequency/phase against absolute video clock")
 
         hashes = destination / f"{stem}-framemd5.txt"
         with hashes.open("w", encoding="utf-8") as stdout:

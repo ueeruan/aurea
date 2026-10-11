@@ -33,6 +33,7 @@
 #include "aurea/export/ExportSinkStartup.hpp"
 #include "aurea/export/OfflineFrameQueue.hpp"
 #include "aurea/export/OfflineFrameRenderer.hpp"
+#include "aurea/export/OfflineAudioSnapshot.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
@@ -250,6 +251,7 @@ struct Engine::ExportContext {
     // Áudio: o MESMO mixer do preview, com um cache próprio que decodifica
     // na hora (o export não disputa decoder com o preview).
     std::unique_ptr<audio::AudioBlockCache> audioCache;
+    std::unique_ptr<OfflineAudioSnapshot> offlineAudio;
     std::shared_ptr<audio::AudioMixSnapshot> audioSnap;
     /// Estado dos efeitos de áudio (atraso, reverb...) entre os pedaços.
     audio::MixState audioFx;
@@ -341,6 +343,9 @@ struct Engine::ExportContext {
         abandoned = true;
         stop = true;
         hungPhase = static_cast<ExportWorkerPhase>(encoderPhase.load(std::memory_order_relaxed));
+        // Retired native calls must observe cancellation before they can publish
+        // a staging file or decode/mix another block when the platform returns.
+        cancelRequested.store(true, std::memory_order_release);
         return hungPhase == ExportWorkerPhase::AudioMix
             ? Status{Errc::DecodeFailed, "o decoder de audio parou de responder durante a exportacao"}
             : Status{Errc::Timeout, "o encoder do aparelho parou de responder (preso na plataforma)"};
@@ -11603,8 +11608,12 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                 config_.exportExecutionProfile); !plan.ok())
             return Status{plan.code(), "tempo de exportacao fora do limite do scheduler"};
         ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
-        ctx->audioSnap = audio::build_snapshot(*comp, ctx->frozenProject ? *ctx->frozenProject : *project_,
-            ctx->audioCache.get(), &Engine::audio_path_resolver, this);
+        auto offlineAudio = OfflineAudioSnapshot::create(*comp, *ctx->frozenProject,
+            ctx->audioCache.get(), &Engine::audio_path_resolver, this,
+            OfflineAudioSnapshot::kDefaultBlockBudget, &ctx->cancelRequested);
+        if (!offlineAudio.ok()) return offlineAudio.status();
+        ctx->offlineAudio = std::move(*offlineAudio);
+        ctx->audioSnap = ctx->offlineAudio->snapshot();
     }
     // Teto do aparelho (a mesma regra lado maior × lado menor da composição).
     const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
@@ -12125,7 +12134,10 @@ Status Engine::write_export_audio(ExportContext& ctx, i64 untilSample) noexcept 
         // Watchdog: decodificar e mixar é a fase da MÍDIA; entregar ao sink, a
         // do encoder (o motivo se a plataforma prender o worker).
         ctx.enter(ExportWorkerPhase::AudioMix);
-        audio::mix(*ctx.audioSnap, ctx.audioWritten, n, blocks, ctx.audioMix.data(), nullptr, &ctx.audioFx);
+        if (!ctx.offlineAudio) return Errc::InvalidState;
+        const Status mixed = ctx.offlineAudio->mix(ctx.audioWritten, n, blocks, ctx.audioMix.data(),
+            nullptr, &ctx.audioFx, &ctx.cancelRequested, &ctx.encoderBeatNs);
+        if (!mixed.ok()) return mixed;
         ctx.enter(ExportWorkerPhase::AudioWrite);
         // A missing requested block is an actual media failure, not intentional
         // silence before/after a clip (the mixer never asks for those samples).
@@ -12305,6 +12317,7 @@ void Engine::export_thread_main() noexcept {
         // next export (or app shutdown). No encoder can use them after the join.
         // (Abandoned worker: it may still be inside the mixer — nothing is freed.)
         ctx.audioSnap.reset();
+        ctx.offlineAudio.reset();
         ctx.audioFx.clear();
         std::vector<f32>().swap(ctx.audioMix);
         std::vector<i16>().swap(ctx.audioPcm);

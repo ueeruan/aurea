@@ -207,6 +207,29 @@ foreach(_fw Metal MetalKit QuartzCore CoreVideo CoreMedia VideoToolbox
     target_link_libraries(aurea_ios PUBLIC "-framework ${_fw}")
 endforeach()
 
+# Export QA executable: the real shared Engine and offscreen Metal compositor,
+# with no Swift app, UI, display link or interactive surface dependency.
+option(AUREA_BUILD_NATIVE_EXPORT_PROBE "Build native offscreen export validation for an iOS simulator" OFF)
+if(AUREA_BUILD_NATIVE_EXPORT_PROBE)
+    if(NOT AUREA_GPU_METAL OR NOT AUREA_IOS_SIMULATOR)
+        message(FATAL_ERROR "The native export probe requires the Metal iOS simulator backend")
+    endif()
+    add_executable(aurea_ios_composition_export_probe
+        verify/export/CompositionExportProbe.mm
+        "${AUREA_ROOT}/tests/test_export.cpp"
+        "${AUREA_ROOT}/tests/test_offline_audio.cpp"
+        "${AUREA_ROOT}/tests/test_ffmpeg_export.cpp"
+        "${AUREA_ROOT}/tests/test_offline_frame_queue.cpp")
+    target_include_directories(aurea_ios_composition_export_probe PRIVATE "${AUREA_ROOT}/tests")
+    target_compile_definitions(aurea_ios_composition_export_probe PRIVATE
+        AUREA_TEST_METAL=1 AUREA_TEST_DATA_DIR="${AUREA_ROOT}/tests/data")
+    target_compile_options(aurea_ios_composition_export_probe PRIVATE
+        "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
+    target_link_libraries(aurea_ios_composition_export_probe PRIVATE aurea_metal)
+    set_target_properties(aurea_ios_composition_export_probe PROPERTIES
+        MACOSX_BUNDLE FALSE XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED NO)
+endif()
+
 # -----------------------------------------------------------------------------
 # Resumo do que foi configurado (o integrador lê isto no primeiro configure).
 # -----------------------------------------------------------------------------

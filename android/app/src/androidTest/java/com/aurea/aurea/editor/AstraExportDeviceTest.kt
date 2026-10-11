@@ -63,7 +63,7 @@ class AstraExportDeviceTest {
         awaitCondition { val values = DoubleArray(8); engine.queryComposition(values) != 0L && values[3].toInt() == frames }
         return composition
     }
-    private fun animatedShape(frames: Int, width: Int, height: Int) {
+    private fun animatedShape(frames: Int, width: Int, height: Int): Long {
         val shape = engine.addShape(1); assertTrue(shape > 0)
         engine.beginCommandBatch(); val commands = CommandBatch(engine)
         assertTrue(commands.setLayerTimeRange(shape, 0, frames))
@@ -73,6 +73,7 @@ class AstraExportDeviceTest {
         assertTrue(commands.insertKeyframe(shape, TrackProperty.POSITION_X, -1, 0, 0, width * .2f))
         assertTrue(commands.insertKeyframe(shape, TrackProperty.POSITION_X, -1, 0, frames - 1, width * .8f))
         assertEquals(6, engine.submitCommands())
+        return shape
     }
     private fun tone(seconds: Int): File {
         val file = File(folder, "owned-stereo-$seconds.wav")
@@ -270,6 +271,29 @@ class AstraExportDeviceTest {
         scene(3600); animatedShape(3600, 320, 180)
         assertTrue(engine.importAudio(tone(120).absolutePath, "Owned two minute stereo") > 0)
         export("headless-long-120s", 3600, 320, 180, true)
+    }
+    @Test fun nestedAudioFollowsParentSpeedAndTimeRemapWithoutPreview() {
+        val composition = scene(60)
+        val shape = animatedShape(60, 320, 180)
+        val audio = engine.importAudio(tone(2).absolutePath, "Owned nested stereo clock")
+        assertTrue(audio > 0)
+        val nested = engine.precompose(longArrayOf(shape, audio)); assertTrue(nested > 0)
+        engine.beginCommandBatch(); var commands = CommandBatch(engine)
+        assertTrue(commands.setCompositionDuration(composition, 30))
+        assertTrue(commands.setLayerSpeed(nested, 2f))
+        assertTrue(commands.setLayerTimeRange(nested, 0, 30))
+        assertEquals(3, engine.submitCommands())
+        export("headless-nested-speed2x", 30, 320, 180, true)
+        engine.beginCommandBatch(); commands = CommandBatch(engine)
+        assertTrue(commands.setLayerSpeed(nested, 1f)); assertTrue(commands.setLayerTimeRange(nested, 0, 30))
+        assertEquals(2, engine.submitCommands())
+        assertEquals(0, engine.saveProject(File(folder, "owned-nested-remap-prepared.aurea").absolutePath))
+        assertTrue(engine.setTimeRemap(nested, true))
+        assertTrue(engine.setTimeRemapValue(nested, 0, 0f))
+        assertTrue(engine.setTimeRemapValue(nested, 30, 60f))
+        export("headless-nested-remap2x", 30, 320, 180, true)
+        File(folder, "nested-audio-expectation.txt").writeText(
+            "fps=30 frames=30 sourceToneHz=440,880 decodedToneHz=880,1760 sourcePhaseRadians=0,0\n")
     }
     @Test fun oldProjectReadsWithoutRewritingItsBytesAndExportsOffline() {
         val input = InstrumentationRegistry.getArguments().getString("aureaLegacyProject")

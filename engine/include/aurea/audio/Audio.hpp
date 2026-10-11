@@ -50,6 +50,7 @@ struct Asset;
 class VideoSourceFactory;
 class Composition;
 class Project;
+struct Layer;
 
 namespace audio {
 
@@ -313,9 +314,16 @@ struct AudioMixSnapshot {
 /// resolve o caminho guardado para o que o decoder abre. Registra os assets
 /// no cache.
 using AssetPathResolver = std::string (*)(void* ctx, const std::string& stored);
+/// Export-only composition bus. Playback keeps flattening nested compositions
+/// when this optional resolver is absent.
+struct ExportNestedAudioSource {
+    void* user = nullptr;
+    bool (*resolve)(void* user, const Layer& layer, u64& asset, i64& lengthSamples) = nullptr;
+};
 [[nodiscard]] std::shared_ptr<AudioMixSnapshot> build_snapshot(const Composition& comp, const Project& project,
                                                                AudioBlockCache* cache, AssetPathResolver resolve,
-                                                               void* resolveCtx);
+                                                               void* resolveCtx,
+                                                               const ExportNestedAudioSource* exportNested = nullptr);
 /// O som de UMA camada de `comp` (com os efeitos de áudio dela e, se for
 /// pré-composição, o que há dentro): o que a Forma de onda e o Espectro de
 /// áudio analisam. Ignora mudo/solo — a camada escolhida é a fonte.
@@ -370,7 +378,7 @@ private:
 /// mais caro). Faltou bloco: o fluxo daquele clipe é descartado e a próxima
 /// chamada (a repetição do mixer) recomeça do mesmo jeito.
 void mix(const AudioMixSnapshot& snap, i64 start, u32 frames, BlockSource& blocks, f32* outStereo,
-         MixStats* stats = nullptr, MixState* state = nullptr) noexcept;
+         MixStats* stats = nullptr, MixState* state = nullptr, bool limitOutput = true) noexcept;
 
 /// Blocos que o trecho [start, start+frames) vai precisar (para pedir antes).
 void blocks_needed(const AudioMixSnapshot& snap, i64 start, i64 frames,

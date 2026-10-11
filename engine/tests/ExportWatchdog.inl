@@ -11,10 +11,10 @@
 
 namespace {
 
-Outcome run_export_with(Rig& r, const ExportSettings& s, int timeoutS) {
+Outcome run_export_with(Rig& r, const ExportSettings& s, int timeoutS, const char* output = "nao-usado.mp4") {
     Outcome o;
     const auto t0 = std::chrono::steady_clock::now();
-    if (!r.e.start_export(s, "nao-usado.mp4").ok()) return o;
+    if (!r.e.start_export(s, output).ok()) return o;
     for (int i = 0; i < timeoutS * 1000; ++i) {
         if (r.e.export_progress().finished) { o.finished = true; break; }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -34,11 +34,12 @@ void release_hung(std::atomic<bool>& release, std::atomic<bool>& returned) {
 }
 
 struct HungGate {
-    std::atomic<bool> entered{false}, release{false}, returned{false};
+    std::atomic<bool> entered{false}, release{false}, returned{false}, cancelled{false};
     void arm(BenchCapture& c) {
         c.hangEntered = &entered;
         c.hangRelease = &release;
         c.hangReturned = &returned;
+        c.hangCancelled = &cancelled;
     }
 };
 
@@ -113,6 +114,41 @@ AUREA_TEST(ExportWatchdog, HungFinishIsAbandonedAsEncoderStall) {
     release_hung(gate.release, gate.returned);
 }
 
+AUREA_TEST(ExportWatchdog, LateValidationCannotPublishAnAbandonedSession) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend, 300); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    const auto dir = std::filesystem::path("build/reference/astra-watchdog-late-validation") /
+        std::to_string(monotonic_ns());
+    std::filesystem::create_directories(dir);
+    const std::string target = (dir / "video.mp4").string();
+    constexpr char previous[] = "previous complete export";
+    AUREA_CHECK(fileio::write_atomic(target, previous, sizeof(previous)).ok());
+    HungGate gate; gate.arm(r.cap); r.cap.hangValidation = true;
+    ExportSettings settings; settings.height = 36; settings.fps = 30; settings.dither = false;
+    const Outcome timedOut = run_export_with(r, settings, 10, target.c_str());
+    AUREA_CHECK(gate.entered.load()); AUREA_CHECK(timedOut.finished);
+    AUREA_CHECK_EQ(timedOut.p.result, Errc::Timeout);
+    AUREA_CHECK_EQ(timedOut.p.failure, static_cast<u32>(ExportFailure::EncoderStalled));
+    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+    // The platform's fresh decoder now returns success, after the watchdog
+    // already retired the worker. Neither the result nor the target may change.
+    release_hung(gate.release, gate.returned);
+    AUREA_CHECK(gate.returned.load()); AUREA_CHECK(gate.cancelled.load());
+    AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Timeout);
+    AUREA_CHECK_EQ(r.e.export_progress().failure, timedOut.p.failure);
+    AUREA_CHECK_EQ(export_retry_from_flags(r.e.export_progress().flags), export_retry_from_flags(timedOut.p.flags));
+    std::vector<u8> bytes;
+    const bool read = fileio::read_all(target, bytes, 1024);
+    AUREA_CHECK(read);
+    if (read) {
+        AUREA_CHECK_EQ(bytes.size(), sizeof(previous));
+        if (bytes.size() == sizeof(previous))
+            AUREA_CHECK(std::memcmp(bytes.data(), previous, sizeof(previous)) == 0);
+    }
+}
+
 /// Cancelar com o encoder preso na plataforma: o limite cai para 3 s (todo
 /// laço de sink olha o cancelamento a cada volta), mesmo com o prazo padrão de
 /// 45 s — o botão Cancelar nunca fica sem resposta.
@@ -157,7 +193,8 @@ AUREA_TEST(ExportWatchdog, SlowEncoderThatKeepsBeatingIsNotAbandoned) {
     AUREA_CHECK_EQ(o.p.result, Errc::Ok);
     AUREA_CHECK(r.cap.finished && !r.cap.aborted);
     AUREA_CHECK_EQ(r.cap.hashes.size(), usize{3});
-    AUREA_CHECK(r.cap.beat != nullptr);
+    AUREA_CHECK(r.cap.heartbeatPulses > 0);
+    AUREA_CHECK(r.cap.beat == nullptr); // finished sinks release borrowed atomics
 }
 
 /// Nível 2 = o mesmo do 1 no encoder de SOFTWARE, e é a última volta: se ainda

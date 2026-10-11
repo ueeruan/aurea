@@ -198,6 +198,9 @@ enum ParityExportProbe {
             report["phase"] = "legacy-offline-export"
             try writeReport()
             report["legacyOfflineExport"] = try await checkLegacyOfflineExport(engine: engine, documents: documents)
+            report["phase"] = "nested-offline-audio"
+            try writeReport()
+            report["nestedOfflineAudio"] = try await checkNestedOfflineAudio(engine: engine, documents: documents)
             report["passed"] = true
             report["phase"] = "complete"
         } catch {
@@ -613,6 +616,82 @@ enum ParityExportProbe {
     }
 
     @MainActor
+    private static func checkNestedOfflineAudio(engine: AureaEngine, documents: URL) async throws -> [[String: Any]] {
+        engine.pause()
+        guard engine.newProjectWidth(320, height: 180, fps: 30, title: "Owned nested stereo clock"),
+              let composition = engine.composition(),
+              let id = (composition[AureaCompositionId] as? NSNumber)?.uint64Value else {
+            throw Failure(message: "Nested clock project could not be created")
+        }
+        engine.setComposition(id, duration: 60)
+        let shape = engine.addShape(1)
+        guard shape >= 0 else { throw Failure(message: "Nested clock shape could not be created") }
+        engine.setLayer(shape, startFrame: 0, endFrame: 60, offsetFrames: 0, setOffset: true)
+        engine.setScale(forLayer: shape, x: 0.18, y: 0.18, z: 1)
+        engine.setShape(shape, fillR: 0.95, g: 0.1, b: 0.15, a: 1)
+        engine.setPosition(forLayer: shape, x: 64, y: 90, z: 0)
+        engine.insertKeyframe(forLayer: shape, property: 0, time: 0, value: 64)
+        engine.insertKeyframe(forLayer: shape, property: 0, time: 59, value: 256)
+        let tone = documents.appendingPathComponent("astra-nested-stereo.wav")
+        try writeTone(to: tone, seconds: 2)
+        let audio = engine.importAudio(tone.path, name: "Owned nested stereo")
+        guard audio >= 0 else { throw Failure(message: "Nested clock audio could not be imported") }
+        let nested = engine.precomposeLayers([NSNumber(value: shape), NSNumber(value: audio)], name: "Owned nested bus")
+        guard nested >= 0 else { throw Failure(message: "Nested clock bus could not be created") }
+        engine.setComposition(id, duration: 30)
+        var results: [[String: Any]] = []
+        for remap in [false, true] {
+            let name = remap ? "astra-nested-remap2x" : "astra-nested-speed2x"
+            engine.setLayer(nested, speed: remap ? 1 : 2)
+            engine.setLayer(nested, startFrame: 0, endFrame: 30, offsetFrames: 0, setOffset: true)
+            guard engine.saveProject(documents.appendingPathComponent("\(name).aurea").path) else {
+                throw Failure(message: "Nested fixture commands did not drain")
+            }
+            if remap {
+                engine.setTimeRemap(true, forLayer: nested)
+                guard engine.setTimeRemapValue(nested, time: 0, value: 0),
+                      engine.setTimeRemapValue(nested, time: 30, value: 60) else {
+                    throw Failure(message: "Nested source-clock remap could not be set")
+                }
+            }
+            let movie = documents.appendingPathComponent("\(name).mp4")
+            let frame = documents.appendingPathComponent("\(name).png")
+            var running = false
+            do {
+                guard engine.startExport(to: movie.path, codec: .h264, height: 180, fps: 30, bitrateMbps: 4, audioBitrateKbps: 128) else {
+                    throw Failure(message: "Nested offline export could not start")
+                }
+                running = true
+                let deadline = ProcessInfo.processInfo.systemUptime + 180
+                var progress: [String: Any] = [:]
+                while true {
+                    progress = engine.exportProgress()
+                    if (progress[AureaExportFinished] as? NSNumber)?.boolValue == true {
+                        running = false
+                        guard (progress[AureaExportResult] as? NSNumber)?.intValue == 0,
+                              (progress[AureaExportFramesDone] as? NSNumber)?.intValue == 30 else {
+                            throw Failure(message: "Nested offline export failed: \(progress)")
+                        }
+                        break
+                    }
+                    guard ProcessInfo.processInfo.systemUptime < deadline else { throw Failure(message: "Nested export timed out") }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
+                let decoded = try await Task.detached(priority: .utility) {
+                    try await decode(movie: movie, frame: frame, width: 320, height: 180, frames: 30)
+                }.value
+                let pcm = try await Task.detached(priority: .utility) {
+                    try await decodeAudio(movie: movie, expectedTones: [880, 1320])
+                }.value
+                guard decoded.distinctPictures > 1 else { throw Failure(message: "Nested video did not follow its source clock") }
+                results.append(["name": name, "passed": true, "decoded": decoded.dictionary,
+                                "decodedAudio": pcm.dictionary, "exportProgress": progress])
+            } catch { if running { engine.cancelExport() }; throw error }
+        }
+        return results
+    }
+
+    @MainActor
     private static func checkAudioFailureRecovery(engine: AureaEngine, documents: URL) async throws -> [String: Any] {
         let token = UUID().uuidString
         let tone = documents.appendingPathComponent("audio-failure-\(token).wav")
@@ -708,15 +787,20 @@ enum ParityExportProbe {
         var peak = 0.0
         var firstTime = Double.nan
         var endTime = 0.0
+        var toneHz: [Double] = []
+        var toneCorrelations: [Double] = []
+        var tonePhases: [Double] = []
         var rms: Double { frames > 0 ? sqrt(squaredSum / Double(frames * 2)) : 0 }
         var dictionary: [String: Any] {
             ["codec": "aac", "sampleRate": 48000, "channels": 2, "frames": frames,
              "buffers": buffers, "firstTimestampSeconds": firstTime,
-             "endTimestampSeconds": endTime, "rms": rms, "peak": peak]
+             "endTimestampSeconds": endTime, "rms": rms, "peak": peak,
+             "sourceClockToneHz": toneHz, "sourceClockCorrelations": toneCorrelations,
+             "sourceClockPhaseRadians": tonePhases]
         }
     }
 
-    private static func decodeAudio(movie: URL, seconds: Int = 1) async throws -> DecodedAudio {
+    private static func decodeAudio(movie: URL, seconds: Int = 1, expectedTones: [Double]? = nil) async throws -> DecodedAudio {
         let asset = AVURLAsset(url: movie)
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard tracks.count == 1, let track = tracks.first else {
@@ -740,6 +824,8 @@ enum ParityExportProbe {
         }
         defer { if reader.status == .reading { reader.cancelReading() } }
         var result = DecodedAudio()
+        var toneSine = [Double](repeating: 0, count: 2), toneCosine = toneSine, tonePower = toneSine
+        var toneSamples = 0
         while let sample = output.copyNextSampleBuffer() {
             try Task.checkCancellation()
             guard result.buffers < 200 * seconds, let format = CMSampleBufferGetFormatDescription(sample),
@@ -765,6 +851,21 @@ enum ParityExportProbe {
             }
             if result.buffers == 0 { result.firstTime = time }
             result.endTime = time + Double(frames) / 48000
+            if let frequencies = expectedTones {
+                guard frequencies.count == 2 else { throw Failure(message: "Known source clock requires stereo tone frequencies") }
+                for sampleFrame in 0..<frames {
+                    let clock = time + Double(sampleFrame) / 48000
+                    if clock < Double(seconds) * 0.25 || clock >= Double(seconds) * 0.75 { continue }
+                    for channel in 0..<2 {
+                        let value = Double(values[sampleFrame * 2 + channel])
+                        let phase = 2 * Double.pi * frequencies[channel] * clock
+                        toneSine[channel] += value * sin(phase)
+                        toneCosine[channel] += value * cos(phase)
+                        tonePower[channel] += value * value
+                    }
+                    toneSamples += 1
+                }
+            }
             for value in values {
                 guard value.isFinite else { throw Failure(message: "Decoded AAC contains nonfinite samples") }
                 let amplitude = Double(value)
@@ -775,6 +876,18 @@ enum ParityExportProbe {
         }
         guard reader.status == .completed else {
             throw Failure(message: reader.error?.localizedDescription ?? "Audio reader did not finish")
+        }
+        if let frequencies = expectedTones {
+            guard toneSamples > 0 else { throw Failure(message: "Decoded nested audio misses its known source-clock interval") }
+            result.toneHz = frequencies
+            for channel in 0..<2 {
+                let correlation = tonePower[channel] > 0 ? sqrt(2 * (toneSine[channel] * toneSine[channel] + toneCosine[channel] * toneCosine[channel]) / (Double(toneSamples) * tonePower[channel])) : 0
+                let phase = atan2(toneCosine[channel], toneSine[channel])
+                guard correlation > 0.97, abs(phase) < 0.35 else {
+                    throw Failure(message: "Nested channel \(channel) misses its video source clock: correlation \(correlation), phase \(phase)")
+                }
+                result.toneCorrelations.append(correlation); result.tonePhases.append(phase)
+            }
         }
         // AAC packets may expose codec priming/padding around the one-second edit.
         guard abs(result.frames - 48000 * seconds) <= 2048, abs(result.firstTime) < 0.05,

@@ -278,6 +278,8 @@ public:
         u32 barriers = 0;
         u64 transientBytes = 0;      ///< soma das físicas distintas
         u64 segmentEstimatedPeakBytes = 0; ///< logical live peak, not driver residency
+        u64 segmentBaselinePeakBytes = 0;
+        u64 segmentGreedyPeakBytes = 0;
         u32 segmentReorderedPasses = 0;
     };
     [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
@@ -363,6 +365,7 @@ private:
     void add_access(u32 pass, FGTexture t, Access a) noexcept;
     [[nodiscard]] bool sort_passes() noexcept;
     [[nodiscard]] bool order_segments_by_memory() noexcept;
+    [[nodiscard]] u64 estimate_order_peak() noexcept;
     void cull() noexcept;
     [[nodiscard]] Status prepare_plan(bool memoryAware = false) noexcept;
     void plan_lifetime_events() noexcept;
@@ -402,6 +405,8 @@ private:
     std::vector<u32> memoryRemaining_;
     std::vector<u32> memorySeen_;
     std::vector<u8> memoryResident_;
+    std::vector<u32> memoryBaselineOrder_;
+    std::vector<u64> memoryBornBytes_, memoryFreedBytes_;
 
     Stats stats_{};
     bool segmentPlan_ = false;

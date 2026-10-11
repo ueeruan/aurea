@@ -226,10 +226,20 @@ struct ShellBarButton: View {
             .mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph))
             .frame(width: width, height: height)
             .contentShape(Rectangle())
-            .onTapGesture { if enabled { action() } }
-            .onLongPressGesture(minimumDuration: 0.45) { if enabled { onLongPress?() } }
+            .gesture(LongPressGesture(minimumDuration: 0.45)
+                .exclusively(before: TapGesture())
+                .onEnded { value in
+                    guard enabled else { return }
+                    switch value {
+                    case .first(let held): if held { onLongPress?() }
+                    case .second: action()
+                    }
+                })
             .accessibilityLabel(description)
             .accessibilityAddTraits(.isButton)
+            // Accessibility activation is the primary tap command. Holding
+            // remains a separate physical gesture and cannot replace it.
+            .accessibilityAction(.default) { if enabled { action() } }
     }
 }
 

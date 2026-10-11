@@ -1,5 +1,44 @@
 // Ordering/alias ownership checks use the recording backend. Native full-pixel
 // equality and physical fence retirement are covered separately by GPU tests.
+AUREA_TEST(FrameGraphSegments, MemoryOrderNeverExpandsAnAlreadyStreamedMrtBranch) {
+    GraphFixture f;
+    const auto target = f.backend.create_texture(rt(64, 32));
+    AUREA_CHECK(target.ok()); if (!target) return;
+    const auto output = f.graph.import_texture("backdrop", *target, rt(64, 32));
+    const auto primary = f.graph.create_texture("costly scene", rt(512, 256));
+    const auto secondary = f.graph.create_texture("scene HDR", rt(512, 256));
+    auto depthDesc = rt(512, 256); depthDesc.format = SurfaceFormat::Depth32F;
+    const auto depth = f.graph.create_texture("scene depth", depthDesc);
+    const auto scene = f.graph.add_raster_pass_depth("scene MRT", PassStage::Scene3D,
+        primary, LoadOp::Clear, {}, depth, LoadOp::Clear, false, 1.f, {});
+    f.graph.set_color1(scene, secondary);
+    const auto consumeScene = f.graph.add_raster_pass("consume scene first", PassStage::Composite,
+        output, LoadOp::Clear, {}, {});
+    f.graph.read(consumeScene, primary);
+    for (u32 i = 0; i < 6; ++i) {
+        const auto source = f.graph.create_texture("later independent source", rt(256 + 32 * i, 128 + 16 * i));
+        f.graph.add_raster_pass("cheap later producer", PassStage::Effects, source, LoadOp::Clear, {}, {});
+        const auto consumer = f.graph.add_raster_pass("backdrop consumer", PassStage::Composite,
+            output, LoadOp::Load, {}, {});
+        f.graph.read(consumer, source);
+    }
+    // A later real reader preserves HDR across arbitrary small-source stages.
+    const auto last = f.graph.add_raster_pass("HDR future reader", PassStage::Composite,
+        output, LoadOp::Load, {}, {});
+    f.graph.read(last, secondary);
+    f.graph.set_output(output, ResourceState::ShaderRead);
+    AUREA_CHECK(f.graph.prepare_segments().ok());
+    const u64 scenePeak = 2 * rt(512, 256).estimated_bytes() + depthDesc.estimated_bytes();
+    AUREA_CHECK_EQ(f.graph.stats().segmentBaselinePeakBytes, scenePeak);
+    AUREA_CHECK(f.graph.stats().segmentGreedyPeakBytes > scenePeak);
+    AUREA_CHECK_EQ(f.graph.stats().segmentEstimatedPeakBytes, scenePeak);
+    AUREA_CHECK_EQ(f.graph.stats().segmentReorderedPasses, 0u);
+    AUREA_CHECK_EQ(f.graph.order()[0], scene);
+    AUREA_CHECK_EQ(f.graph.order()[1], consumeScene);
+    AUREA_CHECK_EQ(f.graph.order().back(), last);
+    f.backend.destroy_texture(*target);
+}
+
 AUREA_TEST(FrameGraphSegments, MemoryOrderConsumesIndependentSourcesBeforeAllocatingTheNext) {
     GraphFixture f;
     const auto target = f.backend.create_texture(rt(32, 16));

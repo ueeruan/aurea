@@ -775,8 +775,14 @@ import UIKit
     func testVideoPreviewKeepsVisiblePixelsAcrossPlaybackPauseAndSeek() throws {
         _ = try launch("playback-stress")
         let play = app.buttons["transport.play"].firstMatch
-        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        // This fixture starts with repeat enabled. Its label stays the same
+        // while playing/paused; a short tap must never toggle the hold action.
+        let repeatLabel = play.label
+        XCTAssertFalse(repeatLabel.isEmpty)
+        play.tap()
         _ = try awaitSnapshot("Video preview starts on the actual native renderer") { $0.playing != 0 }
+        XCTAssertEqual(play.label, repeatLabel, "A play tap must preserve repeat")
         var frames: Set<Int64> = []
         var records: [String] = []
         for sample in 0..<8 {
@@ -790,6 +796,7 @@ import UIKit
         let pause = app.buttons["transport.play"].firstMatch
         XCTAssertTrue(pause.waitForExistence(timeout: 5)); pause.tap()
         let paused = try awaitSnapshot("Video pauses while keeping the last valid picture") { $0.playing == 0 }
+        XCTAssertEqual(play.label, repeatLabel, "A pause tap must preserve repeat")
         try assertVisibleVideoPreview("Paused video frame")
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         XCTAssertEqual(try snapshot().corePlayhead, paused.corePlayhead)
@@ -809,10 +816,27 @@ import UIKit
             $0.playing == 0 && $0.corePlayhead > 0 && $0.corePlayhead < $0.detail.endFrame
         }
         try assertVisibleVideoPreview("After forward seek")
+        XCTAssertEqual(play.label, repeatLabel, "Seeking must preserve repeat before resuming")
         XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
         _ = try awaitSnapshot("Play can resume after repeated seeks") { $0.playing != 0 }
+        XCTAssertEqual(play.label, repeatLabel, "A resume tap must preserve repeat")
         try assertVisibleVideoPreview("Resumed video frame")
         attach("Native video continuity samples", records.joined(separator: "\n"))
+        // A real hold must still toggle repeat, without also issuing play.
+        play.tap()
+        let heldAt = try awaitSnapshot("Pause before checking the separate hold command") { $0.playing == 0 }
+        XCTAssertEqual(play.label, repeatLabel)
+        play.press(forDuration: 0.8)
+        XCTAssertNotEqual(play.label, repeatLabel, "Holding toggles repeat")
+        let afterHold = try snapshot()
+        XCTAssertEqual(afterHold.playing, 0, "Holding must not also issue the tap command")
+        XCTAssertEqual(afterHold.corePlayhead, heldAt.corePlayhead)
+        play.press(forDuration: 0.8)
+        XCTAssertEqual(play.label, repeatLabel, "Another hold restores repeat")
+        let restoredRepeat = try snapshot()
+        XCTAssertEqual(restoredRepeat.playing, 0)
+        XCTAssertEqual(restoredRepeat.corePlayhead, heldAt.corePlayhead)
+        try assertVisibleVideoPreview("Paused video after independent repeat holds")
     }
 
     private func assertVisibleVideoPreview(_ label: String) throws {

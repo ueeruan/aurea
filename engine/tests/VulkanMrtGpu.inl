@@ -9,7 +9,7 @@ struct MrtWithoutDepthGpu {
     u32 samples;
     TextureHandle scene, display, coc, poisonScene, poisonDisplay;
     TextureHandle color0, color1, output0, output1;
-    PipelineHandle pipeline;
+    PipelineHandle pipeline, partialGeometryPipeline;
     SamplerHandle sampler;
     std::vector<TextureHandle> owned;
     std::vector<u16> scenePixels, displayPixels, scenePoison, displayPoison;
@@ -79,6 +79,17 @@ struct MrtWithoutDepthGpu {
         const auto created = gpu.renderer.shaders().pipeline(key);
         AUREA_CHECK(created.ok()); if (!created.ok()) return false;
         pipeline = *created;
+        if (samples > 1) {
+            // Mesa 25.2.8's left MSAA scissor plane admits two samples in
+            // pixel offset-1 (lp_setup.c:1559 / lp_rast_tri_tmp.h:68). The
+            // unchanged failing scissor control is archived in diagnostic
+            // 4eb8ac0416ee17d60873f479a82fa3768283b3a6. Test Load/Clear with
+            // an actual clipped quad instead; 1x still tests the scissor.
+            key.vertex = ShaderId::composite_layer_vert;
+            const auto partial = gpu.renderer.shaders().pipeline(key);
+            AUREA_CHECK(partial.ok()); if (!partial.ok()) return false;
+            partialGeometryPipeline = *partial;
+        }
         sampler = gpu.renderer.shaders().sampler(CommonSampler::NearestClamp);
         return true;
     }
@@ -92,13 +103,29 @@ struct MrtWithoutDepthGpu {
         const auto pass = graph.add_raster_pass("DOF-two-colors-no-depth", PassStage::Effects,
             a, load, clear, [&, partial](PassContext& pc) {
                 const Vec4 params{1.f / width, 1.f / height, 0.f, 32.f};
-                pc.cmds.bind_pipeline(pipeline);
+                const bool geometry = partial && samples > 1;
+                pc.cmds.bind_pipeline(geometry ? partialGeometryPipeline : pipeline);
                 pc.cmds.bind_texture(0, pc.texture(s), sampler);
                 pc.cmds.bind_texture(1, pc.texture(d), sampler);
                 pc.cmds.bind_texture(2, pc.texture(c), sampler);
                 pc.cmds.set_uniforms(&params, sizeof(params));
-                if (partial) pc.cmds.set_scissor(width / 2, 0, width / 2, height);
-                pc.cmds.draw(3);
+                if (geometry) {
+                    struct QuadPush { Mat4 clipFromLayer; Vec4 region, uvRect, params; } push;
+                    push.clipFromLayer.col[0] = Vec4{2.f / width, 0, 0, 0};
+                    push.clipFromLayer.col[1] = Vec4{0, 2.f / height, 0, 0};
+                    push.clipFromLayer.col[3] = Vec4{-1, -1, 0, 1};
+                    push.region = Vec4{width / 2.f, 0, width / 2.f, height};
+                    push.uvRect = Vec4{.5f, 0, .5f, 1};
+                    push.params = Vec4{1, 0, 0, 0};
+                    // uv.x=.5+(x-24+.5)/24*.5=(x+.5)/48. Thus each
+                    // covered pixel samples its ORIGINAL input texel; x<24
+                    // receives no primitive coverage, and remains Load/clear.
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(6);
+                } else {
+                    if (partial) pc.cmds.set_scissor(width / 2, 0, width / 2, height);
+                    pc.cmds.draw(3);
+                }
             });
         graph.set_color1(pass, b);
         graph.read(pass, s); graph.read(pass, d); graph.read(pass, c);
@@ -128,24 +155,38 @@ struct MrtWithoutDepthGpu {
         graph.release(pool); pool.clear();
         return compiled.ok() && waited.ok();
     }
-    bool pixels(const std::vector<u16>& expectDisplay, const std::vector<u16>& expectScene) {
+    bool pixels(const std::vector<u16>& expectDisplay, const std::vector<u16>& expectScene, const char* stage) {
         std::vector<u16> a(expectDisplay.size()), b(expectScene.size());
         const auto read0 = gpu.backend.read_texture(output0, a.data(), width * 8);
         const auto read1 = gpu.backend.read_texture(output1, b.data(), width * 8);
         AUREA_CHECK(read0.ok() && read1.ok());
         if (!read0.ok() || !read1.ok()) return false;
+        u32 mismatches = 0, minX = width, maxX = 0, minY = height, maxY = 0;
         for (usize i = 0; i < a.size(); ++i) {
+            const u32 x = static_cast<u32>(i / 4 % width), y = static_cast<u32>(i / 4 / width);
+            for (u32 output = 0; output < 2; ++output) {
+                const auto actual = output ? b[i] : a[i];
+                const auto expected = output ? expectScene[i] : expectDisplay[i];
+                if (actual == expected) continue;
+                if (mismatches < 8) std::printf("\n    MRT mismatch samples=%u stage=%s output=%u xy=%u,%u channel=%zu actual_half=%u expected_half=%u actual=%.6f expected=%.6f",
+                    samples, stage, output, x, y, i % 4, actual, expected,
+                    half_to_float(actual), half_to_float(expected));
+                ++mismatches; minX = std::min(minX, x); maxX = std::max(maxX, x);
+                minY = std::min(minY, y); maxY = std::max(maxY, y);
+            }
             AUREA_CHECK(std::isfinite(half_to_float(a[i])) && std::isfinite(half_to_float(b[i])));
             AUREA_CHECK_EQ(a[i], expectDisplay[i]); AUREA_CHECK_EQ(b[i], expectScene[i]);
         }
+        std::printf("\n    MRT stage samples=%u stage=%s mismatches=%u bounds=%u,%u..%u,%u full_channels=%zu",
+            samples, stage, mismatches, minX, minY, maxX, maxY, a.size() * 2);
         return a == expectDisplay && b == expectScene;
     }
     bool verify() {
         // Poison both outputs through actual MRT commands. A resolving pass
         // intentionally discards its MSAA storage, so the later Load control
         // first stores both multisampled colors in a pass WITHOUT resolves.
-        if (!draw(true, LoadOp::Clear, false) || !pixels(displayPoison, scenePoison)) return false;
-        if (!draw(false, LoadOp::DontCare, false) || !pixels(displayPixels, scenePixels)) return false;
+        if (!draw(true, LoadOp::Clear, false) || !pixels(displayPoison, scenePoison, "poison-full")) return false;
+        if (!draw(false, LoadOp::DontCare, false) || !pixels(displayPixels, scenePixels, "pattern-full")) return false;
         if (!draw(true, LoadOp::Clear, false, {}, samples == 1)) return false;
         auto expectedDisplay = displayPoison, expectedScene = scenePoison;
         for (u32 y = 0; y < height; ++y) for (u32 x = width / 2; x < width; ++x)
@@ -153,7 +194,7 @@ struct MrtWithoutDepthGpu {
                 const usize i = (y * width + x) * 4 + channel;
                 expectedDisplay[i] = displayPixels[i]; expectedScene[i] = scenePixels[i];
             }
-        if (!draw(false, LoadOp::Load, true) || !pixels(expectedDisplay, expectedScene)) return false;
+        if (!draw(false, LoadOp::Load, true) || !pixels(expectedDisplay, expectedScene, "pattern-partial-load")) return false;
         const Vec4 clear{.25f, .5f, .75f, 1.f};
         expectedDisplay = constant({clear.x, clear.y, clear.z, clear.w}); expectedScene = expectedDisplay;
         for (u32 y = 0; y < height; ++y) for (u32 x = width / 2; x < width; ++x)
@@ -161,14 +202,15 @@ struct MrtWithoutDepthGpu {
                 const usize i = (y * width + x) * 4 + channel;
                 expectedDisplay[i] = displayPixels[i]; expectedScene[i] = scenePixels[i];
             }
-        if (!draw(false, LoadOp::Clear, true, clear) || !pixels(expectedDisplay, expectedScene)) return false;
+        if (!draw(false, LoadOp::Clear, true, clear) || !pixels(expectedDisplay, expectedScene, "pattern-partial-clear")) return false;
         std::vector<u16> original(scenePixels.size());
         AUREA_CHECK(gpu.backend.read_texture(scene, original.data(), width * 8).ok());
         AUREA_CHECK(original == scenePixels);
         AUREA_CHECK(gpu.backend.read_texture(display, original.data(), width * 8).ok());
         AUREA_CHECK(original == displayPixels);
-        std::printf("\n    Vulkan MRT no depth: samples=%u submissions=%u readbacks=10 exact_channels=%zu load/clear/discard=verified validation=%u",
-            samples, submissions, scenePixels.size() * 8, gpu.backend.capabilities().validationEnabled);
+        std::printf("\n    Vulkan MRT no depth: samples=%u submissions=%u readbacks=10 exact_channels=%zu load/clear/discard=verified validation=%u partial=%s",
+            samples, submissions, scenePixels.size() * 8, gpu.backend.capabilities().validationEnabled,
+            samples > 1 ? "geometry" : "scissor");
         return true;
     }
 };

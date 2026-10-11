@@ -474,33 +474,39 @@ void Backend::log_memory_breakdown() noexcept {
     // Failure-only attribution from existing live resource pools. No resource
     // names are retained (many debugName pointers have temporary lifetimes),
     // no allocation registry is added, and this grants no admission credit.
-    u32 suballocatedTextures = 0, suballocatedBuffers = 0;
+    u32 suballocatedTextures = 0, suballocatedBuffers = 0, dedicatedTextures = 0, dedicatedBuffers = 0;
     textures_.for_each([&](u64 handle, const Texture& texture) {
         const auto& a = texture.alloc;
-        if (!a.valid() || a.block == kInvalidIndex) return;
-        ++suballocatedTextures;
-        AUREA_LOG_WARN("GPU live texture: handle=%llu block=%u type=%u offset=%llu allocation=%llu width=%u height=%u format=%u samples=%u mips=%u layers=%u sampled=%u render_target=%u storage=%u transient=%u last_frame=%llu",
+        if (!a.valid()) return;
+        const bool dedicated = a.block == kInvalidIndex;
+        if (dedicated) ++dedicatedTextures; else ++suballocatedTextures;
+        AUREA_LOG_WARN("GPU live texture: handle=%llu block=%u type=%u offset=%llu allocation=%llu width=%u height=%u format=%u samples=%u mips=%u layers=%u sampled=%u render_target=%u storage=%u transient=%u last_frame=%llu dedicated=%u",
             static_cast<unsigned long long>(handle), a.block, a.memoryType,
             static_cast<unsigned long long>(a.offset), static_cast<unsigned long long>(a.size),
             texture.desc.width, texture.desc.height, static_cast<u32>(texture.desc.format),
             texture.desc.sampleCount, texture.desc.mipLevels, texture.desc.layers,
             texture.desc.sampled ? 1u : 0u, texture.desc.renderTarget ? 1u : 0u,
             texture.desc.storage ? 1u : 0u, texture.desc.transient ? 1u : 0u,
-            static_cast<unsigned long long>(texture.lastUsedFrame));
+            static_cast<unsigned long long>(texture.lastUsedFrame), dedicated ? 1u : 0u);
     });
     buffers_.for_each([&](u64 handle, const Buffer& buffer) {
         const auto& a = buffer.alloc;
-        if (!a.valid() || a.block == kInvalidIndex) return;
-        ++suballocatedBuffers;
-        AUREA_LOG_WARN("GPU live buffer: handle=%llu block=%u type=%u offset=%llu allocation=%llu payload=%llu usage=%u access=%u",
+        if (!a.valid()) return;
+        const bool dedicated = a.block == kInvalidIndex;
+        if (dedicated) ++dedicatedBuffers; else ++suballocatedBuffers;
+        AUREA_LOG_WARN("GPU live buffer: handle=%llu block=%u type=%u offset=%llu allocation=%llu payload=%llu usage=%u access=%u dedicated=%u",
             static_cast<unsigned long long>(handle), a.block, a.memoryType,
             static_cast<unsigned long long>(a.offset), static_cast<unsigned long long>(a.size),
             static_cast<unsigned long long>(buffer.desc.bytes), static_cast<u32>(buffer.desc.usage),
-            static_cast<u32>(buffer.desc.access));
+            static_cast<u32>(buffer.desc.access), dedicated ? 1u : 0u);
     });
     AUREA_LOG_WARN("GPU live suballocations: textures=%u buffers=%u", suballocatedTextures, suballocatedBuffers);
+    AUREA_LOG_WARN("GPU live dedicated allocations: textures=%u buffers=%u", dedicatedTextures, dedicatedBuffers);
     for (u32 i = 0; i < framesInFlight_; ++i) {
         const auto& frame = frames_[i];
+        AUREA_LOG_WARN("GPU retirement: slot=%u frame=%llu submitted=%u open=%u deferred=%zu external_acquired=%zu",
+            i, static_cast<unsigned long long>(frame.frameNumber), frame.submitted ? 1u : 0u,
+            &frame == current_ ? 1u : 0u, frame.deferred.size(), frame.externalAcquired.size());
         for (const auto& item : {std::pair<const char*, const HostRing*>{"uniforms", &frame.uniforms},
                                  std::pair<const char*, const HostRing*>{"staging", &frame.staging}}) {
             const auto ring = item.second->stats();
@@ -512,6 +518,9 @@ void Backend::log_memory_breakdown() noexcept {
                 static_cast<unsigned long long>(ring.peakAlignedDemand), ring.chunks);
         }
     }
+    usize immediateDeferred = 0;
+    for (const auto& item : pendingImmediate_) immediateDeferred += item.deferred.size();
+    AUREA_LOG_WARN("GPU immediate retirement: submissions=%zu deferred=%zu", pendingImmediate_.size(), immediateDeferred);
 }
 
 } // namespace aurea::vk

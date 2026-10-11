@@ -153,6 +153,7 @@ private struct HomeBlurOutput {
     private var snapshotTimes: [Double] = []
     private var filterTimes: [Double] = []
     private var captureCounts: [HomeGlassKind: Int] = [:]
+    private var postScrollCaptureCounts: [HomeGlassKind: Int] = [:]
     private var failedSnapshots = 0
     private var debugScrolling = false
     private var debugScrollCompleted = false
@@ -274,6 +275,9 @@ private struct HomeBlurOutput {
         guard !inputs.isEmpty else { return }
         #if DEBUG
         snapshotTimes.append((CACurrentMediaTime() - captureStart) * 1000)
+        // A slow first filter can finish after the scripted scroll even though
+        // its source snapshot preceded it. Readiness belongs to the snapshot.
+        let capturedAfterDebugScroll = debugScrollCompleted
         #endif
         rendering = true
         let capturedGeneration = generation
@@ -290,6 +294,9 @@ private struct HomeBlurOutput {
                     self.glasses[result.input.kind]?.view?.display(result.image, scale: result.input.scale)
                     #if DEBUG
                     self.captureCounts[result.input.kind, default: 0] += 1
+                    if capturedAfterDebugScroll {
+                        self.postScrollCaptureCounts[result.input.kind, default: 0] += 1
+                    }
                     #endif
                 }
                 #if DEBUG
@@ -337,7 +344,9 @@ private struct HomeBlurOutput {
         let present = Set(glasses.compactMap { $0.value.view?.window != nil ? $0.key : nil })
         guard isDebugScene, debugScrollCompleted, !debugWritten,
               outputs.contains(where: { $0.input.kind == .batch }),
-              Set(outputs.map(\.input.kind)).isSuperset(of: present) else { return }
+              Set(outputs.map(\.input.kind)).isSuperset(of: present),
+              present.allSatisfy({ captureCounts[$0, default: 0] >= 2
+                  && postScrollCaptureCounts[$0, default: 0] >= 1 }) else { return }
         let folder = AureaPaths.documents
         var bars: [String: Any] = [:]
         for output in outputs {
@@ -355,6 +364,7 @@ private struct HomeBlurOutput {
             // exceção de ObjC, então isso derrubava o app inteiro. Ver
             // bridge/AureaJSON.h.
             bars[input.kind.rawValue] = ["captureCount": captureCounts[input.kind, default: 0],
+                "postScrollCaptureCount": postScrollCaptureCounts[input.kind, default: 0],
                 "sigmaPoints": Double(input.kind.sigma), "measuredSigmaPixels": output.measuredSigma,
                 "scale": Double(input.scale), "sourceWidth": input.image.width, "sourceHeight": input.image.height]
         }

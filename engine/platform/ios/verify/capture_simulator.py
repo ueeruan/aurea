@@ -384,7 +384,8 @@ def validate_home_backdrop(state, documents, output, record, frame_checker):
             continue
         bar = bars.get(kind, {})
         target_sigma = sigma * bar.get('scale', 0)
-        if (bar.get('captureCount', 0) < 2 or bar.get('sigmaPoints') != sigma
+        if (bar.get('captureCount', 0) < 2 or bar.get('postScrollCaptureCount', 0) < 1
+                or bar.get('sigmaPoints') != sigma
                 or target_sigma <= 0 or abs(bar.get('measuredSigmaPixels', 0) - target_sigma) > target_sigma * 0.05):
             raise RuntimeError(f'{kind} backdrop did not update or its measured Gaussian sigma differs from Android')
         hashes = []

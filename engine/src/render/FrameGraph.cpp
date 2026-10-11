@@ -456,9 +456,11 @@ Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
 Status FrameGraph::prepare_segments() noexcept {
     if (const Status s = prepare_plan(true); !s.ok()) return s;
     segmentPlan_ = true;
-    AUREA_LOG_INFO("FrameGraph recovery: passes=%u reordered=%u logical-live-peak=%llu (driver residency checked separately)",
+    AUREA_LOG_INFO("FrameGraph recovery: passes=%u reordered=%u logical-live-peak=%llu baseline-peak=%llu greedy-peak=%llu (driver residency checked separately)",
         static_cast<u32>(order_.size()), stats_.segmentReorderedPasses,
-        static_cast<unsigned long long>(stats_.segmentEstimatedPeakBytes));
+        static_cast<unsigned long long>(stats_.segmentEstimatedPeakBytes),
+        static_cast<unsigned long long>(stats_.segmentBaselinePeakBytes),
+        static_cast<unsigned long long>(stats_.segmentGreedyPeakBytes));
     return OkStatus;
 }
 
@@ -599,10 +601,48 @@ bool FrameGraph::sort_passes() noexcept {
     return order_.size() == n;
 }
 
+u64 FrameGraph::estimate_order_peak() noexcept {
+    // The same distinct-resource first/last access model as the greedy plan.
+    // Imported attachments are charged by the backend, not counted twice here;
+    // marked transient outputs remain live through the end of the graph.
+    memorySeen_.assign(resources_.size(), kInvalidIndex);
+    memoryRemaining_.assign(resources_.size(), 0);
+    for (u32 pos = 0; pos < order_.size(); ++pos) {
+        const Pass& pass = passes_[order_[pos]];
+        for (u32 k = 0; k < pass.accessCount; ++k) {
+            const u32 r = sortedAccess_[pass.accessBegin + k].resource;
+            if (resources_[r].imported) continue;
+            if (memorySeen_[r] == kInvalidIndex) memorySeen_[r] = pos;
+            memoryRemaining_[r] = pos;
+        }
+    }
+    memoryBornBytes_.assign(order_.size(), 0);
+    memoryFreedBytes_.assign(order_.size(), 0);
+    for (u32 r = 0; r < resources_.size(); ++r) {
+        if (resources_[r].imported || memorySeen_[r] == kInvalidIndex) continue;
+        const u64 bytes = resources_[r].desc.estimated_bytes();
+        auto& born = memoryBornBytes_[memorySeen_[r]];
+        born = add_resource_bytes(born, bytes);
+        if (!resources_[r].isOutput) {
+            auto& freed = memoryFreedBytes_[memoryRemaining_[r]];
+            freed = add_resource_bytes(freed, bytes);
+        }
+    }
+    u64 live = 0, peak = 0;
+    for (u32 pos = 0; pos < order_.size(); ++pos) {
+        live = add_resource_bytes(live, memoryBornBytes_[pos]);
+        peak = std::max(peak, live);
+        live -= std::min(live, memoryFreedBytes_[pos]);
+    }
+    return peak;
+}
+
 bool FrameGraph::order_segments_by_memory() noexcept {
     const u32 n = static_cast<u32>(passes_.size());
     const u32 active = static_cast<u32>(order_.size());
     if (!active) return true;
+    memoryBaselineOrder_.assign(order_.begin(), order_.end());
+    stats_.segmentBaselinePeakBytes = estimate_order_peak();
 
     // Preserve observable callback order. The already valid ordinary order is
     // used rather than declaration order: a producer can be declared later.
@@ -726,7 +766,18 @@ bool FrameGraph::order_segments_by_memory() noexcept {
         for (u32 e = edgeBegin_[p]; e < edgeBegin_[p + 1]; ++e)
             if (--indegree_[succ_[e]] == 0) queue_.push_back(succ_[e]);
     }
-    return order_.size() == active;
+    if (order_.size() != active) return false;
+    stats_.segmentGreedyPeakBytes = stats_.segmentEstimatedPeakBytes;
+    // A locally cheap producer can postpone a costly scene while retaining
+    // all later layers whose backdrop consumers depend on that scene. Never
+    // replace an already streamed valid order with a larger live set. On ties
+    // retain the ordinary order as well; neither plan alters dependency edges.
+    if (stats_.segmentBaselinePeakBytes <= stats_.segmentGreedyPeakBytes) {
+        order_.swap(memoryBaselineOrder_);
+        stats_.segmentEstimatedPeakBytes = stats_.segmentBaselinePeakBytes;
+        stats_.segmentReorderedPasses = 0;
+    }
+    return true;
 }
 
 void FrameGraph::cull() noexcept {

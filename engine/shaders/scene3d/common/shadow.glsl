@@ -40,6 +40,19 @@ vec2 aurea_shadow_vogel(int i, int n, float phi) {
     return r * vec2(cos(t), sin(t));
 }
 
+// Same golden-angle disk, with the per-pixel rotation evaluated once.
+// No indexed constant array: conservative GLES drivers can keep this as a
+// small scalar loop. The old function remains the test A/B reference.
+vec2 aurea_shadow_gold_step(vec2 direction) {
+    const vec2 gold = vec2(-0.7373688221, 0.6754903793);
+    return vec2(gold.x * direction.x - gold.y * direction.y,
+                gold.y * direction.x + gold.x * direction.y);
+}
+
+vec2 aurea_shadow_vogel_rotated(int i, int n, vec2 direction) {
+    return sqrt((float(i) + 0.5) / float(n)) * direction;
+}
+
 // Raio máximo da penumbra em uv: 2·tan do raio angular da luz — a penumbra de
 // um receptor até ~2 larguras do mapa atrás do bloqueador. O ajuste do mapa
 // (SceneRenderer.cpp) deixa essa folga em volta dos projetores, e o valor
@@ -76,6 +89,9 @@ float aurea_shadow(sampler2DShadow cmpMap, sampler2D depthMap, mat4 shadowMatrix
     // (plano inclinado em relação à luz): sem isso o kernel largo se sombreia.
     float slope = params2.z * tanT;
     float phi = aurea_shadow_ign(pixel) * 6.2831853;
+#ifndef AUREA_SHADOW_REFERENCE_VOGEL
+    vec2 rotation = vec2(cos(phi), sin(phi));
+#endif
     float radius = 1.5 * texel;
     int blockers = int(params2.w + 0.5);
     float maxRadius = max(aurea_shadow_max_radius(params2), 2.0 * texel);
@@ -83,9 +99,17 @@ float aurea_shadow(sampler2DShadow cmpMap, sampler2D depthMap, mat4 shadowMatrix
     if (blockers > 0) {
         float search = clamp(params2.x * zr, 2.0 * texel, maxRadius);
         float sum = 0.0, count = 0.0;
+#ifndef AUREA_SHADOW_REFERENCE_VOGEL
+        vec2 direction = rotation;
+#endif
         for (int i = 0; i < 32; ++i) {
             if (i >= blockers) break;
+#ifdef AUREA_SHADOW_REFERENCE_VOGEL
             vec2 o = aurea_shadow_vogel(i, blockers, phi) * search;
+#else
+            vec2 o = aurea_shadow_vogel_rotated(i, blockers, direction) * search;
+            direction = aurea_shadow_gold_step(direction);
+#endif
             float d = textureLod(depthMap, c.xy + o, 0.0).r;
             // Viés de inclinação limitado a poucos texels: um receptor curvo
             // (esfera) não pode esconder o bloqueador de verdade.
@@ -102,9 +126,17 @@ float aurea_shadow(sampler2DShadow cmpMap, sampler2D depthMap, mat4 shadowMatrix
         slopeCap = max(0.5 * (zr - zb), slope * 2.0 * texel);
     }
     float lit = 0.0;
+#ifndef AUREA_SHADOW_REFERENCE_VOGEL
+    vec2 direction = rotation;
+#endif
     for (int i = 0; i < 32; ++i) {
         if (i >= taps) break;
+#ifdef AUREA_SHADOW_REFERENCE_VOGEL
         vec2 o = aurea_shadow_vogel(i, taps, phi) * radius;
+#else
+        vec2 o = aurea_shadow_vogel_rotated(i, taps, direction) * radius;
+        direction = aurea_shadow_gold_step(direction);
+#endif
         // + texel: a pegada do filtro bilinear da comparação.
         float ref = z - bias - min(slope * (length(o) + texel), slopeCap);
         lit += textureLod(cmpMap, vec3(c.xy + o, ref), 0.0);

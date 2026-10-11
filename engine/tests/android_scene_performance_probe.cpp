@@ -6,6 +6,9 @@
 // optionally append animationClip (-1 = bind pose, default = first clip).
 // hdri=1: group HDRI; hdri=2: own-object HDRI (asynchronous preview job).
 // Timings include an explicit GPU wait per frame and are not UI playback FPS.
+// Optional diagnostics: AUREA_PROBE_QUALITY3D=0..4 (default AUTO=0),
+// AUREA_PROBE_PIXEL_FRAMES=1 saves full first/middle/last measured RGBA16F
+// snapshots beside halfPixelDump. Such a pixel round is not performance proof.
 #if defined(AUREA_PROBE_VULKAN)
 #include "VulkanBackend.hpp"
 namespace probe_backend = aurea::vk;
@@ -69,6 +72,26 @@ bool checked(Status status, const char* stage) {
     std::fprintf(stderr, "FAIL stage=%s status=%d detail=%.*s\n", stage, status.raw(),
         static_cast<int>(status.detail().size()), status.detail().data());
     return false;
+}
+struct ProbeOptions {
+    u32 quality3d = 0;
+    bool qualityOverride = false, pixelFrames = false;
+};
+bool parse_probe_options(const char* quality, const char* pixelFrames, ProbeOptions& options) noexcept {
+    options = {};
+    if (quality) {
+        if (std::strlen(quality) != 1 || quality[0] < '0' || quality[0] > '4') {
+            std::fprintf(stderr, "FAIL AUREA_PROBE_QUALITY3D must be exactly 0..4\n"); return false;
+        }
+        options.quality3d = static_cast<u32>(quality[0] - '0'); options.qualityOverride = true;
+    }
+    if (pixelFrames) {
+        if (std::strlen(pixelFrames) != 1 || (pixelFrames[0] != '0' && pixelFrames[0] != '1')) {
+            std::fprintf(stderr, "FAIL AUREA_PROBE_PIXEL_FRAMES must be exactly 0 or 1\n"); return false;
+        }
+        options.pixelFrames = pixelFrames[0] == '1';
+    }
+    return true;
 }
 std::shared_ptr<const scene3d::SceneAsset> make_model(u32 vertices, const char* mode) {
     auto asset = std::make_shared<scene3d::SceneAsset>();
@@ -140,6 +163,8 @@ std::shared_ptr<const scene3d::HdriPixels> make_hdri() {
 
 int main(int argc, char** argv) {
     const auto processStarted = Clock::now();
+    ProbeOptions options;
+    if (!parse_probe_options(std::getenv("AUREA_PROBE_QUALITY3D"), std::getenv("AUREA_PROBE_PIXEL_FRAMES"), options)) return 2;
     const bool modelFile = argc > 1 && std::strcmp(argv[1], "--model") == 0;
     if (argc < 6 || argc > (modelFile ? 16 : 15)) { std::fprintf(stderr, "usage: probe vertices static|rigid|morph|zero floor hdri blur [width height frames finalQuality bounded halfPixelDump batchBudgetMiB objectCount shared|identical|varied]\n       probe --model path.glb|path.gltf floor hdri blur [same options, then animationClip]\n"); return 2; }
     u32 vertices = modelFile ? 0 : std::atoi(argv[1]);
@@ -158,6 +183,12 @@ int main(int argc, char** argv) {
     if (!objectCount || objectCount > 1000) return 2;
     if (argc > 14 && std::strcmp(argv[14], "shared") && !variedMaterials && !identicalOverrides) return 2;
     if (!modelFile && std::strcmp(argv[2], "static") && std::strcmp(argv[2], "rigid") && std::strcmp(argv[2], "morph") && std::strcmp(argv[2], "zero")) return 2;
+    if (options.pixelFrames && (argc <= 11 || !argv[11][0])) {
+        std::fprintf(stderr, "FAIL AUREA_PROBE_PIXEL_FRAMES requires the halfPixelDump path argument\n"); return 2;
+    }
+    std::printf("PROBE_OPTIONS quality3d=%u quality_override=%d pixel_frames=%d performance_usable=%d measurement_scope=%s\n",
+        options.quality3d, options.qualityOverride, options.pixelFrames, !options.pixelFrames,
+        options.pixelFrames ? "pixel_round_synchronous_readbacks" : "performance_round_no_extra_readbacks");
     const auto importStarted = Clock::now();
     std::shared_ptr<const scene3d::SceneAsset> model;
     if (modelFile) {
@@ -194,6 +225,7 @@ int main(int argc, char** argv) {
     if (!projectResult) return 4;
     Project project = std::move(*projectResult); auto* comp = project.timeline().composition(project.timeline().root());
     comp->set_duration(FrameIndex{900});
+    if (options.qualityOverride) comp->post_process().quality3d = options.quality3d;
     Asset asset; asset.kind = AssetKind::Model3D; const auto modelId = project.add_asset(std::move(asset));
     const u32 gridColumns = objectCount == 1 ? 1 : static_cast<u32>(std::ceil(std::sqrt(objectCount * static_cast<double>(width) / height)));
     const u32 gridRows = (objectCount + gridColumns - 1) / gridColumns;
@@ -267,6 +299,9 @@ int main(int argc, char** argv) {
     u64 peakUsed = 0, peakReserved = 0, peakUpload = 0, peakRss = process_rss_bytes();
     u32 peakSamples = 0, peakBatches = 0, draws = 0, triangles = 0, visible = 0, culled = 0, instancedDraws = 0;
     u32 warmup = 0, measured = 0, pendingFrames = 0;
+    std::vector<u16> capturePixels;
+    if (options.pixelFrames) capturePixels.resize(static_cast<size_t>(width) * height * 4);
+    u32 capturedFrames = 0;
     const auto environmentStarted = Clock::now();
     double environmentReadyMs = -1;
     std::printf("CASE vertices=%u triangles=%zu mode=%s floor=%d hdri=%u blur=%d width=%u height=%u final=%d bounded=%d batch_budget_MiB=%u warmup=30 frames=%u objects=%u materials=%s grid_columns=%u grid_rows=%u total_input_triangles=%llu\n",
@@ -356,12 +391,46 @@ int main(int argc, char** argv) {
                 if (!framePasses.empty()) ++sampledGpuFrames;
                 for (const auto& [label, ms] : framePasses) passGpuMs[label].push_back(ms);
             }
+            if (options.pixelFrames && (measured == 0 || measured == frames / 2 || measured + 1 == frames)) {
+                const auto readbackStarted = Clock::now();
+                if (!checked(backend.read_texture(*texture, capturePixels.data(), width * 8), "measured frame readback")) return 6;
+                const double readbackMs = milliseconds(readbackStarted);
+                bool captureFinite = true; u64 captureLit = 0;
+                for (size_t pixel = 0; pixel < capturePixels.size(); pixel += 4) {
+                    f32 color[4];
+                    for (u32 channel = 0; channel < 4; ++channel) {
+                        color[channel] = scene3d::half_to_float(capturePixels[pixel + channel]);
+                        captureFinite &= std::isfinite(color[channel]);
+                    }
+                    if (std::max({color[0], color[1], color[2]}) > .005f) ++captureLit;
+                }
+                if (!captureFinite || captureLit < 100) {
+                    std::printf("FAIL pixel capture measured_index=%u lit=%llu finite=%d\n",
+                        measured, static_cast<unsigned long long>(captureLit), captureFinite); return 7;
+                }
+                const char* names[] = {"first", "middle", "last"};
+                const u32 indexes[] = {0, frames / 2, frames - 1};
+                for (u32 capture = 0; capture < 3; ++capture) if (measured == indexes[capture]) {
+                    const std::string path = std::string(argv[11]) + ".measured-" + names[capture] + ".rgba16f";
+                    auto* file = std::fopen(path.c_str(), "wbx");
+                    if (!file) { std::printf("FAIL pixel capture file path=%s\n", path.c_str()); return 6; }
+                    const usize written = std::fwrite(capturePixels.data(), sizeof(u16), capturePixels.size(), file);
+                    const int closed = std::fclose(file);
+                    if (written != capturePixels.size() || closed) return 6;
+                    ++capturedFrames;
+                    std::printf("PIXEL_FRAME phase=%s measured_index=%u logical_frame=%u project_frame=%u width=%u height=%u format=RGBA16F_LE row_bytes=%u bytes=%zu lit=%llu finite=%d readback_ms=%.3f performance_usable=0 file=%s\n",
+                        names[capture], measured, logicalFrame, 15 + logicalFrame, width, height, width * 8,
+                        capturePixels.size() * sizeof(u16), static_cast<unsigned long long>(captureLit), captureFinite, readbackMs, path.c_str());
+                    std::fflush(stdout);
+                }
+            }
             ++measured;
         }
         // Warmup can show a valid fallback while the asynchronous environment
         // runs, but fallback frames never enter the comparable measurements.
         if (pendingEnvironment) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+    if (options.pixelFrames && capturedFrames != 3) { std::printf("FAIL pixel captures expected=3 actual=%u\n", capturedFrames); return 7; }
     std::vector<u16> pixels(static_cast<size_t>(width) * height * 4);
     if (!checked(backend.read_texture(*texture, pixels.data(), width * 8), "readback")) return 6;
     if (argc > 11) {

@@ -69,7 +69,10 @@ struct Failure {
     std::string detail;
 };
 
-bool cancelled(ImportProgress* p) noexcept { return p && p->cancel.load(std::memory_order_relaxed); }
+bool cancelled(ImportProgress* p) noexcept {
+    return p && (p->cancel.load(std::memory_order_relaxed)
+        || (p->externalCancel && p->externalCancel->load(std::memory_order_acquire)));
+}
 
 void set_phase(ImportProgress* p, ImportPhase phase, f32 fraction = 0.0f) noexcept {
     if (!p) return;
@@ -691,13 +694,18 @@ bool is_ktx2(const u8* data, usize size) noexcept {
     return data && size > sizeof(id) && std::memcmp(data, id, sizeof(id)) == 0;
 }
 
-bool decode_ktx2(const u8* data, usize size, Image& out) {
+bool decode_ktx2(const u8* data, usize size, Image& out, u64 transientLimit, bool* skipped) {
     static const bool ready = [] { basist::basisu_transcoder_init(); return true; }();
     (void)ready;
     basist::ktx2_transcoder t;
-    if (!t.init(data, static_cast<u32>(size)) || t.get_faces() != 1 || !t.start_transcoding()) return false;
+    if (!t.init(data, static_cast<u32>(size)) || t.get_faces() != 1) return false;
     const u32 w = t.get_width(), h = t.get_height();
     if (w == 0 || h == 0 || static_cast<u64>(w) * h > 8192ull * 8192ull) return false;
+    if (transientLimit != ~0ull && static_cast<u64>(w) * h * kDecodeBytesPerPixel > transientLimit) {
+        if (skipped) *skipped = true;
+        return true; // The caller reports budget pressure before allocating RGBA/transcode data.
+    }
+    if (!t.start_transcoding()) return false;
     std::vector<u8> rgba(static_cast<usize>(w) * h * 4);
     // Nível 0, camada 0, face 0; RGBA32 = pixels (sem blocos), largura = w.
     if (!t.transcode_image_level(0, 0, 0, rgba.data(), w * h, basist::transcoder_texture_format::cTFRGBA32, 0, w, h)) {
@@ -770,9 +778,9 @@ bool decode_image(const cgltf_image& src, const cgltf_options& opts, const std::
 
     // KTX2 (KHR_texture_basisu): transcodificado para RGBA no import.
     if (is_ktx2(data, size)) {
-        const bool ok = decode_ktx2(data, size, out);
+        const bool ok = decode_ktx2(data, size, out, transientLimit, skipped);
         if (!ok) fail = {ImportError::TextureDecodeFailed, "textura KTX2 '" + (out.uri.empty() ? out.name : out.uri) + "' ilegivel"};
-        if (ok) {
+        if (ok && !(skipped && *skipped)) {
             if (w0) *w0 = out.width;
             if (h0) *h0 = out.height;
             if (maxSide) downscale_to(out, maxSide);
@@ -1210,7 +1218,8 @@ u8 linear_to_srgb_u8(f32 c) noexcept {
 /// Especular/brilho por pixel -> mapa de metal (B) e rugosidade (G); com a
 /// difusa do mesmo tamanho, também a cor base. As imagens novas entram no fim
 /// de A.images; as originais que só a conversão usava são liberadas.
-void convert_spec_gloss_textures(SceneAsset& A, const std::vector<SpecGlossSource>& specGloss) {
+bool convert_spec_gloss_textures(SceneAsset& A, const std::vector<SpecGlossSource>& specGloss,
+                                u64 strictBudget, u64 heldGeometry) {
     std::vector<u32> refs(A.images.size(), 0);
     auto count = [&](const TextureRef& t) {
         if (t.valid() && t.image < static_cast<i32>(refs.size())) ++refs[static_cast<usize>(t.image)];
@@ -1240,6 +1249,12 @@ void convert_spec_gloss_textures(SceneAsset& A, const std::vector<SpecGlossSourc
                            && sg.diffuseTex.rotation == sg.tex.rotation;
             if (same) di = sg.diffuseTex.image;
         }
+        // Strict export also bounds conversion's extra images before allocating
+        // them. The old source maps remain live until their final reference is
+        // converted, so measuring only the final scene would miss this peak.
+        const u64 extra = static_cast<u64>(px) * (di >= 0 ? 8u : 4u);
+        const u64 held = heldGeometry + A.stats.imageBytes;
+        if (strictBudget && (held > strictBudget || extra > strictBudget - held)) return false;
         Image mr;
         mr.name = A.images[si].name + " (metal/rugosidade)";
         mr.width = w;
@@ -1308,6 +1323,7 @@ void convert_spec_gloss_textures(SceneAsset& A, const std::vector<SpecGlossSourc
         }
         release(si);
     }
+    return true;
 }
 
 } // namespace
@@ -1457,8 +1473,11 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         ModelCost c = cost_from_counts(counts);
         c.parseBytes = heldBytes;
         c.fileBytes = c.parseBytes;
-        // Texturas: no máximo o teto cada (o decode confere uma por uma).
-        c.textures = static_cast<u32>(data->images_count);
+        // Preview uses its capped worst-case square estimate. Strict Original
+        // knows no fixed cap: a thin 4096x16 map must not be charged as a
+        // 16384x16384 map. Geometry is checked here; actual image dimensions,
+        // decode peak and cumulative residency are checked before each decode.
+        c.textures = options.requireAllTextures ? 0u : static_cast<u32>(data->images_count);
         c.texturePixels = static_cast<u64>(c.textures) * options.maxTextureSize * options.maxTextureSize;
         ModelBudget b;
         b.memoryBytes = options.memoryBudget;
@@ -1534,6 +1553,10 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         if (sg.active && sg.tex.valid() && sg.tex.image < static_cast<i32>(used.size())) used[sg.tex.image] = 1;
     const u64 tImg = monotonic_ns();
     set_phase(progress, ImportPhase::Textures);
+    if (options.requireAllTextures) for (const auto& material : A.materials)
+        for (const auto& extension : material.ignoredExtensions)
+            if (extension.find("textura ignorada") != std::string::npos)
+                return fail_result(ImportError::UnsupportedFeature, "textura Original em formato nao suportado: " + extension);
     A.images.resize(data->images_count);
     for (cgltf_size i = 0; i < data->images_count; ++i) {
         if (cancelled(progress)) return fail_result(ImportError::Cancelled, "cancelado");
@@ -1554,6 +1577,7 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         } else if (!decode_image(data->images[i], opts, baseDir, A.images[i], fail, options.maxTextureSize, transient,
                                  &w0, &h0, &skipped)) {
             if (budget.exceeded) return fail_result(ImportError::TooHeavy, "texturas 3D excedem a memoria disponivel para importar");
+            if (options.requireAllTextures) return fail_result(fail.error, fail.detail);
             // Textura ausente ou ilegível (WebP, KTX2 sem reserva, arquivo
             // corrompido): o modelo entra sem ela, com aviso. Antes o import
             // inteiro falhava e o preview nem abria. A ausente vai para a lista
@@ -1572,6 +1596,8 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
             continue;
         }
         if (skipped) {
+            if (options.requireAllTextures)
+                return fail_result(ImportError::TooHeavy, "textura Original nao cabe no limite de memoria da exportacao");
             A.images[i].rgba.clear();
             A.images[i].width = A.images[i].height = 0;
             ++A.stats.texturesSkipped;
@@ -1585,7 +1611,11 @@ ImportResult import_gltf_memory(const u8* bytes, usize size, const std::string& 
         A.stats.imageBytes += A.images[i].rgba.size();
         set_fraction(progress, static_cast<f32>(i + 1) / static_cast<f32>(data->images_count));
     }
-    convert_spec_gloss_textures(A, specGloss);
+    u64 heldGeometry = heldBytes;
+    if (options.requireAllTextures) for (const Mesh& mesh : A.meshes)
+        for (const Primitive& primitive : mesh.primitives) heldGeometry += primitive_bytes(primitive);
+    if (!convert_spec_gloss_textures(A, specGloss, options.requireAllTextures ? options.memoryBudget : 0, heldGeometry))
+        return fail_result(ImportError::TooHeavy, "conversao de texturas Original excede a memoria disponivel");
     A.stats.imagesMs = ms_since(tImg);
 
     // Tangentes: só onde há mapa de normal (é o único consumidor).

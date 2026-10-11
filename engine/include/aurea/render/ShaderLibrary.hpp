@@ -168,6 +168,13 @@ public:
     [[nodiscard]] u32 pipeline_count() const noexcept { return static_cast<u32>(pipelines_.size()); }
     [[nodiscard]] bool has_pipeline(const PipelineKey& key) const noexcept { return pipelines_.contains(key); }
 
+    /// Optional test/diagnostic timing around the actual backend creation.
+    /// Null in normal rendering; no clock reads or log output without a probe.
+    using PipelineCreationProbe = void (*)(void*, const PipelineKey&, u64 elapsedNs, bool ok) noexcept;
+    void set_pipeline_creation_probe(PipelineCreationProbe probe, void* context) noexcept {
+        pipelineProbe_ = probe; pipelineProbeContext_ = context;
+    }
+
     /// Impressão digital (FNV-1a 64) de todo o SPIR-V embutido. É a versão do
     /// cache de pipeline em disco: shader mudou (app atualizado) → o arquivo
     /// antigo é descartado em vez de acumular entradas mortas. Calculada uma
@@ -214,6 +221,8 @@ private:
     u32 failures_ = 0;
     u32 compilesSinceMark_ = 0;
     bool steady_ = false;
+    PipelineCreationProbe pipelineProbe_ = nullptr;
+    void* pipelineProbeContext_ = nullptr;
     std::string lastError_;
 };
 

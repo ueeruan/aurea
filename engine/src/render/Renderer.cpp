@@ -927,7 +927,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     }
     warmPending_.clear();
     warmedEffects_.clear();
-    warmed3d_ = false;
+    warmSceneQualities_ = warmedSceneSamples_ = 0;
     warmedForProject_ = 0;
     std::vector<PipelineKey> keys;
     keys.push_back(PipelineKey::fullscreen(ShaderId::effects_color_stack_frag, kWorkFormat));
@@ -963,10 +963,12 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
 void Renderer::scan_for_warmup(const Project& project) noexcept {
     if (!effects_ || !shaders_.ready()) return;
     // Sem alocação no caso comum: tudo já visto → nenhuma inserção.
-    bool want3d = false;
+    warmSceneQualities_ = 0;
     project.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        bool want3d = c.environment().showBackground
+            && (c.environment().hdri.valid() || c.environment().studioPreset != 0);
         c.layers().for_each([&](LayerId, const Layer& l) {
-            if (!warmed3d_ && (l.threeD || l.kind == LayerKind::Model3D)) want3d = true;
+            if (l.threeD || l.kind == LayerKind::Model3D) want3d = true;
             for (const EffectInstance& e : l.effects) {
                 if (!e.enabled) continue;
                 const auto it = std::lower_bound(warmedEffects_.begin(), warmedEffects_.end(), e.type);
@@ -975,10 +977,43 @@ void Renderer::scan_for_warmup(const Project& project) noexcept {
                 if (const Effect* fx = effects_->find(e.type)) fx->pipelines(warmPending_, kWorkFormat);
             }
         });
+        if (want3d) warmSceneQualities_ |= 1u << std::min(c.post_process().quality3d, kScene3DQualityCount - 1);
     });
-    if (want3d) {
-        warmed3d_ = true;
+}
+
+void Renderer::warm_scene_pipelines(const FrameSnapshot& snapshot) noexcept {
+    // The project scan runs before render quality has been resolved. Keep its
+    // composition qualities, then derive the SAME sample count as the draw.
+    // Actual snapshots also cover a direct play/quality change before a paused
+    // scan, and nested compositions have independent quality settings.
+    const auto visit = [&](auto&& self, const FrameSnapshot& frame) -> void {
+        for (const auto& group : frame.scenes)
+            warmSceneQualities_ |= 1u << std::min(group.post.quality, kScene3DQualityCount - 1);
+        for (const auto& child : frame.nested) if (child) self(self, *child);
+    };
+    visit(visit, snapshot);
+    const auto warmQuality = [&](const HeavyQuality& quality) {
+        scene3d_.set_post_quality(quality.msaaSamples, quality.fxaa, quality.bloomStartDiv, quality.bloomLevels);
+        const u32 samples = scene3d_.pass_samples();
+        const u32 bit = 1u << samples;
+        if (warmedSceneSamples_ & bit) return;
         scene3d_.collect_pipelines(warmPending_);
+        warmedSceneSamples_ |= bit;
+    };
+    for (u32 tier = 0; tier < kScene3DQualityCount; ++tier) {
+        if (!(warmSceneQualities_ & (1u << tier))) continue;
+        HeavyQuality quality = heavyQ_;
+        apply_scene3d_quality(quality, static_cast<Scene3DQuality>(tier));
+        warmQuality(quality);
+        if (tier == static_cast<u32>(Scene3DQuality::Auto) && !heavyQ_.exportFrame) {
+            // Auto can move between exactly these two profiles as load/heat
+            // changes. Compile both before its first playback, never the
+            // unrelated Low (1x) or Ultra export (8x) profiles.
+            for (const u32 samples : {2u, 4u}) {
+                quality.msaaSamples = samples;
+                warmQuality(quality);
+            }
+        }
     }
 }
 
@@ -1067,6 +1102,7 @@ void Renderer::forget_device() noexcept {
 
 void Renderer::release_project_resources() noexcept {
     staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {};
+    warmSceneQualities_ = 0;
     renderInstancePath_.clear();
     nestedNamespaces_.clear();
     nestSalt_ = 0;
@@ -5828,15 +5864,18 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     }
     // Pipelines que a varredura do projeto pediu: antes de pegar a imagem da
     // swapchain (compilar segurando a imagem atrasaria a apresentação).
-    if (!settings.rawPlayback) flush_warmup();
+    quality_ = effective_quality(settings);
+    heavyQ_ = resolve_heavy(settings);
+    if (!settings.rawPlayback) {
+        warm_scene_pipelines(snap);
+        flush_warmup();
+    }
     const u64 t0 = monotonic_ns();
     const u64 effectsBypassedBefore = EffectGraph::bypassed_total();
     scene3d_.reset_incomplete();
     videoSourceFailed_ = false;
     videoUploadMs_ = 0;
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
-    quality_ = effective_quality(settings);
-    heavyQ_ = resolve_heavy(settings);
     heavyStats_.lastParticleSlots = heavyStats_.lastParticleLayers = 0;
     heavyStats_.lastParticleExtraLayers = 0;
     heavyStats_.lastSceneDrawCalls = heavyStats_.lastSceneShadowDrawCalls = heavyStats_.lastSceneInstancedDraws = 0;

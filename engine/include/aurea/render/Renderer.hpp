@@ -985,10 +985,12 @@ private:
     // quadro preparado varre o projeto (efeitos e 3D de TODAS as camadas, não
     // só as do instante) e junta o que falta; o render compila antes do grafo.
     void scan_for_warmup(const Project& project) noexcept;
+    void warm_scene_pipelines(const FrameSnapshot& snapshot) noexcept;
     void flush_warmup() noexcept;
     std::vector<PipelineKey> warmPending_;
     std::vector<EffectTypeId> warmedEffects_;   ///< ordenado; tipos já pedidos
-    bool warmed3d_ = false;
+    u32 warmSceneQualities_ = 0;   ///< qualities used by all compositions, including future/nested layers
+    u32 warmedSceneSamples_ = 0;  ///< actual GPU sample counts already queued
     u32 warmedForProject_ = 0;
     u32 framesRendered_ = 0;
     u64 frameNumber_ = 0;

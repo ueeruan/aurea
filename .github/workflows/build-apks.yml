@@ -5,7 +5,7 @@ on:
       run_native_tests:
         description: 'Run additional emulator editing tests after building the APKs'
         required: false
-        default: false
+        default: true
         type: boolean
   push:
     branches: ['codex/beta-2146-compile']
@@ -70,7 +70,7 @@ jobs:
               assert abis == {sys.argv[2]}, abis
           PY
           mkdir -p build/apk-artifact
-          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2158-export-preview-3d-${{ matrix.abi }}-ci.apk'
+          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2159-export-preview-3d-${{ matrix.abi }}-ci.apk'
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-apk-${{ matrix.abi }}

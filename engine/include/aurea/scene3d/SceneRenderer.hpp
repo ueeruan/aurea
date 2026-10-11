@@ -376,6 +376,9 @@ public:
     /// Solta modelos que nenhum frame usou nos últimos `idleFrames`.
     void collect(u64 frameNumber, u64 idleFrames = 240) noexcept;
     void release_all() noexcept;
+    /// Between completed frames: retire only model resources, without waiting
+    /// for environment-building futures or for GPU completion.
+    void release_models() noexcept;
     /// Between frames only: free reusable upload storage; busy tickets retain ownership.
     u32 trim_upload_pools() noexcept;
     /// Between frames after the GPU is idle: release environments not used by

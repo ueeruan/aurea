@@ -91,6 +91,12 @@ jobs:
             -DAUREA_AI_VULKAN=OFF \
             2>&1 | tee build/host-export-results/configure.log
           grep -Fq 'backend Vulkan no host' build/host-export-results/configure.log
+      - name: Compile original and optimized shadow paths without changing quality
+        run: |
+          set -euo pipefail
+          python3 engine/tools/scene3d/test_shadow_rotation.py --glslc /usr/bin/glslc \
+            --output-dir build/host-export-results/shadow-rotation \
+            2>&1 | tee build/host-export-results/shadow-rotation-compile.log
       - name: Build only the shared test executable
         id: build
         run: |
@@ -119,7 +125,7 @@ jobs:
         working-directory: build/host-export/tests
         run: |
           set -euo pipefail
-          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary; do
+          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary OriginalModelExport SceneWarmupGpu; do
             timeout 180s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/preview-$FILTER.log"
             grep -Eq '^[1-9][0-9]* testes, [0-9]+ verificacoes, 0 falhas$' "../../host-export-results/preview-$FILTER.log"
             if grep -Eq 'pulado|skipped' "../../host-export-results/preview-$FILTER.log"; then exit 1; fi

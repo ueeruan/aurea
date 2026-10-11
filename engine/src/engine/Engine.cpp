@@ -43,6 +43,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <unordered_set>
 
 namespace aurea {
 
@@ -253,6 +254,7 @@ struct Engine::ExportContext {
     std::unordered_map<u64, std::shared_ptr<const CubeLut>> frozenLuts;
     u64 frozenAssetBudget = 0;
     Status frozenAssetStatus = OkStatus;
+    bool promotedOriginalModels = false;
 
     // Plano da sessão, fixado no start (a timeline não muda durante o export:
     // o preview e os comandos da UI ficam congelados).
@@ -609,6 +611,119 @@ void fit_model_textures_to_room(scene3d::ImportOptions& o, const std::string& pa
     o.maxTextureSize = side;
 }
 
+bool model_texture_references_complete(const scene3d::SceneAsset& scene) noexcept {
+    // A failed legacy spec/gloss map can be removed by material conversion,
+    // so it may no longer have a TextureRef and is not included in skipped.
+    for (const auto& warning : scene.warnings)
+        if (warning.rfind("textura ignorada:", 0) == 0) return false;
+    for (const auto& material : scene.materials) {
+        for (const auto& extension : material.ignoredExtensions)
+            if (extension.find("textura ignorada") != std::string::npos) return false;
+        for (const auto* ref : {&material.baseColorTex, &material.metallicRoughnessTex, &material.normalTex,
+                                &material.occlusionTex, &material.emissiveTex}) {
+            if (!ref->valid()) continue;
+            if (static_cast<usize>(ref->image) >= scene.images.size()) return false;
+            const auto& image = scene.images[static_cast<usize>(ref->image)];
+            const u64 bytes = static_cast<u64>(image.width) * image.height * 4;
+            if (!bytes || image.pixels().size() < bytes) return false;
+        }
+    }
+    return true;
+}
+
+// Source glTF bytes remain the durable recipe. Preview may keep smaller maps,
+// but final export must not freeze those maps under the authored Original label.
+// Only degraded Original assets need a new CPU scene; intact scenes remain shared.
+Status prepare_original_export_models(Project& project, CompositionId root,
+        std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>>& models,
+        u64& room, const scene3d::DeviceMemoryHint& memory, u32 gpuTextureLimit,
+        std::atomic<bool>& cancel, std::atomic<u64>& extraBytes, bool& promoted) noexcept {
+    try {
+        std::vector<CompositionId> pending{root};
+        std::unordered_set<u64> compositions, assets;
+        while (!pending.empty()) {
+            const CompositionId id = pending.back(); pending.pop_back();
+            if (!compositions.insert(id.pack()).second) continue;
+            const auto* composition = project.timeline().composition(id);
+            if (!composition) continue;
+            // Hidden model layers can feed mesh particles. Collect all model
+            // sources within reachable compositions, never unrelated projects.
+            composition->layers().for_each([&](LayerId, const Layer& layer) {
+                if (layer.kind == LayerKind::Model3D && layer.model.scene.valid())
+                    assets.insert(layer.model.scene.pack());
+                if (layer.kind == LayerKind::Composition && layer.nested.composition.valid())
+                    pending.push_back(layer.nested.composition);
+            });
+        }
+        // Stable admission order makes multiple-model failures reproducible.
+        std::vector<u64> ordered(assets.begin(), assets.end());
+        std::sort(ordered.begin(), ordered.end());
+        for (u64 key : ordered) {
+            if (cancel.load(std::memory_order_acquire)) return Errc::Cancelled;
+            const Asset* source = project.asset(AssetId::unpack(key));
+            if (!source || source->model.importQuality != static_cast<u8>(scene3d::ModelQuality::Original)) continue;
+            const auto prior = models.find(key);
+            if (prior != models.end() && prior->second) {
+                const auto& scene = *prior->second;
+                if (!scene.stats.texturesReduced && !scene.stats.texturesSkipped && scene.missingTextures.empty()
+                    && scene.stats.sourceTriangles == scene.stats.triangles && model_texture_references_complete(scene)) continue;
+            }
+            const auto dot = source->sourcePath.find_last_of('.');
+            std::string extension = dot == std::string::npos ? std::string{} : source->sourcePath.substr(dot);
+            for (char& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            if (extension != ".glb" && extension != ".gltf")
+                return Status{Errc::NotSupported,
+                    "nao foi possivel restaurar a fonte Original deste formato 3D; exportacao interrompida"};
+            if (room < 4096) return Status{Errc::BudgetExceeded,
+                "memoria insuficiente para preparar as texturas Original da exportacao"};
+            scene3d::ImportOptions options;
+            options.maxTriangles = 0;
+            options.simplifyError = 0;
+            // Cost inspection cannot know dimensions of every data URI/KTX2.
+            // Strict import admits actual images within the GPU/source memory
+            // limits, never a guessed 2048 side masquerading as Original.
+            options.maxTextureSize = gpuTextureLimit;
+            options.memoryBudget = std::min(room, scene3d::model_memory_budget(memory));
+            options.requireAllTextures = true;
+            scene3d::ImportProgress progress;
+            progress.externalCancel = &cancel;
+            auto result = scene3d::import_gltf_file(source->sourcePath, options, &progress);
+            if (cancel.load(std::memory_order_acquire)) return Errc::Cancelled;
+            if (!result.ok()) {
+                AUREA_LOG_WARN("export Original: modelo %s recusado: %s", source->name.c_str(), result.detail.c_str());
+                if (result.error == scene3d::ImportError::Cancelled) return Errc::Cancelled;
+                if (result.error == scene3d::ImportError::TooHeavy || result.error == scene3d::ImportError::OutOfMemory)
+                    return Status{Errc::BudgetExceeded, "memoria insuficiente para exportar o modelo com texturas Original"};
+                if (result.error == scene3d::ImportError::UnsupportedFeature || result.error == scene3d::ImportError::UnsupportedCompression)
+                    return Status{Errc::NotSupported, "uma textura Original usa um formato que este motor nao suporta"};
+                return Status{Errc::AssetCorrupted, "fonte ou textura do modelo Original ausente ou invalida"};
+            }
+            const auto& full = *result.asset;
+            if (full.stats.texturesReduced)
+                return Status{Errc::NotSupported, "a GPU nao suporta a dimensao de uma textura Original deste modelo"};
+            if (full.stats.texturesSkipped || !full.missingTextures.empty() || !model_texture_references_complete(full))
+                return Status{Errc::AssetCorrupted, "modelo Original nao tem todas as texturas necessarias para exportar"};
+            if (full.stats.sourceTriangles != full.stats.triangles
+                || (source->model.sourceTriangles && source->model.sourceTriangles != full.stats.sourceTriangles))
+                return Status{Errc::AssetCorrupted, "a geometria Original do modelo difere da fonte do projeto"};
+            const u64 bytes = scene3d::scene_asset_memory_bytes(full);
+            if (bytes > room) return Status{Errc::BudgetExceeded,
+                "memoria insuficiente para manter o modelo Original durante a exportacao"};
+            // The preview model still belongs to models_ and is counted by the
+            // source room. This new immutable export scene consumes additional,
+            // measured CPU space; it never replaces the saved/editor asset.
+            room -= bytes;
+            models[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(result.asset));
+            extraBytes.fetch_add(bytes, std::memory_order_relaxed);
+            promoted = true;
+            AUREA_LOG_INFO("export Original: %s preparado (%llu bytes CPU, %u triangulos, nenhuma textura reduzida)",
+                source->name.c_str(), static_cast<unsigned long long>(bytes), full.stats.triangles);
+        }
+        return OkStatus;
+    } catch (const std::bad_alloc&) { return Errc::OutOfMemory; }
+      catch (...) { return Errc::AssetCorrupted; }
+}
+
 } // namespace
 
 scene3d::ImportOptions Engine::model_import_options(const std::string& path, scene3d::ModelQuality quality,
@@ -659,8 +774,9 @@ void Engine::apply_memory_budgets() noexcept {
             // Cache backing is counted once here, while pool/render allocations
             // are already included in the backend. Native shared decoder backing
             // may be counted conservatively; this is not a process RSS/PSS cap.
-            return static_cast<MemoryManager*>(context)->total_used();
-        }, &memory_);
+            auto& engine = *static_cast<Engine*>(context);
+            return engine.memory_.total_used() + engine.exportOriginalModelBytes_.load(std::memory_order_relaxed);
+        }, this);
     // Prévia em memória pela faixa de RAM do aparelho (32/64/320/512 MiB),
     // limitada pelo orçamento do processo e pela pressão de memória atual.
     // Classe de memória LOW (até ~4 GB): no máximo 32 MiB, sombra do preview
@@ -9381,14 +9497,24 @@ RenderSettings Engine::current_render_settings() noexcept {
 }
 
 Status Engine::poll_export_gpu_locked(u64 timeoutNs) noexcept {
-    if (!pendingExportGpuFrame_) return OkStatus;
-    if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
+    if (pendingExportGpuFrame_) {
+        if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
+            pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
+            pendingExportModelCleanup_ = false;
+            return OkStatus; // Normal device-loss handling owns actual recovery.
+        }
+        const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, timeoutNs);
+        if (!ready.ok()) return ready;
         pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
-        return OkStatus; // Normal device-loss handling owns actual recovery.
     }
-    const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, timeoutNs);
-    if (ready.ok()) pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
-    return ready;
+    if (pendingExportModelCleanup_) {
+        // A cancelled export may still own submitted draws. Retain their
+        // model handles until its bounded fence poll completes, then let the
+        // normal preview lookup upload its proxy again. No wait_idle/HDR future.
+        if (gpu_ && !gpu_->is_device_lost()) renderer_.scene_renderer().release_models();
+        pendingExportModelCleanup_ = false;
+    }
+    return OkStatus;
 }
 
 void Engine::retain_failed_export_gpu_locked() noexcept {
@@ -9924,6 +10050,8 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     // deu ANR ("Input dispatching timed out") ao sair do editor.
     std::unique_lock<std::mutex> rl(renderMutex_);
     if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
+    if (exportActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
     const u64 previousGeneration = gpuGeneration_;
     if (!exportActive_.load(std::memory_order_acquire)) {
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
@@ -9960,6 +10088,10 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     for (;;) {
         if (!rl.owns_lock()) rl.lock();
         if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+        // Media/AI waiting drops this lock. Export may have taken ownership
+        // meanwhile; do not mutate its frozen snapshot or its full model cache.
+        if (exportActive_.load(std::memory_order_acquire))
+            return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
         if (expectedGpuGeneration != gpuGeneration_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
             return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
@@ -10239,6 +10371,10 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
         std::lock_guard<std::mutex> captureLock(renderMutex_);
         if (!gpu_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
             return Status{Errc::InvalidState, "sem GPU"};
+        // Reject before allocating even the capture target. A thumbnail must
+        // not consume source-export headroom or repopulate its model cache.
+        if (exportActive_.load(std::memory_order_acquire))
+            return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         captureGpu = gpu_.get();
@@ -10258,6 +10394,8 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
         // texture IDs. Never read or destroy an old target in the new device.
         if (captureGeneration != gpuGeneration_ || gpu_.get() != captureGpu || !gpu_)
             return Status{Errc::Cancelled, "GPU trocada durante captura"};
+        if (s.ok() && exportActive_.load(std::memory_order_acquire))
+            s = Status{Errc::Busy, "captura aguarda a exportacao terminar"};
         if (s.ok()) s = poll_export_gpu_locked();
         if (s.ok()) s = gpu_->read_texture(target, half.data(), width * 8);
         gpu_->destroy_texture(target);
@@ -11542,6 +11680,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     { std::lock_guard<std::mutex> context(exportContextMutex_); exportCtx_.reset(); }
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
+        exportOriginalModelBytes_.store(0, std::memory_order_relaxed);
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
     }
@@ -11766,15 +11905,19 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // Failed startup releases ownership so preview can resume normally.
     struct ExportStartupOwnership {
         std::atomic<bool>& active;
+        std::atomic<u64>& originalBytes;
         Engine& engine;
+        ExportContext& context;
         bool committed = false;
         ~ExportStartupOwnership() {
             if (!committed) {
+                context.frozenModels.clear();
+                originalBytes.store(0, std::memory_order_relaxed);
                 active.store(false, std::memory_order_release);
                 engine.request_render();
             }
         }
-    } startupOwnership{exportActive_, *this};
+    } startupOwnership{exportActive_, exportOriginalModelBytes_, *this, *ctx};
     auto drainExportStartup = [&]() -> Status {
         if (!ctx->v2 && !ctx->keyflow) { gpu_->wait_idle(); return OkStatus; }
         const u64 frame = gpu_->last_submitted_frame();
@@ -11809,6 +11952,12 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                        released,
                        static_cast<unsigned long long>(before.usedBytes > after.usedBytes ? before.usedBytes - after.usedBytes : 0),
                        static_cast<unsigned long long>(before.reservedBytes > after.reservedBytes ? before.reservedBytes - after.reservedBytes : 0));
+    }
+    if (ctx->frozenProject) {
+        const Status originals = prepare_original_export_models(*ctx->frozenProject, ctx->recovery.composition,
+            ctx->frozenModels, ctx->frozenAssetBudget, model_memory_hint({}), gpu_->capabilities().maxTexture2D,
+            ctx->cancelRequested, exportOriginalModelBytes_, ctx->promotedOriginalModels);
+        if (!originals.ok()) return originals;
     }
     ExportSinkStartupResult startupResult;
     Status openStatus;
@@ -12676,9 +12825,14 @@ void Engine::export_thread_main() noexcept {
         }
         if (ctx.frozenProject) {
             snapshot_ = FrameSnapshot{};
+            if (ctx.promotedOriginalModels) {
+                pendingExportModelCleanup_ = true;
+                (void)poll_export_gpu_locked(); // zero-timeout; an in-flight fence keeps the model cache alive
+            }
             ctx.frozenProject.reset();
             ctx.frozenImages.clear(); ctx.frozenModels.clear();
             ctx.frozenHdris.clear(); ctx.frozenLuts.clear();
+            exportOriginalModelBytes_.store(0, std::memory_order_relaxed);
         }
     }
     {

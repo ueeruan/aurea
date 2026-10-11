@@ -973,12 +973,16 @@ u32 SceneRenderer::trim_environment_cache(u64 frameNumber) noexcept {
     return released;
 }
 
-void SceneRenderer::release_all() noexcept {
-    drop_upload_pools(true);
+void SceneRenderer::release_models() noexcept {
     for (auto& [k, e] : models_) {
         if (e.model && gpu_) e.model->release(*gpu_);
     }
     models_.clear();
+}
+
+void SceneRenderer::release_all() noexcept {
+    drop_upload_pools(true);
+    release_models();
     // O AMBIENTE também é do projeto, não do aparelho. Este cache é indexado
     // pelo id do asset do HDRI (`key_of`), e dois projetos REAPROVEITAM os
     // mesmos ids: o slot 1 de um projeto não é o slot 1 do seguinte. Sem
@@ -1066,35 +1070,54 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     auto* self = const_cast<SceneRenderer*>(this);
     const u32 savedSamples = passSamples_;
     const bool savedMrt = passMrt_, savedA2C = passA2C_;
-    self->passSamples_ = pass_samples();
-    self->passMrt_ = true;
-    self->passA2C_ = passSamples_ > 1 && gpu_ && gpu_->capabilities().alphaToOne;
-    const usize groundFirst = out.size();   // chão: variantes do reflexo (Ground.cpp)
-    for (AlphaMode mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
-        for (bool twoSided : {false, true}) {
-            for (bool skinned : {false, true}) {
-                auto key = key_for(mode, twoSided, skinned);
-                out.push_back(key);
-                if (!twoSided) {
-                    key.frontFaceCCW = false;
+    const u32 samples = pass_samples();
+    const auto collectSampleCount = [&](u32 count) {
+        self->passSamples_ = count;
+        self->passMrt_ = true;
+        self->passA2C_ = count > 1 && gpu_ && gpu_->capabilities().alphaToOne;
+        const usize groundFirst = out.size();   // chão: variantes do reflexo (Ground.cpp)
+        for (AlphaMode mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
+            for (bool twoSided : {false, true}) {
+                for (bool skinned : {false, true}) {
+                    auto key = key_for(mode, twoSided, skinned);
                     out.push_back(key);
+                    if (!twoSided) {
+                        key.frontFaceCCW = false;
+                        out.push_back(key);
+                    }
                 }
             }
         }
-    }
-    collect_ground_pipelines(out, groundFirst, out.size(), passSamples_);
-    out.push_back(shadow_key(false));
-    out.push_back(shadow_key(true));
-    out.push_back(plane_key());
-    out.push_back(plane_key(true));
-    self->passMrt_ = false;
-    out.push_back(plane_key());
-    out.push_back(plane_key(true));
-    auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
-    sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
-    sky.sampleCount = static_cast<u8>(passSamples_);
-    sky.hasColor1 = true;
-    out.push_back(sky);
+        collect_ground_pipelines(out, groundFirst, out.size(), passSamples_);
+        out.push_back(shadow_key(false));
+        out.push_back(shadow_key(true));
+        out.push_back(plane_key());
+        out.push_back(plane_key(true));
+        self->passMrt_ = false;
+        // A plane-only group checks this PBR key before its MSAA pass,
+        // even though it has no model and no HDR attachment.
+        out.push_back(key_for(AlphaMode::Opaque, false, false));
+        out.push_back(plane_key());
+        out.push_back(plane_key(true));
+        auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
+        sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
+        sky.sampleCount = static_cast<u8>(passSamples_);
+        sky.hasColor1 = true;
+        out.push_back(sky);
+        sky.hasColor1 = false;
+        out.push_back(sky);
+    };
+    collectSampleCount(samples);
+    // DOF needs resolved depth. Its conservative 1x path must be warm too;
+    // the runtime camera may activate the lens later in the same playback.
+    if (samples > 1 && gpu_ && !gpu_->capabilities().depthResolveSampleZero) collectSampleCount(1);
+    // A background-only sky is a 1x pass without depth or MRT. build also
+    // prepares the depth-aware sky key before selecting that direct path.
+    auto directSky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag,
+                                           SurfaceFormat::RGBA16F);
+    out.push_back(directSky);
+    directSky.hasDepth = true; directSky.depthFormat = SurfaceFormat::Depth32F;
+    out.push_back(directSky);
     // Pós do grupo.
     out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_tonemap_frag, SurfaceFormat::RGBA16F));
     out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_bloom_down_frag, SurfaceFormat::RGBA16F));

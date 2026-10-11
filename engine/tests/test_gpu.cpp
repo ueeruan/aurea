@@ -13440,3 +13440,4 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "MinimaxGpu.inl"
 
 #include "RaysFootprintGpu.inl"
+#include "SceneWarmupGpu.inl"

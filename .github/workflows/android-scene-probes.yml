@@ -2,6 +2,12 @@ name: Build Android 3D scene probes
 
 on:
   workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: 'Exact 40-character production commit for the unchanged baseline'
+        required: false
+        default: 'c11fd701906f475f26d8d3c0e27ac58ff2be8483'
+        type: string
   push:
     branches: ['codex/3d-preview-2157']
     paths:
@@ -29,6 +35,7 @@ jobs:
       CMAKE_VERSION: '3.22.1'
       PROBE_ARTIFACT: build/android-scene-probes-arm64
       PROBE_REVISION: ${{ matrix.revision }}
+      BASELINE_REF: ${{ inputs.baseline_ref || 'c11fd701906f475f26d8d3c0e27ac58ff2be8483' }}
     steps:
       - uses: actions/checkout@v4
       - name: Preserve common test source and licensed fixtures
@@ -38,11 +45,19 @@ jobs:
           cp .github/workflows/android-scene-probes.yml "$RUNNER_TEMP/aurea-scene-common/"
           cp engine/tests/data/scene-performance/* "$RUNNER_TEMP/aurea-scene-common/models/"
           git rev-parse HEAD > "$RUNNER_TEMP/aurea-scene-common/source-commit.txt"
+      - name: Validate the pinned baseline commit
+        if: matrix.revision == 'baseline'
+        run: |
+          python3 <<'PY'
+          import os, re
+          if not re.fullmatch(r'[0-9a-f]{40}', os.environ['BASELINE_REF']):
+              raise SystemExit('baseline_ref must be an exact lowercase 40-character commit SHA')
+          PY
       - name: Check out the unchanged production baseline
         if: matrix.revision == 'baseline'
         uses: actions/checkout@v4
         with:
-          ref: be3e189f345ef5620fd10c8d5c6eeb9a6cf5f882
+          ref: ${{ env.BASELINE_REF }}
       - name: Apply the common test harness to the baseline
         if: matrix.revision == 'baseline'
         run: |
@@ -132,6 +147,31 @@ jobs:
           "$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/cmake" --build "$NATIVE_BUILD" \
             --target aurea_scene_vulkan_probe aurea_scene_gles_probe --parallel 2 \
             2>&1 | tee "$PROBE_ARTIFACT/diagnostics/build.log"
+      - name: Verify and preserve the actual GLES shape translation
+        if: matrix.revision == 'target'
+        env:
+          NATIVE_BUILD: ${{ steps.native-tree.outputs.build_dir }}
+        run: |
+          set -o pipefail
+          python3 <<'PY'
+          import os, subprocess
+          from pathlib import Path
+          workspace = Path.cwd()
+          build = workspace / os.environ['NATIVE_BUILD']
+          tool = workspace / 'engine/build/shader-compilers/aurea-gles-compiler'
+          for line in (build / 'CMakeCache.txt').read_text().splitlines():
+              if line.startswith('AUREA_GLES_COMPILER:'):
+                  configured = line.split('=', 1)[1]
+                  if configured:
+                      tool = Path(configured)
+          glslc = Path(os.environ['ANDROID_HOME']) / 'ndk' / os.environ['NDK_VERSION'] / 'shader-tools/linux-x86_64/glslc'
+          artifact = workspace / os.environ['PROBE_ARTIFACT']
+          subprocess.run(['python3', 'engine/tools/gles-shaders/test_translation.py',
+                          '--tool', str(tool), '--glslc', str(glslc),
+                          '--output-dir', str(artifact / 'diagnostics/shape-translation'),
+                          '--production-build', str(build),
+                          '--production-elf', str(artifact / 'bin/aurea_scene_gles_probe')], check=True)
+          PY
       - name: Package ARM64 runtime, models, licenses and provenance
         env:
           NATIVE_BUILD: ${{ steps.native-tree.outputs.build_dir }}
@@ -172,6 +212,11 @@ jobs:
               copy(build / name, artifact / 'diagnostics' / name)
           probe_source = workspace / 'engine/tests/android_scene_performance_probe.cpp'
           copy(probe_source, artifact / 'source/android_scene_performance_probe.cpp')
+          if os.environ['PROBE_REVISION'] == 'target':
+              for name in ('main.cpp', 'test_translation.py'):
+                  copy(workspace / 'engine/tools/gles-shaders' / name, artifact / 'source/gles-shaders' / name)
+              copy(workspace / 'engine/gpu/gles/CMakeLists.txt', artifact / 'source/gles-CMakeLists.txt')
+              copy(workspace / 'engine/shaders/shape/shape.frag', artifact / 'source/shape.frag')
           (artifact / 'README.txt').write_text(
               'Android ARM64 scene probes. Compilation and ELF checks only; device execution has not run.\n'
               'Use libc++_shared.so from this artifact in the same remote directory as both executables.\n'
@@ -180,7 +225,7 @@ jobs:
               'Imported: probe --model path.glb floor hdri blur [same options, then animationClip]\n'
               'animationClip defaults to 0 when present; -1 uses bind pose. hdri=0 off, 1 group, 2 object.\n'
               'Example: aurea_scene_vulkan_probe --model /data/local/tmp/aurea-scene/DamagedHelmet.glb 0 0 0 640 360 60 0 0 /data/local/tmp/aurea-scene/helmet.rgba 32 1 shared -1\n'
-              'Baseline production is be3e189f345ef5620fd10c8d5c6eeb9a6cf5f882, with only the common test harness changed.\n'
+              f'Baseline production is {os.environ["BASELINE_REF"]}, with only the common test harness changed.\n'
               'Compare baseline/target with bounded=0; baseline rejects bounded=1.\n'
               'Timings include explicit GPU waits and must not be presented as UI playback FPS.\n'
               'Keep model license files with the fixtures. provenance.json records source, binaries and fixture hashes.\n')
@@ -216,6 +261,7 @@ jobs:
               'workflow': '.github/workflows/android-scene-probes.yml',
               'workflowSha256': digest(common / 'android-scene-probes.yml'),
               'revision': os.environ['PROBE_REVISION'],
+              'baselineRef': os.environ['BASELINE_REF'],
               'fixtureSourceCommit': (common / 'source-commit.txt').read_text().strip(),
               'probeSourceCommit': (common / 'source-commit.txt').read_text().strip(),
               'probeSourceSha256': digest(probe_source),
@@ -232,6 +278,11 @@ jobs:
               'files': {str(path.relative_to(artifact)): {'bytes': path.stat().st_size, 'sha256': digest(path)}
                         for path in sorted(artifact.rglob('*')) if path.is_file()},
           }
+          if os.environ['PROBE_REVISION'] == 'target':
+              translation = json.loads((artifact / 'diagnostics/shape-translation/translation-regression.json').read_text())
+              if (translation['result'] != 'PASS' or not translation['production']['linkedElfSourceChecked']):
+                  raise SystemExit('The executed GLES shape translation was not verified in the linked target ELF')
+              manifest['shapeTranslation'] = translation
           (artifact / 'provenance.json').write_text(json.dumps(manifest, indent=2))
           print(json.dumps({'commit': manifest['commit'], 'abi': manifest['abi'], 'targets': manifest['targets'], 'deviceExecution': 'not-run'}))
           PY

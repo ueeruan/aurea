@@ -1,5 +1,6 @@
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -170,6 +171,8 @@ void ShaderLibrary::shutdown() noexcept {
 }
 
 void ShaderLibrary::forget_device() noexcept {
+    pipelineProbe_ = nullptr;
+    pipelineProbeContext_ = nullptr;
     pipelines_.clear();
     failedKeys_.clear();
     missingShaders_ = 0;
@@ -265,7 +268,10 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
     desc.hasColor1 = key.hasColor1 && !key.depthOnly;
     desc.colorFormat1 = key.format;
 
+    const u64 createStarted = pipelineProbe_ ? monotonic_ns() : 0;
     auto created = backend_->create_pipeline(desc);
+    if (pipelineProbe_)
+        pipelineProbe_(pipelineProbeContext_, key, monotonic_ns() - createStarted, created.ok());
     if (!created.ok()) {
         ++failures_;
         lastError_ = std::string("pipeline nao compilou: ") + (desc.debugName ? desc.debugName : "?");

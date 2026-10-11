@@ -1774,6 +1774,8 @@ private:
 
     std::unique_ptr<GPUBackend> gpu_;
     u64                pendingExportGpuFrame_ = 0, pendingExportGpuGeneration_ = 0; ///< renderMutex_
+    bool               pendingExportModelCleanup_ = false; ///< renderMutex_, clear only after the export fence
+    std::atomic<u64>   exportOriginalModelBytes_{0}; ///< extra CPU sources, outside the preview/shared model map
     u64                gpuGeneration_ = 0; ///< under renderMutex_; survives backend/device recreation
     bool               gpuRecoveryPending_ = false; ///< renderMutex_; failed rebuild remains retryable
     Renderer           renderer_;

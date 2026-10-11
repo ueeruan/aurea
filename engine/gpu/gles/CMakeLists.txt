@@ -28,18 +28,40 @@ if(NOT AUREA_GLES_COMPILER)
 elseif(NOT EXISTS "${AUREA_GLES_COMPILER}")
     message(FATAL_ERROR "AUREA_GLES_COMPILER does not exist: ${AUREA_GLES_COMPILER}")
 endif()
+execute_process(COMMAND "${AUREA_GLES_COMPILER}" --supports-shared-spv-key
+    RESULT_VARIABLE _supports_shared_key TIMEOUT 10)
+if(NOT _supports_shared_key EQUAL 0)
+    message(FATAL_ERROR "Stale AUREA_GLES_COMPILER: rebuild engine/tools/metal-shaders target aurea-gles-compiler, or unset the prebuilt path to auto-build the current tool")
+endif()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 file(GLOB_RECURSE _shader_inputs CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/shaders/*.vert" "${PROJECT_SOURCE_DIR}/shaders/*.frag" "${PROJECT_SOURCE_DIR}/shaders/*.comp")
 list(SORT _shader_inputs)
+file(GLOB_RECURSE _shader_includes CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/shaders/*.glsl")
 set(_essl_files "")
 foreach(_shader IN LISTS _shader_inputs)
     file(RELATIVE_PATH _relative "${PROJECT_SOURCE_DIR}/shaders" "${_shader}")
     set(_spv "${AUREA_SHADER_SPV_DIR}/${_relative}.spv")
     set(_essl "${_spv}.gles")
-    add_custom_command(OUTPUT "${_essl}"
-        COMMAND "${AUREA_GLES_COMPILER}" "${_spv}" "${_essl}"
-        DEPENDS "${_spv}" "${AUREA_GLES_COMPILER}" VERBATIM)
+    if(_relative STREQUAL "shape/shape.frag")
+        # Adreno 610 physically SIGSEGVs in glCompileShader on the optimized
+        # expanded shape CFG (all forms). The same complete source translated
+        # with function boundaries preserved compiles on that driver. Use -O0
+        # only for this ESSL translation; Vulkan/Metal keep the shared -O SPIR-V.
+        aurea_find_glslc(_gles_glslc)
+        set(_gles_source_spv "${_spv}.gles-source.spv")
+        add_custom_command(OUTPUT "${_gles_source_spv}"
+            COMMAND "${_gles_glslc}" --target-env=vulkan1.0 -O0 -Werror
+                -I "${PROJECT_SOURCE_DIR}/shaders" -o "${_gles_source_spv}" "${_shader}"
+            DEPENDS "${_shader}" ${_shader_includes} VERBATIM)
+        add_custom_command(OUTPUT "${_essl}"
+            COMMAND "${AUREA_GLES_COMPILER}" "${_gles_source_spv}" "${_essl}" "${_spv}"
+            DEPENDS "${_gles_source_spv}" "${_spv}" "${AUREA_GLES_COMPILER}" VERBATIM)
+    else()
+        add_custom_command(OUTPUT "${_essl}"
+            COMMAND "${AUREA_GLES_COMPILER}" "${_spv}" "${_essl}"
+            DEPENDS "${_spv}" "${AUREA_GLES_COMPILER}" VERBATIM)
+    endif()
     list(APPEND _essl_files "${_essl}")
 endforeach()
 set(_blob "${CMAKE_CURRENT_BINARY_DIR}/GlesShaderBlobs.cpp")

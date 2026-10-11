@@ -1688,6 +1688,11 @@ import UIKit
     private func launch(_ scene: String) throws -> Snapshot {
         runID = UUID().uuidString
         app = XCUIApplication(bundleIdentifier: "com.aurea.aurea")
+        if scene == "motion-blur-export" {
+            // Reproduce the measured device budget from the failed Metal run,
+            // independently of the free RAM on this particular CI runner.
+            app.launchArguments.append("--aurea-memory-budget-mb=163")
+        }
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID

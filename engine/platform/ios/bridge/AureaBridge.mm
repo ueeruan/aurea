@@ -173,7 +173,7 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     config.enableExportEngineV2 = ![NSProcessInfo.processInfo.arguments containsObject:@"--aurea-export-legacy"];
     // Admit against tracked Metal resources within the existing device budget.
     // The legacy half-share rejects a 101 MiB Motion Tile target even when
-    // the device envelope is 192 MiB and existing GPU use is below 8 MiB.
+    // the measured device envelope is larger and live GPU use is below 8 MiB.
     config.enableTrackedGpuAdmission = true;
     if (debug) for (NSString* arg in NSProcessInfo.processInfo.arguments) {
         if (![arg hasPrefix:@"--aurea-memory-budget-mb="]) continue;

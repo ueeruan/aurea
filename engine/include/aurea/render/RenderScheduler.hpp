@@ -219,6 +219,11 @@ public:
     [[nodiscard]] const AdaptiveState& update(const FrameStats& stats,
                                               const ThermalState& thermal) noexcept;
 
+    /// A completed preview needed memory segmentation after a real whole-graph
+    /// GPU admission failure. Adjust only the NEXT AUTO picture; manual choices
+    /// and measured CPU/GPU averages remain unchanged. Returns whether changed.
+    [[nodiscard]] bool notify_gpu_budget_exceeded(const ThermalState& thermal) noexcept;
+
     [[nodiscard]] const AdaptiveState& state() const noexcept { return state_; }
     [[nodiscard]] const FrameBudget& budget() const noexcept { return budget_; }
 
@@ -251,9 +256,14 @@ public:
     /// Preview PARADO (Fase 8): o melhor que os pisos (aparelho/calor) deixam.
     /// O AUTO reduz para manter o ritmo; parado não há ritmo a manter.
     [[nodiscard]] u32 still_denominator(const ThermalState& thermal) const noexcept {
-        return userScale_ == PreviewScale::Auto ? floor_denominator(thermal) : state_.denominator;
+        if (userScale_ != PreviewScale::Auto) return state_.denominator;
+        const u32 floor = floor_denominator(thermal);
+        return gpuBudgetLimitedStill_ ? std::max(floor, state_.denominator) : floor;
     }
-    [[nodiscard]] u32 still_heavy_level(const ThermalState& thermal) const noexcept { return floor_heavy(thermal); }
+    [[nodiscard]] u32 still_heavy_level(const ThermalState& thermal) const noexcept {
+        const u32 floor = floor_heavy(thermal);
+        return auto_mode() && gpuBudgetLimitedStill_ ? std::max(floor, state_.heavyLevel) : floor;
+    }
     /// Razão de custo de GPU medida entre um degrau de resolução e o de baixo
     /// (índice = degrau de cima: 0 FULL→1/2, 1 1/2→1/4, 2 1/4→1/8).
     [[nodiscard]] f32 measured_ratio(u32 step) const noexcept { return step < 3 ? ratio_[step] : 0.0f; }
@@ -302,6 +312,9 @@ private:
     u32 ratioPending_ = kInvalidIndex;  ///< degrau cuja razão falta medir
     u32 floorDen_ = 1;               ///< piso de aparelho (8H)
     u32 floorHeavy_ = 0;
+    // Only a completed real GPU-budget recovery sets this. It follows AUTO
+    // state as measured recovery improves, rather than imposing a fixed cap.
+    bool gpuBudgetLimitedStill_ = false;
 };
 
 } // namespace aurea

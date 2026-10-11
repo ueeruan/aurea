@@ -135,7 +135,7 @@ void Backend::Impl::retire(Frame& f) {
 }
 Status Backend::Impl::begin(FrameBegin& out, bool present) {
     Scope scope(*this);
-    if (!scope.valid || frameOpen || deviceLost) return Errc::InvalidState;
+    if (!scope.valid || frameOpen || deviceLost || (present && presentableLease)) return Errc::InvalidState;
     Frame& f = frames[sequence % frameCount];
     if (const auto status = wait(f, 5'000'000'000ull); !status.ok()) return status;
     retire(f); current = &f; f.number = ++sequence;
@@ -156,7 +156,10 @@ Status Backend::Impl::begin(FrameBegin& out, bool present) {
     if (presenting) { out.backbuffer = backbuffer; out.backbufferWidth = surfaceWidth; out.backbufferHeight = surfaceHeight; out.backbufferFormat = SurfaceFormat::RGBA8; }
     frameOpen = true; return check("begin_frame");
 }
-Status Backend::begin_frame(FrameBegin& out) noexcept { return impl_->begin(out, true); }
+Status Backend::begin_frame(FrameBegin& out) noexcept {
+    if (impl_->presentableLease) return Status{Errc::Busy, "presentable frame lease active"};
+    return impl_->begin(out, true);
+}
 Status Backend::begin_offscreen_frame(FrameBegin& out) noexcept { return impl_->begin(out, false); }
 Status Backend::Impl::finish_frame(bool present) {
     auto& d = *this;
@@ -185,6 +188,48 @@ Status Backend::Impl::finish_frame(bool present) {
 }
 Status Backend::end_frame() noexcept { return impl_->finish_frame(true); }
 Status Backend::discard_frame() noexcept { return impl_->finish_frame(false); }
+Status Backend::begin_presentable_frame_lease() noexcept {
+    auto& d = *impl_;
+    if (!d.frameOpen || !d.presenting || d.presentableLease || d.window == EGL_NO_SURFACE
+        || !d.backbuffer.valid() || !find(d.textures, d.backbuffer.id)) return Errc::InvalidState;
+    d.presentableLease = true;
+    d.leasedGeneration = d.surfaceGeneration;
+    d.leasedBackbuffer = d.backbuffer;
+    d.leasedWidth = d.surfaceWidth; d.leasedHeight = d.surfaceHeight;
+    return OkStatus;
+}
+Status Backend::begin_leased_frame(FrameBegin& out) noexcept {
+    auto& d = *impl_;
+    out = {};
+    if (!d.presentableLease || d.frameOpen) return Errc::InvalidState;
+    if (d.deviceLost) return Errc::DeviceLost;
+    if (d.window == EGL_NO_SURFACE || d.leasedGeneration != d.surfaceGeneration
+        || d.leasedBackbuffer != d.backbuffer || !find(d.textures, d.leasedBackbuffer.id)
+        || d.leasedWidth != d.surfaceWidth || d.leasedHeight != d.surfaceHeight)
+        return Errc::SurfaceLost;
+    // Rotate/retire the real command context as an ordinary offscreen frame;
+    // no default-framebuffer blit or EGL swap occurs until final end_frame().
+    if (const Status status = d.begin(out, false); !status.ok()) {
+        // A GL setup error can be reported after opening the command context.
+        // Close that context without a swap, so a failed final lease does not
+        // leave the render thread unable to start its next offscreen request.
+        if (d.frameOpen) (void)d.finish_frame(false);
+        out = {};
+        return status;
+    }
+    d.presenting = true;
+    out.backbuffer = d.leasedBackbuffer;
+    out.backbufferWidth = d.leasedWidth; out.backbufferHeight = d.leasedHeight;
+    out.backbufferFormat = SurfaceFormat::RGBA8;
+    return OkStatus;
+}
+void Backend::end_presentable_frame_lease() noexcept {
+    auto& d = *impl_;
+    // This handle is also owned by the surface. Resize/detach already wait its
+    // last GPU use before destruction; ending the scope needs no blocking wait.
+    d.presentableLease = false; d.leasedBackbuffer = {};
+    d.leasedGeneration = 0; d.leasedWidth = d.leasedHeight = 0;
+}
 Status Backend::attach_surface(const SurfaceDesc& surface) noexcept {
     auto& d = *impl_; if (!surface.nativeWindow || !surface.width || !surface.height) return Errc::InvalidArgument;
     detach_surface(); Impl::Scope scope(d); if (!scope.valid) return Errc::InvalidState;
@@ -197,6 +242,7 @@ Status Backend::attach_surface(const SurfaceDesc& surface) noexcept {
 }
 void Backend::detach_surface() noexcept {
     auto& d = *impl_; Impl::Scope scope(d); if (!scope.valid) return;
+    ++d.surfaceGeneration;
     wait_idle(); if (d.backbuffer.valid()) { destroy_texture(d.backbuffer); d.backbuffer = {}; }
     eglMakeCurrent(d.display, d.pbuffer, d.pbuffer, d.context);
     if (d.window != EGL_NO_SURFACE) { eglDestroySurface(d.display, d.window); d.window = EGL_NO_SURFACE; }
@@ -205,6 +251,7 @@ Status Backend::resize_surface(u32 w, u32 h) noexcept {
     if (!w || !h) return Errc::InvalidArgument;
     auto& d = *impl_; Impl::Scope scope(d); if (!scope.valid) return Errc::InvalidState;
     if (w != d.surfaceWidth || h != d.surfaceHeight) {
+        ++d.surfaceGeneration;
         wait_idle(); if (d.backbuffer.valid()) { destroy_texture(d.backbuffer); d.backbuffer = {}; }
         d.surfaceWidth = w; d.surfaceHeight = h;
     }
@@ -256,6 +303,8 @@ GpuMemoryStats Backend::memory_stats() const noexcept {
 GPUBackend::PipelineCacheInfo Backend::pipeline_cache_info() const noexcept { return impl_->cacheInfo; }
 void Backend::shutdown() noexcept {
     auto& d = *impl_;
+    ++d.surfaceGeneration;
+    end_presentable_frame_lease();
     if (d.context != EGL_NO_CONTEXT && d.make_current()) {
         d.frameOpen = false; d.current = nullptr; wait_idle(); save_pipeline_cache();
         for (auto& [id, p] : d.pipelines) glDeleteProgram(p.id);

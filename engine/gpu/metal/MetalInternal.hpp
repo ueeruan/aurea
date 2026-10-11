@@ -236,6 +236,12 @@ struct FrameContext {
     // the submitted writes complete. This owns the acquired drawable itself,
     // without allocating or copying another full-resolution image.
     id<MTLDrawable>         unpresentedDrawable = nil;
+    /// A leased final frame owns its drawable even after cancellation or a
+    /// surface-generation change. Release only when this submission retires.
+    id<MTLDrawable>         leasedDrawable = nil;
+    u64                     leasedSurfaceGeneration = 0;
+    bool                    leasedFinal = false;
+    bool                    leasedCancelled = false;
 
     HostRing                uniforms;
     HostRing                staging;
@@ -419,6 +425,21 @@ struct Impl {
     u64                 drawableHandles[3]{};   ///< handles das texturas de drawable
     u32                 drawableCursor = 0;
     bool                drawableAcquired = false;   ///< o frame atual tem drawable?
+    TextureHandle       acquiredBackbuffer{};
+    u64                 surfaceGeneration = 0;
+    /// Actual successful acquisitions/present calls; used by native regressions.
+    u64                 drawableAcquisitions = 0, drawablePresentations = 0;
+    struct PresentableLease {
+        id<CAMetalDrawable> drawable = nil;
+        TextureHandle backbuffer{};
+        u32 width = 0, height = 0;
+        SurfaceFormat format = SurfaceFormat::BGRA8;
+        SurfaceRotation rotation = SurfaceRotation::None;
+        u64 generation = 0;
+        bool active = false;
+        bool finalOpened = false;
+        bool presented = false;
+    } presentableLease;
 
     // Cache de pipeline (MTLBinaryArchive)
     id<MTLBinaryArchive> archive = nil;

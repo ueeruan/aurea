@@ -215,6 +215,7 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
 }
 
 void Backend::destroy_swapchain() noexcept {
+    end_presentable_frame_lease();
     for (u64 id : swapTextures_) {
         Texture t;
         if (textures_.remove(id, t)) {

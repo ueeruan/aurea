@@ -13296,6 +13296,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 
 #include "BoundedCommandsGpu.inl"
 #include "DiscardFrameGpu.inl"
+#include "FrameGraphLeaseGpu.inl"
 #include "ParticleCameraGpu.inl"
 #include "SurfaceDeformGpu.inl"
 #include "PageTurnGpu.inl"

@@ -41,6 +41,7 @@ EngineConfig headless_config() {
 #include "ProjectLifecycle.inl"
 #include "CaptureResources.inl"
 #include "PreviewIdle.inl"
+#include "PreviewGraphLifecycle.inl"
 #include "Beta008Scenarios.inl"
 #include "ContentBounds.inl"
 #include "PropertyCoverageTests.inl"

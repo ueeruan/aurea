@@ -627,6 +627,19 @@ public:
     /// required. The default retains the existing end_frame behavior; callers
     /// must check can_discard_frame before relying on picture continuity.
     [[nodiscard]] virtual Status discard_frame() noexcept { return end_frame(); }
+    /// Keep the one already acquired display target through serial submissions.
+    /// Intermediates are offscreen; begin_leased_frame opens only the final
+    /// presentation with the same texture/extent/rotation, without acquiring.
+    [[nodiscard]] virtual bool can_lease_presentable_frame() const noexcept { return false; }
+    [[nodiscard]] virtual Status begin_presentable_frame_lease() noexcept {
+        return Status{Errc::NotSupported, "presentable frame lease unavailable"};
+    }
+    [[nodiscard]] virtual Status begin_leased_frame(FrameBegin&) noexcept {
+        return Status{Errc::NotSupported, "presentable frame lease unavailable"};
+    }
+    /// Never waits on the CPU. Backing read by submitted work remains retained
+    /// until its real fence, including cancellation before final presentation.
+    virtual void end_presentable_frame_lease() noexcept {}
 
     /// Frame OFFSCREEN: NÃO adquire nem apresenta nada na tela.
     ///

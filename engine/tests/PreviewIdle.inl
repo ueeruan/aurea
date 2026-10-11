@@ -195,6 +195,37 @@ AUREA_TEST(PreviewIdle, BackgroundThreadStopsSubmittingOnceItsWindowIsFull) {
     AUREA_CHECK_EQ(fixture.engine.read_status().playhead.value, 0ll);
 }
 
+AUREA_TEST(PreviewIdle, ExactCaptureRestartsCompletedWindowWithoutPresentingOrChangingThePlayhead) {
+    IdlePreviewFixture fixture;
+    AUREA_CHECK(fixture.engine.render_frame(true).ok());
+    fixture.settle(); fixture.fill(4);
+    // The next idle tick marks this same-key completed window done.
+    AUREA_CHECK(fixture.engine.render_frame(true).ok());
+    const u32 heldPresentations = fixture.backend->presents;
+    const u32 heldAcquires = fixture.backend->acquires;
+    TextureDesc descriptor;
+    descriptor.width = descriptor.height = 64;
+    descriptor.format = SurfaceFormat::RGBA16F;
+    descriptor.sampled = descriptor.renderTarget = descriptor.transferSrc = true;
+    auto target = fixture.backend->create_texture(descriptor);
+    AUREA_CHECK(target.ok());
+    if (!target.ok()) return;
+    AUREA_CHECK(fixture.engine.render_offscreen(*target, 64, 64).ok());
+    AUREA_CHECK_EQ(fixture.engine.renderer().preview_cached_count(), 0u);
+    AUREA_CHECK_EQ(fixture.backend->presents, heldPresentations);
+    AUREA_CHECK_EQ(fixture.backend->acquires, heldAcquires);
+    const auto revision = fixture.engine.read_status().modelRevision;
+    // Same revision/frame, no request_render and no display acquisition:
+    // observing the capture's invalidated idle state must refill the window.
+    AUREA_CHECK(fixture.engine.render_frame(true).ok());
+    fixture.settle(); fixture.fill(4);
+    AUREA_CHECK_EQ(fixture.backend->presents, heldPresentations);
+    AUREA_CHECK_EQ(fixture.backend->acquires, heldAcquires);
+    AUREA_CHECK_EQ(fixture.engine.read_status().playhead.value, 0ll);
+    AUREA_CHECK_EQ(fixture.engine.read_status().modelRevision, revision);
+    fixture.backend->destroy_texture(*target);
+}
+
 AUREA_TEST(PreviewIdle, FailedFutureUploadNeverEntersCacheAndWaitsForReadiness) {
     IdlePreviewFixture fixture;
     fixture.add_future_image();

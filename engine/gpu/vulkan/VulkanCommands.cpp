@@ -774,7 +774,64 @@ Status Backend::prepare_reinitialization(u64 timeoutNs) noexcept {
 }
 
 Status Backend::begin_frame(FrameBegin& out) noexcept {
+    if (leasedSwapchain_) return Status{Errc::Busy, "presentable frame lease active"};
     return begin_frame_impl(out, true);
+}
+
+Status Backend::begin_presentable_frame_lease() noexcept {
+    if (leasedSwapchain_) return Status{Errc::Busy, "presentable frame lease active"};
+    if (!current_ || !imageAcquired_ || !swapchain_ || swapchainDirty_
+        || imageIndex_ >= swapTextures_.size()) return Errc::SurfaceLost;
+    leasedSwapchain_ = swapchain_;
+    leasedImageIndex_ = imageIndex_;
+    leasedDisplay_.backbuffer = TextureHandle{swapTextures_[imageIndex_]};
+    leasedDisplay_.backbufferWidth = swapExtent_.width;
+    leasedDisplay_.backbufferHeight = swapExtent_.height;
+    leasedDisplay_.backbufferFormat = from_vk(swapFormat_);
+    switch (swapTransform_) {
+        case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: leasedDisplay_.rotation = SurfaceRotation::Rotate90; break;
+        case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: leasedDisplay_.rotation = SurfaceRotation::Rotate180; break;
+        case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: leasedDisplay_.rotation = SurfaceRotation::Rotate270; break;
+        default: leasedDisplay_.rotation = SurfaceRotation::None; break;
+    }
+    return OkStatus;
+}
+
+Status Backend::begin_leased_frame(FrameBegin& out) noexcept {
+    if (deviceLost_) return Errc::DeviceLost;
+    if (!leasedSwapchain_ || leasedSwapchain_ != swapchain_ || swapchainDirty_ || !heldImage_
+        || imageIndex_ != leasedImageIndex_ || imageIndex_ >= swapTextures_.size()
+        || leasedDisplay_.backbuffer.id != swapTextures_[imageIndex_]
+        || leasedDisplay_.backbufferWidth != swapExtent_.width
+        || leasedDisplay_.backbufferHeight != swapExtent_.height)
+        return Status{Errc::SurfaceLost, "leased display target changed"};
+    VkSurfaceCapabilitiesKHR surfaceCaps{};
+    const VkResult queried = surface_ ? vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &surfaceCaps)
+        : VK_ERROR_SURFACE_LOST_KHR;
+    if (note_device_lost(queried)) return Errc::DeviceLost;
+    if (queried != VK_SUCCESS || surfaceCaps.currentTransform != swapCapsTransform_) {
+        swapchainDirty_ = true;
+        return Status{Errc::SurfaceLost, "leased display transform changed"};
+    }
+    const Status begun = begin_frame_impl(out, false);
+    if (!begun.ok()) return begun;
+    current_->offscreen = false;
+    imageAcquired_ = true;
+    imageAcquireWait_ = false; // initial discarded submission consumed acquire
+    out.backbuffer = leasedDisplay_.backbuffer;
+    out.backbufferWidth = leasedDisplay_.backbufferWidth;
+    out.backbufferHeight = leasedDisplay_.backbufferHeight;
+    out.backbufferFormat = leasedDisplay_.backbufferFormat;
+    out.rotation = leasedDisplay_.rotation;
+    return OkStatus;
+}
+
+void Backend::end_presentable_frame_lease() noexcept {
+    leasedSwapchain_ = VK_NULL_HANDLE;
+    leasedDisplay_ = {};
+    leasedImageIndex_ = 0;
+    // A cancelled acquired image remains held for the next surface render.
+    // Resize/detach already wait for actual work before destroying swapchain.
 }
 
 Status Backend::begin_offscreen_frame(FrameBegin& out) noexcept {

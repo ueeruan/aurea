@@ -828,6 +828,7 @@ void Engine::shutdown() noexcept {
         // Decoder/GL teardown must follow that frame and its retained leases.
         // A void shutdown still depends on the driver completing teardown.
         // Never leak the backend or free resources still owned by its queue.
+        cancel_preview_graph_locked();
         if (!poll_export_gpu_locked().ok())
             AUREA_LOG_WARN("shutdown: GPU do export ainda pendente; aguardando teardown seguro");
         if (gpu_) gpu_->wait_idle();
@@ -901,6 +902,7 @@ Status Engine::suspend() noexcept {
             state_ = s; // Native resources were not suspended; allow retry.
             return ready;
         }
+        cancel_preview_graph_locked();
         if (gpu_) {
             gpu_->wait_idle();
             gpu_->save_pipeline_cache();
@@ -948,6 +950,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     if (previewRelease && st < static_cast<u8>(TrimStage::OldRenderCache)) {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
+            cancel_preview_graph_locked();
             const GpuMemoryStats before = gpu_->memory_stats();
             const u32 frames = renderer_.release_preview_cache();
             if (frames) gpu_->wait_idle();
@@ -974,6 +977,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     if (st >= static_cast<u8>(TrimStage::OldRenderCache)) {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
+            cancel_preview_graph_locked();
             gpu_->wait_idle();   // fora do caminho quente: é um aviso do sistema
             const GpuMemoryStats beforeStats = gpu_->memory_stats();
             const u64 before = beforeStats.usedBytes;
@@ -1030,6 +1034,7 @@ void Engine::invalidate() noexcept {
 
 Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
+    cancel_preview_graph_locked();
     if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     pendingSurfaceSize_.store(0, std::memory_order_release);
@@ -1050,6 +1055,7 @@ Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcep
 
 void Engine::detach_surface() noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
+    cancel_preview_graph_locked();
     surfaceAttached_ = false;
     pendingSurfaceSize_.store(0, std::memory_order_release);
     // A void native surface teardown cannot report pending ownership.
@@ -1229,6 +1235,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     // let prepare() retain a raw VideoSource* while close_all destroys it.
     std::lock_guard<std::mutex> projectRenderLock(renderMutex_);
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+    cancel_preview_graph_locked();
     renderer_.release_project_resources();
     snapshot_ = FrameSnapshot{};
     media_.close_all();
@@ -1504,6 +1511,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
     // native buffers and GL context must outlive every old GPU submission.
     std::unique_lock<std::mutex> projectRenderLock(renderMutex_);
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+    cancel_preview_graph_locked();
     renderer_.release_project_resources();
     snapshot_ = FrameSnapshot{};
     media_.close_all();
@@ -9537,6 +9545,7 @@ Status Engine::recover_device_locked() noexcept {
     }
     AUREA_LOG_WARN("GPU indisponivel: recriando recursos sem alterar o projeto");
     if (++gpuGeneration_ == 0) ++gpuGeneration_;
+    cancel_preview_graph_locked();
     media_.close_all();   // os frames importados pertenciam ao dispositivo morto
     renderer_.forget_device();
     surfaceAttached_ = false;
@@ -9569,6 +9578,8 @@ Status Engine::ensure_gpu_healthy_locked() noexcept {
     if (!result.ok() && result.code() != Errc::Timeout) set_last_error(result, "recuperar GPU");
     return result;
 }
+
+#include "EnginePreviewGraph.inl"
 
 Status Engine::render_frame(bool onlyIfChanged) noexcept {
     // Export em andamento: o último quadro do preview fica na tela; a GPU e
@@ -9604,6 +9615,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         lastSkipped_ = true;
         return healthy;
     }
+    Status continuation;
+    if (continue_preview_graph_locked(frameStart, continuation)) return continuation;
     if (const u64 size = pendingSurfaceSize_.exchange(0, std::memory_order_acq_rel)) {
         const u32 width = static_cast<u32>(size >> 32), height = static_cast<u32>(size);
         if (width != surface_.width || height != surface_.height) {
@@ -9627,6 +9640,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     bool warming = false, cachedPreview = false, idleWarming = false;
     PreviewIdleKey idleKey;
     u64 idleMediaReady = 0;
+    u64 preparedPlaybackGeneration = 0;
     u32 idleCapacity = 0;
     f32 renderSpeed = 1.0f;
     {
@@ -9666,6 +9680,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         const bool force = forceRender_.exchange(false, std::memory_order_acq_rel) || rev != lastRenderedRevision_;
         lastRenderedRevision_ = rev;
         idleKey = {projectSession_, rev, project_->timeline().current().pack(), playback_.media_epoch(), t.value};
+        preparedPlaybackGeneration = playback_.generation();
         const bool idleEligible = !playing && !previewBuffering_ && playback_.mode() == PlaybackMode::Paused
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
             && !refinePending_ && !refineNow_ && !lastIncomplete_
@@ -9834,6 +9849,18 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         }
     }
     const Status s = renderer_.render(snapshot_, rs, nullptr, stats, timings);
+    if (renderer_.preview_graph_pending()) {
+        livePreviewGraphActive_.store(true, std::memory_order_release);
+        livePreviewGraphKey_ = idleKey;
+        livePreviewGraphPlaybackGeneration_ = preparedPlaybackGeneration;
+        livePreviewGraphGpuGeneration_ = gpuGeneration_;
+        livePreviewGraphPlaying_ = playing;
+        livePreviewGraphRefine_ = refineNow_;
+        lastSkipped_ = true;
+        nextFrameDueNs_ = monotonic_ns() + 2'000'000ull;
+        previewRetryDueNs_.store(nextFrameDueNs_, std::memory_order_release);
+        return OkStatus;
+    }
     if (s.code() == Errc::OutOfDeviceMemory) {
         // Recover optional owned CPU storage after failed GPU admission. The
         // existing next render prepares its normal snapshot; no frame/quality
@@ -10044,17 +10071,29 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     // still cover ownership changing after this early observation.
     if (exportActive_.load(std::memory_order_acquire))
         return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
+    if (livePreviewGraphActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "captura aguarda o quadro do preview"};
     struct ReaderGuard {
         std::atomic<u32>& readers;
         explicit ReaderGuard(std::atomic<u32>& value) : readers(value) { readers.fetch_add(1, std::memory_order_acq_rel); }
         ~ReaderGuard() { readers.fetch_sub(1, std::memory_order_release); }
-    } readerGuard(offscreenReaders_);
+    };
+    // Wake idle preparation only after the reader has gone away. An exact
+    // capture may evict a completed window without changing its model key.
+    struct ResumeIdle {
+        Engine& engine;
+        bool changed = false;
+        ~ResumeIdle() { if (changed) engine.wake_render(); }
+    } resumeIdle{*this};
+    ReaderGuard readerGuard(offscreenReaders_);
     // O lock de render é pego só por PREPARE + RENDER (curto). A espera pelos
     // frames de vídeo (até 4 s) e IA local fria (até 30 s) fica FORA dele: com o
     // lock preso, `detach_surface` (surfaceDestroyed na thread principal) e a
     // thread de render esperavam a captura da miniatura — no Galaxy S22 isso
     // deu ANR ("Input dispatching timed out") ao sair do editor.
     std::unique_lock<std::mutex> rl(renderMutex_);
+    if (renderer_.preview_graph_pending())
+        return Status{Errc::Busy, "captura aguarda o quadro do preview"};
     if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
     if (exportActive_.load(std::memory_order_acquire))
         return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
@@ -10095,6 +10134,8 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     for (;;) {
         if (!rl.owns_lock()) rl.lock();
         if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+        if (renderer_.preview_graph_pending())
+            return Status{Errc::Busy, "captura aguarda o quadro do preview"};
         // Media/AI waiting drops this lock. Export may have taken ownership
         // meanwhile; do not mutate its frozen snapshot or its full model cache.
         if (exportActive_.load(std::memory_order_acquire))
@@ -10180,6 +10221,8 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             const GpuMemoryStats before = gpu_->memory_stats();
             const u32 released = renderer_.release_preview_cache();
             if (released) {
+                previewIdle_ = {};
+                resumeIdle.changed = true;
                 gpu_->wait_idle();
                 const GpuMemoryStats after = gpu_->memory_stats();
                 AUREA_LOG_INFO("captura: previa guardada solta (%u quadros, %llu KB de GPU liberados)",
@@ -10302,15 +10345,19 @@ u32 Engine::last_offscreen_gpu_passes(GpuTiming* out, u32 capacity) const noexce
 }
 
 bool Engine::set_effect_preview_source(const u8* rgba, u32 width, u32 height) noexcept {
+    if (livePreviewGraphActive_.load(std::memory_order_acquire)) return false;
     if (!rgba || width == 0 || height == 0 || width > 4096 || height > 4096) return false;
     std::vector<u8> px(rgba, rgba + static_cast<usize>(width) * height * 4);
     std::lock_guard<std::mutex> rl(renderMutex_);
+    if (renderer_.preview_graph_pending()) return false;
     renderer_.set_effect_preview_source(std::move(px), width, height);
     return true;
 }
 
 Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out, u32& outWidth,
                                      u32& outHeight) noexcept {
+    if (livePreviewGraphActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
     if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
     if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
     // A cartela é pequena, mas o aparelho manda: nunca pedir textura maior do
@@ -10325,6 +10372,7 @@ Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vec
         h = std::max<u32>(1, static_cast<u32>(static_cast<f32>(h) * k));
     }
     std::lock_guard<std::mutex> rl(renderMutex_);
+    if (renderer_.preview_graph_pending()) return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     const Status s = renderer_.render_effect_preview(effectRegistry_, typeId, w, h, out, true);
     if (s.ok()) {
@@ -10346,6 +10394,8 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
                                        bool asPreview) noexcept {
     if (exportActive_.load(std::memory_order_acquire))
         return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
+    if (livePreviewGraphActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "captura aguarda o quadro do preview"};
     if (maxDim == 0) return Status{Errc::InvalidState, "dimensao de captura invalida"};
     u32 cw = 0, ch = 0;
     {
@@ -10384,6 +10434,8 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
         // not consume source-export headroom or repopulate its model cache.
         if (exportActive_.load(std::memory_order_acquire))
             return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
+        if (renderer_.preview_graph_pending())
+            return Status{Errc::Busy, "captura aguarda o quadro do preview"};
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         captureGpu = gpu_.get();
@@ -10405,6 +10457,8 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
             return Status{Errc::Cancelled, "GPU trocada durante captura"};
         if (s.ok() && exportActive_.load(std::memory_order_acquire))
             s = Status{Errc::Busy, "captura aguarda a exportacao terminar"};
+        if (s.ok() && renderer_.preview_graph_pending())
+            s = Status{Errc::Busy, "captura aguarda o quadro do preview"};
         if (s.ok()) s = poll_export_gpu_locked();
         if (s.ok()) s = gpu_->read_texture(target, half.data(), width * 8);
         gpu_->destroy_texture(target);
@@ -11944,6 +11998,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        cancel_preview_graph_locked();
         exportActive_.store(true, std::memory_order_release);
         if (const Status drained = drainExportStartup(); !drained.ok()) return drained;
         if (ctx->frozenProject) {

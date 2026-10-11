@@ -353,8 +353,8 @@ struct RenderSettings {
     /// Exact captures can finish pure, unblurred groups before their 2D graph.
     /// Their immutable scene state, shadow resolution and post quality stay exact.
     bool stageUnblurredScenes = false;
-    /// Offline callers may recover whole-graph OOM with the same ordered
-    /// passes in fenced segments. Live swapchain rendering is not segmented.
+    /// Whole-graph OOM may recover with the same ordered passes. Offline
+    /// callers wait bounded fences; display callers resume between render turns.
     bool allowGraphSegments = true;
     /// Incremental, opt-in offline path; authored samples and quality are kept.
     /// Mixed planes/particles and nested compositions retain the original path.
@@ -471,6 +471,12 @@ public:
     [[nodiscard]] Status render(FrameSnapshot& snapshot, const RenderSettings& settings,
                                 const OffscreenTarget* offscreen, FrameStats& stats,
                                 RenderTimings& timings) noexcept;
+    [[nodiscard]] bool preview_graph_pending() const noexcept { return previewGraph_.active; }
+    /// Returns Busy while genuine GPU work is pending, without waiting for it.
+    /// The caller must preserve the prepared snapshot until completion/cancel.
+    [[nodiscard]] Status continue_preview_graph(FrameStats&, RenderTimings&) noexcept;
+    void cancel_preview_graph() noexcept;
+    [[nodiscard]] bool preview_graph_settings_match(const RenderSettings&) const noexcept;
 
     /// Automatic capture phases are bounded to four pure groups, each at most
     /// 320 x 320. Explicit RenderSettings retain their independent full-quality
@@ -740,6 +746,34 @@ private:
         FrameStats& stats, RenderTimings& timings) noexcept;
     [[nodiscard]] Status render_segmented_graph(const RenderSettings&, FrameBegin&,
         RenderTimings&, bool& frameOpen) noexcept;
+    struct PreviewFrame;
+    struct RenderCompletion {
+        FrameBegin frame{};
+        FrameStats exposureStats{};
+        HeavyStats stagedStats{};
+        PreviewFrame* cached = nullptr;
+        std::span<StagedSceneTarget> targets{};
+        u64 effectsBefore = 0, began = 0, buildFrame = 0;
+        u32 width = 0, height = 0;
+        bool offscreen = false;
+    };
+    struct PendingPreviewGraph {
+        bool active = false, initial = false;
+        u32 nextPass = 0;
+        u64 waitingFrame = 0, started = 0;
+        u64 activeRecordNs = 0;
+        FrameSnapshot* snapshot = nullptr;
+        RenderSettings settings{};
+        RenderCompletion completion{};
+        RenderTimings timings{};
+        std::unique_ptr<TextureHandle[]> exposureTextures;
+        u32 exposureCount = 0;
+        std::unique_ptr<StagedSceneTarget[]> stagedTargets;
+        u32 stagedCount = 0;
+    } previewGraph_;
+    [[nodiscard]] Status finish_render(FrameSnapshot&, const RenderSettings&, const OffscreenTarget*,
+        Status, bool frameOpen, RenderCompletion&, FrameStats&, RenderTimings&) noexcept;
+    void release_preview_graph_scope() noexcept;
     void collect_resources(u64 frameNumber) noexcept;
     void read_timings(RenderTimings& t) noexcept;
 

@@ -258,6 +258,74 @@ import UIKit
         _ = try awaitSnapshot("Pause remains responsive after idle preparation") { $0.playing == 0 }
     }
 
+    func testExactCaptureRestartsCompletedPausedCache() throws {
+        _ = try launch("transform-expression")
+        // Reach the project toolbar before filling the window: selection and
+        // panel changes must not be mistaken for a capture-triggered refill.
+        for _ in 0..<2 {
+            if app.buttons["Export"].firstMatch.exists { break }
+            let back = app.buttons["Back (clear the selection)"].firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        }
+        let openExport = app.buttons["Export"].firstMatch
+        XCTAssertTrue(openExport.waitForExistence(timeout: 5)); XCTAssertTrue(openExport.isHittable)
+        let initial = try snapshot()
+        XCTAssertEqual(initial.playing, 0)
+        let frame = initial.corePlayhead
+        let revision = try XCTUnwrap(initial.modelRevision)
+        func completeWindow(_ state: Snapshot) -> Bool {
+            guard let flags = state.previewBufferStatus, let duration = state.compositionDuration,
+                  duration > frame, flags & 0xc000_0000 == 0 else { return false }
+            let target = min(Int64((flags >> 8) & 0xff), duration - frame)
+            return target > 0 && Int64(flags & 0xff) >= target
+                && (state.previewBufferRanges ?? []).contains { $0.count == 2 && $0[0] == frame && $0[1] >= frame + target }
+        }
+        var lastWindow: [[Int64]] = []
+        var unchangedSince = Date()
+        let filled = try awaitSnapshot("Paused cache fills the native budgeted window and stops changing", timeout: 30) { state in
+            guard state.playing == 0, state.corePlayhead == frame, state.modelRevision == revision,
+                  completeWindow(state) else { unchangedSince = Date(); return false }
+            let ranges = state.previewBufferRanges ?? []
+            if ranges != lastWindow { lastWindow = ranges; unchangedSince = Date(); return false }
+            return Date().timeIntervalSince(unchangedSince) >= 0.75
+        }
+        let window = try XCTUnwrap(filled.previewBufferRanges)
+        XCTAssertFalse(window.isEmpty)
+        attach("Completed paused native cache before exact capture", stage.value as? String ?? "missing")
+        try assertVisibleVideoPreview("Completed paused text picture before capture")
+
+        // ExportView.task calls capturePreviewFrame(640) with its default
+        // previewQuality=false: the real captureFrame path, not a screenshot
+        // or a preview-quality proxy. Do not start an encoder or send Play/Seek.
+        openExport.tap()
+        let thumbnail = app.descendants(matching: .any)["Preview"].firstMatch
+        XCTAssertTrue(thumbnail.waitForExistence(timeout: 5))
+        let deadline = Date().addingTimeInterval(30)
+        var exactThumbnailReady = false
+        repeat {
+            if let measured = try? previewPixelMetrics(thumbnail), measured.bright > 5,
+               measured.dark > 100, measured.green < measured.pixels / 5 {
+                exactThumbnailReady = true; break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        XCTAssertTrue(exactThumbnailReady, "The exact native thumbnail never replaced the muted placeholder")
+        try assertVisiblePreviewPixels("Exact native capture thumbnail", element: thumbnail)
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5)); XCTAssertTrue(close.isHittable); close.tap()
+        let rebuilt = try awaitSnapshot("Returning from exact capture rebuilds the same complete paused cache", timeout: 30) {
+            $0.playing == 0 && $0.corePlayhead == frame && $0.modelRevision == revision
+                && completeWindow($0) && $0.previewBufferRanges == window
+        }
+        XCTAssertEqual(rebuilt.previewLastError, 0)
+        try assertVisibleVideoPreview("Paused picture after exact capture and cache refill")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.75))
+        let stable = try snapshot()
+        XCTAssertEqual(stable.playing, 0); XCTAssertEqual(stable.corePlayhead, frame)
+        XCTAssertEqual(stable.modelRevision, revision); XCTAssertEqual(stable.previewBufferRanges, window)
+        attach("Rebuilt paused native cache after exact capture", stage.value as? String ?? "missing")
+    }
+
     func testPreviewBufferStatusAndPauseRemainAvailable() throws {
         _ = try launch("transform-expression")
         let play = app.buttons["Play · hold to repeat"].firstMatch
@@ -737,7 +805,12 @@ import UIKit
     }
 
     private func assertVisibleVideoPreview(_ label: String) throws {
-        let screenshot = stage.screenshot()
+        try assertVisiblePreviewPixels(label, element: stage)
+    }
+
+    private func previewPixelMetrics(_ element: XCUIElement) throws ->
+        (screenshot: XCUIScreenshot, bright: Int, dark: Int, green: Int, pixels: Int) {
+        let screenshot = element.screenshot()
         let image = try XCTUnwrap(screenshot.image.cgImage)
         let width = 160, height = max(2, Int((160.0 * Double(image.height) / Double(image.width)).rounded()))
         var rgba = [UInt8](repeating: 0, count: width * height * 4)
@@ -747,7 +820,7 @@ import UIKit
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
             context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))); return true
         }
-        XCTAssertTrue(drew)
+        guard drew else { throw ProbeError.geometry }
         var bright = 0, dark = 0, green = 0
         for pixel in stride(from: 0, to: rgba.count, by: 4) {
             let r = Int(rgba[pixel]), g = Int(rgba[pixel + 1]), b = Int(rgba[pixel + 2])
@@ -755,12 +828,18 @@ import UIKit
             if r < 64 && g < 64 && b < 64 { dark += 1 }
             if g > 96 && g > r * 3 / 2 + 32 && g > b * 3 / 2 + 32 { green += 1 }
         }
-        // The controlled fixture is a white rounded shape on black with white
-        // text/captions. A uniform green or empty picture cannot satisfy this.
+        return (screenshot, bright, dark, green, width * height)
+    }
+
+    private func assertVisiblePreviewPixels(_ label: String, element: XCUIElement) throws {
+        let measured = try previewPixelMetrics(element)
+        let bright = measured.bright, dark = measured.dark, green = measured.green
+        // The controlled fixtures have white content on a dark background.
+        // A muted placeholder, uniform green or empty picture cannot pass.
         XCTAssertGreaterThan(bright, 5, "\(label): the decoded picture disappeared")
         XCTAssertGreaterThan(dark, 100, "\(label): the fixture background disappeared")
-        XCTAssertLessThan(green, width * height / 5, "\(label): preview flashed green")
-        let attachment = XCTAttachment(screenshot: screenshot)
+        XCTAssertLessThan(green, measured.pixels / 5, "\(label): preview flashed green")
+        let attachment = XCTAttachment(screenshot: measured.screenshot)
         attachment.name = label; attachment.lifetime = .keepAlways; add(attachment)
     }
 
@@ -1946,6 +2025,9 @@ import UIKit
         let playing: UInt32
         let previewLastError: Int?
         let previewDroppedFrames: UInt64?
+        let previewBufferStatus: UInt32?
+        let compositionDuration: Int64?
+        let modelRevision: UInt32?
         let runID: String
         let scene: String
         let ready: Bool

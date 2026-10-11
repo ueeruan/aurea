@@ -24,6 +24,10 @@ public:
     Status end_frame() noexcept override;
     bool can_discard_frame() const noexcept override { return true; }
     Status discard_frame() noexcept override;
+    bool can_lease_presentable_frame() const noexcept override { return true; }
+    Status begin_presentable_frame_lease() noexcept override;
+    Status begin_leased_frame(FrameBegin&) noexcept override;
+    void end_presentable_frame_lease() noexcept override;
     Result<TextureHandle> create_texture(const TextureDesc&) noexcept override;
     Result<BufferHandle> create_buffer(const BufferDesc&) noexcept override;
     Result<SamplerHandle> create_sampler(const SamplerDesc&) noexcept override;

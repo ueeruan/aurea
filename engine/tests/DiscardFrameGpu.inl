@@ -28,6 +28,13 @@ struct DiscardFrameTestAccess {
     }
     static bool held(const Backend& b) { return b.heldImage_; }
     static VkQueue queue(const Backend& b) { return b.queue_; }
+    static VkSurfaceKHR install_lease_test_surface(Backend& b) {
+        const auto old = b.surface_;
+        b.surface_ = reinterpret_cast<VkSurfaceKHR>(b.device_);
+        return old;
+    }
+    static void restore_lease_test_surface(Backend& b, VkSurfaceKHR previous) { b.surface_ = previous; }
+    static VkSurfaceTransformFlagBitsKHR expected_lease_transform(const Backend& b) { return b.swapCapsTransform_; }
     static void detach_test_wsi(Backend& b) {
         b.wait_idle();
         b.swapchain_ = VK_NULL_HANDLE;

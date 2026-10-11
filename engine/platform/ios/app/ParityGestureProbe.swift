@@ -72,6 +72,8 @@ import UIKit
             "coreStarted": model.started, "coreError": model.startError ?? "",
             "modelRevision": model.status.modelRevision, "playhead": model.status.playhead,
             "corePlayhead": readCoreStatus ? coreStatus.playhead : -1,
+            "previewBufferStatus": readCoreStatus ? coreStatus.previewBufferStatus : 0,
+            "compositionDuration": readCoreStatus ? coreStatus.duration : 0,
             "previewBufferRanges": model.previewBufferRanges.map { [$0.lowerBound, $0.upperBound] },
             "motionBlurSettings": model.engine.motionBlurSettings().map(\.floatValue),
             "layerCount": model.layers.count, "primaryID": primary ?? 0,

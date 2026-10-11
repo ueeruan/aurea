@@ -1893,6 +1893,12 @@ private:
     i64  lastRenderedFrame_ = -1;
     PreviewRefill previewRefill_;
     PreviewIdleBuffer previewIdle_;          ///< render thread / renderMutex_
+    std::atomic<bool> livePreviewGraphActive_{false}; ///< capture/UI early Busy without taking renderMutex_
+    PreviewIdleKey livePreviewGraphKey_{};
+    u64 livePreviewGraphPlaybackGeneration_ = 0, livePreviewGraphGpuGeneration_ = 0;
+    bool livePreviewGraphPlaying_ = false, livePreviewGraphRefine_ = false;
+    void cancel_preview_graph_locked() noexcept;
+    [[nodiscard]] bool continue_preview_graph_locked(u64 frameStart, Status& result) noexcept;
     std::atomic<u64> previewPressureUntilNs_{0}; ///< trim_memory(>= RUNNING_LOW): prévia guardada pausada até aqui
     std::atomic<u32> offscreenReaders_{0};    ///< idle work must not steal capture decode targets
     // Protected by modelMutex_. The published packed status is lock-free for UI.

@@ -74,6 +74,9 @@ class ModelPreviewDeviceTest {
             .put("pixelRoi", "central-70-percent-composition").put("pixelInsetFraction", 0.15)
             .put("savedScreenshotScope", "full composition viewport including editor overlays; classification uses the inset ROI")
             .put("playbackBoundsPolicy", "cache stage bounds while paused; no Compose idle wait per playing picture")
+            .put("operationPictureDeadlineMs", 10000)
+            .put("operationPicturePolicy", "wait for measured visible pixels after logical seek; retain every pending screenshot")
+            .put("autoPreviewModel", "DamagedHelmet").put("autoPreviewScope", "separate adaptive display density observation after both manual cycles")
             .toString() + "\n")
         lateinit var store: EditorStore
         var ready = false
@@ -107,6 +110,8 @@ class ModelPreviewDeviceTest {
                 .put("ramBytes", perf.ramBytes).put("gpuBytes", perf.gpuMemoryBytes)
                 .put("gpuReservedBytes", perf.gpuReservedBytes).put("scene3dBytes", perf.scene3dBytes)
                 .put("gpuName", perf.gpuName).put("previewWidth", perf.previewWidth).put("previewHeight", perf.previewHeight)
+                .put("previewAuto", state.previewAuto).put("previewNumerator", state.previewNumerator)
+                .put("previewDenominator", state.previewDenominator)
             report.appendText(extra.toString() + "\n")
             return state
         }
@@ -117,6 +122,7 @@ class ModelPreviewDeviceTest {
         val pendingPictures = mutableMapOf<String, Int>()
         fun pixels(model: String, label: String, requireModel: Boolean = true, save: Boolean = false,
                    stageBounds: androidx.compose.ui.geometry.Rect? = null,
+                   retryable: Boolean = false,
                    observe: ((Long, Long) -> Unit)? = null): Boolean {
             val began = SystemClock.elapsedRealtime()
             // Semantics queries await Compose idleness. Resolve them while
@@ -178,7 +184,7 @@ class ModelPreviewDeviceTest {
                     emptyImageHashes[model] = imageHash
                     emptyRoiSizes[model] = roiSize
                 }
-                val sampleLabel = if (!valid && (label == "empty" || label == "cold")) {
+                val sampleLabel = if (!valid && (label == "empty" || label == "cold" || retryable)) {
                     val key = "$model-$label"
                     val attempt = pendingPictures.getOrDefault(key, 0)
                     pendingPictures[key] = attempt + 1
@@ -208,6 +214,33 @@ class ModelPreviewDeviceTest {
                 }
                 return valid
             } finally { screenshot.recycle() }
+        }
+        fun operationRemainingMs(began: Long): Long {
+            val remaining = 10000L - (SystemClock.elapsedRealtime() - began)
+            assertTrue("Model operation exceeded the ten second picture deadline", remaining > 0)
+            return remaining
+        }
+        fun awaitOperationPicture(model: String, label: String, began: Long, frame: Long,
+                                  stageBounds: androidx.compose.ui.geometry.Rect,
+                                  extra: JSONObject = JSONObject()) {
+            // Loading/seek status becomes ready before a driver submission is
+            // displayed. Keep the operation bounded from its start, and retain
+            // blank observations instead of classifying the first one as a
+            // permanent disappearance. Playback still rejects every blank.
+            var visible = false
+            while (!visible && SystemClock.elapsedRealtime() - began < 10000L) {
+                val state = status()
+                assertEquals("Native error while awaiting model picture", 0, state.lastError)
+                if (!state.playing && state.playhead == frame) {
+                    visible = pixels(model, label, save = true, stageBounds = stageBounds, retryable = true)
+                }
+                if (!visible && SystemClock.elapsedRealtime() - began < 10000L) SystemClock.sleep(100)
+            }
+            val elapsed = SystemClock.elapsedRealtime() - began
+            assertTrue("Model never appeared after $label within ten seconds", visible && elapsed <= 10000L)
+            val state = record(model, "$label-ready", elapsed, extra)
+            assertTrue("Model picture is not paused at the requested frame", !state.playing && state.playhead == frame)
+            assertEquals("Native error after model picture", 0, state.lastError)
         }
         val fixtures = linkedMapOf(
             "DamagedHelmet.glb" to "a1e3b04de97b11de564ce6e53b95f02954a297f0008183ac63a4f5974f6b32d8",
@@ -326,26 +359,83 @@ class ModelPreviewDeviceTest {
                     assertTrue("Playback observations exceeded the ten second deadline", elapsed <= 10000)
                     assertTrue("Timeline did not advance through actual playback", advanced >= 3L)
                     ui { store.pause() }
+                    compose.waitUntil(30000) { !status().playing }
+                    // This operation does not change the stage layout. Cache
+                    // its bounds before loading, so Compose idleness cannot
+                    // hide loading latency inside a screenshot query.
+                    val operationBounds = compose.onNodeWithTag("editor.stage").fetchSemanticsNode().boundsInWindow
                     for (frame in listOf(45, 5, 90, 15)) {
                         val seekAt = SystemClock.elapsedRealtime()
                         ui { store.seek(frame) }
-                        compose.waitUntil(30000) { !status().playing && status().playhead == frame.toLong() }
-                        assertTrue("Model disappeared on seek: $model/$frame", pixels(model, "seek-$round-$frame"))
-                        record(model, "seek-$round-$frame-ready", SystemClock.elapsedRealtime() - seekAt)
+                        compose.waitUntil(operationRemainingMs(seekAt)) { !status().playing && status().playhead == frame.toLong() }
+                        awaitOperationPicture(model, "seek-$round-$frame", seekAt, frame.toLong(), operationBounds)
                     }
                     val reopenAt = SystemClock.elapsedRealtime()
                     assertEquals(0, engine.loadProject(saved.absolutePath))
-                    compose.waitUntil(60000) { status().layerCount == 1 && !status().playing }
+                    compose.waitUntil(operationRemainingMs(reopenAt)) { status().layerCount == 1 && !status().playing }
                     ui { store.clearSelection(); store.seek(30) }
-                    compose.waitUntil(30000) { status().playhead == 30L }
-                    assertTrue("Model disappeared on reopen", pixels(model, "reopen-$round", save = true))
-                    record(model, "reopen-$round-ready", SystemClock.elapsedRealtime() - reopenAt)
+                    compose.waitUntil(operationRemainingMs(reopenAt)) { status().playhead == 30L && !status().playing }
+                    awaitOperationPicture(model, "reopen-$round", reopenAt, 30L, operationBounds)
                     val trimAt = SystemClock.elapsedRealtime()
                     val reclaimed = engine.trimMemory(80)
                     ui { store.seek(60) }
-                    compose.waitUntil(30000) { status().playhead == 60L && !status().playing }
-                    assertTrue("Model disappeared after memory trim", pixels(model, "trim-$round", save = true))
-                    record(model, "trim-$round-ready", SystemClock.elapsedRealtime() - trimAt, JSONObject().put("reclaimedBytes", reclaimed))
+                    compose.waitUntil(operationRemainingMs(trimAt)) { status().playhead == 60L && !status().playing }
+                    awaitOperationPicture(model, "trim-$round", trimAt, 60L, operationBounds, JSONObject().put("reclaimedBytes", reclaimed))
+                }
+                if (model == "DamagedHelmet") {
+                    // Manual 1/1 source geometry and operations above remain
+                    // separate evidence. AUTO changes only preview density;
+                    // report the driver's actual decision, without promising
+                    // a particular FPS or source-resolution display texture.
+                    val autoSetupAt = SystemClock.elapsedRealtime()
+                    ui { store.pause(); store.seek(0); store.setPreviewScale(true, 1, 1) }
+                    compose.waitUntil(operationRemainingMs(autoSetupAt)) {
+                        val state = status()
+                        !state.playing && state.playhead == 0L && state.previewAuto
+                    }
+                    val autoBounds = compose.onNodeWithTag("editor.stage").fetchSemanticsNode().boundsInWindow
+                    awaitOperationPicture(model, "auto-before", autoSetupAt, 0L, autoBounds)
+                    val autoAt = SystemClock.elapsedRealtime()
+                    var samples = 0
+                    val hashes = mutableSetOf<Long>()
+                    val playheads = mutableSetOf<Long>()
+                    val densities = mutableSetOf<String>()
+                    try {
+                        ui { store.play() }
+                        compose.waitUntil(operationRemainingMs(autoAt)) { status().playing && status().playhead > 0L }
+                        record(model, "auto-start", SystemClock.elapsedRealtime() - autoAt)
+                        do {
+                            val state = status()
+                            assertTrue("AUTO preview did not remain active", state.previewAuto)
+                            assertTrue("Invalid AUTO preview density", state.previewNumerator > 0 && state.previewDenominator >= state.previewNumerator)
+                            densities.add("${state.previewNumerator}/${state.previewDenominator}")
+                            assertTrue("Blank/flat green AUTO playback picture",
+                                pixels(model, "auto-play-$samples", save = true, stageBounds = autoBounds, observe = { hash, playhead ->
+                                    hashes.add(hash); playheads.add(playhead)
+                                }))
+                            ++samples
+                            if (SystemClock.elapsedRealtime() - autoAt < 10000L) SystemClock.sleep(100)
+                        } while (SystemClock.elapsedRealtime() - autoAt < 10000L &&
+                            (SystemClock.elapsedRealtime() - autoAt < 8000L || samples < 3 || hashes.size < 2 || playheads.size < 3))
+                        val elapsed = SystemClock.elapsedRealtime() - autoAt
+                        val played = record(model, "auto-played", elapsed,
+                            JSONObject().put("pictureSamples", samples).put("distinctPictureHashes", hashes.size)
+                                .put("timelineSamples", playheads.size).put("advancedFrames", status().playhead)
+                                .put("observedDensityDecisions", JSONArray(densities.toList()))
+                                .put("scope", "AUTO display density; manual geometry and texture import classification are unchanged"))
+                        assertTrue("AUTO playback observations exceeded ten seconds", elapsed in 8000L..10000L)
+                        assertTrue("AUTO preview did not produce three moving displayed pictures",
+                            samples >= 3 && hashes.size >= 2 && playheads.size >= 3 && played.playhead >= 3L)
+                        assertTrue("AUTO state or density decision was missing", played.previewAuto && densities.isNotEmpty())
+                    } finally {
+                        ui { store.pause(); store.setPreviewScale(false, 1, 1); store.seek(0) }
+                    }
+                    compose.waitUntil(10000) {
+                        val state = status()
+                        !state.playing && state.playhead == 0L && !state.previewAuto && state.previewNumerator == 1 && state.previewDenominator == 1
+                    }
+                    record(model, "auto-restored-manual")
+                    assertEquals(0, engine.saveProject(saved.absolutePath))
                 }
             }
             report.appendText(JSONObject().put("result", "PASS").put("targetBuild", build).put("runId", runId)

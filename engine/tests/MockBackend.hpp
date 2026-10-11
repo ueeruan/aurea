@@ -43,6 +43,10 @@ public:
     u32 framesSubmitted = 0;
     u32 framesDiscarded = 0;
     bool supportsFrameDiscard = false;
+    bool supportsPresentableLease = false;
+    bool presentableLeaseActive = false;
+    u32 presentableLeases = 0, presentableLeasesEnded = 0, leasedFrames = 0;
+    u64 surfaceGeneration = 1;
     u32 offscreenFrames = 0;
     /// Quantas vezes o swapchain foi adquirido e quantas o quadro foi para a
     /// tela. Só contam com superfície anexada — é o que a prévia de efeito NÃO
@@ -70,6 +74,7 @@ public:
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
     std::function<void()> beforeBeginOffscreenFrame;
+    std::function<void()> beforeBeginLeasedFrame;
     std::function<void()> beforeWaitIdle;
     std::function<Status()> beforeEndFrame;
     std::function<Status(const BufferDesc&)> beforeCreateBuffer;
@@ -100,11 +105,13 @@ public:
     }
     void shutdown() noexcept override {}
     Status attach_surface(const SurfaceDesc&) noexcept override {
+        ++surfaceGeneration;
         surfaceAttached = true;
         return OkStatus;
     }
-    void detach_surface() noexcept override { surfaceAttached = false; }
+    void detach_surface() noexcept override { ++surfaceGeneration; surfaceAttached = false; }
     Status resize_surface(u32 w, u32 h) noexcept override {
+        if (w != surfaceWidth || h != surfaceHeight) ++surfaceGeneration;
         surfaceWidth = w;
         surfaceHeight = h;
         return OkStatus;
@@ -113,6 +120,7 @@ public:
 
     Status begin_frame(FrameBegin& out) noexcept override {
         if (beforeBeginFrame) beforeBeginFrame();
+        if (presentableLeaseActive) return Errc::Busy;
         out = FrameBegin{};
         out.commands = this;
         out.frameNumber = ++frame_;
@@ -125,6 +133,7 @@ public:
             out.rotation = surfaceRotation;
             frameHadBackbuffer = true;
         }
+        presentableFrame_ = out;
         return OkStatus;
     }
     Status begin_offscreen_frame(FrameBegin& out) noexcept override {
@@ -133,6 +142,7 @@ public:
         out.commands = this;
         out.frameNumber = ++frame_;
         frameOpen = true;
+        frameHadBackbuffer = false;
         ++offscreenFrames;
         return OkStatus;
     }
@@ -151,6 +161,30 @@ public:
         ++framesDiscarded;
         frameHadBackbuffer = false;
         return end_frame();
+    }
+    bool can_lease_presentable_frame() const noexcept override { return supportsPresentableLease; }
+    Status begin_presentable_frame_lease() noexcept override {
+        if (!supportsPresentableLease || !frameOpen || !frameHadBackbuffer || !surfaceAttached
+            || presentableLeaseActive || !presentableFrame_.backbuffer.valid()) return Errc::InvalidState;
+        presentableLeaseActive = true; ++presentableLeases;
+        leasedFrame_ = presentableFrame_; leasedGeneration_ = surfaceGeneration;
+        return OkStatus;
+    }
+    Status begin_leased_frame(FrameBegin& out) noexcept override {
+        if (beforeBeginLeasedFrame) beforeBeginLeasedFrame();
+        out = {};
+        if (!presentableLeaseActive || frameOpen) return Errc::InvalidState;
+        if (deviceLost) return Errc::DeviceLost;
+        if (!surfaceAttached || leasedGeneration_ != surfaceGeneration
+            || leasedFrame_.backbufferWidth != surfaceWidth || leasedFrame_.backbufferHeight != surfaceHeight
+            || leasedFrame_.rotation != surfaceRotation) return Errc::SurfaceLost;
+        out = leasedFrame_; out.commands = this; out.frameNumber = ++frame_;
+        frameOpen = frameHadBackbuffer = true; ++leasedFrames;
+        return OkStatus;
+    }
+    void end_presentable_frame_lease() noexcept override {
+        if (presentableLeaseActive) ++presentableLeasesEnded;
+        presentableLeaseActive = false; leasedFrame_ = {}; leasedGeneration_ = 0;
     }
 
     Result<TextureHandle> create_texture(const TextureDesc& d) noexcept override {
@@ -295,6 +329,8 @@ private:
     std::vector<Deferred> deferred_;
     u64 ids_ = 1'000'000;
     u64 frame_ = 0;
+    FrameBegin presentableFrame_{}, leasedFrame_{};
+    u64 leasedGeneration_ = 0;
 };
 
 } // namespace aurea::test

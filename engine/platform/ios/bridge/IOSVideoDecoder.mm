@@ -27,7 +27,7 @@
 #if DEBUG
 #import "AureaEngine.h"
 #if defined(AUREA_GPU_METAL)
-#include "MetalBackend.hpp"
+#include "MetalInternal.hpp"
 #endif
 #endif
 
@@ -872,6 +872,172 @@ private:
 } // namespace aurea::ios
 
 #if DEBUG
+#if defined(AUREA_GPU_METAL)
+// Actual CAMetalLayer acquisitions and Metal command buffers, independent of
+// the engine's frame-graph mocks. This is a native layer/fence/pixel contract;
+// simulator execution does not assert physical-iPhone display performance.
+static NSString* VerifyMetalPresentationLease(aurea::mtl::Backend& gpu, aurea::u32& checks,
+                                            aurea::u32& leaseChecks, aurea::u32& pixelChecks) {
+    using namespace aurea;
+    CAMetalLayer* layer = [CAMetalLayer layer];
+    layer.bounds = CGRectMake(0, 0, 64, 32);
+    layer.contentsScale = 1;
+    SurfaceDesc surface;
+    surface.nativeWindow = (__bridge void*)layer;
+    surface.width = 64; surface.height = 32;
+    if (!gpu.can_lease_presentable_frame() || !gpu.attach_surface(surface).ok())
+        return @"Metal presentation lease could not attach its native test layer";
+    struct Cleanup {
+        mtl::Backend& gpu;
+        BufferHandle pixels{};
+        ~Cleanup() {
+            gpu.end_presentable_frame_lease();
+            if (gpu.impl().current) (void)gpu.discard_frame();
+            if (pixels.valid()) gpu.destroy_buffer(pixels);
+            gpu.wait_idle();
+            gpu.detach_surface();
+        }
+    } cleanup{gpu};
+    BufferDesc readback;
+    readback.bytes = 64 * 32 * 4;
+    readback.usage = BufferUsage::TransferDst;
+    readback.access = MemoryAccess::Readback;
+    auto pixels = gpu.create_buffer(readback);
+    if (!pixels.ok()) return @"Metal presentation lease readback allocation failed";
+    cleanup.pixels = *pixels;
+    auto check = [&] { ++checks; ++leaseChecks; };
+    auto pixelsMatch = [&](u8 blue, u8 green, u8 red) {
+        void* mapped = nullptr;
+        if (!gpu.map_buffer(*pixels, mapped).ok() || !mapped) return false;
+        const u8* bytes = static_cast<const u8*>(mapped);
+        bool matches = true;
+        for (usize offset = 0; offset < readback.bytes; offset += 4)
+            matches &= bytes[offset] == blue && bytes[offset + 1] == green
+                && bytes[offset + 2] == red && bytes[offset + 3] == 255;
+        gpu.unmap_buffer(*pixels);
+        if (matches) { check(); ++pixelChecks; }
+        return matches;
+    };
+    auto clearAndRead = [&](FrameBegin& frame) {
+        RenderPassBegin pass;
+        pass.color = frame.backbuffer;
+        pass.clear[0] = 1; pass.clear[1] = 0; pass.clear[2] = 0; pass.clear[3] = 1;
+        frame.commands->begin_render_pass(pass);
+        frame.commands->end_render_pass();
+        frame.commands->barrier(frame.backbuffer, ResourceState::TransferSrc);
+        frame.commands->copy_texture_to_buffer(frame.backbuffer, *pixels);
+    };
+    // Success, cancellation before/inside the final frame, resize before/inside
+    // final recording, and detach. Every attempt acquires exactly one drawable;
+    // only a complete, uncancelled, same-generation frame may present it.
+    enum class Case { Complete, CancelPending, CancelFinal, ResizePending, ResizeFinal, DetachPending };
+    for (Case scenario : {Case::Complete, Case::CancelPending, Case::CancelFinal,
+                          Case::ResizePending, Case::ResizeFinal, Case::DetachPending}) {
+        if (!gpu.resize_surface(64, 32).ok()) return @"Metal lease test layer resize failed";
+        const u64 acquisitions = gpu.impl().drawableAcquisitions;
+        const u64 presentations = gpu.impl().drawablePresentations;
+        FrameBegin initial;
+        if (!gpu.begin_frame(initial).ok() || !initial.commands || !initial.backbuffer.valid()
+            || initial.backbufferWidth != 64 || initial.backbufferHeight != 32)
+            return @"Metal lease did not acquire the real native drawable";
+        if (!gpu.begin_presentable_frame_lease().ok()
+            || gpu.begin_presentable_frame_lease().code() != Errc::Busy)
+            return @"Metal lease did not reject a nested reservation";
+        FrameBegin blocked;
+        if (gpu.begin_frame(blocked).code() != Errc::Busy)
+            return @"Metal lease allowed a second native drawable acquisition";
+        check();
+        RenderPassBegin initialPass;
+        initialPass.color = initial.backbuffer;
+        initialPass.clear[0] = 0; initialPass.clear[1] = 0; initialPass.clear[2] = 1; initialPass.clear[3] = 1;
+        initial.commands->begin_render_pass(initialPass);
+        initial.commands->end_render_pass();
+        if (!gpu.discard_frame().ok()) return @"Metal leased initial submission did not discard";
+        u64 last = initial.frameNumber;
+        for (u32 segment = 0; segment < 5; ++segment) {
+            FrameBegin intermediate;
+            if (!gpu.begin_offscreen_frame(intermediate).ok() || !intermediate.commands
+                || intermediate.backbuffer.valid() || !gpu.end_frame().ok())
+                return @"Metal lease could not submit an offscreen continuation";
+            last = intermediate.frameNumber;
+            if (!gpu.impl().presentableLease.drawable
+                || gpu.texture_desc(initial.backbuffer).width != initial.backbufferWidth
+                || gpu.impl().drawableAcquisitions != acquisitions + 1
+                || gpu.impl().drawablePresentations != presentations)
+                return @"Metal lease changed or presented its target during an intermediate segment";
+            check();
+        }
+        if (scenario == Case::CancelPending) {
+            gpu.end_presentable_frame_lease();
+            if (gpu.begin_leased_frame(blocked).code() != Errc::InvalidState)
+                return @"Metal cancelled lease reopened a final frame";
+            if (!gpu.wait_frame(last, 5'000'000'000ull).ok())
+                return @"Metal cancelled lease did not retire its last submitted fence";
+            check();
+        } else if (scenario == Case::ResizePending || scenario == Case::DetachPending) {
+            if (scenario == Case::ResizePending) {
+                if (!gpu.resize_surface(65, 32).ok()) return @"Metal lease resize failed";
+            } else gpu.detach_surface();
+            if (gpu.begin_leased_frame(blocked).code() != Errc::SurfaceLost)
+                return @"Metal lease did not reject a replaced target generation";
+            gpu.end_presentable_frame_lease();
+            if (!gpu.wait_frame(last, 5'000'000'000ull).ok())
+                return @"Metal invalidated lease did not retire its last submitted fence";
+            check();
+        } else {
+            FrameBegin final;
+            if (!gpu.begin_leased_frame(final).ok() || !final.commands
+                || final.backbuffer != initial.backbuffer
+                || final.backbufferWidth != initial.backbufferWidth
+                || final.backbufferHeight != initial.backbufferHeight
+                || final.backbufferFormat != initial.backbufferFormat || final.rotation != initial.rotation)
+                return @"Metal final frame did not reuse the leased target and metadata";
+            // Loading after ring-slot recycling proves that the first discarded
+            // submission's native drawable and exact pixels survived all turns.
+            RenderPassBegin preserved;
+            preserved.color = final.backbuffer; preserved.load = LoadOp::Load;
+            final.commands->begin_render_pass(preserved);
+            final.commands->end_render_pass();
+            final.commands->barrier(final.backbuffer, ResourceState::TransferSrc);
+            final.commands->copy_texture_to_buffer(final.backbuffer, *pixels);
+            if (scenario == Case::CancelFinal) gpu.end_presentable_frame_lease();
+            if (scenario == Case::ResizeFinal && !gpu.resize_surface(65, 32).ok())
+                return @"Metal final lease resize failed";
+            const Status ended = gpu.end_frame();
+            const Errc expected = scenario == Case::CancelFinal ? Errc::Cancelled
+                : scenario == Case::ResizeFinal ? Errc::SurfaceLost : Errc::Ok;
+            if (ended.code() != expected || !gpu.wait_frame(final.frameNumber, 5'000'000'000ull).ok())
+                return @"Metal final lease submission/cancellation did not retire correctly";
+            if (!pixelsMatch(255, 0, 0)) return @"Metal leased final GPU pixels differ exactly";
+            if (scenario == Case::Complete && gpu.begin_leased_frame(blocked).code() != Errc::Busy)
+                return @"Metal lease allowed a second presentation of the same drawable";
+            gpu.end_presentable_frame_lease();
+            check();
+        }
+        if (gpu.impl().presentableLease.active || gpu.impl().drawableAcquisitions != acquisitions + 1
+            || gpu.impl().drawablePresentations != presentations + (scenario == Case::Complete ? 1u : 0u))
+            return @"Metal lease leaked its reservation or acquired/presented an extra drawable";
+        check();
+    }
+    // Detach was the last case: a new target must recover normal playback.
+    if (!gpu.attach_surface(surface).ok()) return @"Metal lease could not reattach after cancellation";
+    const u64 acquisitions = gpu.impl().drawableAcquisitions;
+    const u64 presentations = gpu.impl().drawablePresentations;
+    FrameBegin recovery;
+    if (!gpu.begin_frame(recovery).ok() || !recovery.commands || !recovery.backbuffer.valid())
+        return @"Metal normal display did not recover after the lease";
+    clearAndRead(recovery);
+    if (!gpu.end_frame().ok() || !gpu.wait_frame(recovery.frameNumber, 5'000'000'000ull).ok()
+        || gpu.impl().drawableAcquisitions != acquisitions + 1
+        || gpu.impl().drawablePresentations != presentations + 1 || !pixelsMatch(0, 0, 255))
+        return @"Metal normal display lost exact pixels or presentation after lease cleanup";
+    for (const auto& frame : gpu.impl().frames)
+        if (frame.leasedDrawable || frame.unpresentedDrawable)
+            return @"Metal lease retained its drawable after the terminal GPU fence";
+    check();
+    return nil;
+}
+#endif
 // Compare production CPU/IOSurface outputs against an independent presentation-
 // order reader. No renderer substitution: this is a decoder contract regression.
 NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger expectedFrames) {
@@ -927,6 +1093,8 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
         u32 checks = 0;
         u32 metalPixelChecks = 0;
         u32 metalExternalScopeChecks = 0;
+        u32 metalPresentableLeaseChecks = 0;
+        u64 metalDrawableAcquisitions = 0, metalDrawablePresentations = 0;
         for (bool zeroCopy : {false, true}) {
             control->set_zero_copy(zeroCopy);
             auto decoder = factory->open_video(asset, MediaPriority::Preview);
@@ -1090,6 +1258,13 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
                 gpu.wait_idle();
                 if (gpu.memory_stats().usedBytes != baseline.usedBytes)
                     return failure(@"Metal texture bytes remain after release");
+                if (NSString* error = VerifyMetalPresentationLease(gpu, checks, metalPresentableLeaseChecks, metalPixelChecks))
+                    return failure(error);
+                metalDrawableAcquisitions += gpu.impl().drawableAcquisitions;
+                metalDrawablePresentations += gpu.impl().drawablePresentations;
+                if (gpu.memory_stats().usedBytes != baseline.usedBytes
+                    || gpu.memory_stats().textureCount != baseline.textureCount)
+                    return failure(@"Metal presentation lease changed owned texture accounting after detach");
                 checks += 3;
             }
 #endif
@@ -1134,6 +1309,9 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
         }
         return @{ @"passed": @YES, @"frames": @(expected.size()), @"pixelChecks": @(checks), @"metalPixelChecks": @(metalPixelChecks),
                   @"metalExternalScopeChecks": @(metalExternalScopeChecks),
+                  @"metalPresentableLeaseChecks": @(metalPresentableLeaseChecks),
+                  @"metalDrawableAcquisitions": @(metalDrawableAcquisitions), @"metalDrawablePresentations": @(metalDrawablePresentations),
+                  @"metalPresentationProbeScope": @"native CAMetalLayer; physical iPhone performance not asserted",
                   @"cpuAndIOSurface": @YES, @"lazyCpuFallback": @YES, @"seekAndResume": @YES };
     }
 }

@@ -1719,13 +1719,16 @@ private:
     [[nodiscard]] Status ensure_gpu_healthy_locked() noexcept;
     // renderMutex_: a failed export may leave a real submission in flight.
     [[nodiscard]] Status poll_export_gpu_locked(u64 timeoutNs = 0) noexcept;
+    void drain_capture_target_locked() noexcept;
     void retain_failed_export_gpu_locked() noexcept;
     void render_thread_main() noexcept;
     void update_perf(const FrameStats& stats, const RenderTimings& timings,
                      const FrameSnapshot& snap, u64 frameStartNs) noexcept;
     [[nodiscard]] RenderSettings current_render_settings() noexcept;
+    struct OffscreenRequest;
     [[nodiscard]] Status render_offscreen_impl(TextureHandle target, u32 width, u32 height, bool asPreview,
-                                               u64 expectedGpuGeneration, bool targetPreviewScale) noexcept;
+                                               u64 expectedGpuGeneration, bool targetPreviewScale,
+                                               OffscreenRequest& request) noexcept;
     [[nodiscard]] Status capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& width, u32& height,
                                                 bool asPreview) noexcept;
     static const ImagePixels* image_lookup(void* self, AssetId id);
@@ -1893,14 +1896,20 @@ private:
     i64  lastRenderedFrame_ = -1;
     PreviewRefill previewRefill_;
     PreviewIdleBuffer previewIdle_;          ///< render thread / renderMutex_
-    std::atomic<bool> livePreviewGraphActive_{false}; ///< capture/UI early Busy without taking renderMutex_
+    std::atomic<bool> livePreviewGraphActive_{false}; ///< secondary effect-preview early Busy without renderMutex_
     PreviewIdleKey livePreviewGraphKey_{};
     u64 livePreviewGraphPlaybackGeneration_ = 0, livePreviewGraphGpuGeneration_ = 0;
     bool livePreviewGraphPlaying_ = false, livePreviewGraphRefine_ = false;
     void cancel_preview_graph_locked() noexcept;
     [[nodiscard]] bool continue_preview_graph_locked(u64 frameStart, Status& result) noexcept;
     std::atomic<u64> previewPressureUntilNs_{0}; ///< trim_memory(>= RUNNING_LOW): prévia guardada pausada até aqui
-    std::atomic<u32> offscreenReaders_{0};    ///< idle work must not steal capture decode targets
+    std::mutex offscreenRequestMutex_;       ///< one synchronous capture owns prepare through readback
+    std::atomic<u32> offscreenReaders_{0};    ///< display/idle work must not steal capture graph or decode targets
+    std::atomic<bool> offscreenCancelled_{false}; ///< lifecycle interrupts capture segments before joining ownership
+    std::mutex captureRetirementMutex_;      ///< timeout queues cleanup without waiting for render ownership
+    TextureHandle pendingCaptureTarget_{};
+    GPUBackend* pendingCaptureGpu_ = nullptr;
+    u64 pendingCaptureGeneration_ = 0;
     // Protected by modelMutex_. The published packed status is lock-free for UI.
     bool previewBuffering_ = false;
     i64 previewBufferStart_ = 0;

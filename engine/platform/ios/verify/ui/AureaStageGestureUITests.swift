@@ -586,7 +586,14 @@ import UIKit
         let selected = try snapshot()
         XCTAssertEqual(selected.selectionCount, 1)
         XCTAssertEqual(selected.primaryID, before.primaryID)
-        try openCommandSearch("glow")
+        // The top tenth lies inside the 44-point target and outside the small
+        // magnifier glyph. Opening here checks the real hit region, not only AX.
+        search.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+        let field = app.textFields["commandSearchField"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(field.isHittable)
+        field.tap()
+        field.typeText("glow")
         let effect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "command:effect:")).firstMatch
         XCTAssertTrue(effect.waitForExistence(timeout: 5)); XCTAssertTrue(effect.isEnabled)
         effect.tap()

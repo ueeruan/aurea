@@ -80,6 +80,8 @@ public:
     std::function<Status(const BufferDesc&)> beforeCreateBuffer;
     std::function<Status(u64, u64)> beforeWaitFrame;
     std::function<Status(TextureHandle, const void*, u32)> beforeTextureUpload;
+    // Opt-in mocked readback sink. No pixels are fabricated by default.
+    std::function<Status(TextureHandle, void*, u32)> beforeReadTexture;
     std::function<void(const void*, u32)> beforeSetUniforms;
     std::function<Result<ExternalTexture>(const ExternalImageDesc&)> beforeImportExternalImage;
     std::function<void(void (*)(void*), void*)> beforeDeferUntilGpuDone;
@@ -238,7 +240,9 @@ public:
         return OkStatus;
     }
     void unmap_buffer(BufferHandle) noexcept override {}
-    Status read_texture(TextureHandle, void*, u32) noexcept override { return Errc::NotSupported; }
+    Status read_texture(TextureHandle texture, void* output, u32 rowBytes) noexcept override {
+        return beforeReadTexture ? beforeReadTexture(texture, output, rowBytes) : Status{Errc::NotSupported};
+    }
     Status upload_texture_level(TextureHandle texture, u32 mip, u32, const void* data, usize) noexcept override {
         const auto desc = texture_desc(texture);
         const u32 rowBytes = std::max(1u, desc.width >> mip) * desc.bytes_per_pixel();

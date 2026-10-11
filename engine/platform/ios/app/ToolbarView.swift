@@ -79,7 +79,7 @@ struct TopBarView: View {
         Button {
             if model.status.playing != 0 { model.playPause() }
             shell.commandSearch = true
-        } label: { Image(systemName: "magnifyingglass").foregroundStyle(tint).frame(width: 44, height: 44) }
+        } label: { Image(systemName: "magnifyingglass").foregroundStyle(tint).frame(width: 44, height: 44).contentShape(Rectangle()) }
             .buttonStyle(.plain).accessibilityLabel(AureaText.t("edt_cmd_search_desc")).accessibilityIdentifier("commandSearchOpen")
     }
 

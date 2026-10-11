@@ -37,6 +37,7 @@
 #include "aurea/effects/Particular.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -459,6 +460,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     if (state_ != EngineState::Uninitialized) {
         return Status{Errc::InvalidState, "motor ja inicializado"};
     }
+    offscreenCancelled_.store(false, std::memory_order_release);
     config_ = config;
     renderer_.set_foreground_model_directory(config.documentsDirectory + "/ai/rotobrush");
     startup_ = StartupTimings{};
@@ -804,6 +806,7 @@ void Engine::shutdown() noexcept {
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     if (state_ == EngineState::Uninitialized || state_ == EngineState::ShuttingDown) return;
     state_ = EngineState::ShuttingDown;
+    offscreenCancelled_.store(true, std::memory_order_release);
     captionCancelled.store(true);
 
     if (exportCtx_ && exportCtx_->thread.joinable()) {
@@ -814,6 +817,10 @@ void Engine::shutdown() noexcept {
     join_motion_track();
     text::FontManager::instance().set_path_resolver(nullptr);
     stop_render_thread();
+    // Capture polls may deliberately release renderMutex_. Join their full
+    // request lifetime before destroying decoders, the backend, or this Engine.
+    // The cancellation flag also interrupts a segmented GPU-fence wait.
+    std::lock_guard<std::mutex> captureOwnership(offscreenRequestMutex_);
     media_.proxies().stop();
     thumbs_.stop();
     thumbs_.clear();
@@ -884,10 +891,12 @@ Status Engine::suspend() noexcept {
     // continue submitting while iOS/Android had already suspended the app.
     // Join without model/render locks: the worker needs both to unwind.
     state_ = EngineState::Suspended;
+    offscreenCancelled_.store(true, std::memory_order_release);
     if (exportCtx_ && exportCtx_->thread.joinable()) {
         (void)cancel_export();
         exportCtx_->thread.join();
     }
+    std::lock_guard<std::mutex> captureOwnership(offscreenRequestMutex_);
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         previewBuffering_ = false;
@@ -900,6 +909,7 @@ Status Engine::suspend() noexcept {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) {
             state_ = s; // Native resources were not suspended; allow retry.
+            offscreenCancelled_.store(false, std::memory_order_release);
             return ready;
         }
         cancel_preview_graph_locked();
@@ -1022,6 +1032,7 @@ Status Engine::resume() noexcept {
     if (state_ != EngineState::Suspended) return Status{Errc::InvalidState, "motor nao esta suspenso"};
     media_.resume_all();
     media_.proxies().set_pause_reason(PreviewProxyService::Background, false);
+    offscreenCancelled_.store(false, std::memory_order_release);
     state_ = EngineState::Ready;
     invalidate();
     return OkStatus;
@@ -1136,13 +1147,15 @@ void Engine::render_thread_main() noexcept {
     while (renderRunning_) {
         {
             std::unique_lock<std::mutex> lock(wakeMutex_);
-            if (exportActive_.load(std::memory_order_acquire)) {
-                // The exporter owns the GPU. A stale refinement deadline or
+            if (exportActive_.load(std::memory_order_acquire)
+                || offscreenReaders_.load(std::memory_order_acquire)) {
+                // Export/capture owns the GPU. A stale refinement deadline or
                 // playback hint must not repeatedly enter render_frame's early
                 // return. UI/vsync/decode wakes cannot make preview work useful
-                // until export finishes; both completion paths request_render.
+                // until ownership ends; both completion paths wake rendering.
                 wakeCv_.wait(lock, [this] {
-                    return !renderRunning_ || !exportActive_.load(std::memory_order_acquire);
+                    return !renderRunning_ || (!exportActive_.load(std::memory_order_acquire)
+                        && !offscreenReaders_.load(std::memory_order_acquire));
                 });
             } else if (!surfaceAttached_ || state_ == EngineState::Suspended) {
                 // A pending play/buffer request must not spin when Android/iOS
@@ -9504,7 +9517,27 @@ RenderSettings Engine::current_render_settings() noexcept {
     return rs;
 }
 
+void Engine::drain_capture_target_locked() noexcept {
+    TextureHandle target{};
+    GPUBackend* backend = nullptr;
+    u64 generation = 0;
+    {
+        std::lock_guard<std::mutex> cleanup(captureRetirementMutex_);
+        target = pendingCaptureTarget_;
+        backend = pendingCaptureGpu_;
+        generation = pendingCaptureGeneration_;
+        pendingCaptureTarget_ = {};
+        pendingCaptureGpu_ = nullptr;
+        pendingCaptureGeneration_ = 0;
+    }
+    // A reset/shutdown already retired the old native device's resources.
+    // Handles may have been recycled: never destroy one in a new generation.
+    if (target.valid() && gpu_.get() == backend && gpuGeneration_ == generation)
+        gpu_->destroy_texture(target); // native deferred destruction preserves the submitted fence
+}
+
 Status Engine::poll_export_gpu_locked(u64 timeoutNs) noexcept {
+    drain_capture_target_locked();
     if (pendingExportGpuFrame_) {
         if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
             pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
@@ -9585,9 +9618,15 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     // Export em andamento: o último quadro do preview fica na tela; a GPU e
     // os decoders são do export.
     if (exportActive_.load(std::memory_order_acquire)) return OkStatus;
+    if (offscreenReaders_.load(std::memory_order_acquire)) return OkStatus;
     const u64 frameStart = monotonic_ns();
     std::lock_guard<std::mutex> rl(renderMutex_);
     if (exportActive_.load(std::memory_order_acquire)) return OkStatus;
+    if (offscreenReaders_.load(std::memory_order_acquire)) {
+        lastSkipped_ = true;
+        nextFrameDueNs_ = frameStart + 2'000'000ull;
+        return OkStatus;
+    }
     lastSkipped_ = false;
     const u64 retryDue = previewRetryDueNs_.load(std::memory_order_acquire);
     if (onlyIfChanged && retryDue > frameStart
@@ -10059,41 +10098,105 @@ f32 Engine::preview_heavy_scale() const noexcept {
     return std::min(caps_.policy().heavyScale, adaptive_->quality().heavy());
 }
 
+// One request owns the shared graph from handoff through readback. In particular,
+// a decoder wait cannot allow the display thread to start another LIVE graph.
+// All waits for ownership and an outstanding GPU frame happen without keeping
+// renderMutex_; CPU edits and surface callbacks may make progress meanwhile.
+struct Engine::OffscreenRequest {
+    Engine& engine;
+    std::unique_lock<std::mutex> ownership;
+    u64 started = monotonic_ns();
+    u64 deadline = started + 4'000'000'000ull;
+    bool reader = false;
+    explicit OffscreenRequest(Engine& value)
+        : engine(value), ownership(value.offscreenRequestMutex_, std::defer_lock) {}
+    ~OffscreenRequest() {
+        if (!reader) return;
+        engine.offscreenReaders_.fetch_sub(1, std::memory_order_release);
+        engine.wake_render();
+        // unique_lock releases ownership after this body, including the wake.
+        // A lifecycle join must not outlive the final access to Engine.
+    }
+    Status check() const noexcept {
+        if (engine.exportActive_.load(std::memory_order_acquire))
+            return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
+        if (engine.offscreenCancelled_.load(std::memory_order_acquire)
+            || engine.state() == EngineState::ShuttingDown || engine.state() == EngineState::Uninitialized)
+            return Status{Errc::Cancelled, "captura encerrada"};
+        if (monotonic_ns() >= deadline)
+            return Status{Errc::Timeout, "prazo da captura esgotado"};
+        return OkStatus;
+    }
+    Status lock_render(std::unique_lock<std::mutex>& lock) const noexcept {
+        for (;;) {
+            if (const Status valid = check(); !valid.ok()) return valid;
+            if (lock.try_lock()) return check();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    Status acquire() noexcept {
+        for (;;) {
+            if (const Status valid = check(); !valid.ok()) return valid;
+            if (ownership.try_lock()) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        engine.offscreenReaders_.fetch_add(1, std::memory_order_acq_rel);
+        reader = true;
+        for (;;) {
+            std::unique_lock<std::mutex> lock(engine.renderMutex_, std::defer_lock);
+            if (const Status valid = lock_render(lock); !valid.ok()) return valid;
+            if (!engine.gpu_ || !engine.renderer_.ready()) return Errc::InvalidState;
+            engine.drain_capture_target_locked();
+            if (engine.renderer_.preview_graph_pending()) {
+                // Cancellation preserves the submitted frame's resources behind
+                // its real fence, and leaves the last complete screen visible.
+                engine.cancel_preview_graph_locked();
+                engine.forceRender_.store(true, std::memory_order_release);
+                engine.previewRetryDueNs_.store(0, std::memory_order_release);
+            }
+            const Status retired = engine.renderer_.reclaim_failed_transients(0);
+            if (retired.ok()) return OkStatus;
+            if (retired.code() != Errc::Timeout) return retired;
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+    Status wait_gpu_frame(u64 frame, u64 generation) noexcept {
+        for (;;) {
+            std::unique_lock<std::mutex> lock(engine.renderMutex_, std::defer_lock);
+            if (const Status valid = lock_render(lock); !valid.ok()) return valid;
+            if (!engine.gpu_ || engine.gpuGeneration_ != generation)
+                return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+            const Status ready = engine.gpu_->wait_frame(frame, 0);
+            if (ready.code() != Errc::Timeout) return ready;
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+};
+
 Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview, u64 expectedGpuGeneration) noexcept {
-    return render_offscreen_impl(target, width, height, asPreview, expectedGpuGeneration, false);
+    OffscreenRequest request{*this};
+    if (const Status owned = request.acquire(); !owned.ok()) return owned;
+    return render_offscreen_impl(target, width, height, asPreview, expectedGpuGeneration, false, request);
 }
 
 Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height, bool asPreview,
-                                      u64 expectedGpuGeneration, bool targetPreviewScale) noexcept {
+                                      u64 expectedGpuGeneration, bool targetPreviewScale,
+                                      OffscreenRequest& request) noexcept {
     // Export can hold renderMutex_ while polling an outstanding GPU fence.
     // A thumbnail must report Busy before waiting on that lock, so it cannot
     // block the UI from requesting cancellation. The locked checks below
     // still cover ownership changing after this early observation.
     if (exportActive_.load(std::memory_order_acquire))
         return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
-    if (livePreviewGraphActive_.load(std::memory_order_acquire))
-        return Status{Errc::Busy, "captura aguarda o quadro do preview"};
-    struct ReaderGuard {
-        std::atomic<u32>& readers;
-        explicit ReaderGuard(std::atomic<u32>& value) : readers(value) { readers.fetch_add(1, std::memory_order_acq_rel); }
-        ~ReaderGuard() { readers.fetch_sub(1, std::memory_order_release); }
-    };
-    // Wake idle preparation only after the reader has gone away. An exact
-    // capture may evict a completed window without changing its model key.
-    struct ResumeIdle {
-        Engine& engine;
-        bool changed = false;
-        ~ResumeIdle() { if (changed) engine.wake_render(); }
-    } resumeIdle{*this};
-    ReaderGuard readerGuard(offscreenReaders_);
     // O lock de render é pego só por PREPARE + RENDER (curto). A espera pelos
     // frames de vídeo (até 4 s) e IA local fria (até 30 s) fica FORA dele: com o
     // lock preso, `detach_surface` (surfaceDestroyed na thread principal) e a
     // thread de render esperavam a captura da miniatura — no Galaxy S22 isso
     // deu ANR ("Input dispatching timed out") ao sair do editor.
-    std::unique_lock<std::mutex> rl(renderMutex_);
-    if (renderer_.preview_graph_pending())
-        return Status{Errc::Busy, "captura aguarda o quadro do preview"};
+    std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+    if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
     if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
     if (exportActive_.load(std::memory_order_acquire))
         return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
@@ -10119,8 +10222,9 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     rs.deferLocalAi = !asPreview;
     if (asPreview) { rs.heavyScale = preview_heavy_scale(); rs.flowPolicyScale = caps_.policy().heavyScale; }
     OffscreenMeasure m;
-    const u64 tStart = monotonic_ns();
-    u64 tPrep0 = tStart, tPrep1 = tStart;
+    const u64 tStart = request.started;
+    const u64 measureStart = monotonic_ns();
+    u64 tPrep0 = measureStart, tPrep1 = measureStart;
     u64 captureSession = 0, captureRevision = 0, capturePlaybackGeneration = 0;
     CompositionId captureComposition{};
     FrameIndex captureTime{};
@@ -10132,10 +10236,10 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     // aproximado que o scrub mostra). Limite de 4 s para arquivo quebrado não
     // travar para sempre.
     for (;;) {
-        if (!rl.owns_lock()) rl.lock();
+        if (!rl.owns_lock()) {
+            if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+        }
         if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
-        if (renderer_.preview_graph_pending())
-            return Status{Errc::Busy, "captura aguarda o quadro do preview"};
         // Media/AI waiting drops this lock. Export may have taken ownership
         // meanwhile; do not mutate its frozen snapshot or its full model cache.
         if (exportActive_.load(std::memory_order_acquire))
@@ -10196,7 +10300,10 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         const bool waitingVideo = snapshot_.missingVideoFrames != 0 || snapshot_.staleVideoFrames != 0;
         // Absolute deadlines never restart when preview work interleaves or a
         // different GPU resource becomes unavailable on the next attempt.
-        if (waitingLocalAi) completionDeadline = tStart + 30'000'000'000ull;
+        if (waitingLocalAi) {
+            completionDeadline = tStart + 30'000'000'000ull;
+            request.deadline = completionDeadline;
+        }
         if (waitingVideo || waitingLocalAi) {
             if ((waitingVideo && tPrep1 >= videoDeadline) || tPrep1 >= completionDeadline)
                 return Status{Errc::Timeout, "o quadro exato ainda esta sendo preparado"};
@@ -10207,7 +10314,7 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         }
         auto ms = [](u64 a, u64 b) { return static_cast<f32>(static_cast<f64>(b - a) * 1e-6); };
         m.prepareMs = ms(tPrep0, tPrep1);
-        m.mediaWaitMs = ms(tStart, tPrep0);
+        m.mediaWaitMs = ms(measureStart, tPrep0);
         m.activeEffects = m.particles = 0;
         for (const EffectPlan& p : snapshot_.plans) m.activeEffects += static_cast<u32>(p.evals.size());
         for (const RenderLayer& l : snapshot_.layers) {
@@ -10222,8 +10329,20 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             const u32 released = renderer_.release_preview_cache();
             if (released) {
                 previewIdle_ = {};
-                resumeIdle.changed = true;
-                gpu_->wait_idle();
+                const u64 submitted = gpu_->last_submitted_frame();
+                rl.unlock();
+                if (const Status ready = request.wait_gpu_frame(submitted, expectedGpuGeneration); !ready.ok()) return ready;
+                if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+                if (expectedGpuGeneration != gpuGeneration_)
+                    return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+                {
+                    std::lock_guard<std::mutex> model(modelMutex_);
+                    if (!project_ || projectSession_ != captureSession
+                        || project_->timeline().current() != captureComposition
+                        || modelRevision_.load(std::memory_order_acquire) != captureRevision
+                        || playback_.generation() != capturePlaybackGeneration)
+                        return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a captura"};
+                }
                 const GpuMemoryStats after = gpu_->memory_stats();
                 AUREA_LOG_INFO("captura: previa guardada solta (%u quadros, %llu KB de GPU liberados)",
                     released, static_cast<unsigned long long>((before.usedBytes > after.usedBytes
@@ -10253,17 +10372,35 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             ? std::min<u64>(100'000'000, completionDeadline - reclaimNow) : 0;
         if (const Status ready = renderer_.reclaim_failed_transients(reclaimWait); !ready.ok()) return ready;
         rs.stageUnblurredScenes = !asPreview && Renderer::can_stage_small_scene_capture(snapshot_, width, height);
-        if (rs.stageUnblurredScenes) {
-            const u64 now = monotonic_ns();
-            rs.sceneExposureFenceTimeoutNs = now < completionDeadline ? completionDeadline - now : 1;
-        }
+        // The same absolute request deadline also bounds generic 2D graph
+        // recovery; it must never inherit the export's 120-second ceiling.
+        const u64 beforeRender = monotonic_ns();
+        rs.sceneExposureFenceTimeoutNs = beforeRender < completionDeadline
+            ? completionDeadline - beforeRender : 1;
+        rs.cancelFlag = &offscreenCancelled_;
         const Status s = renderer_.render(snapshot_, rs, &off, stats, timings);
         const bool incomplete = renderer_.take_incomplete();
         const u64 tW0 = monotonic_ns();
         // Only a successful capture reads the result. A failed graph can have
         // submitted uploads, but it must not wait globally/unbounded before
         // reporting its original error; its pending targets use a fence gate.
-        if (s.ok()) gpu_->wait_idle();
+        if (s.ok()) {
+            const u64 submitted = gpu_->last_submitted_frame();
+            rl.unlock();
+            const Status ready = request.wait_gpu_frame(submitted, expectedGpuGeneration);
+            if (!ready.ok()) return ready;
+            if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+            if (expectedGpuGeneration != gpuGeneration_)
+                return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+            {
+                std::lock_guard<std::mutex> model(modelMutex_);
+                if (!project_ || projectSession_ != captureSession
+                    || project_->timeline().current() != captureComposition
+                    || modelRevision_.load(std::memory_order_acquire) != captureRevision
+                    || playback_.generation() != capturePlaybackGeneration)
+                    return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a captura"};
+            }
+        }
         m.gpuWaitMs = ms(tW0, monotonic_ns());
         if (s.code() == Errc::OutOfDeviceMemory) {
             const u64 poolBefore = renderer_.pool_stats().bytes;
@@ -10345,18 +10482,20 @@ u32 Engine::last_offscreen_gpu_passes(GpuTiming* out, u32 capacity) const noexce
 }
 
 bool Engine::set_effect_preview_source(const u8* rgba, u32 width, u32 height) noexcept {
-    if (livePreviewGraphActive_.load(std::memory_order_acquire)) return false;
+    if (livePreviewGraphActive_.load(std::memory_order_acquire)
+        || offscreenReaders_.load(std::memory_order_acquire)) return false;
     if (!rgba || width == 0 || height == 0 || width > 4096 || height > 4096) return false;
     std::vector<u8> px(rgba, rgba + static_cast<usize>(width) * height * 4);
     std::lock_guard<std::mutex> rl(renderMutex_);
-    if (renderer_.preview_graph_pending()) return false;
+    if (renderer_.preview_graph_pending() || offscreenReaders_.load(std::memory_order_acquire)) return false;
     renderer_.set_effect_preview_source(std::move(px), width, height);
     return true;
 }
 
 Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out, u32& outWidth,
                                      u32& outHeight) noexcept {
-    if (livePreviewGraphActive_.load(std::memory_order_acquire))
+    if (livePreviewGraphActive_.load(std::memory_order_acquire)
+        || offscreenReaders_.load(std::memory_order_acquire))
         return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
     if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
     if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
@@ -10372,7 +10511,8 @@ Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vec
         h = std::max<u32>(1, static_cast<u32>(static_cast<f32>(h) * k));
     }
     std::lock_guard<std::mutex> rl(renderMutex_);
-    if (renderer_.preview_graph_pending()) return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
+    if (renderer_.preview_graph_pending() || offscreenReaders_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     const Status s = renderer_.render_effect_preview(effectRegistry_, typeId, w, h, out, true);
     if (s.ok()) {
@@ -10394,9 +10534,9 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
                                        bool asPreview) noexcept {
     if (exportActive_.load(std::memory_order_acquire))
         return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
-    if (livePreviewGraphActive_.load(std::memory_order_acquire))
-        return Status{Errc::Busy, "captura aguarda o quadro do preview"};
     if (maxDim == 0) return Status{Errc::InvalidState, "dimensao de captura invalida"};
+    OffscreenRequest request{*this};
+    if (const Status owned = request.acquire(); !owned.ok()) return owned;
     u32 cw = 0, ch = 0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -10427,15 +10567,14 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
     {
         // Resource pools and the graphics queue are owned by the render lock.
         // UI preview may be recording while a thumbnail/test requests capture.
-        std::lock_guard<std::mutex> captureLock(renderMutex_);
+        std::unique_lock<std::mutex> captureLock(renderMutex_, std::defer_lock);
+        if (const Status owned = request.lock_render(captureLock); !owned.ok()) return owned;
         if (!gpu_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
             return Status{Errc::InvalidState, "sem GPU"};
         // Reject before allocating even the capture target. A thumbnail must
         // not consume source-export headroom or repopulate its model cache.
         if (exportActive_.load(std::memory_order_acquire))
             return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
-        if (renderer_.preview_graph_pending())
-            return Status{Errc::Busy, "captura aguarda o quadro do preview"};
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         captureGpu = gpu_.get();
@@ -10445,20 +10584,33 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
         target = *created;
     }
     std::vector<u16> half(static_cast<usize>(width) * height * 4);
-    Status s = render_offscreen_impl(target, width, height, asPreview, captureGeneration, asPreview);
+    Status s = render_offscreen_impl(target, width, height, asPreview, captureGeneration, asPreview, request);
     {
         // render_offscreen releases its lock before returning. Readback also
         // submits graphics work and mutates resource pools; serialize it with
         // the preview instead of racing vkQueueSubmit and pool reallocation.
-        std::lock_guard<std::mutex> captureLock(renderMutex_);
+        std::unique_lock<std::mutex> captureLock(renderMutex_, std::defer_lock);
+        // Cleanup also remains serialized if the capture's request deadline
+        // elapsed. Returning a target into an active queue is never a credit.
+        const Status locked = request.lock_render(captureLock);
+        if (!locked.ok() && !captureLock.owns_lock() && !captureLock.try_lock()) {
+            // The request deadline must also bound cleanup. There is only one
+            // request token, and the next owner drains this slot before a new
+            // capture allocation. Lifecycle/export can safely retire it later.
+            std::lock_guard<std::mutex> cleanup(captureRetirementMutex_);
+            assert(!pendingCaptureTarget_.valid());
+            pendingCaptureTarget_ = target;
+            pendingCaptureGpu_ = captureGpu;
+            pendingCaptureGeneration_ = captureGeneration;
+            return s.ok() ? locked : s;
+        }
+        if (s.ok() && !locked.ok()) s = locked;
         // Recovery reinitializes the same backend object and can recycle its
         // texture IDs. Never read or destroy an old target in the new device.
         if (captureGeneration != gpuGeneration_ || gpu_.get() != captureGpu || !gpu_)
             return Status{Errc::Cancelled, "GPU trocada durante captura"};
         if (s.ok() && exportActive_.load(std::memory_order_acquire))
             s = Status{Errc::Busy, "captura aguarda a exportacao terminar"};
-        if (s.ok() && renderer_.preview_graph_pending())
-            s = Status{Errc::Busy, "captura aguarda o quadro do preview"};
         if (s.ok()) s = poll_export_gpu_locked();
         if (s.ok()) s = gpu_->read_texture(target, half.data(), width * 8);
         gpu_->destroy_texture(target);

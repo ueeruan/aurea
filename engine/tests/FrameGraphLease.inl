@@ -56,6 +56,16 @@ AUREA_TEST(FrameGraphSegmentsLease, ResizeDetachAndRotationInvalidateFinalLeased
 
 namespace {
 struct PreviewLeaseFixture {
+    // The authored source stays 1024x1024; its Gaussian output is cropped
+    // to the visible 320x180 canvas. H adds the exact 4px sampling halo.
+    // Whole compilation retains all four incompatible physical descriptors:
+    // 1024x1024 + 328x188 + 320x180 + transfer-src 320x180, RGBA16F.
+    // A fenced one-pass segment retains at most source+H. Choose a limit
+    // BETWEEN these measured/derived peaks, without changing the picture.
+    static constexpr u64 wholeBytes = 9'803'520;
+    static constexpr u64 segmentPeakBytes = 8'881'920;
+    static constexpr u64 pressureLimit = 9ull << 20;
+    static_assert(segmentPeakBytes < pressureLimit && pressureLimit < wholeBytes);
     RenderFixture f;
     RenderSettings settings;
     FrameSnapshot snapshot;
@@ -116,14 +126,28 @@ AUREA_TEST(FrameGraphSegmentsLease, PendingFencesDoNotPresentAndFinalPassMatches
     AUREA_CHECK(control.f.renderer.render(control.snapshot, control.settings, nullptr,
         baselineStats, baselineTimings).ok());
     const u32 baselineDraws = control.f.backend.count(MockBackend::Event::Draw);
+    AUREA_CHECK_EQ(control.f.renderer.pool_stats().bytes, PreviewLeaseFixture::wholeBytes);
+    std::printf("\n    leased preview admission: whole=%llu segment-read-write=%llu limit=%llu\n",
+        static_cast<unsigned long long>(control.f.renderer.pool_stats().bytes),
+        static_cast<unsigned long long>(PreviewLeaseFixture::segmentPeakBytes),
+        static_cast<unsigned long long>(PreviewLeaseFixture::pressureLimit));
     PreviewLeaseFixture fixture;
     auto& backend = fixture.f.backend; auto& renderer = fixture.f.renderer;
-    renderer.set_transient_allocation_limit(20ull << 20);
+    renderer.set_transient_allocation_limit(PreviewLeaseFixture::pressureLimit);
     FrameStats stats; RenderTimings timings;
-    AUREA_CHECK_EQ(renderer.render(fixture.snapshot, fixture.settings, nullptr, stats, timings).code(), Errc::Busy);
+    const auto first = renderer.render(fixture.snapshot, fixture.settings, nullptr, stats, timings);
+    AUREA_CHECK_EQ(first.code(), Errc::Busy);
+    if (first.code() != Errc::Busy) return; // Retain the admission failure without cascading unrelated checks.
     AUREA_CHECK(renderer.preview_graph_pending());
     AUREA_CHECK_EQ(backend.acquires, 1u); AUREA_CHECK_EQ(backend.presents, 0u);
     AUREA_CHECK(backend.presentableLeaseActive);
+    u64 measuredSegmentPeak = 0;
+    // Installed after the partial whole-plan submission: observe each real
+    // recovery submission, before its pool resources can be fence-trimmed.
+    backend.beforeEndFrame = [&] {
+        measuredSegmentPeak = std::max(measuredSegmentPeak, renderer.pool_stats().bytes);
+        return OkStatus;
+    };
     const auto bytes = renderer.pool_stats().bytes;
     const auto destroyed = backend.texturesDestroyed;
     backend.beforeWaitFrame = [&](u64, u64 timeout) {
@@ -139,6 +163,9 @@ AUREA_TEST(FrameGraphSegmentsLease, PendingFencesDoNotPresentAndFinalPassMatches
     }
     backend.beforeWaitFrame = {};
     AUREA_CHECK(fixture.finish(stats, timings).ok());
+    backend.beforeEndFrame = {};
+    AUREA_CHECK_EQ(measuredSegmentPeak, PreviewLeaseFixture::segmentPeakBytes);
+    AUREA_CHECK(measuredSegmentPeak < PreviewLeaseFixture::pressureLimit);
     AUREA_CHECK(!renderer.preview_graph_pending());
     AUREA_CHECK_EQ(backend.acquires, 1u); AUREA_CHECK_EQ(backend.presents, 1u);
     AUREA_CHECK_EQ(backend.leasedFrames, 1u);
@@ -155,9 +182,11 @@ AUREA_TEST(FrameGraphSegmentsLease, CancelSeekRevisionAndGenerationChangesPreser
     for (const auto change : {Change::Cancel, Change::SeekRevision, Change::Resize, Change::Detach}) {
         PreviewLeaseFixture fixture;
         auto& backend = fixture.f.backend; auto& renderer = fixture.f.renderer;
-        renderer.set_transient_allocation_limit(20ull << 20);
+        renderer.set_transient_allocation_limit(PreviewLeaseFixture::pressureLimit);
         FrameStats stats; RenderTimings timings;
-        AUREA_CHECK_EQ(renderer.render(fixture.snapshot, fixture.settings, nullptr, stats, timings).code(), Errc::Busy);
+        const auto first = renderer.render(fixture.snapshot, fixture.settings, nullptr, stats, timings);
+        AUREA_CHECK_EQ(first.code(), Errc::Busy);
+        if (first.code() != Errc::Busy) continue;
         u64 pending = 0;
         backend.beforeWaitFrame = [&](u64 frame, u64 timeout) {
             AUREA_CHECK_EQ(timeout, 0ull);
@@ -205,10 +234,12 @@ AUREA_TEST(FrameGraphSegmentsLease, TimeoutAndDeviceLossNeverPublishPendingPictu
     for (const bool deviceLost : {false, true}) {
         PreviewLeaseFixture fixture;
         auto& backend = fixture.f.backend; auto& renderer = fixture.f.renderer;
-        renderer.set_transient_allocation_limit(20ull << 20);
+        renderer.set_transient_allocation_limit(PreviewLeaseFixture::pressureLimit);
         if (!deviceLost) fixture.settings.sceneExposureFenceTimeoutNs = 1;
         FrameStats stats; RenderTimings timings;
-        AUREA_CHECK_EQ(renderer.render(fixture.snapshot, fixture.settings, nullptr, stats, timings).code(), Errc::Busy);
+        const auto first = renderer.render(fixture.snapshot, fixture.settings, nullptr, stats, timings);
+        AUREA_CHECK_EQ(first.code(), Errc::Busy);
+        if (first.code() != Errc::Busy) continue;
         AUREA_CHECK(renderer.preview_graph_pending());
         backend.beforeWaitFrame = [&](u64, u64 timeout) {
             AUREA_CHECK_EQ(timeout, 0ull);

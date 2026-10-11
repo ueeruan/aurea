@@ -10038,6 +10038,12 @@ Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, boo
 
 Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height, bool asPreview,
                                       u64 expectedGpuGeneration, bool targetPreviewScale) noexcept {
+    // Export can hold renderMutex_ while polling an outstanding GPU fence.
+    // A thumbnail must report Busy before waiting on that lock, so it cannot
+    // block the UI from requesting cancellation. The locked checks below
+    // still cover ownership changing after this early observation.
+    if (exportActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
     struct ReaderGuard {
         std::atomic<u32>& readers;
         explicit ReaderGuard(std::atomic<u32>& value) : readers(value) { readers.fetch_add(1, std::memory_order_acq_rel); }
@@ -10337,6 +10343,8 @@ Status Engine::capture_preview_frame_rgba(u32 maxDim, std::vector<u8>& out, u32&
 
 Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& width, u32& height,
                                        bool asPreview) noexcept {
+    if (exportActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
     if (maxDim == 0) return Status{Errc::InvalidState, "dimensao de captura invalida"};
     u32 cw = 0, ch = 0;
     {

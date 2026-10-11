@@ -188,7 +188,10 @@ AUREA_TEST(OriginalModelExport, UnsupportedDegradedSourceCannotSilentlyExportPre
     ExportSettings settings; settings.height = 64;
     const auto failed = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
     AUREA_CHECK_EQ(failed.code(), Errc::NotSupported);
-    AUREA_CHECK(failed.detail().find("Original") != std::string_view::npos);
+    // The frozen recovery source gate rejects OBJ before Original preparation:
+    // it cannot fingerprint this format's dependencies for an offline restart.
+    AUREA_CHECK(!failed.detail().empty());
+    AUREA_CHECK(failed.detail().find("glTF") != std::string_view::npos);
     AUREA_CHECK(!rig.cap.opened && rig.cap.writes == 0);
     AUREA_CHECK(rig.e.model_asset(key) == prior);
 }
@@ -265,8 +268,21 @@ AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRes
     while (!waiting && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(2));
     AUREA_CHECK(waiting.load());
     std::vector<u8> preserved{7, 8, 9}; u32 captureWidth = 0, captureHeight = 0;
-    AUREA_CHECK_EQ(rig.e.capture_preview_frame_rgba(96, preserved, captureWidth, captureHeight).code(), Errc::Busy);
-    AUREA_CHECK(preserved == std::vector<u8>({7, 8, 9}));
+    std::atomic<bool> capturesDone{false};
+    std::array<Errc, 3> captureResults{};
+    const usize texturesBeforeCapture = backend->textures.size();
+    // A failing Busy guard must fail promptly as a test too: cancellation is
+    // requested by this thread even if a capture incorrectly waits on render.
+    std::thread captures([&] {
+        captureResults[0] = rig.e.capture_preview_frame_rgba(96, preserved, captureWidth, captureHeight).code();
+        captureResults[1] = rig.e.capture_frame_rgba(96, preserved, captureWidth, captureHeight).code();
+        captureResults[2] = rig.e.render_offscreen({}, 96, 64, true).code();
+        capturesDone.store(true, std::memory_order_release);
+    });
+    const auto captureDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!capturesDone.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < captureDeadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(capturesDone.load(std::memory_order_acquire));
     const auto idle = backend->idleWaits.load();
     const auto cancelledAt = std::chrono::steady_clock::now(); (void)rig.e.cancel_export();
     deadline = cancelledAt + std::chrono::seconds(3);
@@ -275,6 +291,15 @@ AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRes
     AUREA_CHECK(rig.e.export_progress().finished);
     AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Cancelled);
     AUREA_CHECK(std::chrono::steady_clock::now() - cancelledAt < std::chrono::seconds(3));
+    // Let a broken cancellation path unwind instead of pinning the test's
+    // synthetic fence until the production 120 s deadline. Failed assertions
+    // above remain failures; successful cancellation never takes this escape.
+    if (!rig.e.export_progress().finished) completed = true;
+    captures.join();
+    for (const auto result : captureResults) AUREA_CHECK_EQ(result, Errc::Busy);
+    AUREA_CHECK(preserved == std::vector<u8>({7, 8, 9}));
+    AUREA_CHECK_EQ(captureWidth, 0u); AUREA_CHECK_EQ(captureHeight, 0u);
+    AUREA_CHECK_EQ(backend->textures.size(), texturesBeforeCapture);
     // Join the producer before inspecting the mock's resource records.
     AUREA_CHECK_EQ(rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str()).code(), Errc::Timeout);
     usize sourceTexture = 0;

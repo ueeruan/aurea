@@ -200,9 +200,11 @@ AUREA_TEST(Regression2130, VulkanReturnsEmptySlabsAndPreservesLiveAllocations) {
     b.wait_idle();
     const auto baseUsed = b.allocator().used_bytes();
     const auto baseReserved = b.allocator().reserved_bytes();
-    for (int round=0; round<4; ++round) {
+    // 512px stays suballocated with 4 MiB slabs; 1024px exercises the exact
+    // dedicated path too. Keep live neighbors while middle slabs are trimmed.
+    for (const u32 side : {512u, 1024u}) for (int round=0; round<4; ++round) {
         std::vector<TextureHandle> textures;
-        TextureDesc d; d.width=1024; d.height=1024; d.format=SurfaceFormat::RGBA8; d.sampled=true;
+        TextureDesc d; d.width=side; d.height=side; d.format=SurfaceFormat::RGBA8; d.sampled=true;
         for (int i=0; i<40; ++i) {
             auto t=b.create_texture(d); AUREA_CHECK(t.ok());
             if (t.ok()) textures.push_back(*t);
@@ -13189,6 +13191,7 @@ AUREA_TEST(Gpu, Text3DDepthAndBevelEditsReachTheFrame) {
 #include "TextOutlineGpu.inl"
 #include "ImmediateUploadGpu.inl"
 #include "HostRingGpu.inl"
+#include "VulkanMemoryPackingGpu.inl"
 #include "TextureRetirementGpu.inl"
 
 AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {

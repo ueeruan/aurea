@@ -53,6 +53,12 @@ jobs:
           if [ -z "$XC" ]; then echo "Xcode 26 nao instalado no runner"; ls -d /Applications/Xcode*.app; exit 1; fi
           sudo xcode-select -s "$XC/Contents/Developer"
           xcodebuild -version
+      - name: Ensure Xcode Metal compiler is available
+        run: |
+          if ! xcrun --sdk iphonesimulator metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --sdk iphonesimulator metal --version
       - name: Validate native integration and shared Android resources
         run: |
           python3 engine/platform/ios/verify/check_pbxproj.py
@@ -185,6 +191,12 @@ jobs:
           if [ -z "$XC" ]; then echo "Xcode 26 nao instalado no runner"; ls -d /Applications/Xcode*.app; exit 1; fi
           sudo xcode-select -s "$XC/Contents/Developer"
           xcodebuild -version
+      - name: Ensure Xcode Metal compiler is available
+        run: |
+          if ! xcrun --sdk iphonesimulator metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --sdk iphonesimulator metal --version
       - run: brew install cmake ninja shaderc ccache
       - name: Identify simulator export dependency SDK
         id: export_sdk

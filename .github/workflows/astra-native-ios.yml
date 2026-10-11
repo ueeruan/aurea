@@ -37,6 +37,12 @@ jobs:
           test -n "$XC"
           sudo xcode-select -s "$XC/Contents/Developer"
           xcodebuild -version
+      - name: Ensure Xcode Metal compiler is available
+        run: |
+          if ! xcrun --sdk iphonesimulator metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --sdk iphonesimulator metal --version
       - name: Install native build tools
         run: brew install cmake ninja shaderc ccache
       - name: Identify native export SDK

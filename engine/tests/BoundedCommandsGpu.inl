@@ -3,6 +3,7 @@ namespace aurea::vk {
 struct BoundedCommandsTestAccess {
     static void limit(Backend& b, u32 passes) { b.passesPerCommandBuffer_ = passes; }
     static u32 submitted_buffers(const Backend& b) { return b.lastSubmitted_ ? b.lastSubmitted_->commandBufferCount : 0; }
+    static VkFence submitted_fence(const Backend& b) { return b.lastSubmitted_ ? b.lastSubmitted_->fence : VK_NULL_HANDLE; }
     static std::vector<VkCommandBuffer> buffers(const Backend& b) {
         return b.lastSubmitted_ ? b.lastSubmitted_->commandBuffers : std::vector<VkCommandBuffer>{};
     }
@@ -18,15 +19,22 @@ struct BoundedRecordingDispatch {
     PFN_vkEndCommandBuffer end = backend.device_dispatch().vkEndCommandBuffer;
     PFN_vkAllocateCommandBuffers allocate = backend.device_dispatch().vkAllocateCommandBuffers;
     PFN_vkQueueSubmit submit = backend.device_dispatch().vkQueueSubmit;
+    PFN_vkWaitForFences wait = backend.device_dispatch().vkWaitForFences;
     PFN_vkAllocateDescriptorSets descriptor = backend.device_dispatch().vkAllocateDescriptorSets;
     PFN_vkCreateBuffer buffer = backend.device_dispatch().vkCreateBuffer;
     inline static BoundedRecordingDispatch* active = nullptr;
     Fault fault = Fault::None;
     u32 failedCalls = 0, submitCalls = 0, submittedBuffers = 0;
-    explicit BoundedRecordingDispatch(vk::Backend& target) : backend(target) {
+    bool observePrefixes = false, prefixOrderValid = true;
+    u32 singleBufferSubmissions = 0, completedWaits = 0;
+    VkFence pendingFence = VK_NULL_HANDLE, frameFence = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer> submittedSequence;
+    explicit BoundedRecordingDispatch(vk::Backend& target, bool prefixes = false)
+        : backend(target), observePrefixes(prefixes) {
         active = this;
         backend.device_dispatch().vkBeginCommandBuffer = begin_call; backend.device_dispatch().vkEndCommandBuffer = end_call;
         backend.device_dispatch().vkAllocateCommandBuffers = allocate_call; backend.device_dispatch().vkQueueSubmit = submit_call;
+        backend.device_dispatch().vkWaitForFences = wait_call;
         backend.device_dispatch().vkAllocateDescriptorSets = descriptor_call; backend.device_dispatch().vkCreateBuffer = buffer_call;
     }
     ~BoundedRecordingDispatch() { restore(); }
@@ -34,6 +42,7 @@ struct BoundedRecordingDispatch {
         if (active != this) return;
         backend.device_dispatch().vkBeginCommandBuffer = begin; backend.device_dispatch().vkEndCommandBuffer = end;
         backend.device_dispatch().vkAllocateCommandBuffers = allocate; backend.device_dispatch().vkQueueSubmit = submit;
+        backend.device_dispatch().vkWaitForFences = wait;
         backend.device_dispatch().vkAllocateDescriptorSets = descriptor; backend.device_dispatch().vkCreateBuffer = buffer;
         active = nullptr;
     }
@@ -50,7 +59,39 @@ struct BoundedRecordingDispatch {
     static VKAPI_ATTR VkResult VKAPI_CALL submit_call(VkQueue q, u32 n, const VkSubmitInfo* i, VkFence f) {
         ++active->submitCalls;
         for (u32 j = 0; j < n; ++j) active->submittedBuffers += i[j].commandBufferCount;
-        return active->fail(Fault::Submit) ? VK_ERROR_OUT_OF_HOST_MEMORY : active->submit(q, n, i, f);
+        if (active->observePrefixes) {
+            // The previous real fence must complete before another prefix is
+            // admitted. Recording segmentation alone must not hide one large
+            // driver submission or overlapping prefixes.
+            active->prefixOrderValid &= active->pendingFence == VK_NULL_HANDLE;
+            const bool single = n == 1 && i[0].commandBufferCount == 1 && f != VK_NULL_HANDLE;
+            active->prefixOrderValid &= single;
+            if (single) {
+                ++active->singleBufferSubmissions;
+                active->submittedSequence.push_back(i[0].pCommandBuffers[0]);
+            }
+            if (!active->frameFence) active->frameFence = f;
+            active->prefixOrderValid &= f == active->frameFence;
+        }
+        const VkResult result = active->fail(Fault::Submit)
+            ? VK_ERROR_OUT_OF_HOST_MEMORY : active->submit(q, n, i, f);
+        if (active->observePrefixes && result == VK_SUCCESS) active->pendingFence = f;
+        return result;
+    }
+    static VKAPI_ATTR VkResult VKAPI_CALL wait_call(VkDevice d, u32 n, const VkFence* fences,
+                                                   VkBool32 all, uint64_t timeout) {
+        // Forward first: a counter cannot manufacture GPU completion.
+        const VkResult result = active->wait(d, n, fences, all, timeout);
+        if (active->observePrefixes && active->pendingFence != VK_NULL_HANDLE
+            && n == 1 && fences[0] == active->pendingFence && all == VK_TRUE) {
+            active->prefixOrderValid &= d == active->backend.device()
+                && timeout > 0 && timeout != ~uint64_t{0};
+            if (result == VK_SUCCESS) {
+                ++active->completedWaits;
+                active->pendingFence = VK_NULL_HANDLE;
+            }
+        }
+        return result;
     }
     static VKAPI_ATTR VkResult VKAPI_CALL descriptor_call(VkDevice d, const VkDescriptorSetAllocateInfo* i, VkDescriptorSet* s) {
         return active->fail(Fault::Descriptor) ? VK_ERROR_OUT_OF_DEVICE_MEMORY : active->descriptor(d, i, s);
@@ -61,7 +102,7 @@ struct BoundedRecordingDispatch {
 };
 }
 
-AUREA_TEST(BoundedCommandsGpu, SixHundredPassesPreservePixelsBindingsTimersAndReuseOneFencedSubmission) {
+AUREA_TEST(BoundedCommandsGpu, SixHundredPassesPreservePixelsBindingsTimersAndReuseSequentialFencedSubmissions) {
     AUREA_REQUIRE_GPU();
     Gpu isolated;
     AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
@@ -95,7 +136,7 @@ AUREA_TEST(BoundedCommandsGpu, SixHundredPassesPreservePixelsBindingsTimersAndRe
             cmd.barrier(target, ResourceState::ColorAttachment, true);
             cmd.bind_pipeline(*pipeline);
             cmd.bind_texture(0, *input, isolated.renderer.shaders().sampler(CommonSampler::NearestClamp));
-            BoundedRecordingDispatch dispatch(b);
+            BoundedRecordingDispatch dispatch(b, true);
             for (u32 pass = 0; pass < passes; ++pass) {
                 cmd.begin_label("bounded copy"); cmd.begin_timer("bounded copy");
                 RenderPassBegin rp; rp.color = target; rp.load = pass ? LoadOp::Load : LoadOp::Clear;
@@ -112,20 +153,33 @@ AUREA_TEST(BoundedCommandsGpu, SixHundredPassesPreservePixelsBindingsTimersAndRe
             }
             AUREA_CHECK(b.end_frame().ok());
             const u32 expected = limit ? 1 + passes / limit : 1;
-            AUREA_CHECK_EQ(dispatch.submitCalls, 1u);
+            AUREA_CHECK_EQ(dispatch.submitCalls, expected);
+            AUREA_CHECK_EQ(dispatch.singleBufferSubmissions, expected);
             AUREA_CHECK_EQ(dispatch.submittedBuffers, expected);
             AUREA_CHECK_EQ(vk::BoundedCommandsTestAccess::submitted_buffers(b), expected);
-            dispatch.restore();
+            AUREA_CHECK_EQ(dispatch.completedWaits, expected - 1);
+            AUREA_CHECK(dispatch.prefixOrderValid);
+            AUREA_CHECK(dispatch.pendingFence != VK_NULL_HANDLE
+                && dispatch.pendingFence == vk::BoundedCommandsTestAccess::submitted_fence(b));
             const auto buffers = vk::BoundedCommandsTestAccess::buffers(b);
+            AUREA_CHECK(dispatch.submittedSequence.size() == expected && buffers.size() >= expected
+                && std::equal(dispatch.submittedSequence.begin(), dispatch.submittedSequence.end(), buffers.begin()));
             if (frame < 2) retained[frame] = buffers;
             else AUREA_CHECK(buffers == retained[frame % 2]);
             AUREA_CHECK(b.wait_frame(fb.frameNumber, 5'000'000'000ull).ok());
+            AUREA_CHECK_EQ(dispatch.completedWaits, expected);
+            AUREA_CHECK(dispatch.pendingFence == VK_NULL_HANDLE && dispatch.prefixOrderValid);
+            dispatch.restore();
             std::vector<u16> pixels(width * height * 4);
             AUREA_CHECK(b.read_texture(target, pixels.data(), width * 8).ok());
             AUREA_CHECK(half_to_float(pixels[0]) > .1f);
             AUREA_CHECK(half_to_float(pixels[3]) > .99f);
             if (baseline.empty()) baseline = pixels;
             else AUREA_CHECK(pixels == baseline);
+            std::printf("\n    bounded prefixes: limit=%u frame=%u submits=%u buffers=%u real_waits=%u final_fence_verified=%u pixels_exact=%u reused=%u",
+                limit, frame, dispatch.submitCalls, dispatch.submittedBuffers, dispatch.completedWaits,
+                dispatch.pendingFence == VK_NULL_HANDLE && dispatch.prefixOrderValid,
+                pixels == baseline, frame < 2 || buffers == retained[frame % 2]);
             // wait_frame guarantees completion; timing collection is exposed
             // by slot reuse/wait_idle, not by that fence-only API.
             b.wait_idle();

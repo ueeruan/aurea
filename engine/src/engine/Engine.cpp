@@ -10308,6 +10308,23 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     CompositionId captureComposition{};
     FrameIndex captureTime{};
     bool boundCapture = false;
+    // The ordinary status message names only Errc. Record the exact identity
+    // that invalidated this snapshot, without accepting stale capture pixels.
+    // Every call below already holds modelMutex_.
+    const auto diagnoseCaptureBinding = [&](const char* phase) {
+        const u64 composition = project_ ? project_->timeline().current().pack() : 0;
+        const u64 revision = modelRevision_.load(std::memory_order_acquire);
+        const u64 playbackGeneration = playback_.generation();
+        AUREA_LOG_WARN("capture binding cancelled phase=%s project=%u session=%llu/%llu composition=%llu/%llu revision=%llu/%llu playback_generation=%llu/%llu frame=%lld/%lld playing=%u gpu_generation=%llu/%llu",
+            phase, project_ ? 1u : 0u,
+            static_cast<unsigned long long>(captureSession), static_cast<unsigned long long>(projectSession_),
+            static_cast<unsigned long long>(captureComposition.pack()), static_cast<unsigned long long>(composition),
+            static_cast<unsigned long long>(captureRevision), static_cast<unsigned long long>(revision),
+            static_cast<unsigned long long>(capturePlaybackGeneration), static_cast<unsigned long long>(playbackGeneration),
+            static_cast<long long>(captureTime.value), static_cast<long long>(playback_.current().value),
+            playback_.playing() ? 1u : 0u,
+            static_cast<unsigned long long>(expectedGpuGeneration), static_cast<unsigned long long>(gpuGeneration_));
+    };
     u32 waitingLocalAi = 0;
     const u64 videoDeadline = tStart + 4'000'000'000ull;
     u64& completionDeadline = request.deadline;
@@ -10353,8 +10370,13 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             // ou um seek durante a espera do vídeo só troca o alvo (o prazo absoluto
             // continua valendo). Captura/miniatura exata é cancelada.
             if (asPreview && !targetPreviewScale && (projectChanged || positionChanged)) boundCapture = false;
-            else if (projectChanged) return Status{Errc::Cancelled, "o projeto mudou durante a captura"};
-            else if (positionChanged) return Status{Errc::Cancelled, "a posicao de reproducao mudou durante a captura"};
+            else if (projectChanged) {
+                diagnoseCaptureBinding("media-prepare-project");
+                return Status{Errc::Cancelled, "o projeto mudou durante a captura"};
+            } else if (positionChanged) {
+                diagnoseCaptureBinding("media-prepare-playback");
+                return Status{Errc::Cancelled, "a posicao de reproducao mudou durante a captura"};
+            }
             configure_playback_locked(comp);
             const FrameIndex t = boundCapture ? captureTime : playback_.update(monotonic_ns());
             if (!boundCapture) {
@@ -10420,8 +10442,10 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
                 if (!project_ || projectSession_ != captureSession
                     || project_->timeline().current() != captureComposition
                     || modelRevision_.load(std::memory_order_acquire) != captureRevision
-                    || playback_.generation() != capturePlaybackGeneration)
+                    || playback_.generation() != capturePlaybackGeneration) {
+                    diagnoseCaptureBinding("prior-preview-fence");
                     return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a captura"};
+                }
             }
             if (released) {
                 const GpuMemoryStats after = gpu_->memory_stats();
@@ -10465,8 +10489,10 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
                     if (!project_ || projectSession_ != captureSession
                         || project_->timeline().current() != captureComposition
                         || modelRevision_.load(std::memory_order_acquire) != captureRevision
-                        || playback_.generation() != capturePlaybackGeneration)
+                        || playback_.generation() != capturePlaybackGeneration) {
+                        diagnoseCaptureBinding("resource-prepare");
                         return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a preparacao da captura"};
+                    }
                 }
                 const Status prepared = renderer_.prepare_capture_resources(snapshot_, rs);
                 if (prepared.ok()) {
@@ -10511,8 +10537,10 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
                 if (!project_ || projectSession_ != captureSession
                     || project_->timeline().current() != captureComposition
                     || modelRevision_.load(std::memory_order_acquire) != captureRevision
-                    || playback_.generation() != capturePlaybackGeneration)
+                    || playback_.generation() != capturePlaybackGeneration) {
+                    diagnoseCaptureBinding("final-fence");
                     return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a captura"};
+                }
             }
         }
         m.gpuWaitMs = ms(tW0, monotonic_ns());

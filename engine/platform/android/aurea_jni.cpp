@@ -939,7 +939,9 @@ static jint capture_frame(JNIEnv* env, jlong handle, jint maxDim, jobject out, j
         ? c->engine.capture_preview_frame_rgba(static_cast<u32>(maxDim), rgba, w, h)
         : c->engine.capture_frame_rgba(static_cast<u32>(maxDim), rgba, w, h);
     if (!captured.ok()) {
-        AUREA_LOG_WARN("captura do projeto falhou (%u): %s", static_cast<u32>(captured.code()), captured.message().data());
+        const std::string_view detail = captured.detail();
+        AUREA_LOG_WARN("captura do projeto falhou (%u): %s detail=%.*s", static_cast<u32>(captured.code()), captured.message().data(),
+            static_cast<int>(detail.size()), detail.empty() ? "" : detail.data());
         return 0;
     }
     if (static_cast<jlong>(rgba.size()) > buffer_capacity(env, out)) return 0;

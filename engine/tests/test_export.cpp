@@ -231,7 +231,15 @@ public:
         c_->finished = true;
         if (c_->finishFailure.ok() && c_->persistFinishMarker) {
             const char marker[] = "finished benchmark sink";
-            if (const Status s = fileio::write_atomic(outputPath_, marker, sizeof(marker)); !s.ok()) return s;
+            // The mock marker needs complete bytes, not a second durable save.
+            // fsync here can exceed the intentionally short 300 ms codec
+            // watchdog on the host. StartupGate owns the real atomic commit.
+            std::FILE* file = fileio::open_file(outputPath_, "wb");
+            if (!file) return Status{Errc::IoError, "abrir marcador do encoder de teste"};
+            const bool complete = std::fwrite(marker, 1, sizeof(marker), file) == sizeof(marker);
+            const int closed = std::fclose(file);
+            if (!complete || closed != 0)
+                return Status{Errc::IoError, "gravar marcador do encoder de teste"};
         }
         return c_->finishFailure;
     }
@@ -1049,6 +1057,7 @@ AUREA_TEST(OfflineNativeGpu, CompositionFramesAndStereoReachRealNativeMp4) {
         const bool scene3D = scenario == 1, longComposition = scenario == 2;
         SyntheticConfig cfg; cfg.width = longComposition ? 192 : 320; cfg.height = longComposition ? 96 : 192;
         cfg.pattern = SyntheticPattern::MovingSquare; cfg.audioRate = 44100; cfg.audioSeconds = longComposition ? 120 : 1;
+        if (longComposition) cfg.frameCount = 3600;
         const i64 frames = longComposition ? 3600 : scene3D ? 12 : 30;
         Rig r(cfg, 30, frames, 3, nullptr, nullptr, 0, false, "sintetico",
               ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 30000,

@@ -128,13 +128,19 @@ jobs:
           set -o pipefail
           python3 engine/tools/metal-shaders/verify_msl.py engine/platform/ios/build/core/aurea-engine/generated/shaders 2>&1 | tee build-metal.log
       - name: Package IPA for sideloading
+        id: package-ipa
         run: |
           mkdir -p build/ipa/Payload
           cp -R build/ios/Build/Products/Release-iphoneos/Aurea.app build/ipa/Payload/
+          app="build/ipa/Payload/Aurea.app"
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")
+          number=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")
+          filename="Aurea-${version}-${number}-unsigned.ipa"
           cd build/ipa
-          zip -qr Aurea-0.1.0-2153-unsigned.ipa Payload
+          zip -qr "$filename" Payload
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
       - name: Validate packaged IPA
-        run: python3 engine/platform/ios/verify/check_ipa.py build/ipa/Aurea-0.1.0-2153-unsigned.ipa
+        run: python3 engine/platform/ios/verify/check_ipa.py "build/ipa/${{ steps.package-ipa.outputs.filename }}"
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-ipa

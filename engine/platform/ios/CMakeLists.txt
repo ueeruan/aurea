@@ -227,6 +227,7 @@ if(AUREA_BUILD_NATIVE_EXPORT_PROBE)
     add_executable(aurea_ios_composition_export_probe
         verify/export/CompositionExportProbe.mm
         "${AUREA_ROOT}/tests/test_export.cpp"
+        "${AUREA_ROOT}/tests/test_export_pixel_copy.cpp"
         "${AUREA_ROOT}/tests/test_offline_audio.cpp"
         "${AUREA_ROOT}/tests/test_ffmpeg_export.cpp"
         "${AUREA_ROOT}/tests/test_offline_frame_queue.cpp")

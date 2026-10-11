@@ -22,7 +22,38 @@
 namespace aurea {
 namespace {
 
+// A stalled native open/close still owns its codec and atomics. The permit
+// survives success through OpenedSink and abandonment through the detached
+// worker; another attempt must not accumulate unbounded native sessions.
+class NativeSessionPermit final {
+public:
+    bool acquire() noexcept {
+        auto& count = live_sessions();
+        u32 observed = count.load(std::memory_order_acquire);
+        while (observed < 2) {
+            if (count.compare_exchange_weak(observed, observed + 1,
+                    std::memory_order_acq_rel, std::memory_order_acquire)) {
+                acquired_ = true;
+                return true;
+            }
+        }
+        return false;
+    }
+    ~NativeSessionPermit() {
+        if (acquired_) live_sessions().fetch_sub(1, std::memory_order_acq_rel);
+    }
+private:
+    static std::atomic<u32>& live_sessions() noexcept {
+        static std::atomic<u32> count{0};
+        return count;
+    }
+    bool acquired_ = false;
+};
+
 struct StartupState {
+    // FIRST member is destroyed LAST: release admission only after the native
+    // sink destructor, borrowed-flag owners and synchronization objects finish.
+    NativeSessionPermit permit;
     // These must outlive the sink, including its destructor's abort callback.
     std::atomic<bool> cancel{false};
     std::atomic<u64> beat{0};
@@ -212,6 +243,12 @@ ExportSinkStartupResult open_export_sink_startup(std::unique_ptr<ExportSink> sin
     std::thread worker;
     try {
         state = std::make_shared<StartupState>();
+        if (!state->permit.acquire()) {
+            result.code = Errc::BudgetExceeded;
+            copy_detail(result.detail, sizeof(result.detail), Status{result.code,
+                "duas sessoes nativas de exportacao ainda abertas; aguarde os encoders encerrarem"});
+            return result; // no worker, native open or staging file is created
+        }
         state->sink = std::move(sink);
         state->target = outputPath;
         static std::atomic<u64> generation{0};

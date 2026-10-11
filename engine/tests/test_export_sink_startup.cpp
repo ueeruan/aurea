@@ -3,6 +3,7 @@
 #include "aurea/core/Time.hpp"
 #include "aurea/project/FileIO.hpp"
 
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -299,4 +300,77 @@ AUREA_TEST(ExportSinkStartup, CancellationAtNativeReturnPreventsBothPublicationP
         AUREA_CHECK(!std::filesystem::exists(control->staged));
         AUREA_CHECK_EQ(contents(files.target()), std::string("previous complete export"));
     }
+}
+
+AUREA_TEST(ExportSinkStartup, TwoHungNativeOpensRejectThirdAndReturnedOpenRestoresAdmission) {
+    Files files;
+    { std::ofstream previous(files.target()); previous << "previous complete export"; }
+    auto first = std::make_shared<Control>(); first->blockOpen = true;
+    auto second = std::make_shared<Control>(); second->blockOpen = true;
+    const auto one = run(first, files.target(), nullptr, nullptr, limits(40));
+    const auto two = run(second, files.target(), nullptr, nullptr, limits(40));
+    AUREA_CHECK(one.code == Errc::Timeout); AUREA_CHECK(two.code == Errc::Timeout);
+    AUREA_CHECK(first->entered.load()); AUREA_CHECK(second->entered.load());
+    auto third = std::make_shared<Control>();
+    const auto begin = std::chrono::steady_clock::now();
+    const auto refused = run(third, files.target());
+    AUREA_CHECK(refused.code == Errc::BudgetExceeded); AUREA_CHECK(!refused.sink);
+    AUREA_CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
+    AUREA_CHECK(!third->entered.load()); AUREA_CHECK(third->staged.empty());
+    AUREA_CHECK_EQ(contents(files.target()), std::string("previous complete export"));
+    release(first); AUREA_CHECK(wait_destroyed(first));
+    auto retry = std::make_shared<Control>(); retry->payload = "successful bounded retry";
+    // The destructor notification precedes StartupState's last permit member;
+    // tolerate only this short teardown window, never a third native open.
+    ExportSinkStartupResult opened;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+        opened = run(retry, files.target());
+        if (opened.code != Errc::BudgetExceeded) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+    AUREA_CHECK(opened.status().ok());
+    if (opened.sink) AUREA_CHECK(opened.sink->finish().ok());
+    release(second); AUREA_CHECK(wait_destroyed(second));
+    AUREA_CHECK_EQ(first->concurrentAborts.load(), 0u);
+    AUREA_CHECK_EQ(second->concurrentAborts.load(), 0u);
+    AUREA_CHECK(!std::filesystem::exists(first->staged));
+    AUREA_CHECK(!std::filesystem::exists(second->staged));
+    AUREA_CHECK_EQ(contents(files.target()), std::string("successful bounded retry"));
+}
+
+AUREA_TEST(ExportSinkStartup, ConcurrentRequestsNeverCreateMoreThanTwoNativeOpens) {
+    Files files;
+    constexpr usize count = 8;
+    std::array<std::shared_ptr<Control>, count> controls;
+    std::array<ExportSinkStartupResult, count> results;
+    std::array<std::thread, count> callers;
+    std::atomic<usize> ready{0}; std::atomic<bool> start{false};
+    for (usize i = 0; i < count; ++i) {
+        controls[i] = std::make_shared<Control>(); controls[i]->blockOpen = true;
+        callers[i] = std::thread([&, i] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+            results[i] = run(controls[i], files.target(), nullptr, nullptr, limits(40));
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != count) std::this_thread::yield();
+    start.store(true, std::memory_order_release);
+    for (auto& caller : callers) caller.join();
+    usize entered = 0, refused = 0;
+    for (usize i = 0; i < count; ++i) {
+        if (controls[i]->entered.load()) {
+            ++entered; AUREA_CHECK(results[i].code == Errc::Timeout);
+        } else {
+            ++refused; AUREA_CHECK(results[i].code == Errc::BudgetExceeded);
+            AUREA_CHECK(controls[i]->staged.empty());
+        }
+    }
+    AUREA_CHECK_EQ(entered, usize{2}); AUREA_CHECK_EQ(refused, count - 2);
+    for (auto& control : controls) if (control->entered.load()) {
+        release(control); AUREA_CHECK(wait_destroyed(control));
+        AUREA_CHECK_EQ(control->concurrentAborts.load(), 0u);
+        AUREA_CHECK(!std::filesystem::exists(control->staged));
+    }
+    AUREA_CHECK(!std::filesystem::exists(files.target()));
 }

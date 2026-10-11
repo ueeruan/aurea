@@ -34,6 +34,7 @@ int main(int argc, char** argv) {
         (void)aurea::test::run_all("OfflineAudio");
         (void)aurea::test::run_all("FFmpegExport");
         (void)aurea::test::run_all("OfflineFrameQueue");
+        (void)aurea::test::run_all("ExportPixelCopy");
         return static_cast<int>(aurea::test::Registry::instance().failures());
     }
 }

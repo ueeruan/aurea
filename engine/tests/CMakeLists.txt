@@ -32,6 +32,7 @@ add_executable(aurea_tests
     test_yuv_layout.cpp
     test_p010_upload.cpp
     test_export_sink_startup.cpp
+    test_export_pixel_copy.cpp
     test_aac_output_integrity.cpp
     test_gpu.cpp
     test_scene3d.cpp

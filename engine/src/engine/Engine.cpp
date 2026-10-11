@@ -12301,7 +12301,8 @@ void Engine::export_thread_main() noexcept {
         if (!plan.ok()) { result = plan.status(); break; }
         const u64 renderStarted = monotonic_ns();
         result = render_export_frame(plan->compositionFrame, target, slot.gpuFrame);
-        if (ctx.queue) AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
+        if (ctx.queue && (i == 0 || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !result.ok()))
+            AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
             i, static_cast<long long>(plan->ptsUs), static_cast<unsigned long long>(monotonic_ns()),
             static_cast<unsigned long long>(monotonic_ns() - renderStarted), result.raw());
         if (!result.ok()) break;
@@ -12613,7 +12614,8 @@ void Engine::export_encoder_main() noexcept {
         if (ctx.queue) {
             if (s.ok()) s = ctx.queue->encoded(si, i);
             else ctx.queue->fail(s);
-            AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=encode_audio timestamp_ns=%llu duration_ns=%llu result=%d",
+            if (i == 0 || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !s.ok())
+                AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=encode_audio timestamp_ns=%llu duration_ns=%llu result=%d",
                 i, static_cast<long long>(pts), static_cast<unsigned long long>(monotonic_ns()),
                 static_cast<unsigned long long>(monotonic_ns() - w0), s.raw());
         }

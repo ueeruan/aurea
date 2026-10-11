@@ -102,7 +102,8 @@ int main(int argc, char** argv) {
     sources = [source, ROOT / "engine/src/export/FFmpegExportSink.cpp",
                ROOT / "engine/src/export/OfflineFrameQueue.cpp", ROOT / "engine/src/core/Time.cpp",
                ROOT / "engine/src/core/Log.cpp", ROOT / "engine/src/project/FileIO.cpp",
-               ROOT / "engine/tests/test_ffmpeg_export.cpp", ROOT / "engine/tests/test_offline_frame_queue.cpp"]
+               ROOT / "engine/tests/test_ffmpeg_export.cpp", ROOT / "engine/tests/test_offline_frame_queue.cpp",
+               ROOT / "engine/tests/test_export_pixel_copy.cpp"]
     compile_command = [compiler, "-target", f"{args.arch}-apple-ios{args.ios_min}-simulator", "-isysroot", sdk,
                        "-std=c++23", "-O2", "-gline-tables-only", "-pthread", "-DAUREA_HAS_FFMPEG=1",
                        "-DAUREA_PLATFORM_IOS=1", "-I" + str(ROOT / "engine/include"),

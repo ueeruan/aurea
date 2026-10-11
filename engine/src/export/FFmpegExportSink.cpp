@@ -1,4 +1,5 @@
 #include "aurea/export/FFmpegExportSink.hpp"
+#include "aurea/export/NV12Copy.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/FileIO.hpp"
 
@@ -749,12 +750,10 @@ Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
                     black, static_cast<usize>(storageWidth));
         }
     } else {
-        for (u32 row = 0; row < video_.height; ++row)
-            std::memcpy(videoFrame_->data[0] + static_cast<usize>(row) * videoFrame_->linesize[0],
-                        y + static_cast<usize>(row) * ys, video_.width);
-        for (u32 row = 0; row < video_.height / 2; ++row)
-            std::memcpy(videoFrame_->data[1] + static_cast<usize>(row) * videoFrame_->linesize[1],
-                        uv + static_cast<usize>(row) * uvs, video_.width);
+        export_detail::copy_nv12_plane(videoFrame_->data[0], videoFrame_->linesize[0],
+                                      y, ys, video_.width, video_.height);
+        export_detail::copy_nv12_plane(videoFrame_->data[1], videoFrame_->linesize[1],
+                                      uv, uvs, video_.width, video_.height / 2);
     }
     videoFrame_->pts = framePts; videoFrame_->duration = frameDuration;
     if (const Status status = send(videoCodec_, videoStream_, videoFrame_, true); !status.ok()) return status;

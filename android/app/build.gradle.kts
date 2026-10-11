@@ -99,10 +99,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // versionCode 2140: novas deformações, partículas 3D, cache ocioso e barra compacta. Um número maior é
-        // o que faz o Android aceitar a atualização por cima.
-        versionCode = 2154
-        versionName = "0.1.4"
+        // Deve superar também os APKs 0.1.4 build 2174 já distribuídos.
+        versionCode = 2175
+        versionName = "0.1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

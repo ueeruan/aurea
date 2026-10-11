@@ -447,11 +447,22 @@ public:
     /// Only a lower-quality set of the same HDRI may serve as a pending fallback.
     [[nodiscard]] const EnvSet* environment_set(const SceneEnvironment& env, u64 frameNumber, bool wait = true) noexcept;
     void set_environment_wait(bool wait) noexcept { environmentWait_ = wait; }
+    /// Exact-capture diagnostics only; never changes environment quality/work.
+    bool set_environment_trace(bool enabled) noexcept { const bool old = environmentTrace_; environmentTrace_ = enabled; return old; }
     [[nodiscard]] bool has_environment() const noexcept { return irradiance_.valid(); }
     [[nodiscard]] bool environment_pending() const noexcept { return pendingEnv_.valid() || pendingObjectEnv_.valid(); }
     /// Export e captura usam a qualidade final: esperam o ambiente (ou o geram
     /// agora). O preview não chama — segue sem travar.
     void finish_environment(const SceneEnvironment& env) noexcept;
+    /// Poll one final map job, consuming its future only after it is ready.
+    /// Ready maps use the existing scene/object GPU caches; no quality fallback.
+    [[nodiscard]] Status prepare_environment(const SceneEnvironment& env, u64 frameNumber,
+                                              bool object = false) noexcept;
+    /// Optional native-test gate, copied into the final CPU job. Its owner must
+    /// release/join the job before destroying the context. Null in production.
+    void set_environment_prepare_probe(void (*beforeBuild)(void*), void* context) noexcept {
+        environmentPrepareProbe_ = beforeBuild; environmentPrepareProbeContext_ = context;
+    }
     /// Ambiente atual (0 = estúdio; ~0 = nenhum ainda).
     [[nodiscard]] u64 environment_key() const noexcept { return envKey_; }
     /// Pede o ambiente do quadro: reutiliza seus mapas, ou gera fora da thread
@@ -581,6 +592,9 @@ private:
     u64 pendingObjectKey_ = ~0ull;
     u32 pendingObjectSpecTier_ = 0;
     bool environmentWait_ = false;
+    bool environmentTrace_ = false;
+    void (*environmentPrepareProbe_)(void*) = nullptr;
+    void* environmentPrepareProbeContext_ = nullptr;
     void poll_object_environment(u64 frameNumber, bool wait) noexcept;
     bool envRequested_ = false;
     u64 envKey_ = ~0ull;       ///< o que está na GPU

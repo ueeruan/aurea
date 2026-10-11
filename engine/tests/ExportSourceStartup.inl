@@ -122,7 +122,11 @@ bool export_and_capture(Mode mode, bool keyflow, Captured& output) {
     ReleaseBeforeRigDestruction guard{factory.state};
     AUREA_CHECK(rig.ok); if (!rig.ok) return false;
     rig.cap.keepFrames = true;
+    rig.cap.measureLifecycle = true;
     rig.cap.persistFinishMarker = true; rig.cap.validateCapturedPlanes = true;
+    // Each route must publish its own result; a previous route's marker is
+    // not evidence that this export reached finish/validation/publication.
+    (void)fileio::remove_file("nao-usado.mp4");
     rig.e.media().close_all();
     factory.arm(mode == Mode::Delayed ? 5'200'000'000ull : 0);
     const Outcome out = run_export(rig, 36, 30, false, 15);
@@ -132,7 +136,22 @@ bool export_and_capture(Mode mode, bool keyflow, Captured& output) {
     AUREA_CHECK(out.finished); AUREA_CHECK_EQ(out.p.result, Errc::Ok);
     AUREA_CHECK_EQ(out.p.framesDone, u32{frames}); AUREA_CHECK_EQ(out.p.framesTotal, u32{frames});
     AUREA_CHECK_EQ(out.p.flags & Engine::kExportFrameFallback, 0u);
-    AUREA_CHECK(rig.cap.finished && !rig.cap.aborted);
+    AUREA_CHECK(rig.cap.finished);
+    AUREA_CHECK_EQ(rig.cap.finishCalls, 1u);
+    AUREA_CHECK_EQ(rig.cap.abortBeforeFinish, 0u);
+    AUREA_CHECK_EQ(rig.cap.validationCalls, keyflow ? 1u : 0u);
+    // The serial startup proxy calls abort only to close/release its already
+    // finalized staged sink. That cleanup must preserve the committed file.
+    AUREA_CHECK_EQ(rig.cap.abortAfterFinish, keyflow ? 1u : 0u);
+    const char expectedMarker[] = "finished benchmark sink";
+    std::vector<u8> committed;
+    const bool published = fileio::read_all("nao-usado.mp4", committed, sizeof(expectedMarker))
+        && committed.size() == sizeof(expectedMarker)
+        && std::memcmp(committed.data(), expectedMarker, sizeof(expectedMarker)) == 0;
+    AUREA_CHECK(published);
+    std::printf("source-sink finish=%u validation=%u abort_unfinished=%u cleanup_after_finish=%u published_marker=%d ",
+        rig.cap.finishCalls, rig.cap.validationCalls, rig.cap.abortBeforeFinish,
+        rig.cap.abortAfterFinish, published);
     AUREA_CHECK_EQ(rig.cap.frames.size(), usize{frames});
     AUREA_CHECK_EQ(rig.cap.video.width, 64u); AUREA_CHECK_EQ(rig.cap.video.height, 36u);
     AUREA_CHECK(rig.cap.ptsMonotonic && rig.cap.audioContiguous && rig.cap.hasAudio);

@@ -140,7 +140,9 @@ namespace {
 // Full-quality mobile scenes often have several image memory types. A 64 MiB
 // block per type left >90 MiB unused and refused an otherwise fitting frame.
 // A few small live resources can pin several mostly empty 16 MiB slabs.
-// Share 4 MiB instead; resources above 2 MiB use their exact driver backing.
+// Small pins must not strand a 4 MiB block after a larger neighbour retires.
+// New blocks follow the request size (1/2/4 MiB); existing allocations never
+// move and resources above 2 MiB keep their exact dedicated driver backing.
 // This reduces physical reservation without changing images or crediting
 // deferred releases before their GPU fence has completed.
 constexpr VkDeviceSize kDeviceBlock = 4ull * 1024 * 1024;
@@ -208,14 +210,17 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
     // processo. Lá só se mapeia o que alguém escreve pela CPU.
     // 64 bits: mapeia tudo que é host-visible, como sempre.
     const bool mapNow = hostVisible && (hostPointer || address_space::map_gpu_memory_eagerly());
-    const VkDeviceSize blockSize = hostVisible ? kHostBlock : kDeviceBlock;
+    const VkDeviceSize maximumBlockSize = hostVisible ? kHostBlock : kDeviceBlock;
+    const VkDeviceSize tierSize = req.size <= (512ull << 10) ? (1ull << 20)
+        : req.size <= (1ull << 20) ? (2ull << 20) : maximumBlockSize;
+    const VkDeviceSize blockSize = std::max(tierSize, align_up(req.size, granularity_));
     const VkDeviceSize align = std::max(req.alignment, granularity_);
 
     std::lock_guard<std::mutex> lock(mutex_);
 
     // Grande demais para bloco: alocação dedicada (texturas 4K de vídeo,
     // anéis grandes). Subalocar isso fragmentaria o bloco inteiro.
-    if (dedicated || req.size > blockSize / 2) {
+    if (dedicated || req.size > maximumBlockSize / 2) {
         VkMemoryAllocateInfo info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         info.allocationSize = req.size;
         info.memoryTypeIndex = type;

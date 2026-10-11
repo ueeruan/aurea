@@ -133,10 +133,10 @@ struct MemoryPackingResources {
         return entry.allocation.valid() && vk::vkBindImageMemory(backend.device(), entry.image,
             entry.allocation.memory, entry.allocation.offset) == VK_SUCCESS;
     }
-    bool pin(u32 index) {
+    bool pin(u32 index, u64 bytes = 4096) {
         Entry& entry = entries[index];
         VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-        info.size = 4096; info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        info.size = bytes; info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         if (vk::vkCreateBuffer(backend.device(), &info, nullptr, &entry.buffer) != VK_SUCCESS) return false;
         VkMemoryRequirements requirement{};
@@ -366,5 +366,137 @@ AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysic
     }
     backend.wait_idle();
     AUREA_CHECK_EQ(vk::Backend::validation_errors() - validationErrors, 0u);
+}
+
+AUREA_TEST(VulkanMemoryPackingGpu, SmallPinsBoundActualSlabsWithoutEarlyFenceCreditOrMovingLiveBuffers) {
+    AUREA_REQUIRE_GPU();
+    DeviceOnlyAllocatorProperties properties;
+    Gpu isolated; AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
+    auto& backend = isolated.backend;
+    AUREA_CHECK(properties.physical != VK_NULL_HANDLE); if (!properties.physical) return;
+    VkPhysicalDeviceProperties physical{};
+    vk::vkGetPhysicalDeviceProperties(properties.physical, &physical);
+    const auto fill = reinterpret_cast<PFN_vkCmdFillBuffer>(vk::vkGetDeviceProcAddr(backend.device(), "vkCmdFillBuffer"));
+    AUREA_CHECK(fill != nullptr); if (!fill) return;
+    const u32 validationErrors = vk::Backend::validation_errors();
+    NativeMemoryObservation observed(backend.device());
+    constexpr u64 mib = 1ull << 20;
+    for (const bool deviceOnly : {false, true}) for (const u64 requested : {4096ull, 768ull << 10, 1536ull << 10, 3ull << 20})
+        for (u32 cycle = 0; cycle < 3; ++cycle) {
+        MemoryPackingResources resources(backend);
+        properties.deviceOnly = deviceOnly;
+        resources.allocator.initialize(properties.physical, backend.device());
+        properties.deviceOnly = false; resources.initialized = true;
+        BufferDesc desc; desc.bytes = 8192; desc.usage = BufferUsage::TransferDst;
+        desc.access = MemoryAccess::Readback;
+        const auto readback = backend.create_buffer(desc);
+        AUREA_CHECK(readback.ok()); if (!readback) return;
+        resources.readback = *readback;
+        backend.wait_idle();
+        const auto base = backend.memory_stats();
+        const usize baseHandles = observed.live.size();
+        AUREA_CHECK(resources.pin(0, requested)); AUREA_CHECK(resources.pin(2));
+        if (!resources.entries[0].alive || !resources.entries[0].allocation.valid()
+            || !resources.entries[2].allocation.valid()) return;
+        const auto& large = resources.entries[0];
+        const auto pin = resources.entries[2].allocation;
+        AUREA_CHECK(large.requirementBytes >= requested);
+        AUREA_CHECK(resources.entries[2].requirementBytes <= (512ull << 10));
+        const u64 requirement = large.requirementBytes;
+        const u64 tier = requirement <= (512ull << 10) ? mib : requirement <= mib ? 2 * mib : 4 * mib;
+        const u64 granularity = std::max<u64>(1, physical.limits.bufferImageGranularity);
+        const u64 rounded = (requirement + granularity - 1) / granularity * granularity;
+        const u64 expectedMain = requirement > 2 * mib ? requirement : std::max(tier, rounded);
+        AUREA_CHECK_EQ(observed.live.at(large.allocation.memory), expectedMain);
+        if (requirement > 2 * mib) AUREA_CHECK_EQ(large.allocation.block, kInvalidIndex);
+        else AUREA_CHECK(large.allocation.block != kInvalidIndex);
+        // Exact physical backing, not a changed logical texture estimate.
+        const u64 pendingUsed = resources.allocator.used_bytes();
+        const u64 pendingReserved = resources.allocator.reserved_bytes();
+        AUREA_CHECK(pendingReserved >= pendingUsed);
+        if (requirement <= mib) AUREA_CHECK(pendingReserved < 4 * mib);
+        const std::vector<u8> knownCpuCache(mib, 91);
+        const u64 survivingReservation = observed.live.at(pin.memory);
+        const u64 budget = base.reservedBytes + survivingReservation + knownCpuCache.size();
+        const auto fits = [&] {
+            const auto actual = backend.memory_stats();
+            return fits_tracked_resource_budget(budget, resources.allocator.used_bytes(),
+                actual.usedBytes + resources.allocator.used_bytes(),
+                actual.reservedBytes + resources.allocator.reserved_bytes(), knownCpuCache.size(), 0);
+        };
+        FrameBegin frame; AUREA_CHECK(backend.begin_offscreen_frame(frame).ok()); resources.frameOpen = true;
+        const auto command = static_cast<vk::CommandListImpl*>(frame.commands)->handle();
+        const auto destination = backend.buffer(readback->id)->buffer;
+        const std::array<u32, 2> values{0x12abcd34u + cycle, 0xa9f06721u + cycle};
+        fill(command, large.buffer, 0, 4096, values[0]);
+        fill(command, resources.entries[2].buffer, 0, 4096, values[1]);
+        std::array<VkBufferMemoryBarrier, 2> readable{};
+        for (u32 i = 0; i < 2; ++i) {
+            readable[i].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            readable[i].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; readable[i].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            readable[i].srcQueueFamilyIndex = readable[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            readable[i].buffer = i ? resources.entries[2].buffer : large.buffer; readable[i].size = 4096;
+        }
+        vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 2, readable.data(), 0, nullptr);
+        for (u32 i = 0; i < 2; ++i) {
+            const VkBufferCopy copy{0, i * 4096ull, 4096};
+            vk::vkCmdCopyBuffer(command, readable[i].buffer, destination, 1, &copy);
+        }
+        packing_readback_visible(command, destination);
+        resources.defer(0); resources.allocator.trim_empty_blocks();
+        AUREA_CHECK_EQ(resources.retired, 0u);
+        AUREA_CHECK_EQ(resources.allocator.used_bytes(), pendingUsed);
+        AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), pendingReserved);
+        AUREA_CHECK(backend.end_frame().ok()); resources.frameOpen = false;
+        {
+            DelayedFenceObservation hold(backend.device());
+            AUREA_CHECK_EQ(backend.wait_frame(frame.frameNumber, 0).code(), Errc::Timeout);
+            AUREA_CHECK_EQ(resources.retired, 0u);
+            AUREA_CHECK_EQ(resources.allocator.used_bytes(), pendingUsed);
+            AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), pendingReserved);
+        }
+        AUREA_CHECK(backend.wait_frame(frame.frameNumber, 5'000'000'000ull).ok());
+        AUREA_CHECK_EQ(resources.retired, 1u);
+        resources.allocator.trim_empty_blocks();
+        AUREA_CHECK_EQ(resources.entries[2].allocation.memory, pin.memory);
+        AUREA_CHECK_EQ(resources.entries[2].allocation.offset, pin.offset);
+        AUREA_CHECK_EQ(resources.allocator.used_bytes(), pin.size);
+        AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), survivingReservation);
+        AUREA_CHECK(fits());
+        void* pixels = nullptr; AUREA_CHECK(backend.map_buffer(*readback, pixels).ok());
+        if (!pixels) return;
+        for (u32 i = 0; i < 2048; ++i) AUREA_CHECK_EQ(static_cast<const u32*>(pixels)[i], values[i / 1024]);
+        backend.unmap_buffer(*readback);
+        // Read the still-live pin again after its neighbour's real retirement.
+        FrameBegin next; AUREA_CHECK(backend.begin_offscreen_frame(next).ok()); resources.frameOpen = true;
+        const auto nextCommand = static_cast<vk::CommandListImpl*>(next.commands)->handle();
+        VkBufferMemoryBarrier writable{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+        writable.srcAccessMask = VK_ACCESS_HOST_READ_BIT; writable.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        writable.srcQueueFamilyIndex = writable.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        writable.buffer = destination; writable.size = VK_WHOLE_SIZE;
+        vk::vkCmdPipelineBarrier(nextCommand, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 1, &writable, 0, nullptr);
+        const VkBufferCopy copy{0, 0, 4096};
+        vk::vkCmdCopyBuffer(nextCommand, resources.entries[2].buffer, destination, 1, &copy);
+        packing_readback_visible(nextCommand, destination);
+        AUREA_CHECK(backend.end_frame().ok()); resources.frameOpen = false;
+        AUREA_CHECK(backend.wait_frame(next.frameNumber, 5'000'000'000ull).ok());
+        pixels = nullptr; AUREA_CHECK(backend.map_buffer(*readback, pixels).ok());
+        if (!pixels) return;
+        for (u32 i = 0; i < 1024; ++i) AUREA_CHECK_EQ(static_cast<const u32*>(pixels)[i], values[1]);
+        backend.unmap_buffer(*readback);
+        std::printf("\n    small-slab device_only=%u cycle=%u requested=%llu actual=%llu pending_live=%llu pending_reserved=%llu pin_live=%llu pin_reserved=%llu native_peak_new_handles=%u logical_base_bound=%u native_limit=%u exact_channels=12288\n",
+            deviceOnly, cycle, static_cast<unsigned long long>(requested), static_cast<unsigned long long>(requirement),
+            static_cast<unsigned long long>(pendingUsed), static_cast<unsigned long long>(pendingReserved),
+            static_cast<unsigned long long>(pin.size), static_cast<unsigned long long>(survivingReservation),
+            observed.peakHandles, base.allocationCount, physical.limits.maxMemoryAllocationCount);
+        AUREA_CHECK(base.allocationCount + observed.peakHandles <= physical.limits.maxMemoryAllocationCount);
+        resources.release(2); resources.allocator.trim_empty_blocks();
+        AUREA_CHECK_EQ(resources.allocator.used_bytes(), 0u); AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), 0u);
+        AUREA_CHECK_EQ(observed.live.size(), baseHandles);
+        AUREA_CHECK_EQ(knownCpuCache.front(), 91);
+    }
+    backend.wait_idle(); AUREA_CHECK_EQ(vk::Backend::validation_errors() - validationErrors, 0u);
 }
 #endif

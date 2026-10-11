@@ -378,6 +378,7 @@ struct RenderSettings {
     /// failed whole compile. Only a completed submitted fence may renew its
     /// no-progress window; export and ordinary preview leave these null.
     u64 (*offscreenFenceDeadline)(void*) = nullptr;
+    void (*offscreenFenceSubmitted)(void*, u64) = nullptr;
     void (*offscreenFenceCompleted)(void*, u64) = nullptr;
     void* offscreenFenceContext = nullptr;
     /// Exact offscreen captures enqueue cold local AI, then wait without holding
@@ -484,6 +485,13 @@ public:
     void prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i64 mediaUs,
                      MediaManager& media, u64 frameNumber, DecodeMode mode,
                      i32 direction, f32 speed, u64 epoch, FrameSnapshot& out);
+
+    /// Poll final CPU environment jobs without waiting on their futures.
+    /// Busy means preparation is still pending; the caller owns one fixed
+    /// resource deadline and preserves snapshot/project ownership between polls.
+    /// Ready maps upload into the ordinary GPU caches, without extra CPU copies.
+    [[nodiscard]] Status prepare_capture_resources(FrameSnapshot& snapshot,
+                                                   const RenderSettings& settings) noexcept;
 
     /// Fase 2 (sem lock). `offscreen` nulo = apresenta no swapchain.
     [[nodiscard]] Status render(FrameSnapshot& snapshot, const RenderSettings& settings,

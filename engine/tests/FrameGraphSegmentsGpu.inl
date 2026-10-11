@@ -21,9 +21,10 @@ struct SegmentGpuGraph {
     SamplerHandle sampler;
     std::vector<u16> inputPixels, backgroundPixels;
     bool open = false;
+    bool groupedSources = false;
     u32 callbacks = 0, executed = 0;
 
-    explicit SegmentGpuGraph(Gpu& source) : gpu(source) {}
+    explicit SegmentGpuGraph(Gpu& source, bool grouped = false) : gpu(source), groupedSources(grouped) {}
     ~SegmentGpuGraph() {
         if (open) (void)gpu.backend.end_frame();
         gpu.backend.wait_idle();
@@ -89,18 +90,24 @@ struct SegmentGpuGraph {
             LoadOp::Clear, {}, [this, source](PassContext& pc) { draw(pc, source, 0, 0, width, height); });
         graph.read(keep, source);
         graph.set_output(retained, ResourceState::ShaderRead);
+        std::array<FGTexture, scratchCount> scratchSources;
+        const auto consumeScratch = [&](FGTexture scratch, u32 i) {
+            const auto consume = graph.add_raster_pass("preserve-background-load", PassStage::Composite,
+                output, LoadOp::Load, {}, [this, scratch, i](PassContext& pc) {
+                    draw(pc, scratch, 4 + static_cast<i32>(i) * 8, 4, 8, 16);
+                });
+            graph.read(consume, scratch);
+        };
         for (u32 i = 0; i < scratchCount; ++i) {
             const auto d = desc(512 + i * 32, 256 + i * 16);
             const auto scratch = graph.create_texture("distinct-sized-scratch", d);
             const auto create = graph.add_raster_pass("scratch-sample", PassStage::Effects, scratch,
                 LoadOp::Clear, {}, [this, source, d](PassContext& pc) { draw(pc, source, 0, 0, d.width, d.height); });
             graph.read(create, source);
-            const auto consume = graph.add_raster_pass("preserve-background-load", PassStage::Composite,
-                output, LoadOp::Load, {}, [this, scratch, i](PassContext& pc) {
-                    draw(pc, scratch, 4 + static_cast<i32>(i) * 8, 4, 8, 16);
-                });
-            graph.read(consume, scratch);
+            scratchSources[i] = scratch;
+            if (!groupedSources) consumeScratch(scratch, i);
         }
+        if (groupedSources) for (u32 i = 0; i < scratchCount; ++i) consumeScratch(scratchSources[i], i);
         const auto load = graph.add_raster_pass("late-anchor-load", PassStage::Effects,
             anchor, LoadOp::Load, {}, [this, source](PassContext& pc) { draw(pc, source, 0, 0, width / 2, height); });
         graph.read(load, source);
@@ -157,6 +164,16 @@ struct SegmentGpuGraph {
             const auto planned = graph.prepare_segments();
             AUREA_CHECK(planned.ok()); if (!planned.ok()) return result;
             const u32 count = static_cast<u32>(graph.order().size());
+            const auto position = [&](const char* name) {
+                for (u32 i = 0; i < count; ++i)
+                    if (std::strcmp(graph.pass_name(graph.order()[i]), name) == 0) return i;
+                return kInvalidIndex;
+            };
+            const u32 mrtStart = position("mrt-clear");
+            const u32 anchorLast = position("future-reader-anchor-copy");
+            const u32 secondaryLast = position("future-reader-mrt-copy");
+            const u32 retainedStart = position("early-output-copy");
+            AUREA_CHECK(mrtStart < anchorLast && mrtStart < secondaryLast);
             for (u32 first = 0; first < count; first += chunk) {
                 if (!begin(frame)) return result;
                 const auto compiled = graph.compile_segment(pool, first, chunk);
@@ -167,13 +184,19 @@ struct SegmentGpuGraph {
                 ++result.submissions;
                 // These early allocations must outlive arbitrary intervening
                 // scratch sizes and retain their exact native handles.
-                if (first + chunk < count) {
-                    AUREA_CHECK(graph.physical(anchor).valid());
-                    AUREA_CHECK(graph.physical(secondary).valid());
-                }
+                const u32 end = std::min(count, first + chunk);
+                // Recovery may postpone unrelated producers. Require the same
+                // native allocations from their actual birth through their
+                // future reader, including arbitrary intervening submissions.
+                const bool anchorHeld = end > mrtStart && end <= anchorLast;
+                const bool secondaryHeld = end > mrtStart && end <= secondaryLast;
+                if (anchorHeld) AUREA_CHECK(graph.physical(anchor).valid());
+                if (secondaryHeld) AUREA_CHECK(graph.physical(secondary).valid());
                 graph.release_completed_segment(pool);
                 pool.trim_unreferenced(frame.frameNumber);
-                if (first + chunk < count) AUREA_CHECK(pool.stats().inUse >= 2u);
+                const u32 requiredHeld = static_cast<u32>(anchorHeld) + static_cast<u32>(secondaryHeld)
+                    + static_cast<u32>(end > retainedStart);
+                AUREA_CHECK(pool.stats().inUse >= requiredHeld);
             }
         }
         const auto kept = graph.physical(retained);
@@ -248,6 +271,27 @@ AUREA_TEST(FrameGraphSegmentsGpu, PartialWholeGraphOomRecoversWithoutChangingPas
         AUREA_CHECK(pixels.output == baseline.output);
         AUREA_CHECK(pixels.retained == baseline.retained);
         AUREA_CHECK_EQ(pixels.passes, baseline.passes);
+        AUREA_CHECK(pixels.peakPool < baseline.peakPool);
+    }
+}
+
+AUREA_TEST(FrameGraphSegmentsGpu, MemoryOrderedProducerWavePreservesEveryPixelUnderPressure) {
+    AUREA_REQUIRE_GPU();
+    Gpu isolated; AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
+    SegmentPixels baseline;
+    {
+        SegmentGpuGraph fixture(isolated, true); if (!fixture.setup()) return;
+        baseline = fixture.run(0, false); AUREA_CHECK(baseline.ok); if (!baseline.ok) return;
+    }
+    for (const u32 chunk : {1u, 2u}) {
+        SegmentGpuGraph fixture(isolated, true); if (!fixture.setup()) return;
+        const auto pixels = fixture.run(chunk, true);
+        AUREA_CHECK(pixels.ok); AUREA_CHECK(pixels.wholeOom);
+        AUREA_CHECK(pixels.output == baseline.output);
+        AUREA_CHECK(pixels.retained == baseline.retained);
+        AUREA_CHECK(pixels.imported == baseline.imported);
+        AUREA_CHECK_EQ(pixels.passes, baseline.passes);
+        AUREA_CHECK(fixture.graph.stats().segmentReorderedPasses > 0);
         AUREA_CHECK(pixels.peakPool < baseline.peakPool);
     }
 }

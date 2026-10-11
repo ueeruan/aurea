@@ -76,6 +76,10 @@ struct BenchCapture {
     bool hasAudio = false;
     AudioStreamConfig audio{};
     bool opened = false, finished = false, aborted = false;
+    // Opt-in lifecycle measurements distinguish aborting an unfinished file
+    // from the startup proxy releasing a successfully published sink.
+    bool measureLifecycle = false;
+    u32 finishCalls = 0, abortBeforeFinish = 0, abortAfterFinish = 0;
     bool keepFrames = false;
     u32 encodeUs = 0;                    ///< latência extra simulada do encoder
     u32 openDelayUs = 0;
@@ -215,6 +219,7 @@ public:
         return OkStatus;
     }
     Status finish() noexcept override {
+        if (c_->measureLifecycle) ++c_->finishCalls;
         if (c_->hangFinish) return hang();
         c_->finished = true;
         if (c_->finishFailure.ok() && c_->persistFinishMarker) {
@@ -233,6 +238,10 @@ public:
             c_->ptsMonotonic && c_->audioContiguous && c_->hasAudio == expected.audio ? OkStatus : Status{Errc::CorruptData};
     }
     void abort() noexcept override {
+        if (c_->measureLifecycle) {
+            if (c_->finished) ++c_->abortAfterFinish;
+            else ++c_->abortBeforeFinish;
+        }
         if (c_->abortedDuringOpen && c_->openActive && c_->openActive->load(std::memory_order_acquire))
             c_->abortedDuringOpen->store(true, std::memory_order_release);
         c_->aborted = true;

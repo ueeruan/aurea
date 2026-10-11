@@ -53,6 +53,8 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
     const Status initial = backend_->end_frame();
     frameOpen = false;
     if (!initial.ok()) return finish(initial);
+    if (settings.offscreenFenceSubmitted)
+        settings.offscreenFenceSubmitted(settings.offscreenFenceContext, frame.frameNumber);
     if (const Status ready = wait(frame.frameNumber); !ready.ok()) return finish(ready);
     (void)pool_.trim_unreferenced(frame.frameNumber);
     if (const Status plan = graph_.prepare_segments(); !plan.ok()) return finish(plan);
@@ -82,6 +84,8 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
         const Status submitted = backend_->end_frame();
         frameOpen = false;
         if (!submitted.ok()) return finish(submitted);
+        if (settings.offscreenFenceSubmitted)
+            settings.offscreenFenceSubmitted(settings.offscreenFenceContext, frame.frameNumber);
         if (const Status ready = wait(frame.frameNumber); !ready.ok()) return finish(ready);
         // Lifetime dead != GPU completed. Only now release and destroy slots
         // with no future graph readers; imported/output/live slots stay held.

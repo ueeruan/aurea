@@ -42,6 +42,21 @@ constexpr SurfaceFormat kWorkFormat = SurfaceFormat::RGBA16F;
 constexpr SurfaceFormat kPreviewCacheFormat = SurfaceFormat::RGBA8_sRGB;
 constexpr u32 kPreviewCacheBytesPerPixel = 4;
 
+struct CaptureRenderPhases {
+    bool enabled;
+    u64 started, previous;
+    explicit CaptureRenderPhases(bool trace) noexcept
+        : enabled(trace), started(trace ? monotonic_ns() : 0), previous(started) {}
+    void mark(const char* phase) noexcept {
+        if (!enabled) return;
+        const u64 now = monotonic_ns();
+        AUREA_LOG_INFO("capture-render phase=%s elapsed_ms=%.3f phase_ms=%.3f", phase,
+            static_cast<double>(now - started) * 1e-6, static_cast<double>(now - previous) * 1e-6);
+        previous = now;
+    }
+    ~CaptureRenderPhases() { mark("returned"); }
+};
+
 // A CFR boundary must land on the last frame's actual timestamp. Using half
 // a frame before EOF can be one microsecond outside the decoder's tolerance
 // (30 fps: 9,983,334 vs 9,966,667), making an export wait until its timeout.
@@ -5878,10 +5893,76 @@ void Renderer::prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i
     out.layers.push_back(std::move(video));
 }
 
+Status Renderer::prepare_capture_resources(FrameSnapshot& snapshot, const RenderSettings& settings) noexcept {
+    if (!backend_ || !settings.finalQuality) return Errc::InvalidState;
+    if (previewGraph_.active) return Errc::Busy;
+    const auto cancelled = [&] {
+        return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire);
+    };
+    if (cancelled()) return Errc::Cancelled;
+    const bool traceEnabled = settings.offscreenFenceDeadline != nullptr;
+    struct EnvironmentTraceScope {
+        scene3d::SceneRenderer& scene;
+        bool previous;
+        EnvironmentTraceScope(scene3d::SceneRenderer& value, bool enabled) noexcept
+            : scene(value), previous(scene.set_environment_trace(enabled)) {}
+        ~EnvironmentTraceScope() { (void)scene.set_environment_trace(previous); }
+    } trace(scene3d_, traceEnabled);
+    quality_ = effective_quality(settings);
+    heavyQ_ = resolve_heavy(settings);
+    const u64 pipelinesStarted = traceEnabled ? monotonic_ns() : 0;
+    warm_scene_pipelines(snapshot);
+    flush_warmup();
+    if (traceEnabled && monotonic_ns() - pipelinesStarted > 5000000ull)
+        AUREA_LOG_INFO("capture-resource pipeline-warmup_ms=%.3f", static_cast<double>(monotonic_ns() - pipelinesStarted) * 1e-6);
+    if (cancelled()) return Errc::Cancelled;
+    // Mark all required environments as recent in the same next main frame.
+    // Serial jobs reuse ordinary GPU caches instead of retaining a second set
+    // of full-resolution CPU maps for every nested composition/object.
+    const u64 frame = backend_->last_submitted_frame() + 1;
+    const auto instances = [&](const scene3d::SceneFrame& group) -> Status {
+        for (const auto& instance : group.instances) if (instance.ownEnvironment) {
+            if (cancelled()) return Errc::Cancelled;
+            const Status status = scene3d_.prepare_environment(instance.environment, frame, true);
+            if (!status.ok()) return status;
+        }
+        return OkStatus;
+    };
+    const auto visit = [&](auto&& self, const FrameSnapshot& value) -> Status {
+        for (const auto& group : value.scenes) {
+            if (cancelled()) return Errc::Cancelled;
+            configure_scene_quality(group);
+            const Status environment = scene3d_.prepare_environment(group.environment, frame);
+            if (!environment.ok()) return environment;
+            const Status main = instances(group);
+            if (!main.ok()) return main;
+            for (const auto& sample : group.blurFrames) {
+                const Status subframe = instances(sample);
+                if (!subframe.ok()) return subframe;
+            }
+        }
+        for (const auto& child : value.nested) if (child) {
+            const Status nested = self(self, *child);
+            if (!nested.ok()) return nested;
+        }
+        return OkStatus;
+    };
+    const Status ready = visit(visit, snapshot);
+    return ready;
+}
+
 Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                         const OffscreenTarget* offscreen, FrameStats& stats,
                         RenderTimings& timings) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
+    CaptureRenderPhases capturePhases(offscreen && settings.offscreenFenceDeadline);
+    struct EnvironmentTraceScope {
+        scene3d::SceneRenderer& scene;
+        bool previous;
+        EnvironmentTraceScope(scene3d::SceneRenderer& value, bool enabled) noexcept
+            : scene(value), previous(scene.set_environment_trace(enabled)) {}
+        ~EnvironmentTraceScope() { (void)scene.set_environment_trace(previous); }
+    } environmentTrace(scene3d_, capturePhases.enabled);
     if (previewGraph_.active) return Status{Errc::Busy, "preview graph continuation active"};
     if (settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire)) {
         snap.release_video_frames(); return Errc::Cancelled;
@@ -5889,6 +5970,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     if (const Status ready = reclaim_failed_transients(); !ready.ok()) {
         snap.release_video_frames(); return ready;
     }
+    capturePhases.mark("reclaim");
     // Pipelines que a varredura do projeto pediu: antes de pegar a imagem da
     // swapchain (compilar segurando a imagem atrasaria a apresentação).
     quality_ = effective_quality(settings);
@@ -5897,6 +5979,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         warm_scene_pipelines(snap);
         flush_warmup();
     }
+    capturePhases.mark("pipeline-warmup");
     const u64 t0 = monotonic_ns();
     const u64 effectsBypassedBefore = EffectGraph::bypassed_total();
     scene3d_.reset_incomplete();
@@ -5978,6 +6061,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         }
         boundedSceneTextures_ = completed.textures;
     }
+    capturePhases.mark("scene-stages");
 
     // SceneStatsSink reports cumulative builds within the main GPU frame.
     // Merge completed earlier submissions once, after that sink has run.
@@ -6004,6 +6088,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     }
     const u64 tBegin = monotonic_ns();
     timings.acquireWaitMs = static_cast<f32>(static_cast<f64>(tBegin - acquireStarted) * 1e-6);
+    capturePhases.mark("begin-frame");
 
     // RAW never touches the text subsystem.
     if (!settings.rawPlayback) {
@@ -6040,6 +6125,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         glyphResetSeen_ = resets;
     }
     flush_uploads();
+    capturePhases.mark("uploads");
     pool_.begin_frame(*backend_, fb.frameNumber);
     graph_.reset();
     arena_.reset();
@@ -6116,6 +6202,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     Status previewSourceStatus = OkStatus;
     currentScenes_ = &snap.scenes;
     if (offscreen && !snap.scenes.empty()) scene3d_.finish_environment(snap.scenes[0].environment);
+    capturePhases.mark("scene-environment");
     compTargetW_ = cw;
     compTargetH_ = ch;
 
@@ -6280,7 +6367,9 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     completion.buildFrame = fb.frameNumber;
     completion.width = cw; completion.height = ch;
     completion.offscreen = offscreenFrame;
+    capturePhases.mark("graph-build");
     Status result = previewSourceStatus.ok() ? graph_.compile(pool_) : previewSourceStatus;
+    capturePhases.mark("graph-compile");
     bool frameOpen = true;
     bool segmented = false;
     if (result.code() == Errc::OutOfDeviceMemory && settings.allowGraphSegments
@@ -6339,8 +6428,11 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     } else {
         AUREA_LOG_ERROR("FrameGraph nao compilou: %s", result.message().data());
     }
+    capturePhases.mark("graph-execute");
     completion.frame = fb;
-    return finish_render(snap, settings, offscreen, result, frameOpen, completion, stats, timings);
+    const Status finished = finish_render(snap, settings, offscreen, result, frameOpen, completion, stats, timings);
+    capturePhases.mark("submit");
+    return finished;
 }
 
 Status Renderer::finish_render(FrameSnapshot& snap, const RenderSettings& settings,
@@ -6353,6 +6445,8 @@ Status Renderer::finish_render(FrameSnapshot& snap, const RenderSettings& settin
     const bool discardPresentation = !result.ok() && !completion.offscreen
         && completion.frame.backbuffer.valid() && backend_->can_discard_frame();
     const Status endStatus = frameOpen ? (discardPresentation ? backend_->discard_frame() : backend_->end_frame()) : OkStatus;
+    if (frameOpen && endStatus.ok() && completion.offscreen && settings.offscreenFenceSubmitted)
+        settings.offscreenFenceSubmitted(settings.offscreenFenceContext, completion.frame.frameNumber);
     if (result.code() == Errc::OutOfDeviceMemory && endStatus.ok())
         failedGraphFrame_ = backend_->last_submitted_frame();
     if (!endStatus.ok()) for (auto& target : completion.targets)

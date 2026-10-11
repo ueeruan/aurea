@@ -134,6 +134,8 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
                 ++timings.sceneExposureBatches;
                 if (executed) saved.pendingFrame = frame.frameNumber;
                 if (!submitted.ok()) return submitted;
+                if (settings.offscreenFenceSubmitted)
+                    settings.offscreenFenceSubmitted(settings.offscreenFenceContext, frame.frameNumber);
                 if (!status.ok()) return status;
                 if (auto completed = wait(frame.frameNumber); !completed.ok()) return completed;
                 saved.pendingFrame = 0;

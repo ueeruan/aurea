@@ -8,6 +8,7 @@
 #include "aurea/scene3d/MaterialOverrideKey.hpp"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
 
 #include <algorithm>
 #include <array>
@@ -663,7 +664,14 @@ void SceneRenderer::poll_object_environment(u64 frameNumber, bool wait) noexcept
     // groups/subframes may already have captured their handles this frame.
     EnvironmentMaps maps;
     EnvSet next;
-    if (!take_environment_job(pendingObjectEnv_, maps) || !gpu_ || !upload_environment(maps, next).ok()) {
+    const u64 started = environmentTrace_ ? monotonic_ns() : 0;
+    const bool completed = take_environment_job(pendingObjectEnv_, maps);
+    const u64 waited = environmentTrace_ ? monotonic_ns() : 0;
+    const bool uploaded = completed && gpu_ && upload_environment(maps, next).ok();
+    if (environmentTrace_) AUREA_LOG_INFO("capture-environment object-future key=%llu spec=%u future_wait_ms=%.3f upload_ms=%.3f ok=%u",
+        static_cast<unsigned long long>(key), tier, static_cast<double>(waited - started) * 1e-6,
+        static_cast<double>(monotonic_ns() - waited) * 1e-6, uploaded ? 1u : 0u);
+    if (!uploaded) {
         incomplete_ = true;
         return;
     }
@@ -693,7 +701,14 @@ const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironme
     }
     if (wait) {
         EnvSet next;
-        if (!upload_environment(build_for(env, q), next).ok()) { incomplete_ = true; return nullptr; }
+        const u64 started = environmentTrace_ ? monotonic_ns() : 0;
+        EnvironmentMaps maps = build_for(env, q);
+        const u64 built = environmentTrace_ ? monotonic_ns() : 0;
+        const Status uploaded = upload_environment(maps, next);
+        if (environmentTrace_) AUREA_LOG_INFO("capture-environment object key=%llu spec=%u background=%u cpu_build_ms=%.3f upload_ms=%.3f result=%d",
+            static_cast<unsigned long long>(key), q.specularSize, q.backgroundSize,
+            static_cast<double>(built - started) * 1e-6, static_cast<double>(monotonic_ns() - built) * 1e-6, uploaded.raw());
+        if (!uploaded.ok()) { incomplete_ = true; return nullptr; }
         next.specularTier = q.specularSize;
         next.lastFrame = frameNumber;
         envSets_.emplace_back(key, next);
@@ -744,6 +759,69 @@ void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     incomplete_ = true;
 }
 
+Status SceneRenderer::prepare_environment(const SceneEnvironment& env, u64 frameNumber, bool object) noexcept {
+    if (!gpu_) return Errc::InvalidState;
+    const u64 key = key_of(env);
+    auto& pending = object ? pendingObjectEnv_ : pendingEnv_;
+    const u32 wantBg = !object && env.showBackground ? envFinal_.backgroundSize : 0u;
+    if (pending.valid()) {
+        // Replacing a live std::async future can block in its destructor.
+        // Drain an obsolete preview job only after it has actually finished.
+        if (pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return Errc::Busy;
+        const u64 pendingKey = object ? pendingObjectKey_ : pendingKey_;
+        const u32 pendingSpec = object ? pendingObjectSpecTier_ : pendingSpecTier_;
+        const u32 pendingBg = object ? 0u : pendingBgTier_;
+        EnvironmentMaps maps;
+        if (!take_environment_job(pending, maps)) return Errc::OutOfMemory;
+        if (pendingKey == key && pendingSpec >= envFinal_.specularSize && pendingBg >= wantBg) {
+            const u64 started = environmentTrace_ ? monotonic_ns() : 0;
+            Status status;
+            if (object) {
+                EnvSet next;
+                status = upload_environment(maps, next);
+                if (status.ok()) {
+                    next.specularTier = pendingSpec; next.lastFrame = frameNumber;
+                    envSets_.emplace_back(key, next);
+                }
+            } else {
+                status = set_environment(maps);
+                if (status.ok()) {
+                    envKey_ = key; envSpecTier_ = pendingSpec; envBgTier_ = pendingBg;
+                    envLastFrame_ = frameNumber; envRequested_ = true;
+                }
+            }
+            if (environmentTrace_) AUREA_LOG_INFO("capture-resource environment-ready key=%llu object=%u spec=%u background=%u upload_ms=%.3f result=%d",
+                static_cast<unsigned long long>(key), object ? 1u : 0u, pendingSpec, pendingBg,
+                static_cast<double>(monotonic_ns() - started) * 1e-6, status.raw());
+            if (!status.ok()) return status;
+        }
+    }
+    EnvironmentQuality quality = envFinal_;
+    quality.backgroundSize = wantBg;
+    if (object) {
+        for (auto& entry : envSets_) if (entry.first == key) {
+            entry.second.lastFrame = frameNumber;
+            if (entry.second.specularTier >= quality.specularSize) return OkStatus;
+            quality.specularSize = std::max(quality.specularSize, entry.second.specularTier);
+        }
+    } else {
+        restore_environment(key);
+        if (key == envKey_) {
+            envLastFrame_ = frameNumber;
+            if (envSpecTier_ >= quality.specularSize && envBgTier_ >= wantBg
+                && (wantBg == 0 || background_.valid())) return OkStatus;
+            quality.specularSize = std::max(quality.specularSize, envSpecTier_);
+            quality.backgroundSize = std::max(quality.backgroundSize, envBgTier_);
+        }
+    }
+    if (!start_environment_job(pending, env.hdri, quality, environmentPrepareProbe_, environmentPrepareProbeContext_)) return Errc::OutOfMemory;
+    if (object) { pendingObjectKey_ = key; pendingObjectSpecTier_ = quality.specularSize; }
+    else { pendingKey_ = key; pendingSpecTier_ = quality.specularSize; pendingBgTier_ = quality.backgroundSize; }
+    if (environmentTrace_) AUREA_LOG_INFO("capture-resource environment-start key=%llu object=%u spec=%u background=%u",
+        static_cast<unsigned long long>(key), object ? 1u : 0u, quality.specularSize, quality.backgroundSize);
+    return Errc::Busy;
+}
+
 void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
     // Export/captura: o ambiente CERTO, na qualidade final, já no primeiro
     // quadro (sem esperar a troca). Um preview em andamento da mesma chave e
@@ -754,25 +832,38 @@ void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
     const u32 wantBg = env.showBackground ? envFinal_.backgroundSize : 0u;
     auto enough = [&](u64 k, u32 spec, u32 bg) { return k == key && spec >= envFinal_.specularSize && bg >= wantBg; };
     if (enough(envKey_, envSpecTier_, envBgTier_) && (wantBg == 0 || background_.valid()) && !pendingEnv_.valid()) return;
+    const u64 started = environmentTrace_ ? monotonic_ns() : 0;
+    const u32 previousSpec = envSpecTier_;
+    u64 waited = started, built = started;
+    bool generated = false;
     EnvironmentMaps maps;
     u32 spec = 0, backgroundTier = 0;
     if (pendingEnv_.valid() && enough(pendingKey_, pendingSpecTier_, pendingBgTier_)) {
         maps = pendingEnv_.get();
+        waited = built = environmentTrace_ ? monotonic_ns() : 0;
         spec = pendingSpecTier_;
         backgroundTier = pendingBgTier_;
     } else {
         if (pendingEnv_.valid()) pendingEnv_.wait();
         pendingEnv_ = {};
+        waited = environmentTrace_ ? monotonic_ns() : 0;
         if (enough(envKey_, envSpecTier_, envBgTier_) && (wantBg == 0 || background_.valid())) return;
         EnvironmentQuality q = envFinal_;
         q.backgroundSize = key == envKey_ ? std::max(envBgTier_, wantBg) : wantBg;
         q.specularSize = key == envKey_ ? std::max(envSpecTier_, q.specularSize) : q.specularSize;
         maps = build_for(env, q);
+        generated = true;
+        built = environmentTrace_ ? monotonic_ns() : 0;
         spec = q.specularSize;
         backgroundTier = q.backgroundSize;
     }
     envRequested_ = true;
-    if (const Status s = set_environment(maps); !s.ok()) {
+    const Status s = set_environment(maps);
+    if (environmentTrace_) AUREA_LOG_INFO("capture-environment scene key=%llu previous_spec=%u spec=%u background=%u generated=%u future_wait_ms=%.3f cpu_build_ms=%.3f upload_ms=%.3f result=%d",
+        static_cast<unsigned long long>(key), previousSpec, spec, backgroundTier, generated ? 1u : 0u,
+        static_cast<double>(waited - started) * 1e-6, static_cast<double>(built - waited) * 1e-6,
+        static_cast<double>(monotonic_ns() - built) * 1e-6, s.raw());
+    if (!s.ok()) {
         incomplete_ = true;
         AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
     }
@@ -878,6 +969,8 @@ u32 SceneRenderer::trim_upload_pools() noexcept {
 void SceneRenderer::shutdown() noexcept {
     if (pendingEnv_.valid()) pendingEnv_.wait();
     if (pendingObjectEnv_.valid()) pendingObjectEnv_.wait();
+    environmentPrepareProbe_ = nullptr; environmentPrepareProbeContext_ = nullptr;
+    environmentTrace_ = false;
     if (!gpu_) return;
     drop_upload_pools(true);
     release_all();
@@ -905,6 +998,8 @@ void SceneRenderer::forget_device() noexcept {
     if (pendingObjectEnv_.valid()) { pendingObjectEnv_.wait(); pendingObjectEnv_ = {}; }
     pendingObjectKey_ = ~0ull;
     pendingObjectSpecTier_ = 0;
+    environmentPrepareProbe_ = nullptr; environmentPrepareProbeContext_ = nullptr;
+    environmentTrace_ = false;
     gpu_ = nullptr;
 }
 

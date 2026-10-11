@@ -3529,3 +3529,4 @@ AUREA_TEST(MotionBlur, SamplesPerFrameDrivesThePreviewToo) {
 #include "RaysFootprintPlan.inl"
 #include "FrameGraphSegments.inl"
 #include "FrameGraphLease.inl"
+#include "FrameGraphMemoryOrder.inl"

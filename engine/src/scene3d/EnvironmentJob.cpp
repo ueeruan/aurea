@@ -6,10 +6,11 @@
 namespace aurea::scene3d {
 
 bool start_environment_job(std::future<EnvironmentMaps>& job, std::shared_ptr<const HdriPixels> pixels,
-                           const EnvironmentQuality& quality) noexcept {
+                           const EnvironmentQuality& quality, void (*beforeBuild)(void*), void* probeContext) noexcept {
     if (job.valid()) return false;
     try {
-        job = std::async(std::launch::async, [pixels = std::move(pixels), quality] {
+        job = std::async(std::launch::async, [pixels = std::move(pixels), quality, beforeBuild, probeContext] {
+            if (beforeBuild) beforeBuild(probeContext);
             if (pixels && pixels->width > 0 && !pixels->rgb.empty())
                 return build_environment_from_equirect(pixels->rgb.data(), pixels->width, pixels->height, quality);
             return build_studio_environment(quality);

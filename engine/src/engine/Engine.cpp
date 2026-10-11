@@ -10110,15 +10110,19 @@ struct Engine::OffscreenRequest {
     const u64 hardDeadline = started + 30'000'000'000ull;
     u64 lastProgressFrame = 0;
     u32 completedRecoveryFences = 0;
+    bool preparingResources = false;
+    bool gpuDeadlineArmed = false;
+    u64 firstCaptureSubmission = 0;
     bool reader = false;
     explicit OffscreenRequest(Engine& value)
         : engine(value), ownership(value.offscreenRequestMutex_, std::defer_lock) {}
     ~OffscreenRequest() {
         if (!reader) return;
         engine.offscreenReaders_.fetch_sub(1, std::memory_order_release);
-        AUREA_LOG_INFO("capture lifecycle finished elapsed_ms=%.3f recovery_fences=%u last_frame=%llu hard_cap_ms=30000",
+        AUREA_LOG_INFO("capture lifecycle finished elapsed_ms=%.3f recovery_fences=%u last_frame=%llu hard_cap_ms=30000 resource_prepare=%u gpu_deadline_armed=%u first_capture_frame=%llu",
             static_cast<f64>(monotonic_ns() - started) / 1e6, completedRecoveryFences,
-            static_cast<unsigned long long>(lastProgressFrame));
+            static_cast<unsigned long long>(lastProgressFrame), preparingResources ? 1u : 0u,
+            gpuDeadlineArmed ? 1u : 0u, static_cast<unsigned long long>(firstCaptureSubmission));
         engine.wake_render();
         // unique_lock releases ownership after this body, including the wake.
         // A lifecycle join must not outlive the final access to Engine.
@@ -10129,11 +10133,35 @@ struct Engine::OffscreenRequest {
             name, static_cast<f64>(now - started) / 1e6,
             static_cast<f64>(deadline > now ? deadline - now : 0) / 1e6, completedRecoveryFences);
     }
+    Status begin_resource_preparation() noexcept {
+        if (preparingResources) return check();
+        // Ownership, exact media and prior-preview cleanup still use their
+        // original short guards. A cold final-quality environment is CPU
+        // preparation, not an inactive submitted GPU frame. Give that one
+        // phase the request's immutable total ceiling, without poll credit.
+        if (const Status valid = check(); !valid.ok()) return valid;
+        preparingResources = true;
+        deadline = hardDeadline;
+        phase("resource-prepare");
+        return OkStatus;
+    }
+    void capture_frame_submitted(u64 frame) noexcept {
+        if (!preparingResources || gpuDeadlineArmed || !frame || frame <= lastProgressFrame) return;
+        const u64 now = monotonic_ns();
+        if (now >= hardDeadline) return;
+        // Arm once, at the real first capture submission. Further submissions
+        // cannot disguise a stalled GPU; only completed distinct fences renew.
+        gpuDeadlineArmed = true;
+        firstCaptureSubmission = frame;
+        deadline = std::min<u64>(hardDeadline, now + 4'000'000'000ull);
+        phase("gpu-submitted");
+    }
     void recovery_fence_completed(u64 frame) noexcept {
         const u64 now = monotonic_ns();
         // Repeated polls/old ready frames and late completion after timeout
         // cannot renew the clock. Only new, real submitted recovery fences do.
         if (!frame || frame <= lastProgressFrame || now >= deadline) return;
+        if (preparingResources && (!gpuDeadlineArmed || frame < firstCaptureSubmission)) return;
         lastProgressFrame = frame;
         ++completedRecoveryFences;
         deadline = std::max(deadline, std::min<u64>(hardDeadline, now + 4'000'000'000ull));
@@ -10187,6 +10215,17 @@ struct Engine::OffscreenRequest {
             lock.unlock();
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
+    }
+    Status wait_prior_gpu_frame(u64 frame, u64 generation) noexcept {
+        if (preparingResources) return wait_gpu_frame(frame, generation);
+        // A pending old preview is GPU work, even if no display cache remains
+        // or local AI already used the longer CPU preparation allowance.
+        // Temporarily clamp every lock/poll to its own short inactivity guard.
+        const u64 savedDeadline = deadline;
+        deadline = std::min<u64>(deadline, monotonic_ns() + 4'000'000'000ull);
+        const Status ready = wait_gpu_frame(frame, generation);
+        if (ready.ok()) deadline = savedDeadline;
+        return ready;
     }
     Status wait_gpu_frame(u64 frame, u64 generation) noexcept {
         for (;;) {
@@ -10253,7 +10292,11 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     rs.offscreenFenceCompleted = [](void* context, u64 frame) {
         static_cast<OffscreenRequest*>(context)->recovery_fence_completed(frame);
     };
+    rs.offscreenFenceSubmitted = [](void* context, u64 frame) {
+        static_cast<OffscreenRequest*>(context)->capture_frame_submitted(frame);
+    };
     rs.offscreenFenceContext = &request;
+    rs.cancelFlag = &offscreenCancelled_;
     rs.deferLocalAi = !asPreview;
     if (asPreview) { rs.heavyScale = preview_heavy_scale(); rs.flowPolicyScale = caps_.policy().heavyScale; }
     OffscreenMeasure m;
@@ -10336,8 +10379,8 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         const bool waitingVideo = snapshot_.missingVideoFrames != 0 || snapshot_.staleVideoFrames != 0;
         // Absolute deadlines never restart when preview work interleaves or a
         // different GPU resource becomes unavailable on the next attempt.
-        if (waitingLocalAi) {
-            completionDeadline = tStart + 30'000'000'000ull;
+        if (waitingLocalAi && !request.gpuDeadlineArmed) {
+            completionDeadline = request.hardDeadline;
         }
         if (waitingVideo || waitingLocalAi) {
             if ((waitingVideo && tPrep1 >= videoDeadline) || tPrep1 >= completionDeadline)
@@ -10362,22 +10405,24 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             // before admitting full-quality intermediate render targets.
             const GpuMemoryStats before = gpu_->memory_stats();
             const u32 released = renderer_.release_preview_cache();
+            if (released) previewIdle_ = {};
+            // Cache-free previews can also leave a submitted frame. Retire
+            // it under the short GPU guard before starting any CPU resource job.
+            const u64 submitted = gpu_->last_submitted_frame();
+            rl.unlock();
+            if (const Status ready = request.wait_prior_gpu_frame(submitted, expectedGpuGeneration); !ready.ok()) return ready;
+            if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+            if (expectedGpuGeneration != gpuGeneration_)
+                return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+            {
+                std::lock_guard<std::mutex> model(modelMutex_);
+                if (!project_ || projectSession_ != captureSession
+                    || project_->timeline().current() != captureComposition
+                    || modelRevision_.load(std::memory_order_acquire) != captureRevision
+                    || playback_.generation() != capturePlaybackGeneration)
+                    return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a captura"};
+            }
             if (released) {
-                previewIdle_ = {};
-                const u64 submitted = gpu_->last_submitted_frame();
-                rl.unlock();
-                if (const Status ready = request.wait_gpu_frame(submitted, expectedGpuGeneration); !ready.ok()) return ready;
-                if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
-                if (expectedGpuGeneration != gpuGeneration_)
-                    return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
-                {
-                    std::lock_guard<std::mutex> model(modelMutex_);
-                    if (!project_ || projectSession_ != captureSession
-                        || project_->timeline().current() != captureComposition
-                        || modelRevision_.load(std::memory_order_acquire) != captureRevision
-                        || playback_.generation() != capturePlaybackGeneration)
-                        return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a captura"};
-                }
                 const GpuMemoryStats after = gpu_->memory_stats();
                 AUREA_LOG_INFO("captura: previa guardada solta (%u quadros, %llu KB de GPU liberados)",
                     released, static_cast<unsigned long long>((before.usedBytes > after.usedBytes
@@ -10406,6 +10451,36 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         const u64 reclaimWait = reclaimNow < completionDeadline
             ? std::min<u64>(100'000'000, completionDeadline - reclaimNow) : 0;
         if (const Status ready = renderer_.reclaim_failed_transients(reclaimWait); !ready.ok()) return ready;
+        if (!asPreview) {
+            if (const Status valid = request.begin_resource_preparation(); !valid.ok()) return valid;
+            // Final IBL generation runs in its existing owned worker. Preserve
+            // this exact immutable snapshot/FrameRefs while it prepares; do not
+            // reopen decoders or let another LIVE graph replace their inputs.
+            for (;;) {
+                if (const Status valid = request.check(); !valid.ok()) return valid;
+                {
+                    std::lock_guard<std::mutex> model(modelMutex_);
+                    drain_commands_locked();
+                    if (!project_ || projectSession_ != captureSession
+                        || project_->timeline().current() != captureComposition
+                        || modelRevision_.load(std::memory_order_acquire) != captureRevision
+                        || playback_.generation() != capturePlaybackGeneration)
+                        return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a preparacao da captura"};
+                }
+                const Status prepared = renderer_.prepare_capture_resources(snapshot_, rs);
+                if (prepared.ok()) {
+                    if (const Status valid = request.check(); !valid.ok()) return valid;
+                    request.phase("resources-ready");
+                    break;
+                }
+                if (prepared.code() != Errc::Busy) return prepared;
+                rl.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+                if (!gpu_ || expectedGpuGeneration != gpuGeneration_ || !renderer_.ready())
+                    return Status{Errc::Cancelled, "a GPU mudou durante a preparacao da captura"};
+            }
+        }
         rs.stageUnblurredScenes = !asPreview && Renderer::can_stage_small_scene_capture(snapshot_, width, height);
         // Recovery consults the same absolute caller clock, including whole
         // compile time. New completed fences renew four seconds of patience

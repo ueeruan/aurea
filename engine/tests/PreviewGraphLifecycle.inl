@@ -365,12 +365,15 @@ AUREA_TEST(PreviewGraphLifecycle, ShutdownCancelsAndJoinsAnOwnedCaptureBeforeBac
 }
 
 namespace preview_capture_progress_test {
+constexpr u64 wholeOffscreenBytes = 9'342'720;
+constexpr u64 largestSegmentBytes = 8'881'920;
+constexpr u64 captureAllocationLimit = 9'100'000;
 struct Fixture {
     Engine engine;
     test::MockBackend* backend = new test::MockBackend;
     bool ok = false;
     int window = 0;
-    Fixture() {
+    explicit Fixture(u64 allocationLimit = captureAllocationLimit) {
         backend->mapBuffers = true;
         backend->supportsFrameDiscard = backend->supportsPresentableLease = true;
         auto config = headless_config(); config.backend = backend;
@@ -391,14 +394,15 @@ struct Fixture {
         if (!engine.apply_command(add).ok() || layer->effects.empty()) return;
         layer->effects[0].params[0].constant.v[0] = 3;
         engine.renderer().set_preview_cache_budget(0);
-        // 9,803,520 bytes for the whole graph; 8,881,920-byte segment peak.
-        // The full 320x180 capture MUST enter real graph segmentation.
-        engine.renderer().set_transient_allocation_limit(9ull << 20);
+        // Capture imports its output: unlike LIVE, its composition contributes
+        // no transient allocation. The real control below measures this path.
+        engine.renderer().set_transient_allocation_limit(allocationLimit);
         ok = engine.attach_surface(&window,320,180).ok();
     }
     ~Fixture() {
         if (engine.gpu()==backend) {
             backend->beforeWaitFrame = {}; backend->beforeReadTexture = {};
+            backend->beforeEndFrame = {};
         }
         engine.shutdown();
     }
@@ -422,10 +426,38 @@ Status pattern(test::MockBackend& backend, TextureHandle handle, void* data, u32
 
 AUREA_TEST(PreviewGraphLifecycle, CaptureRenewsOnDistinctCompletedSegmentFencesAndReturnsBytesOnce) {
     using namespace preview_capture_progress_test;
+    u64 measuredWhole = 0;
+    {
+        // A separate Engine proves the actual OFFSCREEN graph's footprint.
+        // Destroy it before pressure: cached compatible control slots must not
+        // bypass admission in the pressured request.
+        Fixture control(256ull << 20); AUREA_CHECK(control.ok); if (!control.ok) return;
+        u32 controlReadbacks = 0;
+        control.backend->beforeEndFrame = [&] {
+            measuredWhole = std::max(measuredWhole, control.engine.renderer().pool_stats().bytes);
+            return OkStatus;
+        };
+        control.backend->beforeReadTexture = [&](TextureHandle h,void* data,u32 stride) {
+            ++controlReadbacks; return pattern(*control.backend,h,data,stride);
+        };
+        std::vector<u8> reference; u32 w=0,h=0;
+        AUREA_CHECK(control.engine.capture_frame_rgba(320,reference,w,h).ok());
+        AUREA_CHECK_EQ(w,320u); AUREA_CHECK_EQ(h,180u);
+        AUREA_CHECK_EQ(reference.size(),usize(320*180*4));
+        AUREA_CHECK_EQ(controlReadbacks,1u);
+        AUREA_CHECK_EQ(control.backend->framesSubmitted,1u);
+        AUREA_CHECK_EQ(measuredWhole,wholeOffscreenBytes);
+    }
+    AUREA_CHECK(largestSegmentBytes < captureAllocationLimit && captureAllocationLimit < measuredWhole);
     Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
     struct Fence { u64 frame, firstPoll; bool completed = false; };
     std::vector<Fence> fences;
     u32 polls=0,readbacks=0,completed=0;
+    u64 measuredSegmentPeak = 0;
+    fixture.backend->beforeEndFrame = [&] {
+        measuredSegmentPeak = std::max(measuredSegmentPeak, fixture.engine.renderer().pool_stats().bytes);
+        return OkStatus;
+    };
     constexpr u64 delay = 1'100'000'000ull;
     fixture.backend->beforeWaitFrame = [&](u64 frame,u64) -> Status {
         ++polls;
@@ -454,6 +486,8 @@ AUREA_TEST(PreviewGraphLifecycle, CaptureRenewsOnDistinctCompletedSegmentFencesA
     AUREA_CHECK_EQ(width,320u); AUREA_CHECK_EQ(height,180u);
     AUREA_CHECK_EQ(pixels.size(),usize(320*180*4));
     AUREA_CHECK(completed>=5 && fences.size()>=5);
+    AUREA_CHECK_EQ(measuredSegmentPeak,largestSegmentBytes);
+    AUREA_CHECK(measuredSegmentPeak<=captureAllocationLimit && measuredSegmentPeak<measuredWhole);
     AUREA_CHECK_EQ(readbacks,1u);
     AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
     bool exact=pixels.size()==usize(320*180*4);
@@ -463,8 +497,10 @@ AUREA_TEST(PreviewGraphLifecycle, CaptureRenewsOnDistinctCompletedSegmentFencesA
     AUREA_CHECK(exact);
     AUREA_CHECK_EQ(fixture.engine.read_status().playhead.value,0ll);
     AUREA_CHECK_EQ(fixture.engine.read_status().previewDenominator,1u);
-    std::printf("\n    capture progress: seconds=%.3f distinct_completed_fences=%u polls=%u capture_invocations=1 mocked_RGBA_bytes=%zu exact_conversion=%d readbacks=%u acquire=0 present=0\n",
-        seconds,completed,polls,pixels.size(),exact,readbacks);
+    std::printf("\n    capture progress: seconds=%.3f distinct_completed_fences=%u polls=%u capture_invocations=1 mocked_RGBA_bytes=%zu exact_conversion=%d readbacks=%u acquire=0 present=0 whole_offscreen_bytes=%llu segment_peak_bytes=%llu allocation_limit=%llu\n",
+        seconds,completed,polls,pixels.size(),exact,readbacks,
+        static_cast<unsigned long long>(measuredWhole),static_cast<unsigned long long>(measuredSegmentPeak),
+        static_cast<unsigned long long>(captureAllocationLimit));
 }
 
 AUREA_TEST(PreviewGraphLifecycle, RepeatedTimeoutPollsDoNotRenewTheCaptureInactivityDeadline) {
@@ -489,4 +525,244 @@ AUREA_TEST(PreviewGraphLifecycle, RepeatedTimeoutPollsDoNotRenewTheCaptureInacti
     AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
     std::printf("\n    capture stalled: seconds=%.3f polls=%u completed_fences=0 capture_invocations=1 readbacks=0 acquire=0 present=0\n",
         seconds,polls);
+}
+
+
+namespace preview_capture_resource_test {
+struct WorkerGate {
+    std::atomic<bool> entered{false}, release{false}, left{false};
+    std::atomic<u32> calls{0};
+    static void before_build(void* context) noexcept {
+        auto& gate=*static_cast<WorkerGate*>(context);
+        gate.calls.fetch_add(1,std::memory_order_relaxed);
+        gate.entered.store(true,std::memory_order_release);
+        while (!gate.release.load(std::memory_order_acquire))
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        gate.left.store(true,std::memory_order_release);
+    }
+};
+struct Fixture {
+    WorkerGate gate;
+    Engine engine;
+    test::MockBackend* backend=new test::MockBackend;
+    std::filesystem::path source;
+    bool ownsSource=false,ok=false;
+    int window=0;
+    Fixture() {
+        backend->mapBuffers=true;
+        backend->supportsFrameDiscard=backend->supportsPresentableLease=true;
+        auto config=headless_config(); config.backend=backend;
+        config.initialPreviewScale=PreviewScale::Full; config.memoryBudgetBytes=256ull<<20;
+        if (!engine.initialize(config).ok() || !engine.new_project(64,36,30.,"capture genuine CPU map preparation").ok()) return;
+        // A real small HDRI uses the normal source-resolution cap in the CPU
+        // environment builder. Requested final quality remains unchanged.
+        source=std::filesystem::temp_directory_path()/std::filesystem::path(
+            "aurea_capture_resource_2165_"+std::to_string(monotonic_ns())+".hdr");
+        FILE* file=std::fopen(source.string().c_str(),"wb");
+        if (!file) return;
+        ownsSource=true;
+        const char header[]="#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 4\n";
+        bool wrote=std::fwrite(header,1,sizeof(header)-1,file)==sizeof(header)-1;
+        for (u32 i=0;i<8;++i) {
+            const u8 pixel[4]={static_cast<u8>(64+i*8),32,16,129};
+            wrote &= std::fwrite(pixel,1,sizeof(pixel),file)==sizeof(pixel);
+        }
+        std::fclose(file);
+        if (!wrote || !engine.import_hdri(source.string().c_str()).ok()) return;
+        auto* composition=engine.project()->timeline().composition(engine.project()->timeline().current());
+        if (!composition || !composition->environment().hdri.valid()) return;
+        composition->environment().showBackground=true;
+        engine.renderer().set_preview_cache_budget(0);
+        engine.renderer().scene_renderer().set_environment_prepare_probe(&WorkerGate::before_build,&gate);
+        ok=engine.attach_surface(&window,64,36).ok();
+    }
+    ~Fixture() {
+        // The final CPU future owns its HDRI/context until the real builder
+        // exits. Logical cancellation never pretends to preempt that worker.
+        gate.release.store(true,std::memory_order_release);
+        if (engine.gpu()==backend) {
+            engine.renderer().scene_renderer().set_environment_prepare_probe(nullptr,nullptr);
+            backend->beforeWaitFrame={}; backend->beforeReadTexture={}; backend->beforeEndFrame={};
+        }
+        engine.shutdown();
+        if (ownsSource) std::remove(source.string().c_str());
+    }
+    bool wait_for_worker() {
+        const u64 until=monotonic_ns()+3'500'000'000ull;
+        while (!gate.entered.load(std::memory_order_acquire) && monotonic_ns()<until)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        return gate.entered.load(std::memory_order_acquire);
+    }
+};
+struct Capture {
+    std::vector<u8> pixels; u32 width=0,height=0;
+    Status result;
+};
+std::future<Capture> start(Fixture& fixture) {
+    return std::async(std::launch::async,[&fixture] {
+        Capture result;
+        result.result=fixture.engine.capture_frame_rgba(64,result.pixels,result.width,result.height);
+        return result;
+    });
+}
+bool exact(const Capture& capture) {
+    if (capture.width!=64 || capture.height!=36 || capture.pixels.size()!=64*36*4) return false;
+    for (u32 y=0;y<36;++y) for (u32 x=0;x<64;++x) {
+        const usize offset=(usize(y)*64+x)*4;
+        if (capture.pixels[offset]!=(x&1?99:188) || capture.pixels[offset+1]!=137
+            || capture.pixels[offset+2]!=(x&1?188:99) || capture.pixels[offset+3]!=255) return false;
+    }
+    return true;
+}
+}
+
+AUREA_TEST(PreviewGraphLifecycle, ColdCpuResourcesRemainOwnedAndReturnExactCaptureAfterFiveSeconds) {
+    using namespace preview_capture_resource_test;
+    Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
+    std::atomic<u32> readbacks{0};
+    fixture.backend->beforeReadTexture=[&](TextureHandle h,void* data,u32 stride) {
+        ++readbacks; return preview_capture_progress_test::pattern(*fixture.backend,h,data,stride);
+    };
+    const u64 started=monotonic_ns(); auto capture=start(fixture);
+    const bool entered=fixture.wait_for_worker(); AUREA_CHECK(entered);
+    if (!entered) { fixture.gate.release=true; (void)capture.get(); return; }
+    // The owned real CPU job is gated; no main capture frame was submitted.
+    AUREA_CHECK_EQ(fixture.backend->framesSubmitted,0u);
+    const u64 callbackStarted=monotonic_ns();
+    AUREA_CHECK(fixture.engine.render_frame(false).ok());
+    std::vector<u8> thumbnail; u32 w=0,h=0;
+    AUREA_CHECK_EQ(fixture.engine.render_effect_preview(effect_type_id(effect_keys::kGaussianBlur),32,18,
+        thumbnail,w,h).code(),Errc::Busy);
+    AUREA_CHECK(monotonic_ns()-callbackStarted<250'000'000ull);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5200));
+    AUREA_CHECK_EQ(capture.wait_for(std::chrono::milliseconds(0)),std::future_status::timeout);
+    AUREA_CHECK(!fixture.gate.left.load()); AUREA_CHECK_EQ(readbacks.load(),0u);
+    fixture.gate.release=true;
+    const bool finished=capture.wait_for(std::chrono::seconds(20))==std::future_status::ready;
+    AUREA_CHECK(finished); const auto result=capture.get();
+    const f64 elapsed=(monotonic_ns()-started)/1.e9;
+    AUREA_CHECK(result.result.ok()); AUREA_CHECK(exact(result));
+    AUREA_CHECK(elapsed>5.2 && elapsed<30.);
+    AUREA_CHECK_EQ(fixture.gate.calls.load(),1u); AUREA_CHECK_EQ(readbacks.load(),1u);
+    AUREA_CHECK_EQ(fixture.backend->framesSubmitted,1u);
+    AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
+    AUREA_CHECK(!fixture.engine.renderer().scene_renderer().environment_pending());
+    AUREA_CHECK_EQ(fixture.engine.read_status().previewDenominator,1u);
+    std::printf("\n    capture CPU resources: seconds=%.3f worker_calls=%u one_caller=1 readbacks=%u exact_mock_rgba=%u main_submissions=%u acquires=%u presents=%u\n",
+        elapsed,fixture.gate.calls.load(),readbacks.load(),exact(result),fixture.backend->framesSubmitted,
+        fixture.backend->acquires,fixture.backend->presents);
+}
+
+AUREA_TEST(PreviewGraphLifecycle, CpuPreparationDoesNotTurnAStalledFirstGpuFenceIntoThirtySeconds) {
+    using namespace preview_capture_resource_test;
+    Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
+    std::atomic<u32> polls{0},readbacks{0}; std::atomic<u64> firstPoll{0};
+    fixture.backend->beforeWaitFrame=[&](u64 frame,u64 timeout)->Status {
+        if (frame && !firstPoll.load()) firstPoll=monotonic_ns();
+        AUREA_CHECK_EQ(timeout,0ull); ++polls;
+        return Errc::Timeout;
+    };
+    fixture.backend->beforeReadTexture=[&](TextureHandle,void*,u32) { ++readbacks; return OkStatus; };
+    const u64 started=monotonic_ns(); auto capture=start(fixture);
+    const bool entered=fixture.wait_for_worker(); AUREA_CHECK(entered);
+    if (!entered) { fixture.gate.release=true; (void)capture.get(); return; }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5200));
+    AUREA_CHECK_EQ(capture.wait_for(std::chrono::milliseconds(0)),std::future_status::timeout);
+    fixture.gate.release=true;
+    const bool finished=capture.wait_for(std::chrono::seconds(16))==std::future_status::ready;
+    AUREA_CHECK(finished); const auto result=capture.get();
+    const u64 ended=monotonic_ns(); const f64 gpuWait=(ended-firstPoll.load())/1.e9;
+    AUREA_CHECK_EQ(result.result.code(),Errc::Timeout);
+    AUREA_CHECK(firstPoll.load()>started+5'000'000'000ull);
+    AUREA_CHECK(gpuWait>=3.8 && gpuWait<6.0);
+    AUREA_CHECK_EQ(fixture.backend->framesSubmitted,1u);
+    AUREA_CHECK(polls.load()>20); AUREA_CHECK_EQ(readbacks.load(),0u);
+    AUREA_CHECK(result.pixels.empty());
+    AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
+    std::printf("\n    capture CPU then stalled GPU: total_seconds=%.3f actual_gpu_inactivity_seconds=%.3f polls=%u completed=0 readbacks=%u main_submissions=%u\n",
+        (ended-started)/1.e9,gpuWait,polls.load(),readbacks.load(),fixture.backend->framesSubmitted);
+}
+
+AUREA_TEST(PreviewGraphLifecycle, PendingCpuResourcesKeepTheFixedRequestHardCeilingWithoutFakeProgress) {
+    using namespace preview_capture_resource_test;
+    Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
+    std::atomic<u32> readbacks{0};
+    fixture.backend->beforeReadTexture=[&](TextureHandle,void*,u32) { ++readbacks; return OkStatus; };
+    const u64 started=monotonic_ns(); auto capture=start(fixture);
+    const bool entered=fixture.wait_for_worker(); AUREA_CHECK(entered);
+    if (!entered) { fixture.gate.release=true; (void)capture.get(); return; }
+    const bool finished=capture.wait_for(std::chrono::seconds(32))==std::future_status::ready;
+    AUREA_CHECK(finished);
+    // Release explicitly even if a regression would hold the request forever.
+    // Cancellation/timeout must return while its immutable CPU job is alive.
+    if (!finished) fixture.gate.release=true;
+    const auto result=capture.get(); const f64 elapsed=(monotonic_ns()-started)/1.e9;
+    AUREA_CHECK_EQ(result.result.code(),Errc::Timeout);
+    AUREA_CHECK(elapsed>=29.8 && elapsed<32.);
+    AUREA_CHECK(!fixture.gate.left.load()); AUREA_CHECK_EQ(fixture.gate.calls.load(),1u);
+    AUREA_CHECK_EQ(readbacks.load(),0u); AUREA_CHECK_EQ(fixture.backend->framesSubmitted,0u);
+    AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
+    AUREA_CHECK(result.pixels.empty());
+    std::printf("\n    capture pending CPU hard cap: seconds=%.3f worker_alive=%u real_main_submissions=%u readbacks=%u no_fake_gpu_progress=1\n",
+        elapsed,!fixture.gate.left.load(),fixture.backend->framesSubmitted,readbacks.load());
+    fixture.gate.release=true;
+}
+
+AUREA_TEST(PreviewGraphLifecycle, SeekCancelsPendingCpuResourcesWithoutDestroyingTheirWorker) {
+    using namespace preview_capture_resource_test;
+    Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
+    std::atomic<u32> readbacks{0};
+    fixture.backend->beforeReadTexture=[&](TextureHandle,void*,u32) { ++readbacks; return OkStatus; };
+    auto capture=start(fixture);
+    const bool entered=fixture.wait_for_worker(); AUREA_CHECK(entered);
+    if (!entered) { fixture.gate.release=true; (void)capture.get(); return; }
+    const u64 started=monotonic_ns();
+    Command seek; seek.type=CommandType::PlaybackSeek; seek.seek.time=tick_at(FrameIndex{10},30.);
+    AUREA_CHECK_EQ(fixture.engine.submit_commands(&seek,1),1u);
+    const bool finished=capture.wait_for(std::chrono::seconds(1))==std::future_status::ready;
+    AUREA_CHECK(finished); if (!finished) fixture.gate.release=true;
+    const auto result=capture.get();
+    AUREA_CHECK_EQ(result.result.code(),Errc::Cancelled);
+    AUREA_CHECK(monotonic_ns()-started<1'000'000'000ull);
+    AUREA_CHECK(!fixture.gate.left.load()); AUREA_CHECK_EQ(readbacks.load(),0u);
+    AUREA_CHECK_EQ(fixture.backend->framesSubmitted,0u);
+    AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
+    AUREA_CHECK(result.pixels.empty());
+    std::printf("\n    capture pending CPU cancellation: request_cancel_ms=%.3f worker_alive=%u readbacks=%u main_submissions=%u explicit_release_before_teardown=1\n",
+        (monotonic_ns()-started)/1.e6,!fixture.gate.left.load(),readbacks.load(),fixture.backend->framesSubmitted);
+    fixture.gate.release=true;
+}
+
+
+AUREA_TEST(PreviewGraphLifecycle, PreviousUnfinishedFrameKeepsFourSecondsBeforeCpuPreparationWhenCacheIsEmpty) {
+    using namespace preview_capture_resource_test;
+    Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
+    // An unfinished earlier submission exists even without any preview-cache
+    // slots. It must complete before the CPU-resource phase gains its ceiling.
+    FrameBegin previous;
+    AUREA_CHECK(fixture.backend->begin_offscreen_frame(previous).ok());
+    AUREA_CHECK(fixture.backend->end_frame().ok());
+    const u32 submitted=fixture.backend->framesSubmitted;
+    AUREA_CHECK_EQ(submitted,1u);
+    std::atomic<u32> polls{0},unexpected{0},readbacks{0};
+    fixture.backend->beforeWaitFrame=[&](u64 frame,u64 timeout)->Status {
+        AUREA_CHECK_EQ(timeout,0ull);
+        if (frame!=previous.frameNumber) { ++unexpected; return Errc::DeviceLost; }
+        ++polls; return Errc::Timeout;
+    };
+    fixture.backend->beforeReadTexture=[&](TextureHandle,void*,u32) { ++readbacks; return OkStatus; };
+    const u64 began=monotonic_ns(); auto capture=start(fixture);
+    const bool finished=capture.wait_for(std::chrono::seconds(8))==std::future_status::ready;
+    AUREA_CHECK(finished); if (!finished) fixture.gate.release=true;
+    const auto result=capture.get(); const f64 seconds=(monotonic_ns()-began)/1.e9;
+    AUREA_CHECK_EQ(result.result.code(),Errc::Timeout);
+    AUREA_CHECK(seconds>=3.8 && seconds<6.);
+    AUREA_CHECK(polls.load()>20); AUREA_CHECK_EQ(unexpected.load(),0u);
+    AUREA_CHECK_EQ(fixture.gate.calls.load(),0u); AUREA_CHECK(!fixture.gate.entered.load());
+    AUREA_CHECK_EQ(readbacks.load(),0u); AUREA_CHECK_EQ(fixture.backend->framesSubmitted,submitted);
+    AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
+    AUREA_CHECK(result.pixels.empty());
+    std::printf("\n    capture prior-frame guard: seconds=%.3f old_frame=%llu polls=%u cpu_jobs=%u readbacks=%u new_submissions=%u preview_cache_disabled=1\n",
+        seconds,static_cast<unsigned long long>(previous.frameNumber),polls.load(),fixture.gate.calls.load(),
+        readbacks.load(),fixture.backend->framesSubmitted-submitted);
 }

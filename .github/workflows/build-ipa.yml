@@ -223,6 +223,18 @@ jobs:
             SIMULATOR_UDID=$(python3 -c 'import json; print(json.load(open("build/ios-parity/manifest.json"))["device"]["udid"])')
             xcrun simctl spawn "$SIMULATOR_UDID" log show --last 20m --style compact \
               --predicate 'subsystem == "com.aurea.aurea" OR process == "Aurea"' > build/ios-native-engine.log
+            APP_DATA=$(xcrun simctl get_app_container "$SIMULATOR_UDID" com.aurea.aurea data)
+            python3 - "$APP_DATA/Documents" <<'PY'
+            from pathlib import Path
+            import shutil
+            import sys
+            documents=Path(sys.argv[1])
+            output=Path('build/ios-exported-videos')
+            output.mkdir(parents=True,exist_ok=True)
+            for pattern in ('*.mp4','*.mp4.aurea-export'):
+                for item in documents.glob(pattern):
+                    if item.is_file(): shutil.copy2(item,output/item.name)
+            PY
           fi
       - name: Export native gesture attachments
         if: always() && !inputs.capture_only
@@ -239,6 +251,7 @@ jobs:
             build/ios-gesture-attachments/
             build-gesture-tests.log
             build/ios-native-engine.log
+            build/ios-exported-videos/
           if-no-files-found: ignore
       - name: Save native gesture test diagnostics
         if: always() && !inputs.capture_only
@@ -251,6 +264,7 @@ jobs:
             build/ios-gesture-attachments/
             build-gesture-tests.log
             build/ios-native-engine.log
+            build/ios-exported-videos/
           if-no-files-found: ignore
       - uses: actions/cache/save@v4
         if: always()

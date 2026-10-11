@@ -1429,8 +1429,13 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         }
         if (Texture* t = cached) {
             t->lastUsedFrame = frameNumber_;
-            t->state = ResourceState::Undefined;   // conteúdo novo do decoder: nova aquisição
-            t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            // A temporal sample can import the same native buffer again after
+            // its first pass acquired it. Preserve that recorded ownership and
+            // layout; only a new frame needs another foreign-queue acquisition.
+            if (!t->acquiredThisFrame) {
+                t->state = ResourceState::Undefined;
+                t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            }
             const SamplerObject* s = samplers_.get(t->ycbcrSampler);
             ExternalTexture out;
             out.texture = TextureHandle{it->second};

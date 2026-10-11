@@ -152,6 +152,8 @@ public:
 
     [[nodiscard]] Status begin_frame(FrameBegin& out) noexcept override;
     [[nodiscard]] Status end_frame() noexcept override;
+    [[nodiscard]] bool can_discard_frame() const noexcept override { return true; }
+    [[nodiscard]] Status discard_frame() noexcept override;
     [[nodiscard]] Status begin_offscreen_frame(FrameBegin& out) noexcept override;
 
     [[nodiscard]] Result<TextureHandle>  create_texture(const TextureDesc& desc) noexcept override;

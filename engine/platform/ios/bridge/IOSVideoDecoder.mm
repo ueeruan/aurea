@@ -925,6 +925,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
         auto factory = aurea::ios::make_video_factory(&control);
         Asset asset; asset.kind = AssetKind::Video; asset.sourcePath = path.UTF8String;
         u32 checks = 0;
+        u32 metalPixelChecks = 0;
         for (bool zeroCopy : {false, true}) {
             control->set_zero_copy(zeroCopy);
             auto decoder = factory->open_video(asset, MediaPriority::Preview);
@@ -953,13 +954,14 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
                 return failure(@"Decoder did not drain to EOS");
 #if defined(AUREA_GPU_METAL)
             if (zeroCopy) {
+                bool discardedRetired = false;
                 mtl::Backend gpu;
                 BackendConfig config;
                 config.enableValidation = false;
                 if (!gpu.initialize(config).ok()) return failure(@"Metal memory regression failed to initialize");
                 const auto baseline = gpu.memory_stats();
                 TextureDesc desc;
-                desc.width = 64; desc.height = 32; desc.mipLevels = 7;
+                desc.width = 64; desc.height = 32; desc.mipLevels = 7; desc.renderTarget = true;
                 auto owned = gpu.create_texture(desc);
                 if (!owned.ok()) return failure(@"Metal mip texture allocation failed");
                 const auto allocated = gpu.memory_stats();
@@ -970,6 +972,50 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
                 image.width = retained->width; image.height = retained->height;
                 auto imported = gpu.import_external_image(image);
                 if (!imported.ok()) return failure(@"Metal IOSurface import failed");
+                std::vector<u8> importedPixels(static_cast<usize>(retained->width) * retained->height * 4);
+                if (!gpu.read_texture(imported->texture, importedPixels.data(), retained->width * 4).ok()
+                    || hashPixels(importedPixels.data(), retained->width, retained->height, retained->width * 4, true)
+                        != expected.front().hash)
+                    return failure(@"Metal IOSurface GPU pixels differ from independent decoder");
+                ++checks; ++metalPixelChecks;
+
+                // Real Metal commands/fences: discard must submit the recorded
+                // clear and retire its owners, then permit a normal next frame.
+                // The presentation decision is checked separately on CI without
+                // submitting an invalid render pass to the physical GPU.
+                if (!gpu.can_discard_frame()) return failure(@"Metal cannot preserve the visible frame");
+                FrameBegin incomplete;
+                if (!gpu.begin_offscreen_frame(incomplete).ok() || !incomplete.commands)
+                    return failure(@"Metal discard regression could not begin a frame");
+                RenderPassBegin pass;
+                pass.color = *owned; pass.clear[0] = 0.2f; pass.clear[1] = 0.4f;
+                pass.clear[2] = 0.6f; pass.clear[3] = 1.0f;
+                incomplete.commands->begin_render_pass(pass);
+                incomplete.commands->end_render_pass();
+                gpu.defer_until_gpu_done([](void* value) { *static_cast<bool*>(value) = true; }, &discardedRetired);
+                if (!gpu.discard_frame().ok() || !gpu.wait_frame(incomplete.frameNumber, 5'000'000'000ull).ok()
+                    || !discardedRetired)
+                    return failure(@"Metal discarded work did not complete and retire through its fence");
+                std::vector<u8> cleared(static_cast<usize>(desc.width) * desc.height * 4);
+                auto clearMatches = [&](u8 red, u8 green, u8 blue) {
+                    if (!gpu.read_texture(*owned, cleared.data(), desc.width * 4).ok()) return false;
+                    for (usize pixel = 0; pixel < cleared.size(); pixel += 4) {
+                        if (std::abs(int(cleared[pixel]) - red) > 1
+                            || std::abs(int(cleared[pixel + 1]) - green) > 1
+                            || std::abs(int(cleared[pixel + 2]) - blue) > 1 || cleared[pixel + 3] != 255) return false;
+                    }
+                    ++checks; ++metalPixelChecks;
+                    return true;
+                };
+                if (!clearMatches(51, 102, 153)) return failure(@"Metal dropped frame lost its recorded GPU work");
+                FrameBegin retry;
+                if (!gpu.begin_offscreen_frame(retry).ok() || !retry.commands)
+                    return failure(@"Metal could not begin a frame after discard");
+                pass.clear[0] = 0.8f; pass.clear[1] = 0.1f; pass.clear[2] = 0.4f;
+                retry.commands->begin_render_pass(pass); retry.commands->end_render_pass();
+                if (!gpu.end_frame().ok() || !gpu.wait_frame(retry.frameNumber, 5'000'000'000ull).ok()
+                    || !clearMatches(204, 26, 102))
+                    return failure(@"Metal normal frame did not recover after discard");
                 gpu.release_external_image(imported->texture);
                 gpu.wait_idle();
                 const auto released = gpu.memory_stats();
@@ -1021,7 +1067,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
             }
             if (!found) return failure(@"Resume returned wrong pixels/PTS");
         }
-        return @{ @"passed": @YES, @"frames": @(expected.size()), @"pixelChecks": @(checks),
+        return @{ @"passed": @YES, @"frames": @(expected.size()), @"pixelChecks": @(checks), @"metalPixelChecks": @(metalPixelChecks),
                   @"cpuAndIOSurface": @YES, @"lazyCpuFallback": @YES, @"seekAndResume": @YES };
     }
 }

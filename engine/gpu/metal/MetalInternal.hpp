@@ -232,6 +232,10 @@ struct FrameContext {
     dispatch_semaphore_t    completion = nil;
     u64                     frameNumber = 0;
     bool                    submitted = false;
+    // A discarded drawable must stay out of CAMetalLayer's reuse pool until
+    // the submitted writes complete. This owns the acquired drawable itself,
+    // without allocating or copying another full-resolution image.
+    id<MTLDrawable>         unpresentedDrawable = nil;
 
     HostRing                uniforms;
     HostRing                staging;
@@ -446,6 +450,7 @@ struct Impl {
     void wait_immediate_gpu() noexcept;
     FrameContext* deferral_target() noexcept;
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
+    [[nodiscard]] Status end_frame_impl(bool presentDrawable) noexcept;
     void destroy_texture_now(Texture& t) noexcept;
     void destroy_buffer_now(Buffer& b) noexcept;
     [[nodiscard]] id<MTLDepthStencilState> depth_state(const PipelineDesc& desc) noexcept;

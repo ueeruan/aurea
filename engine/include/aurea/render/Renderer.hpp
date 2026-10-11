@@ -951,6 +951,7 @@ private:
     std::vector<PendingUpload> uploads_;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
+    bool videoSourceFailed_ = false; ///< principal source could not supply GPU pixels for this frame
     struct PreviewFrame { i64 time = -1; TextureHandle texture{}; bool complete = false; u64 used = 0, gpuFrame = 0; };
     std::vector<PreviewFrame> previewFrames_;
     u64 previewCacheBudget_ = 0, previewCacheKey_ = 0, previewCacheUse_ = 0;

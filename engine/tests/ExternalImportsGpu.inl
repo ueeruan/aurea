@@ -45,6 +45,30 @@ struct ExternalImageDestructionObservation {
     }
 };
 
+// Reimporting the same immutable decoder frame after sampling must leave its
+// existing read layout intact. Observe real recorded barriers, forwarding all
+// calls to the driver so both layout validation and pixel checks still run.
+struct ExternalImageBarrierObservation {
+    PFN_vkCmdPipelineBarrier original = vk::vkCmdPipelineBarrier;
+    VkImage watched = VK_NULL_HANDLE;
+    u32 count = 0;
+    inline static ExternalImageBarrierObservation* active = nullptr;
+    explicit ExternalImageBarrierObservation(VkImage image) : watched(image) {
+        active = this; vk::vkCmdPipelineBarrier = &barrier;
+    }
+    ~ExternalImageBarrierObservation() { vk::vkCmdPipelineBarrier = original; active = nullptr; }
+    static VKAPI_ATTR void VKAPI_CALL barrier(VkCommandBuffer command, VkPipelineStageFlags source,
+        VkPipelineStageFlags destination, VkDependencyFlags dependencies, u32 memoryCount,
+        const VkMemoryBarrier* memory, u32 bufferCount, const VkBufferMemoryBarrier* buffers,
+        u32 imageCount, const VkImageMemoryBarrier* images) {
+        auto& observation = *active;
+        for (u32 i = 0; i < imageCount; ++i)
+            if (images[i].image == observation.watched) ++observation.count;
+        observation.original(command, source, destination, dependencies,
+            memoryCount, memory, bufferCount, buffers, imageCount, images);
+    }
+};
+
 bool copy_external_import(Gpu& g, FrameBegin& frame, const ExternalTexture& imported, TextureHandle target) {
     auto key = PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA8);
     key.immutableSampler = imported.sampler.id;
@@ -102,6 +126,16 @@ AUREA_TEST(ExternalImportsGpu, TrimRetiresNativeBuffersOnTheirLastFenceAndReimpo
     if (reused.ok()) AUREA_CHECK_EQ(reused->texture.id, original->texture.id);
     AUREA_CHECK(original->rgb);
     AUREA_CHECK(copy_external_import(isolated, first, *original, *firstTarget));
+    {
+        ExternalImageBarrierObservation barriers(vk::ImmediateSubmissionTestAccess::native_image(backend, original->texture));
+        const auto sampledAgain = backend.import_external_image(desc);
+        AUREA_CHECK(sampledAgain.ok());
+        if (sampledAgain.ok()) {
+            AUREA_CHECK_EQ(sampledAgain->texture.id, original->texture.id);
+            AUREA_CHECK(copy_external_import(isolated, first, *sampledAgain, *secondTarget));
+        }
+        AUREA_CHECK_MSG(barriers.count == 0, "reimport within one frame must preserve acquired shader-read layout");
+    }
     // Trimming cannot invalidate command recording in the current frame.
     AUREA_CHECK_EQ(backend.trim_external_images(), 0u);
     AUREA_CHECK_EQ(backend.texture_desc(original->texture).width, 64u);

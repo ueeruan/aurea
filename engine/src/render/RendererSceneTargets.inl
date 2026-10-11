@@ -106,6 +106,14 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
             if (next >= targets.size()) return Errc::InvalidState;
             auto& saved = targets[next++]; saved.owner = &snap; saved.scene = scene;
             const u64 previous = backend_->last_submitted_frame();
+            // Retire completed preview targets before opening the next frame.
+            // Backend begin-frame collects empty allocation blocks. Doing this
+            // afterwards left their reservation charged while allocating the
+            // unchanged full-quality shadow map in this first capture stage.
+            if (previous) {
+                if (auto completed = wait(previous); !completed.ok()) return completed;
+                (void)pool_.trim_unreferenced(previous);
+            }
             FrameBegin frame;
             if (auto status = backend_->begin_offscreen_frame(frame); !status.ok()) return status;
             const u64 recorded = monotonic_ns();
@@ -126,12 +134,6 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
                 (void)pool_.trim_unreferenced(frame.frameNumber);
                 return OkStatus;
             };
-            // The previous graph can leave idle targets of different extents.
-            // A fence, not logical cache eviction, proves those reads finished.
-            if (previous) {
-                if (auto completed = wait(previous); !completed.ok()) return finish(completed);
-                (void)pool_.trim_unreferenced(previous);
-            }
             configure_scene_quality(group);
             scene3d_.finish_environment(group.environment);
             FGTexture output;

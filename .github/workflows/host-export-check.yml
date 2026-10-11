@@ -3,7 +3,7 @@ name: Check shared serial export
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/keyflow-export2154']
+    branches: ['codex/keyflow-export2154', 'codex/preview-export2156']
     paths: ['.github/workflows/host-export-check.yml']
 
 permissions:
@@ -114,6 +114,16 @@ jobs:
             2>&1 | tee ../../host-export-results/serial-safe-retry.log
           grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-safe-retry.log
           if grep -Eq 'pulado|skipped' ../../host-export-results/serial-safe-retry.log; then exit 1; fi
+      - name: Verify preview continuity and exact 3D capture memory
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets; do
+            timeout 180s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/preview-$FILTER.log"
+            grep -Eq '^[1-9][0-9]* testes, [0-9]+ verificacoes, 0 falhas$' "../../host-export-results/preview-$FILTER.log"
+            if grep -Eq 'pulado|skipped' "../../host-export-results/preview-$FILTER.log"; then exit 1; fi
+          done
       - name: Preserve host test results
         if: always()
         uses: actions/upload-artifact@v4

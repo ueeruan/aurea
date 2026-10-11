@@ -93,6 +93,7 @@ struct Pool {
     u32 width = 0, height = 0;
     u32 live = 0;          ///< alvos do tamanho atual (livres + em uso)
     u32 cap = 6;
+    u64 generation = 0;
     bool closed = false;
 
     ~Pool() {
@@ -102,16 +103,17 @@ struct Pool {
 
 struct Holder final : GlVideoBridge::Target {
     std::shared_ptr<Pool> pool;
+    u64 generation = 0;
 };
 
 void give_back(Holder* h) noexcept {
     if (!h) return;
     if (h->pool && h->buffer) {
         std::lock_guard<std::mutex> lock(h->pool->mutex);
-        if (!h->pool->closed && h->width == h->pool->width && h->height == h->pool->height) {
+        if (!h->pool->closed && h->generation == h->pool->generation) {
             h->pool->free.push_back(h->buffer);
             h->buffer = nullptr;
-        } else if (h->width == h->pool->width && h->height == h->pool->height && h->pool->live > 0) {
+        } else if (h->generation == h->pool->generation && h->pool->live > 0) {
             --h->pool->live;
         }
         h->pool->freed.notify_all();
@@ -141,7 +143,7 @@ struct GlVideoBridge::Impl {
     GLint aPos = -1, uRect = -1, uClamp = -1, uTex = -1, uColor = -1;
 
     struct Source { EGLImageKHR image = EGL_NO_IMAGE_KHR; GLuint texture = 0; };
-    struct Dest { EGLImageKHR image = EGL_NO_IMAGE_KHR; GLuint texture = 0; GLuint fbo = 0; u32 width = 0, height = 0; };
+    struct Dest { EGLImageKHR image = EGL_NO_IMAGE_KHR; GLuint texture = 0; GLuint fbo = 0; u32 width = 0, height = 0; u64 generation = 0; };
     std::unordered_map<AHardwareBuffer*, Source> sources;   // cada entrada segura uma referência do buffer
     std::unordered_map<AHardwareBuffer*, Dest> dests;       // idem
 
@@ -347,6 +349,13 @@ u32 GlVideoBridge::max_live_targets() const noexcept {
     return impl_->pool->cap;
 }
 
+GlVideoBridge::CacheStats GlVideoBridge::cache_stats() const noexcept {
+    std::lock_guard<std::mutex> use(impl_->use);
+    std::lock_guard<std::mutex> pool(impl_->pool->mutex);
+    return {static_cast<u32>(impl_->sources.size()), static_cast<u32>(impl_->dests.size()),
+            impl_->pool->live, static_cast<u32>(impl_->pool->free.size()), impl_->pool->generation};
+}
+
 void GlVideoBridge::forget_sources() noexcept {
     Impl& g = *impl_;
     std::lock_guard<std::mutex> lock(g.use);
@@ -370,6 +379,7 @@ Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad,
     // Alvo livre (ou um novo, até o teto). Sem nenhum: espera um pouco — o
     // renderer solta o seu depois do fence; desistir perderia este quadro.
     AHardwareBuffer* target = nullptr;
+    u64 generation = 0;
     {
         std::unique_lock<std::mutex> pl(g.pool->mutex);
         Pool& p = *g.pool;
@@ -379,7 +389,9 @@ Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad,
             p.width = quad.width;
             p.height = quad.height;
             p.live = 0;
+            ++p.generation;
         }
+        generation = p.generation;
         const bool got = p.freed.wait_for(pl, std::chrono::milliseconds(250),
                                           [&] { return !p.free.empty() || p.live < p.cap || p.closed; });
         if (p.closed) return Status{Errc::InvalidState, "decoder fechando"};
@@ -411,12 +423,24 @@ Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad,
     holder->width = quad.width;
     holder->height = quad.height;
     holder->pool = g.pool;
+    holder->generation = generation;
     std::shared_ptr<const Target> lease(holder, [](const Target* t) { give_back(static_cast<Holder*>(const_cast<Target*>(t))); });
 
     std::lock_guard<std::mutex> lock(g.use);
     if (!g.make_current()) return Status{Errc::InvalidState, "eglMakeCurrent falhou"};
     struct Release { Impl& g; ~Release() { g.release_current(); } } release{g};
     while (glGetError() != GL_NO_ERROR) {}
+
+    // A size/crop change ends this pool generation. Delete its EGL/FBO cache
+    // references after the completed conversion; displayed frames retain their
+    // own AHardwareBuffer lease until the renderer's GPU fence completes. Width
+    // and height alone are insufficient: A->B->A must not return first-A leases
+    // to the new A pool or make the live-target counter underestimate ownership.
+    for (auto it = g.dests.begin(); it != g.dests.end();) {
+        if (it->second.generation == generation) { ++it; continue; }
+        g.drop_dest(it->first, it->second);
+        it = g.dests.erase(it);
+    }
 
     // Fonte: EGLImage do buffer do decoder (cacheada: o ImageReader recicla um
     // conjunto fixo) religada a cada quadro — o conteúdo mudou.
@@ -448,6 +472,7 @@ Status GlVideoBridge::convert(AHardwareBuffer* source, const ExternalQuad& quad,
         Impl::Dest d;
         d.width = quad.width;
         d.height = quad.height;
+        d.generation = generation;
         d.image = g.image_of(target);
         if (d.image == EGL_NO_IMAGE_KHR) return Status{Errc::UnsupportedFeature, "EGLImage do alvo RGBA recusado"};
         glGenTextures(1, &d.texture);

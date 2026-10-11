@@ -65,7 +65,10 @@ void Backend::detach_surface() noexcept {
             // A camada pode ser destruída pelo sistema logo depois desta chamada:
             // nada pode estar usando o drawable.
             for (u32 i = 0; i < 3; ++i) {
-                if (d.frames[i].submitted) d.wait_frame_gpu(d.frames[i]);
+                if (d.frames[i].submitted) {
+                    d.wait_frame_gpu(d.frames[i]);
+                    d.frames[i].unpresentedDrawable = nil;
+                }
             }
         }
         d.drawable = nil;

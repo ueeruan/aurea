@@ -2153,6 +2153,72 @@ AUREA_TEST(VideoPreview, ShortRgbaRowsAreRejectedBeforeDriverUploadAndRecover) {
     AUREA_CHECK(!f.renderer.take_incomplete()); AUREA_CHECK_EQ(uploads, 1u);
 }
 
+AUREA_TEST(VideoPreview, MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor) {
+    for (bool rawPlayback : {false, true}) {
+    RenderFixture f;
+    f.comp->set_size(32, 16);
+    f.solid("RAW continuity", Vec4{1,1,1,1}, 16, 8);
+    f.solid("second video remains ready", Vec4{1,1,1,1}, 24, 8);
+    f.backend.supportsFrameDiscard = true;
+    int window = 0;
+    SurfaceDesc surface;
+    surface.nativeWindow = &window;
+    surface.width = 32; surface.height = 16;
+    AUREA_CHECK(f.backend.attach_surface(surface).ok());
+    FrameSnapshot snapshot; f.prepare(snapshot);
+    auto* raw = new test::RgbaVideoFrame(true);
+    FrameRef frame = FrameRef::adopt(raw);
+    auto& source = snapshot.layers[0].source;
+    source.kind = LayerSource::Kind::Video;
+    source.width = 32; source.height = 16; source.frame = frame;
+    FrameRef otherFrame = FrameRef::adopt(new test::RgbaVideoFrame(false));
+    auto& other = snapshot.layers[1].source;
+    other.kind = LayerSource::Kind::Video;
+    other.width = 32; other.height = 16; other.frame = otherFrame;
+    RenderSettings settings; settings.rawPlayback = rawPlayback;
+    FrameStats stats; RenderTimings timings;
+    // Mock native import is unavailable, so the real CPU-plane fallback
+    // supplies the first valid picture through Renderer/FrameGraph.
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK_EQ(f.backend.presents, 1u);
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    const u32 validStride = raw->rowStride;
+    raw->rowStride = raw->width * 4 - 1;
+    source.frame = frame;
+    other.frame = otherFrame;
+    const Status failed = f.renderer.render(snapshot, settings, nullptr, stats, timings);
+    AUREA_CHECK(failed.code() == Errc::DecodeFailed);
+    AUREA_CHECK(f.renderer.take_incomplete());
+    AUREA_CHECK(!source.frame);
+    AUREA_CHECK_EQ(f.backend.presents, 1u);
+    AUREA_CHECK_EQ(f.backend.framesDiscarded, 1u);
+    AUREA_CHECK_EQ(f.backend.framesSubmitted, 2u); // fences/resources still finish
+    AUREA_CHECK(!f.backend.frameOpen);
+    raw->rowStride = validStride;
+    source.frame = frame;
+    other.frame = otherFrame;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(f.backend.presents, 2u);
+    AUREA_CHECK_EQ(f.backend.framesDiscarded, 1u);
+    // Decoder starvation is distinct from a GPU import/upload failure. Both
+    // must retain the visible picture, and neither may poison the next frame.
+    source.frame.reset();
+    other.frame = otherFrame;
+    snapshot.missingVideoFrames = 1;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).code() == Errc::DecodeFailed);
+    AUREA_CHECK(f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(f.backend.presents, 2u);
+    AUREA_CHECK_EQ(f.backend.framesDiscarded, 2u);
+    snapshot.missingVideoFrames = 0;
+    source.frame = frame;
+    other.frame = otherFrame;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(f.backend.presents, 3u);
+    }
+}
+
 AUREA_TEST(VideoPreview, RawPlaybackRetainsNativePixelsUntilGpuCompletion) {
     RenderFixture f;
     f.solid("raw native video", Vec4{1,1,1,1});

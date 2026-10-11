@@ -118,6 +118,7 @@ struct Backend::Impl final : CommandList {
         return std::find(caps.extensions.begin(), caps.extensions.end(), name) != caps.extensions.end();
     }
     Status begin(FrameBegin&, bool present);
+    Status finish_frame(bool present);
     Status wait(Frame&, u64 timeout);
     void retire(Frame&);
     void uniforms(u32 binding, const void*, u32);

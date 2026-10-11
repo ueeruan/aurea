@@ -40,7 +40,9 @@ class KeyflowExportDeviceTest {
     private fun waitResult(): ExportProgress {
         val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
         val progress = ExportProgress()
-        val deadline = SystemClock.elapsedRealtime() + 300000
+        val deadlineSeconds = InstrumentationRegistry.getArguments()
+            .getString("aureaExportDeadlineSeconds")?.toLongOrNull()?.coerceIn(30, 900) ?: 300L
+        val deadline = SystemClock.elapsedRealtime() + deadlineSeconds * 1000
         var moved = SystemClock.elapsedRealtime()
         var signature = ""
         do {

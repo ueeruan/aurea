@@ -349,6 +349,7 @@ void Impl::destroy_frames() noexcept {
         f.cmd = nil;
         f.completion = nil;
         f.submitted = false;
+        f.unpresentedDrawable = nil;
         f.frameNumber = 0;
     }
 }
@@ -433,6 +434,9 @@ Status Impl::submit_immediate(void (*record)(Impl&, id<MTLCommandBuffer>, void*)
 // Fila de destruição adiada e espera de GPU
 // =============================================================================
 void Impl::run_deferred(FrameContext& f) noexcept {
+    // Every caller has proved completion before retiring frame-owned objects.
+    // Discarded drawables return to the layer now, never while GPU writes run.
+    f.unpresentedDrawable = nil;
     // Cópia antes de rodar: uma destruição pode, em cascata, adiar outra.
     std::vector<DeferredRelease> list;
     list.swap(f.deferred);

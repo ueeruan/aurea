@@ -1886,6 +1886,7 @@ private:
     bool wakeFlag_ = false;
     // Ritmo do preview pelo conteúdo (render_frame(onlyIfChanged)).
     std::atomic<bool> forceRender_{true};     ///< a UI mudou algo / superfície nova
+    std::atomic<u64> previewRetryDueNs_{0};   ///< retry de recurso/GPU; uma edição cancela a espera
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
     PreviewRefill previewRefill_;

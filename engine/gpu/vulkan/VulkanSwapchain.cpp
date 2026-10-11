@@ -228,6 +228,8 @@ void Backend::destroy_swapchain() noexcept {
     if (swapchain_) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
     swapchain_ = VK_NULL_HANDLE;
     imageAcquired_ = false;
+    imageAcquireWait_ = false;
+    heldImage_ = false;
 }
 
 } // namespace aurea::vk

@@ -971,6 +971,9 @@ void Engine::stop_render_thread() noexcept {
 }
 
 void Engine::request_render() noexcept {
+    // An edit/resize must not wait behind a retry of the previous picture.
+    // Internal retries use wake_render instead, preserving their deadline.
+    previewRetryDueNs_.store(0, std::memory_order_release);
     forceRender_.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lock(wakeMutex_);
@@ -1023,6 +1026,15 @@ void Engine::render_thread_main() noexcept {
                 // A pending play/buffer request must not spin when Android/iOS
                 // destroys its surface. Reattach/resume explicitly wakes us.
                 wakeCv_.wait(lock, [this] { return !renderRunning_ || wakeFlag_; });
+            } else if (const u64 retryDue = previewRetryDueNs_.load(std::memory_order_acquire); retryDue) {
+                // A failed acquire/recording may never reach FIFO/vsync. Pace
+                // retries explicitly, including paused previews. Decoder/UI
+                // wakes still enter render_frame, where new content bypasses
+                // this wait rather than redrawing the same failure in a loop.
+                const u64 now = monotonic_ns();
+                wakeCv_.wait_for(lock, std::chrono::nanoseconds(retryDue > now ? retryDue - now : 0), [this] {
+                    return !renderRunning_ || wakeFlag_;
+                });
             } else if (playingHint_.load() && !lastSkipped_) {
                 // Acabou de apresentar: o próximo frame pode já estar devido
                 // (a aquisição FIFO do swapchain dá o ritmo do vsync).
@@ -9440,6 +9452,17 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
     if (exportActive_.load(std::memory_order_acquire)) return OkStatus;
     lastSkipped_ = false;
+    const u64 retryDue = previewRetryDueNs_.load(std::memory_order_acquire);
+    if (onlyIfChanged && retryDue > frameStart
+        && modelRevision_.load(std::memory_order_acquire) == lastRenderedRevision_
+        && mediaReadyGen_.load(std::memory_order_acquire) == lastMediaGen_) {
+        // Leave forceRender pending until retry time. Polling vsync or calling
+        // render_frame repeatedly cannot acquire/record the same failed frame.
+        lastSkipped_ = true;
+        nextFrameDueNs_ = retryDue;
+        return OkStatus;
+    }
+    previewRetryDueNs_.store(0, std::memory_order_release);
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) {
         // CPU edits/saving stay available; do not consume a pending resize.
         { std::lock_guard<std::mutex> lock(modelMutex_); drain_commands_locked(); }
@@ -9787,27 +9810,28 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     if (!s.ok() && s.code() != Errc::SurfaceLost && s.code() != Errc::Timeout) {
         AUREA_LOG_WARN("frame nao renderizado: %s", s.message().data());
     }
-    if (s.code() == Errc::SurfaceLost || s.code() == Errc::Timeout) request_render();
-
     lastRenderedFrame_ = t.value;
     const bool rendererIncomplete = renderer_.take_incomplete();
     // Asynchronous resources (depth/rotobrush, HDRI, uploads) can finish after
     // the bounded immediate retry window. Their ready callback increments the
     // media generation; retain incomplete state so that wake actually renders
     // the paused frame instead of being skipped forever as "unchanged".
-    lastIncomplete_ = snapshot_.missingVideoFrames > 0 || snapshot_.staleVideoFrames > 0 || rendererIncomplete;
+    lastIncomplete_ = !s.ok() || snapshot_.missingVideoFrames > 0 || snapshot_.staleVideoFrames > 0 || rendererIncomplete;
     lastCulledLayers_.store(snapshot_.culledLayers, std::memory_order_relaxed);
-    // Recurso pendente: tenta de novo nos próximos quadros — no máximo ~1 s
-    // (uma camada que nunca fica pronta não pode prender a GPU em laço).
-    if (rendererIncomplete) {
-        if (++incompleteRetries_ <= 60) {
-            forceRender_.store(true, std::memory_order_release);
-            request_render();
-        }
-    } else {
-        incompleteRetries_ = 0;
+    // Resource retries are bounded, and occur at most once per display tick.
+    // GPU/surface errors get a longer delay because they may bypass vsync.
+    const bool retryResource = rendererIncomplete && ++incompleteRetries_ <= 60;
+    if (!rendererIncomplete) incompleteRetries_ = 0;
+    if (!s.ok() || retryResource) {
+        const u64 delay = s.ok()
+            ? static_cast<u64>(1e9 / std::max(1.0f, config_.displayRefreshRate))
+            : 50'000'000ull;
+        nextFrameDueNs_ = monotonic_ns() + delay;
+        previewRetryDueNs_.store(nextFrameDueNs_, std::memory_order_release);
+        forceRender_.store(true, std::memory_order_release);
+        lastSkipped_ = true;
+        wake_render();
     }
-    if (!s.ok()) forceRender_.store(true, std::memory_order_release);
     if (s.ok()) frameScheduler_.presented(t, playing);
     stats.frameIndex = static_cast<u32>(frameCounter_);
     stats.cpuMs = timings.cpuPrepareMs + timings.cpuRecordMs;

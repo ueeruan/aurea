@@ -5,6 +5,17 @@
 
 namespace aurea::mtl {
 
+// Submit even discarded frames: recorded uploads and deferred ownership still
+// need a real GPU completion. Only a complete picture enters presentation.
+inline void commit_presentable_frame(id<MTLCommandBuffer> command, id<MTLDrawable> drawable,
+                                     bool present, id<MTLDrawable> __strong& unpresented) noexcept {
+    if (drawable) {
+        if (present) [command presentDrawable:drawable];
+        else unpresented = drawable;
+    }
+    [command commit];
+}
+
 [[nodiscard]] inline bool command_buffer_terminal(id<MTLCommandBuffer> command) noexcept {
     if (!command) return false;
     const MTLCommandBufferStatus state = command.status;

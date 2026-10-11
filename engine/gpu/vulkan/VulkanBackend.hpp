@@ -373,6 +373,8 @@ public:
 
     [[nodiscard]] Status begin_frame(FrameBegin& out) noexcept override;
     [[nodiscard]] Status end_frame() noexcept override;
+    [[nodiscard]] bool can_discard_frame() const noexcept override { return true; }
+    [[nodiscard]] Status discard_frame() noexcept override;
     [[nodiscard]] Status begin_offscreen_frame(FrameBegin& out) noexcept override;
 
     [[nodiscard]] Result<TextureHandle>  create_texture(const TextureDesc& desc) noexcept override;
@@ -494,9 +496,11 @@ private:
     /// Corpo comum de `begin_frame` e `begin_offscreen_frame`; `withSurface`
     /// decide se o swapchain é adquirido.
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
+    [[nodiscard]] Status end_frame_impl(bool present) noexcept;
     [[nodiscard]] Status fail_recording(VkResult result, const char* operation) noexcept;
     friend class CommandListImpl;
     friend struct BoundedCommandsTestAccess;
+    friend struct DiscardFrameTestAccess;
 
     BackendConfig config_{};
     GPUCapabilities caps_{};
@@ -592,6 +596,8 @@ private:
     std::vector<VkSemaphore> renderDone_;
     u32 imageIndex_ = 0;
     bool imageAcquired_ = false;
+    bool imageAcquireWait_ = false; ///< this frame acquired; its semaphore must be consumed once
+    bool heldImage_ = false;        ///< discarded image retained for the next surface frame
     bool swapchainDirty_ = false;
     /// VK_SUBOPTIMAL_KHR visto (aquisição/apresentação). NÃO recria sozinho:
     /// begin_frame confere se a superfície mudou de verdade (ver lá).

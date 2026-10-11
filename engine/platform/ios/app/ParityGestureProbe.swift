@@ -66,6 +66,8 @@ import UIKit
             "playbackReport": model.engine.playbackReport(),
             "processFootprintBytes": model.engine.perf()["processFootprintBytes"] ?? 0,
             "playing": readCoreStatus ? coreStatus.playing : 0,
+            "previewLastError": readCoreStatus ? coreStatus.lastError : -1,
+            "previewDroppedFrames": readCoreStatus ? coreStatus.droppedFrames : 0,
             "version": 1, "runID": runID, "scene": scene, "ready": ready,
             "coreStarted": model.started, "coreError": model.startError ?? "",
             "modelRevision": model.status.modelRevision, "playhead": model.status.playhead,

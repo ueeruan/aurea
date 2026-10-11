@@ -158,18 +158,22 @@ Status Backend::Impl::begin(FrameBegin& out, bool present) {
 }
 Status Backend::begin_frame(FrameBegin& out) noexcept { return impl_->begin(out, true); }
 Status Backend::begin_offscreen_frame(FrameBegin& out) noexcept { return impl_->begin(out, false); }
-Status Backend::end_frame() noexcept {
-    auto& d = *impl_;
+Status Backend::Impl::finish_frame(bool present) {
+    auto& d = *this;
     if (!d.frameOpen || !d.current) return Errc::InvalidState;
     while (!d.current->timerStack.empty()) d.end_timer();
-    if (d.presenting && d.frameStatus.ok()) {
+    // Commands can leave a GL error without reporting it individually. Check
+    // before swapping so a failed recording never replaces the visible image.
+    (void)d.check("frame-recording");
+    if (present && d.presenting && d.frameStatus.ok()) {
         auto* t = find(d.textures, d.backbuffer.id);
         if (!eglMakeCurrent(d.display, d.window, d.window, d.context)) d.fail(Errc::SurfaceLost, "EGL window make-current failed");
         else {
             glBindFramebuffer(GL_READ_FRAMEBUFFER, d.readFramebuffer); d.attach(GL_READ_FRAMEBUFFER, t, nullptr);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); glDisable(GL_SCISSOR_TEST);
             glBlitFramebuffer(0, 0, d.surfaceWidth, d.surfaceHeight, 0, d.surfaceHeight, d.surfaceWidth, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-            if (!eglSwapBuffers(d.display, d.window)) d.fail(Errc::SurfaceLost, "EGL swap failed");
+            if (d.check("frame-present-blit").ok() && !eglSwapBuffers(d.display, d.window))
+                d.fail(Errc::SurfaceLost, "EGL swap failed");
         }
     }
     (void)d.check("end_frame");
@@ -179,6 +183,8 @@ Status Backend::end_frame() noexcept {
     eglMakeCurrent(d.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     return d.frameStatus;
 }
+Status Backend::end_frame() noexcept { return impl_->finish_frame(true); }
+Status Backend::discard_frame() noexcept { return impl_->finish_frame(false); }
 Status Backend::attach_surface(const SurfaceDesc& surface) noexcept {
     auto& d = *impl_; if (!surface.nativeWindow || !surface.width || !surface.height) return Errc::InvalidArgument;
     detach_surface(); Impl::Scope scope(d); if (!scope.valid) return Errc::InvalidState;

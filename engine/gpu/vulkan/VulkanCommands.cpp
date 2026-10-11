@@ -853,6 +853,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     out.frameNumber = frameNumber_;
 
     imageAcquired_ = false;
+    imageAcquireWait_ = false;
     // Frame offscreen (prévia de efeito, export): nada de swapchain. A imagem
     // da tela não é nossa, e apresentar daqui seria apresentar o quadro errado.
     if (!withSurface) return OkStatus;
@@ -879,9 +880,14 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
             }
         }
         if (swapchain_) {
-            u32 index = 0;
-            VkResult r = vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
-                                               VK_NULL_HANDLE, &index);
+            // A discarded frame keeps ownership of one acquired image. Reuse
+            // it instead of acquiring another and exhausting the swapchain.
+            // Its earlier acquire semaphore was consumed by that submission.
+            const bool reuseHeld = heldImage_;
+            u32 index = reuseHeld ? imageIndex_ : 0;
+            VkResult r = reuseHeld ? VK_SUCCESS
+                : vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
+                                       VK_NULL_HANDLE, &index);
             if (r == VK_ERROR_OUT_OF_DATE_KHR) {
                 if (recreate_swapchain().ok()) {
                     r = vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
@@ -891,12 +897,15 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
             if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
                 if (r == VK_SUBOPTIMAL_KHR) swapchainSuboptimal_ = true;
                 imageAcquired_ = true;
+                imageAcquireWait_ = !reuseHeld;
                 imageIndex_ = index;
                 Texture* t = textures_.get(swapTextures_[index]);
                 // Conteúdo anterior do swapchain não interessa: o passe de
                 // saída limpa. UNDEFINED evita uma leitura inútil da imagem.
-                t->state = ResourceState::Undefined;
-                t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                if (!reuseHeld) {
+                    t->state = ResourceState::Undefined;
+                    t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                }
                 out.backbuffer = TextureHandle{swapTextures_[index]};
                 out.backbufferWidth = swapExtent_.width;
                 out.backbufferHeight = swapExtent_.height;
@@ -922,6 +931,14 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
 }
 
 Status Backend::end_frame() noexcept {
+    return end_frame_impl(true);
+}
+
+Status Backend::discard_frame() noexcept {
+    return end_frame_impl(false);
+}
+
+Status Backend::end_frame_impl(bool present) noexcept {
     if (!recordingStatus_.ok()) return recordingStatus_;
     if (!current_) return Status{Errc::InvalidState, "nenhum frame aberto"};
     FrameContext& f = *current_;
@@ -948,7 +965,7 @@ Status Backend::end_frame() noexcept {
     }
 
     Texture* back = imageAcquired_ ? textures_.get(swapTextures_[imageIndex_]) : nullptr;
-    if (back && back->state != ResourceState::Present) {
+    if (present && back && back->state != ResourceState::Present) {
         // Rede de segurança: o grafo termina a saída em Present; se nada
         // desenhou (layer vazia, erro), a imagem ainda precisa do layout certo.
         transition(f.cmd, *back, ResourceState::Present, back->state == ResourceState::Undefined);
@@ -974,13 +991,13 @@ Status Backend::end_frame() noexcept {
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount = 1;
         si.pCommandBuffers = &f.commandBuffers[batch];
-        if (imageAcquired_ && batch == 0) {
+        if (imageAcquireWait_ && batch == 0) {
             si.waitSemaphoreCount = 1;
             si.pWaitSemaphores = &f.acquired;
             si.pWaitDstStageMask = &waitStage;
         }
         const bool last = batch + 1 == f.commandBufferCount;
-        if (imageAcquired_ && last) {
+        if (present && imageAcquired_ && last) {
             si.signalSemaphoreCount = 1;
             si.pSignalSemaphores = &renderDone_[imageIndex_];
         }
@@ -1006,6 +1023,15 @@ Status Backend::end_frame() noexcept {
     f.submitted = true;
     lastSubmitted_ = &f;
 
+    imageAcquireWait_ = false;
+    if (imageAcquired_ && !present) {
+        // The presentation engine keeps the previously displayed picture.
+        // Commands/fences still complete normally; the acquired image remains
+        // ours until a later valid surface frame presents it, or resize/detach
+        // destroys the swapchain after the existing device-idle barrier.
+        heldImage_ = true;
+        imageAcquired_ = false;
+    }
     if (imageAcquired_) {
         VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
         pi.waitSemaphoreCount = 1;
@@ -1015,6 +1041,7 @@ Status Backend::end_frame() noexcept {
         pi.pImageIndices = &imageIndex_;
         const VkResult pr = vkQueuePresentKHR(queue_, &pi);
         imageAcquired_ = false;
+        heldImage_ = false;
         if (pr == VK_ERROR_OUT_OF_DATE_KHR) {
             swapchainDirty_ = true;
         } else if (pr == VK_SUBOPTIMAL_KHR) {

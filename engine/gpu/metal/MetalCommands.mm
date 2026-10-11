@@ -687,7 +687,7 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     if (current) return Status{Errc::InvalidState, "frame ja aberto"};
     for (u32 i = 0; i < framesInFlight; ++i) {
         FrameContext& done = frames[i];
-        if (done.submitted && !done.deferred.empty()
+        if (done.submitted && (!done.deferred.empty() || done.unpresentedDrawable)
                 && wait_command_buffer(done.cmd, done.completion, 0, "coletar frame concluido").ok())
             run_deferred(done);
     }
@@ -760,24 +760,32 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
 }
 
 Status Backend::end_frame() noexcept {
+    return impl_->end_frame_impl(true);
+}
+
+Status Backend::discard_frame() noexcept {
+    return impl_->end_frame_impl(false);
+}
+
+Status Impl::end_frame_impl(bool presentDrawable) noexcept {
     @autoreleasepool {
-        Impl& d = *impl_;
-        if (!d.current) return Status{Errc::InvalidState, "nenhum frame aberto"};
-        FrameContext& f = *d.current;
+        if (!current) return Status{Errc::InvalidState, "nenhum frame aberto"};
+        FrameContext& f = *current;
 
-        d.commands.end_render_pass();
-        d.sample_counter(1);
-        d.commands.finish_encoders();   // nenhum encoder pode ficar aberto no commit
+        commands.end_render_pass();
+        sample_counter(1);
+        commands.finish_encoders();   // nenhum encoder pode ficar aberto no commit
 
-        if (d.drawableAcquired && d.drawable) [f.cmd presentDrawable:d.drawable];
-        [f.cmd commit];
+        commit_presentable_frame(f.cmd, drawableAcquired ? drawable : nil,
+                                 presentDrawable, f.unpresentedDrawable);
 
-        d.current = nullptr;
-        d.commands.bind_frame(this, nullptr);
-        d.frameCursor = (d.frameCursor + 1) % d.framesInFlight;
+        current = nullptr;
+        commands.bind_frame(self, nullptr);
+        frameCursor = (frameCursor + 1) % framesInFlight;
         f.submitted = true;
-        d.lastSubmitted = &f;
-        d.drawableAcquired = false;
+        lastSubmitted = &f;
+        drawableAcquired = false;
+        drawable = nil;
         // As texturas externas lidas neste frame não precisam de barreira de
         // devolução: em Metal não há posse de fila a transferir (o Vulkan faz
         // isso porque lá o AHardwareBuffer é compartilhado entre donos).

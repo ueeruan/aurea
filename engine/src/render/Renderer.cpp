@@ -4451,7 +4451,11 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
     switch (layer.source.kind) {
         case LayerSource::Kind::Video: {
             out.texture = graph_.create_texture("layer-video", d);
-            if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) return false;
+            if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) {
+                incomplete_ = true;
+                videoSourceFailed_ = true;
+                return false;
+            }
             if (layer.source.frame->hardwareBuffer) framesUsed.push_back(layer.source.frame);
 
             // RGB NO TEMPO (Fase 7.3 §25): a textura da camada vira a JUNÇÃO
@@ -5828,6 +5832,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     const u64 t0 = monotonic_ns();
     const u64 effectsBypassedBefore = EffectGraph::bypassed_total();
     scene3d_.reset_incomplete();
+    videoSourceFailed_ = false;
     videoUploadMs_ = 0;
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
     quality_ = effective_quality(settings);
@@ -5927,7 +5932,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     if (const Status s = offscreenFrame ? backend_->begin_offscreen_frame(fb) : backend_->begin_frame(fb); !s.ok()) {
         // Sem imagem de swapchain neste vsync (superfície em recriação): os
         // frames de vídeo deste snapshot só são soltos — não houve GPU.
-        for (RenderLayer& l : snap.layers) l.source.frame.reset();
+        snap.release_video_frames();
         return s;
     }
     const u64 tBegin = monotonic_ns();
@@ -6041,6 +6046,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                          : (offscreen && offscreen->texture.valid())
                          ? graph_.import_texture("composicao", offscreen->texture, compDesc)
                          : graph_.create_texture("composicao", compDesc);
+    Status previewSourceStatus = OkStatus;
     currentScenes_ = &snap.scenes;
     if (offscreen && !snap.scenes.empty()) scene3d_.finish_environment(snap.scenes[0].environment);
     compTargetW_ = cw;
@@ -6053,8 +6059,13 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const bool decoded = !snap.layers.empty() && build_video_source(snap.layers.front(), 0, cw, ch, comp, fb.frameNumber);
         if (decoded && snap.layers.front().source.frame->hardwareBuffer)
             framesInFlight_.push_back(snap.layers.front().source.frame);
-        if (!decoded) graph_.add_raster_pass("raw-buffering", PassStage::Decode, comp, LoadOp::Clear,
-                                            Vec4{0, 0, 0, 1}, [](PassContext&) {});
+        if (!decoded) {
+            // Missing RAW pixels are not a successful black video frame. Keep
+            // the last visible picture on backends that can discard safely,
+            // and let Engine retry without advancing presentation telemetry.
+            incomplete_ = true;
+            previewSourceStatus = Status{Errc::DecodeFailed, "frame RAW indisponivel para GPU"};
+        }
     } else {
     upload_glyphs(snap);
     upload_masks(snap);
@@ -6062,6 +6073,13 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     upload_particle_history(snap);
     renderFrameNumber_ = fb.frameNumber;   // o relógio dos buffers extras das partículas (2D e cena)
     compose_layers(snap, comp, compDesc, fb.frameNumber, draws_, 0);
+    }
+    if (!offscreenFrame && fb.backbuffer.valid() && !previewCacheHit_ && videoSourceFailed_) {
+        // A missing main source must not remove a video layer for one display
+        // tick. Auxiliary temporal samples retain their existing valid-source
+        // fallback; this applies only to absent/unusable main video pixels.
+        incomplete_ = true;
+        previewSourceStatus = Status{Errc::DecodeFailed, "pixels principais do video indisponiveis"};
     }
     // A raiz de novo (as pré-composições trocaram o estado em curso).
     currentScenes_ = &snap.scenes;
@@ -6097,7 +6115,10 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const FGTexture bb = graph_.import_texture("swapchain", bbTex, bbDesc);
         auto pOut = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
                                                             ShaderId::composite_output_frag, bbFormat));
-        if (!pOut.ok()) incomplete_ = true;
+        if (!pOut.ok()) {
+            incomplete_ = true;
+            previewSourceStatus = pOut.status();
+        }
         // A composição encaixada (letterbox) no espaço LÓGICO do display, e a
         // pré-rotação aplicada no clip: o compositor do sistema não precisa
         // girar a imagem (o que custaria um passe a mais por frame, dele).
@@ -6181,7 +6202,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         graph_.set_output(comp, ResourceState::ShaderRead);
     }
 
-    Status result = graph_.compile(pool_);
+    Status result = previewSourceStatus.ok() ? graph_.compile(pool_) : previewSourceStatus;
     if (result.ok()) {
         graph_.execute(*fb.commands, settings.gpuTimers);
         // Export: os planos NV12 vão para os buffers de leitura no mesmo frame.
@@ -6198,7 +6219,9 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     pool_.end_frame();
 
     const u64 tRecorded = monotonic_ns();
-    const Status endStatus = backend_->end_frame();
+    const bool discardPresentation = !result.ok() && !offscreenFrame
+        && fb.backbuffer.valid() && backend_->can_discard_frame();
+    const Status endStatus = discardPresentation ? backend_->discard_frame() : backend_->end_frame();
     if (result.code() == Errc::OutOfDeviceMemory && endStatus.ok())
         failedGraphFrame_ = backend_->last_submitted_frame();
     if (!endStatus.ok()) for (auto& target : staged.targets)

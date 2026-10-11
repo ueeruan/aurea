@@ -669,6 +669,74 @@ import UIKit
         XCTAssertGreaterThan(positions.count, 2, "Playhead must advance while decoding video and drawing text/captions")
     }
 
+    func testVideoPreviewKeepsVisiblePixelsAcrossPlaybackPauseAndSeek() throws {
+        _ = try launch("playback-stress")
+        let play = app.buttons["Repeat on · hold to turn off"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+        _ = try awaitSnapshot("Video preview starts on the actual native renderer") { $0.playing != 0 }
+        var frames: Set<Int64> = []
+        var records: [String] = []
+        for sample in 0..<8 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            let state = try snapshot()
+            XCTAssertNotEqual(state.playing, 0); frames.insert(state.corePlayhead)
+            records.append("frame=\(state.corePlayhead) error=\(state.previewLastError ?? -1) drops=\(state.previewDroppedFrames ?? 0)")
+            try assertVisibleVideoPreview("Playing sample \(sample)")
+        }
+        XCTAssertGreaterThan(frames.count, 2, "The decoder/display must advance rather than retaining one frame forever")
+        let pause = app.buttons["Pause"].firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout: 5)); pause.tap()
+        let paused = try awaitSnapshot("Video pauses while keeping the last valid picture") { $0.playing == 0 }
+        try assertVisibleVideoPreview("Paused video frame")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(try snapshot().corePlayhead, paused.corePlayhead)
+        let start = app.buttons["timeline.layer.start"].firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 5)); start.tap()
+        _ = try awaitSnapshot("Seek to video start settles") { $0.corePlayhead == 0 }
+        try assertVisibleVideoPreview("After backward seek")
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let from = CGPoint(x: timeline.frame.midX + 70, y: timeline.frame.minY + 14)
+        let to = CGPoint(x: from.x - 25, y: from.y)
+        coordinate(from).press(forDuration: 0.05, thenDragTo: coordinate(to), withVelocity: .slow, thenHoldForDuration: 0.1)
+        _ = try awaitSnapshot("Forward seek remains inside the imported video") {
+            $0.playing == 0 && $0.corePlayhead > 0 && $0.corePlayhead < $0.detail.endFrame
+        }
+        try assertVisibleVideoPreview("After forward seek")
+        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+        _ = try awaitSnapshot("Play can resume after repeated seeks") { $0.playing != 0 }
+        try assertVisibleVideoPreview("Resumed video frame")
+        attach("Native video continuity samples", records.joined(separator: "\n"))
+    }
+
+    private func assertVisibleVideoPreview(_ label: String) throws {
+        let screenshot = stage.screenshot()
+        let image = try XCTUnwrap(screenshot.image.cgImage)
+        let width = 160, height = max(2, Int((160.0 * Double(image.height) / Double(image.width)).rounded()))
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        let drew = rgba.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))); return true
+        }
+        XCTAssertTrue(drew)
+        var bright = 0, dark = 0, green = 0
+        for pixel in stride(from: 0, to: rgba.count, by: 4) {
+            let r = Int(rgba[pixel]), g = Int(rgba[pixel + 1]), b = Int(rgba[pixel + 2])
+            if r > 180 && g > 180 && b > 180 { bright += 1 }
+            if r < 64 && g < 64 && b < 64 { dark += 1 }
+            if g > 96 && g > r * 3 / 2 + 32 && g > b * 3 / 2 + 32 { green += 1 }
+        }
+        // The controlled fixture is a white rounded shape on black with white
+        // text/captions. A uniform green or empty picture cannot satisfy this.
+        XCTAssertGreaterThan(bright, 5, "\(label): the decoded picture disappeared")
+        XCTAssertGreaterThan(dark, 100, "\(label): the fixture background disappeared")
+        XCTAssertLessThan(green, width * height / 5, "\(label): preview flashed green")
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = label; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     func testDockMoveVideoAtTwoSecondsKeepsAppResponsiveAndPreservesDuration() throws {
         let before = try launch("video-move")
         XCTAssertEqual(before.detail.kind, 1)
@@ -1849,6 +1917,8 @@ import UIKit
         let playbackReport: String
         let processFootprintBytes: Double
         let playing: UInt32
+        let previewLastError: Int?
+        let previewDroppedFrames: UInt64?
         let runID: String
         let scene: String
         let ready: Bool

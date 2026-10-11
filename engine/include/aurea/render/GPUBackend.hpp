@@ -618,6 +618,15 @@ public:
     [[nodiscard]] virtual Status begin_frame(FrameBegin& out) noexcept = 0;
     /// Submete e, se houver backbuffer, apresenta.
     [[nodiscard]] virtual Status end_frame() noexcept = 0;
+    /// Whether discard_frame can finish a frame without changing the visible
+    /// picture. Backends with an acquired swapchain image must opt in only
+    /// after implementing that image's ownership/release correctly.
+    [[nodiscard]] virtual bool can_discard_frame() const noexcept { return false; }
+    /// Finish recorded commands and normal fence/resource retirement, but do
+    /// not present the acquired backbuffer. No extra full-resolution copy is
+    /// required. The default retains the existing end_frame behavior; callers
+    /// must check can_discard_frame before relying on picture continuity.
+    [[nodiscard]] virtual Status discard_frame() noexcept { return end_frame(); }
 
     /// Frame OFFSCREEN: NÃO adquire nem apresenta nada na tela.
     ///

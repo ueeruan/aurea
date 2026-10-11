@@ -38,6 +38,8 @@ public:
     u32 pipelinesCreated = 0;
     u32 shadersCreated = 0;
     u32 framesSubmitted = 0;
+    u32 framesDiscarded = 0;
+    bool supportsFrameDiscard = false;
     u32 offscreenFrames = 0;
     /// Quantas vezes o swapchain foi adquirido e quantas o quadro foi para a
     /// tela. Só contam com superfície anexada — é o que a prévia de efeito NÃO
@@ -64,6 +66,7 @@ public:
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
+    std::function<void()> beforeBeginOffscreenFrame;
     std::function<void()> beforeWaitIdle;
     std::function<Status()> beforeEndFrame;
     std::function<Status(const BufferDesc&)> beforeCreateBuffer;
@@ -122,6 +125,7 @@ public:
         return OkStatus;
     }
     Status begin_offscreen_frame(FrameBegin& out) noexcept override {
+        if (beforeBeginOffscreenFrame) beforeBeginOffscreenFrame();
         out = FrameBegin{};
         out.commands = this;
         out.frameNumber = ++frame_;
@@ -137,6 +141,13 @@ public:
         for (auto& d : deferred_) d.fn(d.ctx);
         deferred_.clear();
         return beforeEndFrame ? beforeEndFrame() : OkStatus;
+    }
+    bool can_discard_frame() const noexcept override { return supportsFrameDiscard; }
+    Status discard_frame() noexcept override {
+        if (!supportsFrameDiscard) return end_frame();
+        ++framesDiscarded;
+        frameHadBackbuffer = false;
+        return end_frame();
     }
 
     Result<TextureHandle> create_texture(const TextureDesc& d) noexcept override {

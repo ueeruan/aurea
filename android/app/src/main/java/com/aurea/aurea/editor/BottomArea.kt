@@ -224,7 +224,7 @@ internal fun dockSectionsFor(l: DockLayer, refreshed: Boolean): List<DockSection
     val ordinary = sectionsFor(l)
     if (!refreshed || l.adjustment || l.kind in listOf(3, 6, 7, 8, 9, 10)) return ordinary
     if (l.kind == 12) return listOf(DockSection.EnterGroup, DockSection.Move, DockSection.Mask, DockSection.Effects, DockSection.Blend)
-    val content = ordinary.filter { it in listOf(DockSection.EditText, DockSection.TextOptions, DockSection.EditVector, DockSection.EditShape, DockSection.Particles) }
+    val content = ordinary.filter { it in listOf(DockSection.EditText, DockSection.TextOptions, DockSection.EditVector, DockSection.EditShape, DockSection.ColorFill, DockSection.Particles) }
     return mediaDockActions(l) + content + listOf(DockSection.Move, DockSection.Mask, DockSection.Effects, DockSection.Blend) +
         ordinary.filter { it == DockSection.Audio || it == DockSection.Presets }
 }

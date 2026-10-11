@@ -930,7 +930,8 @@ private struct DockView: View {
         if EditorTimelineRefresh.enabled && ![3, 6, 8, 9, 10].contains(layer.kind) {
             let edit: Section? = layer.kind == 5 ? (model.isVectorLayer ? .vector : .shape)
                 : layer.kind == 4 ? .editText : layer.kind == 11 ? .particles : nil
-            let content: [Section] = layer.kind == 4 ? [.editText, .text] : (edit.map { [$0] } ?? [])
+            let content: [Section] = layer.kind == 4 ? [.editText, .text]
+                : layer.kind == 5 && !model.isVectorLayer ? [.shape, .color] : (edit.map { [$0] } ?? [])
             return media + content + [.move, .mask, .effects, .blend] +
                 (layer.kind == 1 && hasAudio ? [.audio] : []) + (layer.kind == 4 ? [.presets] : [])
         }

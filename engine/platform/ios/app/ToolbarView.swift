@@ -109,6 +109,7 @@ struct TopBarView: View {
         }.padding(.leading, 6).padding(.trailing, 10)
     }
     private func layerBar(_ row: LayerItem) -> some View {
+        GeometryReader { geometry in
         HStack(spacing: 0) {
             ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_tirar_selecao"), width: 44) { model.editorBack() }
             ShellInlineName(name: row.name, placeholder: AureaText.t("ios_unnamed_layer"), enabled: !row.locked) { value in
@@ -116,6 +117,9 @@ struct TopBarView: View {
             }
             .id(row.id)
             if EditorTimelineRefresh.enabled {
+                // Secondary controls can scroll; delete and the layer menu stay fixed.
+                ScrollView(.horizontal, showsIndicators: true) {
+                HStack(spacing: 0) {
                 if row.kind != 3 {
                     let intrinsic = [8, 9, 10].contains(row.kind)
                     let threeD = row.threeD || intrinsic
@@ -133,6 +137,8 @@ struct TopBarView: View {
                 }
                 searchButton()
                 linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
+                }.fixedSize(horizontal: true, vertical: false)
+                }.frame(width: max(48, min(184, geometry.size.width - 220)))
             } else {
             // Esconder/mostrar a caixa da seleção no preview (ela tampa o que está por baixo).
             ShellBarButton(glyph: model.hideSelectionBox ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Square,
@@ -141,11 +147,13 @@ struct TopBarView: View {
                 .accessibilityIdentifier("stage.selectionBox")
             searchButton()
             linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
-            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 44) { removeSelection() }
             }
+            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 48) { removeSelection() }
+                .disabled(row.locked).accessibilityIdentifier("layer.delete")
             Button { open(.layerMenu) } label: { MaterialGlyph("filled.MoreHoriz", size: 22, color: AureaColors.text).frame(width: 44, height: 44) }
                 .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_acoes_camada"))
-        }.padding(.trailing, 4)
+        }.padding(.trailing, 4).frame(height: geometry.size.height)
+        }
     }
     /// Lote: o mesmo conteúdo de antes, agora sobre o fundo do editor (a
     /// contagem no destaque diz que é um lote).

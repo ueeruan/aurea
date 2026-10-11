@@ -1257,22 +1257,46 @@ import UIKit
         let before = try launch("layer-dock")
         let row = app.scrollViews["dock.tools"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        let move = app.buttons["dock.tool.move"].firstMatch
-        XCTAssertTrue(move.isHittable)
-        let toolY = move.frame.midY
-        XCTAssertGreaterThanOrEqual(move.frame.height, 44)
+        let shape = app.buttons["dock.tool.shape"].firstMatch
+        XCTAssertTrue(shape.isHittable)
+        let toolY = shape.frame.midY
+        XCTAssertGreaterThanOrEqual(shape.frame.height, 44)
         let stageBefore = stage.frame
-        row.swipeLeft()
         let color = app.buttons["dock.tool.color"].firstMatch
         XCTAssertTrue(color.isHittable)
         XCTAssertEqual(color.frame.midY, toolY, accuracy: 1)
         XCTAssertGreaterThanOrEqual(color.frame.height, 44)
         XCTAssertEqual(stage.frame.height, stageBefore.height, accuracy: 1)
         XCTAssertEqual(try snapshot().primaryID, before.primaryID)
+        row.swipeLeft()
+        XCTAssertTrue(app.buttons["dock.tool.blend"].firstMatch.isHittable)
+        row.swipeRight()
+        XCTAssertTrue(color.isHittable)
         color.tap()
         _ = try awaitSnapshot("Scrolling tools still opens the chosen layer panel") {
             $0.sheet == "panel" && $0.primaryID == before.primaryID
         }
+        XCTAssertTrue(app.staticTexts["Fill"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Outline colour"].firstMatch.exists)
+    }
+
+    func testDeleteLayerButtonIsVisibleAndUndoRestoresTheLayer() throws {
+        let before = try launch("layer-dock")
+        let delete = app.buttons["layer.delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        XCTAssertTrue(delete.isHittable)
+        XCTAssertGreaterThanOrEqual(delete.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(delete.frame.height, 44)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertTrue(delete.isHittable, "Delete stays reachable in landscape")
+        XCUIDevice.shared.orientation = .portrait
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertTrue(delete.isHittable)
+        delete.tap()
+        _ = try awaitSnapshot("Delete removes the selected layer") { $0.layerCount == before.layerCount - 1 }
+        try undo()
+        _ = try awaitSnapshot("Undo restores the removed layer") { $0.layerCount == before.layerCount }
     }
 
     func testHoldingLayerToMoveDoesNotOpenOptionsButTapDoes() throws {

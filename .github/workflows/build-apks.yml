@@ -130,7 +130,9 @@ jobs:
           script: |
             adb install -r build/android/app/outputs/apk/uiTest/app-uiTest.apk
             adb install -r build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
+            adb logcat -c
             adb shell am instrument -w -e class com.aurea.aurea.editor.KeyflowExportDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
+            adb logcat -d -v threadtime > build/native-engine.log
             cat build/native-editing.log
             adb exec-out run-as com.aurea.aurea.uitest tar -cf - -C files keyflow-simple-text.mp4 keyflow-simple-text-progress.txt keyflow-animated-text-1080.mp4 keyflow-animated-text-1080-progress.txt > build/native-editing-files.tar
             grep -Eq '^OK \([0-9]+ tests?\)' build/native-editing.log
@@ -140,4 +142,5 @@ jobs:
           name: android-native-editing
           path: |
             build/native-editing.log
+            build/native-engine.log
             build/native-editing-files.tar

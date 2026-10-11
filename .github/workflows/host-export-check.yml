@@ -30,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends cmake ninja-build gcc-14 g++-14 \
-            ccache glslc libvulkan-dev mesa-vulkan-drivers vulkan-tools curl
+            ccache glslc libvulkan-dev mesa-vulkan-drivers vulkan-tools vulkan-validationlayers curl
           mkdir -p build/host-export-results
       - name: Select and verify the software Vulkan driver
         run: |
@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           FAILED=0
-          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary VulkanReturnsEmptySlabsAndPreservesLiveAllocations VulkanMemoryPackingGpu SceneWarmupGpu OriginalModelExport FrameGraphSegments PreviewGraphLifecycle PreviewIdle ExportSourceStartupGpu; do
+          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary VulkanReturnsEmptySlabsAndPreservesLiveAllocations VulkanMemoryPackingGpu VulkanMrtGpu SceneWarmupGpu OriginalModelExport FrameGraphSegments PreviewGraphLifecycle PreviewIdle ExportSourceStartupGpu; do
             # Preserve independent GPU evidence even if another group fails.
             if ! timeout 180s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
             if ! grep -Eq '^[1-9][0-9]* testes, [0-9]+ verificacoes, 0 falhas$' "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi

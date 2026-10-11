@@ -141,8 +141,11 @@ namespace {
 // block per type left >90 MiB unused and refused an otherwise fitting frame.
 // A few small live resources can pin several mostly empty 16 MiB slabs.
 // Small pins must not strand a 4 MiB block after a larger neighbour retires.
-// New blocks follow the request size (1/2/4 MiB); existing allocations never
-// move and resources above 2 MiB keep their exact dedicated driver backing.
+// Blocks follow the request size (1/2/4 MiB), and reuse stays within that class.
+// First-fit across classes let 6-74 KiB persistent pins keep entire 2/4 MiB
+// transient slabs alive after a real fence, despite their much smaller tier.
+// Existing allocations never move; resources above 2 MiB keep exact dedicated
+// driver backing. A separate class records the request, not alignment padding.
 // This reduces physical reservation without changing images or crediting
 // deferred releases before their GPU fence has completed.
 constexpr VkDeviceSize kDeviceBlock = 4ull * 1024 * 1024;
@@ -243,7 +246,7 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
     for (u32 attempt = 0; attempt < 2; ++attempt) {
         for (u32 bi = 0; bi < blocks_.size(); ++bi) {
             Block& b = blocks_[bi];
-            if (!b.memory || b.memoryType != type) continue;
+            if (!b.memory || b.memoryType != type || b.sizeClass != tierSize) continue;
             for (usize r = 0; r < b.free.size(); ++r) {
                 Range& fr = b.free[r];
                 const VkDeviceSize start = align_up(fr.offset, align);
@@ -283,6 +286,7 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
         }
         if (mapNow) (void)vkMapMemory(device_, nb.memory, 0, VK_WHOLE_SIZE, 0, &nb.mapped);
         nb.size = blockSize;
+        nb.sizeClass = tierSize;
         nb.memoryType = type;
         nb.free.push_back(Range{0, blockSize});
         auto empty = std::find_if(blocks_.begin(), blocks_.end(), [](const Block& b) { return !b.memory; });
@@ -348,9 +352,10 @@ void MemoryAllocator::log_memory_breakdown() noexcept {
         u64 largest = 0;
         for (const auto& range : block.free) largest = std::max<u64>(largest, range.size);
         type.largestFree = std::max(type.largestFree, largest);
-        if (printed++ < 24) AUREA_LOG_WARN("GPU block: index=%u type=%u reserved=%llu used=%llu largest_free=%llu ranges=%zu",
+        if (printed++ < 24) AUREA_LOG_WARN("GPU block: index=%u type=%u reserved=%llu used=%llu largest_free=%llu ranges=%zu size_class=%llu",
             i, block.memoryType, static_cast<unsigned long long>(block.size),
-            static_cast<unsigned long long>(block.used), static_cast<unsigned long long>(largest), block.free.size());
+            static_cast<unsigned long long>(block.used), static_cast<unsigned long long>(largest), block.free.size(),
+            static_cast<unsigned long long>(block.sizeClass));
     }
     AUREA_LOG_WARN("GPU backing: reserved=%llu used=%llu block_reserved=%llu block_used=%llu dedicated_reserved=%llu dedicated_used=%llu live_blocks=%u allocations=%u",
         static_cast<unsigned long long>(reserved_), static_cast<unsigned long long>(used_),
@@ -466,6 +471,34 @@ HostRing::Stats HostRing::stats() const noexcept {
 
 void Backend::log_memory_breakdown() noexcept {
     allocator_.log_memory_breakdown();
+    // Failure-only attribution from existing live resource pools. No resource
+    // names are retained (many debugName pointers have temporary lifetimes),
+    // no allocation registry is added, and this grants no admission credit.
+    u32 suballocatedTextures = 0, suballocatedBuffers = 0;
+    textures_.for_each([&](u64 handle, const Texture& texture) {
+        const auto& a = texture.alloc;
+        if (!a.valid() || a.block == kInvalidIndex) return;
+        ++suballocatedTextures;
+        AUREA_LOG_WARN("GPU live texture: handle=%llu block=%u type=%u offset=%llu allocation=%llu width=%u height=%u format=%u samples=%u mips=%u layers=%u sampled=%u render_target=%u storage=%u transient=%u last_frame=%llu",
+            static_cast<unsigned long long>(handle), a.block, a.memoryType,
+            static_cast<unsigned long long>(a.offset), static_cast<unsigned long long>(a.size),
+            texture.desc.width, texture.desc.height, static_cast<u32>(texture.desc.format),
+            texture.desc.sampleCount, texture.desc.mipLevels, texture.desc.layers,
+            texture.desc.sampled ? 1u : 0u, texture.desc.renderTarget ? 1u : 0u,
+            texture.desc.storage ? 1u : 0u, texture.desc.transient ? 1u : 0u,
+            static_cast<unsigned long long>(texture.lastUsedFrame));
+    });
+    buffers_.for_each([&](u64 handle, const Buffer& buffer) {
+        const auto& a = buffer.alloc;
+        if (!a.valid() || a.block == kInvalidIndex) return;
+        ++suballocatedBuffers;
+        AUREA_LOG_WARN("GPU live buffer: handle=%llu block=%u type=%u offset=%llu allocation=%llu payload=%llu usage=%u access=%u",
+            static_cast<unsigned long long>(handle), a.block, a.memoryType,
+            static_cast<unsigned long long>(a.offset), static_cast<unsigned long long>(a.size),
+            static_cast<unsigned long long>(buffer.desc.bytes), static_cast<u32>(buffer.desc.usage),
+            static_cast<u32>(buffer.desc.access));
+    });
+    AUREA_LOG_WARN("GPU live suballocations: textures=%u buffers=%u", suballocatedTextures, suballocatedBuffers);
     for (u32 i = 0; i < framesInFlight_; ++i) {
         const auto& frame = frames_[i];
         for (const auto& item : {std::pair<const char*, const HostRing*>{"uniforms", &frame.uniforms},

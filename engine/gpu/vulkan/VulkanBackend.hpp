@@ -148,6 +148,9 @@ private:
     struct Block {
         VkDeviceMemory memory = VK_NULL_HANDLE;
         VkDeviceSize size = 0;
+        // Request class, independent of driver granularity/alignment. Small
+        // long-lived resources cannot pin a slab opened for larger transients.
+        VkDeviceSize sizeClass = 0;
         u32 memoryType = 0;
         void* mapped = nullptr;
         std::vector<Range> free;   ///< ordenado por offset, coalescido

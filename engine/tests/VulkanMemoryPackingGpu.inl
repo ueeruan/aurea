@@ -499,4 +499,202 @@ AUREA_TEST(VulkanMemoryPackingGpu, SmallPinsBoundActualSlabsWithoutEarlyFenceCre
     }
     backend.wait_idle(); AUREA_CHECK_EQ(vk::Backend::validation_errors() - validationErrors, 0u);
 }
+AUREA_TEST(VulkanMemoryPackingGpu, PersistentTinyPinsCannotStrandRetiredLargerSizeClasses) {
+    AUREA_REQUIRE_GPU();
+    DeviceOnlyAllocatorProperties properties;
+    Gpu isolated; AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
+    auto& backend = isolated.backend;
+    AUREA_CHECK(properties.physical != VK_NULL_HANDLE); if (!properties.physical) return;
+    VkPhysicalDeviceProperties physical{};
+    vk::vkGetPhysicalDeviceProperties(properties.physical, &physical);
+    const auto fill = reinterpret_cast<PFN_vkCmdFillBuffer>(vk::vkGetDeviceProcAddr(backend.device(), "vkCmdFillBuffer"));
+    AUREA_CHECK(fill != nullptr); if (!fill) return;
+    const u32 validationErrors = vk::Backend::validation_errors();
+    NativeMemoryObservation observed(backend.device());
+    constexpr u64 mib = 1ull << 20;
+    // The four persistent payload sizes match the tiny survivors observed in
+    // separate 2 MiB slabs in the physical heavy capture. Real driver memory
+    // requirements are checked below, rather than substituting fake geometry.
+    constexpr std::array<u64, 6> requested{768ull << 10, 1536ull << 10, 5760, 73728, 71616, 73728};
+    constexpr std::array<u32, 6> values{0x31bda4f0u, 0xa95406c3u, 0x951337afu,
+                                      0x79b10dc2u, 0xe4c39025u, 0x123da679u};
+    u64 fullBytes = 0, pinBytes = 0;
+    for (u32 i = 0; i < requested.size(); ++i) {
+        fullBytes += requested[i];
+        if (i >= 2) pinBytes += requested[i];
+    }
+    u64 comparedBytes = 0;
+    for (const bool deviceOnly : {false, true}) {
+        MemoryPackingResources resources(backend);
+        properties.deviceOnly = deviceOnly;
+        resources.allocator.initialize(properties.physical, backend.device());
+        properties.deviceOnly = false; resources.initialized = true;
+        BufferDesc desc; desc.bytes = fullBytes; desc.usage = BufferUsage::TransferDst;
+        desc.access = MemoryAccess::Readback;
+        const auto readback = backend.create_buffer(desc);
+        AUREA_CHECK(readback.ok()); if (!readback) return;
+        resources.readback = *readback;
+        backend.wait_idle();
+        const auto base = backend.memory_stats();
+        const usize baseHandles = observed.live.size();
+        const auto destination = backend.buffer(readback->id)->buffer;
+        const std::vector<u8> knownCpuCache(8 * mib, 83);
+        std::array<vk::Allocation, 4> originalPins{};
+        u64 pinReserved = 0, pinUsed = 0;
+        usize pinHandles = 0;
+        for (u32 cycle = 0; cycle < 4; ++cycle) {
+            // Open each larger class BEFORE allocating the tiny survivors.
+            // Cross-class first-fit would place those pins in the first 2 MiB
+            // slab and keep it alive. Subsequent cycles keep all pins resident.
+            AUREA_CHECK(resources.pin(0, requested[0]));
+            if (!cycle) AUREA_CHECK(resources.pin(2, requested[2]));
+            AUREA_CHECK(resources.pin(1, requested[1]));
+            if (!cycle) for (u32 i = 3; i < requested.size(); ++i)
+                AUREA_CHECK(resources.pin(i, requested[i]));
+            for (const auto& entry : resources.entries) {
+                AUREA_CHECK(entry.alive && entry.allocation.valid());
+                if (!entry.alive || !entry.allocation.valid()) return;
+            }
+            const auto& smallTransient = resources.entries[0];
+            const auto& largeTransient = resources.entries[1];
+            AUREA_CHECK(smallTransient.requirementBytes > (512ull << 10)
+                        && smallTransient.requirementBytes <= mib);
+            AUREA_CHECK(largeTransient.requirementBytes > mib
+                        && largeTransient.requirementBytes <= 2 * mib);
+            // Distinct driver handles prove actual class separation. Logical
+            // accounting alone cannot make a mostly empty slab retire.
+            AUREA_CHECK(smallTransient.allocation.memory != largeTransient.allocation.memory);
+            AUREA_CHECK_EQ(observed.live.at(smallTransient.allocation.memory), 2 * mib);
+            AUREA_CHECK_EQ(observed.live.at(largeTransient.allocation.memory), 4 * mib);
+            for (u32 i = 2; i < requested.size(); ++i) {
+                const auto& pin = resources.entries[i];
+                AUREA_CHECK(pin.requirementBytes <= (512ull << 10));
+                AUREA_CHECK(pin.allocation.memory != smallTransient.allocation.memory);
+                AUREA_CHECK(pin.allocation.memory != largeTransient.allocation.memory);
+                AUREA_CHECK_EQ(pin.allocation.memory, resources.entries[2].allocation.memory);
+                if (!cycle) {
+                    originalPins[i - 2] = pin.allocation;
+                    pinUsed += pin.allocation.size;
+                } else {
+                    AUREA_CHECK_EQ(pin.allocation.memory, originalPins[i - 2].memory);
+                    AUREA_CHECK_EQ(pin.allocation.offset, originalPins[i - 2].offset);
+                    AUREA_CHECK_EQ(pin.allocation.block, originalPins[i - 2].block);
+                    AUREA_CHECK_EQ(pin.allocation.size, originalPins[i - 2].size);
+                }
+            }
+            if (!cycle) {
+                pinReserved = observed.live.at(originalPins[0].memory);
+                AUREA_CHECK_EQ(pinReserved, mib);
+                pinHandles = baseHandles + 1;
+            }
+            const u64 pendingUsed = resources.allocator.used_bytes();
+            const u64 pendingReserved = resources.allocator.reserved_bytes();
+            AUREA_CHECK_EQ(pendingReserved, pinReserved + 6 * mib);
+            AUREA_CHECK_EQ(observed.live.size(), pinHandles + 2);
+            const u64 budget = base.reservedBytes + pinReserved + knownCpuCache.size();
+            auto fits = [&] {
+                const auto actual = backend.memory_stats();
+                return fits_tracked_resource_budget(budget, resources.allocator.used_bytes(),
+                    actual.usedBytes + resources.allocator.used_bytes(),
+                    actual.reservedBytes + resources.allocator.reserved_bytes(), knownCpuCache.size(), 0);
+            };
+            AUREA_CHECK(!fits());
+            FrameBegin frame; const auto begun = backend.begin_offscreen_frame(frame);
+            AUREA_CHECK(begun.ok()); if (!begun.ok()) return;
+            resources.frameOpen = true;
+            const auto command = static_cast<vk::CommandListImpl*>(frame.commands)->handle();
+            VkBufferMemoryBarrier writable{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+            writable.srcAccessMask = VK_ACCESS_HOST_READ_BIT; writable.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            writable.srcQueueFamilyIndex = writable.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            writable.buffer = destination; writable.size = VK_WHOLE_SIZE;
+            vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, 0, nullptr, 1, &writable, 0, nullptr);
+            u64 offset = 0;
+            for (u32 i = 0; i < requested.size(); ++i) {
+                const auto buffer = resources.entries[i].buffer;
+                if (i < 2 || !cycle) {
+                    fill(command, buffer, 0, requested[i], values[i]);
+                    VkBufferMemoryBarrier readable{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+                    readable.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; readable.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                    readable.srcQueueFamilyIndex = readable.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    readable.buffer = buffer; readable.size = requested[i];
+                    vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        0, 0, nullptr, 1, &readable, 0, nullptr);
+                }
+                const VkBufferCopy copy{0, offset, requested[i]};
+                vk::vkCmdCopyBuffer(command, buffer, destination, 1, &copy); offset += requested[i];
+            }
+            packing_readback_visible(command, destination);
+            const u32 beforeRetired = resources.retired;
+            resources.defer(0); resources.defer(1); resources.allocator.trim_empty_blocks();
+            AUREA_CHECK_EQ(resources.retired, beforeRetired);
+            AUREA_CHECK_EQ(resources.allocator.used_bytes(), pendingUsed);
+            AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), pendingReserved);
+            AUREA_CHECK(backend.end_frame().ok()); resources.frameOpen = false;
+            {
+                DelayedFenceObservation held(backend.device());
+                AUREA_CHECK_EQ(backend.wait_frame(frame.frameNumber, 0).code(), Errc::Timeout);
+                AUREA_CHECK_EQ(resources.retired, beforeRetired);
+                AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), pendingReserved);
+                AUREA_CHECK_EQ(observed.live.size(), pinHandles + 2);
+                AUREA_CHECK(!fits());
+            }
+            AUREA_CHECK(backend.wait_frame(frame.frameNumber, 5'000'000'000ull).ok());
+            AUREA_CHECK_EQ(resources.retired, beforeRetired + 2);
+            resources.allocator.trim_empty_blocks();
+            AUREA_CHECK_EQ(resources.allocator.used_bytes(), pinUsed);
+            AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), pinReserved);
+            AUREA_CHECK_EQ(observed.live.size(), pinHandles);
+            AUREA_CHECK(fits());
+            void* bytes = nullptr; AUREA_CHECK(backend.map_buffer(*readback, bytes).ok());
+            if (!bytes) return;
+            u64 word = 0, differences = 0;
+            for (u32 i = 0; i < requested.size(); ++i)
+                for (u64 k = 0; k < requested[i] / 4; ++k, ++word)
+                    differences += static_cast<const u32*>(bytes)[word] != values[i];
+            backend.unmap_buffer(*readback);
+            AUREA_CHECK_EQ(differences, 0u); comparedBytes += fullBytes;
+            // A second genuine submission reads every persistent byte after
+            // both transient slabs have actually been freed. Pins are never
+            // rewritten after cycle zero, so reuse corruption cannot hide.
+            FrameBegin after; const auto afterBegin = backend.begin_offscreen_frame(after);
+            AUREA_CHECK(afterBegin.ok()); if (!afterBegin.ok()) return;
+            resources.frameOpen = true;
+            const auto afterCommand = static_cast<vk::CommandListImpl*>(after.commands)->handle();
+            vk::vkCmdPipelineBarrier(afterCommand, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, 0, nullptr, 1, &writable, 0, nullptr);
+            offset = 0;
+            for (u32 i = 2; i < requested.size(); ++i) {
+                const VkBufferCopy copy{0, offset, requested[i]};
+                vk::vkCmdCopyBuffer(afterCommand, resources.entries[i].buffer, destination, 1, &copy);
+                offset += requested[i];
+            }
+            packing_readback_visible(afterCommand, destination);
+            AUREA_CHECK(backend.end_frame().ok()); resources.frameOpen = false;
+            AUREA_CHECK(backend.wait_frame(after.frameNumber, 5'000'000'000ull).ok());
+            bytes = nullptr; AUREA_CHECK(backend.map_buffer(*readback, bytes).ok()); if (!bytes) return;
+            word = differences = 0;
+            for (u32 i = 2; i < requested.size(); ++i)
+                for (u64 k = 0; k < requested[i] / 4; ++k, ++word)
+                    differences += static_cast<const u32*>(bytes)[word] != values[i];
+            backend.unmap_buffer(*readback);
+            AUREA_CHECK_EQ(differences, 0u); comparedBytes += pinBytes;
+            std::printf("\n    size-class-pins device_only=%u cycle=%u pending_used=%llu pending_reserved=%llu pin_live=%llu pin_reserved=%llu reclaimed_reserved=%llu persistent_buffers=4 exact_bytes=%llu observed_peak_new_handles=%u logical_base_bound=%u native_limit=%u native_calls=%u native_frees=%u alloc_ms=%.3f free_ms=%.3f\n",
+                deviceOnly, cycle, static_cast<unsigned long long>(pendingUsed), static_cast<unsigned long long>(pendingReserved),
+                static_cast<unsigned long long>(pinUsed), static_cast<unsigned long long>(pinReserved),
+                static_cast<unsigned long long>(pendingReserved - pinReserved),
+                static_cast<unsigned long long>(fullBytes + pinBytes), observed.peakHandles, base.allocationCount,
+                physical.limits.maxMemoryAllocationCount, observed.allocations, observed.frees,
+                observed.allocateMs, observed.freeMs);
+            AUREA_CHECK(base.allocationCount + observed.peakHandles <= physical.limits.maxMemoryAllocationCount);
+        }
+        for (u32 i = 2; i < requested.size(); ++i) resources.release(i);
+        resources.allocator.trim_empty_blocks();
+        AUREA_CHECK_EQ(resources.allocator.used_bytes(), 0u); AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), 0u);
+        AUREA_CHECK_EQ(resources.allocator.allocation_count(), 0u); AUREA_CHECK_EQ(observed.live.size(), baseHandles);
+        AUREA_CHECK_EQ(knownCpuCache.front(), 83);
+    }
+    backend.wait_idle(); AUREA_CHECK_EQ(vk::Backend::validation_errors() - validationErrors, 0u);
+    std::printf("\n    size-class-pins complete actual_readback_bytes=%llu\n", static_cast<unsigned long long>(comparedBytes));
+}
 #endif

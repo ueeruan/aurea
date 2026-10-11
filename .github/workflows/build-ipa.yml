@@ -59,6 +59,10 @@ jobs:
             xcodebuild -downloadComponent MetalToolchain
           fi
           xcrun --sdk iphonesimulator metal --version
+      - name: Pin Python used by the Xcode export dependency build
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 12), sys.version'
+          echo "AUREA_PYTHON=$(command -v python3)" >> "$GITHUB_ENV"
       - name: Validate native integration and shared Android resources
         run: |
           python3 engine/platform/ios/verify/check_pbxproj.py
@@ -197,6 +201,10 @@ jobs:
             xcodebuild -downloadComponent MetalToolchain
           fi
           xcrun --sdk iphonesimulator metal --version
+      - name: Pin Python used by the Xcode export dependency build
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 12), sys.version'
+          echo "AUREA_PYTHON=$(command -v python3)" >> "$GITHUB_ENV"
       - run: brew install cmake ninja shaderc ccache
       - name: Identify simulator export dependency SDK
         id: export_sdk

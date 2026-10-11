@@ -58,10 +58,11 @@ class RealCameraControlsTest {
             }
         }
         compose.waitUntil(30000) { rendered && store.engineReady }
-        compose.runOnIdle {
-            assertTrue(store.newProjectHeadless(800, 600, 30f, "Real Camera Compose controls"))
-            store.startRealCamera()
+        compose.runOnIdle { store.newProject(800, 600, 30f, "Real Camera Compose controls") }
+        compose.waitUntil(30000) {
+            store.screen == com.aurea.aurea.state.Screen.Editor && store.project.title == "Real Camera Compose controls"
         }
+        compose.runOnIdle { store.startRealCamera() }
         compose.waitUntil(10000) { RealCamera.session != null && store.layers.any { it.id == RealCamera.session?.layer } }
         val layer = RealCamera.session!!.layer
         compose.onNodeWithTag("realcam.gravar").assertIsDisplayed().performClick()

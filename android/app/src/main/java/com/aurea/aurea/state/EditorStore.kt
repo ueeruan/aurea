@@ -15,6 +15,10 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.media.MediaMetadataRetriever
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import android.util.Log
 import android.view.Display
 import android.view.Surface
@@ -69,7 +73,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Destino da tela. É estado, não pilha: o Aurea edita UM projeto por vez. */
-enum class Screen { Home, Editor }
+enum class Screen { Home, Editor, Upscale }
 
 /** Um projeto na Home (lido do sidecar `.meta.json`, sem abrir o projeto). */
 data class ProjectEntry(
@@ -324,6 +328,115 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     var screen by mutableStateOf(Screen.Home)
         private set
+
+    // =========================================================================
+    // Upscale com IA (upscale/UpscaleScreen.kt): ferramenta própria, fora do
+    // editor e da aba Exportar. O vídeo vira um projeto do tamanho dele (fica
+    // na lista, dá para editar depois) e sai pelo Exporter com a rede neural.
+    // =========================================================================
+    enum class UpscaleStage { Idle, Preparing, Failed }
+    var upscaleStage by mutableStateOf(UpscaleStage.Idle)
+        private set
+    var upscaleSourceName by mutableStateOf<String?>(null)
+        private set
+    /** Largura × altura do vídeo escolhido (após a rotação), para a prévia do tamanho. */
+    var upscaleSourceSize by mutableStateOf<Pair<Int, Int>?>(null)
+        private set
+
+    fun openUpscale() {
+        if (screen != Screen.Home || exporter.busy) return
+        exporter.reset()
+        upscaleReset()
+        screen = Screen.Upscale
+    }
+
+    fun closeUpscale() {
+        if (screen != Screen.Upscale || exporter.busy || upscaleStage == UpscaleStage.Preparing) return
+        exporter.reset()
+        screen = Screen.Home
+        refreshProjects()
+    }
+
+    fun upscaleReset() {
+        if (upscaleStage != UpscaleStage.Preparing) upscaleStage = UpscaleStage.Idle
+    }
+
+    private class UpscaleMedia(val name: String, val width: Int, val height: Int, val fps: Float)
+
+    private fun probeUpscaleVideo(uri: Uri): UpscaleMedia? = try {
+        val app = getApplication<Application>()
+        val display = app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        val name = display?.substringBeforeLast('.')?.takeIf { it.isNotBlank() } ?: appText(R.string.app_imported_media)
+        val r = MediaMetadataRetriever()
+        try {
+            r.setDataSource(app, uri)
+            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            val fps = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()
+                ?.takeIf { it in 1f..240f } ?: 30f
+            if (w <= 0 || h <= 0) null
+            else if (rot == 90 || rot == 270) UpscaleMedia(name, h, w, fps) else UpscaleMedia(name, w, h, fps)
+        } finally {
+            r.release()
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Escolheu o vídeo e o fator: cria o projeto com o tamanho do vídeo (sem
+     * ir para o editor), importa, salva e manda ao Exporter com `aiUpscale`.
+     * O progresso e o resultado são os do [exporter] (a tela observa).
+     */
+    fun upscaleVideo(uri: Uri, factor: Int) {
+        if (upscaleStage == UpscaleStage.Preparing || exporter.busy) return
+        if (factor != 2 && factor != 4) return
+        if (!acceptsProjectChange()) return
+        upscaleStage = UpscaleStage.Preparing
+        viewModelScope.launch {
+            try {
+                val media = withContext(Dispatchers.IO) { probeUpscaleVideo(uri) }
+                if (media == null) {
+                    upscaleStage = UpscaleStage.Failed
+                    showToast(appText(R.string.import_failed))
+                    return@launch
+                }
+                upscaleSourceName = media.name
+                // Encoders pedem medidas pares; o lado menor × fator é a saída.
+                val w = media.width and 1.inv()
+                val h = media.height and 1.inv()
+                upscaleSourceSize = w to h
+                val title = "${media.name} · Upscale ${factor}×"
+                val created = withContext(Dispatchers.Default) { newProjectHeadless(w, h, media.fps, title) }
+                if (!created) {
+                    upscaleStage = UpscaleStage.Failed
+                    showToast(appText(R.string.msg_nao_foi_possivel_criar_o_projeto))
+                    return@launch
+                }
+                withTimeoutOrNull(5_000) { snapshotFlow { project.title }.first { it == title } }
+                errorMessage = null
+                importVideo(uri)   // seta busyMessage já; some quando a importação acaba
+                withTimeoutOrNull(300_000) { snapshotFlow { busyMessage }.first { it == null } }
+                if (errorMessage != null || busyMessage != null) {
+                    upscaleStage = UpscaleStage.Failed
+                    return@launch
+                }
+                // O projeto fica na lista (reabrir, editar), e o ProjectGuard
+                // do export tem um arquivo de verdade para marcar.
+                project.path?.let { path -> withContext(Dispatchers.IO) { engine.saveProject(path) } }
+                upscaleStage = UpscaleStage.Idle
+                exporter.start(title, w, h, media.fps.toDouble(),
+                    ExportOptions(shortSide = kotlin.math.min(w, h) * factor, aiUpscale = factor, trimToContent = true))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.w(TAG, "upscale interrompido: ${failure.javaClass.simpleName}")
+                upscaleStage = UpscaleStage.Failed
+            }
+        }
+    }
     var engineReady by mutableStateOf(false)
         private set
     var errorMessage by mutableStateOf<String?>(null)
@@ -5919,6 +6032,45 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (id < 0) { errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camera, -id); return }
         refreshNow()
         select(id)
+    }
+
+    // ---- Real Camera (editor/RealCamera.kt): a câmera 3D segue o celular ----
+
+    /** "Real Camera" no menu de adicionar: cria a câmera e liga a sessão do sensor. */
+    fun startRealCamera() {
+        val id = engine.addCamera()
+        if (id < 0) { errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camera, -id); return }
+        if (sceneEditor) exitSceneEditor()   // a faixa e o sensor vivem no palco normal
+        pause()
+        refreshNow()
+        select(id)
+        com.aurea.aurea.editor.RealCamera.recording = false
+        com.aurea.aurea.editor.RealCamera.lastFrame = -1
+        com.aurea.aurea.editor.RealCamera.session = com.aurea.aurea.editor.RealCameraSession(id)
+    }
+
+    /** Ao vivo (sem gravar): a rotação do aparelho vira a rotação da câmera, sem keyframe. */
+    fun realCameraApply(layer: Long, rx: Float, ry: Float, rz: Float) {
+        if (layers.none { it.id == layer }) return
+        send { setRotation(layer, rx, ry, rz) }
+    }
+
+    /** Gravando: um keyframe de Rotação X/Y/Z no quadro da prévia (tempo local da camada). */
+    fun realCameraKey(layer: Long, rx: Float, ry: Float, rz: Float) {
+        val d = if (layer == primary) detail else detailOf(layer)
+        val local = d?.localFrame(playhead) ?: playhead
+        send {
+            setKeyframeValue(layer, TrackProperty.ROTATION_X, NO_EFFECT, 0, local, rx)
+            setKeyframeValue(layer, TrackProperty.ROTATION_Y, NO_EFFECT, 0, local, ry)
+            setKeyframeValue(layer, TrackProperty.ROTATION_Z, NO_EFFECT, 0, local, rz)
+        }
+        if (local % 10 == 0) refreshNow()
+    }
+
+    /** "Gravar": um passo de desfazer para a gravação inteira e a timeline toca. */
+    fun realCameraBeginRecording(layer: Long) {
+        if (layers.none { it.id == layer }) return
+        play()
     }
 
     fun addNull(threeD: Boolean) {

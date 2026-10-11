@@ -111,8 +111,13 @@ Status add_gltf_dependencies(Package& package, const std::string& source) {
     const auto file = std::filesystem::u8path(source);
     std::string ext = utf8(file.extension());
     std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    // FBX e OBJ (o app importa os quatro formatos) sao congelados pelo proprio
+    // arquivo, ja impresso em add_path; so o glTF declara dependencias externas
+    // que precisam da mesma verificacao. Recusar aqui fazia TODO export com
+    // modelo FBX/OBJ falhar na largada ("nao iniciou") com o export V2.
+    if (ext == ".fbx" || ext == ".obj") return OkStatus;
     if (ext != ".gltf" && ext != ".glb")
-        return Status{Errc::NotSupported, "recuperacao de modelos requer glTF ou GLB com dependencias verificaveis"};
+        return Status{Errc::NotSupported, "recuperacao de modelos requer glTF, GLB, FBX ou OBJ"};
     std::vector<u8> json;
     if (ext == ".gltf") {
         if (!fileio::read_all(source, json, kMaxGltfJsonBytes)) return Errc::MediaSourceMissing;
@@ -225,8 +230,10 @@ Status capture(const Project& project, CompositionId composition, const ExportSe
                     for (auto path : aurea::text::source_dependencies(*font, data)) {
                         status = add_path(candidate, path, resolve); if (!status.ok()) return;
                     }
-                } else { status = Errc::MediaSourceMissing; return; }
-                status = add_path(candidate, text.fontPath, resolve);
+                    status = add_path(candidate, text.fontPath, resolve);
+                }
+                // Fonte nao resolvida: o render usa a de reserva (como na previa);
+                // antes isto derrubava o export inteiro com "midia nao pode ser lida".
                 if (status.ok()) status = add_path(candidate, text.texturePath, resolve);
                 asset.sourcePath = scene3d::encode_text3d(text);
             } else if (scene3d::decode_shape3d(asset.sourcePath, shape)) {
@@ -249,8 +256,8 @@ Status capture(const Project& project, CompositionId composition, const ExportSe
                     for (auto path : text::source_dependencies(*font, layer.text)) {
                         status = add_path(candidate, path, resolve); if (!status.ok()) return;
                     }
-                } else { status = Errc::MediaSourceMissing; return; }
-                status = add_path(candidate, layer.text.fontPath, resolve);
+                    status = add_path(candidate, layer.text.fontPath, resolve);
+                }   // sem fonte resolvida: a de reserva, igual a previa
             });
         });
         if (!status.ok()) return status;

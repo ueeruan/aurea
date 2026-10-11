@@ -747,7 +747,10 @@ class AureaEngine private constructor() {
     fun rotoCancel() = nativeRotoCancel(nativeHandle)
     fun rotoSetView(layer: Long, effectId: Int, mode: Int): Boolean = nativeRotoSetView(nativeHandle, layer, effectId, mode)
     /** [feitos, total, rodando, falhou, traços no quadro, traços no total] */
-    fun rotoStatus(layer: Long, effectId: Int): LongArray = nativeRotoStatus(nativeHandle, layer, effectId) ?: LongArray(6)
+    /** [propagados, total, propagando, falhou, traços aqui, traços total, quadro atual pronto,
+     *  quadros do clipe prontos, quadros do clipe, há traços] */
+    fun rotoStatus(layer: Long, effectId: Int): LongArray =
+        nativeRotoStatus(nativeHandle, layer, effectId)?.takeIf { it.size >= 10 } ?: LongArray(10)
     fun setGroupCameraPassThrough(layer: Long, on: Boolean): Boolean = nativeSetGroupCameraPassThrough(nativeHandle, layer, on)
     /** −1 = não é grupo. */
     fun queryGroupCameraPassThrough(layer: Long): Int = nativeQueryGroupCameraPassThrough(nativeHandle, layer)

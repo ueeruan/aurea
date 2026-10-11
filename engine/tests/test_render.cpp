@@ -40,8 +40,9 @@ AUREA_TEST(MotionBlur, CroppedExposureKeepsThePixelGridAndFallsBackAtTheCameraPl
         Mat4::translation(Vec3{20.75f, 25.25f, 0})};
     for (u32 den : {1u, 2u}) {
         const auto crop = motion_blur_bounds(Rect{0,0,80,40}, samples, Mat4::identity(), 1920,1080,1920/den,1080/den);
-        AUREA_CHECK(crop.width < 110 / den + 4);
-        AUREA_CHECK(crop.height < 60 / den + 4);
+        AUREA_CHECK(crop.width < 110 / den + 4 + 16);   // +16: alinhamento para reuso do pool
+        AUREA_CHECK(crop.height < 60 / den + 4 + 16);
+        AUREA_CHECK_EQ(crop.width % 16, 0u); AUREA_CHECK_EQ(crop.height % 16, 0u);
         AUREA_CHECK_NEAR(crop.region.x / den, std::floor(crop.region.x / den), 1e-6);
         AUREA_CHECK_NEAR(crop.region.y / den, std::floor(crop.region.y / den), 1e-6);
         AUREA_CHECK_NEAR(crop.region.w / den, crop.width, 1e-6);

@@ -106,6 +106,7 @@ fun HomeScreen(store: EditorStore) {
         onDismiss = { menu = false }, actions = listOf(
         SheetAction(stringResource(R.string.home_tab_settings)) { vm.selectTab(HomeViewModel.SETTINGS_TAB) },
         SheetAction(stringResource(R.string.home_import_media)) { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+        SheetAction(stringResource(R.string.upscale_title)) { store.openUpscale() },
         SheetAction(stringResource(R.string.project_file_import)) { projectFilePicker.launch(arrayOf("*/*")) },
         SheetAction(stringResource(R.string.report_title)) { reportProblem = true },
         SheetAction(stringResource(R.string.settings_group_about)) { about = true },

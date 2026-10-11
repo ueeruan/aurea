@@ -902,6 +902,19 @@
     <string name="donation_export_note">निर्यात जारी है। पूरा होने के बाद कोड या लिंक का उपयोग करें।</string>
     <string name="donation_copied">क्लिपबोर्ड पर कॉपी किया गया।</string>
     <string name="ai_upscale_title">AI वीडियो अपस्केलर</string>
+    <string name="upscale_title">AI अपस्केल</string>
+    <string name="upscale_hint">गैलरी से एक वीडियो और फ़ैक्टर चुनें। न्यूरल नेटवर्क हर फ़्रेम को डिवाइस पर फिर से बनाता है और हाई-रेज़ोल्यूशन वीडियो Movies/Aurea में सेव होता है। वीडियो बाद में संपादित करने के लिए एक प्रोजेक्ट भी बन जाता है।</string>
+    <string name="upscale_pick">वीडियो चुनें</string>
+    <string name="upscale_factor">फ़ैक्टर</string>
+    <string name="upscale_result">इनपुट %1$d × %2$d → आउटपुट %3$d × %4$d</string>
+    <string name="upscale_start">रेज़ोल्यूशन बढ़ाएँ</string>
+    <string name="upscale_preparing">वीडियो तैयार हो रहा है…</string>
+    <string name="upscale_processing">रेज़ोल्यूशन बढ़ाया जा रहा है</string>
+    <string name="upscale_time_note">इसमें कुछ मिनट लगते हैं: हर फ़्रेम डिवाइस पर न्यूरल नेटवर्क से गुज़रता है। Aurea खुला रखें।</string>
+    <string name="upscale_done">वीडियो तैयार</string>
+    <string name="upscale_open">खोलें</string>
+    <string name="upscale_share">साझा करें</string>
+    <string name="upscale_again">दूसरा वीडियो</string>
     <string name="ai_upscale_note">एनीमे और चित्रों के लिए मॉडल। इंटरफ़ेस रोके बिना टाइलों में प्रोसेस करता है। नीचे चुना गया रिज़ॉल्यूशन अंतिम गुणवत्ता है।</string>
     <string name="ai_upscale_dimensions">AI %1$dx · इनपुट %2$d × %3$d → आउटपुट %4$d × %5$d</string>
     <string name="licenses_title">लाइसेंस · AI</string>
@@ -1140,7 +1153,7 @@
     <string name="consent_title">सहमति और ज़िम्मेदारी</string>
     <string name="consent_accept">सहमत होकर जारी रखें</string>
     <string name="consent_body">Aurea डिजिटल सामग्री के संपादन, निर्माण और उत्पादन के लिए एक पेशेवर उपकरण है। ऐप का उपयोग करके उपयोगकर्ता स्वीकार करता है कि वह प्लेटफ़ॉर्म के माध्यम से बनाई, संपादित, आयात, निर्यात, प्रकाशित या साझा की गई सामग्री के लिए पूरी तरह ज़िम्मेदार है।\n\nAurea अवैध, अपमानजनक, धोखाधड़ी वाली, हानिकारक या तीसरे पक्ष के अधिकारों का उल्लंघन करने वाली गतिविधियों के लिए उपकरण के उपयोग को नियंत्रित, प्रोत्साहित, समर्थन या अधिकृत नहीं करता है।\n\nउपयोगकर्ता यह सुनिश्चित करने के लिए ज़िम्मेदार है कि उसके पास उपयोग की गई सामग्री के लिए आवश्यक अनुमतियाँ, लाइसेंस और अधिकार हैं, जिनमें चित्र, वीडियो, संगीत, ट्रेडमार्क, मॉडल, फ़ाइलें और अन्य संरक्षित सामग्री शामिल हैं।\n\nAurea द्वारा दी गई रचनात्मक स्वतंत्रता का अर्थ यह नहीं है कि ऐप उस चीज़ का अनुमोदन करता है, उसमें भाग लेता है या उसकी ज़िम्मेदारी लेता है जिसे प्रत्येक उपयोगकर्ता उपकरण से बनाने या करने का निर्णय लेता है।\n\nउपयोगकर्ता Aurea का उपयोग लागू कानून के अनुसार करने पर सहमत है और अपने कार्यों तथा ऐप के माध्यम से बनाई या वितरित की गई सामग्री की ज़िम्मेदारी स्वीकार करता है।\n\nलागू कानून द्वारा अनुमत अधिकतम सीमा तक, Aurea और उसके ज़िम्मेदार व्यक्ति केवल उपयोगकर्ता द्वारा किए गए कार्यों, उपकरण के दुरुपयोग या उपयोगकर्ता द्वारा बनाई, प्रकाशित या साझा की गई सामग्री से उत्पन्न परिणामों के लिए ज़िम्मेदार नहीं होंगे।\n\nAurea उपकरण प्रदान करता है। उपयोगकर्ता इसके उपयोग के अपने चुने हुए तरीके के लिए ज़िम्मेदार है।\n\nजारी रखकर उपयोगकर्ता घोषणा करता है कि उसने इन शर्तों को पढ़ा, समझा और स्वीकार किया है।</string>
-    <string name="release_notes_body">Aurea Beta 0.1.3 (2173) • 11/10/2026\n\n• लेयर हटाने का बटन फिर शीर्ष पट्टी में है; पूर्ववत और लॉक की गई लेयर की सुरक्षा बनी रहती है।\n• आकार के रंग, भराव और आउटलाइन के नियंत्रण फिर उपलब्ध हैं।\n• प्रीव्यू और 3D में अस्थायी टेक्सचर का उपयोग घटाया गया है और रुके दृश्यों से पहले निष्क्रिय प्रीफेच मुक्त किया जाता है।\n• Vulkan में हर डिवाइस के फ़ंक्शन अलग हैं; मेमोरी मैपिंग और प्रस्तुति बहाली की त्रुटियाँ संभाली जाती हैं।\n• Metal और OpenGL ES में बफ़र एक्सेस की त्रुटियों का प्रबंधन बेहतर किया गया है।\n• ऑडियो और वीडियो के लिए म्यूट और गति के बटन उपलब्ध हैं।\n• चुना गया रिज़ॉल्यूशन, बिटरेट, प्रभाव और मोशन ब्लर सैंपल सुरक्षित रहते हैं।\n• अद्यतन विवरण तथा सही संस्करण और बिल्ड की पहचान।</string>
+    <string name="release_notes_body">Aurea Beta 0.1.4 (2174) • 11/10/2026\n\n• एक्सपोर्ट: 3D या मोशन ब्लर वाले प्रोजेक्ट फिर से एक्सपोर्ट होते हैं (FBX/OBJ मॉडल अस्वीकार होते थे; GPU बजट अतिरिक्त टेक्सचर अस्वीकार करता था)। जो मीडिया फ़्रीज़ नहीं हो सकता वह अब एक्सपोर्ट नहीं गिराता।\n• स्मूद प्रीव्यू: GPU अब हर फ़्रेम के पास के बीच इंतज़ार नहीं करता, मेमोरी हर फ़्रेम रिलीज़ नहीं होती, टेक्स्ट और ब्लर क्रॉप टारगेट दोबारा उपयोग करते हैं।\n• Rotobrush: फ़्रेम जमता नहीं; जो फ़्रेम आप देख रहे हैं उसे प्राथमिकता; स्थिति हमेशा दिखती है (यह फ़्रेम, क्लिप, विफलता); पेंट मोड में अंतिम/ओवरले/मास्क; पारदर्शी ओवरले पीछे का दिखाता है।\n• 3D: FBX/OBJ के मेटल और रफ़नेस मैप अब पढ़े जाते हैं।\n• AI अपस्केल: होम पर अपना टूल (वीडियो और फ़ैक्टर चुनें); उसी मॉडल के साथ 2.5–3× तेज़।\n• Real Camera: 3D सीन के ऐड मेनू में — कैमरा फ़ोन के साथ चलता है और रिकॉर्ड गति को कीफ़्रेम में बदलता है।</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">भरें</string>
@@ -3604,6 +3617,25 @@
     <string name="roto_progress">%2$d में से %1$d ट्रैक हो रहे हैं</string>
     <string name="roto_done">हो गया</string>
     <string name="roto_hint">वस्तु को हरे रंग से पेंट करें; हिस्से हटाने के लिए पृष्ठभूमि चुनें। दूसरे फ़्रेम के स्ट्रोक अगले फ़्रेम अपडेट करते हैं।</string>
+    <string name="real_camera_title">Real Camera</string>
+    <string name="real_camera_hint">फ़ोन हिलाएँ: 3D कैमरा साथ चलता है। रिकॉर्ड टाइमलाइन चलाता है और गति को कीफ़्रेम के रूप में सहेजता है।</string>
+    <string name="real_camera_record">रिकॉर्ड</string>
+    <string name="real_camera_stop">रोकें</string>
+    <string name="real_camera_recording">रिकॉर्ड हो रहा है… फ़्रेम %1$d</string>
+    <string name="real_camera_recenter">फिर से केंद्र करें</string>
+    <string name="real_camera_invert">उलटें</string>
+    <string name="real_camera_sensitivity">संवेदनशीलता</string>
+    <string name="real_camera_done">पूर्ण</string>
+    <string name="real_camera_no_sensor">इस डिवाइस में जायरोस्कोप नहीं है: Real Camera यहाँ काम नहीं करेगा।</string>
+    <string name="roto_frame_ready">यह फ़्रेम: कटआउट तैयार</string>
+    <string name="roto_frame_pending">यह फ़्रेम: कटआउट की गणना हो रही है…</string>
+    <string name="roto_clip_status">क्लिप: %2$d में से %1$d फ़्रेम कटे</string>
+    <string name="roto_failed">किसी फ़्रेम पर प्रसार विफल रहा। एक और स्ट्रोक बनाएँ या फिर से प्रसार करें।</string>
+    <string name="roto_view_label">देखें</string>
+    <string name="roto_view_final">अंतिम</string>
+    <string name="roto_view_overlay">ओवरले</string>
+    <string name="roto_view_mask">मास्क</string>
+    <string name="roto_propagate_count">क्लिप में प्रसार (%1$d फ़्रेम)</string>
     <string name="fxl_roto_contrast">कंट्रास्ट</string>
     <string name="fxl_roto_smooth">स्मूद</string>
     <string name="fxl_roto_chatter">कंपन कम करें</string>

@@ -164,6 +164,23 @@ AUREA_TEST(ExportRecovery, GltfExternalBuffersAndImagesAreDependencyChecked) {
     AUREA_CHECK_EQ(recovery::validate_sources(package).code(), Errc::ChecksumMismatch);
 }
 
+AUREA_TEST(ExportRecovery, FbxAndObjModelsFreezeByTheirOwnFile) {
+    // Beta 0.1.x: um modelo FBX/OBJ na timeline fazia o export V2 recusar na
+    // largada (NotSupported). O arquivo do modelo e a dependencia verificada.
+    Files files; const auto fbx = files.add("personagem.fbx"), obj = files.add("cubo.obj");
+    AUREA_CHECK(put(fbx, "Kaydara FBX Binary  ")); AUREA_CHECK(put(obj, "v 0 0 0 v 1 0 0 v 0 1 0 f 1 2 3"));
+    auto p = project();
+    Asset a; a.kind = AssetKind::Model3D; a.sourcePath = fbx; (void)p.add_asset(a);
+    Asset b; b.kind = AssetKind::Model3D; b.sourcePath = obj; (void)p.add_asset(b);
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    const Status captured = recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package);
+    AUREA_CHECK(captured.ok());
+    AUREA_CHECK_EQ(package.dependencies.size(), usize{2});
+    AUREA_CHECK(recovery::fingerprint_sources(package).ok()); AUREA_CHECK(recovery::validate_sources(package).ok());
+    AUREA_CHECK(put(fbx, "Kaydara FBX Binary  x"));
+    AUREA_CHECK_EQ(recovery::validate_sources(package).code(), Errc::ChecksumMismatch);
+}
+
 AUREA_TEST(ExportRecovery, UnsupportedEphemeralSourcesFailWithoutChangingEditor) {
     auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = "fd:123"; const auto id = p.add_asset(a);
     recovery::Package package; std::unique_ptr<Project> frozen;

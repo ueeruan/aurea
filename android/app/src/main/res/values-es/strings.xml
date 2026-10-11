@@ -902,6 +902,19 @@ para editar la curva.</string>
     <string name="donation_export_note">La exportación continúa. Usa el código o enlace cuando termine.</string>
     <string name="donation_copied">Copiado al portapapeles.</string>
     <string name="ai_upscale_title">Escalado de vídeo con IA</string>
+    <string name="upscale_title">Upscale con IA</string>
+    <string name="upscale_hint">Elige un video de la galería y el factor. La red neuronal rehace cada fotograma en el dispositivo y el video en alta resolución queda en Películas/Aurea. El video también se convierte en un proyecto para editar después.</string>
+    <string name="upscale_pick">Elegir video</string>
+    <string name="upscale_factor">Factor</string>
+    <string name="upscale_result">Entrada %1$d × %2$d → salida %3$d × %4$d</string>
+    <string name="upscale_start">Mejorar resolución</string>
+    <string name="upscale_preparing">Preparando el video…</string>
+    <string name="upscale_processing">Mejorando la resolución</string>
+    <string name="upscale_time_note">Tarda unos minutos: cada fotograma pasa por la red neuronal en el dispositivo. Mantén Aurea abierto.</string>
+    <string name="upscale_done">Video listo</string>
+    <string name="upscale_open">Abrir</string>
+    <string name="upscale_share">Compartir</string>
+    <string name="upscale_again">Otro video</string>
     <string name="ai_upscale_note">Modelo para anime e ilustración. Procesa por bloques sin bloquear la interfaz. La resolución elegida abajo es la calidad final.</string>
     <string name="ai_upscale_dimensions">IA %1$dx · entrada %2$d × %3$d → salida %4$d × %5$d</string>
     <string name="licenses_title">Licencias · IA</string>
@@ -1140,7 +1153,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea Beta 0.1.3 (2173) • 11/10/2026\n\n• Eliminar capa vuelve al encabezado, con deshacer y protección de capas bloqueadas.\n• Los controles de color, relleno y contorno de formas vuelven a estar disponibles.\n• La vista previa y el 3D reducen las texturas temporales y liberan la precarga inactiva antes de escenas pausadas.\n• Vulkan aísla las funciones de cada dispositivo y gestiona errores de mapeo y recuperación de la presentación.\n• Metal y OpenGL ES mejoran el tratamiento de errores de acceso a búferes.\n• Los botones de silencio y velocidad están disponibles para audio y vídeo.\n• Se conservan la resolución, la tasa de bits, los efectos y las muestras de desenfoque elegidos.\n• Notas actuales e identificación correcta de versión y compilación.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.4 (2174) • 11/10/2026\n\n• Exportación: los proyectos con 3D o motion blur vuelven a exportar (se rechazaban modelos FBX/OBJ; el presupuesto de GPU rechazaba las texturas extra). Un medio que no se puede congelar ya no tumba la exportación.\n• Vista previa más fluida: la GPU ya no espera entre pases de cada fotograma, la memoria no se libera en cada fotograma, los recortes de texto y blur reutilizan destinos.\n• Rotobrush: el fotograma no se congela; el fotograma que miras tiene prioridad; estado siempre visible (este fotograma, clip, fallo); Final/Superposición/Máscara dentro del modo pintar; superposición translúcida muestra lo que está detrás.\n• 3D: ahora se leen los mapas de metal y rugosidad de FBX/OBJ.\n• Upscale con IA: herramienta propia en Inicio (elige el video y el factor); 2,5 a 3× más rápido con el mismo modelo.\n• Real Camera: en el menú de añadir de la escena 3D — la cámara sigue al teléfono y Grabar convierte el movimiento en fotogramas clave.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -3608,6 +3621,25 @@ para editar la curva.</string>
     <string name="roto_progress">Propagando %1$d de %2$d</string>
     <string name="roto_done">Listo</string>
     <string name="roto_hint">Pinta el objeto en verde; cambia a Fondo para quitar partes. Los trazos en otro cuadro actualizan los siguientes.</string>
+    <string name="real_camera_title">Real Camera</string>
+    <string name="real_camera_hint">Mueve el teléfono: la cámara 3D lo sigue. Grabar reproduce la línea de tiempo y guarda el movimiento como fotogramas clave.</string>
+    <string name="real_camera_record">Grabar</string>
+    <string name="real_camera_stop">Detener</string>
+    <string name="real_camera_recording">Grabando… fotograma %1$d</string>
+    <string name="real_camera_recenter">Recentrar</string>
+    <string name="real_camera_invert">Invertir</string>
+    <string name="real_camera_sensitivity">Sensibilidad</string>
+    <string name="real_camera_done">Listo</string>
+    <string name="real_camera_no_sensor">Este dispositivo no tiene giroscopio: Real Camera no funciona aquí.</string>
+    <string name="roto_frame_ready">Este fotograma: recorte listo</string>
+    <string name="roto_frame_pending">Este fotograma: calculando el recorte…</string>
+    <string name="roto_clip_status">Clip: %1$d de %2$d fotogramas con recorte</string>
+    <string name="roto_failed">La propagación falló en algún fotograma. Pinta un trazo más o propaga de nuevo.</string>
+    <string name="roto_view_label">Ver</string>
+    <string name="roto_view_final">Final</string>
+    <string name="roto_view_overlay">Superposición</string>
+    <string name="roto_view_mask">Máscara</string>
+    <string name="roto_propagate_count">Propagar clip (%1$d fotogramas)</string>
     <string name="fxl_roto_contrast">Contraste</string>
     <string name="fxl_roto_smooth">Suavizar</string>
     <string name="fxl_roto_chatter">Reducir vibración</string>

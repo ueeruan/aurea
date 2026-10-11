@@ -180,15 +180,18 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
             if (planFinal_) { localAiPending_ |= 2u; return none; }
             incomplete_ = true;
             // Preview: segura a textura de um quadro vizinho já pronto (melhor
-            // atrasado que piscando o original), com o instante DELE.
+            // atrasado que piscando o original). TOCANDO, o vídeo acompanha o
+            // instante dele (recorte e imagem casam); PARADO/scrub, o vídeo
+            // fica no quadro atual com o recorte aproximado - prender o vídeo
+            // num quadro antigo era o "quadro congelado" ao pintar.
             for (i64 d = 1; d <= 6 && l.kind == LayerKind::Video; ++d) {
                 for (const i64 f : {frame - d, frame + d}) {
                     if (f < 0) continue;
                     auto it = depthTex_.find(tex_key(f));
                     if (it == depthTex_.end()) continue;
                     it->second.lastFrame = frameNumber_;
-                    return DepthMapResult{it->second.texture, 0.0f, 1.0f, false,
-                                          static_cast<i64>(std::llround(static_cast<f64>(f) * 1e6 / src.fps))};
+                    const i64 pinUs = planPlayback_ ? static_cast<i64>(std::llround(static_cast<f64>(f) * 1e6 / src.fps)) : -1;
+                    return DepthMapResult{it->second.texture, 0.0f, 1.0f, false, pinUs};
                 }
             }
             return none;
@@ -250,6 +253,43 @@ std::shared_ptr<const std::vector<f32>> Renderer::roto_cached_matte(const Compos
     return roto_->cached(roto_track(comp, layer, &instance, asset), strokes, std::max<i64>(0, frame));
 } catch (...) {
     return nullptr;
+}
+
+bool Renderer::roto_status(const Project& project, const Composition& comp, const Layer& layer,
+                           const EffectInstance& instance, i64 sourceFrame, i64* out8) noexcept try {
+    if (!out8) return false;
+    for (u32 i = 0; i < 8; ++i) out8[i] = 0;
+    ai::RotoStrokes strokes;
+    if (!ai::roto_instance_strokes(instance, strokes) || strokes.empty()) return false;
+    out8[7] = 1;
+    const Asset* asset = project.asset(layer.source);
+    const u64 track = roto_track(&comp, layer, &instance, asset);
+    i64 first = 0, last = 0;
+    if (layer.kind == LayerKind::Video && asset && asset->has_video()) {
+        const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+        const f64 srcFps = asset->video.fps > 0.0 ? asset->video.fps : fps;
+        const i64 total = asset->video.frameCount.value > 0 ? asset->video.frameCount.value
+                                                            : std::max<i64>(1, std::llround(srcFps * 10));
+        auto source_index = [&](i64 timelineTime) {
+            const f64 sf = layer.source_frame(FrameIndex{timelineTime});
+            if (!std::isfinite(sf)) return i64{0};
+            return std::clamp<i64>(static_cast<i64>(std::floor(sf / fps * srcFps + 1e-3)), 0, total - 1);
+        };
+        first = source_index(layer.start.value);
+        last = source_index(std::max(layer.start.value, layer.end.value - 1));
+        if (first > last) std::swap(first, last);
+        for (const ai::RotoStroke& s : strokes) { first = std::min(first, s.frame); last = std::max(last, s.frame); }
+        first = std::max<i64>(0, first); last = std::min(total - 1, last);
+    }
+    out8[6] = last - first + 1;
+    if (!roto_) return true;   // traços sem serviço ainda: nada calculado
+    const auto p = roto_->progress();
+    if (p.track == track) { out8[0] = p.done; out8[1] = p.total; out8[2] = p.running ? 1 : 0; out8[3] = p.failed ? 1 : 0; }
+    out8[4] = roto_->ready(track, strokes, sourceFrame) ? 1 : 0;
+    out8[5] = roto_->ready_count(track, strokes, first, last);
+    return true;
+} catch (...) {
+    return false;
 }
 
 } // namespace aurea

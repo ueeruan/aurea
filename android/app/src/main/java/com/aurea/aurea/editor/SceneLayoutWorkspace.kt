@@ -119,6 +119,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                     if (addMenu) ShellPopupMenu(listOf(
                         PopupItem(stringResource(R.string.sh_add_text_3d), false) { addMenu = false; store.addText3D() },
                         PopupItem(stringResource(R.string.panel_camera_3d), false) { addMenu = false; store.addCamera() },
+                        PopupItem(stringResource(R.string.real_camera_title), false) { addMenu = false; store.startRealCamera() },
                         PopupItem(stringResource(R.string.sh_add_null_3d), false) { addMenu = false; store.addNull(true) },
                         PopupItem(stringResource(R.string.scene_light_directional), false) { addMenu = false; store.addLight(0) },
                         PopupItem(stringResource(R.string.scene_light_point), false) { addMenu = false; store.addLight(1) },

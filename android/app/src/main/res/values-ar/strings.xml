@@ -924,6 +924,19 @@
     <string name="donation_export_note">يستمر التصدير. استخدم الرمز أو الرابط بعد انتهائه.</string>
     <string name="donation_copied">تم النسخ إلى الحافظة.</string>
     <string name="ai_upscale_title">تكبير الفيديو بالذكاء الاصطناعي</string>
+    <string name="upscale_title">رفع الدقة بالذكاء الاصطناعي</string>
+    <string name="upscale_hint">اختر فيديو من المعرض والمُعامل. تعيد الشبكة العصبية بناء كل إطار على الجهاز ويُحفظ الفيديو عالي الدقة في Movies/Aurea. يتحول الفيديو أيضًا إلى مشروع يمكن تعديله لاحقًا.</string>
+    <string name="upscale_pick">اختيار فيديو</string>
+    <string name="upscale_factor">المُعامل</string>
+    <string name="upscale_result">المدخل %1$d × %2$d ← المخرج %3$d × %4$d</string>
+    <string name="upscale_start">رفع الدقة</string>
+    <string name="upscale_preparing">جارٍ تجهيز الفيديو…</string>
+    <string name="upscale_processing">جارٍ رفع الدقة</string>
+    <string name="upscale_time_note">يستغرق بضع دقائق: يمر كل إطار عبر الشبكة العصبية على الجهاز. أبقِ Aurea مفتوحًا.</string>
+    <string name="upscale_done">الفيديو جاهز</string>
+    <string name="upscale_open">فتح</string>
+    <string name="upscale_share">مشاركة</string>
+    <string name="upscale_again">فيديو آخر</string>
     <string name="ai_upscale_note">نموذج للأنمي والرسوم. يعالج أجزاء الصورة دون تجميد الواجهة. الدقة المختارة أدناه هي جودة الإخراج النهائية.</string>
     <string name="ai_upscale_dimensions">الذكاء الاصطناعي ⁨%1$dx⁩ · الإدخال ⁨%2$d × %3$d⁩ ← الإخراج ⁨%4$d × %5$d⁩</string>
     <string name="licenses_title">التراخيص · الذكاء الاصطناعي</string>
@@ -1166,7 +1179,7 @@
     <string name="consent_title">الموافقة والمسؤولية</string>
     <string name="consent_accept">موافقة ومتابعة</string>
     <string name="consent_body">Aurea أداة احترافية لتحرير المحتوى الرقمي وإنشائه وإنتاجه. باستخدام التطبيق، يقر المستخدم بأنه يتحمل المسؤولية الكاملة عن المحتوى الذي ينشئه أو يحرره أو يستورده أو يصدره أو ينشره أو يشاركه عبر المنصة.\n\nلا يتحكم Aurea في استخدام الأداة لأنشطة غير قانونية أو مسيئة أو احتيالية أو ضارة أو تنتهك حقوق الآخرين، ولا يشجع هذا الاستخدام أو يدعمه أو يصرح به.\n\nيتحمل المستخدم مسؤولية التأكد من امتلاكه التصاريح والتراخيص والحقوق اللازمة للمواد المستخدمة، بما فيها الصور ومقاطع الفيديو والموسيقى والعلامات التجارية والنماذج والملفات وغيرها من المحتويات المحمية.\n\nلا تعني الحرية الإبداعية التي يوفرها Aurea موافقة التطبيق أو مشاركته أو مسؤوليته عما يقرر كل مستخدم إنتاجه أو فعله باستخدام الأداة.\n\nيوافق المستخدم على استخدام Aurea وفقاً للقانون المعمول به ويتحمل مسؤولية أفعاله والمحتوى المنتج أو الموزع عبر التطبيق.\n\nإلى أقصى حد يسمح به القانون المعمول به، لا يتحمل Aurea والمسؤولون عنه المسؤولية عن الأفعال التي يقوم بها المستخدم وحده، أو إساءة استخدام الأداة، أو العواقب الناجمة عن المحتوى الذي ينشئه المستخدم نفسه أو ينشره أو يشاركه.\n\nيوفر Aurea الأداة. ويتحمل المستخدم مسؤولية الطريقة التي يختار استخدامها بها.\n\nبالمتابعة، يقر المستخدم بأنه قرأ هذه الشروط وفهمها ووافق عليها.</string>
-    <string name="release_notes_body">Aurea Beta 0.1.3 (2173) • 11/10/2026\n\n• عاد زر حذف الطبقة إلى الشريط العلوي مع الحفاظ على التراجع وحماية الطبقات المقفلة.\n• عادت أدوات لون تعبئة الأشكال وحدودها.\n• تستخدم المعاينة والمشاهد ثلاثية الأبعاد خامات مؤقتة أقل وتحرر الجلب المسبق غير النشط قبل المشاهد المتوقفة.\n• يعزل Vulkan وظائف كل جهاز ويعالج أخطاء ربط الذاكرة واستعادة العرض.\n• تحسنت معالجة أخطاء الوصول إلى المخازن في Metal وOpenGL ES.\n• تتوفر أزرار كتم الصوت والسرعة للصوت والفيديو.\n• تبقى الدقة ومعدل البت والمؤثرات وعينات ضبابية الحركة المختارة محفوظة.\n• ملاحظات تحديث جديدة وتعريف صحيح للإصدار والبناء.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.4 (2174) • 11/10/2026\n\n• التصدير: مشاريع 3D أو motion blur تُصدَّر مجددًا (كانت نماذج FBX/OBJ تُرفض؛ وكانت ميزانية GPU ترفض القوام الإضافي). الوسائط التي لا يمكن تجميدها لم تعد تُسقط التصدير.\n• معاينة أكثر سلاسة: لم تعد GPU تنتظر بين تمريرات كل إطار، ولا تُحرَّر الذاكرة كل إطار، وتُعاد الاستفادة من أهداف قصّ النص والضبابية.\n• Rotobrush: الإطار لا يتجمد؛ الإطار الذي تنظر إليه له الأولوية؛ الحالة ظاهرة دائمًا (هذا الإطار، المقطع، الفشل)؛ النهائي/تراكب/قناع داخل وضع الرسم؛ التراكب نصف الشفاف يُظهر ما خلفه.\n• 3D: تُقرأ الآن خرائط المعدن والخشونة في FBX/OBJ.\n• رفع الدقة بالذكاء الاصطناعي: أداة مستقلة في الرئيسية (اختر الفيديو والمُعامل)؛ أسرع بـ2.5 إلى 3 مرات بالنموذج نفسه.\n• Real Camera: في قائمة إضافة مشهد 3D — تتبع الكاميرا الهاتف ويحوّل «تسجيل» الحركة إلى إطارات مفتاحية.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">تعبئة</string>
@@ -3646,6 +3659,25 @@
     <string name="roto_progress">جارٍ التتبع %1$d من %2$d</string>
     <string name="roto_done">تم</string>
     <string name="roto_hint">ارسم العنصر بالأخضر؛ بدّل إلى الخلفية لإزالة أجزاء. الضربات في إطار آخر تحدّث الإطارات التالية.</string>
+    <string name="real_camera_title">Real Camera</string>
+    <string name="real_camera_hint">حرّك الهاتف: تتبعه الكاميرا ثلاثية الأبعاد. «تسجيل» يشغّل الخط الزمني ويحفظ الحركة كإطارات مفتاحية.</string>
+    <string name="real_camera_record">تسجيل</string>
+    <string name="real_camera_stop">إيقاف</string>
+    <string name="real_camera_recording">جارٍ التسجيل… الإطار %1$d</string>
+    <string name="real_camera_recenter">إعادة التوسيط</string>
+    <string name="real_camera_invert">عكس</string>
+    <string name="real_camera_sensitivity">الحساسية</string>
+    <string name="real_camera_done">تم</string>
+    <string name="real_camera_no_sensor">لا يحتوي هذا الجهاز على جيروسكوب: لا تعمل Real Camera هنا.</string>
+    <string name="roto_frame_ready">هذا الإطار: القصّ جاهز</string>
+    <string name="roto_frame_pending">هذا الإطار: يجري حساب القصّ…</string>
+    <string name="roto_clip_status">المقطع: %1$d من %2$d إطارًا مقصوصًا</string>
+    <string name="roto_failed">فشل الانتشار في أحد الإطارات. ارسم ضربة أخرى أو كرّر الانتشار.</string>
+    <string name="roto_view_label">عرض</string>
+    <string name="roto_view_final">النهائي</string>
+    <string name="roto_view_overlay">تراكب</string>
+    <string name="roto_view_mask">قناع</string>
+    <string name="roto_propagate_count">نشر على المقطع (%1$d إطارًا)</string>
     <string name="fxl_roto_contrast">التباين</string>
     <string name="fxl_roto_smooth">تنعيم</string>
     <string name="fxl_roto_chatter">تقليل الارتجاف</string>

@@ -365,18 +365,8 @@ private fun Options(
             onChange(options.copy(trimToContent = it == contentRange))
         }
 
-        Label(stringResource(R.string.ai_upscale_title))
-        val off = stringResource(R.string.common_off)
-        Chips(listOf(off, "2×", "4×"), if (options.aiUpscale == 0) off else "${options.aiUpscale}×") { label ->
-            val factor = when (label) { "2×" -> 2; "4×" -> 4; else -> 0 }
-            onChange(options.copy(aiUpscale = factor, shortSide = if (factor > 0) short * factor else min(1080, max(720, short))))
-        }
-        if (options.aiUpscale > 0) {
-            Text(stringResource(R.string.ai_upscale_note), style = muted, modifier = Modifier.padding(top = 8.dp))
-            val factor = options.aiUpscale
-            Text(stringResource(R.string.ai_upscale_dimensions, factor, ((w + factor * 2 - 1) / (factor * 2)) * 2,
-                ((h + factor * 2 - 1) / (factor * 2)) * 2, w, h), style = muted, modifier = Modifier.padding(top = 6.dp))
-        }
+        // Upscale com IA saiu daqui: é a ferramenta própria da Home
+        // (upscale/UpscaleScreen.kt), onde a pessoa escolhe o vídeo e o fator.
 
         Spacer(Modifier.height(12.dp))
         SummaryRow(stringResource(R.string.editor_video), listOf("$w × $h", "${fmt(fps)} fps", codecName).joinToString(" · ") { ltrPlain(it) })

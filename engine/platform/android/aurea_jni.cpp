@@ -2540,18 +2540,20 @@ AUREA_JNI jboolean AUREA_FN(nativeRotoSetView)(JNIEnv*, jclass, jlong handle, jl
     NativeContext* c = ctx_of(handle);
     return c && c->engine.roto_set_view(static_cast<u64>(layer), static_cast<u32>(effectId), static_cast<u32>(std::max(0, mode))) ? JNI_TRUE : JNI_FALSE;
 }
-/// [feitos, total, rodando, falhou, traços aqui, traços total]
+/// [propagados, total, propagando, falhou, traços aqui, traços total,
+///  quadro atual pronto, quadros do clipe prontos, quadros do clipe, há traços]
 AUREA_JNI jlongArray AUREA_FN(nativeRotoStatus)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId) {
     NativeContext* c = ctx_of(handle);
-    jlong v[6]{};
+    jlong v[10]{};
     if (c) {
-        i64 p[4]{}; u32 info[3]{};
-        (void)c->engine.roto_progress(p);
+        i64 st[8]{}; u32 info[3]{};
+        (void)c->engine.roto_status(static_cast<u64>(layer), static_cast<u32>(effectId), st);
         (void)c->engine.roto_stroke_info(static_cast<u64>(layer), static_cast<u32>(effectId), info);
-        v[0] = p[0]; v[1] = p[1]; v[2] = p[2]; v[3] = p[3]; v[4] = info[0]; v[5] = info[1];
+        v[0] = st[0]; v[1] = st[1]; v[2] = st[2]; v[3] = st[3]; v[4] = info[0]; v[5] = info[1];
+        v[6] = st[4]; v[7] = st[5]; v[8] = st[6]; v[9] = st[7];
     }
-    jlongArray out = env->NewLongArray(6);
-    if (out) env->SetLongArrayRegion(out, 0, 6, v);
+    jlongArray out = env->NewLongArray(10);
+    if (out) env->SetLongArrayRegion(out, 0, 10, v);
     return out;
 }
 

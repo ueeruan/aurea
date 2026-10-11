@@ -633,7 +633,10 @@ Status CommandListImpl::finish_pass() noexcept {
     if (!backend_->recordingStatus_.ok()) return backend_->recordingStatus_;
     if (!frame_ || !cmd_) return Status{Errc::InvalidState, "sem frame"};
     ++frame_->passesInCommandBuffer;
-    if (!backend_->passesPerCommandBuffer_
+    // So o export (offscreen) e fatiado: a previa manda o quadro inteiro num
+    // job, como antes - fatiar a cada 8 passes e esperar a GPU entre fatias
+    // custava 2 a 7 esperas por quadro com o renderMutex_ preso ("travando").
+    if (!backend_->passesPerCommandBuffer_ || !frame_->offscreen
         || frame_->passesInCommandBuffer < backend_->passesPerCommandBuffer_
         || inRenderPass_ || labelDepth_ || !frame_->timerStack.empty()) return OkStatus;
 
@@ -855,8 +858,10 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
             run_deferred(done);
     }
     // Completed upload/readback retirements can leave large empty blocks.
-    // Return only genuinely unused backing before next-frame admission.
-    allocator_.trim_empty_blocks();
+    // Return only genuinely unused backing before next-frame admission - mas
+    // nao a cada quadro: vkFreeMemory/vkAllocateMemory alternando a cada
+    // frame (bloco zerado pelo kernel) custava milissegundos na previa.
+    if (++trimCountdown_ >= 90) { trimCountdown_ = 0; allocator_.trim_empty_blocks(); }
 
     FrameContext& f = frames_[frameCursor_];
     if (f.submitted) {

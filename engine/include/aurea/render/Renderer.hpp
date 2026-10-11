@@ -580,6 +580,8 @@ public:
     void fill_object_environment(const Layer& l, scene3d::SceneInstance& inst) noexcept;
     [[nodiscard]] const scene3d::SceneStats& scene_stats() const noexcept { return scene3d_.stats(); }
     [[nodiscard]] bool environment_pending() const noexcept { return scene3d_.environment_pending(); }
+    /// Uploads (modelo, textura, imagem) ainda na fila: progresso de GPU para o export.
+    [[nodiscard]] usize pending_uploads() const noexcept { return uploads_.size(); }
     [[nodiscard]] scene3d::SceneRenderer& scene_renderer() noexcept { return scene3d_; }
     [[nodiscard]] u64 scene_resident_bytes() const noexcept { return scene3d_.resident_bytes(); }
     [[nodiscard]] u64 static_pose_cache_bytes() const noexcept { return staticPoseBytes_; }
@@ -639,6 +641,13 @@ public:
     /// "Propagar clipe": todos os quadros da fonte da camada no worker do Roto.
     bool roto_propagate(const Project& project, const Composition& comp, const Layer& layer,
                         const EffectInstance& instance, MediaManager* media) noexcept;
+    /// Estado do Roto DESTA trilha (camada + instância), para a UI:
+    /// out[0] quadros propagados, [1] total da propagação, [2] propagando (0/1),
+    /// [3] falhou (0/1), [4] recorte do quadro `sourceFrame` pronto (0/1),
+    /// [5] quadros do clipe já com recorte válido, [6] quadros do clipe,
+    /// [7] há traços (0/1). Falso = camada sem Rotobrush com traços.
+    bool roto_status(const Project& project, const Composition& comp, const Layer& layer,
+                     const EffectInstance& instance, i64 sourceFrame, i64* out8) noexcept;
     void set_foreground_model_directory(std::string path);
 
     // --- Consultas -------------------------------------------------------------
@@ -1007,6 +1016,7 @@ private:
     const ImagePixels* (*planImageLookup_)(void*, AssetId) = nullptr;
     void* planImageCtx_ = nullptr;
     bool planFinal_ = false;
+    bool planPlayback_ = false;      ///< prepare() em DecodeMode::Playback (tocando)
     bool planDeferLocalAi_ = false;
     u32 localAiPending_ = 0;
     /// A composição, o projeto, a mídia e o instante do `prepare` em curso

@@ -284,6 +284,7 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { MeshWarpStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { PuppetStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RotoPaintStageOverlay() } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { RealCameraStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }
             if model.panel == .tracking && model.cameraTrackerVisible && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
             if let layer = model.selectedLayer, model.selection.count == 1, layer.locked {
@@ -1661,6 +1662,7 @@ private struct AddLayerSheet: View {
                         card("sh_add_model_3d", glyph: CupertinoGlyph.Cube, accent: true) { files(.model) }
                         card("sh_add_text_3d", glyph: ShellGlyph.TextformatAlt, color: ShellColors.text3D) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close() }
                         card("panel_camera_3d", glyph: CupertinoGlyph.CameraFill, accent: true) { model.addCamera(); close() }
+                        card("real_camera_title", glyph: CupertinoGlyph.CameraFill, accent: true) { model.startRealCamera(); close() }
                         drawnCard("sh_add_null_3d", kind: -1) { model.addNull(threeD: true); close() }
                         }
                     case 6:
@@ -2023,6 +2025,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                     Menu {
                         Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25) }
                         Button(AureaText.t("panel_camera_3d")) { model.addCamera() }
+                        Button(AureaText.t("real_camera_title")) { model.startRealCamera() }
                         Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
                         Button(AureaText.t("scene_light_directional")) { model.addLight(0) }
                         Button(AureaText.t("scene_light_point")) { model.addLight(1) }

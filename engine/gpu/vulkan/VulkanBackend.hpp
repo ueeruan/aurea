@@ -553,6 +553,7 @@ private:
     // Bound temporal 3D batches without changing resolution or sample count.
     // end_frame completes each primary before admitting the next GPU batch.
     u32 passesPerCommandBuffer_ = 8;
+    u32 trimCountdown_ = 0;   ///< begin_frame: blocos vazios devolvidos a cada ~90 quadros, nao a cada um
     bool debugUtils_ = false;
     bool timersEnabled_ = false;
     f32 timestampPeriod_ = 1.0f;

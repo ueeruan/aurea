@@ -27,6 +27,7 @@ import com.aurea.aurea.R
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.editor.EditorScreen
 import com.aurea.aurea.home.HomeScreen
+import com.aurea.aurea.upscale.UpscaleScreen
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.Screen
 import com.aurea.aurea.ui.ds.AureaAlert
@@ -59,6 +60,7 @@ fun AureaApp(store: EditorStore) {
                 when (screen) {
                     Screen.Home -> HomeScreen(store)
                     Screen.Editor -> EditorScreen(store)
+                    Screen.Upscale -> UpscaleScreen(store)
                 }
             }
             store.toast?.let { msg ->

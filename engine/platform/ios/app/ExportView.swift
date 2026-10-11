@@ -319,7 +319,7 @@ struct ExportView: View {
                         model.exportOptions.trimToContent = $0 == AureaText.t("export_range_content")
                     }
 
-                    upscaleOptions
+                    // Upscale com IA saiu daqui: é a ferramenta própria da Home (UpscaleView.swift).
                     exportSummary
                 }.padding(.horizontal, 14).padding(.bottom, 14)
             }
@@ -692,7 +692,7 @@ private struct ExportFilesPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
 }
 
-private struct ExportShareSheet: UIViewControllerRepresentable {
+struct ExportShareSheet: UIViewControllerRepresentable {
     let url: URL
     func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [url], applicationActivities: nil) }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
@@ -714,7 +714,7 @@ private struct ExportQuickLook: UIViewControllerRepresentable {
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { url as NSURL }
     }
 }
-private struct ExportMoviePlayer: View {
+struct ExportMoviePlayer: View {
     let url: URL
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?

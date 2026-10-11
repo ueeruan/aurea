@@ -572,6 +572,7 @@ private fun Model3DTab(store: EditorStore, close: () -> Unit) {
             AddItem(stringResource(R.string.sh_add_text_3d), ShellGlyph.TextformatAlt, ShellColors.Text3D) { store.addText3D(); close() },
             AddItem(stringResource(R.string.scene_workspace), CupertinoGlyph.Cube, AureaColors.Accent) { close(); store.enterSceneEditor() },
             AddItem(stringResource(R.string.panel_camera_3d), CupertinoGlyph.CameraFill, AureaColors.Accent) { store.addCamera(); close() },
+            AddItem(stringResource(R.string.real_camera_title), CupertinoGlyph.CameraFill, AureaColors.Accent) { store.startRealCamera(); close() },
             AddItem(stringResource(R.string.sh_add_null_3d), draw = { drawNullIcon() }) { store.addNull(true); close() },
         ),
         hint = stringResource(R.string.sh_add_model_3d_hint) + "\n\n" + stringResource(R.string.model3d_risk_warning),

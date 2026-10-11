@@ -3435,15 +3435,18 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 
 - (NSArray<NSNumber *> *)rotoStatusForEffect:(uint32_t)effectId layer:(long long)layerId {
-    long long v[6] = {0, 0, 0, 0, 0, 0};
+    // [propagados, total, propagando, falhou, traços aqui, traços total,
+    //  quadro atual pronto, quadros do clipe prontos, quadros do clipe, há traços]
+    long long v[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     if (auto* e = self.engine) {
-        aurea::i64 p[4] = {0, 0, 0, 0};
+        aurea::i64 st[8] = {0, 0, 0, 0, 0, 0, 0, 0};
         aurea::u32 info[3] = {0, 0, 0};
-        (void)e->roto_progress(p);
+        (void)e->roto_status(static_cast<aurea::u64>(layerId), effectId, st);
         (void)e->roto_stroke_info(static_cast<aurea::u64>(layerId), effectId, info);
-        v[0] = p[0]; v[1] = p[1]; v[2] = p[2]; v[3] = p[3]; v[4] = info[0]; v[5] = info[1];
+        v[0] = st[0]; v[1] = st[1]; v[2] = st[2]; v[3] = st[3]; v[4] = info[0]; v[5] = info[1];
+        v[6] = st[4]; v[7] = st[5]; v[8] = st[6]; v[9] = st[7];
     }
-    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5])];
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5]), @(v[6]), @(v[7]), @(v[8]), @(v[9])];
 }
 
 - (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId {

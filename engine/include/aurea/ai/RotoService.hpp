@@ -65,7 +65,13 @@ public:
     [[nodiscard]] MattePtr compute(u64 track, const RotoStrokes& strokes, const Source& source, i64 frame,
                                    u64 deadlineNs = 0);
     /// Preview: agenda a cadeia até `frame` no worker (o pedido mais novo vence).
+    /// Durante uma propagação da mesma trilha o quadro vira o FOCO: o worker
+    /// o calcula antes de seguir o trecho (o quadro pintado aparece já).
     void request(u64 track, const RotoStrokes& strokes, const Source& source, i64 frame);
+    /// O recorte de `frame` está pronto para estes traços (sem descompactar).
+    [[nodiscard]] bool ready(u64 track, const RotoStrokes& strokes, i64 frame) const;
+    /// Quantos quadros de [first, last] já têm recorte válido para estes traços.
+    [[nodiscard]] i64 ready_count(u64 track, const RotoStrokes& strokes, i64 first, i64 last) const;
     /// "Propagar clipe": todos os quadros [first, last] no worker, com progresso.
     void propagate(u64 track, const RotoStrokes& strokes, const Source& source, i64 first, i64 last);
     [[nodiscard]] Progress progress() const;
@@ -109,6 +115,8 @@ private:
     mutable std::mutex queueMutex_;
     std::condition_variable wake_;
     std::unique_ptr<Job> pending_;
+    std::unique_ptr<Job> focus_;     ///< quadro pedido pela prévia enquanto uma propagação roda
+    bool runningSingle_ = false;     ///< o worker está num pedido de um quadro (interrompível)
     bool running_ = false;
     std::thread thread_;
     std::atomic<u64> generation_{0};

@@ -329,6 +329,7 @@ struct HomeView: View {
         .confirmationDialog("Aurea", isPresented: $homeMenu, titleVisibility: .visible) {
             Button(AureaText.t("home_tab_settings")) { select(.settings) }
             Button(AureaText.t("home_import_media")) { importing = true }
+            Button(AureaText.t("upscale_title")) { model.openUpscale() }
             Button(AureaText.t("project_file_import")) { importingProjectFile = true }
             Button(AureaText.t("report_title")) { reportingProblem = true }
             Button(AureaText.t("settings_group_about")) { homeInfo = "settings_group_about" }

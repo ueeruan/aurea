@@ -901,6 +901,19 @@ untuk mengedit kurvanya.</string>
     <string name="donation_export_note">Ekspor tetap berjalan. Gunakan kode atau tautan setelah selesai.</string>
     <string name="donation_copied">Disalin ke papan klip.</string>
     <string name="ai_upscale_title">Peningkat Resolusi Video AI</string>
+    <string name="upscale_title">Upscale dengan AI</string>
+    <string name="upscale_hint">Pilih video dari galeri dan faktornya. Jaringan saraf membangun ulang setiap bingkai di perangkat dan video resolusi tinggi tersimpan di Movies/Aurea. Video juga menjadi proyek untuk diedit nanti.</string>
+    <string name="upscale_pick">Pilih video</string>
+    <string name="upscale_factor">Faktor</string>
+    <string name="upscale_result">Masukan %1$d × %2$d → keluaran %3$d × %4$d</string>
+    <string name="upscale_start">Tingkatkan resolusi</string>
+    <string name="upscale_preparing">Menyiapkan video…</string>
+    <string name="upscale_processing">Meningkatkan resolusi</string>
+    <string name="upscale_time_note">Butuh beberapa menit: setiap bingkai melewati jaringan saraf di perangkat. Biarkan Aurea terbuka.</string>
+    <string name="upscale_done">Video siap</string>
+    <string name="upscale_open">Buka</string>
+    <string name="upscale_share">Bagikan</string>
+    <string name="upscale_again">Video lain</string>
     <string name="ai_upscale_note">Model untuk anime dan ilustrasi. Memproses per bagian tanpa membekukan antarmuka. Resolusi di bawah adalah kualitas keluaran akhir.</string>
     <string name="ai_upscale_dimensions">AI %1$dx · masukan %2$d × %3$d → keluaran %4$d × %5$d</string>
     <string name="licenses_title">Lisensi · AI</string>
@@ -1138,7 +1151,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea Beta 0.1.3 (2173) • 11/10/2026\n\n• Tombol hapus lapisan kembali di header, dengan urungkan dan perlindungan lapisan terkunci.\n• Kontrol warna isian dan garis tepi bentuk tersedia kembali.\n• Pratinjau dan 3D memakai lebih sedikit tekstur sementara dan melepas pramuat tidak aktif sebelum adegan dijeda.\n• Vulkan memisahkan fungsi tiap perangkat dan menangani kegagalan pemetaan memori serta pemulihan presentasi.\n• Metal dan OpenGL ES menangani kesalahan akses buffer dengan lebih baik.\n• Tombol bisukan dan kecepatan tersedia untuk audio dan video.\n• Resolusi, bitrate, efek, dan sampel motion blur yang dipilih tetap dipertahankan.\n• Catatan pembaruan terkini serta identifikasi versi dan build yang benar.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.4 (2174) • 11/10/2026\n\n• Ekspor: proyek dengan 3D atau motion blur bisa diekspor lagi (model FBX/OBJ ditolak; anggaran GPU menolak tekstur tambahan). Media yang tidak bisa dibekukan tidak lagi menggagalkan ekspor.\n• Pratinjau lebih mulus: GPU tidak lagi menunggu di antara pass setiap bingkai, memori tidak dilepas setiap bingkai, potongan teks dan blur memakai ulang target.\n• Rotobrush: bingkai tidak membeku; bingkai yang Anda lihat diprioritaskan; status selalu terlihat (bingkai ini, klip, gagal); Akhir/Lapisan/Masker di dalam mode gambar; lapisan tembus pandang memperlihatkan yang di belakang.\n• 3D: peta metal dan kekasaran FBX/OBJ kini dibaca.\n• Upscale dengan AI: alat tersendiri di Beranda (pilih video dan faktor); 2,5 hingga 3× lebih cepat dengan model yang sama.\n• Real Camera: di menu tambah adegan 3D — kamera mengikuti ponsel dan Rekam mengubah gerakan menjadi keyframe.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -3598,6 +3611,25 @@ untuk mengedit kurvanya.</string>
     <string name="roto_progress">Melacak %1$d dari %2$d</string>
     <string name="roto_done">Selesai</string>
     <string name="roto_hint">Lukis objek dengan hijau; ganti ke Latar untuk membuang bagian. Goresan di frame lain memperbarui frame berikutnya.</string>
+    <string name="real_camera_title">Real Camera</string>
+    <string name="real_camera_hint">Gerakkan ponsel: kamera 3D mengikuti. Rekam memutar lini masa dan menyimpan gerakan sebagai keyframe.</string>
+    <string name="real_camera_record">Rekam</string>
+    <string name="real_camera_stop">Berhenti</string>
+    <string name="real_camera_recording">Merekam… bingkai %1$d</string>
+    <string name="real_camera_recenter">Pusatkan ulang</string>
+    <string name="real_camera_invert">Balik</string>
+    <string name="real_camera_sensitivity">Sensitivitas</string>
+    <string name="real_camera_done">Selesai</string>
+    <string name="real_camera_no_sensor">Perangkat ini tidak punya giroskop: Real Camera tidak bisa dipakai di sini.</string>
+    <string name="roto_frame_ready">Bingkai ini: potongan siap</string>
+    <string name="roto_frame_pending">Bingkai ini: menghitung potongan…</string>
+    <string name="roto_clip_status">Klip: %1$d dari %2$d bingkai terpotong</string>
+    <string name="roto_failed">Propagasi gagal di suatu bingkai. Gambar satu goresan lagi atau propagasi ulang.</string>
+    <string name="roto_view_label">Lihat</string>
+    <string name="roto_view_final">Akhir</string>
+    <string name="roto_view_overlay">Lapisan</string>
+    <string name="roto_view_mask">Masker</string>
+    <string name="roto_propagate_count">Propagasi klip (%1$d bingkai)</string>
     <string name="fxl_roto_contrast">Kontras</string>
     <string name="fxl_roto_smooth">Haluskan</string>
     <string name="fxl_roto_chatter">Kurangi getaran</string>

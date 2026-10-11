@@ -292,6 +292,83 @@ final class AureaModel: ObservableObject {
 
     // --- Navegação ----------------------------------------------------------
     @Published var screen: Screen = .home
+
+    // =========================================================================
+    // Upscale com IA (UpscaleView.swift): ferramenta própria, fora do editor e
+    // da aba Exportar. O vídeo vira um projeto do tamanho dele e sai pelo
+    // export normal com `aiUpscale`. Par do Android: EditorStore.upscaleVideo.
+    // =========================================================================
+    enum UpscaleStage { case idle, preparing, done, failed }
+    @Published var upscaleStage: UpscaleStage = .idle
+    @Published var upscaleSourceName: String?
+    @Published var upscaleSourceSize: CGSize?
+    private var upscaleRequest: UUID?
+
+    func openUpscale() {
+        guard screen == .home, !exporting else { return }
+        upscaleStage = .idle
+        screen = .upscale
+    }
+
+    func closeUpscale() {
+        guard screen == .upscale, !exporting, upscaleStage != .preparing else { return }
+        upscaleRequest = nil
+        screen = .home
+        refreshProjectList()
+    }
+
+    func upscaleReset() {
+        if upscaleStage != .preparing { upscaleStage = .idle }
+    }
+
+    func upscaleVideo(url: URL, factor: UInt32) {
+        guard upscaleStage != .preparing, !exporting, factor == 2 || factor == 4, canChangeProject() else { return }
+        upscaleStage = .preparing
+        let request = UUID()
+        upscaleRequest = request
+        Task { @MainActor in
+            let asset = AVURLAsset(url: url)
+            var width: CGFloat = 0, height: CGFloat = 0, fps: Double = 30
+            if let track = try? await asset.loadTracks(withMediaType: .video).first {
+                if let size = try? await track.load(.naturalSize), let transform = try? await track.load(.preferredTransform) {
+                    let oriented = size.applying(transform)
+                    width = abs(oriented.width); height = abs(oriented.height)
+                }
+                if let rate = try? await track.load(.nominalFrameRate), rate >= 1, rate <= 240 { fps = Double(rate) }
+            }
+            guard upscaleRequest == request else { return }
+            guard width.isFinite, height.isFinite, width >= 2, height >= 2 else {
+                upscaleStage = .failed; toast = AureaText.t("import_failed"); return
+            }
+            let w = UInt32(width.rounded()) & ~UInt32(1), h = UInt32(height.rounded()) & ~UInt32(1)
+            let name = url.deletingPathExtension().lastPathComponent
+            upscaleSourceName = name
+            upscaleSourceSize = CGSize(width: CGFloat(w), height: CGFloat(h))
+            let title = "\(name) · Upscale \(factor)×"
+            guard newProject(width: w, height: h, fps: fps, title: title) else { upscaleStage = .failed; return }
+            importMedia(url: url, kind: .video)
+            // A importação é assíncrona (`importingMedia`); espera terminar.
+            let deadline = Date().addingTimeInterval(300)
+            while importingMedia, Date() < deadline, upscaleRequest == request {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            guard upscaleRequest == request else { return }
+            guard !importingMedia, layers.contains(where: { $0.kind == 1 }) || !layers.isEmpty else {
+                upscaleStage = .failed; return
+            }
+            _ = saveProject(writeThumbnail: false)
+            upscaleStage = .idle
+            exportOptions = ExportOptions()
+            exportOptions.aiUpscale = factor
+            exportOptions.shortSide = min(w, h) * factor
+            exportOptions.trimToContent = true
+            startExport()
+            // O fim do export vira "pronto" para a tela (ela observa exportedURL).
+            while exporting, upscaleRequest == request { try? await Task.sleep(nanoseconds: 250_000_000) }
+            guard upscaleRequest == request else { return }
+            upscaleStage = exportedURL != nil ? .done : .failed
+        }
+    }
     @Published var fullscreen = false
     @Published var panel: PanelKind = .none
     /// Face Pivô do Transformar aberta: o arrasto no palco move o PIVÔ.
@@ -608,7 +685,7 @@ final class AureaModel: ObservableObject {
         themeId = palette.id
     }
 
-    enum Screen { case home, editor }
+    enum Screen { case home, editor, upscale }
     enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo }
     @Published var curveProperty: UInt32 = 0
     @Published var timelineFocus: [TimelineTrack]? = nil
@@ -3436,6 +3513,43 @@ final class AureaModel: ObservableObject {
         else { toast = AureaText.t("msg_nao_foi_possivel_criar_a_camera", String(-id)) }
         showAddLayer = false
         syncAfterEdit()
+    }
+
+    // ---- Real Camera (RealCameraStage.swift): a câmera 3D segue o iPhone ----
+
+    /// "Real Camera" no menu de adicionar: cria a câmera e liga a sessão do sensor.
+    func startRealCamera() {
+        let id = engine.addCamera()
+        guard id >= 0 else { toast = AureaText.t("msg_nao_foi_possivel_criar_a_camera", String(-id)); return }
+        if sceneEditor { exitSceneEditor() }   // a faixa e o sensor vivem no palco normal
+        pause()
+        selection = [id]; engine.selectLayers([NSNumber(value: id)])
+        showAddLayer = false
+        syncAfterEdit()
+        RealCameraState.shared.start(self, layer: id)
+    }
+
+    /// Ao vivo (sem gravar): a rotação do aparelho vira a rotação da câmera, sem keyframe.
+    func realCameraApply(_ layer: Int64, rx: Float, ry: Float, rz: Float) {
+        guard layers.contains(where: { $0.id == layer }) else { return }
+        mutate { $0.setRotation(forLayer: layer, x: rx, y: ry, z: rz) }
+    }
+
+    /// Gravando: um keyframe de Rotação X/Y/Z no quadro da prévia (tempo local da camada).
+    func realCameraKey(_ layer: Int64, rx: Float, ry: Float, rz: Float) {
+        let local = localFrame(for: layer)
+        mutate { engine in
+            engine.insertKeyframe(forLayer: layer, property: 6, time: local, value: rx)
+            engine.insertKeyframe(forLayer: layer, property: 7, time: local, value: ry)
+            engine.insertKeyframe(forLayer: layer, property: 8, time: local, value: rz)
+        }
+        if local % 10 == 0 { refreshSelectedLayer() }
+    }
+
+    /// "Gravar": a timeline toca; cada leitura do sensor vira keyframe.
+    func realCameraBeginRecording(_ layer: Int64) {
+        guard layers.contains(where: { $0.id == layer }) else { return }
+        if status.playing == 0 { playPause() }
     }
 
     func enableLayer3D() {

@@ -13,7 +13,9 @@ layout(set=0,binding=AUREA_PARAMS,std140) uniform Params {
 float maskAt(vec2 uv){return texture(u_tex1,clamp(uv,vec2(0),vec2(1))).r;}
 void main(){
     vec4 base=texture(u_tex0,v_uv*p.uvMap.xy+p.uvMap.zw);
-    if(p.p1.y<.5){o_color=base;return;}
+    // Sem recorte ainda: no modo de edicao (sobreposicao) a imagem sai
+    // escurecida - "processando" - em vez de parecer um recorte que cobre tudo.
+    if(p.p1.y<.5){o_color=p.p1.z>1.5?base*.55:base;return;}
     vec2 point=p.p2.xy+v_uv*p.p2.zw;
     vec2 uv=point/max(p.p3.xy,vec2(1));
     vec2 ts=vec2(1.0)/vec2(textureSize(u_tex1,0));
@@ -44,9 +46,11 @@ void main(){
     vec4 cut=src*a;
     if(p.p1.x>.5||(p.p1.z>.5&&p.p1.z<1.5))cut=vec4(vec3(a)*base.a,base.a);
     if(p.p1.z>1.5){
-        // Sobreposição (modo de edição): objeto como está, fundo tingido de vermelho.
-        vec3 tint=mix(base.rgb,vec3(base.a,0.,0.),.55);
-        cut=vec4(mix(tint,base.rgb,a),base.a);
+        // Sobreposição (modo de edição): objeto como está; o fundo fica tingido
+        // de vermelho e TRANSLUCIDO (45%), para as camadas de baixo (um texto
+        // atrás) aparecerem enquanto se pinta - antes o fundo era opaco.
+        vec4 bg=vec4(mix(base.rgb,vec3(base.a,0.,0.),.55),base.a)*.45;
+        cut=mix(bg,base,a);
     }
     o_color=mix(base,cut,clamp(p.p0.w,0.,1.));
 }

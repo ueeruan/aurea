@@ -301,6 +301,7 @@ struct Engine::ExportContext {
     std::vector<u32> freeSlots;        ///< prontos para a GPU escrever
     std::deque<u32>  readySlots;       ///< planos prontos, em ordem de quadro (FIFO)
     bool producerDone = false;         ///< nada mais vai entrar em readySlots
+    bool trackedBudgetLifted = false;  ///< o orcamento rastreado de GPU foi suspenso para este export terminar
     bool stop = false;                 ///< encerrar já (cancelamento ou erro)
     Status encoderStatus = OkStatus;   ///< erro do sink (escrito pelo encoder)
     bool encoderFailed = false;
@@ -12080,17 +12081,37 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
         ctx->compFps = comp->fps();
+        // O congelamento (recuperacao/V2) pode nao ser possivel: midia que o
+        // resolvedor da plataforma nao abre, fonte so em memoria, imagens
+        // alem do orcamento. Sem a recuperacao explicitamente ligada, o export
+        // segue pelo caminho ao vivo (o da 0.0.x) em vez de falhar com
+        // "uma midia do projeto nao pode ser lida".
+        auto freezeFailed = [&](const Status& why) -> Status {
+            if (config_.enableExportRecovery || ctx->keyflow) return why;
+            AUREA_LOG_WARN("export: congelamento indisponivel (%.*s); exportando ao vivo",
+                static_cast<int>(why.detail().size()), why.detail().empty() ? "" : why.detail().data());
+            ctx->v2.reset();
+            ctx->frozenProject.reset();
+            ctx->recovery = export_recovery::Package{};
+            ctx->recoveryPath.clear();
+            return OkStatus;
+        };
+        bool frozen = false;
         if (config_.enableExportRecovery || ctx->v2 || ctx->keyflow) {
             u64 imageBytes = 0;
             const u64 room = source_asset_room_locked();
             const u64 limit = std::min<u64>({64ull << 20, std::max<u64>(4ull << 20, caps_.memory_budget_bytes() / 8), room});
+            Status budget;
             for (const auto& [id, px] : images_) {
                 (void)id;
-                if (px.rgba.size() > limit - imageBytes)
-                    return Status{Errc::BudgetExceeded, "memoria insuficiente para congelar imagens da recuperacao"};
+                if (px.rgba.size() > limit - imageBytes) {
+                    budget = Status{Errc::BudgetExceeded, "memoria insuficiente para congelar imagens da recuperacao"};
+                    break;
+                }
                 imageBytes += px.rgba.size();
             }
-            try {
+            if (!budget.ok()) { if (const Status s = freezeFailed(budget); !s.ok()) return s; }
+            else try {
                 Status sourceStatus;
                 std::unordered_map<std::string, std::string> preparedPaths;
                 const Status captured = export_recovery::capture(*project_, project_->timeline().current(), settings,
@@ -12109,18 +12130,21 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                         preparedPaths.emplace(p, resolved);
                         return resolved;
                     }, ctx->frozenProject, ctx->recovery);
-                if (!sourceStatus.ok()) return sourceStatus;
-                if (!captured.ok()) return captured;
-                ctx->frozenImages = images_;
-                ctx->frozenModels = models_;
-                ctx->frozenHdris = hdris_;
-                ctx->frozenLuts = cubeLuts_;
-                ctx->frozenAssetBudget = room - imageBytes;
-                ctx->recovery.outputPath = outputPath;
-                ctx->recoveryPath = std::string(outputPath) + ".aurea-export";
+                const Status why = !sourceStatus.ok() ? sourceStatus : captured;
+                if (!why.ok()) { if (const Status s = freezeFailed(why); !s.ok()) return s; }
+                else {
+                    ctx->frozenImages = images_;
+                    ctx->frozenModels = models_;
+                    ctx->frozenHdris = hdris_;
+                    ctx->frozenLuts = cubeLuts_;
+                    ctx->frozenAssetBudget = room - imageBytes;
+                    ctx->recovery.outputPath = outputPath;
+                    ctx->recoveryPath = std::string(outputPath) + ".aurea-export";
+                    frozen = true;
+                }
             } catch (const std::bad_alloc&) { return Errc::OutOfMemory; }
               catch (...) { return Errc::IoError; }
-            comp = ctx->frozenProject->timeline().composition(ctx->recovery.composition);
+            if (frozen) comp = ctx->frozenProject->timeline().composition(ctx->recovery.composition);
         }
         // Taxa de saída livre até o teto dos encoders; acima, o motor recusa
         // com o motivo (as telas já limitam o teclado). Abaixo de 1 fps fica
@@ -12884,6 +12908,24 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
             rl.unlock();
             continue;
         }
+        // O orcamento RASTREADO (TrackedResourceBudget.hpp) e uma envoltoria
+        // conservadora: a reserva do driver conta inteira, mesmo com espaco
+        // livre dentro dela. Cenas 3D (sombra, ambiente, MSAA) e desfoque de
+        // movimento (alvo de acumulacao) pedem texturas a mais e caiam nela
+        // em TODA tentativa - o export morria com "sem memoria" sem a GPU ter
+        // recusado nada. Depois da recuperacao, o export segue sem a
+        // envoltoria: o limite de alocacao do pool e o driver continuam
+        // valendo, e a prévia recebe o orcamento de volta no fim.
+        if (s.code() == Errc::OutOfDeviceMemory && config_.enableTrackedGpuAdmission && !c.trackedBudgetLifted) {
+            c.trackedBudgetLifted = true;
+            snapshot_.release_video_frames();
+            if (const Status ready = wait_export_gpu(gpuFrame); !ready.ok()) return ready;
+            renderer_.set_tracked_resource_budget(0);
+            AUREA_LOG_WARN("export: orcamento rastreado de GPU recusou o quadro %lld; exportando sem a envoltoria "
+                           "(limite do pool e do driver continuam)", static_cast<long long>(t.value));
+            rl.unlock();
+            continue;
+        }
         if (rs.gpuTimers) {
             // O 1º quadro separado: é onde caem o IBL final e os pipelines do export.
             if (c.profiledFrames++ == 0) c.firstFrameMs = timings.cpuRecordMs;
@@ -12910,7 +12952,14 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         const u64 now = monotonic_ns();
         // Prazo SEM PROGRESSO (export_resource_wait): decoder/serviço que
         // ainda entrega algo renova; nada mudando, falha em 4 s como antes.
-        const u64 resGen = mediaReadyGen_.load(std::memory_order_acquire) + media_.decode_work();
+        // Progresso da GPU tambem conta: pipelines compilados (o 1o quadro 3D
+        // ou com desfoque compila varios), uploads de modelo/textura e o
+        // ambiente 3D (IBL) ficando pronto. Antes so o decoder renovava o
+        // prazo e um aparelho lento falhava em 4 s com tudo andando.
+        const u64 resGen = mediaReadyGen_.load(std::memory_order_acquire) + media_.decode_work()
+            + (static_cast<u64>(renderer_.shaders().compiles_since_mark()) << 32)
+            + (static_cast<u64>(renderer_.pending_uploads()) << 48)
+            + (renderer_.environment_pending() ? 1ull << 63 : 0ull);
         if (!resourceStarted) {
             const ExportSourceWait rw = export_resource_wait();
             resourceDeadline = ProgressDeadline(now, rw.patienceNs, rw.hardCapNs);
@@ -13290,6 +13339,8 @@ void Engine::export_thread_main() noexcept {
             ctx.frozenHdris.clear(); ctx.frozenLuts.clear();
             exportOriginalModelBytes_.store(0, std::memory_order_relaxed);
         }
+        // A prévia volta a ter a envoltoria rastreada que o export suspendeu.
+        if (ctx.trackedBudgetLifted) apply_memory_budgets();
     }
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);
@@ -13392,7 +13443,9 @@ void Engine::export_encoder_main() noexcept {
         neuralOutput.reset(new (std::nothrow) u8[static_cast<usize>(ctx.width * ctx.settings.aiUpscale) *
                                                (ctx.height * ctx.settings.aiUpscale) * 3 / 2]);
         if (upscaler && neuralInput && neuralOutput) {
-            loaded = upscaler->load(ctx.settings.aiUpscale, 2, 64);
+            // Tile 128: o halo de 20 px e computado por tile; em 64 ele custava
+            // 2,6x a area util, em 128 custa 1,7x (o maximo que o modelo aceita).
+            loaded = upscaler->load(ctx.settings.aiUpscale, 2, 128);
         }
         if (!loaded.ok()) {
             { std::lock_guard<std::mutex> ql(ctx.qMutex);

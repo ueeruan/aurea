@@ -632,6 +632,10 @@ public:
     bool roto_propagate(u64 layerId, u32 effectId) noexcept;
     /// out4: feitos, total, rodando (0/1), falhou (0/1). Falso = nada propagado.
     bool roto_progress(i64* out4) noexcept;
+    /// Estado do Roto desta camada+efeito (Renderer::roto_status): out8 =
+    /// [propagados, total, propagando, falhou, quadro atual pronto, quadros do
+    /// clipe prontos, quadros do clipe, há traços]. Falso = sem traços.
+    bool roto_status(u64 layerId, u32 effectId, i64* out8) noexcept;
     void roto_cancel() noexcept;
     /// Modo de vista (0 final, 1 máscara, 2 sobreposição) sem passo de desfazer:
     /// o modo de pintura liga a sobreposição e devolve o anterior ao sair.

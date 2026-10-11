@@ -223,6 +223,20 @@ bool Engine::roto_progress(i64* out4) noexcept {
     return p.total > 0;
 }
 
+bool Engine::roto_status(u64 layerId, u32 effectId, i64* out8) noexcept {
+    if (!out8) return false;
+    for (u32 i = 0; i < 8; ++i) out8[i] = 0;
+    // Só leitura do modelo e consultas ao cache do serviço (locks próprios):
+    // não precisa do renderMutex_ - a UI pergunta a cada 250 ms.
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = nullptr;
+    const EffectInstance* e = roto_instance(comp, layerId, effectId, l);
+    if (!e) return false;
+    const i64 frame = roto_source_frame(*project_, *comp, *l, playback_.current());
+    return renderer_.roto_status(*project_, *comp, *l, *e, frame, out8);
+}
+
 void Engine::roto_cancel() noexcept {
     if (auto* roto = renderer_.roto_service()) roto->cancel();
     request_render();

@@ -1620,6 +1620,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         }
         ~DepthScope() { r.planImageLookup_ = lookup; r.planImageCtx_ = ctx; r.planFinal_ = final; r.planDeferLocalAi_ = defer; }
     } depthScope{*this, imageLookup, imageCtx, settings.finalQuality, settings.deferLocalAi};
+    planPlayback_ = decodeMode == DecodeMode::Playback;
     if (prepareDepth_ == 0) {
         CompositionId rootComposition{};
         project.timeline().for_each_composition([&](CompositionId id, const Composition& candidate) {
@@ -4696,8 +4697,12 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     // crop edges. Outside the crop still samples transparent.
                     const u32 left = static_cast<u32>(std::clamp(std::floor(x0 * kx) - 2.f, 0.f, static_cast<f32>(w - 1)));
                     const u32 top = static_cast<u32>(std::clamp(std::floor(y0 * ky) - 2.f, 0.f, static_cast<f32>(h - 1)));
-                    const u32 right = static_cast<u32>(std::clamp(std::ceil(x1 * kx) + 2.f, static_cast<f32>(left + 1), static_cast<f32>(w)));
-                    const u32 bottom = static_cast<u32>(std::clamp(std::ceil(y1 * ky) + 2.f, static_cast<f32>(top + 1), static_cast<f32>(h)));
+                    u32 right = static_cast<u32>(std::clamp(std::ceil(x1 * kx) + 2.f, static_cast<f32>(left + 1), static_cast<f32>(w)));
+                    u32 bottom = static_cast<u32>(std::clamp(std::ceil(y1 * ky) + 2.f, static_cast<f32>(top + 1), static_cast<f32>(h)));
+                    // Multiplos de 16 (como MotionBlurBounds): texto animado
+                    // reutiliza o alvo do pool em vez de alocar um por quadro.
+                    right = std::min(w, left + ((right - left + 15u) / 16u) * 16u);
+                    bottom = std::min(h, top + ((bottom - top + 15u) / 16u) * 16u);
                     if (right - left < w || bottom - top < h) {
                         d.width = right - left; d.height = bottom - top;
                         out.virtualSourceRegion = canvas;

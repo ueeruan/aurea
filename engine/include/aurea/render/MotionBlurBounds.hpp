@@ -41,6 +41,11 @@ struct MotionBlurBounds {
     top = std::clamp(std::floor(top - 2), 0.0, static_cast<f64>(targetHeight - 1));
     right = std::clamp(std::ceil(right + 2), left + 1, static_cast<f64>(targetWidth));
     bottom = std::clamp(std::ceil(bottom + 2), top + 1, static_cast<f64>(targetHeight));
+    // Largura/altura em multiplos de 16: o pool so reutiliza texturas do mesmo
+    // tamanho exato, e um recorte que muda 1 px por quadro alocava (e
+    // retinha por 120 quadros) um alvo novo a cada quadro da previa.
+    right = std::min(static_cast<f64>(targetWidth), left + std::ceil((right - left) / 16.0) * 16.0);
+    bottom = std::min(static_cast<f64>(targetHeight), top + std::ceil((bottom - top) / 16.0) * 16.0);
     return {Rect{static_cast<f32>(left / sx), static_cast<f32>(top / sy),
                  static_cast<f32>((right - left) / sx), static_cast<f32>((bottom - top) / sy)},
         static_cast<u32>(right - left), static_cast<u32>(bottom - top)};

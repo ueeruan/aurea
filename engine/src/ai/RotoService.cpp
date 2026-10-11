@@ -36,6 +36,28 @@ RotoService::MattePtr RotoService::cached(u64 track, const RotoStrokes& strokes,
     return out;
 }
 
+bool RotoService::ready(u64 track, const RotoStrokes& strokes, i64 frame) const {
+    const u64 dep = roto_dependency(strokes, frame);
+    if (!dep) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = cache_.find(key_of(track, frame));
+    return it != cache_.end() && it->second.dep == dep;
+}
+
+i64 RotoService::ready_count(u64 track, const RotoStrokes& strokes, i64 first, i64 last) const {
+    if (last < first) std::swap(first, last);
+    if (last - first > 100'000) last = first + 100'000;   // teto de custo da consulta
+    i64 n = 0;
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (i64 f = first; f <= last; ++f) {
+        const u64 dep = roto_dependency(strokes, f);
+        if (!dep) continue;
+        const auto it = cache_.find(key_of(track, f));
+        if (it != cache_.end() && it->second.dep == dep) ++n;
+    }
+    return n;
+}
+
 void RotoService::store(u64 track, i64 frame, u64 dep, const std::vector<f32>& matte) {
     Entry e; e.dep = dep;
     roto_pack(matte, e.rle);
@@ -165,10 +187,19 @@ void RotoService::ensure_thread() {
 
 void RotoService::request(u64 track, const RotoStrokes& strokes, const Source& source, i64 frame) try {
     std::lock_guard<std::mutex> lock(queueMutex_);
-    if (progress_.running && progress_.track == track) return;   // a propagação chega lá
     auto job = std::make_unique<Job>();
     job->track = track; job->strokes = strokes; job->source = source; job->first = job->last = frame;
-    if (pending_ && pending_->range) return;                      // não troca "Propagar" por um quadro
+    if ((progress_.running && progress_.track == track) || (pending_ && pending_->range)) {
+        // A propagação segue, mas este quadro (o que o usuário olha/pinta) vai
+        // na frente: antes o pedido era descartado e o palco esperava a
+        // propagação chegar nele - "o quadro congela".
+        focus_ = std::move(job);
+        ensure_thread();
+        wake_.notify_one();
+        return;
+    }
+    // Um pedido de um quadro em curso (scrub antigo) para: o mais novo vence.
+    if (runningSingle_) generation_.fetch_add(1, std::memory_order_relaxed);
     pending_ = std::move(job);
     ensure_thread();
     wake_.notify_one();
@@ -199,6 +230,7 @@ void RotoService::cancel() noexcept {
     std::lock_guard<std::mutex> lock(queueMutex_);
     generation_.fetch_add(1, std::memory_order_relaxed);
     if (pending_) pending_.reset();
+    focus_.reset();
     progress_.running = false;
 }
 
@@ -215,38 +247,52 @@ void RotoService::thread_main() noexcept {
         u64 gen = 0;
         {
             std::unique_lock<std::mutex> lock(queueMutex_);
-            wake_.wait(lock, [&] { return !running_ || pending_ != nullptr; });
+            wake_.wait(lock, [&] { return !running_ || pending_ != nullptr || focus_ != nullptr; });
             if (!running_) break;
-            job = std::move(pending_);
+            // Sem propagação na fila, o foco é um pedido comum de um quadro.
+            job = pending_ ? std::move(pending_) : std::move(focus_);
             gen = generation_.load(std::memory_order_relaxed);
+            runningSingle_ = !job->range;
         }
-        bool ok = true;
         auto notify = [&] {
             void (*fn)(void*) = nullptr; void* ctx = nullptr;
             { std::lock_guard<std::mutex> lock(queueMutex_); fn = readyFn_; ctx = readyCtx_; }
             if (fn) fn(ctx);
         };
+        bool ok = true;
         if (!job->range) {
             ok = compute_impl(job->track, job->strokes, job->source, job->first, 0, &generation_, gen) != nullptr;
-            if (ok) notify();
+            { std::lock_guard<std::mutex> lock(queueMutex_); runningSingle_ = false; }
+            // Acorda a prévia também na falha/interrupção: o palco não fica
+            // esperando um recorte que nunca vem.
+            notify();
             continue;
         }
         // Propagar: para a frente da primeira base até o fim, depois para trás.
+        // Entre quadros, o FOCO (o quadro que o usuário está olhando) vai antes.
         const std::vector<i64> bases = roto_bases(job->strokes);
         const i64 base = bases.empty() ? job->first : std::clamp(bases.front(), job->first, job->last);
         i64 done = 0;
+        auto serveFocus = [&] {
+            std::unique_ptr<Job> focus;
+            { std::lock_guard<std::mutex> lock(queueMutex_); focus = std::move(focus_); }
+            if (!focus || generation_.load(std::memory_order_relaxed) != gen) return;
+            (void)compute_impl(focus->track, focus->strokes, focus->source, focus->first, 0, &generation_, gen);
+            notify();
+        };
         auto step = [&](i64 f) {
             if (!ok) return;
+            serveFocus();
             ok = compute_impl(job->track, job->strokes, job->source, f, 0, &generation_, gen) != nullptr;
             std::lock_guard<std::mutex> lock(queueMutex_);
             if (generation_.load(std::memory_order_relaxed) == gen) progress_.done = ++done;
         };
-        for (i64 f = base; f <= job->last && ok; ++f) { step(f); if ((f - base) % 8 == 7) notify(); }
+        for (i64 f = base; f <= job->last && ok; ++f) { step(f); notify(); }
         // Um quadro que falhou adiante não impede os quadros antes da base
         // (só o cancelamento, que troca a geração, para tudo).
         const bool forwardOk = ok;
         if (!ok && generation_.load(std::memory_order_relaxed) == gen) ok = true;
-        for (i64 f = base - 1; f >= job->first && ok; --f) { step(f); if ((base - f) % 8 == 0) notify(); }
+        for (i64 f = base - 1; f >= job->first && ok; --f) { step(f); notify(); }
         ok = ok && forwardOk;
         {
             std::lock_guard<std::mutex> lock(queueMutex_);
@@ -255,6 +301,7 @@ void RotoService::thread_main() noexcept {
                 progress_.failed = !ok;
             }
         }
+        serveFocus();
         notify();
     }
 }
@@ -264,6 +311,7 @@ void RotoService::clear() noexcept {
         std::lock_guard<std::mutex> lock(queueMutex_);
         running_ = false;
         pending_.reset();
+        focus_.reset();
         generation_.fetch_add(1, std::memory_order_relaxed);
         progress_ = Progress{};
     }

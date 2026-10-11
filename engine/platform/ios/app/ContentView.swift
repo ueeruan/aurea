@@ -21,6 +21,9 @@ struct ContentView: View {
             case .home:
                 HomeView()
                     .transition(.offset(x: -pageWidth / 3)).zIndex(0)
+            case .upscale:
+                UpscaleView()
+                    .transition(.offset(x: pageWidth)).zIndex(1)
             case .editor:
                 EditorView()
                     // Saiu do editor por qualquer caminho: a reprodução e o

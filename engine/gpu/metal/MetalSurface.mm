@@ -52,6 +52,7 @@ Status Backend::attach_surface(const SurfaceDesc& desc) noexcept {
             layer.drawableSize = CGSizeMake(static_cast<CGFloat>(desc.width), static_cast<CGFloat>(desc.height));
         }
         d.layer = layer;
+        ++d.surfaceGeneration;
         AUREA_LOG_INFO("metal: superficie %ux%u, vsync %d", desc.width, desc.height, desc.vsync ? 1 : 0);
         return OkStatus;
     }
@@ -61,15 +62,20 @@ void Backend::detach_surface() noexcept {
     @autoreleasepool {
         Impl& d = *impl_;
         if (!d.layer && !d.drawable) return;
+        ++d.surfaceGeneration;
         if (d.device && d.initialized) {
             // A camada pode ser destruída pelo sistema logo depois desta chamada:
             // nada pode estar usando o drawable.
             for (u32 i = 0; i < 3; ++i) {
-                if (d.frames[i].submitted) d.wait_frame_gpu(d.frames[i]);
+                if (d.frames[i].submitted) {
+                    d.wait_frame_gpu(d.frames[i]);
+                    d.frames[i].unpresentedDrawable = nil;
+                }
             }
         }
         d.drawable = nil;
         d.drawableAcquired = false;
+        d.acquiredBackbuffer = {};
         d.release_drawable_textures();
         d.layer = nil;
     }
@@ -77,6 +83,8 @@ void Backend::detach_surface() noexcept {
 
 Status Backend::resize_surface(u32 width, u32 height) noexcept {
     Impl& d = *impl_;
+    if (d.surfaceDesc.width != width || d.surfaceDesc.height != height)
+        ++d.surfaceGeneration;
     d.surfaceDesc.width = width;
     d.surfaceDesc.height = height;
     if (!d.layer) return OkStatus;

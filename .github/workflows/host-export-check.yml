@@ -1,0 +1,186 @@
+name: Check native offline export and current renderer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/**']
+    paths: ['.github/workflows/host-export-check.yml', 'engine/**', 'tools/build_ffmpeg.py']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-export-check-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  serial-export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CC: gcc-14
+      CXX: g++-14
+      CCACHE_DIR: ${{ github.workspace }}/build/host-export-ccache
+      CCACHE_MAXSIZE: 2G
+      AUREA_TEST_ERRORS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install host compiler and headless Vulkan
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends cmake ninja-build gcc-14 g++-14 \
+            ccache glslc libvulkan-dev mesa-vulkan-drivers vulkan-tools vulkan-validationlayers curl clang nasm pkg-config python3
+          mkdir -p build/host-export-results
+      - name: Select and verify the software Vulkan driver
+        run: |
+          set -euo pipefail
+          DRIVER=$(python3 - <<'PY'
+          import glob
+          paths = glob.glob('/usr/share/vulkan/icd.d/lvp_icd*.json')
+          assert len(paths) == 1, paths
+          print(paths[0])
+          PY
+          )
+          echo "VK_DRIVER_FILES=$DRIVER" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$DRIVER" >> "$GITHUB_ENV"
+          VK_DRIVER_FILES="$DRIVER" VK_ICD_FILENAMES="$DRIVER" vulkaninfo --summary \
+            2>&1 | tee build/host-export-results/vulkan-driver.log
+          grep -Eiq 'llvmpipe|lavapipe' build/host-export-results/vulkan-driver.log
+          git rev-parse HEAD > build/host-export-results/source-commit.txt
+          g++-14 --version > build/host-export-results/compiler.txt
+      - name: Restore pinned dependency downloads and compiler cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/host-export/_deps
+            build/host-export-ccache
+            build/astra-ffmpeg
+            build/ffmpeg/host
+          key: host-export-gcc14-${{ runner.os }}-${{ hashFiles('engine/CMakeLists.txt', 'engine/cmake/*.cmake', 'tools/build_ffmpeg.py') }}-${{ github.run_id }}
+          restore-keys: |
+            host-export-gcc14-${{ runner.os }}-${{ hashFiles('engine/CMakeLists.txt', 'engine/cmake/*.cmake', 'tools/build_ffmpeg.py') }}-
+      - name: Build and verify pinned native export dependencies
+        run: |
+          set -euo pipefail
+          python3 tools/build_ffmpeg.py --platform host --arch x86_64 --jobs 2 \
+            2>&1 | tee build/host-export-results/ffmpeg-build.log
+          python3 - <<'PY'
+          import json, pathlib
+          root = pathlib.Path('build/ffmpeg/host')
+          manifest = json.loads((root / 'aurea-ffmpeg-build.json').read_text())
+          assert manifest['platform'] == 'host' and manifest['arch'] == 'x86_64', manifest
+          assert manifest['kvazaar'] == '2.3.2' and not manifest['x265'], manifest
+          assert '--enable-gpl' not in manifest['configure'] and '--enable-nonfree' not in manifest['configure'], manifest
+          for library in ('avcodec', 'avformat', 'avutil', 'swscale', 'swresample', 'openh264', 'kvazaar'):
+              assert (root / 'lib' / f'lib{library}.a').stat().st_size > 0, library
+          pathlib.Path('build/host-export-results/ffmpeg-manifest.json').write_text(json.dumps(manifest, indent=2))
+          PY
+      - name: Prepare the existing 3D regression fixtures
+        run: |
+          set -euo pipefail
+          mkdir -p build/host-export-fixtures
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb \
+            -o build/host-export-fixtures/DamagedHelmet.glb
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Fox/glTF-Binary/Fox.glb \
+            -o build/host-export-fixtures/Fox.glb
+          # Match the assets already used by the host regression; a moving
+          # upstream branch cannot silently change the test's input pixels.
+          sha256sum --check <<'SHA'
+          a1e3b04de97b11de564ce6e53b95f02954a297f0008183ac63a4f5974f6b32d8  build/host-export-fixtures/DamagedHelmet.glb
+          d97044e701822bac5a62696459b27d7b375aada5de8574ed4362edbba94771f7  build/host-export-fixtures/Fox.glb
+          SHA
+          sha256sum build/host-export-fixtures/*.glb > build/host-export-results/fixture-sha256.txt
+          echo "AUREA_BENCH_GLTF=$GITHUB_WORKSPACE/build/host-export-fixtures" >> "$GITHUB_ENV"
+      - name: Configure shared renderer tests
+        id: configure
+        run: |
+          set -euo pipefail
+          # These fixtures do not use neural effects. The renderer still uses
+          # real Vulkan shaders; only ncnn's unused inference backend is CPU.
+          cmake -S engine -B build/host-export -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DAUREA_BUILD_TESTS=ON -DAUREA_ENABLE_SANITIZE=OFF \
+            -DAUREA_GLSLC=/usr/bin/glslc -DAUREA_VULKAN_HEADERS=/usr/include \
+            -DAUREA_AI_VULKAN=OFF -DAUREA_FFMPEG_ROOT="$GITHUB_WORKSPACE/build/ffmpeg/host" \
+            2>&1 | tee build/host-export-results/configure.log
+          grep -Fq 'backend Vulkan no host' build/host-export-results/configure.log
+      - name: Build current shared and native FFmpeg test executables
+        id: build
+        run: |
+          set -euo pipefail
+          cmake --build build/host-export --target aurea_tests aurea_ffmpeg_export_tests --parallel 2 \
+            2>&1 | tee build/host-export-results/build.log
+      - name: Compare serial and queued pixels/audio with effects and 3D motion blur
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          timeout 300s ./aurea_tests SerialAndQueuedPlanesAudioMatchWithEffectsAnd3DMotionBlur \
+            2>&1 | tee ../../host-export-results/serial-fidelity.log
+          grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-fidelity.log
+          if grep -Eq 'pulado|skipped' ../../host-export-results/serial-fidelity.log; then exit 1; fi
+      - name: Verify the software retry and validated publication
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          timeout 120s ./aurea_tests SafeModeTwoPublishesValidatedFramesUsingRequestedCodecAndBitrate \
+            2>&1 | tee ../../host-export-results/serial-safe-retry.log
+          grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-safe-retry.log
+          if grep -Eq 'pulado|skipped' ../../host-export-results/serial-safe-retry.log; then exit 1; fi
+      - name: Verify all native frames, bounded sessions, audio mapping and camera capture
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          FAILED=0
+          for FILTER in FFmpegExport OfflineFrameQueue ExportSinkStartup ExportPixelCopy OfflineAudio RealCamera; do
+            if ! timeout 600s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/native-$FILTER.log"; then FAILED=1; fi
+            if ! grep -Eq '^[1-9][0-9]* testes, [1-9][0-9]* verificacoes, 0 falhas$' "../../host-export-results/native-$FILTER.log"; then FAILED=1; fi
+            if grep -Eq 'pulado|skipped' "../../host-export-results/native-$FILTER.log"; then FAILED=1; fi
+          done
+          exit "$FAILED"
+      - name: Verify preview continuity and exact 3D capture memory
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          FAILED=0
+          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary VulkanReturnsEmptySlabsAndPreservesLiveAllocations VulkanMemoryPackingGpu VulkanMrtGpu SceneWarmupGpu OriginalModelExport FrameGraphSegments PreviewGraphLifecycle PreviewIdle ExportSourceStartupGpu VulkanDispatchOwnersGpu BoundedCommandsGpu UploadLifetimeGpu MemoryPressureGpu VulkanDescriptorsGpu VulkanAllocationFailure VulkanRecoveryGpu; do
+            # Preserve independent GPU evidence even if another group fails.
+            if ! timeout 180s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
+            if ! grep -Eq '^[1-9][0-9]* testes, [0-9]+ verificacoes, 0 falhas$' "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
+            if grep -Eq 'pulado|skipped' "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
+          done
+          exit "$FAILED"
+      - name: Verify exclusive idle prefetch recovery before paused graph admission
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          timeout 120s ./aurea_tests PressurePrune \
+            2>&1 | tee ../../host-export-results/preview-PressurePrune.log
+          grep -Eq '^[1-9][0-9]* testes, [1-9][0-9]* verificacoes, 0 falhas$' ../../host-export-results/preview-PressurePrune.log
+          grep -Fq 'PressurePruneBeforePausedSegmentsKeepsLeasesPixelsAndDecoderIdentity' ../../host-export-results/preview-PressurePrune.log
+          if grep -Eq 'pulado|skipped' ../../host-export-results/preview-PressurePrune.log; then exit 1; fi
+          timeout 120s ./aurea_tests ExclusivePrune \
+            2>&1 | tee ../../host-export-results/preview-ExclusivePrune.log
+          grep -Eq '^[1-9][0-9]* testes, [1-9][0-9]* verificacoes, 0 falhas$' ../../host-export-results/preview-ExclusivePrune.log
+          grep -Fq 'ExclusivePruneNeverCreditsSeparatelyRetainedNativeBacking' ../../host-export-results/preview-ExclusivePrune.log
+          if grep -Eq 'pulado|skipped' ../../host-export-results/preview-ExclusivePrune.log; then exit 1; fi
+      - name: Preserve host test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-native-offline-export-check
+          path: |
+            build/host-export-results/
+            build/host-export/tests/build/reference/astra-native/
+            build/host-export/tests/build/reference/astra-composition/
+            build/host-export/tests/build/reference/astra-offline-audio/
+          if-no-files-found: error
+          retention-days: 14

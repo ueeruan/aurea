@@ -1153,7 +1153,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea Beta 0.1.5 (2175) • 11/10/2026\n\n• Exportación: los proyectos con 3D o motion blur vuelven a exportar (se rechazaban modelos FBX/OBJ; el presupuesto de GPU rechazaba las texturas extra). Un medio que no se puede congelar ya no tumba la exportación.\n• Vista previa más fluida: la GPU ya no espera entre pases de cada fotograma, la memoria no se libera en cada fotograma, los recortes de texto y blur reutilizan destinos.\n• Rotobrush: el fotograma no se congela; el fotograma que miras tiene prioridad; estado siempre visible (este fotograma, clip, fallo); Final/Superposición/Máscara dentro del modo pintar; superposición translúcida muestra lo que está detrás.\n• 3D: ahora se leen los mapas de metal y rugosidad de FBX/OBJ.\n• Upscale con IA: herramienta propia en Inicio (elige el video y el factor); 2,5 a 3× más rápido con el mismo modelo.\n• Real Camera: en el menú de añadir de la escena 3D — la cámara sigue al teléfono y Grabar convierte el movimiento en fotogramas clave.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.4 BETA 2 (2175) • 11/10/2026\n\n• Exportación: los proyectos con 3D o motion blur vuelven a exportar (se rechazaban modelos FBX/OBJ; el presupuesto de GPU rechazaba las texturas extra). Un medio que no se puede congelar ya no tumba la exportación.\n• Vista previa más fluida: la GPU ya no espera entre pases de cada fotograma, la memoria no se libera en cada fotograma, los recortes de texto y blur reutilizan destinos.\n• Rotobrush: el fotograma no se congela; el fotograma que miras tiene prioridad; estado siempre visible (este fotograma, clip, fallo); Final/Superposición/Máscara dentro del modo pintar; superposición translúcida muestra lo que está detrás.\n• 3D: ahora se leen los mapas de metal y rugosidad de FBX/OBJ.\n• Upscale con IA: herramienta propia en Inicio (elige el video y el factor); 2,5 a 3× más rápido con el mismo modelo.\n• Real Camera: en el menú de añadir de la escena 3D — la cámara sigue al teléfono y Grabar convierte el movimiento en fotogramas clave.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -3621,6 +3621,15 @@ para editar la curva.</string>
     <string name="roto_progress">Propagando %1$d de %2$d</string>
     <string name="roto_done">Listo</string>
     <string name="roto_hint">Pinta el objeto en verde; cambia a Fondo para quitar partes. Los trazos en otro cuadro actualizan los siguientes.</string>
+    <string name="real_camera_tracking_position">Posición y rotación 3D activas.</string>
+    <string name="real_camera_tracking_rotation">Solo rotación; este modo no mide la posición.</string>
+    <string name="real_camera_tracking_limited">Seguimiento de posición pausado. Mejora la luz y mueve el dispositivo despacio.</string>
+    <string name="real_camera_camera_permission">Sin permiso de cámara: solo rotación.</string>
+    <string name="real_camera_camera_permission_prompt">La cámara rastrea el movimiento 3D del dispositivo. Las imágenes no se graban.</string>
+    <string name="real_camera_tracking_failed">Seguimiento no disponible: solo rotación.</string>
+    <string name="real_camera_arcore_privacy">El seguimiento 3D usa Google Play Services for AR (ARCore), de Google LLC, sujeto a los Términos de Google y a la Política de Privacidad de Google.</string>
+    <string name="real_camera_google_terms">Términos de Google</string>
+    <string name="real_camera_google_privacy">Privacidad de Google</string>
     <string name="real_camera_title">Real Camera</string>
     <string name="real_camera_hint">Mueve el teléfono: la cámara 3D lo sigue. Grabar reproduce la línea de tiempo y guarda el movimiento como fotogramas clave.</string>
     <string name="real_camera_record">Grabar</string>
@@ -3630,7 +3639,7 @@ para editar la curva.</string>
     <string name="real_camera_invert">Invertir</string>
     <string name="real_camera_sensitivity">Sensibilidad</string>
     <string name="real_camera_done">Listo</string>
-    <string name="real_camera_no_sensor">Este dispositivo no tiene giroscopio: Real Camera no funciona aquí.</string>
+    <string name="real_camera_no_sensor">Sensor de orientación no disponible: Real Camera no puede medir el movimiento en este dispositivo.</string>
     <string name="roto_frame_ready">Este fotograma: recorte listo</string>
     <string name="roto_frame_pending">Este fotograma: calculando el recorte…</string>
     <string name="roto_clip_status">Clip: %1$d de %2$d fotogramas con recorte</string>

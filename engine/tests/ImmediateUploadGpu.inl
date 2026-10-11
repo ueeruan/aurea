@@ -35,20 +35,21 @@ namespace {
 // depend on GPU speed to hit the timeout. Tests run serially; other fences and
 // all Vulkan calls still go through the real validation/driver dispatch.
 struct DelayedFenceObservation {
-    PFN_vkWaitForFences original = vk::vkWaitForFences;
+    vk::Backend& backend;
+    PFN_vkWaitForFences original = backend.device_dispatch().vkWaitForFences;
     VkDevice device = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     inline static DelayedFenceObservation* active = nullptr;
-    explicit DelayedFenceObservation(VkDevice target) : device(target) {
+    explicit DelayedFenceObservation(vk::Backend& target) : backend(target), device(target.device()) {
         active = this;
-        vk::vkWaitForFences = &wait;
+        backend.device_dispatch().vkWaitForFences = &wait;
     }
     ~DelayedFenceObservation() { release(); }
     DelayedFenceObservation(const DelayedFenceObservation&) = delete;
     DelayedFenceObservation& operator=(const DelayedFenceObservation&) = delete;
     void release() {
         if (active == this) {
-            vk::vkWaitForFences = original;
+            backend.device_dispatch().vkWaitForFences = original;
             active = nullptr;
         }
     }
@@ -74,7 +75,7 @@ AUREA_TEST(UploadLifetimeGpu, TimedOutSubmissionKeepsItsFenceAndDeferredResource
     AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
     auto& backend = isolated.backend;
     const u32 validationErrors = vk::Backend::validation_errors();
-    DelayedFenceObservation completion(backend.device());
+    DelayedFenceObservation completion(backend);
     const auto status = vk::ImmediateSubmissionTestAccess::submit(backend);
     AUREA_CHECK(status.code() == Errc::Timeout);
     AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::pending(backend), 1u);
@@ -114,7 +115,7 @@ AUREA_TEST(UploadLifetimeGpu, RejectedRetriesDoNotAllocateStagingAndOpenFrameUpl
     const bool bufferNeedsStaging = vk::ImmediateSubmissionTestAccess::buffer_needs_staging(backend, *buffer);
     backend.wait_idle();
     const u32 validationErrors = vk::Backend::validation_errors();
-    DelayedFenceObservation completion(backend.device());
+    DelayedFenceObservation completion(backend);
     AUREA_CHECK(vk::ImmediateSubmissionTestAccess::submit(backend).code() == Errc::Timeout);
     const auto before = backend.memory_stats();
     const auto deferredBefore = vk::ImmediateSubmissionTestAccess::deferred(backend);

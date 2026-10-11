@@ -772,7 +772,13 @@ struct Layer {
         return t >= start && t < end;
     }
     [[nodiscard]] FrameIndex duration() const noexcept { return FrameIndex{end.value - start.value}; }
-    [[nodiscard]] bool animated() const noexcept { return tracks.has_animation() || timeRemapEnabled; }
+    [[nodiscard]] bool animated() const noexcept {
+        if (tracks.has_animation() || timeRemapEnabled) return true;
+        for (const EffectInstance& effect : effects)
+            for (const MeshWarpData& mesh : effect.meshes)
+                if (mesh.keys.size() > 1) return true;
+        return false;
+    }
 
     /// Instante da FONTE (em quadros da composição, fracionário) que toca no
     /// frame `timelineTime` da timeline: ponto de entrada + tempo decorrido ×

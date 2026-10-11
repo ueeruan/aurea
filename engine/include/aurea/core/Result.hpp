@@ -65,6 +65,7 @@ enum class Errc : i32 {
     AssetCorrupted,       ///< ASSET_CORRUPTED: mídia, fonte ou modelo 3D ilegível
     ProjectCorrupted,     ///< PROJECT_CORRUPTED: nenhuma cópia válida do projeto (principal, .tmp, .bak)
     EncoderUnavailable,   ///< ENCODER_UNAVAILABLE: o aparelho não tem encoder para o pedido
+    Busy,                 ///< Renderer owned by another bounded operation; retry without replacing the displayed image.
 };
 
 // Contrato com a UI (EditorStore.kt): os números abaixo são lidos lá.
@@ -75,6 +76,7 @@ static_assert(static_cast<i32>(Errc::OutOfDeviceMemory) == 20);
 static_assert(static_cast<i32>(Errc::ShuttingDown) == 27);
 static_assert(static_cast<i32>(Errc::StorageFull) == 28);
 static_assert(static_cast<i32>(Errc::EncoderUnavailable) == 31);
+static_assert(static_cast<i32>(Errc::Busy) == 32);
 
 [[nodiscard]] constexpr std::string_view to_string(Errc e) noexcept {
     switch (e) {
@@ -110,6 +112,7 @@ static_assert(static_cast<i32>(Errc::EncoderUnavailable) == 31);
         case Errc::AssetCorrupted:        return "arquivo de midia corrompido";
         case Errc::ProjectCorrupted:      return "projeto corrompido";
         case Errc::EncoderUnavailable:    return "encoder indisponivel";
+        case Errc::Busy:                  return "motor ocupado";
     }
     return "erro desconhecido";
 }
@@ -132,6 +135,7 @@ static_assert(static_cast<i32>(Errc::EncoderUnavailable) == 31);
         case Errc::UnsupportedFormat:  return "UNSUPPORTED_FORMAT";
         case Errc::MediaSourceMissing: return "MEDIA_MISSING";
         case Errc::DeviceLost:         return "GPU_DEVICE_LOST";
+        case Errc::Busy:               return "RENDER_BUSY";
         default:                       return "ERRC_OTHER";
     }
 }

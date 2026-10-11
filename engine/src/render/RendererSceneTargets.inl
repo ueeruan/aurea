@@ -74,16 +74,24 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
     const u64 started = monotonic_ns();
     constexpr u64 hardCap = 120ull * 1000 * 1000 * 1000;
     const u64 limit = std::clamp<u64>(settings.sceneExposureFenceTimeoutNs, 1, hardCap);
+    const auto deadline = [&] {
+        return settings.offscreenFenceDeadline
+            ? settings.offscreenFenceDeadline(settings.offscreenFenceContext) : started + limit;
+    };
     auto wait = [&](u64 frame) {
         const u64 waitStarted = monotonic_ns();
         Status status;
         do {
             if (cancelled()) { status = Errc::Cancelled; break; }
-            const u64 elapsed = monotonic_ns() - started;
-            if (elapsed >= limit) { status = Errc::Timeout; break; }
-            status = backend_->wait_frame(frame, std::min<u64>(100ull * 1000 * 1000, limit - elapsed));
+            const u64 now = monotonic_ns(), until = deadline();
+            if (now >= until) { status = Errc::Timeout; break; }
+            status = backend_->wait_frame(frame, std::min<u64>(100ull * 1000 * 1000, until - now));
             if (status.code() != Errc::Timeout) break;
         } while (true);
+        if (status.ok() && settings.offscreenFenceCompleted) {
+            settings.offscreenFenceCompleted(settings.offscreenFenceContext, frame);
+            if (monotonic_ns() >= deadline()) status = Errc::Timeout;
+        }
         timings.sceneExposureWaitMs += static_cast<f32>((monotonic_ns() - waitStarted) * 1e-6);
         return status;
     };
@@ -106,6 +114,14 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
             if (next >= targets.size()) return Errc::InvalidState;
             auto& saved = targets[next++]; saved.owner = &snap; saved.scene = scene;
             const u64 previous = backend_->last_submitted_frame();
+            // Retire completed preview targets before opening the next frame.
+            // Backend begin-frame collects empty allocation blocks. Doing this
+            // afterwards left their reservation charged while allocating the
+            // unchanged full-quality shadow map in this first capture stage.
+            if (previous) {
+                if (auto completed = wait(previous); !completed.ok()) return completed;
+                (void)pool_.trim_unreferenced(previous);
+            }
             FrameBegin frame;
             if (auto status = backend_->begin_offscreen_frame(frame); !status.ok()) return status;
             const u64 recorded = monotonic_ns();
@@ -118,6 +134,8 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
                 ++timings.sceneExposureBatches;
                 if (executed) saved.pendingFrame = frame.frameNumber;
                 if (!submitted.ok()) return submitted;
+                if (settings.offscreenFenceSubmitted)
+                    settings.offscreenFenceSubmitted(settings.offscreenFenceContext, frame.frameNumber);
                 if (!status.ok()) return status;
                 if (auto completed = wait(frame.frameNumber); !completed.ok()) return completed;
                 saved.pendingFrame = 0;
@@ -126,12 +144,6 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
                 (void)pool_.trim_unreferenced(frame.frameNumber);
                 return OkStatus;
             };
-            // The previous graph can leave idle targets of different extents.
-            // A fence, not logical cache eviction, proves those reads finished.
-            if (previous) {
-                if (auto completed = wait(previous); !completed.ok()) return finish(completed);
-                (void)pool_.trim_unreferenced(previous);
-            }
             configure_scene_quality(group);
             scene3d_.finish_environment(group.environment);
             FGTexture output;

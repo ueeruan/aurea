@@ -1825,7 +1825,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea Beta 0.1.5 (2175) • 11/10/2026\n\n• Exportação: projetos com 3D ou motion blur voltam a exportar (modelos FBX/OBJ eram recusados; o orçamento de GPU recusava as texturas extras). Mídia que não dá para congelar não derruba mais o export.\n• Prévia mais fluida: a GPU não espera mais entre passes de cada quadro, memória não é devolvida a cada quadro, recortes de texto e blur reutilizam alvos.\n• Rotobrush: o quadro não congela; o quadro que você olha tem prioridade; status sempre visível (este quadro, clipe, falha); Final/Sobreposição/Máscara dentro do modo pintar; sobreposição translúcida mostra o que está atrás.\n• 3D: mapas de metal e rugosidade de FBX/OBJ passam a ser lidos.\n• Upscale com IA: ferramenta própria na Home (escolha o vídeo e o fator); 2,5 a 3× mais rápido no mesmo modelo.\n• Real Camera: no menu de adicionar da cena 3D — a câmera segue o celular e Gravar transforma o movimento em keyframes.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.4 BETA 2 (2175) • 11/10/2026\n\n• Exportação: projetos com 3D ou motion blur voltam a exportar (modelos FBX/OBJ eram recusados; o orçamento de GPU recusava as texturas extras). Mídia que não dá para congelar não derruba mais o export.\n• Prévia mais fluida: a GPU não espera mais entre passes de cada quadro, memória não é devolvida a cada quadro, recortes de texto e blur reutilizam alvos.\n• Rotobrush: o quadro não congela; o quadro que você olha tem prioridade; status sempre visível (este quadro, clipe, falha); Final/Sobreposição/Máscara dentro do modo pintar; sobreposição translúcida mostra o que está atrás.\n• 3D: mapas de metal e rugosidade de FBX/OBJ passam a ser lidos.\n• Upscale com IA: ferramenta própria na Home (escolha o vídeo e o fator); 2,5 a 3× mais rápido no mesmo modelo.\n• Real Camera: no menu de adicionar da cena 3D — a câmera segue o celular e Gravar transforma o movimento em keyframes.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -3695,6 +3695,15 @@
     <string name="roto_progress">Propagando %1$d de %2$d</string>
     <string name="roto_done">Concluir</string>
     <string name="roto_hint">Pinte o objeto em verde; troque para Fundo para tirar partes. Traços em outro quadro atualizam os quadros seguintes.</string>
+    <string name="real_camera_tracking_position">Posição e rotação 3D ativas.</string>
+    <string name="real_camera_tracking_rotation">Só rotação; este modo não mede posição.</string>
+    <string name="real_camera_tracking_limited">Rastreamento de posição pausado. Melhore a luz e mova o aparelho devagar.</string>
+    <string name="real_camera_camera_permission">Sem permissão de câmera: só rotação.</string>
+    <string name="real_camera_camera_permission_prompt">A câmera rastreia o movimento 3D do aparelho. As imagens não são gravadas.</string>
+    <string name="real_camera_tracking_failed">Rastreamento indisponível: só rotação.</string>
+    <string name="real_camera_arcore_privacy">O rastreamento 3D usa Google Play Services for AR (ARCore), fornecido pelo Google LLC, sujeito aos Termos do Google e à Política de Privacidade do Google.</string>
+    <string name="real_camera_google_terms">Termos do Google</string>
+    <string name="real_camera_google_privacy">Privacidade do Google</string>
     <string name="real_camera_title">Real Camera</string>
     <string name="real_camera_hint">Mova o celular: a câmera 3D segue. Gravar toca a timeline e grava o movimento como keyframes.</string>
     <string name="real_camera_record">Gravar</string>
@@ -3704,7 +3713,7 @@
     <string name="real_camera_invert">Inverter</string>
     <string name="real_camera_sensitivity">Sensibilidade</string>
     <string name="real_camera_done">Concluir</string>
-    <string name="real_camera_no_sensor">Este aparelho não tem giroscópio: a Real Camera não funciona aqui.</string>
+    <string name="real_camera_no_sensor">Sensor de orientação indisponível: a Real Camera não pode medir movimento neste aparelho.</string>
     <string name="roto_frame_ready">Este quadro: recorte pronto</string>
     <string name="roto_frame_pending">Este quadro: calculando o recorte…</string>
     <string name="roto_clip_status">Clipe: %1$d de %2$d quadros com recorte</string>

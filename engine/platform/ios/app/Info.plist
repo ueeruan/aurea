@@ -31,11 +31,15 @@
     <string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>AureaReleaseLabel</key>
+    <string>BETA 2</string>
     <key>CFBundleShortVersionString</key>
     <string>$(MARKETING_VERSION)</string>
     <!-- Build iOS do porte do editor Android atual. -->
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>NSCameraUsageDescription</key>
+    <string>A câmera rastreia o movimento 3D do aparelho para animar a câmera do projeto. As imagens não são gravadas.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Mostrar suas fotos e vídeos dentro do Aurea para escolher o que importar no projeto.</string>
     <key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>

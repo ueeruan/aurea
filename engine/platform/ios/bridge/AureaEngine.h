@@ -305,6 +305,20 @@ NS_SWIFT_NAME(AureaEngine)
 // --- Estado -----------------------------------------------------------------
 /// `YES` se leu. Sem alocação: a UI chama isto uma vez por frame.
 - (BOOL)readStatus:(AureaStatus*)out NS_SWIFT_NAME(readStatus(_:));
+
+/// Sensor transport only. The shared engine owns pose conversion, keyframes,
+/// playback and the recording history group; values are OpenGL column-major.
+- (BOOL)realCameraStart:(long long)layer NS_SWIFT_NAME(realCameraStart(_:));
+- (BOOL)realCameraRecord:(BOOL)recording NS_SWIFT_NAME(realCameraRecord(_:));
+- (BOOL)realCameraSample:(simd_float4x4)pose timestampNs:(uint64_t)timestampNs
+             positional:(BOOL)positional sensitivity:(float)sensitivity inverted:(BOOL)inverted
+    NS_SWIFT_NAME(realCameraSample(_:timestampNs:positional:sensitivity:inverted:));
+- (BOOL)realCameraHold NS_SWIFT_NAME(realCameraHold());
+- (BOOL)realCameraRecenter NS_SWIFT_NAME(realCameraRecenter());
+- (void)realCameraStop NS_SWIFT_NAME(realCameraStop());
+/// active, recording, last native frame keyed, actual position tracking mode.
+- (NSArray<NSNumber*>*)realCameraStatus NS_SWIFT_NAME(realCameraStatus());
+
 /// Pares de quadros [inicio, fim exclusivo] já renderizados na composição atual.
 /// Snapshot curto: não aguarda o renderer nem a GPU.
 - (NSArray<NSNumber*>*)previewBufferRanges NS_SWIFT_NAME(previewBufferRanges());
@@ -701,6 +715,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSNumber*>*)meshWarp:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(meshWarp(_:effect:));
 - (BOOL)meshWarpDrag:(long long)layerId effect:(int32_t)effectId vertex:(int32_t)vertex grip:(int32_t)grip u:(float)u v:(float)v autoKey:(BOOL)autoKey continuing:(BOOL)continuing NS_SWIFT_NAME(meshWarpDrag(_:effect:vertex:grip:u:v:autoKey:continuing:));
 - (BOOL)meshWarpReset:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(meshWarpReset(_:effect:));
+- (BOOL)meshWarpToggleKey:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(meshWarpToggleKey(_:effect:));
 // Fantoche (Engine::query_puppet e família; u, v = fração da caixa da camada):
 // pinos = 4 floats cada {índice, u, v, key no cabeçote}; malha = 6 por triângulo.
 - (NSArray<NSNumber*>*)puppetPins:(long long)layerId effect:(int32_t)effectId NS_SWIFT_NAME(puppetPins(_:effect:));

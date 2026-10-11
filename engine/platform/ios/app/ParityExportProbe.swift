@@ -7,6 +7,8 @@ import Foundation
 import AVFoundation
 import CoreImage
 import UIKit
+import ARKit
+import simd
 
 enum ParityExportProbe {
     private struct Failure: LocalizedError {
@@ -18,7 +20,7 @@ enum ParityExportProbe {
     /// The environment gate also prevents accidental use in ordinary Debug runs.
     /// A terminal report is written atomically to Documents/parity-export-ready.json.
     @MainActor
-    static func run(engine: AureaEngine, documents: URL) async -> [String: Any] {
+    static func run(engine: AureaEngine, documents: URL, model: AureaModel? = nil) async -> [String: Any] {
         let environment = ProcessInfo.processInfo.environment
         guard environment["AUREA_PARITY_EXPORT"] == "1" else {
             return ["enabled": false, "finished": true, "passed": false]
@@ -50,6 +52,13 @@ enum ParityExportProbe {
             guard (engine.exportProgress()[AureaExportRunning] as? NSNumber)?.boolValue != true else {
                 throw Failure(message: "Another export is already running")
             }
+#if targetEnvironment(simulator)
+            if let model {
+                report["phase"] = "real-camera-shared"
+                try writeReport()
+                report["realCamera"] = try await checkRealCameraController(model: model, documents: documents)
+            }
+#endif
             report["phase"] = "particle-camera"
             try writeReport()
             report["particleCamera"] = try await checkParticleCamera(engine: engine, documents: documents)
@@ -394,7 +403,7 @@ enum ParityExportProbe {
             return changed
         }
         var results: [[String: Any]] = []
-        for (name, amount) in [("bender", Float(35)), ("bend", 65), ("curl", 145), ("page_turn", 50)] {
+        for (name, amount) in [("bender", Float(35)), ("bend", 65), ("curl", 145), ("page_turn", 50), ("mesh_warp", 0)] {
             engine.pause(); _ = engine.flush()
             guard engine.newProjectWidth(320, height: 180, fps: 30, title: "Paper \(name)"),
                   let composition = engine.composition(),
@@ -411,7 +420,18 @@ enum ParityExportProbe {
                   let effectID = (effect[AureaEffectId] as? NSNumber)?.uint32Value else {
                 throw Failure(message: "Paper catalog effect could not be added: \(name)")
             }
-            engine.setEffect(effectID, forLayer: layer, paramIndex: 0, value: amount)
+            if name == "mesh_warp" {
+                let meshID = Int32(truncatingIfNeeded: effectID)
+                guard engine.meshWarpToggleKey(layer, effect: meshID) else { throw Failure(message: "Mesh identity key could not be marked") }
+                engine.seek(toFrame: 30); _ = engine.flush()
+                guard engine.saveProject(project.path), engine.meshWarpDrag(layer, effect: meshID, vertex: 36, grip: 0, u: 0.85, v: 0.65, autoKey: false, continuing: false) else {
+                    throw Failure(message: "Animated Mesh Warp drag did not create the second key")
+                }
+                let meshKeys = engine.allKeyframes().filter { ($0["layerId"] as? NSNumber)?.int64Value == layer }
+                    .flatMap { $0["keys"] as? [[String: Any]] ?? [] }
+                    .filter { ($0["property"] as? NSNumber)?.uint32Value == 44 && ($0["effectIndex"] as? NSNumber)?.uint32Value == effectID }
+                guard meshKeys.count == 2 else { throw Failure(message: "Mesh keys are invisible to the native timeline: \(meshKeys.count)") }
+            } else { engine.setEffect(effectID, forLayer: layer, paramIndex: 0, value: amount) }
             if name == "curl" { engine.setEffect(effectID, forLayer: layer, paramIndex: 1, value: 32) }
             if name == "page_turn" { engine.setEffect(effectID, forLayer: layer, paramIndex: 2, value: 16) }
             guard engine.saveProject(project.path) else { throw Failure(message: "Paper parameters could not be saved") }
@@ -419,9 +439,12 @@ enum ParityExportProbe {
             let changed = difference(original, deformed)
             guard changed > 400 else { throw Failure(message: "Paper effect did not change its pixels: \(name)") }
             guard engine.loadProject(project.path) else { throw Failure(message: "Paper project did not reopen") }
+            if name == "mesh_warp" { engine.seek(toFrame: 30); _ = engine.flush(); _ = engine.saveProject(project.path) }
             let reopened = try await capture(name + "-reopened")
             guard difference(deformed, reopened) == 0 else { throw Failure(message: "Paper persistence changed pixels: \(name)") }
-            engine.setEffect(effectID, forLayer: layer, paramIndex: 0, value: 0)
+            if name == "mesh_warp" {
+                guard engine.meshWarpReset(layer, effect: Int32(truncatingIfNeeded: effectID)) else { throw Failure(message: "Mesh reset failed") }
+            } else { engine.setEffect(effectID, forLayer: layer, paramIndex: 0, value: 0) }
             _ = engine.flush()
             let neutral = try await capture(name + "-zero")
             guard difference(original, neutral) == 0 else { throw Failure(message: "Zero paper effect is not identity: \(name)") }
@@ -565,6 +588,109 @@ enum ParityExportProbe {
         return results
     }
 
+#if targetEnvironment(simulator)
+    @MainActor
+    private static func checkRealCameraController(model: AureaModel, documents: URL) async throws -> [String: Any] {
+        let engine = model.engine
+        engine.pause()
+        guard engine.newProjectWidth(320, height: 180, fps: 30, title: "Shared Real Camera") else {
+            throw Failure(message: "Real camera fixture could not be created")
+        }
+        model.refreshModel(force: true)
+        model.startRealCamera()
+        let camera = RealCameraState.shared
+        defer { camera.stop(model) }
+        let layer = camera.layer
+        guard camera.active, !ARWorldTrackingConfiguration.isSupported else {
+            throw Failure(message: "Simulator real camera session did not report its actual capability")
+        }
+        let initial = (engine.layerDetail(layer)?[AureaDetailPosition] as? [NSNumber] ?? []).map(\.floatValue)
+        guard initial.count == 3 else { throw Failure(message: "Camera position is unavailable") }
+        var pose = matrix_identity_float4x4
+        guard camera.paritySubmitPose(pose, timestamp: 1, positional: true) else {
+            throw Failure(message: "Native camera reference pose was rejected")
+        }
+        pose.columns.3 = SIMD4<Float>(0.25, -0.10, 0.20, 1)
+        for index in 0..<5 {
+            guard camera.paritySubmitPose(pose, timestamp: 2 + Double(index) * 0.1, positional: true) else {
+                throw Failure(message: "Native camera translation was rejected")
+            }
+        }
+        let translated = (engine.layerDetail(layer)?[AureaDetailPosition] as? [NSNumber] ?? []).map(\.floatValue)
+        let expected: [Float] = [initial[0] + 22.5, initial[1] + 9, initial[2] - 18]
+        guard translated.count == 3, zip(translated, expected).allSatisfy({ pair in abs(pair.0 - pair.1) < 0.01 }) else {
+            throw Failure(message: "Camera translation did not preserve original position/OpenGL axes/metre scale")
+        }
+        // This is the same action invoked by the production Record/Stop chips.
+        camera.toggleRecording(model)
+        guard camera.recording else { throw Failure(message: "Swift Record did not arm the native session") }
+        var frames = Set<Int64>()
+        var heldFrames = Set<Int64>()
+        for index in 0..<12 {
+            let angle = Float(index) * 0.04
+            pose = simd_float4x4(simd_quatf(angle: angle, axis: SIMD3<Float>(0, 1, 0)))
+            pose.columns.3 = SIMD4<Float>(0.25 + Float(index) * 0.01, -0.10, 0.20, 1)
+            let accepted = index >= 8 ? camera.parityHoldTracking()
+                : camera.paritySubmitPose(pose, timestamp: 3 + Double(index) * 0.05, positional: true)
+            guard accepted, camera.recording, camera.lastFrame >= 0 else {
+                throw Failure(message: "Swift pose/hold callback stopped before native camera keys were recorded")
+            }
+            frames.insert(camera.lastFrame)
+            if index >= 8 { heldFrames.insert(camera.lastFrame) }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        camera.toggleRecording(model)
+        guard !camera.recording else { throw Failure(message: "Swift Stop did not end native recording") }
+        let keys = engine.keyframes(forLayer: layer)
+        let expectedProperties = Set([0, 1, 2, 6, 7, 8])
+        let properties = Set(keys.compactMap { ($0[AureaKeyframeProperty] as? NSNumber)?.intValue })
+        let uniquePairs = Set(keys.compactMap { row -> String? in
+            guard let property = row[AureaKeyframeProperty] as? NSNumber,
+                  let time = row[AureaKeyframeTime] as? NSNumber else { return nil }
+            return "\(property.intValue):\(time.int64Value)"
+        })
+        guard frames.count >= 2, properties == expectedProperties, keys.count == frames.count * 6,
+              uniquePairs.count == keys.count,
+              keys.allSatisfy({ ($0[AureaKeyframeInterpolation] as? NSNumber)?.intValue == 1 }) else {
+            throw Failure(message: "Camera capture did not create six unique linear tracks on native frames")
+        }
+        guard heldFrames.count >= 2, !camera.trackingValid else {
+            throw Failure(message: "Tracking loss did not retain recording over distinct native frames")
+        }
+        for property in expectedProperties {
+            let held = keys.filter { row in
+                guard let p = row[AureaKeyframeProperty] as? NSNumber,
+                      let t = row[AureaKeyframeTime] as? NSNumber else { return false }
+                return p.intValue == property && heldFrames.contains(t.int64Value)
+            }.compactMap { ($0[AureaKeyframeValue] as? NSNumber)?.floatValue }
+            guard held.count == heldFrames.count, let first = held.first,
+                  held.allSatisfy({ abs($0 - first) < 0.00001 }) else {
+                throw Failure(message: "Tracking loss invented movement instead of writing constant native keys")
+            }
+        }
+        let fixture = documents.appendingPathComponent("astra-real-camera-capture.aurea")
+        guard engine.saveProject(fixture.path) else { throw Failure(message: "Recorded camera project was not saved") }
+        engine.run { $0.undo() }
+        guard engine.saveProject(documents.appendingPathComponent("astra-real-camera-undo.aurea").path),
+              engine.keyframes(forLayer: layer).isEmpty else {
+            throw Failure(message: "One native undo did not remove the entire camera recording")
+        }
+        engine.run { $0.redo() }
+        guard engine.saveProject(fixture.path), engine.keyframes(forLayer: layer).count == keys.count else {
+            throw Failure(message: "One native redo did not restore the camera recording")
+        }
+        guard camera.paritySubmitPose(matrix_identity_float4x4, timestamp: 4, positional: false),
+              !camera.positional else { throw Failure(message: "Rotation fallback incorrectly claimed position") }
+        return ["passed": true, "sensorSource": "synthetic transport into production Swift controller",
+                "physicalTrackingValidated": false, "arWorldTrackingSupported": false,
+                "controllerRecordStop": true, "positionBefore": initial, "positionAfter": translated,
+                "nativeFrames": frames.sorted(), "keys": keys.count, "linearTracks": properties.sorted(),
+                "oneUndoRedo": true, "rotationFallbackPositional": camera.positional,
+                "trackingLossHeldFrames": heldFrames.sorted(), "trackingLossKeptPoseConstant": true,
+                "projectFile": fixture.lastPathComponent]
+    }
+#endif
+
     @MainActor
     private static func checkLegacyOfflineExport(engine: AureaEngine, documents: URL) async throws -> [String: Any] {
         let original = documents.appendingPathComponent("astra-legacy-square-glow.aurea")
@@ -577,7 +703,10 @@ enum ParityExportProbe {
         }
         var status = AureaStatus()
         guard engine.readStatus(&status), status.compFps > 0 else { throw Failure(message: "Legacy project status is unavailable") }
-        let frames = Int(ceil(Double(status.duration) * 30 / status.compFps - 1e-8))
+        let sourceFrames = Double(status.duration)
+        let sourceFps = Double(status.compFps)
+        let outputFrames = sourceFrames * 30.0 / sourceFps
+        let frames = Int(ceil(outputFrames - 1.0e-8))
         let ratio = Double(status.compWidth) / Double(status.compHeight)
         let width = ratio >= 1 ? Int((180 * ratio / 2).rounded()) * 2 : 180
         let height = ratio >= 1 ? 180 : Int((180 / ratio / 2).rounded()) * 2

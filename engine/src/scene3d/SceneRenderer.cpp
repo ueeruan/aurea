@@ -8,6 +8,7 @@
 #include "aurea/scene3d/MaterialOverrideKey.hpp"
 
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
 
 #include <algorithm>
 #include <array>
@@ -663,7 +664,14 @@ void SceneRenderer::poll_object_environment(u64 frameNumber, bool wait) noexcept
     // groups/subframes may already have captured their handles this frame.
     EnvironmentMaps maps;
     EnvSet next;
-    if (!take_environment_job(pendingObjectEnv_, maps) || !gpu_ || !upload_environment(maps, next).ok()) {
+    const u64 started = environmentTrace_ ? monotonic_ns() : 0;
+    const bool completed = take_environment_job(pendingObjectEnv_, maps);
+    const u64 waited = environmentTrace_ ? monotonic_ns() : 0;
+    const bool uploaded = completed && gpu_ && upload_environment(maps, next).ok();
+    if (environmentTrace_) AUREA_LOG_INFO("capture-environment object-future key=%llu spec=%u future_wait_ms=%.3f upload_ms=%.3f ok=%u",
+        static_cast<unsigned long long>(key), tier, static_cast<double>(waited - started) * 1e-6,
+        static_cast<double>(monotonic_ns() - waited) * 1e-6, uploaded ? 1u : 0u);
+    if (!uploaded) {
         incomplete_ = true;
         return;
     }
@@ -693,7 +701,14 @@ const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironme
     }
     if (wait) {
         EnvSet next;
-        if (!upload_environment(build_for(env, q), next).ok()) { incomplete_ = true; return nullptr; }
+        const u64 started = environmentTrace_ ? monotonic_ns() : 0;
+        EnvironmentMaps maps = build_for(env, q);
+        const u64 built = environmentTrace_ ? monotonic_ns() : 0;
+        const Status uploaded = upload_environment(maps, next);
+        if (environmentTrace_) AUREA_LOG_INFO("capture-environment object key=%llu spec=%u background=%u cpu_build_ms=%.3f upload_ms=%.3f result=%d",
+            static_cast<unsigned long long>(key), q.specularSize, q.backgroundSize,
+            static_cast<double>(built - started) * 1e-6, static_cast<double>(monotonic_ns() - built) * 1e-6, uploaded.raw());
+        if (!uploaded.ok()) { incomplete_ = true; return nullptr; }
         next.specularTier = q.specularSize;
         next.lastFrame = frameNumber;
         envSets_.emplace_back(key, next);
@@ -744,6 +759,69 @@ void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     incomplete_ = true;
 }
 
+Status SceneRenderer::prepare_environment(const SceneEnvironment& env, u64 frameNumber, bool object) noexcept {
+    if (!gpu_) return Errc::InvalidState;
+    const u64 key = key_of(env);
+    auto& pending = object ? pendingObjectEnv_ : pendingEnv_;
+    const u32 wantBg = !object && env.showBackground ? envFinal_.backgroundSize : 0u;
+    if (pending.valid()) {
+        // Replacing a live std::async future can block in its destructor.
+        // Drain an obsolete preview job only after it has actually finished.
+        if (pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return Errc::Busy;
+        const u64 pendingKey = object ? pendingObjectKey_ : pendingKey_;
+        const u32 pendingSpec = object ? pendingObjectSpecTier_ : pendingSpecTier_;
+        const u32 pendingBg = object ? 0u : pendingBgTier_;
+        EnvironmentMaps maps;
+        if (!take_environment_job(pending, maps)) return Errc::OutOfMemory;
+        if (pendingKey == key && pendingSpec >= envFinal_.specularSize && pendingBg >= wantBg) {
+            const u64 started = environmentTrace_ ? monotonic_ns() : 0;
+            Status status;
+            if (object) {
+                EnvSet next;
+                status = upload_environment(maps, next);
+                if (status.ok()) {
+                    next.specularTier = pendingSpec; next.lastFrame = frameNumber;
+                    envSets_.emplace_back(key, next);
+                }
+            } else {
+                status = set_environment(maps);
+                if (status.ok()) {
+                    envKey_ = key; envSpecTier_ = pendingSpec; envBgTier_ = pendingBg;
+                    envLastFrame_ = frameNumber; envRequested_ = true;
+                }
+            }
+            if (environmentTrace_) AUREA_LOG_INFO("capture-resource environment-ready key=%llu object=%u spec=%u background=%u upload_ms=%.3f result=%d",
+                static_cast<unsigned long long>(key), object ? 1u : 0u, pendingSpec, pendingBg,
+                static_cast<double>(monotonic_ns() - started) * 1e-6, status.raw());
+            if (!status.ok()) return status;
+        }
+    }
+    EnvironmentQuality quality = envFinal_;
+    quality.backgroundSize = wantBg;
+    if (object) {
+        for (auto& entry : envSets_) if (entry.first == key) {
+            entry.second.lastFrame = frameNumber;
+            if (entry.second.specularTier >= quality.specularSize) return OkStatus;
+            quality.specularSize = std::max(quality.specularSize, entry.second.specularTier);
+        }
+    } else {
+        restore_environment(key);
+        if (key == envKey_) {
+            envLastFrame_ = frameNumber;
+            if (envSpecTier_ >= quality.specularSize && envBgTier_ >= wantBg
+                && (wantBg == 0 || background_.valid())) return OkStatus;
+            quality.specularSize = std::max(quality.specularSize, envSpecTier_);
+            quality.backgroundSize = std::max(quality.backgroundSize, envBgTier_);
+        }
+    }
+    if (!start_environment_job(pending, env.hdri, quality, environmentPrepareProbe_, environmentPrepareProbeContext_)) return Errc::OutOfMemory;
+    if (object) { pendingObjectKey_ = key; pendingObjectSpecTier_ = quality.specularSize; }
+    else { pendingKey_ = key; pendingSpecTier_ = quality.specularSize; pendingBgTier_ = quality.backgroundSize; }
+    if (environmentTrace_) AUREA_LOG_INFO("capture-resource environment-start key=%llu object=%u spec=%u background=%u",
+        static_cast<unsigned long long>(key), object ? 1u : 0u, quality.specularSize, quality.backgroundSize);
+    return Errc::Busy;
+}
+
 void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
     // Export/captura: o ambiente CERTO, na qualidade final, já no primeiro
     // quadro (sem esperar a troca). Um preview em andamento da mesma chave e
@@ -754,25 +832,38 @@ void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
     const u32 wantBg = env.showBackground ? envFinal_.backgroundSize : 0u;
     auto enough = [&](u64 k, u32 spec, u32 bg) { return k == key && spec >= envFinal_.specularSize && bg >= wantBg; };
     if (enough(envKey_, envSpecTier_, envBgTier_) && (wantBg == 0 || background_.valid()) && !pendingEnv_.valid()) return;
+    const u64 started = environmentTrace_ ? monotonic_ns() : 0;
+    const u32 previousSpec = envSpecTier_;
+    u64 waited = started, built = started;
+    bool generated = false;
     EnvironmentMaps maps;
     u32 spec = 0, backgroundTier = 0;
     if (pendingEnv_.valid() && enough(pendingKey_, pendingSpecTier_, pendingBgTier_)) {
         maps = pendingEnv_.get();
+        waited = built = environmentTrace_ ? monotonic_ns() : 0;
         spec = pendingSpecTier_;
         backgroundTier = pendingBgTier_;
     } else {
         if (pendingEnv_.valid()) pendingEnv_.wait();
         pendingEnv_ = {};
+        waited = environmentTrace_ ? monotonic_ns() : 0;
         if (enough(envKey_, envSpecTier_, envBgTier_) && (wantBg == 0 || background_.valid())) return;
         EnvironmentQuality q = envFinal_;
         q.backgroundSize = key == envKey_ ? std::max(envBgTier_, wantBg) : wantBg;
         q.specularSize = key == envKey_ ? std::max(envSpecTier_, q.specularSize) : q.specularSize;
         maps = build_for(env, q);
+        generated = true;
+        built = environmentTrace_ ? monotonic_ns() : 0;
         spec = q.specularSize;
         backgroundTier = q.backgroundSize;
     }
     envRequested_ = true;
-    if (const Status s = set_environment(maps); !s.ok()) {
+    const Status s = set_environment(maps);
+    if (environmentTrace_) AUREA_LOG_INFO("capture-environment scene key=%llu previous_spec=%u spec=%u background=%u generated=%u future_wait_ms=%.3f cpu_build_ms=%.3f upload_ms=%.3f result=%d",
+        static_cast<unsigned long long>(key), previousSpec, spec, backgroundTier, generated ? 1u : 0u,
+        static_cast<double>(waited - started) * 1e-6, static_cast<double>(built - waited) * 1e-6,
+        static_cast<double>(monotonic_ns() - built) * 1e-6, s.raw());
+    if (!s.ok()) {
         incomplete_ = true;
         AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
     }
@@ -878,6 +969,8 @@ u32 SceneRenderer::trim_upload_pools() noexcept {
 void SceneRenderer::shutdown() noexcept {
     if (pendingEnv_.valid()) pendingEnv_.wait();
     if (pendingObjectEnv_.valid()) pendingObjectEnv_.wait();
+    environmentPrepareProbe_ = nullptr; environmentPrepareProbeContext_ = nullptr;
+    environmentTrace_ = false;
     if (!gpu_) return;
     drop_upload_pools(true);
     release_all();
@@ -905,6 +998,8 @@ void SceneRenderer::forget_device() noexcept {
     if (pendingObjectEnv_.valid()) { pendingObjectEnv_.wait(); pendingObjectEnv_ = {}; }
     pendingObjectKey_ = ~0ull;
     pendingObjectSpecTier_ = 0;
+    environmentPrepareProbe_ = nullptr; environmentPrepareProbeContext_ = nullptr;
+    environmentTrace_ = false;
     gpu_ = nullptr;
 }
 
@@ -973,12 +1068,16 @@ u32 SceneRenderer::trim_environment_cache(u64 frameNumber) noexcept {
     return released;
 }
 
-void SceneRenderer::release_all() noexcept {
-    drop_upload_pools(true);
+void SceneRenderer::release_models() noexcept {
     for (auto& [k, e] : models_) {
         if (e.model && gpu_) e.model->release(*gpu_);
     }
     models_.clear();
+}
+
+void SceneRenderer::release_all() noexcept {
+    drop_upload_pools(true);
+    release_models();
     // O AMBIENTE também é do projeto, não do aparelho. Este cache é indexado
     // pelo id do asset do HDRI (`key_of`), e dois projetos REAPROVEITAM os
     // mesmos ids: o slot 1 de um projeto não é o slot 1 do seguinte. Sem
@@ -1066,35 +1165,54 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
     auto* self = const_cast<SceneRenderer*>(this);
     const u32 savedSamples = passSamples_;
     const bool savedMrt = passMrt_, savedA2C = passA2C_;
-    self->passSamples_ = pass_samples();
-    self->passMrt_ = true;
-    self->passA2C_ = passSamples_ > 1 && gpu_ && gpu_->capabilities().alphaToOne;
-    const usize groundFirst = out.size();   // chão: variantes do reflexo (Ground.cpp)
-    for (AlphaMode mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
-        for (bool twoSided : {false, true}) {
-            for (bool skinned : {false, true}) {
-                auto key = key_for(mode, twoSided, skinned);
-                out.push_back(key);
-                if (!twoSided) {
-                    key.frontFaceCCW = false;
+    const u32 samples = pass_samples();
+    const auto collectSampleCount = [&](u32 count) {
+        self->passSamples_ = count;
+        self->passMrt_ = true;
+        self->passA2C_ = count > 1 && gpu_ && gpu_->capabilities().alphaToOne;
+        const usize groundFirst = out.size();   // chão: variantes do reflexo (Ground.cpp)
+        for (AlphaMode mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
+            for (bool twoSided : {false, true}) {
+                for (bool skinned : {false, true}) {
+                    auto key = key_for(mode, twoSided, skinned);
                     out.push_back(key);
+                    if (!twoSided) {
+                        key.frontFaceCCW = false;
+                        out.push_back(key);
+                    }
                 }
             }
         }
-    }
-    collect_ground_pipelines(out, groundFirst, out.size(), passSamples_);
-    out.push_back(shadow_key(false));
-    out.push_back(shadow_key(true));
-    out.push_back(plane_key());
-    out.push_back(plane_key(true));
-    self->passMrt_ = false;
-    out.push_back(plane_key());
-    out.push_back(plane_key(true));
-    auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
-    sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
-    sky.sampleCount = static_cast<u8>(passSamples_);
-    sky.hasColor1 = true;
-    out.push_back(sky);
+        collect_ground_pipelines(out, groundFirst, out.size(), passSamples_);
+        out.push_back(shadow_key(false));
+        out.push_back(shadow_key(true));
+        out.push_back(plane_key());
+        out.push_back(plane_key(true));
+        self->passMrt_ = false;
+        // A plane-only group checks this PBR key before its MSAA pass,
+        // even though it has no model and no HDR attachment.
+        out.push_back(key_for(AlphaMode::Opaque, false, false));
+        out.push_back(plane_key());
+        out.push_back(plane_key(true));
+        auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
+        sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
+        sky.sampleCount = static_cast<u8>(passSamples_);
+        sky.hasColor1 = true;
+        out.push_back(sky);
+        sky.hasColor1 = false;
+        out.push_back(sky);
+    };
+    collectSampleCount(samples);
+    // DOF needs resolved depth. Its conservative 1x path must be warm too;
+    // the runtime camera may activate the lens later in the same playback.
+    if (samples > 1 && gpu_ && !gpu_->capabilities().depthResolveSampleZero) collectSampleCount(1);
+    // A background-only sky is a 1x pass without depth or MRT. build also
+    // prepares the depth-aware sky key before selecting that direct path.
+    auto directSky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag,
+                                           SurfaceFormat::RGBA16F);
+    out.push_back(directSky);
+    directSky.hasDepth = true; directSky.depthFormat = SurfaceFormat::Depth32F;
+    out.push_back(directSky);
     // Pós do grupo.
     out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_tonemap_frag, SurfaceFormat::RGBA16F));
     out.push_back(PipelineKey::fullscreen(ShaderId::scene3d_post_bloom_down_frag, SurfaceFormat::RGBA16F));
@@ -1248,7 +1366,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         MeshPush push;
         PipelineHandle pipeline;
         f32 viewDepth;
-        u32 sortKey;
+        i32 materialIndex;           ///< authored index; never a process address
         bool skinned;
         bool morph;
         usize morphPos, morphShade;
@@ -1538,7 +1656,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     BufferHandle morphBuf{};
     {
         usize bytes = 0;
-        std::unordered_map<std::pair<const Primitive*, const std::vector<f32>*>, usize, ScenePairHash> morphUploads;
+        // Animated copies own separate weight vectors even when their pose is
+        // identical. Share by exact values, within this build only: material,
+        // world transform and animation time still belong to each instance.
+        using MorphKey = std::pair<const Primitive*, const std::vector<f32>*>;
+        struct MorphHash {
+            usize operator()(const MorphKey& key) const noexcept {
+                usize hash = std::hash<const Primitive*>{}(key.first);
+                for (f32 weight : *key.second)
+                    hash = (hash ^ std::hash<f32>{}(weight)) * usize{16777619};
+                return hash;
+            }
+        };
+        struct MorphEqual {
+            bool operator()(const MorphKey& a, const MorphKey& b) const noexcept {
+                return a.first == b.first && (a.second == b.second || *a.second == *b.second);
+            }
+        };
+        std::unordered_map<MorphKey, usize, MorphHash, MorphEqual> morphUploads;
         for (usize ii = 0; ii < frame.instances.size(); ++ii) {
             const SceneInstance& inst = frame.instances[ii];
             const GpuModel* gm = instanceModels[ii];
@@ -1585,6 +1720,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     auto* pos = reinterpret_cast<Vec3*>(base + j.posOffset);
                     auto* sh = reinterpret_cast<ShadingVertex*>(base + j.shadeOffset);
                     const usize nv = p.positions.size();
+                    ++stats_.morphUploads;
+                    stats_.morphVertices += nv;
                     select_active_morph_targets(p, *j.weights, activeTargets);
                     for (usize v = 0; v < nv; ++v) {
                         Vec3 P, N;
@@ -1606,6 +1743,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 gpu_->unmap_buffer(buf);
                 morphBuf = buf;
+                stats_.morphUploadBytes += bytes;
             } else {
                 incomplete_ = true;
                 morphJobs.clear();
@@ -1826,7 +1964,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     continue;
                 }
                 const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
-                const GpuMaterial* mat = faded(material_for(inst, *gm, nodes[n].material_for(primitive)), nodeAlpha);
+                const i32 materialIndex = nodes[n].material_for(primitive);
+                const GpuMaterial* mat = faded(material_for(inst, *gm, materialIndex), nodeAlpha);
                 if (n < inst.pose().nodeFill.size()) mat = tinted(mat, inst.pose().nodeFill[n]);
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:
@@ -1881,61 +2020,54 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     pick_lod(p, world, viewFromLocal, lodKey, d.firstIndex, d.indexCount);
                 }
                 d.viewDepth = viewFromLocal.transform_point(p.bounds.center()).z;
-                d.sortKey = static_cast<u32>(pipe->id & 0xFFFF) << 16 | static_cast<u32>(reinterpret_cast<uintptr_t>(mat) >> 4 & 0xFFFF);
+                d.materialIndex = materialIndex;
                 (drawMode == AlphaMode::Blend ? blended : opaque).push_back(d);
                 ++stats_.visiblePrimitives;
                 stats_.triangles += d.indexCount / 3;
             }
         }
     }
-    // Opacos agrupados por pipeline/material (menos trocas de estado); os
-    // transparentes do mais longe para o mais perto (ordem correta do blend).
-    std::sort(opaque.begin(), opaque.end(), [](const Draw& a, const Draw& b) { return a.sortKey < b.sortKey; });
-    std::sort(blended.begin(), blended.end(), [](const Draw& a, const Draw& b) { return a.viewDepth > b.viewDepth; });
+    // Coplanar depth ties need a deterministic material order even when a
+    // model is imported again or GPU/material addresses change. Preserve the
+    // authored instance/node/primitive order within each pipeline/index pair.
+    std::stable_sort(opaque.begin(), opaque.end(), [](const Draw& a, const Draw& b) {
+        return std::tie(a.pipeline.id, a.materialIndex) < std::tie(b.pipeline.id, b.materialIndex);
+    });
+    std::stable_sort(blended.begin(), blended.end(), [](const Draw& a, const Draw& b) { return a.viewDepth > b.viewDepth; });
 
     // --- Instancing (8E) ------------------------------------------------------
     // Objetos iguais (mesma malha, primitiva, LOD, material e pipeline; sem
-    // skin nem morph) viram UM desenho com N instâncias. As matrizes vão num
+    // skin) viram UM desenho com N instâncias. Morphs só se juntam quando
+    // usam exatamente os mesmos fluxos deformados. As matrizes vão num
     // SSBO do quadro: duas mat4 por instância na cor (mundo + normais), uma na
     // sombra (luz ← local). Transparentes ficam fora: a ordem do blend é por
     // profundidade, desenho a desenho. O recorte por frustum já aconteceu —
     // instância fora da tela nem entra no grupo.
     std::vector<Mat4> instData;
     if (instancing_ && (opaque.size() > 1 || shadowDraws.size() > 1)) {
-        auto mix = [](u64 h, u64 v) { return (h ^ v) * 0x100000001B3ull; };
-        std::unordered_map<u64, u32> groupOf;
-        // One flat chain per pass instead of one heap allocation per group.
+        // Merge adjacent runs only. A/B/A at the same depth must remain A/B/A;
+        // collecting all A draws before B changes the winning opaque surface.
+        // The deformation upload cache above remains shared across all runs.
         struct Members { u32 head, tail, count; };
         std::vector<Members> members;
-        std::vector<u32> next(opaque.size(), kInvalidIndex);
         std::vector<Draw> merged;
         merged.reserve(opaque.size());
         members.reserve(opaque.size());
-        if (!opaque.empty()) groupOf.reserve(opaque.size());
         for (u32 i = 0; i < opaque.size(); ++i) {
             const Draw& d = opaque[i];
-            if (d.skinned || d.morph || !instancing_) { merged.push_back(d); members.push_back({i, i, 1}); continue; }
-            u64 h = 0xCBF29CE484222325ull;
-            h = mix(h, reinterpret_cast<uintptr_t>(d.model));
-            h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
-            h = mix(h, reinterpret_cast<uintptr_t>(d.material));
-            h = mix(h, reinterpret_cast<uintptr_t>(d.block));
-            h = mix(h, d.pipeline.id);
-            h = mix(h, (static_cast<u64>(d.firstIndex) << 32) | d.indexCount);
-            auto [it, fresh] = groupOf.try_emplace(h, static_cast<u32>(merged.size()));
-            const Draw* prior = fresh ? nullptr : &merged[it->second];
-            // Hash collisions may miss a batching opportunity, never combine
-            // different meshes, materials, environments or levels of detail.
-            const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->material == d.material
+            const Draw* prior = merged.empty() ? nullptr : &merged.back();
+            const bool equal = !d.skinned && prior && !prior->skinned
+                && prior->model == d.model && prior->prim == d.prim && prior->material == d.material
                 && prior->block == d.block && prior->pipeline.id == d.pipeline.id && prior->firstIndex == d.firstIndex
-                && prior->indexCount == d.indexCount;
-            if (fresh || !equal) { merged.push_back(d); members.push_back({i, i, 1}); }
-            else { auto& group = members[it->second]; next[group.tail] = i; group.tail = i; ++group.count; }
+                && prior->indexCount == d.indexCount && prior->morph == d.morph
+                && (!d.morph || (prior->morphPos == d.morphPos && prior->morphShade == d.morphShade));
+            if (!equal) { merged.push_back(d); members.push_back({i, i, 1}); }
+            else { auto& group = members.back(); group.tail = i; ++group.count; }
         }
         for (u32 g = 0; g < merged.size(); ++g) {
             if (members[g].count < 2) continue;
             const u32 base = static_cast<u32>(instData.size());
-            for (u32 idx = members[g].head; idx != kInvalidIndex; idx = next[idx]) {
+            for (u32 idx = members[g].head; idx <= members[g].tail; ++idx) {
                 const Draw& m = opaque[idx];
                 instData.push_back(m.push.model);
                 Mat4 nm;
@@ -1951,31 +2083,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         }
         opaque.swap(merged);
 
-        // Sombra: o mesmo, por (malha, primitiva, pipeline).
-        std::unordered_map<u64, u32> sgroupOf;
+        // The shadow pass also preserves its original contiguous draw order.
         std::vector<Members> smembers;
-        std::vector<u32> snext(shadowDraws.size(), kInvalidIndex);
         std::vector<ShadowDraw> smerged;
         smerged.reserve(shadowDraws.size());
         smembers.reserve(shadowDraws.size());
-        if (!shadowDraws.empty()) sgroupOf.reserve(shadowDraws.size());
         for (u32 i = 0; i < shadowDraws.size(); ++i) {
             const ShadowDraw& d = shadowDraws[i];
-            if (d.skinned || d.morph || !instancing_) { smerged.push_back(d); smembers.push_back({i, i, 1}); continue; }
-            u64 h = 0xCBF29CE484222325ull;
-            h = mix(h, reinterpret_cast<uintptr_t>(d.model));
-            h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
-            h = mix(h, d.pipeline.id);
-            auto [it, fresh] = sgroupOf.try_emplace(h, static_cast<u32>(smerged.size()));
-            const ShadowDraw* prior = fresh ? nullptr : &smerged[it->second];
-            const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->pipeline.id == d.pipeline.id;
-            if (fresh || !equal) { smerged.push_back(d); smembers.push_back({i, i, 1}); }
-            else { auto& group = smembers[it->second]; snext[group.tail] = i; group.tail = i; ++group.count; }
+            const ShadowDraw* prior = smerged.empty() ? nullptr : &smerged.back();
+            const bool equal = !d.skinned && prior && !prior->skinned
+                && prior->model == d.model && prior->prim == d.prim && prior->pipeline.id == d.pipeline.id
+                && prior->morph == d.morph && (!d.morph || prior->morphPos == d.morphPos);
+            if (!equal) { smerged.push_back(d); smembers.push_back({i, i, 1}); }
+            else { auto& group = smembers.back(); group.tail = i; ++group.count; }
         }
         for (u32 g = 0; g < smerged.size(); ++g) {
             if (smembers[g].count < 2) continue;
             const u32 base = static_cast<u32>(instData.size());
-            for (u32 idx = smembers[g].head; idx != kInvalidIndex; idx = snext[idx]) instData.push_back(shadowDraws[idx].push.model);
+            for (u32 idx = smembers[g].head; idx <= smembers[g].tail; ++idx) instData.push_back(shadowDraws[idx].push.model);
             smerged[g].instanceCount = smembers[g].count;
             smerged[g].push.normalCol[0].y = static_cast<f32>(base + 1u);
         }
@@ -2274,10 +2399,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     c.bind_vertex_buffer(2, d.model->skin, static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex));
                 }
                 c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
+                if (d.instanceCount > 1) c.bind_storage_buffer(cap.inst);
                 boundModel = nullptr;   // o próximo desenho normal re-liga a malha
                 c.set_uniforms(d.block, sizeof(SceneBlock));
                 c.push_constants(&d.push, sizeof(MeshPush));
-                c.draw_indexed(d.indexCount, 1, d.firstIndex, 0, 0);
+                c.draw_indexed(d.indexCount, std::max(1u, d.instanceCount), d.firstIndex, 0, 0);
                 continue;
             }
             if (d.model != boundModel || d.skinned) {

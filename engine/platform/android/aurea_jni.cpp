@@ -934,7 +934,9 @@ static jint capture_frame(JNIEnv* env, jlong handle, jint maxDim, jobject out, j
         ? c->engine.capture_preview_frame_rgba(static_cast<u32>(maxDim), rgba, w, h)
         : c->engine.capture_frame_rgba(static_cast<u32>(maxDim), rgba, w, h);
     if (!captured.ok()) {
-        AUREA_LOG_WARN("captura do projeto falhou (%u): %s", static_cast<u32>(captured.code()), captured.message().data());
+        const std::string_view detail = captured.detail();
+        AUREA_LOG_WARN("captura do projeto falhou (%u): %s detail=%.*s", static_cast<u32>(captured.code()), captured.message().data(),
+            static_cast<int>(detail.size()), detail.empty() ? "" : detail.data());
         return 0;
     }
     if (static_cast<jlong>(rgba.size()) > buffer_capacity(env, out)) return 0;
@@ -1505,6 +1507,11 @@ AUREA_JNI jboolean AUREA_FN(nativeMeshWarpDrag)(JNIEnv*, jclass, jlong handle, j
 AUREA_JNI jboolean AUREA_FN(nativeMeshWarpReset)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect) {
     NativeContext* c = ctx_of(handle);
     return c && effect >= 0 && c->engine.mesh_warp_reset(static_cast<u64>(layer), static_cast<u32>(effect)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMeshWarpToggleKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 && c->engine.mesh_warp_toggle_key(static_cast<u64>(layer), static_cast<u32>(effect)) ? JNI_TRUE : JNI_FALSE;
 }
 
 // --- Fantoche (Engine::query_puppet e família; u, v = fração da camada) -------
@@ -3244,6 +3251,45 @@ AUREA_JNI jboolean AUREA_FN(nativeSetLightParam)(JNIEnv*, jclass, jlong handle, 
     Command command; command.type = CommandType::LayerSetLightParam;
     command.shape_param = ShapeParamPayload{LayerId::unpack(static_cast<u64>(layer)), static_cast<u32>(param), value};
     return c->engine.submit_commands(&command, 1, nullptr, 0) == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+// Real Camera: thin matrix/status bridge. Keyframes and playback belong to C++.
+AUREA_JNI jboolean AUREA_FN(nativeRealCameraStart)(JNIEnv*, jobject, jlong handle, jlong layer) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.real_camera_start(static_cast<u64>(layer)).ok() ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeRealCameraRecord)(JNIEnv*, jobject, jlong handle, jboolean record) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.real_camera_record(record == JNI_TRUE).ok() ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeRealCameraSample)(JNIEnv* env, jobject, jlong handle, jfloatArray pose,
+                                                jlong timestampNs, jboolean positional, jfloat sensitivity, jboolean inverted) {
+    auto* c = ctx_of(handle);
+    if (!c || !pose || env->GetArrayLength(pose) != 16 || timestampNs <= 0) return JNI_FALSE;
+    f32 values[16]{};
+    env->GetFloatArrayRegion(pose, 0, 16, values);
+    if (env->ExceptionCheck()) return JNI_FALSE;
+    return c->engine.real_camera_sample(values, static_cast<u64>(timestampNs), positional == JNI_TRUE,
+                                         sensitivity, inverted == JNI_TRUE).ok() ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeRealCameraHold)(JNIEnv*, jobject, jlong handle) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.real_camera_hold().ok() ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeRealCameraRecenter)(JNIEnv*, jobject, jlong handle) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.real_camera_recenter().ok() ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI void AUREA_FN(nativeRealCameraStop)(JNIEnv*, jobject, jlong handle) {
+    if (auto* c = ctx_of(handle)) c->engine.real_camera_stop();
+}
+AUREA_JNI jlongArray AUREA_FN(nativeRealCameraStatus)(JNIEnv* env, jobject, jlong handle) {
+    auto* c = ctx_of(handle);
+    const auto status = c ? c->engine.real_camera_status() : Engine::RealCameraStatus{};
+    const jlong values[4]{status.active ? 1 : 0, status.recording ? 1 : 0, status.lastFrame, status.positional ? 1 : 0};
+    auto result = env->NewLongArray(4);
+    if (result) env->SetLongArrayRegion(result, 0, 4, values);
+    return result;
 }
 
 AUREA_JNI jlong AUREA_FN(nativeAddCamera)(JNIEnv*, jclass, jlong handle) {

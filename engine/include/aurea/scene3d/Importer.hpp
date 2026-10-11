@@ -42,6 +42,8 @@ struct ImportProgress {
     std::atomic<ImportPhase> phase{ImportPhase::Queued};
     std::atomic<f32> fraction{0.0f};     ///< 0..1 dentro da etapa
     std::atomic<bool> cancel{false};
+    /// Optional owning session flag; it outlives the synchronous import.
+    const std::atomic<bool>* externalCancel = nullptr;
 };
 
 /// Lê um recurso externo referenciado pelo arquivo (o .bin ou a textura de
@@ -64,6 +66,9 @@ struct ImportOptions {
     /// (meshoptimizer), proporcionalmente. 0 = sem simplificação.
     u32 maxTriangles = 0;
     f32 simplifyError = 0.01f;
+    /// Final export cannot substitute a missing map with an untextured material.
+    /// Preview keeps its existing warning/fallback behavior.
+    bool requireAllTextures = false;
 };
 
 struct ImportResult {
@@ -91,7 +96,8 @@ struct ImportResult {
 /// KTX2 (Basis Universal ETC1S/UASTC, com ou sem Zstd): transcodifica o
 /// nível 0 para RGBA8. Usado pelo import de KHR_texture_basisu.
 [[nodiscard]] bool is_ktx2(const u8* data, usize size) noexcept;
-[[nodiscard]] bool decode_ktx2(const u8* data, usize size, Image& out);
+[[nodiscard]] bool decode_ktx2(const u8* data, usize size, Image& out,
+    u64 transientLimit = ~0ull, bool* skipped = nullptr);
 
 [[nodiscard]] ImportResult import_gltf_memory(const u8* data, usize size, const std::string& baseDir,
                                               const ImportOptions& options, ImportProgress* progress = nullptr);

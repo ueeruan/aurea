@@ -114,18 +114,21 @@ struct Allocation {
     u32            memoryType = 0;
     u32            block = kInvalidIndex;   ///< kInvalidIndex = dedicada
     void*          mapped = nullptr;
+    VkResult       failure = VK_SUCCESS;  ///< original driver error on an invalid allocation
     [[nodiscard]] bool valid() const noexcept { return memory != VK_NULL_HANDLE; }
 };
 
 class MemoryAllocator {
 public:
-    void initialize(VkPhysicalDevice physical, VkDevice device) noexcept;
+    void initialize(VkPhysicalDevice physical, VkDevice device,
+                    const InstanceDispatch& instanceFunctions, DeviceDispatch& deviceFunctions) noexcept;
     void shutdown() noexcept;
 
     /// `required`: propriedades obrigatórias; `preferred`: desejáveis.
     /// `hostPointer`: o chamador usa `Allocation::mapped` (buffers, staging).
     /// Imagens passam false: em 32 bits a memória delas não é mapeada no
-    /// processo (AddressSpace.hpp); em 64 bits nada muda.
+    /// processo (AddressSpace.hpp). Optional eager maps may fail, but callers
+    /// requiring a CPU pointer never receive valid, unmapped memory.
     [[nodiscard]] Allocation allocate(const VkMemoryRequirements& req, VkMemoryPropertyFlags required,
                                       VkMemoryPropertyFlags preferred, bool dedicated,
                                       const char* debugName, bool hostPointer = true) noexcept;
@@ -133,6 +136,8 @@ public:
     /// Release unused slabs after deferred resource destruction. Live block
     /// indices stay stable because Allocation stores them.
     void trim_empty_blocks() noexcept;
+    /// Failure-only diagnostics; does not reclaim or change admission policy.
+    void log_memory_breakdown() noexcept;
 
     [[nodiscard]] u64 reserved_bytes() const noexcept { return reserved_; }
     [[nodiscard]] u64 used_bytes() const noexcept { return used_; }
@@ -142,10 +147,15 @@ public:
     [[nodiscard]] const VkPhysicalDeviceMemoryProperties& properties() const noexcept { return props_; }
 
 private:
+    const InstanceDispatch* instanceFunctions_ = nullptr;
+    DeviceDispatch* deviceFunctions_ = nullptr;
     struct Range { VkDeviceSize offset; VkDeviceSize size; };
     struct Block {
         VkDeviceMemory memory = VK_NULL_HANDLE;
         VkDeviceSize size = 0;
+        // Request class, independent of driver granularity/alignment. Small
+        // long-lived resources cannot pin a slab opened for larger transients.
+        VkDeviceSize sizeClass = 0;
         u32 memoryType = 0;
         void* mapped = nullptr;
         std::vector<Range> free;   ///< ordenado por offset, coalescido
@@ -230,6 +240,15 @@ public:
     [[nodiscard]] bool allocate(VkDeviceSize size, VkDeviceSize align, VkBuffer& outBuffer,
                                 VkDeviceSize& outOffset, void*& outPtr) noexcept;
     [[nodiscard]] VkDeviceSize used() const noexcept { return used_; }
+    struct Stats {
+        VkDeviceSize capacity = 0;
+        VkDeviceSize backing = 0;
+        VkDeviceSize payloadUsed = 0;
+        VkDeviceSize alignedDemand = 0;
+        VkDeviceSize peakAlignedDemand = 0;
+        u32 chunks = 0;
+    };
+    [[nodiscard]] Stats stats() const noexcept;
 
 private:
     struct Chunk { VkBuffer buffer = VK_NULL_HANDLE; Allocation alloc{}; VkDeviceSize size = 0; };
@@ -238,7 +257,11 @@ private:
     std::vector<Chunk> chunks_;
     VkDeviceSize offset_ = 0;
     VkDeviceSize used_ = 0;
-    VkDeviceSize peak_ = 0;
+    // Demand in a hypothetical single buffer, including every alignment gap.
+    // Chunk capacities include discarded tails and are not a workload peak.
+    VkDeviceSize alignedDemand_ = 0;
+    VkDeviceSize peakAlignedDemand_ = 0;
+    VkDeviceSize initialCapacity_ = 0;
     VkBufferUsageFlags usage_ = 0;
     const char* name_ = "";
 };
@@ -373,7 +396,13 @@ public:
 
     [[nodiscard]] Status begin_frame(FrameBegin& out) noexcept override;
     [[nodiscard]] Status end_frame() noexcept override;
+    [[nodiscard]] bool can_discard_frame() const noexcept override { return true; }
+    [[nodiscard]] Status discard_frame() noexcept override;
     [[nodiscard]] Status begin_offscreen_frame(FrameBegin& out) noexcept override;
+    [[nodiscard]] bool can_lease_presentable_frame() const noexcept override { return true; }
+    [[nodiscard]] Status begin_presentable_frame_lease() noexcept override;
+    [[nodiscard]] Status begin_leased_frame(FrameBegin& out) noexcept override;
+    void end_presentable_frame_lease() noexcept override;
 
     [[nodiscard]] Result<TextureHandle>  create_texture(const TextureDesc& desc) noexcept override;
     [[nodiscard]] Result<BufferHandle>   create_buffer(const BufferDesc& desc) noexcept override;
@@ -402,6 +431,8 @@ public:
     [[nodiscard]] Result<ExternalTexture> import_external_image(const ExternalImageDesc& img) noexcept override;
     void release_external_image(TextureHandle imported) noexcept override;
     u32 trim_external_images() noexcept override;
+    void begin_external_image_scope() noexcept override { ++externalImageScopes_; }
+    void end_external_image_scope() noexcept override { if (externalImageScopes_) --externalImageScopes_; }
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 
     void wait_idle() noexcept override;
@@ -417,11 +448,18 @@ public:
     [[nodiscard]] Status prepare_reinitialization(u64 timeoutNs) noexcept override;
     [[nodiscard]] u32 frames_in_flight() const noexcept override { return framesInFlight_; }
     [[nodiscard]] GpuMemoryStats memory_stats() const noexcept override;
+    void log_memory_breakdown() noexcept override;
     void save_pipeline_cache() noexcept override;
     [[nodiscard]] PipelineCacheInfo pipeline_cache_info() const noexcept override { return cacheInfo_; }
 
     // --- Internos, usados pelas peças do backend -----------------------------
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
+    [[nodiscard]] VkPhysicalDevice physical_device() const noexcept { return physical_; }
+    [[nodiscard]] VkInstance instance() const noexcept { return instance_; }
+    [[nodiscard]] InstanceDispatch& instance_dispatch() noexcept { return instanceFunctions_; }
+    [[nodiscard]] const InstanceDispatch& instance_dispatch() const noexcept { return instanceFunctions_; }
+    [[nodiscard]] DeviceDispatch& device_dispatch() noexcept { return deviceFunctions_; }
+    [[nodiscard]] const DeviceDispatch& device_dispatch() const noexcept { return deviceFunctions_; }
     [[nodiscard]] MemoryAllocator& allocator() noexcept { return allocator_; }
     [[nodiscard]] Texture* texture(u64 id) noexcept { return textures_.get(id); }
     [[nodiscard]] Buffer* buffer(u64 id) noexcept { return buffers_.get(id); }
@@ -494,10 +532,15 @@ private:
     /// Corpo comum de `begin_frame` e `begin_offscreen_frame`; `withSurface`
     /// decide se o swapchain é adquirido.
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
+    [[nodiscard]] Status end_frame_impl(bool present) noexcept;
     [[nodiscard]] Status fail_recording(VkResult result, const char* operation) noexcept;
     friend class CommandListImpl;
     friend struct BoundedCommandsTestAccess;
+    friend struct DiscardFrameTestAccess;
+    friend struct SwapchainFailureTestAccess;
 
+    InstanceDispatch instanceFunctions_{};
+    DeviceDispatch deviceFunctions_{};
     BackendConfig config_{};
     GPUCapabilities caps_{};
     bool initialized_ = false;
@@ -571,6 +614,7 @@ private:
     FrameContext frames_[3];
     u32 frameCursor_ = 0;
     u64 frameNumber_ = 0;
+    u32 externalImageScopes_ = 0;
     FrameContext* current_ = nullptr;
     struct PendingImmediate {
         VkCommandPool pool = VK_NULL_HANDLE;
@@ -593,6 +637,11 @@ private:
     std::vector<VkSemaphore> renderDone_;
     u32 imageIndex_ = 0;
     bool imageAcquired_ = false;
+    bool imageAcquireWait_ = false; ///< this frame acquired; its semaphore must be consumed once
+    bool heldImage_ = false;        ///< discarded image retained for the next surface frame
+    VkSwapchainKHR leasedSwapchain_ = VK_NULL_HANDLE;
+    FrameBegin leasedDisplay_{}; ///< commands/frame number are not retained
+    u32 leasedImageIndex_ = 0;
     bool swapchainDirty_ = false;
     /// VK_SUBOPTIMAL_KHR visto (aquisição/apresentação). NÃO recria sozinho:
     /// begin_frame confere se a superfície mudou de verdade (ver lá).

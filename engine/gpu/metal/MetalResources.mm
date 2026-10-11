@@ -18,8 +18,10 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cfloat>
 #include <cstring>
+#include <limits>
 #include <new>
 
 namespace aurea::mtl {
@@ -249,6 +251,10 @@ Result<BufferHandle> Backend::create_buffer(const BufferDesc& desc) noexcept {
         b.hostVisible = (options != MTLResourceStorageModePrivate);
         b.buffer = [d.device newBufferWithLength:desc.bytes options:options];
         if (!b.buffer) return Status{Errc::OutOfDeviceMemory, "sem memoria para buffer"};
+        // Upload/readback success promises a usable CPU address on both mobile
+        // backends. Never publish a resource that later reaches memcpy(NULL).
+        if (b.hostVisible && !b.buffer.contents)
+            return Status{Errc::OutOfMemory, "buffer Metal sem endereco CPU"};
         set_object_label(b.buffer, desc.debugName);
         d.bufferBytes += desc.bytes;
         ++d.allocationCount;
@@ -324,11 +330,12 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
 }
 
 Status Backend::map_buffer(BufferHandle buffer, void*& outPtr) noexcept {
+    outPtr = nullptr;
     Impl& d = *impl_;
     Buffer* b = d.buffers.get(buffer.id);
     if (!b || !b->hostVisible) return Errc::InvalidArgument;
     outPtr = b->buffer.contents;
-    return OkStatus;
+    return outPtr ? OkStatus : Status{Errc::OutOfMemory, "buffer Metal sem endereco CPU"};
 }
 
 void Backend::unmap_buffer(BufferHandle buffer) noexcept {
@@ -1127,6 +1134,16 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
 }
 
 void Backend::release_external_image(TextureHandle imported) noexcept { destroy_texture(imported); }
+
+void Backend::begin_external_image_scope() noexcept {
+    assert(impl_->externalImageScopeDepth != std::numeric_limits<u32>::max());
+    ++impl_->externalImageScopeDepth;
+}
+
+void Backend::end_external_image_scope() noexcept {
+    assert(impl_->externalImageScopeDepth && "unbalanced external image scope");
+    if (impl_->externalImageScopeDepth) --impl_->externalImageScopeDepth;
+}
 
 u32 Backend::trim_external_images() noexcept {
     Impl& d = *impl_;

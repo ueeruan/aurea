@@ -1,5 +1,6 @@
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -112,30 +113,12 @@ u64 ShaderLibrary::spirv_fingerprint() noexcept {
 
 Status ShaderLibrary::initialize(GPUBackend& backend) noexcept {
     backend_ = &backend;
+    deferredShaders_ = backend.defer_shader_creation();
     overrides_.assign(kShaderCount, {});
     overrideStamp_.assign(kShaderCount, 0);
 
-    for (u32 i = 0; i < kShaderCount; ++i) {
-        const ShaderBlob& blob = shader_blob(static_cast<ShaderId>(i));
-        ShaderDesc desc;
-        desc.stage = kShaderStages[i];
-        desc.spirv = blob.words;
-        desc.spirvBytes = blob.bytes;
-        desc.debugName = kShaderNames[i];
-        auto created = backend.create_shader(desc);
-        if (!created.ok()) {
-            // Um shader recusado (driver GLES sem suporte a algo de um efeito
-            // novo) não derruba o motor inteiro: sem ele, só os passes que o
-            // pedem ficam sem pipeline e são pulados (bypass do efeito).
-            lastError_ = std::string("shader nao criado: ") + kShaderNames[i];
-            AUREA_LOG_ERROR("%s", lastError_.c_str());
-            ++failures_;
-            ++missingShaders_;
-            shaders_[i] = ShaderHandle{};
-            continue;
-        }
-        shaders_[i] = *created;
-    }
+    if (!deferredShaders_)
+        for (u32 i = 0; i < kShaderCount; ++i) (void)ensure_shader(static_cast<ShaderId>(i));
 
     for (u32 i = 0; i < static_cast<u32>(CommonSampler::Count); ++i) {
         auto created = backend.create_sampler(common_sampler_desc(static_cast<CommonSampler>(i)));
@@ -143,6 +126,34 @@ Status ShaderLibrary::initialize(GPUBackend& backend) noexcept {
         samplers_[i] = *created;
     }
     return OkStatus;
+}
+
+bool ShaderLibrary::ensure_shader(ShaderId id) noexcept {
+    const u32 i = static_cast<u32>(id);
+    if (!backend_ || i >= kShaderCount) return false;
+    if (shaders_[i].valid()) return true;
+    // A rejected effect must not re-enter the driver compiler every frame or
+    // for every pipeline variant. Allow recovery after a bounded request gap.
+    if (shaderRetryRequests_[i] && --shaderRetryRequests_[i]) return false;
+    const ShaderBlob& blob = shader_blob(id);
+    ShaderDesc desc;
+    desc.stage = kShaderStages[i];
+    desc.spirv = overrides_[i].empty() ? blob.words : overrides_[i].data();
+    desc.spirvBytes = overrides_[i].empty() ? blob.bytes : overrides_[i].size() * sizeof(u32);
+    desc.debugName = kShaderNames[i];
+    auto created = backend_->create_shader(desc);
+    if (!created.ok()) {
+        lastError_ = std::string("shader nao criado: ") + kShaderNames[i];
+        AUREA_LOG_ERROR("%s", lastError_.c_str());
+        ++failures_;
+        if (!rejectedShaders_[i]) { rejectedShaders_[i] = true; ++missingShaders_; }
+        shaderRetryRequests_[i] = kRetryAfter;
+        return false;
+    }
+    shaders_[i] = *created;
+    shaderRetryRequests_[i] = 0;
+    if (rejectedShaders_[i]) { rejectedShaders_[i] = false; --missingShaders_; }
+    return true;
 }
 
 void ShaderLibrary::shutdown() noexcept {
@@ -160,9 +171,14 @@ void ShaderLibrary::shutdown() noexcept {
 }
 
 void ShaderLibrary::forget_device() noexcept {
+    pipelineProbe_ = nullptr;
+    pipelineProbeContext_ = nullptr;
     pipelines_.clear();
     failedKeys_.clear();
     missingShaders_ = 0;
+    deferredShaders_ = false;
+    std::fill(std::begin(shaderRetryRequests_), std::end(shaderRetryRequests_), 0u);
+    std::fill(std::begin(rejectedShaders_), std::end(rejectedShaders_), false);
     for (ShaderHandle& s : shaders_) s = ShaderHandle{};
     for (SamplerHandle& s : samplers_) s = SamplerHandle{};
     backend_ = nullptr;
@@ -185,6 +201,17 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
         return Status{Errc::PipelineCompileFailed, "teste: pipeline recusado"};
     }
     if (const auto it = pipelines_.find(key); it != pipelines_.end()) return it->second;
+    if (deferredShaders_) {
+        // Requested shaders only: unrelated effects never enter a GLES driver
+        // compiler during renderer startup. prewarm uses this same path.
+        if (key.is_compute()) {
+            if (!ensure_shader(key.compute)) return Status{Errc::ShaderCompileFailed};
+        } else {
+            const bool vertex = ensure_shader(key.vertex);
+            const bool fragment = key.fragment == ShaderId::Count || ensure_shader(key.fragment);
+            if (!vertex || !fragment) return Status{Errc::ShaderCompileFailed};
+        }
+    }
     // Falhou há pouco: não recompila (nem loga) a cada quadro — um link
     // recusado no GLES custa dezenas de ms. Tenta de novo depois de
     // kRetryAfter pedidos (falta de memória passa; recusa do driver volta).
@@ -241,7 +268,10 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
     desc.hasColor1 = key.hasColor1 && !key.depthOnly;
     desc.colorFormat1 = key.format;
 
+    const u64 createStarted = pipelineProbe_ ? monotonic_ns() : 0;
     auto created = backend_->create_pipeline(desc);
+    if (pipelineProbe_)
+        pipelineProbe_(pipelineProbeContext_, key, monotonic_ns() - createStarted, created.ok());
     if (!created.ok()) {
         ++failures_;
         lastError_ = std::string("pipeline nao compilou: ") + (desc.debugName ? desc.debugName : "?");
@@ -310,8 +340,10 @@ u32 ShaderLibrary::reload_changed(const char* spvDirectory) noexcept {
             overrideStamp_[i] = ticks;
             continue;
         }
-        backend_->destroy_shader(shaders_[i]);
+        if (shaders_[i].valid()) backend_->destroy_shader(shaders_[i]);
         shaders_[i] = *created;
+        shaderRetryRequests_[i] = 0;
+        if (rejectedShaders_[i]) { rejectedShaders_[i] = false; --missingShaders_; }
         overrides_[i] = std::move(words);
         overrideStamp_[i] = ticks;
 

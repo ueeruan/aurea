@@ -51,8 +51,8 @@ class CompactToolsDockTest {
         compose.runOnIdle { store.addShape(0) }
         compose.waitUntil(10000) { store.layers.size == 1 && store.primary != null }
         compose.onNodeWithTag("dock.tool.EditShape").assertIsDisplayed()
-        // Colour is beyond the initially visible tools on a narrow phone.
-        compose.onNodeWithTag("dock.tools").performTouchInput { swipeLeft() }
+        // Shape geometry and colour must both be visible before the generic tools.
+        compose.onNodeWithTag("dock.tool.ColorFill").assertIsDisplayed()
         compose.onNodeWithTag("dock.tool.ColorFill").assertIsDisplayed().performClick()
         compose.runOnIdle {
             assertEquals(EditorPanel.Shape, ui.panel)
@@ -70,5 +70,33 @@ class CompactToolsDockTest {
         assertEquals("All tools stay on one row", first.top.value, last.top.value, 1f)
         assertTrue("Large-font touch height", (first.bottom - first.top).value >= 48f)
         compose.runOnIdle { assertEquals(EditorPanel.Transform, ui.panel) }
+    }
+
+    @Test fun deleteIsVisibleOnSmallPhonesAndUndoRestoresTheLayer() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assertTrue(context.packageName.endsWith(".uitest"))
+        val ui = EditorUi()
+        compose.setContent {
+            store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, 2f)) {
+            AureaTheme {
+                Box(Modifier.width(320.dp).height(48.dp)) {
+                    store.primary?.let { LayerTopBar(store, ui, it) }
+                }
+            }
+            }
+        }
+        compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
+        compose.runOnIdle { store.newProject(720, 720, 30f, "Delete layer controls") }
+        compose.waitUntil(10000) { store.project.title == "Delete layer controls" }
+        compose.runOnIdle { store.addShape(0) }
+        compose.waitUntil(10000) { store.layers.size == 1 && store.primary != null }
+        var layerId = 0L
+        compose.runOnIdle { layerId = store.primary!! }
+        compose.onNodeWithTag("layer.delete").assertIsDisplayed().assertIsEnabled().performClick()
+        compose.waitUntil(10000) { store.layers.isEmpty() }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(10000) { store.layers.size == 1 && store.layers.single().id == layerId }
     }
 }

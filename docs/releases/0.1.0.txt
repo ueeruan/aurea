@@ -1,0 +1,41 @@
+ÁUREA 0.1.0 — NOTAS DE ATUALIZAÇÃO
+Pré-release para validação, com pendências conhecidas descritas abaixo.
+
+• Áudio: Mudo e Velocidade voltaram aos controles rápidos. Os testes
+  confirmaram preservação do volume, desfazer e reabertura do projeto.
+
+• Formas: editar tamanho mostra as chaves da forma; remover a última chave
+  conserva o tamanho atual. Visibilidade remove apenas sua chave de opacidade.
+
+• Puppet: a linha do tempo mostra as chaves dos pinos ativos da instância
+  aberta. Remover um pino e desfazer restaura as quatro chaves esperadas.
+
+• Rastreamento: dois vídeos mantêm análises e animações independentes.
+  Aplicar, desfazer, refazer e reabrir preservou os resultados de cada vídeo.
+
+• Efeitos: corrigidos Minimax, Starglow e Rays. Os testes verificaram as
+  vizinhanças do Minimax e a preservação de pequenos pontos luminosos.
+
+• 3D e câmera: corrigidas a caixa e a seleção de modelos para acompanhar
+  a projeção da câmera. Melhorados materiais, luz spot e animações de modelos.
+
+• Exportação: ajustados o controle do tamanho final e a escolha da codificação;
+  o cancelamento também responde durante a abertura do exportador.
+
+• Motion blur: corrigidos recortes e processamento. Vídeos com blur vetorial
+  e de transformação terminaram a exportação e puderam ser reproduzidos.
+
+• Prévia: reprodução e avanço/retorno no vídeo mantiveram pixels visíveis
+  no teste final. Melhorada a liberação de memória após falhas de renderização.
+
+Desempenho: um cenário medido com 300 objetos de materiais equivalentes ficou
+cerca de 5 vezes mais rápido. Outros materiais apresentaram regressões;
+esse resultado não se estende a todos os projetos ou aparelhos.
+
+Pendências: o teste pesado falhou na segunda recriação da superfície de prévia.
+iOS ainda não teve execução nativa; o final do áudio AAC precisa de validação.
+A sobreposição do projeto legado 0.0.5 não foi reproduzida. Os testes aprovados
+não garantem funcionamento sem erros em todos os celulares.
+
+Distribuição: APKs para Android ARM64 e ARM32; IPA iOS sem assinatura para sideload.
+Esta distribuição não publica o aplicativo no Google Play, App Store ou TestFlight.

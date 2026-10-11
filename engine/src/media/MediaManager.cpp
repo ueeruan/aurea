@@ -246,6 +246,26 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     return nullptr;
 }
 
+MediaManager::SourceStartup MediaManager::source_startup(LayerId layer, AssetId asset) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const Entry& entry : entries_) {
+        if (entry.layer != layer || entry.asset != asset) continue;
+        if (entry.failed) return SourceStartup::Failed;
+        if (entry.source) return SourceStartup::Ready;
+        if (entry.opening) {
+            if (entry.opening->ready.load(std::memory_order_acquire) && !entry.opening->decoder)
+                return SourceStartup::Failed;
+            return SourceStartup::Opening;
+        }
+        return SourceStartup::Unavailable;
+    }
+    if (!factory_) return SourceStartup::Unavailable;
+    // The old codec must retire before the new one can open. This is startup,
+    // not a ready decoder failing to deliver its first frame.
+    std::lock_guard<std::mutex> closing(retireMutex_);
+    return retiring_ || !retired_.empty() ? SourceStartup::Opening : SourceStartup::Unavailable;
+}
+
 void MediaManager::set_pointer_bits(u32 bits) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     pointerBits_ = bits ? bits : kPointerBits;

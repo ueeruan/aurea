@@ -22,10 +22,15 @@
 
 #include "aurea/core/Math.hpp"
 #include "aurea/core/Types.hpp"
+#include "aurea/core/Result.hpp"
 
 #include <vector>
 
 namespace aurea {
+
+struct EffectInstance;
+struct Layer;
+struct Command;
 
 inline constexpr const char* kMeshWarpKey = "aurea.distort.mesh_warp";
 inline constexpr u32 kMeshWarpMaxDivisions = 31;
@@ -47,6 +52,16 @@ struct MeshWarpData {
 };
 
 namespace mesh_warp {
+
+/// Only the current grid is editable; old grid data remains readable in projects.
+[[nodiscard]] const MeshWarpData* animation(const EffectInstance& effect) noexcept;
+[[nodiscard]] MeshWarpData* animation(EffectInstance& effect) noexcept;
+/// Creates the current grid for first-time key insertion or clipboard paste.
+[[nodiscard]] MeshWarpData* ensure_animation(EffectInstance& effect) noexcept;
+[[nodiscard]] Interpolation track_interpolation(u8 legacy) noexcept;
+/// The caller owns the model lock and the composition undo transaction.
+Status key_command(Layer& layer, const Command& command, FrameIndex playhead) noexcept;
+
 
 [[nodiscard]] constexpr u32 vertex_count(u32 rows, u32 cols) noexcept { return (rows + 1) * (cols + 1); }
 [[nodiscard]] constexpr u32 value_count(u32 rows, u32 cols) noexcept {

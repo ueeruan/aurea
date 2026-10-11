@@ -771,6 +771,7 @@ private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) 
     case 39: return AureaText.t("tl_speed")
     case 40: return AureaText.t("tl_animator", effect, param + 1)
     case 31: return (effects.first { $0.effectId == track.effect }?.name ?? AureaText.t("tl_effect")) + " · \(UInt64(track.param) + 1)"
+    case 44: return AureaText.t("fx_name_mesh_warp")
     case 32: return AureaText.t("tl_audio", param + 1)
     case 33: return AureaText.t("tl_text_anim", effect, param + 1)
     case 43:

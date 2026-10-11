@@ -1,0 +1,14 @@
+ARCore Android SDK 1.56.0
+Google LLC
+Maven: com.google.ar:core:1.56.0
+Official binary SHA256: 20a66fb176c62234879a94202f1424adf14f3cc1159aedbd247d3517b65f1f50
+
+The SDK is provided under Google APIs Terms of Service and ARCore Additional Terms of Service.
+https://developers.google.com/terms
+https://developers.google.com/ar/develop/terms
+
+The optional Real Camera feature uses Google Play Services for AR (ARCore). Its use is subject to the current Google Terms of Service and Google Privacy Policy.
+https://policies.google.com/terms
+https://policies.google.com/privacy
+
+This app uses local motion tracking only; it does not enable Cloud Anchors or Geospatial APIs and does not save camera images.

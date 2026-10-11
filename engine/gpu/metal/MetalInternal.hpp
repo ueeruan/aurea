@@ -232,6 +232,16 @@ struct FrameContext {
     dispatch_semaphore_t    completion = nil;
     u64                     frameNumber = 0;
     bool                    submitted = false;
+    // A discarded drawable must stay out of CAMetalLayer's reuse pool until
+    // the submitted writes complete. This owns the acquired drawable itself,
+    // without allocating or copying another full-resolution image.
+    id<MTLDrawable>         unpresentedDrawable = nil;
+    /// A leased final frame owns its drawable even after cancellation or a
+    /// surface-generation change. Release only when this submission retires.
+    id<MTLDrawable>         leasedDrawable = nil;
+    u64                     leasedSurfaceGeneration = 0;
+    bool                    leasedFinal = false;
+    bool                    leasedCancelled = false;
 
     HostRing                uniforms;
     HostRing                staging;
@@ -395,6 +405,9 @@ struct Impl {
     std::unordered_map<u64, id<MTLDepthStencilState>> depthStates;
 
     std::unordered_map<void*, u64> importedByBuffer;   ///< CVPixelBufferRef → textura
+    /// A graph may consume an imported handle after many offline submissions.
+    /// Only automatic cache eviction is paused; explicit retirement stays live.
+    u32 externalImageScopeDepth = 0;
 
     // Frames
     u32 framesInFlight = 2;
@@ -412,6 +425,21 @@ struct Impl {
     u64                 drawableHandles[3]{};   ///< handles das texturas de drawable
     u32                 drawableCursor = 0;
     bool                drawableAcquired = false;   ///< o frame atual tem drawable?
+    TextureHandle       acquiredBackbuffer{};
+    u64                 surfaceGeneration = 0;
+    /// Actual successful acquisitions/present calls; used by native regressions.
+    u64                 drawableAcquisitions = 0, drawablePresentations = 0;
+    struct PresentableLease {
+        id<CAMetalDrawable> drawable = nil;
+        TextureHandle backbuffer{};
+        u32 width = 0, height = 0;
+        SurfaceFormat format = SurfaceFormat::BGRA8;
+        SurfaceRotation rotation = SurfaceRotation::None;
+        u64 generation = 0;
+        bool active = false;
+        bool finalOpened = false;
+        bool presented = false;
+    } presentableLease;
 
     // Cache de pipeline (MTLBinaryArchive)
     id<MTLBinaryArchive> archive = nil;
@@ -446,6 +474,7 @@ struct Impl {
     void wait_immediate_gpu() noexcept;
     FrameContext* deferral_target() noexcept;
     [[nodiscard]] Status begin_frame_impl(FrameBegin& out, bool withSurface) noexcept;
+    [[nodiscard]] Status end_frame_impl(bool presentDrawable) noexcept;
     void destroy_texture_now(Texture& t) noexcept;
     void destroy_buffer_now(Buffer& b) noexcept;
     [[nodiscard]] id<MTLDepthStencilState> depth_state(const PipelineDesc& desc) noexcept;

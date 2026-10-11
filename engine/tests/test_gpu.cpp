@@ -151,10 +151,10 @@ struct Gpu {
     bool ok = false;
     std::unordered_map<u64, TextureHandle> targets;
 
-    explicit Gpu(bool conservative = false) {
+    explicit Gpu(bool conservative = false, bool validation = true) {
         BackendConfig cfg;
         cfg.conservativeVulkan = conservative;
-        cfg.enableValidation = true;   // com a camada instalada, erros de uso aparecem no log
+        cfg.enableValidation = validation;   // com a camada instalada, erros de uso aparecem no log
         cfg.framesInFlight = 2;
         const Status initialized = backend.initialize(cfg);
         if (!initialized.ok()) {
@@ -201,9 +201,11 @@ AUREA_TEST(Regression2130, VulkanReturnsEmptySlabsAndPreservesLiveAllocations) {
     b.wait_idle();
     const auto baseUsed = b.allocator().used_bytes();
     const auto baseReserved = b.allocator().reserved_bytes();
-    for (int round=0; round<4; ++round) {
+    // 512px stays suballocated with 4 MiB slabs; 1024px exercises the exact
+    // dedicated path too. Keep live neighbors while middle slabs are trimmed.
+    for (const u32 side : {512u, 1024u}) for (int round=0; round<4; ++round) {
         std::vector<TextureHandle> textures;
-        TextureDesc d; d.width=1024; d.height=1024; d.format=SurfaceFormat::RGBA8; d.sampled=true;
+        TextureDesc d; d.width=side; d.height=side; d.format=SurfaceFormat::RGBA8; d.sampled=true;
         for (int i=0; i<40; ++i) {
             auto t=b.create_texture(d); AUREA_CHECK(t.ok());
             if (t.ok()) textures.push_back(*t);
@@ -13196,6 +13198,11 @@ AUREA_TEST(Gpu, Text3DDepthAndBevelEditsReachTheFrame) {
 #include "PreviewCacheGpu.inl"
 #include "TextOutlineGpu.inl"
 #include "ImmediateUploadGpu.inl"
+#include "HostRingGpu.inl"
+#include "VulkanAllocationFailure.inl"
+#include "VulkanRecoveryGpu.inl"
+#include "FrameGraphSegmentsGpu.inl"
+#include "VulkanMemoryPackingGpu.inl"
 #include "TextureRetirementGpu.inl"
 
 AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
@@ -13298,6 +13305,8 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "P010VideoGpu.inl"
 
 #include "BoundedCommandsGpu.inl"
+#include "DiscardFrameGpu.inl"
+#include "FrameGraphLeaseGpu.inl"
 #include "ParticleCameraGpu.inl"
 #include "SurfaceDeformGpu.inl"
 #include "PageTurnGpu.inl"
@@ -13436,6 +13445,8 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 
 #include "V2140RegressionScenarios.inl"
 #include "MaterialOverrideGpu.inl"
+#include "MorphSharingGpu.inl"
+#include "VulkanDispatchOwnersGpu.inl"
 #include "SceneTargetGpu.inl"
 #include "LightRays3DGpu.inl"
 #include "BetaEffects1007Gpu.inl"
@@ -13445,3 +13456,5 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "MinimaxGpu.inl"
 
 #include "RaysFootprintGpu.inl"
+#include "SceneWarmupGpu.inl"
+#include "VulkanMrtGpu.inl"

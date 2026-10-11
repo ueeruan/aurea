@@ -139,15 +139,47 @@ import UIKit
     }
 
     func testMotionBlurTextExportCompletesAt1080p() throws {
-        let snapshot = try launch("motion-blur-export")
+        try assertKeyflowTextExport("motion-blur-export")
+    }
+    func testKeyflowPlainTextExportAt1080p() throws {
+        try assertKeyflowTextExport("keyflow-simple-text")
+    }
+    func testKeyflowTextExportsConsecutivelyAtMultipleResolutions() throws {
+        let initial = try launch("keyflow-multiple-exports")
+        XCTAssertEqual(initial.compositionWidth, 1920)
+        XCTAssertEqual(initial.compositionHeight, 1080)
+        let back = app.buttons["Back (clear the selection)"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        // Keep one application/engine/project alive. A relaunch would hide
+        // leaked encoder references or an export context left in a busy state.
+        for resolution in ["480p", "720p", "1080p", "1080p"] {
+            try assertCurrentProjectExports(resolution: resolution)
+            let close = app.buttons["Close"].firstMatch
+            XCTAssertTrue(close.waitForExistence(timeout: 5)); close.tap()
+            XCTAssertTrue(app.buttons["Export"].firstMatch.waitForExistence(timeout: 5))
+        }
+    }
+    func testKeyflowVideoWithTextExportsAt1080p() throws {
+        try assertKeyflowTextExport("keyflow-video-text-export")
+    }
+    private func assertKeyflowTextExport(_ scene: String) throws {
+        let snapshot = try launch(scene)
         XCTAssertEqual(snapshot.compositionWidth, 1920)
         XCTAssertEqual(snapshot.compositionHeight, 1080)
         // Barra de cima (redesenho 2026-09-29): exportar mora na barra do PROJETO,
         // que aparece ao tirar a seleção.
         let back = app.buttons["Back (clear the selection)"].firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        try assertCurrentProjectExports(resolution: "1080p")
+    }
+    private func assertCurrentProjectExports(resolution: String) throws {
         let openExport = app.buttons["Export"].firstMatch
         XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
+        let resolutionOption = app.buttons[resolution].firstMatch
+        XCTAssertTrue(resolutionOption.waitForExistence(timeout: 5))
+        XCTAssertTrue(resolutionOption.isEnabled, "The test resolution must be available")
+        if !resolutionOption.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(resolutionOption.isHittable); resolutionOption.tap()
         // The editor toolbar remains visible above the export sheet. Its Export
         // button opens the sheet; the wide footer button starts the encoder.
         // Choosing firstMatch taps the toolbar again and never starts export.
@@ -224,6 +256,78 @@ import UIKit
         let pause = app.buttons["Pause"].firstMatch
         XCTAssertTrue(pause.waitForExistence(timeout: 5)); pause.tap()
         _ = try awaitSnapshot("Pause remains responsive after idle preparation") { $0.playing == 0 }
+    }
+
+    func testExactCaptureRestartsCompletedPausedCache() throws {
+        _ = try launch("transform-expression")
+        // Reach the project toolbar before filling the window: selection and
+        // panel changes must not be mistaken for a capture-triggered refill.
+        for _ in 0..<2 {
+            if app.buttons["Export"].firstMatch.exists { break }
+            // The expression fixture starts inside the movement panel. Close
+            // that visible panel before clearing the selected layer.
+            let panelBack = app.buttons["Back to the layer tools"].firstMatch
+            let back = panelBack.exists ? panelBack
+                : app.buttons["Back (clear the selection)"].firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        }
+        let openExport = app.buttons["Export"].firstMatch
+        XCTAssertTrue(openExport.waitForExistence(timeout: 5)); XCTAssertTrue(openExport.isHittable)
+        let initial = try snapshot()
+        XCTAssertEqual(initial.playing, 0)
+        let frame = initial.corePlayhead
+        let revision = try XCTUnwrap(initial.modelRevision)
+        func completeWindow(_ state: Snapshot) -> Bool {
+            guard let flags = state.previewBufferStatus, let duration = state.compositionDuration,
+                  duration > frame, flags & 0xc000_0000 == 0 else { return false }
+            let target = min(Int64((flags >> 8) & 0xff), duration - frame)
+            return target > 0 && Int64(flags & 0xff) >= target
+                && (state.previewBufferRanges ?? []).contains { $0.count == 2 && $0[0] == frame && $0[1] >= frame + target }
+        }
+        var lastWindow: [[Int64]] = []
+        var unchangedSince = Date()
+        let filled = try awaitSnapshot("Paused cache fills the native budgeted window and stops changing", timeout: 30) { state in
+            guard state.playing == 0, state.corePlayhead == frame, state.modelRevision == revision,
+                  completeWindow(state) else { unchangedSince = Date(); return false }
+            let ranges = state.previewBufferRanges ?? []
+            if ranges != lastWindow { lastWindow = ranges; unchangedSince = Date(); return false }
+            return Date().timeIntervalSince(unchangedSince) >= 0.75
+        }
+        let window = try XCTUnwrap(filled.previewBufferRanges)
+        XCTAssertFalse(window.isEmpty)
+        attach("Completed paused native cache before exact capture", stage.value as? String ?? "missing")
+        try assertVisibleVideoPreview("Completed paused text picture before capture")
+
+        // ExportView.task calls capturePreviewFrame(640) with its default
+        // previewQuality=false: the real captureFrame path, not a screenshot
+        // or a preview-quality proxy. Do not start an encoder or send Play/Seek.
+        openExport.tap()
+        let thumbnail = app.descendants(matching: .any)["Preview"].firstMatch
+        XCTAssertTrue(thumbnail.waitForExistence(timeout: 5))
+        let deadline = Date().addingTimeInterval(30)
+        var exactThumbnailReady = false
+        repeat {
+            if let measured = try? previewPixelMetrics(thumbnail), measured.bright > 5,
+               measured.dark > 100, measured.green < measured.pixels / 5 {
+                exactThumbnailReady = true; break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        XCTAssertTrue(exactThumbnailReady, "The exact native thumbnail never replaced the muted placeholder")
+        try assertVisiblePreviewPixels("Exact native capture thumbnail", element: thumbnail)
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5)); XCTAssertTrue(close.isHittable); close.tap()
+        let rebuilt = try awaitSnapshot("Returning from exact capture rebuilds the same complete paused cache", timeout: 30) {
+            $0.playing == 0 && $0.corePlayhead == frame && $0.modelRevision == revision
+                && completeWindow($0) && $0.previewBufferRanges == window
+        }
+        XCTAssertEqual(rebuilt.previewLastError, 0)
+        try assertVisibleVideoPreview("Paused picture after exact capture and cache refill")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.75))
+        let stable = try snapshot()
+        XCTAssertEqual(stable.playing, 0); XCTAssertEqual(stable.corePlayhead, frame)
+        XCTAssertEqual(stable.modelRevision, revision); XCTAssertEqual(stable.previewBufferRanges, window)
+        attach("Rebuilt paused native cache after exact capture", stage.value as? String ?? "missing")
     }
 
     func testPreviewBufferStatusAndPauseRemainAvailable() throws {
@@ -471,6 +575,37 @@ import UIKit
         }
     }
 
+    func testSelectedLayerCommandSearchRemainsAvailableAndAppliesEffect() throws {
+        let before = try launch("transform")
+        let section = app.otherElements["editor.sectionBar"].firstMatch
+        if section.exists {
+            let back = section.buttons.firstMatch
+            XCTAssertTrue(back.isHittable); back.tap()
+        }
+        let search = app.buttons["commandSearchOpen"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
+        XCTAssertFalse(search.label.isEmpty)
+        XCTAssertGreaterThanOrEqual(search.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(search.frame.height, 44)
+        let selected = try snapshot()
+        XCTAssertEqual(selected.selectionCount, 1)
+        XCTAssertEqual(selected.primaryID, before.primaryID)
+        // The top tenth lies inside the 44-point target and outside the small
+        // magnifier glyph. Opening here checks the real hit region, not only AX.
+        search.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+        let field = app.textFields["commandSearchField"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(field.isHittable)
+        field.tap()
+        field.typeText("glow")
+        let effect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "command:effect:")).firstMatch
+        XCTAssertTrue(effect.waitForExistence(timeout: 5)); XCTAssertTrue(effect.isEnabled)
+        effect.tap()
+        _ = try awaitSnapshot("Selected layer search applies an effect without clearing its target") {
+            $0.effectCount == before.effectCount + 1 && $0.selectionCount == 1 && $0.primaryID == before.primaryID
+        }
+    }
+
     func testCommandSearchFindsAccentlessActionAndUndoRefreshesMagneticMode() throws {
         _ = try launch("transform")
         let before = try snapshot()
@@ -635,6 +770,112 @@ import UIKit
             if sample > 5 { XCTAssertLessThan(value.processFootprintBytes, baseline + 180 * 1024 * 1024) }
         }
         XCTAssertGreaterThan(positions.count, 2, "Playhead must advance while decoding video and drawing text/captions")
+    }
+
+    func testVideoPreviewKeepsVisiblePixelsAcrossPlaybackPauseAndSeek() throws {
+        _ = try launch("playback-stress")
+        let play = app.buttons["transport.play"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        // This fixture starts with repeat enabled. Its label stays the same
+        // while playing/paused; a short tap must never toggle the hold action.
+        let repeatLabel = play.label
+        XCTAssertFalse(repeatLabel.isEmpty)
+        play.tap()
+        _ = try awaitSnapshot("Video preview starts on the actual native renderer") { $0.playing != 0 }
+        XCTAssertEqual(play.label, repeatLabel, "A play tap must preserve repeat")
+        var frames: Set<Int64> = []
+        var records: [String] = []
+        for sample in 0..<8 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            let state = try snapshot()
+            XCTAssertNotEqual(state.playing, 0); frames.insert(state.corePlayhead)
+            records.append("frame=\(state.corePlayhead) error=\(state.previewLastError ?? -1) drops=\(state.previewDroppedFrames ?? 0)")
+            try assertVisibleVideoPreview("Playing sample \(sample)")
+        }
+        XCTAssertGreaterThan(frames.count, 2, "The decoder/display must advance rather than retaining one frame forever")
+        let pause = app.buttons["transport.play"].firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout: 5)); pause.tap()
+        let paused = try awaitSnapshot("Video pauses while keeping the last valid picture") { $0.playing == 0 }
+        XCTAssertEqual(play.label, repeatLabel, "A pause tap must preserve repeat")
+        try assertVisibleVideoPreview("Paused video frame")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(try snapshot().corePlayhead, paused.corePlayhead)
+        // The actual transport goes to composition start on a long press.
+        // A tap navigates keys/markers and need not return to frame zero.
+        let start = app.buttons["transport.previous"].firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 5)); XCTAssertTrue(start.isHittable)
+        start.press(forDuration: 0.8)
+        _ = try awaitSnapshot("Seek to video start settles") { $0.corePlayhead == 0 }
+        try assertVisibleVideoPreview("After backward seek")
+        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        let from = CGPoint(x: timeline.frame.midX + 70, y: timeline.frame.minY + 14)
+        let to = CGPoint(x: from.x - 25, y: from.y)
+        coordinate(from).press(forDuration: 0.05, thenDragTo: coordinate(to), withVelocity: .slow, thenHoldForDuration: 0.1)
+        _ = try awaitSnapshot("Forward seek remains inside the imported video") {
+            $0.playing == 0 && $0.corePlayhead > 0 && $0.corePlayhead < $0.detail.endFrame
+        }
+        try assertVisibleVideoPreview("After forward seek")
+        XCTAssertEqual(play.label, repeatLabel, "Seeking must preserve repeat before resuming")
+        XCTAssertTrue(play.waitForExistence(timeout: 5)); play.tap()
+        _ = try awaitSnapshot("Play can resume after repeated seeks") { $0.playing != 0 }
+        XCTAssertEqual(play.label, repeatLabel, "A resume tap must preserve repeat")
+        try assertVisibleVideoPreview("Resumed video frame")
+        attach("Native video continuity samples", records.joined(separator: "\n"))
+        // A real hold must still toggle repeat, without also issuing play.
+        play.tap()
+        let heldAt = try awaitSnapshot("Pause before checking the separate hold command") { $0.playing == 0 }
+        XCTAssertEqual(play.label, repeatLabel)
+        play.press(forDuration: 0.8)
+        XCTAssertNotEqual(play.label, repeatLabel, "Holding toggles repeat")
+        let afterHold = try snapshot()
+        XCTAssertEqual(afterHold.playing, 0, "Holding must not also issue the tap command")
+        XCTAssertEqual(afterHold.corePlayhead, heldAt.corePlayhead)
+        play.press(forDuration: 0.8)
+        XCTAssertEqual(play.label, repeatLabel, "Another hold restores repeat")
+        let restoredRepeat = try snapshot()
+        XCTAssertEqual(restoredRepeat.playing, 0)
+        XCTAssertEqual(restoredRepeat.corePlayhead, heldAt.corePlayhead)
+        try assertVisibleVideoPreview("Paused video after independent repeat holds")
+    }
+
+    private func assertVisibleVideoPreview(_ label: String) throws {
+        try assertVisiblePreviewPixels(label, element: stage)
+    }
+
+    private func previewPixelMetrics(_ element: XCUIElement) throws ->
+        (screenshot: XCUIScreenshot, bright: Int, dark: Int, green: Int, pixels: Int) {
+        let screenshot = element.screenshot()
+        let image = try XCTUnwrap(screenshot.image.cgImage)
+        let width = 160, height = max(2, Int((160.0 * Double(image.height) / Double(image.width)).rounded()))
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        let drew = rgba.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))); return true
+        }
+        guard drew else { throw ProbeError.geometry }
+        var bright = 0, dark = 0, green = 0
+        for pixel in stride(from: 0, to: rgba.count, by: 4) {
+            let r = Int(rgba[pixel]), g = Int(rgba[pixel + 1]), b = Int(rgba[pixel + 2])
+            if r > 180 && g > 180 && b > 180 { bright += 1 }
+            if r < 64 && g < 64 && b < 64 { dark += 1 }
+            if g > 96 && g > r * 3 / 2 + 32 && g > b * 3 / 2 + 32 { green += 1 }
+        }
+        return (screenshot, bright, dark, green, width * height)
+    }
+
+    private func assertVisiblePreviewPixels(_ label: String, element: XCUIElement) throws {
+        let measured = try previewPixelMetrics(element)
+        let bright = measured.bright, dark = measured.dark, green = measured.green
+        // The controlled fixtures have white content on a dark background.
+        // A muted placeholder, uniform green or empty picture cannot pass.
+        XCTAssertGreaterThan(bright, 5, "\(label): the decoded picture disappeared")
+        XCTAssertGreaterThan(dark, 100, "\(label): the fixture background disappeared")
+        XCTAssertLessThan(green, measured.pixels / 5, "\(label): preview flashed green")
+        let attachment = XCTAttachment(screenshot: measured.screenshot)
+        attachment.name = label; attachment.lifetime = .keepAlways; add(attachment)
     }
 
     func testDockMoveVideoAtTwoSecondsKeepsAppResponsiveAndPreservesDuration() throws {
@@ -1016,22 +1257,46 @@ import UIKit
         let before = try launch("layer-dock")
         let row = app.scrollViews["dock.tools"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        let move = app.buttons["dock.tool.move"].firstMatch
-        XCTAssertTrue(move.isHittable)
-        let toolY = move.frame.midY
-        XCTAssertGreaterThanOrEqual(move.frame.height, 44)
+        let shape = app.buttons["dock.tool.shape"].firstMatch
+        XCTAssertTrue(shape.isHittable)
+        let toolY = shape.frame.midY
+        XCTAssertGreaterThanOrEqual(shape.frame.height, 44)
         let stageBefore = stage.frame
-        row.swipeLeft()
         let color = app.buttons["dock.tool.color"].firstMatch
         XCTAssertTrue(color.isHittable)
         XCTAssertEqual(color.frame.midY, toolY, accuracy: 1)
         XCTAssertGreaterThanOrEqual(color.frame.height, 44)
         XCTAssertEqual(stage.frame.height, stageBefore.height, accuracy: 1)
         XCTAssertEqual(try snapshot().primaryID, before.primaryID)
+        row.swipeLeft()
+        XCTAssertTrue(app.buttons["dock.tool.blend"].firstMatch.isHittable)
+        row.swipeRight()
+        XCTAssertTrue(color.isHittable)
         color.tap()
         _ = try awaitSnapshot("Scrolling tools still opens the chosen layer panel") {
             $0.sheet == "panel" && $0.primaryID == before.primaryID
         }
+        XCTAssertTrue(app.staticTexts["Fill"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Outline colour"].firstMatch.exists)
+    }
+
+    func testDeleteLayerButtonIsVisibleAndUndoRestoresTheLayer() throws {
+        let before = try launch("layer-dock")
+        let delete = app.buttons["layer.delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        XCTAssertTrue(delete.isHittable)
+        XCTAssertGreaterThanOrEqual(delete.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(delete.frame.height, 44)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertTrue(delete.isHittable, "Delete stays reachable in landscape")
+        XCUIDevice.shared.orientation = .portrait
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertTrue(delete.isHittable)
+        delete.tap()
+        _ = try awaitSnapshot("Delete removes the selected layer") { $0.layerCount == before.layerCount - 1 }
+        try undo()
+        _ = try awaitSnapshot("Undo restores the removed layer") { $0.layerCount == before.layerCount }
     }
 
     func testHoldingLayerToMoveDoesNotOpenOptionsButTapDoes() throws {
@@ -1688,7 +1953,7 @@ import UIKit
     private func launch(_ scene: String) throws -> Snapshot {
         runID = UUID().uuidString
         app = XCUIApplication(bundleIdentifier: "com.aurea.aurea")
-        if scene == "motion-blur-export" {
+        if ["motion-blur-export", "keyflow-simple-text", "keyflow-multiple-exports", "keyflow-video-text-export"].contains(scene) {
             // Reproduce the measured device budget from the failed Metal run,
             // independently of the free RAM on this particular CI runner.
             app.launchArguments.append("--aurea-memory-budget-mb=163")
@@ -1696,8 +1961,8 @@ import UIKit
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID
-        if ["video-move", "playback-stress", "clip-edit"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
-        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit"].contains(scene) ? 120 : 30
+        if ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
+        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene) ? 120 : 30
         app.launch()
         guard stage.waitForExistence(timeout: preparationTimeout) else {
             XCTFail("Read-only DEBUG preview probe is missing; inspect the app configuration and INTEGRATION.md")
@@ -1708,6 +1973,7 @@ import UIKit
         }
         XCTAssertTrue(state.coreStarted, state.coreError)
         if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) }
+        else if scene == "keyflow-video-text-export" { XCTAssertEqual(state.layerCount, 2) }
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
         else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
         else if scene == "parent-new-null" { XCTAssertEqual(state.layerCount, 2) }
@@ -1816,6 +2082,11 @@ import UIKit
         let playbackReport: String
         let processFootprintBytes: Double
         let playing: UInt32
+        let previewLastError: Int?
+        let previewDroppedFrames: UInt64?
+        let previewBufferStatus: UInt32?
+        let compositionDuration: Int64?
+        let modelRevision: UInt32?
         let runID: String
         let scene: String
         let ready: Bool

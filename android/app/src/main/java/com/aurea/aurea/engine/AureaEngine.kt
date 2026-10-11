@@ -540,6 +540,7 @@ class AureaEngine private constructor() {
     fun meshWarpDrag(layer: Long, effect: Int, vertex: Int, grip: Int, u: Float, v: Float, autoKey: Boolean, continuing: Boolean): Boolean =
         nativeMeshWarpDrag(nativeHandle, layer, effect, vertex, grip, u, v, autoKey, continuing)
     fun meshWarpReset(layer: Long, effect: Int): Boolean = nativeMeshWarpReset(nativeHandle, layer, effect)
+    fun meshWarpToggleKey(layer: Long, effect: Int): Boolean = nativeMeshWarpToggleKey(nativeHandle, layer, effect)
     // Fantoche (Engine::query_puppet): 4 floats por pino {índice, u, v, key no cabeçote};
     // a malha deformada: 6 floats por triângulo (u, v). u, v = fração da camada.
     fun queryPuppet(layer: Long, effect: Int, out: FloatArray): Int = nativeQueryPuppet(nativeHandle, layer, effect, out)
@@ -921,6 +922,24 @@ class AureaEngine private constructor() {
     fun addLight(kind: Int): Long = nativeAddLight(nativeHandle, kind)
     fun lightInfo(layer: Long): FloatArray? = FloatArray(11).takeIf { nativeLightInfo(nativeHandle, layer, it) }
     fun setLightParam(layer: Long, param: Int, value: Float): Boolean = nativeSetLightParam(nativeHandle, layer, param, value)
+    // Real Camera rules, recording state and key creation live in the shared engine.
+    fun realCameraStart(layer: Long): Boolean = nativeWork.run(false) { nativeRealCameraStart(nativeHandle, layer) }
+    fun realCameraRecord(record: Boolean): Boolean = nativeWork.run(false) { nativeRealCameraRecord(nativeHandle, record) }
+    fun realCameraSample(pose: FloatArray, timestampNs: Long, positional: Boolean, sensitivity: Float, inverted: Boolean): Boolean =
+        nativeWork.run(false) { nativeRealCameraSample(nativeHandle, pose, timestampNs, positional, sensitivity, inverted) }
+    fun realCameraHold(): Boolean = nativeWork.run(false) { nativeRealCameraHold(nativeHandle) }
+    fun realCameraRecenter(): Boolean = nativeWork.run(false) { nativeRealCameraRecenter(nativeHandle) }
+    fun realCameraStop() = nativeWork.run(Unit) { nativeRealCameraStop(nativeHandle) }
+    /** [active, recording, last local frame, positional] from the native session. */
+    fun realCameraStatus(): LongArray = nativeWork.run(longArrayOf(0, 0, -1, 0)) { nativeRealCameraStatus(nativeHandle) }
+    private external fun nativeRealCameraStart(handle: Long, layer: Long): Boolean
+    private external fun nativeRealCameraRecord(handle: Long, record: Boolean): Boolean
+    private external fun nativeRealCameraSample(handle: Long, pose: FloatArray, timestampNs: Long, positional: Boolean, sensitivity: Float, inverted: Boolean): Boolean
+    private external fun nativeRealCameraHold(handle: Long): Boolean
+    private external fun nativeRealCameraRecenter(handle: Long): Boolean
+    private external fun nativeRealCameraStop(handle: Long)
+    private external fun nativeRealCameraStatus(handle: Long): LongArray
+
     fun addCamera(): Long = nativeAddCamera(nativeHandle)
     /** Lente da câmera 3D (9 valores, ver `nativeQueryCameraLens`); null se a camada não é câmera. */
     fun cameraLens(layer: Long): FloatArray? = FloatArray(9).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
@@ -1275,6 +1294,7 @@ class AureaEngine private constructor() {
     private external fun nativeMeshWarpDrag(handle: Long, layer: Long, effect: Int, vertex: Int, grip: Int, u: Float, v: Float,
                                             autoKey: Boolean, continuing: Boolean): Boolean
     private external fun nativeMeshWarpReset(handle: Long, layer: Long, effect: Int): Boolean
+    private external fun nativeMeshWarpToggleKey(handle: Long, layer: Long, effect: Int): Boolean
     private external fun nativeQueryPuppet(handle: Long, layer: Long, effect: Int, out: FloatArray): Int
     private external fun nativeQueryPuppetMesh(handle: Long, layer: Long, effect: Int, out: FloatArray): Int
     private external fun nativePuppetAddPin(handle: Long, layer: Long, effect: Int, u: Float, v: Float): Int

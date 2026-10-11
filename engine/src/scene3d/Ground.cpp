@@ -183,10 +183,11 @@ void ground_record_draws(CommandList& c, PassContext& pc, const DrawT* draws, u3
                 c.bind_vertex_buffer(2, d.model->skin, static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex));
             }
             c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
+            if (d.instanceCount > 1) c.bind_storage_buffer(x.inst);
             boundModel = nullptr;
             c.set_uniforms(block, sizeof(SceneBlock));
             c.push_constants(&d.push, sizeof(MeshPush));
-            c.draw_indexed(d.indexCount, 1, d.firstIndex, 0, 0);
+            c.draw_indexed(d.indexCount, std::max(1u, d.instanceCount), d.firstIndex, 0, 0);
             continue;
         }
         if (d.model != boundModel || d.skinned) {

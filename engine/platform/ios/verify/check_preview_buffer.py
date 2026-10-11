@@ -63,7 +63,11 @@ def main() -> int:
     draw = block(timeline, 'private func drawPreviewBuffer(')
     assert 'copy_preview_buffer_ranges(pairs, aurea::kPreviewCacheMaxFrames)' in bridge
     assert 'let pairs = engine.previewBufferRanges()' in model
-    assert 'refreshPreviewBufferRanges()' in block(model, 'private func refreshStatus()')
+    assert 'refreshPreviewBufferRanges(revision: out.modelRevision)' in block(model, 'private func refreshStatus()')
+    refresh = block(model, 'private func refreshPreviewBufferRanges(revision: UInt32)')
+    assert 'revision != lastPreviewAuxRevision || now - lastPreviewAuxAt >= 0.2' in refresh
+    assert 'lastPreviewAuxRevision = revision' in refresh
+    assert 'engine.previewBufferRanges()' in refresh
     assert 'for range in model.previewBufferRanges' in draw
     assert 'TimelinePreviewBuffer.span(range' in draw
     assert 'previewBufferStatus' not in draw

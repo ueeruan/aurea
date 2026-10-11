@@ -6,8 +6,14 @@
 
 @interface TestCommandBufferState : NSObject
 @property(nonatomic) MTLCommandBufferStatus status;
+@property(nonatomic) NSUInteger commits;
+@property(nonatomic) NSUInteger presentations;
+- (void)commit;
+- (void)presentDrawable:(id<MTLDrawable>)drawable;
 @end
 @implementation TestCommandBufferState
+- (void)commit { ++_commits; }
+- (void)presentDrawable:(id<MTLDrawable>)drawable { if (drawable) ++_presentations; }
 @end
 
 using namespace aurea;
@@ -33,6 +39,22 @@ static int checks = 0;
 
 int main() {
     @autoreleasepool {
+        id<MTLDrawable> drawable = (id<MTLDrawable>)[NSObject new];
+        id<MTLDrawable> held = nil;
+        TestCommandBufferState* complete = [TestCommandBufferState new];
+        commit_presentable_frame((id<MTLCommandBuffer>)complete, drawable, true, held);
+        REQUIRE(complete.commits == 1 && complete.presentations == 1 && held == nil);
+        TestCommandBufferState* discarded = [TestCommandBufferState new];
+        commit_presentable_frame((id<MTLCommandBuffer>)discarded, drawable, false, held);
+        REQUIRE(discarded.commits == 1 && discarded.presentations == 0);
+        REQUIRE(held == drawable); // no layer reuse before its GPU completion
+        held = nil; // the actual backend clears only after its frame fence
+        TestCommandBufferState* offscreen = [TestCommandBufferState new];
+        commit_presentable_frame((id<MTLCommandBuffer>)offscreen, nil, false, held);
+        REQUIRE(offscreen.commits == 1 && offscreen.presentations == 0 && held == nil);
+        REQUIRE(!command_buffer_terminal((id<MTLCommandBuffer>)discarded));
+        discarded.status = MTLCommandBufferStatusCompleted;
+        REQUIRE(command_buffer_terminal((id<MTLCommandBuffer>)discarded));
         TestFrame frames[5];
         for (u32 i = 0; i < 5; ++i) {
             frames[i].cmd = buffer(MTLCommandBufferStatusScheduled);

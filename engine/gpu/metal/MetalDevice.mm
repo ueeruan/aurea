@@ -14,6 +14,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdio>
 #include <cstring>
 
@@ -29,6 +30,8 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
         d.config = config;
         d.framesInFlight = std::clamp<u32>(config.framesInFlight, 1, 3);
         d.deviceLost = false;
+        d.externalImageScopeDepth = 0;
+        d.drawableAcquisitions = d.drawablePresentations = 0;
 
         d.device = d.requestedDevice ? (__bridge id<MTLDevice>)d.requestedDevice
                                      : MTLCreateSystemDefaultDevice();
@@ -72,6 +75,8 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
 void Backend::shutdown() noexcept {
     @autoreleasepool {
         Impl& d = *impl_;
+        assert(d.externalImageScopeDepth == 0 && "unclosed external image scope at Metal shutdown");
+        d.externalImageScopeDepth = 0;
         if (!d.device && !d.initialized) return;
 
         // 1. Nada pode estar em voo quando os recursos começam a morrer — e a
@@ -84,11 +89,14 @@ void Backend::shutdown() noexcept {
         d.current = nullptr;
         d.lastSubmitted = nullptr;
         for (u32 i = 0; i < 3; ++i) d.run_deferred(d.frames[i]);
+        assert(!d.presentableLease.active && "unclosed presentable frame lease at Metal shutdown");
+        d.presentableLease = {};
 
         // 2. A superfície antes dos recursos: as texturas do drawable morrem com
         //    a layer.
         d.release_drawable_textures();
         d.drawable = nil;
+        d.acquiredBackbuffer = {};
         d.layer = nil;
 
         if (d.device) {
@@ -349,6 +357,11 @@ void Impl::destroy_frames() noexcept {
         f.cmd = nil;
         f.completion = nil;
         f.submitted = false;
+        f.unpresentedDrawable = nil;
+        f.leasedDrawable = nil;
+        f.leasedSurfaceGeneration = 0;
+        f.leasedFinal = false;
+        f.leasedCancelled = false;
         f.frameNumber = 0;
     }
 }
@@ -433,6 +446,13 @@ Status Impl::submit_immediate(void (*record)(Impl&, id<MTLCommandBuffer>, void*)
 // Fila de destruição adiada e espera de GPU
 // =============================================================================
 void Impl::run_deferred(FrameContext& f) noexcept {
+    // Every caller has proved completion before retiring frame-owned objects.
+    // Discarded drawables return to the layer now, never while GPU writes run.
+    f.unpresentedDrawable = nil;
+    f.leasedDrawable = nil;
+    f.leasedSurfaceGeneration = 0;
+    f.leasedFinal = false;
+    f.leasedCancelled = false;
     // Cópia antes de rodar: uma destruição pode, em cascata, adiar outra.
     std::vector<DeferredRelease> list;
     list.swap(f.deferred);

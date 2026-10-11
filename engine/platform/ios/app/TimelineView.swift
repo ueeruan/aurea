@@ -1268,7 +1268,7 @@ struct TimelineView: View {
                 model.select(layerId: row.id, additive: false)
                 switch track.property {
                 case 30: model.openPanel(.effects)
-                case 31:
+                case 31, 44:
                     model.openPanel(.effects)
                     model.loadParams(layerId: row.id, effectId: track.effect)
                 case 32: model.openPanel(.audio)

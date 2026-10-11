@@ -1,10 +1,10 @@
 package com.aurea.aurea.editor
 
-import android.content.Context
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +21,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -42,6 +43,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
@@ -49,101 +54,32 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
-import kotlin.math.PI
 
-// =============================================================================
-//  Real Camera: a câmera 3D segue o celular. O vetor de rotação do aparelho
-//  (giroscópio + acelerômetro, sem bússola) vira a rotação da camada Câmera
-//  relativa à postura em que a sessão começou ("Recentrar" zera). "Gravar"
-//  toca a timeline e escreve keyframes de Rotação X/Y/Z no quadro da prévia a
-//  cada leitura — o movimento da mão vira animação de câmera. Só rotação: o
-//  celular não mede posição sem AR.
-// =============================================================================
-
+// Platform sources send OpenGL camera-to-world poses. Native C++ owns all motion
+// conversion, smoothing, recording and keyframes on Android and iOS.
 data class RealCameraSession(val layer: Long)
 
 object RealCamera {
     var session by mutableStateOf<RealCameraSession?>(null)
     var recording by mutableStateOf(false)
-    /** Multiplica os graus do aparelho (0,5 = metade do movimento, 2 = dobro). */
     var sensitivity by mutableFloatStateOf(1f)
-    /** Inverte pan e tilt (quem preferir "a câmera vai para onde o celular aponta" ao contrário). */
     var inverted by mutableStateOf(false)
     var available by mutableStateOf(true)
-    /** Último quadro gravado (só para a faixa mostrar). */
     var lastFrame by mutableIntStateOf(-1)
+    var positional by mutableStateOf(false)
+    internal var tracking by mutableStateOf(RealCameraTracking.Rotation)
+    internal var usesArCore by mutableStateOf(false)
+
+    fun reset() {
+        recording = false
+        lastFrame = -1
+        positional = false
+        tracking = RealCameraTracking.Rotation
+        usesArCore = false
+    }
 }
 
 fun realCameraActive(store: EditorStore): Boolean = RealCamera.session != null && store.layers.any { it.id == RealCamera.session?.layer }
-
-/** Lê o sensor e manda a rotação ao motor (ao vivo ou gravando keyframes). */
-internal class RealCameraSensor(context: Context, private val store: EditorStore) : SensorEventListener {
-    private val manager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-    private val sensor: Sensor? = manager?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
-        ?: manager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-    private val rotation = FloatArray(9)
-    private val remapped = FloatArray(9)
-    private val orientation = FloatArray(3)
-    private var reference: FloatArray? = null
-    private var smooth = FloatArray(3)
-    private var lastSentNs = 0L
-
-    val available: Boolean get() = sensor != null
-
-    fun start() {
-        RealCamera.available = sensor != null
-        val s = sensor ?: return
-        manager?.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME)
-    }
-
-    fun stop() { manager?.unregisterListener(this) }
-
-    /** A postura atual vira o zero: a câmera volta a olhar para a frente. */
-    fun recenter() { reference = null; smooth = FloatArray(3) }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-
-    override fun onSensorChanged(event: SensorEvent) {
-        val session = RealCamera.session ?: return
-        SensorManager.getRotationMatrixFromVector(rotation, event.values)
-        // Celular em pé, olhando "através" da tela: o eixo que aponta para
-        // fora da tela vira o -Z da câmera (AXIS_X, AXIS_Z).
-        SensorManager.remapCoordinateSystem(rotation, SensorManager.AXIS_X, SensorManager.AXIS_Z, remapped)
-        SensorManager.getOrientation(remapped, orientation)
-        val ref = reference ?: orientation.clone().also { reference = it }
-        val delta = FloatArray(3) { i -> wrap(orientation[i] - ref[i]) }
-        // Suaviza (filtro simples): o sensor tem ruído de ~0,2°.
-        for (i in 0..2) smooth[i] += (delta[i] - smooth[i]) * 0.45f
-        val sign = if (RealCamera.inverted) -1f else 1f
-        val k = RealCamera.sensitivity * sign * (180f / PI.toFloat())
-        // azimute = pan (Rotação Y); pitch = tilt (Rotação X); roll = Rotação Z.
-        val ry = -smooth[0] * k
-        val rx = smooth[1] * k
-        val rz = -smooth[2] * k
-        if (!rx.isFinite() || !ry.isFinite() || !rz.isFinite()) return
-        // ~30 leituras/s bastam para a prévia e para um keyframe por quadro.
-        val now = event.timestamp
-        if (now - lastSentNs < 25_000_000L) return
-        lastSentNs = now
-        if (RealCamera.recording && store.playing) {
-            val frame = store.playhead
-            if (frame != RealCamera.lastFrame) {
-                RealCamera.lastFrame = frame
-                store.realCameraKey(session.layer, rx, ry, rz)
-            }
-        } else {
-            if (RealCamera.recording && !store.playing) RealCamera.recording = false   // chegou ao fim
-            store.realCameraApply(session.layer, rx, ry, rz)
-        }
-    }
-
-    private fun wrap(a: Float): Float {
-        var v = a
-        while (v > PI) v -= (2 * PI).toFloat()
-        while (v < -PI) v += (2 * PI).toFloat()
-        return v
-    }
-}
 
 @Composable
 private fun CamChip(label: String, tag: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
@@ -166,12 +102,41 @@ private fun CamChip(label: String, tag: String, on: Boolean, enabled: Boolean = 
 @Composable
 fun RealCameraBar(store: EditorStore, modifier: Modifier) {
     val session = RealCamera.session ?: return
-    if (!realCameraActive(store)) { RealCamera.session = null; RealCamera.recording = false; return }
+    if (!realCameraActive(store)) {
+        LaunchedEffect(session) { store.realCameraStop() }
+        return
+    }
     val context = LocalContext.current
-    val sensor = remember(session) { RealCameraSensor(context, store) }
-    DisposableEffect(session) {
-        sensor.start()
-        onDispose { sensor.stop(); if (RealCamera.recording) { RealCamera.recording = false; store.pause() } }
+    val owner = LocalLifecycleOwner.current
+    var motion by remember(session) { mutableStateOf<RealCameraMotion?>(null) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        motion?.permissionResult(granted)
+    }
+    DisposableEffect(session, owner) {
+        val controller = RealCameraMotion(context, store, session.layer) { permission.launch(Manifest.permission.CAMERA) }
+        motion = controller
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) controller.resume()
+                }
+                Lifecycle.Event.ON_PAUSE -> controller.pause()
+                else -> Unit
+            }
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose {
+            owner.lifecycle.removeObserver(observer)
+            controller.close()
+            if (RealCamera.session == session) store.realCameraStop()
+        }
+    }
+    LaunchedEffect(session) {
+        while (RealCamera.session == session) {
+            store.syncRealCameraStatus()
+            motion?.updateDisplayGeometry()
+            delay(50L)
+        }
     }
     val muted = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted))
     Column(
@@ -191,7 +156,13 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
                 when {
                     !RealCamera.available -> stringResource(R.string.real_camera_no_sensor)
                     RealCamera.recording -> stringResource(R.string.real_camera_recording, RealCamera.lastFrame.coerceAtLeast(0))
-                    else -> stringResource(R.string.real_camera_hint)
+                    else -> stringResource(when (RealCamera.tracking) {
+                        RealCameraTracking.Position -> R.string.real_camera_tracking_position
+                        RealCameraTracking.Limited -> R.string.real_camera_tracking_limited
+                        RealCameraTracking.Permission -> R.string.real_camera_camera_permission
+                        RealCameraTracking.Failed -> R.string.real_camera_tracking_failed
+                        RealCameraTracking.Rotation -> R.string.real_camera_tracking_rotation
+                    })
                 },
                 maxLines = 2, style = muted, modifier = Modifier.weight(1f),
             )
@@ -199,23 +170,25 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
         Row(Modifier.padding(top = 6.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CamChip(
                 stringResource(if (RealCamera.recording) R.string.real_camera_stop else R.string.real_camera_record),
-                "realcam.gravar", RealCamera.recording, enabled = RealCamera.available,
+                "realcam.gravar", RealCamera.recording, enabled = RealCamera.recording || RealCamera.available,
             ) {
-                if (RealCamera.recording) {
-                    RealCamera.recording = false
-                    store.pause()
-                } else {
-                    RealCamera.lastFrame = -1
-                    RealCamera.recording = true
-                    store.realCameraBeginRecording(session.layer)
-                }
+                store.realCameraRecord(!RealCamera.recording)
             }
-            CamChip(stringResource(R.string.real_camera_recenter), "realcam.recentrar", false) { sensor.recenter() }
+            CamChip(stringResource(R.string.real_camera_recenter), "realcam.recentrar", false) { store.realCameraRecenter() }
             CamChip(stringResource(R.string.real_camera_invert), "realcam.inverter", RealCamera.inverted) { RealCamera.inverted = !RealCamera.inverted }
-            CamChip(stringResource(R.string.real_camera_done), "realcam.concluir", false) {
-                if (RealCamera.recording) { RealCamera.recording = false; store.pause() }
-                RealCamera.session = null
-            }
+            CamChip(stringResource(R.string.real_camera_done), "realcam.concluir", false) { store.realCameraStop() }
+        }
+        if (RealCamera.recording) {
+            Text(stringResource(when (RealCamera.tracking) {
+                RealCameraTracking.Position -> R.string.real_camera_tracking_position
+                RealCameraTracking.Limited -> R.string.real_camera_tracking_limited
+                RealCameraTracking.Permission -> R.string.real_camera_camera_permission
+                RealCameraTracking.Failed -> R.string.real_camera_tracking_failed
+                RealCameraTracking.Rotation -> R.string.real_camera_tracking_rotation
+            }), style = muted, modifier = Modifier.testTag("realcam.tracking"))
+        }
+        if (RealCamera.tracking == RealCameraTracking.Permission) {
+            Text(stringResource(R.string.real_camera_camera_permission_prompt), style = muted)
         }
         Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             val sens = stringResource(R.string.real_camera_sensitivity)
@@ -227,6 +200,19 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
             )
             Spacer(Modifier.width(6.dp))
             Text("${(RealCamera.sensitivity * 100).toInt()}%", style = muted)
+        }
+        if (RealCamera.usesArCore) {
+            Text(stringResource(R.string.real_camera_arcore_privacy), style = muted, modifier = Modifier.padding(top = 4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(stringResource(R.string.real_camera_google_terms), style = muted,
+                    modifier = Modifier.testTag("realcam.google.terms").tocavel {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://policies.google.com/terms"))) }
+                    })
+                Text(stringResource(R.string.real_camera_google_privacy), style = muted,
+                    modifier = Modifier.testTag("realcam.google.privacy").tocavel {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://policies.google.com/privacy"))) }
+                    })
+            }
         }
     }
 }

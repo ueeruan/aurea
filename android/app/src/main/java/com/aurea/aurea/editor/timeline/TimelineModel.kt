@@ -500,6 +500,7 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
     return axisName(track.property) ?: when (track.property) {
         30 -> LaneNames.get(R.string.tl_time_remap)
         31 -> (effects.firstOrNull { it.first == track.effect }?.second ?: LaneNames.get(R.string.tl_effect)) + " · ${track.param + 1}"
+        44 -> LaneNames.get(R.string.fx_name_mesh_warp)
         32 -> LaneNames.get(R.string.tl_audio, track.param + 1)
         33 -> LaneNames.get(R.string.tl_text_anim, track.effect + 1, track.param + 1)
         43 -> LaneNames.get(R.string.tl_mask, track.effect + 1,

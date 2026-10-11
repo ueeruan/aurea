@@ -68,6 +68,12 @@ public:
 
     [[nodiscard]] u32 max_live_targets() const noexcept;
 
+    /// Native diagnostics: retained EGL imports and the current pool generation.
+    /// Old displayed frames may outlive a resize, but their imports must not
+    /// remain cached in this decoder or count as reusable current-size targets.
+    struct CacheStats { u32 sourceImports = 0, targetImports = 0, liveTargets = 0, freeTargets = 0; u64 generation = 0; };
+    [[nodiscard]] CacheStats cache_stats() const noexcept;
+
     struct Impl;
 
 private:

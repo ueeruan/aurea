@@ -70,7 +70,9 @@ Status Upscaler::load(u32 scale, u32 threads, u32 tileSize, Backend requested) t
     impl_->net.clear();
     impl_->backend = Backend::Cpu;
     impl_->fallback = requested == Backend::Auto;
-    // Sem runtime OpenMP no ncnn (AureaNcnn.cmake) um worker só executa; o
+    // Baseline is a single CPU worker on every platform. No OpenMP runtime or
+    // graphics-device dependency is injected into the editor's render backend.
+    // Sem runtime OpenMP no ncnn (AureaNcnn.cmake) um worker so executa; o
     // pedido fica registrado para a build que o habilitar.
     impl_->net.opt.num_threads = static_cast<int>(threads);
     impl_->net.opt.use_vulkan_compute = false;

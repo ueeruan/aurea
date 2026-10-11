@@ -462,6 +462,55 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 // =============================================================================
 // Estado
 // =============================================================================
+// Real camera session: no edit/playback logic belongs to this transport.
+- (BOOL)realCameraStart:(long long)layer {
+    auto* e = self.engine;
+    return e && e->real_camera_start(static_cast<aurea::u64>(layer)).ok();
+}
+
+- (BOOL)realCameraRecord:(BOOL)recording {
+    auto* e = self.engine;
+    const bool accepted = e && e->real_camera_record(recording).ok();
+    if (accepted) [self wakeRender];
+    return accepted;
+}
+
+- (BOOL)realCameraSample:(simd_float4x4)pose timestampNs:(uint64_t)timestampNs
+             positional:(BOOL)positional sensitivity:(float)sensitivity inverted:(BOOL)inverted {
+    auto* e = self.engine;
+    if (!e) return NO;
+    static_assert(sizeof(simd_float4x4) == sizeof(float) * 16);
+    float values[16];
+    std::memcpy(values, &pose, sizeof(values));
+    return e->real_camera_sample(values, timestampNs, positional, sensitivity, inverted).ok();
+}
+
+- (BOOL)realCameraHold {
+    auto* e = self.engine;
+    const bool accepted = e && e->real_camera_hold().ok();
+    if (accepted) [self wakeRender];
+    return accepted;
+}
+
+- (BOOL)realCameraRecenter {
+    auto* e = self.engine;
+    const bool accepted = e && e->real_camera_recenter().ok();
+    if (accepted) [self wakeRender];
+    return accepted;
+}
+
+- (void)realCameraStop {
+    if (auto* e = self.engine) e->real_camera_stop();
+    [self wakeRender];
+}
+
+- (NSArray<NSNumber*>*)realCameraStatus {
+    auto* e = self.engine;
+    if (!e) return @[@NO, @NO, @(-1), @NO];
+    const auto status = e->real_camera_status();
+    return @[@(status.active), @(status.recording), @(status.lastFrame), @(status.positional)];
+}
+
 - (BOOL)readStatus:(AureaStatus*)out {
     auto* e = self.engine;
     if (!e || !out) return NO;
@@ -3213,6 +3262,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (BOOL)meshWarpReset:(long long)layerId effect:(int32_t)effectId {
     auto* e = self.engine; return e && effectId >= 0 && e->mesh_warp_reset(layerId, static_cast<aurea::u32>(effectId));
+}
+- (BOOL)meshWarpToggleKey:(long long)layerId effect:(int32_t)effectId {
+    auto* e = self.engine; return e && effectId >= 0 && e->mesh_warp_toggle_key(layerId, static_cast<aurea::u32>(effectId));
 }
 - (NSArray<NSNumber*>*)puppetPins:(long long)layerId effect:(int32_t)effectId {
     auto* e = self.engine;

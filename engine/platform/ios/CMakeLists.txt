@@ -229,6 +229,8 @@ if(AUREA_BUILD_NATIVE_EXPORT_PROBE)
         "${AUREA_ROOT}/tests/test_export.cpp"
         "${AUREA_ROOT}/tests/test_export_pixel_copy.cpp"
         "${AUREA_ROOT}/tests/test_offline_audio.cpp"
+        "${AUREA_ROOT}/tests/test_real_camera.cpp"
+        "${AUREA_ROOT}/tests/test_mesh_warp_keys.cpp"
         "${AUREA_ROOT}/tests/test_ffmpeg_export.cpp"
         "${AUREA_ROOT}/tests/test_offline_frame_queue.cpp")
     target_include_directories(aurea_ios_composition_export_probe PRIVATE "${AUREA_ROOT}/tests")

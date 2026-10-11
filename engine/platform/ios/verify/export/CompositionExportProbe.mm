@@ -32,6 +32,8 @@ int main(int argc, char** argv) {
         // picture. Audio cases also verify nested clocks and encoded AAC tones.
         (void)aurea::test::run_all("OfflineNativeGpu");
         (void)aurea::test::run_all("OfflineAudio");
+        (void)aurea::test::run_all("RealCamera");
+        (void)aurea::test::run_all("MeshWarpKeys");
         (void)aurea::test::run_all("FFmpegExport");
         (void)aurea::test::run_all("OfflineFrameQueue");
         (void)aurea::test::run_all("ExportPixelCopy");

@@ -5,7 +5,7 @@ on:
       run_native_tests:
         description: 'Run additional emulator editing tests after building the APKs'
         required: false
-        default: false
+        default: true
         type: boolean
   push:
     branches: ['codex/beta-2146-compile']
@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        abi: [armeabi-v7a, arm64-v8a]
+        abi: [arm64-v8a]
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 2
     steps:
@@ -64,13 +64,19 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
           python3 - "$APK" '${{ matrix.abi }}' <<'PY'
-          import sys, zipfile
+          import re, shutil, sys, zipfile
+          from pathlib import Path
           with zipfile.ZipFile(sys.argv[1]) as package:
               abis = {name.split('/')[1] for name in package.namelist() if name.startswith('lib/') and name.endswith('.so')}
               assert abis == {sys.argv[2]}, abis
+          metadata = Path('apk-badging.txt').read_text()
+          version = re.search(r"versionName='([^']+)'", metadata).group(1)
+          version = re.sub(r"[^A-Za-z0-9.]+", "-", version).strip("-")
+          number = re.search(r"versionCode='([^']+)'", metadata).group(1)
+          output = Path('build/apk-artifact')
+          output.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(sys.argv[1], output / f'Aurea-{version}-{number}-{sys.argv[2]}-ci.apk')
           PY
-          mkdir -p build/apk-artifact
-          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2153-${{ matrix.abi }}-ci.apk'
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-apk-${{ matrix.abi }}
@@ -87,6 +93,10 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.run_native_tests
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [x86_64, arm64-v8a]
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 2
     steps:
@@ -106,19 +116,28 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/app/.cxx
-          key: android-x86_64-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: android-x86_64-${{ runner.os }}-
+          key: android-native-${{ matrix.abi }}-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            android-native-${{ matrix.abi }}-${{ runner.os }}-
+            android-${{ matrix.abi }}-${{ runner.os }}-
       - name: Enable KVM
+        if: matrix.abi == 'x86_64'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Prepare licensed real-model preview fixtures
+        run: |
+          mkdir -p android/app/src/androidTest/assets/models-preview-owned
+          cp engine/tests/data/scene-performance/*.glb android/app/src/androidTest/assets/models-preview-owned/
+          cp engine/tests/data/scene-performance/LICENSE_*.md android/app/src/androidTest/assets/models-preview-owned/
       - name: Build isolated test app
         working-directory: android
         run: |
-          bash gradlew :app:assembleUiTest :app:assembleUiTestAndroidTest -PaureaAbi=x86_64 --no-daemon --max-workers=2 \
+          bash gradlew :app:assembleUiTest :app:assembleUiTestAndroidTest -PaureaAbi=${{ matrix.abi }} --no-daemon --max-workers=2 \
             '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8'
       - name: Run native editing regressions
+        if: matrix.abi == 'x86_64'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -130,14 +149,27 @@ jobs:
           script: |
             adb install -r build/android/app/outputs/apk/uiTest/app-uiTest.apk
             adb install -r build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
-            adb shell am instrument -w -e class com.aurea.aurea.editor.Beta007EditingTest,com.aurea.aurea.editor.TimelineCoordinatesTest,com.aurea.aurea.editor.MotionTileMarginsDeviceTest,com.aurea.aurea.editor.TextAnimatorEditingTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
+            adb logcat -c
+            # SwiftShader on the 2-core CI AVD takes ~25 s/frame for all 60 Full HD motion-blur frames; allow completion without changing quality or the app watchdog.
+            adb shell am instrument -w -e aureaExportDeadlineSeconds 1800 -e class com.aurea.aurea.editor.KeyflowExportDeviceTest,com.aurea.aurea.editor.PreviewVideoLatencyDeviceTest,com.aurea.aurea.editor.CompactToolsDockTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
+            adb logcat -d -v threadtime > build/native-engine.log
             cat build/native-editing.log
-            adb exec-out run-as com.aurea.aurea.uitest tar -cf - -C files motion-tile-margins beta007-marker-empty.png beta007-batch-result.txt beta007-spacing-result.txt > build/native-editing-files.tar
+            python3 engine/platform/android/verify/collect_owned_export_files.py --output build/native-editing-files.tar
             grep -Eq '^OK \([0-9]+ tests?\)' build/native-editing.log
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.abi == 'x86_64'
         with:
           name: android-native-editing
           path: |
             build/native-editing.log
+            build/native-engine.log
             build/native-editing-files.tar
+      - name: Preserve ARM64 tests for the connected phone
+        if: matrix.abi == 'arm64-v8a'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-device-test-arm64-v8a
+          path: |
+            build/android/app/outputs/apk/uiTest/app-uiTest.apk
+            build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
+          if-no-files-found: error

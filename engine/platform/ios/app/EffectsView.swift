@@ -49,8 +49,15 @@ struct EffectsView: View {
     /// Sem [focusedType] é o painel inteiro, com abas; com ele, o editor embutido.
     private var tabbed: Bool { focusedType == nil }
     private var hasAudio: Bool { ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0 }
-    private var canAnimate: Bool { selectedParam.map { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 } ?? false }
+    private var meshSelected: Bool {
+        selected == nil && openId != nil && model.effects.contains { $0.effectId == openId && $0.typeId == fxEffectTypeId("aurea.distort.mesh_warp") }
+    }
+    private var canAnimate: Bool { meshSelected || (selectedParam.map { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 } ?? false) }
     private var railLook: KeyframeLook {
+        if meshSelected, let effect = openId, let layer = model.primarySelection {
+            let keys = (model.keyframes[layer] ?? []).filter { $0.property == 44 && $0.effectIndex == effect }
+            return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
+        }
         guard let selected else { return .none }
         return look(effect: selected.effect, param: selected.param)
     }
@@ -188,7 +195,7 @@ struct EffectsView: View {
         if let type = focusedType, let effect = model.effects.first(where: { $0.typeId == type }) {
             open(effect.effectId); return
         }
-        guard model.curveProperty == 31, model.curveSelectedTime != nil,
+        guard (model.curveProperty == 31 || model.curveProperty == 44), model.curveSelectedTime != nil,
               model.effects.contains(where: { $0.effectId == model.curveEffect }) else {
             // A pilha já abre com o primeiro cartão à vista (um toque a menos);
             // os outros recolhidos (acordeão: um aberto por vez). Camada sem
@@ -198,6 +205,7 @@ struct EffectsView: View {
             return
         }
         // Entrar pelo losango de um parâmetro é editar: abre na pilha.
+        if model.curveProperty == 44 { open(model.curveEffect); selected = nil; return }
         let entry = EffectParamSelection(effect: model.curveEffect, param: model.curveParam / 4, component: Int(model.curveParam % 4))
         selected = entry; open(entry.effect)
         if parameterGroups(entry.effect).rest.contains(where: { $0.index == entry.param }) { advanced.insert(entry.effect) }
@@ -218,7 +226,9 @@ struct EffectsView: View {
     private func open(_ id: UInt32) {
         guard let layer = model.primarySelection else { return }
         openId = id; model.loadParams(layerId: layer, effectId: id)
-        if selected?.effect != id {
+        if model.effects.contains(where: { $0.effectId == id && $0.typeId == fxEffectTypeId("aurea.distort.mesh_warp") }) {
+            selected = nil
+        } else if selected?.effect != id {
             let groups = parameterGroups(id)
             let first = (groups.main + groups.rest).first(where: { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 })
                 ?? groups.main.first(where: { fxComponentCount(Int($0.type)) > 0 })
@@ -298,7 +308,7 @@ struct EffectsView: View {
                     if !effect.known { PanelNotice(AureaText.t("panel_este_efeito_saiu_catalogo_ele_nao")) }
                     else if effect.typeId == fxEffectTypeId("aurea.time.remap") { TimeRemapEffectEditor(effectId: effect.effectId) }
                     else {
-                        if effect.typeId == fxEffectTypeId("aurea.distort.mesh_warp") { MeshWarpCardTools(effectId: effect.effectId) }
+                        if effect.typeId == fxEffectTypeId("aurea.distort.mesh_warp") { MeshWarpCardTools(effectId: effect.effectId, selected: meshSelected, onSelect: { selected = nil }) }
                         if effect.typeId == fxEffectTypeId("aurea.distort.puppet") { PuppetCardTools(effectId: effect.effectId) }
                         if effect.typeId == fxEffectTypeId("aurea.key.rotobrush") {
                             PanelNotice(AureaText.t("roto_note"))
@@ -634,6 +644,12 @@ struct EffectsView: View {
         expressionLooks = looks
     }
     private func toggleSelectedKey() {
+        if meshSelected, let effect = openId, let layer = model.primarySelection, model.selectedLayer?.locked != true {
+            if model.engine.meshWarpToggleKey(layer, effect: Int32(truncatingIfNeeded: effect)) {
+                MeshWarpStageState.shared.revision += 1; model.refreshModel(force: true)
+            }
+            return
+        }
         guard let selection = selected, let param = currentParam(selection.param), let layer = model.primarySelection,
               model.selectedLayer?.locked != true, param.flags & 1 != 0 else { return }
         let here = (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == selection.effect && $0.paramIndex / 4 == param.index && $0.time == model.localPlayhead }
@@ -648,7 +664,9 @@ struct EffectsView: View {
         model.endGesture(); model.commitPendingCommands(); model.refreshModel(force: true)
     }
     private func updateTimelineFocus() {
-        if let layer = model.primarySelection, let effect = openId, puppet.layer == layer,
+        if meshSelected, let effect = openId {
+            model.timelineFocus = [TimelineTrack(property: 44, effect: effect, param: 0)]
+        } else if let layer = model.primarySelection, let effect = openId, puppet.layer == layer,
            puppet.effect >= 0, UInt32(puppet.effect) == effect,
            model.effects.contains(where: { $0.effectId == effect && $0.typeId == PuppetStageState.type }),
            puppet.editing || selected == nil {

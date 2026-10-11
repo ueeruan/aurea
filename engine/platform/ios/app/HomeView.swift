@@ -1132,6 +1132,11 @@ struct HomeSettingsTab: View {
                 DonationCard()
                 groupHeader("settings_group_about", top: true)
                 group {
+                    Text(AureaText.t("ios_version_build", version, build))
+                        .font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
+                        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("app.version")
+                    groupDivider
                     tileRow(CupertinoGlyph.Bolt, title: "settings_technology", subtitle: AureaText.t("settings_technology_ios_value"))
                     groupDivider
                     tileRow(CupertinoGlyph.PersonCropCircle, title: "settings_creator",

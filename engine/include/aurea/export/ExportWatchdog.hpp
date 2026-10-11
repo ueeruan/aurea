@@ -82,6 +82,9 @@ struct ExportSourceWait {
 /// Quadros aproximados SEGUIDOS a partir dos quais a paciência cai de novo.
 inline constexpr u32 kExportFallbackStreak = 8;
 
+/// Fixed cold-opening window; opening metadata is not decoded frame progress.
+inline constexpr u64 kExportSourceOpeningTimeoutNs = 10'000'000'000ull;
+
 /// 0 aproximados: 4 s sem progresso, teto de 60 s (efeito que lê vários
 /// instantes com GOP longo é legítimo). Depois do 1º: 1 s / 4 s. Depois de
 /// `kExportFallbackStreak` seguidos: 250 ms / 1 s — uma fonte quebrada no fim

@@ -87,12 +87,12 @@ void Backend::set_object_name(VkObjectType type, u64 handle, const char* name) n
     // Object labels are validation diagnostics. Some Android emulator drivers
     // advertise debug utils but crash naming non-dispatchable image handles.
     // Normal rendering must never depend on this optional diagnostic call.
-    if (!caps_.validationEnabled || !debugUtils_ || !vkSetDebugUtilsObjectNameEXT || !name || !handle) return;
+    if (!caps_.validationEnabled || !debugUtils_ || !deviceFunctions_.vkSetDebugUtilsObjectNameEXT || !name || !handle) return;
     VkDebugUtilsObjectNameInfoEXT info{VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT};
     info.objectType = type;
     info.objectHandle = handle;
     info.pObjectName = name;
-    (void)vkSetDebugUtilsObjectNameEXT(device_, &info);
+    (void)deviceFunctions_.vkSetDebugUtilsObjectNameEXT(device_, &info);
 }
 
 // =============================================================================
@@ -127,10 +127,10 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
         info.arrayLayers = 6;
     }
     info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (const Status s = check(vkCreateImage(device_, &info, nullptr, &t.image), "vkCreateImage"); !s.ok()) return s;
+    if (const Status s = check(deviceFunctions_.vkCreateImage(device_, &info, nullptr, &t.image), "vkCreateImage"); !s.ok()) return s;
 
     VkMemoryRequirements req{};
-    vkGetImageMemoryRequirements(device_, t.image, &req);
+    deviceFunctions_.vkGetImageMemoryRequirements(device_, t.image, &req);
     // Transitório: memória LAZY (só no tile) quando o aparelho tem; alocação
     // dedicada, para o driver não precisar comprometer um bloco inteiro.
     const bool lazy = desc.transient && caps_.lazyAttachments;
@@ -140,12 +140,12 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
                                   lazy ? VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT : 0, lazy, desc.debugName,
                                   /*hostPointer=*/false);
     if (!t.alloc.valid()) {
-        vkDestroyImage(device_, t.image, nullptr);
+        deviceFunctions_.vkDestroyImage(device_, t.image, nullptr);
         return Status{Errc::OutOfDeviceMemory, "sem memoria para textura"};
     }
-    if (const Status s = check(vkBindImageMemory(device_, t.image, t.alloc.memory, t.alloc.offset), "vkBindImageMemory");
+    if (const Status s = check(deviceFunctions_.vkBindImageMemory(device_, t.image, t.alloc.memory, t.alloc.offset), "vkBindImageMemory");
         !s.ok()) {
-        vkDestroyImage(device_, t.image, nullptr);
+        deviceFunctions_.vkDestroyImage(device_, t.image, nullptr);
         allocator_.free(t.alloc);
         return s;
     }
@@ -156,8 +156,8 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
                 : info.arrayLayers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
     vi.format = t.format;
     vi.subresourceRange = {aspect_of(t.format), 0, info.mipLevels, 0, info.arrayLayers};
-    if (const Status s = check(vkCreateImageView(device_, &vi, nullptr, &t.view), "vkCreateImageView"); !s.ok()) {
-        vkDestroyImage(device_, t.image, nullptr);
+    if (const Status s = check(deviceFunctions_.vkCreateImageView(device_, &vi, nullptr, &t.view), "vkCreateImageView"); !s.ok()) {
+        deviceFunctions_.vkDestroyImage(device_, t.image, nullptr);
         allocator_.free(t.alloc);
         return s;
     }
@@ -168,16 +168,16 @@ Result<TextureHandle> Backend::create_texture(const TextureDesc& desc) noexcept 
 
 void Backend::destroy_texture_now(Texture& t) noexcept {
     for (VkFramebuffer& fb : t.framebuffers) {
-        if (fb) vkDestroyFramebuffer(device_, fb, nullptr);
+        if (fb) deviceFunctions_.vkDestroyFramebuffer(device_, fb, nullptr);
         fb = VK_NULL_HANDLE;
     }
     for (Texture::DepthFramebuffer& d : t.depthFramebuffers) {
-        if (d.fb) vkDestroyFramebuffer(device_, d.fb, nullptr);
+        if (d.fb) deviceFunctions_.vkDestroyFramebuffer(device_, d.fb, nullptr);
     }
     t.depthFramebuffers.clear();
-    if (t.view) vkDestroyImageView(device_, t.view, nullptr);
-    if (t.ownsImage && t.image) vkDestroyImage(device_, t.image, nullptr);
-    if (t.importedMemory) vkFreeMemory(device_, t.importedMemory, nullptr);
+    if (t.view) deviceFunctions_.vkDestroyImageView(device_, t.view, nullptr);
+    if (t.ownsImage && t.image) deviceFunctions_.vkDestroyImage(device_, t.image, nullptr);
+    if (t.importedMemory) deviceFunctions_.vkFreeMemory(device_, t.importedMemory, nullptr);
     allocator_.free(t.alloc);
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
     if (t.nativeBuffer) AHardwareBuffer_release(static_cast<AHardwareBuffer*>(t.nativeBuffer));
@@ -200,7 +200,7 @@ void Backend::retire_texture(TextureHandle h, u64 lastUsedFrame) noexcept {
         if (frame.frameNumber != lastUsedFrame) continue;
         if (&frame == current_) releaseOn = &frame;
         else if (frame.submitted && !deviceLost_) {
-            const VkResult ready = vkWaitForFences(device_, 1, &frame.fence, VK_TRUE, 0);
+            const VkResult ready = deviceFunctions_.vkWaitForFences(device_, 1, &frame.fence, VK_TRUE, 0);
             if (ready != VK_SUCCESS && !note_device_lost(ready)) releaseOn = &frame;
         }
         break;
@@ -220,7 +220,7 @@ void Backend::retire_texture(TextureHandle h, u64 lastUsedFrame) noexcept {
         struct Node { Backend* b; VkFramebuffer fb; };
         retire([](void* p) {
             auto* n = static_cast<Node*>(p);
-            vkDestroyFramebuffer(n->b->device(), n->fb, nullptr);
+            n->b->device_dispatch().vkDestroyFramebuffer(n->b->device(), n->fb, nullptr);
             delete n;
         }, new Node{this, it->fb});
         it = framebuffers3d_.erase(it);
@@ -234,7 +234,7 @@ void Backend::retire_texture(TextureHandle h, u64 lastUsedFrame) noexcept {
                 struct Node { Backend* b; VkFramebuffer fb; };
                 retire([](void* p) {
                     auto* n = static_cast<Node*>(p);
-                    vkDestroyFramebuffer(n->b->device(), n->fb, nullptr);
+                    n->b->device_dispatch().vkDestroyFramebuffer(n->b->device(), n->fb, nullptr);
                     delete n;
                 }, new Node{this, it->fb});
                 it = other.depthFramebuffers.erase(it);
@@ -273,10 +273,10 @@ Result<BufferHandle> Backend::create_buffer(const BufferDesc& desc) noexcept {
     if (has_flag(desc.usage, BufferUsage::Indirect)) u |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
     info.usage = u;
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if (const Status s = check(vkCreateBuffer(device_, &info, nullptr, &b.buffer), "vkCreateBuffer"); !s.ok()) return s;
+    if (const Status s = check(deviceFunctions_.vkCreateBuffer(device_, &info, nullptr, &b.buffer), "vkCreateBuffer"); !s.ok()) return s;
 
     VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(device_, b.buffer, &req);
+    deviceFunctions_.vkGetBufferMemoryRequirements(device_, b.buffer, &req);
     VkMemoryPropertyFlags required = 0, preferred = 0;
     switch (desc.access) {
         case MemoryAccess::GpuOnly:
@@ -291,19 +291,25 @@ Result<BufferHandle> Backend::create_buffer(const BufferDesc& desc) noexcept {
             preferred = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
             break;
     }
-    b.alloc = allocator_.allocate(req, required, preferred, false, desc.debugName);
-    if (!b.alloc.valid()
-        || vkBindBufferMemory(device_, b.buffer, b.alloc.memory, b.alloc.offset) != VK_SUCCESS) {
-        vkDestroyBuffer(device_, b.buffer, nullptr);
+    b.alloc = allocator_.allocate(req, required, preferred, false, desc.debugName,
+        desc.access != MemoryAccess::GpuOnly);
+    if (!b.alloc.valid()) {
+        deviceFunctions_.vkDestroyBuffer(device_, b.buffer, nullptr);
+        return check(b.alloc.failure == VK_SUCCESS ? VK_ERROR_OUT_OF_DEVICE_MEMORY : b.alloc.failure,
+            "memoria/mapeamento do buffer");
+    }
+    if (const Status bound = check(deviceFunctions_.vkBindBufferMemory(device_, b.buffer,
+            b.alloc.memory, b.alloc.offset), "vkBindBufferMemory"); !bound.ok()) {
+        deviceFunctions_.vkDestroyBuffer(device_, b.buffer, nullptr);
         allocator_.free(b.alloc);
-        return Status{Errc::OutOfDeviceMemory, "sem memoria para buffer"};
+        return bound;
     }
     set_object_name(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<u64>(b.buffer), desc.debugName);
     return BufferHandle{buffers_.add(std::move(b))};
 }
 
 void Backend::destroy_buffer_now(Buffer& b) noexcept {
-    if (b.buffer) vkDestroyBuffer(device_, b.buffer, nullptr);
+    if (b.buffer) deviceFunctions_.vkDestroyBuffer(device_, b.buffer, nullptr);
     allocator_.free(b.alloc);
     b = Buffer{};
 }
@@ -346,16 +352,17 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
     std::memcpy(s->alloc.mapped, data, bytes);
     struct Ctx { VkBuffer src; VkBuffer dst; VkDeviceSize offset; VkDeviceSize size; }
         ctx{s->buffer, dstBuffer, offset, bytes};
-    const Status st = submit_immediate([](Backend&, VkCommandBuffer cmd, void* p) {
+    const Status st = submit_immediate([](Backend& be, VkCommandBuffer cmd, void* p) {
         const Ctx* c = static_cast<const Ctx*>(p);
         VkBufferCopy region{0, c->offset, c->size};
-        vkCmdCopyBuffer(cmd, c->src, c->dst, 1, &region);
+        be.device_dispatch().vkCmdCopyBuffer(cmd, c->src, c->dst, 1, &region);
     }, &ctx);
     destroy_buffer(*staging);
     return st;
 }
 
 Status Backend::map_buffer(BufferHandle buffer, void*& outPtr) noexcept {
+    outPtr = nullptr;
     Buffer* b = buffers_.get(buffer.id);
     if (!b || !b->alloc.mapped) return Errc::InvalidArgument;
     if (!(allocator_.properties().memoryTypes[b->alloc.memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
@@ -363,7 +370,8 @@ Status Backend::map_buffer(BufferHandle buffer, void*& outPtr) noexcept {
         r.memory = b->alloc.memory;
         r.offset = 0;
         r.size = VK_WHOLE_SIZE;
-        (void)vkInvalidateMappedMemoryRanges(device_, 1, &r);
+        if (const Status visible = check(deviceFunctions_.vkInvalidateMappedMemoryRanges(device_, 1, &r),
+                "vkInvalidateMappedMemoryRanges"); !visible.ok()) return visible;
     }
     outPtr = b->alloc.mapped;
     return OkStatus;
@@ -396,7 +404,7 @@ Result<SamplerHandle> Backend::create_sampler(const SamplerDesc& desc) noexcept 
         info.maxAnisotropy = std::min(desc.maxAnisotropy, caps_.maxSamplerAnisotropy);
     }
     SamplerObject s;
-    if (const Status st = check(vkCreateSampler(device_, &info, nullptr, &s.sampler), "vkCreateSampler"); !st.ok()) return st;
+    if (const Status st = check(deviceFunctions_.vkCreateSampler(device_, &info, nullptr, &s.sampler), "vkCreateSampler"); !st.ok()) return st;
     return SamplerHandle{samplers_.add(std::move(s))};
 }
 
@@ -408,7 +416,7 @@ void Backend::destroy_sampler(SamplerHandle h) noexcept {
     struct Node { Backend* b; VkSampler s; };
     defer_until_gpu_done([](void* p) {
         auto* n = static_cast<Node*>(p);
-        vkDestroySampler(n->b->device(), n->s, nullptr);
+        n->b->device_dispatch().vkDestroySampler(n->b->device(), n->s, nullptr);
         delete n;
     }, new Node{this, dead.sampler});
 }
@@ -422,7 +430,7 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
     info.pCode = desc.spirv;
     ShaderModule m;
     m.stage = desc.stage;
-    if (const Status s = check(vkCreateShaderModule(device_, &info, nullptr, &m.module), "vkCreateShaderModule"); !s.ok()) {
+    if (const Status s = check(deviceFunctions_.vkCreateShaderModule(device_, &info, nullptr, &m.module), "vkCreateShaderModule"); !s.ok()) {
         return Status{Errc::ShaderCompileFailed, desc.debugName};
     }
     set_object_name(VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<u64>(m.module), desc.debugName);
@@ -437,7 +445,7 @@ void Backend::destroy_shader(ShaderHandle h) noexcept {
     struct Node { Backend* b; VkShaderModule m; };
     defer_until_gpu_done([](void* p) {
         auto* n = static_cast<Node*>(p);
-        vkDestroyShaderModule(n->b->device(), n->m, nullptr);
+        n->b->device_dispatch().vkDestroyShaderModule(n->b->device(), n->m, nullptr);
         delete n;
     }, new Node{this, m.module});
 }
@@ -494,7 +502,7 @@ VkPipelineLayout Backend::pipeline_layout(u64 immutableSampler, VkDescriptorSetL
     si.bindingCount = binding::kBindingCount;
     si.pBindings = b;
     VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
-    if (vkCreateDescriptorSetLayout(device_, &si, nullptr, &setLayout) != VK_SUCCESS) return VK_NULL_HANDLE;
+    if (deviceFunctions_.vkCreateDescriptorSetLayout(device_, &si, nullptr, &setLayout) != VK_SUCCESS) return VK_NULL_HANDLE;
 
     VkPushConstantRange push{all, 0, binding::kPushConstantBytes};
     VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
@@ -503,8 +511,8 @@ VkPipelineLayout Backend::pipeline_layout(u64 immutableSampler, VkDescriptorSetL
     li.pushConstantRangeCount = 1;
     li.pPushConstantRanges = &push;
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    if (vkCreatePipelineLayout(device_, &li, nullptr, &layout) != VK_SUCCESS) {
-        vkDestroyDescriptorSetLayout(device_, setLayout, nullptr);
+    if (deviceFunctions_.vkCreatePipelineLayout(device_, &li, nullptr, &layout) != VK_SUCCESS) {
+        deviceFunctions_.vkDestroyDescriptorSetLayout(device_, setLayout, nullptr);
         return VK_NULL_HANDLE;
     }
     layouts_[immutableSampler] = layout;
@@ -564,7 +572,7 @@ VkRenderPass Backend::render_pass(VkFormat format, LoadOp load) noexcept {
     info.dependencyCount = 2;
     info.pDependencies = deps;
     VkRenderPass rp = VK_NULL_HANDLE;
-    if (vkCreateRenderPass(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
+    if (deviceFunctions_.vkCreateRenderPass(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
     renderPasses_[key] = rp;
     return rp;
 }
@@ -642,7 +650,7 @@ VkRenderPass Backend::render_pass(VkFormat format, LoadOp load, VkFormat depth, 
     info.dependencyCount = 2;
     info.pDependencies = deps;
     VkRenderPass rp = VK_NULL_HANDLE;
-    if (vkCreateRenderPass(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
+    if (deviceFunctions_.vkCreateRenderPass(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
     renderPasses_[key] = rp;
     return rp;
 }
@@ -668,7 +676,7 @@ VkFramebuffer Backend::framebuffer(Texture* color, Texture& depth, u64 depthId, 
     info.height = depth.desc.height;
     info.layers = 1;
     VkFramebuffer fb = VK_NULL_HANDLE;
-    if (!info.renderPass || vkCreateFramebuffer(device_, &info, nullptr, &fb) != VK_SUCCESS) return VK_NULL_HANDLE;
+    if (!info.renderPass || deviceFunctions_.vkCreateFramebuffer(device_, &info, nullptr, &fb) != VK_SUCCESS) return VK_NULL_HANDLE;
     owner.depthFramebuffers.push_back(Texture::DepthFramebuffer{depthId, key, fb});
     return fb;
 }
@@ -683,7 +691,7 @@ VkFramebuffer Backend::framebuffer(Texture& t, LoadOp load) noexcept {
     info.width = t.desc.width;
     info.height = t.desc.height;
     info.layers = 1;
-    if (vkCreateFramebuffer(device_, &info, nullptr, &t.framebuffers[i]) != VK_SUCCESS) return VK_NULL_HANDLE;
+    if (deviceFunctions_.vkCreateFramebuffer(device_, &info, nullptr, &t.framebuffers[i]) != VK_SUCCESS) return VK_NULL_HANDLE;
     return t.framebuffers[i];
 }
 
@@ -813,7 +821,7 @@ VkRenderPass Backend::render_pass(const RenderPassKey& k) noexcept {
         info.pSubpasses = &sub;
         info.dependencyCount = 2;
         info.pDependencies = deps;
-        if (!vkCreateRenderPass2KHR || vkCreateRenderPass2KHR(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
+        if (!deviceFunctions_.vkCreateRenderPass2KHR || deviceFunctions_.vkCreateRenderPass2KHR(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
     } else {
         VkAttachmentDescription a1[6]{};
         for (u32 i = 0; i < n; ++i) {
@@ -855,7 +863,7 @@ VkRenderPass Backend::render_pass(const RenderPassKey& k) noexcept {
         info.pSubpasses = &sub;
         info.dependencyCount = 2;
         info.pDependencies = deps;
-        if (vkCreateRenderPass(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
+        if (deviceFunctions_.vkCreateRenderPass(device_, &info, nullptr, &rp) != VK_SUCCESS) return VK_NULL_HANDLE;
     }
     renderPasses3d_.emplace_back(k, rp);
     return rp;
@@ -879,7 +887,7 @@ VkFramebuffer Backend::framebuffer(const RenderPassKey& k, const u64 ids[6], VkI
     info.height = height;
     info.layers = 1;
     VkFramebuffer fb = VK_NULL_HANDLE;
-    if (!info.renderPass || vkCreateFramebuffer(device_, &info, nullptr, &fb) != VK_SUCCESS) return VK_NULL_HANDLE;
+    if (!info.renderPass || deviceFunctions_.vkCreateFramebuffer(device_, &info, nullptr, &fb) != VK_SUCCESS) return VK_NULL_HANDLE;
     Framebuffer3d entry;
     entry.key = k;
     std::copy(ids, ids + 6, entry.ids);
@@ -907,7 +915,7 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         info.stage.module = cs->module;
         info.stage.pName = "main";
         info.layout = p.layout;
-        if (vkCreateComputePipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
+        if (deviceFunctions_.vkCreateComputePipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
             return Status{Errc::PipelineCompileFailed, desc.debugName};
         }
         p.bindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
@@ -1044,7 +1052,7 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     }
     info.subpass = 0;
     if (!info.renderPass) return Status{Errc::PipelineCompileFailed, "render pass"};
-    if (vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
+    if (deviceFunctions_.vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &info, nullptr, &p.pipeline) != VK_SUCCESS) {
         return Status{Errc::PipelineCompileFailed, desc.debugName};
     }
     p.bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -1058,7 +1066,7 @@ void Backend::destroy_pipeline(PipelineHandle h) noexcept {
     struct Node { Backend* b; VkPipeline p; };
     defer_until_gpu_done([](void* ptr) {
         auto* n = static_cast<Node*>(ptr);
-        vkDestroyPipeline(n->b->device(), n->p, nullptr);
+        n->b->device_dispatch().vkDestroyPipeline(n->b->device(), n->p, nullptr);
         delete n;
     }, new Node{this, p.pipeline});
 }
@@ -1083,7 +1091,7 @@ Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPer
         region.bufferOffset = offset;
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {w, h, 1};
-        vkCmdCopyBufferToImage(cmd, src, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        deviceFunctions_.vkCmdCopyBufferToImage(cmd, src, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
         // Fica pronta para amostrar: quem sobe textura (LUT, imagem, plano de
         // vídeo) a lê em seguida num passe, fora do FrameGraph.
         transition(cmd, *t, ResourceState::ShaderRead, false);
@@ -1121,7 +1129,7 @@ Status Backend::upload_texture(TextureHandle dst, const void* data, u32 bytesPer
     u8* d = static_cast<u8*>(s->alloc.mapped);
     for (u32 y = 0; y < h; ++y) std::memcpy(d + static_cast<usize>(y) * rowBytes, src + static_cast<usize>(y) * pitch, rowBytes);
     struct Ctx { decltype(record)* rec; VkBuffer buf; } ctx{&record, s->buffer};
-    const Status st = submit_immediate([](Backend&, VkCommandBuffer cmd, void* p) {
+    const Status st = submit_immediate([](Backend& be, VkCommandBuffer cmd, void* p) {
         auto* c = static_cast<Ctx*>(p);
         (*c->rec)(cmd, c->buf, 0);
     }, &ctx);
@@ -1156,18 +1164,18 @@ Status Backend::upload_texture_level(TextureHandle dst, u32 mipLevel, u32 layer,
         b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.image = c->t->image;
         b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, c->mip, 1, c->layer, 1};
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+        be.device_dispatch().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                              nullptr, 1, &b);
         VkBufferImageCopy region{};
         region.bufferOffset = c->off;
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, c->mip, c->layer, 1};
         region.imageExtent = {c->w, c->h, 1};
-        vkCmdCopyBufferToImage(cmd, c->buf, c->t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        be.device_dispatch().vkCmdCopyBufferToImage(cmd, c->buf, c->t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
         b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
+        be.device_dispatch().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
                              0, nullptr, 1, &b);
         c->t->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         c->t->state = ResourceState::ShaderRead;
@@ -1226,14 +1234,14 @@ Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
     if (levels <= 1) return OkStatus;
     if (is_block_compressed(t->desc.format)) return Status{Errc::NotSupported, "mips de textura comprimida vem do arquivo"};
     VkFormatProperties fp{};
-    vkGetPhysicalDeviceFormatProperties(physical_, t->format, &fp);
+    instanceFunctions_.vkGetPhysicalDeviceFormatProperties(physical_, t->format, &fp);
     if (!(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)
         || !(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT)
         || !(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
         return Status{Errc::NotSupported, "formato sem blit linear"};
     }
     struct Ctx { Texture* t; u32 levels; u32 layers; } ctx{t, levels, t->desc.cube ? 6u : std::max(1u, t->desc.layers)};
-    const auto record = [](Backend&, VkCommandBuffer cmd, void* p) {
+    const auto record = [](Backend& be, VkCommandBuffer cmd, void* p) {
         auto* c = static_cast<Ctx*>(p);
         Texture& tx = *c->t;
         auto barrier = [&](u32 mip, VkImageLayout from, VkImageLayout to, VkAccessFlags src, VkAccessFlags dst,
@@ -1246,7 +1254,7 @@ Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
             b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             b.image = tx.image;
             b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, c->layers};
-            vkCmdPipelineBarrier(cmd, s0, s1, 0, 0, nullptr, 0, nullptr, 1, &b);
+            be.device_dispatch().vkCmdPipelineBarrier(cmd, s0, s1, 0, 0, nullptr, 0, nullptr, 1, &b);
         };
         // Nível 0 vem de amostragem (subido antes); vira origem de blit.
         barrier(0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -1262,7 +1270,7 @@ Status Backend::generate_mipmaps(TextureHandle texture) noexcept {
             blit.srcOffsets[1] = {w, h, 1};
             blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, m, 0, c->layers};
             blit.dstOffsets[1] = {nw, nh, 1};
-            vkCmdBlitImage(cmd, tx.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, tx.image,
+            be.device_dispatch().vkCmdBlitImage(cmd, tx.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, tx.image,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
             barrier(m, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -1312,7 +1320,7 @@ Status Backend::read_texture(TextureHandle src, void* outData, u32 bytesPerRow) 
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {c->w, c->h, 1};
-        vkCmdCopyImageToBuffer(cmd, c->t->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, c->buf, 1, &region);
+        be.device_dispatch().vkCmdCopyImageToBuffer(cmd, c->t->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, c->buf, 1, &region);
         if (before != ResourceState::Undefined) be.transition(cmd, *c->t, before, false);
     }, &ctx);
     if (st.ok()) {
@@ -1341,48 +1349,48 @@ Status Backend::submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*
     pi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     pi.queueFamilyIndex = graphicsFamily_;
     VkCommandPool pool = VK_NULL_HANDLE;
-    if (const Status s = check(vkCreateCommandPool(device_, &pi, nullptr, &pool), "vkCreateCommandPool"); !s.ok()) return s;
+    if (const Status s = check(deviceFunctions_.vkCreateCommandPool(device_, &pi, nullptr, &pool), "vkCreateCommandPool"); !s.ok()) return s;
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = pool;
     ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    if (const VkResult r = vkAllocateCommandBuffers(device_, &ai, &cmd); r != VK_SUCCESS) {
-        vkDestroyCommandPool(device_, pool, nullptr);
+    if (const VkResult r = deviceFunctions_.vkAllocateCommandBuffers(device_, &ai, &cmd); r != VK_SUCCESS) {
+        deviceFunctions_.vkDestroyCommandPool(device_, pool, nullptr);
         return check(r, "vkAllocateCommandBuffers imediato");
     }
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (const VkResult r = vkBeginCommandBuffer(cmd, &bi); r != VK_SUCCESS) {
-        vkDestroyCommandPool(device_, pool, nullptr);
+    if (const VkResult r = deviceFunctions_.vkBeginCommandBuffer(cmd, &bi); r != VK_SUCCESS) {
+        deviceFunctions_.vkDestroyCommandPool(device_, pool, nullptr);
         return check(r, "vkBeginCommandBuffer imediato");
     }
     record(*this, cmd, ctx);
-    if (const VkResult r = vkEndCommandBuffer(cmd); r != VK_SUCCESS) {
-        vkDestroyCommandPool(device_, pool, nullptr);
+    if (const VkResult r = deviceFunctions_.vkEndCommandBuffer(cmd); r != VK_SUCCESS) {
+        deviceFunctions_.vkDestroyCommandPool(device_, pool, nullptr);
         return check(r, "vkEndCommandBuffer imediato");
     }
 
     VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkFence fence = VK_NULL_HANDLE;
-    if (const VkResult r = vkCreateFence(device_, &fi, nullptr, &fence); r != VK_SUCCESS) {
-        vkDestroyCommandPool(device_, pool, nullptr);
+    if (const VkResult r = deviceFunctions_.vkCreateFence(device_, &fi, nullptr, &fence); r != VK_SUCCESS) {
+        deviceFunctions_.vkDestroyCommandPool(device_, pool, nullptr);
         return check(r, "vkCreateFence imediato");
     }
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd;
-    VkResult r = vkQueueSubmit(queue_, 1, &si, fence);
+    VkResult r = deviceFunctions_.vkQueueSubmit(queue_, 1, &si, fence);
     const bool submitted = r == VK_SUCCESS;
-    if (submitted) r = vkWaitForFences(device_, 1, &fence, VK_TRUE, timeoutNs);
+    if (submitted) r = deviceFunctions_.vkWaitForFences(device_, 1, &fence, VK_TRUE, timeoutNs);
     (void)note_device_lost(r);
     if (submitted && r != VK_SUCCESS && !deviceLost_) {
         // Timeout is not cancellation: the command buffer and every staging
         // resource it references must survive until its own fence completes.
         pendingImmediate_.push_back(PendingImmediate{pool, fence, {}});
     } else {
-        vkDestroyFence(device_, fence, nullptr);
-        vkDestroyCommandPool(device_, pool, nullptr);
+        deviceFunctions_.vkDestroyFence(device_, fence, nullptr);
+        deviceFunctions_.vkDestroyCommandPool(device_, pool, nullptr);
     }
     return check(r, "submissao imediata");
 }
@@ -1391,13 +1399,13 @@ void Backend::collect_immediate(bool deviceIdle) noexcept {
     for (usize i = 0; i < pendingImmediate_.size();) {
         auto& submission = pendingImmediate_[i];
         if (!deviceIdle && !deviceLost_
-            && vkWaitForFences(device_, 1, &submission.fence, VK_TRUE, 0) != VK_SUCCESS) {
+            && deviceFunctions_.vkWaitForFences(device_, 1, &submission.fence, VK_TRUE, 0) != VK_SUCCESS) {
             ++i;
             continue;
         }
         auto releases = std::move(submission.deferred);
-        vkDestroyFence(device_, submission.fence, nullptr);
-        vkDestroyCommandPool(device_, submission.pool, nullptr);
+        deviceFunctions_.vkDestroyFence(device_, submission.fence, nullptr);
+        deviceFunctions_.vkDestroyCommandPool(device_, submission.pool, nullptr);
         pendingImmediate_.erase(pendingImmediate_.begin() + static_cast<std::ptrdiff_t>(i));
         for (const auto& release : releases) if (release.fn) release.fn(release.ctx);
     }
@@ -1429,8 +1437,13 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         }
         if (Texture* t = cached) {
             t->lastUsedFrame = frameNumber_;
-            t->state = ResourceState::Undefined;   // conteúdo novo do decoder: nova aquisição
-            t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            // A temporal sample can import the same native buffer again after
+            // its first pass acquired it. Preserve that recorded ownership and
+            // layout; only a new frame needs another foreign-queue acquisition.
+            if (!t->acquiredThisFrame) {
+                t->state = ResourceState::Undefined;
+                t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            }
             const SamplerObject* s = samplers_.get(t->ycbcrSampler);
             ExternalTexture out;
             out.texture = TextureHandle{it->second};
@@ -1445,7 +1458,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     VkAndroidHardwareBufferFormatPropertiesANDROID fmt{VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID};
     VkAndroidHardwareBufferPropertiesANDROID props{VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID};
     props.pNext = &fmt;
-    if (const Status s = check(vkGetAndroidHardwareBufferPropertiesANDROID(device_, ahb, &props),
+    if (const Status s = check(deviceFunctions_.vkGetAndroidHardwareBufferPropertiesANDROID(device_, ahb, &props),
                                "vkGetAndroidHardwareBufferPropertiesANDROID"); !s.ok()) {
         return s;
     }
@@ -1483,7 +1496,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
         si.maxLod = 0.0f;
-        if (const Status s = check(vkCreateSampler(device_, &si, nullptr, &so.sampler), "vkCreateSampler(ahb rgb)"); !s.ok()) {
+        if (const Status s = check(deviceFunctions_.vkCreateSampler(device_, &si, nullptr, &so.sampler), "vkCreateSampler(ahb rgb)"); !s.ok()) {
             return s;
         }
         samplerId = samplers_.add(std::move(so));
@@ -1514,7 +1527,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         ci.forceExplicitReconstruction = VK_FALSE;
         SamplerObject so;
         so.shared = true;
-        if (const Status s = check(vkCreateSamplerYcbcrConversion(device_, &ci, nullptr, &so.conversion),
+        if (const Status s = check(deviceFunctions_.vkCreateSamplerYcbcrConversion(device_, &ci, nullptr, &so.conversion),
                                    "vkCreateSamplerYcbcrConversion"); !s.ok()) {
             return s;
         }
@@ -1526,8 +1539,8 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
         si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
         si.maxLod = 0.0f;
-        if (const Status s = check(vkCreateSampler(device_, &si, nullptr, &so.sampler), "vkCreateSampler(ycbcr)"); !s.ok()) {
-            vkDestroySamplerYcbcrConversion(device_, so.conversion, nullptr);
+        if (const Status s = check(deviceFunctions_.vkCreateSampler(device_, &si, nullptr, &so.sampler), "vkCreateSampler(ycbcr)"); !s.ok()) {
+            deviceFunctions_.vkDestroySamplerYcbcrConversion(device_, so.conversion, nullptr);
             return s;
         }
         samplerId = samplers_.add(std::move(so));
@@ -1567,7 +1580,7 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
     ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (const Status s = check(vkCreateImage(device_, &ii, nullptr, &t.image), "vkCreateImage(ahb)"); !s.ok()) return s;
+    if (const Status s = check(deviceFunctions_.vkCreateImage(device_, &ii, nullptr, &t.image), "vkCreateImage(ahb)"); !s.ok()) return s;
 
     VkImportAndroidHardwareBufferInfoANDROID imp{VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID};
     imp.buffer = ahb;
@@ -1579,13 +1592,13 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     ai.allocationSize = props.allocationSize;
     ai.memoryTypeIndex = 0;
     while (ai.memoryTypeIndex < 32 && !(props.memoryTypeBits & (1u << ai.memoryTypeIndex))) ++ai.memoryTypeIndex;
-    if (const Status s = check(vkAllocateMemory(device_, &ai, nullptr, &t.importedMemory), "vkAllocateMemory(ahb)"); !s.ok()) {
-        vkDestroyImage(device_, t.image, nullptr);
+    if (const Status s = check(deviceFunctions_.vkAllocateMemory(device_, &ai, nullptr, &t.importedMemory), "vkAllocateMemory(ahb)"); !s.ok()) {
+        deviceFunctions_.vkDestroyImage(device_, t.image, nullptr);
         return s;
     }
-    if (const Status s = check(vkBindImageMemory(device_, t.image, t.importedMemory, 0), "vkBindImageMemory(ahb)"); !s.ok()) {
-        vkFreeMemory(device_, t.importedMemory, nullptr);
-        vkDestroyImage(device_, t.image, nullptr);
+    if (const Status s = check(deviceFunctions_.vkBindImageMemory(device_, t.image, t.importedMemory, 0), "vkBindImageMemory(ahb)"); !s.ok()) {
+        deviceFunctions_.vkFreeMemory(device_, t.importedMemory, nullptr);
+        deviceFunctions_.vkDestroyImage(device_, t.image, nullptr);
         return s;
     }
 
@@ -1597,9 +1610,9 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = fmt.format;
     vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    if (const Status s = check(vkCreateImageView(device_, &vi, nullptr, &t.view), "vkCreateImageView(ahb)"); !s.ok()) {
-        vkFreeMemory(device_, t.importedMemory, nullptr);
-        vkDestroyImage(device_, t.image, nullptr);
+    if (const Status s = check(deviceFunctions_.vkCreateImageView(device_, &vi, nullptr, &t.view), "vkCreateImageView(ahb)"); !s.ok()) {
+        deviceFunctions_.vkFreeMemory(device_, t.importedMemory, nullptr);
+        deviceFunctions_.vkDestroyImage(device_, t.image, nullptr);
         return s;
     }
     // A importação segura o buffer enquanto estiver no cache: o ImageReader

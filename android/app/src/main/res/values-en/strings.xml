@@ -1792,7 +1792,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.1.5 (2175) • 2026-10-11\n\n• Export: projects with 3D or motion blur export again (FBX/OBJ models were refused; the GPU budget refused the extra textures). Media that cannot be frozen no longer kills the export.\n• Smoother preview: the GPU no longer waits between passes of every frame, memory is not released every frame, text and blur crops reuse targets.\n• Rotobrush: the frame no longer freezes; the frame you look at has priority; status always visible (this frame, clip, failure); Final/Overlay/Mask inside paint mode; translucent overlay shows what is behind.\n• 3D: FBX/OBJ metal and roughness maps are now read.\n• AI Upscale: its own tool on the Home (pick the video and the factor); 2.5 to 3× faster with the same model.\n• Real Camera: in the 3D scene add menu — the camera follows your phone and Record turns the motion into keyframes.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.4 BETA 2 (2175) • 2026-10-11\n\n• Export: projects with 3D or motion blur export again (FBX/OBJ models were refused; the GPU budget refused the extra textures). Media that cannot be frozen no longer kills the export.\n• Smoother preview: the GPU no longer waits between passes of every frame, memory is not released every frame, text and blur crops reuse targets.\n• Rotobrush: the frame no longer freezes; the frame you look at has priority; status always visible (this frame, clip, failure); Final/Overlay/Mask inside paint mode; translucent overlay shows what is behind.\n• 3D: FBX/OBJ metal and roughness maps are now read.\n• AI Upscale: its own tool on the Home (pick the video and the factor); 2.5 to 3× faster with the same model.\n• Real Camera: in the 3D scene add menu — the camera follows your phone and Record turns the motion into keyframes.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -3662,6 +3662,15 @@ to edit the curve.</string>
     <string name="roto_progress">Tracking %1$d of %2$d</string>
     <string name="roto_done">Done</string>
     <string name="roto_hint">Paint the object in green; switch to Background to remove parts. Strokes on another frame update the following frames.</string>
+    <string name="real_camera_tracking_position">3D position and rotation active.</string>
+    <string name="real_camera_tracking_rotation">Rotation only; this mode does not measure position.</string>
+    <string name="real_camera_tracking_limited">Position tracking paused. Improve the lighting and move the device slowly.</string>
+    <string name="real_camera_camera_permission">Camera permission unavailable: rotation only.</string>
+    <string name="real_camera_camera_permission_prompt">The camera tracks the device’s 3D movement. Images are not recorded.</string>
+    <string name="real_camera_tracking_failed">Tracking unavailable: rotation only.</string>
+    <string name="real_camera_arcore_privacy">3D tracking uses Google Play Services for AR (ARCore), provided by Google LLC, subject to Google Terms of Service and the Google Privacy Policy.</string>
+    <string name="real_camera_google_terms">Google Terms</string>
+    <string name="real_camera_google_privacy">Google Privacy</string>
     <string name="real_camera_title">Real Camera</string>
     <string name="real_camera_hint">Move your phone: the 3D camera follows. Record plays the timeline and saves the motion as keyframes.</string>
     <string name="real_camera_record">Record</string>
@@ -3671,7 +3680,7 @@ to edit the curve.</string>
     <string name="real_camera_invert">Invert</string>
     <string name="real_camera_sensitivity">Sensitivity</string>
     <string name="real_camera_done">Done</string>
-    <string name="real_camera_no_sensor">This device has no gyroscope: Real Camera cannot work here.</string>
+    <string name="real_camera_no_sensor">Orientation sensor unavailable: Real Camera cannot measure motion on this device.</string>
     <string name="roto_frame_ready">This frame: cut-out ready</string>
     <string name="roto_frame_pending">This frame: computing the cut-out…</string>
     <string name="roto_clip_status">Clip: %1$d of %2$d frames cut out</string>

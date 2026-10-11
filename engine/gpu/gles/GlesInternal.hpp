@@ -67,6 +67,12 @@ struct Backend::Impl final : CommandList {
     u32 frameCount = 3, surfaceWidth = 0, surfaceHeight = 0;
     bool frameOpen = false, presenting = false, deviceLost = false, borderClamp = false;
     TextureHandle backbuffer{};
+    // The owned composition backbuffer survives intermediate pbuffer frames.
+    // Its window generation/extent must still match before the final swap.
+    bool presentableLease = false;
+    u64 surfaceGeneration = 1, leasedGeneration = 0;
+    TextureHandle leasedBackbuffer{};
+    u32 leasedWidth = 0, leasedHeight = 0;
     GLuint vao = 0, framebuffer = 0, readFramebuffer = 0;
     GLuint drawAttachments[3]{}, readAttachment = 0;
     GLuint dummy2D = 0, dummyCube = 0, dummyBuffer = 0, dummySampler = 0;
@@ -118,6 +124,7 @@ struct Backend::Impl final : CommandList {
         return std::find(caps.extensions.begin(), caps.extensions.end(), name) != caps.extensions.end();
     }
     Status begin(FrameBegin&, bool present);
+    Status finish_frame(bool present);
     Status wait(Frame&, u64 timeout);
     void retire(Frame&);
     void uniforms(u32 binding, const void*, u32);

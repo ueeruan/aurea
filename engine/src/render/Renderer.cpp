@@ -42,6 +42,21 @@ constexpr SurfaceFormat kWorkFormat = SurfaceFormat::RGBA16F;
 constexpr SurfaceFormat kPreviewCacheFormat = SurfaceFormat::RGBA8_sRGB;
 constexpr u32 kPreviewCacheBytesPerPixel = 4;
 
+struct CaptureRenderPhases {
+    bool enabled;
+    u64 started, previous;
+    explicit CaptureRenderPhases(bool trace) noexcept
+        : enabled(trace), started(trace ? monotonic_ns() : 0), previous(started) {}
+    void mark(const char* phase) noexcept {
+        if (!enabled) return;
+        const u64 now = monotonic_ns();
+        AUREA_LOG_INFO("capture-render phase=%s elapsed_ms=%.3f phase_ms=%.3f", phase,
+            static_cast<double>(now - started) * 1e-6, static_cast<double>(now - previous) * 1e-6);
+        previous = now;
+    }
+    ~CaptureRenderPhases() { mark("returned"); }
+};
+
 // A CFR boundary must land on the last frame's actual timestamp. Using half
 // a frame before EOF can be one microsecond outside the decoder's tolerance
 // (30 fps: 9,983,334 vs 9,966,667), making an export wait until its timeout.
@@ -927,7 +942,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     }
     warmPending_.clear();
     warmedEffects_.clear();
-    warmed3d_ = false;
+    warmSceneQualities_ = warmedSceneSamples_ = 0;
     warmedForProject_ = 0;
     std::vector<PipelineKey> keys;
     keys.push_back(PipelineKey::fullscreen(ShaderId::effects_color_stack_frag, kWorkFormat));
@@ -963,10 +978,12 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
 void Renderer::scan_for_warmup(const Project& project) noexcept {
     if (!effects_ || !shaders_.ready()) return;
     // Sem alocação no caso comum: tudo já visto → nenhuma inserção.
-    bool want3d = false;
+    warmSceneQualities_ = 0;
     project.timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        bool want3d = c.environment().showBackground
+            && (c.environment().hdri.valid() || c.environment().studioPreset != 0);
         c.layers().for_each([&](LayerId, const Layer& l) {
-            if (!warmed3d_ && (l.threeD || l.kind == LayerKind::Model3D)) want3d = true;
+            if (l.threeD || l.kind == LayerKind::Model3D) want3d = true;
             for (const EffectInstance& e : l.effects) {
                 if (!e.enabled) continue;
                 const auto it = std::lower_bound(warmedEffects_.begin(), warmedEffects_.end(), e.type);
@@ -975,10 +992,43 @@ void Renderer::scan_for_warmup(const Project& project) noexcept {
                 if (const Effect* fx = effects_->find(e.type)) fx->pipelines(warmPending_, kWorkFormat);
             }
         });
+        if (want3d) warmSceneQualities_ |= 1u << std::min(c.post_process().quality3d, kScene3DQualityCount - 1);
     });
-    if (want3d) {
-        warmed3d_ = true;
+}
+
+void Renderer::warm_scene_pipelines(const FrameSnapshot& snapshot) noexcept {
+    // The project scan runs before render quality has been resolved. Keep its
+    // composition qualities, then derive the SAME sample count as the draw.
+    // Actual snapshots also cover a direct play/quality change before a paused
+    // scan, and nested compositions have independent quality settings.
+    const auto visit = [&](auto&& self, const FrameSnapshot& frame) -> void {
+        for (const auto& group : frame.scenes)
+            warmSceneQualities_ |= 1u << std::min(group.post.quality, kScene3DQualityCount - 1);
+        for (const auto& child : frame.nested) if (child) self(self, *child);
+    };
+    visit(visit, snapshot);
+    const auto warmQuality = [&](const HeavyQuality& quality) {
+        scene3d_.set_post_quality(quality.msaaSamples, quality.fxaa, quality.bloomStartDiv, quality.bloomLevels);
+        const u32 samples = scene3d_.pass_samples();
+        const u32 bit = 1u << samples;
+        if (warmedSceneSamples_ & bit) return;
         scene3d_.collect_pipelines(warmPending_);
+        warmedSceneSamples_ |= bit;
+    };
+    for (u32 tier = 0; tier < kScene3DQualityCount; ++tier) {
+        if (!(warmSceneQualities_ & (1u << tier))) continue;
+        HeavyQuality quality = heavyQ_;
+        apply_scene3d_quality(quality, static_cast<Scene3DQuality>(tier));
+        warmQuality(quality);
+        if (tier == static_cast<u32>(Scene3DQuality::Auto) && !heavyQ_.exportFrame) {
+            // Auto can move between exactly these two profiles as load/heat
+            // changes. Compile both before its first playback, never the
+            // unrelated Low (1x) or Ultra export (8x) profiles.
+            for (const u32 samples : {2u, 4u}) {
+                quality.msaaSamples = samples;
+                warmQuality(quality);
+            }
+        }
     }
 }
 
@@ -992,6 +1042,7 @@ void Renderer::flush_warmup() noexcept {
 }
 
 void Renderer::shutdown() noexcept {
+    cancel_preview_graph();
     staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {};
     if (!backend_) return;
     backend_->wait_idle();
@@ -1027,6 +1078,7 @@ void Renderer::shutdown() noexcept {
 }
 
 void Renderer::forget_device() noexcept {
+    cancel_preview_graph();
     staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {};
     previewFrames_.clear();
     previewCacheKey_ = 0;
@@ -1066,7 +1118,9 @@ void Renderer::forget_device() noexcept {
 }
 
 void Renderer::release_project_resources() noexcept {
+    cancel_preview_graph();
     staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {};
+    warmSceneQualities_ = 0;
     renderInstancePath_.clear();
     nestedNamespaces_.clear();
     nestSalt_ = 0;
@@ -1116,6 +1170,7 @@ void Renderer::release_project_resources() noexcept {
 }
 
 void Renderer::clear_preview_cache() noexcept {
+    cancel_preview_graph();
     previewCacheRevision_ = previewCacheComposition_ = 0;
     // Withdraw the UI snapshot before releasing any GPU resources.
     publish_preview_buffer_ranges();
@@ -1534,6 +1589,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        MediaManager* media, const ImagePixels* (*imageLookup)(void*, AssetId),
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
+    if (previewGraph_.active) return;
     frameNumber_ = frameNumber;
     // O espectro de áudio (EffectResources) precisa saber DE QUE composição,
     // projeto e instante o planejamento é — dentro de uma pré-composição, os
@@ -1615,6 +1671,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.videoLayers = 0;
     out.staleVideoFrames = 0;
     out.missingVideoFrames = 0;
+    out.videoSourceWaits.clear();
     out.culledLayers = 0;
 
     const f32 previewFactor = static_cast<f32>(settings.previewNumerator)
@@ -2545,6 +2602,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 out.videoLayers += snapChild->videoLayers;
                 out.staleVideoFrames += snapChild->staleVideoFrames;
                 out.missingVideoFrames += snapChild->missingVideoFrames;
+                out.videoSourceWaits.insert(out.videoSourceWaits.end(),
+                    snapChild->videoSourceWaits.begin(), snapChild->videoSourceWaits.end());
                 out.culledLayers += snapChild->culledLayers;
                 rl.source.kind = LayerSource::Kind::Nested;
                 rl.source.width = child->width();
@@ -2874,6 +2933,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     out.videoLayers += snap->videoLayers;
                     out.staleVideoFrames += snap->staleVideoFrames;
                     out.missingVideoFrames += snap->missingVideoFrames;
+                    out.videoSourceWaits.insert(out.videoSourceWaits.end(),
+                        snap->videoSourceWaits.begin(), snap->videoSourceWaits.end());
                     const u32 index = static_cast<u32>(out.nested.size());
                     out.nested.push_back(std::move(snap));
                     made.emplace_back(cf, index);
@@ -3025,6 +3086,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         if (rl.source.kind == LayerSource::Kind::Video && media) {
             const Asset* asset = project.asset(l->source);
             VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber, settings.finalQuality);
+            const u32 missingBefore = out.missingVideoFrames;
+            const u32 staleBefore = out.staleVideoFrames;
             if (src) {
                 src->set_epoch(settings.mediaGeneration);
                 const VideoStreamInfo streamInfo = src->info();
@@ -3253,10 +3316,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (!rl.source.frame) ++out.missingVideoFrames;
                 else if (!exact) ++out.staleVideoFrames;
             }
+            if (!src) ++out.missingVideoFrames;
+            if (settings.finalQuality && (out.missingVideoFrames != missingBefore
+                    || out.staleVideoFrames != staleBefore)) {
+                const auto sourceStats = src ? src->stats() : VideoSource::Stats{};
+                const auto startup = src ? MediaManager::SourceStartup::Ready : media->source_startup(rid, l->source);
+                out.videoSourceWaits.push_back({rid, l->source,
+                    sourceStats.framesDelivered + sourceStats.framesDiscarded,
+                    startup == MediaManager::SourceStartup::Opening,
+                    out.missingVideoFrames != missingBefore,
+                    out.staleVideoFrames != staleBefore,
+                    startup == MediaManager::SourceStartup::Failed});
+            }
             if (!rl.source.frame) {
                 // Ainda nada decodificado (primeiro frame a caminho): a layer
                 // fica de fora deste frame; o callback da fonte acorda o render.
-                if (!src) ++out.missingVideoFrames;
                 continue;
             }
         }
@@ -3795,6 +3869,8 @@ void Renderer::fill_object_environment(const Layer& l, scene3d::SceneInstance& i
 }
 #include "RendererSceneExposure.inl"
 #include "RendererSceneTargets.inl"
+#include "RendererGraphSegments.inl"
+#include "RendererPreviewGraph.inl"
 
 void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
     // Todos os snapshots (pré-composições incluídas) num buffer só do quadro.
@@ -4452,7 +4528,11 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
     switch (layer.source.kind) {
         case LayerSource::Kind::Video: {
             out.texture = graph_.create_texture("layer-video", d);
-            if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) return false;
+            if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) {
+                incomplete_ = true;
+                videoSourceFailed_ = true;
+                return false;
+            }
             if (layer.source.frame->hardwareBuffer) framesUsed.push_back(layer.source.frame);
 
             // RGB NO TEMPO (Fase 7.3 §25): a textura da camada vira a JUNÇÃO
@@ -5780,6 +5860,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
 void Renderer::prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i64 mediaUs,
                            MediaManager& media, u64 frameNumber, DecodeMode mode,
                            i32 direction, f32 speed, u64 epoch, FrameSnapshot& out) {
+    if (previewGraph_.active) return;
     out = FrameSnapshot{};
     out.compWidth = std::max(1u, asset.video.width);
     out.compHeight = std::max(1u, asset.video.height);
@@ -5817,26 +5898,99 @@ void Renderer::prepare_raw(LayerId id, const Layer& layer, const Asset& asset, i
     out.layers.push_back(std::move(video));
 }
 
+Status Renderer::prepare_capture_resources(FrameSnapshot& snapshot, const RenderSettings& settings) noexcept {
+    if (!backend_ || !settings.finalQuality) return Errc::InvalidState;
+    if (previewGraph_.active) return Errc::Busy;
+    const auto cancelled = [&] {
+        return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire);
+    };
+    if (cancelled()) return Errc::Cancelled;
+    const bool traceEnabled = settings.offscreenFenceDeadline != nullptr;
+    struct EnvironmentTraceScope {
+        scene3d::SceneRenderer& scene;
+        bool previous;
+        EnvironmentTraceScope(scene3d::SceneRenderer& value, bool enabled) noexcept
+            : scene(value), previous(scene.set_environment_trace(enabled)) {}
+        ~EnvironmentTraceScope() { (void)scene.set_environment_trace(previous); }
+    } trace(scene3d_, traceEnabled);
+    quality_ = effective_quality(settings);
+    heavyQ_ = resolve_heavy(settings);
+    const u64 pipelinesStarted = traceEnabled ? monotonic_ns() : 0;
+    warm_scene_pipelines(snapshot);
+    flush_warmup();
+    if (traceEnabled && monotonic_ns() - pipelinesStarted > 5000000ull)
+        AUREA_LOG_INFO("capture-resource pipeline-warmup_ms=%.3f", static_cast<double>(monotonic_ns() - pipelinesStarted) * 1e-6);
+    if (cancelled()) return Errc::Cancelled;
+    // Mark all required environments as recent in the same next main frame.
+    // Serial jobs reuse ordinary GPU caches instead of retaining a second set
+    // of full-resolution CPU maps for every nested composition/object.
+    const u64 frame = backend_->last_submitted_frame() + 1;
+    const auto instances = [&](const scene3d::SceneFrame& group) -> Status {
+        for (const auto& instance : group.instances) if (instance.ownEnvironment) {
+            if (cancelled()) return Errc::Cancelled;
+            const Status status = scene3d_.prepare_environment(instance.environment, frame, true);
+            if (!status.ok()) return status;
+        }
+        return OkStatus;
+    };
+    const auto visit = [&](auto&& self, const FrameSnapshot& value) -> Status {
+        for (const auto& group : value.scenes) {
+            if (cancelled()) return Errc::Cancelled;
+            configure_scene_quality(group);
+            const Status environment = scene3d_.prepare_environment(group.environment, frame);
+            if (!environment.ok()) return environment;
+            const Status main = instances(group);
+            if (!main.ok()) return main;
+            for (const auto& sample : group.blurFrames) {
+                const Status subframe = instances(sample);
+                if (!subframe.ok()) return subframe;
+            }
+        }
+        for (const auto& child : value.nested) if (child) {
+            const Status nested = self(self, *child);
+            if (!nested.ok()) return nested;
+        }
+        return OkStatus;
+    };
+    const Status ready = visit(visit, snapshot);
+    return ready;
+}
+
 Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                         const OffscreenTarget* offscreen, FrameStats& stats,
                         RenderTimings& timings) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
+    CaptureRenderPhases capturePhases(offscreen && settings.offscreenFenceDeadline);
+    struct EnvironmentTraceScope {
+        scene3d::SceneRenderer& scene;
+        bool previous;
+        EnvironmentTraceScope(scene3d::SceneRenderer& value, bool enabled) noexcept
+            : scene(value), previous(scene.set_environment_trace(enabled)) {}
+        ~EnvironmentTraceScope() { (void)scene.set_environment_trace(previous); }
+    } environmentTrace(scene3d_, capturePhases.enabled);
+    if (previewGraph_.active) return Status{Errc::Busy, "preview graph continuation active"};
     if (settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire)) {
         snap.release_video_frames(); return Errc::Cancelled;
     }
     if (const Status ready = reclaim_failed_transients(); !ready.ok()) {
         snap.release_video_frames(); return ready;
     }
+    capturePhases.mark("reclaim");
     // Pipelines que a varredura do projeto pediu: antes de pegar a imagem da
     // swapchain (compilar segurando a imagem atrasaria a apresentação).
-    if (!settings.rawPlayback) flush_warmup();
+    quality_ = effective_quality(settings);
+    heavyQ_ = resolve_heavy(settings);
+    if (!settings.rawPlayback) {
+        warm_scene_pipelines(snap);
+        flush_warmup();
+    }
+    capturePhases.mark("pipeline-warmup");
     const u64 t0 = monotonic_ns();
     const u64 effectsBypassedBefore = EffectGraph::bypassed_total();
     scene3d_.reset_incomplete();
+    videoSourceFailed_ = false;
     videoUploadMs_ = 0;
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
-    quality_ = effective_quality(settings);
-    heavyQ_ = resolve_heavy(settings);
     heavyStats_.lastParticleSlots = heavyStats_.lastParticleLayers = 0;
     heavyStats_.lastParticleExtraLayers = 0;
     heavyStats_.lastSceneDrawCalls = heavyStats_.lastSceneShadowDrawCalls = heavyStats_.lastSceneInstancedDraws = 0;
@@ -5855,6 +6009,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     FrameStats exposureStats;
     timings.sceneExposureRecordMs = timings.sceneExposureWaitMs = 0;
     timings.sceneExposureBatches = 0;
+    timings.gpuProfileFragmented = false;
     struct CompletedSceneTargets {
         Renderer& renderer;
         std::unique_ptr<StagedSceneTarget[]> storage;
@@ -5911,6 +6066,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         }
         boundedSceneTextures_ = completed.textures;
     }
+    capturePhases.mark("scene-stages");
 
     // SceneStatsSink reports cumulative builds within the main GPU frame.
     // Merge completed earlier submissions once, after that sink has run.
@@ -5932,11 +6088,12 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     if (const Status s = offscreenFrame ? backend_->begin_offscreen_frame(fb) : backend_->begin_frame(fb); !s.ok()) {
         // Sem imagem de swapchain neste vsync (superfície em recriação): os
         // frames de vídeo deste snapshot só são soltos — não houve GPU.
-        for (RenderLayer& l : snap.layers) l.source.frame.reset();
+        snap.release_video_frames();
         return s;
     }
     const u64 tBegin = monotonic_ns();
     timings.acquireWaitMs = static_cast<f32>(static_cast<f64>(tBegin - acquireStarted) * 1e-6);
+    capturePhases.mark("begin-frame");
 
     // RAW never touches the text subsystem.
     if (!settings.rawPlayback) {
@@ -5973,6 +6130,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         glyphResetSeen_ = resets;
     }
     flush_uploads();
+    capturePhases.mark("uploads");
     pool_.begin_frame(*backend_, fb.frameNumber);
     graph_.reset();
     arena_.reset();
@@ -6046,8 +6204,10 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                          : (offscreen && offscreen->texture.valid())
                          ? graph_.import_texture("composicao", offscreen->texture, compDesc)
                          : graph_.create_texture("composicao", compDesc);
+    Status previewSourceStatus = OkStatus;
     currentScenes_ = &snap.scenes;
     if (offscreen && !snap.scenes.empty()) scene3d_.finish_environment(snap.scenes[0].environment);
+    capturePhases.mark("scene-environment");
     compTargetW_ = cw;
     compTargetH_ = ch;
 
@@ -6058,8 +6218,13 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const bool decoded = !snap.layers.empty() && build_video_source(snap.layers.front(), 0, cw, ch, comp, fb.frameNumber);
         if (decoded && snap.layers.front().source.frame->hardwareBuffer)
             framesInFlight_.push_back(snap.layers.front().source.frame);
-        if (!decoded) graph_.add_raster_pass("raw-buffering", PassStage::Decode, comp, LoadOp::Clear,
-                                            Vec4{0, 0, 0, 1}, [](PassContext&) {});
+        if (!decoded) {
+            // Missing RAW pixels are not a successful black video frame. Keep
+            // the last visible picture on backends that can discard safely,
+            // and let Engine retry without advancing presentation telemetry.
+            incomplete_ = true;
+            previewSourceStatus = Status{Errc::DecodeFailed, "frame RAW indisponivel para GPU"};
+        }
     } else {
     upload_glyphs(snap);
     upload_masks(snap);
@@ -6067,6 +6232,13 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     upload_particle_history(snap);
     renderFrameNumber_ = fb.frameNumber;   // o relógio dos buffers extras das partículas (2D e cena)
     compose_layers(snap, comp, compDesc, fb.frameNumber, draws_, 0);
+    }
+    if (!offscreenFrame && fb.backbuffer.valid() && !previewCacheHit_ && videoSourceFailed_) {
+        // A missing main source must not remove a video layer for one display
+        // tick. Auxiliary temporal samples retain their existing valid-source
+        // fallback; this applies only to absent/unusable main video pixels.
+        incomplete_ = true;
+        previewSourceStatus = Status{Errc::DecodeFailed, "pixels principais do video indisponiveis"};
     }
     // A raiz de novo (as pré-composições trocaram o estado em curso).
     currentScenes_ = &snap.scenes;
@@ -6102,7 +6274,10 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const FGTexture bb = graph_.import_texture("swapchain", bbTex, bbDesc);
         auto pOut = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
                                                             ShaderId::composite_output_frag, bbFormat));
-        if (!pOut.ok()) incomplete_ = true;
+        if (!pOut.ok()) {
+            incomplete_ = true;
+            previewSourceStatus = pOut.status();
+        }
         // A composição encaixada (letterbox) no espaço LÓGICO do display, e a
         // pré-rotação aplicada no clip: o compositor do sistema não precisa
         // girar a imagem (o que custaria um passe a mais por frame, dele).
@@ -6186,9 +6361,68 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         graph_.set_output(comp, ResourceState::ShaderRead);
     }
 
-    Status result = graph_.compile(pool_);
+    RenderCompletion completion;
+    completion.frame = fb;
+    completion.exposureStats = exposureStats;
+    completion.stagedStats = stagedStats;
+    completion.cached = cached;
+    completion.targets = staged.targets;
+    completion.effectsBefore = effectsBypassedBefore;
+    completion.began = tBegin;
+    completion.buildFrame = fb.frameNumber;
+    completion.width = cw; completion.height = ch;
+    completion.offscreen = offscreenFrame;
+    capturePhases.mark("graph-build");
+    Status result = previewSourceStatus.ok() ? graph_.compile(pool_) : previewSourceStatus;
+    capturePhases.mark("graph-compile");
+    bool frameOpen = true;
+    bool segmented = false;
+    if (result.code() == Errc::OutOfDeviceMemory && settings.allowGraphSegments
+        && !offscreen && !offscreenFrame && fb.backbuffer.valid()
+        && backend_->can_discard_frame() && backend_->can_lease_presentable_frame()
+        && !incomplete_ && !scene3d_.incomplete()
+        && EffectGraph::bypassed_total() == effectsBypassedBefore) {
+        const Status lease = backend_->begin_presentable_frame_lease();
+        if (lease.ok()) {
+            auto& pending = previewGraph_;
+            pending.active = pending.initial = true;
+            pending.snapshot = &snap;
+            pending.settings = settings;
+            pending.completion = completion;
+            timings.gpuProfileFragmented = true;
+            read_timings(timings);
+            pending.timings = timings;
+            stats = {};
+            pending.started = monotonic_ns();
+            pending.activeRecordNs = pending.started - tBegin;
+            pending.exposureCount = static_cast<u32>(completed.textures.size());
+            pending.exposureTextures = std::move(completed.storage);
+            completed.textures = {};
+            pending.stagedCount = static_cast<u32>(staged.targets.size());
+            pending.stagedTargets = std::move(staged.storage);
+            staged.targets = {};
+            backend_->begin_external_image_scope();
+            graph_.release(pool_);
+            pool_.end_frame();
+            const Status submitted = backend_->discard_frame();
+            pending.waitingFrame = backend_->last_submitted_frame();
+            if (!submitted.ok()) {
+                cancel_preview_graph();
+                return submitted;
+            }
+            // Ownership spans turns: do not release FrameRefs, reset the CPU
+            // arena, publish a cache slot or count presentation before final.
+            return Status{Errc::Busy, "preview graph continuation pending"};
+        }
+    }
+    if (result.code() == Errc::OutOfDeviceMemory && settings.allowGraphSegments
+        && offscreenFrame && offscreen && offscreen->texture.valid()) {
+        result = render_segmented_graph(settings, fb, timings, frameOpen);
+        segmented = result.ok();
+        if (cached) cached->gpuFrame = fb.frameNumber;
+    }
     if (result.ok()) {
-        graph_.execute(*fb.commands, settings.gpuTimers);
+        if (!segmented) graph_.execute(*fb.commands, settings.gpuTimers);
         // Export: os planos NV12 vão para os buffers de leitura no mesmo frame.
         if (offscreen && offscreen->yReadback.valid() && offscreen->uvReadback.valid()
             && offscreen->yPlane.valid() && offscreen->uvPlane.valid()) {
@@ -6199,23 +6433,37 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     } else {
         AUREA_LOG_ERROR("FrameGraph nao compilou: %s", result.message().data());
     }
+    capturePhases.mark("graph-execute");
+    completion.frame = fb;
+    const Status finished = finish_render(snap, settings, offscreen, result, frameOpen, completion, stats, timings);
+    capturePhases.mark("submit");
+    return finished;
+}
+
+Status Renderer::finish_render(FrameSnapshot& snap, const RenderSettings& settings,
+    const OffscreenTarget* offscreen, Status result, bool frameOpen, RenderCompletion& completion,
+    FrameStats& stats, RenderTimings& timings) noexcept {
     graph_.release(pool_);
     pool_.end_frame();
 
     const u64 tRecorded = monotonic_ns();
-    const Status endStatus = backend_->end_frame();
+    const bool discardPresentation = !result.ok() && !completion.offscreen
+        && completion.frame.backbuffer.valid() && backend_->can_discard_frame();
+    const Status endStatus = frameOpen ? (discardPresentation ? backend_->discard_frame() : backend_->end_frame()) : OkStatus;
+    if (frameOpen && endStatus.ok() && completion.offscreen && settings.offscreenFenceSubmitted)
+        settings.offscreenFenceSubmitted(settings.offscreenFenceContext, completion.frame.frameNumber);
     if (result.code() == Errc::OutOfDeviceMemory && endStatus.ok())
         failedGraphFrame_ = backend_->last_submitted_frame();
-    if (!endStatus.ok()) for (auto& target : staged.targets)
-        if (target.texture.valid()) target.pendingFrame = fb.frameNumber;
+    if (!endStatus.ok()) for (auto& target : completion.targets)
+        if (target.texture.valid()) target.pendingFrame = completion.frame.frameNumber;
     incomplete_ = incomplete_ || scene3d_.incomplete()
-        || EffectGraph::bypassed_total() != effectsBypassedBefore;
-    if (cached) cached->complete = result.ok() && endStatus.ok() && !incomplete_
+        || EffectGraph::bypassed_total() != completion.effectsBefore;
+    if (completion.cached) completion.cached->complete = result.ok() && endStatus.ok() && !incomplete_
         && !snap.missingVideoFrames && !snap.staleVideoFrames
-        && EffectGraph::bypassed_total() == effectsBypassedBefore
+        && EffectGraph::bypassed_total() == completion.effectsBefore
         && !scene3d_.incomplete()
         && (snap.scenes.empty() || !environment_pending());
-    if (cached) publish_preview_buffer_ranges();
+    if (completion.cached) publish_preview_buffer_ranges();
     if (!uploads_.empty()) {
         // Intermediate image/flow caches built from an unavailable upload are
         // not reusable after that upload succeeds. Destruction is GPU-deferred.
@@ -6237,27 +6485,27 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     framesInFlight_.clear();
     snap.release_video_frames();
 
-    collect_resources(fb.frameNumber);
+    collect_resources(completion.buildFrame);
 
     timings.videoUploadMs = videoUploadMs_;
-    timings.cpuRecordMs = static_cast<f32>(static_cast<f64>(tRecorded - tBegin) * 1e-6) + timings.sceneExposureRecordMs;
+    timings.cpuRecordMs = static_cast<f32>(static_cast<f64>(tRecorded - completion.began) * 1e-6) + timings.sceneExposureRecordMs;
     timings.presentMs = static_cast<f32>(static_cast<f64>(tEnd - tRecorded) * 1e-6);
     read_timings(timings);
 
-    heavyStats_.lastSceneDrawCalls += stagedStats.lastSceneDrawCalls;
-    heavyStats_.lastSceneShadowDrawCalls += stagedStats.lastSceneShadowDrawCalls;
-    heavyStats_.lastSceneInstancedDraws += stagedStats.lastSceneInstancedDraws;
-    heavyStats_.lastSceneVisible += stagedStats.lastSceneVisible;
-    heavyStats_.lastSceneCulled += stagedStats.lastSceneCulled;
-    heavyStats_.lastSceneTriangles += stagedStats.lastSceneTriangles;
-    heavyStats_.lastShadowMapSize = std::max(heavyStats_.lastShadowMapSize, stagedStats.lastShadowMapSize);
+    heavyStats_.lastSceneDrawCalls += completion.stagedStats.lastSceneDrawCalls;
+    heavyStats_.lastSceneShadowDrawCalls += completion.stagedStats.lastSceneShadowDrawCalls;
+    heavyStats_.lastSceneInstancedDraws += completion.stagedStats.lastSceneInstancedDraws;
+    heavyStats_.lastSceneVisible += completion.stagedStats.lastSceneVisible;
+    heavyStats_.lastSceneCulled += completion.stagedStats.lastSceneCulled;
+    heavyStats_.lastSceneTriangles += completion.stagedStats.lastSceneTriangles;
+    heavyStats_.lastShadowMapSize = std::max(heavyStats_.lastShadowMapSize, completion.stagedStats.lastShadowMapSize);
 
-    stats.passesExecuted = graph_.stats().passesExecuted + exposureStats.passesExecuted;
-    stats.passesCulled = graph_.stats().passesCulled + exposureStats.passesCulled;
-    stats.drawCalls = static_cast<u32>(draws_.size()) + graph_.stats().passesExecuted + exposureStats.drawCalls;
+    stats.passesExecuted = graph_.stats().passesExecuted + completion.exposureStats.passesExecuted;
+    stats.passesCulled = graph_.stats().passesCulled + completion.exposureStats.passesCulled;
+    stats.drawCalls = static_cast<u32>(draws_.size()) + graph_.stats().passesExecuted + completion.exposureStats.drawCalls;
     stats.layersRendered = static_cast<u32>(draws_.size());
-    stats.previewWidth = cw;
-    stats.previewHeight = ch;
+    stats.previewWidth = completion.width;
+    stats.previewHeight = completion.height;
     stats.gpuMs = timings.gpuMeasured ? timings.gpuTotalMs : 0.0f;
     stats.gpuMemoryBytes = backend_->memory_stats().usedBytes;
     ++framesRendered_;
@@ -6267,6 +6515,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
 }
 
 void Renderer::set_effect_preview_source(std::vector<u8> rgba, u32 width, u32 height) noexcept {
+    if (previewGraph_.active) return;
     if (width == 0 || height == 0) {   // sem foto: volta para a cartela de teste
         if (previewSrcTex_.valid()) backend_->destroy_texture(previewSrcTex_);
         previewSrcTex_ = TextureHandle{};
@@ -6289,6 +6538,7 @@ void Renderer::set_effect_preview_source(std::vector<u8> rgba, u32 width, u32 he
 Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
                                        u32 width, u32 height, std::vector<u8>& outRgba, bool comparison) noexcept {
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
+    if (previewGraph_.active) return Status{Errc::Busy, "preview graph continuation active"};
     if (const Status ready = reclaim_failed_transients(); !ready.ok()) return ready;
     if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
     const Effect* effect = effects.find(type);
@@ -6678,6 +6928,7 @@ void Renderer::destroy_image_linear(ImageTexture& img) noexcept {
 }
 
 u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
+    if (stage >= 4) cancel_preview_graph();
     if (stage >= 4) { staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {}; }
     if (!backend_ || stage < 4) return 0;
     u32 n = static_cast<u32>(previewFrames_.size());
@@ -6755,6 +7006,12 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
 }
 
 void Renderer::read_timings(RenderTimings& t) noexcept {
+    if (t.gpuProfileFragmented) {
+        lastGpuPasses_ = 0;
+        t.gpuMeasured = false;
+        t.gpuTotalMs = t.gpuColorConvMs = t.gpuEffectsMs = t.gpuBlurMs = t.gpuGlowMs = t.gpuCompositeMs = t.gpuOutputMs = 0.0f;
+        return;
+    }
     f32 total = 0.0f;
     const u32 n = backend_->read_gpu_timings(timingScratch_.data(),
                                              static_cast<u32>(timingScratch_.size()), &total);

@@ -27,8 +27,7 @@ void TransientTexturePool::begin_frame(GPUBackend& backend, u64 frameNumber) noe
 TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     for (Entry& e : entries_) {
         if (e.inUse || !e.desc.compatible(desc)) continue;
-        // Reusar uma textura ja alocada nao cria backing: recusar aqui so
-        // derrubava o quadro da previa sem liberar nada.
+        if (!tracked_admission(desc, 0, stats_.bytes, true, "reuse")) return TextureHandle{};
         e.inUse = true;
         e.lastUsedFrame = frame_;
         ++stats_.inUse;
@@ -59,7 +58,7 @@ TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     // the logical texture estimate. Recheck actual residency before publishing
     // the handle. It has never been recorded, but retirement still follows the
     // backend's fence-safe contract; no early credit is granted for that memory.
-    if (!tracked_admission(desc, 0, stats_.bytes + incoming)) {
+    if (!tracked_admission(desc, 0, stats_.bytes + incoming, false, "post-create")) {
         backend_->retire_texture(*created, 0);
         return TextureHandle{};
     }
@@ -78,18 +77,20 @@ TextureHandle TransientTexturePool::acquire(const TextureDesc& desc) noexcept {
     return e.texture;
 }
 
-bool TransientTexturePool::tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes, bool reuse) const noexcept {
+bool TransientTexturePool::tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes,
+    bool reuse, const char* phase) const noexcept {
     const u64 budget = trackedResourceBudget_.load(std::memory_order_relaxed);
     if (!budget || !backend_) return true;
     const u64 known = knownResourceUse_ ? knownResourceUse_(knownResourceContext_) : 0;
     const auto gpu = backend_->memory_stats();
     if (reuse && fits_existing_tracked_resource_budget(budget, poolBytes, gpu.usedBytes, known)) return true;
     if (fits_tracked_resource_budget(budget, poolBytes, gpu.usedBytes, gpu.reservedBytes, known, incomingBytes)) return true;
-    AUREA_LOG_WARN("pool: orcamento de recursos rastreados antes de criar %ux%u (%s): pool=%llu gpu=%llu reservado=%llu caches=%llu pedido=%llu limite=%llu",
-        desc.width, desc.height, desc.debugName ? desc.debugName : "?",
+    AUREA_LOG_WARN("pool: orcamento de recursos rastreados fase=%s %ux%u (%s): pool=%llu gpu=%llu reservado=%llu caches=%llu pedido=%llu limite=%llu",
+        phase, desc.width, desc.height, desc.debugName ? desc.debugName : "?",
         static_cast<unsigned long long>(poolBytes), static_cast<unsigned long long>(gpu.usedBytes),
         static_cast<unsigned long long>(gpu.reservedBytes), static_cast<unsigned long long>(known),
         static_cast<unsigned long long>(incomingBytes), static_cast<unsigned long long>(budget));
+    backend_->log_memory_breakdown();
     return false;
 }
 
@@ -226,6 +227,8 @@ void FrameGraph::reset() noexcept {
     finalBarriers_.clear();
     stats_ = Stats{};
     compiled_ = false;
+    segmentPlan_ = false;
+    segmentFirst_ = segmentEnd_ = 0;
 }
 
 FGTexture FrameGraph::create_texture(const char* name, const TextureDesc& desc) noexcept {
@@ -354,9 +357,16 @@ void FrameGraph::set_output(FGTexture t, ResourceState finalState) noexcept {
 // =============================================================================
 namespace {
 [[nodiscard]] constexpr bool is_write(u8 a) noexcept { return a != 0 && a != 3; }   // Read=0, CopySrc=3
+[[nodiscard]] constexpr u64 add_resource_bytes(u64 a, u64 b) noexcept {
+    return b > ~u64{0} - a ? ~u64{0} : a + b;
+}
 }
 
-Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
+Status FrameGraph::prepare_plan(bool memoryAware) noexcept {
+    if (!slots_.empty()) return Status{Errc::InvalidState, "physical graph assignments still held"};
+    compiled_ = false;
+    segmentPlan_ = false;
+    segmentFirst_ = segmentEnd_ = 0;
     stats_ = Stats{};
     stats_.passesDeclared = static_cast<u32>(passes_.size());
 
@@ -381,6 +391,10 @@ Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
         return Status{Errc::InvalidState, "ciclo no FrameGraph"};
     }
     cull();
+    // Only OOM recovery changes scheduling. Ordinary frames retain the stable
+    // declaration/dependency order and their existing physical alias plan.
+    if (memoryAware && !order_segments_by_memory())
+        return Status{Errc::InvalidState, "ciclo no plano de memoria do FrameGraph"};
 
     // Vidas: posição do primeiro e do último uso na ordem de execução.
     for (Resource& r : resources_) {
@@ -422,17 +436,56 @@ Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
         }
     }
 
-    if (const Status s = assign_physical(pool); !s.ok()) return s;
-    plan_barriers();
-
+    plan_lifetime_events();
     stats_.passesExecuted = static_cast<u32>(order_.size());
     stats_.passesCulled = stats_.passesDeclared - stats_.passesExecuted;
-    stats_.physicalTextures = static_cast<u32>(slots_.size());
-    for (const Slot& s : slots_) stats_.transientBytes += s.desc.estimated_bytes();
+    return OkStatus;
+}
+
+Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
+    if (const Status s = prepare_plan(); !s.ok()) return s;
+    segmentEnd_ = static_cast<u32>(order_.size());
+    if (const Status s = assign_physical(pool, 0, segmentEnd_); !s.ok()) return s;
+    plan_barriers(0, segmentEnd_);
     stats_.barriers = static_cast<u32>(barriers_.size() + finalBarriers_.size());
 
     compiled_ = true;
     return OkStatus;
+}
+
+Status FrameGraph::prepare_segments() noexcept {
+    if (const Status s = prepare_plan(true); !s.ok()) return s;
+    segmentPlan_ = true;
+    AUREA_LOG_INFO("FrameGraph recovery: passes=%u reordered=%u logical-live-peak=%llu baseline-peak=%llu greedy-peak=%llu (driver residency checked separately)",
+        static_cast<u32>(order_.size()), stats_.segmentReorderedPasses,
+        static_cast<unsigned long long>(stats_.segmentEstimatedPeakBytes),
+        static_cast<unsigned long long>(stats_.segmentBaselinePeakBytes),
+        static_cast<unsigned long long>(stats_.segmentGreedyPeakBytes));
+    return OkStatus;
+}
+
+Status FrameGraph::compile_segment(TransientTexturePool& pool, u32 first, u32 count) noexcept {
+    if (!segmentPlan_ || compiled_ || !count || first != segmentEnd_ || first >= order_.size())
+        return Status{Errc::InvalidState, "nonconsecutive graph segment"};
+    segmentFirst_ = first;
+    segmentEnd_ = first + std::min<u32>(count, static_cast<u32>(order_.size()) - first);
+    if (const Status s = assign_physical(pool, first, segmentEnd_); !s.ok()) return s;
+    // Imported video images may have returned to the decoder's foreign queue
+    // at the preceding submission. Emit the first access transition again;
+    // backend state keeps the actual layout of preserved ordinary textures.
+    plan_barriers(first, segmentEnd_);
+    stats_.barriers += static_cast<u32>(barriers_.size() + finalBarriers_.size());
+    compiled_ = true;
+    return OkStatus;
+}
+
+void FrameGraph::release_completed_segment(TransientTexturePool& pool) noexcept {
+    if (!segmentPlan_ || !compiled_) return;
+    for (Slot& slot : slots_) if (slot.free && slot.texture.valid()) {
+        pool.release(slot.texture);
+        slot.texture = {};
+    }
+    compiled_ = false;
 }
 
 bool FrameGraph::sort_passes() noexcept {
@@ -548,6 +601,247 @@ bool FrameGraph::sort_passes() noexcept {
     return order_.size() == n;
 }
 
+u64 FrameGraph::estimate_order_peak() noexcept {
+    // The same distinct-resource first/last access model as the greedy plan.
+    // Imported attachments are charged by the backend, not counted twice here;
+    // marked transient outputs remain live through the end of the graph.
+    memorySeen_.assign(resources_.size(), kInvalidIndex);
+    memoryRemaining_.assign(resources_.size(), 0);
+    for (u32 pos = 0; pos < order_.size(); ++pos) {
+        const Pass& pass = passes_[order_[pos]];
+        for (u32 k = 0; k < pass.accessCount; ++k) {
+            const u32 r = sortedAccess_[pass.accessBegin + k].resource;
+            if (resources_[r].imported) continue;
+            if (memorySeen_[r] == kInvalidIndex) memorySeen_[r] = pos;
+            memoryRemaining_[r] = pos;
+        }
+    }
+    memoryBornBytes_.assign(order_.size(), 0);
+    memoryFreedBytes_.assign(order_.size(), 0);
+    for (u32 r = 0; r < resources_.size(); ++r) {
+        if (resources_[r].imported || memorySeen_[r] == kInvalidIndex) continue;
+        const u64 bytes = resources_[r].desc.estimated_bytes();
+        auto& born = memoryBornBytes_[memorySeen_[r]];
+        born = add_resource_bytes(born, bytes);
+        if (!resources_[r].isOutput) {
+            auto& freed = memoryFreedBytes_[memoryRemaining_[r]];
+            freed = add_resource_bytes(freed, bytes);
+        }
+    }
+    u64 live = 0, peak = 0;
+    for (u32 pos = 0; pos < order_.size(); ++pos) {
+        live = add_resource_bytes(live, memoryBornBytes_[pos]);
+        peak = std::max(peak, live);
+        live -= std::min(live, memoryFreedBytes_[pos]);
+    }
+    return peak;
+}
+
+bool FrameGraph::order_segments_by_memory() noexcept {
+    const u32 n = static_cast<u32>(passes_.size());
+    const u32 active = static_cast<u32>(order_.size());
+    if (!active) return true;
+    memoryBaselineOrder_.assign(order_.begin(), order_.end());
+    stats_.segmentBaselinePeakBytes = estimate_order_peak();
+
+    // Preserve observable callback order. The already valid ordinary order is
+    // used rather than declaration order: a producer can be declared later.
+    u32 previousEffect = kInvalidIndex;
+    for (const u32 p : order_) if (passes_[p].sideEffect) {
+        if (previousEffect != kInvalidIndex) { edges_.push_back(previousEffect); edges_.push_back(p); }
+        previousEffect = p;
+    }
+    // Two imported logical resources may name the SAME native attachment.
+    // Per-FG-index RAW/WAR/WAW edges do not describe that overlap. Keep every
+    // access of such an alias group in its original order, including Load and
+    // sampling, instead of speculatively moving writes across another alias.
+    for (u32 r = 0; r < resources_.size(); ++r) {
+        const Resource& imported = resources_[r];
+        if (!imported.imported) continue;
+        bool first = true, aliased = false;
+        for (u32 other = 0; other < resources_.size(); ++other) {
+            if (other == r || !resources_[other].imported || resources_[other].physical != imported.physical) continue;
+            if (other < r) first = false;
+            aliased = true;
+        }
+        if (!first || !aliased) continue;
+        u32 previous = kInvalidIndex;
+        for (const u32 p : order_) {
+            const Pass& pass = passes_[p];
+            bool touches = false;
+            for (u32 k = 0; k < pass.accessCount; ++k) {
+                const auto& resource = resources_[sortedAccess_[pass.accessBegin + k].resource];
+                if (resource.imported && resource.physical == imported.physical) { touches = true; break; }
+            }
+            if (!touches) continue;
+            if (previous != kInvalidIndex) { edges_.push_back(previous); edges_.push_back(p); }
+            previous = p;
+        }
+    }
+
+    // Rebuild the existing dependency CSR without culled passes. No texture
+    // dependency is removed; new constraints above follow a valid order.
+    edgeBegin_.assign(n + 1, 0);
+    indegree_.assign(n, 0);
+    for (usize e = 0; e + 1 < edges_.size(); e += 2)
+        if (!passes_[edges_[e]].culled && !passes_[edges_[e + 1]].culled) ++edgeBegin_[edges_[e] + 1];
+    for (u32 p = 0; p < n; ++p) edgeBegin_[p + 1] += edgeBegin_[p];
+    succ_.resize(edgeBegin_.back());
+    fill_.assign(edgeBegin_.begin(), edgeBegin_.end() - 1);
+    for (usize e = 0; e + 1 < edges_.size(); e += 2) {
+        const u32 pred = edges_[e], next = edges_[e + 1];
+        if (passes_[pred].culled || passes_[next].culled) continue;
+        succ_[fill_[pred]++] = next;
+        ++indegree_[next];
+    }
+
+    memoryRemaining_.assign(resources_.size(), 0);
+    memorySeen_.assign(resources_.size(), kInvalidIndex);
+    memoryResident_.assign(resources_.size(), 0);
+    for (const u32 p : order_) {
+        const Pass& pass = passes_[p];
+        for (u32 k = 0; k < pass.accessCount; ++k) {
+            const u32 r = sortedAccess_[pass.accessBegin + k].resource;
+            if (memorySeen_[r] == p) continue;
+            memorySeen_[r] = p;
+            ++memoryRemaining_[r];
+        }
+    }
+    // Save the original positions for diagnostics. All scratch vectors retain
+    // their capacity between frames; the quadratic ready selection is confined
+    // to exceptional, fence-separated OOM recovery, not the normal hot path.
+    passBucket_.assign(n, kInvalidIndex);
+    for (u32 pos = 0; pos < active; ++pos) passBucket_[order_[pos]] = pos;
+    queue_.clear();
+    for (const u32 p : order_) if (!indegree_[p]) queue_.push_back(p);
+    order_.clear();
+    u64 live = 0;
+    std::fill(memorySeen_.begin(), memorySeen_.end(), 0);
+    u32 seenTag = 0;
+    const auto nextTag = [&]() noexcept {
+        if (++seenTag == 0) { std::fill(memorySeen_.begin(), memorySeen_.end(), 0); ++seenTag; }
+        return seenTag;
+    };
+    while (!queue_.empty()) {
+        usize chosen = 0;
+        u64 bestAfter = ~u64{0}, bestPeak = ~u64{0}, chosenBorn = 0, chosenFreed = 0;
+        u32 bestPass = kInvalidIndex;
+        for (usize candidate = 0; candidate < queue_.size(); ++candidate) {
+            const u32 p = queue_[candidate];
+            const Pass& pass = passes_[p];
+            u64 born = 0, freed = 0;
+            // A pass can read and write the same attachment. Count it once.
+            const u32 tag = nextTag();
+            for (u32 k = 0; k < pass.accessCount; ++k) {
+                const u32 r = sortedAccess_[pass.accessBegin + k].resource;
+                if (memorySeen_[r] == tag || resources_[r].imported) continue;
+                memorySeen_[r] = tag;
+                const u64 bytes = resources_[r].desc.estimated_bytes();
+                if (!memoryResident_[r]) born = add_resource_bytes(born, bytes);
+                if (memoryRemaining_[r] == 1 && !resources_[r].isOutput) freed = add_resource_bytes(freed, bytes);
+            }
+            const u64 peak = add_resource_bytes(live, born);
+            const u64 after = peak - std::min(peak, freed);
+            if (after < bestAfter || (after == bestAfter && (peak < bestPeak || (peak == bestPeak && p < bestPass)))) {
+                chosen = candidate; bestPass = p; bestAfter = after; bestPeak = peak;
+                chosenBorn = born; chosenFreed = freed;
+            }
+        }
+        const u32 p = queue_[chosen];
+        queue_[chosen] = queue_.back(); queue_.pop_back();
+        if (passBucket_[p] != order_.size()) ++stats_.segmentReorderedPasses;
+        order_.push_back(p);
+        const u64 peak = add_resource_bytes(live, chosenBorn);
+        stats_.segmentEstimatedPeakBytes = std::max(stats_.segmentEstimatedPeakBytes, peak);
+        live = peak - std::min(peak, chosenFreed);
+        const u32 tag = nextTag();
+        const Pass& pass = passes_[p];
+        for (u32 k = 0; k < pass.accessCount; ++k) {
+            const u32 r = sortedAccess_[pass.accessBegin + k].resource;
+            if (memorySeen_[r] == tag || resources_[r].imported) continue;
+            memorySeen_[r] = tag;
+            memoryResident_[r] = 1;
+            if (--memoryRemaining_[r] == 0 && !resources_[r].isOutput) memoryResident_[r] = 0;
+        }
+        for (u32 e = edgeBegin_[p]; e < edgeBegin_[p + 1]; ++e)
+            if (--indegree_[succ_[e]] == 0) queue_.push_back(succ_[e]);
+    }
+    if (order_.size() != active) return false;
+    stats_.segmentGreedyPeakBytes = stats_.segmentEstimatedPeakBytes;
+    // A locally cheap producer can postpone a costly scene while retaining
+    // all later layers whose backdrop consumers depend on that scene. Never
+    // replace an already streamed valid order with a larger live set. On ties
+    // retain the ordinary order as well; neither plan alters dependency edges.
+    if (stats_.segmentBaselinePeakBytes <= stats_.segmentGreedyPeakBytes) {
+        order_.swap(memoryBaselineOrder_);
+        stats_.segmentEstimatedPeakBytes = stats_.segmentBaselinePeakBytes;
+        stats_.segmentReorderedPasses = 0;
+    }
+
+    // Nested compositions are declared before the main scene. Both stable
+    // order and locally cheap ready selection can retain every nested target
+    // while an expensive earlier backdrop is still being rendered. Build a
+    // third, demand-driven topological order: finish the previous backdrop's
+    // dependencies before creating the next independent layer. Keep ALL the
+    // version, side-effect and imported-alias edges assembled above.
+    const u64 bestPeak = stats_.segmentEstimatedPeakBytes;
+    memoryBaselineOrder_.assign(order_.begin(), order_.end());
+    edgeBegin_.assign(n + 1, 0);
+    for (usize e = 0; e + 1 < edges_.size(); e += 2)
+        if (!passes_[edges_[e]].culled && !passes_[edges_[e + 1]].culled) ++edgeBegin_[edges_[e + 1] + 1];
+    for (u32 p = 0; p < n; ++p) edgeBegin_[p + 1] += edgeBegin_[p];
+    succ_.resize(edgeBegin_.back());
+    fill_.assign(edgeBegin_.begin(), edgeBegin_.end() - 1);
+    for (usize e = 0; e + 1 < edges_.size(); e += 2) {
+        const u32 pred = edges_[e], next = edges_[e + 1];
+        if (!passes_[pred].culled && !passes_[next].culled) succ_[fill_[next]++] = pred;
+    }
+    for (u32 p = 0; p < n; ++p)
+        std::sort(succ_.begin() + edgeBegin_[p], succ_.begin() + edgeBegin_[p + 1],
+            [this](u32 a, u32 b) noexcept { return passBucket_[a] > passBucket_[b]; });
+    // Iterative postorder avoids recursion even for a long effect chain.
+    // Existing compiler scratch retains capacity; no per-pass allocation.
+    memoryRemaining_.assign(active, kInvalidIndex);
+    for (u32 p = 0; p < n; ++p) if (!passes_[p].culled) memoryRemaining_[passBucket_[p]] = p;
+    memorySeen_.assign(n, 0);
+    fill_.assign(edgeBegin_.begin(), edgeBegin_.end() - 1);
+    queue_.clear();
+    order_.clear();
+    for (u32 pos = active; pos > 0; --pos) {
+        const u32 root = memoryRemaining_[pos - 1];
+        if (memorySeen_[root] == 2) continue;
+        memorySeen_[root] = 1;
+        queue_.push_back(root);
+        while (!queue_.empty()) {
+            const u32 p = queue_.back();
+            if (fill_[p] != edgeBegin_[p + 1]) {
+                const u32 pred = succ_[fill_[p]++];
+                if (memorySeen_[pred] == 1) return false;
+                if (!memorySeen_[pred]) { memorySeen_[pred] = 1; queue_.push_back(pred); }
+            } else {
+                memorySeen_[p] = 2;
+                order_.push_back(p);
+                queue_.pop_back();
+            }
+        }
+    }
+    if (order_.size() != active) return false;
+    for (u32 pos = 0; pos < active; ++pos) fill_[order_[pos]] = pos;
+    for (usize e = 0; e + 1 < edges_.size(); e += 2)
+        if (!passes_[edges_[e]].culled && !passes_[edges_[e + 1]].culled
+            && fill_[edges_[e]] >= fill_[edges_[e + 1]]) return false;
+    const u64 demandPeak = estimate_order_peak();
+    if (demandPeak < bestPeak) {
+        stats_.segmentEstimatedPeakBytes = demandPeak;
+        stats_.segmentReorderedPasses = 0;
+        for (u32 pos = 0; pos < active; ++pos)
+            if (passBucket_[order_[pos]] != pos) ++stats_.segmentReorderedPasses;
+    } else {
+        order_.swap(memoryBaselineOrder_);
+    }
+    return true;
+}
+
 void FrameGraph::cull() noexcept {
     for (Resource& r : resources_) r.alive = false;
     for (u32 out : outputs_) resources_[out].alive = true;
@@ -571,8 +865,7 @@ void FrameGraph::cull() noexcept {
                  order_.end());
 }
 
-Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
-    slots_.clear();
+void FrameGraph::plan_lifetime_events() noexcept {
     const u32 steps = static_cast<u32>(order_.size());
     const u32 resourceCount = static_cast<u32>(resources_.size());
     // Quem nasce e quem morre em cada posição (CSR, na ordem dos índices —
@@ -603,7 +896,10 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
         dies_[fill_[r.lastUse]++] = i;
     }
 
-    for (u32 pos = 0; pos < steps; ++pos) {
+}
+
+Status FrameGraph::assign_physical(TransientTexturePool& pool, u32 first, u32 end) noexcept {
+    for (u32 pos = first; pos < end; ++pos) {
         // Nasce aqui: pega uma física livre compatível deste frame, senão o pool.
         for (u32 bi = bornBegin_[pos]; bi < bornBegin_[pos + 1]; ++bi) {
             Resource& r = resources_[born_[bi]];
@@ -611,7 +907,7 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
 
             u32 chosen = kInvalidIndex;
             for (u32 s = 0; s < slots_.size(); ++s) {
-                if (slots_[s].free && slots_[s].desc.compatible(r.desc)) { chosen = s; break; }
+                if (slots_[s].free && slots_[s].texture.valid() && slots_[s].desc.compatible(r.desc)) { chosen = s; break; }
             }
             if (chosen != kInvalidIndex) {
                 ++stats_.aliasedTextures;
@@ -626,6 +922,8 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
                 slot.desc = r.desc;
                 slots_.push_back(slot);
                 chosen = static_cast<u32>(slots_.size() - 1);
+                ++stats_.physicalTextures;
+                stats_.transientBytes += r.desc.estimated_bytes();
             }
             r.slot = chosen;
             r.physical = slots_[chosen].texture;
@@ -641,12 +939,12 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
     return OkStatus;
 }
 
-void FrameGraph::plan_barriers() noexcept {
+void FrameGraph::plan_barriers(u32 first, u32 end) noexcept {
     barriers_.clear();
     finalBarriers_.clear();
     tracked_.assign(resources_.size(), ResourceState::Undefined);
 
-    for (u32 pos = 0; pos < order_.size(); ++pos) {
+    for (u32 pos = first; pos < end; ++pos) {
         Pass& p = passes_[order_[pos]];
         p.barrierBegin = static_cast<u32>(barriers_.size());
         p.barrierCount = 0;
@@ -701,7 +999,7 @@ void FrameGraph::plan_barriers() noexcept {
         }
     }
 
-    for (u32 out : outputs_) {
+    if (end == order_.size()) for (u32 out : outputs_) {
         const Resource& r = resources_[out];
         if (r.firstUse == kInvalidIndex) continue;
         if (tracked_[out] == r.finalState) continue;
@@ -717,7 +1015,7 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
     if (!compiled_) return;
     PassContext ctx{cmds, *this};
 
-    for (u32 pos = 0; pos < order_.size(); ++pos) {
+    for (u32 pos = segmentFirst_; pos < segmentEnd_; ++pos) {
         Pass& p = passes_[order_[pos]];
 
         for (u32 b = 0; b < p.barrierCount; ++b) {
@@ -761,12 +1059,14 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
 }
 
 void FrameGraph::release(TransientTexturePool& pool) noexcept {
-    for (const Slot& s : slots_) pool.release(s.texture);
+    for (const Slot& s : slots_) if (s.texture.valid()) pool.release(s.texture);
     slots_.clear();
     for (Resource& r : resources_) {
         if (!r.imported) r.physical = TextureHandle{};
     }
     compiled_ = false;
+    segmentPlan_ = false;
+    segmentFirst_ = segmentEnd_ = 0;
 }
 
 // =============================================================================

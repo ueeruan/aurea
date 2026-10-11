@@ -138,7 +138,7 @@ public:
     ShaderLibrary(const ShaderLibrary&) = delete;
     ShaderLibrary& operator=(const ShaderLibrary&) = delete;
 
-    /// Cria os módulos de shader e os samplers comuns.
+    /// Cria os samplers e os módulos (GLES adia módulos até pipeline/prewarm).
     [[nodiscard]] Status initialize(GPUBackend& backend) noexcept;
     /// Destrói tudo (encerramento normal).
     void shutdown() noexcept;
@@ -168,6 +168,13 @@ public:
     [[nodiscard]] u32 pipeline_count() const noexcept { return static_cast<u32>(pipelines_.size()); }
     [[nodiscard]] bool has_pipeline(const PipelineKey& key) const noexcept { return pipelines_.contains(key); }
 
+    /// Optional test/diagnostic timing around the actual backend creation.
+    /// Null in normal rendering; no clock reads or log output without a probe.
+    using PipelineCreationProbe = void (*)(void*, const PipelineKey&, u64 elapsedNs, bool ok) noexcept;
+    void set_pipeline_creation_probe(PipelineCreationProbe probe, void* context) noexcept {
+        pipelineProbe_ = probe; pipelineProbeContext_ = context;
+    }
+
     /// Impressão digital (FNV-1a 64) de todo o SPIR-V embutido. É a versão do
     /// cache de pipeline em disco: shader mudou (app atualizado) → o arquivo
     /// antigo é descartado em vez de acumular entradas mortas. Calculada uma
@@ -183,7 +190,7 @@ public:
     // usado no Android de produção: lá os shaders são os embutidos.
     u32 reload_changed(const char* spvDirectory) noexcept;
 
-    /// Shaders que o backend recusou na inicialização (ex.: driver GLES que
+    /// Shaders que o backend recusou ao criar (ex.: driver GLES que
     /// não compila um shader novo). O resto do motor segue: só os passes que
     /// pedem esse shader ficam sem pipeline e são pulados.
     [[nodiscard]] u32 missing_shaders() const noexcept { return missingShaders_; }
@@ -193,10 +200,14 @@ public:
     void set_test_failing_shader(ShaderId id) noexcept { testFailing_ = id; }
 
 private:
+    [[nodiscard]] bool ensure_shader(ShaderId id) noexcept;
     GPUBackend* backend_ = nullptr;
+    bool deferredShaders_ = false;
     ShaderId testFailing_ = ShaderId::Count;
     u32 missingShaders_ = 0;
     ShaderHandle shaders_[kShaderCount]{};
+    u32 shaderRetryRequests_[kShaderCount]{};
+    bool rejectedShaders_[kShaderCount]{};
     SamplerHandle samplers_[static_cast<u32>(CommonSampler::Count)]{};
     std::unordered_map<PipelineKey, PipelineHandle, PipelineKeyHash> pipelines_;
     /// Pipelines que falharam → pedidos restantes até tentar de novo.
@@ -210,6 +221,8 @@ private:
     u32 failures_ = 0;
     u32 compilesSinceMark_ = 0;
     bool steady_ = false;
+    PipelineCreationProbe pipelineProbe_ = nullptr;
+    void* pipelineProbeContext_ = nullptr;
     std::string lastError_;
 };
 

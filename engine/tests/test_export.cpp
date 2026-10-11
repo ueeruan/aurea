@@ -81,6 +81,10 @@ struct BenchCapture {
     bool hasAudio = false;
     AudioStreamConfig audio{};
     bool opened = false, finished = false, aborted = false;
+    // Opt-in lifecycle measurements distinguish aborting an unfinished file
+    // from the startup proxy releasing a successfully published sink.
+    bool measureLifecycle = false;
+    u32 finishCalls = 0, abortBeforeFinish = 0, abortAfterFinish = 0;
     bool keepFrames = false;
     u32 encodeUs = 0;                    ///< latência extra simulada do encoder
     u32 openDelayUs = 0;
@@ -89,6 +93,7 @@ struct BenchCapture {
     std::atomic<bool>* openActive = nullptr;
     std::atomic<bool>* abortedDuringOpen = nullptr;
     bool persistFinishMarker = true, validateCapturedPlanes = true;
+    u32 validationCalls = 0;
     std::atomic<bool>* writeEntered = nullptr;
     std::atomic<bool>* allowWrite = nullptr;
     Status writeFailure{};              ///< fault injection at the platform boundary
@@ -227,6 +232,7 @@ public:
         return OkStatus;
     }
     Status finish() noexcept override {
+        if (c_->measureLifecycle) ++c_->finishCalls;
         if (c_->hangFinish) return hang();
         c_->finished = true;
         if (c_->finishFailure.ok() && c_->persistFinishMarker) {
@@ -246,6 +252,7 @@ public:
     // This host test validates uncompressed planes, not a native MP4. Native
     // codec/reader validation is exercised separately on Android and iOS.
     Status validate_output(const ExportOutputValidation& expected) noexcept override {
+        ++c_->validationCalls;
         if (c_->hangValidation) return hang(OkStatus);
         if (!c_->validateCapturedPlanes) return Errc::NotSupported;
         return c_->finished && c_->hashes.size() == expected.frames &&
@@ -253,6 +260,10 @@ public:
             c_->ptsMonotonic && c_->audioContiguous && c_->hasAudio == expected.audio ? OkStatus : Status{Errc::CorruptData};
     }
     void abort() noexcept override {
+        if (c_->measureLifecycle) {
+            if (c_->finished) ++c_->abortAfterFinish;
+            else ++c_->abortBeforeFinish;
+        }
         if (c_->hangAbort) { (void)hang(OkStatus); return; }
         if (c_->abortedDuringOpen && c_->openActive && c_->openActive->load(std::memory_order_acquire))
             c_->abortedDuringOpen->store(true, std::memory_order_release);
@@ -1010,7 +1021,7 @@ AUREA_TEST(OfflineExportGpu, SerialAndQueuedPlanesAudioMatchWithEffectsAnd3DMoti
         std::vector<std::vector<u8>> reference;
         std::vector<i64> referencePts;
         u64 referenceAudio = 0; i64 referenceSamples = 0;
-        for (u32 mode = 0; mode < 3; ++mode) {
+        for (u32 mode = 0; mode < 4; ++mode) {
             SyntheticConfig cfg; cfg.width = 320; cfg.height = 192;
             cfg.pattern = SyntheticPattern::MovingSquare; cfg.audioRate = 44100; cfg.audioSeconds = 1;
             Rig r(cfg, 30, 12, mode == 2 ? 3 : 1, nullptr, nullptr, 0, false, source.c_str(),
@@ -1032,18 +1043,36 @@ AUREA_TEST(OfflineExportGpu, SerialAndQueuedPlanesAudioMatchWithEffectsAnd3DMoti
             r.cap.keepFrames = true;
             r.cap.persistFinishMarker = true;
             r.cap.validateCapturedPlanes = true;
+            if (mode == 3) {
+                r.cap.beforeOpen = [&] {
+                    // The snapshot is captured before opening the native sink.
+                    // Changing the live editor here must not alter later pixels.
+                    r.comp()->motion_blur().enabled = false;
+                    r.comp()->layer(r.video_layer())->transform.opacity = .03f;
+                    return OkStatus;
+                };
+            }
             const auto result = run_export(r, 192, 30, false, 60);
             AUREA_CHECK(result.finished); AUREA_CHECK_EQ(result.p.result, Errc::Ok);
             AUREA_CHECK_EQ(r.cap.frames.size(), usize{12});
+            AUREA_CHECK_EQ(result.p.framesDone, 12u);
+            AUREA_CHECK_EQ(result.p.framesTotal, 12u);
             if (mode == 0) {
                 reference = r.cap.frames; referencePts = r.cap.pts;
                 referenceAudio = r.cap.audioHash; referenceSamples = r.cap.audioFrames;
             } else {
                 AUREA_CHECK_EQ((result.p.flags >> 8) & 15u, 6u);
+                AUREA_CHECK_EQ(r.cap.validationCalls, 1u);
+                AUREA_CHECK(r.cap.finished && r.cap.video.validateBeforePublish);
                 AUREA_CHECK(r.cap.frames == reference);
                 AUREA_CHECK(r.cap.pts == referencePts);
                 AUREA_CHECK_EQ(r.cap.audioHash, referenceAudio);
                 AUREA_CHECK_EQ(r.cap.audioFrames, referenceSamples);
+                if (mode == 3) {
+                    AUREA_CHECK_EQ(result.p.pipelineDepth, 1u);
+                    AUREA_CHECK(!r.comp()->motion_blur().enabled);
+                    AUREA_CHECK_EQ(r.comp()->layer(r.video_layer())->transform.opacity, .03f);
+                }
             }
         }
     }
@@ -2538,6 +2567,8 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "CutFrameGpu.inl"
 #include "ExportWatchdog.inl"
 #include "ExportSlowMedia.inl"
+#include "ExportSourceStartup.inl"
+#include "OriginalModelExport.inl"
 
 #endif // AUREA_TEST_VULKAN
 

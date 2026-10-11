@@ -11,8 +11,8 @@
 //  chamada, o que importa num backend que grava milhares de comandos por
 //  segundo.
 //
-//  Os ponteiros vivem em `aurea::vk` com os NOMES oficiais: o código do backend
-//  escreve `vkCmdDraw(...)` normalmente.
+//  Apenas os comandos globais pertencem ao loader do processo. Os comandos
+//  de instância/dispositivo vivem na tabela de cada backend proprietário.
 // =============================================================================
 #pragma once
 
@@ -169,20 +169,30 @@ namespace aurea::vk {
     X(vkSetDebugUtilsObjectNameEXT)             \
     X(vkCreateRenderPass2KHR)
 
+// Instance/device PFNs belong to exactly one Vulkan owner. A second
+// backend must not replace dispatch used by live command buffers or teardown.
+struct InstanceDispatch {
+#define AUREA_VK_MEMBER(name) PFN_##name name = nullptr;
+    AUREA_VK_INSTANCE_FUNCTIONS(AUREA_VK_MEMBER)
+    AUREA_VK_PLATFORM_INSTANCE_FUNCTIONS(AUREA_VK_MEMBER)
+#undef AUREA_VK_MEMBER
+};
+struct DeviceDispatch {
+#define AUREA_VK_MEMBER(name) PFN_##name name = nullptr;
+    AUREA_VK_DEVICE_FUNCTIONS(AUREA_VK_MEMBER)
+    AUREA_VK_PLATFORM_DEVICE_FUNCTIONS(AUREA_VK_MEMBER)
+#undef AUREA_VK_MEMBER
+};
+
 #define AUREA_VK_DECLARE(name) extern PFN_##name name;
 AUREA_VK_GLOBAL_FUNCTIONS(AUREA_VK_DECLARE)
-AUREA_VK_INSTANCE_FUNCTIONS(AUREA_VK_DECLARE)
-AUREA_VK_PLATFORM_INSTANCE_FUNCTIONS(AUREA_VK_DECLARE)
-AUREA_VK_DEVICE_FUNCTIONS(AUREA_VK_DECLARE)
-AUREA_VK_PLATFORM_DEVICE_FUNCTIONS(AUREA_VK_DECLARE)
 #undef AUREA_VK_DECLARE
 
 extern PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
 
 /// Abre a biblioteca do sistema. `false` = não há Vulkan neste aparelho/host.
 [[nodiscard]] bool load_library() noexcept;
-void load_instance(VkInstance instance) noexcept;
-void load_device(VkDevice device) noexcept;
-void unload_library() noexcept;
+void load_instance(VkInstance instance, InstanceDispatch& functions) noexcept;
+void load_device(const InstanceDispatch& instanceFunctions, VkDevice device, DeviceDispatch& functions) noexcept;
 
 } // namespace aurea::vk

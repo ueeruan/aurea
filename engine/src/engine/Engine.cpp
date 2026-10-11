@@ -1,4 +1,5 @@
 #include "aurea/Engine.hpp"
+#include "aurea/tracking/RealCameraPreviewScope.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/PreviewViewport.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
@@ -36,16 +37,19 @@
 #include "aurea/export/OfflineAudioSnapshot.hpp"
 #include "aurea/export/OfflineAudioBlockSource.hpp"
 #include "aurea/export/UpscaleColor.hpp"
+#include "aurea/effects/MeshWarp.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <unordered_set>
 
 namespace aurea {
 
@@ -115,12 +119,14 @@ bool is_remap_time_alias(const Layer& l, const TrackRef& ref) noexcept {
 }
 
 const Track* read_command_track(const Layer& l, const TrackRef& ref) noexcept {
+    if (ref.property == TrackProperty::MeshWarp) return nullptr;
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) return &l.timeRemap;
     if (ref.property == TrackProperty::Speed) return l.tracks.find(ref.property);
     return l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
 }
 
 Track* command_track(Layer& l, const TrackRef& ref, bool create) noexcept {
+    if (ref.property == TrackProperty::MeshWarp) return nullptr;
     if (ref.property == TrackProperty::MaskParam && (ref.effectParamIndex > 2 ||
         std::none_of(l.masks.begin(), l.masks.end(), [&](const Mask& m) { return m.id == ref.effectIndex; }))) return nullptr;
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) {
@@ -239,6 +245,8 @@ struct Engine::ExportContext {
     std::unordered_map<u64, std::shared_ptr<const CubeLut>> frozenLuts;
     u64 frozenAssetBudget = 0;
     Status frozenAssetStatus = OkStatus;
+    bool promotedOriginalModels = false;
+    u64 originalModelBytes = 0; // export-owned CPU sources, retained until actual cleanup
 
     // Plano da sessão, fixado no start (a timeline não muda durante o export:
     // o preview e os comandos da UI ficam congelados).
@@ -468,6 +476,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     if (state_ != EngineState::Uninitialized) {
         return Status{Errc::InvalidState, "motor ja inicializado"};
     }
+    offscreenCancelled_.store(false, std::memory_order_release);
     config_ = config;
     renderer_.set_foreground_model_directory(config.documentsDirectory + "/ai/rotobrush");
     startup_ = StartupTimings{};
@@ -620,6 +629,119 @@ void fit_model_textures_to_room(scene3d::ImportOptions& o, const std::string& pa
     o.maxTextureSize = side;
 }
 
+bool model_texture_references_complete(const scene3d::SceneAsset& scene) noexcept {
+    // A failed legacy spec/gloss map can be removed by material conversion,
+    // so it may no longer have a TextureRef and is not included in skipped.
+    for (const auto& warning : scene.warnings)
+        if (warning.rfind("textura ignorada:", 0) == 0) return false;
+    for (const auto& material : scene.materials) {
+        for (const auto& extension : material.ignoredExtensions)
+            if (extension.find("textura ignorada") != std::string::npos) return false;
+        for (const auto* ref : {&material.baseColorTex, &material.metallicRoughnessTex, &material.normalTex,
+                                &material.occlusionTex, &material.emissiveTex}) {
+            if (!ref->valid()) continue;
+            if (static_cast<usize>(ref->image) >= scene.images.size()) return false;
+            const auto& image = scene.images[static_cast<usize>(ref->image)];
+            const u64 bytes = static_cast<u64>(image.width) * image.height * 4;
+            if (!bytes || image.pixels().size() < bytes) return false;
+        }
+    }
+    return true;
+}
+
+// Source glTF bytes remain the durable recipe. Preview may keep smaller maps,
+// but final export must not freeze those maps under the authored Original label.
+// Only degraded Original assets need a new CPU scene; intact scenes remain shared.
+Status prepare_original_export_models(Project& project, CompositionId root,
+        std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>>& models,
+        u64& room, const scene3d::DeviceMemoryHint& memory, u32 gpuTextureLimit,
+        std::atomic<bool>& cancel, std::atomic<u64>& extraBytes, bool& promoted) noexcept {
+    try {
+        std::vector<CompositionId> pending{root};
+        std::unordered_set<u64> compositions, assets;
+        while (!pending.empty()) {
+            const CompositionId id = pending.back(); pending.pop_back();
+            if (!compositions.insert(id.pack()).second) continue;
+            const auto* composition = project.timeline().composition(id);
+            if (!composition) continue;
+            // Hidden model layers can feed mesh particles. Collect all model
+            // sources within reachable compositions, never unrelated projects.
+            composition->layers().for_each([&](LayerId, const Layer& layer) {
+                if (layer.kind == LayerKind::Model3D && layer.model.scene.valid())
+                    assets.insert(layer.model.scene.pack());
+                if (layer.kind == LayerKind::Composition && layer.nested.composition.valid())
+                    pending.push_back(layer.nested.composition);
+            });
+        }
+        // Stable admission order makes multiple-model failures reproducible.
+        std::vector<u64> ordered(assets.begin(), assets.end());
+        std::sort(ordered.begin(), ordered.end());
+        for (u64 key : ordered) {
+            if (cancel.load(std::memory_order_acquire)) return Errc::Cancelled;
+            const Asset* source = project.asset(AssetId::unpack(key));
+            if (!source || source->model.importQuality != static_cast<u8>(scene3d::ModelQuality::Original)) continue;
+            const auto prior = models.find(key);
+            if (prior != models.end() && prior->second) {
+                const auto& scene = *prior->second;
+                if (!scene.stats.texturesReduced && !scene.stats.texturesSkipped && scene.missingTextures.empty()
+                    && scene.stats.sourceTriangles == scene.stats.triangles && model_texture_references_complete(scene)) continue;
+            }
+            const auto dot = source->sourcePath.find_last_of('.');
+            std::string extension = dot == std::string::npos ? std::string{} : source->sourcePath.substr(dot);
+            for (char& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            if (extension != ".glb" && extension != ".gltf")
+                return Status{Errc::NotSupported,
+                    "nao foi possivel restaurar a fonte Original deste formato 3D; exportacao interrompida"};
+            if (room < 4096) return Status{Errc::BudgetExceeded,
+                "memoria insuficiente para preparar as texturas Original da exportacao"};
+            scene3d::ImportOptions options;
+            options.maxTriangles = 0;
+            options.simplifyError = 0;
+            // Cost inspection cannot know dimensions of every data URI/KTX2.
+            // Strict import admits actual images within the GPU/source memory
+            // limits, never a guessed 2048 side masquerading as Original.
+            options.maxTextureSize = gpuTextureLimit;
+            options.memoryBudget = std::min(room, scene3d::model_memory_budget(memory));
+            options.requireAllTextures = true;
+            scene3d::ImportProgress progress;
+            progress.externalCancel = &cancel;
+            auto result = scene3d::import_gltf_file(source->sourcePath, options, &progress);
+            if (cancel.load(std::memory_order_acquire)) return Errc::Cancelled;
+            if (!result.ok()) {
+                AUREA_LOG_WARN("export Original: modelo %s recusado: %s", source->name.c_str(), result.detail.c_str());
+                if (result.error == scene3d::ImportError::Cancelled) return Errc::Cancelled;
+                if (result.error == scene3d::ImportError::TooHeavy || result.error == scene3d::ImportError::OutOfMemory)
+                    return Status{Errc::BudgetExceeded, "memoria insuficiente para exportar o modelo com texturas Original"};
+                if (result.error == scene3d::ImportError::UnsupportedFeature || result.error == scene3d::ImportError::UnsupportedCompression)
+                    return Status{Errc::NotSupported, "uma textura Original usa um formato que este motor nao suporta"};
+                return Status{Errc::AssetCorrupted, "fonte ou textura do modelo Original ausente ou invalida"};
+            }
+            const auto& full = *result.asset;
+            if (full.stats.texturesReduced)
+                return Status{Errc::NotSupported, "a GPU nao suporta a dimensao de uma textura Original deste modelo"};
+            if (full.stats.texturesSkipped || !full.missingTextures.empty() || !model_texture_references_complete(full))
+                return Status{Errc::AssetCorrupted, "modelo Original nao tem todas as texturas necessarias para exportar"};
+            if (full.stats.sourceTriangles != full.stats.triangles
+                || (source->model.sourceTriangles && source->model.sourceTriangles != full.stats.sourceTriangles))
+                return Status{Errc::AssetCorrupted, "a geometria Original do modelo difere da fonte do projeto"};
+            const u64 bytes = scene3d::scene_asset_memory_bytes(full);
+            if (bytes > room) return Status{Errc::BudgetExceeded,
+                "memoria insuficiente para manter o modelo Original durante a exportacao"};
+            // The preview model still belongs to models_ and is counted by the
+            // source room. This new immutable export scene consumes additional,
+            // measured CPU space; it never replaces the saved/editor asset.
+            room -= bytes;
+            models[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(result.asset));
+            extraBytes.fetch_add(bytes, std::memory_order_relaxed);
+            promoted = true;
+            AUREA_LOG_INFO("export Original: %s preparado (%llu bytes CPU, %u triangulos, nenhuma textura reduzida)",
+                source->name.c_str(), static_cast<unsigned long long>(bytes), full.stats.triangles);
+        }
+        return OkStatus;
+    } catch (const std::bad_alloc&) { return Errc::OutOfMemory; }
+      catch (...) { return Errc::AssetCorrupted; }
+}
+
 } // namespace
 
 scene3d::ImportOptions Engine::model_import_options(const std::string& path, scene3d::ModelQuality quality,
@@ -670,8 +792,9 @@ void Engine::apply_memory_budgets() noexcept {
             // Cache backing is counted once here, while pool/render allocations
             // are already included in the backend. Native shared decoder backing
             // may be counted conservatively; this is not a process RSS/PSS cap.
-            return static_cast<MemoryManager*>(context)->total_used();
-        }, &memory_);
+            auto& engine = *static_cast<Engine*>(context);
+            return engine.memory_.total_used() + engine.exportOriginalModelBytes_.load(std::memory_order_relaxed);
+        }, this);
     // Prévia em memória pela faixa de RAM do aparelho (32/64/320/512 MiB),
     // limitada pelo orçamento do processo e pela pressão de memória atual.
     // Classe de memória LOW (até ~4 GB): no máximo 32 MiB, sombra do preview
@@ -699,6 +822,7 @@ void Engine::shutdown() noexcept {
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     if (state_ == EngineState::Uninitialized || state_ == EngineState::ShuttingDown) return;
     state_ = EngineState::ShuttingDown;
+    offscreenCancelled_.store(true, std::memory_order_release);
     captionCancelled.store(true);
 
     if (exportCtx_ && exportCtx_->thread.joinable()) {
@@ -709,6 +833,10 @@ void Engine::shutdown() noexcept {
     join_motion_track();
     text::FontManager::instance().set_path_resolver(nullptr);
     stop_render_thread();
+    // Capture polls may deliberately release renderMutex_. Join their full
+    // request lifetime before destroying decoders, the backend, or this Engine.
+    // The cancellation flag also interrupts a segmented GPU-fence wait.
+    std::lock_guard<std::mutex> captureOwnership(offscreenRequestMutex_);
     media_.proxies().stop();
     thumbs_.stop();
     thumbs_.clear();
@@ -723,6 +851,7 @@ void Engine::shutdown() noexcept {
         // Decoder/GL teardown must follow that frame and its retained leases.
         // A void shutdown still depends on the driver completing teardown.
         // Never leak the backend or free resources still owned by its queue.
+        cancel_preview_graph_locked();
         if (!poll_export_gpu_locked().ok())
             AUREA_LOG_WARN("shutdown: GPU do export ainda pendente; aguardando teardown seguro");
         if (gpu_) gpu_->wait_idle();
@@ -779,10 +908,12 @@ Status Engine::suspend() noexcept {
     // continue submitting while iOS/Android had already suspended the app.
     // Join without model/render locks: the worker needs both to unwind.
     state_ = EngineState::Suspended;
+    offscreenCancelled_.store(true, std::memory_order_release);
     if (exportCtx_ && exportCtx_->thread.joinable()) {
         (void)cancel_export();
         exportCtx_->thread.join();
     }
+    std::lock_guard<std::mutex> captureOwnership(offscreenRequestMutex_);
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         previewBuffering_ = false;
@@ -795,8 +926,10 @@ Status Engine::suspend() noexcept {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) {
             state_ = s; // Native resources were not suspended; allow retry.
+            offscreenCancelled_.store(false, std::memory_order_release);
             return ready;
         }
+        cancel_preview_graph_locked();
         if (gpu_) {
             gpu_->wait_idle();
             gpu_->save_pipeline_cache();
@@ -844,6 +977,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     if (previewRelease && st < static_cast<u8>(TrimStage::OldRenderCache)) {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
+            cancel_preview_graph_locked();
             const GpuMemoryStats before = gpu_->memory_stats();
             const u32 frames = renderer_.release_preview_cache();
             if (frames) gpu_->wait_idle();
@@ -870,6 +1004,7 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     if (st >= static_cast<u8>(TrimStage::OldRenderCache)) {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
+            cancel_preview_graph_locked();
             gpu_->wait_idle();   // fora do caminho quente: é um aviso do sistema
             const GpuMemoryStats beforeStats = gpu_->memory_stats();
             const u64 before = beforeStats.usedBytes;
@@ -914,6 +1049,7 @@ Status Engine::resume() noexcept {
     if (state_ != EngineState::Suspended) return Status{Errc::InvalidState, "motor nao esta suspenso"};
     media_.resume_all();
     media_.proxies().set_pause_reason(PreviewProxyService::Background, false);
+    offscreenCancelled_.store(false, std::memory_order_release);
     state_ = EngineState::Ready;
     invalidate();
     return OkStatus;
@@ -926,6 +1062,7 @@ void Engine::invalidate() noexcept {
 
 Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
+    cancel_preview_graph_locked();
     if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     pendingSurfaceSize_.store(0, std::memory_order_release);
@@ -946,6 +1083,7 @@ Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcep
 
 void Engine::detach_surface() noexcept {
     std::lock_guard<std::mutex> rl(renderMutex_);
+    cancel_preview_graph_locked();
     surfaceAttached_ = false;
     pendingSurfaceSize_.store(0, std::memory_order_release);
     // A void native surface teardown cannot report pending ownership.
@@ -983,6 +1121,9 @@ void Engine::stop_render_thread() noexcept {
 }
 
 void Engine::request_render() noexcept {
+    // An edit/resize must not wait behind a retry of the previous picture.
+    // Internal retries use wake_render instead, preserving their deadline.
+    previewRetryDueNs_.store(0, std::memory_order_release);
     forceRender_.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lock(wakeMutex_);
@@ -1023,18 +1164,29 @@ void Engine::render_thread_main() noexcept {
     while (renderRunning_) {
         {
             std::unique_lock<std::mutex> lock(wakeMutex_);
-            if (exportActive_.load(std::memory_order_acquire)) {
-                // The exporter owns the GPU. A stale refinement deadline or
+            if (exportActive_.load(std::memory_order_acquire)
+                || offscreenReaders_.load(std::memory_order_acquire)) {
+                // Export/capture owns the GPU. A stale refinement deadline or
                 // playback hint must not repeatedly enter render_frame's early
                 // return. UI/vsync/decode wakes cannot make preview work useful
-                // until export finishes; both completion paths request_render.
+                // until ownership ends; both completion paths wake rendering.
                 wakeCv_.wait(lock, [this] {
-                    return !renderRunning_ || !exportActive_.load(std::memory_order_acquire);
+                    return !renderRunning_ || (!exportActive_.load(std::memory_order_acquire)
+                        && !offscreenReaders_.load(std::memory_order_acquire));
                 });
             } else if (!surfaceAttached_ || state_ == EngineState::Suspended) {
                 // A pending play/buffer request must not spin when Android/iOS
                 // destroys its surface. Reattach/resume explicitly wakes us.
                 wakeCv_.wait(lock, [this] { return !renderRunning_ || wakeFlag_; });
+            } else if (const u64 retryDue = previewRetryDueNs_.load(std::memory_order_acquire); retryDue) {
+                // A failed acquire/recording may never reach FIFO/vsync. Pace
+                // retries explicitly, including paused previews. Decoder/UI
+                // wakes still enter render_frame, where new content bypasses
+                // this wait rather than redrawing the same failure in a loop.
+                const u64 now = monotonic_ns();
+                wakeCv_.wait_for(lock, std::chrono::nanoseconds(retryDue > now ? retryDue - now : 0), [this] {
+                    return !renderRunning_ || wakeFlag_;
+                });
             } else if (playingHint_.load() && !lastSkipped_) {
                 // Acabou de apresentar: o próximo frame pode já estar devido
                 // (a aquisição FIFO do swapchain dá o ritmo do vsync).
@@ -1113,6 +1265,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     // let prepare() retain a raw VideoSource* while close_all destroys it.
     std::lock_guard<std::mutex> projectRenderLock(renderMutex_);
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+    cancel_preview_graph_locked();
     renderer_.release_project_resources();
     snapshot_ = FrameSnapshot{};
     media_.close_all();
@@ -1137,6 +1290,9 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
     models_.clear();
     hdris_.clear();
     cubeLuts_.clear();
+    realCameraState_ = {};
+    realCameraLayer_ = {};
+    realCameraPlaybackStarted_ = false;
     history_.clear();
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     selection_.clear();
@@ -1388,6 +1544,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
     // native buffers and GL context must outlive every old GPU submission.
     std::unique_lock<std::mutex> projectRenderLock(renderMutex_);
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+    cancel_preview_graph_locked();
     renderer_.release_project_resources();
     snapshot_ = FrameSnapshot{};
     media_.close_all();
@@ -1448,7 +1605,10 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         models_.clear();
         hdris_.clear();
     cubeLuts_.clear();
-        history_.clear();
+        realCameraState_ = {};
+    realCameraLayer_ = {};
+    realCameraPlaybackStarted_ = false;
+    history_.clear();
         modelRevision_.fetch_add(1, std::memory_order_acq_rel);
         selection_.clear();
         if (Composition* c = current_composition()) {
@@ -6615,6 +6775,7 @@ u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
     const FrameIndex local = l->local_time(FrameIndex{frame});
     clipboard_.keys.clear();
     clipboard_.pathKeys.clear();
+    clipboard_.meshKeys.clear();
     for (u32 i = 0; i < l->tracks.size(); ++i) {
         const Track& t = l->tracks.at(i);
         const u32 k = t.find_exact(local);
@@ -6634,11 +6795,23 @@ u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
         }
         clipboard_.keys.push_back(Clipboard::Key{t.property, t.effectIndex, t.effectParamIndex, type, key, ordinal});
     }
-    return static_cast<u32>(clipboard_.keys.size());
+    u32 ordinal = 0;
+    for (const auto& effect : l->effects) {
+        if (effect.type != effect_type_id(kMeshWarpKey)) continue;
+        if (const auto* data = mesh_warp::animation(effect)) {
+            const i32 at = mesh_warp::key_at(*data, local.value);
+            if (at >= 0) {
+                MeshWarpKey key = data->keys[static_cast<usize>(at)]; key.frame = 0;
+                clipboard_.meshKeys.push_back({ordinal, data->rows, data->cols, std::move(key)});
+            }
+        }
+        ++ordinal;
+    }
+    return static_cast<u32>(clipboard_.keys.size() + clipboard_.meshKeys.size());
 }
 
 namespace {
-struct SelectedTrackKey { u32 track; u32 key; };
+struct SelectedTrackKey { u32 track; u32 key; bool mesh = false; };
 // Time remap is stored outside TrackSet. Every selection operation must resolve
 // it through the same identity as single-key commands (including its effect alias).
 const Track& selected_track(const Layer& layer, u32 index) {
@@ -6655,6 +6828,19 @@ bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
         if (ref[0] < 0 || ref[0] > 65535 || ref[1] < -1 || ref[1] > UINT32_MAX
             || ref[2] < 0 || ref[2] > UINT32_MAX || ref[3] < INT32_MIN || ref[3] > INT32_MAX) return false;
         const TrackRef identity{{}, static_cast<TrackProperty>(ref[0]), static_cast<u32>(ref[1]), static_cast<u32>(ref[2])};
+        if (identity.property == TrackProperty::MeshWarp) {
+            if (identity.effectParamIndex != 0) return false;
+            u32 index = 0;
+            while (index < layer.effects.size() && layer.effects[index].id != identity.effectIndex) ++index;
+            if (index == layer.effects.size()) return false;
+            const auto* data = mesh_warp::animation(layer.effects[index]);
+            const i32 key = data ? mesh_warp::key_at(*data, ref[3]) : -1;
+            if (key < 0) return false;
+            if (std::none_of(out.begin(), out.end(), [=](const auto& item) {
+                return item.mesh && item.track == index && item.key == static_cast<u32>(key);
+            })) out.push_back({index, static_cast<u32>(key), true});
+            continue;
+        }
         const Track* track = read_command_track(layer, identity);
         if (!track) return false;
         const u32 key = track->find_exact(FrameIndex{ref[3]});
@@ -6664,7 +6850,7 @@ bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
             for (u32 t = 0; t < layer.tracks.size(); ++t) if (&layer.tracks.at(t) == track) { index = t; break; }
             if (index == kInvalidIndex) return false;
         }
-        if (std::none_of(out.begin(), out.end(), [=](const auto& item) { return item.track == index && item.key == key; }))
+        if (std::none_of(out.begin(), out.end(), [=](const auto& item) { return !item.mesh && item.track == index && item.key == key; }))
             out.push_back({index, key});
     }
     return !out.empty();
@@ -6673,17 +6859,29 @@ bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
 
 u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
-    // As referências vêm do modelo que a UI já viu: o que ela enfileirou antes
-    // (inserir/mover keyframe) precisa estar aplicado.
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     std::vector<SelectedTrackKey> selected;
     if (!layer || !resolve_selected_keys(*layer, refs, count, selected)) return 0;
     i64 anchor = INT64_MAX;
-    for (const auto& item : selected) anchor = std::min(anchor, selected_track(*layer, item.track).keys[item.key].time.value);
-    std::vector<Clipboard::Key> copied;
     for (const auto& item : selected) {
+        const i64 time = item.mesh ? mesh_warp::animation(layer->effects[item.track])->keys[item.key].frame
+                                  : selected_track(*layer, item.track).keys[item.key].time.value;
+        anchor = std::min(anchor, time);
+    }
+    std::vector<Clipboard::Key> copied;
+    std::vector<Clipboard::MeshKey> meshes;
+    for (const auto& item : selected) {
+        if (item.mesh) {
+            const auto& effect = layer->effects[item.track];
+            const auto* data = mesh_warp::animation(effect);
+            u32 ordinal = 0;
+            for (u32 e = 0; e < item.track; ++e) if (layer->effects[e].type == effect.type) ++ordinal;
+            MeshWarpKey key = data->keys[item.key]; key.frame -= anchor;
+            meshes.push_back({ordinal, data->rows, data->cols, std::move(key)});
+            continue;
+        }
         const Track& track = selected_track(*layer, item.track);
         Keyframe key = track.keys[item.key]; key.time.value -= anchor;
         EffectTypeId type = 0; u32 ordinal = 0;
@@ -6697,8 +6895,9 @@ u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noe
         copied.push_back({track.property, track.effectIndex, track.effectParamIndex, type, key, ordinal});
     }
     clipboard_.keys = std::move(copied);
+    clipboard_.meshKeys = std::move(meshes);
     clipboard_.pathKeys.clear();
-    return static_cast<u32>(clipboard_.keys.size());
+    return static_cast<u32>(selected.size());
 }
 
 u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64 delta, bool remove) noexcept {
@@ -6716,7 +6915,7 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
     for (u32 slot = 0; slot <= layer->tracks.size(); ++slot) {
         const u32 index = slot == layer->tracks.size() ? kInvalidIndex : slot;
         std::vector<u32> keys;
-        for (const auto& item : selected) if (item.track == index) keys.push_back(item.key);
+        for (const auto& item : selected) if (!item.mesh && item.track == index) keys.push_back(item.key);
         if (keys.empty()) continue;
         const Track& original = selected_track(*layer, index);
         Track next = original;
@@ -6737,12 +6936,39 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
         next.lastIndex = 0;
         changed.emplace_back(index, std::move(next));
     }
+    std::vector<std::pair<u32, MeshWarpData>> changedMeshes;
+    for (u32 index = 0; index < layer->effects.size(); ++index) {
+        std::vector<u32> keys;
+        for (const auto& item : selected) if (item.mesh && item.track == index) keys.push_back(item.key);
+        if (keys.empty()) continue;
+        const MeshWarpData& original = *mesh_warp::animation(layer->effects[index]);
+        MeshWarpData next = original;
+        next.keys.clear();
+        for (u32 k = 0; k < original.keys.size(); ++k) {
+            const bool picked = std::find(keys.begin(), keys.end(), k) != keys.end();
+            if (picked && remove) continue;
+            MeshWarpKey key = original.keys[k];
+            if (picked) {
+                const i64 target = key.frame + delta;
+                if (target < INT32_MIN || target > INT32_MAX) return 0;
+                key.frame = target;
+            }
+            next.keys.push_back(std::move(key));
+        }
+        std::sort(next.keys.begin(), next.keys.end(), [](const auto& a, const auto& b) { return a.frame < b.frame; });
+        for (usize k = 1; k < next.keys.size(); ++k) if (next.keys[k - 1].frame == next.keys[k].frame) return 0;
+        if (remove && next.keys.empty())
+            (void)mesh_warp::evaluate(&original, original.rows, original.cols,
+                static_cast<f64>(layer->local_time(playback_.current()).value), next.values);
+        changedMeshes.emplace_back(index, std::move(next));
+    }
     history_.before_mutation(*comp, project_->timeline().current(), remove ? "remover keyframes" : "mover keyframes");
     for (auto& entry : changed) {
         Track& original = selected_track(*layer, entry.first);
         if (remove && entry.second.keys.empty()) freeze_last_shape_key(*layer, original, layer->local_time(playback_.current()));
         original = std::move(entry.second);
     }
+    for (auto& entry : changedMeshes) *mesh_warp::animation(layer->effects[entry.first]) = std::move(entry.second);
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     project_->mark_dirty(); request_render();
     return static_cast<u32>(selected.size());
@@ -6752,85 +6978,99 @@ u32 Engine::paste_keyframes(const u64* ids, u32 count, i64 frame) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
-    if (!comp || !ids || (clipboard_.keys.empty() && clipboard_.pathKeys.empty()) || frame < INT32_MIN || frame > INT32_MAX)
-        return 0;
+    if (!comp || !ids || (clipboard_.keys.empty() && clipboard_.pathKeys.empty() && clipboard_.meshKeys.empty())
+        || frame < INT32_MIN || frame > INT32_MAX) return 0;
     u32 placed = 0;
     for (u32 i = 0; i < count; ++i) {
         Layer* d = comp->layer(LayerId::unpack(ids[i]));
         if (!d || d->locked) continue;
         const FrameIndex local = d->local_time(FrameIndex{frame});
-        if (std::any_of(clipboard_.keys.begin(), clipboard_.keys.end(), [&](const auto& key) {
-            const i64 target = local.value + key.key.time.value;
-            return target < INT32_MIN || target > INT32_MAX;
-        })) continue;
-        const bool pathsOut = std::any_of(clipboard_.pathKeys.begin(), clipboard_.pathKeys.end(), [&](const auto& pk) {
-            return std::any_of(pk.keys.begin(), pk.keys.end(), [&](const PathKey& k) {
-                const i64 target = local.value + k.frame;
-                return target < INT32_MIN || target > INT32_MAX;
-            });
-        });
-        if (pathsOut) continue;
+        const auto inRange = [&](i64 relative) {
+            const i64 target = local.value + relative;
+            return target >= INT32_MIN && target <= INT32_MAX;
+        };
+        if (std::any_of(clipboard_.keys.begin(), clipboard_.keys.end(), [&](const auto& k) { return !inRange(k.key.time.value); })
+            || std::any_of(clipboard_.meshKeys.begin(), clipboard_.meshKeys.end(), [&](const auto& k) { return !inRange(k.key.frame); })
+            || std::any_of(clipboard_.pathKeys.begin(), clipboard_.pathKeys.end(), [&](const auto& p) {
+                return std::any_of(p.keys.begin(), p.keys.end(), [&](const auto& k) { return !inRange(k.frame); });
+            })) continue;
+        // Plan the complete destination before changing its tracks or geometry.
+        // Incompatible mesh grids must not leave scalar keys from a mixed paste.
+        Layer next = *d;
+        u32 added = 0;
+        bool meshValid = true;
+        std::vector<u32> meshEffects;
+        for (const auto& ck : clipboard_.meshKeys) {
+            u32 ordinal = 0, index = 0;
+            while (index < next.effects.size()) {
+                if (next.effects[index].type == effect_type_id(kMeshWarpKey) && ordinal++ == ck.effectOrdinal) break;
+                ++index;
+            }
+            if (index == next.effects.size()) { meshValid = false; break; }
+            MeshWarpData* data = mesh_warp::ensure_animation(next.effects[index]);
+            if (!data || data->rows != ck.rows || data->cols != ck.cols
+                || ck.key.values.size() != mesh_warp::value_count(ck.rows, ck.cols)) { meshValid = false; break; }
+            MeshWarpKey key = ck.key; key.frame += local.value;
+            const i32 existing = mesh_warp::key_at(*data, key.frame);
+            if (existing >= 0) data->keys[static_cast<usize>(existing)] = std::move(key);
+            else {
+                if (data->keys.size() >= kMeshWarpMaxKeys) { meshValid = false; break; }
+                const auto at = std::lower_bound(data->keys.begin(), data->keys.end(), key.frame,
+                    [](const MeshWarpKey& a, i64 time) { return a.frame < time; });
+                data->keys.insert(at, std::move(key));
+            }
+            if (std::find(meshEffects.begin(), meshEffects.end(), index) == meshEffects.end()) meshEffects.push_back(index);
+            ++added;
+        }
+        if (!meshValid) continue;
         for (const Clipboard::Key& ck : clipboard_.keys) {
+            if (ck.property == TrackProperty::MeshWarp) continue;
             u32 effectIndex = ck.effectIndex;
-            if (ck.property == TrackProperty::MaskParam && (ck.effectParamIndex > 2 || !mask_by_id(*d, effectIndex))) continue;
+            if (ck.property == TrackProperty::MaskParam && (ck.effectParamIndex > 2 || !mask_by_id(next, effectIndex))) continue;
             if (ck.property == TrackProperty::EffectParam) {
-                // Match the same occurrence, so two Glows do not overwrite
-                // each other's animation. Missing occurrences are skipped.
-                effectIndex = kInvalidIndex;
-                u32 ordinal = 0;
-                for (const EffectInstance& e : d->effects) {
-                    if (e.type == ck.effectType && ordinal++ == ck.effectOrdinal) {
-                        effectIndex = e.id; break;
-                    }
-                }
+                effectIndex = kInvalidIndex; u32 ordinal = 0;
+                for (const auto& effect : next.effects)
+                    if (effect.type == ck.effectType && ordinal++ == ck.effectOrdinal) { effectIndex = effect.id; break; }
                 if (effectIndex == kInvalidIndex) continue;
             }
-            if (placed == 0) {
-                history_.before_mutation(*comp, project_->timeline().current(), "colar keyframes");
-                modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-            }
             const FrameIndex target{local.value + ck.key.time.value};
-            if (target.value < INT32_MIN || target.value > INT32_MAX) continue;
-            Track& t = ck.property == TrackProperty::TimeRemap ? d->timeRemap
-                : d->tracks.get_or_create(ck.property, effectIndex, ck.effectParamIndex);
-            if (ck.property == TrackProperty::TimeRemap) d->timeRemapEnabled = true;
-            const u32 k = t.set(target, ck.key.value, ck.key.interp);
-            if (k < t.keys.size()) {
-                // Curva inteira (bezier, tangentes, easing) do keyframe copiado.
-                Keyframe nk = ck.key;
-                nk.time = target;
-                t.keys[k] = nk;
-            }
-            ++placed;
+            Track& track = ck.property == TrackProperty::TimeRemap ? next.timeRemap
+                : next.tracks.get_or_create(ck.property, effectIndex, ck.effectParamIndex);
+            if (ck.property == TrackProperty::TimeRemap) next.timeRemapEnabled = true;
+            const u32 k = track.set(target, ck.key.value, ck.key.interp);
+            Keyframe key = ck.key; key.time = target;
+            if (k < track.keys.size()) track.keys[k] = key;
+            ++added;
         }
-        // Keyframes de forma (morph) da camada vetorial: no mesmo caminho
-        // (grupo, caminho) do destino, se ele existir. Um key no mesmo quadro
-        // é trocado; o caminho vira livre (o morph só existe no livre).
-        if (d->kind == LayerKind::Shape && d->shape.shapeType == kShapeVector) {
-            for (const Clipboard::PathKeys& pk : clipboard_.pathKeys) {
-                if (pk.group >= d->shape.vector.groups.size() || pk.path >= d->shape.vector.groups[pk.group].paths.size())
-                    continue;
-                if (placed == 0) {
-                    history_.before_mutation(*comp, project_->timeline().current(), "colar keyframes");
-                    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
-                }
-                VectorPath& vp = d->shape.vector.groups[pk.group].paths[pk.path];
+        bool pathsChanged = false;
+        if (next.kind == LayerKind::Shape && next.shape.shapeType == kShapeVector) {
+            for (const auto& pk : clipboard_.pathKeys) {
+                if (pk.group >= next.shape.vector.groups.size() || pk.path >= next.shape.vector.groups[pk.group].paths.size()) continue;
+                VectorPath& vp = next.shape.vector.groups[pk.group].paths[pk.path];
                 if (vp.kind != VectorPathKind::Free) vector::make_editable(vp);
-                for (PathKey k : pk.keys) {
-                    k.frame += local.value;
-                    auto at = std::lower_bound(vp.keys.begin(), vp.keys.end(), k.frame,
-                                               [](const PathKey& a, i64 f) { return a.frame < f; });
-                    if (at != vp.keys.end() && at->frame == k.frame) *at = std::move(k);
-                    else vp.keys.insert(at, std::move(k));
-                    ++placed;
+                for (PathKey key : pk.keys) {
+                    key.frame += local.value;
+                    auto at = std::lower_bound(vp.keys.begin(), vp.keys.end(), key.frame,
+                        [](const PathKey& a, i64 time) { return a.frame < time; });
+                    if (at != vp.keys.end() && at->frame == key.frame) *at = std::move(key);
+                    else vp.keys.insert(at, std::move(key));
+                    ++added; pathsChanged = true;
                 }
             }
         }
+        if (!added) continue;
+        if (!placed) {
+            history_.before_mutation(*comp, project_->timeline().current(), "colar keyframes");
+            modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        }
+        d->tracks = std::move(next.tracks);
+        d->timeRemap = std::move(next.timeRemap);
+        d->timeRemapEnabled = next.timeRemapEnabled;
+        if (pathsChanged) d->shape = std::move(next.shape);
+        for (u32 index : meshEffects) d->effects[index].meshes = std::move(next.effects[index].meshes);
+        placed += added;
     }
-    if (placed != 0) {
-        project_->mark_dirty();
-        request_render();
-    }
+    if (placed) { project_->mark_dirty(); request_render(); }
     return placed;
 }
 
@@ -6849,7 +7089,20 @@ u32 Engine::copy_animation(u64 layerId) noexcept {
         for (const VectorGroup& g : l->shape.vector.groups)
             for (const VectorPath& p : g.paths)
                 for (const PathKey& k : p.keys) anchor = std::min(anchor, k.frame);
+    for (const auto& effect : l->effects) if (const auto* data = mesh_warp::animation(effect))
+        for (const auto& key : data->keys) anchor = std::min(anchor, key.frame);
     if (anchor == INT64_MAX) return 0;
+    std::vector<Clipboard::MeshKey> copiedMeshes;
+    u32 ordinal = 0;
+    for (const auto& effect : l->effects) {
+        if (effect.type != effect_type_id(kMeshWarpKey)) continue;
+        if (const auto* data = mesh_warp::animation(effect))
+            for (auto key : data->keys) {
+                key.frame -= anchor;
+                copiedMeshes.push_back({ordinal, data->rows, data->cols, std::move(key)});
+            }
+        ++ordinal;
+    }
     std::vector<Clipboard::PathKeys> copiedPaths;
     u32 pathCount = 0;
     if (vectorLayer) {
@@ -6884,7 +7137,8 @@ u32 Engine::copy_animation(u64 layerId) noexcept {
     }
     clipboard_.keys = std::move(copied);
     clipboard_.pathKeys = std::move(copiedPaths);
-    return static_cast<u32>(clipboard_.keys.size()) + pathCount;
+    clipboard_.meshKeys = std::move(copiedMeshes);
+    return static_cast<u32>(clipboard_.keys.size() + clipboard_.meshKeys.size()) + pathCount;
 }
 
 u32 Engine::optimize_keyframes(u64 layerId, i32 property, f32 tolerance) noexcept {
@@ -6919,7 +7173,7 @@ u32 Engine::optimize_keyframes(u64 layerId, i32 property, f32 tolerance) noexcep
 u32 Engine::clipboard_state() noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     return (clipboard_.layers.empty() ? 0u : 1u) | (clipboard_.hasStyle ? 2u : 0u)
-         | (clipboard_.effects.empty() ? 0u : 4u) | (clipboard_.keys.empty() && clipboard_.pathKeys.empty() ? 0u : 8u)
+         | (clipboard_.effects.empty() ? 0u : 4u) | (clipboard_.keys.empty() && clipboard_.pathKeys.empty() && clipboard_.meshKeys.empty() ? 0u : 8u)
          | (clipboard_.hasTransform ? 16u : 0u);
 }
 
@@ -8627,6 +8881,7 @@ namespace {
 Track* expression_track(Layer& l, u32 property, u32 effectIndex, u32 paramIndex, bool create) noexcept {
     if (property >= static_cast<u32>(TrackProperty::_Count)) return nullptr;
     const auto p = static_cast<TrackProperty>(property);
+    if (p == TrackProperty::MeshWarp) return nullptr;
     if (p == TrackProperty::TimeRemap) return &l.timeRemap;
     if (p == TrackProperty::EffectParam && !l.find_effect(EffectId{effectIndex, 0})) return nullptr;
     if (p == TrackProperty::TextAnimParam && effectIndex >= l.text.animators.size()) return nullptr;
@@ -8666,6 +8921,7 @@ Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const c
     bool anyChange = false;
     for (u32 i = 0; i < count; ++i) {
         const u32* k = keys3 + i * 3;
+        if (k[0] == static_cast<u32>(TrackProperty::MeshWarp)) return Errc::NotSupported;
         Track* t = expression_track(*l, k[0], k[1], k[2], false);
         if (!t && !remove) {
             const auto p = k[0] < static_cast<u32>(TrackProperty::_Count) ? static_cast<TrackProperty>(k[0]) : TrackProperty::_Count;
@@ -9380,7 +9636,27 @@ RenderSettings Engine::current_render_settings() noexcept {
     return rs;
 }
 
+void Engine::drain_capture_target_locked() noexcept {
+    TextureHandle target{};
+    GPUBackend* backend = nullptr;
+    u64 generation = 0;
+    {
+        std::lock_guard<std::mutex> cleanup(captureRetirementMutex_);
+        target = pendingCaptureTarget_;
+        backend = pendingCaptureGpu_;
+        generation = pendingCaptureGeneration_;
+        pendingCaptureTarget_ = {};
+        pendingCaptureGpu_ = nullptr;
+        pendingCaptureGeneration_ = 0;
+    }
+    // A reset/shutdown already retired the old native device's resources.
+    // Handles may have been recycled: never destroy one in a new generation.
+    if (target.valid() && gpu_.get() == backend && gpuGeneration_ == generation)
+        gpu_->destroy_texture(target); // native deferred destruction preserves the submitted fence
+}
+
 Status Engine::poll_export_gpu_locked(u64 timeoutNs) noexcept {
+    drain_capture_target_locked();
     if (!pendingExportGpuFrame_) return OkStatus;
     if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
         pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
@@ -9419,6 +9695,7 @@ Status Engine::recover_device_locked() noexcept {
     }
     AUREA_LOG_WARN("GPU indisponivel: recriando recursos sem alterar o projeto");
     if (++gpuGeneration_ == 0) ++gpuGeneration_;
+    cancel_preview_graph_locked();
     media_.close_all();   // os frames importados pertenciam ao dispositivo morto
     renderer_.forget_device();
     surfaceAttached_ = false;
@@ -9452,14 +9729,33 @@ Status Engine::ensure_gpu_healthy_locked() noexcept {
     return result;
 }
 
+#include "EnginePreviewGraph.inl"
+
 Status Engine::render_frame(bool onlyIfChanged) noexcept {
     // Export em andamento: o último quadro do preview fica na tela; a GPU e
     // os decoders são do export.
     if (exportActive_.load(std::memory_order_acquire)) return OkStatus;
+    if (offscreenReaders_.load(std::memory_order_acquire)) return OkStatus;
     const u64 frameStart = monotonic_ns();
     std::lock_guard<std::mutex> rl(renderMutex_);
     if (exportActive_.load(std::memory_order_acquire)) return OkStatus;
+    if (offscreenReaders_.load(std::memory_order_acquire)) {
+        lastSkipped_ = true;
+        nextFrameDueNs_ = frameStart + 2'000'000ull;
+        return OkStatus;
+    }
     lastSkipped_ = false;
+    const u64 retryDue = previewRetryDueNs_.load(std::memory_order_acquire);
+    if (onlyIfChanged && retryDue > frameStart
+        && modelRevision_.load(std::memory_order_acquire) == lastRenderedRevision_
+        && mediaReadyGen_.load(std::memory_order_acquire) == lastMediaGen_) {
+        // Leave forceRender pending until retry time. Polling vsync or calling
+        // render_frame repeatedly cannot acquire/record the same failed frame.
+        lastSkipped_ = true;
+        nextFrameDueNs_ = retryDue;
+        return OkStatus;
+    }
+    previewRetryDueNs_.store(0, std::memory_order_release);
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) {
         // CPU edits/saving stay available; do not consume a pending resize.
         { std::lock_guard<std::mutex> lock(modelMutex_); drain_commands_locked(); }
@@ -9475,6 +9771,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         lastSkipped_ = true;
         return healthy;
     }
+    Status continuation;
+    if (continue_preview_graph_locked(frameStart, continuation)) return continuation;
     if (const u64 size = pendingSurfaceSize_.exchange(0, std::memory_order_acq_rel)) {
         const u32 width = static_cast<u32>(size >> 32), height = static_cast<u32>(size);
         if (width != surface_.width || height != surface_.height) {
@@ -9498,6 +9796,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     bool warming = false, cachedPreview = false, idleWarming = false;
     PreviewIdleKey idleKey;
     u64 idleMediaReady = 0;
+    u64 preparedPlaybackGeneration = 0;
     u32 idleCapacity = 0;
     f32 renderSpeed = 1.0f;
     {
@@ -9537,6 +9836,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         const bool force = forceRender_.exchange(false, std::memory_order_acq_rel) || rev != lastRenderedRevision_;
         lastRenderedRevision_ = rev;
         idleKey = {projectSession_, rev, project_->timeline().current().pack(), playback_.media_epoch(), t.value};
+        preparedPlaybackGeneration = playback_.generation();
         const bool idleEligible = !playing && !previewBuffering_ && playback_.mode() == PlaybackMode::Paused
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
             && !refinePending_ && !refineNow_ && !lastIncomplete_
@@ -9632,8 +9932,11 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             renderer_.prepare_raw(rawPlaybackLayer_, *rawLayer, *rawAsset, playback_.current_ns() / 1000, media_, ++frameCounter_,
                                   mode, decodeDirection, playback_.speed(), rs.mediaGeneration, snapshot_);
         } else {
-            renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
-                              decodeDirection, mode, playback_.speed(), snapshot_);
+            {
+                tracking::RealCameraPreviewScope realCameraPreview(real_camera_preview_layer_locked());
+                renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
+                                  decodeDirection, mode, playback_.speed(), snapshot_);
+            }
         }
     }
     const u64 tPrepared = monotonic_ns();
@@ -9705,6 +10008,18 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         }
     }
     const Status s = renderer_.render(snapshot_, rs, nullptr, stats, timings);
+    if (renderer_.preview_graph_pending()) {
+        livePreviewGraphActive_.store(true, std::memory_order_release);
+        livePreviewGraphKey_ = idleKey;
+        livePreviewGraphPlaybackGeneration_ = preparedPlaybackGeneration;
+        livePreviewGraphGpuGeneration_ = gpuGeneration_;
+        livePreviewGraphPlaying_ = playing;
+        livePreviewGraphRefine_ = refineNow_;
+        lastSkipped_ = true;
+        nextFrameDueNs_ = monotonic_ns() + 2'000'000ull;
+        previewRetryDueNs_.store(nextFrameDueNs_, std::memory_order_release);
+        return OkStatus;
+    }
     if (s.code() == Errc::OutOfDeviceMemory) {
         // Recover optional owned CPU storage after failed GPU admission. The
         // existing next render prepares its normal snapshot; no frame/quality
@@ -9807,27 +10122,28 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     if (!s.ok() && s.code() != Errc::SurfaceLost && s.code() != Errc::Timeout) {
         AUREA_LOG_WARN("frame nao renderizado: %s", s.message().data());
     }
-    if (s.code() == Errc::SurfaceLost || s.code() == Errc::Timeout) request_render();
-
     lastRenderedFrame_ = t.value;
     const bool rendererIncomplete = renderer_.take_incomplete();
     // Asynchronous resources (depth/rotobrush, HDRI, uploads) can finish after
     // the bounded immediate retry window. Their ready callback increments the
     // media generation; retain incomplete state so that wake actually renders
     // the paused frame instead of being skipped forever as "unchanged".
-    lastIncomplete_ = snapshot_.missingVideoFrames > 0 || snapshot_.staleVideoFrames > 0 || rendererIncomplete;
+    lastIncomplete_ = !s.ok() || snapshot_.missingVideoFrames > 0 || snapshot_.staleVideoFrames > 0 || rendererIncomplete;
     lastCulledLayers_.store(snapshot_.culledLayers, std::memory_order_relaxed);
-    // Recurso pendente: tenta de novo nos próximos quadros — no máximo ~1 s
-    // (uma camada que nunca fica pronta não pode prender a GPU em laço).
-    if (rendererIncomplete) {
-        if (++incompleteRetries_ <= 60) {
-            forceRender_.store(true, std::memory_order_release);
-            request_render();
-        }
-    } else {
-        incompleteRetries_ = 0;
+    // Resource retries are bounded, and occur at most once per display tick.
+    // GPU/surface errors get a longer delay because they may bypass vsync.
+    const bool retryResource = rendererIncomplete && ++incompleteRetries_ <= 60;
+    if (!rendererIncomplete) incompleteRetries_ = 0;
+    if (!s.ok() || retryResource) {
+        const u64 delay = s.ok()
+            ? static_cast<u64>(1e9 / std::max(1.0f, config_.displayRefreshRate))
+            : 50'000'000ull;
+        nextFrameDueNs_ = monotonic_ns() + delay;
+        previewRetryDueNs_.store(nextFrameDueNs_, std::memory_order_release);
+        forceRender_.store(true, std::memory_order_release);
+        lastSkipped_ = true;
+        wake_render();
     }
-    if (!s.ok()) forceRender_.store(true, std::memory_order_release);
     if (s.ok()) frameScheduler_.presented(t, playing);
     stats.frameIndex = static_cast<u32>(frameCounter_);
     stats.cpuMs = timings.cpuPrepareMs + timings.cpuRecordMs;
@@ -9902,24 +10218,178 @@ f32 Engine::preview_heavy_scale() const noexcept {
     return std::min(caps_.policy().heavyScale, adaptive_->quality().heavy());
 }
 
+// One request owns the shared graph from handoff through readback. In particular,
+// a decoder wait cannot allow the display thread to start another LIVE graph.
+// All waits for ownership and an outstanding GPU frame happen without keeping
+// renderMutex_; CPU edits and surface callbacks may make progress meanwhile.
+struct Engine::OffscreenRequest {
+    Engine& engine;
+    std::unique_lock<std::mutex> ownership;
+    u64 started = monotonic_ns();
+    u64 deadline = started + 4'000'000'000ull;
+    const u64 hardDeadline = started + 30'000'000'000ull;
+    u64 lastProgressFrame = 0;
+    u32 completedRecoveryFences = 0;
+    bool preparingResources = false;
+    bool gpuDeadlineArmed = false;
+    u64 firstCaptureSubmission = 0;
+    bool reader = false;
+    explicit OffscreenRequest(Engine& value)
+        : engine(value), ownership(value.offscreenRequestMutex_, std::defer_lock) {}
+    ~OffscreenRequest() {
+        if (!reader) return;
+        engine.offscreenReaders_.fetch_sub(1, std::memory_order_release);
+        AUREA_LOG_INFO("capture lifecycle finished elapsed_ms=%.3f recovery_fences=%u last_frame=%llu hard_cap_ms=30000 resource_prepare=%u gpu_deadline_armed=%u first_capture_frame=%llu",
+            static_cast<f64>(monotonic_ns() - started) / 1e6, completedRecoveryFences,
+            static_cast<unsigned long long>(lastProgressFrame), preparingResources ? 1u : 0u,
+            gpuDeadlineArmed ? 1u : 0u, static_cast<unsigned long long>(firstCaptureSubmission));
+        engine.wake_render();
+        // unique_lock releases ownership after this body, including the wake.
+        // A lifecycle join must not outlive the final access to Engine.
+    }
+    void phase(const char* name) const noexcept {
+        const u64 now = monotonic_ns();
+        AUREA_LOG_INFO("capture phase=%s elapsed_ms=%.3f remaining_ms=%.3f recovery_fences=%u",
+            name, static_cast<f64>(now - started) / 1e6,
+            static_cast<f64>(deadline > now ? deadline - now : 0) / 1e6, completedRecoveryFences);
+    }
+    Status begin_resource_preparation() noexcept {
+        if (preparingResources) return check();
+        // Ownership, exact media and prior-preview cleanup still use their
+        // original short guards. A cold final-quality environment is CPU
+        // preparation, not an inactive submitted GPU frame. Give that one
+        // phase the request's immutable total ceiling, without poll credit.
+        if (const Status valid = check(); !valid.ok()) return valid;
+        preparingResources = true;
+        deadline = hardDeadline;
+        phase("resource-prepare");
+        return OkStatus;
+    }
+    void capture_frame_submitted(u64 frame) noexcept {
+        if (!preparingResources || gpuDeadlineArmed || !frame || frame <= lastProgressFrame) return;
+        const u64 now = monotonic_ns();
+        if (now >= hardDeadline) return;
+        // Arm once, at the real first capture submission. Further submissions
+        // cannot disguise a stalled GPU; only completed distinct fences renew.
+        gpuDeadlineArmed = true;
+        firstCaptureSubmission = frame;
+        deadline = std::min<u64>(hardDeadline, now + 4'000'000'000ull);
+        phase("gpu-submitted");
+    }
+    void recovery_fence_completed(u64 frame) noexcept {
+        const u64 now = monotonic_ns();
+        // Repeated polls/old ready frames and late completion after timeout
+        // cannot renew the clock. Only new, real submitted recovery fences do.
+        if (!frame || frame <= lastProgressFrame || now >= deadline) return;
+        if (preparingResources && (!gpuDeadlineArmed || frame < firstCaptureSubmission)) return;
+        lastProgressFrame = frame;
+        ++completedRecoveryFences;
+        deadline = std::max(deadline, std::min<u64>(hardDeadline, now + 4'000'000'000ull));
+    }
+    Status check() const noexcept {
+        if (engine.exportActive_.load(std::memory_order_acquire))
+            return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
+        if (engine.offscreenCancelled_.load(std::memory_order_acquire)
+            || engine.state() == EngineState::ShuttingDown || engine.state() == EngineState::Uninitialized)
+            return Status{Errc::Cancelled, "captura encerrada"};
+        if (monotonic_ns() >= deadline)
+            return Status{Errc::Timeout, "prazo da captura esgotado"};
+        return OkStatus;
+    }
+    Status lock_render(std::unique_lock<std::mutex>& lock) const noexcept {
+        for (;;) {
+            if (const Status valid = check(); !valid.ok()) return valid;
+            if (lock.try_lock()) return check();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    Status acquire() noexcept {
+        for (;;) {
+            if (const Status valid = check(); !valid.ok()) return valid;
+            if (ownership.try_lock()) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        engine.offscreenReaders_.fetch_add(1, std::memory_order_acq_rel);
+        reader = true;
+        for (;;) {
+            std::unique_lock<std::mutex> lock(engine.renderMutex_, std::defer_lock);
+            if (const Status valid = lock_render(lock); !valid.ok()) return valid;
+            if (!engine.gpu_ || !engine.renderer_.ready()) return Errc::InvalidState;
+            engine.drain_capture_target_locked();
+            if (engine.renderer_.preview_graph_pending()) {
+                // Cancellation preserves the submitted frame's resources behind
+                // its real fence, and leaves the last complete screen visible.
+                engine.cancel_preview_graph_locked();
+                engine.forceRender_.store(true, std::memory_order_release);
+                engine.previewRetryDueNs_.store(0, std::memory_order_release);
+            }
+            const Status retired = engine.renderer_.reclaim_failed_transients(0);
+            if (retired.ok()) {
+                // Staging may first wait on the preceding preview/cache frame.
+                // That old submission is not progress made by this capture.
+                lastProgressFrame = engine.gpu_->last_submitted_frame();
+                phase("handoff-complete");
+                return OkStatus;
+            }
+            if (retired.code() != Errc::Timeout) return retired;
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+    Status wait_prior_gpu_frame(u64 frame, u64 generation) noexcept {
+        if (!frame) return check(); // Zero means no prior GPU submission.
+        if (preparingResources) return wait_gpu_frame(frame, generation);
+        // A pending old preview is GPU work, even if no display cache remains
+        // or local AI already used the longer CPU preparation allowance.
+        // Temporarily clamp every lock/poll to its own short inactivity guard.
+        const u64 savedDeadline = deadline;
+        deadline = std::min<u64>(deadline, monotonic_ns() + 4'000'000'000ull);
+        const Status ready = wait_gpu_frame(frame, generation);
+        if (ready.ok()) deadline = savedDeadline;
+        return ready;
+    }
+    Status wait_gpu_frame(u64 frame, u64 generation) noexcept {
+        for (;;) {
+            std::unique_lock<std::mutex> lock(engine.renderMutex_, std::defer_lock);
+            if (const Status valid = lock_render(lock); !valid.ok()) return valid;
+            if (!engine.gpu_ || engine.gpuGeneration_ != generation)
+                return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+            const Status ready = engine.gpu_->wait_frame(frame, 0);
+            if (ready.code() != Errc::Timeout) {
+                if (ready.ok() && completedRecoveryFences) recovery_fence_completed(frame);
+                return ready;
+            }
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+};
+
 Status Engine::render_offscreen(TextureHandle target, u32 width, u32 height, bool asPreview, u64 expectedGpuGeneration) noexcept {
-    return render_offscreen_impl(target, width, height, asPreview, expectedGpuGeneration, false);
+    OffscreenRequest request{*this};
+    if (const Status owned = request.acquire(); !owned.ok()) return owned;
+    return render_offscreen_impl(target, width, height, asPreview, expectedGpuGeneration, false, request);
 }
 
 Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height, bool asPreview,
-                                      u64 expectedGpuGeneration, bool targetPreviewScale) noexcept {
-    struct ReaderGuard {
-        std::atomic<u32>& readers;
-        explicit ReaderGuard(std::atomic<u32>& value) : readers(value) { readers.fetch_add(1, std::memory_order_acq_rel); }
-        ~ReaderGuard() { readers.fetch_sub(1, std::memory_order_release); }
-    } readerGuard(offscreenReaders_);
+                                      u64 expectedGpuGeneration, bool targetPreviewScale,
+                                      OffscreenRequest& request) noexcept {
+    // Export can hold renderMutex_ while polling an outstanding GPU fence.
+    // A thumbnail must report Busy before waiting on that lock, so it cannot
+    // block the UI from requesting cancellation. The locked checks below
+    // still cover ownership changing after this early observation.
+    if (exportActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
     // O lock de render é pego só por PREPARE + RENDER (curto). A espera pelos
     // frames de vídeo (até 4 s) e IA local fria (até 30 s) fica FORA dele: com o
     // lock preso, `detach_surface` (surfaceDestroyed na thread principal) e a
     // thread de render esperavam a captura da miniatura — no Galaxy S22 isso
     // deu ANR ("Input dispatching timed out") ao sair do editor.
-    std::unique_lock<std::mutex> rl(renderMutex_);
+    std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+    if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
     if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
+    if (exportActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
     const u64 previousGeneration = gpuGeneration_;
     if (!exportActive_.load(std::memory_order_acquire)) {
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
@@ -9938,24 +10408,59 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     // for a cold local-AI result after reopening. Only explicit preview callers
     // may present a pending map asynchronously.
     rs.finalQuality = !asPreview;
+    rs.allowGraphSegments = true;
+    rs.offscreenFenceDeadline = [](void* context) { return static_cast<OffscreenRequest*>(context)->deadline; };
+    rs.offscreenFenceCompleted = [](void* context, u64 frame) {
+        static_cast<OffscreenRequest*>(context)->recovery_fence_completed(frame);
+    };
+    rs.offscreenFenceSubmitted = [](void* context, u64 frame) {
+        static_cast<OffscreenRequest*>(context)->capture_frame_submitted(frame);
+    };
+    rs.offscreenFenceContext = &request;
+    rs.cancelFlag = &offscreenCancelled_;
     rs.deferLocalAi = !asPreview;
     if (asPreview) { rs.heavyScale = preview_heavy_scale(); rs.flowPolicyScale = caps_.policy().heavyScale; }
     OffscreenMeasure m;
-    const u64 tStart = monotonic_ns();
-    u64 tPrep0 = tStart, tPrep1 = tStart;
+    const u64 tStart = request.started;
+    const u64 measureStart = monotonic_ns();
+    u64 tPrep0 = measureStart, tPrep1 = measureStart;
     u64 captureSession = 0, captureRevision = 0, capturePlaybackGeneration = 0;
     CompositionId captureComposition{};
     FrameIndex captureTime{};
     bool boundCapture = false;
+    // The ordinary status message names only Errc. Record the exact identity
+    // that invalidated this snapshot, without accepting stale capture pixels.
+    // Every call below already holds modelMutex_.
+    const auto diagnoseCaptureBinding = [&](const char* phase) {
+        const u64 composition = project_ ? project_->timeline().current().pack() : 0;
+        const u64 revision = modelRevision_.load(std::memory_order_acquire);
+        const u64 playbackGeneration = playback_.generation();
+        AUREA_LOG_WARN("capture binding cancelled phase=%s project=%u session=%llu/%llu composition=%llu/%llu revision=%llu/%llu playback_generation=%llu/%llu frame=%lld/%lld playing=%u gpu_generation=%llu/%llu",
+            phase, project_ ? 1u : 0u,
+            static_cast<unsigned long long>(captureSession), static_cast<unsigned long long>(projectSession_),
+            static_cast<unsigned long long>(captureComposition.pack()), static_cast<unsigned long long>(composition),
+            static_cast<unsigned long long>(captureRevision), static_cast<unsigned long long>(revision),
+            static_cast<unsigned long long>(capturePlaybackGeneration), static_cast<unsigned long long>(playbackGeneration),
+            static_cast<long long>(captureTime.value), static_cast<long long>(playback_.current().value),
+            playback_.playing() ? 1u : 0u,
+            static_cast<unsigned long long>(expectedGpuGeneration), static_cast<unsigned long long>(gpuGeneration_));
+    };
     u32 waitingLocalAi = 0;
     const u64 videoDeadline = tStart + 4'000'000'000ull;
-    u64 completionDeadline = videoDeadline;
+    u64& completionDeadline = request.deadline;
+    request.phase("media-prepare");
     // Espera os frames EXATOS de vídeo (export e teste não aceitam o frame
     // aproximado que o scrub mostra). Limite de 4 s para arquivo quebrado não
     // travar para sempre.
     for (;;) {
-        if (!rl.owns_lock()) rl.lock();
+        if (!rl.owns_lock()) {
+            if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+        }
         if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+        // Media/AI waiting drops this lock. Export may have taken ownership
+        // meanwhile; do not mutate its frozen snapshot or its full model cache.
+        if (exportActive_.load(std::memory_order_acquire))
+            return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
         if (expectedGpuGeneration != gpuGeneration_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
             return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
@@ -9985,8 +10490,13 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             // ou um seek durante a espera do vídeo só troca o alvo (o prazo absoluto
             // continua valendo). Captura/miniatura exata é cancelada.
             if (asPreview && !targetPreviewScale && (projectChanged || positionChanged)) boundCapture = false;
-            else if (projectChanged) return Status{Errc::Cancelled, "o projeto mudou durante a captura"};
-            else if (positionChanged) return Status{Errc::Cancelled, "a posicao de reproducao mudou durante a captura"};
+            else if (projectChanged) {
+                diagnoseCaptureBinding("media-prepare-project");
+                return Status{Errc::Cancelled, "o projeto mudou durante a captura"};
+            } else if (positionChanged) {
+                diagnoseCaptureBinding("media-prepare-playback");
+                return Status{Errc::Cancelled, "a posicao de reproducao mudou durante a captura"};
+            }
             configure_playback_locked(comp);
             const FrameIndex t = boundCapture ? captureTime : playback_.update(monotonic_ns());
             if (!boundCapture) {
@@ -10004,15 +10514,20 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             // ordinary playback advancement does not change the generation.
             rs.mediaGeneration = playback_.media_epoch();
             project_->timeline().set_playhead(t);
-            renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
-                              0, DecodeMode::Still, 1.0f, snapshot_);
+            {
+                tracking::RealCameraPreviewScope realCameraPreview(real_camera_preview_layer_locked());
+                renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
+                                  0, DecodeMode::Still, 1.0f, snapshot_);
+            }
         }
         tPrep1 = monotonic_ns();
         waitingLocalAi = rs.deferLocalAi ? renderer_.local_ai_pending() : 0;
         const bool waitingVideo = snapshot_.missingVideoFrames != 0 || snapshot_.staleVideoFrames != 0;
         // Absolute deadlines never restart when preview work interleaves or a
         // different GPU resource becomes unavailable on the next attempt.
-        if (waitingLocalAi) completionDeadline = tStart + 30'000'000'000ull;
+        if (waitingLocalAi && !request.gpuDeadlineArmed) {
+            completionDeadline = request.hardDeadline;
+        }
         if (waitingVideo || waitingLocalAi) {
             if ((waitingVideo && tPrep1 >= videoDeadline) || tPrep1 >= completionDeadline)
                 return Status{Errc::Timeout, "o quadro exato ainda esta sendo preparado"};
@@ -10023,7 +10538,7 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         }
         auto ms = [](u64 a, u64 b) { return static_cast<f32>(static_cast<f64>(b - a) * 1e-6); };
         m.prepareMs = ms(tPrep0, tPrep1);
-        m.mediaWaitMs = ms(tStart, tPrep0);
+        m.mediaWaitMs = ms(measureStart, tPrep0);
         m.activeEffects = m.particles = 0;
         for (const EffectPlan& p : snapshot_.plans) m.activeEffects += static_cast<u32>(p.evals.size());
         for (const RenderLayer& l : snapshot_.layers) {
@@ -10036,8 +10551,26 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             // before admitting full-quality intermediate render targets.
             const GpuMemoryStats before = gpu_->memory_stats();
             const u32 released = renderer_.release_preview_cache();
+            if (released) previewIdle_ = {};
+            // Cache-free previews can also leave a submitted frame. Retire
+            // it under the short GPU guard before starting any CPU resource job.
+            const u64 submitted = gpu_->last_submitted_frame();
+            rl.unlock();
+            if (const Status ready = request.wait_prior_gpu_frame(submitted, expectedGpuGeneration); !ready.ok()) return ready;
+            if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+            if (expectedGpuGeneration != gpuGeneration_)
+                return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+            {
+                std::lock_guard<std::mutex> model(modelMutex_);
+                if (!project_ || projectSession_ != captureSession
+                    || project_->timeline().current() != captureComposition
+                    || modelRevision_.load(std::memory_order_acquire) != captureRevision
+                    || playback_.generation() != capturePlaybackGeneration) {
+                    diagnoseCaptureBinding("prior-preview-fence");
+                    return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a captura"};
+                }
+            }
             if (released) {
-                gpu_->wait_idle();
                 const GpuMemoryStats after = gpu_->memory_stats();
                 AUREA_LOG_INFO("captura: previa guardada solta (%u quadros, %llu KB de GPU liberados)",
                     released, static_cast<unsigned long long>((before.usedBytes > after.usedBytes
@@ -10066,18 +10599,73 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         const u64 reclaimWait = reclaimNow < completionDeadline
             ? std::min<u64>(100'000'000, completionDeadline - reclaimNow) : 0;
         if (const Status ready = renderer_.reclaim_failed_transients(reclaimWait); !ready.ok()) return ready;
-        rs.stageUnblurredScenes = !asPreview && Renderer::can_stage_small_scene_capture(snapshot_, width, height);
-        if (rs.stageUnblurredScenes) {
-            const u64 now = monotonic_ns();
-            rs.sceneExposureFenceTimeoutNs = now < completionDeadline ? completionDeadline - now : 1;
+        if (!asPreview) {
+            if (const Status valid = request.begin_resource_preparation(); !valid.ok()) return valid;
+            // Final IBL generation runs in its existing owned worker. Preserve
+            // this exact immutable snapshot/FrameRefs while it prepares; do not
+            // reopen decoders or let another LIVE graph replace their inputs.
+            for (;;) {
+                if (const Status valid = request.check(); !valid.ok()) return valid;
+                {
+                    std::lock_guard<std::mutex> model(modelMutex_);
+                    drain_commands_locked();
+                    if (!project_ || projectSession_ != captureSession
+                        || project_->timeline().current() != captureComposition
+                        || modelRevision_.load(std::memory_order_acquire) != captureRevision
+                        || playback_.generation() != capturePlaybackGeneration) {
+                        diagnoseCaptureBinding("resource-prepare");
+                        return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a preparacao da captura"};
+                    }
+                }
+                const Status prepared = renderer_.prepare_capture_resources(snapshot_, rs);
+                if (prepared.ok()) {
+                    if (const Status valid = request.check(); !valid.ok()) return valid;
+                    request.phase("resources-ready");
+                    break;
+                }
+                if (prepared.code() != Errc::Busy) return prepared;
+                rl.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+                if (!gpu_ || expectedGpuGeneration != gpuGeneration_ || !renderer_.ready())
+                    return Status{Errc::Cancelled, "a GPU mudou durante a preparacao da captura"};
+            }
         }
+        rs.stageUnblurredScenes = !asPreview && Renderer::can_stage_small_scene_capture(snapshot_, width, height);
+        // Recovery consults the same absolute caller clock, including whole
+        // compile time. New completed fences renew four seconds of patience
+        // only within the capture's fixed 30-second total ceiling.
+        const u64 beforeRender = monotonic_ns();
+        rs.sceneExposureFenceTimeoutNs = beforeRender < completionDeadline
+            ? completionDeadline - beforeRender : 1;
+        rs.cancelFlag = &offscreenCancelled_;
+        request.phase("record");
         const Status s = renderer_.render(snapshot_, rs, &off, stats, timings);
         const bool incomplete = renderer_.take_incomplete();
         const u64 tW0 = monotonic_ns();
         // Only a successful capture reads the result. A failed graph can have
         // submitted uploads, but it must not wait globally/unbounded before
         // reporting its original error; its pending targets use a fence gate.
-        if (s.ok()) gpu_->wait_idle();
+        if (s.ok()) {
+            const u64 submitted = gpu_->last_submitted_frame();
+            request.phase("final-fence");
+            rl.unlock();
+            const Status ready = request.wait_gpu_frame(submitted, expectedGpuGeneration);
+            if (!ready.ok()) return ready;
+            if (const Status owned = request.lock_render(rl); !owned.ok()) return owned;
+            if (expectedGpuGeneration != gpuGeneration_)
+                return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
+            {
+                std::lock_guard<std::mutex> model(modelMutex_);
+                if (!project_ || projectSession_ != captureSession
+                    || project_->timeline().current() != captureComposition
+                    || modelRevision_.load(std::memory_order_acquire) != captureRevision
+                    || playback_.generation() != capturePlaybackGeneration) {
+                    diagnoseCaptureBinding("final-fence");
+                    return Status{Errc::Cancelled, "o projeto ou a posicao mudou durante a captura"};
+                }
+            }
+        }
         m.gpuWaitMs = ms(tW0, monotonic_ns());
         if (s.code() == Errc::OutOfDeviceMemory) {
             const u64 poolBefore = renderer_.pool_stats().bytes;
@@ -10130,7 +10718,7 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         }
         m.transientBytes = renderer_.graph_stats().transientBytes;
         m.gpuUsedBytes = gpu_->memory_stats().usedBytes;
-        if (offscreenTimers_ && s.ok()) {
+        if (offscreenTimers_ && s.ok() && !timings.gpuProfileFragmented) {
             // Depois do wait_idle o backend já leu os timestamps DESTE quadro.
             f32 total = 0.0f;
             m.gpuPasses = gpu_->read_gpu_timings(offscreenPasses_, 64, &total);
@@ -10159,15 +10747,21 @@ u32 Engine::last_offscreen_gpu_passes(GpuTiming* out, u32 capacity) const noexce
 }
 
 bool Engine::set_effect_preview_source(const u8* rgba, u32 width, u32 height) noexcept {
+    if (livePreviewGraphActive_.load(std::memory_order_acquire)
+        || offscreenReaders_.load(std::memory_order_acquire)) return false;
     if (!rgba || width == 0 || height == 0 || width > 4096 || height > 4096) return false;
     std::vector<u8> px(rgba, rgba + static_cast<usize>(width) * height * 4);
     std::lock_guard<std::mutex> rl(renderMutex_);
+    if (renderer_.preview_graph_pending() || offscreenReaders_.load(std::memory_order_acquire)) return false;
     renderer_.set_effect_preview_source(std::move(px), width, height);
     return true;
 }
 
 Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out, u32& outWidth,
                                      u32& outHeight) noexcept {
+    if (livePreviewGraphActive_.load(std::memory_order_acquire)
+        || offscreenReaders_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
     if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
     if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
     // A cartela é pequena, mas o aparelho manda: nunca pedir textura maior do
@@ -10182,6 +10776,8 @@ Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vec
         h = std::max<u32>(1, static_cast<u32>(static_cast<f32>(h) * k));
     }
     std::lock_guard<std::mutex> rl(renderMutex_);
+    if (renderer_.preview_graph_pending() || offscreenReaders_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
     const Status s = renderer_.render_effect_preview(effectRegistry_, typeId, w, h, out, true);
     if (s.ok()) {
@@ -10201,7 +10797,11 @@ Status Engine::capture_preview_frame_rgba(u32 maxDim, std::vector<u8>& out, u32&
 
 Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& width, u32& height,
                                        bool asPreview) noexcept {
+    if (exportActive_.load(std::memory_order_acquire))
+        return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
     if (maxDim == 0) return Status{Errc::InvalidState, "dimensao de captura invalida"};
+    OffscreenRequest request{*this};
+    if (const Status owned = request.acquire(); !owned.ok()) return owned;
     u32 cw = 0, ch = 0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -10232,9 +10832,14 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
     {
         // Resource pools and the graphics queue are owned by the render lock.
         // UI preview may be recording while a thumbnail/test requests capture.
-        std::lock_guard<std::mutex> captureLock(renderMutex_);
+        std::unique_lock<std::mutex> captureLock(renderMutex_, std::defer_lock);
+        if (const Status owned = request.lock_render(captureLock); !owned.ok()) return owned;
         if (!gpu_ || state() == EngineState::ShuttingDown || state() == EngineState::Uninitialized)
             return Status{Errc::InvalidState, "sem GPU"};
+        // Reject before allocating even the capture target. A thumbnail must
+        // not consume source-export headroom or repopulate its model cache.
+        if (exportActive_.load(std::memory_order_acquire))
+            return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         captureGpu = gpu_.get();
@@ -10244,18 +10849,38 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
         target = *created;
     }
     std::vector<u16> half(static_cast<usize>(width) * height * 4);
-    Status s = render_offscreen_impl(target, width, height, asPreview, captureGeneration, asPreview);
+    Status s = render_offscreen_impl(target, width, height, asPreview, captureGeneration, asPreview, request);
     {
         // render_offscreen releases its lock before returning. Readback also
         // submits graphics work and mutates resource pools; serialize it with
         // the preview instead of racing vkQueueSubmit and pool reallocation.
-        std::lock_guard<std::mutex> captureLock(renderMutex_);
+        std::unique_lock<std::mutex> captureLock(renderMutex_, std::defer_lock);
+        // Cleanup also remains serialized if the capture's request deadline
+        // elapsed. Returning a target into an active queue is never a credit.
+        const Status locked = request.lock_render(captureLock);
+        if (!locked.ok() && !captureLock.owns_lock() && !captureLock.try_lock()) {
+            // The request deadline must also bound cleanup. There is only one
+            // request token, and the next owner drains this slot before a new
+            // capture allocation. Lifecycle/export can safely retire it later.
+            std::lock_guard<std::mutex> cleanup(captureRetirementMutex_);
+            assert(!pendingCaptureTarget_.valid());
+            pendingCaptureTarget_ = target;
+            pendingCaptureGpu_ = captureGpu;
+            pendingCaptureGeneration_ = captureGeneration;
+            return s.ok() ? locked : s;
+        }
+        if (s.ok() && !locked.ok()) s = locked;
         // Recovery reinitializes the same backend object and can recycle its
         // texture IDs. Never read or destroy an old target in the new device.
         if (captureGeneration != gpuGeneration_ || gpu_.get() != captureGpu || !gpu_)
             return Status{Errc::Cancelled, "GPU trocada durante captura"};
+        if (s.ok() && exportActive_.load(std::memory_order_acquire))
+            s = Status{Errc::Busy, "captura aguarda a exportacao terminar"};
         if (s.ok()) s = poll_export_gpu_locked();
-        if (s.ok()) s = gpu_->read_texture(target, half.data(), width * 8);
+        if (s.ok()) {
+            request.phase("readback");
+            s = gpu_->read_texture(target, half.data(), width * 8);
+        }
         gpu_->destroy_texture(target);
     }
     if (!s.ok()) return s;
@@ -10620,6 +11245,7 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         row.maskCount = static_cast<u32>(l->masks.size());
         u32 keyCount = static_cast<u32>(l->timeRemap.keys.size());
         for (u32 t = 0; t < l->tracks.size(); ++t) keyCount += static_cast<u32>(l->tracks.at(t).keys.size());
+        for (const auto& effect : l->effects) if (const auto* data = mesh_warp::animation(effect)) keyCount += static_cast<u32>(data->keys.size());
         row.keyframeCount = keyCount;
         row.blendMode = static_cast<u32>(l->blendMode);
         u32 flags = 0;
@@ -10686,6 +11312,24 @@ u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) 
     };
     put(l.timeRemap);
     for (u32 t = 0; t < l.tracks.size() && written < capacity; ++t) put(l.tracks.at(t));
+    for (const auto& effect : l.effects) {
+        const auto* data = mesh_warp::animation(effect);
+        if (!data) continue;
+        for (const auto& key : data->keys) {
+            if (written >= capacity) break;
+            bridge::KeyframeRow row{};
+            row.property = static_cast<u32>(TrackProperty::MeshWarp);
+            row.effectIndex = effect.id;
+            row.paramIndex = 0;
+            row.time = static_cast<i32>(key.frame);
+            row.value = 0;
+            row.interpolation = static_cast<u32>(mesh_warp::track_interpolation(key.interp));
+            const i64 timelineFrame = key.frame + l.start.value - l.offset.value;
+            if (timelineFrame < l.start.value || timelineFrame > l.end.value)
+                row.timelineFlags |= bridge::kKeyframeTimelineHidden;
+            out[written++] = row;
+        }
+    }
     return written;
 }
 } // namespace
@@ -10716,6 +11360,7 @@ u32 Engine::query_all_keyframes(bridge::KeyframeIndexRow* outIndex, u32 layerCap
         ++layers;
         total += l->timeRemap.keys.size();
         for (u32 t = 0; t < l->tracks.size(); ++t) total += l->tracks.at(t).keys.size();
+        for (const auto& effect : l->effects) if (const auto* data = mesh_warp::animation(effect)) total += data->keys.size();
     }
     if (outLayers) *outLayers = layers;
     const u32 totalU = static_cast<u32>(std::min<u64>(total, 0xFFFFFFFFull));
@@ -11779,6 +12424,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        cancel_preview_graph_locked();
         exportActive_.store(true, std::memory_order_release);
         if (const Status drained = drainExportStartup(); !drained.ok()) return drained;
         if (const Status initialized = initialize_offline_export(*ctx); !initialized.ok()) return initialized;
@@ -12087,7 +12733,14 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     }, &ctx);
     offlineRenderer.set_audio_source(ctx.audioCache.get(), nullptr, nullptr);
     offlineRenderer.set_bounded_text_surface_enabled(config_.enableBoundedTextSurface);
-    return OkStatus;
+    // The 2174 Original policy applies to this immutable offline scene only.
+    // Track each session's real CPU allocation until its deferred cleanup ends.
+    const u64 originalBytesBefore = exportOriginalModelBytes_.load(std::memory_order_relaxed);
+    const Status originals = prepare_original_export_models(*ctx.frozenProject, ctx.recovery.composition,
+        ctx.frozenModels, ctx.frozenAssetBudget, model_memory_hint({}), gpu_->capabilities().maxTexture2D,
+        ctx.cancelRequested, exportOriginalModelBytes_, ctx.promotedOriginalModels);
+    ctx.originalModelBytes = exportOriginalModelBytes_.load(std::memory_order_relaxed) - originalBytesBefore;
+    return originals;
 }
 
 void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) noexcept {
@@ -12123,6 +12776,10 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
     ctx.comp = {}; ctx.y = {}; ctx.uv = {};
     ctx.frozenProject.reset();
     ctx.frozenImages.clear(); ctx.frozenModels.clear(); ctx.frozenHdris.clear(); ctx.frozenLuts.clear();
+    if (ctx.originalModelBytes) {
+        exportOriginalModelBytes_.fetch_sub(ctx.originalModelBytes, std::memory_order_relaxed);
+        ctx.originalModelBytes = 0;
+    }
 }
 
 Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& target, u64& gpuFrame) noexcept {
@@ -12850,6 +13507,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         cd.debugName = "export-imagem";
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        cancel_preview_graph_locked();
         exportActive_.store(true, std::memory_order_release);
         const u64 frame = gpu_->last_submitted_frame();
         if (frame) {
@@ -13879,6 +14537,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeInsert: {
             Layer* l = need_layer(cmd.keyframe.track.layer);
             if (!l) return Errc::NotFound;
+            if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
+                return mesh_warp::key_command(*l, cmd, playback_.current());
             // Gesto de transform (kAutoKey*): o tempo é o do quadro na tela e,
             // sem keyframe na trilha, o valor parado muda — a mesma regra nas
             // duas UIs, com o estado vivo do motor. Antes a UI decidia pelo
@@ -13922,6 +14582,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeDelete: {
             Layer* l = need_layer(cmd.keyframe.track.layer);
             if (!l) return Errc::NotFound;
+            if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
+                return mesh_warp::key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track || track->find_exact(cmd.keyframe.time) == kInvalidIndex) return Errc::NotFound;
             if (track->keys.size() == 1) freeze_last_shape_key(*l, *track, l->local_time(playback_.current()));
@@ -13931,6 +14593,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeMove: {
             Layer* l = need_layer(cmd.keyframe_move.track.layer);
             if (!l) return Errc::NotFound;
+            if (cmd.keyframe_move.track.property == TrackProperty::MeshWarp)
+                return mesh_warp::key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe_move.track, false);
             if (!track) return Errc::NotFound;
             if (track->move(cmd.keyframe_move.fromTime, cmd.keyframe_move.toTime) == kInvalidIndex) return Errc::NotFound;
@@ -13939,6 +14603,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeSetValue: {
             Layer* l = need_layer(cmd.keyframe.track.layer);
             if (!l) return Errc::NotFound;
+            if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
+                return mesh_warp::key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track) return Errc::NotFound;
             const u32 idx = track->find_exact(cmd.keyframe.time);
@@ -13952,6 +14618,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::KeyframeSetEasing: {
             Layer* l = need_layer(cmd.keyframe_interp.track.layer);
             if (!l) return Errc::NotFound;
+            if (cmd.keyframe_interp.track.property == TrackProperty::MeshWarp)
+                return mesh_warp::key_command(*l, cmd, playback_.current());
             const KeyframeInterpPayload& k = cmd.keyframe_interp;
             Track* track = command_track(*l, k.track, false);
             if (!track) return Errc::NotFound;

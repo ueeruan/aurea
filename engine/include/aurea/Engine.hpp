@@ -51,6 +51,7 @@
 #include "aurea/memory/MemoryManager.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/playback/Playback.hpp"
+#include "aurea/tracking/RealCameraCapture.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/GPUBackend.hpp"
 #include "aurea/render/RenderScheduler.hpp"
@@ -746,6 +747,23 @@ public:
     [[nodiscard]] Result<u32> arrange_layer_times(const u64* layerIds, u32 count,
         LayerTimeArrangement mode, i64 playhead = 0) noexcept;
     [[nodiscard]] Result<u64> add_camera() noexcept;
+    // Both native interfaces send a display-oriented OpenGL pose. Capture
+    // state, timeline time, key creation and undo belong to the shared engine.
+    struct RealCameraStatus {
+        bool active = false;
+        bool recording = false;
+        i64 lastFrame = -1;
+        bool positional = false;
+    };
+    [[nodiscard]] Status real_camera_start(u64 packedLayer) noexcept;
+    [[nodiscard]] Status real_camera_record(bool recording) noexcept;
+    [[nodiscard]] Status real_camera_sample(const f32* pose16, u64 timestampNs,
+                                          bool positional, f32 sensitivity, bool inverted) noexcept;
+    [[nodiscard]] Status real_camera_recenter() noexcept;
+    /// Tracking is lost: record the last valid virtual pose as a constant.
+    [[nodiscard]] Status real_camera_hold() noexcept;
+    void real_camera_stop() noexcept;
+    [[nodiscard]] RealCameraStatus real_camera_status() noexcept;
     /// 0 directional, 1 point, 2 spot, 3 point light with a camera-projected flare.
     [[nodiscard]] Result<u64> add_light(u32 kind) noexcept;
     [[nodiscard]] u32 query_materials(u64 layer, f32* values, u32 capacity) noexcept;
@@ -885,6 +903,7 @@ public:
                         bool continuing) noexcept;
     /// "Redefinir malha": a de fábrica, sem keys. Um passo de desfazer.
     bool mesh_warp_reset(u64 layerId, u32 effectId) noexcept;
+    bool mesh_warp_toggle_key(u64 layerId, u32 effectId) noexcept;
     // --- Fantoche (aurea.distort.puppet; effects/Puppet.hpp) — EnginePuppet.cpp.
     // u, v = fração da caixa da camada (como a malha de deformação).
     /// Por pino ligado kPuppetPinFloats floats: índice, u, v (posição no
@@ -1719,13 +1738,16 @@ private:
     [[nodiscard]] Status ensure_gpu_healthy_locked() noexcept;
     // renderMutex_: a failed export may leave a real submission in flight.
     [[nodiscard]] Status poll_export_gpu_locked(u64 timeoutNs = 0) noexcept;
+    void drain_capture_target_locked() noexcept;
     void retain_failed_export_gpu_locked() noexcept;
     void render_thread_main() noexcept;
     void update_perf(const FrameStats& stats, const RenderTimings& timings,
                      const FrameSnapshot& snap, u64 frameStartNs) noexcept;
     [[nodiscard]] RenderSettings current_render_settings() noexcept;
+    struct OffscreenRequest;
     [[nodiscard]] Status render_offscreen_impl(TextureHandle target, u32 width, u32 height, bool asPreview,
-                                               u64 expectedGpuGeneration, bool targetPreviewScale) noexcept;
+                                               u64 expectedGpuGeneration, bool targetPreviewScale,
+                                               OffscreenRequest& request) noexcept;
     [[nodiscard]] Status capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& width, u32& height,
                                                 bool asPreview) noexcept;
     static const ImagePixels* image_lookup(void* self, AssetId id);
@@ -1769,11 +1791,20 @@ private:
     JobSystem          jobs_{};
     MemoryManager      memory_{};
     History            history_{};
+    tracking::RealCameraCapture realCameraPose_;
+    RealCameraStatus realCameraState_;
+    CompositionId realCameraComp_{};
+    LayerId realCameraLayer_{};
+    bool realCameraPlaybackStarted_ = false;
+    void real_camera_end_locked(bool pause) noexcept;
+    [[nodiscard]] Status real_camera_commit_locked() noexcept;
+    [[nodiscard]] Layer* real_camera_preview_layer_locked() noexcept;
     EffectRegistry     effectRegistry_{};
     AdaptiveResolutionController* adaptive_ = nullptr;
 
     std::unique_ptr<GPUBackend> gpu_;
     u64                pendingExportGpuFrame_ = 0, pendingExportGpuGeneration_ = 0; ///< renderMutex_
+    std::atomic<u64>   exportOriginalModelBytes_{0}; ///< extra CPU sources, outside the preview/shared model map
     u64                gpuGeneration_ = 0; ///< under renderMutex_; survives backend/device recreation
     bool               gpuRecoveryPending_ = false; ///< renderMutex_; failed rebuild remains retryable
     Renderer           renderer_;
@@ -1835,6 +1866,8 @@ private:
         i64 effectsBase = 0;                        ///< offset da camada de origem (início dela em tempo local)
         f64 effectsFps = 0.0;                       ///< fps da composição de origem (colar numa pré-comp com outro fps reescala)
         struct Key { TrackProperty property; u32 effectIndex; u32 effectParamIndex; EffectTypeId effectType; Keyframe key; u32 effectOrdinal = 0; };
+        struct MeshKey { u32 effectOrdinal; u32 rows; u32 cols; MeshWarpKey key; };
+        std::vector<MeshKey> meshKeys;
         std::vector<Key> keys;                       ///< tempo relativo ao instante copiado (0)
         /// Copiar animação: os keyframes de FORMA (morph) da camada vetorial,
         /// por (grupo, caminho), com o tempo relativo como `keys`.
@@ -1886,12 +1919,25 @@ private:
     bool wakeFlag_ = false;
     // Ritmo do preview pelo conteúdo (render_frame(onlyIfChanged)).
     std::atomic<bool> forceRender_{true};     ///< a UI mudou algo / superfície nova
+    std::atomic<u64> previewRetryDueNs_{0};   ///< retry de recurso/GPU; uma edição cancela a espera
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
     PreviewRefill previewRefill_;
     PreviewIdleBuffer previewIdle_;          ///< render thread / renderMutex_
+    std::atomic<bool> livePreviewGraphActive_{false}; ///< secondary effect-preview early Busy without renderMutex_
+    PreviewIdleKey livePreviewGraphKey_{};
+    u64 livePreviewGraphPlaybackGeneration_ = 0, livePreviewGraphGpuGeneration_ = 0;
+    bool livePreviewGraphPlaying_ = false, livePreviewGraphRefine_ = false;
+    void cancel_preview_graph_locked() noexcept;
+    [[nodiscard]] bool continue_preview_graph_locked(u64 frameStart, Status& result) noexcept;
     std::atomic<u64> previewPressureUntilNs_{0}; ///< trim_memory(>= RUNNING_LOW): prévia guardada pausada até aqui
-    std::atomic<u32> offscreenReaders_{0};    ///< idle work must not steal capture decode targets
+    std::mutex offscreenRequestMutex_;       ///< one synchronous capture owns prepare through readback
+    std::atomic<u32> offscreenReaders_{0};    ///< display/idle work must not steal capture graph or decode targets
+    std::atomic<bool> offscreenCancelled_{false}; ///< lifecycle interrupts capture segments before joining ownership
+    std::mutex captureRetirementMutex_;      ///< timeout queues cleanup without waiting for render ownership
+    TextureHandle pendingCaptureTarget_{};
+    GPUBackend* pendingCaptureGpu_ = nullptr;
+    u64 pendingCaptureGeneration_ = 0;
     // Protected by modelMutex_. The published packed status is lock-free for UI.
     bool previewBuffering_ = false;
     i64 previewBufferStart_ = 0;

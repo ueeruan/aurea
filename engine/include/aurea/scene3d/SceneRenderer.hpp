@@ -334,6 +334,9 @@ struct SceneStats {
     u32 shadowMapSize = 0;       ///< lado do mapa de sombra usado (0 = sem sombra)
     u64 geometryBytes = 0;
     u64 textureBytes = 0;
+    u32 morphUploads = 0;       ///< unique deformed primitive streams built this frame
+    u64 morphVertices = 0;      ///< vertices actually deformed, shared copies counted once
+    u64 morphUploadBytes = 0;   ///< aligned deformed vertex buffers, all scene/blur builds
 };
 
 /// Matriz clip ← vista, perspectiva com Z REVERSO e far infinito: perto → 1,
@@ -373,6 +376,9 @@ public:
     /// Solta modelos que nenhum frame usou nos últimos `idleFrames`.
     void collect(u64 frameNumber, u64 idleFrames = 240) noexcept;
     void release_all() noexcept;
+    /// Between completed frames: retire only model resources, without waiting
+    /// for environment-building futures or for GPU completion.
+    void release_models() noexcept;
     /// Between frames only: free reusable upload storage; busy tickets retain ownership.
     u32 trim_upload_pools() noexcept;
     /// Between frames after the GPU is idle: release environments not used by
@@ -441,11 +447,22 @@ public:
     /// Only a lower-quality set of the same HDRI may serve as a pending fallback.
     [[nodiscard]] const EnvSet* environment_set(const SceneEnvironment& env, u64 frameNumber, bool wait = true) noexcept;
     void set_environment_wait(bool wait) noexcept { environmentWait_ = wait; }
+    /// Exact-capture diagnostics only; never changes environment quality/work.
+    bool set_environment_trace(bool enabled) noexcept { const bool old = environmentTrace_; environmentTrace_ = enabled; return old; }
     [[nodiscard]] bool has_environment() const noexcept { return irradiance_.valid(); }
     [[nodiscard]] bool environment_pending() const noexcept { return pendingEnv_.valid() || pendingObjectEnv_.valid(); }
     /// Export e captura usam a qualidade final: esperam o ambiente (ou o geram
     /// agora). O preview não chama — segue sem travar.
     void finish_environment(const SceneEnvironment& env) noexcept;
+    /// Poll one final map job, consuming its future only after it is ready.
+    /// Ready maps use the existing scene/object GPU caches; no quality fallback.
+    [[nodiscard]] Status prepare_environment(const SceneEnvironment& env, u64 frameNumber,
+                                              bool object = false) noexcept;
+    /// Optional native-test gate, copied into the final CPU job. Its owner must
+    /// release/join the job before destroying the context. Null in production.
+    void set_environment_prepare_probe(void (*beforeBuild)(void*), void* context) noexcept {
+        environmentPrepareProbe_ = beforeBuild; environmentPrepareProbeContext_ = context;
+    }
     /// Ambiente atual (0 = estúdio; ~0 = nenhum ainda).
     [[nodiscard]] u64 environment_key() const noexcept { return envKey_; }
     /// Pede o ambiente do quadro: reutiliza seus mapas, ou gera fora da thread
@@ -575,6 +592,9 @@ private:
     u64 pendingObjectKey_ = ~0ull;
     u32 pendingObjectSpecTier_ = 0;
     bool environmentWait_ = false;
+    bool environmentTrace_ = false;
+    void (*environmentPrepareProbe_)(void*) = nullptr;
+    void* environmentPrepareProbeContext_ = nullptr;
     void poll_object_environment(u64 frameNumber, bool wait) noexcept;
     bool envRequested_ = false;
     u64 envKey_ = ~0ull;       ///< o que está na GPU

@@ -484,7 +484,7 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
             if (store.primary != layer) store.select(layer)
             openPanel(store, ui, when (property) {
                 30 -> EditorPanel.Effects
-                31 -> EditorPanel.Effects
+                31, 44 -> EditorPanel.Effects
                 32 -> EditorPanel.Audio
                 33 -> EditorPanel.Text
                 43 -> EditorPanel.Mask
@@ -515,7 +515,7 @@ private fun onKeyframeTapped(store: EditorStore, ui: EditorUi, layer: Long, key:
     if (store.primary != layer || store.selection.size != 1) store.select(layer)
     val current = ui.panel
     if (current != null && current != EditorPanel.Curve) return
-    openPanel(store, ui, if (key.property == TrackProperty.EFFECT_PARAM) EditorPanel.Effects else EditorPanel.Curve)
+    openPanel(store, ui, if (key.property == TrackProperty.EFFECT_PARAM || key.property == TrackProperty.MESH_WARP) EditorPanel.Effects else EditorPanel.Curve)
 }
 
 /**

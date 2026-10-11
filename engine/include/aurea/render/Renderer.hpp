@@ -262,6 +262,15 @@ struct RenderLayer {
 };
 
 struct FrameSnapshot {
+    struct VideoSourceWait {
+        LayerId layer{};
+        AssetId asset{};
+        u64 decodeWork = 0;   ///< successful reads, including discarded preroll
+        bool opening = false;
+        bool missing = false;
+        bool stale = false;
+        bool failed = false;
+    };
     struct SceneExposureBatch {
         u32 scene = 0;
         u32 samplesPerBatch = 0;
@@ -287,6 +296,9 @@ struct FrameSnapshot {
     u32  videoLayers = 0;
     u32  staleVideoFrames = 0;         ///< mostrando frame aproximado (scrub)
     u32  missingVideoFrames = 0;       ///< nenhum frame ainda (primeiro decode)
+    /// Export-only pending sources, including omitted layers and nested clips.
+    /// Each source owns its watchdog; another decoder cannot renew its clock.
+    std::vector<VideoSourceWait> videoSourceWaits;
     /// Camadas visíveis no instante que ficaram de fora por estarem inteiras
     /// fora da composição (sem decode, sem passe). Fase 8C §20.
     u32  culledLayers = 0;
@@ -353,12 +365,22 @@ struct RenderSettings {
     /// Exact captures can finish pure, unblurred groups before their 2D graph.
     /// Their immutable scene state, shadow resolution and post quality stay exact.
     bool stageUnblurredScenes = false;
+    /// Whole-graph OOM may recover with the same ordered passes. Offline
+    /// callers wait bounded fences; display callers resume between render turns.
+    bool allowGraphSegments = true;
     /// Incremental, opt-in offline path; authored samples and quality are kept.
     /// Mixed planes/particles and nested compositions retain the original path.
     bool boundedSceneExposure = false;
     u64 sceneExposureBatchBudgetBytes = 32ull << 20;
     const std::atomic<bool>* cancelFlag = nullptr;
     u64 sceneExposureFenceTimeoutNs = 120ull * 1000 * 1000 * 1000;
+    /// Capture recovery shares the caller's absolute clock, including the
+    /// failed whole compile. Only a completed submitted fence may renew its
+    /// no-progress window; export and ordinary preview leave these null.
+    u64 (*offscreenFenceDeadline)(void*) = nullptr;
+    void (*offscreenFenceSubmitted)(void*, u64) = nullptr;
+    void (*offscreenFenceCompleted)(void*, u64) = nullptr;
+    void* offscreenFenceContext = nullptr;
     /// Exact offscreen captures enqueue cold local AI, then wait without holding
     /// the renderer lock. Export's private renderer keeps synchronous inference.
     bool deferLocalAi = false;
@@ -435,6 +457,8 @@ struct RenderTimings {
     f32 gpuCompositeMs = 0.0f;
     f32 gpuOutputMs = 0.0f;
     bool gpuMeasured = false;
+    /// Latest-submission queries cannot represent a memory-segmented frame.
+    bool gpuProfileFragmented = false;
 };
 
 class Renderer final : public EffectResources {
@@ -462,10 +486,23 @@ public:
                      MediaManager& media, u64 frameNumber, DecodeMode mode,
                      i32 direction, f32 speed, u64 epoch, FrameSnapshot& out);
 
+    /// Poll final CPU environment jobs without waiting on their futures.
+    /// Busy means preparation is still pending; the caller owns one fixed
+    /// resource deadline and preserves snapshot/project ownership between polls.
+    /// Ready maps upload into the ordinary GPU caches, without extra CPU copies.
+    [[nodiscard]] Status prepare_capture_resources(FrameSnapshot& snapshot,
+                                                   const RenderSettings& settings) noexcept;
+
     /// Fase 2 (sem lock). `offscreen` nulo = apresenta no swapchain.
     [[nodiscard]] Status render(FrameSnapshot& snapshot, const RenderSettings& settings,
                                 const OffscreenTarget* offscreen, FrameStats& stats,
                                 RenderTimings& timings) noexcept;
+    [[nodiscard]] bool preview_graph_pending() const noexcept { return previewGraph_.active; }
+    /// Returns Busy while genuine GPU work is pending, without waiting for it.
+    /// The caller must preserve the prepared snapshot until completion/cancel.
+    [[nodiscard]] Status continue_preview_graph(FrameStats&, RenderTimings&) noexcept;
+    void cancel_preview_graph() noexcept;
+    [[nodiscard]] bool preview_graph_settings_match(const RenderSettings&) const noexcept;
 
     /// Automatic capture phases are bounded to four pure groups, each at most
     /// 320 x 320. Explicit RenderSettings retain their independent full-quality
@@ -742,6 +779,36 @@ private:
     [[nodiscard]] Status render_bounded_scene_exposures(const FrameSnapshot&, const RenderSettings&,
         u32 width, u32 height, std::span<TextureHandle> textures,
         FrameStats& stats, RenderTimings& timings) noexcept;
+    [[nodiscard]] Status render_segmented_graph(const RenderSettings&, FrameBegin&,
+        RenderTimings&, bool& frameOpen) noexcept;
+    struct PreviewFrame;
+    struct RenderCompletion {
+        FrameBegin frame{};
+        FrameStats exposureStats{};
+        HeavyStats stagedStats{};
+        PreviewFrame* cached = nullptr;
+        std::span<StagedSceneTarget> targets{};
+        u64 effectsBefore = 0, began = 0, buildFrame = 0;
+        u32 width = 0, height = 0;
+        bool offscreen = false;
+    };
+    struct PendingPreviewGraph {
+        bool active = false, initial = false;
+        u32 nextPass = 0;
+        u64 waitingFrame = 0, started = 0;
+        u64 activeRecordNs = 0;
+        FrameSnapshot* snapshot = nullptr;
+        RenderSettings settings{};
+        RenderCompletion completion{};
+        RenderTimings timings{};
+        std::unique_ptr<TextureHandle[]> exposureTextures;
+        u32 exposureCount = 0;
+        std::unique_ptr<StagedSceneTarget[]> stagedTargets;
+        u32 stagedCount = 0;
+    } previewGraph_;
+    [[nodiscard]] Status finish_render(FrameSnapshot&, const RenderSettings&, const OffscreenTarget*,
+        Status, bool frameOpen, RenderCompletion&, FrameStats&, RenderTimings&) noexcept;
+    void release_preview_graph_scope() noexcept;
     void collect_resources(u64 frameNumber) noexcept;
     void read_timings(RenderTimings& t) noexcept;
 
@@ -961,6 +1028,7 @@ private:
     std::vector<PendingUpload> uploads_;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
+    bool videoSourceFailed_ = false; ///< principal source could not supply GPU pixels for this frame
     struct PreviewFrame { i64 time = -1; TextureHandle texture{}; bool complete = false; u64 used = 0, gpuFrame = 0; };
     std::vector<PreviewFrame> previewFrames_;
     u64 previewCacheBudget_ = 0, previewCacheKey_ = 0, previewCacheUse_ = 0;
@@ -994,10 +1062,12 @@ private:
     // quadro preparado varre o projeto (efeitos e 3D de TODAS as camadas, não
     // só as do instante) e junta o que falta; o render compila antes do grafo.
     void scan_for_warmup(const Project& project) noexcept;
+    void warm_scene_pipelines(const FrameSnapshot& snapshot) noexcept;
     void flush_warmup() noexcept;
     std::vector<PipelineKey> warmPending_;
     std::vector<EffectTypeId> warmedEffects_;   ///< ordenado; tipos já pedidos
-    bool warmed3d_ = false;
+    u32 warmSceneQualities_ = 0;   ///< qualities used by all compositions, including future/nested layers
+    u32 warmedSceneSamples_ = 0;  ///< actual GPU sample counts already queued
     u32 warmedForProject_ = 0;
     u32 framesRendered_ = 0;
     u64 frameNumber_ = 0;

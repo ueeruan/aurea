@@ -228,8 +228,10 @@ enum class TrackProperty : u16 {
     RigBone,           ///< rotação do osso do rig 2D, graus (paramIndex = id da junta na ponta do osso)
     ShapePart,         ///< parte da forma 3D (effectIndex = parte, paramIndex = canal 0..8: pos XYZ, rot XYZ °, escala XYZ)
     MaskParam,         ///< máscara: effectIndex = id estável, paramIndex = 0 feather, 1 expansão, 2 opacidade
+    MeshWarp,          ///< malha de deformação inteira: effectIndex = id estável, paramIndex = 0; dados em EffectInstance::meshes
     _Count,
 };
+static_assert(static_cast<u16>(TrackProperty::MeshWarp) == 44);
 
 enum class ExportCodec : u16 {
     H264 = 0, HEVC, AV1, ProRes,

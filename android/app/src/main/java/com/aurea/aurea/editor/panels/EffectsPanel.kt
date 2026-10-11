@@ -263,7 +263,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
 
     // Veio de um losango de efeito da timeline (ou volta da curva dele)? Abre ali.
     val entry = remember(layerId) {
-        store.selectedKeyframe?.takeIf { it.first == layerId && it.second.property == TrackProperty.EFFECT_PARAM }?.second
+        store.selectedKeyframe?.takeIf { it.first == layerId && (it.second.property == TrackProperty.EFFECT_PARAM || it.second.property == TrackProperty.MESH_WARP) }?.second
             ?.takeIf { k -> effects.any { it.effectId == k.effectIndex } }
     }
     // As ferramentas-efeito que a camada usa (cartões no topo da pilha).
@@ -311,15 +311,19 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     }
     var known by remember(layerId) { mutableStateOf(effects.map { it.effectId }.toSet()) }
     var selected by remember(layerId) {
-        mutableStateOf(entry?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) })
+        mutableStateOf(entry?.takeIf { it.property == TrackProperty.EFFECT_PARAM }?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) })
     }
+    var selectedMesh by remember(layerId) { mutableStateOf(entry?.takeIf { it.property == TrackProperty.MESH_WARP }?.effectIndex) }
+    val meshOpen = openId != null && effects.any { it.effectId == openId && it.typeId == effectTypeId("aurea.distort.mesh_warp") }
+    val meshSelected = meshOpen && selectedMesh == openId
     val puppet = com.aurea.aurea.editor.PuppetStage
     val puppetOpen = layerId != null && puppet.layer == layerId && puppet.effect == openId &&
         effects.any { it.effectId == openId && it.typeId == puppet.TYPE }
     val activePins = remember(store, layerId, openId, puppetOpen, store.rigRevision, store.curveRevision) {
         if (puppetOpen && layerId != null && openId != null) store.puppetPins(layerId, openId!!) else FloatArray(0)
     }
-    val focus = if (puppetOpen && (puppet.editing || selected == null))
+    val focus = if (meshSelected) listOf(TrackKey(TrackProperty.MESH_WARP, openId!!, 0))
+    else if (puppetOpen && (puppet.editing || selected == null))
         puppetPanelTimelineFocus(puppet.effect, puppet.selected, activePins)
     else selected?.let { listOf(TrackKey(31, it.effectId, it.param * 4 + it.component)) } ?: emptyList()
     androidx.compose.runtime.DisposableEffect(store, layerId, focus) {
@@ -385,9 +389,15 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         val id = openId
         if (id == null) {
             selected = null
+            selectedMesh = null
+            return@LaunchedEffect
+        }
+        if (effects.any { it.effectId == id && it.typeId == effectTypeId("aurea.distort.mesh_warp") } && selected?.effectId != id) {
+            selected = null; selectedMesh = id
             return@LaunchedEffect
         }
         if (selected?.effectId == id) return@LaunchedEffect
+        selectedMesh = null
         val visible = store.effectParams[id].orEmpty().map { ParamSlot.of(it) }.filter { !it.hidden }
         val groups = splitPrincipal(store.typeOf(id), visible)
         val first = (groups.first + groups.second).firstOrNull { it.animatable }
@@ -396,12 +406,18 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     }
 
     // O trilho só precisa do ESTADO do losango — derivado, não do valor que anda.
-    val railLook by remember(store) {
-        derivedStateOf { selected?.let { effectLook(store, it.effectId, it.param) } ?: KeyframeLook.None }
-    }
-    val railAnimatable by remember(store) {
+    val railLook by remember(store, meshSelected, openId) {
         derivedStateOf {
-            selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false
+            if (meshSelected) {
+                val keys = store.primaryKeys().filter { it.property == TrackProperty.MESH_WARP && it.effectIndex == openId }
+                val local = store.detail?.localFrame(store.playhead)
+                if (keys.any { it.time == local }) KeyframeLook.KeyHere else if (keys.isEmpty()) KeyframeLook.None else KeyframeLook.Animated
+            } else selected?.let { effectLook(store, it.effectId, it.param) } ?: KeyframeLook.None
+        }
+    }
+    val railAnimatable by remember(store, meshSelected) {
+        derivedStateOf {
+            meshSelected || (selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false)
         }
     }
     val curveTrackReady by remember(store) {
@@ -438,7 +454,8 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 onKeyframe = if (railAnimatable) {
                     {
                         // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
-                        selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
+                        if (meshSelected) store.primary?.let { layer -> openId?.let { store.meshWarpToggleKey(layer, it) } }
+                        else selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
                     }
                 } else {
                     null
@@ -525,7 +542,9 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                         onToggleAdvanced = {
                             advancedOpen = if (e.effectId in advancedOpen) advancedOpen - e.effectId else advancedOpen + e.effectId
                         },
-                        onSelect = { selected = it },
+                        onSelect = { selectedMesh = null; selected = it },
+                        meshSelected = meshSelected && openId == e.effectId,
+                        onSelectMesh = { selected = null; selectedMesh = e.effectId },
                         onParamMenu = { paramMenu = it },
                         onMenu = { menuFor = e },
                         onRemove = { store.removeEffect(e.effectId) },
@@ -953,6 +972,8 @@ private fun EffectCardItem(
     onToggle: () -> Unit,
     onToggleAdvanced: () -> Unit,
     onSelect: (ParamKey) -> Unit,
+    meshSelected: Boolean,
+    onSelectMesh: () -> Unit,
     onParamMenu: (ParamMenuTarget) -> Unit,
     onMenu: () -> Unit,
     onRemove: () -> Unit,
@@ -1002,7 +1023,7 @@ private fun EffectCardItem(
             TimeRemapEffectEditor(env, id)
             return@FxStackCard
         }
-        if (effect.typeId == effectTypeId("aurea.distort.mesh_warp")) com.aurea.aurea.editor.MeshWarpCardTools(store, id)
+        if (effect.typeId == effectTypeId("aurea.distort.mesh_warp")) com.aurea.aurea.editor.MeshWarpCardTools(store, id, meshSelected, onSelectMesh)
         if (effect.typeId == effectTypeId("aurea.distort.puppet")) com.aurea.aurea.editor.PuppetCardTools(store, id)
         val visible = slots.filter { !it.hidden }
         if (visible.isEmpty()) {

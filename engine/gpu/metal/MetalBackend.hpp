@@ -152,7 +152,13 @@ public:
 
     [[nodiscard]] Status begin_frame(FrameBegin& out) noexcept override;
     [[nodiscard]] Status end_frame() noexcept override;
+    [[nodiscard]] bool can_discard_frame() const noexcept override { return true; }
+    [[nodiscard]] Status discard_frame() noexcept override;
     [[nodiscard]] Status begin_offscreen_frame(FrameBegin& out) noexcept override;
+    [[nodiscard]] bool can_lease_presentable_frame() const noexcept override { return true; }
+    [[nodiscard]] Status begin_presentable_frame_lease() noexcept override;
+    [[nodiscard]] Status begin_leased_frame(FrameBegin& out) noexcept override;
+    void end_presentable_frame_lease() noexcept override;
 
     [[nodiscard]] Result<TextureHandle>  create_texture(const TextureDesc& desc) noexcept override;
     [[nodiscard]] Result<BufferHandle>   create_buffer(const BufferDesc& desc) noexcept override;
@@ -217,6 +223,8 @@ public:
         const ExternalImageDesc& img) noexcept override;
     void release_external_image(TextureHandle imported) noexcept override;
     u32 trim_external_images() noexcept override;
+    void begin_external_image_scope() noexcept override;
+    void end_external_image_scope() noexcept override;
 
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 

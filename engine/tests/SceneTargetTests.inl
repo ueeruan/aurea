@@ -32,6 +32,7 @@ SceneTargetBudgetRun scene_target_budget_run(bool staged, u64 limit) {
     f.renderer.set_transient_cache_budget(1); // Retain live targets; idle targets cannot hide the cause.
     f.renderer.set_tracked_resource_budget(limit, [](void*) noexcept -> u64 { return u64{12} << 20; });
     RenderSettings settings; settings.finalQuality = true; settings.stageUnblurredScenes = staged; settings.dither = false;
+    settings.allowGraphSegments = false; // Compare unchanged whole-graph and 3D-stage admission.
     FrameSnapshot snapshot;
     f.renderer.prepare(*f.comp, f.project, FrameIndex{0}, nullptr, nullptr, nullptr, settings, 1, 0, DecodeMode::Still, 1, snapshot);
     test_fixtures::scene_target::add_scene(snapshot, test_fixtures::material_override::asset());
@@ -126,10 +127,18 @@ AUREA_TEST(SceneTargets, SubmittedCancellationAndTimeoutDoNotStartTheMainGraph) 
         TextureDesc desc; desc.width = 320; desc.height = 180; desc.renderTarget = true; desc.format = SurfaceFormat::RGBA16F;
         const auto texture = f.backend.create_texture(desc); AUREA_CHECK(texture.ok()); if (!texture) continue;
         RenderSettings settings; settings.finalQuality = settings.stageUnblurredScenes = true;
-        settings.cancelFlag = &cancelled; settings.sceneExposureFenceTimeoutNs = cancel ? 1'000'000'000 : 1;
+        // Cancellation is injected by wait_frame after submitting the stage.
+        // Allow cold environment preparation to reach that callback; the
+        // separate timeout row deliberately expires before its first wait.
+        settings.cancelFlag = &cancelled; settings.sceneExposureFenceTimeoutNs = cancel ? 10'000'000'000 : 1;
         OffscreenTarget target{*texture, 320, 180}; FrameStats stats; RenderTimings timings;
         const u32 destroyed = f.backend.texturesDestroyed;
+        const u64 started = monotonic_ns();
         const auto result = f.renderer.render(snapshot, settings, &target, stats, timings);
+        std::printf("\n    submitted stage stop: cancel=%u result=%u elapsed_ms=%.3f waits=%u submitted=%u\n",
+            cancel ? 1u : 0u, static_cast<u32>(result.code()),
+            static_cast<double>(monotonic_ns() - started) * 1e-6, waits, f.backend.framesSubmitted);
+        if (cancel) AUREA_CHECK(waits > 0);
         AUREA_CHECK_EQ(result.code(), cancel ? Errc::Cancelled : Errc::Timeout);
         AUREA_CHECK_EQ(f.backend.framesSubmitted, 1u); AUREA_CHECK(!f.backend.frameOpen);
         AUREA_CHECK(f.renderer.take_incomplete()); AUREA_CHECK(!pending.empty());
@@ -205,6 +214,7 @@ AUREA_TEST(SceneTargets, PartialGraphPressureWaitsBeforeReclaimAndUsesTheSameTar
     const auto targetTexture = f.backend.create_texture(desc); AUREA_CHECK(targetTexture.ok()); if (!targetTexture) return;
     OffscreenTarget target{*targetTexture, desc.width, desc.height};
     RenderSettings settings; settings.finalQuality = true; settings.dither = false;
+    settings.allowGraphSegments = false; // This fixture audits failed whole-graph retirement itself.
     FrameSnapshot snapshot;
     f.renderer.prepare(*f.comp, f.project, FrameIndex{0}, nullptr, nullptr, nullptr, settings, 1, 0, DecodeMode::Still, 1, snapshot);
     FrameStats stats; RenderTimings timings;
@@ -267,4 +277,55 @@ AUREA_TEST(SceneTargets, TrackedAdmissionCanFailWithIdleTargetsBelowTheInternalR
     AUREA_CHECK_EQ(pool.trim_unreferenced(1), 1u);
     const auto admitted = pool.acquire(small); AUREA_CHECK(admitted.valid());
     pool.release(admitted); pool.clear(); backend.queryMemoryStats = {};
+}
+
+AUREA_TEST(SceneTargets, CompletedPreviewBackingIsRetiredBeforeTheFirstExactShadowStage) {
+    RenderFixture f; f.backend.mapBuffers = true;
+    const auto id = f.solid("old preview ellipse", Vec4{.3f, .6f, .9f, 1});
+    auto* layer = f.comp->layer(id);
+    layer->shape.shapeType = 1; layer->shape.bounds = Rect{0, 0, 1024, 1024};
+    auto blur = make_effect(f.effects, effect_keys::kGaussianBlur, 0);
+    blur.params[0].constant.v[0] = 3; layer->effects.push_back(std::move(blur));
+    TextureDesc desc; desc.width = 320; desc.height = 180;
+    desc.format = SurfaceFormat::RGBA16F; desc.renderTarget = desc.sampled = true;
+    const auto texture = f.backend.create_texture(desc); AUREA_CHECK(texture.ok()); if (!texture) return;
+    OffscreenTarget target{*texture, 320, 180}; FrameStats stats; RenderTimings timings;
+    RenderSettings preview; preview.dither = false;
+    FrameSnapshot prior;
+    f.renderer.prepare(*f.comp, f.project, FrameIndex{0}, nullptr, nullptr, nullptr, preview, 1, 0, DecodeMode::Still, 1, prior);
+    AUREA_CHECK(f.renderer.render(prior, preview, &target, stats, timings).ok());
+    AUREA_CHECK(f.renderer.pool_stats().bytes > 0);
+    std::vector<TextureHandle> priorTargets;
+    for (usize i = 0; i < f.backend.textures.size(); ++i) {
+        const auto& d = f.backend.textures[i];
+        if (f.backend.textureAlive[i] && d.width == 1024 && d.height == 1024)
+            priorTargets.push_back(TextureHandle{i + 1});
+    }
+    AUREA_CHECK(!priorTargets.empty());
+    // Model a driver that collects empty reserved blocks at begin-frame.
+    // A pool eviction after begin cannot make this physical reservation vanish.
+    u64 retained = 128ull << 20; bool collected = false;
+    f.backend.beforeBeginOffscreenFrame = [&] {
+        bool live = false;
+        for (const auto h : priorTargets) live = live || f.backend.textureAlive[h.id - 1];
+        if (!live) { retained = 0; collected = true; }
+    };
+    f.backend.queryMemoryStats = [&] {
+        GpuMemoryStats memory;
+        for (usize i = 0; i < f.backend.textures.size(); ++i) if (f.backend.textureAlive[i])
+            memory.usedBytes += f.backend.textures[i].estimated_bytes();
+        memory.reservedBytes = std::max(memory.usedBytes, retained); return memory;
+    };
+    f.renderer.set_tracked_resource_budget(96ull << 20);
+    FrameSnapshot exact; exact.compWidth = 1920; exact.compHeight = 1080;
+    test_fixtures::scene_target::add_scene(exact, test_fixtures::material_override::asset());
+    RenderSettings settings; settings.dither = false; settings.finalQuality = settings.stageUnblurredScenes = true;
+    stats = {}; timings = {};
+    AUREA_CHECK(f.renderer.render(exact, settings, &target, stats, timings).ok());
+    AUREA_CHECK(collected); AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(f.renderer.heavy_stats().lastShadowMapSize, 4096u);
+    AUREA_CHECK_EQ(timings.sceneExposureBatches, 1u);
+    AUREA_CHECK(f.backend.textureAlive[texture->id - 1]);
+    f.backend.beforeBeginOffscreenFrame = {}; f.backend.queryMemoryStats = {};
+    f.backend.destroy_texture(*texture);
 }

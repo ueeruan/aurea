@@ -1151,7 +1151,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea Beta 0.1.5 (2175) • 11/10/2026\n\n• Ekspor: proyek dengan 3D atau motion blur bisa diekspor lagi (model FBX/OBJ ditolak; anggaran GPU menolak tekstur tambahan). Media yang tidak bisa dibekukan tidak lagi menggagalkan ekspor.\n• Pratinjau lebih mulus: GPU tidak lagi menunggu di antara pass setiap bingkai, memori tidak dilepas setiap bingkai, potongan teks dan blur memakai ulang target.\n• Rotobrush: bingkai tidak membeku; bingkai yang Anda lihat diprioritaskan; status selalu terlihat (bingkai ini, klip, gagal); Akhir/Lapisan/Masker di dalam mode gambar; lapisan tembus pandang memperlihatkan yang di belakang.\n• 3D: peta metal dan kekasaran FBX/OBJ kini dibaca.\n• Upscale dengan AI: alat tersendiri di Beranda (pilih video dan faktor); 2,5 hingga 3× lebih cepat dengan model yang sama.\n• Real Camera: di menu tambah adegan 3D — kamera mengikuti ponsel dan Rekam mengubah gerakan menjadi keyframe.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.4 BETA 2 (2175) • 11/10/2026\n\n• Ekspor: proyek dengan 3D atau motion blur bisa diekspor lagi (model FBX/OBJ ditolak; anggaran GPU menolak tekstur tambahan). Media yang tidak bisa dibekukan tidak lagi menggagalkan ekspor.\n• Pratinjau lebih mulus: GPU tidak lagi menunggu di antara pass setiap bingkai, memori tidak dilepas setiap bingkai, potongan teks dan blur memakai ulang target.\n• Rotobrush: bingkai tidak membeku; bingkai yang Anda lihat diprioritaskan; status selalu terlihat (bingkai ini, klip, gagal); Akhir/Lapisan/Masker di dalam mode gambar; lapisan tembus pandang memperlihatkan yang di belakang.\n• 3D: peta metal dan kekasaran FBX/OBJ kini dibaca.\n• Upscale dengan AI: alat tersendiri di Beranda (pilih video dan faktor); 2,5 hingga 3× lebih cepat dengan model yang sama.\n• Real Camera: di menu tambah adegan 3D — kamera mengikuti ponsel dan Rekam mengubah gerakan menjadi keyframe.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -3611,6 +3611,15 @@ untuk mengedit kurvanya.</string>
     <string name="roto_progress">Melacak %1$d dari %2$d</string>
     <string name="roto_done">Selesai</string>
     <string name="roto_hint">Lukis objek dengan hijau; ganti ke Latar untuk membuang bagian. Goresan di frame lain memperbarui frame berikutnya.</string>
+    <string name="real_camera_tracking_position">Pelacakan posisi dan rotasi 3D aktif.</string>
+    <string name="real_camera_tracking_rotation">Hanya rotasi; mode ini tidak mengukur posisi.</string>
+    <string name="real_camera_tracking_limited">Pelacakan posisi dijeda. Tingkatkan pencahayaan dan gerakkan perangkat perlahan.</string>
+    <string name="real_camera_camera_permission">Izin kamera tidak tersedia: hanya rotasi.</string>
+    <string name="real_camera_camera_permission_prompt">Kamera melacak gerakan 3D perangkat. Gambar tidak direkam.</string>
+    <string name="real_camera_tracking_failed">Pelacakan tidak tersedia: hanya rotasi.</string>
+    <string name="real_camera_arcore_privacy">Pelacakan 3D memakai Google Play Services for AR (ARCore) dari Google LLC, tunduk pada Persyaratan Layanan Google dan Kebijakan Privasi Google.</string>
+    <string name="real_camera_google_terms">Persyaratan Google</string>
+    <string name="real_camera_google_privacy">Privasi Google</string>
     <string name="real_camera_title">Real Camera</string>
     <string name="real_camera_hint">Gerakkan ponsel: kamera 3D mengikuti. Rekam memutar lini masa dan menyimpan gerakan sebagai keyframe.</string>
     <string name="real_camera_record">Rekam</string>
@@ -3620,7 +3629,7 @@ untuk mengedit kurvanya.</string>
     <string name="real_camera_invert">Balik</string>
     <string name="real_camera_sensitivity">Sensitivitas</string>
     <string name="real_camera_done">Selesai</string>
-    <string name="real_camera_no_sensor">Perangkat ini tidak punya giroskop: Real Camera tidak bisa dipakai di sini.</string>
+    <string name="real_camera_no_sensor">Sensor orientasi tidak tersedia: Real Camera tidak dapat mengukur gerakan di perangkat ini.</string>
     <string name="roto_frame_ready">Bingkai ini: potongan siap</string>
     <string name="roto_frame_pending">Bingkai ini: menghitung potongan…</string>
     <string name="roto_clip_status">Klip: %1$d dari %2$d bingkai terpotong</string>

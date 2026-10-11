@@ -73,6 +73,7 @@ AdaptiveResolutionController::AdaptiveResolutionController(
 
 void AdaptiveResolutionController::configure(u32 compWidth, u32 compHeight,
                                              f32 targetFps) noexcept {
+    gpuBudgetLimitedStill_ = false;
     compWidth_ = compWidth ? compWidth : 1920;
     compHeight_ = compHeight ? compHeight : 1080;
 
@@ -158,6 +159,7 @@ void AdaptiveResolutionController::recompute_budget() noexcept {
 void AdaptiveResolutionController::set_user_scale(PreviewScale scale) noexcept {
     userScale_ = scale;
     if (scale == PreviewScale::Auto) return;   // volta ao automático
+    gpuBudgetLimitedStill_ = false;
 
     // Escolha manual nunca é sobreposta pelo automático. O usuário mandou; ele
     // vê o resultado, mesmo que o frame caia. A UI avisa se ficar lento.
@@ -319,6 +321,19 @@ void AdaptiveResolutionController::step_up() noexcept {
         return;
     }
     note_change(true);
+}
+
+bool AdaptiveResolutionController::notify_gpu_budget_exceeded(const ThermalState& thermal) noexcept {
+    if (!auto_mode()) return false;
+    gpuBudgetLimitedStill_ = true;
+    const u32 before = changeCount_;
+    state_.bottleneck = PreviewBottleneck::Memory;
+    step_down();
+    // Segmented timestamps are unavailable: no throughput ratio can be
+    // inferred from an older unrelated GPU sample or time between UI turns.
+    ratioPending_ = kInvalidIndex;
+    apply_quality(thermal);
+    return changeCount_ != before;
 }
 
 const AdaptiveState& AdaptiveResolutionController::update(const FrameStats& stats,

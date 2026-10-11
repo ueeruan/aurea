@@ -6,17 +6,27 @@
 #include <vector>
 
 int main(int argc, char** argv) {
-    if (argc != 3) return 2;
+    if (argc == 2 && std::string(argv[1]) == "--supports-shared-spv-key") return 0;
+    // Optional argument: the shared optimized SPIR-V lookup key when ESSL is
+    // translated from a semantically identical, driver-compatible module.
+    if (argc != 3 && argc != 4) return 2;
     try {
-        std::ifstream input(argv[1], std::ios::binary | std::ios::ate);
-        const auto size = input.tellg();
-        if (size <= 0 || size % 4) throw std::runtime_error("invalid SPIR-V file");
-        std::vector<uint32_t> words(static_cast<size_t>(size) / 4);
-        input.seekg(0);
-        if (!input.read(reinterpret_cast<char*>(words.data()), size)) throw std::runtime_error("SPIR-V read failed");
+        const auto load = [](const char* path) {
+            std::ifstream input(path, std::ios::binary | std::ios::ate);
+            const auto size = input.tellg();
+            if (size < 20 || size % 4) throw std::runtime_error("invalid SPIR-V file");
+            std::vector<uint32_t> words(static_cast<size_t>(size) / 4);
+            input.seekg(0);
+            if (!input.read(reinterpret_cast<char*>(words.data()), size)) throw std::runtime_error("SPIR-V read failed");
+            if (words[0] != 0x07230203u) throw std::runtime_error("invalid SPIR-V magic");
+            return words;
+        };
+        auto words = load(argv[1]);
+        const auto keyWords = argc == 4 ? load(argv[3]) : std::vector<uint32_t>{};
+        const auto& fingerprintWords = argc == 4 ? keyWords : words;
         uint64_t fingerprint = 14695981039346656037ull;
-        for (size_t i = 0; i < words.size() * 4; ++i) {
-            fingerprint ^= reinterpret_cast<const unsigned char*>(words.data())[i];
+        for (size_t i = 0; i < fingerprintWords.size() * 4; ++i) {
+            fingerprint ^= reinterpret_cast<const unsigned char*>(fingerprintWords.data())[i];
             fingerprint *= 1099511628211ull;
         }
         spirv_cross::CompilerGLSL compiler(std::move(words));

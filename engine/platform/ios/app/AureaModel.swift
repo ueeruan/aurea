@@ -18,6 +18,7 @@
 //  toa (e arrastaria o usuário para uma UI que engasga).
 // =============================================================================
 import Foundation
+import simd
 import AVFoundation
 import Photos
 import ImageIO
@@ -649,7 +650,8 @@ final class AureaModel: ObservableObject {
 
     func openCurve(property: UInt32, effect: UInt32 = UInt32.max, param: UInt32 = 0, time: Int32? = nil) {
         if panel != .curve { curveReturnPanel = panel }
-        curveProperty = property; curveEffect = effect; curveParam = param; curveSelectedTime = time; openPanel(.curve)
+        curveProperty = property; curveEffect = effect; curveParam = param; curveSelectedTime = time
+        openPanel(property == 44 ? .effects : .curve)
     }
     private var pendingExportURL: URL?
     /// A última rede contra o export parado (ExportStallWatch) e o modo de
@@ -773,7 +775,7 @@ final class AureaModel: ObservableObject {
                 // the fixture through the model opens the editor before the
                 // probe replaces its core compositions; Home has no surface.
                 _ = newProject(width: 1920, height: 1080, fps: 30, title: "Parity viewport")
-                exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
+                exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents, model: self)
                 refreshModel(force: true); enterEditor()
                 if let id = layers.first?.id { select(layerId: id, additive: false); panel = .effects }
             } else if scene == "manual-android-project", started {
@@ -799,24 +801,33 @@ final class AureaModel: ObservableObject {
                         panel = .dock; seek(toFrame: 0); setLooping(true); toggleRawPlayback()
                     }
                 }
-            } else if ["video-move", "playback-stress", "clip-edit"].contains(scene), started {
+            } else if ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene), started {
                 // Reuse the real H.264 export fixture, then import through the
                 // production decoder. The UI test operates only the visible dock.
                 _ = newProject(width: 1920, height: 1080, fps: 30, title: "Parity viewport")
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 if exportProbe["passed"] as? Bool == true,
                    let movie = exportProbe["movieFile"] as? String,
-                   newProject(width: 640, height: 360, fps: 30, title: "Video dock move") {
+                   newProject(width: scene == "keyflow-video-text-export" ? 1920 : 640,
+                              height: scene == "keyflow-video-text-export" ? 1080 : 360,
+                              fps: 30, title: "Video dock move") {
                     let layer = engine.importVideo(AureaPaths.documents.appendingPathComponent(movie).path, name: "Dock move video")
                     if layer >= 0 {
                         if let compositionID = (engine.composition()?[AureaCompositionId] as? NSNumber)?.uint64Value {
-                            engine.setComposition(compositionID, duration: scene == "playback-stress" ? 30 : 180)
+                            engine.setComposition(compositionID, duration: ["playback-stress", "keyflow-video-text-export"].contains(scene) ? 30 : 180)
                         }
                         if scene == "clip-edit" {
                             engine.setLayer(layer, startFrame: 0, endFrame: 15, offsetFrames: 5, setOffset: true)
                         }
                         refreshModel(force: true); enterEditor(); select(layerId: layer, additive: false)
                         panel = .dock; seek(toFrame: scene == "video-move" ? 60 : 0)
+                        if scene == "keyflow-video-text-export" {
+                            let text = engine.addText("AUREA VIDEO WITH TEXT")
+                            if text >= 0 {
+                                engine.setLayer(text, startFrame: 0, endFrame: 30, offsetFrames: 0, setOffset: true)
+                                refreshModel(force: true); select(layerId: text, additive: false); panel = .none
+                            }
+                        }
                         if scene == "playback-stress" {
                             _ = engine.addText("Texto durante reprodução")
                             _ = engine.createCaptions(layer, words: [["word": "Legenda", "start": 0.0, "end": 0.9]], options: [:])
@@ -993,14 +1004,15 @@ final class AureaModel: ObservableObject {
                             engine.setLayerMotionBlurLength(1.25, forLayer: id)
                             refreshModel(force: true); transformTab = 5; panel = .transform
                         }
-                    case "motion-blur-export":
+                    case "motion-blur-export", "keyflow-simple-text", "keyflow-multiple-exports":
                         let id = engine.addText("AUREA MOTION BLUR")
                         if id >= 0 {
-                            _ = engine.applyTextPreset(id, preset: 11)
+                            let frames: Int32 = scene == "keyflow-multiple-exports" ? 12 : 60
+                            if scene == "motion-blur-export" { _ = engine.applyTextPreset(id, preset: 11) }
                             engine.run {
-                                $0.setMotionBlur(true, forLayer: id)
-                                $0.setMotionBlurSettings(true, shutter: 180)
-                                $0.setLayer(id, startFrame: 0, endFrame: 60, offsetFrames: 0, setOffset: false)
+                                $0.setMotionBlur(scene == "motion-blur-export", forLayer: id)
+                                $0.setMotionBlurSettings(scene == "motion-blur-export", shutter: 180)
+                                $0.setLayer(id, startFrame: 0, endFrame: frames, offsetFrames: 0, setOffset: false)
                                 $0.seek(toFrame: 0)
                             }
                             refreshModel(force: true); select(layerId: id, additive: false)
@@ -3519,28 +3531,46 @@ final class AureaModel: ObservableObject {
         RealCameraState.shared.start(self, layer: id)
     }
 
-    /// Ao vivo (sem gravar): a rotação do aparelho vira a rotação da câmera, sem keyframe.
-    func realCameraApply(_ layer: Int64, rx: Float, ry: Float, rz: Float) {
-        guard layers.contains(where: { $0.id == layer }) else { return }
-        mutate { $0.setRotation(forLayer: layer, x: rx, y: ry, z: rz) }
+    // The shared engine owns playback, recording history and the exact native
+    // frame. Sensor callbacks never decide recording from the UI status cache.
+    func realCameraStart(_ layer: Int64) -> Bool {
+        guard started, layers.contains(where: { $0.id == layer }) else { return false }
+        return engine.realCameraStart(layer)
     }
 
-    /// Gravando: um keyframe de Rotação X/Y/Z no quadro da prévia (tempo local da camada).
-    func realCameraKey(_ layer: Int64, rx: Float, ry: Float, rz: Float) {
-        let local = localFrame(for: layer)
-        mutate { engine in
-            engine.insertKeyframe(forLayer: layer, property: 6, time: local, value: rx)
-            engine.insertKeyframe(forLayer: layer, property: 7, time: local, value: ry)
-            engine.insertKeyframe(forLayer: layer, property: 8, time: local, value: rz)
-        }
-        if local % 10 == 0 { refreshSelectedLayer() }
+    func realCameraRecord(_ recording: Bool) -> Bool {
+        let result = engine.realCameraRecord(recording)
+        refreshStatus()
+        if !recording { refreshModel(force: true) }
+        return result
     }
 
-    /// "Gravar": a timeline toca; cada leitura do sensor vira keyframe.
-    func realCameraBeginRecording(_ layer: Int64) {
-        guard layers.contains(where: { $0.id == layer }) else { return }
-        if status.playing == 0 { playPause() }
+    func realCameraSample(_ pose: simd_float4x4, timestamp: Double, positional: Bool,
+                          sensitivity: Float, inverted: Bool) -> Bool {
+        guard timestamp.isFinite, timestamp >= 0,
+              timestamp < Double(UInt64.max) / 1.0e9 else { return false }
+        let timestampNs = UInt64(timestamp * 1.0e9)
+        let accepted = engine.realCameraSample(pose, timestampNs: timestampNs,
+            positional: positional, sensitivity: sensitivity, inverted: inverted)
+        if accepted { engine.wakeRender() }
+        return accepted
     }
+
+    func realCameraHold() -> Bool { engine.realCameraHold() }
+
+    func realCameraRecenter() -> Bool {
+        let result = engine.realCameraRecenter()
+        refreshStatus()
+        return result
+    }
+
+    func realCameraStop() {
+        engine.realCameraStop()
+        refreshStatus()
+        refreshModel(force: true)
+    }
+
+    func realCameraStatus() -> [NSNumber] { engine.realCameraStatus() }
 
     func enableLayer3D() {
         guard let id = primarySelection, engine.enableLayer3D(id) else { return }

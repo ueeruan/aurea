@@ -174,7 +174,8 @@ private:
     std::atomic<u64> trackedResourceBudget_{0};
     KnownResourceUse knownResourceUse_ = nullptr;
     void* knownResourceContext_ = nullptr;
-    [[nodiscard]] bool tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes, bool reuse = false) const noexcept;
+    [[nodiscard]] bool tracked_admission(const TextureDesc& desc, u64 incomingBytes, u64 poolBytes,
+        bool reuse = false, const char* phase = "pre-create") const noexcept;
     void trim_for(u64 incomingBytes) noexcept;
 };
 
@@ -241,6 +242,18 @@ public:
     /// barreiras. Falha em ciclo e em leitura de textura nunca escrita.
     [[nodiscard]] Status compile(TransientTexturePool& pool) noexcept;
 
+    /// Validate and retain the same sorted/cull/lifetime plan without admitting
+    /// every physical texture at once. Existing physical assignments must first
+    /// have been returned by release(); callbacks and imported outputs survive.
+    [[nodiscard]] Status prepare_segments() noexcept;
+    /// Admit the next consecutive range of the prepared plan. Textures whose
+    /// last reader is in a later range remain held across GPU submissions.
+    [[nodiscard]] Status compile_segment(TransientTexturePool& pool, u32 first, u32 count) noexcept;
+    /// Caller has completed the current segment's real GPU fence. Return only
+    /// its dead physical slots; outputs and later readers remain held. This does
+    /// not credit backend reservation: trim/begin-frame still collect backing.
+    void release_completed_segment(TransientTexturePool& pool) noexcept;
+
     // --- Execução -------------------------------------------------------------
 
     /// Grava os passes na ordem compilada. Com `timers`, cada passe vira uma
@@ -264,6 +277,10 @@ public:
         u32 aliasedTextures = 0;     ///< lógicas que reusaram física do mesmo frame
         u32 barriers = 0;
         u64 transientBytes = 0;      ///< soma das físicas distintas
+        u64 segmentEstimatedPeakBytes = 0; ///< logical live peak, not driver residency
+        u64 segmentBaselinePeakBytes = 0;
+        u64 segmentGreedyPeakBytes = 0;
+        u32 segmentReorderedPasses = 0;
     };
     [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
 
@@ -347,9 +364,13 @@ private:
 
     void add_access(u32 pass, FGTexture t, Access a) noexcept;
     [[nodiscard]] bool sort_passes() noexcept;
+    [[nodiscard]] bool order_segments_by_memory() noexcept;
+    [[nodiscard]] u64 estimate_order_peak() noexcept;
     void cull() noexcept;
-    [[nodiscard]] Status assign_physical(TransientTexturePool& pool) noexcept;
-    void plan_barriers() noexcept;
+    [[nodiscard]] Status prepare_plan(bool memoryAware = false) noexcept;
+    void plan_lifetime_events() noexcept;
+    [[nodiscard]] Status assign_physical(TransientTexturePool& pool, u32 first, u32 end) noexcept;
+    void plan_barriers(u32 first, u32 end) noexcept;
 
     std::vector<Pass>          passes_;
     std::vector<Resource>      resources_;
@@ -381,8 +402,15 @@ private:
     std::vector<u32> born_;
     std::vector<u32> diesBegin_;
     std::vector<u32> dies_;
+    std::vector<u32> memoryRemaining_;
+    std::vector<u32> memorySeen_;
+    std::vector<u8> memoryResident_;
+    std::vector<u32> memoryBaselineOrder_;
+    std::vector<u64> memoryBornBytes_, memoryFreedBytes_;
 
     Stats stats_{};
+    bool segmentPlan_ = false;
+    u32 segmentFirst_ = 0, segmentEnd_ = 0;
     bool  compiled_ = false;
 };
 

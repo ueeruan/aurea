@@ -114,7 +114,7 @@ void Backend::transition(VkCommandBuffer cmd, Texture& t, ResourceState newState
         }
     }
 
-    vkCmdPipelineBarrier(cmd, srcStage, to.stage, 0, 0, nullptr, 0, nullptr, 1, &b);
+    deviceFunctions_.vkCmdPipelineBarrier(cmd, srcStage, to.stage, 0, 0, nullptr, 0, nullptr, 1, &b);
     t.layout = to.layout;
     t.state = newState;
 }
@@ -130,7 +130,7 @@ VkDescriptorSet Backend::allocate_set(FrameContext& frame, VkDescriptorSetLayout
             ai.descriptorSetCount = 1;
             ai.pSetLayouts = &layout;
             VkDescriptorSet set = VK_NULL_HANDLE;
-            const VkResult r = vkAllocateDescriptorSets(device_, &ai, &set);
+            const VkResult r = deviceFunctions_.vkAllocateDescriptorSets(device_, &ai, &set);
             if (r == VK_SUCCESS) return set;
             ++frame.descriptorPoolCursor;   // cheio: próximo pool
             continue;
@@ -148,7 +148,7 @@ VkDescriptorSet Backend::allocate_set(FrameContext& frame, VkDescriptorSetLayout
         pi.poolSizeCount = 4;
         pi.pPoolSizes = sizes;
         VkDescriptorPool pool = VK_NULL_HANDLE;
-        if (vkCreateDescriptorPool(device_, &pi, nullptr, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
+        if (deviceFunctions_.vkCreateDescriptorPool(device_, &pi, nullptr, &pool) != VK_SUCCESS) return VK_NULL_HANDLE;
         frame.descriptorPools.push_back(pool);
         frame.descriptorPoolCursor = static_cast<u32>(frame.descriptorPools.size() - 1);
         attempt = 0;
@@ -195,24 +195,24 @@ void CommandListImpl::barrier(TextureHandle texture, ResourceState newState, boo
 void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
     if (!cmd_) return;
     if (inRenderPass_) return;
-    if (pass.depth.valid() && (pass.color1.valid() || pass.resolve.valid()
-                               || (pass.color.valid() && backend_->texture(pass.color.id)
-                                   && backend_->texture(pass.color.id)->desc.sampleCount > 1))) {
-        // 3D com MSAA / MRT / resolve.
+    if (pass.color1.valid() || pass.resolve.valid()
+        || (pass.color.valid() && backend_->texture(pass.color.id)
+            && backend_->texture(pass.color.id)->desc.sampleCount > 1)) {
+        // MRT / MSAA / resolve also serve post-processing without depth.
         Texture* c0 = pass.color.valid() ? backend_->texture(pass.color.id) : nullptr;
         Texture* c1 = pass.color1.valid() ? backend_->texture(pass.color1.id) : nullptr;
-        Texture* d = backend_->texture(pass.depth.id);
+        Texture* d = pass.depth.valid() ? backend_->texture(pass.depth.id) : nullptr;
         Texture* r0 = pass.resolve.valid() ? backend_->texture(pass.resolve.id) : nullptr;
         Texture* r1 = pass.resolve1.valid() ? backend_->texture(pass.resolve1.id) : nullptr;
-        const bool wantDepthResolve = pass.depthResolve.valid() && backend_->depth_resolve_supported() && r0;
+        const bool wantDepthResolve = d && pass.depthResolve.valid() && backend_->depth_resolve_supported() && r0;
         Texture* dr = wantDepthResolve ? backend_->texture(pass.depthResolve.id) : nullptr;
-        if (!d || !c0 || (pass.color1.valid() && !c1) || (pass.resolve.valid() && !r0)
+        if (!c0 || (pass.depth.valid() && !d) || (pass.color1.valid() && !c1) || (pass.resolve.valid() && !r0)
             || (pass.resolve1.valid() && !r1)) return;
         const bool discardColor = pass.load != LoadOp::Load;
         for (Texture* t : {c0, c1}) {
             if (t && t->state != ResourceState::ColorAttachment) backend_->transition(cmd_, *t, ResourceState::ColorAttachment, discardColor);
         }
-        if (d->state != ResourceState::DepthAttachment) {
+        if (d && d->state != ResourceState::DepthAttachment) {
             backend_->transition(cmd_, *d, ResourceState::DepthAttachment, pass.depthLoad != LoadOp::Load);
         }
         for (Texture* t : {r0, r1}) {
@@ -223,34 +223,35 @@ void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
         Backend::RenderPassKey key;
         key.color0 = c0->format;
         key.color1 = c1 ? c1->format : VK_FORMAT_UNDEFINED;
-        key.depth = d->format;
+        key.depth = d ? d->format : VK_FORMAT_UNDEFINED;
         key.samples = std::max(1u, c0->desc.sampleCount);
         key.load = pass.load;
         key.depthLoad = pass.depthLoad;
         key.storeDepth = pass.storeDepth;
         key.resolve = r0 != nullptr;
         key.depthResolve = dr != nullptr;
-        u64 ids[6] = {pass.color.id, c1 ? pass.color1.id : 0, pass.depth.id, r0 ? pass.resolve.id : 0,
+        u64 ids[6] = {pass.color.id, c1 ? pass.color1.id : 0, d ? pass.depth.id : 0, r0 ? pass.resolve.id : 0,
                       r1 ? pass.resolve1.id : 0, dr ? pass.depthResolve.id : 0};
-        VkImageView views[6] = {c0->view, c1 ? c1->view : VK_NULL_HANDLE, d->view, r0 ? r0->view : VK_NULL_HANDLE,
+        VkImageView views[6] = {c0->view, c1 ? c1->view : VK_NULL_HANDLE, d ? d->view : VK_NULL_HANDLE, r0 ? r0->view : VK_NULL_HANDLE,
                                 r1 ? r1->view : VK_NULL_HANDLE, dr ? dr->view : VK_NULL_HANDLE};
         VkRenderPassBeginInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         info.renderPass = backend_->render_pass(key);
-        info.framebuffer = backend_->framebuffer(key, ids, views, d->desc.width, d->desc.height);
-        info.renderArea = {{0, 0}, {d->desc.width, d->desc.height}};
+        const Texture& extent = d ? *d : *c0;
+        info.framebuffer = backend_->framebuffer(key, ids, views, extent.desc.width, extent.desc.height);
+        info.renderArea = {{0, 0}, {extent.desc.width, extent.desc.height}};
         // Um valor de limpeza por anexo (os de resolve/DONT_CARE são ignorados).
         VkClearValue clears[6]{};
         u32 n = 0;
         std::memcpy(clears[n++].color.float32, pass.clear, sizeof(f32) * 4);
         if (c1) std::memcpy(clears[n++].color.float32, pass.clear, sizeof(f32) * 4);
-        clears[n++].depthStencil = {pass.clearDepth, 0};
+        if (d) clears[n++].depthStencil = {pass.clearDepth, 0};
         info.clearValueCount = n;
         info.pClearValues = clears;
         if (!info.renderPass || !info.framebuffer) return;
-        vkCmdBeginRenderPass(cmd_, &info, VK_SUBPASS_CONTENTS_INLINE);
+        backend_->device_dispatch().vkCmdBeginRenderPass(cmd_, &info, VK_SUBPASS_CONTENTS_INLINE);
         inRenderPass_ = true;
-        targetWidth_ = d->desc.width;
-        targetHeight_ = d->desc.height;
+        targetWidth_ = extent.desc.width;
+        targetHeight_ = extent.desc.height;
         if (frame_) {
             for (Texture* t : {c0, c1, d, r0, r1, dr}) if (t) t->lastUsedFrame = frame_->frameNumber;
         }
@@ -287,7 +288,7 @@ void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
         info.clearValueCount = n;
         info.pClearValues = clears;
         if (!info.renderPass || !info.framebuffer) return;
-        vkCmdBeginRenderPass(cmd_, &info, VK_SUBPASS_CONTENTS_INLINE);
+        backend_->device_dispatch().vkCmdBeginRenderPass(cmd_, &info, VK_SUBPASS_CONTENTS_INLINE);
         inRenderPass_ = true;
         targetWidth_ = d->desc.width;
         targetHeight_ = d->desc.height;
@@ -315,7 +316,7 @@ void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
     info.clearValueCount = pass.load == LoadOp::Clear ? 1 : 0;
     info.pClearValues = &clear;
     if (!info.renderPass || !info.framebuffer) return;
-    vkCmdBeginRenderPass(cmd_, &info, VK_SUBPASS_CONTENTS_INLINE);
+    backend_->device_dispatch().vkCmdBeginRenderPass(cmd_, &info, VK_SUBPASS_CONTENTS_INLINE);
     inRenderPass_ = true;
     targetWidth_ = t->desc.width;
     targetHeight_ = t->desc.height;
@@ -326,7 +327,7 @@ void CommandListImpl::begin_render_pass(const RenderPassBegin& pass) noexcept {
 
 void CommandListImpl::end_render_pass() noexcept {
     if (!inRenderPass_) return;
-    vkCmdEndRenderPass(cmd_);
+    backend_->device_dispatch().vkCmdEndRenderPass(cmd_);
     inRenderPass_ = false;
 }
 
@@ -335,7 +336,7 @@ void CommandListImpl::bind_pipeline(PipelineHandle pipeline) noexcept {
     const PipelineObject* p = backend_->pipeline(pipeline.id);
     if (!p) return;
     if (p != pipeline_) {
-        vkCmdBindPipeline(cmd_, p->bindPoint, p->pipeline);
+        backend_->device_dispatch().vkCmdBindPipeline(cmd_, p->bindPoint, p->pipeline);
         // Layout diferente invalida o set amarrado.
         if (!pipeline_ || pipeline_->layout != p->layout) dirty_ = true;
         pipeline_ = p;
@@ -389,7 +390,7 @@ void CommandListImpl::push_constants(const void* data, u32 bytes) noexcept {
     std::memcpy(pushData_, data, count);
     pushBytes_ = std::max(pushBytes_, count);
     pushLayout_ = pipeline_->layout;
-    vkCmdPushConstants(cmd_, pipeline_->layout,
+    backend_->device_dispatch().vkCmdPushConstants(cmd_, pipeline_->layout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
                        0, std::min(bytes, binding::kPushConstantBytes), data);
 }
@@ -398,14 +399,14 @@ void CommandListImpl::set_viewport(f32 x, f32 y, f32 w, f32 h) noexcept {
     if (!cmd_) return;
     VkViewport v{x, y, w, h, 0.0f, 1.0f};
     viewport_ = v; hasViewport_ = true;
-    vkCmdSetViewport(cmd_, 0, 1, &v);
+    backend_->device_dispatch().vkCmdSetViewport(cmd_, 0, 1, &v);
 }
 
 void CommandListImpl::set_scissor(i32 x, i32 y, u32 w, u32 h) noexcept {
     if (!cmd_) return;
     VkRect2D r{{x, y}, {w, h}};
     scissor_ = r; hasScissor_ = true;
-    vkCmdSetScissor(cmd_, 0, 1, &r);
+    backend_->device_dispatch().vkCmdSetScissor(cmd_, 0, 1, &r);
 }
 
 bool CommandListImpl::flush_descriptors() noexcept {
@@ -496,9 +497,9 @@ bool CommandListImpl::flush_descriptors() noexcept {
     writes[n].pBufferInfo = &ssbo1;
     ++n;
 
-    vkUpdateDescriptorSets(backend_->device(), n, writes, 0, nullptr);
+    backend_->device_dispatch().vkUpdateDescriptorSets(backend_->device(), n, writes, 0, nullptr);
     const u32 dynamicOffset = uniformBuffer_ ? uniformOffset_ : 0;
-    vkCmdBindDescriptorSets(cmd_, pipeline_->bindPoint, pipeline_->layout, 0, 1, &set, 1, &dynamicOffset);
+    backend_->device_dispatch().vkCmdBindDescriptorSets(cmd_, pipeline_->bindPoint, pipeline_->layout, 0, 1, &set, 1, &dynamicOffset);
     dirty_ = false;
     lastSet_ = set;
     return true;
@@ -509,14 +510,14 @@ bool CommandListImpl::prepare_draw() noexcept {
     if (dirty_) return flush_descriptors();
     if (lastSet_) {
         const u32 dynamicOffset = uniformBuffer_ ? uniformOffset_ : 0;
-        vkCmdBindDescriptorSets(cmd_, pipeline_->bindPoint, pipeline_->layout, 0, 1, &lastSet_, 1, &dynamicOffset);
+        backend_->device_dispatch().vkCmdBindDescriptorSets(cmd_, pipeline_->bindPoint, pipeline_->layout, 0, 1, &lastSet_, 1, &dynamicOffset);
     }
     return true;
 }
 
 void CommandListImpl::draw(u32 vertexCount, u32 instanceCount, u32 firstVertex) noexcept {
     if (!prepare_draw()) return;
-    vkCmdDraw(cmd_, vertexCount, instanceCount, firstVertex, 0);
+    backend_->device_dispatch().vkCmdDraw(cmd_, vertexCount, instanceCount, firstVertex, 0);
 }
 
 void CommandListImpl::bind_vertex_buffer(u32 binding, BufferHandle buffer, u64 offset) noexcept {
@@ -526,7 +527,7 @@ void CommandListImpl::bind_vertex_buffer(u32 binding, BufferHandle buffer, u64 o
     const VkDeviceSize off = offset;
     if (vertices_.size() <= binding) vertices_.resize(static_cast<usize>(binding) + 1);
     vertices_[binding] = VertexBinding{b->buffer, off};
-    vkCmdBindVertexBuffers(cmd_, binding, 1, &b->buffer, &off);
+    backend_->device_dispatch().vkCmdBindVertexBuffers(cmd_, binding, 1, &b->buffer, &off);
 }
 
 void CommandListImpl::bind_index_buffer(BufferHandle buffer, u64 offset, IndexType type) noexcept {
@@ -535,19 +536,19 @@ void CommandListImpl::bind_index_buffer(BufferHandle buffer, u64 offset, IndexTy
     if (!b) return;
     indexBuffer_ = b->buffer; indexOffset_ = offset;
     indexType_ = type == IndexType::U16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
-    vkCmdBindIndexBuffer(cmd_, b->buffer, offset, indexType_);
+    backend_->device_dispatch().vkCmdBindIndexBuffer(cmd_, b->buffer, offset, indexType_);
 }
 
 void CommandListImpl::draw_indexed(u32 indexCount, u32 instanceCount, u32 firstIndex, i32 vertexOffset,
                                    u32 firstInstance) noexcept {
     if (!prepare_draw()) return;
-    vkCmdDrawIndexed(cmd_, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+    backend_->device_dispatch().vkCmdDrawIndexed(cmd_, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
 
 void CommandListImpl::dispatch(u32 x, u32 y, u32 z) noexcept {
     if (inRenderPass_ || !pipeline_ || pipeline_->bindPoint != VK_PIPELINE_BIND_POINT_COMPUTE) return;
     if (dirty_ && !flush_descriptors()) return;
-    vkCmdDispatch(cmd_, x, y, z);
+    backend_->device_dispatch().vkCmdDispatch(cmd_, x, y, z);
 }
 
 void CommandListImpl::copy_texture(TextureHandle src, TextureHandle dst) noexcept {
@@ -561,7 +562,7 @@ void CommandListImpl::copy_texture(TextureHandle src, TextureHandle dst) noexcep
     region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.extent = {std::min(s->desc.width, d->desc.width), std::min(s->desc.height, d->desc.height), 1};
-    vkCmdCopyImage(cmd_, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->image,
+    backend_->device_dispatch().vkCmdCopyImage(cmd_, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->image,
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 }
 
@@ -574,7 +575,7 @@ void CommandListImpl::copy_texture_to_buffer(TextureHandle src, BufferHandle dst
     VkBufferImageCopy region{};
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent = {s->desc.width, s->desc.height, 1};
-    vkCmdCopyImageToBuffer(cmd_, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, b->buffer, 1, &region);
+    backend_->device_dispatch().vkCmdCopyImageToBuffer(cmd_, s->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, b->buffer, 1, &region);
     // A CPU lê o buffer depois do fence (export): a escrita da cópia tem de
     // ficar disponível para o domínio do host.
     VkBufferMemoryBarrier hb{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
@@ -584,7 +585,7 @@ void CommandListImpl::copy_texture_to_buffer(TextureHandle src, BufferHandle dst
     hb.buffer = b->buffer;
     hb.offset = 0;
     hb.size = VK_WHOLE_SIZE;
-    vkCmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &hb, 0,
+    backend_->device_dispatch().vkCmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &hb, 0,
                          nullptr);
 }
 
@@ -598,7 +599,7 @@ void CommandListImpl::begin_timer(const char* label) noexcept {
     if (index >= backend_->max_timers()) return;
     frame_->timerLabels.push_back(label);
     frame_->timerStack.push_back(index);
-    vkCmdWriteTimestamp(cmd_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, frame_->queries, 2 + index * 2);
+    backend_->device_dispatch().vkCmdWriteTimestamp(cmd_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, frame_->queries, 2 + index * 2);
     frame_->timersWritten = true;
 }
 
@@ -606,25 +607,25 @@ void CommandListImpl::end_timer() noexcept {
     if (!frame_ || !frame_->queries || frame_->timerStack.empty() || inRenderPass_) return;
     const u32 index = frame_->timerStack.back();
     frame_->timerStack.pop_back();
-    vkCmdWriteTimestamp(cmd_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, frame_->queries, 2 + index * 2 + 1);
+    backend_->device_dispatch().vkCmdWriteTimestamp(cmd_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, frame_->queries, 2 + index * 2 + 1);
 }
 
 void CommandListImpl::begin_label(const char* label) noexcept {
     if (!cmd_) return;
     if (!label) return;
     ++labelDepth_;
-    if (!backend_->debug_utils() || !vkCmdBeginDebugUtilsLabelEXT) return;
+    if (!backend_->debug_utils() || !backend_->device_dispatch().vkCmdBeginDebugUtilsLabelEXT) return;
     VkDebugUtilsLabelEXT l{VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
     l.pLabelName = label;
-    vkCmdBeginDebugUtilsLabelEXT(cmd_, &l);
+    backend_->device_dispatch().vkCmdBeginDebugUtilsLabelEXT(cmd_, &l);
 }
 
 void CommandListImpl::end_label() noexcept {
     if (!cmd_) return;
     if (!labelDepth_) return;
     --labelDepth_;
-    if (!backend_->debug_utils() || !vkCmdEndDebugUtilsLabelEXT) return;
-    vkCmdEndDebugUtilsLabelEXT(cmd_);
+    if (!backend_->debug_utils() || !backend_->device_dispatch().vkCmdEndDebugUtilsLabelEXT) return;
+    backend_->device_dispatch().vkCmdEndDebugUtilsLabelEXT(cmd_);
 }
 
 Status CommandListImpl::finish_pass() noexcept {
@@ -642,7 +643,7 @@ Status CommandListImpl::finish_pass() noexcept {
     // Keep every pass/sample, but bound the work admitted in each GPU batch.
     // All primaries still own the same frame's descriptors and staging data.
     FrameContext& f = *frame_;
-    if (const VkResult r = vkEndCommandBuffer(cmd_); r != VK_SUCCESS)
+    if (const VkResult r = backend_->device_dispatch().vkEndCommandBuffer(cmd_); r != VK_SUCCESS)
         return backend_->fail_recording(r, "vkEndCommandBuffer checkpoint");
     if (f.commandBufferCount == f.commandBuffers.size()) {
         VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -650,14 +651,14 @@ Status CommandListImpl::finish_pass() noexcept {
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         ai.commandBufferCount = 1;
         VkCommandBuffer next = VK_NULL_HANDLE;
-        if (const VkResult r = vkAllocateCommandBuffers(backend_->device(), &ai, &next); r != VK_SUCCESS)
+        if (const VkResult r = backend_->device_dispatch().vkAllocateCommandBuffers(backend_->device(), &ai, &next); r != VK_SUCCESS)
             return backend_->fail_recording(r, "vkAllocateCommandBuffers checkpoint");
         f.commandBuffers.push_back(next);
     }
     f.cmd = f.commandBuffers[f.commandBufferCount++];
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (const VkResult r = vkBeginCommandBuffer(f.cmd, &bi); r != VK_SUCCESS)
+    if (const VkResult r = backend_->device_dispatch().vkBeginCommandBuffer(f.cmd, &bi); r != VK_SUCCESS)
         return backend_->fail_recording(r, "vkBeginCommandBuffer checkpoint");
     cmd_ = f.cmd;
     f.passesInCommandBuffer = 0;
@@ -666,27 +667,27 @@ Status CommandListImpl::finish_pass() noexcept {
     VkMemoryBarrier memory{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
     memory.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
     memory.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-    vkCmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+    backend_->device_dispatch().vkCmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memory, 0, nullptr, 0, nullptr);
 
     // Layouts use the same complete push-constant range. Preserve the tail
     // after a caller overwrites only a prefix, as the unsplit buffer does.
     if (pushLayout_ && pushBytes_)
-        vkCmdPushConstants(cmd_, pushLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+        backend_->device_dispatch().vkCmdPushConstants(cmd_, pushLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
                            | VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes_, pushData_);
     if (pipeline_) {
-        vkCmdBindPipeline(cmd_, pipeline_->bindPoint, pipeline_->pipeline);
+        backend_->device_dispatch().vkCmdBindPipeline(cmd_, pipeline_->bindPoint, pipeline_->pipeline);
         if (!dirty_ && lastSet_) {
             const u32 offset = uniformBuffer_ ? uniformOffset_ : 0;
-            vkCmdBindDescriptorSets(cmd_, pipeline_->bindPoint, pipeline_->layout,
+            backend_->device_dispatch().vkCmdBindDescriptorSets(cmd_, pipeline_->bindPoint, pipeline_->layout,
                                     0, 1, &lastSet_, 1, &offset);
         }
     }
     for (u32 i = 0; i < vertices_.size(); ++i) if (vertices_[i].buffer)
-        vkCmdBindVertexBuffers(cmd_, i, 1, &vertices_[i].buffer, &vertices_[i].offset);
-    if (indexBuffer_) vkCmdBindIndexBuffer(cmd_, indexBuffer_, indexOffset_, indexType_);
-    if (hasViewport_) vkCmdSetViewport(cmd_, 0, 1, &viewport_);
-    if (hasScissor_) vkCmdSetScissor(cmd_, 0, 1, &scissor_);
+        backend_->device_dispatch().vkCmdBindVertexBuffers(cmd_, i, 1, &vertices_[i].buffer, &vertices_[i].offset);
+    if (indexBuffer_) backend_->device_dispatch().vkCmdBindIndexBuffer(cmd_, indexBuffer_, indexOffset_, indexType_);
+    if (hasViewport_) backend_->device_dispatch().vkCmdSetViewport(cmd_, 0, 1, &viewport_);
+    if (hasScissor_) backend_->device_dispatch().vkCmdSetScissor(cmd_, 0, 1, &scissor_);
     return OkStatus;
 }
 
@@ -707,7 +708,7 @@ void Backend::collect_timings(FrameContext& f) noexcept {
     const u32 count = static_cast<u32>(f.timerLabels.size());
     const u32 queries = 2 + count * 2;
     u64 values[2 + kMaxTimers * 2]{};
-    const VkResult r = vkGetQueryPoolResults(device_, f.queries, 0, queries, sizeof(values), values,
+    const VkResult r = deviceFunctions_.vkGetQueryPoolResults(device_, f.queries, 0, queries, sizeof(values), values,
                                              sizeof(u64), VK_QUERY_RESULT_64_BIT);
     f.timersWritten = false;
     if (r != VK_SUCCESS) return;
@@ -757,27 +758,84 @@ Status Backend::prepare_reinitialization(u64 timeoutNs) noexcept {
     if (recordingStatus_.ok()) return OkStatus;
     if (!recoveryFence_) {
         VkFenceCreateInfo info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-        VkResult result = vkCreateFence(device_, &info, nullptr, &recoveryFence_);
+        VkResult result = deviceFunctions_.vkCreateFence(device_, &info, nullptr, &recoveryFence_);
         if (note_device_lost(result)) return OkStatus;
         if (result != VK_SUCCESS) return check(result, "vkCreateFence recovery");
         // Fence signal scope covers every earlier submission, including
         // uploads and a partially submitted frame. No invalid layouts reused.
-        result = vkQueueSubmit(queue_, 0, nullptr, recoveryFence_);
+        result = deviceFunctions_.vkQueueSubmit(queue_, 0, nullptr, recoveryFence_);
         if (note_device_lost(result)) return OkStatus;
         if (result != VK_SUCCESS) {
-            vkDestroyFence(device_, recoveryFence_, nullptr);
+            deviceFunctions_.vkDestroyFence(device_, recoveryFence_, nullptr);
             recoveryFence_ = VK_NULL_HANDLE;
             return check(result, "vkQueueSubmit recovery");
         }
     }
-    const VkResult result = vkWaitForFences(device_, 1, &recoveryFence_, VK_TRUE, timeoutNs);
+    const VkResult result = deviceFunctions_.vkWaitForFences(device_, 1, &recoveryFence_, VK_TRUE, timeoutNs);
     if (note_device_lost(result)) return OkStatus;
     if (result == VK_TIMEOUT) return Status{Errc::Timeout, "GPU atrasada"};
     return check(result, "vkWaitForFences recovery");
 }
 
 Status Backend::begin_frame(FrameBegin& out) noexcept {
+    if (leasedSwapchain_) return Status{Errc::Busy, "presentable frame lease active"};
     return begin_frame_impl(out, true);
+}
+
+Status Backend::begin_presentable_frame_lease() noexcept {
+    if (leasedSwapchain_) return Status{Errc::Busy, "presentable frame lease active"};
+    if (!current_ || !imageAcquired_ || !swapchain_ || swapchainDirty_
+        || imageIndex_ >= swapTextures_.size()) return Errc::SurfaceLost;
+    leasedSwapchain_ = swapchain_;
+    leasedImageIndex_ = imageIndex_;
+    leasedDisplay_.backbuffer = TextureHandle{swapTextures_[imageIndex_]};
+    leasedDisplay_.backbufferWidth = swapExtent_.width;
+    leasedDisplay_.backbufferHeight = swapExtent_.height;
+    leasedDisplay_.backbufferFormat = from_vk(swapFormat_);
+    switch (swapTransform_) {
+        case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: leasedDisplay_.rotation = SurfaceRotation::Rotate90; break;
+        case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: leasedDisplay_.rotation = SurfaceRotation::Rotate180; break;
+        case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: leasedDisplay_.rotation = SurfaceRotation::Rotate270; break;
+        default: leasedDisplay_.rotation = SurfaceRotation::None; break;
+    }
+    return OkStatus;
+}
+
+Status Backend::begin_leased_frame(FrameBegin& out) noexcept {
+    if (deviceLost_) return Errc::DeviceLost;
+    if (!leasedSwapchain_ || leasedSwapchain_ != swapchain_ || swapchainDirty_ || !heldImage_
+        || imageIndex_ != leasedImageIndex_ || imageIndex_ >= swapTextures_.size()
+        || leasedDisplay_.backbuffer.id != swapTextures_[imageIndex_]
+        || leasedDisplay_.backbufferWidth != swapExtent_.width
+        || leasedDisplay_.backbufferHeight != swapExtent_.height)
+        return Status{Errc::SurfaceLost, "leased display target changed"};
+    VkSurfaceCapabilitiesKHR surfaceCaps{};
+    const VkResult queried = surface_ ? instanceFunctions_.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &surfaceCaps)
+        : VK_ERROR_SURFACE_LOST_KHR;
+    if (note_device_lost(queried)) return Errc::DeviceLost;
+    if (queried != VK_SUCCESS || surfaceCaps.currentTransform != swapCapsTransform_) {
+        swapchainDirty_ = true;
+        return Status{Errc::SurfaceLost, "leased display transform changed"};
+    }
+    const Status begun = begin_frame_impl(out, false);
+    if (!begun.ok()) return begun;
+    current_->offscreen = false;
+    imageAcquired_ = true;
+    imageAcquireWait_ = false; // initial discarded submission consumed acquire
+    out.backbuffer = leasedDisplay_.backbuffer;
+    out.backbufferWidth = leasedDisplay_.backbufferWidth;
+    out.backbufferHeight = leasedDisplay_.backbufferHeight;
+    out.backbufferFormat = leasedDisplay_.backbufferFormat;
+    out.rotation = leasedDisplay_.rotation;
+    return OkStatus;
+}
+
+void Backend::end_presentable_frame_lease() noexcept {
+    leasedSwapchain_ = VK_NULL_HANDLE;
+    leasedDisplay_ = {};
+    leasedImageIndex_ = 0;
+    // A cancelled acquired image remains held for the next surface render.
+    // Resize/detach already wait for actual work before destroying swapchain.
 }
 
 Status Backend::begin_offscreen_frame(FrameBegin& out) noexcept {
@@ -796,7 +854,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     for (u32 i = 0; i < framesInFlight_; ++i) {
         FrameContext& done = frames_[i];
         if (done.submitted && !done.deferred.empty()
-                && vkWaitForFences(device_, 1, &done.fence, VK_TRUE, 0) == VK_SUCCESS)
+                && deviceFunctions_.vkWaitForFences(device_, 1, &done.fence, VK_TRUE, 0) == VK_SUCCESS)
             run_deferred(done);
     }
     // Completed upload/readback retirements can leave large empty blocks.
@@ -807,7 +865,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
 
     FrameContext& f = frames_[frameCursor_];
     if (f.submitted) {
-        const VkResult w = vkWaitForFences(device_, 1, &f.fence, VK_TRUE, 2'000'000'000ull);
+        const VkResult w = deviceFunctions_.vkWaitForFences(device_, 1, &f.fence, VK_TRUE, 2'000'000'000ull);
         if (note_device_lost(w)) return Status{Errc::DeviceLost, "fence"};
         if (w == VK_TIMEOUT) return Status{Errc::Timeout, "GPU atrasada: frame pulado"};
         if (w != VK_SUCCESS) return fail_recording(w, "vkWaitForFences frame");
@@ -815,7 +873,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         run_deferred(f);
         // Imagens importadas que ninguém usa há 10 s: a importação é soltada
         // (o decoder pode ter trocado de buffers após um seek ou fechamento).
-        if (frameNumber_ % 120 == 0) {
+        if (!externalImageScopes_ && frameNumber_ % 120 == 0) {
             std::vector<u64> stale;
             for (auto& [buf, id] : importedByBuffer_) {
                 const Texture* t = textures_.get(id);
@@ -828,7 +886,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     f.offscreen = !withSurface;
     f.frameNumber = ++frameNumber_;
     for (VkDescriptorPool p : f.descriptorPools)
-        if (const VkResult r = vkResetDescriptorPool(device_, p, 0); r != VK_SUCCESS)
+        if (const VkResult r = deviceFunctions_.vkResetDescriptorPool(device_, p, 0); r != VK_SUCCESS)
             return fail_recording(r, "vkResetDescriptorPool frame");
     f.descriptorPoolCursor = 0;
     f.uniforms.reset();
@@ -841,15 +899,15 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     f.cmd = f.commandBuffers.front();
     f.commandBufferCount = 1;
     f.passesInCommandBuffer = 0;
-    if (const VkResult r = vkResetCommandPool(device_, f.pool, 0); r != VK_SUCCESS)
+    if (const VkResult r = deviceFunctions_.vkResetCommandPool(device_, f.pool, 0); r != VK_SUCCESS)
         return fail_recording(r, "vkResetCommandPool");
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (const VkResult r = vkBeginCommandBuffer(f.cmd, &bi); r != VK_SUCCESS)
+    if (const VkResult r = deviceFunctions_.vkBeginCommandBuffer(f.cmd, &bi); r != VK_SUCCESS)
         return fail_recording(r, "vkBeginCommandBuffer frame");
     if (f.queries && timersEnabled_) {
-        vkCmdResetQueryPool(f.cmd, f.queries, 0, f.queryCount);
-        vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, 0);
+        deviceFunctions_.vkCmdResetQueryPool(f.cmd, f.queries, 0, f.queryCount);
+        deviceFunctions_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, 0);
     }
     current_ = &f;
     commands_.bind_frame(this, &f, f.cmd);
@@ -858,6 +916,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     out.frameNumber = frameNumber_;
 
     imageAcquired_ = false;
+    imageAcquireWait_ = false;
     // Frame offscreen (prévia de efeito, export): nada de swapchain. A imagem
     // da tela não é nossa, e apresentar daqui seria apresentar o quadro errado.
     if (!withSurface) return OkStatus;
@@ -871,7 +930,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
             swapchainSuboptimal_ = false;
             suboptimalCheckFrame_ = frameNumber_ + 30;
             VkSurfaceCapabilitiesKHR caps{};
-            if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps) == VK_SUCCESS
+            if (instanceFunctions_.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps) == VK_SUCCESS
                 && caps.currentTransform != swapCapsTransform_) {
                 swapchainDirty_ = true;
             } else if (suboptimalIgnored_++ == 0) {
@@ -881,27 +940,43 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         if (swapchainDirty_ && surface_) {
             if (const Status s = recreate_swapchain(); !s.ok()) {
                 AUREA_LOG_WARN("swapchain nao recriado: %s", s.message().data());
+                if (s.code() == Errc::DeviceLost) {
+                    deviceLost_ = true;
+                    return s;
+                }
             }
         }
         if (swapchain_) {
-            u32 index = 0;
-            VkResult r = vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
-                                               VK_NULL_HANDLE, &index);
+            // A discarded frame keeps ownership of one acquired image. Reuse
+            // it instead of acquiring another and exhausting the swapchain.
+            // Its earlier acquire semaphore was consumed by that submission.
+            const bool reuseHeld = heldImage_;
+            u32 index = reuseHeld ? imageIndex_ : 0;
+            VkResult r = reuseHeld ? VK_SUCCESS
+                : deviceFunctions_.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
+                                       VK_NULL_HANDLE, &index);
             if (r == VK_ERROR_OUT_OF_DATE_KHR) {
-                if (recreate_swapchain().ok()) {
-                    r = vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
+                const Status recreated = recreate_swapchain();
+                if (recreated.ok()) {
+                    r = deviceFunctions_.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
                                               VK_NULL_HANDLE, &index);
+                } else if (recreated.code() == Errc::DeviceLost) {
+                    deviceLost_ = true;
+                    return recreated;
                 }
             }
             if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
                 if (r == VK_SUBOPTIMAL_KHR) swapchainSuboptimal_ = true;
                 imageAcquired_ = true;
+                imageAcquireWait_ = !reuseHeld;
                 imageIndex_ = index;
                 Texture* t = textures_.get(swapTextures_[index]);
                 // Conteúdo anterior do swapchain não interessa: o passe de
                 // saída limpa. UNDEFINED evita uma leitura inútil da imagem.
-                t->state = ResourceState::Undefined;
-                t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                if (!reuseHeld) {
+                    t->state = ResourceState::Undefined;
+                    t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                }
                 out.backbuffer = TextureHandle{swapTextures_[index]};
                 out.backbufferWidth = swapExtent_.width;
                 out.backbufferHeight = swapExtent_.height;
@@ -927,6 +1002,14 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
 }
 
 Status Backend::end_frame() noexcept {
+    return end_frame_impl(true);
+}
+
+Status Backend::discard_frame() noexcept {
+    return end_frame_impl(false);
+}
+
+Status Backend::end_frame_impl(bool present) noexcept {
     if (!recordingStatus_.ok()) return recordingStatus_;
     if (!current_) return Status{Errc::InvalidState, "nenhum frame aberto"};
     FrameContext& f = *current_;
@@ -945,7 +1028,7 @@ Status Backend::end_frame() noexcept {
         b.dstQueueFamilyIndex = foreign_family(hasForeignQueue_);
         b.image = t->image;
         b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        deviceFunctions_.vkCmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
         t->acquiredThisFrame = false;
         t->state = ResourceState::Undefined;
@@ -953,16 +1036,16 @@ Status Backend::end_frame() noexcept {
     }
 
     Texture* back = imageAcquired_ ? textures_.get(swapTextures_[imageIndex_]) : nullptr;
-    if (back && back->state != ResourceState::Present) {
+    if (present && back && back->state != ResourceState::Present) {
         // Rede de segurança: o grafo termina a saída em Present; se nada
         // desenhou (layer vazia, erro), a imagem ainda precisa do layout certo.
         transition(f.cmd, *back, ResourceState::Present, back->state == ResourceState::Undefined);
     }
     if (f.queries && timersEnabled_) {
-        vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, 1);
+        deviceFunctions_.vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.queries, 1);
         f.timersWritten = true;
     }
-    if (const VkResult r = vkEndCommandBuffer(f.cmd); r != VK_SUCCESS)
+    if (const VkResult r = deviceFunctions_.vkEndCommandBuffer(f.cmd); r != VK_SUCCESS)
         return fail_recording(r, "vkEndCommandBuffer frame");
 
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -974,22 +1057,22 @@ Status Backend::end_frame() noexcept {
     const auto submitDeadline = std::chrono::steady_clock::now()
         + std::chrono::seconds(f.offscreen ? 120 : 2);
     for (u32 batch = 0; batch < f.commandBufferCount; ++batch) {
-        if (const VkResult r = vkResetFences(device_, 1, &f.fence); r != VK_SUCCESS)
+        if (const VkResult r = deviceFunctions_.vkResetFences(device_, 1, &f.fence); r != VK_SUCCESS)
             return fail_recording(r, "vkResetFences frame batch");
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount = 1;
         si.pCommandBuffers = &f.commandBuffers[batch];
-        if (imageAcquired_ && batch == 0) {
+        if (imageAcquireWait_ && batch == 0) {
             si.waitSemaphoreCount = 1;
             si.pWaitSemaphores = &f.acquired;
             si.pWaitDstStageMask = &waitStage;
         }
         const bool last = batch + 1 == f.commandBufferCount;
-        if (imageAcquired_ && last) {
+        if (present && imageAcquired_ && last) {
             si.signalSemaphoreCount = 1;
             si.pSignalSemaphores = &renderDone_[imageIndex_];
         }
-        const VkResult r = vkQueueSubmit(queue_, 1, &si, f.fence);
+        const VkResult r = deviceFunctions_.vkQueueSubmit(queue_, 1, &si, f.fence);
         if (r != VK_SUCCESS) return fail_recording(r, "vkQueueSubmit frame batch");
         f.submitted = true;
         lastSubmitted_ = &f;
@@ -1000,7 +1083,7 @@ Status Backend::end_frame() noexcept {
             const auto remaining = std::chrono::duration_cast<std::chrono::nanoseconds>(
                 submitDeadline - std::chrono::steady_clock::now()).count();
             const VkResult ready = remaining > 0
-                ? vkWaitForFences(device_, 1, &f.fence, VK_TRUE, static_cast<u64>(remaining))
+                ? deviceFunctions_.vkWaitForFences(device_, 1, &f.fence, VK_TRUE, static_cast<u64>(remaining))
                 : VK_TIMEOUT;
             if (ready != VK_SUCCESS) return fail_recording(ready, "vkWaitForFences frame batch");
         }
@@ -1011,6 +1094,15 @@ Status Backend::end_frame() noexcept {
     f.submitted = true;
     lastSubmitted_ = &f;
 
+    imageAcquireWait_ = false;
+    if (imageAcquired_ && !present) {
+        // The presentation engine keeps the previously displayed picture.
+        // Commands/fences still complete normally; the acquired image remains
+        // ours until a later valid surface frame presents it, or resize/detach
+        // destroys the swapchain after the existing device-idle barrier.
+        heldImage_ = true;
+        imageAcquired_ = false;
+    }
     if (imageAcquired_) {
         VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
         pi.waitSemaphoreCount = 1;
@@ -1018,8 +1110,9 @@ Status Backend::end_frame() noexcept {
         pi.swapchainCount = 1;
         pi.pSwapchains = &swapchain_;
         pi.pImageIndices = &imageIndex_;
-        const VkResult pr = vkQueuePresentKHR(queue_, &pi);
+        const VkResult pr = deviceFunctions_.vkQueuePresentKHR(queue_, &pi);
         imageAcquired_ = false;
+        heldImage_ = false;
         if (pr == VK_ERROR_OUT_OF_DATE_KHR) {
             swapchainDirty_ = true;
         } else if (pr == VK_SUBOPTIMAL_KHR) {
@@ -1063,7 +1156,7 @@ void Backend::defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept {
 
 void Backend::wait_idle() noexcept {
     if (!device_) return;
-    vkDeviceWaitIdle(device_);
+    deviceFunctions_.vkDeviceWaitIdle(device_);
     collect_immediate(true);
     for (u32 i = 0; i < framesInFlight_; ++i) {
         if (&frames_[i] == current_) continue;
@@ -1084,7 +1177,7 @@ Status Backend::wait_frame(u64 frameNumber, u64 timeoutNs) noexcept {
     for (u32 i = 0; i < framesInFlight_; ++i) {
         FrameContext& f = frames_[i];
         if (&f == current_ || !f.submitted || f.frameNumber != frameNumber) continue;
-        const VkResult w = vkWaitForFences(device_, 1, &f.fence, VK_TRUE, timeoutNs);
+        const VkResult w = deviceFunctions_.vkWaitForFences(device_, 1, &f.fence, VK_TRUE, timeoutNs);
         if (note_device_lost(w)) return Status{Errc::DeviceLost, "fence"};
         if (w == VK_TIMEOUT) return Status{Errc::Timeout, "GPU atrasada"};
         const Status status = check(w, "vkWaitForFences");

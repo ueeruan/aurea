@@ -217,6 +217,8 @@ set(AUREA_CORE_SOURCES
     src/scene3d/Shape3D.cpp
     src/scene3d/MaterialPreview.cpp
     src/engine/Engine.cpp
+    src/engine/EngineRealCamera.cpp
+    src/tracking/RealCameraCapture.cpp
     src/engine/EngineMotion.cpp
     src/engine/EngineMotion.cpp
     ${AUREA_SHADER_SOURCES}
@@ -490,7 +492,7 @@ if(AUREA_PLATFORM_ANDROID)
     if(AUREA_ANDROID_RUNTIME_TESTS)
         set(_aurea_runtime_tests
             tests/main.cpp tests/test_gpu.cpp tests/test_motion_blur.cpp tests/test_render.cpp
-            tests/test_media.cpp tests/test_engine.cpp tests/test_motion_geometry.cpp
+            tests/test_media.cpp tests/test_engine.cpp tests/test_real_camera.cpp tests/test_mesh_warp_keys.cpp tests/test_motion_geometry.cpp
             tests/test_export.cpp tests/test_export_scheduler.cpp
             tests/test_export_recovery.cpp tests/test_export_sink_startup.cpp tests/test_aac_output_integrity.cpp
             tests/test_scene_environment_jobs.cpp tests/test_morph_deformation.cpp

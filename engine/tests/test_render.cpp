@@ -1529,6 +1529,78 @@ AUREA_TEST(ShaderLibrary, SameKeySamePipelineCompiledOnce) {
     AUREA_CHECK(!(*lib.pipeline(add) == *lib.pipeline(normal)));
 }
 
+AUREA_TEST(ShaderLibrary, DeferredPrewarmDoesNotCompileUnrelatedEffects) {
+    MockBackend b; b.deferredShaders = true;
+    b.failShader = "effects/pix_diffusion.comp";
+    ShaderLibrary lib;
+    AUREA_CHECK(lib.initialize(b).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 0u);
+    const PipelineKey keys[] = {
+        PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F),
+        PipelineKey::fullscreen(ShaderId::shape_shape_frag, SurfaceFormat::RGBA16F),
+        PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F),
+    };
+    AUREA_CHECK_EQ(lib.prewarm(keys, 3), 2u);
+    AUREA_CHECK_EQ(b.shadersCreated, 3u);  // shared fullscreen vertex + two fragments
+    AUREA_CHECK_EQ(lib.missing_shaders(), 0u);
+    AUREA_CHECK(!lib.shader(ShaderId::effects_pix_diffusion_comp).valid());
+    lib.mark_steady_state();
+    AUREA_CHECK(lib.pipeline(keys[0]).ok());
+    AUREA_CHECK_EQ(lib.compiles_since_mark(), 0u);
+    AUREA_CHECK_EQ(b.shadersAttempted, 3u);
+    lib.shutdown();
+    AUREA_CHECK_EQ(b.shadersDestroyed, 3u);
+}
+
+AUREA_TEST(ShaderLibrary, DeferredShaderRejectionIsPacedAndRecovers) {
+    MockBackend b; b.deferredShaders = true;
+    b.failShader = "effects/pix_diffusion.comp";
+    ShaderLibrary lib;
+    AUREA_CHECK(lib.initialize(b).ok());
+    const auto key = PipelineKey::compute_shader(ShaderId::effects_pix_diffusion_comp);
+    AUREA_CHECK(!lib.pipeline(key).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 1u);
+    AUREA_CHECK_EQ(b.pipelinesCreated, 0u);
+    AUREA_CHECK_EQ(lib.missing_shaders(), 1u);
+    // A different pipeline variant must not re-enter the failed compiler.
+    auto variant = key; variant.format = SurfaceFormat::RGBA8;
+    AUREA_CHECK(!lib.pipeline(variant).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 1u);
+    AUREA_CHECK(lib.pipeline(PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F)).ok());
+    b.failShader = nullptr;
+    for (u32 i = 0; i < 238; ++i) AUREA_CHECK(!lib.pipeline(key).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 3u); // failed compute + unrelated copy shaders
+    AUREA_CHECK(lib.pipeline(key).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, 4u);
+    AUREA_CHECK_EQ(lib.missing_shaders(), 0u);
+    AUREA_CHECK_EQ(lib.compile_failures(), 1u);
+    lib.shutdown();
+    AUREA_CHECK_EQ(b.shadersDestroyed, 3u);
+}
+
+AUREA_TEST(ShaderLibrary, DeferredDeviceRecoveryDropsRejectedAndCompiledState) {
+    MockBackend b; b.deferredShaders = true;
+    ShaderLibrary lib;
+    AUREA_CHECK(lib.initialize(b).ok());
+    const auto copy = PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA16F);
+    AUREA_CHECK(lib.pipeline(copy).ok());
+    b.failShader = "effects/pix_diffusion.comp";
+    AUREA_CHECK(!lib.pipeline(PipelineKey::compute_shader(ShaderId::effects_pix_diffusion_comp)).ok());
+    const u32 before = b.shadersAttempted;
+    lib.forget_device();
+    AUREA_CHECK(!lib.ready());
+    AUREA_CHECK_EQ(lib.missing_shaders(), 0u);
+    AUREA_CHECK_EQ(b.shadersDestroyed, 0u); // the lost device already destroyed its objects
+    b.failShader = nullptr;
+    AUREA_CHECK(lib.initialize(b).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, before);
+    AUREA_CHECK(lib.pipeline(copy).ok());
+    AUREA_CHECK_EQ(b.shadersAttempted, before + 2);
+    AUREA_CHECK(lib.pipeline(PipelineKey::compute_shader(ShaderId::effects_pix_diffusion_comp)).ok());
+    lib.shutdown();
+    AUREA_CHECK_EQ(b.shadersDestroyed, 3u);
+}
+
 AUREA_TEST(ShaderLibrary, CompilesDuringPlaybackAreCounted) {
     MockBackend b;
     ShaderLibrary lib;
@@ -2154,6 +2226,72 @@ AUREA_TEST(VideoPreview, ShortRgbaRowsAreRejectedBeforeDriverUploadAndRecover) {
     AUREA_CHECK(!f.renderer.take_incomplete()); AUREA_CHECK_EQ(uploads, 1u);
 }
 
+AUREA_TEST(VideoPreview, MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor) {
+    for (bool rawPlayback : {false, true}) {
+    RenderFixture f;
+    f.comp->set_size(32, 16);
+    f.solid("RAW continuity", Vec4{1,1,1,1}, 16, 8);
+    f.solid("second video remains ready", Vec4{1,1,1,1}, 24, 8);
+    f.backend.supportsFrameDiscard = true;
+    int window = 0;
+    SurfaceDesc surface;
+    surface.nativeWindow = &window;
+    surface.width = 32; surface.height = 16;
+    AUREA_CHECK(f.backend.attach_surface(surface).ok());
+    FrameSnapshot snapshot; f.prepare(snapshot);
+    auto* raw = new test::RgbaVideoFrame(true);
+    FrameRef frame = FrameRef::adopt(raw);
+    auto& source = snapshot.layers[0].source;
+    source.kind = LayerSource::Kind::Video;
+    source.width = 32; source.height = 16; source.frame = frame;
+    FrameRef otherFrame = FrameRef::adopt(new test::RgbaVideoFrame(false));
+    auto& other = snapshot.layers[1].source;
+    other.kind = LayerSource::Kind::Video;
+    other.width = 32; other.height = 16; other.frame = otherFrame;
+    RenderSettings settings; settings.rawPlayback = rawPlayback;
+    FrameStats stats; RenderTimings timings;
+    // Mock native import is unavailable, so the real CPU-plane fallback
+    // supplies the first valid picture through Renderer/FrameGraph.
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK_EQ(f.backend.presents, 1u);
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    const u32 validStride = raw->rowStride;
+    raw->rowStride = raw->width * 4 - 1;
+    source.frame = frame;
+    other.frame = otherFrame;
+    const Status failed = f.renderer.render(snapshot, settings, nullptr, stats, timings);
+    AUREA_CHECK(failed.code() == Errc::DecodeFailed);
+    AUREA_CHECK(f.renderer.take_incomplete());
+    AUREA_CHECK(!source.frame);
+    AUREA_CHECK_EQ(f.backend.presents, 1u);
+    AUREA_CHECK_EQ(f.backend.framesDiscarded, 1u);
+    AUREA_CHECK_EQ(f.backend.framesSubmitted, 2u); // fences/resources still finish
+    AUREA_CHECK(!f.backend.frameOpen);
+    raw->rowStride = validStride;
+    source.frame = frame;
+    other.frame = otherFrame;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(f.backend.presents, 2u);
+    AUREA_CHECK_EQ(f.backend.framesDiscarded, 1u);
+    // Decoder starvation is distinct from a GPU import/upload failure. Both
+    // must retain the visible picture, and neither may poison the next frame.
+    source.frame.reset();
+    other.frame = otherFrame;
+    snapshot.missingVideoFrames = 1;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).code() == Errc::DecodeFailed);
+    AUREA_CHECK(f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(f.backend.presents, 2u);
+    AUREA_CHECK_EQ(f.backend.framesDiscarded, 2u);
+    snapshot.missingVideoFrames = 0;
+    source.frame = frame;
+    other.frame = otherFrame;
+    AUREA_CHECK(f.renderer.render(snapshot, settings, nullptr, stats, timings).ok());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK_EQ(f.backend.presents, 3u);
+    }
+}
+
 AUREA_TEST(VideoPreview, RawPlaybackRetainsNativePixelsUntilGpuCompletion) {
     RenderFixture f;
     f.solid("raw native video", Vec4{1,1,1,1});
@@ -2674,6 +2812,7 @@ AUREA_TEST(MemoryPressure, DenseMotionBlurCompositesReleaseEarlierLayerTargets) 
 
 #include "NormalCompositeLivenessTests.inl"
 #include "MaterialOverrideTests.inl"
+#include "MorphSharingTests.inl"
 #include "SceneTargetTests.inl"
 #include "MinimaxPlan.inl"
 
@@ -3389,3 +3528,6 @@ AUREA_TEST(MotionBlur, SamplesPerFrameDrivesThePreviewToo) {
 }
 
 #include "RaysFootprintPlan.inl"
+#include "FrameGraphSegments.inl"
+#include "FrameGraphLease.inl"
+#include "FrameGraphMemoryOrder.inl"

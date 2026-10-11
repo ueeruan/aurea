@@ -11,12 +11,11 @@ EN = ROOT + r"\android\app\src\main\res\values-en\strings.xml"
 OUT = ROOT + r"\engine\platform\ios\app\AureaStrings.swift"
 
 KEYS = [
-    'curve_color_input', 'curve_color_output', 'curve_color_graph', 'curve_color_hint', 'curve_color_red', 'curve_color_green', 'curve_color_blue', 'curve_color_point',
     "export_range_content", "export_range_full",
-    "upscale_title", "upscale_hint", "upscale_pick", "upscale_factor", "upscale_result", "upscale_start",
-    "upscale_preparing", "upscale_processing", "upscale_time_note", "upscale_done", "upscale_open", "upscale_share", "upscale_again",
     "real_camera_title", "real_camera_hint", "real_camera_record", "real_camera_stop", "real_camera_recording",
     "real_camera_recenter", "real_camera_invert", "real_camera_sensitivity", "real_camera_done", "real_camera_no_sensor",
+    "upscale_title", "upscale_hint", "upscale_pick", "upscale_factor", "upscale_result", "upscale_start",
+    "upscale_preparing", "upscale_processing", "upscale_time_note", "upscale_done", "upscale_open", "upscale_share", "upscale_again",
     "roto_frame_ready", "roto_frame_pending", "roto_clip_status", "roto_failed", "roto_view_label",
     "roto_view_final", "roto_view_overlay", "roto_view_mask", "roto_propagate_count",
     "consent_title", "consent_accept", "consent_body",

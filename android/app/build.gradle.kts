@@ -101,7 +101,7 @@ android {
         targetSdk = 36
         // Deve superar também os APKs 0.1.4 build 2174 já distribuídos.
         versionCode = 2175
-        versionName = "0.1.5"
+        versionName = "0.1.4 BETA 2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -270,6 +270,7 @@ val nativeNdkPath = nativeLocalProperties.getProperty("ndk.dir")
 val ffmpegPython = providers.gradleProperty("aureaPython").getOrElse(
     if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
 )
+val aureaFFmpegCache = providers.gradleProperty("aureaFFmpegCache").orNull
 val ffmpegPrepareTasks = (aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "armeabi-v7a")).map { abi ->
     tasks.register<Exec>("prepareAureaFFmpeg" + abi.replace("-", "").replace("_", "")) {
         val prefix = File(aureaFFmpegRoot ?: rootProject.file("../build/ffmpeg/android").absolutePath, abi)
@@ -287,6 +288,7 @@ val ffmpegPrepareTasks = (aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "a
         commandLine(ffmpegPython, rootProject.file("../tools/build_ffmpeg.py").absolutePath,
             "--platform", "android", "--arch", abi, "--ndk", resolvedNdk,
             "--prefix", prefix.absolutePath)
+        if (aureaFFmpegCache != null) args("--cache", aureaFFmpegCache)
         if (aureaFFmpegWithX265) args("--with-x265")
     }
 }
@@ -308,6 +310,8 @@ tasks.configureEach {
 }
 
 dependencies {
+    // Optional, local device motion tracking. No Cloud Anchors or location APIs.
+    implementation("com.google.ar:core:1.56.0")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

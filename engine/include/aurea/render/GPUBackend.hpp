@@ -618,6 +618,28 @@ public:
     [[nodiscard]] virtual Status begin_frame(FrameBegin& out) noexcept = 0;
     /// Submete e, se houver backbuffer, apresenta.
     [[nodiscard]] virtual Status end_frame() noexcept = 0;
+    /// Whether discard_frame can finish a frame without changing the visible
+    /// picture. Backends with an acquired swapchain image must opt in only
+    /// after implementing that image's ownership/release correctly.
+    [[nodiscard]] virtual bool can_discard_frame() const noexcept { return false; }
+    /// Finish recorded commands and normal fence/resource retirement, but do
+    /// not present the acquired backbuffer. No extra full-resolution copy is
+    /// required. The default retains the existing end_frame behavior; callers
+    /// must check can_discard_frame before relying on picture continuity.
+    [[nodiscard]] virtual Status discard_frame() noexcept { return end_frame(); }
+    /// Keep the one already acquired display target through serial submissions.
+    /// Intermediates are offscreen; begin_leased_frame opens only the final
+    /// presentation with the same texture/extent/rotation, without acquiring.
+    [[nodiscard]] virtual bool can_lease_presentable_frame() const noexcept { return false; }
+    [[nodiscard]] virtual Status begin_presentable_frame_lease() noexcept {
+        return Status{Errc::NotSupported, "presentable frame lease unavailable"};
+    }
+    [[nodiscard]] virtual Status begin_leased_frame(FrameBegin&) noexcept {
+        return Status{Errc::NotSupported, "presentable frame lease unavailable"};
+    }
+    /// Never waits on the CPU. Backing read by submitted work remains retained
+    /// until its real fence, including cancellation before final presentation.
+    virtual void end_presentable_frame_lease() noexcept {}
 
     /// Frame OFFSCREEN: NÃO adquire nem apresenta nada na tela.
     ///
@@ -636,6 +658,9 @@ public:
     [[nodiscard]] virtual Result<TextureHandle>  create_texture(const TextureDesc&) noexcept = 0;
     [[nodiscard]] virtual Result<BufferHandle>   create_buffer(const BufferDesc&) noexcept = 0;
     [[nodiscard]] virtual Result<SamplerHandle>  create_sampler(const SamplerDesc&) noexcept = 0;
+    /// GLES compiles source in the driver; defer unused effect shaders until
+    /// an actual pipeline/prewarm requests them. Other APIs keep eager modules.
+    [[nodiscard]] virtual bool defer_shader_creation() const noexcept { return false; }
     [[nodiscard]] virtual Result<ShaderHandle>   create_shader(const ShaderDesc&) noexcept = 0;
     [[nodiscard]] virtual Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept = 0;
 
@@ -690,6 +715,12 @@ public:
     /// lock. Submitted reads retain their native buffers until their fence.
     /// Decoder-owned frames remain valid and can be imported again on demand.
     virtual u32 trim_external_images() noexcept { return 0; }
+    /// A single graph can span multiple offline submissions. Its imported
+    /// handles, including ones consumed late, must survive automatic stale
+    /// import-cache eviction across that scope. Does not change explicit
+    /// destruction, GPU fence ownership, or tracked memory accounting.
+    virtual void begin_external_image_scope() noexcept {}
+    virtual void end_external_image_scope() noexcept {}
 
     /// Executa `fn(ctx)` quando a GPU concluir o frame que está sendo gravado
     /// agora. É como a camada de mídia devolve o buffer ao decoder no momento
@@ -734,6 +765,8 @@ public:
     }
     [[nodiscard]] virtual u32  frames_in_flight() const noexcept = 0;
     [[nodiscard]] virtual GpuMemoryStats memory_stats() const noexcept = 0;
+    /// Optional, failure-only allocation diagnostics. Never changes residency.
+    virtual void log_memory_breakdown() noexcept {}
 
     /// Grava o cache de pipeline. Chamado ao ir para segundo plano — pode
     /// bloquear enquanto o driver serializa, então NUNCA no caminho de frame.

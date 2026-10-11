@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,6 +34,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
+import com.aurea.aurea.engine.TrackProperty
+import com.aurea.aurea.ui.ds.KeyframeLook
+import com.aurea.aurea.ui.ds.KeyframeDiamondIcon
+import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
@@ -239,14 +244,26 @@ internal suspend fun AwaitPointerEventScope.meshWarpGesture(store: EditorStore, 
  * está aberto e oferece "Redefinir malha" (um passo de desfazer).
  */
 @Composable
-internal fun MeshWarpCardTools(store: EditorStore, effectId: Int) {
+internal fun MeshWarpCardTools(store: EditorStore, effectId: Int, selected: Boolean, onSelect: () -> Unit) {
     val layer = store.primary ?: return
     DisposableEffect(layer, effectId) {
         MeshWarpStage.open(layer, effectId)
         onDispose { MeshWarpStage.close(effectId) }
     }
     val reset = stringResource(R.string.mesh_warp_reset)
+    val keys = store.keyframes[layer].orEmpty().filter { it.property == TrackProperty.MESH_WARP && it.effectIndex == effectId }
+    val local = store.detail?.localFrame(store.playhead)
+    val look = if (keys.any { it.time == local }) KeyframeLook.KeyHere else if (keys.isEmpty()) KeyframeLook.None else KeyframeLook.Animated
+    val mark = stringResource(R.string.panel_marcar_keyframe_aqui)
     Column(Modifier.padding(bottom = 6.dp)) {
+        PropertyCustomRow(stringResource(R.string.fx_name_mesh_warp), selected, onSelect, keyframe = look) {
+            Box(Modifier.size(44.dp, 36.dp).testTag("fx.mesh_warp.key")
+                .semantics { role = Role.Button; contentDescription = mark }
+                .tocavel(onClick = { onSelect(); store.meshWarpToggleKey(layer, effectId) }),
+                contentAlignment = androidx.compose.ui.Alignment.Center) {
+                KeyframeDiamondIcon(look, store.detail?.locked != true, Modifier.size(22.dp))
+            }
+        }
         Text(
             stringResource(R.string.mesh_warp_hint),
             style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)),

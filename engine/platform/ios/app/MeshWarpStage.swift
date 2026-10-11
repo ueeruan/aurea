@@ -231,9 +231,32 @@ private func meshToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)? {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var mesh = MeshWarpStageState.shared
     let effectId: UInt32
+    let selected: Bool
+    let onSelect: () -> Void
+    private var keyLook: KeyframeLook {
+        guard let layer = model.primarySelection else { return .none }
+        let keys = (model.keyframes[layer] ?? []).filter { $0.property == 44 && $0.effectIndex == effectId }
+        return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: ParamRowDims.gap) {
+                ParamRowLabel(label: AureaText.t("fx_name_mesh_warp"), selected: selected, keyframe: keyLook, expression: .none)
+                    .contentShape(Rectangle()).onTapGesture(perform: onSelect)
+                Button {
+                    onSelect()
+                    if let layer = model.primarySelection, model.selectedLayer?.locked != true,
+                       model.engine.meshWarpToggleKey(layer, effect: Int32(truncatingIfNeeded: effectId)) {
+                        mesh.revision += 1; model.refreshModel(force: true)
+                    }
+                } label: {
+                    KeyframeDiamondIcon(look: keyLook, enabled: model.selectedLayer?.locked != true).frame(width: 22, height: 22).frame(width: 44, height: 36)
+                }.buttonStyle(.plain).disabled(model.selectedLayer?.locked == true)
+                    .accessibilityLabel(AureaText.t("panel_marcar_keyframe_aqui"))
+                    .accessibilityIdentifier("fx.mesh_warp.key")
+                Spacer(minLength: 0)
+            }.frame(minHeight: ParamRowDims.row)
             Text(AureaText.t("mesh_warp_hint"))
                 .font(.system(size: 11.5))
                 .foregroundStyle(AureaColors.muted)

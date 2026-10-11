@@ -136,6 +136,38 @@ int main() {
             }
         }
     }
+    u32 resizeChecks = 0;
+    for (auto& bridge : bridges) {
+        bridge->set_max_live_targets(2);
+        VideoColorInfo color;
+        color.matrix = YCbCrMatrix::BT601;
+        color.fromStream = true;
+        auto a = quad, b = quad;
+        b.width = b.height = 48;
+        std::shared_ptr<const android::GlVideoBridge::Target> oldA, activeA, secondA, temporary;
+        if (!bridge->convert(raw, a, color, oldA).ok() || !oldA) return 7;
+        if (!bridge->convert(raw, b, color, temporary).ok() || !temporary) return 7;
+        temporary.reset();
+        if (!bridge->convert(raw, a, color, activeA).ok() || !activeA) return 7;
+        oldA.reset(); // A->B->A: an old generation cannot become a free new-A slot.
+        if (!bridge->convert(raw, a, color, secondA).ok() || !secondA) return 7;
+        const Status pressure = bridge->convert(raw, a, color, temporary);
+        if (pressure.code() != Errc::BudgetExceeded || temporary) {
+            std::puts("FAIL: old-size lease bypassed the bounded RGBA pool"); return 7;
+        }
+        activeA.reset(); secondA.reset();
+        for (u32 side : {32u, 64u, 48u, 16u, 64u, 32u, 48u, 64u}) {
+            auto resized = quad; resized.width = resized.height = side;
+            if (!bridge->convert(raw, resized, color, temporary).ok() || !temporary) return 7;
+            const auto stats = bridge->cache_stats();
+            if (stats.targetImports > bridge->max_live_targets() || stats.liveTargets > bridge->max_live_targets()
+                || stats.freeTargets > stats.liveTargets) {
+                std::puts("FAIL: resize retained stale EGL/RGBA imports or invalid pool accounting"); return 7;
+            }
+            ++resizeChecks; temporary.reset();
+        }
+    }
+    std::printf("RGBA POOL RESULT contexts=4 resizeChecks=%u generationAccounting=passed\n", resizeChecks);
     std::printf("YUV COLOR RESULT matrices=601,709,2020 ranges=limited,full contexts=4 rounds=3 comparisons=%u readableTargets=%u maxDelta=%u failures=%u\n",
         comparisons, readableTargets, maxDelta, failures);
     return failures ? 1 : 0;

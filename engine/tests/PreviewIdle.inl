@@ -1,5 +1,48 @@
 // Shared Android/iOS scheduling contract. The mock executes real Engine and
 // Renderer cache decisions; pixel fidelity has separate GPU-cache regressions.
+AUREA_TEST(PreviewRetry, FailedFramesArePacedAndAnEditRecoversImmediately) {
+    Engine engine;
+    auto* backend = new test::MockBackend;
+    auto config = headless_config();
+    config.backend = backend;
+    config.initialPreviewScale = PreviewScale::Full;
+    AUREA_CHECK(engine.initialize(config).ok());
+    AUREA_CHECK(engine.new_project(64, 64, 30., "paced GPU retry").ok());
+    engine.renderer().set_preview_cache_budget(0);
+    int window = 0;
+    AUREA_CHECK(engine.attach_surface(&window, 64, 64).ok());
+    backend->beforeEndFrame = [] { return Status{Errc::Timeout}; };
+    AUREA_CHECK(engine.render_frame(true).code() == Errc::Timeout);
+    const u32 first = backend->framesSubmitted;
+    for (u32 poll = 0; poll < 20; ++poll) (void)engine.render_frame(true);
+    AUREA_CHECK_EQ(backend->framesSubmitted, first);
+
+    // A failed submission does not block on vsync. The real paused render
+    // thread must still wait between attempts, instead of spinning through
+    // repeated commands/presents until a resource becomes available.
+    engine.start_render_thread();
+    std::this_thread::sleep_for(std::chrono::milliseconds(175));
+    engine.stop_render_thread();
+    const u32 paced = backend->framesSubmitted;
+    AUREA_CHECK(paced > first);
+    AUREA_CHECK(paced <= first + 4);
+
+    Command seek;
+    seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{1}, 30.);
+    AUREA_CHECK_EQ(engine.submit_commands(&seek, 1), 1u);
+    AUREA_CHECK(engine.render_frame(true).code() == Errc::Timeout);
+    AUREA_CHECK_EQ(backend->framesSubmitted, paced + 1);
+    backend->beforeEndFrame = [] { return OkStatus; };
+    engine.request_render();
+    AUREA_CHECK(engine.render_frame(true).ok());
+    const u32 recovered = backend->framesSubmitted;
+    AUREA_CHECK_EQ(recovered, paced + 2);
+    for (u32 poll = 0; poll < 20; ++poll) AUREA_CHECK(engine.render_frame(true).ok());
+    AUREA_CHECK_EQ(backend->framesSubmitted, recovered);
+    engine.shutdown();
+}
+
 namespace {
 struct IdlePreviewFixture {
     Engine engine;
@@ -150,6 +193,37 @@ AUREA_TEST(PreviewIdle, BackgroundThreadStopsSubmittingOnceItsWindowIsFull) {
     fixture.engine.stop_render_thread();
     AUREA_CHECK_EQ(fixture.backend->offscreenFrames, 3u);
     AUREA_CHECK_EQ(fixture.engine.read_status().playhead.value, 0ll);
+}
+
+AUREA_TEST(PreviewIdle, ExactCaptureRestartsCompletedWindowWithoutPresentingOrChangingThePlayhead) {
+    IdlePreviewFixture fixture;
+    AUREA_CHECK(fixture.engine.render_frame(true).ok());
+    fixture.settle(); fixture.fill(4);
+    // The next idle tick marks this same-key completed window done.
+    AUREA_CHECK(fixture.engine.render_frame(true).ok());
+    const u32 heldPresentations = fixture.backend->presents;
+    const u32 heldAcquires = fixture.backend->acquires;
+    TextureDesc descriptor;
+    descriptor.width = descriptor.height = 64;
+    descriptor.format = SurfaceFormat::RGBA16F;
+    descriptor.sampled = descriptor.renderTarget = descriptor.transferSrc = true;
+    auto target = fixture.backend->create_texture(descriptor);
+    AUREA_CHECK(target.ok());
+    if (!target.ok()) return;
+    AUREA_CHECK(fixture.engine.render_offscreen(*target, 64, 64).ok());
+    AUREA_CHECK_EQ(fixture.engine.renderer().preview_cached_count(), 0u);
+    AUREA_CHECK_EQ(fixture.backend->presents, heldPresentations);
+    AUREA_CHECK_EQ(fixture.backend->acquires, heldAcquires);
+    const auto revision = fixture.engine.read_status().modelRevision;
+    // Same revision/frame, no request_render and no display acquisition:
+    // observing the capture's invalidated idle state must refill the window.
+    AUREA_CHECK(fixture.engine.render_frame(true).ok());
+    fixture.settle(); fixture.fill(4);
+    AUREA_CHECK_EQ(fixture.backend->presents, heldPresentations);
+    AUREA_CHECK_EQ(fixture.backend->acquires, heldAcquires);
+    AUREA_CHECK_EQ(fixture.engine.read_status().playhead.value, 0ll);
+    AUREA_CHECK_EQ(fixture.engine.read_status().modelRevision, revision);
+    fixture.backend->destroy_texture(*target);
 }
 
 AUREA_TEST(PreviewIdle, FailedFutureUploadNeverEntersCacheAndWaitsForReadiness) {

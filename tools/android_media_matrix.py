@@ -1,8 +1,7 @@
 """Generate owned test patterns and run the production Android decoder probe.
 
 Requires FFmpeg as a development tool, adb, and aurea_media_probe built for the
-connected device's ABI. The development CLI independently validates the app's
-shared native FFmpeg export libraries.
+connected device's ABI. No FFmpeg binaries or libraries are bundled in the app.
 """
 import argparse
 import json

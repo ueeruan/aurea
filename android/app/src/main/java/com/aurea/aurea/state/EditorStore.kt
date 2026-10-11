@@ -1937,6 +1937,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (playing) pause()
         if (engine.meshWarpDrag(layer, effect, vertex, grip, u, v, autoKeyTransforms, continuing)) rigRevision++
     }
+    fun meshWarpToggleKey(layer: Long, effect: Int) {
+        if (detail?.locked == true) return
+        if (playing) pause()
+        if (engine.meshWarpToggleKey(layer, effect)) { rigRevision++; refreshNow() }
+    }
     fun meshWarpReset(layer: Long, effect: Int) {
         if (engine.meshWarpReset(layer, effect)) { rigRevision++; refreshNow() }
     }
@@ -6034,43 +6039,60 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         select(id)
     }
 
-    // ---- Real Camera (editor/RealCamera.kt): a câmera 3D segue o celular ----
+    // ---- Real Camera: platform poses; native state, playback and keyframes ----
 
-    /** "Real Camera" no menu de adicionar: cria a câmera e liga a sessão do sensor. */
     fun startRealCamera() {
         val id = engine.addCamera()
         if (id < 0) { errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camera, -id); return }
-        if (sceneEditor) exitSceneEditor()   // a faixa e o sensor vivem no palco normal
+        if (sceneEditor) exitSceneEditor()
         pause()
         refreshNow()
         select(id)
-        com.aurea.aurea.editor.RealCamera.recording = false
-        com.aurea.aurea.editor.RealCamera.lastFrame = -1
+        if (!engine.realCameraStart(id)) {
+            showToast(appText(R.string.real_camera_tracking_failed))
+            return
+        }
+        com.aurea.aurea.editor.RealCamera.reset()
         com.aurea.aurea.editor.RealCamera.session = com.aurea.aurea.editor.RealCameraSession(id)
     }
 
-    /** Ao vivo (sem gravar): a rotação do aparelho vira a rotação da câmera, sem keyframe. */
-    fun realCameraApply(layer: Long, rx: Float, ry: Float, rz: Float) {
-        if (layers.none { it.id == layer }) return
-        send { setRotation(layer, rx, ry, rz) }
+    /** OpenGL camera-to-world pose; no UI playhead or cached playing decision. */
+    fun realCameraSample(pose: FloatArray, timestampNs: Long, positional: Boolean): Boolean =
+        !destroyed && engine.realCameraSample(pose, timestampNs, positional,
+            com.aurea.aurea.editor.RealCamera.sensitivity, com.aurea.aurea.editor.RealCamera.inverted)
+
+    fun realCameraHold(): Boolean = !destroyed && engine.realCameraHold()
+
+    fun realCameraStatus(): LongArray = if (destroyed) longArrayOf(0, 0, -1, 0) else engine.realCameraStatus()
+
+    fun realCameraRecord(record: Boolean): Boolean {
+        if (destroyed) return false
+        val accepted = engine.realCameraRecord(record)
+        syncRealCameraStatus()
+        refreshNow()
+        return accepted
     }
 
-    /** Gravando: um keyframe de Rotação X/Y/Z no quadro da prévia (tempo local da camada). */
-    fun realCameraKey(layer: Long, rx: Float, ry: Float, rz: Float) {
-        val d = if (layer == primary) detail else detailOf(layer)
-        val local = d?.localFrame(playhead) ?: playhead
-        send {
-            setKeyframeValue(layer, TrackProperty.ROTATION_X, NO_EFFECT, 0, local, rx)
-            setKeyframeValue(layer, TrackProperty.ROTATION_Y, NO_EFFECT, 0, local, ry)
-            setKeyframeValue(layer, TrackProperty.ROTATION_Z, NO_EFFECT, 0, local, rz)
-        }
-        if (local % 10 == 0) refreshNow()
+    fun syncRealCameraStatus() {
+        val native = realCameraStatus()
+        if (native.size != 4) return
+        if (native[0] == 0L) com.aurea.aurea.editor.RealCamera.session = null
+        com.aurea.aurea.editor.RealCamera.recording = native[1] != 0L
+        com.aurea.aurea.editor.RealCamera.lastFrame = native[2].toInt()
+        com.aurea.aurea.editor.RealCamera.positional = native[3] != 0L
     }
 
-    /** "Gravar": um passo de desfazer para a gravação inteira e a timeline toca. */
-    fun realCameraBeginRecording(layer: Long) {
-        if (layers.none { it.id == layer }) return
-        play()
+    fun realCameraRecenter() {
+        if (!destroyed) engine.realCameraRecenter()
+        syncRealCameraStatus()
+        refreshNow()
+    }
+
+    fun realCameraStop() {
+        if (!destroyed) engine.realCameraStop()
+        com.aurea.aurea.editor.RealCamera.reset()
+        com.aurea.aurea.editor.RealCamera.session = null
+        if (!destroyed) refreshNow()
     }
 
     fun addNull(threeD: Boolean) {

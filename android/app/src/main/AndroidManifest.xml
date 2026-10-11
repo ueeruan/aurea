@@ -41,11 +41,15 @@
          Console tem de declarar "usa ID de publicidade: sim (publicidade)". -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
 
-    <!-- Fase 8I (§185, §195): saíram CAMERA, RECORD_AUDIO (não há captura no
-         editor), REQUEST_INSTALL_PACKAGES (não há atualização dentro do app)
-         e WRITE_EXTERNAL_STORAGE (voltou em 10/2026 só até a API 28, para o
-         export aparecer na galeria do Android 8–9 — ver acima). Permissão
-         declarada sem recurso que a use é promessa falsa na loja. -->
+    <!-- No microphone recording or APK installation feature is exposed.
+         CAMERA is requested only by optional positional Real Camera tracking. -->
+
+    <!-- Real Camera uses optional ARCore for positional tracking. Rotation
+         recording remains available without ARCore or camera permission. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false"/>
 
     <!-- Vulkan is preferred; OpenGL ES 3.1 is the fallback. Floating-point
          render target support is checked against the driver at startup. -->
@@ -73,6 +77,8 @@
         android:hardwareAccelerated="true"
         android:supportsRtl="true"
         android:theme="@style/AureaTheme">
+
+        <meta-data android:name="com.google.ar.core" android:value="optional"/>
 
         <!-- AdMob: o App ID vem de res/values*/ads_config.xml (debug = teste do
              Google; release = o real). As duas flags tiram a inicialização e o

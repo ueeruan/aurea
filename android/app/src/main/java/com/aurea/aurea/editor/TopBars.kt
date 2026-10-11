@@ -167,8 +167,10 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
             tint = if (StagePrefs.hideSelectionBox) AureaColors.Accent else AureaColors.Text,
         )
         ChromeButton(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
-        ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), onClick = { LayerOps.delete(store, listOf(h.id)) }, size = 19.dp, width = 44.dp)
         }
+        ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada),
+            onClick = if (!h.locked) ({ LayerOps.delete(store, listOf(h.id)) }) else null,
+            modifier = Modifier.testTag("layer.delete"), size = 19.dp, width = 48.dp, height = 48.dp)
         ChromeVectorButton(Icons.Filled.MoreHoriz, stringResource(R.string.editor_mais_acoes_camada), onClick = { openSheet(store, ui, ShellSheet.LayerMenu) }, size = 22.dp, width = 44.dp)
     }
 }

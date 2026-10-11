@@ -30,6 +30,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 
 namespace aurea::mtl {
@@ -657,7 +658,7 @@ void Impl::sample_counter(u32 index) noexcept {
 }
 
 void Impl::reclaim_stale_imports() noexcept {
-    if (importedByBuffer.empty()) return;
+    if (externalImageScopeDepth || importedByBuffer.empty()) return;
     std::vector<u64> stale;
     for (const auto& [buffer, id] : importedByBuffer) {
         const Texture* t = textures.get(id);
@@ -680,14 +681,77 @@ Status Backend::begin_offscreen_frame(FrameBegin& out) noexcept {
     return impl_->begin_frame_impl(out, false);
 }
 
+Status Backend::begin_presentable_frame_lease() noexcept {
+    Impl& d = *impl_;
+    if (!d.initialized) return Status{Errc::InvalidState, "backend nao inicializado"};
+    if (d.deviceLost) return Status{Errc::DeviceLost, "dispositivo perdido"};
+    if (d.presentableLease.active) return Status{Errc::Busy, "drawable ja reservado"};
+    const Texture* target = d.textures.get(d.acquiredBackbuffer.id);
+    if (!d.current || !d.layer || !d.drawableAcquired || !d.drawable || !target || !target->texture)
+        return Status{Errc::InvalidState, "frame apresentavel nao aberto"};
+    auto& lease = d.presentableLease;
+    lease.drawable = d.drawable;
+    lease.backbuffer = d.acquiredBackbuffer;
+    lease.width = target->desc.width;
+    lease.height = target->desc.height;
+    lease.format = target->desc.format;
+    lease.rotation = SurfaceRotation::None;
+    lease.generation = d.surfaceGeneration;
+    lease.active = true;
+    return OkStatus;
+}
+
+Status Backend::begin_leased_frame(FrameBegin& out) noexcept {
+    out = FrameBegin{};
+    Impl& d = *impl_;
+    auto& lease = d.presentableLease;
+    if (!lease.active) return Status{Errc::InvalidState, "drawable nao reservado"};
+    if (d.current || lease.finalOpened || lease.presented) return Status{Errc::Busy, "frame reservado ja aberto"};
+    if (!d.layer || lease.generation != d.surfaceGeneration || !d.textures.get(lease.backbuffer.id))
+        return Status{Errc::SurfaceLost, "superficie reservada mudou"};
+    const Status status = d.begin_frame_impl(out, false);
+    if (!status.ok()) return status;
+    d.drawable = lease.drawable;
+    d.drawableAcquired = true;
+    d.acquiredBackbuffer = lease.backbuffer;
+    d.current->leasedDrawable = lease.drawable;
+    d.current->leasedSurfaceGeneration = lease.generation;
+    d.current->leasedFinal = true;
+    d.current->leasedCancelled = false;
+    lease.finalOpened = true;
+    out.backbuffer = lease.backbuffer;
+    out.backbufferWidth = lease.width;
+    out.backbufferHeight = lease.height;
+    out.backbufferFormat = lease.format;
+    out.rotation = lease.rotation;
+    return OkStatus;
+}
+
+void Backend::end_presentable_frame_lease() noexcept {
+    Impl& d = *impl_;
+    auto& lease = d.presentableLease;
+    if (!lease.active) return;
+    // Cancellation may close the scope with GPU work still submitted or with
+    // a final encoder still open. Its real fence, never scope exit, releases
+    // the drawable. No image copy and no CPU wait are needed.
+    if (FrameContext* owner = d.deferral_target()) {
+        assert(!owner->leasedDrawable || owner->leasedDrawable == lease.drawable);
+        owner->leasedDrawable = lease.drawable;
+        if (owner == d.current && d.drawable == lease.drawable)
+            owner->leasedCancelled = true;
+    }
+    lease = {};
+}
+
 Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     out = FrameBegin{};
     if (!initialized) return Status{Errc::InvalidState, "backend nao inicializado"};
     if (deviceLost) return Status{Errc::DeviceLost, "dispositivo perdido"};
+    if (withSurface && presentableLease.active) return Status{Errc::Busy, "drawable reservado pela previa"};
     if (current) return Status{Errc::InvalidState, "frame ja aberto"};
     for (u32 i = 0; i < framesInFlight; ++i) {
         FrameContext& done = frames[i];
-        if (done.submitted && !done.deferred.empty()
+        if (done.submitted && (!done.deferred.empty() || done.unpresentedDrawable || done.leasedDrawable)
                 && wait_command_buffer(done.cmd, done.completion, 0, "coletar frame concluido").ok())
             run_deferred(done);
     }
@@ -708,6 +772,10 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         collect_timings(f);
     }
     f.frameNumber = ++frameNumber;
+    f.leasedDrawable = nil;
+    f.leasedSurfaceGeneration = 0;
+    f.leasedFinal = false;
+    f.leasedCancelled = false;
     f.uniforms.reset();
     f.staging.reset();
     f.timerLabels.clear();
@@ -735,6 +803,7 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
     // nada. Apresentar daqui seria apresentar o quadro errado.
     drawable = nil;
     drawableAcquired = false;
+    acquiredBackbuffer = {};
     if (!withSurface) return OkStatus;
     if (!layer) return OkStatus;
 
@@ -747,9 +816,11 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         AUREA_LOG_WARN("metal: nextDrawable sem imagem; frame sem backbuffer");
         return OkStatus;
     }
+    ++drawableAcquisitions;
     const u32 width = static_cast<u32>(drawable.texture.width);
     const u32 height = static_cast<u32>(drawable.texture.height);
     out.backbuffer = register_drawable(drawable.texture, width, height);
+    acquiredBackbuffer = out.backbuffer;
     out.backbufferWidth = width;
     out.backbufferHeight = height;
     out.backbufferFormat = from_mtl(layer.pixelFormat);
@@ -760,27 +831,47 @@ Status Impl::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
 }
 
 Status Backend::end_frame() noexcept {
+    return impl_->end_frame_impl(true);
+}
+
+Status Backend::discard_frame() noexcept {
+    return impl_->end_frame_impl(false);
+}
+
+Status Impl::end_frame_impl(bool presentDrawable) noexcept {
     @autoreleasepool {
-        Impl& d = *impl_;
-        if (!d.current) return Status{Errc::InvalidState, "nenhum frame aberto"};
-        FrameContext& f = *d.current;
+        if (!current) return Status{Errc::InvalidState, "nenhum frame aberto"};
+        FrameContext& f = *current;
 
-        d.commands.end_render_pass();
-        d.sample_counter(1);
-        d.commands.finish_encoders();   // nenhum encoder pode ficar aberto no commit
+        commands.end_render_pass();
+        sample_counter(1);
+        commands.finish_encoders();   // nenhum encoder pode ficar aberto no commit
 
-        if (d.drawableAcquired && d.drawable) [f.cmd presentDrawable:d.drawable];
-        [f.cmd commit];
+        id<MTLDrawable> target = f.leasedFinal ? f.leasedDrawable : (drawableAcquired ? drawable : nil);
+        const bool surfaceLost = f.leasedFinal && (!layer || f.leasedSurfaceGeneration != surfaceGeneration);
+        const bool wrongPhase = presentDrawable && target && presentableLease.active && !f.leasedFinal;
+        const bool shouldPresent = presentDrawable && target && !f.leasedCancelled && !surfaceLost && !wrongPhase;
+        commit_presentable_frame(f.cmd, target, shouldPresent, f.unpresentedDrawable);
+        if (shouldPresent) ++drawablePresentations;
+        if (f.leasedFinal && presentableLease.active) {
+            presentableLease.finalOpened = false;
+            if (shouldPresent) presentableLease.presented = true;
+        }
 
-        d.current = nullptr;
-        d.commands.bind_frame(this, nullptr);
-        d.frameCursor = (d.frameCursor + 1) % d.framesInFlight;
+        current = nullptr;
+        commands.bind_frame(self, nullptr);
+        frameCursor = (frameCursor + 1) % framesInFlight;
         f.submitted = true;
-        d.lastSubmitted = &f;
-        d.drawableAcquired = false;
+        lastSubmitted = &f;
+        drawableAcquired = false;
+        drawable = nil;
+        acquiredBackbuffer = {};
         // As texturas externas lidas neste frame não precisam de barreira de
         // devolução: em Metal não há posse de fila a transferir (o Vulkan faz
         // isso porque lá o AHardwareBuffer é compartilhado entre donos).
+        if (surfaceLost) return Status{Errc::SurfaceLost, "superficie reservada mudou"};
+        if (f.leasedCancelled) return Status{Errc::Cancelled, "frame reservado cancelado"};
+        if (wrongPhase) return Status{Errc::InvalidState, "apresentacao antes do frame final"};
         return OkStatus;
     }
 }

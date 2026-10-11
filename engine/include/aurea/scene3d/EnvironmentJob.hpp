@@ -11,7 +11,9 @@ namespace aurea::scene3d {
 // A live future is never replaced, because std::async destruction may wait.
 [[nodiscard]] bool start_environment_job(std::future<EnvironmentMaps>& job,
                                          std::shared_ptr<const HdriPixels> pixels,
-                                         const EnvironmentQuality& quality) noexcept;
+                                         const EnvironmentQuality& quality,
+                                         void (*beforeBuild)(void*) = nullptr,
+                                         void* probeContext = nullptr) noexcept;
 [[nodiscard]] bool take_environment_job(std::future<EnvironmentMaps>& job,
                                         EnvironmentMaps& maps) noexcept;
 

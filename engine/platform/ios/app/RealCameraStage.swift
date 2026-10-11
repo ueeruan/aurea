@@ -1,92 +1,249 @@
-// Real Camera: a câmera 3D segue o iPhone. CoreMotion (giroscópio +
-// acelerômetro, sem bússola) vira a rotação da camada Câmera relativa à
-// postura em que a sessão começou ("Recentrar" zera). "Gravar" toca a
-// timeline e escreve keyframes de Rotação X/Y/Z no quadro da prévia a cada
-// leitura. Só rotação: o aparelho não mede posição sem AR.
-// Par do Android: editor/RealCamera.kt.
+// Real Camera delivers a display-oriented OpenGL pose to the shared camera
+// session. ARKit supplies true position only while world tracking is normal;
+// devices without AR/camera access retain CoreMotion rotation without position.
+import ARKit
+import AVFoundation
 import CoreMotion
+import simd
 import SwiftUI
 
-@MainActor final class RealCameraState: ObservableObject {
+@MainActor final class RealCameraState: NSObject, ObservableObject, @preconcurrency ARSessionDelegate {
     static let shared = RealCameraState()
 
     @Published var layer: Int64 = 0
     @Published var active = false
     @Published var recording = false
-    /// Multiplica os graus do aparelho (0,5 = metade, 2 = dobro).
     @Published var sensitivity: Double = 1
     @Published var inverted = false
-    @Published var available = true
+    @Published var available = false
+    @Published var trackingValid = false
+    @Published var positional = false
     @Published var lastFrame: Int64 = -1
+    @Published private var trackingMessageKey = "real_camera_tracking_rotation"
 
     private let motion = CMMotionManager()
-    private var reference: CMAttitude?
-    private var smooth = (x: 0.0, y: 0.0, z: 0.0)
-    private var lastSent = Date.distantPast
+    private let arSession = ARSession()
+    private weak var model: AureaModel?
+    private var generation: UInt64 = 0
+    private var usingAR = false
+
+    var statusText: String {
+        let tracking = AureaText.t(available ? trackingMessageKey : "real_camera_no_sensor")
+        guard recording else { return tracking }
+        return String(format: AureaText.t("real_camera_recording"), Int(max(lastFrame, 0))) + " · " + tracking
+    }
 
     func painting(_ model: AureaModel) -> Bool { active && model.layers.contains { $0.id == layer } }
 
     func start(_ model: AureaModel, layer id: Int64) {
+        stopSensors()
+        generation &+= 1
+        self.model = model
         layer = id
         recording = false
         lastFrame = -1
-        reference = nil
-        smooth = (0, 0, 0)
-        available = motion.isDeviceMotionAvailable
-        active = true
-        guard available else { return }
-        motion.deviceMotionUpdateInterval = 1.0 / 30.0
-        motion.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self, weak model] data, _ in
-            guard let self, let model, let data else { return }
-            self.consume(data.attitude, model)
+        positional = false
+        trackingValid = false
+        guard model.realCameraStart(id) else { active = false; return }
+        synchronize(model)
+        if ARWorldTrackingConfiguration.isSupported {
+            available = true
+            trackingMessageKey = "real_camera_tracking_limited"
+            authorizeCamera(generation)
+        } else {
+            startMotion(reason: "real_camera_tracking_rotation")
         }
     }
 
     func stop(_ model: AureaModel) {
-        guard active else { return }
-        if recording { recording = false; model.pause() }
-        motion.stopDeviceMotionUpdates()
+        generation &+= 1
+        stopSensors()
+        model.realCameraStop()
+        self.model = nil
         active = false
+        recording = false
+        trackingValid = false
+        positional = false
     }
 
-    func recenter() { reference = nil; smooth = (0, 0, 0) }
+    func recenter() {
+        guard active, let model else { return }
+        _ = model.realCameraRecenter()
+        synchronize(model)
+    }
 
     func toggleRecording(_ model: AureaModel) {
-        if recording {
-            recording = false
-            model.pause()
-        } else {
-            lastFrame = -1
-            recording = true
-            model.realCameraBeginRecording(layer)
+        guard active, recording || trackingValid else { return }
+        _ = model.realCameraRecord(!recording)
+        synchronize(model)
+    }
+
+    private func authorizeCamera(_ token: UInt64) {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            startAR()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self, self.active, self.generation == token else { return }
+                    if granted { self.startAR() }
+                    else { self.startMotion(reason: "real_camera_camera_permission") }
+                }
+            }
+        default:
+            startMotion(reason: "real_camera_camera_permission")
         }
     }
 
-    private func consume(_ attitude: CMAttitude, _ model: AureaModel) {
+    private func startAR() {
         guard active else { return }
-        let a = attitude.copy() as! CMAttitude
-        if let reference { a.multiply(byInverseOf: reference) } else { reference = attitude.copy() as? CMAttitude; return }
-        // Suaviza (filtro simples): o sensor tem ruído de ~0,2°.
-        smooth.x += (a.pitch - smooth.x) * 0.45
-        smooth.y += (a.yaw - smooth.y) * 0.45
-        smooth.z += (a.roll - smooth.z) * 0.45
-        let k = sensitivity * (inverted ? -1 : 1) * 180 / .pi
-        // yaw = pan (Rotação Y); pitch = tilt (Rotação X); roll = Rotação Z.
-        let rx = Float(smooth.x * k), ry = Float(-smooth.y * k), rz = Float(-smooth.z * k)
-        guard rx.isFinite, ry.isFinite, rz.isFinite else { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastSent) >= 0.025 else { return }
-        lastSent = now
-        if recording && model.status.playing != 0 {
-        let frame = model.status.playhead
-            if frame != lastFrame {
-                lastFrame = frame
-                model.realCameraKey(layer, rx: rx, ry: ry, rz: rz)
-            }
-        } else {
-            if recording && model.status.playing == 0 { recording = false }   // chegou ao fim
-            model.realCameraApply(layer, rx: rx, ry: ry, rz: rz)
+        motion.stopDeviceMotionUpdates()
+        usingAR = true
+        available = true
+        trackingValid = false
+        trackingMessageKey = "real_camera_tracking_limited"
+        arSession.delegate = self
+        arSession.delegateQueue = .main
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.worldAlignment = .gravity
+        configuration.isLightEstimationEnabled = false
+        arSession.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+    }
+
+    private var displayOrientation: UIInterfaceOrientation {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first(where: { $0.activationState == .foregroundActive })?.interfaceOrientation ?? .portrait
+    }
+
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        guard active, usingAR, let model else { return }
+        synchronize(model)
+        guard active else { return }
+        guard case .normal = frame.camera.trackingState else {
+            _ = holdTracking(model)
+            return
         }
+        // viewMatrix is world -> display camera. Its inverse is the required
+        // right-handed camera pose; raw camera.transform ignores screen orientation.
+        let pose = simd_inverse(frame.camera.viewMatrix(for: displayOrientation))
+        let accepted = model.realCameraSample(pose, timestamp: frame.timestamp,
+            positional: true, sensitivity: Float(sensitivity), inverted: inverted)
+        trackingValid = accepted
+        trackingMessageKey = accepted ? "real_camera_tracking_position" : "real_camera_tracking_limited"
+        synchronize(model)
+    }
+
+    func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        guard active, usingAR else { return }
+        if case .normal = camera.trackingState { return }
+        trackingValid = false
+        trackingMessageKey = "real_camera_tracking_limited"
+    }
+
+    func session(_ session: ARSession, didFailWithError error: Error) {
+        guard active, usingAR else { return }
+        // The shared pose session rebases a position/rotation mode change at
+        // the current virtual pose. Recenter is reserved for the explicit button.
+        startMotion(reason: "real_camera_tracking_failed")
+    }
+
+    func sessionWasInterrupted(_ session: ARSession) {
+        guard active, usingAR else { return }
+        trackingValid = false
+        trackingMessageKey = "real_camera_tracking_limited"
+    }
+
+    func sessionInterruptionEnded(_ session: ARSession) {
+        guard active, usingAR else { return }
+        // Preserve the session's reference world rather than resetting origin.
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.worldAlignment = .gravity
+        configuration.isLightEstimationEnabled = false
+        arSession.run(configuration)
+    }
+
+    @discardableResult
+    private func holdTracking(_ model: AureaModel) -> Bool {
+        // Fill each actual native frame with the last accepted virtual pose;
+        // gaps must not interpolate movement through lost tracking.
+        let held = positional && model.realCameraHold()
+        synchronize(model)
+        trackingValid = false
+        trackingMessageKey = "real_camera_tracking_limited"
+        return held
+    }
+
+    private func startMotion(reason: String) {
+        arSession.pause()
+        arSession.delegate = nil
+        usingAR = false
+        available = motion.isDeviceMotionAvailable
+        trackingValid = false
+        positional = false
+        trackingMessageKey = reason
+        guard available else { return }
+        let token = generation
+        motion.deviceMotionUpdateInterval = 1.0 / 30.0
+        motion.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] data, _ in
+            guard let self, self.active, !self.usingAR, self.generation == token,
+                  let model = self.model, let data else { return }
+            let q = data.attitude.quaternion
+            let vector = SIMD4<Float>(Float(q.x), Float(q.y), Float(q.z), Float(q.w))
+            guard vector.x.isFinite, vector.y.isFinite, vector.z.isFinite, vector.w.isFinite,
+                  simd_length_squared(vector) > 0.5 else { return }
+            // CoreMotion expresses reference -> device attitude. Invert to
+            // device -> reference, then align the camera's axes with the display.
+            let orientation = simd_quatf(vector: simd_normalize(vector)).inverse
+            let angle: Float
+            switch self.displayOrientation {
+            case .landscapeLeft: angle = .pi / 2
+            case .landscapeRight: angle = -.pi / 2
+            case .portraitUpsideDown: angle = .pi
+            default: angle = 0
+            }
+            let display = simd_quatf(angle: angle, axis: SIMD3<Float>(0, 0, 1))
+            let pose = simd_float4x4(orientation * display)
+            self.trackingValid = model.realCameraSample(pose, timestamp: data.timestamp,
+                positional: false, sensitivity: Float(self.sensitivity), inverted: self.inverted)
+            self.synchronize(model)
+        }
+    }
+
+#if DEBUG && targetEnvironment(simulator)
+    // CI proves the production Swift recording controller and native bridge,
+    // while explicitly avoiding any claim of physical AR/sensor tracking.
+    func parityHoldTracking() -> Bool {
+        guard ProcessInfo.processInfo.environment["AUREA_PARITY_EXPORT"] == "1",
+              active, let model else { return false }
+        return holdTracking(model)
+    }
+
+    func paritySubmitPose(_ pose: simd_float4x4, timestamp: Double, positional: Bool) -> Bool {
+        guard ProcessInfo.processInfo.environment["AUREA_PARITY_EXPORT"] == "1",
+              active, let model else { return false }
+        let accepted = model.realCameraSample(pose, timestamp: timestamp,
+            positional: positional, sensitivity: Float(sensitivity), inverted: inverted)
+        trackingValid = accepted
+        synchronize(model)
+        return accepted
+    }
+#endif
+
+    private func synchronize(_ model: AureaModel) {
+        let status = model.realCameraStatus()
+        guard status.count == 4 else { return }
+        active = status[0].boolValue
+        recording = status[1].boolValue
+        lastFrame = status[2].int64Value
+        positional = status[3].boolValue
+        if !active { stopSensors() }
+    }
+
+    private func stopSensors() {
+        motion.stopDeviceMotionUpdates()
+        arSession.pause()
+        arSession.delegate = nil
+        usingAR = false
     }
 }
 
@@ -118,15 +275,13 @@ import SwiftUI
                     HStack(spacing: 7) {
                         Image(systemName: "camera.fill").font(.system(size: 12)).foregroundStyle(AureaColors.accent)
                         Text(AureaText.t("real_camera_title")).font(.system(size: 12, weight: .semibold)).foregroundStyle(AureaColors.text)
-                        Text(!cam.available ? AureaText.t("real_camera_no_sensor")
-                             : cam.recording ? String(format: AureaText.t("real_camera_recording"), Int(max(cam.lastFrame, 0)))
-                             : AureaText.t("real_camera_hint"))
+                        Text(cam.statusText)
                             .font(.system(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     HStack(spacing: 6) {
                         chip(AureaText.t(cam.recording ? "real_camera_stop" : "real_camera_record"), "realcam.gravar", cam.recording,
-                             enabled: cam.available) { cam.toggleRecording(model) }
+                             enabled: cam.recording || cam.trackingValid) { cam.toggleRecording(model) }
                         chip(AureaText.t("real_camera_recenter"), "realcam.recentrar", false) { cam.recenter() }
                         chip(AureaText.t("real_camera_invert"), "realcam.inverter", cam.inverted) { cam.inverted.toggle() }
                         chip(AureaText.t("real_camera_done"), "realcam.concluir", false) { cam.stop(model) }
@@ -146,7 +301,10 @@ import SwiftUI
                 .accessibilityIdentifier("realcam.bar")
                 Spacer()
             }
-            .onDisappear { if cam.active { cam.stop(model) } }
+            .onDisappear { cam.stop(model) }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                cam.stop(model)
+            }
         }
     }
 }

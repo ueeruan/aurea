@@ -11532,6 +11532,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // Modo de segurança (ExportWatchdog.hpp): só o nível que o motor sugeriu
     // depois de o encoder travar; acima do máximo vale o máximo.
     ctx->safeMode = std::min(settings.safeMode, kExportSafeModeMax);
+    if (ctx->safeMode) ctx->progress.flags |= kExportSafeMode;
     ctx->workerHangNs = config_.exportWorkerHangMs ? static_cast<u64>(config_.exportWorkerHangMs) * 1'000'000ull
                                                    : kExportWorkerHangNs;
     {
@@ -12320,7 +12321,8 @@ void Engine::export_thread_main() noexcept {
             stage = ctx.hungPhase == ExportWorkerPhase::Finish ? ExportStage::Finish : ExportStage::Encode;
         } else {
             if (ctx.encoderFailed && (result.ok() || result.code() == ctx.encoderStatus.code())) stage = ExportStage::Encode;
-            if (result.ok() && ctx.encoderFailed) result = ctx.encoderStatus;
+            if (ctx.encoderFailed && (result.ok() || result.code() == ctx.encoderStatus.code()))
+                result = ctx.encoderStatus;
         }
         finishCalled = ctx.finishCalled;
         finishStatus = ctx.finishStatus;
@@ -12410,6 +12412,10 @@ void Engine::export_encoder_main() noexcept {
         ExportContext& c;
         ~WorkerExit() {
             bool finishFile = false, abandoned = false;
+            const auto exited = [&] {
+                { std::lock_guard<std::mutex> ql(c.qMutex); c.encoderExited = true; }
+                c.qCv.notify_all();
+            };
             {
                 std::lock_guard<std::mutex> ql(c.qMutex);
                 abandoned = c.abandoned;
@@ -12426,11 +12432,16 @@ void Engine::export_encoder_main() noexcept {
                         c.publish_export_phase("finalizando");
                     }
                     if (fin.ok()) fin = c.sink->finish();
+                    // finish/validation can return after the watchdog retired
+                    // this session. Its sink still belongs to that native call;
+                    // no late abort, validation or publication is permitted.
+                    if (c.abandoned_worker()) { exited(); return; }
                     if (fin.ok() && c.queue) {
                         fin = c.queue->begin_validating();
                         c.publish_export_phase("validando");
                         if (fin.ok()) fin = c.sink->validate_output({c.outputWidth, c.outputHeight,
                             c.frames, c.fps, c.withAudio});
+                        if (c.abandoned_worker()) { exited(); return; }
                         c.queue->validated(fin);
                         c.publish_export_phase(fin.ok() ? "concluido" : "falha na validacao");
                     }

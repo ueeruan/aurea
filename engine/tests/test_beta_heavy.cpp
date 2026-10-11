@@ -10,6 +10,7 @@
 #include "TestFramework.hpp"
 #include "MockBackend.hpp"
 #include "SyntheticVideo.hpp"
+#include "CapturedExportProof.hpp"
 
 #include "aurea/Engine.hpp"
 #include "aurea/bridge/BridgePods.hpp"
@@ -36,14 +37,16 @@ namespace {
 class NullSink final : public ExportSink {
 public:
     explicit NullSink(std::atomic<u32>* frames) : frames_(frames) {}
-    Status open(const char*, const VideoStreamConfig&, const AudioStreamConfig*) noexcept override { return OkStatus; }
-    Status write_video(const u8*, u32, const u8*, u32, i64) noexcept override { frames_->fetch_add(1); return OkStatus; }
-    Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
-    Status finish() noexcept override { return OkStatus; }
+    Status open(const char* path, const VideoStreamConfig& video, const AudioStreamConfig* audio) noexcept override { return proof_.open(path, video, audio); }
+    Status write_video(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 pts) noexcept override { proof_.picture(y, ys, uv, uvs, pts); frames_->fetch_add(1); return OkStatus; }
+    Status write_audio(const i16* pcm, u32 frames, i64 pts) noexcept override { proof_.pcm(pcm, frames, pts); return OkStatus; }
+    Status finish() noexcept override { return proof_.finish(); }
+    Status validate_output(const ExportOutputValidation& expected) noexcept override { return proof_.validate(expected); }
     void abort() noexcept override {}
     EncoderInfo encoder_info() const noexcept override { return EncoderInfo{}; }
 private:
     std::atomic<u32>* frames_;
+    CapturedExportProof proof_;
 };
 std::unique_ptr<ExportSink> make_null_sink(void* user) { return std::make_unique<NullSink>(static_cast<std::atomic<u32>*>(user)); }
 

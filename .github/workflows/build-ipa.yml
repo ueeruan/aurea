@@ -88,7 +88,7 @@ jobs:
       - name: Verify native iOS export dependency archives
         run: |
           test -s build/ffmpeg/ios/arm64/aurea-ffmpeg-build.json
-          for LIB in avcodec avformat avutil swscale swresample openh264; do
+          for LIB in avcodec avformat avutil swscale swresample openh264 kvazaar; do
             test -s "build/ffmpeg/ios/arm64/lib/lib${LIB}.a"
             xcrun lipo "build/ffmpeg/ios/arm64/lib/lib${LIB}.a" -verify_arch arm64
           done
@@ -193,24 +193,42 @@ jobs:
           set -o pipefail
           python3 tools/build_ffmpeg.py --platform ios-simulator --arch "$(uname -m)" --jobs 3 2>&1 | tee build-ffmpeg-simulator.log
       - name: Verify native simulator export dependency archives
+        id: export_archives
         run: |
           PREFIX="build/ffmpeg/ios-simulator/$(uname -m)"
           test -s "$PREFIX/aurea-ffmpeg-build.json"
-          for LIB in avcodec avformat avutil swscale swresample openh264; do
+          for LIB in avcodec avformat avutil swscale swresample openh264 kvazaar; do
             test -s "$PREFIX/lib/lib${LIB}.a"
             xcrun lipo "$PREFIX/lib/lib${LIB}.a" -verify_arch "$(uname -m)"
           done
+      - name: Run native offline queue and FFmpeg exports in iOS Simulator
+        id: native_export
+        run: |
+          python3 tools/run_ios_native_export_probe.py \
+            --ffmpeg-root "build/ffmpeg/ios-simulator/$(uname -m)" \
+            --arch "$(uname -m)" --ios-min 16.0 \
+            --output build/reference/astra-ios-native
+      - name: Preserve every native iOS export and independent decode result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-native-ffmpeg-exports
+          path: build/reference/astra-ios-native/
+          if-no-files-found: error
       - uses: actions/cache/restore@v4
         with:
           path: build/ccache
           key: ios-simulator-${{ runner.os }}-${{ github.run_id }}
           restore-keys: ios-simulator-${{ runner.os }}-
       - name: Build simulator shader translator
+        if: always() && steps.export_archives.outcome == 'success'
+        id: shader_translator
         run: |
           cmake -S engine/tools/metal-shaders -B build/metal-tools -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/metal-tools --parallel 3
           echo "AUREA_METAL_COMPILER=$GITHUB_WORKSPACE/build/metal-tools/aurea-metal-compiler" >> "$GITHUB_ENV"
       - name: Compile simulator application
+        if: always() && steps.shader_translator.outcome == 'success'
         id: compile_simulator
         run: |
           set -o pipefail

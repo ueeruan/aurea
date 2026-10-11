@@ -20,6 +20,7 @@
 
 #include "ImageIO.hpp"
 #include "SyntheticVideo.hpp"
+#include "CapturedExportProof.hpp"
 #include "RgbaVideoFixture.hpp"
 #include "P010VideoFixture.hpp"
 #include "ModelTextureFixtures.hpp"
@@ -3995,12 +3996,12 @@ struct CapturedExport {
 class CaptureSink final : public ExportSink {
 public:
     CaptureSink(CapturedExport* out, u32 delayMs) : out_(out), delayMs_(delayMs) {}
-    Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
+    Status open(const char* path, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
         out_->video = v;
         out_->hasAudio = a != nullptr;
         if (a) out_->audio = *a;
         out_->opened = true;
-        return OkStatus;
+        return proof_.open(path, v, a);
     }
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
         const u32 w = out_->video.width, h = out_->video.height;
@@ -4010,6 +4011,7 @@ public:
         out_->y.push_back(std::move(yy));
         out_->uv.push_back(std::move(cc));
         out_->pts.push_back(ptsUs);
+        proof_.picture(y, yStride, uv, uvStride, ptsUs);
         if (delayMs_) std::this_thread::sleep_for(std::chrono::milliseconds(delayMs_));
         return OkStatus;
     }
@@ -4017,13 +4019,16 @@ public:
         out_->pcm.insert(out_->pcm.end(), pcm, pcm + static_cast<usize>(frames) * out_->audio.channels);
         out_->audioPts.push_back(ptsUs);
         out_->audioFrames.push_back(frames);
+        proof_.pcm(pcm, frames, ptsUs);
         return OkStatus;
     }
-    Status finish() noexcept override { out_->finished = true; return OkStatus; }
+    Status finish() noexcept override { const auto status = proof_.finish(); out_->finished = status.ok(); return status; }
+    Status validate_output(const ExportOutputValidation& expected) noexcept override { return proof_.validate(expected); }
     void abort() noexcept override { out_->aborted = true; }
 private:
     CapturedExport* out_;
     u32 delayMs_;
+    CapturedExportProof proof_;
 };
 
 struct SinkCtx { CapturedExport* out; u32 delayMs; };
@@ -4533,10 +4538,10 @@ struct PaddedResult {
 class PaddedStrideSink final : public ExportSink {
 public:
     explicit PaddedStrideSink(PaddedResult* out) : out_(out) {}
-    Status open(const char*, const VideoStreamConfig& v, const AudioStreamConfig*) noexcept override {
+    Status open(const char* path, const VideoStreamConfig& v, const AudioStreamConfig* a) noexcept override {
         w_ = v.width;
         h_ = v.height;
-        return OkStatus;
+        return proof_.open(path, v, a);
     }
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
         // O motor entrega passo = largura (as duas texturas têm essa largura).
@@ -4582,15 +4587,18 @@ public:
         out_->luma = std::move(lido);
         out_->pts.push_back(ptsUs);
         ++out_->quadros;
+        proof_.picture(y, yStride, uv, uvStride, ptsUs);
         return OkStatus;
     }
-    Status write_audio(const i16*, u32, i64) noexcept override { return OkStatus; }
-    Status finish() noexcept override { return OkStatus; }
+    Status write_audio(const i16* pcm, u32 frames, i64 pts) noexcept override { proof_.pcm(pcm, frames, pts); return OkStatus; }
+    Status finish() noexcept override { return proof_.finish(); }
+    Status validate_output(const ExportOutputValidation& expected) noexcept override { return proof_.validate(expected); }
     void abort() noexcept override {}
 
 private:
     PaddedResult* out_;
     u32 w_ = 0, h_ = 0;
+    CapturedExportProof proof_;
 };
 
 std::unique_ptr<ExportSink> make_padded_sink(void* user) {

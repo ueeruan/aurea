@@ -17,6 +17,7 @@
 #if defined(AUREA_HAS_FFMPEG) && AUREA_HAS_FFMPEG
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavcodec/bsf.h>
 #include <libavformat/avformat.h>
 #include <libavutil/audio_fifo.h>
 #include <libavutil/channel_layout.h>
@@ -201,6 +202,7 @@ private:
     AVFormatContext* format_ = nullptr;
     AVCodecContext* videoCodec_ = nullptr;
     AVCodecContext* audioCodec_ = nullptr;
+    AVBSFContext* videoCrop_ = nullptr;
     AVStream* videoStream_ = nullptr;
     AVStream* audioStream_ = nullptr;
     AVFrame* videoFrame_ = nullptr;
@@ -271,6 +273,7 @@ void FFmpegSink::release() noexcept {
     if (format_ && format_->pb) avio_closep(&format_->pb);
     avcodec_free_context(&videoCodec_);
     avcodec_free_context(&audioCodec_);
+    av_bsf_free(&videoCrop_);
     av_frame_free(&videoFrame_);
     av_frame_free(&audioFrame_);
     av_frame_free(&resampleFrame_);
@@ -345,8 +348,12 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     if (!videoStream_) return error(Errc::OutOfMemory, "criar faixa de video FFmpeg");
     videoStream_->time_base = videoTimebase_;
     videoStream_->avg_frame_rate = rate_;
-    if ((result = avcodec_parameters_from_context(videoStream_->codecpar, videoCodec_)) < 0)
+    result = videoCrop_ ? avcodec_parameters_copy(videoStream_->codecpar, videoCrop_->par_out)
+                        : avcodec_parameters_from_context(videoStream_->codecpar, videoCodec_);
+    if (result < 0)
         return error(Errc::EncodeFailed, "parametros de video FFmpeg", result);
+    videoStream_->codecpar->width = static_cast<int>(video_.width);
+    videoStream_->codecpar->height = static_cast<int>(video_.height);
     if (video.codec == ExportCodec::HEVC) videoStream_->codecpar->codec_tag = MKTAG('h', 'v', 'c', '1');
     if (audio) {
         audioStream_ = avformat_new_stream(format_, nullptr);
@@ -387,7 +394,12 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         }
     }
     auto* ctx = videoCodec_;
-    ctx->width = static_cast<int>(video_.width); ctx->height = static_cast<int>(video_.height);
+    // Kvazaar's FFmpeg wrapper requires 8-pixel storage dimensions. Keep the
+    // requested picture intact inside that storage and crop only its SPS
+    // conformance window; the published and decoded dimensions stay exact.
+    const bool kvazaar = std::strcmp(name, "libkvazaar") == 0;
+    ctx->width = static_cast<int>(kvazaar ? (video_.width + 7u) & ~7u : video_.width);
+    ctx->height = static_cast<int>(kvazaar ? (video_.height + 7u) & ~7u : video_.height);
     ctx->pix_fmt = pixel; ctx->time_base = videoTimebase_; ctx->framerate = rate_;
     ctx->sample_aspect_ratio = AVRational{1, 1};
     ctx->bit_rate = video_.bitrateBps ? video_.bitrateBps : 12'000'000;
@@ -417,6 +429,13 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         av_dict_set(&options, "preset", "veryfast", 0);
         av_dict_set(&options, "tune", "zerolatency", 0);
         av_dict_set(&options, "x264-params", "rc-lookahead=0:sync-lookahead=0:scenecut=0", 0);
+    } else if (kvazaar) {
+        char parameters[160]{};
+        // gop=0 disables B-picture reordering; owf=0 bounds frame buffering.
+        // The wrapper copies the requested AVCodecContext bitrate and VUI.
+        std::snprintf(parameters, sizeof(parameters),
+            "preset=ultrafast,threads=4,owf=0,gop=0,period=%d,open-gop=0", ctx->gop_size);
+        av_dict_set(&options, "kvazaar-params", parameters, 0);
     } else if (std::strcmp(name, "libx265") == 0) {
         av_dict_set(&options, "preset", "veryfast", 0);
         av_dict_set(&options, "x265-params", "rc-lookahead=0:bframes=0:pools=4:frame-threads=1:log-level=error", 0);
@@ -466,7 +485,7 @@ Status FFmpegSink::open_video() noexcept {
         const char* candidates[4]{};
         switch (video_.codec) {
             case ExportCodec::H264: candidates[0] = "libopenh264"; candidates[1] = "libx264"; break;
-            case ExportCodec::HEVC: candidates[0] = "libx265"; break;
+            case ExportCodec::HEVC: candidates[0] = "libkvazaar"; candidates[1] = "libx265"; break;
             case ExportCodec::AV1: candidates[0] = "libsvtav1"; candidates[1] = "libaom-av1"; candidates[2] = "librav1e"; break;
             case ExportCodec::ProRes: candidates[0] = "prores_ks"; candidates[1] = "prores_aw"; break;
         }
@@ -490,6 +509,21 @@ Status FFmpegSink::open_video() noexcept {
     if (!selected.ok()) return error(cancelled() ? Errc::Cancelled :
         selected.code() == Errc::OutOfMemory ? Errc::OutOfMemory : Errc::EncoderUnavailable,
         "FFmpeg nao abriu encoder solicitado nem fallback por software");
+    if (videoCodec_->width != static_cast<int>(video_.width) ||
+        videoCodec_->height != static_cast<int>(video_.height)) {
+        const AVBitStreamFilter* crop = av_bsf_get_by_name("hevc_metadata");
+        int result = crop ? av_bsf_alloc(crop, &videoCrop_) : AVERROR_BSF_NOT_FOUND;
+        if (result < 0) return error(Errc::EncoderUnavailable, "filtro de dimensoes HEVC FFmpeg ausente", result);
+        if ((result = avcodec_parameters_from_context(videoCrop_->par_in, videoCodec_)) < 0)
+            return error(Errc::EncodeFailed, "parametros do crop HEVC FFmpeg", result);
+        videoCrop_->time_base_in = videoTimebase_;
+        if ((result = av_opt_set_int(videoCrop_->priv_data, "crop_left", 0, 0)) < 0 ||
+            (result = av_opt_set_int(videoCrop_->priv_data, "crop_top", 0, 0)) < 0 ||
+            (result = av_opt_set_int(videoCrop_->priv_data, "crop_right", videoCodec_->width - video_.width, 0)) < 0 ||
+            (result = av_opt_set_int(videoCrop_->priv_data, "crop_bottom", videoCodec_->height - video_.height, 0)) < 0 ||
+            (result = av_bsf_init(videoCrop_)) < 0)
+            return error(Errc::EncodeFailed, "preservar dimensoes visiveis HEVC FFmpeg", result);
+    }
     videoFrame_ = av_frame_alloc();
     if (!videoFrame_) return error(Errc::OutOfMemory, "frame de video FFmpeg");
     videoFrame_->format = videoCodec_->pix_fmt;
@@ -500,8 +534,9 @@ Status FFmpegSink::open_video() noexcept {
     const int result = av_frame_get_buffer(videoFrame_, 32);
     if (result < 0) return error(Errc::OutOfMemory, "pixels do frame FFmpeg", result);
     if (videoCodec_->pix_fmt != AV_PIX_FMT_NV12) {
-        scale_ = sws_getContext(videoCodec_->width, videoCodec_->height, AV_PIX_FMT_NV12,
-            videoCodec_->width, videoCodec_->height, videoCodec_->pix_fmt, SWS_BILINEAR, nullptr, nullptr, nullptr);
+        scale_ = sws_getContext(static_cast<int>(video_.width), static_cast<int>(video_.height), AV_PIX_FMT_NV12,
+            static_cast<int>(video_.width), static_cast<int>(video_.height), videoCodec_->pix_fmt,
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
         if (!scale_) return error(Errc::OutOfMemory, "conversor libswscale");
         const int* coefficients = sws_getCoefficients(SWS_CS_ITU709);
         if (sws_setColorspaceDetails(scale_, coefficients, video_.color.fullRange ? 1 : 0,
@@ -598,7 +633,17 @@ Status FFmpegSink::drain(AVCodecContext* codec, AVStream* stream, bool video,
             packet_->duration = pendingVideo_[pendingHead_].duration;
             pendingHead_ = (pendingHead_ + 1) % maxPendingVideo; --pendingCount_;
             ++videoPackets_;
+            if (videoCrop_) {
+                int filtered = av_bsf_send_packet(videoCrop_, packet_);
+                if (filtered >= 0) filtered = av_bsf_receive_packet(videoCrop_, packet_);
+                if (filtered < 0) return error(Errc::EncodeFailed, "aplicar dimensoes HEVC FFmpeg ao frame", filtered);
+            }
             if (const Status status = mux(packet_, codec, stream); !status.ok()) return status;
+            if (videoCrop_) {
+                const int extra = av_bsf_receive_packet(videoCrop_, packet_);
+                if (extra != AVERROR(EAGAIN))
+                    return error(Errc::EncodeFailed, "crop HEVC FFmpeg alterou a quantidade de frames", extra);
+            }
         } else {
             // Keep only the final AAC packet so its exact duration/tail padding
             // can be written after all resampler samples have been accounted.
@@ -685,8 +730,24 @@ Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
     if (scale_) {
         const u8* source[4]{y, uv, nullptr, nullptr};
         const int strides[4]{static_cast<int>(ys), static_cast<int>(uvs), 0, 0};
-        result = sws_scale(scale_, source, strides, 0, videoCodec_->height, videoFrame_->data, videoFrame_->linesize);
-        if (result != videoCodec_->height) return error(Errc::EncodeFailed, "libswscale nao converteu todo o frame", result);
+        result = sws_scale(scale_, source, strides, 0, static_cast<int>(video_.height),
+            videoFrame_->data, videoFrame_->linesize);
+        if (result != static_cast<int>(video_.height))
+            return error(Errc::EncodeFailed, "libswscale nao converteu todo o frame", result);
+        if (videoCrop_) for (int plane = 0; plane < 3; ++plane) {
+            const int shift = plane ? 1 : 0;
+            const int pictureWidth = static_cast<int>(video_.width) >> shift;
+            const int pictureHeight = static_cast<int>(video_.height) >> shift;
+            const int storageWidth = videoCodec_->width >> shift;
+            const int storageHeight = videoCodec_->height >> shift;
+            const int black = plane ? 128 : video_.color.fullRange ? 0 : 16;
+            for (int row = 0; row < pictureHeight; ++row)
+                std::memset(videoFrame_->data[plane] + static_cast<usize>(row) * videoFrame_->linesize[plane] + pictureWidth,
+                    black, static_cast<usize>(storageWidth - pictureWidth));
+            for (int row = pictureHeight; row < storageHeight; ++row)
+                std::memset(videoFrame_->data[plane] + static_cast<usize>(row) * videoFrame_->linesize[plane],
+                    black, static_cast<usize>(storageWidth));
+        }
     } else {
         for (u32 row = 0; row < video_.height; ++row)
             std::memcpy(videoFrame_->data[0] + static_cast<usize>(row) * videoFrame_->linesize[0],
@@ -819,6 +880,12 @@ Status FFmpegSink::finish() noexcept {
     if (const Status status = drain(videoCodec_, videoStream_, true, true, produced); !status.ok()) return status;
     if (pendingCount_ || videoPackets_ != videoFrames_)
         return error(Errc::EncodeFailed, "encoder FFmpeg nao entregou todos os frames submetidos");
+    if (videoCrop_) {
+        int result = av_bsf_send_packet(videoCrop_, nullptr);
+        if (result >= 0) result = av_bsf_receive_packet(videoCrop_, packet_);
+        if (result != AVERROR_EOF)
+            return error(Errc::EncodeFailed, "crop HEVC FFmpeg nao concluiu EOS sem frames adicionais", result);
+    }
     videoStream_->duration = av_rescale_q(lastVideoEnd_, videoTimebase_, videoStream_->time_base);
     if (hasAudio_) {
         if (const Status status = flush_resampler(); !status.ok()) return status;

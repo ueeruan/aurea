@@ -21,7 +21,9 @@ Status OfflineFrameRenderer::initialize(GPUBackend& gpu, const EffectRegistry& e
     renderer_.set_preview_cache_budget(0);
     renderer_.set_flow_cache_budget(16ull << 20);
     const Status status = renderer_.initialize(gpu, effects);
-    if (!status.ok()) { shutdown(); return status; }
+    // Engine owns fence-bounded cleanup even when initialization fails after
+    // a resource upload. Do not enter Renderer::shutdown's idle wait here.
+    if (!status.ok()) return status;
     return OkStatus;
 }
 Status OfflineFrameRenderer::wait_gpu(u64 frame, const std::atomic<bool>* cancel) noexcept {

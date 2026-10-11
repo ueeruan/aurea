@@ -195,6 +195,9 @@ enum ParityExportProbe {
             report["phase"] = "offline-stress"
             try writeReport()
             report["offlineStress"] = try await checkOfflineStress(engine: engine, documents: documents)
+            report["phase"] = "legacy-offline-export"
+            try writeReport()
+            report["legacyOfflineExport"] = try await checkLegacyOfflineExport(engine: engine, documents: documents)
             report["passed"] = true
             report["phase"] = "complete"
         } catch {
@@ -476,6 +479,18 @@ enum ParityExportProbe {
                     engine.insertKeyframe(forLayer: layer, property: 7, time: Int32(frames - 1), value: 100)
                     engine.setMotionBlur(true, forLayer: layer)
                 }
+                let obj = documents.appendingPathComponent("astra-owned-triangle.obj")
+                try "o OwnedTriangle\nv -1 -1 0\nv 1 -1 0\nv 0 1 0\nf 1 2 3\n".write(to: obj, atomically: true, encoding: .utf8)
+                for (index, file) in ["DamagedHelmet.glb", "Fox.glb", "animated-character.fbx", obj.lastPathComponent].enumerated() {
+                    let layer = engine.importModel(documents.appendingPathComponent(file).path, name: "Offline imported \(file)")
+                    guard layer >= 0 else { throw Failure(message: "Offline \(file) import failed") }
+                    engine.setLayer(layer, startFrame: 0, endFrame: Int32(frames), offsetFrames: 0, setOffset: true)
+                    engine.setScale(forLayer: layer, x: 0.5, y: 0.5, z: 0.5)
+                    engine.setPosition(forLayer: layer, x: Float(120 + index * 240), y: 270, z: 0)
+                    engine.insertKeyframe(forLayer: layer, property: 7, time: 0, value: 0)
+                    engine.insertKeyframe(forLayer: layer, property: 7, time: Int32(frames - 1), value: 75)
+                    engine.setMotionBlur(true, forLayer: layer)
+                }
                 guard engine.addParticles(20) >= 0, engine.addText("ASTRA OFFLINE") >= 0,
                       engine.setMotionBlurSettings(true, shutter: 270, phase: -135, samples: 8, adaptiveLimit: 16) else {
                     throw Failure(message: "Offline particles, text, or motion blur fixture failed")
@@ -545,6 +560,56 @@ enum ParityExportProbe {
             }
         }
         return results
+    }
+
+    @MainActor
+    private static func checkLegacyOfflineExport(engine: AureaEngine, documents: URL) async throws -> [String: Any] {
+        let original = documents.appendingPathComponent("astra-legacy-square-glow.aurea")
+        let originalBytes = try Data(contentsOf: original)
+        let movie = documents.appendingPathComponent("astra-legacy-square-glow.mp4")
+        let frame = documents.appendingPathComponent("astra-legacy-square-glow.png")
+        engine.pause()
+        guard engine.loadProject(original.path), engine.lastLoadNotice & 11 == 0, engine.lastLoadMissingAssets == 0 else {
+            throw Failure(message: "Original Android project could not be read with all assets and layers")
+        }
+        var status = AureaStatus()
+        guard engine.readStatus(&status), status.compFps > 0 else { throw Failure(message: "Legacy project status is unavailable") }
+        let frames = Int(ceil(Double(status.duration) * 30 / status.compFps - 1e-8))
+        let ratio = Double(status.compWidth) / Double(status.compHeight)
+        let width = ratio >= 1 ? Int((180 * ratio / 2).rounded()) * 2 : 180
+        let height = ratio >= 1 ? 180 : Int((180 / ratio / 2).rounded()) * 2
+        var running = false
+        defer { if running { engine.cancelExport() } }
+        guard engine.startExport(to: movie.path, codec: .h264, height: 180, fps: 30, bitrateMbps: 4, audioBitrateKbps: 128) else {
+            throw Failure(message: "Legacy offline export did not start")
+        }
+        running = true
+        let deadline = ProcessInfo.processInfo.systemUptime + 1800
+        var progress: [String: Any] = [:]
+        while true {
+            try Task.checkCancellation()
+            progress = engine.exportProgress()
+            if (progress[AureaExportFinished] as? NSNumber)?.boolValue == true {
+                running = false
+                guard (progress[AureaExportResult] as? NSNumber)?.intValue == 0,
+                      (progress[AureaExportFramesDone] as? NSNumber)?.intValue == frames,
+                      ((progress[AureaExportFlags] as? NSNumber)?.uint32Value ?? 0) & 8 == 0 else {
+                    throw Failure(message: "Legacy offline export failed: \(progress)")
+                }
+                break
+            }
+            guard ProcessInfo.processInfo.systemUptime < deadline else { throw Failure(message: "Legacy offline export timed out") }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let decoded = try await Task.detached(priority: .utility) {
+            try await decode(movie: movie, frame: frame, width: width, height: height, frames: frames)
+        }.value
+        guard originalBytes == (try Data(contentsOf: original)), decoded.frameCount == frames,
+              decoded.maxRGB - decoded.minRGB > 40 else {
+            throw Failure(message: "Legacy original changed, or its exported composition is incomplete")
+        }
+        return ["passed": true, "originalUnchanged": true, "originalBytes": originalBytes.count,
+                "loadNotice": engine.lastLoadNotice, "decoded": decoded.dictionary, "exportProgress": progress]
     }
 
     @MainActor

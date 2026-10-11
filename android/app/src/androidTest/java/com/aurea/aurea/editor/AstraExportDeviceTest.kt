@@ -58,6 +58,8 @@ class AstraExportDeviceTest {
         engine.beginCommandBatch()
         assertTrue(CommandBatch(engine).setCompositionDuration(composition, frames))
         assertEquals(1, engine.submitCommands())
+        // Apply queued editing commands without an Activity or preview frame.
+        assertEquals(0, engine.saveProject(File(folder, "owned-prepared-fixture.aurea").absolutePath))
         awaitCondition { val values = DoubleArray(8); engine.queryComposition(values) != 0L && values[3].toInt() == frames }
         return composition
     }
@@ -101,7 +103,7 @@ class AstraExportDeviceTest {
         val movie = File(folder, "$name.mp4")
         val progressLog = File(folder, "$name-progress.txt")
         progressLog.writeText("headless-native=true preview-surface=false frames=$frames width=$width height=$height\n")
-        assertEquals("Native FFmpeg export must open", 0, engine.startExport(movie.absolutePath, height, 30.0, 0, 4))
+        assertEquals("Native FFmpeg export must open", 0, engine.startExport(movie.absolutePath, minOf(width, height), 30.0, 0, 4))
         val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
         val progress = ExportProgress()
         val began = SystemClock.elapsedRealtime()
@@ -239,6 +241,31 @@ class AstraExportDeviceTest {
             export("headless-imported-${source.extension}", 30, 640, 360, false)
         }
     }
+    @Test fun texturedAnimatedGlbAssetsRenderWithMotionBlurOffline() {
+        val directory = File(checkNotNull(InstrumentationRegistry.getArguments().getString("aureaHeavyModelDirectory")) {
+            "The textured model test requires the owned fixture directory"
+        })
+        scene(60, 960, 540)
+        val models = (0 until 8).map { index ->
+            val source = File(directory, if (index % 2 == 0) "DamagedHelmet.glb" else "Fox.glb")
+            assertTrue(source.isFile)
+            val detail = arrayOfNulls<String>(1)
+            engine.importModel(source.absolutePath, "Textured animated fixture $index", detail).also { id ->
+                assertTrue("${source.name}: ${detail[0]}", id > 0)
+            }
+        }
+        engine.beginCommandBatch(); val commands = CommandBatch(engine)
+        models.forEachIndexed { index, id ->
+            assertTrue(commands.setLayerTimeRange(id, 0, 60)); assertTrue(commands.setScale(id, .5f, .5f, .5f))
+            assertTrue(commands.setPosition(id, 120f + index % 4 * 240f, 130f + index / 4 * 270f, 0f))
+            assertTrue(commands.insertKeyframe(id, TrackProperty.ROTATION_Y, -1, 0, 0, 0f))
+            assertTrue(commands.insertKeyframe(id, TrackProperty.ROTATION_Y, -1, 0, 59, 75f))
+        }
+        assertTrue(engine.submitCommands() > 0)
+        models.forEach { assertTrue(engine.setMotionBlur(it, true)) }
+        assertTrue(engine.setMotionBlurSettings(MotionBlurSettings(true, 270f, -135f, 8, 16, 4)))
+        export("headless-textured-animated-glb-blur", 60, 960, 540, false)
+    }
     @Test fun twoMinutesOfCompositionAndAudioDoNotLosePictures() {
         scene(3600); animatedShape(3600, 320, 180)
         assertTrue(engine.importAudio(tone(120).absolutePath, "Owned two minute stereo") > 0)
@@ -251,7 +278,47 @@ class AstraExportDeviceTest {
     }
     @Test fun existingUserProjectReadsAndExportsWithoutDestructiveMigration() {
         val input = InstrumentationRegistry.getArguments().getString("aureaLegacyUserProject")
-        verifyLegacyProject(File(checkNotNull(input) { "Existing user project validation requires an isolated copy" }), "headless-user-project", false)
+        val helper = InstrumentationRegistry.getArguments().getString("aureaLegacyFixtureHelper")
+        val models = InstrumentationRegistry.getArguments().getString("aureaHeavyModelDirectory")
+        val originalModelPath = checkNotNull(InstrumentationRegistry.getArguments().getString("aureaLegacyOriginalModelPath")) {
+            "Original model source identity must be supplied separately from the immutable project"
+        }
+        System.load(checkNotNull(helper) { "Unmodified Windows fixture requires its instrumentation-only cwd helper" })
+        val originalDirectory = android.system.Os.readlink("/proc/self/cwd")
+        val working = File(folder, "owned-user-working-directory").apply { mkdirs() }
+        require(originalModelPath.length > 3 && originalModelPath[1] == ':' && originalModelPath[2] == '/')
+        val target = File(working, originalModelPath)
+        require(target.canonicalPath.startsWith(working.canonicalPath + File.separator))
+        target.parentFile!!.mkdirs()
+        File(checkNotNull(models), "DamagedHelmet.glb").copyTo(target, overwrite = true)
+        assertEquals(0, changeFixtureDirectory(working.absolutePath))
+        try {
+            verifyLegacyProject(File(checkNotNull(input) { "Existing user project validation requires an isolated copy" }), "headless-user-project", false)
+        } finally { assertEquals(0, changeFixtureDirectory(originalDirectory)) }
+    }
+    private external fun changeFixtureDirectory(directory: String): Int
+
+    @Test fun oldProjectWithMissingMediaFailsExplicitlyAndPreservesItsBytes() {
+        val file = File(checkNotNull(InstrumentationRegistry.getArguments().getString("aureaMissingMediaProject")))
+        val original = file.readBytes()
+        assertEquals(0, engine.loadProject(file.absolutePath))
+        val movie = File(folder, "missing-media-must-not-publish.mp4")
+        assertFalse(movie.exists())
+        assertEquals(0, engine.startExport(movie.absolutePath, 36, 30.0, 0, 4))
+        val buffer = ByteBuffer.allocateDirect(128).order(ByteOrder.nativeOrder())
+        val progress = ExportProgress()
+        val began = SystemClock.elapsedRealtime()
+        try {
+            do {
+                assertTrue(engine.exportProgress(buffer)); progress.readFrom(buffer)
+                assertTrue(SystemClock.elapsedRealtime() - began < 180000)
+                if (!progress.finished) SystemClock.sleep(25)
+            } while (!progress.finished)
+            assertEquals("Missing real source must remain a decode error", 14, progress.result)
+            assertFalse(progress.frameFallback)
+            assertFalse("Failed export must not publish an invented picture", movie.exists())
+            assertArrayEquals(original, file.readBytes())
+        } finally { if (!progress.finished) engine.cancelExport() }
     }
     private fun verifyLegacyProject(file: File, name: String, audio: Boolean) {
         assertTrue(file.isFile)

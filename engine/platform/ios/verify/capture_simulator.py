@@ -421,6 +421,10 @@ def capture_scene(scene, app, output, udid, console_option, report, frame_checke
         if scene == 'export-render':
             shutil.copy2('engine/tests/data/preview-bframes.mp4', documents / 'preview-bframes.mp4')
             shutil.copy2('engine/tests/data/preview-vfr.mp4', documents / 'preview-vfr.mp4')
+            shutil.copy2('engine/tests/data/gltf/DamagedHelmet.glb', documents / 'DamagedHelmet.glb')
+            shutil.copy2('engine/tests/data/gltf/Fox.glb', documents / 'Fox.glb')
+            shutil.copy2('android/app/src/androidTest/assets/animated-character.fbx', documents / 'animated-character.fbx')
+            shutil.copy2('docs/parity/fixtures/android-2103-square-glow.aurea', documents / 'astra-legacy-square-glow.aurea')
         ready = documents / 'parity-ready.json'
         record['readyPath'] = str(ready)
         if ready.exists():

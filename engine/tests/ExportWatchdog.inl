@@ -47,7 +47,7 @@ struct HungGate {
 AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
-    Rig r(cfg, 30, 6, 2, nullptr, backend, 400); AUREA_CHECK(r.ok); if (!r.ok) return;
+    Rig r(cfg, 30, 6, 2, nullptr, backend, 1500); AUREA_CHECK(r.ok); if (!r.ok) return;
     r.comp()->layer(r.video_layer())->visible = false;
     HungGate gate; gate.arm(r.cap);
     r.cap.hangWriteAt = 2;   // o 3º quadro entra no encoder e não volta
@@ -70,7 +70,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     AUREA_CHECK_EQ(pod.flags >> kExportFailureShift, static_cast<u32>(ExportFailure::EncoderStalled));
 
     // A tela refaz no modo sugerido: o contexto preso fica de lado (vivo) e o
-    // export novo termina — H.264 Baseline, múltiplos de 16, taxa menor.
+    // export novo termina com o mesmo formato, tamanho e bitrate solicitado.
     r.cap.hangWriteAt = -1;
     r.cap.hashes.clear();
     r.cap.pts.clear();
@@ -84,14 +84,13 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     AUREA_CHECK(r.cap.ptsMonotonic);
     AUREA_CHECK((retry.p.flags & Engine::kExportSafeMode) != 0);
     AUREA_CHECK_EQ(export_retry_from_flags(retry.p.flags), 0u);
-    AUREA_CHECK(r.cap.video.codec == ExportCodec::H264);
+    AUREA_CHECK(r.cap.video.codec == ExportCodec::HEVC);
     AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
     AUREA_CHECK(!r.cap.video.preferSoftware);
-    AUREA_CHECK_EQ(r.cap.video.width % 16, 0u);
-    AUREA_CHECK_EQ(r.cap.video.height % 16, 0u);
+    AUREA_CHECK_EQ(r.cap.video.width, 64u);
+    AUREA_CHECK_EQ(r.cap.video.height, 36u);
     AUREA_CHECK_EQ(r.cap.video.bitrateBps,
-                   export_safe_bitrate_bps(export_video_bitrate_bps(r.cap.video.width, r.cap.video.height, 30.0,
-                                                                    ExportCodec::H264, static_cast<ExportQuality>(s.quality)), 1));
+                   export_video_bitrate_bps(64, 36, 30.0, ExportCodec::HEVC, static_cast<ExportQuality>(s.quality)));
     release_hung(gate.release, gate.returned);
     AUREA_CHECK(gate.returned.load());
 }
@@ -99,7 +98,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
 AUREA_TEST(ExportWatchdog, HungFinishIsAbandonedAsEncoderStall) {
     SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
-    Rig r(cfg, 30, 3, 1, nullptr, backend, 400); AUREA_CHECK(r.ok); if (!r.ok) return;
+    Rig r(cfg, 30, 3, 1, nullptr, backend, 1500); AUREA_CHECK(r.ok); if (!r.ok) return;
     r.comp()->layer(r.video_layer())->visible = false;
     HungGate gate; gate.arm(r.cap);
     r.cap.hangFinish = true;   // EOS/esvaziar/fechar o MP4 nunca volta

@@ -277,7 +277,7 @@ val ffmpegPrepareTasks = (aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "a
         inputs.file(rootProject.file("../tools/build_ffmpeg.py"))
         outputs.files(File(prefix, "lib/libavformat.a"), File(prefix, "lib/libavcodec.a"),
             File(prefix, "lib/libswscale.a"), File(prefix, "lib/libswresample.a"),
-            File(prefix, "lib/libavutil.a"), File(prefix, "lib/libopenh264.a"),
+            File(prefix, "lib/libavutil.a"), File(prefix, "lib/libopenh264.a"), File(prefix, "lib/libkvazaar.a"),
             File(prefix, "aurea-ffmpeg-build.json"))
         if (aureaFFmpegWithX265) outputs.file(File(prefix, "lib/libx265.a"))
         workingDir(rootProject.file(".."))

@@ -183,7 +183,7 @@ set_source_files_properties(bridge/IOSVideoDecoder.mm PROPERTIES COMPILE_OPTIONS
 target_link_libraries(aurea_ios PUBLIC aurea_core)
 # The Xcode app consumes archives directly rather than the CMake executable
 # link graph. Stage the same pinned FFmpeg archives beside libaurea_ios.a.
-foreach(_component avformat avcodec swscale swresample avutil openh264)
+foreach(_component avformat avcodec swscale swresample avutil openh264 kvazaar)
     add_custom_command(TARGET aurea_ios POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${AUREA_FFMPEG_ROOT}/lib/lib${_component}.a"

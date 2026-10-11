@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the pinned export-only FFmpeg libraries for Android, iOS or host.
+"""Build the pinned export-only FFmpeg/OpenH264/Kvazaar libraries for mobile or host.
 
 Android Windows uses Git Bash plus the NDK's GNU make and clang; Linux/macOS use
 their POSIX shell. iOS always requires a real macOS host with the selected SDK.
@@ -22,6 +22,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 FFMPEG_VERSION = "8.0.3"
 OPENH264_VERSION = "2.6.0"
+KVAZAAR_VERSION = "2.3.2"
 X265_VERSION = "4.1"
 X265_SOURCE = ("x265_4.1.tar.gz", "https://github.com/Multicorewareinc/x265/releases/download/4.1/x265_4.1.tar.gz",
                "a31699c6a89806b74b0151e5e6a7df65de4b49050482fe5ebf8a4379d7af8f29")
@@ -30,6 +31,8 @@ SOURCES = (
      "6136812ea6d4e68bdba27e33c2a94382711cdf4f8602ffef056ff792bd6f9818"),
     (f"openh264-{OPENH264_VERSION}.tar.gz", f"https://github.com/cisco/openh264/archive/refs/tags/v{OPENH264_VERSION}.tar.gz",
      "558544ad358283a7ab2930d69a9ceddf913f4a51ee9bf1bfb9e377322af81a69"),
+    (f"kvazaar-{KVAZAAR_VERSION}.tar.gz", f"https://github.com/ultravideo/kvazaar/releases/download/v{KVAZAAR_VERSION}/kvazaar-{KVAZAAR_VERSION}.tar.gz",
+     "b95d2e20f2b0d8d7ed320055740be2e7a730abe28b153b5a788cfca371cc38b2"),
 )
 
 def run(args: list[str], cwd: Path | None = None, env: dict | None = None) -> None:
@@ -98,12 +101,48 @@ def install_public_headers(source: Path, configured: Path, prefix: Path) -> dict
                 original = (configured if variable == "BUILT_HEADERS" else source) / directory / name
                 destination = prefix / "include" / directory / name
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(original, destination)
+                temporary = destination.with_name(destination.name + f".{os.getpid()}.tmp")
+                shutil.copy2(original, temporary)
                 digest = hashlib.sha256(original.read_bytes()).hexdigest()
-                if hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
+                if hashlib.sha256(temporary.read_bytes()).hexdigest() != digest:
                     raise RuntimeError(f"Installed public header mismatch: {destination}")
+                os.replace(temporary, destination)
                 installed[f"{directory}/{name}"] = digest
     return installed
+
+def write_manifest(path: Path, manifest: dict) -> None:
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+def fix_kvazaar_debug_file_lifetime(source: Path) -> str:
+    """Fix upstream's destruction of unused/already destroyed debug mutexes.
+
+    Kvazaar 2.3.2 unconditionally destroys static RD-training file mutexes when
+    closing every encoder. Those mutexes are initialized only when training
+    files are opened; Android Bionic aborts on the second ordinary export.
+    Keep the encoder algorithms intact and release only actual debug resources.
+    """
+    file = source / "src/rdo.c"
+    content = file.read_text(encoding="utf-8")
+    old = """    if (curr != NULL) {
+      fclose(curr);
+    }
+    if (curr_mtx != NULL) {
+      pthread_mutex_destroy(curr_mtx);
+    }
+"""
+    new = """    if (curr != NULL) {
+      fclose(curr);
+      fastrd_learning_outfile[i] = NULL;
+      pthread_mutex_destroy(curr_mtx);
+    }
+"""
+    if content.count(old) == 1:
+        file.write_text(content.replace(old, new), encoding="utf-8")
+    elif content.count(new) != 1:
+        raise RuntimeError("Unexpected pinned Kvazaar RD debug cleanup implementation")
+    return hashlib.sha256(file.read_bytes()).hexdigest()
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -130,6 +169,9 @@ def main() -> None:
     work = args.cache.resolve() / "objects" / args.platform / native_arch
     if args.with_x265:
         work = work / "gpl"
+    # Keep the newly enabled BSD HEVC build separate from archives currently
+    # linked or being exercised by an Android/iOS app build.
+    work = work / "bsd-hevc"
     work.mkdir(parents=True, exist_ok=True)
     prefix.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
@@ -152,7 +194,7 @@ def main() -> None:
               "--disable-avdevice", "--disable-avfilter", "--disable-everything",
               "--enable-avcodec", "--enable-avformat", "--enable-swscale", "--enable-swresample",
               "--enable-static", "--disable-shared", "--enable-pic", "--enable-pthreads",
-              "--enable-libopenh264", "--enable-encoder=libopenh264,aac,mpeg4,mjpeg,png,ffv1",
+              "--enable-libopenh264", "--enable-libkvazaar", "--enable-encoder=libopenh264,libkvazaar,aac,mpeg4,mjpeg,png,ffv1",
               "--enable-decoder=h264,hevc,mpeg4,aac,mjpeg,png,ffv1",
               "--enable-parser=h264,hevc,mpeg4video,aac", "--enable-muxer=mp4,mov,matroska,image2",
               "--enable-demuxer=mov,matroska,image2", "--enable-protocol=file",
@@ -201,6 +243,27 @@ def main() -> None:
     else:
         oh = ["OS=darwin" if platform.system() == "Darwin" else "OS=linux", f"ARCH={platform.machine()}"]
         common += ["--disable-x86asm"]
+    kvazaar_original = args.cache.resolve() / f"source/kvazaar-{KVAZAAR_VERSION}"
+    # Upstream CMake generates version/pkg-config files inside its source tree.
+    # Each ABI therefore receives a private copy of the verified release source.
+    kvazaar_source = work / f"kvazaar-source-{KVAZAAR_VERSION}"
+    if not kvazaar_source.exists():
+        shutil.copytree(kvazaar_original, kvazaar_source)
+    kvazaar_patch = fix_kvazaar_debug_file_lifetime(kvazaar_source)
+    kvazaar_work = work / "kvazaar"
+    kvazaar_args = ["cmake", "-S", q(kvazaar_source), "-B", q(kvazaar_work), "-G", "Ninja",
+                    f"-DCMAKE_INSTALL_PREFIX={q(prefix)}", "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_BUILD_TYPE=Release",
+                    "-DCMAKE_POSITION_INDEPENDENT_CODE=ON", "-DBUILD_SHARED_LIBS=OFF",
+                    "-DBUILD_TESTS=OFF", "-DBUILD_KVAZAAR_BINARY=OFF", "-DUSE_CRYPTO=OFF"]
+    if args.platform == "android":
+        kvazaar_args += [f"-DCMAKE_TOOLCHAIN_FILE={q(ndk / 'build/cmake/android.toolchain.cmake')}",
+                        f"-DANDROID_ABI={native_arch}", f"-DANDROID_PLATFORM=android-{args.api}", "-DANDROID_STL=c++_shared"]
+    elif args.platform.startswith("ios"):
+        kvazaar_args += ["-DCMAKE_SYSTEM_NAME=iOS", f"-DCMAKE_OSX_SYSROOT={sysroot}",
+                        f"-DCMAKE_OSX_ARCHITECTURES={native_arch}", f"-DCMAKE_OSX_DEPLOYMENT_TARGET={args.ios_min}"]
+    run(kvazaar_args, env=env)
+    run(["cmake", "--build", q(kvazaar_work), "--parallel", str(args.jobs)], env=env)
+    run(["cmake", "--install", q(kvazaar_work)], env=env)
     if args.with_x265:
         common += ["--enable-gpl", "--enable-libx265", "--enable-encoder=libx265"]
         x265_source = args.cache.resolve() / f"source/x265_{X265_VERSION}/source"
@@ -229,13 +292,14 @@ def main() -> None:
         run(x265_args, env=env)
         run(["cmake", "--build", q(x265_work), "--parallel", str(args.jobs)], env=env)
         run(["cmake", "--install", q(x265_work)], env=env)
-    # Only the exact OpenH264 package is visible to this cross build.
+    # Only these exact pinned codec packages are visible to this cross build.
     pkg = work / "aurea-pkg-config.sh"
     cpp_runtime = "-lc++_shared" if args.platform == "android" else "-lc++" if platform.system() == "Darwin" else "-lstdc++"
     x265_pkg = ""
     if args.with_x265:
         x265_pkg = " *--modversion*x265*) echo 4.1;;\n *--cflags*x265*) echo '-I"+q(prefix)+"/include';;\n *--libs*x265*) echo '-L"+q(prefix)+"/lib -lx265 "+cpp_runtime+" -lm';;\n *x265*) exit 0;;\n"
-    pkg.write_text("#!/bin/sh\ncase \"$*\" in\n *--version*) echo 1.8.0;;\n"+x265_pkg+" *--modversion*) echo 2.6.0;;\n *--cflags*) echo '-I"+q(prefix)+"/include';;\n *--libs*) echo '-L"+q(prefix)+"/lib -lopenh264 "+cpp_runtime+" -lm';;\n *openh264*) exit 0;;\n *) exit 1;;\nesac\n", encoding="utf-8")
+    kvazaar_pkg = " *--modversion*kvazaar*) echo 2.3.2;;\n *--cflags*kvazaar*) echo '-I"+q(prefix)+"/include';;\n *--libs*kvazaar*) echo '-L"+q(prefix)+"/lib -lkvazaar -lm -pthread';;\n *kvazaar*) exit 0;;\n"
+    pkg.write_text("#!/bin/sh\ncase \"$*\" in\n *--version*) echo 1.8.0;;\n"+x265_pkg+kvazaar_pkg+" *--modversion*) echo 2.6.0;;\n *--cflags*) echo '-I"+q(prefix)+"/include';;\n *--libs*) echo '-L"+q(prefix)+"/lib -lopenh264 "+cpp_runtime+" -lm';;\n *openh264*) exit 0;;\n *) exit 1;;\nesac\n", encoding="utf-8")
     pkg.chmod(0o755)
     openh_work = work / "openh264"
     ff_work = work / "ffmpeg"
@@ -247,18 +311,28 @@ def main() -> None:
         [make, f"-j{args.jobs}"], [make, "install"],
     ]
     manifest_path = prefix / "aurea-ffmpeg-build.json"
-    expected_archives = ("avformat", "avcodec", "swscale", "swresample", "avutil", "openh264") + (("x265",) if args.with_x265 else ())
+    license_dir = prefix / "licenses"
+    license_dir.mkdir(exist_ok=True)
+    shutil.copy2(ffmpeg / "COPYING.LGPLv2.1", license_dir / "FFmpeg-LGPL-2.1.txt")
+    shutil.copy2(openh264 / "LICENSE", license_dir / "OpenH264-BSD-2-Clause.txt")
+    shutil.copy2(kvazaar_original / "LICENSE", license_dir / "Kvazaar-BSD-3-Clause.txt")
+    if args.with_x265:
+        shutil.copy2(ffmpeg / "COPYING.GPLv2", license_dir / "FFmpeg-GPL-2.0.txt")
+        shutil.copy2(x265_source.parent / "COPYING", license_dir / "x265-GPL-2.0.txt")
+    expected_archives = ("avformat", "avcodec", "swscale", "swresample", "avutil", "openh264", "kvazaar") + (("x265",) if args.with_x265 else ())
     if manifest_path.exists() and not args.force:
         previous = json.loads(manifest_path.read_text(encoding="utf-8"))
         if (previous.get("configure") == steps[1] and previous.get("ffmpeg") == FFMPEG_VERSION
                 and previous.get("openh264") == OPENH264_VERSION
+                and previous.get("kvazaar") == KVAZAAR_VERSION
                 and previous.get("x265") == (X265_VERSION if args.with_x265 else None)
                 and (prefix / "include/libavcodec/avcodec.h").exists()
                 and all((prefix / f"lib/lib{name}.a").is_file() and (prefix / f"lib/lib{name}.a").stat().st_size > 0 for name in expected_archives)):
             # Also repair prefixes produced by Windows make's long install
             # command. Public headers are sourced from this exact native build.
             previous["public_headers"] = install_public_headers(ffmpeg, ff_work, prefix)
-            manifest_path.write_text(json.dumps(previous, indent=2)+"\n", encoding="utf-8")
+            previous["kvazaar_patches"] = {"rdcost_debug_cleanup": kvazaar_patch}
+            write_manifest(manifest_path, previous)
             print(f"Native export dependency manifest matches: {prefix}", flush=True)
             return
     for index, step in enumerate(steps):
@@ -274,17 +348,10 @@ def main() -> None:
                 file.write_text(content, encoding="utf-8")
     installed_headers = install_public_headers(ffmpeg, ff_work, prefix)
     manifest = {"platform": args.platform, "arch": native_arch, "api": args.api if args.platform == "android" else None,
-                "ffmpeg": FFMPEG_VERSION, "openh264": OPENH264_VERSION, "x265": X265_VERSION if args.with_x265 else None,
+                "ffmpeg": FFMPEG_VERSION, "openh264": OPENH264_VERSION, "kvazaar": KVAZAAR_VERSION, "x265": X265_VERSION if args.with_x265 else None,
                 "sources": [{"url": u, "sha256": h} for _, u, h in (*SOURCES, *((X265_SOURCE,) if args.with_x265 else ()))], "configure": steps[1],
-                "public_headers": installed_headers}
-    manifest_path.write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
-    license_dir = prefix / "licenses"
-    license_dir.mkdir(exist_ok=True)
-    shutil.copy2(ffmpeg / "COPYING.LGPLv2.1", license_dir / "FFmpeg-LGPL-2.1.txt")
-    shutil.copy2(openh264 / "LICENSE", license_dir / "OpenH264-BSD-2-Clause.txt")
-    if args.with_x265:
-        shutil.copy2(ffmpeg / "COPYING.GPLv2", license_dir / "FFmpeg-GPL-2.0.txt")
-        shutil.copy2(x265_source.parent / "COPYING", license_dir / "x265-GPL-2.0.txt")
+                "public_headers": installed_headers, "kvazaar_patches": {"rdcost_debug_cleanup": kvazaar_patch}}
+    write_manifest(manifest_path, manifest)
     print(f"Built native export libraries at {prefix}", flush=True)
 
 if __name__ == "__main__":

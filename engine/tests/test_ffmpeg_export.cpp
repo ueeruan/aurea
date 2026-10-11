@@ -3,6 +3,7 @@
 // packet count cannot conceal reordered, repeated or missing pictures.
 #include "TestFramework.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
+#include "NativeExportVerifier.hpp"
 
 #if defined(AUREA_HAS_FFMPEG)
 extern "C" {
@@ -19,6 +20,7 @@ extern "C" {
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -234,7 +236,7 @@ AUREA_TEST(FFmpegExport, NativeSoftwareCfrAllPicturesAndStereoAudio) {
 }
 AUREA_TEST(FFmpegExport, NativeSoftwareHevcPreservesAllPicturesAndAudio) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
-    if (!avcodec_find_encoder_by_name("libx265")) {
+    if (!avcodec_find_encoder_by_name("libkvazaar") && !avcodec_find_encoder_by_name("libx265")) {
         auto video = configuration(); video.codec = ExportCodec::HEVC;
         const auto path = output("hevc-unavailable");
         const auto status = sink->open(path.c_str(), video, nullptr);
@@ -249,6 +251,32 @@ AUREA_TEST(FFmpegExport, NativeSoftwareHevcPreservesAllPicturesAndAudio) {
         sink->abort();
     }
     (void)exportNumbered(*sink, output("hevc-stereo"), 90, 30, true, ExportCodec::HEVC);
+}
+AUREA_TEST(FFmpegExport, NativeSoftwareHevcPreservesNonEightPictureDimensions) {
+    if (!avcodec_find_encoder_by_name("libkvazaar") && !avcodec_find_encoder_by_name("libx265")) {
+        std::printf("(software HEVC absent; explicit unavailability covered separately) ");
+        return;
+    }
+    constexpr u32 width = 854, height = 482, stride = 864, frames = 15;
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    auto video = configuration(); video.width = width; video.height = height; video.codec = ExportCodec::HEVC;
+    const auto path = output("hevc-non8");
+    if (!good(sink->open(path.c_str(), video, nullptr))) return;
+    std::vector<u8> y(stride * height, 0xA5), uv(stride * height / 2, 0xA5);
+    for (u32 row = 0; row < height / 2; ++row) std::fill_n(uv.data() + row * stride, width, u8{128});
+    for (u32 frame = 0; frame < frames; ++frame) {
+        for (u32 row = 0; row < height; ++row) {
+            std::fill_n(y.data() + row * stride, width, u8{32});
+            std::fill_n(y.data() + row * stride + 20 + frame * 12, 16, u8{220});
+        }
+        if (!good(sink->write_video(y.data(), stride, uv.data(), stride, std::llround(frame * 1'000'000.0 / 30)))) return;
+    }
+    if (!good(sink->finish())) return;
+    if (!good(sink->validate_output(ExportOutputValidation{width, height, frames, 30, false}))) return;
+    const auto decoded = aurea::test::verify_native_export(path, frames, width, height, 30, false);
+    AUREA_CHECK(decoded.ok); AUREA_CHECK_EQ(decoded.pictures, frames);
+    AUREA_CHECK_EQ(decoded.contrastingFrames, frames); AUREA_CHECK_EQ(decoded.distinctFrameHashes, frames);
+    if (!decoded.ok) std::printf("\n    HEVC non-eight independent decode: %s\n", decoded.error.c_str());
 }
 AUREA_TEST(FFmpegExport, FractionalClockSurvivesAllFramesAndReopen) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
@@ -298,6 +326,56 @@ AUREA_TEST(FFmpegExport, IndependentValidationRejectsTruncatedFinalizedMp4) {
     std::filesystem::resize_file(path, originalBytes / 2, error); AUREA_CHECK(!error);
     if (error) return;
     AUREA_CHECK(!sink->validate_output(ExportOutputValidation{kWidth, kHeight, 30, 30, false}).ok());
+}
+AUREA_TEST(FFmpegExport, MissingHalfOfAudioCannotPublishAValidVideoTrack) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("incomplete-audio");
+    std::error_code ec; std::filesystem::remove(path, ec);
+    const auto video = configuration(); AudioStreamConfig audio; Picture picture; picture.numbered(0);
+    if (!good(sink->open(path.c_str(), video, &audio))) return;
+    if (!good(sink->write_video(picture.y.data(), kStride, picture.uv.data(), kStride, 0))) return;
+    std::vector<i16> pcm(800 * 2, 1000);
+    if (!good(sink->write_audio(pcm.data(), 800, 0))) return;
+    AUREA_CHECK(sink->finish().code() == Errc::EncodeFailed);
+    AUREA_CHECK(!std::filesystem::exists(path));
+    sink->abort();
+}
+AUREA_TEST(FFmpegExport, CorruptStagingPreservesExistingTargetUntilIndependentValidation) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("atomic-existing-target");
+    const std::string original = "owned-existing-output-must-survive-a-failed-export";
+    { std::ofstream stream(path, std::ios::binary | std::ios::trunc); stream << original; }
+    auto existing = [&] { std::ifstream stream(path, std::ios::binary); return std::string(std::istreambuf_iterator<char>(stream), {}); };
+    auto video = configuration(); video.validateBeforePublish = true; Picture picture;
+    auto writeThree = [&]() {
+        if (!good(sink->open(path.c_str(), video, nullptr))) return false;
+        for (u32 i = 0; i < 3; ++i) {
+            picture.numbered(i);
+            if (!good(sink->write_video(picture.y.data(), kStride, picture.uv.data(), kStride, std::llround(i * 1'000'000.0 / 30)))) return false;
+        }
+        return good(sink->finish());
+    };
+    if (!writeThree()) return;
+    AUREA_CHECK(existing() == original);
+    const auto target = std::filesystem::path(path);
+    std::filesystem::path staged; u32 stages = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(target.parent_path())) {
+        if (entry.path().filename().string().rfind(target.filename().string() + ".aurea-ffmpeg-", 0) == 0) {
+            staged = entry.path(); ++stages;
+        }
+    }
+    AUREA_CHECK_EQ(stages, 1u); if (stages != 1) return;
+    std::error_code ec; const auto bytes = std::filesystem::file_size(staged, ec); AUREA_CHECK(!ec); if (ec) return;
+    std::filesystem::resize_file(staged, bytes / 2, ec); AUREA_CHECK(!ec); if (ec) return;
+    AUREA_CHECK(!sink->validate_output(ExportOutputValidation{kWidth, kHeight, 3, 30, false}).ok());
+    AUREA_CHECK(existing() == original);
+    sink->abort(); AUREA_CHECK(!std::filesystem::exists(staged)); AUREA_CHECK(existing() == original);
+    if (!writeThree()) return;
+    AUREA_CHECK(existing() == original);
+    if (!good(sink->validate_output(ExportOutputValidation{kWidth, kHeight, 3, 30, false}))) return;
+    const auto decoded = decode(path, 30);
+    AUREA_CHECK(decoded.opened && decoded.cleanEof && decoded.pixelsOrdered && decoded.exactClock);
+    AUREA_CHECK_EQ(decoded.videoFrames, 3u);
 }
 AUREA_TEST(FFmpegExport, RejectsDiscontinuousVideoAudioAndWrongValidationCount) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;

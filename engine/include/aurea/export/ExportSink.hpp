@@ -47,10 +47,10 @@ struct VideoStreamConfig {
     /// Perfil (ExportWatchdog.hpp): 0 = o padrão do encoder, 1 = Baseline (modo
     /// de segurança — sem B-quadros, o que todo encoder de fabricante faz).
     u32 profile = 0;
-    /// Modo de segurança nível 2: abrir direto o encoder de SOFTWARE do sistema
-    /// (Android). Plataforma sem essa escolha ignora.
+    /// Abrir diretamente o codec FFmpeg por software, preservando formato,
+    /// resolução e relógio do fluxo solicitado.
     bool preferSoftware = false;
-    /// V2: finish closes the temporary file; independent validation must
+    /// finish closes the temporary file; independent validation must
     /// succeed before the startup gate atomically replaces the destination.
     bool validateBeforePublish = false;
 };

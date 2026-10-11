@@ -9,8 +9,7 @@
 //  Benchmarks (lentos) só com AUREA_BENCH_EXPORT=1:
 //      aurea_tests.exe ExportBench
 //  Uma linha por cenário: quadros/s do pipeline inteiro e ms por estágio. O
-//  "encoder" do host é um stub que copia os planos (o mesmo trabalho que o
-//  MediaCodecExport faz para o buffer de entrada do codec); o custo dele sai
+//  "encoder" do benchmark copia os planos recebidos pelo sink FFmpeg; seu custo sai
 //  na coluna própria. Os modelos 3D vêm de AUREA_BENCH_GLTF (pasta com
 //  DamagedHelmet.glb e Fox.glb) ou de tests/data/gltf.
 // =============================================================================
@@ -195,7 +194,7 @@ public:
             }
         }
         const u32 w = c_->video.width, h = c_->video.height;
-        // O trabalho do MediaCodecExport: planos → buffer de entrada do codec.
+        // Captura dos planos entregues ao sink: copiar as linhas úteis.
         u8* dst = c_->input.data();
         for (u32 r = 0; r < h; ++r) std::memcpy(dst + static_cast<usize>(r) * w, y + static_cast<usize>(r) * yStride, w);
         u8* dc = dst + static_cast<usize>(w) * h;
@@ -1336,6 +1335,8 @@ AUREA_TEST(Export, VectorAndTransformMotionBlurFinishEveryFrame) {
         AUREA_CHECK(r.e.set_vector_blur(id.pack(), mode & 1u ? 1.f : 0.f));
         AUREA_CHECK(r.e.set_motion_blur(id.pack(), (mode & 2u) != 0));
         AUREA_CHECK(r.e.set_composition_motion_blur(true));
+        u32 previewHits = 0, previewMisses = 0;
+        r.e.flow_cache_stats(previewHits, previewMisses);
         const auto result = run_export(r, 72, 30, false, 20);
         AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
         if (!result.finished) return; // Rig teardown joins the worker before capture is destroyed.
@@ -1347,7 +1348,10 @@ AUREA_TEST(Export, VectorAndTransformMotionBlurFinishEveryFrame) {
         if (mode & 1u) {
             u32 hits = 0, misses = 0;
             r.e.flow_cache_stats(hits, misses);
-            AUREA_CHECK(misses > 0);
+            // Temporal export history belongs to its offline compositor; it
+            // must not populate or clear the interactive preview flow cache.
+            AUREA_CHECK_EQ(hits, previewHits);
+            AUREA_CHECK_EQ(misses, previewMisses);
         }
     }
 }
@@ -1389,7 +1393,8 @@ AUREA_TEST(Export, MissingVideoFramesAbortInsteadOfReportingBlankVideoAsSuccess)
     SyntheticConfig cfg;
     LeasedFactory factory(cfg);
     factory.leases->limit = 0;
-    Rig r(cfg, 30.0, 3, 3, &factory);
+    Rig r(cfg, 30.0, 3, 3, &factory, nullptr, 0, false, "sintetico",
+          ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 500);
     AUREA_CHECK(r.ok);
     if (!r.ok) return;
     const auto t0 = std::chrono::steady_clock::now();
@@ -1844,7 +1849,9 @@ AUREA_TEST(Export, TemporaryMissingGpuTextBufferRetriesBeforeEncoding) {
 AUREA_TEST(Export, PersistentMissingGpuTextBufferFailsInsteadOfSavingIncompleteVideo) {
     SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
-    Rig r(cfg, 30, 1, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
+    Rig r(cfg, 30, 1, 1, nullptr, backend, 0, false, "sintetico",
+          ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 300);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
     r.comp()->layer(r.video_layer())->visible = false;
     AUREA_CHECK(r.e.add_text("Text").ok());
     backend->beforeCreateBuffer = [](const BufferDesc& desc) {
@@ -1853,7 +1860,7 @@ AUREA_TEST(Export, PersistentMissingGpuTextBufferFailsInsteadOfSavingIncompleteV
     };
     const Outcome o = run_export(r, 36, 30, false, 8);
     AUREA_CHECK(o.finished);
-    AUREA_CHECK_EQ(o.p.result, Errc::InvalidState);
+    AUREA_CHECK_EQ(o.p.result, Errc::Timeout);
     AUREA_CHECK_EQ(o.p.failure, 3u); // ExportFailure::Render
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
     AUREA_CHECK(r.cap.hashes.empty());
@@ -1878,7 +1885,7 @@ AUREA_TEST(ExportStartupRecovery, OpeningFailurePublishesFreshRecoveryAndNeverRe
     AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
 }
 
-AUREA_TEST(ExportStartupMemory, PreviewTemporariesAreReleasedBeforeCodecAllocationAndFailureResumesPreview) {
+AUREA_TEST(ExportStartupMemory, PreviewTemporariesArePreservedAndCodecFailureResumesPreview) {
     SyntheticConfig cfg; cfg.width = 128; cfg.height = 72;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
     Rig r(cfg, 30, 3, 1, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
@@ -1887,11 +1894,12 @@ AUREA_TEST(ExportStartupMemory, PreviewTemporariesAreReleasedBeforeCodecAllocati
     AUREA_CHECK(r.e.attach_surface(reinterpret_cast<void*>(1), 128, 72).ok());
     AUREA_CHECK(r.e.render_frame().ok());
     const u32 waits = backend->idleWaits.load();
+    const u32 destroyed = backend->texturesDestroyed;
     bool checked = false;
     r.cap.beforeOpen = [&]() -> Status {
         checked = true;
-        AUREA_CHECK(backend->texturesDestroyed > 0);
-        AUREA_CHECK(backend->idleWaits.load() >= waits + 2);
+        AUREA_CHECK_EQ(backend->texturesDestroyed, destroyed);
+        AUREA_CHECK_EQ(backend->idleWaits.load(), waits);
         return Status{Errc::OutOfMemory, "injected codec allocation failure"};
     };
     ExportSettings settings; settings.height = 72;
@@ -2008,13 +2016,14 @@ AUREA_TEST(Export, SuspendStopsExportBeforeClosingMediaAndAllowsRestart) {
     AUREA_CHECK(restarted.finished && restarted.p.result == Errc::Ok);
 }
 
-AUREA_TEST(Export, SuspendSerializesWithAnEncoderThatIsStillOpening) {
+AUREA_TEST(Export, SuspendCancelsAnEncoderThatIsStillOpening) {
     SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
     Rig r(cfg, 30, 300, 2, nullptr, backend); AUREA_CHECK(r.ok); if (!r.ok) return;
     r.comp()->layer(r.video_layer())->visible = false;
-    std::atomic<bool> opening{false};
+    std::atomic<bool> opening{false}, destroyed{false};
     r.cap.openEntered = &opening;
+    r.cap.sinkDestroyed = &destroyed;
     r.cap.openDelayUs = 100000;
     r.cap.encodeUs = 20000;
     Status start;
@@ -2025,15 +2034,22 @@ AUREA_TEST(Export, SuspendSerializesWithAnEncoderThatIsStillOpening) {
     AUREA_CHECK(opening.load());
     AUREA_CHECK(r.e.suspend().ok());
     exporting.join();
-    AUREA_CHECK(start.ok());
+    AUREA_CHECK_EQ(start.code(), Errc::Cancelled);
     AUREA_CHECK_EQ(r.e.state(), EngineState::Suspended);
     const auto progress = r.e.export_progress();
     AUREA_CHECK(progress.finished && !progress.running);
     AUREA_CHECK_EQ(progress.result, Errc::Cancelled);
+    // The startup worker owns its sink until the native open returns. Keep
+    // this mock's borrowed capture alive until its delayed abort completes.
+    const auto cleanupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!destroyed.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < cleanupDeadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(destroyed.load(std::memory_order_acquire));
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
     ExportSettings settings;
     AUREA_CHECK_EQ(r.e.start_export(settings, "nao-usado.mp4").code(), Errc::InvalidState);
     r.cap.openEntered = nullptr;
+    r.cap.sinkDestroyed = nullptr;
 }
 
 AUREA_TEST(Export, CancelIsResponsiveAndReleasesTheSink) {

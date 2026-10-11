@@ -11499,10 +11499,10 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         if (running) return Status{Errc::InvalidState, "ja existe um export em andamento"};
         exportCtx_->thread.join();
     }
-    retire_abandoned_export_locked();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
+        retire_abandoned_export_locked();
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         // Complete retained GPU ownership before replacing the previous session.
         std::lock_guard<std::mutex> context(exportContextMutex_);
@@ -12682,10 +12682,10 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         if (running) return Status{Errc::InvalidState, "ja existe um export em andamento"};
         exportCtx_->thread.join();
     }
-    retire_abandoned_export_locked();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
+        retire_abandoned_export_locked();
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
     }
 
@@ -12923,7 +12923,6 @@ void Engine::image_export_thread_main() noexcept {
         std::lock_guard<std::mutex> rl(renderMutex_);
         release_offline_export(ctx);
         retain_failed_export_gpu_locked();
-        ctx.audioCache.reset();
     }
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);

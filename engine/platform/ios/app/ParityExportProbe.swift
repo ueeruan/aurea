@@ -695,7 +695,7 @@ enum ParityExportProbe {
             }
             guard copied == kCMBlockBufferNoErr else { throw Failure(message: "Could not read decoded PCM") }
             let time = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample))
-            guard time.isFinite, result.buffers == 0 || abs(time - result.endTime) < 0.002 else {
+            guard time.isFinite, result.buffers == 0 || abs(time - result.endTime) <= 2.0 / 48000 else {
                 throw Failure(message: "Decoded AAC has discontinuous sample timestamps")
             }
             if result.buffers == 0 { result.firstTime = time }
@@ -763,7 +763,7 @@ enum ParityExportProbe {
                 throw Failure(message: "Decoded video dimensions or format differ")
             }
             let timestamp = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample))
-            guard timestamp.isFinite, abs(timestamp - Double(result.frameCount) / 30) < 0.002 else {
+            guard timestamp.isFinite, abs(timestamp - Double(result.frameCount) / 30) <= 0.000002 else {
                 throw Failure(message: "Decoded video has a missing or mistimed frame at index \(result.frameCount)")
             }
             result.timestamps.append(timestamp)

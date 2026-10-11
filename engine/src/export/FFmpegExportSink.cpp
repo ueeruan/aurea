@@ -395,7 +395,7 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
     ctx->rc_min_rate = video_.rateMode == 0 ? ctx->bit_rate : 0;
     ctx->rc_buffer_size = static_cast<int>(std::min<i64>(ctx->bit_rate * 2, INT_MAX));
     ctx->gop_size = video_.keyframeIntervalFrames ? static_cast<int>(std::min<u32>(video_.keyframeIntervalFrames, INT_MAX)) :
-        static_cast<int>(std::lround(video_.fps * 2));
+        std::max(1, static_cast<int>(std::lround(video_.fps * 2)));
     ctx->max_b_frames = 0; ctx->thread_count = 4; ctx->thread_type = FF_THREAD_SLICE;
     ctx->color_primaries = static_cast<AVColorPrimaries>(video_.color.primaries);
     ctx->color_trc = static_cast<AVColorTransferCharacteristic>(video_.color.transfer);
@@ -406,7 +406,8 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
     if (format_->oformat->flags & AVFMT_GLOBALHEADER) ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     AVDictionary* options = nullptr;
     if (std::strstr(name, "videotoolbox")) {
-        av_dict_set(&options, "allow_sw", "0", 0); // successful open is hardware, never hidden VT software
+        // Desktop FFmpeg enforces this; iOS acceleration remains Unknown below.
+        av_dict_set(&options, "allow_sw", "0", 0);
         av_dict_set(&options, "realtime", "0", 0);
     } else if (std::strstr(name, "mediacodec")) {
         av_dict_set(&options, "codec_name", nativeName, 0);
@@ -486,7 +487,8 @@ Status FFmpegSink::open_video() noexcept {
         }
 #endif
     }
-    if (!selected.ok()) return error(cancelled() ? Errc::Cancelled : Errc::EncoderUnavailable,
+    if (!selected.ok()) return error(cancelled() ? Errc::Cancelled :
+        selected.code() == Errc::OutOfMemory ? Errc::OutOfMemory : Errc::EncoderUnavailable,
         "FFmpeg nao abriu encoder solicitado nem fallback por software");
     videoFrame_ = av_frame_alloc();
     if (!videoFrame_) return error(Errc::OutOfMemory, "frame de video FFmpeg");
@@ -806,6 +808,12 @@ Status FFmpegSink::finish() noexcept {
     if (const Status status = ready(); !status.ok()) return status;
     if (!videoFrames_ || (hasAudio_ && !audioInputSamples_))
         return error(Errc::EncodeFailed, "exportacao FFmpeg sem frames ou amostras esperadas");
+    if (hasAudio_) {
+        const i64 expectedSamples = av_rescale_q(lastVideoEnd_, videoTimebase_,
+            AVRational{1, static_cast<int>(audio_.sampleRate)});
+        if (expectedSamples < 0 || std::abs(audioInputSamples_ - expectedSamples) > 2)
+            return error(Errc::EncodeFailed, "audio e video FFmpeg possuem duracoes divergentes");
+    }
     unsigned produced = 0;
     if (const Status status = send(videoCodec_, videoStream_, nullptr, true); !status.ok()) return status;
     if (const Status status = drain(videoCodec_, videoStream_, true, true, produced); !status.ok()) return status;
@@ -976,6 +984,8 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
                     frame->nb_samples <= 0)
                     return error(Errc::CorruptData, "layout de audio FFmpeg divergente");
                 const i64 start = av_rescale_q(pts, stream->time_base, AVRational{1, audioRate_});
+                if (start > INT64_MAX - frame->nb_samples)
+                    return error(Errc::CorruptData, "PTS de audio FFmpeg excedeu faixa de amostras");
                 const i64 end = start + frame->nb_samples;
                 if (start < -audioFrameSamples_ || end > audioConvertedSamples_ + audioFrameSamples_ ||
                     (previousAudioRawEnd != AV_NOPTS_VALUE && std::abs(start - previousAudioRawEnd) > 1))

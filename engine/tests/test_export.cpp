@@ -33,6 +33,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
+#include "NativeExportVerifier.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/audio/AudioEffects.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
@@ -1063,6 +1064,14 @@ AUREA_TEST(OfflineNativeGpu, CompositionFramesAndStereoReachRealNativeMp4) {
         AUREA_CHECK_EQ(progress.framesTotal, static_cast<u32>(frames));
         AUREA_CHECK((progress.flags & (1u << 3)) == 0);
         AUREA_CHECK(fileio::exists(movie.c_str()));
+        if (progress.finished && progress.result == Errc::Ok) {
+            const auto decoded = verify_native_export(movie.c_str(), static_cast<u32>(frames), 320, 192, 30, true);
+            AUREA_CHECK(decoded.ok);
+            AUREA_CHECK_EQ(decoded.pictures, static_cast<u32>(frames));
+            AUREA_CHECK(decoded.contrastingFrames > 0 && decoded.distinctFrameHashes > 1);
+            AUREA_CHECK(decoded.samples > 0 && decoded.meanSquare > .001);
+            if (!decoded.ok) std::printf("\n    independent native decode: %s\n", decoded.error.c_str());
+        }
         if (progress.result != Errc::Ok) std::printf("\n    offline native failure: %s\n", progress.message);
         if (!progress.finished) (void)r.e.cancel_export();
     }
@@ -2258,34 +2267,53 @@ AUREA_TEST(Regression2135Gpu, CancelWhileDecodeNeedsGpuDoesNotWaitIdle) {
     SyntheticConfig cfg; cfg.width = 128; cfg.height = 72;
     cfg.frameCount = 30; cfg.decodeCostUs = 500000;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
-    std::atomic<bool> waiting{false};
-    std::atomic<u64> waitingFrame{~u64{0}};
-    std::atomic<u32> nonBlockingPolls{0};
-    backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
-        if (timeout == 0) { ++nonBlockingPolls; return Status{Errc::Timeout}; }
-        waitingFrame.store(frame);
-        waiting.store(true);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        return Status{Errc::Timeout};
+    std::atomic<bool> decoding{false};
+    std::atomic<u32> nonexistentFenceWaits{0};
+    class PendingDecoder final : public VideoDecoderBackend {
+    public:
+        PendingDecoder(const SyntheticConfig& config, std::atomic<bool>& entered) : decoder_(config), entered_(entered) {}
+        const VideoStreamInfo& info() const noexcept override { return decoder_.info(); }
+        Status seek_to_keyframe(i64 time) noexcept override { return decoder_.seek_to_keyframe(time); }
+        Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+            entered_ = true; return decoder_.next_frame(from, out, pts, eos);
+        }
+        u32 max_live_frames() const noexcept override { return 12; }
+        i64 keyframe_interval_us() const noexcept override { return decoder_.keyframe_interval_us(); }
+    private:
+        SyntheticDecoder decoder_; std::atomic<bool>& entered_;
     };
-    Rig r(cfg, 30, 30, 2, nullptr, backend);
+    class PendingFactory final : public VideoSourceFactory {
+    public:
+        PendingFactory(const SyntheticConfig& config, std::atomic<bool>& entered) : config_(config), entered_(entered) {}
+        bool probe(const char* path, MediaProbe& out) override { return SyntheticFactory(config_).probe(path, out); }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+            return std::make_unique<PendingDecoder>(config_, entered_);
+        }
+    private:
+        SyntheticConfig config_; std::atomic<bool>& entered_;
+    } factory(cfg, decoding);
+    backend->beforeWaitFrame = [&](u64 frame, u64) {
+        if (!frame) ++nonexistentFenceWaits;
+        return OkStatus;
+    };
+    Rig r(cfg, 30, 30, 2, &factory, backend);
     AUREA_CHECK(r.ok); if (!r.ok) return;
     AUREA_CHECK(r.e.set_vector_blur(r.video_layer().pack(), 1));
     ExportSettings settings; settings.height = 72;
     AUREA_CHECK(r.e.start_export(settings, "test-cancel-gpu.mp4").ok());
     const u32 idleBefore = backend->idleWaits.load();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-    while (!waiting.load() && std::chrono::steady_clock::now() < deadline)
+    while (!decoding.load() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    AUREA_CHECK(waiting.load());
-    AUREA_CHECK_EQ(waitingFrame.load(), 0u); // Still preparing the very first video frame.
+    AUREA_CHECK(decoding.load());
+    AUREA_CHECK_EQ(r.e.export_progress().framesDone, 0u);
     r.e.cancel_export();
     while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     AUREA_CHECK(r.e.export_progress().finished);
     AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
     AUREA_CHECK_EQ(backend->idleWaits.load(), idleBefore);
-    AUREA_CHECK_EQ(nonBlockingPolls.load(), 1u);
+    AUREA_CHECK_EQ(nonexistentFenceWaits.load(), 0u);
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
 }
 

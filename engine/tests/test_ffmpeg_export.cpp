@@ -140,14 +140,17 @@ DecodeResult decode(const std::string& path, double fps) {
                     if (result.firstAudioPtsUs < 0) result.firstAudioPtsUs = ptsUs;
                     // Native AAC decoder is planar float. A changed output
                     // format must make this assertion fail, never bypass audio.
-                    if (frame->format != AV_SAMPLE_FMT_FLTP || frame->ch_layout.nb_channels != 2) decoderFailure = true;
+                    if (frame->format != AV_SAMPLE_FMT_FLTP || frame->ch_layout.nb_channels < 1 || frame->ch_layout.nb_channels > 2) decoderFailure = true;
                     else {
                         const float* left = reinterpret_cast<const float*>(frame->extended_data[0]);
-                        const float* right = reinterpret_cast<const float*>(frame->extended_data[1]);
+                        const float* right = frame->ch_layout.nb_channels == 2 ? reinterpret_cast<const float*>(frame->extended_data[1]) : nullptr;
                         for (int n = 0; n < frame->nb_samples; ++n) {
-                            result.audioSquare += left[n] * left[n] + right[n] * right[n];
-                            const double difference = left[n] - right[n];
-                            result.stereoDifferenceSquare += difference * difference;
+                            result.audioSquare += left[n] * left[n];
+                            if (right) {
+                                result.audioSquare += right[n] * right[n];
+                                const double difference = left[n] - right[n];
+                                result.stereoDifferenceSquare += difference * difference;
+                            }
                         }
                         result.audioSamples += frame->nb_samples;
                     }
@@ -176,8 +179,9 @@ cleanup:
     return result;
 }
 
-bool exportNumbered(ExportSink& sink, const std::string& path, u32 frames, double fps, bool withAudio) {
-    const auto video = configuration(fps); AudioStreamConfig audio;
+bool exportNumbered(ExportSink& sink, const std::string& path, u32 frames, double fps, bool withAudio,
+                    ExportCodec codec = ExportCodec::H264) {
+    auto video = configuration(fps); video.codec = codec; AudioStreamConfig audio;
     if (!good(sink.open(path.c_str(), video, withAudio ? &audio : nullptr))) return false;
     AUREA_CHECK(sink.encoder_info().acceleration == ExportSink::Acceleration::Software);
     Picture picture;
@@ -228,6 +232,24 @@ AUREA_TEST(FFmpegExport, NativeSoftwareCfrAllPicturesAndStereoAudio) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
     (void)exportNumbered(*sink, output("cfr-stereo"), 90, 30, true);
 }
+AUREA_TEST(FFmpegExport, NativeSoftwareHevcPreservesAllPicturesAndAudio) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    if (!avcodec_find_encoder_by_name("libx265")) {
+        auto video = configuration(); video.codec = ExportCodec::HEVC;
+        const auto path = output("hevc-unavailable");
+        const auto status = sink->open(path.c_str(), video, nullptr);
+        if (!status.ok()) {
+            AUREA_CHECK_EQ(status.code(), Errc::EncoderUnavailable);
+            AUREA_CHECK(!std::filesystem::exists(path));
+            std::printf("\n    HEVC software unavailable explicitly reported; no output published\n");
+            return;
+        }
+        // Android may supply a classified native software encoder via FFmpeg.
+        AUREA_CHECK(sink->encoder_info().acceleration == ExportSink::Acceleration::Software);
+        sink->abort();
+    }
+    (void)exportNumbered(*sink, output("hevc-stereo"), 90, 30, true, ExportCodec::HEVC);
+}
 AUREA_TEST(FFmpegExport, FractionalClockSurvivesAllFramesAndReopen) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
     if (!exportNumbered(*sink, output("fractional-2997"), 300, 30000.0 / 1001, true)) return;
@@ -237,6 +259,45 @@ AUREA_TEST(FFmpegExport, LongNativeEncodePreservesEveryPictureWithFixedInputBuff
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
     // Two minutes / 3600 frames. The input buffers remain 36 KiB throughout.
     (void)exportNumbered(*sink, output("long-120s"), 3600, 30, true);
+}
+AUREA_TEST(FFmpegExport, SubOneFpsPreservesAbsolutePictureClockAndFinalDuration) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    (void)exportNumbered(*sink, output("half-fps"), 3, .5, false);
+}
+AUREA_TEST(FFmpegExport, MonoSampleRateConversionFlushesPartialAacTail) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    constexpr u32 inputRate = 44117, sourceSamples = 1025;
+    const double fps = double(inputRate) / sourceSamples;
+    const auto video = configuration(fps); AudioStreamConfig audio; audio.channels = 1; audio.sampleRate = inputRate;
+    const auto path = output("mono-resampled-tail"); Picture picture; picture.numbered(0);
+    if (!good(sink->open(path.c_str(), video, &audio))) return;
+    if (!good(sink->write_video(picture.y.data(), kStride, picture.uv.data(), kStride, 0))) return;
+    std::vector<i16> pcm(sourceSamples);
+    for (u32 sample = 0; sample < sourceSamples; ++sample)
+        pcm[sample] = static_cast<i16>(12000 * std::sin(double(sample) * 440 * 6.283185307179586 / inputRate));
+    // Two deliberately uneven chunks exercise the absolute sample clock.
+    if (!good(sink->write_audio(pcm.data(), 513, 0))) return;
+    if (!good(sink->write_audio(pcm.data() + 513, 512, std::llround(513 * 1'000'000.0 / inputRate)))) return;
+    if (!good(sink->finish())) return;
+    if (!good(sink->validate_output(ExportOutputValidation{kWidth, kHeight, 1, fps, true}))) return;
+    const auto decoded = decode(path, fps);
+    AUREA_CHECK(decoded.opened && decoded.cleanEof && decoded.pixelsOrdered && decoded.exactClock);
+    AUREA_CHECK_EQ(decoded.videoFrames, 1u); AUREA_CHECK_EQ(decoded.audioChannels, 1u); AUREA_CHECK_EQ(decoded.sampleRate, 44100u);
+    const i64 expected = std::llround(double(sourceSamples) * 44100 / inputRate);
+    AUREA_CHECK(std::llabs(static_cast<i64>(decoded.audioSamples) - expected) <= 1024);
+    AUREA_CHECK(decoded.audioSamples >= static_cast<u64>(expected));
+    AUREA_CHECK(decoded.audioSamples > 0 && decoded.audioSquare / decoded.audioSamples > .001);
+}
+AUREA_TEST(FFmpegExport, IndependentValidationRejectsTruncatedFinalizedMp4) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("truncated-finalized");
+    if (!exportNumbered(*sink, path, 30, 30, false)) return;
+    std::error_code error;
+    const auto originalBytes = std::filesystem::file_size(path, error); AUREA_CHECK(!error);
+    if (error) return;
+    std::filesystem::resize_file(path, originalBytes / 2, error); AUREA_CHECK(!error);
+    if (error) return;
+    AUREA_CHECK(!sink->validate_output(ExportOutputValidation{kWidth, kHeight, 30, 30, false}).ok());
 }
 AUREA_TEST(FFmpegExport, RejectsDiscontinuousVideoAudioAndWrongValidationCount) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;

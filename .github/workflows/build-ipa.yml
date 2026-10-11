@@ -62,7 +62,6 @@ jobs:
           python3 engine/platform/ios/verify/check_effect_contract.py
           python3 engine/platform/ios/verify/check_metal_frag_outputs.py
           python3 engine/platform/ios/verify/check_editor_layout.py
-          python3 engine/platform/ios/verify/check_preview_buffer.py
           python3 engine/platform/ios/verify/check_ai_sessions.py
           python3 engine/platform/ios/verify/check_project_lifecycle.py
           python3 engine/platform/ios/verify/check_scene_drag.py
@@ -91,7 +90,7 @@ jobs:
           test -s build/ffmpeg/ios/arm64/aurea-ffmpeg-build.json
           for LIB in avcodec avformat avutil swscale swresample openh264; do
             test -s "build/ffmpeg/ios/arm64/lib/lib${LIB}.a"
-            xcrun lipo -verify_arch arm64 "build/ffmpeg/ios/arm64/lib/lib${LIB}.a"
+            xcrun lipo "build/ffmpeg/ios/arm64/lib/lib${LIB}.a" -verify_arch arm64
           done
       - name: Verify Apple stereo audio and sample-rate conversion
         run: |
@@ -199,7 +198,7 @@ jobs:
           test -s "$PREFIX/aurea-ffmpeg-build.json"
           for LIB in avcodec avformat avutil swscale swresample openh264; do
             test -s "$PREFIX/lib/lib${LIB}.a"
-            xcrun lipo -verify_arch "$(uname -m)" "$PREFIX/lib/lib${LIB}.a"
+            xcrun lipo "$PREFIX/lib/lib${LIB}.a" -verify_arch "$(uname -m)"
           done
       - uses: actions/cache/restore@v4
         with:

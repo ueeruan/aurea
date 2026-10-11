@@ -84,7 +84,7 @@ para distribuição oficial exige configurar a conta Apple no Xcode.
 | Decode de vídeo | `aurea::VideoDecoderBackend` (`media/VideoSource.hpp`) | `IOSVideoDecoder.mm` — AVAssetReader + `VTDecompressionSession` |
 | Sonda de mídia | `aurea::VideoSourceFactory` (`media/MediaManager.hpp`) | idem (`probe`/`open_video`/`open_audio`) |
 | Decode de áudio | `aurea::audio::AudioDecoderBackend` (`audio/Audio.hpp`) | idem — PCM float no formato do arquivo |
-| Export | `aurea::ExportSink` (`export/ExportSink.hpp`) | idem — `VTCompressionSession` + `AVAssetWriter` |
+| Export | `aurea::ExportSink` (`export/ExportSink.hpp`) | FFmpeg compartilhado; VideoToolbox por hardware e OpenH264 por software |
 | Áudio na saída | `aurea::audio::AudioOutput` (`audio/Audio.hpp`) | `IOSAudio.mm` — `AVAudioEngine` + `AVAudioSourceNode` |
 | Preview | `SurfaceDesc::nativeWindow` (`render/GPUBackend.hpp`) | `IOSSurfaceView.mm` — `CAMetalLayer*` |
 | Comandos | `Command` / `CommandQueue` (`command/Command.hpp`) | `AureaEngine.mm` + `ios::Batch` |

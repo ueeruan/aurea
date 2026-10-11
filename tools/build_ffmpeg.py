@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -74,6 +75,36 @@ def windows_native_compiler_environment(env: dict[str, str]) -> dict[str, str]:
             env[key.upper() if key.upper() != "PATH" else "PATH"] = value
     return env
 
+def install_public_headers(source: Path, configured: Path, prefix: Path) -> dict[str, str]:
+    """Install upstream public headers individually, including generated ABI data.
+
+    Windows make/install can exceed cmd.exe's command length for libavutil's
+    public header list. Use the checksum-pinned upstream HEADERS definitions,
+    keeping each file operation independent and verifying the installed bytes.
+    """
+    installed: dict[str, str] = {}
+    for component in ("avcodec", "avformat", "avutil", "swscale", "swresample"):
+        directory = "lib" + component
+        declarations = (source / directory / "Makefile").read_text(encoding="utf-8").replace("\\\n", "")
+        for variable in ("HEADERS", "BUILT_HEADERS"):
+            match = re.search(r"^" + variable + r"\s*=\s*([^\n]*)", declarations, re.MULTILINE)
+            if not match:
+                if variable == "HEADERS":
+                    raise RuntimeError(f"Upstream public header list missing for {component}")
+                continue
+            for name in match.group(1).split():
+                if not re.fullmatch(r"[A-Za-z0-9_]+\.h", name):
+                    raise RuntimeError(f"Unexpected upstream public header expression: {name}")
+                original = (configured if variable == "BUILT_HEADERS" else source) / directory / name
+                destination = prefix / "include" / directory / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(original, destination)
+                digest = hashlib.sha256(original.read_bytes()).hexdigest()
+                if hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
+                    raise RuntimeError(f"Installed public header mismatch: {destination}")
+                installed[f"{directory}/{name}"] = digest
+    return installed
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("android", "ios", "ios-simulator", "host"), required=True)
@@ -97,6 +128,8 @@ def main() -> None:
     if args.platform == "host" and not args.prefix:
         prefix = ROOT / "build" / family / "host"
     work = args.cache.resolve() / "objects" / args.platform / native_arch
+    if args.with_x265:
+        work = work / "gpl"
     work.mkdir(parents=True, exist_ok=True)
     prefix.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
@@ -222,6 +255,10 @@ def main() -> None:
                 and previous.get("x265") == (X265_VERSION if args.with_x265 else None)
                 and (prefix / "include/libavcodec/avcodec.h").exists()
                 and all((prefix / f"lib/lib{name}.a").is_file() and (prefix / f"lib/lib{name}.a").stat().st_size > 0 for name in expected_archives)):
+            # Also repair prefixes produced by Windows make's long install
+            # command. Public headers are sourced from this exact native build.
+            previous["public_headers"] = install_public_headers(ffmpeg, ff_work, prefix)
+            manifest_path.write_text(json.dumps(previous, indent=2)+"\n", encoding="utf-8")
             print(f"Native export dependency manifest matches: {prefix}", flush=True)
             return
     for index, step in enumerate(steps):
@@ -235,15 +272,18 @@ def main() -> None:
                 for drive in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
                     content = content.replace(f"/{drive.lower()}/", f"{drive}:/")
                 file.write_text(content, encoding="utf-8")
+    installed_headers = install_public_headers(ffmpeg, ff_work, prefix)
     manifest = {"platform": args.platform, "arch": native_arch, "api": args.api if args.platform == "android" else None,
                 "ffmpeg": FFMPEG_VERSION, "openh264": OPENH264_VERSION, "x265": X265_VERSION if args.with_x265 else None,
-                "sources": [{"url": u, "sha256": h} for _, u, h in (*SOURCES, *((X265_SOURCE,) if args.with_x265 else ()))], "configure": steps[1]}
+                "sources": [{"url": u, "sha256": h} for _, u, h in (*SOURCES, *((X265_SOURCE,) if args.with_x265 else ()))], "configure": steps[1],
+                "public_headers": installed_headers}
     manifest_path.write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
     license_dir = prefix / "licenses"
     license_dir.mkdir(exist_ok=True)
     shutil.copy2(ffmpeg / "COPYING.LGPLv2.1", license_dir / "FFmpeg-LGPL-2.1.txt")
     shutil.copy2(openh264 / "LICENSE", license_dir / "OpenH264-BSD-2-Clause.txt")
     if args.with_x265:
+        shutil.copy2(ffmpeg / "COPYING.GPLv2", license_dir / "FFmpeg-GPL-2.0.txt")
         shutil.copy2(x265_source.parent / "COPYING", license_dir / "x265-GPL-2.0.txt")
     print(f"Built native export libraries at {prefix}", flush=True)
 

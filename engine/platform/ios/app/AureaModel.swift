@@ -916,13 +916,13 @@ final class AureaModel: ObservableObject {
                             engine.setLayerMotionBlurLength(1.25, forLayer: id)
                             refreshModel(force: true); transformTab = 5; panel = .transform
                         }
-                    case "motion-blur-export":
+                    case "motion-blur-export", "keyflow-simple-text":
                         let id = engine.addText("AUREA MOTION BLUR")
                         if id >= 0 {
-                            _ = engine.applyTextPreset(id, preset: 11)
+                            if scene == "motion-blur-export" { _ = engine.applyTextPreset(id, preset: 11) }
                             engine.run {
-                                $0.setMotionBlur(true, forLayer: id)
-                                $0.setMotionBlurSettings(true, shutter: 180)
+                                $0.setMotionBlur(scene == "motion-blur-export", forLayer: id)
+                                $0.setMotionBlurSettings(scene == "motion-blur-export", shutter: 180)
                                 $0.setLayer(id, startFrame: 0, endFrame: 60, offsetFrames: 0, setOffset: false)
                                 $0.seek(toFrame: 0)
                             }

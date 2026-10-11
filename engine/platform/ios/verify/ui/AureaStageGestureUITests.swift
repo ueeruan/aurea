@@ -139,7 +139,13 @@ import UIKit
     }
 
     func testMotionBlurTextExportCompletesAt1080p() throws {
-        let snapshot = try launch("motion-blur-export")
+        try assertKeyflowTextExport("motion-blur-export")
+    }
+    func testKeyflowPlainTextExportAt1080p() throws {
+        try assertKeyflowTextExport("keyflow-simple-text")
+    }
+    private func assertKeyflowTextExport(_ scene: String) throws {
+        let snapshot = try launch(scene)
         XCTAssertEqual(snapshot.compositionWidth, 1920)
         XCTAssertEqual(snapshot.compositionHeight, 1080)
         // Barra de cima (redesenho 2026-09-29): exportar mora na barra do PROJETO,
@@ -1688,7 +1694,7 @@ import UIKit
     private func launch(_ scene: String) throws -> Snapshot {
         runID = UUID().uuidString
         app = XCUIApplication(bundleIdentifier: "com.aurea.aurea")
-        if scene == "motion-blur-export" {
+        if ["motion-blur-export", "keyflow-simple-text"].contains(scene) {
             // Reproduce the measured device budget from the failed Metal run,
             // independently of the free RAM on this particular CI runner.
             app.launchArguments.append("--aurea-memory-budget-mb=163")

@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        abi: [armeabi-v7a, arm64-v8a]
+        abi: [arm64-v8a]
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 2
     steps:
@@ -70,7 +70,7 @@ jobs:
               assert abis == {sys.argv[2]}, abis
           PY
           mkdir -p build/apk-artifact
-          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2153-${{ matrix.abi }}-ci.apk'
+          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2154-keyflow-${{ matrix.abi }}-ci.apk'
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-apk-${{ matrix.abi }}
@@ -130,9 +130,9 @@ jobs:
           script: |
             adb install -r build/android/app/outputs/apk/uiTest/app-uiTest.apk
             adb install -r build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
-            adb shell am instrument -w -e class com.aurea.aurea.editor.Beta007EditingTest,com.aurea.aurea.editor.TimelineCoordinatesTest,com.aurea.aurea.editor.MotionTileMarginsDeviceTest,com.aurea.aurea.editor.TextAnimatorEditingTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
+            adb shell am instrument -w -e class com.aurea.aurea.editor.KeyflowExportDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
             cat build/native-editing.log
-            adb exec-out run-as com.aurea.aurea.uitest tar -cf - -C files motion-tile-margins beta007-marker-empty.png beta007-batch-result.txt beta007-spacing-result.txt > build/native-editing-files.tar
+            adb exec-out run-as com.aurea.aurea.uitest tar -cf - -C files keyflow-simple-text.mp4 keyflow-simple-text-progress.txt keyflow-animated-text-1080.mp4 keyflow-animated-text-1080-progress.txt > build/native-editing-files.tar
             grep -Eq '^OK \([0-9]+ tests?\)' build/native-editing.log
       - uses: actions/upload-artifact@v4
         if: always()

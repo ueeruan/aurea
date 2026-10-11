@@ -1086,6 +1086,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
     uint32_t _audioRate;
     uint32_t _audioChannels;
     BOOL _hasAudio;
+    BOOL _keyflowDirect;
     NSUInteger _pendingVideo;
     NSUInteger _pendingAudio;
     NSUInteger _submittedVideo;
@@ -1254,19 +1255,19 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
     CFRetain(first);
     [_state unlock];
     CMFormatDescriptionRef format = CMSampleBufferGetFormatDescription(first);
-    if (format) {
+    if (!_keyflowDirect && format) {
         _videoInput = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo
             outputSettings:nil sourceFormatHint:format];
         _videoInput.expectsMediaDataInRealTime = NO;
     }
     CFRelease(first);
-    if (!_videoInput || ![_writer canAddInput:_videoInput]) {
+    if (!_videoInput || (!_keyflowDirect && ![_writer canAddInput:_videoInput])) {
         [_state lock];
         [self failLocked:_writer.error message:@"o MP4 recusou o formato do video codificado"];
         [_state unlock];
         return NO;
     }
-    [_writer addInput:_videoInput];
+    if (!_keyflowDirect) [_writer addInput:_videoInput];
     if (![_writer startWriting]) {
         [_state lock];
         [self failLocked:_writer.error message:@"o gravador nao iniciou o MP4"];
@@ -1344,6 +1345,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                 userInfo:@{NSLocalizedDescriptionKey: @"dimensoes ou taxa de quadros invalidas"}];
             return NO;
         }
+        _keyflowDirect = video.keyflowCompatible;
         _width = video.width;
         _height = video.height;
         // Credits cover raw frames held by VT as well as compressed samples
@@ -1386,6 +1388,49 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             [_writer addInput:_audioInput];
         }
 
+        if (_keyflowDirect) {
+            // Equivalent to Keyflow's platform encoder surface: provide raw
+            // finished frames to Apple's writer and let it own compression.
+            // No explicit VT session, compressed callback or B-frame FIFO.
+            _videoCapacity=2;
+            _poolLimits=@{(id)kCVPixelBufferPoolAllocationThresholdKey: @4};
+            NSDictionary* properties=@{
+                AVVideoAverageBitRateKey: @(video.bitrateBps ?: 14000000u),
+                AVVideoExpectedSourceFrameRateKey: @(video.fps),
+                AVVideoMaxKeyFrameIntervalKey: @(video.keyframeIntervalFrames ?: (uint32_t)llround(video.fps)),
+                AVVideoAllowFrameReorderingKey: @NO
+            };
+            NSDictionary* settings=@{
+                AVVideoCodecKey: video.codec==ExportCodec::HEVC ? AVVideoCodecTypeHEVC : AVVideoCodecTypeH264,
+                AVVideoWidthKey: @(_width),AVVideoHeightKey: @(_height),
+                AVVideoCompressionPropertiesKey: properties,
+                AVVideoColorPropertiesKey: @{
+                    AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                    AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+                }
+            };
+            _videoInput=[[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:settings];
+            _videoInput.expectsMediaDataInRealTime=NO;
+            if (![_writer canAddInput:_videoInput]) {
+                if(error)*error=[NSError errorWithDomain:@"aurea.keyflow" code:1 userInfo:@{NSLocalizedDescriptionKey:@"o gravador recusou o video Keyflow"}];
+                return NO;
+            }
+            [_writer addInput:_videoInput];
+            NSDictionary* attributes=@{
+                (id)kCVPixelBufferPixelFormatTypeKey:@(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange),
+                (id)kCVPixelBufferWidthKey:@(_width),(id)kCVPixelBufferHeightKey:@(_height),
+                (id)kCVPixelBufferIOSurfacePropertiesKey:@{},(id)kCVPixelBufferMetalCompatibilityKey:@YES
+            };
+            const CVReturn created=CVPixelBufferPoolCreate(kCFAllocatorDefault,nullptr,(__bridge CFDictionaryRef)attributes,&_pool);
+            if(created!=kCVReturnSuccess || !_pool) {
+                if(error)*error=[NSError errorWithDomain:@"aurea.export.memory" code:created userInfo:nil];
+                return NO;
+            }
+            _encoderName=@"AVAssetWriter (Keyflow)"; _hardwareEncoder=NO;
+            AUREA_LOG_INFO("export-keyflow: AVAssetWriter raw frames, serial, no explicit VT session");
+            return YES;
+        }
         // VTCompressionSession: o encoder de vídeo de verdade.
         // Modo de segurança (export/ExportWatchdog.hpp): Baseline sem
         // reordenação (nenhum B-quadro segurando amostras no intercalador do
@@ -1521,13 +1566,13 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                  uv:(const uint8_t*)uv uvStride:(uint32_t)uvStride
               ptsUs:(int64_t)ptsUs durationUs:(int64_t)durationUs {
     @autoreleasepool {
-        if (!_session || !_pool) return NO;
+        if ((!_session && !_keyflowDirect) || !_pool) return NO;
         if (!y || !uv || yStride < _width || uvStride < _width) return NO;
         if (![self startSessionIfNeeded:ptsUs] || ![self waitForCapacity:YES]) return NO;
         CVPixelBufferRef pixel = nullptr;
         CVReturn allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, _pool,
                                                     (__bridge CFDictionaryRef)_poolLimits, &pixel);
-        if (allocation == kCVReturnWouldExceedAllocationThreshold) {
+        if (!_keyflowDirect && allocation == kCVReturnWouldExceedAllocationThreshold) {
             // Recycle VT references before declaring memory pressure terminal.
             (void)VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
             allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, _pool,
@@ -1567,6 +1612,28 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
 
         const CMTime pts = CMTimeMake(ptsUs, 1'000'000);
         const CMTime duration = CMTimeMake(durationUs > 0 ? durationUs : _frameDurationUs, 1'000'000);
+        if (_keyflowDirect) {
+            CMVideoFormatDescriptionRef format=nullptr;
+            CMSampleBufferRef sample=nullptr;
+            CMSampleTimingInfo timing{duration,pts,kCMTimeInvalid};
+            OSStatus status=CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault,pixel,&format);
+            if(status==noErr) status=CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,pixel,format,&timing,&sample);
+            if(format)CFRelease(format);
+            CVPixelBufferRelease(pixel);
+            [_state lock];
+            BOOL healthy=[self healthyLocked];
+            if(status!=noErr || !sample) {
+                [self failLocked:[NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil]
+                         message:@"Keyflow: nao foi possivel preparar um quadro"];
+                healthy=NO;
+            } else if(healthy) {
+                [_videoSamples addObject:(__bridge id)sample]; ++_pendingVideo; ++_submittedVideo;
+            }
+            [_state unlock];
+            if(sample)CFRelease(sample);
+            if(healthy)dispatch_async(_writerQueue,^{[self drainInput:YES];});
+            return healthy;
+        }
         [_state lock];
         if (![self healthyLocked]) { [_state unlock]; CVPixelBufferRelease(pixel); return NO; }
         ++_pendingVideo;   // o `finish` espera estes sairem antes de fechar
@@ -1935,7 +2002,8 @@ public:
         if (!host) return info;
         NSString* name = host.encoderName;
         if (name) std::snprintf(info.name, sizeof(info.name), "%s", name.UTF8String);
-        info.acceleration = host.hardwareEncoder ? Acceleration::Hardware : Acceleration::Software;
+        info.acceleration = [name isEqualToString:@"AVAssetWriter (Keyflow)"] ? Acceleration::Unknown
+            : host.hardwareEncoder ? Acceleration::Hardware : Acceleration::Software;
         return info;
     }
 

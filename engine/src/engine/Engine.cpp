@@ -285,6 +285,7 @@ struct Engine::ExportContext {
     u32 depth = 1;                     ///< slots em circulação (sem calor)
     AureaRenderScheduler scheduler;
     std::unique_ptr<AureaExportEngineV2> v2;
+    bool keyflow = false;
     bool withAudio = false;
     void publish_v2_phase(const char* message) noexcept {
         if (!v2) return;
@@ -11522,7 +11523,9 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     }
 
     auto ctx = std::make_unique<ExportContext>();
-    if (config_.enableExportEngineV2) ctx->v2 = std::make_unique<AureaExportEngineV2>();
+    ctx->keyflow = config_.enableKeyflowExport;
+    if (config_.enableExportEngineV2 && !ctx->keyflow) ctx->v2 = std::make_unique<AureaExportEngineV2>();
+    if (ctx->keyflow) AUREA_LOG_INFO("export-keyflow: serial offline render, native encoder, V2 disabled");
     struct StartupCancellation {
         Engine& engine;
         std::atomic<bool>& flag;
@@ -11537,7 +11540,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             std::lock_guard<std::mutex> lock(engine.exportContextMutex_);
             if (engine.exportStartupCancel_ == &flag) engine.exportStartupCancel_ = nullptr;
         }
-    } startupCancellation{*this, ctx->cancelRequested, config_.enableExportStartupGate || config_.enableExportEngineV2};
+    } startupCancellation{*this, ctx->cancelRequested, config_.enableExportStartupGate || config_.enableExportEngineV2 || config_.enableKeyflowExport};
     ctx->settings = settings;
     ctx->outputPath = outputPath;
     ctx->dither = settings.dither;
@@ -11554,7 +11557,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
         ctx->compFps = comp->fps();
-        if (config_.enableExportRecovery || ctx->v2) {
+        if (config_.enableExportRecovery || ctx->v2 || ctx->keyflow) {
             u64 imageBytes = 0;
             const u64 room = source_asset_room_locked();
             const u64 limit = std::min<u64>({64ull << 20, std::max<u64>(4ull << 20, caps_.memory_budget_bytes() / 8), room});
@@ -11609,7 +11612,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         // (export/ExportRules.hpp): 854×480 virava "buffer do encoder menor
         // que o quadro" no encoder MediaTek; 848×480 cabe em todo encoder.
         // No modo de segurança, os DOIS lados em múltiplo de 16 (para baixo).
-        const ExportFrameSize size = ctx->v2
+        const ExportFrameSize size = (ctx->v2 || ctx->keyflow)
             ? export_frame_size_v2(comp->width(), comp->height(), settings.height)
             : ctx->safeMode > 0
             ? export_safe_frame_size(comp->width(), comp->height(), settings.height)
@@ -11676,8 +11679,9 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     vc.width = ctx->outputWidth;
     vc.height = ctx->outputHeight;
     vc.fps = ctx->fps;
-    vc.codec = ctx->v2 ? settings.videoCodec : export_safe_codec(settings.videoCodec, ctx->safeMode);
-    vc.validateBeforePublish = static_cast<bool>(ctx->v2);
+    vc.codec = (ctx->v2 || ctx->keyflow) ? settings.videoCodec : export_safe_codec(settings.videoCodec, ctx->safeMode);
+    vc.validateBeforePublish = static_cast<bool>(ctx->v2) || ctx->keyflow;
+    vc.keyflowCompatible = ctx->keyflow;
     // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
     // 1080p30 Normal ≈ 8 Mbps, 4K30 ≈ 32 Mbps; Mbps manual só com teto. No
     // modo de segurança, o bitrate continua sendo o solicitado.
@@ -11745,7 +11749,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         }
     } startupOwnership{exportActive_, *this};
     auto drainExportStartup = [&]() -> Status {
-        if (!ctx->v2) { gpu_->wait_idle(); return OkStatus; }
+        if (!ctx->v2 && !ctx->keyflow) { gpu_->wait_idle(); return OkStatus; }
         const u64 frame = gpu_->last_submitted_frame();
         if (!frame) return OkStatus;
         const u64 deadline = monotonic_ns() + (config_.exportGpuTimeoutMs
@@ -11781,7 +11785,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     }
     ExportSinkStartupResult startupResult;
     Status openStatus;
-    if (config_.enableExportStartupGate || ctx->v2) {
+    if (config_.enableExportStartupGate || ctx->v2 || ctx->keyflow) {
         ExportSinkStartupLimits limits;
         limits.stallNs = ctx->workerHangNs;
         startupResult = open_export_sink_startup(std::move(ctx->sink), outputPath, vc, withAudio ? &ac : nullptr,
@@ -11889,7 +11893,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         // frames beside a large effect target. Serialize instead of changing
         // output dimensions or shutter samples.
         const bool limitedBacking = config_.enableTrackedGpuAdmission && trackedBudget < (192ull << 20);
-        const u32 want = limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
+        const u32 want = ctx->keyflow || limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
             : std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
                                                          : (policyDepth ? policyDepth : 3u), 1u, 4u);
         for (u32 k = 0; k < want; ++k) {
@@ -11972,7 +11976,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
 }
 
 Status Engine::restart_export(const char* recoveryPath, const char* outputPath) noexcept {
-    if (!config_.enableExportRecovery && !config_.enableExportEngineV2) return Status{Errc::NotSupported, "recuperacao de export desativada"};
+    if (!config_.enableExportRecovery && !config_.enableExportEngineV2 && !config_.enableKeyflowExport) return Status{Errc::NotSupported, "recuperacao de export desativada"};
     if (!recoveryPath || !*recoveryPath || !outputPath || !*outputPath) return Errc::InvalidArgument;
     std::unique_lock<std::mutex> lifecycle(exportLifecycleMutex_);
     if (exportActive_.load(std::memory_order_acquire) ||
@@ -12180,9 +12184,9 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
                         static_cast<long long>(t.value), missing, static_cast<f64>(now - t0) / 1e9);
                     return Status{Errc::DecodeFailed, "midia de video indisponivel para renderizar o quadro"};
                 }
-                if (c.v2) {
+                if (c.v2 || c.keyflow) {
                     snapshot_.release_video_frames();
-                    AUREA_LOG_ERROR("export-v2 decode failure frame=%lld missing=%u stale=%u timestamp_ns=%llu",
+                    AUREA_LOG_ERROR("export decode failure frame=%lld missing=%u stale=%u timestamp_ns=%llu",
                         static_cast<long long>(t.value), missing, stale, static_cast<unsigned long long>(now));
                     return Status{Errc::DecodeFailed, "a fonte nao entregou o quadro exato; exportacao interrompida"};
                 }
@@ -12237,7 +12241,7 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
         // compilation, while its GPU work/backing is still outstanding. One
         // fence-bounded reclamation rebuilds this exact output frame. A second
         // allocation failure is final; there is no rescale or endless retry.
-        if (s.code() == Errc::OutOfDeviceMemory && c.v2 && config_.enableTrackedGpuAdmission
+        if (s.code() == Errc::OutOfDeviceMemory && (c.v2 || c.keyflow) && config_.enableTrackedGpuAdmission
                 && !reclaimedAllocationFailure) {
             reclaimedAllocationFailure = true;
             snapshot_.release_video_frames();
@@ -12523,6 +12527,7 @@ void Engine::export_thread_main() noexcept {
         if (!plan.ok()) { result = plan.status(); break; }
         const u64 renderStarted = monotonic_ns();
         result = render_export_frame(plan->compositionFrame, target, slot.gpuFrame);
+        if (ctx.keyflow) AUREA_LOG_INFO("export-keyflow frame=%u/%u result=%d",i+1,ctx.frames,result.raw());
         if (ctx.v2) AUREA_LOG_INFO("export-v2 frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
             i, static_cast<long long>(plan->ptsUs), static_cast<unsigned long long>(monotonic_ns()),
             static_cast<unsigned long long>(monotonic_ns() - renderStarted), result.raw());
@@ -12639,7 +12644,7 @@ void Engine::export_thread_main() noexcept {
             // Cancellation/device failure must never turn into an unbounded
             // wait for the queue we just stopped waiting on. Poll completed
             // fences; still-busy resources retain their deferred destruction.
-            if (result.ok() && !ctx.v2) gpu_->wait_idle();
+            if (result.ok() && !ctx.v2 && !ctx.keyflow) gpu_->wait_idle();
             else retain_failed_export_gpu_locked();
         }
         if (ctx.frozenProject) {
@@ -12717,6 +12722,10 @@ void Engine::export_encoder_main() noexcept {
                             c.frames, c.fps, c.withAudio});
                         c.v2->validated(fin);
                         c.publish_v2_phase(fin.ok() ? "concluido" : "falha na validacao");
+                    }
+                    if (fin.ok() && c.keyflow) {
+                        fin = c.sink->validate_output({c.outputWidth, c.outputHeight,c.frames,c.fps,c.withAudio});
+                        AUREA_LOG_INFO("export-keyflow validated frames=%u result=%d",c.frames,fin.raw());
                     }
                     if (!fin.ok()) { if (c.v2) c.v2->fail(fin); c.sink->abort(); }
                 } else {
@@ -12814,7 +12823,7 @@ void Engine::export_encoder_main() noexcept {
                 const Status temporal = temporalUpscale.process(neuralInput.get(), ctx.width, ctx.height,
                     neuralOutput.get(), ctx.outputWidth, ctx.outputHeight, i);
                 if (!temporal.ok()) {
-                    if (ctx.v2) {
+                    if (ctx.v2 || ctx.keyflow) {
                         s = Status{temporal.code(), "memoria insuficiente para preservar estabilizacao temporal da IA"};
                     } else {
                         temporalAvailable = false;

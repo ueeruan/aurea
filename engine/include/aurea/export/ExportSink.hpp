@@ -56,6 +56,8 @@ struct VideoStreamConfig {
     /// V2: finish closes the temporary file; independent validation must
     /// succeed before the startup gate atomically replaces the destination.
     bool validateBeforePublish = false;
+    /// Android: recordable EGL encoder surface. iOS: raw frames to AVAssetWriter.
+    bool keyflowCompatible = false;
 };
 
 struct AudioStreamConfig {

@@ -213,6 +213,8 @@ struct EngineConfig {
     /// Independently coordinated offline queue and validate-before-publication.
     /// Disable for rollback; no project schema or visual renderer changes.
     bool enableExportEngineV2 = false;
+    /// Keyflow-compatible serial offline export; mutually exclusive with V2.
+    bool enableKeyflowExport = false;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
 

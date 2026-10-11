@@ -410,7 +410,8 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     // Exporter writes app-owned cache files. Bounded startup and atomic publish
     // preserve a previous valid result when a codec stalls or finalization fails.
     config.enableExportStartupGate = true;
-    config.enableExportEngineV2 = true;
+    config.enableExportEngineV2 = false;
+    config.enableKeyflowExport = true;
     // Debug device rollback, without changing saved projects or release quality.
     char exportVersion[PROP_VALUE_MAX]{};
     if (debug == JNI_TRUE) __system_property_get("debug.aurea.export_v2", exportVersion);

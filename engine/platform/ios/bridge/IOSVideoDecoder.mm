@@ -1393,7 +1393,11 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             // finished frames to Apple's writer and let it own compression.
             // No explicit VT session, compressed callback or B-frame FIFO.
             _videoCapacity=2;
-            _poolLimits=@{(id)kCVPixelBufferPoolAllocationThresholdKey: @4};
+            // AVAssetWriter owns the compressor's reference frames. Four pool
+            // buffers are not four queued samples: even successful appends can
+            // retain them. Bound our FIFO with writer readiness/capacity rather
+            // than treating normal encoder references as an allocation failure.
+            _poolLimits=nil;
             NSDictionary* properties=@{
                 AVVideoAverageBitRateKey: @(video.bitrateBps ?: 14000000u),
                 AVVideoExpectedSourceFrameRateKey: @(video.fps),
@@ -1413,7 +1417,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             _videoInput=[[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeVideo outputSettings:settings];
             _videoInput.expectsMediaDataInRealTime=NO;
             if (![_writer canAddInput:_videoInput]) {
-                if(error)*error=[NSError errorWithDomain:@"aurea.keyflow" code:1 userInfo:@{NSLocalizedDescriptionKey:@"o gravador recusou o video Keyflow"}];
+                if(error)*error=[NSError errorWithDomain:@"aurea.export" code:1 userInfo:@{NSLocalizedDescriptionKey:@"o gravador recusou o video do motor de teste"}];
                 return NO;
             }
             [_writer addInput:_videoInput];
@@ -1427,7 +1431,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                 if(error)*error=[NSError errorWithDomain:@"aurea.export.memory" code:created userInfo:nil];
                 return NO;
             }
-            _encoderName=@"AVAssetWriter (Keyflow)"; _hardwareEncoder=NO;
+            _encoderName=@"AVAssetWriter"; _hardwareEncoder=NO;
             AUREA_LOG_INFO("export-keyflow: AVAssetWriter raw frames, serial, no explicit VT session");
             return YES;
         }
@@ -1570,7 +1574,9 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         if (!y || !uv || yStride < _width || uvStride < _width) return NO;
         if (![self startSessionIfNeeded:ptsUs] || ![self waitForCapacity:YES]) return NO;
         CVPixelBufferRef pixel = nullptr;
-        CVReturn allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, _pool,
+        CVReturn allocation = _keyflowDirect
+            ? CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, _pool, &pixel)
+            : CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, _pool,
                                                     (__bridge CFDictionaryRef)_poolLimits, &pixel);
         if (!_keyflowDirect && allocation == kCVReturnWouldExceedAllocationThreshold) {
             // Recycle VT references before declaring memory pressure terminal.
@@ -1624,7 +1630,7 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             BOOL healthy=[self healthyLocked];
             if(status!=noErr || !sample) {
                 [self failLocked:[NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:nil]
-                         message:@"Keyflow: nao foi possivel preparar um quadro"];
+                         message:@"Motor de teste: nao foi possivel preparar um quadro"];
                 healthy=NO;
             } else if(healthy) {
                 [_videoSamples addObject:(__bridge id)sample]; ++_pendingVideo; ++_submittedVideo;

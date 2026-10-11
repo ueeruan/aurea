@@ -210,8 +210,8 @@ private fun dockLayerOf(store: EditorStore, layerId: Long): DockLayer? {
 internal fun dockTileRowCount(store: EditorStore): Int {
     val id = store.primary ?: return 1
     dockLayerOf(store, id) ?: return 1
-    // Três cortes contextuais e uma fileira rolável de ferramentas.
-    return 1
+    // Tempo em duas fileiras e ferramentas contextuais sempre visíveis.
+    return 2
 }
 
 /**
@@ -240,7 +240,12 @@ internal fun dockSectionsFor(l: DockLayer, refreshed: Boolean): List<DockSection
 internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
     val layer by remember(layerId) { derivedStateOf { dockLayerOf(store, layerId) } }
     val l = layer ?: return
+    val timeActions = store.clipTimeActions(l.id)
     val sections = dockSectionsFor(l, EditorTimelineRefresh.enabled)
+        .filter { it != DockSection.Mute && it != DockSection.Speed }
+        .let { tools -> if (l.kind == 1) tools.sortedBy { when (it) {
+            DockSection.Move -> 0; DockSection.Effects -> 1; DockSection.Blend -> 2; DockSection.Audio -> 3; else -> 4
+        } } else tools }
     val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 2f)
     val tileHeight = EditorLayout.dockTile(fontScale)
     val deselectLabel = stringResource(R.string.editor_limpar_selecao)
@@ -261,41 +266,43 @@ internal fun LayerToolsDock(store: EditorStore, ui: EditorUi, layerId: Long) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val actions = store.clipTimeActions(l.id)
-            Row(
-                Modifier.fillMaxWidth().fillMaxHeight().clip(RoundedCornerShape(if (EditorTimelineRefresh.enabled) 24.dp else 10.dp)).background(ShellColors.DockRow),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (actions and 8 != 0) {
-                    LayerTimeAction(CupertinoGlyph.ArrowLeftToLine, R.string.timeline_extend_left,
-                        R.string.editor_extend_start_to_playhead, "timeline.extend.start", !l.locked) {
-                        extendEdit(store, l, start = true)
-                    }
-                } else if (actions and 16 != 0) {
-                    LayerTimeAction(CupertinoGlyph.ArrowRightToLine, R.string.timeline_extend_right,
-                        R.string.editor_extend_end_to_playhead, "timeline.extend.end", !l.locked) {
-                        extendEdit(store, l, start = false)
-                    }
-                } else if (actions != 0 || EditorTimelineRefresh.enabled) {
-                    DockTrimTool(TrimGlyph.Start, stringResource(R.string.editor_aparar_inicio_cabecote)) {
-                        timeEdit(store, l) { if (!store.trimStart(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
-                    }
-                    DockDivider()
-                    DockTrimTool(TrimGlyph.Split, stringResource(R.string.editor_dividir_cabecote)) {
-                        timeEdit(store, l) { store.splitAtPlayhead(listOf(l.id)) }
-                    }
-                    DockDivider()
-                    DockTrimTool(TrimGlyph.End, stringResource(R.string.editor_aparar_fim_cabecote)) {
-                        timeEdit(store, l) { if (!store.trimEnd(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
-                    }
-                }
-                if (EditorTimelineRefresh.enabled) {
-                    DockDivider()
-                    DockTool(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada), 19, tint = AureaColors.Danger) {
-                        LayerOps.delete(store, listOf(l.id))
-                    }
+            if (l.kind == 1 || l.kind == 3) DockSquare {
+                DockTool(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), 20) {
+                    openPanel(store, ui, EditorPanel.Speed)
                 }
             }
+            Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow),
+                verticalAlignment = Alignment.CenterVertically) {
+                DockTrimTool(TrimGlyph.Start, stringResource(if (timeActions and 8 != 0) R.string.editor_extend_start_to_playhead else R.string.editor_aparar_inicio_cabecote)) {
+                    if (timeActions and 8 != 0) extendEdit(store, l, start = true)
+                    else timeEdit(store, l) { if (!store.trimStart(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
+                }
+                DockDivider()
+                DockTrimTool(TrimGlyph.Split, stringResource(R.string.editor_dividir_cabecote)) {
+                    timeEdit(store, l) { store.splitAtPlayhead(listOf(l.id)) }
+                }
+                DockDivider()
+                DockTrimTool(TrimGlyph.End, stringResource(if (timeActions and 16 != 0) R.string.editor_extend_end_to_playhead else R.string.editor_aparar_fim_cabecote)) {
+                    if (timeActions and 16 != 0) extendEdit(store, l, start = false)
+                    else timeEdit(store, l) { if (!store.trimEnd(l.id, store.playhead)) store.toastRes(R.string.timeline_cut_failed) }
+                }
+            }
+            if (l.kind == 3 || l.hasAudio) DockSquare {
+                DockTool(if (l.muted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2,
+                    stringResource(if (l.muted) R.string.editor_unmute_audio else R.string.editor_mute_audio), 20,
+                    tint = if (l.muted) AureaColors.Accent else AureaColors.Text) {
+                    if (l.locked) store.toastRes(R.string.editor_camada_bloqueada_desbloqueie_editar)
+                    else store.setAudioMuted(!l.muted)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth().height(EditorLayout.DOCK_QUICK.dp)
+            .clip(RoundedCornerShape(10.dp)).background(ShellColors.DockRow), verticalAlignment = Alignment.CenterVertically) {
+            LayerTimeAction(CupertinoGlyph.ArrowLeftToLine, R.string.panel_inicio, R.string.panel_inicio, "timeline.layer.start") { store.seek(l.start) }
+            LayerTimeAction(CupertinoGlyph.ArrowRightToLine, R.string.panel_fim, R.string.panel_fim, "timeline.layer.end") { store.seek((l.end - 1).coerceAtLeast(l.start)) }
+            LayerTimeAction(CupertinoGlyph.ChevronRight, R.string.timeline_starts_at_playhead, R.string.timeline_starts_at_playhead, "timeline.layer.starts-at-playhead", !l.locked) { store.arrangeLayerTimes(5) }
+            LayerTimeAction(CupertinoGlyph.ChevronLeft, R.string.timeline_ends_at_playhead, R.string.timeline_ends_at_playhead, "timeline.layer.ends-at-playhead", !l.locked) { store.arrangeLayerTimes(6) }
         }
         Spacer(Modifier.height(if (EditorTimelineRefresh.enabled) 4.dp else 8.dp))
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -398,7 +405,7 @@ private fun RowScope.DockTrimTool(kind: TrimGlyph, description: String, onClick:
                 strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round,
             )
         }
-        if (!EditorTimelineRefresh.enabled) Text(stringResource(when(kind) {
+        Text(stringResource(when(kind) {
             TrimGlyph.Start -> R.string.timeline_cut_left
             TrimGlyph.Split -> R.string.dock_short_split
             TrimGlyph.End -> R.string.timeline_cut_right

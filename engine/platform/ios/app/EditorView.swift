@@ -914,7 +914,12 @@ private struct DockView: View {
     /// Android): o que é próprio do tipo primeiro, depois Transformar, Efeitos e
     /// Opacidade/mesclagem. Aparar e dividir moram na fileira rápida;
     /// som e velocidade ficam visíveis na mídia; as operações raras ficam no ⋯.
-    private var sections: [Section] { Self.sections(model) }
+    private var sections: [Section] {
+        let tools = Self.sections(model).filter { $0 != .mute && $0 != .speed }
+        guard model.selectedLayer?.kind == 1 else { return tools }
+        let primary: [Section] = [.move, .effects, .blend, .audio]
+        return primary.filter { tools.contains($0) } + tools.filter { !primary.contains($0) }
+    }
     fileprivate static func sections(_ model: AureaModel) -> [Section] {
         guard let layer = model.selectedLayer else { return [] }
         let hasAudio = ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0
@@ -949,39 +954,50 @@ private struct DockView: View {
         }
     }
     /// Três cortes contextuais e uma fileira rolável de ferramentas.
-    fileprivate static func tileRows(_ model: AureaModel) -> Int { 1 }
+    fileprivate static func tileRows(_ model: AureaModel) -> Int { 2 }
 
     var body: some View {
         if let layer = model.selectedLayer {
             // Superfície compacta, com rolagem quando a área disponível é curta.
             let fontScale = UIFont.preferredFont(forTextStyle: .body).pointSize / 17
+            let timeActions = model.engine.queryClipTimeActions(layer.id, frame: model.status.playhead)
             ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    let actions = model.engine.queryClipTimeActions(layer.id, frame: model.status.playhead)
+                    if layer.kind == 1 || layer.kind == 3 {
+                        dockSquare { quickAction(CupertinoGlyph.Speedometer, "editor_velocidade") { model.openPanel(.speed) } }
+                    }
                     HStack(spacing: 0) {
-                        if actions & 8 != 0 {
-                            layerTimeAction(CupertinoGlyph.ArrowLeftToLine, "timeline_extend_left", "editor_extend_start_to_playhead", "timeline.extend.start", enabled: !layer.locked) {
-                                extendEdit(layer, start: true)
-                            }
-                        } else if actions & 16 != 0 {
-                            layerTimeAction(CupertinoGlyph.ArrowRightToLine, "timeline_extend_right", "editor_extend_end_to_playhead", "timeline.extend.end", enabled: !layer.locked) {
-                                extendEdit(layer, start: false)
-                            }
-                        } else if actions != 0 || EditorTimelineRefresh.enabled {
-                            trimAction(.start, "editor_aparar_inicio_cabecote") { timeEdit(layer) { if !model.trimStart(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
-                            dockDivider
-                            trimAction(.split, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
-                            dockDivider
-                            trimAction(.end, "editor_aparar_fim_cabecote") { timeEdit(layer) { if !model.trimEnd(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
+                        trimAction(.start, timeActions & 8 != 0 ? "editor_extend_start_to_playhead" : "editor_aparar_inicio_cabecote") {
+                            if timeActions & 8 != 0 { extendEdit(layer, start: true) }
+                            else { timeEdit(layer) { if !model.trimStart(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                         }
-                        if EditorTimelineRefresh.enabled {
-                            dockDivider
-                            quickAction(CupertinoGlyph.Trash, "editor_excluir_camada", tint: AureaColors.danger) { model.deleteSelectedLayers() }
+                        dockDivider
+                        trimAction(.split, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
+                        dockDivider
+                        trimAction(.end, timeActions & 16 != 0 ? "editor_extend_end_to_playhead" : "editor_aparar_fim_cabecote") {
+                            if timeActions & 16 != 0 { extendEdit(layer, start: false) }
+                            else { timeEdit(layer) { if !model.trimEnd(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
                         }
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: EditorTimelineRefresh.enabled ? 24 : 10))
+                        .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
+                    if layer.kind == 3 || hasAudio {
+                        dockSquare { quickAction(muted ? CupertinoGlyph.SpeakerSlash : CupertinoGlyph.Speaker2,
+                            muted ? "editor_unmute_audio" : "editor_mute_audio", tint: muted ? AureaColors.accent : AureaColors.text) {
+                            guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
+                            let next = !muted
+                            model.mutate { $0.setLayer(layer.id, audioMuted: next) }
+                            model.refreshModel(force: true)
+                        } }
+                    }
                 }.frame(height: EditorLayout.dockQuick)
+                HStack(spacing: 0) {
+                    layerTimeAction(CupertinoGlyph.ArrowLeftToLine, "panel_inicio", "panel_inicio", "timeline.layer.start") { model.seek(toFrame: Int64(layer.startFrame)) }
+                    layerTimeAction(CupertinoGlyph.ArrowRightToLine, "panel_fim", "panel_fim", "timeline.layer.end") { model.seek(toFrame: Int64(max(layer.startFrame, layer.endFrame - 1))) }
+                    layerTimeAction(CupertinoGlyph.ChevronRight, "timeline_starts_at_playhead", "timeline_starts_at_playhead", "timeline.layer.starts-at-playhead", enabled: !layer.locked) { model.arrangeLayerTimes(5) }
+                    layerTimeAction(CupertinoGlyph.ChevronLeft, "timeline_ends_at_playhead", "timeline_ends_at_playhead", "timeline.layer.ends-at-playhead", enabled: !layer.locked) { model.arrangeLayerTimes(6) }
+                }.frame(height: EditorLayout.dockQuick)
+                    .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
                 GeometryReader { geometry in
                     let gap: CGFloat = EditorTimelineRefresh.enabled ? 4 : 8
                     let minimum = CGFloat(EditorTimelineRefresh.enabled ? 60 : 76) + 28 * (min(max(fontScale, 1), 2) - 1)
@@ -1006,7 +1022,7 @@ private struct DockView: View {
                     .id(layer.id)
                     .accessibilityIdentifier("dock.tools")
                 }
-                .frame(height: CGFloat(Self.tileRows(model)) * EditorLayout.dockTileHeight(fontScale: fontScale) + CGFloat(Self.tileRows(model) - 1) * 8)
+                .frame(height: EditorLayout.dockTileHeight(fontScale: fontScale))
             }
             .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
             }
@@ -1115,8 +1131,8 @@ private struct DockView: View {
             context.stroke(mid, with: .color(AureaColors.text), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
         }
         .frame(width: 22, height: 22)
-        if !EditorTimelineRefresh.enabled { Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
-            .font(.aurea(size: 10)).lineLimit(1) }
+        Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
+            .font(.aurea(size: 10)).lineLimit(1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         .onTapGesture(perform: action)

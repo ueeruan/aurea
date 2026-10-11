@@ -72,9 +72,10 @@ public:
 private:
     Status error(const char* stage, GLenum glError=GL_NO_ERROR) noexcept {
         const EGLint eglError=eglGetError();
-        std::snprintf(errorDetail_,sizeof(errorDetail_),"Motor de teste: superficie do encoder (%s, EGL %x, GL %x)",stage,eglError,glError);
-        AUREA_LOG_ERROR("%s",errorDetail_);
-        return Status{Errc::EncodeFailed,errorDetail_};
+        AUREA_LOG_ERROR("motor-teste superficie etapa=%s EGL=%x GL=%x",stage,eglError,glError);
+        // Status borrows its detail; the encoder/surface can be destroyed before
+        // Engine publishes terminal progress. Keep the user-facing text static.
+        return Status{Errc::EncodeFailed,"Motor de teste: falha na superficie grafica do encoder"};
     }
     GLuint shader(GLenum type, const char* source) noexcept {
         GLuint s=glCreateShader(type); glShaderSource(s,1,&source,nullptr); glCompileShader(s);
@@ -117,7 +118,6 @@ private:
     EGLDisplay display_=EGL_NO_DISPLAY; EGLContext context_=EGL_NO_CONTEXT;
     EGLSurface surface_=EGL_NO_SURFACE; PFNEGLPRESENTATIONTIMEANDROIDPROC presentation_=nullptr;
     GLuint program_=0, textures_[2]{},vbo_=0,vao_=0; bool uploaded_[2]{}; u32 width_=0,height_=0;
-    char errorDetail_[192]{};
     std::vector<u8> packed_;
 };
 }

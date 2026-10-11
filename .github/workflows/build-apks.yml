@@ -70,7 +70,7 @@ jobs:
               assert abis == {sys.argv[2]}, abis
           PY
           mkdir -p build/apk-artifact
-          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2154-keyflow-${{ matrix.abi }}-ci.apk'
+          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2154-teste-motor-novo-${{ matrix.abi }}-ci.apk'
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-apk-${{ matrix.abi }}

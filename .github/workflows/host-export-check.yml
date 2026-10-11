@@ -127,6 +127,21 @@ jobs:
             if grep -Eq 'pulado|skipped' "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
           done
           exit "$FAILED"
+      - name: Verify exclusive idle prefetch recovery before paused graph admission
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          timeout 120s ./aurea_tests PressurePrune \
+            2>&1 | tee ../../host-export-results/preview-PressurePrune.log
+          grep -Eq '^[1-9][0-9]* testes, [1-9][0-9]* verificacoes, 0 falhas$' ../../host-export-results/preview-PressurePrune.log
+          grep -Fq 'PressurePruneBeforePausedSegmentsKeepsLeasesPixelsAndDecoderIdentity' ../../host-export-results/preview-PressurePrune.log
+          if grep -Eq 'pulado|skipped' ../../host-export-results/preview-PressurePrune.log; then exit 1; fi
+          timeout 120s ./aurea_tests ExclusivePrune \
+            2>&1 | tee ../../host-export-results/preview-ExclusivePrune.log
+          grep -Eq '^[1-9][0-9]* testes, [1-9][0-9]* verificacoes, 0 falhas$' ../../host-export-results/preview-ExclusivePrune.log
+          grep -Fq 'ExclusivePruneNeverCreditsSeparatelyRetainedNativeBacking' ../../host-export-results/preview-ExclusivePrune.log
+          if grep -Eq 'pulado|skipped' ../../host-export-results/preview-ExclusivePrune.log; then exit 1; fi
       - name: Preserve host test results
         if: always()
         uses: actions/upload-artifact@v4

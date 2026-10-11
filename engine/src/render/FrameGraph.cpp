@@ -777,6 +777,68 @@ bool FrameGraph::order_segments_by_memory() noexcept {
         stats_.segmentEstimatedPeakBytes = stats_.segmentBaselinePeakBytes;
         stats_.segmentReorderedPasses = 0;
     }
+
+    // Nested compositions are declared before the main scene. Both stable
+    // order and locally cheap ready selection can retain every nested target
+    // while an expensive earlier backdrop is still being rendered. Build a
+    // third, demand-driven topological order: finish the previous backdrop's
+    // dependencies before creating the next independent layer. Keep ALL the
+    // version, side-effect and imported-alias edges assembled above.
+    const u64 bestPeak = stats_.segmentEstimatedPeakBytes;
+    memoryBaselineOrder_.assign(order_.begin(), order_.end());
+    edgeBegin_.assign(n + 1, 0);
+    for (usize e = 0; e + 1 < edges_.size(); e += 2)
+        if (!passes_[edges_[e]].culled && !passes_[edges_[e + 1]].culled) ++edgeBegin_[edges_[e + 1] + 1];
+    for (u32 p = 0; p < n; ++p) edgeBegin_[p + 1] += edgeBegin_[p];
+    succ_.resize(edgeBegin_.back());
+    fill_.assign(edgeBegin_.begin(), edgeBegin_.end() - 1);
+    for (usize e = 0; e + 1 < edges_.size(); e += 2) {
+        const u32 pred = edges_[e], next = edges_[e + 1];
+        if (!passes_[pred].culled && !passes_[next].culled) succ_[fill_[next]++] = pred;
+    }
+    for (u32 p = 0; p < n; ++p)
+        std::sort(succ_.begin() + edgeBegin_[p], succ_.begin() + edgeBegin_[p + 1],
+            [this](u32 a, u32 b) noexcept { return passBucket_[a] > passBucket_[b]; });
+    // Iterative postorder avoids recursion even for a long effect chain.
+    // Existing compiler scratch retains capacity; no per-pass allocation.
+    memoryRemaining_.assign(active, kInvalidIndex);
+    for (u32 p = 0; p < n; ++p) if (!passes_[p].culled) memoryRemaining_[passBucket_[p]] = p;
+    memorySeen_.assign(n, 0);
+    fill_.assign(edgeBegin_.begin(), edgeBegin_.end() - 1);
+    queue_.clear();
+    order_.clear();
+    for (u32 pos = active; pos > 0; --pos) {
+        const u32 root = memoryRemaining_[pos - 1];
+        if (memorySeen_[root] == 2) continue;
+        memorySeen_[root] = 1;
+        queue_.push_back(root);
+        while (!queue_.empty()) {
+            const u32 p = queue_.back();
+            if (fill_[p] != edgeBegin_[p + 1]) {
+                const u32 pred = succ_[fill_[p]++];
+                if (memorySeen_[pred] == 1) return false;
+                if (!memorySeen_[pred]) { memorySeen_[pred] = 1; queue_.push_back(pred); }
+            } else {
+                memorySeen_[p] = 2;
+                order_.push_back(p);
+                queue_.pop_back();
+            }
+        }
+    }
+    if (order_.size() != active) return false;
+    for (u32 pos = 0; pos < active; ++pos) fill_[order_[pos]] = pos;
+    for (usize e = 0; e + 1 < edges_.size(); e += 2)
+        if (!passes_[edges_[e]].culled && !passes_[edges_[e + 1]].culled
+            && fill_[edges_[e]] >= fill_[edges_[e + 1]]) return false;
+    const u64 demandPeak = estimate_order_peak();
+    if (demandPeak < bestPeak) {
+        stats_.segmentEstimatedPeakBytes = demandPeak;
+        stats_.segmentReorderedPasses = 0;
+        for (u32 pos = 0; pos < active; ++pos)
+            if (passBucket_[order_[pos]] != pos) ++stats_.segmentReorderedPasses;
+    } else {
+        order_.swap(memoryBaselineOrder_);
+    }
     return true;
 }
 

@@ -1,5 +1,80 @@
 // Ordering/alias ownership checks use the recording backend. Native full-pixel
 // equality and physical fence retirement are covered separately by GPU tests.
+AUREA_TEST(FrameGraphSegments, DemandOrderDefersFullHdNestedTargetsUntilBackdropConsumesThem) {
+    GraphFixture f;
+    const auto full = rt(1920, 1080);
+    const auto target = f.backend.create_texture(full);
+    AUREA_CHECK(target.ok()); if (!target) return;
+    const auto output = f.graph.import_texture("unchanged Full HD backdrop", *target, full);
+    std::array<FGTexture, 2> nested;
+    std::array<u32, 2> producers, consumers;
+    std::vector<u32> executed;
+    // Renderer declares nested compositions together before the main scene.
+    for (u32 i = 0; i < nested.size(); ++i) {
+        nested[i] = f.graph.create_texture("Full HD precomposition", full);
+        producers[i] = f.graph.add_raster_pass("nested source", PassStage::Composite,
+            nested[i], LoadOp::Clear, {}, [&, i](PassContext&) { executed.push_back(10 + i); });
+    }
+    const auto color = f.graph.create_texture("costly scene color", full);
+    const auto hdr = f.graph.create_texture("scene HDR with future reader", full);
+    auto depthDesc = full; depthDesc.format = SurfaceFormat::Depth32F;
+    const auto depth = f.graph.create_texture("scene depth", depthDesc);
+    const auto scene = f.graph.add_raster_pass_depth("Full HD MRT scene", PassStage::Scene3D,
+        color, LoadOp::Clear, {}, depth, LoadOp::Clear, false, 1.f,
+        [&](PassContext&) { executed.push_back(20); });
+    f.graph.set_color1(scene, hdr);
+    const auto consumeScene = f.graph.add_raster_pass("scene before nested layers", PassStage::Composite,
+        output, LoadOp::Load, {}, [&](PassContext&) { executed.push_back(21); });
+    f.graph.read(consumeScene, color);
+    for (u32 i = 0; i < nested.size(); ++i) {
+        consumers[i] = f.graph.add_raster_pass("nested backdrop consumer", PassStage::Composite,
+            output, LoadOp::Load, {}, [&, i](PassContext&) { executed.push_back(30 + i); });
+        f.graph.read(consumers[i], nested[i]);
+    }
+    const auto future = f.graph.add_raster_pass("late HDR reader", PassStage::Composite,
+        output, LoadOp::Load, {}, [&](PassContext&) { executed.push_back(40); });
+    f.graph.read(future, hdr);
+    f.graph.set_output(output, ResourceState::ShaderRead);
+    const u64 scenePeak = 2 * full.estimated_bytes() + depthDesc.estimated_bytes();
+    f.pool.set_allocation_limit(scenePeak);
+    FrameBegin frame; AUREA_CHECK(f.backend.begin_offscreen_frame(frame).ok());
+    f.pool.begin_frame(f.backend, frame.frameNumber);
+    AUREA_CHECK_EQ(f.graph.compile(f.pool).code(), Errc::OutOfDeviceMemory);
+    AUREA_CHECK(executed.empty());
+    f.graph.release(f.pool); AUREA_CHECK(f.backend.end_frame().ok());
+    AUREA_CHECK(f.backend.wait_frame(frame.frameNumber, 1).ok());
+    f.pool.trim_unreferenced(frame.frameNumber);
+    AUREA_CHECK_EQ(f.pool.stats().bytes, 0ull);
+    AUREA_CHECK(f.graph.prepare_segments().ok());
+    const auto& plan = f.graph.stats();
+    AUREA_CHECK_EQ(plan.segmentBaselinePeakBytes, scenePeak + 2 * full.estimated_bytes());
+    AUREA_CHECK_EQ(plan.segmentGreedyPeakBytes, plan.segmentBaselinePeakBytes);
+    AUREA_CHECK_EQ(plan.segmentEstimatedPeakBytes, scenePeak);
+    AUREA_CHECK_EQ(plan.segmentBaselinePeakBytes - plan.segmentEstimatedPeakBytes, 33'177'600ull);
+    const std::array<u32, 7> expected{scene, consumeScene, producers[0], consumers[0], producers[1], consumers[1], future};
+    AUREA_CHECK_EQ(f.graph.order().size(), expected.size());
+    for (u32 i = 0; i < expected.size(); ++i) AUREA_CHECK_EQ(f.graph.order()[i], expected[i]);
+    TextureHandle preservedHdr{};
+    for (u32 pos = 0; pos < expected.size(); ++pos) {
+        AUREA_CHECK(f.backend.begin_offscreen_frame(frame).ok());
+        f.pool.begin_frame(f.backend, frame.frameNumber);
+        AUREA_CHECK(f.graph.compile_segment(f.pool, pos, 1).ok());
+        AUREA_CHECK(f.pool.stats().bytes <= scenePeak);
+        const auto currentHdr = f.graph.physical(hdr);
+        AUREA_CHECK(currentHdr.valid());
+        if (preservedHdr.valid()) AUREA_CHECK(currentHdr == preservedHdr);
+        else preservedHdr = currentHdr;
+        f.graph.execute(*frame.commands, false);
+        AUREA_CHECK(f.backend.end_frame().ok()); AUREA_CHECK(f.backend.wait_frame(frame.frameNumber, 1).ok());
+        f.graph.release_completed_segment(f.pool); f.pool.trim_unreferenced(frame.frameNumber);
+    }
+    const std::vector<u32> expectedCallbacks{20, 21, 10, 30, 11, 31, 40};
+    AUREA_CHECK(executed == expectedCallbacks);
+    AUREA_CHECK_EQ(f.graph.stats().passesExecuted, 7u);
+    AUREA_CHECK_EQ(f.graph.stats().passesCulled, 0u);
+    f.graph.release(f.pool); f.pool.clear(); f.backend.destroy_texture(*target);
+}
+
 AUREA_TEST(FrameGraphSegments, MemoryOrderNeverExpandsAnAlreadyStreamedMrtBranch) {
     GraphFixture f;
     const auto target = f.backend.create_texture(rt(64, 32));

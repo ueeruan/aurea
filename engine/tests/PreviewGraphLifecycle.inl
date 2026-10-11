@@ -88,6 +88,137 @@ AUREA_TEST(PreviewGraphLifecycle, PendingPictureKeepsItsSnapshotAndSeekCancelsBe
     engine.shutdown();
 }
 
+AUREA_TEST(PreviewGraphLifecycle, PressurePruneBeforePausedSegmentsKeepsLeasesPixelsAndDecoderIdentity) {
+    test::SyntheticConfig video;
+    video.width = 1920; video.height = 1080; video.pattern = test::SyntheticPattern::FrameGray;
+    test::SyntheticFactory factory(video);
+    Engine engine; auto* backend = new test::MockBackend;
+    backend->mapBuffers = true;
+    backend->supportsFrameDiscard = backend->supportsPresentableLease = true;
+    auto config = headless_config(); config.backend = backend; config.mediaFactory = &factory;
+    config.initialPreviewScale = PreviewScale::Full; config.memoryBudgetBytes = 256ull << 20;
+    AUREA_CHECK(engine.initialize(config).ok());
+    AUREA_CHECK(engine.new_project(320,180,30.,"paused segmented decoded pressure").ok());
+    constexpr u64 frameBytes = 1920ull * 1080 * 3 / 2;
+    engine.memory().set_budget(MemoryClass::DecodedFrames, 12 * frameBytes);
+    std::array<VideoSource*,2> sources{};
+    std::array<test::SyntheticDecoder*,2> decoders{};
+    std::array<FrameRef,2> leased{};
+    std::array<u64,2> content{};
+    const DecodeRequest request{0, DecodeMode::Playback, 1, 1.f};
+    for (u32 i=0;i<sources.size();++i) {
+        VideoImport imported; imported.sourcePath = "paused-segment-source-" + std::to_string(i);
+        const auto id=engine.import_video(imported); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+        auto* comp=engine.project()->timeline().composition(engine.project()->timeline().current());
+        auto* layer=comp->layer(LayerId::unpack(*id)); layer->visible=false;
+        const auto* asset=engine.project()->asset(layer->source);
+        const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+        while (!sources[i] && std::chrono::steady_clock::now()<until) {
+            sources[i]=engine.media().source_for(LayerId::unpack(*id),layer->source,*asset,1,true);
+            if (!sources[i]) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        AUREA_CHECK(sources[i]); if (!sources[i]) return;
+        decoders[i]=factory.last.load(); AUREA_CHECK(decoders[i]);
+        sources[i]->cache().configure({5,5 * frameBytes});
+        test::SyntheticDecoder fixture(video);
+        for (u32 f=0;f<5;++f) {
+            FrameRef decoded; i64 pts=0; bool eos=false;
+            AUREA_CHECK(fixture.next_frame(-1,decoded,pts,eos).ok());
+            AUREA_CHECK(sources[i]->cache().insert(std::move(decoded)));
+        }
+        bool exact=false; leased[i]=sources[i]->frame_for(fixture.pts_of(2),&exact);
+        AUREA_CHECK(exact && leased[i]); if (!leased[i]) return;
+        content[i]=leased[i]->content_id(); sources[i]->request(request);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    AUREA_CHECK_EQ(engine.memory().used(MemoryClass::DecodedFrames),10 * frameBytes);
+    std::array<u64,2> requests{},decoded{};
+    for (u32 i=0;i<sources.size();++i) {
+        requests[i]=sources[i]->stats().requests; decoded[i]=decoders[i]->decoded.load();
+        AUREA_CHECK_EQ(sources[i]->cache().stats().frames,5u);
+    }
+    const auto id=engine.add_shape(0); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* comp=engine.project()->timeline().composition(engine.project()->timeline().current());
+    auto* layer=comp->layer(LayerId::unpack(*id));
+    layer->shape.bounds=Rect{0,0,1024,1024}; layer->shape.shapeType=1;
+    layer->transform.anchor=Vec3{512,512,0}; layer->transform.position=Vec3{160,90,0};
+    Command effect; effect.type=CommandType::EffectAdd;
+    effect.effect_add.layer=LayerId::unpack(*id);
+    effect.effect_add.effectType=effect_type_id(effect_keys::kGaussianBlur);
+    effect.effect_add.index=kInvalidIndex;
+    AUREA_CHECK(engine.apply_command(effect).ok()); if (layer->effects.empty()) return;
+    layer->effects[0].params[0].constant.v[0]=3;
+    engine.renderer().set_preview_cache_budget(0);
+    engine.renderer().set_transient_allocation_limit(9ull << 20);
+    int window=0; AUREA_CHECK(engine.attach_surface(&window,320,180).ok());
+    AUREA_CHECK(engine.render_frame(false).ok());
+    AUREA_CHECK(engine.renderer().preview_graph_pending());
+    if (!engine.renderer().preview_graph_pending()) return;
+    // Fixed persistent GPU occupancy plus actual pool backing and decoded
+    // CPU storage. The current picture fits only after exclusive prefetch is
+    // really destroyed; no allocation failure or successful render is faked.
+    constexpr u64 persistent=24ull << 20, envelope=48ull << 20;
+    backend->queryMemoryStats=[&] {
+        GpuMemoryStats stats;
+        stats.usedBytes=stats.reservedBytes=persistent+engine.renderer().pool_stats().bytes;
+        return stats;
+    };
+    engine.renderer().set_tracked_resource_budget(envelope,
+        [](void* context) noexcept { return static_cast<MemoryManager*>(context)->used(MemoryClass::DecodedFrames); },
+        &engine.memory());
+    constexpr u64 segmentPeak=8'881'920;
+    AUREA_CHECK(persistent+10 * frameBytes+segmentPeak>envelope);
+    AUREA_CHECK(persistent+4 * frameBytes+segmentPeak<envelope);
+    const auto submitted=backend->framesSubmitted;
+    backend->beforeWaitFrame=[](u64,u64 timeout) { AUREA_CHECK_EQ(timeout,0ull); return Status{Errc::Timeout}; };
+    // A source may still be acknowledging the preloaded request on a slow
+    // host. Pending turns must retry reclaim after it becomes idle, while the
+    // blocked GPU fence prevents allocation or presentation throughout.
+    const auto pruneDeadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+    while (engine.memory().used(MemoryClass::DecodedFrames)!=4 * frameBytes
+        && std::chrono::steady_clock::now()<pruneDeadline) {
+        AUREA_CHECK(engine.render_frame(false).ok());
+        AUREA_CHECK(engine.renderer().preview_graph_pending());
+        AUREA_CHECK_EQ(backend->framesSubmitted,submitted); AUREA_CHECK_EQ(backend->presents,0u);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    AUREA_CHECK_EQ(engine.memory().used(MemoryClass::DecodedFrames),4 * frameBytes);
+    for (u32 turn=0;turn<3;++turn) {
+        AUREA_CHECK(engine.render_frame(false).ok());
+        AUREA_CHECK(engine.renderer().preview_graph_pending());
+        AUREA_CHECK_EQ(backend->framesSubmitted,submitted); AUREA_CHECK_EQ(backend->presents,0u);
+        AUREA_CHECK_EQ(engine.memory().used(MemoryClass::DecodedFrames),4 * frameBytes);
+    }
+    backend->beforeWaitFrame={};
+    for (u32 turn=0;turn<1000 && engine.renderer().preview_graph_pending();++turn)
+        AUREA_CHECK(engine.render_frame(false).ok());
+    AUREA_CHECK(!engine.renderer().preview_graph_pending()); AUREA_CHECK_EQ(backend->presents,1u);
+    AUREA_CHECK_EQ(engine.read_status().lastError,Errc::Ok);
+    AUREA_CHECK_EQ(engine.read_status().playhead.value,0ll);
+    AUREA_CHECK_EQ(engine.read_status().previewWidth,320u); AUREA_CHECK_EQ(engine.read_status().previewHeight,180u);
+    AUREA_CHECK_EQ(engine.read_status().previewDenominator,1u);
+    for (u32 i=0;i<sources.size();++i) {
+        AUREA_CHECK_EQ(sources[i]->cache().stats().frames,2u);
+        AUREA_CHECK(sources[i]->cache().contains(0,1));
+        AUREA_CHECK_EQ(leased[i]->content_id(),content[i]);
+        AUREA_CHECK_EQ(leased[i]->planes[0][0],test::frame_gray_code(2));
+        sources[i]->request(request);
+        AUREA_CHECK_EQ(sources[i]->stats().requests,requests[i]);
+        AUREA_CHECK_EQ(decoders[i]->decoded.load(),decoded[i]);
+        // An actual epoch transition still schedules the unchanged decoder;
+        // only the exact pressure-prune cache version was acknowledged.
+        sources[i]->set_epoch(1); sources[i]->request(request);
+        AUREA_CHECK(sources[i]->stats().requests>requests[i]);
+    }
+    std::printf("\n    paused segmented pressure: CPU_before=%llu CPU_after=%llu freed=%llu required_deficit=%llu fixed_envelope=%llu final_presents=1 pinned_original_pixels=2 mockGPU=1\n",
+        static_cast<unsigned long long>(10 * frameBytes),static_cast<unsigned long long>(4 * frameBytes),
+        static_cast<unsigned long long>(6 * frameBytes),
+        static_cast<unsigned long long>(persistent+10 * frameBytes+segmentPeak-envelope),
+        static_cast<unsigned long long>(envelope));
+    backend->queryMemoryStats={}; engine.renderer().set_tracked_resource_budget(0);
+    for (auto& frame:leased) frame.reset(); engine.shutdown();
+}
+
 AUREA_TEST(PreviewGraphLifecycle, AutomaticPressureChangesOnlyThePictureAfterFinalPresentation) {
     Engine engine;
     auto* backend = new test::MockBackend;

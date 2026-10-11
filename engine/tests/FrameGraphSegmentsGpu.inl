@@ -441,4 +441,124 @@ AUREA_TEST(FrameGraphSegmentsGpu, AlreadyStreamedMrtBranchNeverBecomesAPressureP
         AUREA_CHECK(result.peakPool < baseline.peakPool);
     }
 }
+
+namespace {
+struct DemandNestedGpuGraph : SegmentGpuGraph {
+    explicit DemandNestedGpuGraph(Gpu& source) : SegmentGpuGraph(source) {}
+    static u64 limit() { return 2 * desc(1920, 1080).estimated_bytes() + 1920ull * 1080 * 4 + desc().estimated_bytes(); }
+    bool setup_demand() {
+        if (!setup()) return false;
+        graph.reset();
+        const auto source = graph.import_texture("original input", input, desc());
+        output = graph.import_texture("original loaded backdrop", background, desc());
+        retained = graph.create_texture("retained exact source", desc());
+        const auto keep = graph.add_raster_pass("retain source", PassStage::Effects, retained,
+            LoadOp::Clear, {}, [this, source](PassContext& pc) { draw(pc, source, 0, 0, width, height); });
+        graph.read(keep, source); graph.set_output(retained, ResourceState::ShaderRead);
+        const auto full = desc(1920, 1080);
+        std::array<FGTexture, 2> nested;
+        for (u32 i = 0; i < nested.size(); ++i) {
+            nested[i] = graph.create_texture("early Full HD precomposition", full);
+            const auto make = graph.add_raster_pass("nested producer", PassStage::Effects, nested[i],
+                LoadOp::Clear, {}, [this, source](PassContext& pc) { draw(pc, source, 0, 0, 1920, 1080); });
+            graph.read(make, source);
+        }
+        anchor = graph.create_texture("Full HD scene color", full);
+        secondary = graph.create_texture("Full HD HDR future reader", full);
+        auto dd = full; dd.format = SurfaceFormat::Depth32F;
+        const auto depth = graph.create_texture("Full HD scene depth", dd);
+        const auto scene = graph.add_raster_pass_depth("Full HD MRT", PassStage::Scene3D, anchor,
+            LoadOp::Clear, Vec4{.125f, .25f, .5f, 1.f}, depth, LoadOp::Clear, false, 1.f,
+            [this](PassContext&) { ++executed; });
+        graph.set_color1(scene, secondary);
+        const auto consume = graph.add_raster_pass("scene backdrop", PassStage::Composite, output,
+            LoadOp::Load, {}, [this](PassContext& pc) { draw(pc, anchor, 4, 4, 8, 16); });
+        graph.read(consume, anchor);
+        for (u32 i = 0; i < nested.size(); ++i) {
+            const auto read = graph.add_raster_pass("nested backdrop Load", PassStage::Composite, output,
+                LoadOp::Load, {}, [this, image = nested[i], i](PassContext& pc) { draw(pc, image, 16 + i * 8, 4, 6, 16); });
+            graph.read(read, nested[i]);
+        }
+        const auto future = graph.add_raster_pass("HDR future consumer", PassStage::Composite, output,
+            LoadOp::Load, {}, [this](PassContext& pc) { draw(pc, secondary, 4, 20, 28, 8); });
+        graph.read(future, secondary); graph.set_output(output, ResourceState::ShaderRead);
+        return true;
+    }
+    SegmentPixels run_demand(u32 chunk) {
+        SegmentPixels result;
+        if (chunk) pool.set_allocation_limit(limit());
+        FrameBegin frame; if (!begin(frame)) return result;
+        const auto whole = graph.compile(pool);
+        if (!chunk) {
+            AUREA_CHECK(whole.ok()); if (!whole.ok()) return result;
+            result.peakPool = pool.stats().bytes; graph.execute(*frame.commands, false);
+            if (!finish(frame)) return result;
+            ++result.submissions;
+        } else {
+            result.wholeOom = whole.code() == Errc::OutOfDeviceMemory;
+            AUREA_CHECK(result.wholeOom); if (!result.wholeOom) return result;
+            AUREA_CHECK_EQ(executed, 0u); graph.release(pool);
+            if (!finish(frame)) return result;
+            ++result.submissions; pool.trim_unreferenced(frame.frameNumber);
+            AUREA_CHECK_EQ(pool.stats().bytes, 0ull);
+            AUREA_CHECK(graph.prepare_segments().ok());
+            const auto& plan = graph.stats();
+            AUREA_CHECK(plan.segmentEstimatedPeakBytes < plan.segmentBaselinePeakBytes);
+            AUREA_CHECK(plan.segmentEstimatedPeakBytes < plan.segmentGreedyPeakBytes);
+            AUREA_CHECK(plan.segmentEstimatedPeakBytes <= limit());
+            for (u32 first = 0; first < graph.order().size(); first += chunk) {
+                if (!begin(frame)) return result;
+                const auto compiled = graph.compile_segment(pool, first, chunk);
+                AUREA_CHECK(compiled.ok()); if (!compiled.ok()) return result;
+                result.peakPool = std::max(result.peakPool, pool.stats().bytes);
+                AUREA_CHECK(result.peakPool <= limit());
+                graph.execute(*frame.commands, false);
+                if (!finish(frame)) return result;
+                ++result.submissions;
+                graph.release_completed_segment(pool); pool.trim_unreferenced(frame.frameNumber);
+            }
+        }
+        result.output.resize(width * height * 4); result.retained.resize(result.output.size());
+        result.imported.resize(result.output.size());
+        const auto a = gpu.backend.read_texture(background, result.output.data(), width * 8);
+        const auto b = gpu.backend.read_texture(graph.physical(retained), result.retained.data(), width * 8);
+        const auto c = gpu.backend.read_texture(input, result.imported.data(), width * 8);
+        AUREA_CHECK(a.ok() && b.ok() && c.ok());
+        AUREA_CHECK(result.retained == inputPixels); AUREA_CHECK(result.imported == inputPixels);
+        const std::array<f32, 4> clearColor{.125f, .25f, .5f, 1.f};
+        for (u32 channel = 0; channel < clearColor.size(); ++channel) {
+            AUREA_CHECK_EQ(result.output[(10 * width + 8) * 4 + channel], scene3d::float_to_half(clearColor[channel]));
+            AUREA_CHECK_EQ(result.output[(24 * width + 16) * 4 + channel], scene3d::float_to_half(clearColor[channel]));
+        }
+        for (u32 x = 0; x < width * 4; ++x) AUREA_CHECK_EQ(result.output[x], backgroundPixels[x]);
+        result.callbacks = callbacks; result.passes = executed;
+        AUREA_CHECK_EQ(callbacks, result.submissions); AUREA_CHECK_EQ(executed, 8u);
+        graph.release(pool); pool.trim_unreferenced(frame.frameNumber); AUREA_CHECK_EQ(pool.stats().bytes, 0ull);
+        result.ok = a.ok() && b.ok() && c.ok();
+        std::printf("\n    demand nested MRT: chunk=%u wholeOOM=%u passes=%u realFences=%u peak=%llu cap=%llu channels=%zu baselineLogical=%llu greedyLogical=%llu chosenLogical=%llu",
+            chunk, result.wholeOom, result.passes, result.submissions, static_cast<unsigned long long>(result.peakPool),
+            static_cast<unsigned long long>(chunk ? limit() : 0), 3 * result.output.size(),
+            static_cast<unsigned long long>(graph.stats().segmentBaselinePeakBytes),
+            static_cast<unsigned long long>(graph.stats().segmentGreedyPeakBytes),
+            static_cast<unsigned long long>(graph.stats().segmentEstimatedPeakBytes));
+        return result;
+    }
+};
+}
+
+AUREA_TEST(FrameGraphSegmentsGpu, DemandNestedMrtPreservesEveryPixelBehindActualFences) {
+    AUREA_REQUIRE_GPU();
+    Gpu isolated; AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
+    SegmentPixels baseline;
+    { DemandNestedGpuGraph fixture(isolated); if (!fixture.setup_demand()) return;
+      baseline = fixture.run_demand(0); AUREA_CHECK(baseline.ok); if (!baseline.ok) return; }
+    for (const u32 chunk : {1u, 2u}) {
+        DemandNestedGpuGraph fixture(isolated); if (!fixture.setup_demand()) return;
+        const auto result = fixture.run_demand(chunk);
+        AUREA_CHECK(result.ok && result.wholeOom);
+        AUREA_CHECK(result.output == baseline.output); AUREA_CHECK(result.retained == baseline.retained);
+        AUREA_CHECK(result.imported == baseline.imported); AUREA_CHECK_EQ(result.passes, baseline.passes);
+        AUREA_CHECK(result.peakPool < baseline.peakPool);
+    }
+}
 #endif

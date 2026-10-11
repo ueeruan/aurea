@@ -53,6 +53,17 @@ bool Engine::continue_preview_graph_locked(u64 frameStart, Status& result) noexc
             return false;
         }
     }
+    if (!playing) {
+        // Decoders can settle between segmented turns. Reclaim only their
+        // optional, exclusively owned CPU prefetch before the next admission;
+        // the frozen graph's frame leases, target intervals and native backing
+        // remain protected. Retry on each turn without restarting decode.
+        const u64 before = memory_.used(MemoryClass::DecodedFrames);
+        const usize freed = media_.reclaim_idle_prefetch_frames();
+        if (freed) AUREA_LOG_INFO("preview segmentado pausado: prefetch CPU ocioso liberado=%zu decodificado=%llu->%llu bytes",
+            freed, static_cast<unsigned long long>(before),
+            static_cast<unsigned long long>(memory_.used(MemoryClass::DecodedFrames)));
+    }
     FrameStats stats;
     RenderTimings timings;
     const Status continued = renderer_.continue_preview_graph(stats, timings);

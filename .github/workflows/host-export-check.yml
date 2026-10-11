@@ -1,0 +1,121 @@
+name: Check shared serial export
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-export-check-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  serial-export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CC: gcc-14
+      CXX: g++-14
+      CCACHE_DIR: ${{ github.workspace }}/build/host-export-ccache
+      CCACHE_MAXSIZE: 2G
+      AUREA_TEST_ERRORS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install host compiler and headless Vulkan
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends cmake ninja-build gcc-14 g++-14 \
+            ccache glslc libvulkan-dev mesa-vulkan-drivers vulkan-tools curl
+          mkdir -p build/host-export-results
+      - name: Select and verify the software Vulkan driver
+        run: |
+          set -euo pipefail
+          DRIVER=$(python3 - <<'PY'
+          import glob
+          paths = glob.glob('/usr/share/vulkan/icd.d/lvp_icd*.json')
+          assert len(paths) == 1, paths
+          print(paths[0])
+          PY
+          )
+          echo "VK_DRIVER_FILES=$DRIVER" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$DRIVER" >> "$GITHUB_ENV"
+          VK_DRIVER_FILES="$DRIVER" VK_ICD_FILENAMES="$DRIVER" vulkaninfo --summary \
+            2>&1 | tee build/host-export-results/vulkan-driver.log
+          grep -Eiq 'llvmpipe|lavapipe' build/host-export-results/vulkan-driver.log
+          git rev-parse HEAD > build/host-export-results/source-commit.txt
+          g++-14 --version > build/host-export-results/compiler.txt
+      - name: Restore pinned dependency downloads and compiler cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/host-export/_deps
+            build/host-export-ccache
+          key: host-export-gcc14-${{ runner.os }}-${{ hashFiles('engine/CMakeLists.txt', 'engine/cmake/*.cmake') }}-${{ github.run_id }}
+          restore-keys: |
+            host-export-gcc14-${{ runner.os }}-${{ hashFiles('engine/CMakeLists.txt', 'engine/cmake/*.cmake') }}-
+      - name: Prepare the existing 3D regression fixtures
+        run: |
+          set -euo pipefail
+          mkdir -p build/host-export-fixtures
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb \
+            -o build/host-export-fixtures/DamagedHelmet.glb
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Fox/glTF-Binary/Fox.glb \
+            -o build/host-export-fixtures/Fox.glb
+          # Match the assets already used by the host regression; a moving
+          # upstream branch cannot silently change the test's input pixels.
+          sha256sum --check <<'SHA'
+          a1e3b04de97b11de564ce6e53b95f02954a297f0008183ac63a4f5974f6b32d8  build/host-export-fixtures/DamagedHelmet.glb
+          d97044e701822bac5a62696459b27d7b375aada5de8574ed4362edbba94771f7  build/host-export-fixtures/Fox.glb
+          SHA
+          sha256sum build/host-export-fixtures/*.glb > build/host-export-results/fixture-sha256.txt
+          echo "AUREA_BENCH_GLTF=$GITHUB_WORKSPACE/build/host-export-fixtures" >> "$GITHUB_ENV"
+      - name: Configure shared renderer tests
+        id: configure
+        run: |
+          set -euo pipefail
+          # These fixtures do not use neural effects. The renderer still uses
+          # real Vulkan shaders; only ncnn's unused inference backend is CPU.
+          cmake -S engine -B build/host-export -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DAUREA_BUILD_TESTS=ON -DAUREA_ENABLE_SANITIZE=OFF \
+            -DAUREA_GLSLC=/usr/bin/glslc -DAUREA_VULKAN_HEADERS=/usr/include \
+            -DAUREA_AI_VULKAN=OFF \
+            2>&1 | tee build/host-export-results/configure.log
+          grep -Fq 'backend Vulkan no host' build/host-export-results/configure.log
+      - name: Build only the shared test executable
+        id: build
+        run: |
+          set -euo pipefail
+          cmake --build build/host-export --target aurea_tests --parallel 2 \
+            2>&1 | tee build/host-export-results/build.log
+      - name: Compare serial pixels and audio with legacy and V2
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          timeout 300s ./aurea_tests PlanesAndAudioMatchLegacyWithEffectsAnd3DMotionBlur \
+            2>&1 | tee ../../host-export-results/serial-fidelity.log
+          grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-fidelity.log
+          if grep -Eq 'pulado|skipped' ../../host-export-results/serial-fidelity.log; then exit 1; fi
+      - name: Verify the software retry and validated publication
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: build/host-export/tests
+        run: |
+          set -euo pipefail
+          timeout 120s ./aurea_tests SafeModeTwoPublishesValidatedFramesUsingH264WithoutReducingRequestedBitrate \
+            2>&1 | tee ../../host-export-results/serial-safe-retry.log
+          grep -Eq '^1 testes, [0-9]+ verificacoes, 0 falhas$' ../../host-export-results/serial-safe-retry.log
+          if grep -Eq 'pulado|skipped' ../../host-export-results/serial-safe-retry.log; then exit 1; fi
+      - name: Preserve host test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-serial-export-check
+          path: build/host-export-results/
+          if-no-files-found: error
+          retention-days: 14

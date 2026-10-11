@@ -10217,6 +10217,7 @@ struct Engine::OffscreenRequest {
         }
     }
     Status wait_prior_gpu_frame(u64 frame, u64 generation) noexcept {
+        if (!frame) return check(); // Zero means no prior GPU submission.
         if (preparingResources) return wait_gpu_frame(frame, generation);
         // A pending old preview is GPU work, even if no display cache remains
         // or local AI already used the longer CPU preparation allowance.

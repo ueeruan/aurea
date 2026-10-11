@@ -135,6 +135,10 @@ public:
     /// descartados a caminho do alvo): o sinal de vida do decoder que o export
     /// usa para não dar como perdida a mídia de um decoder lento.
     [[nodiscard]] u64 decode_work() const noexcept { return decodeWork_.load(std::memory_order_acquire); }
+    enum class SourceStartup : u8 { Ready, Opening, Failed, Unavailable };
+    /// Includes pending promotion/admission; a failed open is distinct from
+    /// a ready decoder that has not delivered its frame yet.
+    [[nodiscard]] SourceStartup source_startup(LayerId layer, AssetId asset) noexcept;
 
     struct Stats {
         u32 sources = 0;

@@ -30,6 +30,9 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -69,13 +72,15 @@ class ModelPreviewDeviceTest {
             .put("texturePolicy", "native device and project budget; reductions are reported separately")
             .put("mipPolicy", "native generated mipmaps; retained texture dimensions are not exposed by this interface")
             .put("width", 960).put("height", 540).put("measurement", "SurfaceFlinger pixels and native preview statistics")
-            .put("pictureEvidenceSchema", 2).put("runId", runId).put("cleanedArtifacts", cleanedArtifacts)
+            .put("pictureEvidenceSchema", 3).put("runId", runId).put("cleanedArtifacts", cleanedArtifacts)
             .put("artifactPolicy", "direct files in the isolated package's named test folder; no recursive deletion")
             .put("pixelRoi", "central-70-percent-composition").put("pixelInsetFraction", 0.15)
             .put("savedScreenshotScope", "full composition viewport including editor overlays; classification uses the inset ROI")
             .put("playbackBoundsPolicy", "cache stage bounds while paused; no Compose idle wait per playing picture")
             .put("operationPictureDeadlineMs", 10000)
             .put("operationPicturePolicy", "wait for measured visible pixels after logical seek; retain every pending screenshot")
+            .put("coldPicturePolicy", "same operation native source triangle draw observed after empty draw counters, followed by selection-free visible pixels")
+            .put("beforePlayPictureDeadlineMs", 10000)
             .put("autoPreviewModel", "DamagedHelmet").put("autoPreviewScope", "separate adaptive display density observation after both manual cycles")
             .toString() + "\n")
         lateinit var store: EditorStore
@@ -116,6 +121,35 @@ class ModelPreviewDeviceTest {
             return state
         }
         fun ui(action: () -> Unit) { instrumentation.runOnMainSync(action) }
+        data class ColdDraw(val atMs: Long, val draws: Long, val triangles: Long)
+        class ColdProof(val model: String, val sourceSha256: String, val triangles: Long,
+                        val startedAtMs: Long, val emptyHash: Long) {
+            val running = AtomicBoolean(true)
+            val observations = AtomicInteger(0)
+            val first = AtomicReference<ColdDraw?>(null)
+            // Separate direct buffers; screenshot/UI reads must not race this
+            // short collector. Counts mean observations, never distinct frames.
+            private val measuredPerf = ByteBuffer.allocateDirect(PerfStats.BYTES).order(ByteOrder.nativeOrder())
+            private val measuredStatus = ByteBuffer.allocateDirect(PodLayout.STATUS_BYTES).order(ByteOrder.nativeOrder())
+            private val worker = Thread({
+                while (running.get() && SystemClock.elapsedRealtime() - startedAtMs < 240000L) {
+                    if (engine.readPerf(measuredPerf) && engine.readStatus(measuredStatus)) {
+                        val perf = PerfStats.read(measuredPerf)
+                        val state = EngineStatus().also { it.readFrom(measuredStatus) }
+                        if (state.layerCount == 1 && !state.playing && state.playhead == 0L &&
+                            perf.draws3D > 0 && perf.triangles3D.toLong() == triangles) {
+                            observations.incrementAndGet()
+                            first.compareAndSet(null, ColdDraw(SystemClock.elapsedRealtime(), perf.draws3D.toLong(), perf.triangles3D.toLong()))
+                        }
+                    }
+                    SystemClock.sleep(10)
+                }
+            }, "aurea-model-cold-proof")
+            fun start() { worker.start() }
+            fun stop() { running.set(false); worker.join(1000); assertFalse("Cold proof worker did not stop", worker.isAlive) }
+        }
+        val coldProofs = mutableMapOf<String, ColdProof>()
+        var activeColdProof: ColdProof? = null
         var background = 0
         val emptyImageHashes = mutableMapOf<String, Long>()
         val emptyRoiSizes = mutableMapOf<String, Pair<Int, Int>>()
@@ -131,6 +165,7 @@ class ModelPreviewDeviceTest {
             val boundsLookupMs = SystemClock.elapsedRealtime() - began
             assertTrue(engine.readPerf(perfBuffer))
             val capturePerf = PerfStats.read(perfBuffer)
+            val selectionClearedAtScreenshot = store.selection.isEmpty() && store.gizmo == null
             val screenshotBegan = SystemClock.elapsedRealtime()
             val screenshot = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
             val screenshotMs = SystemClock.elapsedRealtime() - screenshotBegan
@@ -173,10 +208,17 @@ class ModelPreviewDeviceTest {
                 val emptyImageHash = emptyImageHashes[model]
                 val backgroundCompared = requireModel && emptyImageHash != null && emptyRoiSizes[model] == roiSize
                 val backgroundDifferent = backgroundCompared && imageHash != emptyImageHash
+                val coldRequired = label == "cold"
+                val coldProof = coldProofs[model]
+                val coldDraw = coldProof?.first?.get()
+                val coldNativeGeometryObserved = coldProof != null && coldDraw != null &&
+                    coldProof.model == model && coldDraw.triangles == coldProof.triangles && coldDraw.draws > 0 &&
+                    coldDraw.atMs in coldProof.startedAtMs..screenshotBegan
                 // A cached composition can legitimately report no new 3D
                 // draws. Visibility requires central ROI pixels differing
                 // from this model's measured empty composition instead.
-                val valid = if (requireModel) backgroundDifferent && foreground >= maxOf(16, total / 500) && histogram.size >= 3 && !flatGreen
+                val valid = if (requireModel) backgroundDifferent && foreground >= maxOf(16, total / 500) && histogram.size >= 3 && !flatGreen &&
+                                (!coldRequired || (selectionClearedAtScreenshot && coldNativeGeometryObserved))
                             else dominantFraction > 0.97 && !flatGreen
                 if (!requireModel && valid && dominant != null) {
                     val bin = dominant.key
@@ -202,6 +244,19 @@ class ModelPreviewDeviceTest {
                         .put("cachedPlaybackBounds", stageBounds != null)
                         .put("nativeModelDrawnAtScreenshot", nativeModelDrawn)
                         .put("draws3DAtScreenshot", capturePerf.draws3D).put("triangles3DAtScreenshot", capturePerf.triangles3D)
+                        .put("uiSelectionClearedAtScreenshot", selectionClearedAtScreenshot)
+                        .put("pictureObservedAtMs", screenshotBegan)
+                        .put("coldNativeGeometryRequired", coldRequired)
+                        .put("coldNativeGeometryObserved", coldNativeGeometryObserved)
+                        .put("coldProofModel", coldProof?.model ?: JSONObject.NULL)
+                        .put("coldProofSourceSha256", coldProof?.sourceSha256 ?: JSONObject.NULL)
+                        .put("coldProofRunId", if (coldProof != null) runId else JSONObject.NULL)
+                        .put("coldProofEmptyImageHash", coldProof?.emptyHash ?: JSONObject.NULL)
+                        .put("coldProofStartedAtMs", coldProof?.startedAtMs ?: 0L)
+                        .put("coldProofObservedAtMs", coldDraw?.atMs ?: 0L)
+                        .put("coldProofObservations", coldProof?.observations?.get() ?: 0)
+                        .put("coldProofDraws", coldDraw?.draws ?: 0L)
+                        .put("coldProofTriangles", coldDraw?.triangles ?: 0L)
                         .put("pixelRoi", "central-70-percent-composition").put("pixelInsetFraction", 0.15)
                         .put("roiLeft", roiLeft - left).put("roiTop", roiTop - top)
                         .put("roiRight", roiRight - left).put("roiBottom", roiBottom - top)
@@ -275,7 +330,16 @@ class ModelPreviewDeviceTest {
                     if (!emptyReady) SystemClock.sleep(100)
                 }
                 assertTrue("New composition never displayed its empty background", emptyReady)
+                compose.waitUntil(10000) {
+                    status().layerCount == 0 && engine.readPerf(perfBuffer) &&
+                        PerfStats.read(perfBuffer).let { it.draws3D == 0 && it.triangles3D == 0 }
+                }
+                record(model, "empty-native-ready", extra = JSONObject()
+                    .put("observationAtMs", SystemClock.elapsedRealtime()).put("layerCount", status().layerCount)
+                    .put("sourceSha256", actualHash).put("emptyImageHash", checkNotNull(emptyImageHashes[model])))
                 val importAt = SystemClock.elapsedRealtime()
+                val coldProof = ColdProof(model, actualHash, sourcePlan.triangles, importAt, checkNotNull(emptyImageHashes[model]))
+                coldProofs[model] = coldProof; activeColdProof = coldProof; coldProof.start()
                 ui { store.importModel(Uri.fromFile(source)) }
                 compose.waitUntil(180000) {
                     store.modelOptimize?.let { request -> ui { store.modelOptimizeQuality = MODEL_QUALITY_ORIGINAL; store.confirmModelOptimize(request) } }
@@ -312,6 +376,8 @@ class ModelPreviewDeviceTest {
                     assertEquals(3, engine.submitCommands())
                     store.seek(0)
                 }
+                compose.waitUntil(10000) { store.selection.isEmpty() && store.gizmo == null }
+                compose.waitForIdle()
                 var visible = false
                 val coldDeadline = SystemClock.elapsedRealtime() + 60000
                 while (!visible && SystemClock.elapsedRealtime() < coldDeadline) {
@@ -320,15 +386,17 @@ class ModelPreviewDeviceTest {
                 }
                 record(model, "cold-ready", SystemClock.elapsedRealtime() - importAt)
                 assertTrue("ORIGINAL model never appeared: $name; ${store.errorMessage}", visible)
+                coldProof.stop(); activeColdProof = null
                 val saved = File(folder, "$model.aurea")
                 assertEquals(0, engine.saveProject(saved.absolutePath))
                 for (round in 0..1) {
+                    val beforePlayAt = SystemClock.elapsedRealtime()
                     ui { store.pause(); store.seek(0) }
-                    compose.waitUntil(30000) { !status().playing && status().playhead == 0L }
+                    compose.waitUntil(operationRemainingMs(beforePlayAt)) { !status().playing && status().playhead == 0L }
                     val observedBounds = compose.onNodeWithTag("editor.stage").fetchSemanticsNode().boundsInWindow
                     val playbackBounds = androidx.compose.ui.geometry.Rect(
                         observedBounds.left, observedBounds.top, observedBounds.right, observedBounds.bottom)
-                    assertTrue("Missing model before play", pixels(model, "warm-$round-before", stageBounds = playbackBounds))
+                    awaitOperationPicture(model, "warm-$round-before", beforePlayAt, 0L, playbackBounds)
                     val playAt = SystemClock.elapsedRealtime()
                     ui { store.play() }
                     compose.waitUntil(30000) { status().playhead > 0L }
@@ -445,6 +513,6 @@ class ModelPreviewDeviceTest {
             report.appendText(JSONObject().put("result", "FAIL").put("targetBuild", build).put("runId", runId).put("error", error.toString())
                 .put("editorError", store.errorMessage).put("busy", store.busyMessage).toString() + "\n")
             throw error
-        } finally { ui { store.pause() } }
+        } finally { activeColdProof?.stop(); ui { store.pause() } }
     }
 }

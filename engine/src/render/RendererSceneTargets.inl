@@ -74,16 +74,24 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
     const u64 started = monotonic_ns();
     constexpr u64 hardCap = 120ull * 1000 * 1000 * 1000;
     const u64 limit = std::clamp<u64>(settings.sceneExposureFenceTimeoutNs, 1, hardCap);
+    const auto deadline = [&] {
+        return settings.offscreenFenceDeadline
+            ? settings.offscreenFenceDeadline(settings.offscreenFenceContext) : started + limit;
+    };
     auto wait = [&](u64 frame) {
         const u64 waitStarted = monotonic_ns();
         Status status;
         do {
             if (cancelled()) { status = Errc::Cancelled; break; }
-            const u64 elapsed = monotonic_ns() - started;
-            if (elapsed >= limit) { status = Errc::Timeout; break; }
-            status = backend_->wait_frame(frame, std::min<u64>(100ull * 1000 * 1000, limit - elapsed));
+            const u64 now = monotonic_ns(), until = deadline();
+            if (now >= until) { status = Errc::Timeout; break; }
+            status = backend_->wait_frame(frame, std::min<u64>(100ull * 1000 * 1000, until - now));
             if (status.code() != Errc::Timeout) break;
         } while (true);
+        if (status.ok() && settings.offscreenFenceCompleted) {
+            settings.offscreenFenceCompleted(settings.offscreenFenceContext, frame);
+            if (monotonic_ns() >= deadline()) status = Errc::Timeout;
+        }
         timings.sceneExposureWaitMs += static_cast<f32>((monotonic_ns() - waitStarted) * 1e-6);
         return status;
     };

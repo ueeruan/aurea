@@ -264,7 +264,11 @@ import UIKit
         // panel changes must not be mistaken for a capture-triggered refill.
         for _ in 0..<2 {
             if app.buttons["Export"].firstMatch.exists { break }
-            let back = app.buttons["Back (clear the selection)"].firstMatch
+            // The expression fixture starts inside the movement panel. Close
+            // that visible panel before clearing the selected layer.
+            let panelBack = app.buttons["Back to the layer tools"].firstMatch
+            let back = panelBack.exists ? panelBack
+                : app.buttons["Back (clear the selection)"].firstMatch
             XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
         }
         let openExport = app.buttons["Export"].firstMatch

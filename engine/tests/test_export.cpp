@@ -2453,6 +2453,7 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "CutFrameGpu.inl"
 #include "ExportWatchdog.inl"
 #include "ExportSlowMedia.inl"
+#include "ExportSourceStartup.inl"
 #include "OriginalModelExport.inl"
 
 #endif // AUREA_TEST_VULKAN

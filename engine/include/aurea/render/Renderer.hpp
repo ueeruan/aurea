@@ -262,6 +262,15 @@ struct RenderLayer {
 };
 
 struct FrameSnapshot {
+    struct VideoSourceWait {
+        LayerId layer{};
+        AssetId asset{};
+        u64 decodeWork = 0;   ///< successful reads, including discarded preroll
+        bool opening = false;
+        bool missing = false;
+        bool stale = false;
+        bool failed = false;
+    };
     struct SceneExposureBatch {
         u32 scene = 0;
         u32 samplesPerBatch = 0;
@@ -287,6 +296,9 @@ struct FrameSnapshot {
     u32  videoLayers = 0;
     u32  staleVideoFrames = 0;         ///< mostrando frame aproximado (scrub)
     u32  missingVideoFrames = 0;       ///< nenhum frame ainda (primeiro decode)
+    /// Export-only pending sources, including omitted layers and nested clips.
+    /// Each source owns its watchdog; another decoder cannot renew its clock.
+    std::vector<VideoSourceWait> videoSourceWaits;
     /// Camadas visíveis no instante que ficaram de fora por estarem inteiras
     /// fora da composição (sem decode, sem passe). Fase 8C §20.
     u32  culledLayers = 0;
@@ -362,6 +374,12 @@ struct RenderSettings {
     u64 sceneExposureBatchBudgetBytes = 32ull << 20;
     const std::atomic<bool>* cancelFlag = nullptr;
     u64 sceneExposureFenceTimeoutNs = 120ull * 1000 * 1000 * 1000;
+    /// Capture recovery shares the caller's absolute clock, including the
+    /// failed whole compile. Only a completed submitted fence may renew its
+    /// no-progress window; export and ordinary preview leave these null.
+    u64 (*offscreenFenceDeadline)(void*) = nullptr;
+    void (*offscreenFenceCompleted)(void*, u64) = nullptr;
+    void* offscreenFenceContext = nullptr;
     /// Exact offscreen captures enqueue cold local AI, then wait without holding
     /// the renderer lock. Export's private renderer keeps synchronous inference.
     bool deferLocalAi = false;

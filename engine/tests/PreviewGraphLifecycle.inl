@@ -139,6 +139,11 @@ AUREA_TEST(PreviewGraphLifecycle, AutomaticPressureChangesOnlyThePictureAfterFin
     AUREA_CHECK_EQ(completed.previewHeight, 180u);
     AUREA_CHECK_EQ(completed.previewDenominator, 2u);
     AUREA_CHECK_EQ(completed.gpuMs, 0.f);
+    // This fixture exercises one real admission failure and sticky AUTO,
+    // rather than imposing another artificial failure on the next picture.
+    // Shape/SDF keeps its authored 1024² source even at reduced preview scale.
+    // Continuous-pressure continuation is covered by the other lease tests.
+    engine.renderer().set_transient_allocation_limit(256ull << 20);
     AUREA_CHECK(engine.render_frame(true).ok()); // no request_render/seek/edit
     AUREA_CHECK(!engine.renderer().preview_graph_pending());
     AUREA_CHECK_EQ(backend->presents, 2u);
@@ -357,4 +362,131 @@ AUREA_TEST(PreviewGraphLifecycle, ShutdownCancelsAndJoinsAnOwnedCaptureBeforeBac
         std::chrono::steady_clock::now()-began).count();
     std::printf("\n    capture shutdown: never-signalled-fence polls=%u cancelled=1 readbacks=0 request_join_ms=%lld backend_teardown_waits=%u\n",
         polls.load(),static_cast<long long>(elapsed),teardownWaits.load());
+}
+
+namespace preview_capture_progress_test {
+struct Fixture {
+    Engine engine;
+    test::MockBackend* backend = new test::MockBackend;
+    bool ok = false;
+    int window = 0;
+    Fixture() {
+        backend->mapBuffers = true;
+        backend->supportsFrameDiscard = backend->supportsPresentableLease = true;
+        auto config = headless_config(); config.backend = backend;
+        config.initialPreviewScale = PreviewScale::Full;
+        config.memoryBudgetBytes = 256ull << 20;
+        if (!engine.initialize(config).ok() || !engine.new_project(320,180,30.,"capture real fence progress").ok()) return;
+        const auto source = engine.add_shape(0);
+        if (!source.ok()) return;
+        auto* comp = engine.project()->timeline().composition(engine.project()->timeline().current());
+        auto* layer = comp->layer(LayerId::unpack(*source));
+        if (!layer) return;
+        layer->shape.bounds = Rect{0,0,1024,1024}; layer->shape.shapeType = 1;
+        layer->transform.anchor = Vec3{512,512,0}; layer->transform.position = Vec3{160,90,0};
+        Command add; add.type = CommandType::EffectAdd;
+        add.effect_add.layer = LayerId::unpack(*source);
+        add.effect_add.effectType = effect_type_id(effect_keys::kGaussianBlur);
+        add.effect_add.index = kInvalidIndex;
+        if (!engine.apply_command(add).ok() || layer->effects.empty()) return;
+        layer->effects[0].params[0].constant.v[0] = 3;
+        engine.renderer().set_preview_cache_budget(0);
+        // 9,803,520 bytes for the whole graph; 8,881,920-byte segment peak.
+        // The full 320x180 capture MUST enter real graph segmentation.
+        engine.renderer().set_transient_allocation_limit(9ull << 20);
+        ok = engine.attach_surface(&window,320,180).ok();
+    }
+    ~Fixture() {
+        if (engine.gpu()==backend) {
+            backend->beforeWaitFrame = {}; backend->beforeReadTexture = {};
+        }
+        engine.shutdown();
+    }
+};
+Status pattern(test::MockBackend& backend, TextureHandle handle, void* data, u32 stride) {
+    const auto desc = backend.texture_desc(handle);
+    if (desc.format != SurfaceFormat::RGBA16F || stride != desc.width*8)
+        return Errc::InvalidArgument;
+    for (u32 y=0;y<desc.height;++y) {
+        auto* row = reinterpret_cast<u16*>(static_cast<u8*>(data)+usize(y)*stride);
+        for (u32 x=0;x<desc.width;++x) {
+            row[x*4] = x&1 ? 0x3000 : 0x3800;
+            row[x*4+1] = 0x3400;
+            row[x*4+2] = x&1 ? 0x3800 : 0x3000;
+            row[x*4+3] = 0x3c00;
+        }
+    }
+    return OkStatus;
+}
+} // namespace preview_capture_progress_test
+
+AUREA_TEST(PreviewGraphLifecycle, CaptureRenewsOnDistinctCompletedSegmentFencesAndReturnsBytesOnce) {
+    using namespace preview_capture_progress_test;
+    Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
+    struct Fence { u64 frame, firstPoll; bool completed = false; };
+    std::vector<Fence> fences;
+    u32 polls=0,readbacks=0,completed=0;
+    constexpr u64 delay = 1'100'000'000ull;
+    fixture.backend->beforeWaitFrame = [&](u64 frame,u64) -> Status {
+        ++polls;
+        auto it = std::find_if(fences.begin(),fences.end(),[&](const auto& f) { return f.frame == frame; });
+        if (it == fences.end()) { fences.push_back({frame,monotonic_ns()}); it=std::prev(fences.end()); }
+        if (monotonic_ns()-it->firstPoll < delay) {
+            // Real elapsed waits, each below the inactivity deadline. Returning
+            // Timeout repeatedly without a signalled fence is not progress.
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            return Errc::Timeout;
+        }
+        if (!it->completed) { it->completed=true; ++completed; }
+        return OkStatus;
+    };
+    fixture.backend->beforeReadTexture = [&](TextureHandle h,void* data,u32 stride) {
+        AUREA_CHECK(completed>=5); // final readback cannot race any segment
+        ++readbacks; return pattern(*fixture.backend,h,data,stride);
+    };
+    std::vector<u8> pixels; u32 width=0,height=0;
+    const u64 start=monotonic_ns();
+    // One synchronous caller invocation. The readback sink is mocked, while
+    // graph admission/segmentation and every elapsed wait run in production.
+    const Status capture=fixture.engine.capture_frame_rgba(320,pixels,width,height);
+    const f64 seconds=static_cast<f64>(monotonic_ns()-start)/1e9;
+    AUREA_CHECK(capture.ok()); AUREA_CHECK(seconds>5.0 && seconds<20.0);
+    AUREA_CHECK_EQ(width,320u); AUREA_CHECK_EQ(height,180u);
+    AUREA_CHECK_EQ(pixels.size(),usize(320*180*4));
+    AUREA_CHECK(completed>=5 && fences.size()>=5);
+    AUREA_CHECK_EQ(readbacks,1u);
+    AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
+    bool exact=pixels.size()==usize(320*180*4);
+    for (usize i=0;exact && i<pixels.size()/4;++i)
+        exact = pixels[i*4]==(i&1 ? 99 : 188) && pixels[i*4+1]==137 &&
+                pixels[i*4+2]==(i&1 ? 188 : 99) && pixels[i*4+3]==255;
+    AUREA_CHECK(exact);
+    AUREA_CHECK_EQ(fixture.engine.read_status().playhead.value,0ll);
+    AUREA_CHECK_EQ(fixture.engine.read_status().previewDenominator,1u);
+    std::printf("\n    capture progress: seconds=%.3f distinct_completed_fences=%u polls=%u capture_invocations=1 mocked_RGBA_bytes=%zu exact_conversion=%d readbacks=%u acquire=0 present=0\n",
+        seconds,completed,polls,pixels.size(),exact,readbacks);
+}
+
+AUREA_TEST(PreviewGraphLifecycle, RepeatedTimeoutPollsDoNotRenewTheCaptureInactivityDeadline) {
+    using namespace preview_capture_progress_test;
+    Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
+    u32 polls=0,readbacks=0;
+    fixture.backend->beforeWaitFrame = [&](u64,u64) -> Status {
+        ++polls;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        return Errc::Timeout; // no completed GPU work, no deadline renewal
+    };
+    fixture.backend->beforeReadTexture = [&](TextureHandle,void*,u32) {
+        ++readbacks; return OkStatus;
+    };
+    std::vector<u8> pixels; u32 width=0,height=0;
+    const u64 start=monotonic_ns();
+    const Status capture=fixture.engine.capture_frame_rgba(320,pixels,width,height);
+    const f64 seconds=static_cast<f64>(monotonic_ns()-start)/1e9;
+    AUREA_CHECK_EQ(capture.code(),Errc::Timeout);
+    AUREA_CHECK(seconds>=3.8 && seconds<5.5);
+    AUREA_CHECK(polls>10); AUREA_CHECK(pixels.empty()); AUREA_CHECK_EQ(readbacks,0u);
+    AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
+    std::printf("\n    capture stalled: seconds=%.3f polls=%u completed_fences=0 capture_invocations=1 readbacks=0 acquire=0 present=0\n",
+        seconds,polls);
 }

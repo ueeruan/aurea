@@ -82,6 +82,10 @@ struct ExportSourceWait {
 /// Quadros aproximados SEGUIDOS a partir dos quais a paciência cai de novo.
 inline constexpr u32 kExportFallbackStreak = 8;
 
+/// Cold metadata/codec opening has a fixed startup window. It does not renew
+/// the ready decoder's no-progress deadline, nor count as decoded work.
+inline constexpr u64 kExportSourceOpeningTimeoutNs = 10'000'000'000ull;
+
 /// 0 aproximados: 4 s sem progresso, teto de 60 s (efeito que lê vários
 /// instantes com GOP longo é legítimo). Depois do 1º: 1 s / 4 s. Depois de
 /// `kExportFallbackStreak` seguidos: 250 ms / 1 s — uma fonte quebrada no fim
@@ -95,8 +99,8 @@ inline constexpr u32 kExportFallbackStreak = 8;
 /// Camada SEM NENHUMA imagem (nem aproximada): não há o que gravar — mas
 /// decoder LENTO não é mídia quebrada (beta 0.0.2/0.0.3: "não consigo
 /// exportar" com vídeo). A paciência conta tempo SEM TRABALHO do decoder
-/// (quadro entregue OU decodificado e descartado a caminho do alvo, codec que
-/// terminou de abrir) e o teto é o da GPU — nunca o teto curto dos aproximados
+/// (quadro entregue OU decodificado e descartado a caminho do alvo) e o teto
+/// é o da GPU — nunca o teto curto dos aproximados
 /// de `export_source_wait`: antes, depois de alguns quadros aproximados no fim
 /// de um clipe o teto caía para 1 s e o clipe SEGUINTE (codec abrindo, seek
 /// num GOP longo) falhava como "mídia indisponível".

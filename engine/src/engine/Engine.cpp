@@ -10107,15 +10107,36 @@ struct Engine::OffscreenRequest {
     std::unique_lock<std::mutex> ownership;
     u64 started = monotonic_ns();
     u64 deadline = started + 4'000'000'000ull;
+    const u64 hardDeadline = started + 30'000'000'000ull;
+    u64 lastProgressFrame = 0;
+    u32 completedRecoveryFences = 0;
     bool reader = false;
     explicit OffscreenRequest(Engine& value)
         : engine(value), ownership(value.offscreenRequestMutex_, std::defer_lock) {}
     ~OffscreenRequest() {
         if (!reader) return;
         engine.offscreenReaders_.fetch_sub(1, std::memory_order_release);
+        AUREA_LOG_INFO("capture lifecycle finished elapsed_ms=%.3f recovery_fences=%u last_frame=%llu hard_cap_ms=30000",
+            static_cast<f64>(monotonic_ns() - started) / 1e6, completedRecoveryFences,
+            static_cast<unsigned long long>(lastProgressFrame));
         engine.wake_render();
         // unique_lock releases ownership after this body, including the wake.
         // A lifecycle join must not outlive the final access to Engine.
+    }
+    void phase(const char* name) const noexcept {
+        const u64 now = monotonic_ns();
+        AUREA_LOG_INFO("capture phase=%s elapsed_ms=%.3f remaining_ms=%.3f recovery_fences=%u",
+            name, static_cast<f64>(now - started) / 1e6,
+            static_cast<f64>(deadline > now ? deadline - now : 0) / 1e6, completedRecoveryFences);
+    }
+    void recovery_fence_completed(u64 frame) noexcept {
+        const u64 now = monotonic_ns();
+        // Repeated polls/old ready frames and late completion after timeout
+        // cannot renew the clock. Only new, real submitted recovery fences do.
+        if (!frame || frame <= lastProgressFrame || now >= deadline) return;
+        lastProgressFrame = frame;
+        ++completedRecoveryFences;
+        deadline = std::max(deadline, std::min<u64>(hardDeadline, now + 4'000'000'000ull));
     }
     Status check() const noexcept {
         if (engine.exportActive_.load(std::memory_order_acquire))
@@ -10155,7 +10176,13 @@ struct Engine::OffscreenRequest {
                 engine.previewRetryDueNs_.store(0, std::memory_order_release);
             }
             const Status retired = engine.renderer_.reclaim_failed_transients(0);
-            if (retired.ok()) return OkStatus;
+            if (retired.ok()) {
+                // Staging may first wait on the preceding preview/cache frame.
+                // That old submission is not progress made by this capture.
+                lastProgressFrame = engine.gpu_->last_submitted_frame();
+                phase("handoff-complete");
+                return OkStatus;
+            }
             if (retired.code() != Errc::Timeout) return retired;
             lock.unlock();
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -10168,7 +10195,10 @@ struct Engine::OffscreenRequest {
             if (!engine.gpu_ || engine.gpuGeneration_ != generation)
                 return Status{Errc::Cancelled, "a GPU mudou durante a captura"};
             const Status ready = engine.gpu_->wait_frame(frame, 0);
-            if (ready.code() != Errc::Timeout) return ready;
+            if (ready.code() != Errc::Timeout) {
+                if (ready.ok() && completedRecoveryFences) recovery_fence_completed(frame);
+                return ready;
+            }
             lock.unlock();
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
@@ -10219,6 +10249,11 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     // may present a pending map asynchronously.
     rs.finalQuality = !asPreview;
     rs.allowGraphSegments = true;
+    rs.offscreenFenceDeadline = [](void* context) { return static_cast<OffscreenRequest*>(context)->deadline; };
+    rs.offscreenFenceCompleted = [](void* context, u64 frame) {
+        static_cast<OffscreenRequest*>(context)->recovery_fence_completed(frame);
+    };
+    rs.offscreenFenceContext = &request;
     rs.deferLocalAi = !asPreview;
     if (asPreview) { rs.heavyScale = preview_heavy_scale(); rs.flowPolicyScale = caps_.policy().heavyScale; }
     OffscreenMeasure m;
@@ -10231,7 +10266,8 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     bool boundCapture = false;
     u32 waitingLocalAi = 0;
     const u64 videoDeadline = tStart + 4'000'000'000ull;
-    u64 completionDeadline = videoDeadline;
+    u64& completionDeadline = request.deadline;
+    request.phase("media-prepare");
     // Espera os frames EXATOS de vídeo (export e teste não aceitam o frame
     // aproximado que o scrub mostra). Limite de 4 s para arquivo quebrado não
     // travar para sempre.
@@ -10302,7 +10338,6 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         // different GPU resource becomes unavailable on the next attempt.
         if (waitingLocalAi) {
             completionDeadline = tStart + 30'000'000'000ull;
-            request.deadline = completionDeadline;
         }
         if (waitingVideo || waitingLocalAi) {
             if ((waitingVideo && tPrep1 >= videoDeadline) || tPrep1 >= completionDeadline)
@@ -10372,12 +10407,14 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             ? std::min<u64>(100'000'000, completionDeadline - reclaimNow) : 0;
         if (const Status ready = renderer_.reclaim_failed_transients(reclaimWait); !ready.ok()) return ready;
         rs.stageUnblurredScenes = !asPreview && Renderer::can_stage_small_scene_capture(snapshot_, width, height);
-        // The same absolute request deadline also bounds generic 2D graph
-        // recovery; it must never inherit the export's 120-second ceiling.
+        // Recovery consults the same absolute caller clock, including whole
+        // compile time. New completed fences renew four seconds of patience
+        // only within the capture's fixed 30-second total ceiling.
         const u64 beforeRender = monotonic_ns();
         rs.sceneExposureFenceTimeoutNs = beforeRender < completionDeadline
             ? completionDeadline - beforeRender : 1;
         rs.cancelFlag = &offscreenCancelled_;
+        request.phase("record");
         const Status s = renderer_.render(snapshot_, rs, &off, stats, timings);
         const bool incomplete = renderer_.take_incomplete();
         const u64 tW0 = monotonic_ns();
@@ -10386,6 +10423,7 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         // reporting its original error; its pending targets use a fence gate.
         if (s.ok()) {
             const u64 submitted = gpu_->last_submitted_frame();
+            request.phase("final-fence");
             rl.unlock();
             const Status ready = request.wait_gpu_frame(submitted, expectedGpuGeneration);
             if (!ready.ok()) return ready;
@@ -10612,7 +10650,10 @@ Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& wi
         if (s.ok() && exportActive_.load(std::memory_order_acquire))
             s = Status{Errc::Busy, "captura aguarda a exportacao terminar"};
         if (s.ok()) s = poll_export_gpu_locked();
-        if (s.ok()) s = gpu_->read_texture(target, half.data(), width * 8);
+        if (s.ok()) {
+            request.phase("readback");
+            s = gpu_->read_texture(target, half.data(), width * 8);
+        }
         gpu_->destroy_texture(target);
     }
     if (!s.ok()) return s;
@@ -12450,15 +12491,24 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     // while another decoder kept delivering frames every degraded frame could
     // cost a minute — the export looked frozen at a percentage.
     const ExportSourceWait wait = export_source_wait(c.consecutiveFallbacks);
-    ProgressDeadline deadline(t0, wait.patienceNs, wait.hardCapNs);
     // Camada sem imagem nenhuma: o prazo dela renova com o TRABALHO do decoder
     // (quadros descartados a caminho do alvo contam) e não cai com os
     // aproximados (export_missing_source_wait).
     const ExportSourceWait missingWait = export_missing_source_wait();
-    ProgressDeadline missingDeadline(t0, missingWait.patienceNs, missingWait.hardCapNs);
-    u64 lastGen = mediaReadyGen_.load(std::memory_order_acquire);
-    u64 lastWork = media_.decode_work();
-    u64 notedWork = lastWork, notedNs = t0;
+    struct SourceDeadline {
+        LayerId layer{};
+        AssetId asset{};
+        ProgressDeadline opening, missing, stale;
+        u64 lastWork = 0;
+        bool openingStarted = false;
+        bool decodeStarted = false;
+        bool openingThisAttempt = false;
+        bool pendingThisAttempt = false;
+    };
+    std::vector<SourceDeadline> sourceDeadlines;
+    u64 gpuExcludedNs = 0;
+    u32 notedOpening = 0;
+    u64 notedWork = media_.decode_work(), notedNs = t0;
     bool drainedGpu = false;
     bool reclaimedAllocationFailure = false;
     std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
@@ -12550,14 +12600,96 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
             const u64 gen = mediaReadyGen_.load(std::memory_order_acquire);
             rl.lock();
             if (const Status s = prepare(); !s.ok()) return s;
-            if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) { c.consecutiveFallbacks = 0; break; }
+            if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) {
+                for (auto& state : sourceDeadlines) state.decodeStarted = false;
+                c.consecutiveFallbacks = 0;
+                break;
+            }
             const u64 now = monotonic_ns();
             const u64 work = media_.decode_work();
-            if (gen != lastGen || work != lastWork) {
-                lastGen = gen;
-                lastWork = work;
-                deadline.progress(now);
-                missingDeadline.progress(now);
+            bool sourceExpired = false;
+            bool openingExpired = false;
+            u32 openingCount = 0;
+            for (auto& state : sourceDeadlines) {
+                state.openingThisAttempt = false;
+                state.pendingThisAttempt = false;
+            }
+            // A cold open is not a decoder that owes a frame. The opening
+            // window is fixed and per source; ready decoders retain their own
+            // 4-second no-work clock even while another codec is opening.
+            for (const auto& pending : snapshot_.videoSourceWaits) {
+                if (pending.failed) {
+                    snapshot_.release_video_frames();
+                    AUREA_LOG_ERROR("export source open failed frame=%lld layer=%llu asset=%llu elapsed_s=%.3f",
+                        static_cast<long long>(t.value), static_cast<unsigned long long>(pending.layer.pack()),
+                        static_cast<unsigned long long>(pending.asset.pack()), static_cast<f64>(now - t0) / 1e9);
+                    return Status{Errc::DecodeFailed, "nao foi possivel abrir a fonte de video para exportar"};
+                }
+                auto found = std::find_if(sourceDeadlines.begin(), sourceDeadlines.end(), [&](const auto& state) {
+                    return state.layer == pending.layer && state.asset == pending.asset;
+                });
+                if (found == sourceDeadlines.end()) {
+                    sourceDeadlines.push_back({pending.layer, pending.asset});
+                    found = std::prev(sourceDeadlines.end());
+                }
+                auto& state = *found;
+                state.pendingThisAttempt = true;
+                const u64 elapsed = now - t0 - std::min(now - t0, gpuExcludedNs);
+                if ((pending.missing && elapsed > missingWait.hardCapNs)
+                        || (pending.stale && elapsed > wait.hardCapNs)) sourceExpired = true;
+                if (pending.opening) {
+                    state.openingThisAttempt = true;
+                    // A replacement decoder has its own work counter. Keep
+                    // the original fixed startup/global cap, but start decode
+                    // patience only after that new decoder becomes ready.
+                    state.decodeStarted = false;
+                    if (!state.openingStarted) {
+                        state.opening = ProgressDeadline(now, kExportSourceOpeningTimeoutNs,
+                            kExportSourceOpeningTimeoutNs);
+                        state.openingStarted = true;
+                        AUREA_LOG_INFO("export source startup frame=%lld layer=%llu asset=%llu timeout_ms=10000",
+                            static_cast<long long>(t.value), static_cast<unsigned long long>(pending.layer.pack()),
+                            static_cast<unsigned long long>(pending.asset.pack()));
+                    }
+                    if (state.opening.expired(now)) openingExpired = true;
+                } else {
+                    if (!state.decodeStarted) {
+                        state.missing = ProgressDeadline(now, missingWait.patienceNs, 0);
+                        state.stale = ProgressDeadline(now, wait.patienceNs, 0);
+                        state.lastWork = pending.decodeWork;
+                        state.decodeStarted = true;
+                        if (state.openingStarted) {
+                            AUREA_LOG_INFO("export source ready frame=%lld layer=%llu own_decode_work=%llu",
+                                static_cast<long long>(t.value), static_cast<unsigned long long>(pending.layer.pack()),
+                                static_cast<unsigned long long>(pending.decodeWork));
+                        }
+                    } else if (pending.decodeWork > state.lastWork) {
+                        state.lastWork = pending.decodeWork;
+                        state.missing.progress(now);
+                        state.stale.progress(now);
+                    }
+                    if ((pending.missing && state.missing.expired(now))
+                            || (pending.stale && state.stale.expired(now)))
+                        sourceExpired = true;
+                }
+            }
+            for (auto& state : sourceDeadlines) {
+                openingCount += state.openingThisAttempt;
+                // A source that already supplied every required sample is not
+                // accumulating decode latency while other layers/resources wait.
+                if (!state.pendingThisAttempt) state.decodeStarted = false;
+            }
+            if (openingCount != notedOpening) {
+                notedOpening = openingCount;
+                std::lock_guard<std::mutex> pl(c.mutex);
+                std::snprintf(c.progress.message, sizeof(c.progress.message), "%s",
+                    openingCount ? "preparando video para exportar" : "preparando os quadros do video");
+            }
+            if (openingExpired) {
+                snapshot_.release_video_frames();
+                AUREA_LOG_ERROR("export source startup timeout frame=%lld opening=%u elapsed_s=%.3f",
+                    static_cast<long long>(t.value), openingCount, static_cast<f64>(now - t0) / 1e9);
+                return Status{Errc::DecodeFailed, "a fonte de video nao abriu dentro do prazo de inicializacao"};
             }
             if (export_liveness_due(now, notedNs, work, notedWork)) {
                 // A tela vê o decoder trabalhando (ExportStallWatchdog.kt /
@@ -12568,8 +12700,7 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
                 std::snprintf(c.progress.message, sizeof(c.progress.message), "decodificando: quadro %lld (%llu)",
                               static_cast<long long>(t.value), static_cast<unsigned long long>(work));
             }
-            const bool anyMissing = snapshot_.missingVideoFrames > 0;
-            if (anyMissing ? missingDeadline.expired(now) : deadline.expired(now)) {
+            if (sourceExpired) {
                 const u32 missing = snapshot_.missingVideoFrames, stale = snapshot_.staleVideoFrames;
                 if (missing > 0) {
                     snapshot_.release_video_frames();
@@ -12605,8 +12736,12 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
                 if (!ready.ok()) return ready;
                 // GPU work from the previous blurred frame is not decoder latency.
                 const u64 gpuNs = monotonic_ns() - waitStart;
-                deadline.exclude(gpuNs);
-                missingDeadline.exclude(gpuNs);
+                gpuExcludedNs += gpuNs;
+                for (auto& state : sourceDeadlines) {
+                    if (!state.decodeStarted) continue;
+                    state.missing.exclude(gpuNs);
+                    state.stale.exclude(gpuNs);
+                }
                 drainedGpu = true;
             }
             rl.unlock();

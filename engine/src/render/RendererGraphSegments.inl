@@ -13,6 +13,10 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
     const u64 started = monotonic_ns();
     constexpr u64 hardCap = 120ull * 1000 * 1000 * 1000;
     const u64 limit = std::clamp<u64>(settings.sceneExposureFenceTimeoutNs, 1, hardCap);
+    const auto deadline = [&] {
+        return settings.offscreenFenceDeadline
+            ? settings.offscreenFenceDeadline(settings.offscreenFenceContext) : started + limit;
+    };
     const auto cancelled = [&] { return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
     u32 batches = 0;
     f32 waitedMs = 0;
@@ -21,11 +25,15 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
         Status status;
         do {
             if (cancelled()) { status = Errc::Cancelled; break; }
-            const u64 elapsed = monotonic_ns() - started;
-            if (elapsed >= limit) { status = Errc::Timeout; break; }
-            status = backend_->wait_frame(pending, std::min<u64>(100ull * 1000 * 1000, limit - elapsed));
+            const u64 now = monotonic_ns(), until = deadline();
+            if (now >= until) { status = Errc::Timeout; break; }
+            status = backend_->wait_frame(pending, std::min<u64>(100ull * 1000 * 1000, until - now));
             if (status.code() != Errc::Timeout) break;
         } while (true);
+        if (status.ok() && settings.offscreenFenceCompleted) {
+            settings.offscreenFenceCompleted(settings.offscreenFenceContext, pending);
+            if (monotonic_ns() >= deadline()) status = Errc::Timeout;
+        }
         waitedMs += static_cast<f32>((monotonic_ns() - waitStarted) * 1e-6);
         // No unfinished physical slot can be recycled by another render. The
         // ordinary next request must poll this exact submitted fence first.
@@ -52,7 +60,7 @@ Status Renderer::render_segmented_graph(const RenderSettings& settings, FrameBeg
     if (!steps) return finish(Status{Errc::InvalidState, "empty graph recovery"});
     for (u32 first = 0; first < steps; ++first) {
         if (cancelled()) return finish(Errc::Cancelled);
-        if (monotonic_ns() - started >= limit) return finish(Errc::Timeout);
+        if (monotonic_ns() >= deadline()) return finish(Errc::Timeout);
         FrameBegin next;
         if (const Status begin = backend_->begin_offscreen_frame(next); !begin.ok()) return finish(begin);
         frame = next;

@@ -1655,6 +1655,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.videoLayers = 0;
     out.staleVideoFrames = 0;
     out.missingVideoFrames = 0;
+    out.videoSourceWaits.clear();
     out.culledLayers = 0;
 
     const f32 previewFactor = static_cast<f32>(settings.previewNumerator)
@@ -2585,6 +2586,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 out.videoLayers += snapChild->videoLayers;
                 out.staleVideoFrames += snapChild->staleVideoFrames;
                 out.missingVideoFrames += snapChild->missingVideoFrames;
+                out.videoSourceWaits.insert(out.videoSourceWaits.end(),
+                    snapChild->videoSourceWaits.begin(), snapChild->videoSourceWaits.end());
                 out.culledLayers += snapChild->culledLayers;
                 rl.source.kind = LayerSource::Kind::Nested;
                 rl.source.width = child->width();
@@ -2914,6 +2917,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     out.videoLayers += snap->videoLayers;
                     out.staleVideoFrames += snap->staleVideoFrames;
                     out.missingVideoFrames += snap->missingVideoFrames;
+                    out.videoSourceWaits.insert(out.videoSourceWaits.end(),
+                        snap->videoSourceWaits.begin(), snap->videoSourceWaits.end());
                     const u32 index = static_cast<u32>(out.nested.size());
                     out.nested.push_back(std::move(snap));
                     made.emplace_back(cf, index);
@@ -3065,6 +3070,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         if (rl.source.kind == LayerSource::Kind::Video && media) {
             const Asset* asset = project.asset(l->source);
             VideoSource* src = media->source_for(rid, l->source, *asset, frameNumber, settings.finalQuality);
+            const u32 missingBefore = out.missingVideoFrames;
+            const u32 staleBefore = out.staleVideoFrames;
             if (src) {
                 src->set_epoch(settings.mediaGeneration);
                 const VideoStreamInfo streamInfo = src->info();
@@ -3293,10 +3300,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (!rl.source.frame) ++out.missingVideoFrames;
                 else if (!exact) ++out.staleVideoFrames;
             }
+            if (!src) ++out.missingVideoFrames;
+            if (settings.finalQuality && (out.missingVideoFrames != missingBefore
+                    || out.staleVideoFrames != staleBefore)) {
+                const auto sourceStats = src ? src->stats() : VideoSource::Stats{};
+                const auto startup = src ? MediaManager::SourceStartup::Ready : media->source_startup(rid, l->source);
+                out.videoSourceWaits.push_back({rid, l->source,
+                    sourceStats.framesDelivered + sourceStats.framesDiscarded,
+                    startup == MediaManager::SourceStartup::Opening,
+                    out.missingVideoFrames != missingBefore,
+                    out.staleVideoFrames != staleBefore,
+                    startup == MediaManager::SourceStartup::Failed});
+            }
             if (!rl.source.frame) {
                 // Ainda nada decodificado (primeiro frame a caminho): a layer
                 // fica de fora deste frame; o callback da fonte acorda o render.
-                if (!src) ++out.missingVideoFrames;
                 continue;
             }
         }

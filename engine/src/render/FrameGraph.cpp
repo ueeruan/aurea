@@ -226,6 +226,8 @@ void FrameGraph::reset() noexcept {
     finalBarriers_.clear();
     stats_ = Stats{};
     compiled_ = false;
+    segmentPlan_ = false;
+    segmentFirst_ = segmentEnd_ = 0;
 }
 
 FGTexture FrameGraph::create_texture(const char* name, const TextureDesc& desc) noexcept {
@@ -356,7 +358,11 @@ namespace {
 [[nodiscard]] constexpr bool is_write(u8 a) noexcept { return a != 0 && a != 3; }   // Read=0, CopySrc=3
 }
 
-Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
+Status FrameGraph::prepare_plan() noexcept {
+    if (!slots_.empty()) return Status{Errc::InvalidState, "physical graph assignments still held"};
+    compiled_ = false;
+    segmentPlan_ = false;
+    segmentFirst_ = segmentEnd_ = 0;
     stats_ = Stats{};
     stats_.passesDeclared = static_cast<u32>(passes_.size());
 
@@ -422,17 +428,51 @@ Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
         }
     }
 
-    if (const Status s = assign_physical(pool); !s.ok()) return s;
-    plan_barriers();
-
+    plan_lifetime_events();
     stats_.passesExecuted = static_cast<u32>(order_.size());
     stats_.passesCulled = stats_.passesDeclared - stats_.passesExecuted;
-    stats_.physicalTextures = static_cast<u32>(slots_.size());
-    for (const Slot& s : slots_) stats_.transientBytes += s.desc.estimated_bytes();
+    return OkStatus;
+}
+
+Status FrameGraph::compile(TransientTexturePool& pool) noexcept {
+    if (const Status s = prepare_plan(); !s.ok()) return s;
+    segmentEnd_ = static_cast<u32>(order_.size());
+    if (const Status s = assign_physical(pool, 0, segmentEnd_); !s.ok()) return s;
+    plan_barriers(0, segmentEnd_);
     stats_.barriers = static_cast<u32>(barriers_.size() + finalBarriers_.size());
 
     compiled_ = true;
     return OkStatus;
+}
+
+Status FrameGraph::prepare_segments() noexcept {
+    if (const Status s = prepare_plan(); !s.ok()) return s;
+    segmentPlan_ = true;
+    return OkStatus;
+}
+
+Status FrameGraph::compile_segment(TransientTexturePool& pool, u32 first, u32 count) noexcept {
+    if (!segmentPlan_ || compiled_ || !count || first != segmentEnd_ || first >= order_.size())
+        return Status{Errc::InvalidState, "nonconsecutive graph segment"};
+    segmentFirst_ = first;
+    segmentEnd_ = first + std::min<u32>(count, static_cast<u32>(order_.size()) - first);
+    if (const Status s = assign_physical(pool, first, segmentEnd_); !s.ok()) return s;
+    // Imported video images may have returned to the decoder's foreign queue
+    // at the preceding submission. Emit the first access transition again;
+    // backend state keeps the actual layout of preserved ordinary textures.
+    plan_barriers(first, segmentEnd_);
+    stats_.barriers += static_cast<u32>(barriers_.size() + finalBarriers_.size());
+    compiled_ = true;
+    return OkStatus;
+}
+
+void FrameGraph::release_completed_segment(TransientTexturePool& pool) noexcept {
+    if (!segmentPlan_ || !compiled_) return;
+    for (Slot& slot : slots_) if (slot.free && slot.texture.valid()) {
+        pool.release(slot.texture);
+        slot.texture = {};
+    }
+    compiled_ = false;
 }
 
 bool FrameGraph::sort_passes() noexcept {
@@ -571,8 +611,7 @@ void FrameGraph::cull() noexcept {
                  order_.end());
 }
 
-Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
-    slots_.clear();
+void FrameGraph::plan_lifetime_events() noexcept {
     const u32 steps = static_cast<u32>(order_.size());
     const u32 resourceCount = static_cast<u32>(resources_.size());
     // Quem nasce e quem morre em cada posição (CSR, na ordem dos índices —
@@ -603,7 +642,10 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
         dies_[fill_[r.lastUse]++] = i;
     }
 
-    for (u32 pos = 0; pos < steps; ++pos) {
+}
+
+Status FrameGraph::assign_physical(TransientTexturePool& pool, u32 first, u32 end) noexcept {
+    for (u32 pos = first; pos < end; ++pos) {
         // Nasce aqui: pega uma física livre compatível deste frame, senão o pool.
         for (u32 bi = bornBegin_[pos]; bi < bornBegin_[pos + 1]; ++bi) {
             Resource& r = resources_[born_[bi]];
@@ -611,7 +653,7 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
 
             u32 chosen = kInvalidIndex;
             for (u32 s = 0; s < slots_.size(); ++s) {
-                if (slots_[s].free && slots_[s].desc.compatible(r.desc)) { chosen = s; break; }
+                if (slots_[s].free && slots_[s].texture.valid() && slots_[s].desc.compatible(r.desc)) { chosen = s; break; }
             }
             if (chosen != kInvalidIndex) {
                 ++stats_.aliasedTextures;
@@ -626,6 +668,8 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
                 slot.desc = r.desc;
                 slots_.push_back(slot);
                 chosen = static_cast<u32>(slots_.size() - 1);
+                ++stats_.physicalTextures;
+                stats_.transientBytes += r.desc.estimated_bytes();
             }
             r.slot = chosen;
             r.physical = slots_[chosen].texture;
@@ -641,12 +685,12 @@ Status FrameGraph::assign_physical(TransientTexturePool& pool) noexcept {
     return OkStatus;
 }
 
-void FrameGraph::plan_barriers() noexcept {
+void FrameGraph::plan_barriers(u32 first, u32 end) noexcept {
     barriers_.clear();
     finalBarriers_.clear();
     tracked_.assign(resources_.size(), ResourceState::Undefined);
 
-    for (u32 pos = 0; pos < order_.size(); ++pos) {
+    for (u32 pos = first; pos < end; ++pos) {
         Pass& p = passes_[order_[pos]];
         p.barrierBegin = static_cast<u32>(barriers_.size());
         p.barrierCount = 0;
@@ -701,7 +745,7 @@ void FrameGraph::plan_barriers() noexcept {
         }
     }
 
-    for (u32 out : outputs_) {
+    if (end == order_.size()) for (u32 out : outputs_) {
         const Resource& r = resources_[out];
         if (r.firstUse == kInvalidIndex) continue;
         if (tracked_[out] == r.finalState) continue;
@@ -717,7 +761,7 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
     if (!compiled_) return;
     PassContext ctx{cmds, *this};
 
-    for (u32 pos = 0; pos < order_.size(); ++pos) {
+    for (u32 pos = segmentFirst_; pos < segmentEnd_; ++pos) {
         Pass& p = passes_[order_[pos]];
 
         for (u32 b = 0; b < p.barrierCount; ++b) {
@@ -761,12 +805,14 @@ void FrameGraph::execute(CommandList& cmds, bool timers) noexcept {
 }
 
 void FrameGraph::release(TransientTexturePool& pool) noexcept {
-    for (const Slot& s : slots_) pool.release(s.texture);
+    for (const Slot& s : slots_) if (s.texture.valid()) pool.release(s.texture);
     slots_.clear();
     for (Resource& r : resources_) {
         if (!r.imported) r.physical = TextureHandle{};
     }
     compiled_ = false;
+    segmentPlan_ = false;
+    segmentFirst_ = segmentEnd_ = 0;
 }
 
 // =============================================================================

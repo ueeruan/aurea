@@ -32,6 +32,7 @@ SceneTargetBudgetRun scene_target_budget_run(bool staged, u64 limit) {
     f.renderer.set_transient_cache_budget(1); // Retain live targets; idle targets cannot hide the cause.
     f.renderer.set_tracked_resource_budget(limit, [](void*) noexcept -> u64 { return u64{12} << 20; });
     RenderSettings settings; settings.finalQuality = true; settings.stageUnblurredScenes = staged; settings.dither = false;
+    settings.allowGraphSegments = false; // Compare unchanged whole-graph and 3D-stage admission.
     FrameSnapshot snapshot;
     f.renderer.prepare(*f.comp, f.project, FrameIndex{0}, nullptr, nullptr, nullptr, settings, 1, 0, DecodeMode::Still, 1, snapshot);
     test_fixtures::scene_target::add_scene(snapshot, test_fixtures::material_override::asset());
@@ -213,6 +214,7 @@ AUREA_TEST(SceneTargets, PartialGraphPressureWaitsBeforeReclaimAndUsesTheSameTar
     const auto targetTexture = f.backend.create_texture(desc); AUREA_CHECK(targetTexture.ok()); if (!targetTexture) return;
     OffscreenTarget target{*targetTexture, desc.width, desc.height};
     RenderSettings settings; settings.finalQuality = true; settings.dither = false;
+    settings.allowGraphSegments = false; // This fixture audits failed whole-graph retirement itself.
     FrameSnapshot snapshot;
     f.renderer.prepare(*f.comp, f.project, FrameIndex{0}, nullptr, nullptr, nullptr, settings, 1, 0, DecodeMode::Still, 1, snapshot);
     FrameStats stats; RenderTimings timings;

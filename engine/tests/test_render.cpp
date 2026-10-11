@@ -3527,3 +3527,4 @@ AUREA_TEST(MotionBlur, SamplesPerFrameDrivesThePreviewToo) {
 }
 
 #include "RaysFootprintPlan.inl"
+#include "FrameGraphSegments.inl"

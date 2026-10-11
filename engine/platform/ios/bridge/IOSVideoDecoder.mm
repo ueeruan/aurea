@@ -926,6 +926,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
         Asset asset; asset.kind = AssetKind::Video; asset.sourcePath = path.UTF8String;
         u32 checks = 0;
         u32 metalPixelChecks = 0;
+        u32 metalExternalScopeChecks = 0;
         for (bool zeroCopy : {false, true}) {
             control->set_zero_copy(zeroCopy);
             auto decoder = factory->open_video(asset, MediaPriority::Preview);
@@ -1016,7 +1017,71 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
                 if (!gpu.end_frame().ok() || !gpu.wait_frame(retry.frameNumber, 5'000'000'000ull).ok()
                     || !clearMatches(204, 26, 102))
                     return failure(@"Metal normal frame did not recover after discard");
-                gpu.release_external_image(imported->texture);
+
+                // The same graph may hold this handle until a late segment.
+                // Its CVPixelBuffer owner alone cannot prevent cache eviction.
+                struct ExternalScope {
+                    GPUBackend& backend;
+                    bool active = true;
+                    explicit ExternalScope(GPUBackend& value) : backend(value) { backend.begin_external_image_scope(); }
+                    void close() { if (active) { backend.end_external_image_scope(); active = false; } }
+                    ~ExternalScope() { close(); }
+                } externalScope(gpu), nestedScope(gpu);
+                BufferDesc readbackDesc;
+                readbackDesc.bytes = importedPixels.size();
+                readbackDesc.usage = BufferUsage::TransferDst;
+                readbackDesc.access = MemoryAccess::Readback;
+                auto lateReadback = gpu.create_buffer(readbackDesc);
+                if (!lateReadback.ok()) return failure(@"Metal late imported consumer readback failed to allocate");
+                u64 lateConsumerFrame = 0;
+                for (u32 segment = 0; segment < 6; ++segment) {
+                    if (segment == 2) nestedScope.close(); // the outer scope must still protect the handle
+                    FrameBegin late;
+                    if (!gpu.begin_offscreen_frame(late).ok() || !late.commands)
+                        return failure(@"Metal imported scope could not begin a segment");
+                    if (gpu.texture_desc(imported->texture).width != retained->width)
+                        return failure(@"Metal retired an imported handle before its late consumer");
+                    ++checks; ++metalExternalScopeChecks;
+                    if (segment == 5) {
+                        late.commands->barrier(imported->texture, ResourceState::TransferSrc);
+                        late.commands->copy_texture_to_buffer(imported->texture, *lateReadback);
+                    }
+                    if (!gpu.end_frame().ok()) return failure(@"Metal imported scope segment did not submit");
+                    lateConsumerFrame = late.frameNumber;
+                }
+                // Recycle real submitted frame slots above so automatic cache
+                // eviction is exercised, then await the actual late read fence.
+                if (!gpu.wait_frame(lateConsumerFrame, 5'000'000'000ull).ok())
+                    return failure(@"Metal imported scope late consumer fence did not complete");
+                void* latePixels = nullptr;
+                if (!gpu.map_buffer(*lateReadback, latePixels).ok() || !latePixels)
+                    return failure(@"Metal late imported consumer could not map pixels");
+                const bool lateMatches = hashPixels(static_cast<const u8*>(latePixels), retained->width,
+                    retained->height, retained->width * 4, true) == expected.front().hash;
+                gpu.unmap_buffer(*lateReadback);
+                if (!lateMatches) return failure(@"Metal late imported consumer pixels differ from independent decoder");
+                ++checks; ++metalPixelChecks; ++metalExternalScopeChecks;
+                gpu.destroy_buffer(*lateReadback);
+                externalScope.close();
+                u64 cleanupFrame = 0;
+                for (u32 cleanup = 0; cleanup <= gpu.frames_in_flight(); ++cleanup) {
+                    FrameBegin evict;
+                    if (!gpu.begin_offscreen_frame(evict).ok()) return failure(@"Metal import cleanup frame did not begin");
+                    if (!gpu.end_frame().ok()) return failure(@"Metal import cleanup frame did not submit");
+                    cleanupFrame = evict.frameNumber;
+                }
+                if (!gpu.wait_frame(cleanupFrame, 5'000'000'000ull).ok()
+                    || gpu.texture_desc(imported->texture).width != 0)
+                    return failure(@"Metal stale import eviction did not resume after the scope");
+                ++checks; ++metalExternalScopeChecks;
+                auto reimported = gpu.import_external_image(image);
+                if (!reimported.ok()) return failure(@"Metal could not reimport after scope cleanup");
+                ExternalScope explicitReleaseScope(gpu);
+                gpu.release_external_image(reimported->texture);
+                if (gpu.texture_desc(reimported->texture).width != 0)
+                    return failure(@"Metal external scope blocked explicit retirement");
+                explicitReleaseScope.close();
+                ++checks; ++metalExternalScopeChecks;
                 gpu.wait_idle();
                 const auto released = gpu.memory_stats();
                 if (released.usedBytes != allocated.usedBytes || released.textureCount != allocated.textureCount)
@@ -1068,6 +1133,7 @@ NSDictionary<NSString*, id>* AureaVerifyVideoDecoder(NSString* path, NSUInteger 
             if (!found) return failure(@"Resume returned wrong pixels/PTS");
         }
         return @{ @"passed": @YES, @"frames": @(expected.size()), @"pixelChecks": @(checks), @"metalPixelChecks": @(metalPixelChecks),
+                  @"metalExternalScopeChecks": @(metalExternalScopeChecks),
                   @"cpuAndIOSurface": @YES, @"lazyCpuFallback": @YES, @"seekAndResume": @YES };
     }
 }

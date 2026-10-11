@@ -14,6 +14,7 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdio>
 #include <cstring>
 
@@ -29,6 +30,7 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
         d.config = config;
         d.framesInFlight = std::clamp<u32>(config.framesInFlight, 1, 3);
         d.deviceLost = false;
+        d.externalImageScopeDepth = 0;
 
         d.device = d.requestedDevice ? (__bridge id<MTLDevice>)d.requestedDevice
                                      : MTLCreateSystemDefaultDevice();
@@ -72,6 +74,8 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
 void Backend::shutdown() noexcept {
     @autoreleasepool {
         Impl& d = *impl_;
+        assert(d.externalImageScopeDepth == 0 && "unclosed external image scope at Metal shutdown");
+        d.externalImageScopeDepth = 0;
         if (!d.device && !d.initialized) return;
 
         // 1. Nada pode estar em voo quando os recursos começam a morrer — e a

@@ -419,6 +419,8 @@ public:
     [[nodiscard]] Result<ExternalTexture> import_external_image(const ExternalImageDesc& img) noexcept override;
     void release_external_image(TextureHandle imported) noexcept override;
     u32 trim_external_images() noexcept override;
+    void begin_external_image_scope() noexcept override { ++externalImageScopes_; }
+    void end_external_image_scope() noexcept override { if (externalImageScopes_) --externalImageScopes_; }
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 
     void wait_idle() noexcept override;
@@ -590,6 +592,7 @@ private:
     FrameContext frames_[3];
     u32 frameCursor_ = 0;
     u64 frameNumber_ = 0;
+    u32 externalImageScopes_ = 0;
     FrameContext* current_ = nullptr;
     struct PendingImmediate {
         VkCommandPool pool = VK_NULL_HANDLE;

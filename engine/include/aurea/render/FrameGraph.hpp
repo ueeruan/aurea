@@ -241,6 +241,18 @@ public:
     /// barreiras. Falha em ciclo e em leitura de textura nunca escrita.
     [[nodiscard]] Status compile(TransientTexturePool& pool) noexcept;
 
+    /// Validate and retain the same sorted/cull/lifetime plan without admitting
+    /// every physical texture at once. Existing physical assignments must first
+    /// have been returned by release(); callbacks and imported outputs survive.
+    [[nodiscard]] Status prepare_segments() noexcept;
+    /// Admit the next consecutive range of the prepared plan. Textures whose
+    /// last reader is in a later range remain held across GPU submissions.
+    [[nodiscard]] Status compile_segment(TransientTexturePool& pool, u32 first, u32 count) noexcept;
+    /// Caller has completed the current segment's real GPU fence. Return only
+    /// its dead physical slots; outputs and later readers remain held. This does
+    /// not credit backend reservation: trim/begin-frame still collect backing.
+    void release_completed_segment(TransientTexturePool& pool) noexcept;
+
     // --- Execução -------------------------------------------------------------
 
     /// Grava os passes na ordem compilada. Com `timers`, cada passe vira uma
@@ -348,8 +360,10 @@ private:
     void add_access(u32 pass, FGTexture t, Access a) noexcept;
     [[nodiscard]] bool sort_passes() noexcept;
     void cull() noexcept;
-    [[nodiscard]] Status assign_physical(TransientTexturePool& pool) noexcept;
-    void plan_barriers() noexcept;
+    [[nodiscard]] Status prepare_plan() noexcept;
+    void plan_lifetime_events() noexcept;
+    [[nodiscard]] Status assign_physical(TransientTexturePool& pool, u32 first, u32 end) noexcept;
+    void plan_barriers(u32 first, u32 end) noexcept;
 
     std::vector<Pass>          passes_;
     std::vector<Resource>      resources_;
@@ -383,6 +397,8 @@ private:
     std::vector<u32> dies_;
 
     Stats stats_{};
+    bool segmentPlan_ = false;
+    u32 segmentFirst_ = 0, segmentEnd_ = 0;
     bool  compiled_ = false;
 };
 

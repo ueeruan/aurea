@@ -219,6 +219,8 @@ public:
         const ExternalImageDesc& img) noexcept override;
     void release_external_image(TextureHandle imported) noexcept override;
     u32 trim_external_images() noexcept override;
+    void begin_external_image_scope() noexcept override;
+    void end_external_image_scope() noexcept override;
 
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 

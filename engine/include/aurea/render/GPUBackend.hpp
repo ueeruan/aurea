@@ -702,6 +702,12 @@ public:
     /// lock. Submitted reads retain their native buffers until their fence.
     /// Decoder-owned frames remain valid and can be imported again on demand.
     virtual u32 trim_external_images() noexcept { return 0; }
+    /// A single graph can span multiple offline submissions. Its imported
+    /// handles, including ones consumed late, must survive automatic stale
+    /// import-cache eviction across that scope. Does not change explicit
+    /// destruction, GPU fence ownership, or tracked memory accounting.
+    virtual void begin_external_image_scope() noexcept {}
+    virtual void end_external_image_scope() noexcept {}
 
     /// Executa `fn(ctx)` quando a GPU concluir o frame que está sendo gravado
     /// agora. É como a camada de mídia devolve o buffer ao decoder no momento

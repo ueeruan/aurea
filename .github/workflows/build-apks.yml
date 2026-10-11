@@ -70,7 +70,7 @@ jobs:
               assert abis == {sys.argv[2]}, abis
           PY
           mkdir -p build/apk-artifact
-          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2160-export-preview-3d-${{ matrix.abi }}-ci.apk'
+          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2161-export-preview-3d-${{ matrix.abi }}-ci.apk'
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-apk-${{ matrix.abi }}
@@ -144,7 +144,8 @@ jobs:
             adb install -r build/android/app/outputs/apk/uiTest/app-uiTest.apk
             adb install -r build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
             adb logcat -c
-            adb shell am instrument -w -e aureaExportDeadlineSeconds 900 -e class com.aurea.aurea.editor.KeyflowExportDeviceTest,com.aurea.aurea.editor.PreviewVideoLatencyDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
+            # SwiftShader on the 2-core CI AVD takes ~25 s/frame for all 60 Full HD motion-blur frames; allow completion without changing quality or the app watchdog.
+            adb shell am instrument -w -e aureaExportDeadlineSeconds 1800 -e class com.aurea.aurea.editor.KeyflowExportDeviceTest,com.aurea.aurea.editor.PreviewVideoLatencyDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
             adb logcat -d -v threadtime > build/native-engine.log
             cat build/native-editing.log
             python3 engine/platform/android/verify/collect_owned_export_files.py --output build/native-editing-files.tar

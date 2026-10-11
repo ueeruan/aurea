@@ -657,7 +657,7 @@ void Impl::sample_counter(u32 index) noexcept {
 }
 
 void Impl::reclaim_stale_imports() noexcept {
-    if (importedByBuffer.empty()) return;
+    if (externalImageScopeDepth || importedByBuffer.empty()) return;
     std::vector<u64> stale;
     for (const auto& [buffer, id] : importedByBuffer) {
         const Texture* t = textures.get(id);

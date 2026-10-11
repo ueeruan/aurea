@@ -18,8 +18,10 @@
 #include "aurea/core/Log.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cfloat>
 #include <cstring>
+#include <limits>
 #include <new>
 
 namespace aurea::mtl {
@@ -1127,6 +1129,16 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
 }
 
 void Backend::release_external_image(TextureHandle imported) noexcept { destroy_texture(imported); }
+
+void Backend::begin_external_image_scope() noexcept {
+    assert(impl_->externalImageScopeDepth != std::numeric_limits<u32>::max());
+    ++impl_->externalImageScopeDepth;
+}
+
+void Backend::end_external_image_scope() noexcept {
+    assert(impl_->externalImageScopeDepth && "unbalanced external image scope");
+    if (impl_->externalImageScopeDepth) --impl_->externalImageScopeDepth;
+}
 
 u32 Backend::trim_external_images() noexcept {
     Impl& d = *impl_;

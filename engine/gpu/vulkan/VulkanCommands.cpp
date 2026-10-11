@@ -810,7 +810,7 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         run_deferred(f);
         // Imagens importadas que ninguém usa há 10 s: a importação é soltada
         // (o decoder pode ter trocado de buffers após um seek ou fechamento).
-        if (frameNumber_ % 120 == 0) {
+        if (!externalImageScopes_ && frameNumber_ % 120 == 0) {
             std::vector<u64> stale;
             for (auto& [buf, id] : importedByBuffer_) {
                 const Texture* t = textures_.get(id);

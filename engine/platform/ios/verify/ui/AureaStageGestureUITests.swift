@@ -503,6 +503,30 @@ import UIKit
         }
     }
 
+    func testSelectedLayerCommandSearchRemainsAvailableAndAppliesEffect() throws {
+        let before = try launch("transform")
+        let section = app.otherElements["editor.sectionBar"].firstMatch
+        if section.exists {
+            let back = section.buttons.firstMatch
+            XCTAssertTrue(back.isHittable); back.tap()
+        }
+        let search = app.buttons["commandSearchOpen"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
+        XCTAssertFalse(search.label.isEmpty)
+        XCTAssertGreaterThanOrEqual(search.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(search.frame.height, 44)
+        let selected = try snapshot()
+        XCTAssertEqual(selected.selectionCount, 1)
+        XCTAssertEqual(selected.primaryID, before.primaryID)
+        try openCommandSearch("glow")
+        let effect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "command:effect:")).firstMatch
+        XCTAssertTrue(effect.waitForExistence(timeout: 5)); XCTAssertTrue(effect.isEnabled)
+        effect.tap()
+        _ = try awaitSnapshot("Selected layer search applies an effect without clearing its target") {
+            $0.effectCount == before.effectCount + 1 && $0.selectionCount == 1 && $0.primaryID == before.primaryID
+        }
+    }
+
     func testCommandSearchFindsAccentlessActionAndUndoRefreshesMagneticMode() throws {
         _ = try launch("transform")
         let before = try snapshot()
@@ -690,8 +714,11 @@ import UIKit
         try assertVisibleVideoPreview("Paused video frame")
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         XCTAssertEqual(try snapshot().corePlayhead, paused.corePlayhead)
-        let start = app.buttons["timeline.layer.start"].firstMatch
-        XCTAssertTrue(start.waitForExistence(timeout: 5)); start.tap()
+        // The actual transport goes to composition start on a long press.
+        // A tap navigates keys/markers and need not return to frame zero.
+        let start = app.buttons["transport.previous"].firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 5)); XCTAssertTrue(start.isHittable)
+        start.press(forDuration: 0.8)
         _ = try awaitSnapshot("Seek to video start settles") { $0.corePlayhead == 0 }
         try assertVisibleVideoPreview("After backward seek")
         let timeline = app.otherElements["aurea.parity.timeline"].firstMatch

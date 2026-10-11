@@ -3830,6 +3830,7 @@ void Renderer::fill_object_environment(const Layer& l, scene3d::SceneInstance& i
 }
 #include "RendererSceneExposure.inl"
 #include "RendererSceneTargets.inl"
+#include "RendererGraphSegments.inl"
 
 void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
     // Todos os snapshots (pré-composições incluídas) num buffer só do quadro.
@@ -5894,6 +5895,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     FrameStats exposureStats;
     timings.sceneExposureRecordMs = timings.sceneExposureWaitMs = 0;
     timings.sceneExposureBatches = 0;
+    timings.gpuProfileFragmented = false;
     struct CompletedSceneTargets {
         Renderer& renderer;
         std::unique_ptr<StagedSceneTarget[]> storage;
@@ -6242,8 +6244,16 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     }
 
     Status result = previewSourceStatus.ok() ? graph_.compile(pool_) : previewSourceStatus;
+    bool frameOpen = true;
+    bool segmented = false;
+    if (result.code() == Errc::OutOfDeviceMemory && settings.allowGraphSegments
+        && offscreenFrame && offscreen && offscreen->texture.valid()) {
+        result = render_segmented_graph(settings, fb, timings, frameOpen);
+        segmented = result.ok();
+        if (cached) cached->gpuFrame = fb.frameNumber;
+    }
     if (result.ok()) {
-        graph_.execute(*fb.commands, settings.gpuTimers);
+        if (!segmented) graph_.execute(*fb.commands, settings.gpuTimers);
         // Export: os planos NV12 vão para os buffers de leitura no mesmo frame.
         if (offscreen && offscreen->yReadback.valid() && offscreen->uvReadback.valid()
             && offscreen->yPlane.valid() && offscreen->uvPlane.valid()) {
@@ -6260,7 +6270,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     const u64 tRecorded = monotonic_ns();
     const bool discardPresentation = !result.ok() && !offscreenFrame
         && fb.backbuffer.valid() && backend_->can_discard_frame();
-    const Status endStatus = discardPresentation ? backend_->discard_frame() : backend_->end_frame();
+    const Status endStatus = frameOpen ? (discardPresentation ? backend_->discard_frame() : backend_->end_frame()) : OkStatus;
     if (result.code() == Errc::OutOfDeviceMemory && endStatus.ok())
         failedGraphFrame_ = backend_->last_submitted_frame();
     if (!endStatus.ok()) for (auto& target : staged.targets)
@@ -6812,6 +6822,12 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
 }
 
 void Renderer::read_timings(RenderTimings& t) noexcept {
+    if (t.gpuProfileFragmented) {
+        lastGpuPasses_ = 0;
+        t.gpuMeasured = false;
+        t.gpuTotalMs = t.gpuColorConvMs = t.gpuEffectsMs = t.gpuBlurMs = t.gpuGlowMs = t.gpuCompositeMs = t.gpuOutputMs = 0.0f;
+        return;
+    }
     f32 total = 0.0f;
     const u32 n = backend_->read_gpu_timings(timingScratch_.data(),
                                              static_cast<u32>(timingScratch_.size()), &total);

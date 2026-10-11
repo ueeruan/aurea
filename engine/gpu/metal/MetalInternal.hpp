@@ -399,6 +399,9 @@ struct Impl {
     std::unordered_map<u64, id<MTLDepthStencilState>> depthStates;
 
     std::unordered_map<void*, u64> importedByBuffer;   ///< CVPixelBufferRef → textura
+    /// A graph may consume an imported handle after many offline submissions.
+    /// Only automatic cache eviction is paused; explicit retirement stays live.
+    u32 externalImageScopeDepth = 0;
 
     // Frames
     u32 framesInFlight = 2;

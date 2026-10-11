@@ -10076,6 +10076,7 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
     // for a cold local-AI result after reopening. Only explicit preview callers
     // may present a pending map asynchronously.
     rs.finalQuality = !asPreview;
+    rs.allowGraphSegments = true;
     rs.deferLocalAi = !asPreview;
     if (asPreview) { rs.heavyScale = preview_heavy_scale(); rs.flowPolicyScale = caps_.policy().heavyScale; }
     OffscreenMeasure m;
@@ -10272,7 +10273,7 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
         }
         m.transientBytes = renderer_.graph_stats().transientBytes;
         m.gpuUsedBytes = gpu_->memory_stats().usedBytes;
-        if (offscreenTimers_ && s.ok()) {
+        if (offscreenTimers_ && s.ok() && !timings.gpuProfileFragmented) {
             // Depois do wait_idle o backend já leu os timestamps DESTE quadro.
             f32 total = 0.0f;
             m.gpuPasses = gpu_->read_gpu_timings(offscreenPasses_, 64, &total);
@@ -12220,6 +12221,7 @@ Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, 
     rs.dither = false;
     rs.gpuTimers = config_.enableTelemetry;
     rs.finalQuality = true;
+    rs.allowGraphSegments = true;
     rs.boundedSceneExposure = config_.enableBoundedSceneExposure;
     rs.cancelFlag = &c.cancelRequested;
     // Quadros EXATOS de vídeo, em sequência (o modo Playback decodifica

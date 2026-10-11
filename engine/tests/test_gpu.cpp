@@ -13191,6 +13191,7 @@ AUREA_TEST(Gpu, Text3DDepthAndBevelEditsReachTheFrame) {
 #include "TextOutlineGpu.inl"
 #include "ImmediateUploadGpu.inl"
 #include "HostRingGpu.inl"
+#include "FrameGraphSegmentsGpu.inl"
 #include "VulkanMemoryPackingGpu.inl"
 #include "TextureRetirementGpu.inl"
 

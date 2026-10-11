@@ -131,6 +131,7 @@ struct TopBarView: View {
                     }.disabled(row.locked).accessibilityValue(AureaText.t(motion ? "common_on" : "common_off"))
                         .accessibilityIdentifier("trial.layer.motionBlur")
                 }
+                searchButton()
                 linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
             } else {
             // Esconder/mostrar a caixa da seleção no preview (ela tampa o que está por baixo).

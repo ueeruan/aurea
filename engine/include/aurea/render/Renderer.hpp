@@ -353,6 +353,9 @@ struct RenderSettings {
     /// Exact captures can finish pure, unblurred groups before their 2D graph.
     /// Their immutable scene state, shadow resolution and post quality stay exact.
     bool stageUnblurredScenes = false;
+    /// Offline callers may recover whole-graph OOM with the same ordered
+    /// passes in fenced segments. Live swapchain rendering is not segmented.
+    bool allowGraphSegments = true;
     /// Incremental, opt-in offline path; authored samples and quality are kept.
     /// Mixed planes/particles and nested compositions retain the original path.
     bool boundedSceneExposure = false;
@@ -435,6 +438,8 @@ struct RenderTimings {
     f32 gpuCompositeMs = 0.0f;
     f32 gpuOutputMs = 0.0f;
     bool gpuMeasured = false;
+    /// Latest-submission queries cannot represent a memory-segmented frame.
+    bool gpuProfileFragmented = false;
 };
 
 class Renderer final : public EffectResources {
@@ -733,6 +738,8 @@ private:
     [[nodiscard]] Status render_bounded_scene_exposures(const FrameSnapshot&, const RenderSettings&,
         u32 width, u32 height, std::span<TextureHandle> textures,
         FrameStats& stats, RenderTimings& timings) noexcept;
+    [[nodiscard]] Status render_segmented_graph(const RenderSettings&, FrameBegin&,
+        RenderTimings&, bool& frameOpen) noexcept;
     void collect_resources(u64 frameNumber) noexcept;
     void read_timings(RenderTimings& t) noexcept;
 

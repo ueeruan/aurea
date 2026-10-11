@@ -114,6 +114,7 @@ struct Allocation {
     u32            memoryType = 0;
     u32            block = kInvalidIndex;   ///< kInvalidIndex = dedicada
     void*          mapped = nullptr;
+    VkResult       failure = VK_SUCCESS;  ///< original driver error on an invalid allocation
     [[nodiscard]] bool valid() const noexcept { return memory != VK_NULL_HANDLE; }
 };
 
@@ -126,7 +127,8 @@ public:
     /// `required`: propriedades obrigatórias; `preferred`: desejáveis.
     /// `hostPointer`: o chamador usa `Allocation::mapped` (buffers, staging).
     /// Imagens passam false: em 32 bits a memória delas não é mapeada no
-    /// processo (AddressSpace.hpp); em 64 bits nada muda.
+    /// processo (AddressSpace.hpp). Optional eager maps may fail, but callers
+    /// requiring a CPU pointer never receive valid, unmapped memory.
     [[nodiscard]] Allocation allocate(const VkMemoryRequirements& req, VkMemoryPropertyFlags required,
                                       VkMemoryPropertyFlags preferred, bool dedicated,
                                       const char* debugName, bool hostPointer = true) noexcept;
@@ -535,6 +537,7 @@ private:
     friend class CommandListImpl;
     friend struct BoundedCommandsTestAccess;
     friend struct DiscardFrameTestAccess;
+    friend struct SwapchainFailureTestAccess;
 
     InstanceDispatch instanceFunctions_{};
     DeviceDispatch deviceFunctions_{};

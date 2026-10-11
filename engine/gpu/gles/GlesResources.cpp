@@ -137,7 +137,8 @@ Status Backend::map_buffer(BufferHandle h, void*& pointer) noexcept {
         if (!valid) return Status{Errc::DeviceLost};
         b->pendingRead = false;
     }
-    pointer = b->cpu.data(); return d.check("map_buffer");
+    if (const auto status = d.check("map_buffer"); !status.ok()) return status;
+    pointer = b->cpu.data(); return OkStatus;
 }
 void Backend::unmap_buffer(BufferHandle h) noexcept {
     auto* b = find(impl_->buffers, h.id);

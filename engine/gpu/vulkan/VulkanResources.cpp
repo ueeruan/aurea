@@ -291,12 +291,18 @@ Result<BufferHandle> Backend::create_buffer(const BufferDesc& desc) noexcept {
             preferred = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
             break;
     }
-    b.alloc = allocator_.allocate(req, required, preferred, false, desc.debugName);
-    if (!b.alloc.valid()
-        || deviceFunctions_.vkBindBufferMemory(device_, b.buffer, b.alloc.memory, b.alloc.offset) != VK_SUCCESS) {
+    b.alloc = allocator_.allocate(req, required, preferred, false, desc.debugName,
+        desc.access != MemoryAccess::GpuOnly);
+    if (!b.alloc.valid()) {
+        deviceFunctions_.vkDestroyBuffer(device_, b.buffer, nullptr);
+        return check(b.alloc.failure == VK_SUCCESS ? VK_ERROR_OUT_OF_DEVICE_MEMORY : b.alloc.failure,
+            "memoria/mapeamento do buffer");
+    }
+    if (const Status bound = check(deviceFunctions_.vkBindBufferMemory(device_, b.buffer,
+            b.alloc.memory, b.alloc.offset), "vkBindBufferMemory"); !bound.ok()) {
         deviceFunctions_.vkDestroyBuffer(device_, b.buffer, nullptr);
         allocator_.free(b.alloc);
-        return Status{Errc::OutOfDeviceMemory, "sem memoria para buffer"};
+        return bound;
     }
     set_object_name(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<u64>(b.buffer), desc.debugName);
     return BufferHandle{buffers_.add(std::move(b))};
@@ -356,6 +362,7 @@ Status Backend::write_buffer(BufferHandle dst, usize offset, const void* data, u
 }
 
 Status Backend::map_buffer(BufferHandle buffer, void*& outPtr) noexcept {
+    outPtr = nullptr;
     Buffer* b = buffers_.get(buffer.id);
     if (!b || !b->alloc.mapped) return Errc::InvalidArgument;
     if (!(allocator_.properties().memoryTypes[b->alloc.memoryType].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
@@ -363,7 +370,8 @@ Status Backend::map_buffer(BufferHandle buffer, void*& outPtr) noexcept {
         r.memory = b->alloc.memory;
         r.offset = 0;
         r.size = VK_WHOLE_SIZE;
-        (void)deviceFunctions_.vkInvalidateMappedMemoryRanges(device_, 1, &r);
+        if (const Status visible = check(deviceFunctions_.vkInvalidateMappedMemoryRanges(device_, 1, &r),
+                "vkInvalidateMappedMemoryRanges"); !visible.ok()) return visible;
     }
     outPtr = b->alloc.mapped;
     return OkStatus;

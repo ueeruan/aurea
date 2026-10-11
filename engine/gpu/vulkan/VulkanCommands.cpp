@@ -935,6 +935,10 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         if (swapchainDirty_ && surface_) {
             if (const Status s = recreate_swapchain(); !s.ok()) {
                 AUREA_LOG_WARN("swapchain nao recriado: %s", s.message().data());
+                if (s.code() == Errc::DeviceLost) {
+                    deviceLost_ = true;
+                    return s;
+                }
             }
         }
         if (swapchain_) {
@@ -947,9 +951,13 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
                 : deviceFunctions_.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
                                        VK_NULL_HANDLE, &index);
             if (r == VK_ERROR_OUT_OF_DATE_KHR) {
-                if (recreate_swapchain().ok()) {
+                const Status recreated = recreate_swapchain();
+                if (recreated.ok()) {
                     r = deviceFunctions_.vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000ull, f.acquired,
                                               VK_NULL_HANDLE, &index);
+                } else if (recreated.code() == Errc::DeviceLost) {
+                    deviceLost_ = true;
+                    return recreated;
                 }
             }
             if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {

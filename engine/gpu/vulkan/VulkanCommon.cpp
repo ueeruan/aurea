@@ -44,6 +44,7 @@ Status check(VkResult r, const char* what) noexcept {
         case VK_ERROR_DEVICE_LOST: return Status{Errc::DeviceLost, what};
         case VK_ERROR_OUT_OF_DEVICE_MEMORY: return Status{Errc::OutOfDeviceMemory, what};
         case VK_ERROR_OUT_OF_HOST_MEMORY: return Status{Errc::OutOfMemory, what};
+        case VK_ERROR_MEMORY_MAP_FAILED: return Status{Errc::OutOfMemory, what};
         case VK_ERROR_SURFACE_LOST_KHR:
         case VK_ERROR_OUT_OF_DATE_KHR: return Status{Errc::SurfaceLost, what};
         case VK_TIMEOUT: return Status{Errc::Timeout, what};
@@ -206,6 +207,7 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
     const u32 type = find_type(req.memoryTypeBits, required, preferred);
     if (type == kInvalidIndex) {
         AUREA_LOG_ERROR("memoria: nenhum tipo compativel para '%s'", debugName ? debugName : "?");
+        out.failure = VK_ERROR_FEATURE_NOT_PRESENT;
         return out;
     }
     const VkMemoryPropertyFlags flags = props_.memoryTypes[type].propertyFlags;
@@ -223,6 +225,21 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
     const VkDeviceSize align = std::max(req.alignment, granularity_);
 
     std::lock_guard<std::mutex> lock(mutex_);
+    // Mapping can fail independently of vkAllocateMemory, especially when
+    // process address space is exhausted. Do not publish CPU buffers without
+    // a pointer or consume a slab range until its required mapping succeeds.
+    // Images may keep valid device backing after an optional eager-map failure.
+    bool mappingAttempted = false;
+    const auto map_memory = [&](VkDeviceMemory memory, void*& mapped) noexcept {
+        mappingAttempted = true;
+        void* pointer = nullptr;
+        VkResult result = deviceFunctions_->vkMapMemory(device_, memory, 0, VK_WHOLE_SIZE, 0, &pointer);
+        if (result == VK_SUCCESS && pointer) { mapped = pointer; return VK_SUCCESS; }
+        if (result == VK_SUCCESS) result = VK_ERROR_MEMORY_MAP_FAILED;
+        AUREA_LOG_WARN("memoria: vkMapMemory falhou (%s, CPU=%d, %s)",
+            result_name(result), hostPointer ? 1 : 0, debugName ? debugName : "?");
+        return result;
+    };
 
     // Grande demais para bloco: alocação dedicada (texturas 4K de vídeo,
     // anéis grandes). Subalocar isso fragmentaria o bloco inteiro.
@@ -230,13 +247,21 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
         VkMemoryAllocateInfo info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         info.allocationSize = req.size;
         info.memoryTypeIndex = type;
-        if (deviceFunctions_->vkAllocateMemory(device_, &info, nullptr, &out.memory) != VK_SUCCESS) {
+        out.failure = deviceFunctions_->vkAllocateMemory(device_, &info, nullptr, &out.memory);
+        if (out.failure != VK_SUCCESS) {
             AUREA_LOG_ERROR("memoria: dedicada de %llu bytes falhou (%s)",
                             static_cast<unsigned long long>(req.size), debugName ? debugName : "?");
             out.memory = VK_NULL_HANDLE;
             return out;
         }
-        if (mapNow) (void)deviceFunctions_->vkMapMemory(device_, out.memory, 0, VK_WHOLE_SIZE, 0, &out.mapped);
+        if (mapNow) {
+            const VkResult mapped = map_memory(out.memory, out.mapped);
+            if (mapped != VK_SUCCESS && (hostPointer || mapped == VK_ERROR_DEVICE_LOST)) {
+                deviceFunctions_->vkFreeMemory(device_, out.memory, nullptr);
+                out = Allocation{}; out.failure = mapped;
+                return out;
+            }
+        }
         out.size = req.size;
         out.memoryType = type;
         out.block = kInvalidIndex;
@@ -255,16 +280,19 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
                 const VkDeviceSize start = align_up(fr.offset, align);
                 const VkDeviceSize end = start + align_up(req.size, granularity_);
                 if (end > fr.offset + fr.size) continue;
+                if (mapNow && !b.mapped && (hostPointer || !mappingAttempted)) {
+                    const VkResult mapped = map_memory(b.memory, b.mapped);
+                    if (mapped != VK_SUCCESS && (hostPointer || mapped == VK_ERROR_DEVICE_LOST)) {
+                        out.failure = mapped;
+                        return out;
+                    }
+                }
                 // Recorta o intervalo livre: sobra antes (alinhamento) e depois.
                 const Range before{fr.offset, start - fr.offset};
                 const Range after{end, fr.offset + fr.size - end};
                 b.free.erase(b.free.begin() + static_cast<std::ptrdiff_t>(r));
                 if (after.size) b.free.insert(b.free.begin() + static_cast<std::ptrdiff_t>(r), after);
                 if (before.size) b.free.insert(b.free.begin() + static_cast<std::ptrdiff_t>(r), before);
-                // 32 bits: bloco aberto por uma imagem (sem mapa) servindo agora
-                // um buffer que escreve pela CPU — mapeia o bloco uma vez, aqui.
-                if (mapNow && !b.mapped && !address_space::map_gpu_memory_eagerly())
-                    (void)deviceFunctions_->vkMapMemory(device_, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped);
                 out.memory = b.memory;
                 out.offset = start;
                 out.size = end - start;
@@ -282,12 +310,20 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
         VkMemoryAllocateInfo info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         info.allocationSize = blockSize;
         info.memoryTypeIndex = type;
-        if (deviceFunctions_->vkAllocateMemory(device_, &info, nullptr, &nb.memory) != VK_SUCCESS) {
+        out.failure = deviceFunctions_->vkAllocateMemory(device_, &info, nullptr, &nb.memory);
+        if (out.failure != VK_SUCCESS) {
             AUREA_LOG_ERROR("memoria: bloco de %llu MB falhou",
                             static_cast<unsigned long long>(blockSize >> 20));
             return out;
         }
-        if (mapNow) (void)deviceFunctions_->vkMapMemory(device_, nb.memory, 0, VK_WHOLE_SIZE, 0, &nb.mapped);
+        if (mapNow) {
+            const VkResult mapped = map_memory(nb.memory, nb.mapped);
+            if (mapped != VK_SUCCESS && (hostPointer || mapped == VK_ERROR_DEVICE_LOST)) {
+                deviceFunctions_->vkFreeMemory(device_, nb.memory, nullptr);
+                out.failure = mapped;
+                return out;
+            }
+        }
         nb.size = blockSize;
         nb.sizeClass = tierSize;
         nb.memoryType = type;

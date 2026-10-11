@@ -313,7 +313,7 @@ jobs:
           assert source == scene_manifest['commit'] and source == scene_manifest['probeSourceCommit']
           gradle = (workspace / 'android/app/build.gradle.kts').read_text()
           version = re.search(r'versionCode\s*=\s*(\d+)', gradle)
-          assert version and int(version[1]) == 2170
+          assert version and int(version[1]) == 2171
           cache = (build / 'CMakeCache.txt').read_text()
           assert re.search(r'^AUREA_ANDROID_RUNTIME_TESTS:BOOL=ON$', cache, re.M)
           def digest(path):
@@ -384,14 +384,14 @@ jobs:
               'files': {path.relative_to(artifact).as_posix(): {'bytes': path.stat().st_size, 'sha256': digest(path)}
                         for path in sorted(artifact.rglob('*')) if path.is_file()}}
           (artifact / 'manifest.json').write_text(json.dumps(manifest, indent=2))
-          print(json.dumps({'build': manifest['build'], 'sourceCommit': source, 'artifact': 'android-native-gpu-runtime-2170',
+          print(json.dumps({'build': manifest['build'], 'sourceCommit': source, 'artifact': 'android-native-gpu-runtime-2171',
                             'binary': manifest['binary']['name'], 'deviceExecution': 'not-run'}))
           PY
       - name: Preserve the target-only native GPU regression executable
         if: matrix.revision == 'target'
         uses: actions/upload-artifact@v4
         with:
-          name: android-native-gpu-runtime-2170
+          name: android-native-gpu-runtime-2171
           path: build/android-native-gpu-runtime-arm64
           if-no-files-found: error
           retention-days: 14

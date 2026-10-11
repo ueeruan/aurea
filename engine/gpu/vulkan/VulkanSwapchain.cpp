@@ -82,6 +82,7 @@ Status Backend::recreate_swapchain() noexcept {
 
 Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     if (!surface_) return Status{Errc::SurfaceLost, "sem superficie"};
+    swapchainDirty_ = true;
 
     VkSurfaceCapabilitiesKHR caps{};
     if (const Status s = check(instanceFunctions_.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps),
@@ -90,9 +91,14 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     }
 
     u32 fc = 0;
-    instanceFunctions_.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &fc, nullptr);
+    if (const Status s = check(instanceFunctions_.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &fc, nullptr),
+            "vkGetPhysicalDeviceSurfaceFormatsKHR count"); !s.ok()) return s;
+    if (!fc) return Status{Errc::UnsupportedFormat, "superficie sem formatos"};
     std::vector<VkSurfaceFormatKHR> formats(fc);
-    instanceFunctions_.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &fc, formats.data());
+    if (const Status s = check(instanceFunctions_.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &fc, formats.data()),
+            "vkGetPhysicalDeviceSurfaceFormatsKHR"); !s.ok()) return s;
+    if (!fc || fc > formats.size()) return Status{Errc::SurfaceLost, "formatos da superficie mudaram"};
+    formats.resize(fc);
     // UNORM, não SRGB: a codificação sRGB é do passe de saída (a mesma função
     // do export). Metade em hardware e metade em shader faria o preview e o
     // arquivo divergirem.
@@ -164,6 +170,9 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     VkSwapchainKHR created = VK_NULL_HANDLE;
     if (const Status s = check(deviceFunctions_.vkCreateSwapchainKHR(device_, &info, nullptr, &created), "vkCreateSwapchainKHR");
         !s.ok()) {
+        // Vulkan retires oldSwapchain when creation is called, including a
+        // failed creation. A later acquire/retry must never reuse that handle.
+        destroy_swapchain();
         return s;
     }
     // O antigo (e suas views) sai só depois que o novo existe: foi passado como
@@ -175,11 +184,22 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     swapTransform_ = transform;
     swapCapsTransform_ = caps.currentTransform;
     swapchainSuboptimal_ = false;
+    const auto abandon = [&](Status failure) noexcept {
+        destroy_swapchain();
+        // Remain retryable, with no partially initialized image/semaphore set.
+        swapchainDirty_ = true;
+        return failure;
+    };
 
     u32 count = 0;
-    deviceFunctions_.vkGetSwapchainImagesKHR(device_, swapchain_, &count, nullptr);
+    if (const Status s = check(deviceFunctions_.vkGetSwapchainImagesKHR(device_, swapchain_, &count, nullptr),
+            "vkGetSwapchainImagesKHR count"); !s.ok()) return abandon(s);
+    if (!count) return abandon(Status{Errc::SurfaceLost, "swapchain sem imagens"});
     std::vector<VkImage> images(count);
-    deviceFunctions_.vkGetSwapchainImagesKHR(device_, swapchain_, &count, images.data());
+    if (const Status s = check(deviceFunctions_.vkGetSwapchainImagesKHR(device_, swapchain_, &count, images.data()),
+            "vkGetSwapchainImagesKHR"); !s.ok()) return abandon(s);
+    if (!count || count > images.size()) return abandon(Status{Errc::SurfaceLost, "imagens do swapchain mudaram"});
+    images.resize(count);
 
     VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     for (VkImage img : images) {
@@ -197,15 +217,15 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = chosen.format;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        if (deviceFunctions_.vkCreateImageView(device_, &vi, nullptr, &t.view) != VK_SUCCESS) {
-            return Status{Errc::SurfaceLost, "view do swapchain"};
-        }
+        if (const Status s = check(deviceFunctions_.vkCreateImageView(device_, &vi, nullptr, &t.view),
+                "vkCreateImageView swapchain"); !s.ok()) return abandon(s);
         swapTextures_.push_back(textures_.add(std::move(t)));
         // O semáforo de "render terminou" é POR IMAGEM: um só para todas
         // falha sob carga (a apresentação da imagem N ainda o espera quando o
         // frame N+1 já quer sinalizá-lo), e o sintoma é um frame rasgado.
         VkSemaphore sem = VK_NULL_HANDLE;
-        (void)deviceFunctions_.vkCreateSemaphore(device_, &si, nullptr, &sem);
+        if (const Status s = check(deviceFunctions_.vkCreateSemaphore(device_, &si, nullptr, &sem),
+                "vkCreateSemaphore swapchain"); !s.ok()) return abandon(s);
         renderDone_.push_back(sem);
     }
     swapchainDirty_ = false;

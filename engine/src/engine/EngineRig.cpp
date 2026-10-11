@@ -149,8 +149,8 @@ u32 Engine::rig_auto_humanoid(u64 layerId) noexcept {
     Layer* l = rig_layer(comp, layerId);
     if (!l) return 0;
     const auto it = images_.find(l->source.pack());
-    if (it == images_.end() || !it->second.width || !it->second.height) return 0;
-    const ImagePixels& px = it->second;
+    if (it == images_.end() || !it->second || !it->second->width || !it->second->height) return 0;
+    const ImagePixels& px = *it->second;
     // A caixa do que aparece (alfa > 16), amostrada em no máximo ~256×256;
     // foto sem transparência = a imagem inteira.
     const u32 w = px.width, h = px.height;

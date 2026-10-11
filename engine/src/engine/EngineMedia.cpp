@@ -130,16 +130,16 @@ void clamp_to_source(Layer& l, i64 sourceFrames) {
 }
 
 /// Tamanho da mídia que a camada mostra agora (vídeo: o asset; imagem: pixels).
-bool current_media_size(const Project& project, const std::unordered_map<u64, ImagePixels>& images,
+bool current_media_size(const Project& project, const std::unordered_map<u64, std::shared_ptr<const ImagePixels>>& images,
                         const Layer& l, f32& w, f32& h) {
     if (const Asset* a = project.asset(l.source); a && a->video.width > 0 && a->video.height > 0) {
         w = static_cast<f32>(a->video.width);
         h = static_cast<f32>(a->video.height);
         return true;
     }
-    if (const auto it = images.find(l.source.pack()); it != images.end() && it->second.width > 0) {
-        w = static_cast<f32>(it->second.width);
-        h = static_cast<f32>(it->second.height);
+    if (const auto it = images.find(l.source.pack()); it != images.end() && it->second && it->second->width > 0) {
+        w = static_cast<f32>(it->second->width);
+        h = static_cast<f32>(it->second->height);
         return true;
     }
     return false;
@@ -252,7 +252,7 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
     asset.video.height = height;
     const AssetId assetId = project_->add_asset(std::move(asset));
 
-    images_[assetId.pack()] = std::move(px);
+    images_[assetId.pack()] = std::make_shared<const ImagePixels>(std::move(px));
 
     l = comp->layer(id);
     if (!l) return Status{Errc::InvalidState, "camada sumiu"};

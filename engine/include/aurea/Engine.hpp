@@ -1845,7 +1845,7 @@ private:
         u64 session = 0;
         std::unordered_map<u64, Asset> assets;
         std::unordered_map<u64, std::shared_ptr<const Composition>> compositions;
-        std::unordered_map<u64, ImagePixels> images;
+        std::unordered_map<u64, std::shared_ptr<const ImagePixels>> images;
         std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models;
         std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris;
         std::unordered_map<u64, std::shared_ptr<const CubeLut>> luts;
@@ -1876,7 +1876,12 @@ private:
         std::vector<LayerAnimator> layerAnimators;   ///< animadores de camada copiados
         std::vector<Track> layerAnimTracks;          ///< trilhas deles (effectIndex = posição na cópia)
     } clipboard_;
-    std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado
+    /// Por AssetId empacotado. Pixels IMUTÁVEIS e compartilhados: trocar uma
+    /// imagem cria outro objeto. O export (snapshot offline), o colar e a
+    /// recuperação seguram ponteiros, não cópias — copiar todas as fotos do
+    /// projeto na largada do export estourava o orçamento ("erro 9") em
+    /// projetos com muitas imagens.
+    std::unordered_map<u64, std::shared_ptr<const ImagePixels>> images_;
     /// Modelos 3D carregados, por AssetId. Um por asset, qualquer número de
     /// layers (ModelInstance) apontando para ele.
     std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models_;

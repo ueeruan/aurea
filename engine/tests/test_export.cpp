@@ -1738,6 +1738,30 @@ AUREA_TEST(Export, HeatReducesParallelismNeverQuality) {
     AUREA_CHECK((flags[1] & Engine::kExportThermalReduced) != 0);
 }
 
+AUREA_TEST(Export, ImageHeavyProjectExportsWithoutCopyingEveryPhoto) {
+    // Beta 0.1.4 BETA 2: a largada do motor novo copiava TODAS as imagens do
+    // projeto para o snapshot offline e recusava com BudgetExceeded (erro 9)
+    // quando a cópia não cabia no espaço de mídia restante. Projetos antigos,
+    // com muitas fotos, não exportavam. Aqui as imagens ocupam mais da metade
+    // do espaço: o snapshot compartilha os pixels e o export termina.
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg; cfg.width = 320; cfg.height = 180;
+    cfg.pattern = SyntheticPattern::MovingSquare;
+    Rig r(cfg, 30.0, 3, 1);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    constexpr u32 w = 4096, h = 2304;   // ~37,7 MB cada; 4 = ~151 MB
+    std::vector<u8> rgba(static_cast<usize>(w) * h * 4);
+    for (usize i = 0; i < rgba.size(); i += 4) { rgba[i] = static_cast<u8>(i >> 12); rgba[i + 1] = 90; rgba[i + 2] = 200; rgba[i + 3] = 255; }
+    u32 imported = 0;
+    for (int i = 0; i < 4; ++i) if (r.e.import_image(rgba.data(), w, h, "foto").ok()) ++imported;
+    rgba.clear(); rgba.shrink_to_fit();
+    AUREA_CHECK_EQ(imported, 4u);
+    const Outcome o = run_export(r, 180, 0.0, false, 300);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK(o.p.result == Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(3));
+}
+
 AUREA_TEST(Export, MemoryWarningReducesAdmissionWithoutChangingFramesOrAudio) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;

@@ -239,7 +239,7 @@ struct Engine::ExportContext {
     std::unique_ptr<Project> frozenProject;
     export_recovery::Package recovery;
     std::string recoveryPath;
-    std::unordered_map<u64, ImagePixels> frozenImages;
+    std::unordered_map<u64, std::shared_ptr<const ImagePixels>> frozenImages;   ///< ponteiros, sem copiar pixels
     std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> frozenModels;
     std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> frozenHdris;
     std::unordered_map<u64, std::shared_ptr<const CubeLut>> frozenLuts;
@@ -1667,7 +1667,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
             if ((a->video.width && px.width != a->video.width)
                 || (a->video.height && px.height != a->video.height)) { ++missing; continue; }
             if (px.rgba.capacity() + sizeof(px) > source_asset_room_locked()) { ++missing; continue; }
-            images_[key] = std::move(px);
+            images_[key] = std::make_shared<const ImagePixels>(std::move(px));
         }
         if (missing) AUREA_LOG_WARN("%u imagem(ns) do projeto nao puderam ser abertas", missing);
         missingTotal += missing;
@@ -8145,7 +8145,7 @@ u64 Engine::source_asset_room_locked() const noexcept {
         config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
     u64 room = std::min<u64>(budget / 3, 256ull << 20);
     auto consume = [&room](u64 bytes) { room -= std::min(room, bytes); };
-    for (const auto& [key, image] : images_) consume(image.rgba.capacity() + sizeof(image));
+    for (const auto& [key, image] : images_) if (image) consume(image->rgba.capacity() + sizeof(*image));
     for (const auto& [key, model] : models_) if (model) consume(scene3d::scene_asset_memory_bytes(*model));
     for (const auto& [key, hdri] : hdris_) if (hdri) consume(hdri->rgb.capacity() * sizeof(f32) + sizeof(*hdri));
     return room;
@@ -8179,7 +8179,7 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
     asset.video.height = height;
     const AssetId assetId = project_->add_asset(std::move(asset));
 
-    images_[assetId.pack()] = std::move(px);
+    images_[assetId.pack()] = std::make_shared<const ImagePixels>(std::move(px));
 
     const LayerId lid = comp->add_layer(LayerKind::Image, name ? std::string(name) : std::string());
     Layer* l = comp->layer(lid);
@@ -9519,7 +9519,7 @@ std::shared_ptr<const scene3d::SceneAsset> Engine::model_lookup(void* self, Asse
 const ImagePixels* Engine::image_lookup(void* self, AssetId id) {
     Engine* e = static_cast<Engine*>(self);
     const auto it = e->images_.find(id.pack());
-    return it == e->images_.end() ? nullptr : &it->second;
+    return it == e->images_.end() ? nullptr : it->second.get();
 }
 
 // =============================================================================
@@ -11468,8 +11468,8 @@ u32 Engine::query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out,
         const u64 key = l->source.pack();
         if (a->kind == AssetKind::Image) {
             const auto it = images_.find(key);
-            if (it == images_.end()) return 0;
-            if (!thumbs_.image(key, it->second.rgba.data(), it->second.width, it->second.height, height, img)) return 0;
+            if (it == images_.end() || !it->second) return 0;
+            if (!thumbs_.image(key, it->second->rgba.data(), it->second->width, it->second->height, height, img)) return 0;
         } else if (a->kind == AssetKind::Video) {
             const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
             const f64 src = std::max(0.0, l->source_frame(FrameIndex{timelineFrame}));
@@ -12224,15 +12224,11 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->compFps = comp->fps();
         // Freeze with the established serializer; the editor document and its
         // historical file formats are never rewritten by export.
-        u64 imageBytes = 0;
+        // Imagens entram no snapshot por ponteiro (pixels imutáveis): nenhum
+        // byte novo. Antes a largada copiava TODAS as fotos e recusava com
+        // BudgetExceeded (erro 9) quando a cópia não cabia — projetos antigos,
+        // cheios de imagens, não exportavam mais com o motor novo.
         const u64 room = source_asset_room_locked();
-        const u64 limit = std::min<u64>(caps_.memory_budget_bytes() / 4, room);
-        for (const auto& [id, px] : images_) {
-            (void)id;
-            if (px.rgba.size() > limit - std::min(limit, imageBytes))
-                return Status{Errc::BudgetExceeded, "memoria insuficiente para o snapshot offline de imagens"};
-            imageBytes += px.rgba.size();
-        }
         Status sourceStatus;
         std::unordered_map<std::string, std::string> preparedPaths;
         const Status captured = export_recovery::capture(*project_, project_->timeline().current(), settings,
@@ -12253,7 +12249,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->frozenModels = models_;
         ctx->frozenHdris = hdris_;
         ctx->frozenLuts = cubeLuts_;
-        ctx->frozenAssetBudget = room - imageBytes;
+        ctx->frozenAssetBudget = room;
         if (config_.enableExportRecovery) {
             ctx->recovery.outputPath = outputPath;
             ctx->recoveryPath = std::string(outputPath) + ".aurea-export";
@@ -12795,7 +12791,7 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
     const Status result = c.offline->render(*c.frozenProject, c.recovery.composition, time, target,
         [](void* p, AssetId id) -> const ImagePixels* {
             const auto& ctx = *static_cast<ExportContext*>(p);
-            if (const auto it = ctx.frozenImages.find(id.pack()); it != ctx.frozenImages.end()) return &it->second;
+            if (const auto it = ctx.frozenImages.find(id.pack()); it != ctx.frozenImages.end()) return it->second.get();
             return nullptr;
         }, &c, settings, gpuFrame);
     c.renderNs.fetch_add(monotonic_ns() - begin, std::memory_order_relaxed);

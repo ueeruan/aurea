@@ -644,11 +644,13 @@ AUREA_TEST(PreviewGraphLifecycle, ColdCpuResourcesRemainOwnedAndReturnExactCaptu
     AUREA_CHECK(result.result.ok()); AUREA_CHECK(exact(result));
     AUREA_CHECK(elapsed>5.2 && elapsed<30.);
     AUREA_CHECK_EQ(fixture.gate.calls.load(),1u); AUREA_CHECK_EQ(readbacks.load(),1u);
-    AUREA_CHECK_EQ(fixture.backend->framesSubmitted,1u);
+    // Small exact HDRI capture stages its pure sky scene, then submits the
+    // final composition. Both are actual capture submissions, without WSI.
+    AUREA_CHECK_EQ(fixture.backend->framesSubmitted,2u);
     AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
     AUREA_CHECK(!fixture.engine.renderer().scene_renderer().environment_pending());
     AUREA_CHECK_EQ(fixture.engine.read_status().previewDenominator,1u);
-    std::printf("\n    capture CPU resources: seconds=%.3f worker_calls=%u one_caller=1 readbacks=%u exact_mock_rgba=%u main_submissions=%u acquires=%u presents=%u\n",
+    std::printf("\n    capture CPU resources: seconds=%.3f worker_calls=%u one_caller=1 readbacks=%u exact_mock_rgba=%u actual_total_submissions=%u staged_scene=1 final_composition=1 acquires=%u presents=%u\n",
         elapsed,fixture.gate.calls.load(),readbacks.load(),exact(result),fixture.backend->framesSubmitted,
         fixture.backend->acquires,fixture.backend->presents);
 }
@@ -656,10 +658,12 @@ AUREA_TEST(PreviewGraphLifecycle, ColdCpuResourcesRemainOwnedAndReturnExactCaptu
 AUREA_TEST(PreviewGraphLifecycle, CpuPreparationDoesNotTurnAStalledFirstGpuFenceIntoThirtySeconds) {
     using namespace preview_capture_resource_test;
     Fixture fixture; AUREA_CHECK(fixture.ok); if (!fixture.ok) return;
-    std::atomic<u32> polls{0},readbacks{0}; std::atomic<u64> firstPoll{0};
+    std::atomic<u32> polls{0},readbacks{0},nonzeroBoundedStagePolls{0}; std::atomic<u64> firstPoll{0};
     fixture.backend->beforeWaitFrame=[&](u64 frame,u64 timeout)->Status {
         if (frame && !firstPoll.load()) firstPoll=monotonic_ns();
-        AUREA_CHECK_EQ(timeout,0ull); ++polls;
+        AUREA_CHECK_EQ(frame,1ull); AUREA_CHECK(timeout<=100'000'000ull);
+        if (timeout) ++nonzeroBoundedStagePolls;
+        ++polls;
         return Errc::Timeout;
     };
     fixture.backend->beforeReadTexture=[&](TextureHandle,void*,u32) { ++readbacks; return OkStatus; };
@@ -673,14 +677,16 @@ AUREA_TEST(PreviewGraphLifecycle, CpuPreparationDoesNotTurnAStalledFirstGpuFence
     AUREA_CHECK(finished); const auto result=capture.get();
     const u64 ended=monotonic_ns(); const f64 gpuWait=(ended-firstPoll.load())/1.e9;
     AUREA_CHECK_EQ(result.result.code(),Errc::Timeout);
-    AUREA_CHECK(firstPoll.load()>started+5'000'000'000ull);
+    AUREA_CHECK(firstPoll.load()>started+5'200'000'000ull);
     AUREA_CHECK(gpuWait>=3.8 && gpuWait<6.0);
+    AUREA_CHECK(ended-started<=30'000'000'000ull);
     AUREA_CHECK_EQ(fixture.backend->framesSubmitted,1u);
-    AUREA_CHECK(polls.load()>20); AUREA_CHECK_EQ(readbacks.load(),0u);
+    AUREA_CHECK(polls.load()>20); AUREA_CHECK(nonzeroBoundedStagePolls.load()>=1);
+    AUREA_CHECK_EQ(readbacks.load(),0u);
     AUREA_CHECK(result.pixels.empty());
     AUREA_CHECK_EQ(fixture.backend->acquires,0u); AUREA_CHECK_EQ(fixture.backend->presents,0u);
-    std::printf("\n    capture CPU then stalled GPU: total_seconds=%.3f actual_gpu_inactivity_seconds=%.3f polls=%u completed=0 readbacks=%u main_submissions=%u\n",
-        (ended-started)/1.e9,gpuWait,polls.load(),readbacks.load(),fixture.backend->framesSubmitted);
+    std::printf("\n    capture CPU then stalled GPU: total_seconds=%.3f actual_gpu_inactivity_seconds=%.3f polls=%u nonzero_bounded_stage_polls=%u completed=0 readbacks=%u actual_total_submissions=%u\n",
+        (ended-started)/1.e9,gpuWait,polls.load(),nonzeroBoundedStagePolls.load(),readbacks.load(),fixture.backend->framesSubmitted);
 }
 
 AUREA_TEST(PreviewGraphLifecycle, PendingCpuResourcesKeepTheFixedRequestHardCeilingWithoutFakeProgress) {

@@ -193,3 +193,64 @@ AUREA_TEST(ExportWatchdog, SafeModeLevelTwoAsksForSoftwareAndIsTheLastRetry) {
     AUREA_CHECK(clamped.finished && clamped.p.result == Errc::Ok);
     AUREA_CHECK(r.cap.video.preferSoftware);
 }
+
+// Exercise the complete serial export session, not just the codec recipe:
+// frozen project, render/readback, native sink boundary, final validation and
+// staged publication must still work when the compatibility retry is selected.
+AUREA_TEST(ExportSerialGpu, SafeModeTwoPublishesValidatedFramesUsingH264WithoutReducingRequestedBitrate) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string source = "aurea_serial_retry_source.bin";
+    struct Cleanup {
+        std::string source;
+        ~Cleanup() {
+            fileio::remove_file(source);
+            for (const auto& path : {"nao-usado.mp4", "nao-usado.mp4.aurea-export", "nao-usado.mp4.aurea-export.project.aurea"})
+                fileio::remove_file(path);
+        }
+    } cleanup{source};
+    const char identity[] = "stable identity for serial compatibility retry";
+    AUREA_CHECK(fileio::write_atomic(source, identity, sizeof(identity)).ok());
+    SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+    cfg.pattern = SyntheticPattern::MovingSquare; cfg.audioRate = 44100; cfg.audioSeconds = 1;
+    Rig r(cfg, 30, 8, 4, nullptr, nullptr, 0, false, source.c_str(),
+          ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, true);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.cap.keepFrames = true;
+    r.cap.persistFinishMarker = true;
+    r.cap.validateCapturedPlanes = true;
+    ExportSettings settings;
+    settings.height = 64; settings.fps = 30; settings.dither = false;
+    settings.videoCodec = ExportCodec::HEVC;
+    settings.videoBitrateMbps = 13;
+    settings.safeMode = 2;
+    const auto result = run_export_with(r, settings, 30);
+    AUREA_CHECK(result.finished);
+    AUREA_CHECK_EQ(result.p.result, Errc::Ok);
+    AUREA_CHECK_EQ(result.p.framesDone, 8u);
+    AUREA_CHECK_EQ(result.p.framesTotal, 8u);
+    AUREA_CHECK_EQ(result.p.pipelineDepth, 1u);
+    AUREA_CHECK_EQ((result.p.flags >> 8) & 15u, 0u);
+    AUREA_CHECK((result.p.flags & Engine::kExportSafeMode) != 0);
+    AUREA_CHECK_EQ(export_retry_from_flags(result.p.flags), 0u);
+    AUREA_CHECK_EQ(r.cap.video.codec, ExportCodec::H264);
+    AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
+    AUREA_CHECK(r.cap.video.preferSoftware);
+    AUREA_CHECK_EQ(r.cap.video.bitrateBps, 13'000'000u);
+    AUREA_CHECK(r.cap.video.validateBeforePublish);
+    AUREA_CHECK(r.cap.finished);
+    AUREA_CHECK_EQ(r.cap.validationCalls, 1u);
+    AUREA_CHECK_EQ(r.cap.frames.size(), usize{8});
+    if (r.cap.frames.size() == 8) AUREA_CHECK(r.cap.frames.front() != r.cap.frames.back());
+    AUREA_CHECK(r.cap.ptsMonotonic && r.cap.audioContiguous);
+    AUREA_CHECK_EQ(r.cap.pts.size(), usize{8});
+    if (r.cap.pts.size() == 8) {
+        AUREA_CHECK_EQ(r.cap.pts.front(), i64{0});
+        AUREA_CHECK_EQ(r.cap.pts.back(), i64{233333});
+    }
+    AUREA_CHECK_EQ(r.cap.audioFrames, i64{12800});
+    std::vector<u8> published;
+    AUREA_CHECK(fileio::read_all("nao-usado.mp4", published, 1024));
+    const char marker[] = "finished benchmark sink";
+    AUREA_CHECK_EQ(published.size(), sizeof(marker));
+    if (published.size() == sizeof(marker)) AUREA_CHECK(std::memcmp(published.data(), marker, sizeof(marker)) == 0);
+}

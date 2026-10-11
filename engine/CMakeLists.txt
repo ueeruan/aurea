@@ -440,11 +440,11 @@ if(AUREA_PLATFORM_ANDROID)
         target_link_libraries(aurea_gl_video_color_probe PRIVATE aurea_core android log dl EGL GLESv3)
         add_executable(aurea_export_probe tests/android_export_probe.cpp platform/android/MediaCodecExport.cpp)
         target_include_directories(aurea_export_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
-        target_link_libraries(aurea_export_probe PRIVATE aurea_core android log mediandk EGL GLESv3)
+        target_link_libraries(aurea_export_probe PRIVATE aurea_core android log mediandk)
         add_executable(aurea_encoder_eos_probe tests/android_encoder_eos_probe.cpp
                        platform/android/MediaCodecExport.cpp)
         target_include_directories(aurea_encoder_eos_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
-        target_link_libraries(aurea_encoder_eos_probe PRIVATE aurea_core android log mediandk EGL GLESv3)
+        target_link_libraries(aurea_encoder_eos_probe PRIVATE aurea_core android log mediandk)
         target_link_options(aurea_encoder_eos_probe PRIVATE
             -Wl,--wrap=AMediaCodec_dequeueOutputBuffer,--wrap=fsync,--wrap=close)
     endif()

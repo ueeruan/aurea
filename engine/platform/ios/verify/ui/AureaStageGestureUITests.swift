@@ -144,6 +144,24 @@ import UIKit
     func testKeyflowPlainTextExportAt1080p() throws {
         try assertKeyflowTextExport("keyflow-simple-text")
     }
+    func testKeyflowTextExportsConsecutivelyAtMultipleResolutions() throws {
+        let initial = try launch("keyflow-multiple-exports")
+        XCTAssertEqual(initial.compositionWidth, 1920)
+        XCTAssertEqual(initial.compositionHeight, 1080)
+        let back = app.buttons["Back (clear the selection)"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        // Keep one application/engine/project alive. A relaunch would hide
+        // leaked encoder references or an export context left in a busy state.
+        for resolution in ["480p", "720p", "1080p", "1080p"] {
+            try assertCurrentProjectExports(resolution: resolution)
+            let close = app.buttons["Close"].firstMatch
+            XCTAssertTrue(close.waitForExistence(timeout: 5)); close.tap()
+            XCTAssertTrue(app.buttons["Export"].firstMatch.waitForExistence(timeout: 5))
+        }
+    }
+    func testKeyflowVideoWithTextExportsAt1080p() throws {
+        try assertKeyflowTextExport("keyflow-video-text-export")
+    }
     private func assertKeyflowTextExport(_ scene: String) throws {
         let snapshot = try launch(scene)
         XCTAssertEqual(snapshot.compositionWidth, 1920)
@@ -152,8 +170,16 @@ import UIKit
         // que aparece ao tirar a seleção.
         let back = app.buttons["Back (clear the selection)"].firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        try assertCurrentProjectExports(resolution: "1080p")
+    }
+    private func assertCurrentProjectExports(resolution: String) throws {
         let openExport = app.buttons["Export"].firstMatch
         XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
+        let resolutionOption = app.buttons[resolution].firstMatch
+        XCTAssertTrue(resolutionOption.waitForExistence(timeout: 5))
+        XCTAssertTrue(resolutionOption.isEnabled, "The test resolution must be available")
+        if !resolutionOption.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(resolutionOption.isHittable); resolutionOption.tap()
         // The editor toolbar remains visible above the export sheet. Its Export
         // button opens the sheet; the wide footer button starts the encoder.
         // Choosing firstMatch taps the toolbar again and never starts export.
@@ -1694,7 +1720,7 @@ import UIKit
     private func launch(_ scene: String) throws -> Snapshot {
         runID = UUID().uuidString
         app = XCUIApplication(bundleIdentifier: "com.aurea.aurea")
-        if ["motion-blur-export", "keyflow-simple-text"].contains(scene) {
+        if ["motion-blur-export", "keyflow-simple-text", "keyflow-multiple-exports", "keyflow-video-text-export"].contains(scene) {
             // Reproduce the measured device budget from the failed Metal run,
             // independently of the free RAM on this particular CI runner.
             app.launchArguments.append("--aurea-memory-budget-mb=163")
@@ -1702,8 +1728,8 @@ import UIKit
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID
-        if ["video-move", "playback-stress", "clip-edit"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
-        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit"].contains(scene) ? 120 : 30
+        if ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
+        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene) ? 120 : 30
         app.launch()
         guard stage.waitForExistence(timeout: preparationTimeout) else {
             XCTFail("Read-only DEBUG preview probe is missing; inspect the app configuration and INTEGRATION.md")
@@ -1714,6 +1740,7 @@ import UIKit
         }
         XCTAssertTrue(state.coreStarted, state.coreError)
         if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) }
+        else if scene == "keyflow-video-text-export" { XCTAssertEqual(state.layerCount, 2) }
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
         else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
         else if scene == "parent-new-null" { XCTAssertEqual(state.layerCount, 2) }

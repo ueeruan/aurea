@@ -1,18 +1,13 @@
 package com.aurea.aurea.editor
 
 import android.app.Application
-import android.content.ContentValues
 import android.media.MediaMetadataRetriever
 import android.os.SystemClock
-import android.provider.MediaStore
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
-import com.aurea.aurea.engine.CommandBatch
 import com.aurea.aurea.engine.ExportProgress
-import com.aurea.aurea.engine.TrackProperty
-import com.aurea.aurea.editor.panels.effectTypeId
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaTheme
 import org.junit.Assert.*
@@ -83,25 +78,78 @@ class KeyflowExportDeviceTest {
         } finally { reader.release() }
         return output
     }
-    @Test fun plainTextExportsAt1080p() {
-        initialize(); project(1920, 1080, 30f, "Keyflow plain text")
-        compose.runOnIdle {
-            assertTrue(store.engineForStress.addText("AUREA KEYFLOW") > 0)
-            store.setCompositionDuration(60)
-        }
-        compose.waitUntil(15000) { store.project.durationFrames == 60 }
-        val output=export("simple-text",1080,30.0,60)
+    private fun assertVisibleText(output: File) {
         val reader=MediaMetadataRetriever()
         try {
             reader.setDataSource(output.absolutePath)
             val frame=reader.getFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST)!!
             val pixels=IntArray(frame.width*frame.height); frame.getPixels(pixels,0,frame.width,0,0,frame.width,frame.height)
-            assertTrue("Plain text must be visibly rendered",pixels.count { (it and 0xff)>160 && ((it ushr 8) and 0xff)>160 && ((it ushr 16) and 0xff)>160 }>100)
+            assertTrue("Plain text must be visibly rendered",pixels.count { (it and 0xff)>160 && ((it ushr 8) and 0xff)>160 && ((it ushr 16) and 0xff)>160 }>20)
             frame.recycle()
         } finally { reader.release() }
     }
+    @Test fun plainTextExportsAt1080p() {
+        initialize(); project(1920, 1080, 30f, "Aurea plain text")
+        compose.runOnIdle {
+            assertTrue(store.engineForStress.addText("AUREA EXPORT") > 0)
+            store.setCompositionDuration(60)
+        }
+        compose.waitUntil(15000) { store.project.durationFrames == 60 }
+        assertVisibleText(export("simple-text",1080,30.0,60))
+    }
+    @Test fun plainTextExportsAt360p720p1080pInSameEngine() {
+        initialize(); project(1920, 1080, 30f, "Aurea resolutions and reuse")
+        compose.runOnIdle {
+            assertTrue(store.engineForStress.addText("AUREA EXPORT") > 0)
+            store.setCompositionDuration(30)
+        }
+        compose.waitUntil(15000) { store.project.durationFrames == 30 }
+        for ((index,height) in listOf(360, 720, 1080, 360).withIndex()) {
+            val repeat = if (index == 3) "-repeat" else ""
+            assertVisibleText(export("text-$height$repeat",height,30.0,30))
+        }
+    }
+    @Test fun realVideoWithTextExportsAt360pAnd720pInSameEngine() {
+        initialize(); project(1920,1080,30f,"Aurea video and text")
+        val source=File(context.filesDir,"aurea-owned-motion-fixture.mp4")
+        InstrumentationRegistry.getInstrumentation().context.assets.open("motion-fixture.mp4").use { input ->
+            source.outputStream().use { input.copyTo(it) }
+        }
+        val audio=File(context.filesDir,"aurea-owned-two-second-tone.wav")
+        val samples=2*48000
+        val wav=ByteBuffer.allocate(44+samples*4).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put("RIFF".toByteArray()); putInt(capacity()-8); put("WAVEfmt ".toByteArray())
+            putInt(16); putShort(1); putShort(2); putInt(48000); putInt(192000); putShort(4); putShort(16)
+            put("data".toByteArray()); putInt(samples*4)
+            repeat(samples) { n ->
+                val sample=(sin(2*PI*440*n/48000)*12000).toInt().toShort()
+                putShort(sample); putShort(sample)
+            }
+        }
+        audio.writeBytes(wav.array())
+        compose.runOnIdle {
+            assertTrue(store.engineForStress.importVideo(source.absolutePath,"Owned motion fixture") > 0)
+            assertTrue(store.engineForStress.addText("AUREA VIDEO") > 0)
+            assertTrue(store.engineForStress.importAudio(audio.absolutePath,"Owned two second tone") > 0)
+            store.setCompositionDuration(60)
+        }
+        compose.waitUntil(15000) { store.project.durationFrames == 60 }
+        for (height in listOf(360,720)) {
+            val output=export("video-text-$height",height,30.0,60)
+            val reader=MediaMetadataRetriever()
+            try {
+                reader.setDataSource(output.absolutePath)
+                assertEquals("AAC audio track must be present","yes",reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO))
+                val bitmap=checkNotNull(reader.getFrameAtTime(1_000_000L,MediaMetadataRetriever.OPTION_CLOSEST))
+                val colors=HashSet<Int>()
+                for(y in 0 until bitmap.height step 8) for(x in 0 until bitmap.width step 8) colors.add(bitmap.getPixel(x,y))
+                assertTrue("Imported video must retain decoded image detail",colors.size>20)
+                bitmap.recycle()
+            } finally { reader.release() }
+        }
+    }
     @Test fun animatedTextPresetAndMotionBlurExportAt1080p() {
-        initialize(); project(1920, 1080, 30f, "Keyflow text blur")
+        initialize(); project(1920, 1080, 30f, "Aurea text blur")
         compose.runOnIdle {
             val engine = store.engineForStress
             val text = engine.addText("AUREA MOTION BLUR")

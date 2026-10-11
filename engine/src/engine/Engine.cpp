@@ -11679,7 +11679,10 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     vc.width = ctx->outputWidth;
     vc.height = ctx->outputHeight;
     vc.fps = ctx->fps;
-    vc.codec = (ctx->v2 || ctx->keyflow) ? settings.videoCodec : export_safe_codec(settings.videoCodec, ctx->safeMode);
+    // Serial native export must honor the H.264 compatibility retry too.
+    // Keep the user's raster and bitrate; only the explicitly retried codec
+    // and encoder profile change when the device rejects its first encoder.
+    vc.codec = ctx->v2 ? settings.videoCodec : export_safe_codec(settings.videoCodec, ctx->safeMode);
     vc.validateBeforePublish = static_cast<bool>(ctx->v2) || ctx->keyflow;
     vc.keyflowCompatible = ctx->keyflow;
     // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
@@ -11829,7 +11832,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         bool hw = false, sw = false;
         if (enc.acceleration == ExportSink::Acceleration::Hardware) hw = true;
         else if (enc.acceleration == ExportSink::Acceleration::Software) sw = true;
-        else if (table.supported) (table.hardwareAccelerated ? hw : sw) = true;
+        else if (table.supported && !(ctx->keyflow && enc.name[0])) (table.hardwareAccelerated ? hw : sw) = true;
         if (hw) ctx->progress.flags |= kExportHardwareEncoder;
         if (sw) {
             ctx->progress.flags |= kExportSoftwareEncoder;

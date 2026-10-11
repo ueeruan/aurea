@@ -722,24 +722,33 @@ final class AureaModel: ObservableObject {
                         panel = .dock; seek(toFrame: 0); setLooping(true); toggleRawPlayback()
                     }
                 }
-            } else if ["video-move", "playback-stress", "clip-edit"].contains(scene), started {
+            } else if ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene), started {
                 // Reuse the real H.264 export fixture, then import through the
                 // production decoder. The UI test operates only the visible dock.
                 _ = newProject(width: 1920, height: 1080, fps: 30, title: "Parity viewport")
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 if exportProbe["passed"] as? Bool == true,
                    let movie = exportProbe["movieFile"] as? String,
-                   newProject(width: 640, height: 360, fps: 30, title: "Video dock move") {
+                   newProject(width: scene == "keyflow-video-text-export" ? 1920 : 640,
+                              height: scene == "keyflow-video-text-export" ? 1080 : 360,
+                              fps: 30, title: "Video dock move") {
                     let layer = engine.importVideo(AureaPaths.documents.appendingPathComponent(movie).path, name: "Dock move video")
                     if layer >= 0 {
                         if let compositionID = (engine.composition()?[AureaCompositionId] as? NSNumber)?.uint64Value {
-                            engine.setComposition(compositionID, duration: scene == "playback-stress" ? 30 : 180)
+                            engine.setComposition(compositionID, duration: ["playback-stress", "keyflow-video-text-export"].contains(scene) ? 30 : 180)
                         }
                         if scene == "clip-edit" {
                             engine.setLayer(layer, startFrame: 0, endFrame: 15, offsetFrames: 5, setOffset: true)
                         }
                         refreshModel(force: true); enterEditor(); select(layerId: layer, additive: false)
                         panel = .dock; seek(toFrame: scene == "video-move" ? 60 : 0)
+                        if scene == "keyflow-video-text-export" {
+                            let text = engine.addText("AUREA VIDEO WITH TEXT")
+                            if text >= 0 {
+                                engine.setLayer(text, startFrame: 0, endFrame: 30, offsetFrames: 0, setOffset: true)
+                                refreshModel(force: true); select(layerId: text, additive: false); panel = .none
+                            }
+                        }
                         if scene == "playback-stress" {
                             _ = engine.addText("Texto durante reprodução")
                             _ = engine.createCaptions(layer, words: [["word": "Legenda", "start": 0.0, "end": 0.9]], options: [:])
@@ -916,14 +925,15 @@ final class AureaModel: ObservableObject {
                             engine.setLayerMotionBlurLength(1.25, forLayer: id)
                             refreshModel(force: true); transformTab = 5; panel = .transform
                         }
-                    case "motion-blur-export", "keyflow-simple-text":
+                    case "motion-blur-export", "keyflow-simple-text", "keyflow-multiple-exports":
                         let id = engine.addText("AUREA MOTION BLUR")
                         if id >= 0 {
+                            let frames: Int32 = scene == "keyflow-multiple-exports" ? 12 : 60
                             if scene == "motion-blur-export" { _ = engine.applyTextPreset(id, preset: 11) }
                             engine.run {
                                 $0.setMotionBlur(scene == "motion-blur-export", forLayer: id)
                                 $0.setMotionBlurSettings(scene == "motion-blur-export", shutter: 180)
-                                $0.setLayer(id, startFrame: 0, endFrame: 60, offsetFrames: 0, setOffset: false)
+                                $0.setLayer(id, startFrame: 0, endFrame: frames, offsetFrames: 0, setOffset: false)
                                 $0.seek(toFrame: 0)
                             }
                             refreshModel(force: true); select(layerId: id, additive: false)

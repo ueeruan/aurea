@@ -110,9 +110,9 @@ jobs:
           mkdir -p build/ipa/Payload
           cp -R build/ios/Build/Products/Release-iphoneos/Aurea.app build/ipa/Payload/
           cd build/ipa
-          zip -qr Aurea-0.1.0-2154-keyflow-unsigned.ipa Payload
+          zip -qr Aurea-0.1.0-2155-export-correcao-unsigned.ipa Payload
       - name: Validate packaged IPA
-        run: python3 engine/platform/ios/verify/check_ipa.py build/ipa/Aurea-0.1.0-2154-keyflow-unsigned.ipa
+        run: python3 engine/platform/ios/verify/check_ipa.py build/ipa/Aurea-0.1.0-2155-export-correcao-unsigned.ipa
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-ipa

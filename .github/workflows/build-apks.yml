@@ -70,7 +70,7 @@ jobs:
               assert abis == {sys.argv[2]}, abis
           PY
           mkdir -p build/apk-artifact
-          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2154-teste-motor-novo-${{ matrix.abi }}-ci.apk'
+          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2155-export-correcao-${{ matrix.abi }}-ci.apk'
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-apk-${{ matrix.abi }}
@@ -87,6 +87,10 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.run_native_tests
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [x86_64, arm64-v8a]
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 2
     steps:
@@ -106,9 +110,12 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             android/app/.cxx
-          key: android-x86_64-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: android-x86_64-${{ runner.os }}-
+          key: android-native-${{ matrix.abi }}-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            android-native-${{ matrix.abi }}-${{ runner.os }}-
+            android-${{ matrix.abi }}-${{ runner.os }}-
       - name: Enable KVM
+        if: matrix.abi == 'x86_64'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
@@ -116,9 +123,10 @@ jobs:
       - name: Build isolated test app
         working-directory: android
         run: |
-          bash gradlew :app:assembleUiTest :app:assembleUiTestAndroidTest -PaureaAbi=x86_64 --no-daemon --max-workers=2 \
+          bash gradlew :app:assembleUiTest :app:assembleUiTestAndroidTest -PaureaAbi=${{ matrix.abi }} --no-daemon --max-workers=2 \
             '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8'
       - name: Run native editing regressions
+        if: matrix.abi == 'x86_64'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -134,13 +142,22 @@ jobs:
             adb shell am instrument -w -e class com.aurea.aurea.editor.KeyflowExportDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
             adb logcat -d -v threadtime > build/native-engine.log
             cat build/native-editing.log
-            adb exec-out run-as com.aurea.aurea.uitest tar -cf - -C files keyflow-simple-text.mp4 keyflow-simple-text-progress.txt keyflow-animated-text-1080.mp4 keyflow-animated-text-1080-progress.txt > build/native-editing-files.tar
+            adb exec-out run-as com.aurea.aurea.uitest tar -cf - -C files keyflow-simple-text.mp4 keyflow-simple-text-progress.txt keyflow-animated-text-1080.mp4 keyflow-animated-text-1080-progress.txt keyflow-text-360.mp4 keyflow-text-360-progress.txt keyflow-text-720.mp4 keyflow-text-720-progress.txt keyflow-text-1080.mp4 keyflow-text-1080-progress.txt keyflow-text-360-repeat.mp4 keyflow-text-360-repeat-progress.txt keyflow-video-text-360.mp4 keyflow-video-text-360-progress.txt keyflow-video-text-720.mp4 keyflow-video-text-720-progress.txt > build/native-editing-files.tar
             grep -Eq '^OK \([0-9]+ tests?\)' build/native-editing.log
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.abi == 'x86_64'
         with:
           name: android-native-editing
           path: |
             build/native-editing.log
             build/native-engine.log
             build/native-editing-files.tar
+      - name: Preserve ARM64 tests for the connected phone
+        if: matrix.abi == 'arm64-v8a'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-device-test-arm64-v8a
+          path: |
+            build/android/app/outputs/apk/uiTest/app-uiTest.apk
+            build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
+          if-no-files-found: error

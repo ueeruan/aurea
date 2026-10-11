@@ -5,7 +5,6 @@
 #include "MediaMuxerPacket.hpp"
 #include "ExportOutputValidation.hpp"
 #include "AacPrimingCalibration.hpp"
-#include "KeyflowEncoderSurface.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
@@ -150,13 +149,10 @@ public:
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
         if (cancelled()) return Errc::Cancelled;
         if (!video__.codec || video__.eos) return Status{Errc::InvalidState, "encoder de video fechado"};
-        if (video_.keyflowCompatible) {
-            if (ptsUs < 0 || (videoQueued_ && ptsUs <= lastVideoPts_)) return Errc::InvalidArgument;
-            if (const Status drained = drain(video__, false); !drained.ok()) return drained;
-            if (const Status submitted = surface_.submit(y,yStride,uv,uvStride,ptsUs); !submitted.ok()) return submitted;
-            pulse(); ++videoQueued_; lastVideoPts_=ptsUs;
-            return drain(video__,false);
-        }
+        // The serial renderer already produces NV12. Feed those planes directly
+        // to MediaCodec using its measured layout instead of converting them
+        // back to RGB through another EGL context. The surface bridge failed
+        // before accepting the first frame, even for a plain text composition.
         // Listras diagonais nascem AQUI. O quadro chegava com passo = largura e
         // era escrito no buffer do encoder com ESSE passo: se o encoder pede
         // linhas de 1152 bytes para uma imagem de 1080, sobram 72 bytes por
@@ -570,7 +566,6 @@ private:
                                  const char* name, bool& attempted, u32 rateMode) noexcept {
         const i32 order[] = {kColorFormatNv12, kColorFormatI420, kColorFormatFlexible};
         for (i32 cf : order) {
-            if (video_.keyflowCompatible && cf != order[0]) break;
             // configure() can leave a vendor codec in its error state. Each
             // format/profile retry starts with a new instance of the same codec.
             if (attempted) {
@@ -590,7 +585,7 @@ private:
             const f64 gopSeconds = video_.keyframeIntervalFrames > 0 ? video_.keyframeIntervalFrames / video_.fps : video_.keyflowCompatible ? 1.0 : 2.0;
             AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, static_cast<i32>(
                 std::clamp(std::floor(gopSeconds + 0.5), 1.0, static_cast<f64>(std::numeric_limits<i32>::max()))));
-            AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_COLOR_FORMAT, video_.keyflowCompatible ? 0x7F000789 : cf);
+            AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_COLOR_FORMAT, cf);
             // MediaCodecInfo.EncoderCapabilities: 0 = CQ, 1 = VBR, 2 = CBR. CQ nunca:
             // ignora a taxa (era o "1 minuto = 1 GB"). CBR quando o encoder do
             // aparelho não anuncia VBR (o app confere no MediaCodecList).
@@ -679,7 +674,7 @@ private:
         // Modo de segurança nível 2: o encoder de hardware já travou duas vezes
         // neste projeto — direto o de SOFTWARE do sistema (mais lento, nunca
         // trava no HAL do fabricante). Sem ele, o preferido de sempre.
-        if (!video_.keyflowCompatible && video_.preferSoftware && open_software_video(mime, "(modo de seguranca)", "travou antes")) {
+        if (video_.preferSoftware && open_software_video(mime, "(modo de seguranca)", "travou antes")) {
             if (AMediaCodec_start(video__.codec) == AMEDIA_OK) {
                 triedSoftwareReopen_ = true;
                 AUREA_LOG_INFO("export: %s %s (SOFTWARE, modo de seguranca) %ux%u @%.2f %u bps", mime, info_.name,
@@ -714,15 +709,11 @@ private:
         // quadro (resolve_layout): so depois do start o formato de entrada e o
         // buffer tem o tamanho de verdade, e o passo nunca e suposto igual a
         // largura.
-        if (video_.keyflowCompatible) {
-            const auto created = AMediaCodec_createInputSurface(video__.codec, &inputSurface_);
-            if (created != AMEDIA_OK || !inputSurface_) return fail(Errc::NotSupported,"Keyflow: encoder sem superficie de entrada");
-            if (const Status opened=surface_.open(inputSurface_,video_.width,video_.height); !opened.ok()) return fail_status(opened);
-            AUREA_LOG_INFO("export-keyflow: MediaCodec recordable EGL input surface %ux%u",video_.width,video_.height);
-        }
         const media_status_t started = AMediaCodec_start(video__.codec);
-        if (started != AMEDIA_OK && (video_.keyflowCompatible || !reopen_software_video("nao conseguiu iniciar")))
+        if (started != AMEDIA_OK && !reopen_software_video("nao conseguiu iniciar"))
             return fail_status(codec_error("encoder de video nao iniciou", started));
+        if (video_.keyflowCompatible)
+            AUREA_LOG_INFO("export-keyflow: serial MediaCodec measured YUV input, no EGL bridge %ux%u",video_.width,video_.height);
         AUREA_LOG_INFO("export: %s %s (%s) %ux%u @%.2f %u bps %s, formato pedido %s", mime,
                        info_.name[0] ? info_.name : "?",
                        info_.acceleration == Acceleration::Hardware ? "hardware"
@@ -775,12 +766,6 @@ private:
     /// Marca o fim do fluxo. `budgetNs` 0 = o prazo de travamento inteiro (o
     /// primeiro EOS); a segunda tentativa (finish) só espera um pouco.
     Status signal_eos(Track& t, u64 budgetNs = 0) noexcept {
-        if (!t.audio && video_.keyflowCompatible) {
-            if (surfaceEos_) return OkStatus;
-            const auto signalled=AMediaCodec_signalEndOfInputStream(t.codec); pulse();
-            if (signalled != AMEDIA_OK) return codec_error("Keyflow: encoder recusou EOS de superficie",signalled);
-            surfaceEos_=true; return OkStatus;
-        }
         u64 deadline = monotonic_ns() + (budgetNs ? budgetNs : stall_timeout_ns());
         u64 generation = progressGeneration_;
         ssize_t idx = -1;
@@ -948,9 +933,6 @@ private:
 
     Status release(bool deleteFile) noexcept {
         Status closed = OkStatus;
-        surface_.close();
-        if (inputSurface_) { ANativeWindow_release(inputSurface_); inputSurface_=nullptr; }
-        surfaceEos_=false;
         for (Track* t : {&video__, &audio__}) {
             if (t->codec) {
                 AMediaCodec_stop(t->codec);
@@ -978,9 +960,6 @@ private:
         return closed;
     }
 
-    KeyflowEncoderSurface surface_;
-    ANativeWindow* inputSurface_=nullptr;
-    bool surfaceEos_=false;
     std::string path_;
     i64 explicitLastVideoDurationUs_ = 0;
     char errorDetail_[192]{};

@@ -1345,7 +1345,11 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
                 userInfo:@{NSLocalizedDescriptionKey: @"dimensoes ou taxa de quadros invalidas"}];
             return NO;
         }
-        _keyflowDirect = video.keyflowCompatible;
+        // The explicit safe-mode retry must also change the backend. Repeating
+        // an AVAssetWriter compression failure with identical settings cannot
+        // recover; mode 2 uses the existing VT path without requiring hardware.
+        _keyflowDirect = video.keyflowCompatible && !video.preferSoftware;
+        const BOOL baseline = video.profile == aurea::kExportProfileBaseline && video.codec == ExportCodec::H264;
         _width = video.width;
         _height = video.height;
         // Credits cover raw frames held by VT as well as compressed samples
@@ -1398,12 +1402,16 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
             // retain them. Bound our FIFO with writer readiness/capacity rather
             // than treating normal encoder references as an allocation failure.
             _poolLimits=nil;
-            NSDictionary* properties=@{
+            NSMutableDictionary* properties=[@{
                 AVVideoAverageBitRateKey: @(video.bitrateBps ?: 14000000u),
                 AVVideoExpectedSourceFrameRateKey: @(video.fps),
                 AVVideoMaxKeyFrameIntervalKey: @(video.keyframeIntervalFrames ?: (uint32_t)llround(video.fps)),
                 AVVideoAllowFrameReorderingKey: @NO
-            };
+            } mutableCopy];
+            if (video.codec == ExportCodec::H264) {
+                properties[AVVideoProfileLevelKey] = baseline ? AVVideoProfileLevelH264BaselineAutoLevel
+                                                             : AVVideoProfileLevelH264HighAutoLevel;
+            }
             NSDictionary* settings=@{
                 AVVideoCodecKey: video.codec==ExportCodec::HEVC ? AVVideoCodecTypeHEVC : AVVideoCodecTypeH264,
                 AVVideoWidthKey: @(_width),AVVideoHeightKey: @(_height),
@@ -1440,7 +1448,6 @@ static void aurea_encoder_output(void* refcon, void* sourceRefCon, OSStatus stat
         // reordenação (nenhum B-quadro segurando amostras no intercalador do
         // gravador) e, no nível 2, sem exigir o encoder de hardware — o
         // VideoToolbox escolhe o que tiver.
-        const BOOL baseline = video.profile == aurea::kExportProfileBaseline && video.codec == ExportCodec::H264;
         NSDictionary* encoderSpec = nil;
         if (@available(iOS 17.4, *)) {
             if (!video.preferSoftware) {
@@ -2008,7 +2015,7 @@ public:
         if (!host) return info;
         NSString* name = host.encoderName;
         if (name) std::snprintf(info.name, sizeof(info.name), "%s", name.UTF8String);
-        info.acceleration = [name isEqualToString:@"AVAssetWriter (Keyflow)"] ? Acceleration::Unknown
+        info.acceleration = [name isEqualToString:@"AVAssetWriter"] ? Acceleration::Unknown
             : host.hardwareEncoder ? Acceleration::Hardware : Acceleration::Software;
         return info;
     }

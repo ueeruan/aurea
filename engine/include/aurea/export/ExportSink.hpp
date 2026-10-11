@@ -56,7 +56,7 @@ struct VideoStreamConfig {
     /// V2: finish closes the temporary file; independent validation must
     /// succeed before the startup gate atomically replaces the destination.
     bool validateBeforePublish = false;
-    /// Android: recordable EGL encoder surface. iOS: raw frames to AVAssetWriter.
+    /// Serial native input: measured YUV planes on Android, raw AVAssetWriter frames on iOS.
     bool keyflowCompatible = false;
 };
 

@@ -334,6 +334,9 @@ struct SceneStats {
     u32 shadowMapSize = 0;       ///< lado do mapa de sombra usado (0 = sem sombra)
     u64 geometryBytes = 0;
     u64 textureBytes = 0;
+    u32 morphUploads = 0;       ///< unique deformed primitive streams built this frame
+    u64 morphVertices = 0;      ///< vertices actually deformed, shared copies counted once
+    u64 morphUploadBytes = 0;   ///< aligned deformed vertex buffers, all scene/blur builds
 };
 
 /// Matriz clip ← vista, perspectiva com Z REVERSO e far infinito: perto → 1,

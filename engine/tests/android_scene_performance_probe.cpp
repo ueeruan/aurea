@@ -2,6 +2,8 @@
 // Renderer and actual Vulkan/GLES backend offscreen. No app data is touched.
 // argv: vertices static|rigid|morph|zero floor(0|1) hdri(0|1|2) blur(0|1)
 //       [width height measuredFrames finalQuality(0|1) bounded(0|1) halfPixelDump batchBudgetMiB objectCount shared|identical|varied]
+// Real assets: replace `vertices mode` with `--model path.glb|path.gltf` and
+// optionally append animationClip (-1 = bind pose, default = first clip).
 // hdri=1: group HDRI; hdri=2: own-object HDRI (asynchronous preview job).
 // Timings include an explicit GPU wait per frame and are not UI playback FPS.
 #if defined(AUREA_PROBE_VULKAN)
@@ -15,6 +17,7 @@ namespace probe_backend = aurea::gles;
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/Renderer.hpp"
+#include "aurea/scene3d/Importer.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -135,8 +138,10 @@ std::shared_ptr<const scene3d::HdriPixels> make_hdri() {
 
 int main(int argc, char** argv) {
     const auto processStarted = Clock::now();
-    if (argc < 6 || argc > 15) { std::fprintf(stderr, "usage: probe vertices static|rigid|morph|zero floor hdri blur [width height frames finalQuality bounded halfPixelDump batchBudgetMiB objectCount shared|identical|varied]\n"); return 2; }
-    const u32 vertices = std::atoi(argv[1]), width = argc > 6 ? std::atoi(argv[6]) : 1280;
+    const bool modelFile = argc > 1 && std::strcmp(argv[1], "--model") == 0;
+    if (argc < 6 || argc > (modelFile ? 16 : 15)) { std::fprintf(stderr, "usage: probe vertices static|rigid|morph|zero floor hdri blur [width height frames finalQuality bounded halfPixelDump batchBudgetMiB objectCount shared|identical|varied]\n       probe --model path.glb|path.gltf floor hdri blur [same options, then animationClip]\n"); return 2; }
+    u32 vertices = modelFile ? 0 : std::atoi(argv[1]);
+    const u32 width = argc > 6 ? std::atoi(argv[6]) : 1280;
     const u32 height = argc > 7 ? std::atoi(argv[7]) : 720, frames = argc > 8 ? std::atoi(argv[8]) : 60;
     const bool floor = std::atoi(argv[3]) != 0, blur = std::atoi(argv[5]) != 0;
     const u32 hdrMode = std::atoi(argv[4]); const bool finalQuality = argc > 9 && std::atoi(argv[9]);
@@ -146,18 +151,41 @@ int main(int argc, char** argv) {
     const bool variedMaterials = argc > 14 && std::strcmp(argv[14], "varied") == 0;
     const bool identicalOverrides = argc > 14 && std::strcmp(argv[14], "identical") == 0;
     const char* materialMode = variedMaterials ? "varied" : identicalOverrides ? "identical" : "shared";
-    if (vertices < 100 || vertices > 200000 || !width || !height || !frames || frames > 600 || hdrMode > 2) return 2;
+    if ((!modelFile && (vertices < 100 || vertices > 200000)) || !width || !height || !frames || frames > 600 || hdrMode > 2) return 2;
     if (!batchBudgetMiB || batchBudgetMiB > 32) return 2;
     if (!objectCount || objectCount > 1000) return 2;
     if (argc > 14 && std::strcmp(argv[14], "shared") && !variedMaterials && !identicalOverrides) return 2;
-    if (std::strcmp(argv[2], "static") && std::strcmp(argv[2], "rigid") && std::strcmp(argv[2], "morph") && std::strcmp(argv[2], "zero")) return 2;
+    if (!modelFile && std::strcmp(argv[2], "static") && std::strcmp(argv[2], "rigid") && std::strcmp(argv[2], "morph") && std::strcmp(argv[2], "zero")) return 2;
+    const auto importStarted = Clock::now();
+    std::shared_ptr<const scene3d::SceneAsset> model;
+    if (modelFile) {
+        scene3d::ImportOptions options;
+        auto imported = scene3d::import_gltf_file(argv[2], options);
+        if (!imported.ok()) {
+            std::fprintf(stderr, "FAIL model import error=%u detail=%s\n", static_cast<u32>(imported.error), imported.detail.c_str());
+            return 4;
+        }
+        model = std::move(imported.asset);
+    } else model = make_model(vertices, argv[2]);
+    const double importMs = milliseconds(importStarted);
+    u64 inputTriangles = 0; u32 primitives = 0, drawnPrimitives = 0, morphPrimitives = 0, skinnedPrimitives = 0;
+    if (modelFile) vertices = 0;
+    for (const auto& mesh : model->meshes) for (const auto& primitive : mesh.primitives) {
+        if (modelFile) vertices += primitive.positions.size();
+        inputTriangles += primitive.indices.size() / 3; ++primitives;
+        morphPrimitives += !primitive.morphTargets.empty(); skinnedPrimitives += primitive.skinned();
+    }
+    for (const auto& node : model->nodes) if (node.inScene && node.mesh >= 0 && static_cast<usize>(node.mesh) < model->meshes.size())
+        drawnPrimitives += model->meshes[node.mesh].primitives.size();
+    const i32 clip = modelFile && argc > 15 ? std::atoi(argv[15]) : model->animations.empty() ? -1 : 0;
+    if (!drawnPrimitives || !model->bounds.valid() || clip < -1 || clip >= static_cast<i32>(model->animations.size())) return 2;
     probe_backend::Backend backend; BackendConfig config; config.framesInFlight = 2;
     if (!checked(backend.initialize(config), "initialize GPU")) return 3;
     std::printf("DEVICE backend=%s gpu=%s driver=%s timers=%d\n", backend.name(), backend.capabilities().deviceName.c_str(),
         backend.capabilities().driverInfo.c_str(), backend.capabilities().timestampQueries);
     EffectRegistry effects; register_builtin_effects(effects); Renderer renderer;
     if (!checked(renderer.initialize(backend, effects), "initialize Renderer")) return 3;
-    auto model = make_model(vertices, argv[2]); auto hdri = hdrMode ? make_hdri() : nullptr;
+    auto hdri = hdrMode ? make_hdri() : nullptr;
     renderer.set_model_lookup([](void* ctx, AssetId) { return *static_cast<std::shared_ptr<const scene3d::SceneAsset>*>(ctx); }, &model);
     renderer.set_hdri_lookup([](void* ctx, AssetId) { return *static_cast<std::shared_ptr<const scene3d::HdriPixels>*>(ctx); }, &hdri);
     auto projectResult = Project::create_new(width, height, 30, "isolated device 3D benchmark");
@@ -170,16 +198,22 @@ int main(int argc, char** argv) {
     const f32 cellWidth = width / static_cast<f32>(gridColumns), cellHeight = height / static_cast<f32>(gridRows);
     std::vector<LayerId> layerIds;
     for (u32 object = 0; object < objectCount; ++object) {
-        const auto layerId = comp->add_layer(LayerKind::Model3D, "sphere"); auto* layer = comp->layer(layerId);
+        const auto layerId = comp->add_layer(LayerKind::Model3D, modelFile ? model->sourceName : "sphere"); auto* layer = comp->layer(layerId);
         layerIds.push_back(layerId);
         layer->model.scene = modelId;
         // The original single-object fixture retains precisely its transform.
         layer->model.unitScale = objectCount == 1 ? height * .3f : std::min(cellWidth, cellHeight) * .3f;
-        layer->model.animationClip = model->animations.empty() ? -1 : 0;
+        if (modelFile) {
+            const Vec3 extent = model->bounds.extent();
+            const f32 longest = std::max({extent.x, extent.y, extent.z, 1e-6f});
+            layer->model.unitScale *= 2.f / longest;
+            layer->model.pivot = model->bounds.center();
+        }
+        layer->model.animationClip = clip;
         layer->transform.position = objectCount == 1 ? Vec3{width * .5f, height * .45f, 0}
             : Vec3{(object % gridColumns + .5f) * cellWidth, (object / gridColumns + .5f) * cellHeight, 0};
         layer->threeD = true; layer->motionBlur = blur;
-        if (variedMaterials || identicalOverrides) {
+        if ((variedMaterials || identicalOverrides) && !model->materials.empty()) {
             // One immutable mesh is shared. Only native layer factors vary;
             // cloning all vertex arrays would confound an instancing benchmark.
             MaterialOverride material; material.materialIndex = 0; material.mask = 0x37;
@@ -194,7 +228,7 @@ int main(int argc, char** argv) {
             }
             layer->model.materials.push_back(material);
         }
-        if (std::strcmp(argv[2], "zero") == 0) {
+        if (!modelFile && std::strcmp(argv[2], "zero") == 0) {
             auto& track = layer->tracks.get_or_create(TrackProperty::PositionX);
             const f32 center = layer->transform.position.x;
             const f32 amplitude = objectCount == 1 ? width * .1f : cellWidth * .1f;
@@ -229,9 +263,12 @@ int main(int argc, char** argv) {
     const auto environmentStarted = Clock::now();
     double environmentReadyMs = -1;
     std::printf("CASE vertices=%u triangles=%zu mode=%s floor=%d hdri=%u blur=%d width=%u height=%u final=%d bounded=%d batch_budget_MiB=%u warmup=30 frames=%u objects=%u materials=%s grid_columns=%u grid_rows=%u total_input_triangles=%llu\n",
-        vertices, model->meshes[0].primitives[0].indices.size() / 3, argv[2], floor, hdrMode, blur, width, height, finalQuality, bounded, batchBudgetMiB, frames,
+        vertices, static_cast<usize>(inputTriangles), modelFile ? "imported" : argv[2], floor, hdrMode, blur, width, height, finalQuality, bounded, batchBudgetMiB, frames,
         objectCount, materialMode, gridColumns, gridRows,
-        static_cast<unsigned long long>(objectCount) * (model->meshes[0].primitives[0].indices.size() / 3));
+        static_cast<unsigned long long>(objectCount) * inputTriangles);
+    std::printf("MODEL fixture=%s import_wall_ms=%.3f nodes=%zu meshes=%zu primitives=%u drawable_primitives=%u images=%zu materials=%zu skins=%zu skinned_primitives=%u morph_primitives=%u animations=%zu clip=%d texture_import_limit=4096 triangle_import_limit=0\n",
+        modelFile ? argv[2] : "synthetic", importMs, model->nodes.size(), model->meshes.size(), primitives, drawnPrimitives,
+        model->images.size(), model->materials.size(), model->skins.size(), skinnedPrimitives, morphPrimitives, model->animations.size(), clip);
     std::printf("SETUP cold_setup_wall_ms=%.3f rss_bytes=%llu scope=direct_renderer_no_ui_or_engine_scheduler\n", milliseconds(processStarted), static_cast<unsigned long long>(peakRss));
     for (u32 i = 0; measured < frames; ++i) {
         const auto begin = Clock::now(); FrameSnapshot snapshot;
@@ -284,7 +321,10 @@ int main(int argc, char** argv) {
         triangles = renderer.heavy_stats().lastSceneTriangles;
         visible = renderer.heavy_stats().lastSceneVisible; culled = renderer.heavy_stats().lastSceneCulled;
         instancedDraws = renderer.heavy_stats().lastSceneInstancedDraws;
-        if (visible != objectCount || culled) { std::printf("FAIL grid visibility requested=%u visible=%u culled=%u\n", objectCount, visible, culled); return 5; }
+        const u32 expected = objectCount * drawnPrimitives;
+        if ((!modelFile && (visible != expected || culled)) || (modelFile && (!visible || visible + culled != expected))) {
+            std::printf("FAIL grid visibility expected_primitives=%u visible=%u culled=%u\n", expected, visible, culled); return 5;
+        }
         if (i == 0) std::printf("COLD prepare_ms=%.3f render_ms=%.3f wait_ms=%.3f total_ms=%.3f samples=%u\n",
             milliseconds(begin, prepared), milliseconds(prepared, submitted), milliseconds(submitted, complete), milliseconds(begin, complete), peakSamples);
         if (i % 15 == 0) { std::printf("PROGRESS frame=%u total_ms=%.3f gpuBytes=%llu environment_pending=%d\n", i, milliseconds(begin, complete), static_cast<unsigned long long>(memory.usedBytes), pendingEnvironment); std::fflush(stdout); }
@@ -331,6 +371,11 @@ int main(int argc, char** argv) {
         objectCount, materialMode, measured, waited_fps(total), waited_one_percent_low(total),
         percentile(total, .99) > 0 ? 1000 / percentile(total, .99) : 0,
         static_cast<unsigned long long>(peakReserved), static_cast<unsigned long long>(peakRss), visible, culled, instancedDraws);
+#if !defined(AUREA_PROBE_BASELINE)
+    const auto& sceneStats = renderer.scene_stats();
+    std::printf("DEFORMATION unique_morph_uploads=%u deformed_vertices=%llu morph_upload_bytes=%llu scope=last_frame_all_scene_and_shutter_builds\n",
+        sceneStats.morphUploads, static_cast<unsigned long long>(sceneStats.morphVertices), static_cast<unsigned long long>(sceneStats.morphUploadBytes));
+#endif
     backend.wait_idle(); backend.destroy_texture(*texture); renderer.shutdown(); backend.shutdown();
     if (!finite || lit < 100) { std::printf("FAIL blank or nonfinite rendered image\n"); return 7; }
     std::printf("PASS device offscreen benchmark; explicit per-frame waits; not UI playback FPS\n"); return 0;

@@ -13429,6 +13429,7 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 
 #include "V2140RegressionScenarios.inl"
 #include "MaterialOverrideGpu.inl"
+#include "MorphSharingGpu.inl"
 #include "SceneTargetGpu.inl"
 #include "LightRays3DGpu.inl"
 #include "BetaEffects1007Gpu.inl"

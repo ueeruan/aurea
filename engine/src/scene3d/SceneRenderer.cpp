@@ -1538,7 +1538,24 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     BufferHandle morphBuf{};
     {
         usize bytes = 0;
-        std::unordered_map<std::pair<const Primitive*, const std::vector<f32>*>, usize, ScenePairHash> morphUploads;
+        // Animated copies own separate weight vectors even when their pose is
+        // identical. Share by exact values, within this build only: material,
+        // world transform and animation time still belong to each instance.
+        using MorphKey = std::pair<const Primitive*, const std::vector<f32>*>;
+        struct MorphHash {
+            usize operator()(const MorphKey& key) const noexcept {
+                usize hash = std::hash<const Primitive*>{}(key.first);
+                for (f32 weight : *key.second)
+                    hash = (hash ^ std::hash<f32>{}(weight)) * usize{16777619};
+                return hash;
+            }
+        };
+        struct MorphEqual {
+            bool operator()(const MorphKey& a, const MorphKey& b) const noexcept {
+                return a.first == b.first && (a.second == b.second || *a.second == *b.second);
+            }
+        };
+        std::unordered_map<MorphKey, usize, MorphHash, MorphEqual> morphUploads;
         for (usize ii = 0; ii < frame.instances.size(); ++ii) {
             const SceneInstance& inst = frame.instances[ii];
             const GpuModel* gm = instanceModels[ii];
@@ -1585,6 +1602,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     auto* pos = reinterpret_cast<Vec3*>(base + j.posOffset);
                     auto* sh = reinterpret_cast<ShadingVertex*>(base + j.shadeOffset);
                     const usize nv = p.positions.size();
+                    ++stats_.morphUploads;
+                    stats_.morphVertices += nv;
                     select_active_morph_targets(p, *j.weights, activeTargets);
                     for (usize v = 0; v < nv; ++v) {
                         Vec3 P, N;
@@ -1606,6 +1625,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 gpu_->unmap_buffer(buf);
                 morphBuf = buf;
+                stats_.morphUploadBytes += bytes;
             } else {
                 incomplete_ = true;
                 morphJobs.clear();
@@ -1895,7 +1915,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
 
     // --- Instancing (8E) ------------------------------------------------------
     // Objetos iguais (mesma malha, primitiva, LOD, material e pipeline; sem
-    // skin nem morph) viram UM desenho com N instâncias. As matrizes vão num
+    // skin) viram UM desenho com N instâncias. Morphs só se juntam quando
+    // usam exatamente os mesmos fluxos deformados. As matrizes vão num
     // SSBO do quadro: duas mat4 por instância na cor (mundo + normais), uma na
     // sombra (luz ← local). Transparentes ficam fora: a ordem do blend é por
     // profundidade, desenho a desenho. O recorte por frustum já aconteceu —
@@ -1914,7 +1935,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!opaque.empty()) groupOf.reserve(opaque.size());
         for (u32 i = 0; i < opaque.size(); ++i) {
             const Draw& d = opaque[i];
-            if (d.skinned || d.morph || !instancing_) { merged.push_back(d); members.push_back({i, i, 1}); continue; }
+            if (d.skinned || !instancing_) { merged.push_back(d); members.push_back({i, i, 1}); continue; }
             u64 h = 0xCBF29CE484222325ull;
             h = mix(h, reinterpret_cast<uintptr_t>(d.model));
             h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
@@ -1922,13 +1943,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             h = mix(h, reinterpret_cast<uintptr_t>(d.block));
             h = mix(h, d.pipeline.id);
             h = mix(h, (static_cast<u64>(d.firstIndex) << 32) | d.indexCount);
+            h = mix(h, d.morph);
+            if (d.morph) { h = mix(h, d.morphPos); h = mix(h, d.morphShade); }
             auto [it, fresh] = groupOf.try_emplace(h, static_cast<u32>(merged.size()));
             const Draw* prior = fresh ? nullptr : &merged[it->second];
             // Hash collisions may miss a batching opportunity, never combine
             // different meshes, materials, environments or levels of detail.
             const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->material == d.material
                 && prior->block == d.block && prior->pipeline.id == d.pipeline.id && prior->firstIndex == d.firstIndex
-                && prior->indexCount == d.indexCount;
+                && prior->indexCount == d.indexCount && prior->morph == d.morph
+                && (!d.morph || (prior->morphPos == d.morphPos && prior->morphShade == d.morphShade));
             if (fresh || !equal) { merged.push_back(d); members.push_back({i, i, 1}); }
             else { auto& group = members[it->second]; next[group.tail] = i; group.tail = i; ++group.count; }
         }
@@ -1961,14 +1985,17 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (!shadowDraws.empty()) sgroupOf.reserve(shadowDraws.size());
         for (u32 i = 0; i < shadowDraws.size(); ++i) {
             const ShadowDraw& d = shadowDraws[i];
-            if (d.skinned || d.morph || !instancing_) { smerged.push_back(d); smembers.push_back({i, i, 1}); continue; }
+            if (d.skinned || !instancing_) { smerged.push_back(d); smembers.push_back({i, i, 1}); continue; }
             u64 h = 0xCBF29CE484222325ull;
             h = mix(h, reinterpret_cast<uintptr_t>(d.model));
             h = mix(h, reinterpret_cast<uintptr_t>(d.prim));
             h = mix(h, d.pipeline.id);
+            h = mix(h, d.morph);
+            if (d.morph) h = mix(h, d.morphPos);
             auto [it, fresh] = sgroupOf.try_emplace(h, static_cast<u32>(smerged.size()));
             const ShadowDraw* prior = fresh ? nullptr : &smerged[it->second];
-            const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->pipeline.id == d.pipeline.id;
+            const bool equal = prior && prior->model == d.model && prior->prim == d.prim && prior->pipeline.id == d.pipeline.id
+                && prior->morph == d.morph && (!d.morph || prior->morphPos == d.morphPos);
             if (fresh || !equal) { smerged.push_back(d); smembers.push_back({i, i, 1}); }
             else { auto& group = smembers[it->second]; snext[group.tail] = i; group.tail = i; ++group.count; }
         }
@@ -2274,10 +2301,11 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     c.bind_vertex_buffer(2, d.model->skin, static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex));
                 }
                 c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
+                if (d.instanceCount > 1) c.bind_storage_buffer(cap.inst);
                 boundModel = nullptr;   // o próximo desenho normal re-liga a malha
                 c.set_uniforms(d.block, sizeof(SceneBlock));
                 c.push_constants(&d.push, sizeof(MeshPush));
-                c.draw_indexed(d.indexCount, 1, d.firstIndex, 0, 0);
+                c.draw_indexed(d.indexCount, std::max(1u, d.instanceCount), d.firstIndex, 0, 0);
                 continue;
             }
             if (d.model != boundModel || d.skinned) {

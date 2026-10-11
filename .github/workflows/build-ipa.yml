@@ -110,9 +110,9 @@ jobs:
           mkdir -p build/ipa/Payload
           cp -R build/ios/Build/Products/Release-iphoneos/Aurea.app build/ipa/Payload/
           cd build/ipa
-          zip -qr Aurea-0.1.0-2156-export-preview-correcao-unsigned.ipa Payload
+          zip -qr Aurea-0.1.0-2157-export-preview-3d-unsigned.ipa Payload
       - name: Validate packaged IPA
-        run: python3 engine/platform/ios/verify/check_ipa.py build/ipa/Aurea-0.1.0-2156-export-preview-correcao-unsigned.ipa
+        run: python3 engine/platform/ios/verify/check_ipa.py build/ipa/Aurea-0.1.0-2157-export-preview-3d-unsigned.ipa
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-ipa
@@ -225,16 +225,16 @@ jobs:
               --predicate 'subsystem == "com.aurea.aurea" OR process == "Aurea"' > build/ios-native-engine.log
             APP_DATA=$(xcrun simctl get_app_container "$SIMULATOR_UDID" com.aurea.aurea data)
             python3 - "$APP_DATA/Documents" <<'PY'
-            from pathlib import Path
-            import shutil
-            import sys
-            documents=Path(sys.argv[1])
-            output=Path('build/ios-exported-videos')
-            output.mkdir(parents=True,exist_ok=True)
-            for pattern in ('*.mp4','*.mp4.aurea-export'):
-                for item in documents.glob(pattern):
-                    if item.is_file(): shutil.copy2(item,output/item.name)
-            PY
+          from pathlib import Path
+          import shutil
+          import sys
+          documents=Path(sys.argv[1])
+          output=Path('build/ios-exported-videos')
+          output.mkdir(parents=True,exist_ok=True)
+          for pattern in ('*.mp4','*.mp4.aurea-export'):
+              for item in documents.glob(pattern):
+                  if item.is_file(): shutil.copy2(item,output/item.name)
+          PY
           fi
       - name: Export native gesture attachments
         if: always() && !inputs.capture_only

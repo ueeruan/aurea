@@ -70,7 +70,7 @@ jobs:
               assert abis == {sys.argv[2]}, abis
           PY
           mkdir -p build/apk-artifact
-          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2156-export-preview-correcao-${{ matrix.abi }}-ci.apk'
+          cp "$APK" 'build/apk-artifact/Aurea-0.1.0-2157-export-preview-3d-${{ matrix.abi }}-ci.apk'
       - uses: actions/upload-artifact@v4
         with:
           name: aurea-apk-${{ matrix.abi }}
@@ -120,6 +120,11 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Prepare licensed real-model preview fixtures
+        run: |
+          mkdir -p android/app/src/androidTest/assets/models-preview-owned
+          cp engine/tests/data/scene-performance/*.glb android/app/src/androidTest/assets/models-preview-owned/
+          cp engine/tests/data/scene-performance/LICENSE_*.md android/app/src/androidTest/assets/models-preview-owned/
       - name: Build isolated test app
         working-directory: android
         run: |

@@ -3,7 +3,7 @@ name: Check shared serial export
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/keyflow-export2154', 'codex/preview-export2156']
+    branches: ['codex/keyflow-export2154', 'codex/preview-export2156', 'codex/3d-preview-2157']
     paths: ['.github/workflows/host-export-check.yml']
 
 permissions:
@@ -119,7 +119,7 @@ jobs:
         working-directory: build/host-export/tests
         run: |
           set -euo pipefail
-          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets; do
+          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing; do
             timeout 180s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/preview-$FILTER.log"
             grep -Eq '^[1-9][0-9]* testes, [0-9]+ verificacoes, 0 falhas$' "../../host-export-results/preview-$FILTER.log"
             if grep -Eq 'pulado|skipped' "../../host-export-results/preview-$FILTER.log"; then exit 1; fi

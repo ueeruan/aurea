@@ -1,0 +1,251 @@
+name: Build Android 3D scene probes
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/3d-preview-2157']
+    paths:
+      - '.github/workflows/android-scene-probes.yml'
+      - 'engine/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-scene-probes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arm64-probes:
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [target, baseline]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      NDK_VERSION: '28.2.13676358'
+      CMAKE_VERSION: '3.22.1'
+      PROBE_ARTIFACT: build/android-scene-probes-arm64
+      PROBE_REVISION: ${{ matrix.revision }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preserve common test source and licensed fixtures
+        run: |
+          mkdir -p "$RUNNER_TEMP/aurea-scene-common/models"
+          cp engine/tests/android_scene_performance_probe.cpp "$RUNNER_TEMP/aurea-scene-common/"
+          cp .github/workflows/android-scene-probes.yml "$RUNNER_TEMP/aurea-scene-common/"
+          cp engine/tests/data/scene-performance/* "$RUNNER_TEMP/aurea-scene-common/models/"
+          git rev-parse HEAD > "$RUNNER_TEMP/aurea-scene-common/source-commit.txt"
+      - name: Check out the unchanged production baseline
+        if: matrix.revision == 'baseline'
+        uses: actions/checkout@v4
+        with:
+          ref: be3e189f345ef5620fd10c8d5c6eeb9a6cf5f882
+      - name: Apply the common test harness to the baseline
+        if: matrix.revision == 'baseline'
+        run: |
+          cp "$RUNNER_TEMP/aurea-scene-common/android_scene_performance_probe.cpp" engine/tests/android_scene_performance_probe.cpp
+          test "$(git diff --name-only)" = "engine/tests/android_scene_performance_probe.cpp"
+      - uses: android-actions/setup-android@v4
+        with:
+          log-accepted-android-sdk-licenses: false
+      - name: Install native toolchain
+        run: sdkmanager "cmake;$CMAKE_VERSION" "ndk;$NDK_VERSION"
+      - name: Restore native build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            android/app/.cxx
+            engine/build/shader-compilers
+            build/android-scene-native-arm64
+          key: android-scene-${{ matrix.revision }}-arm64-v8a-${{ runner.os }}-ndk28.2.13676358-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            android-scene-${{ matrix.revision }}-arm64-v8a-${{ runner.os }}-ndk28.2.13676358-
+            android-native-arm64-v8a-${{ runner.os }}-
+            android-arm64-v8a-${{ runner.os }}-
+      - name: Select compatible ARM64 CMake cache
+        id: native-tree
+        run: |
+          mkdir -p "$PROBE_ARTIFACT/bin" "$PROBE_ARTIFACT/diagnostics"
+          python3 <<'PY'
+          import json, os
+          from pathlib import Path
+          workspace = Path.cwd().resolve()
+          engine = (workspace / 'engine').resolve()
+          candidates = []
+          for root in (workspace / 'android/app/.cxx', workspace / 'build/android-scene-native-arm64'):
+              if not root.exists():
+                  continue
+              for cache in root.rglob('CMakeCache.txt'):
+                  values = {}
+                  for line in cache.read_text(errors='replace').splitlines():
+                      if line.startswith(('#', '//')) or ':' not in line or '=' not in line:
+                          continue
+                      key, value = line.split('=', 1)
+                      values[key.split(':', 1)[0]] = value
+                  home = values.get('CMAKE_HOME_DIRECTORY', '')
+                  abi = values.get('ANDROID_ABI', values.get('CMAKE_ANDROID_ARCH_ABI', ''))
+                  ndk = values.get('CMAKE_ANDROID_NDK', values.get('ANDROID_NDK', ''))
+                  if (not home or Path(home).resolve() != engine or abi != 'arm64-v8a'
+                          or values.get('CMAKE_GENERATOR') != 'Ninja' or Path(ndk).name != os.environ['NDK_VERSION']):
+                      continue
+                  directory = cache.parent.resolve()
+                  if not directory.is_relative_to(workspace):
+                      continue
+                  # Retain the tree with the most completed compilation work.
+                  objects = sum(1 for _ in directory.rglob('*.o'))
+                  candidates.append((objects, str(directory.relative_to(workspace))))
+          candidates.sort(reverse=True)
+          chosen = candidates[0][1] if candidates else 'build/android-scene-native-arm64'
+          evidence = {'buildDirectory': chosen, 'compatibleCaches': candidates, 'restoredObjects': candidates[0][0] if candidates else 0}
+          Path(os.environ['PROBE_ARTIFACT'], 'diagnostics/cache-selection.json').write_text(json.dumps(evidence, indent=2))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('build_dir=' + chosen + '\n')
+          print(json.dumps(evidence))
+          PY
+      - name: Configure the production renderer and both probe targets
+        env:
+          NATIVE_BUILD: ${{ steps.native-tree.outputs.build_dir }}
+        run: |
+          set -o pipefail
+          NDK="$ANDROID_HOME/ndk/$NDK_VERSION"
+          CMAKE="$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/cmake"
+          BASELINE_DEFINE=""
+          if [ "$PROBE_REVISION" = baseline ]; then BASELINE_DEFINE="-DAUREA_PROBE_BASELINE=1"; fi
+          "$CMAKE" -S engine -B "$NATIVE_BUILD" -G Ninja \
+            -DCMAKE_MAKE_PROGRAM="$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/ninja" \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_CXX_FLAGS=-std=c++23 -fno-exceptions -fno-rtti -fvisibility=hidden -fvisibility-inlines-hidden $BASELINE_DEFINE" \
+            -DCMAKE_C_FLAGS=-fvisibility=hidden \
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$GITHUB_WORKSPACE/$PROBE_ARTIFACT/bin" \
+            -DAUREA_GPU_GLES=ON -DAUREA_ANDROID_SCENE_BENCHMARK=ON -DAUREA_BUILD_TESTS=OFF \
+            2>&1 | tee "$PROBE_ARTIFACT/diagnostics/configure.log"
+      - name: Build only the Vulkan and GLES scene probes
+        env:
+          NATIVE_BUILD: ${{ steps.native-tree.outputs.build_dir }}
+        run: |
+          set -o pipefail
+          "$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/cmake" --build "$NATIVE_BUILD" \
+            --target aurea_scene_vulkan_probe aurea_scene_gles_probe --parallel 2 \
+            2>&1 | tee "$PROBE_ARTIFACT/diagnostics/build.log"
+      - name: Package ARM64 runtime, models, licenses and provenance
+        env:
+          NATIVE_BUILD: ${{ steps.native-tree.outputs.build_dir }}
+        run: |
+          python3 <<'PY'
+          import hashlib, json, os, shutil, struct, subprocess
+          from pathlib import Path
+          workspace = Path.cwd()
+          artifact = workspace / os.environ['PROBE_ARTIFACT']
+          build = workspace / os.environ['NATIVE_BUILD']
+          ndk = Path(os.environ['ANDROID_HOME']) / 'ndk' / os.environ['NDK_VERSION']
+          tools = ndk / 'toolchains/llvm/prebuilt/linux-x86_64'
+          runtime = tools / 'sysroot/usr/lib/aarch64-linux-android/libc++_shared.so'
+          shutil.copy2(runtime, artifact / 'bin/libc++_shared.so')
+          def digest(path):
+              checksum = hashlib.sha256()
+              with path.open('rb') as stream:
+                  for chunk in iter(lambda: stream.read(1 << 20), b''):
+                      checksum.update(chunk)
+              return checksum.hexdigest()
+          def copy(path, destination):
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(path, destination)
+          common = Path(os.environ['RUNNER_TEMP']) / 'aurea-scene-common'
+          models = common / 'models'
+          for name in ('DamagedHelmet.glb', 'Fox.glb', 'AnimatedMorphCube.glb'):
+              source = models / name
+              if not source.is_file():
+                  raise SystemExit('Required licensed test model missing: ' + str(source))
+              copy(source, artifact / 'models' / name)
+          licenses = list(models.glob('LICENSE*'))
+          if not licenses:
+              raise SystemExit('Model fixture licenses missing')
+          for license_file in licenses:
+              if license_file.is_file():
+                  copy(license_file, artifact / 'models' / license_file.name)
+          for name in ('CMakeCache.txt', 'compile_commands.json'):
+              copy(build / name, artifact / 'diagnostics' / name)
+          probe_source = workspace / 'engine/tests/android_scene_performance_probe.cpp'
+          copy(probe_source, artifact / 'source/android_scene_performance_probe.cpp')
+          (artifact / 'README.txt').write_text(
+              'Android ARM64 scene probes. Compilation and ELF checks only; device execution has not run.\n'
+              'Use libc++_shared.so from this artifact in the same remote directory as both executables.\n'
+              'Set LD_LIBRARY_PATH to that directory and chmod executables before running on a device.\n'
+              'Synthetic: probe vertices static|rigid|morph|zero floor hdri blur [width height frames finalQuality bounded dump budgetMiB objectCount shared|identical|varied]\n'
+              'Imported: probe --model path.glb floor hdri blur [same options, then animationClip]\n'
+              'animationClip defaults to 0 when present; -1 uses bind pose. hdri=0 off, 1 group, 2 object.\n'
+              'Example: aurea_scene_vulkan_probe --model /data/local/tmp/aurea-scene/DamagedHelmet.glb 0 0 0 640 360 60 0 0 /data/local/tmp/aurea-scene/helmet.rgba 32 1 shared -1\n'
+              'Baseline production is be3e189f345ef5620fd10c8d5c6eeb9a6cf5f882, with only the common test harness changed.\n'
+              'Compare baseline/target with bounded=0; baseline rejects bounded=1.\n'
+              'Timings include explicit GPU waits and must not be presented as UI playback FPS.\n'
+              'Keep model license files with the fixtures. provenance.json records source, binaries and fixture hashes.\n')
+          # Include notices for vendored code and pinned build dependencies.
+          for label, root in (('vendored', workspace / 'engine/third_party'),
+                              ('native-dependencies', build / '_deps'),
+                              ('shader-compiler', workspace / 'engine/build/shader-compilers/_deps')):
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if path.is_file() and (path.name.upper().startswith(('LICENSE', 'COPYING', 'NOTICE')) or path.name.upper() == 'FTL.TXT'):
+                      copy(path, artifact / 'licenses' / label / path.relative_to(root))
+          for name in ('aurea_scene_vulkan_probe', 'aurea_scene_gles_probe', 'libc++_shared.so'):
+              binary = artifact / 'bin' / name
+              with binary.open('rb') as stream:
+                  header = stream.read(64)
+              if header[:4] != b'\x7fELF' or header[4:6] != b'\x02\x01' or struct.unpack_from('<H', header, 18)[0] != 183:
+                  raise SystemExit('Not an ELF64 AArch64 binary: ' + name)
+              inspected = subprocess.run([str(tools / 'bin/llvm-readelf'), '--file-header', '--dynamic', '--notes', str(binary)], check=True, capture_output=True, text=True)
+              (artifact / 'diagnostics' / (name + '.elf.txt')).write_text(inspected.stdout)
+          tracked = subprocess.check_output(['git', 'ls-files', '-z', 'engine'], text=True).split('\0')
+          source_hashes = {}
+          extensions = {'.cpp', '.c', '.hpp', '.h', '.inl', '.cmake', '.vert', '.frag', '.comp', '.glsl'}
+          for name in sorted(filter(None, tracked)):
+              path = workspace / name
+              if path.suffix.lower() in extensions or path.name == 'CMakeLists.txt':
+                  source_hashes[name] = digest(path)
+          harness = 'engine/tests/android_scene_performance_probe.cpp'
+          production_hashes = {name: value for name, value in source_hashes.items() if name != harness}
+          manifest = {
+              'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'engineTree': subprocess.check_output(['git', 'rev-parse', 'HEAD:engine'], text=True).strip(),
+              'workflow': '.github/workflows/android-scene-probes.yml',
+              'workflowSha256': digest(common / 'android-scene-probes.yml'),
+              'revision': os.environ['PROBE_REVISION'],
+              'fixtureSourceCommit': (common / 'source-commit.txt').read_text().strip(),
+              'probeSourceCommit': (common / 'source-commit.txt').read_text().strip(),
+              'probeSourceSha256': digest(probe_source),
+              'productionSourceSha256': production_hashes,
+              'runId': os.environ['GITHUB_RUN_ID'], 'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'abi': 'arm64-v8a', 'androidApi': 26, 'ndkVersion': os.environ['NDK_VERSION'],
+              'cmakeVersion': os.environ['CMAKE_VERSION'], 'nativeBuildDirectory': str(build.relative_to(workspace)),
+              'targets': ['aurea_scene_vulkan_probe', 'aurea_scene_gles_probe'],
+              'settings': {'AUREA_ANDROID_SCENE_BENCHMARK': 'ON', 'AUREA_GPU_GLES': 'ON', 'ANDROID_STL': 'c++_shared',
+                           'AUREA_PROBE_BASELINE': os.environ['PROBE_REVISION'] == 'baseline'},
+              'validation': {'compiled': True, 'elfAbiChecked': True, 'deviceExecution': 'not-run'},
+              'measurement': 'Offscreen frame timings include an explicit GPU fence wait; these are not UI playback FPS.',
+              'sourceSha256': source_hashes,
+              'files': {str(path.relative_to(artifact)): {'bytes': path.stat().st_size, 'sha256': digest(path)}
+                        for path in sorted(artifact.rglob('*')) if path.is_file()},
+          }
+          (artifact / 'provenance.json').write_text(json.dumps(manifest, indent=2))
+          print(json.dumps({'commit': manifest['commit'], 'abi': manifest['abi'], 'targets': manifest['targets'], 'deviceExecution': 'not-run'}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-scene-probes-arm64-v8a-${{ matrix.revision }}
+          path: build/android-scene-probes-arm64
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-scene-probes-build-diagnostics-${{ matrix.revision }}
+          path: build/android-scene-probes-arm64/diagnostics
+          if-no-files-found: warn
+          retention-days: 14

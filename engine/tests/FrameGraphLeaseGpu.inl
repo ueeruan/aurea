@@ -3,15 +3,15 @@ namespace {
 struct LeaseSurfaceCapabilitiesDispatch {
     vk::Backend& backend;
     VkSurfaceKHR previousSurface;
-    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR original = vk::vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR original = backend.instance_dispatch().vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
     inline static LeaseSurfaceCapabilitiesDispatch* active = nullptr;
     u32 queries = 0;
     explicit LeaseSurfaceCapabilitiesDispatch(vk::Backend& value) : backend(value),
         previousSurface(vk::DiscardFrameTestAccess::install_lease_test_surface(value)) {
-        active = this; vk::vkGetPhysicalDeviceSurfaceCapabilitiesKHR = capabilities;
+        active = this; backend.instance_dispatch().vkGetPhysicalDeviceSurfaceCapabilitiesKHR = capabilities;
     }
     ~LeaseSurfaceCapabilitiesDispatch() {
-        vk::vkGetPhysicalDeviceSurfaceCapabilitiesKHR = original;
+        backend.instance_dispatch().vkGetPhysicalDeviceSurfaceCapabilitiesKHR = original;
         vk::DiscardFrameTestAccess::restore_lease_test_surface(backend, previousSurface);
         active = nullptr;
     }

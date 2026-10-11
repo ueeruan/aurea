@@ -119,7 +119,8 @@ struct Allocation {
 
 class MemoryAllocator {
 public:
-    void initialize(VkPhysicalDevice physical, VkDevice device) noexcept;
+    void initialize(VkPhysicalDevice physical, VkDevice device,
+                    const InstanceDispatch& instanceFunctions, DeviceDispatch& deviceFunctions) noexcept;
     void shutdown() noexcept;
 
     /// `required`: propriedades obrigatórias; `preferred`: desejáveis.
@@ -144,6 +145,8 @@ public:
     [[nodiscard]] const VkPhysicalDeviceMemoryProperties& properties() const noexcept { return props_; }
 
 private:
+    const InstanceDispatch* instanceFunctions_ = nullptr;
+    DeviceDispatch* deviceFunctions_ = nullptr;
     struct Range { VkDeviceSize offset; VkDeviceSize size; };
     struct Block {
         VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -449,6 +452,12 @@ public:
 
     // --- Internos, usados pelas peças do backend -----------------------------
     [[nodiscard]] VkDevice device() const noexcept { return device_; }
+    [[nodiscard]] VkPhysicalDevice physical_device() const noexcept { return physical_; }
+    [[nodiscard]] VkInstance instance() const noexcept { return instance_; }
+    [[nodiscard]] InstanceDispatch& instance_dispatch() noexcept { return instanceFunctions_; }
+    [[nodiscard]] const InstanceDispatch& instance_dispatch() const noexcept { return instanceFunctions_; }
+    [[nodiscard]] DeviceDispatch& device_dispatch() noexcept { return deviceFunctions_; }
+    [[nodiscard]] const DeviceDispatch& device_dispatch() const noexcept { return deviceFunctions_; }
     [[nodiscard]] MemoryAllocator& allocator() noexcept { return allocator_; }
     [[nodiscard]] Texture* texture(u64 id) noexcept { return textures_.get(id); }
     [[nodiscard]] Buffer* buffer(u64 id) noexcept { return buffers_.get(id); }
@@ -527,6 +536,8 @@ private:
     friend struct BoundedCommandsTestAccess;
     friend struct DiscardFrameTestAccess;
 
+    InstanceDispatch instanceFunctions_{};
+    DeviceDispatch deviceFunctions_{};
     BackendConfig config_{};
     GPUCapabilities caps_{};
     bool initialized_ = false;

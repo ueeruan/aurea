@@ -28,20 +28,20 @@ Status Backend::attach_surface(const SurfaceDesc& desc) noexcept {
     VkWin32SurfaceCreateInfoKHR info{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
     info.hwnd = static_cast<HWND>(desc.nativeWindow);
     info.hinstance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(info.hwnd, GWLP_HINSTANCE));
-    const Status created = check(vkCreateWin32SurfaceKHR(instance_, &info, nullptr, &surface_), "vkCreateWin32SurfaceKHR");
+    const Status created = check(instanceFunctions_.vkCreateWin32SurfaceKHR(instance_, &info, nullptr, &surface_), "vkCreateWin32SurfaceKHR");
 #else
     VkAndroidSurfaceCreateInfoKHR info{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
     info.window = static_cast<ANativeWindow*>(desc.nativeWindow);
-    const Status created = check(vkCreateAndroidSurfaceKHR(instance_, &info, nullptr, &surface_), "vkCreateAndroidSurfaceKHR");
+    const Status created = check(instanceFunctions_.vkCreateAndroidSurfaceKHR(instance_, &info, nullptr, &surface_), "vkCreateAndroidSurfaceKHR");
 #endif
     if (!created.ok()) {
         surface_ = VK_NULL_HANDLE;
         return created;
     }
     VkBool32 supported = VK_FALSE;
-    vkGetPhysicalDeviceSurfaceSupportKHR(physical_, graphicsFamily_, surface_, &supported);
+    instanceFunctions_.vkGetPhysicalDeviceSurfaceSupportKHR(physical_, graphicsFamily_, surface_, &supported);
     if (!supported) {
-        vkDestroySurfaceKHR(instance_, surface_, nullptr);
+        instanceFunctions_.vkDestroySurfaceKHR(instance_, surface_, nullptr);
         surface_ = VK_NULL_HANDLE;
         return Status{Errc::UnsupportedFeature, "fila grafica nao apresenta nesta superficie"};
     }
@@ -57,12 +57,12 @@ void Backend::detach_surface() noexcept {
     if (swapchain_ || surface_) {
         // A janela vai ser destruída pelo sistema logo depois desta chamada:
         // nada pode estar usando o swapchain.
-        vkDeviceWaitIdle(device_);
+        deviceFunctions_.vkDeviceWaitIdle(device_);
         for (u32 i = 0; i < framesInFlight_; ++i) run_deferred(frames_[i]);
     }
     destroy_swapchain();
     if (surface_) {
-        vkDestroySurfaceKHR(instance_, surface_, nullptr);
+        instanceFunctions_.vkDestroySurfaceKHR(instance_, surface_, nullptr);
         surface_ = VK_NULL_HANDLE;
     }
 }
@@ -76,7 +76,7 @@ Status Backend::resize_surface(u32 width, u32 height) noexcept {
 }
 
 Status Backend::recreate_swapchain() noexcept {
-    vkDeviceWaitIdle(device_);
+    deviceFunctions_.vkDeviceWaitIdle(device_);
     return create_swapchain(surfaceDesc_.width, surfaceDesc_.height);
 }
 
@@ -84,15 +84,15 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     if (!surface_) return Status{Errc::SurfaceLost, "sem superficie"};
 
     VkSurfaceCapabilitiesKHR caps{};
-    if (const Status s = check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps),
+    if (const Status s = check(instanceFunctions_.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_, surface_, &caps),
                                "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"); !s.ok()) {
         return s;
     }
 
     u32 fc = 0;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &fc, nullptr);
+    instanceFunctions_.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &fc, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(fc);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &fc, formats.data());
+    instanceFunctions_.vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &fc, formats.data());
     // UNORM, não SRGB: a codificação sRGB é do passe de saída (a mesma função
     // do export). Metade em hardware e metade em shader faria o preview e o
     // arquivo divergirem.
@@ -162,7 +162,7 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     info.oldSwapchain = swapchain_;
 
     VkSwapchainKHR created = VK_NULL_HANDLE;
-    if (const Status s = check(vkCreateSwapchainKHR(device_, &info, nullptr, &created), "vkCreateSwapchainKHR");
+    if (const Status s = check(deviceFunctions_.vkCreateSwapchainKHR(device_, &info, nullptr, &created), "vkCreateSwapchainKHR");
         !s.ok()) {
         return s;
     }
@@ -177,9 +177,9 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
     swapchainSuboptimal_ = false;
 
     u32 count = 0;
-    vkGetSwapchainImagesKHR(device_, swapchain_, &count, nullptr);
+    deviceFunctions_.vkGetSwapchainImagesKHR(device_, swapchain_, &count, nullptr);
     std::vector<VkImage> images(count);
-    vkGetSwapchainImagesKHR(device_, swapchain_, &count, images.data());
+    deviceFunctions_.vkGetSwapchainImagesKHR(device_, swapchain_, &count, images.data());
 
     VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     for (VkImage img : images) {
@@ -197,7 +197,7 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = chosen.format;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        if (vkCreateImageView(device_, &vi, nullptr, &t.view) != VK_SUCCESS) {
+        if (deviceFunctions_.vkCreateImageView(device_, &vi, nullptr, &t.view) != VK_SUCCESS) {
             return Status{Errc::SurfaceLost, "view do swapchain"};
         }
         swapTextures_.push_back(textures_.add(std::move(t)));
@@ -205,7 +205,7 @@ Status Backend::create_swapchain(u32 width, u32 height) noexcept {
         // falha sob carga (a apresentação da imagem N ainda o espera quando o
         // frame N+1 já quer sinalizá-lo), e o sintoma é um frame rasgado.
         VkSemaphore sem = VK_NULL_HANDLE;
-        (void)vkCreateSemaphore(device_, &si, nullptr, &sem);
+        (void)deviceFunctions_.vkCreateSemaphore(device_, &si, nullptr, &sem);
         renderDone_.push_back(sem);
     }
     swapchainDirty_ = false;
@@ -219,14 +219,14 @@ void Backend::destroy_swapchain() noexcept {
     for (u64 id : swapTextures_) {
         Texture t;
         if (textures_.remove(id, t)) {
-            for (VkFramebuffer fb : t.framebuffers) if (fb) vkDestroyFramebuffer(device_, fb, nullptr);
-            if (t.view) vkDestroyImageView(device_, t.view, nullptr);
+            for (VkFramebuffer fb : t.framebuffers) if (fb) deviceFunctions_.vkDestroyFramebuffer(device_, fb, nullptr);
+            if (t.view) deviceFunctions_.vkDestroyImageView(device_, t.view, nullptr);
         }
     }
     swapTextures_.clear();
-    for (VkSemaphore s : renderDone_) if (s) vkDestroySemaphore(device_, s, nullptr);
+    for (VkSemaphore s : renderDone_) if (s) deviceFunctions_.vkDestroySemaphore(device_, s, nullptr);
     renderDone_.clear();
-    if (swapchain_) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+    if (swapchain_) deviceFunctions_.vkDestroySwapchainKHR(device_, swapchain_, nullptr);
     swapchain_ = VK_NULL_HANDLE;
     imageAcquired_ = false;
     imageAcquireWait_ = false;

@@ -8,7 +8,7 @@ struct DiscardFrameTestAccess {
         b.swapTextures_.push_back(b.textures_.add(std::move(metadata)));
         VkSemaphore semaphore = VK_NULL_HANDLE;
         VkSemaphoreCreateInfo info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        const VkResult result = vkCreateSemaphore(b.device_, &info, nullptr, &semaphore);
+        const VkResult result = b.device_dispatch().vkCreateSemaphore(b.device_, &info, nullptr, &semaphore);
         if (result != VK_SUCCESS) { b.destroy_swapchain(); return Errc::OutOfMemory; }
         b.renderDone_.push_back(semaphore);
         // No native window is available on the headless host. WSI calls are
@@ -45,9 +45,9 @@ struct DiscardFrameTestAccess {
 namespace {
 struct DiscardFrameWsiDispatch {
     vk::Backend& backend;
-    PFN_vkAcquireNextImageKHR originalAcquire = vk::vkAcquireNextImageKHR;
-    PFN_vkQueuePresentKHR originalPresent = vk::vkQueuePresentKHR;
-    PFN_vkQueueSubmit originalSubmit = vk::vkQueueSubmit;
+    PFN_vkAcquireNextImageKHR originalAcquire = backend.device_dispatch().vkAcquireNextImageKHR;
+    PFN_vkQueuePresentKHR originalPresent = backend.device_dispatch().vkQueuePresentKHR;
+    PFN_vkQueueSubmit originalSubmit = backend.device_dispatch().vkQueueSubmit;
     inline static DiscardFrameWsiDispatch* active = nullptr;
     u32 acquires = 0, presents = 0, frameWaits = 0, frameSignals = 0;
     bool attached = false;
@@ -55,16 +55,16 @@ struct DiscardFrameWsiDispatch {
         attached = vk::DiscardFrameTestAccess::attach_test_wsi(b).ok();
         if (!attached) return;
         active = this;
-        vk::vkAcquireNextImageKHR = acquire;
-        vk::vkQueuePresentKHR = present;
-        vk::vkQueueSubmit = submit;
+        backend.device_dispatch().vkAcquireNextImageKHR = acquire;
+        backend.device_dispatch().vkQueuePresentKHR = present;
+        backend.device_dispatch().vkQueueSubmit = submit;
     }
     ~DiscardFrameWsiDispatch() {
         if (!attached) return;
         vk::DiscardFrameTestAccess::detach_test_wsi(backend);
-        vk::vkAcquireNextImageKHR = originalAcquire;
-        vk::vkQueuePresentKHR = originalPresent;
-        vk::vkQueueSubmit = originalSubmit;
+        backend.device_dispatch().vkAcquireNextImageKHR = originalAcquire;
+        backend.device_dispatch().vkQueuePresentKHR = originalPresent;
+        backend.device_dispatch().vkQueueSubmit = originalSubmit;
         active = nullptr;
     }
     static VKAPI_ATTR VkResult VKAPI_CALL acquire(VkDevice, VkSwapchainKHR, u64,

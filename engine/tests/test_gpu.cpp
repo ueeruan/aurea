@@ -150,10 +150,10 @@ struct Gpu {
     bool ok = false;
     std::unordered_map<u64, TextureHandle> targets;
 
-    explicit Gpu(bool conservative = false) {
+    explicit Gpu(bool conservative = false, bool validation = true) {
         BackendConfig cfg;
         cfg.conservativeVulkan = conservative;
-        cfg.enableValidation = true;   // com a camada instalada, erros de uso aparecem no log
+        cfg.enableValidation = validation;   // com a camada instalada, erros de uso aparecem no log
         cfg.framesInFlight = 2;
         const Status initialized = backend.initialize(cfg);
         if (!initialized.ok()) {
@@ -13436,6 +13436,7 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "V2140RegressionScenarios.inl"
 #include "MaterialOverrideGpu.inl"
 #include "MorphSharingGpu.inl"
+#include "VulkanDispatchOwnersGpu.inl"
 #include "SceneTargetGpu.inl"
 #include "LightRays3DGpu.inl"
 #include "BetaEffects1007Gpu.inl"

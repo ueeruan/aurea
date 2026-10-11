@@ -154,11 +154,14 @@ constexpr VkDeviceSize kHostBlock   = 4ull * 1024 * 1024;
 VkDeviceSize align_up(VkDeviceSize v, VkDeviceSize a) noexcept { return a ? (v + a - 1) / a * a : v; }
 } // namespace
 
-void MemoryAllocator::initialize(VkPhysicalDevice physical, VkDevice device) noexcept {
+void MemoryAllocator::initialize(VkPhysicalDevice physical, VkDevice device,
+                                 const InstanceDispatch& instanceFunctions, DeviceDispatch& deviceFunctions) noexcept {
+    instanceFunctions_ = &instanceFunctions;
+    deviceFunctions_ = &deviceFunctions;
     device_ = device;
-    vkGetPhysicalDeviceMemoryProperties(physical, &props_);
+    instanceFunctions_->vkGetPhysicalDeviceMemoryProperties(physical, &props_);
     VkPhysicalDeviceProperties p{};
-    vkGetPhysicalDeviceProperties(physical, &p);
+    instanceFunctions_->vkGetPhysicalDeviceProperties(physical, &p);
     granularity_ = std::max<VkDeviceSize>(1, p.limits.bufferImageGranularity);
 
     // Memória unificada (celular): algum tipo é device-local E host-visible
@@ -176,8 +179,8 @@ void MemoryAllocator::initialize(VkPhysicalDevice physical, VkDevice device) noe
 void MemoryAllocator::shutdown() noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     for (Block& b : blocks_) {
-        if (b.mapped) vkUnmapMemory(device_, b.memory);
-        if (b.memory) vkFreeMemory(device_, b.memory, nullptr);
+        if (b.mapped) deviceFunctions_->vkUnmapMemory(device_, b.memory);
+        if (b.memory) deviceFunctions_->vkFreeMemory(device_, b.memory, nullptr);
     }
     blocks_.clear();
     reserved_ = used_ = 0;
@@ -227,13 +230,13 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
         VkMemoryAllocateInfo info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         info.allocationSize = req.size;
         info.memoryTypeIndex = type;
-        if (vkAllocateMemory(device_, &info, nullptr, &out.memory) != VK_SUCCESS) {
+        if (deviceFunctions_->vkAllocateMemory(device_, &info, nullptr, &out.memory) != VK_SUCCESS) {
             AUREA_LOG_ERROR("memoria: dedicada de %llu bytes falhou (%s)",
                             static_cast<unsigned long long>(req.size), debugName ? debugName : "?");
             out.memory = VK_NULL_HANDLE;
             return out;
         }
-        if (mapNow) (void)vkMapMemory(device_, out.memory, 0, VK_WHOLE_SIZE, 0, &out.mapped);
+        if (mapNow) (void)deviceFunctions_->vkMapMemory(device_, out.memory, 0, VK_WHOLE_SIZE, 0, &out.mapped);
         out.size = req.size;
         out.memoryType = type;
         out.block = kInvalidIndex;
@@ -261,7 +264,7 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
                 // 32 bits: bloco aberto por uma imagem (sem mapa) servindo agora
                 // um buffer que escreve pela CPU — mapeia o bloco uma vez, aqui.
                 if (mapNow && !b.mapped && !address_space::map_gpu_memory_eagerly())
-                    (void)vkMapMemory(device_, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped);
+                    (void)deviceFunctions_->vkMapMemory(device_, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped);
                 out.memory = b.memory;
                 out.offset = start;
                 out.size = end - start;
@@ -279,12 +282,12 @@ Allocation MemoryAllocator::allocate(const VkMemoryRequirements& req, VkMemoryPr
         VkMemoryAllocateInfo info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         info.allocationSize = blockSize;
         info.memoryTypeIndex = type;
-        if (vkAllocateMemory(device_, &info, nullptr, &nb.memory) != VK_SUCCESS) {
+        if (deviceFunctions_->vkAllocateMemory(device_, &info, nullptr, &nb.memory) != VK_SUCCESS) {
             AUREA_LOG_ERROR("memoria: bloco de %llu MB falhou",
                             static_cast<unsigned long long>(blockSize >> 20));
             return out;
         }
-        if (mapNow) (void)vkMapMemory(device_, nb.memory, 0, VK_WHOLE_SIZE, 0, &nb.mapped);
+        if (mapNow) (void)deviceFunctions_->vkMapMemory(device_, nb.memory, 0, VK_WHOLE_SIZE, 0, &nb.mapped);
         nb.size = blockSize;
         nb.sizeClass = tierSize;
         nb.memoryType = type;
@@ -303,8 +306,8 @@ void MemoryAllocator::free(const Allocation& a) noexcept {
     if (allocations_) --allocations_;
     used_ -= std::min<u64>(used_, a.size);
     if (a.block == kInvalidIndex) {
-        if (a.mapped) vkUnmapMemory(device_, a.memory);
-        vkFreeMemory(device_, a.memory, nullptr);
+        if (a.mapped) deviceFunctions_->vkUnmapMemory(device_, a.memory);
+        deviceFunctions_->vkFreeMemory(device_, a.memory, nullptr);
         reserved_ -= std::min<u64>(reserved_, a.size);
         return;
     }
@@ -329,8 +332,8 @@ void MemoryAllocator::trim_empty_blocks() noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     for (Block& b : blocks_) {
         if (!b.memory || b.used) continue;
-        if (b.mapped) vkUnmapMemory(device_, b.memory);
-        vkFreeMemory(device_, b.memory, nullptr);
+        if (b.mapped) deviceFunctions_->vkUnmapMemory(device_, b.memory);
+        deviceFunctions_->vkFreeMemory(device_, b.memory, nullptr);
         reserved_ -= std::min<u64>(reserved_, b.size);
         b = Block{};
     }
@@ -391,14 +394,14 @@ bool HostRing::add_chunk(VkDeviceSize size) noexcept {
     info.size = size;
     info.usage = usage_;
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if (vkCreateBuffer(backend_->device(), &info, nullptr, &c.buffer) != VK_SUCCESS) return false;
+    if (backend_->device_dispatch().vkCreateBuffer(backend_->device(), &info, nullptr, &c.buffer) != VK_SUCCESS) return false;
     VkMemoryRequirements req{};
-    vkGetBufferMemoryRequirements(backend_->device(), c.buffer, &req);
+    backend_->device_dispatch().vkGetBufferMemoryRequirements(backend_->device(), c.buffer, &req);
     c.alloc = backend_->allocator().allocate(req,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 0, false, name_);
     if (!c.alloc.valid() || !c.alloc.mapped
-        || vkBindBufferMemory(backend_->device(), c.buffer, c.alloc.memory, c.alloc.offset) != VK_SUCCESS) {
-        vkDestroyBuffer(backend_->device(), c.buffer, nullptr);
+        || backend_->device_dispatch().vkBindBufferMemory(backend_->device(), c.buffer, c.alloc.memory, c.alloc.offset) != VK_SUCCESS) {
+        backend_->device_dispatch().vkDestroyBuffer(backend_->device(), c.buffer, nullptr);
         backend_->allocator().free(c.alloc);
         return false;
     }
@@ -409,7 +412,7 @@ bool HostRing::add_chunk(VkDeviceSize size) noexcept {
 void HostRing::shutdown() noexcept {
     if (!backend_) return;
     for (Chunk& c : chunks_) {
-        vkDestroyBuffer(backend_->device(), c.buffer, nullptr);
+        backend_->device_dispatch().vkDestroyBuffer(backend_->device(), c.buffer, nullptr);
         backend_->allocator().free(c.alloc);
     }
     chunks_.clear();

@@ -12,28 +12,29 @@ namespace {
 // All unaffected calls use the real validation/driver dispatch. These hooks
 // inject recording/allocation failure, never submit malformed GPU work.
 struct BoundedRecordingDispatch {
+    vk::Backend& backend;
     enum class Fault { None, Begin, End, Allocate, Submit, Descriptor, Uniform };
-    PFN_vkBeginCommandBuffer begin = vk::vkBeginCommandBuffer;
-    PFN_vkEndCommandBuffer end = vk::vkEndCommandBuffer;
-    PFN_vkAllocateCommandBuffers allocate = vk::vkAllocateCommandBuffers;
-    PFN_vkQueueSubmit submit = vk::vkQueueSubmit;
-    PFN_vkAllocateDescriptorSets descriptor = vk::vkAllocateDescriptorSets;
-    PFN_vkCreateBuffer buffer = vk::vkCreateBuffer;
+    PFN_vkBeginCommandBuffer begin = backend.device_dispatch().vkBeginCommandBuffer;
+    PFN_vkEndCommandBuffer end = backend.device_dispatch().vkEndCommandBuffer;
+    PFN_vkAllocateCommandBuffers allocate = backend.device_dispatch().vkAllocateCommandBuffers;
+    PFN_vkQueueSubmit submit = backend.device_dispatch().vkQueueSubmit;
+    PFN_vkAllocateDescriptorSets descriptor = backend.device_dispatch().vkAllocateDescriptorSets;
+    PFN_vkCreateBuffer buffer = backend.device_dispatch().vkCreateBuffer;
     inline static BoundedRecordingDispatch* active = nullptr;
     Fault fault = Fault::None;
     u32 failedCalls = 0, submitCalls = 0, submittedBuffers = 0;
-    BoundedRecordingDispatch() {
+    explicit BoundedRecordingDispatch(vk::Backend& target) : backend(target) {
         active = this;
-        vk::vkBeginCommandBuffer = begin_call; vk::vkEndCommandBuffer = end_call;
-        vk::vkAllocateCommandBuffers = allocate_call; vk::vkQueueSubmit = submit_call;
-        vk::vkAllocateDescriptorSets = descriptor_call; vk::vkCreateBuffer = buffer_call;
+        backend.device_dispatch().vkBeginCommandBuffer = begin_call; backend.device_dispatch().vkEndCommandBuffer = end_call;
+        backend.device_dispatch().vkAllocateCommandBuffers = allocate_call; backend.device_dispatch().vkQueueSubmit = submit_call;
+        backend.device_dispatch().vkAllocateDescriptorSets = descriptor_call; backend.device_dispatch().vkCreateBuffer = buffer_call;
     }
     ~BoundedRecordingDispatch() { restore(); }
     void restore() {
         if (active != this) return;
-        vk::vkBeginCommandBuffer = begin; vk::vkEndCommandBuffer = end;
-        vk::vkAllocateCommandBuffers = allocate; vk::vkQueueSubmit = submit;
-        vk::vkAllocateDescriptorSets = descriptor; vk::vkCreateBuffer = buffer;
+        backend.device_dispatch().vkBeginCommandBuffer = begin; backend.device_dispatch().vkEndCommandBuffer = end;
+        backend.device_dispatch().vkAllocateCommandBuffers = allocate; backend.device_dispatch().vkQueueSubmit = submit;
+        backend.device_dispatch().vkAllocateDescriptorSets = descriptor; backend.device_dispatch().vkCreateBuffer = buffer;
         active = nullptr;
     }
     bool fail(Fault kind) { if (fault != kind) return false; ++failedCalls; return true; }
@@ -94,7 +95,7 @@ AUREA_TEST(BoundedCommandsGpu, SixHundredPassesPreservePixelsBindingsTimersAndRe
             cmd.barrier(target, ResourceState::ColorAttachment, true);
             cmd.bind_pipeline(*pipeline);
             cmd.bind_texture(0, *input, isolated.renderer.shaders().sampler(CommonSampler::NearestClamp));
-            BoundedRecordingDispatch dispatch;
+            BoundedRecordingDispatch dispatch(b);
             for (u32 pass = 0; pass < passes; ++pass) {
                 cmd.begin_label("bounded copy"); cmd.begin_timer("bounded copy");
                 RenderPassBegin rp; rp.color = target; rp.load = pass ? LoadOp::Load : LoadOp::Clear;
@@ -215,14 +216,14 @@ AUREA_TEST(BoundedCommandsGpu, RecordingFailuresAbortWithoutPublishingOrReleasin
         AUREA_CHECK(b.end_frame().ok());
         bool priorReleased = false, abortedReleased = false;
         b.defer_until_gpu_done([](void* p) { *static_cast<bool*>(p) = true; }, &priorReleased);
-        DelayedFenceObservation observation(b.device());
+        DelayedFenceObservation observation(b);
         FrameBegin fb; AUREA_CHECK(b.begin_offscreen_frame(fb).ok()); if (!fb.commands) return;
         b.defer_until_gpu_done([](void* p) { *static_cast<bool*>(p) = true; }, &abortedReleased);
         fb.commands->barrier(target, ResourceState::ColorAttachment, true);
         RenderPassBegin rp; rp.color = target;
         fb.commands->begin_render_pass(rp);
         fb.commands->bind_pipeline(*pipeline);
-        BoundedRecordingDispatch dispatch; dispatch.fault = fault;
+        BoundedRecordingDispatch dispatch(b); dispatch.fault = fault;
         Status status;
         if (fault == Fault::Descriptor) {
             fb.commands->draw(3);

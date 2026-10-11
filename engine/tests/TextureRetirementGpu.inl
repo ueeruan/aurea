@@ -82,7 +82,7 @@ AUREA_TEST(MemoryPressureGpu, RetirementWaitsForOldUseWithoutWaitingForANewerFra
     FrameBegin second;
     AUREA_CHECK(backend.begin_offscreen_frame(second).ok());
     pool.begin_frame(backend, second.frameNumber);
-    DelayedFenceObservation oldCompletion(backend.device());
+    DelayedFenceObservation oldCompletion(backend);
     oldCompletion.fence = vk::ImmediateSubmissionTestAccess::frame_fence(backend, first.frameNumber);
     const auto b = pool.acquire(retirement_texture(640));
     AUREA_CHECK(b.valid());
@@ -95,7 +95,7 @@ AUREA_TEST(MemoryPressureGpu, RetirementWaitsForOldUseWithoutWaitingForANewerFra
 
     // The third slot is unused. Keep the newer frame unobserved: the ready
     // first frame must release A without recycling either submitted slot.
-    DelayedFenceObservation newerCompletion(backend.device());
+    DelayedFenceObservation newerCompletion(backend);
     newerCompletion.fence = vk::ImmediateSubmissionTestAccess::frame_fence(backend, second.frameNumber);
     FrameBegin third;
     AUREA_CHECK(backend.begin_offscreen_frame(third).ok());

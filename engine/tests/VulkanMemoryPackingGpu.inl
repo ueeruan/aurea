@@ -8,29 +8,20 @@ namespace {
 // The normal backend/readback allocator, requirements, memory indices, binds,
 // submissions and driver allocation calls all retain their actual behavior.
 struct DeviceOnlyAllocatorProperties {
-    PFN_vkGetInstanceProcAddr originalProc = vk::vkGetInstanceProcAddr;
-    PFN_vkGetPhysicalDeviceMemoryProperties originalProperties = vk::vkGetPhysicalDeviceMemoryProperties;
-    VkPhysicalDevice physical = VK_NULL_HANDLE;
+    vk::InstanceDispatch functions;
+    PFN_vkGetPhysicalDeviceMemoryProperties originalProperties;
+    VkPhysicalDevice physical;
     bool deviceOnly = false;
     u32 maskedTypes = 0;
     inline static DeviceOnlyAllocatorProperties* active = nullptr;
-    DeviceOnlyAllocatorProperties() {
-        active = this; vk::vkGetInstanceProcAddr = &proc;
+    explicit DeviceOnlyAllocatorProperties(vk::Backend& backend)
+        : functions(backend.instance_dispatch()),
+          originalProperties(functions.vkGetPhysicalDeviceMemoryProperties),
+          physical(backend.physical_device()) {
+        active = this;
+        functions.vkGetPhysicalDeviceMemoryProperties = &properties;
     }
-    ~DeviceOnlyAllocatorProperties() {
-        vk::vkGetInstanceProcAddr = originalProc;
-        vk::vkGetPhysicalDeviceMemoryProperties = originalProperties;
-        active = nullptr;
-    }
-    static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL proc(VkInstance instance, const char* name) {
-        auto& observation = *active;
-        const auto actual = observation.originalProc(instance, name);
-        if (std::strcmp(name, "vkGetPhysicalDeviceMemoryProperties") == 0) {
-            observation.originalProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(actual);
-            return reinterpret_cast<PFN_vkVoidFunction>(&properties);
-        }
-        return actual;
-    }
+    ~DeviceOnlyAllocatorProperties() { active = nullptr; }
     static VKAPI_ATTR void VKAPI_CALL properties(VkPhysicalDevice physical,
                                                  VkPhysicalDeviceMemoryProperties* out) {
         auto& observation = *active;
@@ -50,18 +41,19 @@ struct DeviceOnlyAllocatorProperties {
 // Count actual VkDeviceMemory handles and allocation/free time, not logical
 // resources/suballocations. Forward every call to the real driver.
 struct NativeMemoryObservation {
-    PFN_vkAllocateMemory originalAllocate = vk::vkAllocateMemory;
-    PFN_vkFreeMemory originalFree = vk::vkFreeMemory;
+    vk::Backend& backend;
+    PFN_vkAllocateMemory originalAllocate = backend.device_dispatch().vkAllocateMemory;
+    PFN_vkFreeMemory originalFree = backend.device_dispatch().vkFreeMemory;
     VkDevice device;
     std::unordered_map<VkDeviceMemory, VkDeviceSize> live;
     u32 allocations = 0, frees = 0, peakHandles = 0;
     f64 allocateMs = 0, freeMs = 0;
     inline static NativeMemoryObservation* active = nullptr;
-    explicit NativeMemoryObservation(VkDevice target) : device(target) {
-        active = this; vk::vkAllocateMemory = &allocate; vk::vkFreeMemory = &free;
+    explicit NativeMemoryObservation(vk::Backend& target) : backend(target), device(target.device()) {
+        active = this; backend.device_dispatch().vkAllocateMemory = &allocate; backend.device_dispatch().vkFreeMemory = &free;
     }
     ~NativeMemoryObservation() {
-        vk::vkAllocateMemory = originalAllocate; vk::vkFreeMemory = originalFree; active = nullptr;
+        backend.device_dispatch().vkAllocateMemory = originalAllocate; backend.device_dispatch().vkFreeMemory = originalFree; active = nullptr;
     }
     static VKAPI_ATTR VkResult VKAPI_CALL allocate(VkDevice device, const VkMemoryAllocateInfo* info,
         const VkAllocationCallbacks* callbacks, VkDeviceMemory* memory) {
@@ -123,14 +115,14 @@ struct MemoryPackingResources {
         info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
                    | VK_IMAGE_USAGE_SAMPLED_BIT;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        if (vk::vkCreateImage(backend.device(), &info, nullptr, &entry.image) != VK_SUCCESS) return false;
+        if (backend.device_dispatch().vkCreateImage(backend.device(), &info, nullptr, &entry.image) != VK_SUCCESS) return false;
         VkMemoryRequirements requirement{};
-        vk::vkGetImageMemoryRequirements(backend.device(), entry.image, &requirement);
+        backend.device_dispatch().vkGetImageMemoryRequirements(backend.device(), entry.image, &requirement);
         entry.requirementBytes = requirement.size;
         entry.allocation = allocator.allocate(requirement, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             0, false, "memory-packing-live-image", false);
         entry.alive = true;
-        return entry.allocation.valid() && vk::vkBindImageMemory(backend.device(), entry.image,
+        return entry.allocation.valid() && backend.device_dispatch().vkBindImageMemory(backend.device(), entry.image,
             entry.allocation.memory, entry.allocation.offset) == VK_SUCCESS;
     }
     bool pin(u32 index, u64 bytes = 4096) {
@@ -138,21 +130,21 @@ struct MemoryPackingResources {
         VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         info.size = bytes; info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        if (vk::vkCreateBuffer(backend.device(), &info, nullptr, &entry.buffer) != VK_SUCCESS) return false;
+        if (backend.device_dispatch().vkCreateBuffer(backend.device(), &info, nullptr, &entry.buffer) != VK_SUCCESS) return false;
         VkMemoryRequirements requirement{};
-        vk::vkGetBufferMemoryRequirements(backend.device(), entry.buffer, &requirement);
+        backend.device_dispatch().vkGetBufferMemoryRequirements(backend.device(), entry.buffer, &requirement);
         entry.requirementBytes = requirement.size;
         entry.allocation = allocator.allocate(requirement, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             0, false, "memory-packing-small-pin", false);
         entry.alive = true;
-        return entry.allocation.valid() && vk::vkBindBufferMemory(backend.device(), entry.buffer,
+        return entry.allocation.valid() && backend.device_dispatch().vkBindBufferMemory(backend.device(), entry.buffer,
             entry.allocation.memory, entry.allocation.offset) == VK_SUCCESS;
     }
     void release(u32 index) {
         Entry& entry = entries[index];
         if (!entry.alive) return;
-        if (entry.image) vk::vkDestroyImage(backend.device(), entry.image, nullptr);
-        if (entry.buffer) vk::vkDestroyBuffer(backend.device(), entry.buffer, nullptr);
+        if (entry.image) backend.device_dispatch().vkDestroyImage(backend.device(), entry.image, nullptr);
+        if (entry.buffer) backend.device_dispatch().vkDestroyBuffer(backend.device(), entry.buffer, nullptr);
         allocator.free(entry.allocation); entry = Entry{};
     }
     void defer(u32 index) {
@@ -165,42 +157,42 @@ struct MemoryPackingResources {
     }
 };
 
-void packing_copy_corners(VkCommandBuffer command, VkImage image, VkBuffer destination, u32 region) {
+void packing_copy_corners(vk::Backend& backend, VkCommandBuffer command, VkImage image, VkBuffer destination, u32 region) {
     for (u32 corner = 0; corner < 2; ++corner) {
         VkBufferImageCopy copy{};
         copy.bufferOffset = static_cast<VkDeviceSize>(region + corner) * 32 * 32 * 4;
         copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         copy.imageOffset = corner ? VkOffset3D{1536 - 32, 1024 - 32, 0} : VkOffset3D{0, 0, 0};
         copy.imageExtent = {32, 32, 1};
-        vk::vkCmdCopyImageToBuffer(command, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, destination, 1, &copy);
+        backend.device_dispatch().vkCmdCopyImageToBuffer(command, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, destination, 1, &copy);
     }
 }
 
-void packing_readback_visible(VkCommandBuffer command, VkBuffer destination) {
+void packing_readback_visible(vk::Backend& backend, VkCommandBuffer command, VkBuffer destination) {
     VkBufferMemoryBarrier visible{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
     visible.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; visible.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
     visible.srcQueueFamilyIndex = visible.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     visible.buffer = destination; visible.size = VK_WHOLE_SIZE;
-    vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+    backend.device_dispatch().vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
         0, 0, nullptr, 1, &visible, 0, nullptr);
 }
 }
 
 AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysicalBacking) {
     AUREA_REQUIRE_GPU();
-    DeviceOnlyAllocatorProperties properties;
     Gpu isolated;
     AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
     auto& backend = isolated.backend;
+    DeviceOnlyAllocatorProperties properties(backend);
     const u32 validationErrors = vk::Backend::validation_errors();
     AUREA_CHECK(properties.physical != VK_NULL_HANDLE);
     if (!properties.physical) return;
     VkPhysicalDeviceProperties physical{};
-    vk::vkGetPhysicalDeviceProperties(properties.physical, &physical);
-    NativeMemoryObservation nativeMemory(backend.device());
+    backend.instance_dispatch().vkGetPhysicalDeviceProperties(properties.physical, &physical);
+    NativeMemoryObservation nativeMemory(backend);
     MemoryPackingResources resources(backend);
     properties.deviceOnly = true;
-    resources.allocator.initialize(properties.physical, backend.device());
+    resources.allocator.initialize(properties.physical, backend.device(), properties.functions, backend.device_dispatch());
     properties.deviceOnly = false;
     resources.initialized = true;
     AUREA_CHECK(properties.maskedTypes > 0);
@@ -213,7 +205,7 @@ AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysic
     resources.readback = *readback;
     const VkBuffer destination = backend.buffer(readback->id)->buffer;
     const auto clearColorImage = reinterpret_cast<PFN_vkCmdClearColorImage>(
-        vk::vkGetDeviceProcAddr(backend.device(), "vkCmdClearColorImage"));
+        backend.instance_dispatch().vkGetDeviceProcAddr(backend.device(), "vkCmdClearColorImage"));
     AUREA_CHECK(clearColorImage != nullptr); if (!clearColorImage) return;
     backend.wait_idle();
     const auto base = backend.memory_stats();
@@ -255,7 +247,7 @@ AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysic
         reusable.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         reusable.srcQueueFamilyIndex = reusable.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         reusable.buffer = destination; reusable.size = VK_WHOLE_SIZE;
-        vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+        backend.device_dispatch().vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &reusable, 0, nullptr);
         for (u32 i = 0; i < images.size(); ++i) {
             const VkImage image = resources.entries[images[i]].image;
@@ -264,7 +256,7 @@ AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysic
             writable.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; writable.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             writable.srcQueueFamilyIndex = writable.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             writable.image = image; writable.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-            vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            backend.device_dispatch().vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 0, 0, nullptr, 0, nullptr, 1, &writable);
             VkClearColorValue clear{};
             for (u32 c = 0; c < 4; ++c) clear.float32[c] = colors[i][c] / 255.0f;
@@ -273,11 +265,11 @@ AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysic
             auto readable = writable;
             readable.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; readable.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
             readable.oldLayout = writable.newLayout; readable.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            backend.device_dispatch().vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 0, 0, nullptr, 0, nullptr, 1, &readable);
-            packing_copy_corners(command, image, destination, i * 2);
+            packing_copy_corners(backend, command, image, destination, i * 2);
         }
-        packing_readback_visible(command, destination);
+        packing_readback_visible(backend, command, destination);
         const u64 pendingUsed = resources.allocator.used_bytes(), pendingReserved = resources.allocator.reserved_bytes();
         const u32 previousRetirements = resources.retired;
         resources.defer(0); resources.defer(3);
@@ -290,7 +282,7 @@ AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysic
         resources.frameOpen = false;
         AUREA_CHECK(submitted.ok()); if (!submitted.ok()) return;
         {
-            DelayedFenceObservation completion(backend.device());
+            DelayedFenceObservation completion(backend);
             const Status pending = backend.wait_frame(frame.frameNumber, 0);
             AUREA_CHECK(pending.code() == Errc::Timeout);
             AUREA_CHECK_EQ(resources.retired, previousRetirements);
@@ -332,11 +324,11 @@ AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysic
         overwrite.srcAccessMask = VK_ACCESS_HOST_READ_BIT; overwrite.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         overwrite.srcQueueFamilyIndex = overwrite.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         overwrite.buffer = destination; overwrite.size = VK_WHOLE_SIZE;
-        vk::vkCmdPipelineBarrier(nextCommand, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        backend.device_dispatch().vkCmdPipelineBarrier(nextCommand, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
             0, 0, nullptr, 1, &overwrite, 0, nullptr);
-        packing_copy_corners(nextCommand, resources.entries[1].image, destination, 0);
-        packing_copy_corners(nextCommand, resources.entries[4].image, destination, 2);
-        packing_readback_visible(nextCommand, destination);
+        packing_copy_corners(backend, nextCommand, resources.entries[1].image, destination, 0);
+        packing_copy_corners(backend, nextCommand, resources.entries[4].image, destination, 2);
+        packing_readback_visible(backend, nextCommand, destination);
         const Status resubmitted = backend.end_frame();
         resources.frameOpen = false;
         AUREA_CHECK(resubmitted.ok()); if (!resubmitted.ok()) return;
@@ -370,22 +362,22 @@ AUREA_TEST(VulkanMemoryPackingGpu, FenceRetirementPreservesPixelsAndBoundsPhysic
 
 AUREA_TEST(VulkanMemoryPackingGpu, SmallPinsBoundActualSlabsWithoutEarlyFenceCreditOrMovingLiveBuffers) {
     AUREA_REQUIRE_GPU();
-    DeviceOnlyAllocatorProperties properties;
     Gpu isolated; AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
     auto& backend = isolated.backend;
+    DeviceOnlyAllocatorProperties properties(backend);
     AUREA_CHECK(properties.physical != VK_NULL_HANDLE); if (!properties.physical) return;
     VkPhysicalDeviceProperties physical{};
-    vk::vkGetPhysicalDeviceProperties(properties.physical, &physical);
-    const auto fill = reinterpret_cast<PFN_vkCmdFillBuffer>(vk::vkGetDeviceProcAddr(backend.device(), "vkCmdFillBuffer"));
+    backend.instance_dispatch().vkGetPhysicalDeviceProperties(properties.physical, &physical);
+    const auto fill = reinterpret_cast<PFN_vkCmdFillBuffer>(backend.instance_dispatch().vkGetDeviceProcAddr(backend.device(), "vkCmdFillBuffer"));
     AUREA_CHECK(fill != nullptr); if (!fill) return;
     const u32 validationErrors = vk::Backend::validation_errors();
-    NativeMemoryObservation observed(backend.device());
+    NativeMemoryObservation observed(backend);
     constexpr u64 mib = 1ull << 20;
     for (const bool deviceOnly : {false, true}) for (const u64 requested : {4096ull, 768ull << 10, 1536ull << 10, 3ull << 20})
         for (u32 cycle = 0; cycle < 3; ++cycle) {
         MemoryPackingResources resources(backend);
         properties.deviceOnly = deviceOnly;
-        resources.allocator.initialize(properties.physical, backend.device());
+        resources.allocator.initialize(properties.physical, backend.device(), properties.functions, backend.device_dispatch());
         properties.deviceOnly = false; resources.initialized = true;
         BufferDesc desc; desc.bytes = 8192; desc.usage = BufferUsage::TransferDst;
         desc.access = MemoryAccess::Readback;
@@ -437,20 +429,20 @@ AUREA_TEST(VulkanMemoryPackingGpu, SmallPinsBoundActualSlabsWithoutEarlyFenceCre
             readable[i].srcQueueFamilyIndex = readable[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             readable[i].buffer = i ? resources.entries[2].buffer : large.buffer; readable[i].size = 4096;
         }
-        vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        backend.device_dispatch().vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
             0, 0, nullptr, 2, readable.data(), 0, nullptr);
         for (u32 i = 0; i < 2; ++i) {
             const VkBufferCopy copy{0, i * 4096ull, 4096};
-            vk::vkCmdCopyBuffer(command, readable[i].buffer, destination, 1, &copy);
+            backend.device_dispatch().vkCmdCopyBuffer(command, readable[i].buffer, destination, 1, &copy);
         }
-        packing_readback_visible(command, destination);
+        packing_readback_visible(backend, command, destination);
         resources.defer(0); resources.allocator.trim_empty_blocks();
         AUREA_CHECK_EQ(resources.retired, 0u);
         AUREA_CHECK_EQ(resources.allocator.used_bytes(), pendingUsed);
         AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), pendingReserved);
         AUREA_CHECK(backend.end_frame().ok()); resources.frameOpen = false;
         {
-            DelayedFenceObservation hold(backend.device());
+            DelayedFenceObservation hold(backend);
             AUREA_CHECK_EQ(backend.wait_frame(frame.frameNumber, 0).code(), Errc::Timeout);
             AUREA_CHECK_EQ(resources.retired, 0u);
             AUREA_CHECK_EQ(resources.allocator.used_bytes(), pendingUsed);
@@ -475,11 +467,11 @@ AUREA_TEST(VulkanMemoryPackingGpu, SmallPinsBoundActualSlabsWithoutEarlyFenceCre
         writable.srcAccessMask = VK_ACCESS_HOST_READ_BIT; writable.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         writable.srcQueueFamilyIndex = writable.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         writable.buffer = destination; writable.size = VK_WHOLE_SIZE;
-        vk::vkCmdPipelineBarrier(nextCommand, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        backend.device_dispatch().vkCmdPipelineBarrier(nextCommand, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
             0, 0, nullptr, 1, &writable, 0, nullptr);
         const VkBufferCopy copy{0, 0, 4096};
-        vk::vkCmdCopyBuffer(nextCommand, resources.entries[2].buffer, destination, 1, &copy);
-        packing_readback_visible(nextCommand, destination);
+        backend.device_dispatch().vkCmdCopyBuffer(nextCommand, resources.entries[2].buffer, destination, 1, &copy);
+        packing_readback_visible(backend, nextCommand, destination);
         AUREA_CHECK(backend.end_frame().ok()); resources.frameOpen = false;
         AUREA_CHECK(backend.wait_frame(next.frameNumber, 5'000'000'000ull).ok());
         pixels = nullptr; AUREA_CHECK(backend.map_buffer(*readback, pixels).ok());
@@ -501,16 +493,16 @@ AUREA_TEST(VulkanMemoryPackingGpu, SmallPinsBoundActualSlabsWithoutEarlyFenceCre
 }
 AUREA_TEST(VulkanMemoryPackingGpu, PersistentTinyPinsCannotStrandRetiredLargerSizeClasses) {
     AUREA_REQUIRE_GPU();
-    DeviceOnlyAllocatorProperties properties;
     Gpu isolated; AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
     auto& backend = isolated.backend;
+    DeviceOnlyAllocatorProperties properties(backend);
     AUREA_CHECK(properties.physical != VK_NULL_HANDLE); if (!properties.physical) return;
     VkPhysicalDeviceProperties physical{};
-    vk::vkGetPhysicalDeviceProperties(properties.physical, &physical);
-    const auto fill = reinterpret_cast<PFN_vkCmdFillBuffer>(vk::vkGetDeviceProcAddr(backend.device(), "vkCmdFillBuffer"));
+    backend.instance_dispatch().vkGetPhysicalDeviceProperties(properties.physical, &physical);
+    const auto fill = reinterpret_cast<PFN_vkCmdFillBuffer>(backend.instance_dispatch().vkGetDeviceProcAddr(backend.device(), "vkCmdFillBuffer"));
     AUREA_CHECK(fill != nullptr); if (!fill) return;
     const u32 validationErrors = vk::Backend::validation_errors();
-    NativeMemoryObservation observed(backend.device());
+    NativeMemoryObservation observed(backend);
     constexpr u64 mib = 1ull << 20;
     // The four persistent payload sizes match the tiny survivors observed in
     // separate 2 MiB slabs in the physical heavy capture. Real driver memory
@@ -527,7 +519,7 @@ AUREA_TEST(VulkanMemoryPackingGpu, PersistentTinyPinsCannotStrandRetiredLargerSi
     for (const bool deviceOnly : {false, true}) {
         MemoryPackingResources resources(backend);
         properties.deviceOnly = deviceOnly;
-        resources.allocator.initialize(properties.physical, backend.device());
+        resources.allocator.initialize(properties.physical, backend.device(), properties.functions, backend.device_dispatch());
         properties.deviceOnly = false; resources.initialized = true;
         BufferDesc desc; desc.bytes = fullBytes; desc.usage = BufferUsage::TransferDst;
         desc.access = MemoryAccess::Readback;
@@ -607,7 +599,7 @@ AUREA_TEST(VulkanMemoryPackingGpu, PersistentTinyPinsCannotStrandRetiredLargerSi
             writable.srcAccessMask = VK_ACCESS_HOST_READ_BIT; writable.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
             writable.srcQueueFamilyIndex = writable.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             writable.buffer = destination; writable.size = VK_WHOLE_SIZE;
-            vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            backend.device_dispatch().vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 0, 0, nullptr, 1, &writable, 0, nullptr);
             u64 offset = 0;
             for (u32 i = 0; i < requested.size(); ++i) {
@@ -618,13 +610,13 @@ AUREA_TEST(VulkanMemoryPackingGpu, PersistentTinyPinsCannotStrandRetiredLargerSi
                     readable.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; readable.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
                     readable.srcQueueFamilyIndex = readable.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                     readable.buffer = buffer; readable.size = requested[i];
-                    vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    backend.device_dispatch().vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                         0, 0, nullptr, 1, &readable, 0, nullptr);
                 }
                 const VkBufferCopy copy{0, offset, requested[i]};
-                vk::vkCmdCopyBuffer(command, buffer, destination, 1, &copy); offset += requested[i];
+                backend.device_dispatch().vkCmdCopyBuffer(command, buffer, destination, 1, &copy); offset += requested[i];
             }
-            packing_readback_visible(command, destination);
+            packing_readback_visible(backend, command, destination);
             const u32 beforeRetired = resources.retired;
             resources.defer(0); resources.defer(1); resources.allocator.trim_empty_blocks();
             AUREA_CHECK_EQ(resources.retired, beforeRetired);
@@ -632,7 +624,7 @@ AUREA_TEST(VulkanMemoryPackingGpu, PersistentTinyPinsCannotStrandRetiredLargerSi
             AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), pendingReserved);
             AUREA_CHECK(backend.end_frame().ok()); resources.frameOpen = false;
             {
-                DelayedFenceObservation held(backend.device());
+                DelayedFenceObservation held(backend);
                 AUREA_CHECK_EQ(backend.wait_frame(frame.frameNumber, 0).code(), Errc::Timeout);
                 AUREA_CHECK_EQ(resources.retired, beforeRetired);
                 AUREA_CHECK_EQ(resources.allocator.reserved_bytes(), pendingReserved);
@@ -661,15 +653,15 @@ AUREA_TEST(VulkanMemoryPackingGpu, PersistentTinyPinsCannotStrandRetiredLargerSi
             AUREA_CHECK(afterBegin.ok()); if (!afterBegin.ok()) return;
             resources.frameOpen = true;
             const auto afterCommand = static_cast<vk::CommandListImpl*>(after.commands)->handle();
-            vk::vkCmdPipelineBarrier(afterCommand, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            backend.device_dispatch().vkCmdPipelineBarrier(afterCommand, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 0, 0, nullptr, 1, &writable, 0, nullptr);
             offset = 0;
             for (u32 i = 2; i < requested.size(); ++i) {
                 const VkBufferCopy copy{0, offset, requested[i]};
-                vk::vkCmdCopyBuffer(afterCommand, resources.entries[i].buffer, destination, 1, &copy);
+                backend.device_dispatch().vkCmdCopyBuffer(afterCommand, resources.entries[i].buffer, destination, 1, &copy);
                 offset += requested[i];
             }
-            packing_readback_visible(afterCommand, destination);
+            packing_readback_visible(backend, afterCommand, destination);
             AUREA_CHECK(backend.end_frame().ok()); resources.frameOpen = false;
             AUREA_CHECK(backend.wait_frame(after.frameNumber, 5'000'000'000ull).ok());
             bytes = nullptr; AUREA_CHECK(backend.map_buffer(*readback, bytes).ok()); if (!bytes) return;

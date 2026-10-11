@@ -24,21 +24,21 @@ AUREA_TEST(VulkanDescriptorsGpu, FallbackBufferSupportsStorageAndDynamicUniformD
     layoutInfo.bindingCount = 2;
     layoutInfo.pBindings = bindings;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-    AUREA_CHECK_EQ(vk::vkCreateDescriptorSetLayout(backend.device(), &layoutInfo, nullptr, &layout), VK_SUCCESS);
+    AUREA_CHECK_EQ(backend.device_dispatch().vkCreateDescriptorSetLayout(backend.device(), &layoutInfo, nullptr, &layout), VK_SUCCESS);
     if (!layout) return;
     VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     poolInfo.maxSets = 1;
     poolInfo.poolSizeCount = 2;
     poolInfo.pPoolSizes = sizes;
     VkDescriptorPool pool = VK_NULL_HANDLE;
-    AUREA_CHECK_EQ(vk::vkCreateDescriptorPool(backend.device(), &poolInfo, nullptr, &pool), VK_SUCCESS);
+    AUREA_CHECK_EQ(backend.device_dispatch().vkCreateDescriptorPool(backend.device(), &poolInfo, nullptr, &pool), VK_SUCCESS);
     if (pool) {
         VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         allocate.descriptorPool = pool;
         allocate.descriptorSetCount = 1;
         allocate.pSetLayouts = &layout;
         VkDescriptorSet set = VK_NULL_HANDLE;
-        AUREA_CHECK_EQ(vk::vkAllocateDescriptorSets(backend.device(), &allocate, &set), VK_SUCCESS);
+        AUREA_CHECK_EQ(backend.device_dispatch().vkAllocateDescriptorSets(backend.device(), &allocate, &set), VK_SUCCESS);
         if (set) {
             const VkDescriptorBufferInfo buffer{backend.dummy_buffer().buffer, 0, 16};
             VkWriteDescriptorSet writes[2]{};
@@ -50,11 +50,11 @@ AUREA_TEST(VulkanDescriptorsGpu, FallbackBufferSupportsStorageAndDynamicUniformD
                 writes[i].descriptorCount = 1;
                 writes[i].pBufferInfo = &buffer;
             }
-            vk::vkUpdateDescriptorSets(backend.device(), 2, writes, 0, nullptr);
+            backend.device_dispatch().vkUpdateDescriptorSets(backend.device(), 2, writes, 0, nullptr);
         }
-        vk::vkDestroyDescriptorPool(backend.device(), pool, nullptr);
+        backend.device_dispatch().vkDestroyDescriptorPool(backend.device(), pool, nullptr);
     }
-    vk::vkDestroyDescriptorSetLayout(backend.device(), layout, nullptr);
+    backend.device_dispatch().vkDestroyDescriptorSetLayout(backend.device(), layout, nullptr);
     AUREA_CHECK_EQ(vk::Backend::validation_errors() - errors, 0u);
 }
 AUREA_TEST(VulkanDescriptorsGpu, ColdPbrDrawRemainsValidAcrossProjectResets) {

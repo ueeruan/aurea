@@ -28,15 +28,16 @@ struct ExternalImportBuffer {
 // Observe actual driver destruction while delaying only the CPU's fence poll.
 // The submission remains valid and runs normally, unlike an unsignaled VkEvent.
 struct ExternalImageDestructionObservation {
-    PFN_vkDestroyImage original = vk::vkDestroyImage;
+    vk::Backend& backend;
+    PFN_vkDestroyImage original = backend.device_dispatch().vkDestroyImage;
     VkImage watched = VK_NULL_HANDLE;
     bool destroyed = false;
     inline static ExternalImageDestructionObservation* active = nullptr;
-    explicit ExternalImageDestructionObservation(VkImage image) : watched(image) {
+    explicit ExternalImageDestructionObservation(vk::Backend& target, VkImage image) : backend(target), watched(image) {
         active = this;
-        vk::vkDestroyImage = &destroy;
+        backend.device_dispatch().vkDestroyImage = &destroy;
     }
-    ~ExternalImageDestructionObservation() { vk::vkDestroyImage = original; active = nullptr; }
+    ~ExternalImageDestructionObservation() { backend.device_dispatch().vkDestroyImage = original; active = nullptr; }
     static VKAPI_ATTR void VKAPI_CALL destroy(VkDevice device, VkImage image,
                                                const VkAllocationCallbacks* allocator) {
         auto& observation = *active;
@@ -49,14 +50,15 @@ struct ExternalImageDestructionObservation {
 // existing read layout intact. Observe real recorded barriers, forwarding all
 // calls to the driver so both layout validation and pixel checks still run.
 struct ExternalImageBarrierObservation {
-    PFN_vkCmdPipelineBarrier original = vk::vkCmdPipelineBarrier;
+    vk::Backend& backend;
+    PFN_vkCmdPipelineBarrier original = backend.device_dispatch().vkCmdPipelineBarrier;
     VkImage watched = VK_NULL_HANDLE;
     u32 count = 0;
     inline static ExternalImageBarrierObservation* active = nullptr;
-    explicit ExternalImageBarrierObservation(VkImage image) : watched(image) {
-        active = this; vk::vkCmdPipelineBarrier = &barrier;
+    explicit ExternalImageBarrierObservation(vk::Backend& target, VkImage image) : backend(target), watched(image) {
+        active = this; backend.device_dispatch().vkCmdPipelineBarrier = &barrier;
     }
-    ~ExternalImageBarrierObservation() { vk::vkCmdPipelineBarrier = original; active = nullptr; }
+    ~ExternalImageBarrierObservation() { backend.device_dispatch().vkCmdPipelineBarrier = original; active = nullptr; }
     static VKAPI_ATTR void VKAPI_CALL barrier(VkCommandBuffer command, VkPipelineStageFlags source,
         VkPipelineStageFlags destination, VkDependencyFlags dependencies, u32 memoryCount,
         const VkMemoryBarrier* memory, u32 bufferCount, const VkBufferMemoryBarrier* buffers,
@@ -127,7 +129,7 @@ AUREA_TEST(ExternalImportsGpu, TrimRetiresNativeBuffersOnTheirLastFenceAndReimpo
     AUREA_CHECK(original->rgb);
     AUREA_CHECK(copy_external_import(isolated, first, *original, *firstTarget));
     {
-        ExternalImageBarrierObservation barriers(vk::ImmediateSubmissionTestAccess::native_image(backend, original->texture));
+        ExternalImageBarrierObservation barriers(backend, vk::ImmediateSubmissionTestAccess::native_image(backend, original->texture));
         const auto sampledAgain = backend.import_external_image(desc);
         AUREA_CHECK(sampledAgain.ok());
         if (sampledAgain.ok()) {
@@ -141,9 +143,9 @@ AUREA_TEST(ExternalImportsGpu, TrimRetiresNativeBuffersOnTheirLastFenceAndReimpo
     AUREA_CHECK_EQ(backend.texture_desc(original->texture).width, 64u);
     AUREA_CHECK(backend.end_frame().ok());
 
-    ExternalImageDestructionObservation destruction(vk::ImmediateSubmissionTestAccess::native_image(backend, original->texture));
+    ExternalImageDestructionObservation destruction(backend, vk::ImmediateSubmissionTestAccess::native_image(backend, original->texture));
     AUREA_CHECK(destruction.watched != VK_NULL_HANDLE);
-    DelayedFenceObservation completion(backend.device());
+    DelayedFenceObservation completion(backend);
     completion.fence = vk::ImmediateSubmissionTestAccess::frame_fence(backend, first.frameNumber);
     AUREA_CHECK(completion.fence != VK_NULL_HANDLE);
     AUREA_CHECK_EQ(backend.trim_external_images(), 1u);

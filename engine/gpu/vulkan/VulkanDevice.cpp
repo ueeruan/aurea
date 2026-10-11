@@ -70,7 +70,7 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
     if (const Status s = pick_device(); !s.ok()) return s;
     if (const Status s = create_device(); !s.ok()) return s;
 
-    allocator_.initialize(physical_, device_);
+    allocator_.initialize(physical_, device_, instanceFunctions_, deviceFunctions_);
     fill_capabilities();
     load_pipeline_cache();
 
@@ -84,15 +84,15 @@ Status Backend::initialize(const BackendConfig& config) noexcept {
 
 void Backend::shutdown() noexcept {
     if (!device_ && !instance_) return;
-    if (device_) vkDeviceWaitIdle(device_);
-    if (device_ && recoveryFence_) vkDestroyFence(device_, recoveryFence_, nullptr);
+    if (device_) deviceFunctions_.vkDeviceWaitIdle(device_);
+    if (device_ && recoveryFence_) deviceFunctions_.vkDestroyFence(device_, recoveryFence_, nullptr);
     recoveryFence_ = VK_NULL_HANDLE;
     if (device_) collect_immediate(true);
 
     for (u32 i = 0; i < 3; ++i) run_deferred(frames_[i]);
     destroy_swapchain();
     if (surface_) {
-        vkDestroySurfaceKHR(instance_, surface_, nullptr);
+        instanceFunctions_.vkDestroySurfaceKHR(instance_, surface_, nullptr);
         surface_ = VK_NULL_HANDLE;
     }
 
@@ -102,42 +102,42 @@ void Backend::shutdown() noexcept {
         textures_.clear();
         buffers_.for_each([this](u64, Buffer& b) { destroy_buffer_now(b); });
         buffers_.clear();
-        pipelines_.for_each([this](u64, PipelineObject& p) { vkDestroyPipeline(device_, p.pipeline, nullptr); });
+        pipelines_.for_each([this](u64, PipelineObject& p) { deviceFunctions_.vkDestroyPipeline(device_, p.pipeline, nullptr); });
         pipelines_.clear();
-        shaders_.for_each([this](u64, ShaderModule& s) { vkDestroyShaderModule(device_, s.module, nullptr); });
+        shaders_.for_each([this](u64, ShaderModule& s) { deviceFunctions_.vkDestroyShaderModule(device_, s.module, nullptr); });
         shaders_.clear();
         samplers_.for_each([this](u64, SamplerObject& s) {
-            vkDestroySampler(device_, s.sampler, nullptr);
-            if (s.conversion) vkDestroySamplerYcbcrConversion(device_, s.conversion, nullptr);
+            deviceFunctions_.vkDestroySampler(device_, s.sampler, nullptr);
+            if (s.conversion) deviceFunctions_.vkDestroySamplerYcbcrConversion(device_, s.conversion, nullptr);
         });
         samplers_.clear();
-        for (auto& [k, rp] : renderPasses_) vkDestroyRenderPass(device_, rp, nullptr);
+        for (auto& [k, rp] : renderPasses_) deviceFunctions_.vkDestroyRenderPass(device_, rp, nullptr);
         renderPasses_.clear();
-        for (Framebuffer3d& f : framebuffers3d_) if (f.fb) vkDestroyFramebuffer(device_, f.fb, nullptr);
+        for (Framebuffer3d& f : framebuffers3d_) if (f.fb) deviceFunctions_.vkDestroyFramebuffer(device_, f.fb, nullptr);
         framebuffers3d_.clear();
-        for (auto& [k, rp] : renderPasses3d_) vkDestroyRenderPass(device_, rp, nullptr);
+        for (auto& [k, rp] : renderPasses3d_) deviceFunctions_.vkDestroyRenderPass(device_, rp, nullptr);
         renderPasses3d_.clear();
-        for (auto& [k, l] : layouts_) vkDestroyPipelineLayout(device_, l, nullptr);
+        for (auto& [k, l] : layouts_) deviceFunctions_.vkDestroyPipelineLayout(device_, l, nullptr);
         layouts_.clear();
-        for (auto& [k, l] : setLayouts_) vkDestroyDescriptorSetLayout(device_, l, nullptr);
+        for (auto& [k, l] : setLayouts_) deviceFunctions_.vkDestroyDescriptorSetLayout(device_, l, nullptr);
         setLayouts_.clear();
         ycbcrByFormat_.clear();
         importedByBuffer_.clear();
-        if (defaultSampler_) vkDestroySampler(device_, defaultSampler_, nullptr);
+        if (defaultSampler_) deviceFunctions_.vkDestroySampler(device_, defaultSampler_, nullptr);
         defaultSampler_ = VK_NULL_HANDLE;
         destroy_frames();
-        if (pipelineCache_) vkDestroyPipelineCache(device_, pipelineCache_, nullptr);
+        if (pipelineCache_) deviceFunctions_.vkDestroyPipelineCache(device_, pipelineCache_, nullptr);
         pipelineCache_ = VK_NULL_HANDLE;
         allocator_.shutdown();
-        vkDestroyDevice(device_, nullptr);
+        deviceFunctions_.vkDestroyDevice(device_, nullptr);
         device_ = VK_NULL_HANDLE;
     }
     if (messenger_) {
-        vkDestroyDebugUtilsMessengerEXT(instance_, messenger_, nullptr);
+        instanceFunctions_.vkDestroyDebugUtilsMessengerEXT(instance_, messenger_, nullptr);
         messenger_ = VK_NULL_HANDLE;
     }
     if (instance_) {
-        vkDestroyInstance(instance_, nullptr);
+        instanceFunctions_.vkDestroyInstance(instance_, nullptr);
         instance_ = VK_NULL_HANDLE;
     }
     current_ = lastSubmitted_ = nullptr;
@@ -211,15 +211,15 @@ Status Backend::create_instance(bool validation) noexcept {
     info.enabledLayerCount = static_cast<u32>(layers.size());
     info.ppEnabledLayerNames = layers.data();
     if (const Status s = check(vkCreateInstance(&info, nullptr, &instance_), "vkCreateInstance"); !s.ok()) return s;
-    load_instance(instance_);
+    load_instance(instance_, instanceFunctions_);
 
-    if (debugUtils_ && caps_.validationEnabled && vkCreateDebugUtilsMessengerEXT) {
+    if (debugUtils_ && caps_.validationEnabled && instanceFunctions_.vkCreateDebugUtilsMessengerEXT) {
         VkDebugUtilsMessengerCreateInfoEXT m{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
         m.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
         m.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
                       | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
         m.pfnUserCallback = &debug_callback;
-        (void)vkCreateDebugUtilsMessengerEXT(instance_, &m, nullptr, &messenger_);
+        (void)instanceFunctions_.vkCreateDebugUtilsMessengerEXT(instance_, &m, nullptr, &messenger_);
     }
     return OkStatus;
 }
@@ -229,22 +229,22 @@ Status Backend::create_instance(bool validation) noexcept {
 // =============================================================================
 Status Backend::pick_device() noexcept {
     u32 count = 0;
-    vkEnumeratePhysicalDevices(instance_, &count, nullptr);
+    instanceFunctions_.vkEnumeratePhysicalDevices(instance_, &count, nullptr);
     if (count == 0) return Status{Errc::NotSupported, "nenhuma GPU Vulkan"};
     std::vector<VkPhysicalDevice> devices(count);
-    vkEnumeratePhysicalDevices(instance_, &count, devices.data());
+    instanceFunctions_.vkEnumeratePhysicalDevices(instance_, &count, devices.data());
 
     // Preferência: discreta > integrada > outras, sempre com fila gráfica+compute
     // e Vulkan 1.0+. No celular só há uma; no host de testes, pega a dedicada.
     i32 bestScore = -1;
     for (VkPhysicalDevice d : devices) {
         VkPhysicalDeviceProperties p{};
-        vkGetPhysicalDeviceProperties(d, &p);
+        instanceFunctions_.vkGetPhysicalDeviceProperties(d, &p);
         if (p.apiVersion < VK_API_VERSION_1_0) continue;
         u32 qc = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(d, &qc, nullptr);
+        instanceFunctions_.vkGetPhysicalDeviceQueueFamilyProperties(d, &qc, nullptr);
         std::vector<VkQueueFamilyProperties> qs(qc);
-        vkGetPhysicalDeviceQueueFamilyProperties(d, &qc, qs.data());
+        instanceFunctions_.vkGetPhysicalDeviceQueueFamilyProperties(d, &qc, qs.data());
         u32 family = kInvalidIndex;
         for (u32 i = 0; i < qc; ++i) {
             if ((qs[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && (qs[i].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
@@ -270,9 +270,9 @@ Status Backend::pick_device() noexcept {
 
 Status Backend::create_device() noexcept {
     u32 count = 0;
-    vkEnumerateDeviceExtensionProperties(physical_, nullptr, &count, nullptr);
+    instanceFunctions_.vkEnumerateDeviceExtensionProperties(physical_, nullptr, &count, nullptr);
     std::vector<VkExtensionProperties> exts(count);
-    vkEnumerateDeviceExtensionProperties(physical_, nullptr, &count, exts.data());
+    instanceFunctions_.vkEnumerateDeviceExtensionProperties(physical_, nullptr, &count, exts.data());
 
     std::vector<const char*> enabled;
     if (hasSurfaceExt_ && has_extension(exts, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
@@ -307,11 +307,11 @@ Status Backend::create_device() noexcept {
 
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES};
     VkPhysicalDeviceFeatures2 features2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    if (apiVersion_ >= VK_API_VERSION_1_1 && vkGetPhysicalDeviceFeatures2) {
+    if (apiVersion_ >= VK_API_VERSION_1_1 && instanceFunctions_.vkGetPhysicalDeviceFeatures2) {
         features2.pNext = &ycbcr;
-        vkGetPhysicalDeviceFeatures2(physical_, &features2);
+        instanceFunctions_.vkGetPhysicalDeviceFeatures2(physical_, &features2);
     } else {
-        vkGetPhysicalDeviceFeatures(physical_, &features2.features);
+        instanceFunctions_.vkGetPhysicalDeviceFeatures(physical_, &features2.features);
     }
     hasYcbcr_ = ycbcr.samplerYcbcrConversion == VK_TRUE;
 
@@ -345,7 +345,7 @@ Status Backend::create_device() noexcept {
     info.pQueueCreateInfos = &q;
     info.enabledExtensionCount = static_cast<u32>(enabled.size());
     info.ppEnabledExtensionNames = enabled.data();
-    VkResult created = vkCreateDevice(physical_, &info, nullptr, &device_);
+    VkResult created = instanceFunctions_.vkCreateDevice(physical_, &info, nullptr, &device_);
     if (created != VK_SUCCESS && (hasAhb_ || hasYcbcr_)) {
         // Some mobile drivers advertise external video features but reject
         // device creation with them. Keep Vulkan and use the YUV upload path.
@@ -360,7 +360,7 @@ Status Backend::create_device() noexcept {
         info.enabledExtensionCount = static_cast<u32>(enabled.size());
         info.ppEnabledExtensionNames = enabled.data();
         device_ = VK_NULL_HANDLE;
-        created = vkCreateDevice(physical_, &info, nullptr, &device_);
+        created = instanceFunctions_.vkCreateDevice(physical_, &info, nullptr, &device_);
     }
     if (created != VK_SUCCESS && (depthResolve_ || alphaToOne_)) {
         // Extras do MSAA do 3D são opcionais: o 3D continua (sem profundidade
@@ -375,12 +375,12 @@ Status Backend::create_device() noexcept {
         info.enabledExtensionCount = static_cast<u32>(enabled.size());
         info.ppEnabledExtensionNames = enabled.data();
         device_ = VK_NULL_HANDLE;
-        created = vkCreateDevice(physical_, &info, nullptr, &device_);
+        created = instanceFunctions_.vkCreateDevice(physical_, &info, nullptr, &device_);
     }
     if (const Status s = check(created, "vkCreateDevice"); !s.ok()) return s;
-    load_device(device_);
-    if (depthResolve_ && !vkCreateRenderPass2KHR) depthResolve_ = false;
-    vkGetDeviceQueue(device_, graphicsFamily_, 0, &queue_);
+    load_device(instanceFunctions_, device_, deviceFunctions_);
+    if (depthResolve_ && !deviceFunctions_.vkCreateRenderPass2KHR) depthResolve_ = false;
+    deviceFunctions_.vkGetDeviceQueue(device_, graphicsFamily_, 0, &queue_);
 
     caps_.extensions.clear();
     for (const char* e : enabled) caps_.extensions.emplace_back(e);
@@ -389,16 +389,16 @@ Status Backend::create_device() noexcept {
 
 void Backend::fill_capabilities() noexcept {
     VkPhysicalDeviceProperties p{};
-    vkGetPhysicalDeviceProperties(physical_, &p);
+    instanceFunctions_.vkGetPhysicalDeviceProperties(physical_, &p);
     VkPhysicalDeviceFeatures f{};
-    vkGetPhysicalDeviceFeatures(physical_, &f);
+    instanceFunctions_.vkGetPhysicalDeviceFeatures(physical_, &f);
 
     VkPhysicalDevice16BitStorageFeatures s16{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
     VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     // Do not chain Vulkan 1.2 feature structs into a 1.0/1.1 driver.
-    if (apiVersion_ >= VK_API_VERSION_1_1 && vkGetPhysicalDeviceFeatures2) {
+    if (apiVersion_ >= VK_API_VERSION_1_1 && instanceFunctions_.vkGetPhysicalDeviceFeatures2) {
         f2.pNext = &s16;
-        vkGetPhysicalDeviceFeatures2(physical_, &f2);
+        instanceFunctions_.vkGetPhysicalDeviceFeatures2(physical_, &f2);
     }
 
     caps_.apiName = "Vulkan";
@@ -441,9 +441,9 @@ void Backend::fill_capabilities() noexcept {
 
     // Timestamps: a fila precisa ter bits válidos e o período ser conhecido.
     u32 qc = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_, &qc, nullptr);
+    instanceFunctions_.vkGetPhysicalDeviceQueueFamilyProperties(physical_, &qc, nullptr);
     std::vector<VkQueueFamilyProperties> qs(qc);
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_, &qc, qs.data());
+    instanceFunctions_.vkGetPhysicalDeviceQueueFamilyProperties(physical_, &qc, qs.data());
     const u32 validBits = graphicsFamily_ < qc ? qs[graphicsFamily_].timestampValidBits : 0;
     caps_.timestampQueries = validBits > 0 && l.timestampPeriod > 0.0f
                           && (l.timestampComputeAndGraphics == VK_TRUE || validBits > 0);
@@ -454,7 +454,7 @@ void Backend::fill_capabilities() noexcept {
 
     auto fmt = [&](VkFormat vf, VkFormatFeatureFlags want) {
         VkFormatProperties fp{};
-        vkGetPhysicalDeviceFormatProperties(physical_, vf, &fp);
+        instanceFunctions_.vkGetPhysicalDeviceFormatProperties(physical_, vf, &fp);
         return (fp.optimalTilingFeatures & want) == want;
     };
     caps_.rgba16fRenderable = fmt(VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT);
@@ -614,7 +614,7 @@ void Backend::load_pipeline_cache() noexcept {
         cachePath_ = std::string(config_.cacheDirectory) + "/aurea_pipeline_cache.bin";
         guard = cachePath_ + ".carregando";
         VkPhysicalDeviceProperties p{};
-        vkGetPhysicalDeviceProperties(physical_, &p);
+        instanceFunctions_.vkGetPhysicalDeviceProperties(physical_, &p);
         cacheHeader_.resize(sizeof(CacheFileHeader));
         const CacheFileHeader expect = header_for(p, config_.pipelineCacheTag);
         std::memcpy(cacheHeader_.data(), &expect, sizeof(expect));
@@ -643,7 +643,7 @@ void Backend::load_pipeline_cache() noexcept {
     if (initial) {
         if (std::FILE* g = std::fopen(guard.c_str(), "wb")) std::fclose(g);
     }
-    const VkResult r = vkCreatePipelineCache(device_, &info, nullptr, &pipelineCache_);
+    const VkResult r = deviceFunctions_.vkCreatePipelineCache(device_, &info, nullptr, &pipelineCache_);
     if (initial) std::remove(guard.c_str());
     if (r != VK_SUCCESS) {
         if (initial) {
@@ -653,7 +653,7 @@ void Backend::load_pipeline_cache() noexcept {
         }
         info.initialDataSize = 0;
         info.pInitialData = nullptr;
-        (void)vkCreatePipelineCache(device_, &info, nullptr, &pipelineCache_);
+        (void)deviceFunctions_.vkCreatePipelineCache(device_, &info, nullptr, &pipelineCache_);
     } else if (initial) {
         cacheInfo_.load = PipelineCacheInfo::Load::Loaded;
         cacheInfo_.loadedBytes = initialBytes;
@@ -665,7 +665,7 @@ void Backend::load_pipeline_cache() noexcept {
 void Backend::save_pipeline_cache() noexcept {
     if (!device_ || !pipelineCache_ || cachePath_.empty() || cacheHeader_.size() != sizeof(CacheFileHeader)) return;
     usize size = 0;
-    if (vkGetPipelineCacheData(device_, pipelineCache_, &size, nullptr) != VK_SUCCESS || size == 0) return;
+    if (deviceFunctions_.vkGetPipelineCacheData(device_, pipelineCache_, &size, nullptr) != VK_SUCCESS || size == 0) return;
     // Nada novo desde a carga/última gravação: ir para segundo plano não
     // regrava centenas de KB à toa. (O blob só cresce quando entra pipeline.)
     if (size == lastSavedCacheBytes_ && file_exists(cachePath_)) return;
@@ -674,7 +674,7 @@ void Backend::save_pipeline_cache() noexcept {
         return;
     }
     std::vector<u8> file(sizeof(CacheFileHeader) + size);
-    if (vkGetPipelineCacheData(device_, pipelineCache_, &size, file.data() + sizeof(CacheFileHeader)) != VK_SUCCESS) return;
+    if (deviceFunctions_.vkGetPipelineCacheData(device_, pipelineCache_, &size, file.data() + sizeof(CacheFileHeader)) != VK_SUCCESS) return;
     file.resize(sizeof(CacheFileHeader) + size);
     CacheFileHeader h;
     std::memcpy(&h, cacheHeader_.data(), sizeof(h));
@@ -718,25 +718,25 @@ Status Backend::create_frames() noexcept {
         VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         pi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
         pi.queueFamilyIndex = graphicsFamily_;
-        if (const Status s = check(vkCreateCommandPool(device_, &pi, nullptr, &f.pool), "vkCreateCommandPool"); !s.ok()) return s;
+        if (const Status s = check(deviceFunctions_.vkCreateCommandPool(device_, &pi, nullptr, &f.pool), "vkCreateCommandPool"); !s.ok()) return s;
         VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         ai.commandPool = f.pool;
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         ai.commandBufferCount = 1;
-        if (const Status s = check(vkAllocateCommandBuffers(device_, &ai, &f.cmd), "vkAllocateCommandBuffers"); !s.ok()) return s;
+        if (const Status s = check(deviceFunctions_.vkAllocateCommandBuffers(device_, &ai, &f.cmd), "vkAllocateCommandBuffers"); !s.ok()) return s;
         f.commandBuffers.push_back(f.cmd);
         VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;   // o primeiro wait não pode travar
-        if (const Status s = check(vkCreateFence(device_, &fi, nullptr, &f.fence), "vkCreateFence"); !s.ok()) return s;
+        if (const Status s = check(deviceFunctions_.vkCreateFence(device_, &fi, nullptr, &f.fence), "vkCreateFence"); !s.ok()) return s;
         VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        if (const Status s = check(vkCreateSemaphore(device_, &si, nullptr, &f.acquired), "vkCreateSemaphore"); !s.ok()) return s;
+        if (const Status s = check(deviceFunctions_.vkCreateSemaphore(device_, &si, nullptr, &f.acquired), "vkCreateSemaphore"); !s.ok()) return s;
         f.uniforms.initialize(this, 256 * 1024, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, "anel-uniforms");
         f.staging.initialize(this, 4 * 1024 * 1024, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, "anel-staging");
         if (timersEnabled_) {
             VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
             qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
             qi.queryCount = kMaxTimers * 2 + 2;
-            if (vkCreateQueryPool(device_, &qi, nullptr, &f.queries) == VK_SUCCESS) f.queryCount = qi.queryCount;
+            if (deviceFunctions_.vkCreateQueryPool(device_, &qi, nullptr, &f.queries) == VK_SUCCESS) f.queryCount = qi.queryCount;
         }
         f.timerLabels.reserve(kMaxTimers);
         f.deferred.reserve(64);
@@ -748,12 +748,12 @@ void Backend::destroy_frames() noexcept {
     for (FrameContext& f : frames_) {
         f.uniforms.shutdown();
         f.staging.shutdown();
-        for (VkDescriptorPool p : f.descriptorPools) vkDestroyDescriptorPool(device_, p, nullptr);
+        for (VkDescriptorPool p : f.descriptorPools) deviceFunctions_.vkDestroyDescriptorPool(device_, p, nullptr);
         f.descriptorPools.clear();
-        if (f.queries) vkDestroyQueryPool(device_, f.queries, nullptr);
-        if (f.acquired) vkDestroySemaphore(device_, f.acquired, nullptr);
-        if (f.fence) vkDestroyFence(device_, f.fence, nullptr);
-        if (f.pool) vkDestroyCommandPool(device_, f.pool, nullptr);
+        if (f.queries) deviceFunctions_.vkDestroyQueryPool(device_, f.queries, nullptr);
+        if (f.acquired) deviceFunctions_.vkDestroySemaphore(device_, f.acquired, nullptr);
+        if (f.fence) deviceFunctions_.vkDestroyFence(device_, f.fence, nullptr);
+        if (f.pool) deviceFunctions_.vkDestroyCommandPool(device_, f.pool, nullptr);
         f = FrameContext{};
     }
 }
@@ -768,7 +768,7 @@ Status Backend::create_dummies() noexcept {
     si.magFilter = si.minFilter = VK_FILTER_LINEAR;
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     si.maxLod = 0.0f;
-    if (const Status s = check(vkCreateSampler(device_, &si, nullptr, &defaultSampler_), "vkCreateSampler"); !s.ok()) return s;
+    if (const Status s = check(deviceFunctions_.vkCreateSampler(device_, &si, nullptr, &defaultSampler_), "vkCreateSampler"); !s.ok()) return s;
 
     TextureDesc d;
     d.width = d.height = 1;

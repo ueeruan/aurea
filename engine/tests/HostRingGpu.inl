@@ -77,7 +77,7 @@ AUREA_TEST(HostRingGpu, AlignedUploadsSurviveFenceAndConsolidateWithinMemoryBudg
         destinationOffset = 0;
         for (u32 slice = 0; slice < sources.size(); ++slice) {
             const VkBufferCopy copy{offsets[slice], destinationOffset, lengths[slice]};
-            vk::vkCmdCopyBuffer(command, sources[slice], nativeDestination, 1, &copy);
+            backend.device_dispatch().vkCmdCopyBuffer(command, sources[slice], nativeDestination, 1, &copy);
             destinationOffset += lengths[slice];
         }
         VkBufferMemoryBarrier visible{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
@@ -85,7 +85,7 @@ AUREA_TEST(HostRingGpu, AlignedUploadsSurviveFenceAndConsolidateWithinMemoryBudg
         visible.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
         visible.srcQueueFamilyIndex = visible.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         visible.buffer = nativeDestination; visible.size = destinationBytes;
-        vk::vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+        backend.device_dispatch().vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
             0, 0, nullptr, 1, &visible, 0, nullptr);
         const Status submitted = backend.end_frame();
         AUREA_CHECK(submitted.ok()); if (!submitted.ok()) return;

@@ -12,6 +12,7 @@
 #include "aurea/export/ImageEncode.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/project/Serialization.hpp"
+#include "aurea/project/FileIO.hpp"
 
 #define STBI_NO_STDIO
 #include "../third_party/stb/stb_image.h"
@@ -617,6 +618,9 @@ AUREA_TEST(ImageExport, SequenceZipAndGifCarryEveryRenderedFrame) {
     VideoImport vi;
     vi.sourcePath = "sintetico";
     vi.displayName = "sintetico";
+    const char identity[] = "owned synthetic image-sequence export source";
+    if (!fileio::exists(vi.sourcePath))
+        AUREA_CHECK(fileio::write_atomic(vi.sourcePath, identity, sizeof(identity)).ok());
     AUREA_CHECK(e.import_video(vi).ok());
     Command d;
     d.type = CommandType::CompositionSetDuration;

@@ -8,7 +8,6 @@ bool initialize_media();
 void shutdown_media();
 bool load_image(const char* path, ImagePixels& out, void* context);
 bool save_png(const std::wstring& path, const u8* rgba, u32 w, u32 h);
-std::unique_ptr<ExportSink> make_export_sink(void*);
 std::unique_ptr<audio::AudioOutput> make_audio_output();
 class MediaFactory final : public VideoSourceFactory {
 public:

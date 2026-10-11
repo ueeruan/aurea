@@ -1,3 +1,4 @@
+#include "aurea/export/FFmpegExportSink.hpp"
 // Windows host. Editing, interpolation, rendering and persistence stay in aurea_core.
 #include "WindowsMedia.hpp"
 #include "TimelineGeometry.hpp"
@@ -367,7 +368,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show){
  WNDCLASSW wc{};wc.lpfnWndProc=WindowProc;wc.hInstance=instance;wc.lpszClassName=L"AureaDesktop";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=LoadIconW(nullptr,IDI_APPLICATION);RegisterClassW(&wc);
  const auto window=CreateWindowExW(0,wc.lpszClassName,L"AUREA Desktop",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1440,960,nullptr,menu(),instance,nullptr);
  if(!window){LocalFree(argv);return 1;}BOOL dark=TRUE;DwmSetWindowAttribute(window,20,&dark,sizeof(dark));
- value.audio=make_audio_output();EngineConfig cfg;cfg.backend=new vk::Backend;cfg.mediaFactory=&value.media;cfg.imageLoader=load_image;cfg.exportSinkFactory=make_export_sink;cfg.audioOutput=value.audio.get();cfg.documentsDirectory=utf8(value.appDirectory.wstring());cfg.cacheDirectory=utf8((value.appDirectory/L"cache").wstring());cfg.defaultFontPath="C:/Windows/Fonts/segoeui.ttf";cfg.workerCount=4;
+ value.audio=make_audio_output();EngineConfig cfg;cfg.backend=new vk::Backend;cfg.mediaFactory=&value.media;cfg.imageLoader=load_image;cfg.exportSinkFactory=make_ffmpeg_export_sink;cfg.audioOutput=value.audio.get();cfg.documentsDirectory=utf8(value.appDirectory.wstring());cfg.cacheDirectory=utf8((value.appDirectory/L"cache").wstring());cfg.defaultFontPath="C:/Windows/Fonts/segoeui.ttf";cfg.workerCount=4;
  const auto init=value.engine.initialize(cfg);if(!init.ok()){MessageBoxW(window,(L"Não foi possível iniciar a GPU do AUREA.\nAtualize o driver de vídeo com suporte a Vulkan.\n\n"+wide(std::string(init.message()))).c_str(),L"AUREA",MB_ICONERROR);DestroyWindow(window);exitCode=1;}
  else {value.ready=true;(void)value.engine.new_project(1920,1080,30,"Sem titulo");
   std::array<bridge::EffectCatalogRow,2048> rows{};std::array<char,262144> blob{};const auto count=std::min<u32>(u32(rows.size()),value.engine.query_effect_catalog(rows.data(),u32(rows.size()),blob.data(),u32(blob.size())));for(u32 i=0;i<count;++i)value.library.push_back({rows[i].typeId,wide(std::string(blob.data()+rows[i].nameOffset,rows[i].nameLength))});std::sort(value.library.begin(),value.library.end(),[](const auto& a,const auto& b){return a.name<b.name;});value.filterEffects();

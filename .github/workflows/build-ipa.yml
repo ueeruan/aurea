@@ -70,6 +70,29 @@ jobs:
           python3 engine/platform/ios/verify/check_motion_blur.py
       - name: Install shader tools
         run: brew install cmake ninja shaderc ccache
+      - name: Identify iOS export dependency SDK
+        id: export_sdk
+        run: echo "version=$(xcrun --sdk iphoneos --show-sdk-version)" >> "$GITHUB_OUTPUT"
+      - name: Restore pinned native iOS export libraries
+        id: export_libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/ffmpeg/ios/arm64
+            build/astra-ffmpeg/downloads
+          key: aurea-ffmpeg-ios-arm64-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'engine/cmake/AureaFFmpeg.cmake') }}
+      - name: Compile FFmpeg and software fallback for physical iOS
+        if: steps.export_libraries.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          python3 tools/build_ffmpeg.py --platform ios --arch arm64 --jobs 3 2>&1 | tee build-ffmpeg-ios.log
+      - name: Verify native iOS export dependency archives
+        run: |
+          test -s build/ffmpeg/ios/arm64/aurea-ffmpeg-build.json
+          for LIB in avcodec avformat avutil swscale swresample openh264; do
+            test -s "build/ffmpeg/ios/arm64/lib/lib${LIB}.a"
+            xcrun lipo -verify_arch arm64 "build/ffmpeg/ios/arm64/lib/lib${LIB}.a"
+          done
       - name: Verify Apple stereo audio and sample-rate conversion
         run: |
           mkdir -p build
@@ -126,6 +149,8 @@ jobs:
           path: |
             build-ios.log
             build-metal.log
+            build-ffmpeg-ios.log
+            build/ffmpeg/ios/arm64/aurea-ffmpeg-build.json
           if-no-files-found: ignore
       - uses: actions/cache/save@v4
         if: always()
@@ -150,6 +175,32 @@ jobs:
           sudo xcode-select -s "$XC/Contents/Developer"
           xcodebuild -version
       - run: brew install cmake ninja shaderc ccache
+      - name: Identify simulator export dependency SDK
+        id: export_sdk
+        run: |
+          echo "version=$(xcrun --sdk iphonesimulator --show-sdk-version)" >> "$GITHUB_OUTPUT"
+          echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
+      - name: Restore pinned native simulator export libraries
+        id: export_libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/ffmpeg/ios-simulator/${{ steps.export_sdk.outputs.arch }}
+            build/astra-ffmpeg/downloads
+          key: aurea-ffmpeg-ios-simulator-${{ steps.export_sdk.outputs.arch }}-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'engine/cmake/AureaFFmpeg.cmake') }}
+      - name: Compile FFmpeg and software fallback for iOS Simulator
+        if: steps.export_libraries.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          python3 tools/build_ffmpeg.py --platform ios-simulator --arch "$(uname -m)" --jobs 3 2>&1 | tee build-ffmpeg-simulator.log
+      - name: Verify native simulator export dependency archives
+        run: |
+          PREFIX="build/ffmpeg/ios-simulator/$(uname -m)"
+          test -s "$PREFIX/aurea-ffmpeg-build.json"
+          for LIB in avcodec avformat avutil swscale swresample openh264; do
+            test -s "$PREFIX/lib/lib${LIB}.a"
+            xcrun lipo -verify_arch "$(uname -m)" "$PREFIX/lib/lib${LIB}.a"
+          done
       - uses: actions/cache/restore@v4
         with:
           path: build/ccache
@@ -180,6 +231,8 @@ jobs:
           path: |
             build/ios-parity/
             build-simulator.log
+            build-ffmpeg-simulator.log
+            build/ffmpeg/ios-simulator/*/aurea-ffmpeg-build.json
           if-no-files-found: ignore
       - name: Run native preview gestures and undo tests
         if: always() && steps.compile_simulator.outcome == 'success' && !inputs.capture_only

@@ -19,8 +19,6 @@
 //                      núcleo, sem nada de Apple) e definidas nos .mm:
 //                        make_video_factory  → IOSVideoDecoder.mm (VideoToolbox)
 //                        make_audio_output   → IOSAudio.mm (AVAudioEngine)
-//                        make_export_sink    → IOSVideoDecoder.mm (VTCompression
-//                                              + AVAssetWriter)
 //                        fill_platform_info  → IOSVideoDecoder.mm
 //                        ios_load_image      → IOSVideoDecoder.mm (ImageIO)
 // =============================================================================
@@ -32,7 +30,6 @@
 #include "aurea/audio/Audio.hpp"
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/command/Command.hpp"
-#include "aurea/export/ExportSink.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
 
@@ -65,10 +62,6 @@ public:
 /// Engine COMPARTILHADO do núcleo — este arquivo não mixa nada, só entrega os
 /// quadros que `audio::AudioEngine` já produziu (ver audio/Audio.hpp).
 [[nodiscard]] std::unique_ptr<audio::AudioOutput> make_audio_output();
-
-/// Encoder/contêiner do iOS: VTCompressionSession (H.264/HEVC) + AVAssetWriter.
-/// É a MESMA fronteira `ExportSink` do MediaCodec/AMediaMuxer do Android.
-[[nodiscard]] std::unique_ptr<ExportSink> make_export_sink(void* user);
 
 /// Sonda o aparelho: núcleos, memória, e a tabela de codecs que o VideoToolbox
 /// declara suportar. Os fatos que SÓ a plataforma sabe (DeviceCapabilities.hpp).

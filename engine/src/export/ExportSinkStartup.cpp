@@ -78,7 +78,11 @@ public:
         }
         bindingsChanged_.notify_all();
         if (monitor_.joinable()) monitor_.join();
-        abort_staged(*state_);
+        if (!published_) abort_staged(*state_);
+        else {
+            state_->sink->set_cancel_flag(nullptr);
+            state_->sink->set_heartbeat(nullptr);
+        }
     }
 
     void set_cancel_flag(const std::atomic<bool>* flag) noexcept override {

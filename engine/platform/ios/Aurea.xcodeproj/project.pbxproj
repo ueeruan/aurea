@@ -518,7 +518,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\n# O nucleo C++ e os terceiros sao compilados pelo CMake, com os MESMOS alvos do\n# Android (aurea_core, aurea_thirdparty) mais a ponte iOS (aurea_ios) e o backend\n# Metal (aurea_metal). E o unico passo que o Xcode nao sabe fazer sozinho.\nBUILD_DIR=\"${SRCROOT}/build/core\"\nEXTRA=\"\"\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  EXTRA=\"-DAUREA_IOS_SIMULATOR=ON -DCMAKE_OSX_ARCHITECTURES=${NATIVE_ARCH_ACTUAL}\"\nfi\ncmake -S \"${SRCROOT}\" -B \"${BUILD_DIR}\" \\\n      -DCMAKE_TOOLCHAIN_FILE=\"${SRCROOT}/ios_toolchain.cmake\" \\\n      -DCMAKE_BUILD_TYPE=\"${CONFIGURATION}\" \\\n      -DAUREA_BUILD_TESTS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache ${EXTRA}\ncmake --build \"${BUILD_DIR}\" --parallel 3\n";
+			shellScript = "set -e\n# O nucleo C++ e os terceiros sao compilados pelo CMake, com os MESMOS alvos do\n# Android (aurea_core, aurea_thirdparty) mais a ponte iOS (aurea_ios) e o backend\n# Metal (aurea_metal). E o unico passo que o Xcode nao sabe fazer sozinho.\nBUILD_DIR=\"${SRCROOT}/build/core\"\nFFMPEG_PLATFORM=ios\nFFMPEG_ARCH=arm64\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  FFMPEG_PLATFORM=ios-simulator\n  FFMPEG_ARCH=\"${NATIVE_ARCH_ACTUAL}\"\nfi\nFFMPEG_PREFIX=\"${SRCROOT}/../../../build/ffmpeg/${FFMPEG_PLATFORM}/${FFMPEG_ARCH}\"\nif [ ! -f \"${FFMPEG_PREFIX}/aurea-ffmpeg-build.json\" ]; then\n  python3 \"${SRCROOT}/../../../tools/build_ffmpeg.py\" --platform \"${FFMPEG_PLATFORM}\" --arch \"${FFMPEG_ARCH}\" --prefix \"${FFMPEG_PREFIX}\" --jobs 3\nfi\nEXTRA=\"\"\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  EXTRA=\"-DAUREA_IOS_SIMULATOR=ON -DCMAKE_OSX_ARCHITECTURES=${NATIVE_ARCH_ACTUAL}\"\nfi\ncmake -S \"${SRCROOT}\" -B \"${BUILD_DIR}\" \\\n      -DCMAKE_TOOLCHAIN_FILE=\"${SRCROOT}/ios_toolchain.cmake\" \\\n      -DCMAKE_BUILD_TYPE=\"${CONFIGURATION}\" \\\n      -DAUREA_FFMPEG_ROOT=\"${FFMPEG_PREFIX}\" -DAUREA_BUILD_TESTS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache ${EXTRA}\ncmake --build \"${BUILD_DIR}\" --parallel 3\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -702,6 +702,16 @@
 					"-laurea_metal",
 					"-laurea_core",
 					"-laurea_thirdparty",
+					"-lavformat",
+					"-lavcodec",
+					"-lswscale",
+					"-lswresample",
+					"-lavutil",
+					"-lopenh264",
+					"$(AUREA_FFMPEG_EXTRA_LIBS)",
+					"-lz",
+					"-lbz2",
+					"-liconv",
 					"-lncnn",
 					"-lwhisper",
 					"-lggml",
@@ -759,6 +769,16 @@
 					"-laurea_metal",
 					"-laurea_core",
 					"-laurea_thirdparty",
+					"-lavformat",
+					"-lavcodec",
+					"-lswscale",
+					"-lswresample",
+					"-lavutil",
+					"-lopenh264",
+					"$(AUREA_FFMPEG_EXTRA_LIBS)",
+					"-lz",
+					"-lbz2",
+					"-liconv",
 					"-lncnn",
 					"-lwhisper",
 					"-lggml",

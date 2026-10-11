@@ -15,6 +15,7 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Version.hpp"
+#include "aurea/export/FFmpegExportSink.hpp"
 
 #include <os/log.h>
 
@@ -168,9 +169,7 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     config.hasPlatformInfo = true;
 
     config.mediaFactory = media_.get();
-    config.exportSinkFactory = &make_export_sink;
-    config.enableExportStartupGate = true;
-    config.enableExportEngineV2 = ![NSProcessInfo.processInfo.arguments containsObject:@"--aurea-export-legacy"];
+    config.exportSinkFactory = &make_ffmpeg_export_sink;
     // Admit against tracked Metal resources within the existing device budget.
     // The legacy half-share rejects a 101 MiB Motion Tile target even when
     // the measured device envelope is larger and live GPU use is below 8 MiB.

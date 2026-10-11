@@ -127,52 +127,6 @@ public:
   out.resize(n/sizeof(float));memcpy(out.data(),p,out.size()*sizeof(float));b->Unlock();return OkStatus;
  }
 };
-class Sink final : public ExportSink {
- ComPtr<IMFSinkWriter> writer_; VideoStreamConfig video_{}; AudioStreamConfig audio_{};DWORD vi_=0,ai_=0;bool hasAudio_=false;std::wstring path_;
- Status sample(DWORD stream,const u8* bytes,u32 size,i64 pts,i64 dur) {
-  ComPtr<IMFMediaBuffer> b;ComPtr<IMFSample> s;BYTE* p=nullptr;
-  if(FAILED(MFCreateMemoryBuffer(size,&b))||FAILED(b->Lock(&p,nullptr,nullptr)))return failure(Errc::OutOfMemory,"Windows: buffer do encoder");
-  memcpy(p,bytes,size);b->Unlock();b->SetCurrentLength(size);MFCreateSample(&s);s->AddBuffer(b.Get());s->SetSampleTime(pts*10);s->SetSampleDuration(dur*10);
-  return SUCCEEDED(writer_->WriteSample(stream,s.Get()))?OkStatus:failure(Errc::EncodeFailed,"Windows: gravacao do MP4");
- }
-public:
- Status open(const char* path,const VideoStreamConfig& v,const AudioStreamConfig* a) noexcept override {
-  apartment();if(v.codec!=ExportCodec::H264)return failure(Errc::UnsupportedCodec,"Desktop Preview: exportacao H.264");
-  path_=wide(path);video_=v;hasAudio_=a!=nullptr;if(a)audio_=*a;
-  ComPtr<IMFAttributes> at;MFCreateAttributes(&at,2);at->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,TRUE);
-  at->SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING,TRUE);
-  if(FAILED(MFCreateSinkWriterFromURL(path_.c_str(),nullptr,at.Get(),&writer_)))return failure(Errc::IoError,"Windows: abrir destino MP4");
-  auto videoType=[&](const GUID& subtype){ComPtr<IMFMediaType> mt;MFCreateMediaType(&mt);mt->SetGUID(MF_MT_MAJOR_TYPE,MFMediaType_Video);mt->SetGUID(MF_MT_SUBTYPE,subtype);
-   MFSetAttributeSize(mt.Get(),MF_MT_FRAME_SIZE,v.width,v.height);MFSetAttributeRatio(mt.Get(),MF_MT_FRAME_RATE,UINT32(std::llround(v.fps*1000)),1000);
-   MFSetAttributeRatio(mt.Get(),MF_MT_PIXEL_ASPECT_RATIO,1,1);mt->SetUINT32(MF_MT_INTERLACE_MODE,MFVideoInterlace_Progressive);
-   mt->SetUINT32(MF_MT_VIDEO_PRIMARIES,MFVideoPrimaries_BT709);mt->SetUINT32(MF_MT_TRANSFER_FUNCTION,MFVideoTransFunc_709);
-   mt->SetUINT32(MF_MT_YUV_MATRIX,MFVideoTransferMatrix_BT709);mt->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE,MFNominalRange_16_235);return mt;};
-  auto output=videoType(MFVideoFormat_H264);output->SetUINT32(MF_MT_AVG_BITRATE,v.bitrateBps?v.bitrateBps:12000000);
-  if(FAILED(writer_->AddStream(output.Get(),&vi_)))return failure(Errc::EncoderUnavailable,"Windows: encoder H.264 indisponivel");
-  auto input=videoType(MFVideoFormat_NV12);
-  if(FAILED(writer_->SetInputMediaType(vi_,input.Get(),nullptr)))return failure(Errc::EncoderUnavailable,"Windows: encoder NV12 indisponivel");
-  if(a) {
-   auto audioType=[&](const GUID& sub){ComPtr<IMFMediaType> mt;MFCreateMediaType(&mt);mt->SetGUID(MF_MT_MAJOR_TYPE,MFMediaType_Audio);mt->SetGUID(MF_MT_SUBTYPE,sub);mt->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS,a->channels);mt->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND,a->sampleRate);mt->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE,16);return mt;};
-   auto ao=audioType(MFAudioFormat_AAC);ao->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,a->bitrateBps/8);ao->SetUINT32(MF_MT_AAC_PAYLOAD_TYPE,0);
-   if(FAILED(writer_->AddStream(ao.Get(),&ai_)))return failure(Errc::EncoderUnavailable,"Windows: encoder AAC indisponivel");
-   auto in=audioType(MFAudioFormat_PCM);in->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT,a->channels*2);in->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,a->sampleRate*a->channels*2);
-   if(FAILED(writer_->SetInputMediaType(ai_,in.Get(),nullptr)))return failure(Errc::EncoderUnavailable,"Windows: entrada PCM indisponivel");
-  }
-  return SUCCEEDED(writer_->BeginWriting())?OkStatus:failure(Errc::EncodeFailed,"Windows: iniciar MP4");
- }
- Status write_video(const u8* y,u32 ys,const u8* uv,u32 uvs,i64 pts) noexcept override {
-  apartment();const u32 w=video_.width,h=video_.height;std::vector<u8> data(size_t(w)*h*3/2);
-  for(u32 row=0;row<h;++row)memcpy(data.data()+size_t(row)*w,y+size_t(row)*ys,w);
-  for(u32 row=0;row<h/2;++row)memcpy(data.data()+size_t(w)*h+size_t(row)*w,uv+size_t(row)*uvs,w);
-  return sample(vi_,data.data(),u32(data.size()),pts,i64(std::llround(1000000/video_.fps)));
- }
- Status write_audio(const i16* data,u32 frames,i64 pts) noexcept override {
-  apartment();return hasAudio_?sample(ai_,reinterpret_cast<const u8*>(data),frames*audio_.channels*2,pts,i64(frames)*1000000/audio_.sampleRate):OkStatus;
- }
- Status finish() noexcept override {apartment();const auto hr=writer_?writer_->Finalize():E_FAIL;writer_.Reset();return SUCCEEDED(hr)?OkStatus:failure(Errc::EncodeFailed,"Windows: finalizar MP4");}
- void abort() noexcept override {writer_.Reset();if(!path_.empty())DeleteFileW(path_.c_str());}
- EncoderInfo encoder_info() const noexcept override {EncoderInfo out;strcpy_s(out.name,"Media Foundation H.264");return out;}
-};
 class Sound final : public audio::AudioOutput {
  HWAVEOUT device_=nullptr;HANDLE event_=nullptr;audio::AudioRenderFn fn_=nullptr;void* ctx_=nullptr;
  std::atomic<bool> running_{false};std::thread worker_;std::mutex mutex_;i64 base_=0;
@@ -220,6 +174,5 @@ bool save_png(const std::wstring& path,const u8* rgba,u32 w,u32 h) {
 bool MediaFactory::probe(const char* path,MediaProbe& out){out={};Video v;Audio a;if(v.open(path)){out.hasVideo=true;out.video=v.info();}if(a.open(path)){out.hasAudio=true;out.audioSampleRate=a.info().sampleRate;out.audioChannels=a.info().channels;out.audioDurationUs=a.info().durationUs;}return out.hasVideo||out.hasAudio;}
 std::unique_ptr<VideoDecoderBackend> MediaFactory::open_video(const Asset& asset,MediaPriority){auto v=std::make_unique<Video>();return v->open(asset.sourcePath.c_str())?std::move(v):nullptr;}
 std::unique_ptr<audio::AudioDecoderBackend> MediaFactory::open_audio(const char* path){auto a=std::make_unique<Audio>();return a->open(path)?std::move(a):nullptr;}
-std::unique_ptr<ExportSink> make_export_sink(void*){return std::make_unique<Sink>();}
 std::unique_ptr<audio::AudioOutput> make_audio_output(){return std::make_unique<Sound>();}
 }

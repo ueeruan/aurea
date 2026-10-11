@@ -32,6 +32,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
+#include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/audio/AudioEffects.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
@@ -46,6 +47,7 @@ namespace aurea { namespace vk = gles; }
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <thread>
@@ -83,7 +85,7 @@ struct BenchCapture {
     std::atomic<bool>* sinkDestroyed = nullptr;
     std::atomic<bool>* openActive = nullptr;
     std::atomic<bool>* abortedDuringOpen = nullptr;
-    bool persistFinishMarker = false, validateCapturedPlanes = false;
+    bool persistFinishMarker = true, validateCapturedPlanes = true;
     std::atomic<bool>* writeEntered = nullptr;
     std::atomic<bool>* allowWrite = nullptr;
     Status writeFailure{};              ///< fault injection at the platform boundary
@@ -279,24 +281,24 @@ struct Rig {
     Rig(const SyntheticConfig& cfg, f64 compFps, i64 frames, u32 depth,
         VideoSourceFactory* mediaFactory = nullptr, GPUBackend* backend = nullptr, u32 workerHangMs = 0,
         bool recovery = false, const char* sourcePath = "sintetico",
-        ExportExecutionProfile profile = ExportExecutionProfile::Balanced, bool startupGate = false,
-        ImageLoaderFn imageLoader = nullptr, void* imageLoaderContext = nullptr, bool v2 = false,
-        u64 trackedBudget = 0, bool boundedText = true) : factory(cfg) {
+        ExportExecutionProfile profile = ExportExecutionProfile::Balanced, bool = false,
+        ImageLoaderFn imageLoader = nullptr, void* imageLoaderContext = nullptr, bool = false,
+        u64 trackedBudget = 0, bool boundedText = true, u32 resourceTimeoutMs = 0,
+        ExportSinkFactory nativeSink = nullptr) : factory(cfg) {
         EngineConfig ec;
-        ec.enableExportEngineV2 = v2;
+        ec.exportGpuTimeoutMs = resourceTimeoutMs;
         ec.enableBoundedTextSurface = boundedText;
         ec.memoryBudgetBytes = trackedBudget;
         if (trackedBudget) ec.enableTrackedGpuAdmission = true;
         ec.exportWorkerHangMs = workerHangMs;
         ec.enableExportRecovery = recovery;
-        ec.enableExportStartupGate = startupGate;
         ec.imageLoader = imageLoader;
         ec.imageLoaderContext = imageLoaderContext;
         ec.backend = backend ? backend : new vk::Backend();
         ec.backendConfig.enableValidation = false;
         ec.mediaFactory = mediaFactory ? mediaFactory : &factory;
-        ec.exportSinkFactory = &make_bench_sink;
-        ec.exportSinkContext = &cap;
+        ec.exportSinkFactory = nativeSink ? nativeSink : &make_bench_sink;
+        ec.exportSinkContext = nativeSink ? nullptr : &cap;
         ec.exportPipelineDepth = depth;
         ec.exportExecutionProfile = profile;
         ec.disableAutosave = true;
@@ -319,6 +321,11 @@ struct Rig {
         ec.platformInfo.encoderCount = 1;
         if (!e.initialize(ec).ok()) return;
         if (!e.new_project(cfg.width, cfg.height, compFps, nullptr).ok()) return;
+        // The production offline snapshot checks source identity. Synthetic
+        // decoders still need owned stable files, rather than missing paths.
+        const char identity[] = "owned synthetic export source; pixels supplied by test decoder";
+        for (const char* path : {"sintetico", "clip-b"})
+            if (!fileio::exists(path) && !fileio::write_atomic(path, identity, sizeof(identity)).ok()) return;
         VideoImport vi;
         vi.sourcePath = sourcePath;
         vi.displayName = "sintetico";
@@ -964,7 +971,7 @@ AUREA_TEST(Export, NeuralUpscaleKeepsOutputTimingAudioAndDimensions) {
     }
 }
 
-AUREA_TEST(ExportV2Gpu, PlanesAndAudioMatchLegacyWithEffectsAnd3DMotionBlur) {
+AUREA_TEST(OfflineExportGpu, SerialAndQueuedPlanesAudioMatchWithEffectsAnd3DMotionBlur) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     const std::string source = "aurea_v2_pixel_source.bin";
     struct Cleanup {
@@ -1000,8 +1007,8 @@ AUREA_TEST(ExportV2Gpu, PlanesAndAudioMatchLegacyWithEffectsAnd3DMotionBlur) {
             }
             (void)r.e.set_composition_motion_blur(true);
             r.cap.keepFrames = true;
-            r.cap.persistFinishMarker = mode != 0;
-            r.cap.validateCapturedPlanes = mode != 0;
+            r.cap.persistFinishMarker = true;
+            r.cap.validateCapturedPlanes = true;
             const auto result = run_export(r, 192, 30, false, 60);
             AUREA_CHECK(result.finished); AUREA_CHECK_EQ(result.p.result, Errc::Ok);
             AUREA_CHECK_EQ(r.cap.frames.size(), usize{12});
@@ -1018,6 +1025,49 @@ AUREA_TEST(ExportV2Gpu, PlanesAndAudioMatchLegacyWithEffectsAnd3DMotionBlur) {
         }
     }
 }
+
+#if defined(AUREA_HAS_FFMPEG)
+AUREA_TEST(OfflineNativeGpu, CompositionFramesAndStereoReachRealNativeMp4) {
+    AUREA_CHECK(gpu_ok()); if (!gpu_ok()) return;
+    std::filesystem::create_directories("build/reference/astra-composition");
+    for (bool scene3D : {false, true}) {
+        SyntheticConfig cfg; cfg.width = 320; cfg.height = 192;
+        cfg.pattern = SyntheticPattern::MovingSquare; cfg.audioRate = 44100; cfg.audioSeconds = 1;
+        const i64 frames = scene3D ? 12 : 30;
+        Rig r(cfg, 30, frames, 3, nullptr, nullptr, 0, false, "sintetico",
+              ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 30000,
+              &make_ffmpeg_export_sink);
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        if (scene3D) {
+            AUREA_CHECK(build_3d_scene(r));
+            for (u32 index = 0; index < r.comp()->order().size(); ++index)
+                AUREA_CHECK(r.e.set_motion_blur(r.comp()->order().at(index).pack(), true));
+            AUREA_CHECK(r.e.set_composition_motion_blur(true));
+        } else {
+            AUREA_CHECK(r.add_effect(r.video_layer(), effect_keys::kGaussianBlur) != nullptr);
+            AUREA_CHECK(r.add_effect(r.video_layer(), effect_keys::kGlow) != nullptr);
+            auto& track = r.comp()->layer(r.video_layer())->tracks.get_or_create(TrackProperty::PositionX);
+            AUREA_CHECK(track.set(FrameIndex{0}, 130.f, Interpolation::Linear) != kInvalidIndex);
+            AUREA_CHECK(track.set(FrameIndex{frames - 1}, 180.f, Interpolation::Linear) != kInvalidIndex);
+        }
+        const std::string movie = scene3D ? "build/reference/astra-composition/offline-3d-blur.mp4"
+                                         : "build/reference/astra-composition/offline-2d-stereo.mp4";
+        ExportSettings settings; settings.height = 192; settings.fps = 30; settings.dither = false;
+        AUREA_CHECK(r.e.start_export(settings, movie.c_str()).ok());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
+        while (!r.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        const auto progress = r.e.export_progress();
+        AUREA_CHECK(progress.finished); AUREA_CHECK_EQ(progress.result, Errc::Ok);
+        AUREA_CHECK_EQ(progress.framesDone, static_cast<u32>(frames));
+        AUREA_CHECK_EQ(progress.framesTotal, static_cast<u32>(frames));
+        AUREA_CHECK((progress.flags & (1u << 3)) == 0);
+        AUREA_CHECK(fileio::exists(movie.c_str()));
+        if (progress.result != Errc::Ok) std::printf("\n    offline native failure: %s\n", progress.message);
+        if (!progress.finished) (void)r.e.cancel_export();
+    }
+}
+#endif
 
 AUREA_TEST(Export, PipelinedOutputIsByteIdenticalToSerial) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
@@ -1420,9 +1470,8 @@ private:
 };
 } // namespace
 
-/// The decoder dies in the middle of the clip: the export keeps the nearest
-/// decoded frame for the rest instead of throwing the whole video away.
-AUREA_TEST(Export, DecoderStallUsesNearestDecodedFrameAndFinishes) {
+/// A dead source cannot substitute repeated preview pictures into an export.
+AUREA_TEST(Export, DecoderStallFailsBeforeAnyApproximatePictureIsEncoded) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;
     cfg.width = 64; cfg.height = 36;
@@ -1430,22 +1479,17 @@ AUREA_TEST(Export, DecoderStallUsesNearestDecodedFrameAndFinishes) {
     cfg.gop = 30;
     const i64 stallUs = static_cast<i64>(std::llround(5 * 1e6 / 30.0));   // frames 0..4 decode
     StallingFactory factory(cfg, stallUs);
-    Rig r(cfg, 30.0, 7, 3, &factory);
+    Rig r(cfg, 30.0, 7, 3, &factory, nullptr, 0, false, "sintetico",
+        ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 1500);
     AUREA_CHECK(r.ok);
     if (!r.ok) return;
     r.cap.keepFrames = true;
     const Outcome o = run_export(r, 36, 30, false, 30);
     AUREA_CHECK(o.finished);
-    AUREA_CHECK_EQ(o.p.result, Errc::Ok);
-    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
-    AUREA_CHECK_EQ(r.cap.frames.size(), static_cast<usize>(7));
-    AUREA_CHECK((o.p.flags & Engine::kExportFrameFallback) != 0);
-    if (r.cap.frames.size() == 7) {
-        // Frames before the stall are distinct; after it, the last good one repeats.
-        AUREA_CHECK(r.cap.frames[3] != r.cap.frames[4]);
-        AUREA_CHECK(r.cap.frames[5] == r.cap.frames[4]);
-        AUREA_CHECK(r.cap.frames[6] == r.cap.frames[4]);
-    }
+    AUREA_CHECK_EQ(o.p.result, Errc::DecodeFailed);
+    AUREA_CHECK(!r.cap.finished && r.cap.aborted);
+    AUREA_CHECK(r.cap.frames.size() <= 5);
+    AUREA_CHECK_EQ(o.p.flags & Engine::kExportFrameFallback, 0u);
 }
 
 /// Many clips in sequence, device with just one decoder instance. The preview used to

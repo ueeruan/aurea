@@ -181,14 +181,27 @@ target_compile_options(aurea_ios PRIVATE
 set_source_files_properties(bridge/IOSVideoDecoder.mm PROPERTIES COMPILE_OPTIONS "-fexceptions")
 
 target_link_libraries(aurea_ios PUBLIC aurea_core)
+# The Xcode app consumes archives directly rather than the CMake executable
+# link graph. Stage the same pinned FFmpeg archives beside libaurea_ios.a.
+foreach(_component avformat avcodec swscale swresample avutil openh264)
+    add_custom_command(TARGET aurea_ios POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${AUREA_FFMPEG_ROOT}/lib/lib${_component}.a"
+            "${CMAKE_BINARY_DIR}/lib${_component}.a")
+endforeach()
+if(EXISTS "${AUREA_FFMPEG_ROOT}/lib/libx265.a")
+    add_custom_command(TARGET aurea_ios POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${AUREA_FFMPEG_ROOT}/lib/libx265.a" "${CMAKE_BINARY_DIR}/libx265.a")
+endif()
 target_compile_definitions(aurea_ios PRIVATE "$<$<CONFIG:Debug>:DEBUG=1>")
 if(AUREA_GPU_METAL)
     target_link_libraries(aurea_ios PUBLIC aurea_metal)
     target_compile_definitions(aurea_ios PUBLIC AUREA_GPU_METAL=1)
 endif()
 
-# Frameworks da Apple. VideoToolbox e CoreMedia no decode/encode; AVFoundation
-# no AVAudioEngine e no AVAssetWriter; Metal e QuartzCore no CAMetalLayer.
+# Frameworks da Apple. VideoToolbox/CoreMedia no decoder e FFmpeg encoder;
+# AVFoundation no AVAudioEngine; Metal e QuartzCore no CAMetalLayer.
 foreach(_fw Metal MetalKit QuartzCore CoreVideo CoreMedia VideoToolbox
             AVFoundation AudioToolbox CoreAudio CoreText Foundation UIKit)
     target_link_libraries(aurea_ios PUBLIC "-framework ${_fw}")

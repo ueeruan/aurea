@@ -1,5 +1,5 @@
-// Explicit opt-in CI fixture. Exercises the real Metal -> NV12 -> VideoToolbox
-// -> MP4 path, then independently decodes the exported file with AVAssetReader.
+// Explicit opt-in CI fixture. Exercises the real offline Metal -> NV12 -> FFmpeg
+// -> MP4 path, then independently decodes every picture with AVAssetReader.
 // Imports a generated PCM tone through the production importer to verify AAC too.
 // No Photos access, replacement renderer, or encoder stub.
 #if DEBUG
@@ -192,6 +192,9 @@ enum ParityExportProbe {
             report["phase"] = "audio-failure-recovery"
             try writeReport()
             report["audioFailureRecovery"] = try await checkAudioFailureRecovery(engine: engine, documents: documents)
+            report["phase"] = "offline-stress"
+            try writeReport()
+            report["offlineStress"] = try await checkOfflineStress(engine: engine, documents: documents)
             report["passed"] = true
             report["phase"] = "complete"
         } catch {
@@ -425,6 +428,9 @@ enum ParityExportProbe {
     }
 
     private struct DecodedMovie: Sendable {
+        var width = 640
+        var height = 360
+        var distinctPictures = 0
         var frameCount = 0
         var duration = 0.0
         var fileBytes: UInt64 = 0
@@ -434,10 +440,111 @@ enum ParityExportProbe {
         var minRGB = 255
         var maxRGB = 0
         var dictionary: [String: Any] {
-            ["codec": "h264", "width": 640, "height": 360, "frames": frameCount,
+            ["codec": "h264", "width": width, "height": height, "frames": frameCount,
              "durationSeconds": duration, "fileBytes": fileBytes, "timestampsSeconds": timestamps,
-             "lightPixels": lightPixels, "darkPixels": darkPixels, "minRGB": minRGB, "maxRGB": maxRGB]
+             "lightPixels": lightPixels, "darkPixels": darkPixels, "minRGB": minRGB, "maxRGB": maxRGB,
+             "distinctPictures": distinctPictures]
         }
+    }
+
+    @MainActor
+    private static func checkOfflineStress(engine: AureaEngine, documents: URL) async throws -> [[String: Any]] {
+        var results: [[String: Any]] = []
+        for heavy in [true, false] {
+            let name = heavy ? "astra-heavy3d-motionblur" : "astra-long-120s"
+            let width = heavy ? 960 : 320, height = heavy ? 540 : 180
+            let frames = heavy ? 60 : 3600
+            let movie = documents.appendingPathComponent("\(name).mp4")
+            let frame = documents.appendingPathComponent("\(name).png")
+            let project = documents.appendingPathComponent("\(name).aurea")
+            engine.pause()
+            guard engine.newProjectWidth(UInt32(width), height: UInt32(height), fps: 30, title: name),
+                  let composition = engine.composition(),
+                  let id = (composition[AureaCompositionId] as? NSNumber)?.uint64Value else {
+                throw Failure(message: "Could not create \(name)")
+            }
+            engine.setComposition(id, duration: Int64(frames))
+            engine.setComposition(id, backgroundR: 0.03, g: 0.03, b: 0.03, a: 1)
+            if heavy {
+                for index in 0..<24 {
+                    let layer = engine.addShape3D(kind: UInt32(index % 3), name: "Offline mesh \(index)")
+                    guard layer >= 0 else { throw Failure(message: "Offline 3D mesh creation failed") }
+                    engine.setLayer(layer, startFrame: 0, endFrame: Int32(frames), offsetFrames: 0, setOffset: true)
+                    engine.setScale(forLayer: layer, x: 0.3, y: 0.3, z: 0.3)
+                    engine.setPosition(forLayer: layer, x: Float(100 + index % 6 * 145), y: Float(75 + index / 6 * 125), z: 0)
+                    engine.insertKeyframe(forLayer: layer, property: 7, time: 0, value: 0)
+                    engine.insertKeyframe(forLayer: layer, property: 7, time: Int32(frames - 1), value: 100)
+                    engine.setMotionBlur(true, forLayer: layer)
+                }
+                guard engine.addParticles(20) >= 0, engine.addText("ASTRA OFFLINE") >= 0,
+                      engine.setMotionBlurSettings(true, shutter: 270, phase: -135, samples: 8, adaptiveLimit: 16) else {
+                    throw Failure(message: "Offline particles, text, or motion blur fixture failed")
+                }
+            } else {
+                let shape = engine.addShape(1)
+                guard shape >= 0 else { throw Failure(message: "Long composition shape failed") }
+                engine.setLayer(shape, startFrame: 0, endFrame: Int32(frames), offsetFrames: 0, setOffset: true)
+                engine.setScale(forLayer: shape, x: 0.18, y: 0.18, z: 1)
+                engine.setShape(shape, fillR: 0.95, g: 0.1, b: 0.15, a: 1)
+                engine.setPosition(forLayer: shape, x: 64, y: 90, z: 0)
+                engine.insertKeyframe(forLayer: shape, property: 0, time: 0, value: 64)
+                engine.insertKeyframe(forLayer: shape, property: 0, time: Int32(frames - 1), value: 256)
+                let tone = documents.appendingPathComponent("astra-long-stereo.wav")
+                try writeTone(to: tone, seconds: 120)
+                guard engine.importAudio(tone.path, name: "Owned two minute stereo") >= 0 else {
+                    throw Failure(message: "Long composition WAV import failed")
+                }
+            }
+            guard engine.saveProject(project.path) else { throw Failure(message: "Offline fixture commands did not drain") }
+            var running = false
+            do {
+                guard engine.startExport(to: movie.path, codec: .h264, height: UInt32(height), fps: 30,
+                                         bitrateMbps: 4, audioBitrateKbps: 128) else {
+                    throw Failure(message: "Offline \(name) export could not start")
+                }
+                running = true
+                let deadline = ProcessInfo.processInfo.systemUptime + 1800
+                var progress: [String: Any] = [:]
+                while true {
+                    try Task.checkCancellation()
+                    progress = engine.exportProgress()
+                    if (progress[AureaExportFinished] as? NSNumber)?.boolValue == true {
+                        running = false
+                        guard (progress[AureaExportResult] as? NSNumber)?.intValue == 0,
+                              (progress[AureaExportFramesDone] as? NSNumber)?.intValue == frames,
+                              (progress[AureaExportFramesTotal] as? NSNumber)?.intValue == frames,
+                              ((progress[AureaExportFlags] as? NSNumber)?.uint32Value ?? 0) & 8 == 0 else {
+                            throw Failure(message: "Offline \(name) lost a picture or failed: \(progress)")
+                        }
+                        break
+                    }
+                    guard ProcessInfo.processInfo.systemUptime < deadline else { throw Failure(message: "Offline \(name) timed out") }
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                let decoded = try await Task.detached(priority: .utility) {
+                    try await decode(movie: movie, frame: frame, width: width, height: height, frames: frames)
+                }.value
+                guard decoded.frameCount == frames, decoded.distinctPictures > 1,
+                      decoded.maxRGB - decoded.minRGB > 40 else {
+                    throw Failure(message: "Offline \(name) decoded blank, repeated, or missing pictures")
+                }
+                var result: [String: Any] = ["name": name, "passed": true, "exportProgress": progress,
+                                           "decoded": decoded.dictionary, "movieFile": movie.lastPathComponent]
+                if !heavy {
+                    result["decodedAudio"] = try await Task.detached(priority: .utility) {
+                        try await decodeAudio(movie: movie, seconds: 120)
+                    }.value.dictionary
+                }
+                results.append(result)
+                if let data = AureaJSONData(["passed": true, "cases": results], true) {
+                    try data.write(to: documents.appendingPathComponent("astra-offline-ready.json"), options: .atomic)
+                }
+            } catch {
+                if running { engine.cancelExport() }
+                throw error
+            }
+        }
+        return results
     }
 
     @MainActor
@@ -500,9 +607,8 @@ enum ParityExportProbe {
                 "decodedAudio": audio.dictionary, "movieFile": recovered.lastPathComponent]
     }
 
-    private static func writeTone(to url: URL) throws {
-        // Exactly one second of 16-bit stereo PCM; no external/user media.
-        let rate = 48_000, channels = 2, byteCount = rate * channels * 2
+    private static func writeTone(to url: URL, seconds: Int = 1) throws {
+        let rate = 48_000, channels = 2, byteCount = rate * seconds * channels * 2
         var bytes = Data()
         func ascii(_ value: String) { bytes.append(contentsOf: value.utf8) }
         func littleEndian<T: FixedWidthInteger>(_ value: T) {
@@ -514,13 +620,20 @@ enum ParityExportProbe {
         littleEndian(UInt32(rate)); littleEndian(UInt32(rate * channels * 2))
         littleEndian(UInt16(channels * 2)); littleEndian(UInt16(16))
         ascii("data"); littleEndian(UInt32(byteCount))
-        for sample in 0..<rate {
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let output = try FileHandle(forWritingTo: url)
+        defer { try? output.close() }
+        try output.truncate(atOffset: 0)
+        try output.write(contentsOf: bytes)
+        bytes.removeAll(keepingCapacity: true)
+        for sample in 0..<(rate * seconds) {
             for frequency in [440.0, 660.0] {
                 let amplitude = sin(2 * Double.pi * frequency * Double(sample) / Double(rate)) * 8192
                 littleEndian(Int16(amplitude.rounded()))
             }
+            if bytes.count >= 16384 { try output.write(contentsOf: bytes); bytes.removeAll(keepingCapacity: true) }
         }
-        try bytes.write(to: url, options: .atomic)
+        if !bytes.isEmpty { try output.write(contentsOf: bytes) }
     }
 
     private struct DecodedAudio: Sendable {
@@ -538,7 +651,7 @@ enum ParityExportProbe {
         }
     }
 
-    private static func decodeAudio(movie: URL) async throws -> DecodedAudio {
+    private static func decodeAudio(movie: URL, seconds: Int = 1) async throws -> DecodedAudio {
         let asset = AVURLAsset(url: movie)
         let tracks = try await asset.loadTracks(withMediaType: .audio)
         guard tracks.count == 1, let track = tracks.first else {
@@ -564,7 +677,7 @@ enum ParityExportProbe {
         var result = DecodedAudio()
         while let sample = output.copyNextSampleBuffer() {
             try Task.checkCancellation()
-            guard result.buffers < 200, let format = CMSampleBufferGetFormatDescription(sample),
+            guard result.buffers < 200 * seconds, let format = CMSampleBufferGetFormatDescription(sample),
                   let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format),
                   abs(asbd.pointee.mSampleRate - 48000) < 0.1,
                   asbd.pointee.mChannelsPerFrame == 2, asbd.pointee.mBitsPerChannel == 32,
@@ -599,15 +712,15 @@ enum ParityExportProbe {
             throw Failure(message: reader.error?.localizedDescription ?? "Audio reader did not finish")
         }
         // AAC packets may expose codec priming/padding around the one-second edit.
-        guard abs(result.frames - 48000) <= 2048, abs(result.firstTime) < 0.05,
-              abs(result.endTime - 1) < 0.05, result.rms > 0.1, result.rms < 0.3,
+        guard abs(result.frames - 48000 * seconds) <= 2048, abs(result.firstTime) < 0.05,
+              abs(result.endTime - Double(seconds)) < 0.05, result.rms > 0.1, result.rms < 0.3,
               result.peak > 0.2, result.peak < 0.5 else {
             throw Failure(message: "Decoded AAC lost the tone or its duration: \(result.frames) frames, RMS \(result.rms)")
         }
         return result
     }
 
-    private static func decode(movie: URL, frame: URL) async throws -> DecodedMovie {
+    private static func decode(movie: URL, frame: URL, width: Int = 640, height: Int = 360, frames: Int = 30) async throws -> DecodedMovie {
         let attributes = try FileManager.default.attributesOfItem(atPath: movie.path)
         guard let fileBytes = (attributes[.size] as? NSNumber)?.uint64Value, fileBytes > 0 else {
             throw Failure(message: "Exported MP4 is missing or empty")
@@ -635,23 +748,26 @@ enum ParityExportProbe {
         }
         defer { if reader.status == .reading { reader.cancelReading() } }
         var result = DecodedMovie()
+        result.width = width; result.height = height
         result.duration = duration; result.fileBytes = fileBytes
-        let deadline = ProcessInfo.processInfo.systemUptime + 30
+        var hashes = Set<UInt64>()
+        let deadline = ProcessInfo.processInfo.systemUptime + 600
         while let sample = output.copyNextSampleBuffer() {
             try Task.checkCancellation()
-            guard ProcessInfo.processInfo.systemUptime < deadline, result.frameCount < 120 else {
+            guard ProcessInfo.processInfo.systemUptime < deadline, result.frameCount < frames else {
                 throw Failure(message: "Video decode exceeded its bounded fixture budget")
             }
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample),
-                  CVPixelBufferGetWidth(pixelBuffer) == 640, CVPixelBufferGetHeight(pixelBuffer) == 360,
+                  CVPixelBufferGetWidth(pixelBuffer) == width, CVPixelBufferGetHeight(pixelBuffer) == height,
                   CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else {
-                throw Failure(message: "Decoded video is not 640x360 BGRA")
+                throw Failure(message: "Decoded video dimensions or format differ")
             }
             let timestamp = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample))
             guard timestamp.isFinite, abs(timestamp - Double(result.frameCount) / 30) < 0.002 else {
                 throw Failure(message: "Decoded video has a missing or mistimed frame at index \(result.frameCount)")
             }
             result.timestamps.append(timestamp)
+            hashes.insert(try pictureHash(pixelBuffer))
             if result.frameCount == 0 {
                 try inspect(pixelBuffer, result: &result, frame: frame)
             }
@@ -660,7 +776,25 @@ enum ParityExportProbe {
         guard reader.status == .completed else {
             throw Failure(message: reader.error?.localizedDescription ?? "AVAssetReader did not finish")
         }
+        guard result.frameCount == frames, abs(duration - Double(frames) / 30) < 0.04 else {
+            throw Failure(message: "Decoded movie duration or picture count differs")
+        }
+        result.distinctPictures = hashes.count
         return result
+    }
+
+    private static func pictureHash(_ buffer: CVPixelBuffer) throws -> UInt64 {
+        guard CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { throw Failure(message: "Decoded picture lock failed") }
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { throw Failure(message: "Decoded picture pixels absent") }
+        let bytes = base.assumingMemoryBound(to: UInt8.self), row = CVPixelBufferGetBytesPerRow(buffer)
+        var hash: UInt64 = 1469598103934665603
+        for y in stride(from: 0, to: CVPixelBufferGetHeight(buffer), by: 4) {
+            for x in stride(from: 0, to: CVPixelBufferGetWidth(buffer), by: 4) {
+                for channel in 0..<3 { hash = (hash ^ UInt64(bytes[y * row + x * 4 + channel])) &* 1099511628211 }
+            }
+        }
+        return hash
     }
 
     private static func inspect(_ buffer: CVPixelBuffer, result: inout DecodedMovie, frame: URL) throws {
@@ -669,13 +803,13 @@ enum ParityExportProbe {
         }
         do {
             defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-            guard let base = CVPixelBufferGetBaseAddress(buffer), CVPixelBufferGetBytesPerRow(buffer) >= 640 * 4 else {
+            guard let base = CVPixelBufferGetBaseAddress(buffer), CVPixelBufferGetBytesPerRow(buffer) >= result.width * 4 else {
                 throw Failure(message: "Decoded frame has no readable BGRA pixels")
             }
             let bytes = base.assumingMemoryBound(to: UInt8.self)
             let stride = CVPixelBufferGetBytesPerRow(buffer)
-            for y in 0..<360 {
-                for x in 0..<640 {
+            for y in 0..<result.height {
+                for x in 0..<result.width {
                     let i = y * stride + x * 4
                     let rgb = max(Int(bytes[i]), Int(bytes[i + 1]), Int(bytes[i + 2]))
                     result.minRGB = min(result.minRGB, rgb); result.maxRGB = max(result.maxRGB, rgb)

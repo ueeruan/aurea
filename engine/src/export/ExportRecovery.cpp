@@ -206,7 +206,8 @@ bool valid_settings(const ExportSettings& s) noexcept {
 } // namespace
 
 Status capture(const Project& project, CompositionId composition, const ExportSettings& settings,
-               const PathResolver& resolve, std::unique_ptr<Project>& frozen, Package& package) noexcept {
+               const PathResolver& resolve, std::unique_ptr<Project>& frozen, Package& package,
+               bool requirePersistentSources) noexcept {
     try {
         Package candidate; candidate.settings = settings; candidate.composition = composition;
         SaveOptions save; save.writeThumbnail = false;
@@ -241,8 +242,9 @@ Status capture(const Project& project, CompositionId composition, const ExportSe
                 asset.sourcePath = scene3d::encode_shape3d(shape);
             } else if (!asset.sourcePath.empty()) {
                 status = add_path(candidate, asset.sourcePath, resolve);
-                if (status.ok() && asset.kind == AssetKind::Model3D) status = add_gltf_dependencies(candidate, asset.sourcePath);
-            } else if (asset.kind == AssetKind::Image || asset.kind == AssetKind::Video || asset.kind == AssetKind::Audio || asset.kind == AssetKind::Model3D) {
+                if (status.ok() && requirePersistentSources && asset.kind == AssetKind::Model3D)
+                    status = add_gltf_dependencies(candidate, asset.sourcePath);
+            } else if (requirePersistentSources && (asset.kind == AssetKind::Image || asset.kind == AssetKind::Video || asset.kind == AssetKind::Audio || asset.kind == AssetKind::Model3D)) {
                 status = Status{Errc::NotSupported, "fonte apenas em memoria nao pode ser recuperada apos fechar o app"};
             }
             asset.proxyPath.clear(); // Final export always resolves the original.

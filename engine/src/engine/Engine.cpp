@@ -31,7 +31,8 @@
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
 #include "aurea/export/ExportSinkStartup.hpp"
-#include "aurea/export/AureaExportEngineV2.hpp"
+#include "aurea/export/OfflineFrameQueue.hpp"
+#include "aurea/export/OfflineFrameRenderer.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
@@ -214,27 +215,10 @@ bool put_string(char* blob, u32 capacity, u32& cursor, const char* s, u32& outOf
 } // namespace
 
 // -----------------------------------------------------------------------------
-// ExportContext — uma sessão de export (threads, sink, alvos de GPU, progresso).
-//
-// PIPELINE SOBREPOSTO (Fase 8F). Três coisas andam ao mesmo tempo:
-//
-//   decoder  ── quadro N+1..N+3 (a thread de decode anda adiantada no modo Playback)
-//   produtor ── prepara e grava o quadro N; a GPU renderiza, converte para NV12
-//               e COPIA os planos para o buffer de leitura do slot, tudo num
-//               frame só (sem submissão extra, sem fence próprio)
-//   encoder  ── entrega o quadro N−1 ao sink direto do buffer mapeado + áudio
-//
-// Os slots (buffers de leitura) circulam produtor → encoder → produtor. A
-// profundidade é o número de slots: limita a memória (3 × 1,5 × L × A bytes —
-// 37 MB em 4K) e é o que a temperatura reduz (1 = serial). A GPU só é esperada
-// no fence do quadro ANTERIOR, depois de submeter o atual.
+// Offline export sessions own immutable composition snapshots, GPU readbacks,
+// isolated compositor/decode state and one bounded FFmpeg consumer queue.
+// The platform bridge controls this same pipeline on Android and iOS.
 // -----------------------------------------------------------------------------
-namespace {
-/// Preparos sem aparecer até um decoder sair durante o export (ver collect em
-/// render_export_frame). Quem está na tela é tocado a cada preparo.
-constexpr u32 kExportIdleFrames = 2;
-} // namespace
-
 struct Engine::ExportContext {
     mutable std::mutex mutex;          ///< protege `progress`
     ExportProgress progress{};
@@ -284,20 +268,21 @@ struct Engine::ExportContext {
     std::vector<Slot> slots;
     u32 depth = 1;                     ///< slots em circulação (sem calor)
     AureaRenderScheduler scheduler;
-    std::unique_ptr<AureaExportEngineV2> v2;
+    std::unique_ptr<OfflineFrameQueue> queue;
+    std::unique_ptr<OfflineFrameRenderer> offline;
+    bool deferredGpuCleanup = false, retainedReadbacks = false;
+    u64 deferredGpuFrame = 0, deferredGpuGeneration = 0;
+    u64 queueByteLimit = 0;
     bool withAudio = false;
-    void publish_v2_phase(const char* message) noexcept {
-        if (!v2) return;
+    void publish_export_phase(const char* message) noexcept {
+        if (!queue) return;
         std::lock_guard lock(mutex);
-        progress.flags = (progress.flags & ~kExportPhaseMask) | (static_cast<u32>(v2->phase()) << kExportPhaseShift);
+        progress.flags = (progress.flags & ~kExportPhaseMask) | (static_cast<u32>(queue->phase()) << kExportPhaseShift);
         set_message(message);
     }
     std::mutex qMutex;                 ///< protege as duas filas e os estados abaixo
     std::condition_variable qCv;
-    std::vector<u32> freeSlots;        ///< prontos para a GPU escrever
-    std::deque<u32>  readySlots;       ///< planos prontos, em ordem de quadro (FIFO)
-    bool producerDone = false;         ///< nada mais vai entrar em readySlots
-    bool trackedBudgetLifted = false;  ///< o orcamento rastreado de GPU foi suspenso para este export terminar
+    bool producerDone = false;
     bool stop = false;                 ///< encerrar já (cancelamento ou erro)
     Status encoderStatus = OkStatus;   ///< erro do sink (escrito pelo encoder)
     bool encoderFailed = false;
@@ -314,14 +299,6 @@ struct Engine::ExportContext {
     std::atomic<u64> writeNs{0}, audioNs{0};                // encoder
     u64 startNs = 0;
     u32 thermalReducedFrames = 0;
-    /// Quadros gravados com o quadro decodificado MAIS PRÓXIMO (o exato não
-    /// veio a tempo). Só o produtor escreve.
-    u64 fallbackFrames = 0;
-    /// Quadros aproximados SEGUIDOS: a paciência com a fonte cai com eles
-    /// (export_source_wait, ExportWatchdog.hpp) até um quadro exato voltar —
-    /// uma fonte quebrada não pode custar segundos por quadro num export longo.
-    u32 consecutiveFallbacks = 0;
-
     // --- Watchdog do worker do encoder (export/ExportWatchdog.hpp) -----------
     // O worker bate a cada passo e o sink a cada chamada da plataforma que
     // volta. Preso DENTRO da plataforma (HAL travado), não bate: o produtor
@@ -715,6 +692,7 @@ void Engine::shutdown() noexcept {
         if (!poll_export_gpu_locked().ok())
             AUREA_LOG_WARN("shutdown: GPU do export ainda pendente; aguardando teardown seguro");
         if (gpu_) gpu_->wait_idle();
+        (void)poll_export_gpu_locked();
         snapshot_ = FrameSnapshot{};
         media_.close_all();
     }
@@ -9372,11 +9350,19 @@ Status Engine::poll_export_gpu_locked(u64 timeoutNs) noexcept {
     if (!pendingExportGpuFrame_) return OkStatus;
     if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
         pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
-        return OkStatus; // Normal device-loss handling owns actual recovery.
+    } else {
+        const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, timeoutNs);
+        if (!ready.ok()) return ready;
+        pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
     }
-    const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, timeoutNs);
-    if (ready.ok()) pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
-    return ready;
+    if (pendingExportStartup_) {
+        release_offline_export(*pendingExportStartup_, pendingExportStartup_->retainedReadbacks);
+        pendingExportStartup_.reset();
+    }
+    std::lock_guard<std::mutex> context(exportContextMutex_);
+    if (exportCtx_ && exportCtx_->deferredGpuCleanup)
+        release_offline_export(*exportCtx_, exportCtx_->retainedReadbacks);
+    return OkStatus;
 }
 
 void Engine::retain_failed_export_gpu_locked() noexcept {
@@ -11514,16 +11500,17 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         exportCtx_->thread.join();
     }
     retire_abandoned_export_locked();
-    // A failed new attempt must never expose retry flags from an older export.
-    { std::lock_guard<std::mutex> context(exportContextMutex_); exportCtx_.reset(); }
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        // Complete retained GPU ownership before replacing the previous session.
+        std::lock_guard<std::mutex> context(exportContextMutex_);
+        exportCtx_.reset();
     }
 
     auto ctx = std::make_unique<ExportContext>();
-    if (config_.enableExportEngineV2) ctx->v2 = std::make_unique<AureaExportEngineV2>();
+    ctx->queue = std::make_unique<OfflineFrameQueue>();
     struct StartupCancellation {
         Engine& engine;
         std::atomic<bool>& flag;
@@ -11538,7 +11525,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             std::lock_guard<std::mutex> lock(engine.exportContextMutex_);
             if (engine.exportStartupCancel_ == &flag) engine.exportStartupCancel_ = nullptr;
         }
-    } startupCancellation{*this, ctx->cancelRequested, config_.enableExportStartupGate || config_.enableExportEngineV2};
+    } startupCancellation{*this, ctx->cancelRequested, true};
     ctx->settings = settings;
     ctx->outputPath = outputPath;
     ctx->dither = settings.dither;
@@ -11555,71 +11542,44 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
         ctx->compFps = comp->fps();
-        // O congelamento (recuperacao/V2) pode nao ser possivel: midia que o
-        // resolvedor da plataforma nao abre, fonte so em memoria, imagens
-        // alem do orcamento. Sem a recuperacao explicitamente ligada, o export
-        // segue pelo caminho ao vivo (o da 0.0.x) em vez de falhar com
-        // "uma midia do projeto nao pode ser lida".
-        auto freezeFailed = [&](const Status& why) -> Status {
-            if (config_.enableExportRecovery) return why;
-            AUREA_LOG_WARN("export: congelamento indisponivel (%.*s); exportando ao vivo",
-                static_cast<int>(why.detail().size()), why.detail().empty() ? "" : why.detail().data());
-            ctx->v2.reset();
-            ctx->frozenProject.reset();
-            ctx->recovery = export_recovery::Package{};
-            ctx->recoveryPath.clear();
-            return OkStatus;
-        };
-        bool frozen = false;
-        if (config_.enableExportRecovery || ctx->v2) {
-            u64 imageBytes = 0;
-            const u64 room = source_asset_room_locked();
-            const u64 limit = std::min<u64>({64ull << 20, std::max<u64>(4ull << 20, caps_.memory_budget_bytes() / 8), room});
-            Status budget;
-            for (const auto& [id, px] : images_) {
-                (void)id;
-                if (px.rgba.size() > limit - imageBytes) {
-                    budget = Status{Errc::BudgetExceeded, "memoria insuficiente para congelar imagens da recuperacao"};
-                    break;
-                }
-                imageBytes += px.rgba.size();
-            }
-            if (!budget.ok()) { if (const Status s = freezeFailed(budget); !s.ok()) return s; }
-            else try {
-                Status sourceStatus;
-                std::unordered_map<std::string, std::string> preparedPaths;
-                const Status captured = export_recovery::capture(*project_, project_->timeline().current(), settings,
-                    [&](const std::string& p) {
-                        const auto found = preparedPaths.find(p);
-                        if (found != preparedPaths.end()) return found->second;
-                        std::string resolved = resolve_asset_path(p);
-                        if (config_.exportAssetPathResolver) {
-                            auto persistent = config_.exportAssetPathResolver(resolved, config_.documentsDirectory, &ctx->cancelRequested);
-                            if (!persistent.ok()) {
-                                sourceStatus = Status{persistent.code(), "nao foi possivel preservar a midia para exportacao e recuperacao"};
-                                return std::string{};
-                            }
-                            resolved = std::move(*persistent);
-                        }
-                        preparedPaths.emplace(p, resolved);
-                        return resolved;
-                    }, ctx->frozenProject, ctx->recovery);
-                const Status why = !sourceStatus.ok() ? sourceStatus : captured;
-                if (!why.ok()) { if (const Status s = freezeFailed(why); !s.ok()) return s; }
-                else {
-                    ctx->frozenImages = images_;
-                    ctx->frozenModels = models_;
-                    ctx->frozenHdris = hdris_;
-                    ctx->frozenLuts = cubeLuts_;
-                    ctx->frozenAssetBudget = room - imageBytes;
-                    ctx->recovery.outputPath = outputPath;
-                    ctx->recoveryPath = std::string(outputPath) + ".aurea-export";
-                    frozen = true;
-                }
-            } catch (const std::bad_alloc&) { return Errc::OutOfMemory; }
-              catch (...) { return Errc::IoError; }
-            if (frozen) comp = ctx->frozenProject->timeline().composition(ctx->recovery.composition);
+        // Freeze with the established serializer; the editor document and its
+        // historical file formats are never rewritten by export.
+        u64 imageBytes = 0;
+        const u64 room = source_asset_room_locked();
+        const u64 limit = std::min<u64>(caps_.memory_budget_bytes() / 4, room);
+        for (const auto& [id, px] : images_) {
+            (void)id;
+            if (px.rgba.size() > limit - std::min(limit, imageBytes))
+                return Status{Errc::BudgetExceeded, "memoria insuficiente para o snapshot offline de imagens"};
+            imageBytes += px.rgba.size();
         }
+        Status sourceStatus;
+        std::unordered_map<std::string, std::string> preparedPaths;
+        const Status captured = export_recovery::capture(*project_, project_->timeline().current(), settings,
+            [&](const std::string& path) {
+                if (const auto found = preparedPaths.find(path); found != preparedPaths.end()) return found->second;
+                std::string resolved = resolve_asset_path(path);
+                if (config_.exportAssetPathResolver) {
+                    auto persistent = config_.exportAssetPathResolver(resolved, config_.documentsDirectory, &ctx->cancelRequested);
+                    if (!persistent.ok()) { sourceStatus = persistent.status(); return std::string{}; }
+                    resolved = std::move(*persistent);
+                }
+                preparedPaths.emplace(path, resolved);
+                return resolved;
+            }, ctx->frozenProject, ctx->recovery, config_.enableExportRecovery);
+        if (!sourceStatus.ok()) return sourceStatus;
+        if (!captured.ok()) return captured;
+        ctx->frozenImages = images_;
+        ctx->frozenModels = models_;
+        ctx->frozenHdris = hdris_;
+        ctx->frozenLuts = cubeLuts_;
+        ctx->frozenAssetBudget = room - imageBytes;
+        if (config_.enableExportRecovery) {
+            ctx->recovery.outputPath = outputPath;
+            ctx->recoveryPath = std::string(outputPath) + ".aurea-export";
+        }
+        comp = ctx->frozenProject->timeline().composition(ctx->recovery.composition);
+        if (!comp) return Errc::ProjectCorrupted;
         // Taxa de saída livre até o teto dos encoders; acima, o motor recusa
         // com o motivo (as telas já limitam o teclado). Abaixo de 1 fps fica
         // como pedido (lapso de tempo); de 1 para cima, razão NTSC exata.
@@ -11627,17 +11587,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             return Status{Errc::NotSupported, "taxa de quadros acima do que o encoder aceita (maximo 240 fps)"};
         ctx->fps = settings.fps > 0.0 ? (settings.fps >= kMinCompositionFps ? normalize_fps(settings.fps) : settings.fps)
                                       : comp->fps();
-        // Lado menor pedido; a largura vem da proporção da composição (o
-        // renderer preenche o alvo inteiro — outra proporção esticaria).
-        // Lado maior em múltiplo de 16 e menor par
-        // (export/ExportRules.hpp): 854×480 virava "buffer do encoder menor
-        // que o quadro" no encoder MediaTek; 848×480 cabe em todo encoder.
-        // No modo de segurança, os DOIS lados em múltiplo de 16 (para baixo).
-        const ExportFrameSize size = ctx->v2
-            ? export_frame_size_v2(comp->width(), comp->height(), settings.height)
-            : ctx->safeMode > 0
-            ? export_safe_frame_size(comp->width(), comp->height(), settings.height)
-            : export_frame_size(comp->width(), comp->height(), settings.height);
+        const ExportFrameSize size = export_frame_size_v2(comp->width(), comp->height(), settings.height);
         if (!size.width || !size.height)
             return Status{Errc::NotSupported, "o codec 4:2:0 requer dimensoes pares; escolha explicitamente outra resolucao"};
         ctx->width = size.width;
@@ -11680,7 +11630,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->dither = false; // Do not feed quantization noise to the neural network.
     }
 
-    if (ctx->frozenProject) {
+    if (!ctx->recoveryPath.empty()) {
         if (const Status s = export_recovery::fingerprint_sources(ctx->recovery); !s.ok()) return s;
         if (const Status s = export_recovery::write(ctx->recoveryPath, ctx->recovery); !s.ok()) return s;
     }
@@ -11700,23 +11650,15 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     vc.width = ctx->outputWidth;
     vc.height = ctx->outputHeight;
     vc.fps = ctx->fps;
-    vc.codec = ctx->v2 ? settings.videoCodec : export_safe_codec(settings.videoCodec, ctx->safeMode);
-    vc.validateBeforePublish = static_cast<bool>(ctx->v2);
+    vc.codec = settings.videoCodec;
+    vc.validateBeforePublish = true;
     // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
     // 1080p30 Normal ≈ 8 Mbps, 4K30 ≈ 32 Mbps; Mbps manual só com teto. No
     // modo de segurança, o bitrate continua sendo o solicitado.
-    vc.bitrateBps = export_safe_bitrate_bps(
-        export_video_bitrate_bps(ctx->outputWidth, ctx->outputHeight, ctx->fps, vc.codec,
-                                 static_cast<ExportQuality>(std::min<u32>(settings.quality, 2u)),
-                                 settings.videoBitrateMbps),
-        ctx->safeMode);
+    vc.bitrateBps = export_video_bitrate_bps(ctx->outputWidth, ctx->outputHeight, ctx->fps, vc.codec,
+        static_cast<ExportQuality>(std::min<u32>(settings.quality, 2u)), settings.videoBitrateMbps);
     vc.profile = ctx->safeMode > 0 ? kExportProfileBaseline : kExportProfileDefault;
     vc.preferSoftware = ctx->safeMode >= 2;
-    if (ctx->safeMode > 0) {
-        ctx->progress.flags |= kExportSafeMode;
-        AUREA_LOG_WARN("export: modo de seguranca %u (H.264 Baseline %ux%u, %u bps%s)", ctx->safeMode, vc.width,
-                       vc.height, vc.bitrateBps, vc.preferSoftware ? ", encoder de software" : "");
-    }
     // CBR só quando pedido; o padrão é VBR com pico limitado no encoder.
     vc.rateMode = settings.rateMode == 0 ? 0u : 1u;
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
@@ -11768,8 +11710,21 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             }
         }
     } startupOwnership{exportActive_, *this};
+    struct OfflineStartupCleanup {
+        Engine& engine;
+        ExportContext& context;
+        std::unique_ptr<ExportContext>& owner;
+        bool committed = false;
+        ~OfflineStartupCleanup() {
+            if (committed) return;
+            std::lock_guard<std::mutex> lock(engine.renderMutex_);
+            engine.release_offline_export(context);
+            if (context.deferredGpuCleanup && owner)
+                engine.pendingExportStartup_ = std::move(owner);
+        }
+    } offlineCleanup{*this, *ctx, ctx};
+
     auto drainExportStartup = [&]() -> Status {
-        if (!ctx->v2) { gpu_->wait_idle(); return OkStatus; }
         const u64 frame = gpu_->last_submitted_frame();
         if (!frame) return OkStatus;
         const u64 deadline = monotonic_ns() + (config_.exportGpuTimeoutMs
@@ -11787,34 +11742,16 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         exportActive_.store(true, std::memory_order_release);
         if (const Status drained = drainExportStartup(); !drained.ok()) return drained;
-        if (ctx->frozenProject) {
-            // Rebuild effect/particle and decode histories from zero. Preview
-            // history must not seed the first export or its later restart.
-            renderer_.release_project_resources();
-            snapshot_ = FrameSnapshot{};
-            media_.close_all();
-        }
-        const GpuMemoryStats before = gpu_->memory_stats();
-        const u32 released = renderer_.trim_memory(static_cast<u8>(TrimStage::OldRenderCache), frameCounter_);
-        if (const Status drained = drainExportStartup(); !drained.ok()) return drained; // Return deferred allocations to the driver before codec.start.
-        const GpuMemoryStats after = gpu_->memory_stats();
-        AUREA_LOG_INFO("export: startup released %u reusable textures (%llu bytes used, %llu bytes reserved)",
-                       released,
-                       static_cast<unsigned long long>(before.usedBytes > after.usedBytes ? before.usedBytes - after.usedBytes : 0),
-                       static_cast<unsigned long long>(before.reservedBytes > after.reservedBytes ? before.reservedBytes - after.reservedBytes : 0));
+        if (const Status initialized = initialize_offline_export(*ctx); !initialized.ok()) return initialized;
     }
     ExportSinkStartupResult startupResult;
     Status openStatus;
-    if (config_.enableExportStartupGate || ctx->v2) {
-        ExportSinkStartupLimits limits;
-        limits.stallNs = ctx->workerHangNs;
-        startupResult = open_export_sink_startup(std::move(ctx->sink), outputPath, vc, withAudio ? &ac : nullptr,
-            &ctx->cancelRequested, &ctx->encoderBeatNs, limits);
-        ctx->sink = std::move(startupResult.sink);
-        openStatus = startupResult.status();
-    } else {
-        openStatus = ctx->sink->open(outputPath, vc, withAudio ? &ac : nullptr);
-    }
+    ExportSinkStartupLimits limits;
+    limits.stallNs = ctx->workerHangNs;
+    startupResult = open_export_sink_startup(std::move(ctx->sink), outputPath, vc, withAudio ? &ac : nullptr,
+        &ctx->cancelRequested, &ctx->encoderBeatNs, limits);
+    ctx->sink = std::move(startupResult.sink);
+    openStatus = startupResult.status();
     if (const Status s = openStatus; !s.ok()) {
         // Status borrows its diagnostic. Platform sinks keep it in their own
         // storage, which is destroyed with this local context on return.
@@ -11841,15 +11778,13 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         return Status{code, detail};
     }
 
-    // O encoder que o sink REALMENTE abriu. Quando o sink não sabe dizer (host,
-    // plataforma sem essa consulta), vale a tabela do MediaCodecList.
+    // Report only acceleration verified by the opened encoder, not a codec
+    // capability table that may describe a different device/session.
     {
         const ExportSink::EncoderInfo enc = ctx->sink->encoder_info();
-        const CodecCapability& table = vc.codec == ExportCodec::HEVC ? caps_.encoder_hevc() : caps_.encoder_h264();
         bool hw = false, sw = false;
         if (enc.acceleration == ExportSink::Acceleration::Hardware) hw = true;
         else if (enc.acceleration == ExportSink::Acceleration::Software) sw = true;
-        else if (table.supported) (table.hardwareAccelerated ? hw : sw) = true;
         if (hw) ctx->progress.flags |= kExportHardwareEncoder;
         if (sw) {
             ctx->progress.flags |= kExportSoftwareEncoder;
@@ -11868,7 +11803,6 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             ctx->sink->abort();
             return ready;
         }
-        renderer_.clear_preview_cache();
         if (const Status drained = drainExportStartup(); !drained.ok()) return drained; // Drain deferred cache destruction before export's allocation peak.
         TextureDesc cd;
         cd.width = ctx->width;
@@ -11916,7 +11850,12 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         const u32 want = limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
             : std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
                                                          : (policyDepth ? policyDepth : 3u), 1u, 4u);
-        for (u32 k = 0; k < want; ++k) {
+        const u64 slotBytes = static_cast<u64>(ctx->width) * ctx->height * 3 / 2;
+        ctx->queueByteLimit = config_.exportFrameQueueBudgetBytes ? config_.exportFrameQueueBudgetBytes
+            : std::min<u64>(64ull << 20, std::max<u64>(8ull << 20, caps_.memory_budget_bytes() / 8));
+        const u32 boundedSlots = static_cast<u32>(std::min<u64>(want, ctx->queueByteLimit / slotBytes));
+        if (!boundedSlots) { ctx->sink->abort(); return Status{Errc::BudgetExceeded, "um quadro nao cabe na fila de exportacao"}; }
+        for (u32 k = 0; k < boundedSlots; ++k) {
             BufferDesc bd;
             bd.usage = BufferUsage::TransferDst;
             bd.access = MemoryAccess::Readback;
@@ -11942,31 +11881,20 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             ctx->slots.push_back(slot);
         }
         if (ctx->slots.empty()) {
-            gpu_->destroy_texture(ctx->comp);
-            gpu_->destroy_texture(ctx->y);
-            gpu_->destroy_texture(ctx->uv);
             ctx->sink->abort();
             return Status{Errc::OutOfMemory, "sem memoria para ler os quadros do export"};
         }
         ctx->depth = static_cast<u32>(ctx->slots.size());
         (void)ctx->scheduler.configure(ctx->frames, ctx->fps, ctx->compFps, ctx->depth,
                                        config_.exportExecutionProfile);
-        for (u32 k = 0; k < ctx->depth; ++k) ctx->freeSlots.push_back(ctx->depth - 1 - k);
-        if (ctx->v2) {
-            if (const Status prepared = ctx->v2->prepare(ctx->depth, ctx->frames, &ctx->cancelRequested); !prepared.ok())
+        if (ctx->queue) {
+            if (const Status prepared = ctx->queue->prepare(ctx->depth, ctx->frames, slotBytes, ctx->queueByteLimit, &ctx->cancelRequested); !prepared.ok())
                 return prepared;
         }
         // The cancellation pointer stays bound through post-open allocation,
         // before exportCtx_ is published. These resources were never submitted
         // to the GPU; release them and abort only the already-opened sink.
         if (ctx->cancelRequested.load(std::memory_order_acquire)) {
-            for (const ExportContext::Slot& slot : ctx->slots) {
-                gpu_->destroy_buffer(slot.y);
-                gpu_->destroy_buffer(slot.uv);
-            }
-            gpu_->destroy_texture(ctx->comp);
-            gpu_->destroy_texture(ctx->y);
-            gpu_->destroy_texture(ctx->uv);
             ctx->sink->abort();
             return Errc::Cancelled;
         }
@@ -11977,7 +11905,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     ctx->progress.framesTotal = ctx->frames;
     ctx->progress.pipelineDepth = ctx->depth;
     ctx->set_message("exportando");
-    ctx->publish_v2_phase("exportando");
+    ctx->publish_export_phase("exportando");
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         previewBuffering_ = false;
@@ -11991,12 +11919,13 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     proxyPause.started = true;
     startupOwnership.committed = true;
+    offlineCleanup.committed = true;
     exportCtx_->thread = std::thread([this] { export_thread_main(); });
     return OkStatus;
 }
 
 Status Engine::restart_export(const char* recoveryPath, const char* outputPath) noexcept {
-    if (!config_.enableExportRecovery && !config_.enableExportEngineV2) return Status{Errc::NotSupported, "recuperacao de export desativada"};
+    if (!config_.enableExportRecovery) return Status{Errc::NotSupported, "recuperacao de export desativada"};
     if (!recoveryPath || !*recoveryPath || !outputPath || !*outputPath) return Errc::InvalidArgument;
     std::unique_lock<std::mutex> lifecycle(exportLifecycleMutex_);
     if (exportActive_.load(std::memory_order_acquire) ||
@@ -12040,6 +11969,7 @@ void Engine::retire_abandoned_export_locked() noexcept {
 
 Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
     if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
+    if (!gpuFrame) return OkStatus;
     const u64 deadline = monotonic_ns() + (config_.exportGpuTimeoutMs
         ? static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull : 120'000'000'000ull);
     for (;;) {
@@ -12049,302 +11979,97 @@ Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
     }
 }
 
-Status Engine::render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept {
-    ExportContext& c = *exportCtx_;
-    gpuFrame = 0;
-    RenderSettings rs;
-    rs.dither = false;
-    rs.gpuTimers = config_.enableTelemetry;
-    rs.finalQuality = true;
-    rs.boundedSceneExposure = config_.enableBoundedSceneExposure;
-    rs.cancelFlag = &c.cancelRequested;
-    // Quadros EXATOS de vídeo, em sequência (o modo Playback decodifica
-    // adiante). Falta quadro: espera o decoder AVISAR que entregou (antes era
-    // um sono cego de 5 ms por tentativa), no máximo 4 s — arquivo quebrado
-    // não trava. O lock do render só vale para preparar e gravar: esperando o
-    // decoder, a GPU fica livre para quem precisar (captura, prévia de efeito).
-    const u64 t0 = monotonic_ns();
-    // O prazo de 4 s conta SEM PROGRESSO do decoder: efeito que lê outros
-    // instantes (RGB no tempo, mistura de quadros) pode precisar de vários
-    // quadros por quadro de saída — e com GOP longo isso passa de 4 s sem que
-    // nada esteja quebrado. Teto absoluto de 60 s por quadro.
-    //
-    // A decoded approximation can still be exported with the fallback flag.
-    // A missing layer cannot: finishing an MP4 without its source video used
-    // to report success while silently exporting black/incomplete frames.
-    // After a fallback, patience AND the per-frame ceiling drop until an exact
-    // frame returns (export_source_wait): the ceiling used to stay at 60 s, so
-    // while another decoder kept delivering frames every degraded frame could
-    // cost a minute — the export looked frozen at a percentage.
-    const ExportSourceWait wait = export_source_wait(c.consecutiveFallbacks);
-    ProgressDeadline deadline(t0, wait.patienceNs, wait.hardCapNs);
-    // Camada sem imagem nenhuma: o prazo dela renova com o TRABALHO do decoder
-    // (quadros descartados a caminho do alvo contam) e não cai com os
-    // aproximados (export_missing_source_wait).
-    const ExportSourceWait missingWait = export_missing_source_wait();
-    ProgressDeadline missingDeadline(t0, missingWait.patienceNs, missingWait.hardCapNs);
-    u64 lastGen = mediaReadyGen_.load(std::memory_order_acquire);
-    u64 lastWork = media_.decode_work();
-    u64 notedWork = lastWork, notedNs = t0;
-    bool drainedGpu = false;
-    bool reclaimedAllocationFailure = false;
-    std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
-    // Install only while holding renderMutex_, and restore before any decoder
-    // wait unlocks it. Offscreen readers never inherit export-owned callbacks.
-    struct FrozenLookupGuard {
-        Renderer& renderer;
-        Engine& engine;
-        bool active;
-        ~FrozenLookupGuard() {
-            if (!active) return;
-            renderer.set_model_lookup(&Engine::model_lookup, &engine);
-            renderer.set_hdri_lookup(&Engine::hdri_lookup, &engine);
-            renderer.set_cube_lookup(&Engine::cube_lookup, &engine);
+Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
+    ctx.offline = std::make_unique<OfflineFrameRenderer>();
+    const u64 renderBudget = std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2);
+    if (const Status initialized = ctx.offline->initialize(*gpu_, effectRegistry_, config_.mediaFactory,
+            &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull); !initialized.ok())
+        return initialized;
+    auto& offlineRenderer = ctx.offline->compositor();
+    offlineRenderer.set_model_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::SceneAsset> {
+        const auto& c = *static_cast<ExportContext*>(p);
+        if (const auto it = c.frozenModels.find(id.pack()); it != c.frozenModels.end()) return it->second;
+        return {};
+    }, &ctx);
+    offlineRenderer.set_hdri_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::HdriPixels> {
+        auto& c = *static_cast<ExportContext*>(p);
+        if (const auto it = c.frozenHdris.find(id.pack()); it != c.frozenHdris.end()) return it->second;
+        const Asset* asset = c.frozenProject->asset(id);
+        if (!asset || asset->kind != AssetKind::Environment) return {};
+        const auto pixels = read_hdri_file(asset->sourcePath, c.frozenAssetBudget).pixels;
+        if (!pixels) c.frozenAssetStatus = Errc::MediaSourceMissing;
+        else c.frozenAssetBudget -= std::min<u64>(c.frozenAssetBudget, pixels->rgb.capacity() * sizeof(f32));
+        c.frozenHdris[id.pack()] = pixels;
+        return pixels;
+    }, &ctx);
+    offlineRenderer.set_cube_lookup([](void* p, AssetId id) -> std::shared_ptr<const CubeLut> {
+        auto& c = *static_cast<ExportContext*>(p);
+        if (const auto it = c.frozenLuts.find(id.pack()); it != c.frozenLuts.end()) return it->second;
+        const Asset* asset = c.frozenProject->asset(id);
+        if (!asset || asset->kind != AssetKind::Lut) return {};
+        auto parsed = read_cube_lut(asset->sourcePath);
+        if (!parsed.ok()) { c.frozenAssetStatus = parsed.status(); return {}; }
+        auto lut = std::make_shared<const CubeLut>(std::move(*parsed));
+        c.frozenLuts[id.pack()] = lut;
+        return lut;
+    }, &ctx);
+    offlineRenderer.set_audio_source(ctx.audioCache.get(), nullptr, nullptr);
+    offlineRenderer.set_bounded_text_surface_enabled(config_.enableBoundedTextSurface);
+    return OkStatus;
+}
+
+void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) noexcept {
+    bool lostDevice = !gpu_ || gpu_->is_device_lost()
+        || (ctx.deferredGpuCleanup && ctx.deferredGpuGeneration != gpuGeneration_);
+    if (ctx.offline && !lostDevice) {
+        const u64 fence = ctx.deferredGpuCleanup ? ctx.deferredGpuFrame : gpu_->last_submitted_frame();
+        const Status ready = fence ? gpu_->wait_frame(fence, 0) : OkStatus;
+        if (ready.code() == Errc::DeviceLost) lostDevice = true;
+        if (ready.code() == Errc::Timeout) {
+            // Renderer::shutdown waits for the device. Retain its decoders,
+            // snapshots and targets instead of entering that wait after timeout.
+            ctx.deferredGpuCleanup = true;
+            ctx.deferredGpuFrame = fence; ctx.deferredGpuGeneration = gpuGeneration_;
+            ctx.retainedReadbacks = retainReadbacks;
+            pendingExportGpuFrame_ = fence; pendingExportGpuGeneration_ = gpuGeneration_;
+            return;
         }
-    };
-    auto installFrozenLookups = [&] {
-        if (!c.frozenProject) return;
-        renderer_.set_model_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::SceneAsset> {
-            auto& ctx = *static_cast<ExportContext*>(p);
-            const auto it = ctx.frozenModels.find(id.pack());
-            return it == ctx.frozenModels.end() ? nullptr : it->second;
-        }, &c);
-        renderer_.set_hdri_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::HdriPixels> {
-            auto& ctx = *static_cast<ExportContext*>(p);
-            static const auto missing = std::make_shared<const scene3d::HdriPixels>();
-            if (const auto it = ctx.frozenHdris.find(id.pack()); it != ctx.frozenHdris.end()) return it->second ? it->second : missing;
-            const Asset* asset = ctx.frozenProject->asset(id);
-            if (!asset || asset->kind != AssetKind::Environment) return missing;
-            if (ctx.frozenAssetBudget < 4096) { ctx.frozenAssetStatus = Errc::BudgetExceeded; return nullptr; }
-            const auto pixels = read_hdri_file(asset->sourcePath, ctx.frozenAssetBudget).pixels;
-            if (!pixels) ctx.frozenAssetStatus = Errc::MediaSourceMissing;
-            if (pixels) ctx.frozenAssetBudget -= std::min<u64>(ctx.frozenAssetBudget,
-                pixels->rgb.capacity() * sizeof(f32) + sizeof(*pixels));
-            ctx.frozenHdris[id.pack()] = pixels;
-            return pixels ? pixels : missing;
-        }, &c);
-        renderer_.set_cube_lookup([](void* p, AssetId id) -> std::shared_ptr<const CubeLut> {
-            auto& ctx = *static_cast<ExportContext*>(p);
-            if (const auto it = ctx.frozenLuts.find(id.pack()); it != ctx.frozenLuts.end()) return it->second;
-            const Asset* asset = ctx.frozenProject->asset(id);
-            if (!asset || asset->kind != AssetKind::Lut) return {};
-            if (ctx.frozenAssetBudget < kMaxCubeFileBytes) { ctx.frozenAssetStatus = Errc::BudgetExceeded; return {}; }
-            auto parsed = read_cube_lut(asset->sourcePath);
-            if (!parsed.ok()) ctx.frozenAssetStatus = parsed.status();
-            if (parsed.ok()) ctx.frozenAssetBudget -= std::min<u64>(ctx.frozenAssetBudget,
-                parsed->values.capacity() * sizeof(Vec4) + sizeof(*parsed));
-            auto data = parsed.ok() ? std::make_shared<const CubeLut>(std::move(*parsed)) : nullptr;
-            ctx.frozenLuts[id.pack()] = data;
-            return data;
-        }, &c);
-    };
-    auto prepare = [&]() -> Status {
-        if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
-        std::lock_guard<std::mutex> lock(modelMutex_);
-        Project* document = c.frozenProject ? c.frozenProject.get() : project_.get();
-        if (!document) return Errc::InvalidState;
-        Composition* comp = c.frozenProject ? document->timeline().composition(c.recovery.composition) : current_composition();
-        if (!comp) return Errc::NotFound;
-        FrozenLookupGuard callbacks{renderer_, *this, static_cast<bool>(c.frozenProject)};
-        installFrozenLookups();
-        (void)renderer_.take_incomplete();
-        auto frozenImage = [](void* p, AssetId id) -> const ImagePixels* {
-            auto& ctx = *static_cast<ExportContext*>(p);
-            const auto it = ctx.frozenImages.find(id.pack());
-            return it == ctx.frozenImages.end() ? nullptr : &it->second;
-        };
-        renderer_.prepare(*comp, *document, t, &media_, c.frozenProject ? frozenImage : &Engine::image_lookup,
-                          c.frozenProject ? static_cast<void*>(&c) : static_cast<void*>(this), rs, ++frameCounter_,
-                          1, DecodeMode::Playback, 1.0f, snapshot_);
-        if (!c.frozenAssetStatus.ok()) return c.frozenAssetStatus;
-        // Retire outgoing clips while waiting as well. On a one-decoder
-        // device the next clip cannot produce a frame until the previous
-        // codec closes; collecting only after a successful prepare deadlocked
-        // admission until the export timed out. Keep active invisible clips
-        // touched so fades do not repeatedly tear down their decoder.
-        comp->layers().for_each([&](LayerId id, const Layer& layer) {
-            if (layer.kind == LayerKind::Video && layer.contains_time(t)) media_.touch(id, frameCounter_);
-        });
-        media_.collect(frameCounter_, kExportIdleFrames);
-        return OkStatus;
-    };
-    ProgressDeadline resourceDeadline;
-    bool resourceStarted = false;
-    u64 resourceGen = 0;
-    for (;;) {
-        const u64 attemptStart = monotonic_ns();
-        for (;;) {
-            const u64 gen = mediaReadyGen_.load(std::memory_order_acquire);
-            rl.lock();
-            if (const Status s = prepare(); !s.ok()) return s;
-            if (snapshot_.missingVideoFrames == 0 && snapshot_.staleVideoFrames == 0) { c.consecutiveFallbacks = 0; break; }
-            const u64 now = monotonic_ns();
-            const u64 work = media_.decode_work();
-            if (gen != lastGen || work != lastWork) {
-                lastGen = gen;
-                lastWork = work;
-                deadline.progress(now);
-                missingDeadline.progress(now);
-            }
-            if (export_liveness_due(now, notedNs, work, notedWork)) {
-                // A tela vê o decoder trabalhando (ExportStallWatchdog.kt /
-                // ExportStallWatch no iOS comparam a mensagem).
-                notedWork = work;
-                notedNs = now;
-                std::lock_guard<std::mutex> pl(c.mutex);
-                std::snprintf(c.progress.message, sizeof(c.progress.message), "decodificando: quadro %lld (%llu)",
-                              static_cast<long long>(t.value), static_cast<unsigned long long>(work));
-            }
-            const bool anyMissing = snapshot_.missingVideoFrames > 0;
-            if (anyMissing ? missingDeadline.expired(now) : deadline.expired(now)) {
-                const u32 missing = snapshot_.missingVideoFrames, stale = snapshot_.staleVideoFrames;
-                if (missing > 0) {
-                    snapshot_.release_video_frames();
-                    AUREA_LOG_ERROR("export: quadro %lld indisponivel em %u camada(s) de video apos %.1f s",
-                        static_cast<long long>(t.value), missing, static_cast<f64>(now - t0) / 1e9);
-                    return Status{Errc::DecodeFailed, "midia de video indisponivel para renderizar o quadro"};
-                }
-                if (c.v2) {
-                    snapshot_.release_video_frames();
-                    AUREA_LOG_ERROR("export-v2 decode failure frame=%lld missing=%u stale=%u timestamp_ns=%llu",
-                        static_cast<long long>(t.value), missing, stale, static_cast<unsigned long long>(now));
-                    return Status{Errc::DecodeFailed, "a fonte nao entregou o quadro exato; exportacao interrompida"};
-                }
-                if (c.consecutiveFallbacks < std::numeric_limits<u32>::max()) ++c.consecutiveFallbacks;
-                if (c.fallbackFrames++ < 8 || c.fallbackFrames % 300 == 0) {
-                    AUREA_LOG_WARN("export: quadro %lld sem o video exato apos %.1f s (%u sem quadro, %u aproximados); "
-                                   "gravando o mais proximo decodificado (%llu ate agora)",
-                                   static_cast<long long>(t.value), static_cast<f64>(now - t0) / 1e9, missing, stale,
-                                   static_cast<unsigned long long>(c.fallbackFrames));
-                }
-                if (c.fallbackFrames == 1) {
-                    std::lock_guard<std::mutex> pl(c.mutex);
-                    c.progress.flags |= kExportFrameFallback;
-                }
-                break;   // o snapshot já preparado vai para a GPU como está
-            }
-            snapshot_.release_video_frames();
-            // Waiting for decode must not pin completed external images behind GPU
-            // retirement callbacks that would otherwise run only on a new submission.
-            if (!drainedGpu) {
-                const u64 waitStart = monotonic_ns();
-                const Status ready = wait_export_gpu(gpu_->last_submitted_frame());
-                if (!ready.ok()) return ready;
-                // GPU work from the previous blurred frame is not decoder latency.
-                const u64 gpuNs = monotonic_ns() - waitStart;
-                deadline.exclude(gpuNs);
-                missingDeadline.exclude(gpuNs);
-                drainedGpu = true;
-            }
-            rl.unlock();
-            if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
-            std::unique_lock<std::mutex> wl(exportWakeMutex_);
-            exportWakeCv_.wait_for(wl, std::chrono::milliseconds(5), [&] {
-                return mediaReadyGen_.load(std::memory_order_acquire) != gen
-                    || c.cancelRequested.load(std::memory_order_acquire);
-            });
-        }
-        const u64 t1 = monotonic_ns();
-        FrameStats stats;
-        RenderTimings timings;
-        // Grava e submete: composição → NV12 → cópia para o slot, num frame só.
-        // A GPU NÃO é esperada aqui (o produtor espera o quadro anterior depois).
-        Status s;
-        {
-            FrozenLookupGuard callbacks{renderer_, *this, static_cast<bool>(c.frozenProject)};
-            installFrozenLookups();
-            s = renderer_.render(snapshot_, rs, &target, stats, timings);
-        }
-        if (!c.frozenAssetStatus.ok()) s = c.frozenAssetStatus;
-        gpuFrame = gpu_->last_submitted_frame();
-        // A changing effect extent can retire a large previous target during
-        // compilation, while its GPU work/backing is still outstanding. One
-        // fence-bounded reclamation rebuilds this exact output frame. A second
-        // allocation failure is final; there is no rescale or endless retry.
-        if (s.code() == Errc::OutOfDeviceMemory && c.v2 && config_.enableTrackedGpuAdmission
-                && !reclaimedAllocationFailure) {
-            reclaimedAllocationFailure = true;
-            snapshot_.release_video_frames();
-            if (const Status ready = wait_export_gpu(gpuFrame); !ready.ok()) return ready;
-            if (const Status reclaimed = renderer_.reclaim_failed_transients(100'000'000ull); !reclaimed.ok()) return reclaimed;
-            AUREA_LOG_INFO("export-v2: backing concluido liberado; reconstruir o mesmo quadro %lld, qualidade igual",
-                static_cast<long long>(t.value));
-            rl.unlock();
-            continue;
-        }
-        // O orcamento RASTREADO (TrackedResourceBudget.hpp) e uma envoltoria
-        // conservadora: a reserva do driver conta inteira, mesmo com espaco
-        // livre dentro dela. Cenas 3D (sombra, ambiente, MSAA) e desfoque de
-        // movimento (alvo de acumulacao) pedem texturas a mais e caiam nela
-        // em TODA tentativa - o export morria com "sem memoria" sem a GPU ter
-        // recusado nada. Depois da recuperacao, o export segue sem a
-        // envoltoria: o limite de alocacao do pool e o driver continuam
-        // valendo, e a prévia recebe o orcamento de volta no fim.
-        if (s.code() == Errc::OutOfDeviceMemory && config_.enableTrackedGpuAdmission && !c.trackedBudgetLifted) {
-            c.trackedBudgetLifted = true;
-            snapshot_.release_video_frames();
-            if (const Status ready = wait_export_gpu(gpuFrame); !ready.ok()) return ready;
-            renderer_.set_tracked_resource_budget(0);
-            AUREA_LOG_WARN("export: orcamento rastreado de GPU recusou o quadro %lld; exportando sem a envoltoria "
-                           "(limite do pool e do driver continuam)", static_cast<long long>(t.value));
-            rl.unlock();
-            continue;
-        }
-        if (rs.gpuTimers) {
-            // O 1º quadro separado: é onde caem o IBL final e os pipelines do export.
-            if (c.profiledFrames++ == 0) c.firstFrameMs = timings.cpuRecordMs;
-            else c.recordMs += timings.cpuRecordMs;
-            const GpuTiming* passes = nullptr;
-            const u32 n = renderer_.last_gpu_passes(passes);
-            if (n > 0) ++c.gpuFrames;
-            for (u32 i = 0; i < n; ++i) {
-                const char* label = passes[i].label ? passes[i].label : "?";
-                auto it = std::find_if(c.gpuPasses.begin(), c.gpuPasses.end(),
-                                       [&](const ExportContext::PassSum& p) { return std::strcmp(p.label, label) == 0; });
-                if (it == c.gpuPasses.end()) c.gpuPasses.push_back({label, passes[i].ms});
-                else it->ms += passes[i].ms;
-            }
-        }
-        c.decodeNs.fetch_add(t1 - attemptStart, std::memory_order_relaxed);
-        c.renderNs.fetch_add(monotonic_ns() - t1, std::memory_order_relaxed);
-        if (!s.ok() || !renderer_.take_incomplete()) return s;
-        // A submitted frame can still omit text/images/models when a GPU resource
-        // is temporarily unavailable. Never hand that incomplete frame to the
-        // encoder: wait its fence, rebuild the SAME frame, then retry boundedly.
-        snapshot_.release_video_frames();
-        if (const Status ready = wait_export_gpu(gpuFrame); !ready.ok()) return ready;
-        const u64 now = monotonic_ns();
-        // Prazo SEM PROGRESSO (export_resource_wait): decoder/serviço que
-        // ainda entrega algo renova; nada mudando, falha em 4 s como antes.
-        // Progresso da GPU tambem conta: pipelines compilados (o 1o quadro 3D
-        // ou com desfoque compila varios), uploads de modelo/textura e o
-        // ambiente 3D (IBL) ficando pronto. Antes so o decoder renovava o
-        // prazo e um aparelho lento falhava em 4 s com tudo andando.
-        const u64 resGen = mediaReadyGen_.load(std::memory_order_acquire) + media_.decode_work()
-            + (static_cast<u64>(renderer_.shaders().compiles_since_mark()) << 32)
-            + (static_cast<u64>(renderer_.pending_uploads()) << 48)
-            + (renderer_.environment_pending() ? 1ull << 63 : 0ull);
-        if (!resourceStarted) {
-            const ExportSourceWait rw = export_resource_wait();
-            resourceDeadline = ProgressDeadline(now, rw.patienceNs, rw.hardCapNs);
-            resourceStarted = true;
-            resourceGen = resGen;
-        } else if (resGen != resourceGen) {
-            resourceGen = resGen;
-            resourceDeadline.progress(now);
-        }
-        if (resourceDeadline.expired(now)) {
-            AUREA_LOG_ERROR("export: quadro %lld com recurso de GPU pendente apos %.1f s",
-                            static_cast<long long>(t.value), static_cast<f64>(now - t0) / 1e9);
-            return Status{Errc::InvalidState, "recursos de GPU indisponiveis para renderizar todas as camadas"};
-        }
-        rl.unlock();
-        if (c.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
-        std::unique_lock<std::mutex> wake(exportWakeMutex_);
-        exportWakeCv_.wait_for(wake, std::chrono::milliseconds(10), [&] {
-            return c.cancelRequested.load(std::memory_order_acquire);
-        });
     }
+    if (ctx.offline && lostDevice) ctx.offline->forget_device();
+    if (ctx.offline) ctx.offline->shutdown();
+    ctx.offline.reset();
+    if (!retainReadbacks) ctx.audioCache.reset();
+    ctx.deferredGpuCleanup = false;
+    if (gpu_ && !lostDevice) {
+        gpu_->destroy_texture(ctx.comp); gpu_->destroy_texture(ctx.y); gpu_->destroy_texture(ctx.uv);
+        if (!retainReadbacks) for (auto& slot : ctx.slots) {
+            gpu_->destroy_buffer(slot.y); gpu_->destroy_buffer(slot.uv);
+            slot.y = {}; slot.uv = {}; slot.yPtr = slot.uvPtr = nullptr;
+        }
+    }
+    ctx.comp = {}; ctx.y = {}; ctx.uv = {};
+    ctx.frozenProject.reset();
+    ctx.frozenImages.clear(); ctx.frozenModels.clear(); ctx.frozenHdris.clear(); ctx.frozenLuts.clear();
+}
+
+Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& target, u64& gpuFrame) noexcept {
+    ExportContext& c = *exportCtx_;
+    std::lock_guard<std::mutex> renderLock(renderMutex_);
+    if (!c.offline || !c.frozenProject) return Errc::InvalidState;
+    RenderSettings settings;
+    settings.finalQuality = true;
+    settings.boundedSceneExposure = config_.enableBoundedSceneExposure;
+    settings.gpuTimers = config_.enableTelemetry;
+    settings.cancelFlag = &c.cancelRequested;
+    const u64 begin = monotonic_ns();
+    const Status result = c.offline->render(*c.frozenProject, c.recovery.composition, time, target,
+        [](void* p, AssetId id) -> const ImagePixels* {
+            const auto& ctx = *static_cast<ExportContext*>(p);
+            if (const auto it = ctx.frozenImages.find(id.pack()); it != ctx.frozenImages.end()) return &it->second;
+            return nullptr;
+        }, &c, settings, gpuFrame);
+    c.renderNs.fetch_add(monotonic_ns() - begin, std::memory_order_relaxed);
+    return c.frozenAssetStatus.ok() ? result : c.frozenAssetStatus;
 }
 
 namespace {
@@ -12475,19 +12200,7 @@ void Engine::export_thread_main() noexcept {
         }
         ctx.readNs.fetch_add(monotonic_ns() - r0, std::memory_order_relaxed);
         inflight.pop_front();
-        if (ctx.v2) {
-            const Status published = ctx.v2->publish(si, slot.frame);
-            AUREA_LOG_INFO("export-v2 frame=%u phase=readback timestamp_ns=%llu duration_ns=%llu result=%d",
-                slot.frame, static_cast<unsigned long long>(monotonic_ns()),
-                static_cast<unsigned long long>(monotonic_ns() - r0), published.raw());
-            return published;
-        }
-        {
-            std::lock_guard<std::mutex> ql(ctx.qMutex);
-            ctx.readySlots.push_back(si);
-        }
-        ctx.qCv.notify_all();
-        return OkStatus;
+        return ctx.queue->publish(si, slot.frame);
     };
 
     Status result = OkStatus;
@@ -12500,7 +12213,7 @@ void Engine::export_thread_main() noexcept {
         const bool hot = thermalDegrade_.load(std::memory_order_acquire);
         u32 allowed = ctx.scheduler.admission_limit(memory_.pressure(), preview_memory_hold(),
                                                     hot, monotonic_ns());
-        if (ctx.v2 && config_.enableTrackedGpuAdmission) {
+        if (ctx.queue && config_.enableTrackedGpuAdmission) {
             // Reclaim completed uploads before admitting another expensive
             // scene. This changes concurrency, never shadows/blur or pixels.
             const auto residency = gpu_->memory_stats();
@@ -12528,40 +12241,19 @@ void Engine::export_thread_main() noexcept {
         // limita a memória e segura o ritmo). Esperar o encoder tem watchdog:
         // preso dentro da plataforma, ele não devolveria o slot nunca.
         u32 si = 0;
-        if (ctx.v2) {
-            for (;;) {
-                const auto acquired = ctx.v2->acquire(allowed);
-                if (acquired.ok()) { si = *acquired; break; }
-                { std::lock_guard lock(ctx.qMutex);
-                    if (ctx.encoderFailed) { result = ctx.encoderStatus; break; }
-                    if (ctx.worker_hung_locked(monotonic_ns())) {
-                        result = ctx.abandon_worker_locked(); abandonedWorker = true; break;
-                    }
+        for (;;) {
+            const auto acquired = ctx.queue->acquire(allowed);
+            if (acquired.ok()) { si = *acquired; break; }
+            {
+                std::lock_guard lock(ctx.qMutex);
+                if (ctx.encoderFailed) { result = ctx.encoderStatus; break; }
+                if (ctx.worker_hung_locked(monotonic_ns())) {
+                    result = ctx.abandon_worker_locked(); abandonedWorker = true; break;
                 }
-                if (acquired.code() != Errc::Timeout) { result = acquired.status(); break; }
             }
-            if (!result.ok()) break;
-        } else {
-            std::unique_lock<std::mutex> ql(ctx.qMutex);
-            auto slotReady = [&] {
-                return ctx.encoderFailed || cancelled()
-                    || (!ctx.freeSlots.empty() && ctx.depth - static_cast<u32>(ctx.freeSlots.size()) < allowed);
-            };
-            bool hung = false;
-            while (!slotReady()) {
-                ctx.qCv.wait_for(ql, std::chrono::milliseconds(100));
-                if (!slotReady() && ctx.worker_hung_locked(monotonic_ns())) { hung = true; break; }
-            }
-            if (hung) {
-                result = ctx.abandon_worker_locked();
-                abandonedWorker = true;
-                break;
-            }
-            if (ctx.encoderFailed) { result = ctx.encoderStatus; break; }
-            if (cancelled()) { result = Errc::Cancelled; break; }
-            si = ctx.freeSlots.back();
-            ctx.freeSlots.pop_back();
+            if (acquired.code() != Errc::Timeout) { result = acquired.status(); break; }
         }
+        if (!result.ok()) break;
         ExportContext::Slot& slot = ctx.slots[si];
         slot.frame = i;
         target.yReadback = slot.y;
@@ -12572,7 +12264,7 @@ void Engine::export_thread_main() noexcept {
         if (!plan.ok()) { result = plan.status(); break; }
         const u64 renderStarted = monotonic_ns();
         result = render_export_frame(plan->compositionFrame, target, slot.gpuFrame);
-        if (ctx.v2) AUREA_LOG_INFO("export-v2 frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
+        if (ctx.queue) AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
             i, static_cast<long long>(plan->ptsUs), static_cast<unsigned long long>(monotonic_ns()),
             static_cast<unsigned long long>(monotonic_ns() - renderStarted), result.raw());
         if (!result.ok()) break;
@@ -12584,7 +12276,7 @@ void Engine::export_thread_main() noexcept {
     // sink acontece nele. Aqui só se espera — com o watchdog. Preso dentro da
     // plataforma (o encoder do aparelho não devolve a chamada), ele é
     // abandonado em vez de segurar este join para sempre: era o "parou em 70%".
-    if (ctx.v2) ctx.v2->end_render(result);
+    if (ctx.queue) ctx.queue->end_render(result);
     bool hangResult = abandonedWorker;
     {
         std::unique_lock<std::mutex> ql(ctx.qMutex);
@@ -12612,7 +12304,6 @@ void Engine::export_thread_main() noexcept {
         // next export (or app shutdown). No encoder can use them after the join.
         // (Abandoned worker: it may still be inside the mixer — nothing is freed.)
         ctx.audioSnap.reset();
-        ctx.audioCache.reset();
         ctx.audioFx.clear();
         std::vector<f32>().swap(ctx.audioMix);
         std::vector<i16>().swap(ctx.audioPcm);
@@ -12671,44 +12362,18 @@ void Engine::export_thread_main() noexcept {
     log_export_profile();
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (gpu_) {
-            gpu_->destroy_texture(ctx.comp);
-            gpu_->destroy_texture(ctx.y);
-            gpu_->destroy_texture(ctx.uv);
-            // Os buffers de leitura ficam com um worker abandonado: ele pode
-            // voltar no meio da cópia do quadro para o encoder. Vazam (poucos MB).
-            if (!abandonedWorker) {
-                for (ExportContext::Slot& s : ctx.slots) {
-                    gpu_->destroy_buffer(s.y);
-                    gpu_->destroy_buffer(s.uv);
-                    s.yPtr = s.uvPtr = nullptr;
-                }
-            }
-            // Successful exports already completed their fences: reclaim now.
-            // Cancellation/device failure must never turn into an unbounded
-            // wait for the queue we just stopped waiting on. Poll completed
-            // fences; still-busy resources retain their deferred destruction.
-            if (result.ok() && !ctx.v2) gpu_->wait_idle();
-            else retain_failed_export_gpu_locked();
-        }
-        if (ctx.frozenProject) {
-            snapshot_ = FrameSnapshot{};
-            ctx.frozenProject.reset();
-            ctx.frozenImages.clear(); ctx.frozenModels.clear();
-            ctx.frozenHdris.clear(); ctx.frozenLuts.clear();
-        }
-        // A prévia volta a ter a envoltoria rastreada que o export suspendeu.
-        if (ctx.trackedBudgetLifted) apply_memory_budgets();
+        release_offline_export(ctx, abandonedWorker);
+        retain_failed_export_gpu_locked();
     }
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);
         ctx.progress.running = false;
         ctx.progress.finished = true;
         ctx.progress.result = result.code();
-        if (ctx.v2) {
-            if (!result.ok()) ctx.v2->fail(result);
+        if (ctx.queue) {
+            if (!result.ok()) ctx.queue->fail(result);
             ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
-                | (static_cast<u32>(ctx.v2->phase()) << kExportPhaseShift);
+                | (static_cast<u32>(ctx.queue->phase()) << kExportPhaseShift);
         }
         const ExportFailure failure = export_failure_reason(stage, result.code());
         ctx.progress.failure = static_cast<u32>(failure);
@@ -12749,27 +12414,27 @@ void Engine::export_encoder_main() noexcept {
                 std::lock_guard<std::mutex> ql(c.qMutex);
                 abandoned = c.abandoned;
                 finishFile = !abandoned && !c.stop && !c.encoderFailed
-                          && (c.v2 ? c.v2->drained() : c.producerDone && c.readySlots.empty())
+                          && c.queue->drained()
                           && !c.cancelRequested.load(std::memory_order_acquire);
             }
             Status fin = OkStatus;
             if (!abandoned) {
                 if (finishFile) {
                     c.enter(ExportWorkerPhase::Finish);
-                    if (c.v2) {
-                        fin = c.v2->begin_finalizing();
-                        c.publish_v2_phase("finalizando");
+                    if (c.queue) {
+                        fin = c.queue->begin_finalizing();
+                        c.publish_export_phase("finalizando");
                     }
                     if (fin.ok()) fin = c.sink->finish();
-                    if (fin.ok() && c.v2) {
-                        fin = c.v2->begin_validating();
-                        c.publish_v2_phase("validando");
+                    if (fin.ok() && c.queue) {
+                        fin = c.queue->begin_validating();
+                        c.publish_export_phase("validando");
                         if (fin.ok()) fin = c.sink->validate_output({c.outputWidth, c.outputHeight,
                             c.frames, c.fps, c.withAudio});
-                        c.v2->validated(fin);
-                        c.publish_v2_phase(fin.ok() ? "concluido" : "falha na validacao");
+                        c.queue->validated(fin);
+                        c.publish_export_phase(fin.ok() ? "concluido" : "falha na validacao");
                     }
-                    if (!fin.ok()) { if (c.v2) c.v2->fail(fin); c.sink->abort(); }
+                    if (!fin.ok()) { if (c.queue) c.queue->fail(fin); c.sink->abort(); }
                 } else {
                     c.enter(ExportWorkerPhase::Abort);
                     c.sink->abort();
@@ -12787,7 +12452,6 @@ void Engine::export_encoder_main() noexcept {
     } workerExit{ctx};
     std::unique_ptr<ai::Upscaler> upscaler;
     ai::TemporalStabilizer temporalUpscale;
-    bool temporalAvailable = true;
     std::unique_ptr<u8[]> neuralInput, neuralOutput;
     if (ctx.settings.aiUpscale) {
         // Loading weights and all inference stay on the encoder worker.
@@ -12802,6 +12466,7 @@ void Engine::export_encoder_main() noexcept {
             loaded = upscaler->load(ctx.settings.aiUpscale, 2, 128);
         }
         if (!loaded.ok()) {
+            ctx.queue->fail(loaded);
             { std::lock_guard<std::mutex> ql(ctx.qMutex);
               ctx.encoderStatus = loaded; ctx.encoderFailed = true; ctx.stop = true; }
             ctx.qCv.notify_all();
@@ -12812,28 +12477,16 @@ void Engine::export_encoder_main() noexcept {
     u64 logWrite = 0, logRead = 0, logRender = 0, logDecode = 0;
     for (;;) {
         u32 si = 0;
-        if (ctx.v2) {
-            for (;;) {
-                const auto taken = ctx.v2->take();
-                if (taken.ok()) { si = *taken; break; }
-                if (taken.code() == Errc::Timeout) continue;
-                return;
-            }
-        } else {
-            std::unique_lock<std::mutex> ql(ctx.qMutex);
-            ctx.qCv.wait(ql, [&] {
-                return ctx.stop || ctx.cancelRequested.load(std::memory_order_acquire) || !ctx.readySlots.empty()
-                    || ctx.producerDone;
-            });
-            if (ctx.stop || ctx.cancelRequested.load(std::memory_order_acquire)) return;
-            if (ctx.readySlots.empty()) return;   // produtor terminou e a fila esvaziou
-            si = ctx.readySlots.front();
-            ctx.readySlots.pop_front();
+        for (;;) {
+            const auto taken = ctx.queue->take();
+            if (taken.ok()) { si = *taken; break; }
+            if (taken.code() != Errc::Timeout) return;
         }
         const ExportContext::Slot& slot = ctx.slots[si];
         const u32 i = slot.frame;
         const auto plan = ctx.scheduler.frame(i);
         if (!plan.ok()) {
+            ctx.queue->fail(plan.status());
             { std::lock_guard<std::mutex> ql(ctx.qMutex);
               ctx.encoderStatus = plan.status(); ctx.encoderFailed = true; ctx.stop = true; }
             ctx.qCv.notify_all();
@@ -12863,16 +12516,11 @@ void Engine::export_encoder_main() noexcept {
             if (s.ok() && !ai::resize_nv12_709(neuralOutput.get(), ctx.width * ctx.settings.aiUpscale,
                     ctx.height * ctx.settings.aiUpscale, neuralOutput.get(), ctx.outputWidth, ctx.outputHeight))
                 s = Status{Errc::InvalidState, "dimensoes invalidas no upscale"};
-            if (s.ok() && temporalAvailable) {
+            if (s.ok()) {
                 const Status temporal = temporalUpscale.process(neuralInput.get(), ctx.width, ctx.height,
                     neuralOutput.get(), ctx.outputWidth, ctx.outputHeight, i);
                 if (!temporal.ok()) {
-                    if (ctx.v2) {
-                        s = Status{temporal.code(), "memoria insuficiente para preservar estabilizacao temporal da IA"};
-                    } else {
-                        temporalAvailable = false;
-                        AUREA_LOG_WARN("AI temporal history disabled: memory budget or invalid dimensions");
-                    }
+                    s = Status{temporal.code(), "memoria insuficiente para preservar estabilizacao temporal da IA"};
                 }
             }
             if (s.ok()) {
@@ -12897,17 +12545,16 @@ void Engine::export_encoder_main() noexcept {
             ctx.audioNs.fetch_add(monotonic_ns() - w1, std::memory_order_relaxed);
         }
         ctx.leave();
-        if (ctx.v2) {
-            if (s.ok()) s = ctx.v2->encoded(si, i);
-            else ctx.v2->fail(s);
-            AUREA_LOG_INFO("export-v2 frame=%u pts_us=%lld phase=encode_audio timestamp_ns=%llu duration_ns=%llu result=%d",
+        if (ctx.queue) {
+            if (s.ok()) s = ctx.queue->encoded(si, i);
+            else ctx.queue->fail(s);
+            AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=encode_audio timestamp_ns=%llu duration_ns=%llu result=%d",
                 i, static_cast<long long>(pts), static_cast<unsigned long long>(monotonic_ns()),
                 static_cast<unsigned long long>(monotonic_ns() - w0), s.raw());
         }
         {
             std::lock_guard<std::mutex> ql(ctx.qMutex);
             if (ctx.abandoned) return;
-            if (!ctx.v2) ctx.freeSlots.push_back(si);
             if (!s.ok()) {
                 ctx.encoderFailed = true;
                 ctx.encoderStatus = s;
@@ -12938,6 +12585,7 @@ void Engine::export_encoder_main() noexcept {
                 const std::filesystem::space_info sp = std::filesystem::space(ctx.outputDir, ec);
                 if (!ec && sp.available != static_cast<std::uintmax_t>(-1) && sp.available < (16ull << 20)) {
                     AUREA_LOG_ERROR("export: armazenamento cheio no quadro %u de %u", done, ctx.frames);
+                    ctx.queue->fail(Status{Errc::StorageFull, "armazenamento cheio durante a exportacao"});
                     {
                         std::lock_guard<std::mutex> ql(ctx.qMutex);
                         ctx.encoderFailed = true;
@@ -12960,8 +12608,8 @@ void Engine::export_encoder_main() noexcept {
         const f64 elapsed = static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9;
         std::lock_guard<std::mutex> pl(ctx.mutex);
         ctx.progress.framesDone = done;
-        if (ctx.v2) ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
-            | (static_cast<u32>(ctx.v2->phase()) << kExportPhaseShift);
+        if (ctx.queue) ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
+            | (static_cast<u32>(ctx.queue->phase()) << kExportPhaseShift);
         ctx.progress.decodeWaitMs = static_cast<f32>(ctx.decodeNs.load(std::memory_order_relaxed) * k);
         ctx.progress.renderMs = static_cast<f32>(ctx.renderNs.load(std::memory_order_relaxed) * k);
         ctx.progress.readbackMs = static_cast<f32>(ctx.readNs.load(std::memory_order_relaxed) * k);
@@ -13061,6 +12709,17 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         ctx->frames = plan.frames;
         ctx->imageAlpha = plan.alpha;
         ctx->imageFrame = project_->timeline().playhead();
+        ExportSettings freezeSettings;
+        freezeSettings.fps = plan.fps;
+        freezeSettings.trimToContent = settings.trimToContent;
+        if (const Status frozen = export_recovery::capture(*project_, project_->timeline().current(), freezeSettings,
+                [this](const std::string& path) { return resolve_asset_path(path); },
+                ctx->frozenProject, ctx->recovery, false); !frozen.ok()) return frozen;
+        ctx->frozenImages = images_; ctx->frozenModels = models_;
+        ctx->frozenHdris = hdris_; ctx->frozenLuts = cubeLuts_;
+        ctx->frozenAssetBudget = source_asset_room_locked();
+        ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
+
     }
     if (settings.format == ImageExportFormat::Gif && ctx->frames > kGifMaxFrames)
         return Status{Errc::NotSupported, "GIF longo demais: use um trecho menor ou menos quadros por segundo"};
@@ -13098,6 +12757,20 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
             if (!committed) { active.store(false, std::memory_order_release); engine.request_render(); }
         }
     } startupOwnership{exportActive_, *this};
+    struct OfflineStartupCleanup {
+        Engine& engine;
+        ExportContext& context;
+        std::unique_ptr<ExportContext>& owner;
+        bool committed = false;
+        ~OfflineStartupCleanup() {
+            if (committed) return;
+            std::lock_guard<std::mutex> lock(engine.renderMutex_);
+            engine.release_offline_export(context);
+            if (context.deferredGpuCleanup && owner)
+                engine.pendingExportStartup_ = std::move(owner);
+        }
+    } offlineCleanup{*this, *ctx, ctx};
+
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         TextureDesc cd;
@@ -13111,8 +12784,16 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         exportActive_.store(true, std::memory_order_release);
-        renderer_.clear_preview_cache();
-        gpu_->wait_idle();
+        const u64 frame = gpu_->last_submitted_frame();
+        if (frame) {
+            const u64 started = monotonic_ns();
+            for (;;) {
+                const Status ready = gpu_->wait_frame(frame, 100'000'000ull);
+                if (ready.ok()) break;
+                if (ready.code() != Errc::Timeout || monotonic_ns() - started > 120'000'000'000ull) return ready;
+            }
+        }
+        if (const Status initialized = initialize_offline_export(*ctx); !initialized.ok()) return initialized;
         auto c = gpu_->create_texture(cd);
         if (!c.ok()) return Status{Errc::OutOfMemory, "sem memoria de GPU para o export"};
         ctx->comp = *c;
@@ -13142,6 +12823,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
     media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
     proxyPause.started = true;
     startupOwnership.committed = true;
+    offlineCleanup.committed = true;
     exportCtx_->thread = std::thread([this] { image_export_thread_main(); });
     return OkStatus;
 }
@@ -13239,11 +12921,9 @@ void Engine::image_export_thread_main() noexcept {
     }
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (gpu_) {
-            gpu_->destroy_texture(ctx.comp);
-            if (result.ok()) gpu_->wait_idle();
-            else retain_failed_export_gpu_locked();
-        }
+        release_offline_export(ctx);
+        retain_failed_export_gpu_locked();
+        ctx.audioCache.reset();
     }
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);

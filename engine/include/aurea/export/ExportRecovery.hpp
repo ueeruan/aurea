@@ -36,7 +36,8 @@ inline constexpr usize kMaxPackageBytes = kMaxProjectBytes + (4ull << 20);
 // fonts are frozen in the clone; the open editor document is never modified.
 [[nodiscard]] Status capture(const Project& project, CompositionId composition,
                              const ExportSettings& settings, const PathResolver& resolve,
-                             std::unique_ptr<Project>& frozen, Package& package) noexcept;
+                             std::unique_ptr<Project>& frozen, Package& package,
+                             bool requirePersistentSources = true) noexcept;
 // Expensive source hashing runs outside the model lock, with a fixed 64 KiB
 // buffer. Missing, unsupported URI or concurrently changing sources fail.
 [[nodiscard]] Status fingerprint_sources(Package& package) noexcept;

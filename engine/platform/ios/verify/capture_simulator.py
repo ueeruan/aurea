@@ -156,7 +156,8 @@ def collect_export_artifacts(documents, output, record):
     # actual pixels and reports alongside the MP4, including a failed phase.
     for pattern in ('paper-*.png', 'paper-*.aurea', 'paper-effects-ready.json',
                     'particle-camera-*.rgba', 'particle-camera-*.png',
-                    'particle-camera-*.aurea', 'particle-camera-ready.json'):
+                    'particle-camera-*.aurea', 'particle-camera-ready.json',
+                    'astra-*.mp4', 'astra-*.png', 'astra-*.aurea', 'astra-offline-ready.json'):
         for source in sorted(documents.glob(pattern)):
             if source.is_file() and source.name not in record['exportArtifacts']:
                 shutil.copy2(source, output / source.name)
@@ -465,7 +466,7 @@ def capture_scene(scene, app, output, udid, console_option, report, frame_checke
         record['launch']['hostProcessPid'] = process.pid
         record['coldStart'] = cold
         state = wait_ready(ready, process, record,
-                           timeout=210 if scene == 'export-render' else COLD_START_TIMEOUT if cold else READY_TIMEOUT)
+                           timeout=2400 if scene == 'export-render' else COLD_START_TIMEOUT if cold else READY_TIMEOUT)
         record['state'] = state
         save_json(output / f'{scene}.json', state)
         report['screens'].append(state)

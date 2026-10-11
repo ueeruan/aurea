@@ -92,7 +92,9 @@ set(AUREA_CORE_SOURCES
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp
     src/export/ExportSinkStartup.cpp
-    src/export/AureaExportEngineV2.cpp
+    src/export/OfflineFrameQueue.cpp
+    src/export/OfflineFrameRenderer.cpp
+    src/export/FFmpegExportSink.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
@@ -253,6 +255,8 @@ add_library(aurea_core STATIC ${AUREA_CORE_SOURCES})
 include(cmake/AureaNcnn.cmake)
 include(cmake/AureaWhisper.cmake)
 target_link_libraries(aurea_core PUBLIC aurea_thirdparty)
+include(cmake/AureaFFmpeg.cmake)
+target_link_libraries(aurea_core PUBLIC aurea_ffmpeg)
 
 target_include_directories(aurea_core
     PUBLIC
@@ -313,7 +317,8 @@ set(AUREA_IMPORT_BOUNDARIES
     src/timeline/Timeline.cpp
     src/scene3d/EnvironmentJob.cpp
 )
-list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportSinkStartup.cpp)
+list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportSinkStartup.cpp
+    src/export/FFmpegExportSink.cpp)
 if(MSVC)
     set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
@@ -438,21 +443,11 @@ if(AUREA_PLATFORM_ANDROID)
                        platform/android/GlVideoBridge.cpp)
         target_include_directories(aurea_gl_video_color_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
         target_link_libraries(aurea_gl_video_color_probe PRIVATE aurea_core android log dl EGL GLESv3)
-        add_executable(aurea_export_probe tests/android_export_probe.cpp platform/android/MediaCodecExport.cpp)
-        target_include_directories(aurea_export_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
-        target_link_libraries(aurea_export_probe PRIVATE aurea_core android log mediandk)
-        add_executable(aurea_encoder_eos_probe tests/android_encoder_eos_probe.cpp
-                       platform/android/MediaCodecExport.cpp)
-        target_include_directories(aurea_encoder_eos_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
-        target_link_libraries(aurea_encoder_eos_probe PRIVATE aurea_core android log mediandk)
-        target_link_options(aurea_encoder_eos_probe PRIVATE
-            -Wl,--wrap=AMediaCodec_dequeueOutputBuffer,--wrap=fsync,--wrap=close)
     endif()
     add_library(aurea SHARED
         platform/android/aurea_jni.cpp
         platform/android/MediaCodecSource.cpp
         platform/android/GlVideoBridge.cpp
-        platform/android/MediaCodecExport.cpp
         platform/android/AAudioOutput.cpp
     )
     target_include_directories(aurea PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platform/android)
@@ -497,8 +492,8 @@ if(AUREA_PLATFORM_ANDROID)
             tests/test_export_recovery.cpp tests/test_export_sink_startup.cpp tests/test_aac_output_integrity.cpp
             tests/test_scene_environment_jobs.cpp tests/test_morph_deformation.cpp
             tests/test_ground_placement.cpp tests/test_yuv_layout.cpp tests/test_p010_upload.cpp tests/test_memory.cpp
-            tests/test_proxy.cpp platform/android/MediaCodecSource.cpp
-            platform/android/GlVideoBridge.cpp platform/android/MediaCodecExport.cpp)
+            tests/test_proxy.cpp tests/test_ffmpeg_export.cpp platform/android/MediaCodecSource.cpp
+            platform/android/GlVideoBridge.cpp)
         foreach(_backend IN ITEMS vulkan gles)
             if(_backend STREQUAL "gles" AND NOT AUREA_GPU_GLES)
                 continue()

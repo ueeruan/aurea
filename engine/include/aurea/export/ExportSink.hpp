@@ -1,16 +1,13 @@
 // =============================================================================
 //  Aurea / export / ExportSink.hpp
 //
-//  A fronteira entre o export do motor e o encoder da plataforma.
+//  A fronteira entre a composicao offline e os codecs FFmpeg compartilhados.
 //
 //  O motor faz tudo que é igual em todo aparelho: percorre a timeline no
-//  tempo de SAÍDA, renderiza cada quadro com o MESMO renderer do preview,
-//  converte para Y'CbCr 4:2:0 na GPU e mixa o áudio. A plataforma só recebe
-//  planos prontos e PCM e os entrega ao hardware:
-//
-//    Android  MediaCodec (H.264/HEVC/AAC) + AMediaMuxer
-//    iOS      VideoToolbox/AVAssetWriter (codifica e multiplexa juntos — por
-//             isso a fronteira é "sink", e não "encoder" + "muxer")
+//  tempo de SAIDA, usa uma instancia isolada do compositor existente, converte
+//  para Y'CbCr 4:2:0 na GPU e mixa o audio. FFmpeg recebe planos e PCM:
+//  libavcodec codifica, libswscale/libswresample convertem e libavformat
+//  multiplexa. Android e iOS registram a mesma fabrica nativa.
 //
 //  Tempo: tudo em microssegundos a partir do zero do vídeo; o motor já manda
 //  os carimbos monotônicos e exatos (quadro i → i·10⁶/fps).

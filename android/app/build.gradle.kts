@@ -75,6 +75,9 @@ if (pedeBundleRelease && releaseComChaveDeDebug && !permitirAssinaturaDeDebug) {
 // nome que não bate com o que a loja espera; aqui o filtro é explícito e o APK
 // sai inteiro, com os assets certos.
 val aureaAbi = providers.gradleProperty("aureaAbi").orNull
+val aureaFFmpegWithX265 = providers.gradleProperty("aureaFFmpegWithX265").map { it.toBoolean() }.getOrElse(false)
+val aureaFFmpegRoot = providers.gradleProperty("aureaFFmpegRoot").orNull
+    ?: if (aureaFFmpegWithX265) rootProject.file("../build/ffmpeg-gpl/android").absolutePath else null
 val aureasAbisPermitidas = setOf("armeabi-v7a", "arm64-v8a", "x86_64")
 require(aureaAbi == null || aureaAbi in aureasAbisPermitidas) {
     "aureaAbi invalida: $aureaAbi (esperado: armeabi-v7a, arm64-v8a ou x86_64 — este só para o emulador)"
@@ -135,6 +138,9 @@ android {
                     "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
                     "-DAUREA_GPU_GLES=ON",
                 )
+                if (aureaFFmpegRoot != null) {
+                    arguments += "-DAUREA_FFMPEG_ANDROID_ROOT=$aureaFFmpegRoot"
+                }
             }
         }
     }
@@ -250,6 +256,40 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+}
+
+// The export dependency is compiled from checksum-pinned source for exactly the
+// app ABIs. Configuration never falls back to the removed platform exporters.
+val nativeLocalProperties = Properties().apply {
+    val source = rootProject.file("local.properties")
+    if (source.exists()) source.inputStream().use { load(it) }
+}
+val nativeSdkPath = nativeLocalProperties.getProperty("sdk.dir")
+    ?: System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
+val nativeNdkPath = nativeLocalProperties.getProperty("ndk.dir")
+    ?: nativeSdkPath?.let { "$it/ndk/${android.ndkVersion}" }
+val ffmpegPython = providers.gradleProperty("aureaPython").getOrElse(
+    if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
+)
+val ffmpegPrepareTasks = (aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "armeabi-v7a")).map { abi ->
+    tasks.register<Exec>("prepareAureaFFmpeg" + abi.replace("-", "").replace("_", "")) {
+        val prefix = File(aureaFFmpegRoot ?: rootProject.file("../build/ffmpeg/android").absolutePath, abi)
+        inputs.file(rootProject.file("../tools/build_ffmpeg.py"))
+        outputs.files(File(prefix, "lib/libavformat.a"), File(prefix, "lib/libavcodec.a"),
+            File(prefix, "lib/libswscale.a"), File(prefix, "lib/libswresample.a"),
+            File(prefix, "lib/libavutil.a"), File(prefix, "lib/libopenh264.a"),
+            File(prefix, "aurea-ffmpeg-build.json"))
+        if (aureaFFmpegWithX265) outputs.file(File(prefix, "lib/libx265.a"))
+        workingDir(rootProject.file(".."))
+        commandLine(ffmpegPython, rootProject.file("../tools/build_ffmpeg.py").absolutePath,
+            "--platform", "android", "--arch", abi, "--ndk", nativeNdkPath ?: "",
+            "--prefix", prefix.absolutePath)
+        if (aureaFFmpegWithX265) args("--with-x265")
+        doFirst { require(nativeNdkPath != null) { "Android NDK path is required to build the FFmpeg exporter" } }
+    }
+}
+tasks.configureEach {
+    if (name.startsWith("configureCMake") || name.startsWith("buildCMake")) dependsOn(ffmpegPrepareTasks)
 }
 
 dependencies {

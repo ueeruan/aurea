@@ -78,7 +78,7 @@ add_executable(aurea_tests
     test_export.cpp
     test_export_recovery.cpp
     test_export_scheduler.cpp
-    test_export_v2.cpp
+    test_offline_frame_queue.cpp
     test_image_export.cpp
     test_project_settings.cpp
     test_perf.cpp
@@ -105,6 +105,21 @@ target_include_directories(aurea_tests PRIVATE
 )
 
 target_link_libraries(aurea_tests PRIVATE aurea_core)
+if(TARGET aurea_ffmpeg)
+    target_sources(aurea_tests PRIVATE test_ffmpeg_export.cpp)
+    # Small device/host entry point for real codec and file verification. The
+    # same production sink is linked; no encoder or muxer is substituted.
+    add_executable(aurea_ffmpeg_export_tests main.cpp test_ffmpeg_export.cpp)
+    target_include_directories(aurea_ffmpeg_export_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(aurea_ffmpeg_export_tests PRIVATE aurea_core aurea_ffmpeg)
+    if(MSVC)
+        target_link_libraries(aurea_ffmpeg_export_tests PRIVATE dbghelp)
+        target_compile_options(aurea_ffmpeg_export_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME aurea_ffmpeg_export_tests COMMAND aurea_ffmpeg_export_tests FFmpegExport)
+    set_tests_properties(aurea_ffmpeg_export_tests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 600)
+endif()
 if(MSVC)
     target_compile_options(aurea_tests PRIVATE /MP2)
     target_link_options(aurea_tests PRIVATE /DEBUG)

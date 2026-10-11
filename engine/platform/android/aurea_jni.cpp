@@ -20,7 +20,10 @@
 #include <sys/system_properties.h>
 
 #include "AAudioOutput.hpp"
-#include "MediaCodecExport.hpp"
+#include "aurea/export/FFmpegExportSink.hpp"
+extern "C" {
+#include <libavcodec/jni.h>
+}
 #include "MediaCodecSource.hpp"
 #include "ExportAssetSource.hpp"
 #include "VulkanBackend.hpp"
@@ -274,6 +277,7 @@ AUREA_JNI jfloat AUREA_FN(clampPinchFactor3D)(JNIEnv*, jclass, jint kind, jfloat
 
 AUREA_JNI jint JNI_OnLoad(JavaVM* vm, void*) {
     g_vm = vm;
+    if (av_jni_set_java_vm(vm, nullptr) < 0) return JNI_ERR;
     JNIEnv* env = nullptr;
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) return JNI_ERR;
     set_log_sink(&android_log_sink, nullptr);
@@ -407,14 +411,6 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     }
 
     EngineConfig config;
-    // Exporter writes app-owned cache files. Bounded startup and atomic publish
-    // preserve a previous valid result when a codec stalls or finalization fails.
-    config.enableExportStartupGate = true;
-    config.enableExportEngineV2 = true;
-    // Debug device rollback, without changing saved projects or release quality.
-    char exportVersion[PROP_VALUE_MAX]{};
-    if (debug == JNI_TRUE) __system_property_get("debug.aurea.export_v2", exportVersion);
-    if (std::strcmp(exportVersion, "0") == 0) config.enableExportEngineV2 = false;
     char memoryBudget[PROP_VALUE_MAX]{};
     if (debug == JNI_TRUE) __system_property_get("debug.aurea.memory_budget_mb", memoryBudget);
     const auto memoryMiB = std::strtoul(memoryBudget, nullptr, 10);
@@ -450,7 +446,7 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.platformInfo = info;
     config.hasPlatformInfo = hasInfo;
     config.mediaFactory = &c->media;
-    config.exportSinkFactory = &android::make_mediacodec_export_sink;
+    config.exportSinkFactory = &make_ffmpeg_export_sink;
     config.exportAssetPathResolver = &preserve_export_asset;
     config.audioOutput = &c->audioOut;
     config.defaultFontPath = config.cacheDirectory + "/Roboto-Regular.ttf";

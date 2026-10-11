@@ -189,6 +189,9 @@ struct EngineConfig {
     /// o anterior). 0 = automático (3; 1 sob calor). 1 = serial — o teste de
     /// equivalência compara os dois bytes a bytes.
     u32 exportPipelineDepth = 0;
+    /// Hard limit for offline readback leases. Zero derives 8..64 MiB from
+    /// the device budget; a single frame exceeding it fails before allocation.
+    u64 exportFrameQueueBudgetBytes = 0;
     ExportExecutionProfile exportExecutionProfile = ExportExecutionProfile::Balanced;
     /// Staged bounded 3D exposure path, retaining the original route.
     bool enableBoundedSceneExposure = false;
@@ -207,12 +210,6 @@ struct EngineConfig {
     /// Opt-in integrity recovery. A checked, frozen export snapshot is
     /// persisted before codec open; version 1 restarts from frame zero.
     bool enableExportRecovery = false;
-    /// Opt-in worker isolation for codec startup. A finite startup deadline
-    /// and unique staging path protect retry from a late native abort.
-    bool enableExportStartupGate = false;
-    /// Independently coordinated offline queue and validate-before-publication.
-    /// Disable for rollback; no project schema or visual renderer changes.
-    bool enableExportEngineV2 = false;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
 
@@ -1962,6 +1959,8 @@ private:
     // or for the lifecycle join, only for publication of a new context.
     mutable std::mutex exportContextMutex_;
     std::unique_ptr<ExportContext> exportCtx_;
+    /// Startup resources held until their submitted GPU fence is terminal.
+    std::unique_ptr<ExportContext> pendingExportStartup_; ///< renderMutex_
     // Bound from startup context creation through publication when gated. The pointer lock prevents a
     // public cancellation from racing its scoped removal/context destruction.
     std::atomic<bool>* exportStartupCancel_ = nullptr;
@@ -1981,6 +1980,8 @@ private:
     /// sink chamaria a plataforma travada de novo. Vaza de propósito.
     void retire_abandoned_export_locked() noexcept;
     void image_export_thread_main() noexcept;
+    [[nodiscard]] Status initialize_offline_export(ExportContext& ctx) noexcept;
+    void release_offline_export(ExportContext& ctx, bool retainReadbacks = false) noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status wait_export_gpu(u64 gpuFrame) noexcept; // renderMutex_ held by caller
     /// O contexto vem explícito: um worker abandonado (ExportWatchdog.hpp) que

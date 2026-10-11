@@ -1,3 +1,4 @@
+#include "aurea/export/FFmpegExportSink.hpp"
 #include "WindowsMedia.hpp"
 #include "TimelineGeometry.hpp"
 #include "VulkanBackend.hpp"
@@ -15,7 +16,7 @@ int run_desktop_tests(const std::wstring& directory) {
   TimelineGeometry geometry{312,scroll,zoom};for(i64 time:{0,1,17,300,4000}){check(geometry.frame(geometry.x(double(time)))==time,"frame/pixel round trip");check(geometry.key_time(geometry.key_x(time,93,21),93,21)==time,"keyframe local/timeline round trip");}
   const double x=geometry.x(123.);geometry.zoom_at(x,zoom*1.7);check(std::abs(geometry.x(123.)-x)<1e-7,"zoom preserves cursor anchor");
  }
- MediaFactory factory;Engine engine;EngineConfig cfg;cfg.backend=new vk::Backend;cfg.mediaFactory=&factory;cfg.imageLoader=load_image;cfg.exportSinkFactory=make_export_sink;cfg.disableAutosave=true;cfg.workerCount=2;cfg.documentsDirectory=utf8(directory);cfg.cacheDirectory=utf8((fs::path(directory)/L"cache").wstring());cfg.defaultFontPath="C:/Windows/Fonts/segoeui.ttf";
+ MediaFactory factory;Engine engine;EngineConfig cfg;cfg.backend=new vk::Backend;cfg.mediaFactory=&factory;cfg.imageLoader=load_image;cfg.exportSinkFactory=make_ffmpeg_export_sink;cfg.disableAutosave=true;cfg.workerCount=2;cfg.documentsDirectory=utf8(directory);cfg.cacheDirectory=utf8((fs::path(directory)/L"cache").wstring());cfg.defaultFontPath="C:/Windows/Fonts/segoeui.ttf";
  auto status=engine.initialize(cfg);check(status.ok(),"engine initializes with Windows Vulkan and media adapters");if(!status.ok()){log<<status.message()<<std::endl;return 1;}
  check(engine.new_project(320,180,30,"Desktop test").ok(),"create composition");
  const auto shape=engine.add_shape(0);check(shape.ok(),"add shape");
@@ -32,7 +33,7 @@ int run_desktop_tests(const std::wstring& directory) {
  check(engine.load_project(utf8(project.wstring()).c_str()).ok()&&engine.read_status().layerCount==before,"reopen without losing layers");
  std::vector<u8> frame;u32 w=0,h=0;auto capture=engine.capture_frame_rgba(320,frame,w,h);check(capture.ok()&&w==320&&h==180,"render shared engine with Vulkan");if(capture.ok())check(save_png((fs::path(directory)/L"preview.png").wstring(),frame.data(),w,h),"save rendered preview");
  // Real Windows encode -> probe -> video decode, including audio muxing.
- auto sink=make_export_sink(nullptr);VideoStreamConfig v;v.width=64;v.height=48;v.fps=30;v.bitrateBps=1000000;AudioStreamConfig a;const auto videoPath=utf8((fs::path(directory)/L"media.mp4").wstring());
+ auto sink=make_ffmpeg_export_sink(nullptr);VideoStreamConfig v;v.width=64;v.height=48;v.fps=30;v.bitrateBps=1000000;AudioStreamConfig a;const auto videoPath=utf8((fs::path(directory)/L"media.mp4").wstring());
  auto opened=sink->open(videoPath.c_str(),v,&a);check(opened.ok(),"open H264/AAC sink");
  if(opened.ok()){std::vector<u8> y(64*48,90),uv(64*24,128);std::vector<i16> pcm(1600*2);for(size_t i=0;i<pcm.size()/2;++i)pcm[i*2]=pcm[i*2+1]=i16(std::sin(double(i)*440*6.2831853/48000)*12000);
   bool encoded=true;for(int i=0;i<30;++i){encoded&=sink->write_video(y.data(),64,uv.data(),64,i64(i)*1000000/30).ok();encoded&=sink->write_audio(pcm.data(),1600,i64(i)*1000000/30).ok();}check(encoded&&sink->finish().ok(),"encode real 1s MP4 with audio");

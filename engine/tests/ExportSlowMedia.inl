@@ -82,7 +82,8 @@ AUREA_TEST(ExportSlowMedia, DeadDecoderStillFailsAsMediaQuickly) {
     cfg.pattern = SyntheticPattern::FrameGray;
     // Nada decodifica a partir do quadro 0: nenhuma imagem, nenhum trabalho.
     StallingFactory factory(cfg, 0);
-    Rig r(cfg, 30.0, 3, 3, &factory);
+    Rig r(cfg, 30.0, 3, 3, &factory, nullptr, 0, false, "sintetico",
+        ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 1500);
     AUREA_CHECK(r.ok); if (!r.ok) return;
     const Outcome o = run_export(r, 36, 30, false, 30);
     std::printf("decoder morto: %.1f s ", o.seconds);

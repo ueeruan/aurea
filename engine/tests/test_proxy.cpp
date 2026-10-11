@@ -182,7 +182,7 @@ AUREA_TEST(PreviewProxy, P010KeepsEncodedHdrValuesAndMetadata) {
 
 #ifdef __ANDROID__
 #include "MediaCodecSource.hpp"
-#include "MediaCodecExport.hpp"
+#include "aurea/export/FFmpegExportSink.hpp"
 #include <fcntl.h>
 
 AUREA_TEST(PreviewProxy, RealCodecVfrRoundTripAndExportUsesOriginal) {
@@ -196,7 +196,7 @@ AUREA_TEST(PreviewProxy, RealCodecVfrRoundTripAndExportUsesOriginal) {
     AUREA_CHECK(!factory.cache_identity(source.sourcePath.c_str()).empty());
     source.video.width = probe.video.display_width(); source.video.height = probe.video.display_height();
     MediaManager manager; manager.set_factory(&factory);
-    manager.proxies().configure(&factory, android::make_mediacodec_export_sink, nullptr, "/data/local/tmp/aurea-proxy-regression");
+    manager.proxies().configure(&factory, make_ffmpeg_export_sink, nullptr, "/data/local/tmp/aurea-proxy-regression");
     const u32 target = std::max(2u, std::min(source.video.width, source.video.height) / 2 / 2 * 2);
     manager.proxies().set_policy(target);
     std::shared_ptr<const PreviewProxy> proxy;

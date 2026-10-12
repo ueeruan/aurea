@@ -21,6 +21,7 @@
 // =============================================================================
 #pragma once
 
+#include "aurea/render/ShutterPlan.hpp"
 #include "aurea/ai/DepthMapService.hpp"
 namespace aurea::ai { class RotoService; struct RotoStroke; }
 #include "aurea/effects/EffectGraph.hpp"
@@ -576,6 +577,19 @@ public:
     /// do driver móvel (~2 s por envio), em vez de a GPU ser resetada.
     [[nodiscard]] u32 export_gpu_step() const noexcept { return exportGpuStep_; }
     u32 raise_export_gpu_step() noexcept { if (exportGpuStep_ < 4) ++exportGpuStep_; return exportGpuStep_; }
+    /// Export em GPU fraca: teto de amostras de motion blur (0 = sem teto).
+    /// Cada chamada corta pela metade (128 -> 64 -> ... -> 2) quando o quadro
+    /// inteiro passa de ~4 s de GPU (rastro com centenas de passes).
+    [[nodiscard]] u32 export_blur_cap() const noexcept { return exportBlurCap_; }
+    /// Trecho leve de novo: o teto dobra (64 ou mais = sem teto).
+    u32 raise_export_blur_cap() noexcept {
+        if (exportBlurCap_) exportBlurCap_ = exportBlurCap_ >= 32u ? 0u : exportBlurCap_ * 2u;
+        return exportBlurCap_;
+    }
+    u32 lower_export_blur_cap() noexcept {
+        exportBlurCap_ = exportBlurCap_ ? std::max(2u, exportBlurCap_ / 2) : 64u;
+        return exportBlurCap_;
+    }
     [[nodiscard]] const char* incomplete_file() const noexcept { return incompleteFile_; }
     [[nodiscard]] u32 incomplete_line() const noexcept { return incompleteLine_; }
     [[nodiscard]] u32 local_ai_pending() const noexcept { return localAiPending_; }
@@ -1040,6 +1054,13 @@ private:
     const char* incompleteFile_ = nullptr;
     u32 incompleteLine_ = 0;
     u32 exportGpuStep_ = 0;
+    u32 exportBlurCap_ = 0;
+    /// shutter_sample_count com o teto de amostras do export em GPU fraca.
+    [[nodiscard]] u32 capped_shutter_samples(const MotionBlurSettings& settings, bool finalQuality, f32 quality,
+            f64 pathPixels, bool changing = false, u32 resourceLimit = ShutterPlan::kHardLimit) const noexcept {
+        if (exportBlurCap_ >= 2) resourceLimit = std::min(resourceLimit, exportBlurCap_);
+        return shutter_sample_count(settings, finalQuality, quality, pathPixels, changing, resourceLimit);
+    }
     void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }
     bool videoSourceFailed_ = false; ///< principal source could not supply GPU pixels for this frame
     struct PreviewFrame { i64 time = -1; TextureHandle texture{}; bool complete = false; u64 used = 0, gpuFrame = 0; };

@@ -244,7 +244,7 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
     const f64 travel = std::fabs(pd.speed) * open / fps + shutter_projected_path(shutter,
         static_cast<f32>(comp.width()), static_cast<f32>(comp.height()), [&](f64 offset) { return outFrom(tl + offset); });
     const u32 k = (blur && !ps.inScene)
-        ? shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel, true)
+        ? capped_shutter_samples(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel, true)
         : 1u;
     shutter.count = k;
     ps.subs.resize(k);

@@ -246,7 +246,9 @@ struct Engine::ExportContext {
     u64 frozenAssetBudget = 0;
     Status frozenAssetStatus = OkStatus;
     bool promotedOriginalModels = false;
-    i64 gpuStepAt = -100;   ///< quadro em que o export desceu o ultimo degrau de custo 3D
+    i64 gpuStepAt = -100;
+    i64 blurCapAt = -100;
+    u32 lightGpuFrames = 0;   ///< quadros seguidos com GPU leve (o teto de motion blur volta a subir)   ///< quadro em que o export cortou o teto de amostras de motion blur   ///< quadro em que o export desceu o ultimo degrau de custo 3D
     u64 originalModelBytes = 0; // export-owned CPU sources, retained until actual cleanup
 
     // Plano da sessão, fixado no start (a timeline não muda durante o export:
@@ -12839,6 +12841,27 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
         // Um passe 3D acima de ~0,9 s está perto do prazo do driver móvel (~2 s
         // por envio, KGSL/Adreno): desce um degrau de custo 3D antes de a GPU
         // ser resetada (VK_ERROR_DEVICE_LOST no meio do export).
+        // Quadro inteiro acima de ~4 s de GPU (motion blur com centenas de
+        // passes: Project 8 chegava a 55 s por quadro e estourava o prazo de
+        // 120 s): corta pela metade o teto de amostras de motion blur.
+        // Trecho leve de novo (15 quadros abaixo de 1,5 s): o teto volta a subir.
+        // Só o motion blur: ele se espalha em muitos passes curtos, sem risco de
+        // reset da GPU; o degrau 3D (um passe longo) não volta.
+        if (n > 0) c.lightGpuFrames = total < 1500.f ? c.lightGpuFrames + 1 : 0;
+        if (c.lightGpuFrames >= 15 && c.offline->compositor().export_blur_cap() != 0) {
+            c.lightGpuFrames = 0;
+            const u32 cap = c.offline->compositor().raise_export_blur_cap();
+            AUREA_LOG_INFO("export: quadros leves de novo: motion blur do export %s", cap ? "com teto maior" : "sem teto");
+        }
+        if (total > 4000.f && time.value - c.blurCapAt >= 3) {
+            auto& compositor = c.offline->compositor();
+            if (compositor.export_blur_cap() != 2) {
+                c.blurCapAt = time.value;
+                const u32 cap = compositor.lower_export_blur_cap();
+                AUREA_LOG_WARN("export: quadro com %.0f ms de GPU: motion blur do export limitado a %u amostras",
+                               static_cast<double>(total), cap);
+            }
+        }
         if (worst && worst->ms > 900.f && worst->label && std::strncmp(worst->label, "3d", 2) == 0) {
             auto& compositor = c.offline->compositor();
             const u32 before = compositor.export_gpu_step();

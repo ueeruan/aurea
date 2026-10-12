@@ -2230,7 +2230,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const MotionBlurSettings& mb = comp.motion_blur();
                     textShutter = shutter_window(mb, l->transform.motionBlurAmount);
                     if (textShutter.duration > 0)
-                        sets = shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, 0, true);
+                        sets = capped_shutter_samples(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, 0, true);
                 }
                 // Texto no caminho: cada letra vai para o seu ponto do caminho-guia
                 // (pelo centro do avanço), girada pela tangente. O animador age
@@ -2333,7 +2333,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             }
                         }
                     }
-                    sets = shutter_sample_count(comp.motion_blur(), settings.finalQuality,
+                    sets = capped_shutter_samples(comp.motion_blur(), settings.finalQuality,
                         effective_quality(settings).motionBlurSamples, travel, true);
                 }
                 // Charge the same frame allowance as 3D samples, including
@@ -2748,7 +2748,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             const f64 travel = shutter_projected_path(layerShutter, static_cast<f32>(rl.source.width),
                 static_cast<f32>(rl.source.height), shutterMatrix, previewFactor);
             const u32 k = rl.source.glyphSets > 1 ? rl.source.glyphSets
-                : shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel);
+                : capped_shutter_samples(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel);
             layerShutter.count = k;
             if (layerShutter.duration > 0.0 && k > 1) {
                 rl.blurMatrices.resize(k);
@@ -3033,7 +3033,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const f64 travel = shutter_projected_path(layerShutter, static_cast<f32>(rl.source.width),
                     static_cast<f32>(rl.source.height), matrixAt, previewFactor);
                 layerShutter.count = rl.source.glyphSets > 1 ? rl.source.glyphSets
-                    : shutter_sample_count(comp.motion_blur(), settings.finalQuality,
+                    : capped_shutter_samples(comp.motion_blur(), settings.finalQuality,
                         effective_quality(settings).motionBlurSamples, travel);
                 if (layerShutter.count > 1) {
                     rl.blurMatrices.resize(layerShutter.count);
@@ -3586,7 +3586,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 minimum = std::max(minimum, static_cast<u32>(out.layers[pi].blurMatrices.size()));
             const bool batchEligible = settings.boundedSceneExposure && settings.finalQuality
                 && prepareDepth_ == 0 && out.nested.empty() && f.planeLayers.empty() && f.particleLayers.empty();
-            const u32 desired = shutter_sample_count(mb, settings.finalQuality,
+            const u32 desired = capped_shutter_samples(mb, settings.finalQuality,
                 effective_quality(settings).motionBlurSamples, travel, changing, ShutterPlan::kHardLimit);
             const u64 batchBudget = std::min(stateBudget, settings.sceneExposureBatchBudgetBytes);
             const bool batchExposure = batchEligible && desired > 1
@@ -3607,7 +3607,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (admitted < 2) { mark_incomplete(__FILE__, __LINE__); continue; }
             if (settings.finalQuality && admitted < std::clamp(mb.samples, 2u, 64u) && (changing || travel >= .01))
                 AUREA_LOG_WARN("motion blur 3D reduzido a %u amostras pelo orcamento do quadro (pedido %u)", admitted, mb.samples);
-            shutter.count = std::max(minimum, shutter_sample_count(mb, settings.finalQuality,
+            shutter.count = std::max(minimum, capped_shutter_samples(mb, settings.finalQuality,
                 effective_quality(settings).motionBlurSamples, travel, changing, admitted));
             if (shutter.count <= 1) continue;
             if (shutter.count > admitted) { mark_incomplete(__FILE__, __LINE__); continue; }

@@ -61,6 +61,7 @@ void register_pixel_encoder(EffectRegistry& r);
 void register_starglow(EffectRegistry& r);
 void register_pix_dither(EffectRegistry& r);
 void register_color_quantize_effects(EffectRegistry& r);
+void register_glow_scan_effect(EffectRegistry& r);
 void register_video_glitch(EffectRegistry& r);
 void register_displace_transform(EffectRegistry& r);
 /// Shape 3D Layout (PatternEffects.cpp): o Text 3D Layout das formas 3D.

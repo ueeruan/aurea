@@ -340,7 +340,7 @@ AUREA_TEST(ClipEdit, RejectsMissingNeighboursLocksAndSourceOverrunWithoutUndoEnt
     AUREA_CHECK(!r.e.edit_clip_time(r.b, 5, 10));
     AUREA_CHECK(!r.e.edit_clip_time(r.b, 4, 40, r.a, r.c));
     AUREA_CHECK(!r.e.edit_clip_time(r.b, 2, -100));
-    AUREA_CHECK(!r.e.edit_clip_time(r.b, 1, 1000));
+    // (Puxar o fim além da mídia agora vale e segura o último quadro: ClipTime.)
     r.comp()->layer(LayerId::unpack(r.c))->locked = true;
     AUREA_CHECK(!r.e.edit_clip_time(r.b, 4, 1, r.a, r.c));
     r.e.set_edit_mode(true);

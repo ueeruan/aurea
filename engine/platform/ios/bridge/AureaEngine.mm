@@ -492,6 +492,11 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     return accepted;
 }
 
+- (BOOL)realCameraWalk:(float)speed depth:(float)depth {
+    auto* e = self.engine;
+    return e && e->real_camera_walk(speed, depth).ok();
+}
+
 - (BOOL)realCameraRecenter {
     auto* e = self.engine;
     const bool accepted = e && e->real_camera_recenter().ok();

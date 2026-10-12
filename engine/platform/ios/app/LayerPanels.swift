@@ -1,7 +1,7 @@
 import SwiftUI
 
 var extraTextPresetNames: [String] { [AureaText.t("ios_textpreset_x_bounce"), AureaText.t("ios_textpreset_x_soft_in"), AureaText.t("ios_textpreset_x_reveal"), AureaText.t("ios_textpreset_x_slide"),
-                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }
+                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5", "app_text_preset_explosion"].map { AureaText.t($0) }
 }
 import UIKit
 import UniformTypeIdentifiers

@@ -1344,11 +1344,14 @@ AUREA_TEST(ClipTime, SplitPartsExtendAgainUpToTheSource) {
         // Segunda parte: puxa o começo de volta até o começo original.
         AUREA_CHECK(r.e.edit_clip_time(second.pack(), 0, s0));
         AUREA_CHECK_EQ(r.comp()->layer(second)->start.value, s0);
-        if (kind == 2) {   // foto: sem fim de mídia
-            AUREA_CHECK(r.e.edit_clip_time(id.pack(), 1, e0 + 500));
-            AUREA_CHECK_EQ(r.comp()->layer(id)->end.value, e0 + 500);
-        } else {           // vídeo/áudio: nunca além da fonte
-            AUREA_CHECK(!r.e.edit_clip_time(id.pack(), 1, e0 + 500));
+        // Foto, vídeo e áudio: a borda passa do fim da mídia (beta 0.1.6) —
+        // o trecho a mais segura o último quadro, e a composição cresce junto.
+        AUREA_CHECK(r.e.edit_clip_time(id.pack(), 1, e0 + 500));
+        AUREA_CHECK_EQ(r.comp()->layer(id)->end.value, e0 + 500);
+        AUREA_CHECK(r.comp()->duration().value >= e0 + 500);
+        if (kind != 2) {
+            const Layer* held = r.comp()->layer(id);
+            AUREA_CHECK(held && std::isfinite(held->source_frame(FrameIndex{e0 + 499})));
         }
     }
 }

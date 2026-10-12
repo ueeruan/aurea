@@ -635,6 +635,19 @@ final class AureaModel: ObservableObject {
     @Published private(set) var exportProgress: [String: Any] = [:]
     @Published private(set) var exporting = false
     @Published private(set) var exportedURL: URL?
+    /// Pré-export pronto (MP4 temporário para o player da tela; não vai para o Fotos).
+    @Published private(set) var preExportURL: URL?
+    /// O export em curso é um pré-export (baixa resolução, qualidade rápida).
+    private var preExporting = false
+    /// As opções do export em curso: as da tela, ou as do pré-export.
+    private var activeExportOptions: ExportOptions {
+        guard preExporting else { return exportOptions }
+        var o = exportOptions
+        o.kind = .video
+        o.shortSide = min(540, max(2, min(compositionWidth, compositionHeight))) & ~1
+        o.quality = 0; o.bitrateMbps = 0; o.aiUpscale = 0; o.fps = 0; o.trimToContent = true
+        return o
+    }
     @Published private(set) var exportMessage: String?
     @Published private(set) var exportCancelled = false
     /// A tela desistiu de um export sem progresso por minutos (ExportStallWatch).
@@ -801,27 +814,27 @@ final class AureaModel: ObservableObject {
                         panel = .dock; seek(toFrame: 0); setLooping(true); toggleRawPlayback()
                     }
                 }
-            } else if ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene), started {
+            } else if ["video-move", "playback-stress", "clip-edit", "video-text-export"].contains(scene), started {
                 // Reuse the real H.264 export fixture, then import through the
                 // production decoder. The UI test operates only the visible dock.
                 _ = newProject(width: 1920, height: 1080, fps: 30, title: "Parity viewport")
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 if exportProbe["passed"] as? Bool == true,
                    let movie = exportProbe["movieFile"] as? String,
-                   newProject(width: scene == "keyflow-video-text-export" ? 1920 : 640,
-                              height: scene == "keyflow-video-text-export" ? 1080 : 360,
+                   newProject(width: scene == "video-text-export" ? 1920 : 640,
+                              height: scene == "video-text-export" ? 1080 : 360,
                               fps: 30, title: "Video dock move") {
                     let layer = engine.importVideo(AureaPaths.documents.appendingPathComponent(movie).path, name: "Dock move video")
                     if layer >= 0 {
                         if let compositionID = (engine.composition()?[AureaCompositionId] as? NSNumber)?.uint64Value {
-                            engine.setComposition(compositionID, duration: ["playback-stress", "keyflow-video-text-export"].contains(scene) ? 30 : 180)
+                            engine.setComposition(compositionID, duration: ["playback-stress", "video-text-export"].contains(scene) ? 30 : 180)
                         }
                         if scene == "clip-edit" {
                             engine.setLayer(layer, startFrame: 0, endFrame: 15, offsetFrames: 5, setOffset: true)
                         }
                         refreshModel(force: true); enterEditor(); select(layerId: layer, additive: false)
                         panel = .dock; seek(toFrame: scene == "video-move" ? 60 : 0)
-                        if scene == "keyflow-video-text-export" {
+                        if scene == "video-text-export" {
                             let text = engine.addText("AUREA VIDEO WITH TEXT")
                             if text >= 0 {
                                 engine.setLayer(text, startFrame: 0, endFrame: 30, offsetFrames: 0, setOffset: true)
@@ -1004,10 +1017,10 @@ final class AureaModel: ObservableObject {
                             engine.setLayerMotionBlurLength(1.25, forLayer: id)
                             refreshModel(force: true); transformTab = 5; panel = .transform
                         }
-                    case "motion-blur-export", "keyflow-simple-text", "keyflow-multiple-exports":
+                    case "motion-blur-export", "simple-text-export", "multiple-text-exports":
                         let id = engine.addText("AUREA MOTION BLUR")
                         if id >= 0 {
-                            let frames: Int32 = scene == "keyflow-multiple-exports" ? 12 : 60
+                            let frames: Int32 = scene == "multiple-text-exports" ? 12 : 60
                             if scene == "motion-blur-export" { _ = engine.applyTextPreset(id, preset: 11) }
                             engine.run {
                                 $0.setMotionBlur(scene == "motion-blur-export", forLayer: id)
@@ -3608,8 +3621,42 @@ final class AureaModel: ObservableObject {
     // =========================================================================
     // Export
     // =========================================================================
+    /// Pré-export: o vídeo inteiro pelo MESMO caminho do export, em até 540p e
+    /// na qualidade rápida — para assistir liso e pegar um erro antes.
+    func startPreExport() {
+        guard !exporting else { return }
+        clearPreExport()
+        exportedURL = nil
+        exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
+        exportStalled = false
+        exportWatch = ExportStallWatch()
+        exportSafeMode = 0
+        exportedKind = .video
+        preExporting = true
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("aurea-preexport-\(UUID().uuidString).mp4")
+        guard startVideoExport(url, safeMode: 0) else {
+            preExporting = false
+            let progress = engine.exportProgress()
+            let message = progress["message"] as? String ?? ""
+            let code = (progress["result"] as? NSNumber)?.intValue ?? 0
+            exportMessage = message.isEmpty ? AureaText.t("ios_export_could_not_start") : AureaEngineText.sentence(message, code: code)
+            toast = exportMessage
+            return
+        }
+        exporting = true
+        pendingExportURL = url
+        startExportPolling()
+    }
+
+    func clearPreExport() {
+        if let url = preExportURL { try? FileManager.default.removeItem(at: url) }
+        preExportURL = nil
+    }
+
     func startExport() {
         guard !exporting else { return }
+        preExporting = false
+        clearPreExport()
         exportedURL = nil
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         exportStalled = false
@@ -3644,14 +3691,15 @@ final class AureaModel: ObservableObject {
     private func startVideoExport(_ url: URL, safeMode: UInt32) -> Bool {
         var level = safeMode
         while true {
+            let options = activeExportOptions
             let ok = engine.startExport(to: url.path,
-                           codec: exportOptions.codec,
-                           height: exportOptions.shortSide,
-                           fps: exportOptions.fps,
-                           bitrateMbps: exportOptions.bitrateMbps,
-                           audioBitrateKbps: exportOptions.audioBitrateKbps,
-                           aiUpscale: exportOptions.aiUpscale, trimToContent: exportOptions.trimToContent,
-                           quality: exportOptions.quality, safeMode: level)
+                           codec: options.codec,
+                           height: options.shortSide,
+                           fps: options.fps,
+                           bitrateMbps: options.bitrateMbps,
+                           audioBitrateKbps: options.audioBitrateKbps,
+                           aiUpscale: options.aiUpscale, trimToContent: options.trimToContent,
+                           quality: options.quality, safeMode: level)
             if ok { exportSafeMode = level; return true }
             guard !exportCancelled else { return false }
             let progress = engine.exportProgress()
@@ -3816,6 +3864,16 @@ final class AureaModel: ObservableObject {
                             self.exportWatch = ExportStallWatch()
                             self.exportProgress = [:]
                             self.startExportPolling()
+                            return
+                        }
+                    }
+                    if self.preExporting {
+                        // Pré-export: fica no temporário, a tela toca em loop.
+                        self.preExporting = false
+                        if result == 0, let url = self.pendingExportURL {
+                            self.pendingExportURL = nil
+                            self.exporting = false
+                            self.preExportURL = url
                             return
                         }
                     }

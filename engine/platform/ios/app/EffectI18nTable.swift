@@ -689,7 +689,7 @@ enum EffectI18nTable {
     aurea.generate.tracery|4|stroke|fxl_box_stroke|
     aurea.generate.tracery|5|overlay_color|fxl_overlay_color|
     aurea.generate.tracery|6|marker_size|fxl_marker_size|
-    aurea.generate.tracery|7|connections|fxl_connections|fxo_none_2,fxo_sequential,fxo_star,fxo_full_mesh_16_regions,fxo_minimum_spanning_tree
+    aurea.generate.tracery|7|connections|fxl_connections|fxo_none_2,fxo_sequential,fxo_star,fxo_full_mesh_16_regions,fxo_minimum_spanning_tree,fxo_tracery_network
     aurea.generate.tracery|8|fill|fxl_box_fill|
     aurea.generate.tracery|9|corners|fxl_corner_length|
     aurea.generate.tracery|10|marker|fxl_marker|fxo_dot,fxo_plus,fxo_cross,fxo_none_2
@@ -1560,5 +1560,43 @@ enum EffectI18nTable {
     aurea.color.palettize|2|dither|fxl_dither|fxo_none_2,fxo_floyd_steinberg,fxo_false_floyd_steinberg,fxo_filter_lite,fxo_zhigang_fan,fxo_shiau_fan,fxo_jarvis_judice_ninke,fxo_stucki,fxo_burkes,fxo_sierra,fxo_two_row_sierra,fxo_atkinson,fxo_bayer_2x2,fxo_bayer_3x3,fxo_bayer_5x3,fxo_bayer_4x4,fxo_bayer_8x8,fxo_cluster_dot_4x4,fxo_cluster_dot_8x8,fxo_horizontal_2x2,fxo_horizontal_8x1,fxo_horizontal_12x4,fxo_vertical_2x2,fxo_vertical_1x8,fxo_vertical_4x12,fxo_diagonal_5x5
     aurea.color.palettize|3|dither_amount|fxl_dither_strength|
     aurea.color.palettize|4|amount|fx_intensidade|
+    aurea.generate.particular|40|plexus|fxl_plexus|
+    aurea.generate.particular|41|plexus_distance|fxl_plexus_distance|
+    aurea.generate.particular|42|plexus_width|fxl_plexus_width|
+    aurea.generate.particular|43|plexus_opacity|fxl_plexus_opacity|
+    aurea.generate.particular|44|plexus_points|fxl_plexus_points|
+    aurea.light.lens_flare|6|style|fxl_flare_style|fxo_flare_classic,fxo_flare_anamorphic,fxo_flare_summer,fxo_flare_star,fxo_flare_neon,fxo_flare_cinema,fxo_flare_rainbow,fxo_flare_scifi,fxo_flare_sunset
+    aurea.light.lens_flare|7|tint_amount|fxl_flare_tint_amount|
+    aurea.light.lens_flare|8|rotation|fxl_flare_rotation|
+    aurea.light.lens_flare|9|streak|fxl_flare_streak|
+    aurea.light.lens_flare|10|rays|fxl_flare_rays|
+    aurea.light.lens_flare|11|flicker|fxl_flare_flicker|
+    aurea.light.scene_flare|6|style|fxl_flare_style|fxo_flare_classic,fxo_flare_anamorphic,fxo_flare_summer,fxo_flare_star,fxo_flare_neon,fxo_flare_cinema,fxo_flare_rainbow,fxo_flare_scifi,fxo_flare_sunset
+    aurea.light.scene_flare|7|tint_amount|fxl_flare_tint_amount|
+    aurea.light.scene_flare|8|rotation|fxl_flare_rotation|
+    aurea.light.scene_flare|9|streak|fxl_flare_streak|
+    aurea.light.scene_flare|10|rays|fxl_flare_rays|
+    aurea.light.scene_flare|11|flicker|fxl_flare_flicker|
+    aurea.light.glow_scan|0|progress|fxl_scan_progress|
+    aurea.light.glow_scan|1|auto|fxl_scan_auto|
+    aurea.light.glow_scan|2|duration|fxl_scan_duration|
+    aurea.light.glow_scan|3|pause|fxl_scan_pause|
+    aurea.light.glow_scan|4|angle|fx_angulo|
+    aurea.light.glow_scan|5|width|fx_largura|
+    aurea.light.glow_scan|6|softness|fx_suavidade|
+    aurea.light.glow_scan|7|color|fxl_scan_color|
+    aurea.light.glow_scan|8|intensity|fx_intensidade|
+    aurea.light.glow_scan|9|glow_radius|fxl_scan_glow_radius|
+    aurea.light.glow_scan|10|glow|fxl_scan_glow|
+    aurea.light.glow_scan|11|edges|fxl_scan_edges|
+    aurea.generate.tracery|19|detect|fxl_tracery_detect|fxo_tracery_key,fxo_tracery_brightness
+    aurea.generate.tracery|20|glow|fxl_tracery_glow|
+    aurea.generate.tracery|21|glow_radius|fxl_tracery_glow_radius|
+    aurea.generate.tracery|22|network_distance|fxl_tracery_network|
+    aurea.time.low_fps|0|frame_rate|fx_quadros_segundo|
+    aurea.time.low_fps|1|jitter|fxl_lowfps_jitter|
+    aurea.time.low_fps|2|jitter_rotation|fxl_lowfps_jitter_rotation|
+    aurea.time.low_fps|3|irregular|fxl_lowfps_irregular|
+    aurea.time.low_fps|4|seed|fxl_seed|
     """
 }

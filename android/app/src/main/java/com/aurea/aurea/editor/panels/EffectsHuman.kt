@@ -76,6 +76,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.stylize.pixel_encoder", EffectHuman(keywords = "pixel encoder pixel_encoder megakrunch ascii letras grunge",
         principal = listOf(0, 1, 2, 3, 4)))
     put("aurea.stylize.pix_dither", EffectHuman(keywords = "pixdither pix dither pontilhado paleta atkinson bayer", principal = listOf(0, 1, 2)))
+    put("aurea.time.low_fps", EffectHuman(keywords = "low fps stop motion travado quadros choppy tremido", principal = listOf(0, 1, 3),
+        params = mapOf(0 to ParamHuman(suffix = " fps", decimals = 0), 1 to ParamHuman(decimals = 1), 3 to ParamHuman(decimals = 0))))
+    put("aurea.light.glow_scan", EffectHuman(keywords = "glow scan varredura scanner faixa de luz brilho light sweep shine logo",
+        principal = listOf(0, 1, 5, 8), params = mapOf(0 to ParamHuman(decimals = 0), 8 to ParamHuman(decimals = 0), 10 to ParamHuman(decimals = 0))))
     put("aurea.color.threshold", EffectHuman(keywords = "threshold limiar limite preto e branco duas cores 2 cores", principal = listOf(0, 1),
         params = mapOf(0 to ParamHuman(decimals = 0), 1 to ParamHuman(decimals = 0))))
     put("aurea.color.posterize", EffectHuman(keywords = "posterize posterizar niveis tons reduzir cores", principal = listOf(0, 1),

@@ -535,6 +535,26 @@ struct CameraPassThrough {
 };
 thread_local CameraPassThrough g_cameraPassThrough;
 
+/// A camada existe no instante FRACIONÁRIO? As amostras do obturador vão até
+/// ±meio quadro em volta do quadro desenhado: no 1º quadro da câmera metade
+/// delas caía no quadro −1, a câmera "sumia" e entrava a câmera padrão —
+/// a cópia fantasma parada quando a câmera tem pai (beta 12/10, câmera presa
+/// a um nulo). Um quadro de folga nas bordas mantém a mesma câmera.
+bool contains_time_frac(const Layer& l, f64 timeF) noexcept {
+    const i64 t = static_cast<i64>(std::floor(timeF));
+    if (l.contains_time(FrameIndex{t})) return true;
+    return l.end.value > l.start.value && (t == l.start.value - 1 || t == l.end.value);
+}
+
+bool has_active_camera_frac(const Composition& comp, f64 timeF) noexcept {
+    const auto& order = comp.order();
+    for (u32 i = 0; i < order.size(); ++i) {
+        const Layer* l = comp.layer(order.at(i));
+        if (l && l->kind == LayerKind::Camera && l->camera.active && l->visible && contains_time_frac(*l, timeF)) return true;
+    }
+    return false;
+}
+
 bool has_active_camera(const Composition& comp, FrameIndex time) noexcept {
     const auto& order = comp.order();
     for (u32 i = 0; i < order.size(); ++i) {
@@ -589,7 +609,7 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
     const CameraPassThrough pt = g_cameraPassThrough;
     if (pt.child != &comp || !pt.parent || !pt.group) return camera_for_frac_own(comp, timeF, w, h);
     const f64 outer = pt.parentTime0 + (timeF - pt.childTime0) * pt.rate;
-    if (!has_active_camera(*pt.parent, FrameIndex{static_cast<i64>(std::floor(outer))}))
+    if (!has_active_camera_frac(*pt.parent, outer))
         return camera_for_frac_own(comp, timeF, w, h);
     g_cameraPassThrough = CameraPassThrough{};   // a de fora com as regras dela
     scene3d::SceneCamera cam = camera_for_frac(*pt.parent, outer, w, h);
@@ -601,12 +621,11 @@ scene3d::SceneCamera camera_for_frac(const Composition& comp, f64 timeF, u32 w, 
 }
 
 scene3d::SceneCamera camera_for_frac_own(const Composition& comp, f64 timeF, u32 w, u32 h) noexcept {
-    const FrameIndex time{static_cast<i64>(std::floor(timeF))};
     scene3d::SceneCamera cam = scene3d::default_camera(w, h);
     const OrderedIds<LayerId>& order = comp.order();
     for (u32 i = 0; i < order.size(); ++i) {
         const Layer* l = comp.layer(order.at(i));
-        if (!l || !l->visible || !l->contains_time(time)) continue;
+        if (!l || !l->visible || !contains_time_frac(*l, timeF)) continue;
         if (l->kind != LayerKind::Camera || !l->camera.active) continue;
         const f64 local = timeF - static_cast<f64>(l->start.value) + static_cast<f64>(l->offset.value);
         const Mat4 wm = world_3d_frac(comp, *l, timeF);
@@ -941,6 +960,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     // Tipos que o prepare consulta por camada: resolvidos uma vez (a busca
     // por chave é linear no registro).
     posterizeType_ = effects.find_key(effect_keys::kPosterizeTime);
+    lowFpsType_ = effects.find_key(effect_keys::kLowFps);
     echoType_ = effects.find_key(effect_keys::kEchoTrail);
     rgbTimeType_ = effects.find_key(effect_keys::kTimeWarpRgb);
     motionDetectType_ = effects.find_key(effect_keys::kMotionDetect);
@@ -1809,6 +1829,29 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         layerTime = FrameIndex{static_cast<i64>((hold ? std::floor(v) : std::round(v)) * step)};
                     }
                     break;   // um Posterizar por camada: o primeiro ligado manda
+                }
+            }
+            // LOW FPS: o mesmo travamento, com ritmo irregular — a fronteira de
+            // cada quadro segurado anda um sorteio (até meio passo) para frente
+            // ou para trás. O tremido é o próprio efeito (TemporalEffects.cpp).
+            const ParameterRegistry* lp = lowFpsType_ ? effects_->params(lowFpsType_) : nullptr;
+            if (layerTime == time && lp && lp->count() >= 5) {
+                for (const EffectInstance& inst : l->effects) {
+                    if (!inst.enabled || inst.type != lowFpsType_) continue;
+                    const FrameIndex lt = l->local_time(time);
+                    const f32 fps = evaluate_param(l->tracks, inst, 0, lp->at(0), lt).v[0];
+                    const f32 irregular = std::clamp(evaluate_param(l->tracks, inst, 3, lp->at(3), lt).v[0] * .01f, 0.f, 1.f);
+                    const f32 seed = evaluate_param(l->tracks, inst, 4, lp->at(4), lt).v[0];
+                    const f64 step = comp.fps() / std::max(fps, 0.01f);
+                    if (step > 1.0) {
+                        const f64 v = static_cast<f64>(time.value) / step;
+                        const f64 cell = std::floor(v);
+                        const f64 h = std::sin((cell + 1.0) * 12.9898 + static_cast<f64>(seed) * 78.233) * 43758.5453;
+                        const f64 shift = (h - std::floor(h) - 0.5) * irregular;
+                        const f64 k = std::floor(v - shift);
+                        layerTime = FrameIndex{std::min(time.value, static_cast<i64>(std::max(0.0, k) * step))};
+                    }
+                    break;
                 }
             }
         }

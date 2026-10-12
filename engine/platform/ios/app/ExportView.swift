@@ -7,6 +7,25 @@ import UIKit
 import AVKit
 import QuickLook
 
+/// O pré-export tocando em loop (Android: ExportScreen.PreExportPlayer).
+struct PreExportPlayer: View {
+    let url: URL
+    let aspect: CGFloat
+    @State private var player = AVQueuePlayer()
+    @State private var looper: AVPlayerLooper?
+    var body: some View {
+        VideoPlayer(player: player)
+            .aspectRatio(min(3, max(0.3, aspect)), contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .onAppear {
+                looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+                player.play()
+            }
+            .onDisappear { player.pause(); looper = nil }
+            .accessibilityIdentifier("export.preexport.player")
+    }
+}
+
 struct ExportView: View {
     @EnvironmentObject private var model: AureaModel
     @Environment(\.dismiss) private var dismiss
@@ -56,6 +75,16 @@ struct ExportView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         if model.exporting { ExportRenderingView(notice: progressNotice) }
+                        else if let url = model.preExportURL {
+                            PreExportPlayer(url: url, aspect: CGFloat(max(1, model.compositionWidth)) / CGFloat(max(1, model.compositionHeight)))
+                                .frame(width: bounds.size.width - 36)
+                            Spacer().frame(height: 18)
+                            VStack(spacing: 6) {
+                                Text(AureaText.t("preexport_ready")).font(.aurea(size: 22, weight: .bold))
+                                Text(AureaText.t("preexport_hint")).font(.aurea(size: 14)).foregroundStyle(AureaColors.muted)
+                                    .multilineTextAlignment(.center)
+                            }.frame(maxWidth: .infinity)
+                        }
                         else if let url = model.exportedURL {
                             previewCard(width: bounds.size.width - 36)
                             Spacer().frame(height: 18)
@@ -425,6 +454,14 @@ struct ExportView: View {
                 wideButton("editor_salvando", filled: false) {}.disabled(true)
             } else if model.exporting {
                 wideButton("editor_cancelar", filled: false) { cancelled = true; model.cancelExport() }.disabled(model.exportCancelled)
+            } else if model.preExportURL != nil {
+                HStack(spacing: 10) {
+                    wideButton("preexport_back", filled: false) { model.clearPreExport() }
+                    wideButton("preexport_export", filled: true) {
+                        attempted = true; cancelled = false
+                        model.startExport()
+                    }
+                }
             } else if model.exportedURL != nil {
                 HStack(spacing: 10) {
                     wideButton("editor_abrir", filled: false) { viewing = true }
@@ -432,9 +469,17 @@ struct ExportView: View {
                 }
             } else {
                 // A taxa vem do motor pela qualidade; só o Mbps manual vai como número.
-                wideButton("editor_exportar", filled: true, height: 56) {
-                    attempted = true; cancelled = false
-                    model.startExport()
+                VStack(spacing: 8) {
+                    if model.exportOptions.kind == .video {
+                        wideButton("preexport_button", filled: false) {
+                            attempted = true; cancelled = false
+                            model.startPreExport()
+                        }.accessibilityIdentifier("export.preexport")
+                    }
+                    wideButton("editor_exportar", filled: true, height: 56) {
+                        attempted = true; cancelled = false
+                        model.startExport()
+                    }
                 }
             }
         }

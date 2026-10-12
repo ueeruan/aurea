@@ -216,7 +216,7 @@ struct ParticlesPanel: View {
     // Os presets do Particular (ordem = `particular::apply_preset`).
     private let presetKeys = ["particular_preset_default", "particular_preset_rain", "particular_preset_snow",
                               "particular_preset_fire", "particular_preset_sparks", "particular_preset_fireworks",
-                              "particular_preset_dust", "particular_preset_bokeh"]
+                              "particular_preset_dust", "particular_preset_bokeh", "particular_preset_plexus"]
 
     private func group(_ title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {

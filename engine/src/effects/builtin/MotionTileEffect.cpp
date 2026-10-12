@@ -546,6 +546,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_starglow(registry);
     builtin::register_pix_dither(registry);
     builtin::register_color_quantize_effects(registry);
+    builtin::register_glow_scan_effect(registry);
     builtin::register_video_glitch(registry);
     builtin::register_displace_transform(registry);
 }

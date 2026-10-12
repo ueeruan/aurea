@@ -68,6 +68,7 @@
 #include <unordered_map>
 #include <vector>
 
+namespace aurea { class OfflineFrameRenderer; }
 namespace aurea {
 
 /// Stable bridge values. Timing arrangements move whole layers without trimming.
@@ -760,6 +761,8 @@ public:
     [[nodiscard]] Status real_camera_sample(const f32* pose16, u64 timestampNs,
                                           bool positional, f32 sensitivity, bool inverted) noexcept;
     [[nodiscard]] Status real_camera_recenter() noexcept;
+    /// Andar (m/s, + frente) e profundidade (× do deslocamento frente/trás do AR).
+    [[nodiscard]] Status real_camera_walk(f32 metersPerSecond, f32 depthScale) noexcept;
     /// Tracking is lost: record the last valid virtual pose as a constant.
     [[nodiscard]] Status real_camera_hold() noexcept;
     void real_camera_stop() noexcept;
@@ -1952,6 +1955,10 @@ private:
     i64 previewBufferStart_ = 0;
     u64 previewBufferSince_ = 0;
     u32 previewBufferReady_ = 0, previewBufferTarget_ = 0;
+    /// Quadros perdidos até o último Play e se a reprodução anterior engasgou
+    /// (a pré-render do próximo Play prepara mais quadros).
+    u32 previewDroppedAtPlay_ = 0;
+    bool previewStuttered_ = false;
     std::atomic<u32> previewBufferStatus_{0};
     u32  lastRenderedRevision_ = 0;           ///< modelRevision_ do último frame desenhado
     u32  incompleteRetries_ = 0;              ///< quadros seguidos com camada pendente
@@ -2020,6 +2027,12 @@ private:
     std::array<std::unique_ptr<ExportContext>, 2> retiredExports_; ///< lifecycle + renderMutex_
     /// Startup resources held until their submitted GPU fence is terminal.
     std::unique_ptr<ExportContext> pendingExportStartup_; ///< renderMutex_
+    /// Sessões de export cujo abridor de vídeo da plataforma ficou PRESO na
+    /// chamada de abrir (decoder do aparelho, content:// que não responde).
+    /// Fechar esperaria por ele — era o "travado em 0%" (o export nunca
+    /// marcava fim e segurava renderMutex_). Ficam guardadas até o abridor
+    /// voltar e são fechadas no próximo export ou no shutdown. renderMutex_.
+    std::vector<std::unique_ptr<OfflineFrameRenderer>> parkedOffline_;
     // Bound from startup context creation through publication when gated. The pointer lock prevents a
     // public cancellation from racing its scoped removal/context destruction.
     std::atomic<bool>* exportStartupCancel_ = nullptr;

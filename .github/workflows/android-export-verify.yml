@@ -2,7 +2,7 @@ name: Verify Android serial export
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/keyflow-export2154']
+    branches: ['codex/export-verify']
     paths: ['.github/workflows/android-export-verify.yml']
 permissions:
   contents: read
@@ -65,7 +65,7 @@ jobs:
             adb install -r build/android/app/outputs/apk/uiTest/app-uiTest.apk
             adb install -r build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
             adb logcat -c
-            adb shell am instrument -w -e aureaExportDeadlineSeconds 900 -e class com.aurea.aurea.editor.KeyflowExportDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
+            adb shell am instrument -w -e aureaExportDeadlineSeconds 900 -e class com.aurea.aurea.editor.TextExportDeviceTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
             adb logcat -d -v threadtime > build/native-engine.log
             cat build/native-editing.log
             python3 engine/platform/android/verify/collect_owned_export_files.py --output build/native-editing-files.tar

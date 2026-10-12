@@ -17,7 +17,7 @@ public:
         p.add_float("stroke","Box Stroke",1.5f,0,20,kParamAnimatable|kParamPixels,"px");
         p.add_color("overlay_color","Overlay Color",{.02f,.8f,1,1});
         p.add_float("marker_size","Marker Size",4,0,50,kParamAnimatable|kParamPixels,"px");
-        static const char* lines[]={"None","Sequential","Star","Full Mesh (16 regions)","Minimum Spanning Tree"};p.add_enum("connections","Connections",lines,5,1);
+        static const char* lines[]={"None","Sequential","Star","Full Mesh (16 regions)","Minimum Spanning Tree","Distance Network (24 regions)"};p.add_enum("connections","Connections",lines,6,1);
         p.add_float("fill","Box Fill",0,0,100,kParamAnimatable|kParamPercent,"%");
         p.add_float("corners","Corner Length",25,0,100,kParamAnimatable|kParamPercent,"%");
         static const char* markers[]={"Dot","Plus","Cross","None"};p.add_enum("marker","Marker",markers,4,1);
@@ -29,6 +29,12 @@ public:
         p.add_float("blur","Detection Blur",0,0,4,kParamAnimatable|kParamPixels,"px");
         p.add_float("padding","Box Padding",2,0,100,kParamAnimatable|kParamPixels,"px");
         p.add_float("opacity","Overlay Opacity",100,0,100,kParamAnimatable|kParamPercent,"%");
+        // 0.1.6 BETA 2 (no fim: índices antigos valem): detectar pelo brilho,
+        // brilho (glow) do desenho e a rede por distância.
+        static const char* detect[]={"Key Color","Brightness"};p.add_enum("detect","Detect By",detect,2,0);
+        p.add_float("glow","Glow",0,0,400,kParamAnimatable|kParamPercent,"%");
+        p.add_float("glow_radius","Glow Radius",8,0,80,kParamAnimatable|kParamPixels,"px");
+        p.add_float("network_distance","Network Distance",300,1,4000,kParamAnimatable|kParamPixels,"px");
     }
     bool is_identity(const EffectEval& e) const noexcept override {return !e.b(13)&&!e.b(14)&&e.f(18)<=0;}
     void pipelines(std::vector<PipelineKey>& v,SurfaceFormat f) const override {v.push_back(PipelineKey::fullscreen(ShaderId::effects_tracery_detect_frag,f));v.push_back(PipelineKey::fullscreen(ShaderId::effects_tracery_overlay_frag,f));}
@@ -39,7 +45,7 @@ public:
         const u32 h=std::max(8u,u32(std::round(longest/std::max(ratio,1.f))));
         const u32 limit=std::min(e.e(7)==3?16u:64u,std::max(1u,e.e(3)));
         EffectUniforms u{};u.texel={f32(w),f32(h),in.region.w,in.region.h};
-        u.p0={e.f(1)*.01f,e.f(16),e.f(2)*.01f,f32(limit)};u.color=e.color(0);
+        u.p0={e.f(1)*.01f,e.f(16),e.f(2)*.01f,f32(limit)};u.color=e.color(0);u.p1.y=f32(e.e(19));
         const auto pass=[&](const char* name,u32 stage,u32 width,u32 height,std::initializer_list<PassTexture> inputs,FGTexture& target)->Status {
             u.p3.x=f32(stage);target=c.texture(name,width,height);
             const auto a=*inputs.begin(),b=inputs.size()>1?*(inputs.begin()+1):a;
@@ -66,6 +72,7 @@ public:
         data.base.p1={e.f(8)*.01f,e.f(9)*.01f,f32(e.e(10)),e.b(11)?1.f:0.f};
         data.base.p2={f32(e.e(12)),e.b(13)?1.f:0.f,e.b(14)?1.f:0.f,e.f(17)};
         data.base.color=e.color(5);data.extra={e.f(18)*.01f,in.texel_scale_x(),in.texel_scale_y(),0};
+        data.base.p3={std::max(0.f,e.f(20))*.01f,std::max(0.f,e.f(21)),std::max(1.f,e.f(22)),0};
         out={c.texture("tracery-overlay",in.width,in.height),in.region,in.width,in.height};
         if(c.fullscreen_pass("tracery-overlay",PassStage::Effects,out.texture,ShaderId::effects_tracery_overlay_frag,
             {{in.texture,{},CommonSampler::LinearClamp},{boxes,{},CommonSampler::NearestClamp},{edges,{},CommonSampler::NearestClamp},{labels,{},CommonSampler::NearestClamp}},&data,sizeof(data))==kInvalidIndex)return Errc::PipelineCompileFailed;

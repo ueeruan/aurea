@@ -122,6 +122,7 @@ namespace effect_keys {
     inline constexpr const char* kCrossGlitch        = "aurea.glitch.cross";
     // Tempo (integrados ao Temporal Engine, não desenham na cadeia de pixels)
     inline constexpr const char* kPosterizeTime      = "aurea.time.posterize";
+    inline constexpr const char* kLowFps             = "aurea.time.low_fps";
     inline constexpr const char* kTimeWarpRgb        = "aurea.time.warp_rgb";
     inline constexpr const char* kTimeRemap          = "aurea.time.remap";
     // Controles de expressão (não desenham; ver ExpressionControls.cpp).

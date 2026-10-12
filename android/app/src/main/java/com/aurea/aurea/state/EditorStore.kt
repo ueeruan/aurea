@@ -6086,6 +6086,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         com.aurea.aurea.editor.RealCamera.positional = native[3] != 0L
     }
 
+    /** Andar da Real Camera: [direction] +1 frente, −1 trás, 0 parado (velocidade e profundidade do painel). */
+    fun realCameraWalk(direction: Int) {
+        if (destroyed) return
+        val cam = com.aurea.aurea.editor.RealCamera
+        engine.realCameraWalk(direction.coerceIn(-1, 1) * cam.walkSpeed, cam.depthScale)
+    }
+
     fun realCameraRecenter() {
         if (!destroyed) engine.realCameraRecenter()
         syncRealCameraStatus()

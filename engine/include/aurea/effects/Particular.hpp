@@ -21,8 +21,8 @@
 namespace aurea::particular {
 
 /// Presets: 0 Padrão, 1 Chuva, 2 Neve, 3 Fogo, 4 Faíscas, 5 Fogos de
-/// artifício, 6 Poeira, 7 Bokeh.
-inline constexpr u32 kPresetCount = 8;
+/// artifício, 6 Poeira, 7 Bokeh, 8 Rede (plexus).
+inline constexpr u32 kPresetCount = 9;
 /// Número do preset 0 na API do motor/bridges (preset `kPresetBase + i`).
 inline constexpr u32 kPresetBase = 20;
 
@@ -36,6 +36,8 @@ enum Param : u32 {
     kLife, kLifeRandom, kSize, kSizeRandom, kSizeEnd, kOpacity, kFadeIn, kFadeOut,
     kFeather, kStretch, kColor, kColorEnd, kColorRandom, kAddMode, kShowSource, kSeed,
     kMotionBlur, kShutterAngle,
+    // Rede (plexus): linhas entre partículas próximas.
+    kPlexus, kPlexusDistance, kPlexusWidth, kPlexusOpacity, kPlexusPoints,
     kParamCount,
 };
 

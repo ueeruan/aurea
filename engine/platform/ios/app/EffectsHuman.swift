@@ -78,6 +78,8 @@ private let FxMatrixLabels = [
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.stylize.pixel_encoder", FxEffectHuman(keywords: "pixel encoder pixel_encoder megakrunch ascii letras grunge", principal: [0, 1, 2, 3, 4])),
     ("aurea.stylize.pix_dither", FxEffectHuman(keywords: "pixdither pix dither pontilhado paleta atkinson bayer", principal: [0, 1, 2])),
+    ("aurea.time.low_fps", FxEffectHuman(keywords: "low fps stop motion travado quadros choppy tremido", principal: [0, 1, 3])),
+    ("aurea.light.glow_scan", FxEffectHuman(keywords: "glow scan varredura scanner faixa de luz brilho light sweep shine logo", principal: [0, 1, 5, 8])),
     ("aurea.color.threshold", FxEffectHuman(keywords: "threshold limiar limite preto e branco duas cores 2 cores", principal: [0, 1])),
     ("aurea.color.posterize", FxEffectHuman(keywords: "posterize posterizar niveis tons reduzir cores", principal: [0, 1])),
     ("aurea.color.palettize", FxEffectHuman(keywords: "palettize paleta gameboy game boy nes pico-8 cga lospec gimp gpl hex retro pontilhado dither oklab", principal: [0, 2, 4])),
@@ -1557,6 +1559,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.color.threshold", "fx_desc_color_threshold")
     put("aurea.color.posterize", "fx_desc_color_posterize")
     put("aurea.color.palettize", "fx_desc_color_palettize")
+    put("aurea.light.glow_scan", "fx_desc_light_glow_scan")
+    put("aurea.time.low_fps", "fx_desc_time_low_fps", FxAllTargets, "low fps stop motion travado quadros choppy tremido")
     put("aurea.color.matrix", "fx_desc_color_matrix")
     put("aurea.color.levels", "fx_desc_color_levels")
     put("aurea.color.curves", "fx_desc_color_curves")

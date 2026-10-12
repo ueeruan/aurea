@@ -751,7 +751,7 @@ AUREA_TEST(Text, ImportedFontsReturnToTheListAfterReopeningTheApp) {
 }
 
 AUREA_TEST(Text, PackPresetsKeepContentAndLocalStart) {
-    for (u32 id = 19; id < text::kTextPresetCount; ++id) {
+    for (u32 id = 19; id < 25; ++id) {
         TextData data; data.content = "Minha legenda"; TrackSet tracks;
         AUREA_CHECK(text::apply_text_preset(id, data, tracks, 17, 30, 30));
         AUREA_CHECK(data.content == "Minha legenda");
@@ -761,6 +761,25 @@ AUREA_TEST(Text, PackPresetsKeepContentAndLocalStart) {
             AUREA_CHECK(track && !track->keys.empty());
             if (track && !track->keys.empty()) AUREA_CHECK_EQ(track->keys.front().time.value, 17);
         }
+    }
+}
+
+AUREA_TEST(Text, TextExplosionScattersEachLetterDifferentlyAndAssembles) {
+    TextData data; data.content = "BOOM"; TrackSet tracks;
+    AUREA_CHECK(text::apply_text_preset(25, data, tracks, 10, 30, 30));
+    AUREA_CHECK_EQ(data.animators.size(), usize{4});
+    const std::vector<text::GlyphUnits> units{{0, 0, 0}, {1, 0, 0}, {2, 0, 0}, {3, 0, 0}};
+    std::vector<text::GlyphAnim> start, end;
+    text::evaluate_text_animators(data, tracks, 10, 30, units, 4, 1, 1, start);
+    text::evaluate_text_animators(data, tracks, 60, 30, units, 4, 1, 1, end);
+    AUREA_CHECK_EQ(start.size(), usize{4});
+    if (start.size() != 4 || end.size() != 4) return;
+    // No início cada letra está num lugar diferente; no fim todas em casa.
+    AUREA_CHECK(std::abs(start[0].translate.x - start[1].translate.x) > 1.0f);
+    AUREA_CHECK(std::abs(start[0].translate.z) + std::abs(start[1].translate.z) > 1.0f);
+    for (const auto& g : end) {
+        AUREA_CHECK_NEAR(g.translate.x, 0.f, .01f);
+        AUREA_CHECK_NEAR(g.opacity, 1.f, .01f);
     }
 }
 

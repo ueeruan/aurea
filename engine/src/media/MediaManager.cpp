@@ -336,6 +336,19 @@ void MediaManager::close_layer(LayerId layer) {
     }
 }
 
+bool MediaManager::opening_in_flight() noexcept {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const Entry& entry : entries_)
+            if (entry.opening && !entry.opening->ready.load(std::memory_order_acquire)) return true;
+    }
+    std::lock_guard<std::mutex> lock(retireMutex_);
+    if (retiring_) return true;   // pode ser exatamente o join de um abridor preso
+    for (const Entry& entry : retired_)
+        if (entry.opening && !entry.opening->ready.load(std::memory_order_acquire)) return true;
+    return false;
+}
+
 void MediaManager::close_all() {
     {
         std::lock_guard<std::mutex> lock(mutex_);

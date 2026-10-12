@@ -3278,6 +3278,10 @@ AUREA_JNI jboolean AUREA_FN(nativeRealCameraRecenter)(JNIEnv*, jobject, jlong ha
     auto* c = ctx_of(handle);
     return c && c->engine.real_camera_recenter().ok() ? JNI_TRUE : JNI_FALSE;
 }
+AUREA_JNI jboolean AUREA_FN(nativeRealCameraWalk)(JNIEnv*, jobject, jlong handle, jfloat speed, jfloat depth) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.real_camera_walk(speed, depth).ok() ? JNI_TRUE : JNI_FALSE;
+}
 AUREA_JNI void AUREA_FN(nativeRealCameraStop)(JNIEnv*, jobject, jlong handle) {
     if (auto* c = ctx_of(handle)) c->engine.real_camera_stop();
 }

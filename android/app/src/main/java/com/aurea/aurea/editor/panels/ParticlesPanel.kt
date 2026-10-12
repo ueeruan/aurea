@@ -229,7 +229,7 @@ private fun PresetRow(store: EditorStore) {
     // Os presets do Particular (ordem = `particular::apply_preset`).
     val names = listOf(R.string.particular_preset_default, R.string.particular_preset_rain, R.string.particular_preset_snow,
         R.string.particular_preset_fire, R.string.particular_preset_sparks, R.string.particular_preset_fireworks,
-        R.string.particular_preset_dust, R.string.particular_preset_bokeh)
+        R.string.particular_preset_dust, R.string.particular_preset_bokeh, R.string.particular_preset_plexus)
     Column {
         Text(stringResource(R.string.particular_presets), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)))
         Spacer(Modifier.height(5.dp))

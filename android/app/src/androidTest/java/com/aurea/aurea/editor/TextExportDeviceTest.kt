@@ -20,7 +20,7 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /** Real renderer, GPU readback, platform encoders and independent decoder. */
-class KeyflowExportDeviceTest {
+class TextExportDeviceTest {
     @get:Rule val compose = createComposeRule()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private lateinit var store: EditorStore
@@ -58,10 +58,10 @@ class KeyflowExportDeviceTest {
         return progress
     }
     private fun export(name: String, height: Int, fps: Double, frames: Int): File {
-        val output = File(context.filesDir, "keyflow-$name.mp4")
+        val output = File(context.filesDir, "text-export-$name.mp4")
         assertEquals(0, store.engineForStress.startExport(output.absolutePath, height, fps, 0, 8))
         val progress = waitResult()
-        File(context.filesDir, "keyflow-$name-progress.txt").writeText(
+        File(context.filesDir, "text-export-$name-progress.txt").writeText(
             "result=${progress.result} frames=${progress.framesDone}/${progress.framesTotal} flags=${progress.flags} ${progress.message}")
         assertEquals(progress.message, 0, progress.result)
         assertEquals(frames, progress.framesDone)

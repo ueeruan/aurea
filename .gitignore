@@ -100,3 +100,8 @@ entrega/
 /discovery/.wrangler/
 /discovery/.dev.vars
 /discovery/.env*
+
+# Gerados (limpeza 0.1.6 BETA 2)
+__pycache__/
+*.pyc
+engine/tests/aurea_model_budget_tmp/

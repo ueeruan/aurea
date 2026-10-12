@@ -82,9 +82,32 @@ void RealCameraCapture::recenter() noexcept {
     filteredRotation_ = Quat::identity();
     filteredPosition_ = {};
     relativeEuler_ = {};
+    walkOffset_ = {};
     lastTimestamp_ = 0;
 }
+Vec3 RealCameraCapture::deepen(Vec3 world) const noexcept {
+    if (std::fabs(depthScale_ - 1) < 1e-4f) return world;
+    const f32 h = heading_of(baseRotation_);
+    const Vec3 forward{std::sin(h), 0, std::cos(h)};
+    return world + forward * ((depthScale_ - 1) * world.dot(forward));
+}
 bool RealCameraCapture::sample(const f32* m, u64 timestampNs, bool positional, f32 sensitivity, bool inverted) noexcept {
+    const u64 previous = lastTimestamp_;
+    const bool continuing = referenceValid_ && positional == positional_ && previous;
+    if (!sample_pose(m, timestampNs, positional, sensitivity, inverted)) return false;
+    // Andar: soma ao longo do rumo da câmera (no plano do chão, como uma
+    // pessoa andando), por cima do que o AR mediu. O reposicionamento da
+    // referência já embutiu o andado na base.
+    if (continuing && walkSpeed_ != 0) {
+        const f32 dt = static_cast<f32>(std::min<u64>(timestampNs - previous, 100'000'000)) * 1e-9f;
+        const f32 h = heading_of(Quat::from_euler_zyx(outputRotation_.x * kDeg2Rad, outputRotation_.y * kDeg2Rad, outputRotation_.z * kDeg2Rad));
+        walkOffset_ += Vec3{std::sin(h), 0, std::cos(h)} * (walkSpeed_ * dt * pixelsPerMeter_);
+    }
+    if (positional) { if (continuing) outputPosition_ += walkOffset_; }
+    else outputPosition_ = basePosition_ + walkOffset_;
+    return true;
+}
+bool RealCameraCapture::sample_pose(const f32* m, u64 timestampNs, bool positional, f32 sensitivity, bool inverted) noexcept {
     if (!timestampNs || !std::isfinite(sensitivity) || sensitivity < .25f || sensitivity > 3 || !rigid_pose(m)) return false;
     if (lastTimestamp_ && timestampNs <= lastTimestamp_) return false;
     const Quat q = rotation_of(m);
@@ -94,6 +117,7 @@ bool RealCameraCapture::sample(const f32* m, u64 timestampNs, bool positional, f
         // the displayed pose, retaining the camera's position and orientation.
         if (referenceValid_) {
             basePosition_ = outputPosition_;
+            walkOffset_ = {};
             baseRotation_ = Quat::from_euler_zyx(outputRotation_.x * kDeg2Rad, outputRotation_.y * kDeg2Rad, outputRotation_.z * kDeg2Rad);
         }
         referenceRotation_ = q;
@@ -124,7 +148,7 @@ bool RealCameraCapture::sample(const f32* m, u64 timestampNs, bool positional, f
         outputRotation_ = continuous_euler((world * baseRotation_).normalized(), outputRotation_);
         if (positional) {
             const Vec3 moved = to_composition(t - referencePosition_);
-            outputPosition_ = basePosition_ + rotate(heading, moved * pixelsPerMeter_);
+            outputPosition_ = basePosition_ + deepen(rotate(heading, moved * pixelsPerMeter_));
         }
         return true;
     }
@@ -143,7 +167,7 @@ bool RealCameraCapture::sample(const f32* m, u64 timestampNs, bool positional, f
         const Vec3 local = rotate(conjugate(referenceRotation_), t - referencePosition_);
         const Vec3 convertedPosition{local.x, -local.y, -local.z};
         filteredPosition_ += (convertedPosition - filteredPosition_) * alpha;
-        outputPosition_ = basePosition_ + rotate(baseRotation_, filteredPosition_ * (pixelsPerMeter_ * sensitivity));
+        outputPosition_ = basePosition_ + deepen(rotate(baseRotation_, filteredPosition_ * (pixelsPerMeter_ * sensitivity)));
     }
     return true;
 }

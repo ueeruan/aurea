@@ -42,6 +42,9 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 camUp;
     mat4 previousParticleProjection;
     mat4 layerFromComp;    // composição -> plano original, antes dos efeitos seguintes
+    // Rede (plexus): distância máxima (px; 0 = desligada), espessura (px),
+    // opacidade, pontos ligados (os primeiros M slots).
+    vec4 plexus;
 } p;
 
 layout(location = 0) out vec2 v_corner;   // -1..1 no quadrado da partícula
@@ -91,10 +94,113 @@ void cull() {
     v_feather = 0.0;
 }
 
+// --- Rede (plexus) -------------------------------------------------------------
+// Centro, cor e alfa de um slot: a MESMA conta do main (sem esticar nem
+// desfoque de movimento), para a linha começar e acabar no miolo da partícula.
+bool particle_center(float slot, out vec3 pos, out vec4 color) {
+    pos = vec3(0.0); color = vec4(0.0);
+    const float now = p.clock.x;
+    const float grid = max(p.clock.y, 1e-4);
+    const float cycle = max(p.clock.z / grid, 1e-4);
+    const float since = now - slot / grid;
+    const float generation = floor(since / cycle);
+    const float age = since - generation * cycle;
+    const float id = slot * 1.7 + generation * 91.7 + p.emitSize.w * 13.31;
+    const vec3 rA = rand3(id);
+    const vec3 rB = rand3(id + 37.13);
+    const vec3 rC = rand3(id + 71.77);
+    const vec3 rD = rand3(id + 113.7);
+    const vec3 rE = rand3(id + 191.3);
+    const float life = max(max(p.lifeSize.x, 1.0) * 0.001 * (1.0 + (rA.x - 0.5) * 2.0 * p.lifeSize.y), 1e-3);
+    const float k = age / life;
+    if (rE.x >= p.clock.w / grid || since < 0.0 || k > 1.0) return false;
+    const vec3 halfSize = vec3(p.emitSize.x * p.frame.x, p.emitSize.y * p.frame.y, p.emitSize.z * p.frame.y) * 0.5;
+    vec3 unit = rB * 2.0 - 1.0;
+    if (p.emitPos.w > 0.5) {
+        const float cz = rC.x * 2.0 - 1.0;
+        const float sr = sqrt(max(0.0, 1.0 - cz * cz));
+        const float ph = TWO_PI * rC.y;
+        unit = vec3(sr * cos(ph), sr * sin(ph), cz) * pow(max(rB.x, 1e-4), 1.0 / 3.0);
+    }
+    const vec3 offset = unit * halfSize;
+    const float tilt = p.launch.z, spin = p.launch.w;
+    const vec3 aim = vec3(sin(tilt) * sin(spin), -cos(tilt), sin(tilt) * cos(spin));
+    const float cosMax = cos(radians(clamp(p.cone.x, 0.0, 180.0)));
+    const float cz2 = mix(1.0, cosMax, rA.y);
+    const float sz2 = sqrt(max(0.0, 1.0 - cz2 * cz2));
+    const float ph2 = TWO_PI * rA.z;
+    const vec3 pole = abs(aim.y) > 0.99 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    const vec3 ta = normalize(cross(pole, aim));
+    const vec3 tb = cross(aim, ta);
+    vec3 dir = normalize(ta * (sz2 * cos(ph2)) + tb * (sz2 * sin(ph2)) + aim * cz2);
+    const float offLen = length(offset);
+    if (p.cone.y > 0.001 && offLen > 0.001) dir = normalize(mix(dir, offset / offLen, clamp(p.cone.y, 0.0, 1.0)));
+    const float speed = p.launch.x * max(0.0, 1.0 + (rD.x - 0.5) * 2.0 * p.launch.y);
+    const vec3 start = vec3(p.emitPos.x * p.frame.x, p.emitPos.y * p.frame.y, p.emitPos.z * p.frame.y) + offset;
+    pos = vec3(p.frame.zw, 0.0) + start + flight(age, dir, speed) + wander(now, k, rC * TWO_PI, generation);
+    const float fin = p.look.z <= 0.0 ? 1.0 : smoothstep(0.0, p.look.z, k);
+    const float fout = p.look.w <= 0.0 ? 1.0 : 1.0 - smoothstep(1.0 - p.look.w, 1.0, k);
+    vec3 c = mix(p.color0.rgb, p.color1.rgb, k);
+    if (p.color0.w > 0.0) c = mix(c, hue_color(rD.z), clamp(p.color0.w, 0.0, 1.0));
+    color = vec4(c, p.look.y * fin * fout);
+    return true;
+}
+
+// Ponto da camada (px) -> px da região de saída, pela mesma projeção do main.
+bool project_center(vec3 pos, out vec2 at) {
+    at = vec2(0.0);
+    if (p.camRight.w > 0.5) {
+        const vec4 cc = p.compFromWorld * vec4((p.worldFromLayer * vec4(pos, 1.0)).xyz, 1.0);
+        if (cc.w < max(p.frame.y, 1.0) * 1e-3) return false;
+        const vec4 plane = p.layerFromComp * vec4(cc.xy / cc.w, 0.0, 1.0);
+        if (plane.w <= 1e-6) return false;
+        at = plane.xy / plane.w;
+        return true;
+    }
+    const float F = max(p.view.z, 1.0);
+    const float depth = F + pos.z;
+    if (depth < 0.01 * F) return false;
+    at = p.view.xy + (pos.xy - p.view.xy) * (F / depth);
+    return true;
+}
+
+// Um par (i, j), i > j, por 6 vértices: a linha entre os dois centros, mais
+// forte perto e sumindo até a distância máxima (medida no espaço 3D).
+void plexus_vertex(int vid) {
+    const float pair = float(vid / 6);
+    float i = floor((1.0 + sqrt(1.0 + 8.0 * pair)) * 0.5);
+    if (i * (i - 1.0) * 0.5 > pair) i -= 1.0;
+    if ((i + 1.0) * i * 0.5 <= pair) i += 1.0;
+    const float j = pair - i * (i - 1.0) * 0.5;
+    vec3 a, b; vec4 ca, cb;
+    if (!particle_center(i, a, ca) || !particle_center(j, b, cb)) { cull(); return; }
+    const float d = distance(a, b);
+    if (d >= p.plexus.x) { cull(); return; }
+    vec2 sa, sb;
+    if (!project_center(a, sa) || !project_center(b, sb)) { cull(); return; }
+    const vec2 ab = sb - sa;
+    const float len = length(ab);
+    if (len < 0.5) { cull(); return; }
+    const vec2 along = ab / len, normal = vec2(-along.y, along.x);
+    const int c = vid % 6;
+    const float t = (c == 1 || c == 4 || c == 5) ? 1.0 : 0.0;
+    const float side = (c == 2 || c == 3 || c == 5) ? 1.0 : -1.0;
+    const float half_width = max(p.plexus.y, 0.25) * 0.5 + 1.0;   // +1 px de borda suave
+    const vec2 at = mix(sa, sb, t) + normal * side * half_width;
+    const float fade = 1.0 - d / max(p.plexus.x, 1e-3);
+    v_color = vec4(mix(ca.rgb, cb.rgb, t), min(ca.a, cb.a) * fade * fade * clamp(p.plexus.z, 0.0, 1.0));
+    v_corner = vec2(0.0, side);
+    v_feather = clamp(1.0 / half_width, 0.3, 1.0);
+    gl_Position = vec4((at - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0, 0.5, 1.0);
+}
+
 void main() {
     const vec2 corners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0),
                                     vec2(-1.0, 1.0), vec2(1.0, -1.0), vec2(1.0, 1.0));
-    const int vid = gl_VertexIndex;
+    // Rede: os primeiros vértices são as linhas (por baixo dos pontos).
+    const int plexusVerts = p.plexus.x > 0.0 ? int(p.plexus.w * (p.plexus.w - 1.0) * 0.5 + 0.5) * 6 : 0;
+    if (gl_VertexIndex < plexusVerts) { plexus_vertex(gl_VertexIndex); return; }
+    const int vid = gl_VertexIndex - plexusVerts;
     const float slot = float(vid / 6);
     const vec2 corner = corners[vid % 6];
 

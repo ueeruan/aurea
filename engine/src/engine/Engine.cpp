@@ -890,6 +890,10 @@ void Engine::shutdown() noexcept {
             AUREA_LOG_WARN("shutdown: GPU do export ainda pendente; aguardando teardown seguro");
         if (gpu_) gpu_->wait_idle();
         (void)poll_export_gpu_locked();
+        // Sessões de export com abridor preso: fecham aqui, com a GPU viva
+        // (o join espera o abridor da plataforma voltar).
+        for (auto& parked : parkedOffline_) parked->shutdown();
+        parkedOffline_.clear();
         snapshot_ = FrameSnapshot{};
         media_.close_all();
     }
@@ -7613,7 +7617,11 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
         // still valid: no new source range is introduced by a shorter interval.
         const bool onlyShortening = &item == &edited &&
             ((operation == 0 && target >= start) || (operation == 1 && target <= end));
-        if (onlyShortening)
+        // Puxar a borda além da mídia (beta 0.1.6: "vai até 3 s, quero puxar
+        // até quanto quiser"): o trecho a mais segura o primeiro/último quadro
+        // — video_media_us já prende o instante na mídia, prévia e export.
+        const bool pastMedia = &item == &edited && (operation == 0 || operation == 1) && !extendOnly;
+        if (onlyShortening || pastMedia)
             return std::isfinite(item.source_frame(item.start)) &&
                    std::isfinite(item.source_frame(FrameIndex{item.end.value - 1}));
         if (!inside(item.source_frame(item.start)) || !inside(item.source_frame(FrameIndex{item.end.value - 1}))) return false;
@@ -9907,12 +9915,12 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         pendingPreviewRanges_.clear();
         if (previewBuffering_) {
             previewBufferTarget_ = preview_cache_target(comp->fps(), cacheCapacity,
-                comp->duration().value - previewBufferStart_, renderSpeed);
+                comp->duration().value - previewBufferStart_, renderSpeed, previewStuttered_);
             previewBufferReady_ = 0;
             while (previewBufferReady_ < previewBufferTarget_
                 && renderer_.preview_cached(FrameIndex{previewBufferStart_ + previewBufferReady_})) ++previewBufferReady_;
             const bool limited = !cacheCapacity || (previewBufferReady_ < previewBufferTarget_
-                && preview_buffer_expired(frameStart - previewBufferSince_, previewBufferReady_));
+                && preview_buffer_expired(frameStart - previewBufferSince_, previewBufferReady_, previewStuttered_));
             if (previewBufferReady_ >= previewBufferTarget_ || limited) {
                 previewBuffering_ = false;
                 playback_.play(frameStart);
@@ -12796,7 +12804,21 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
             return;
         }
     }
+    // Sessões guardadas cujo abridor já voltou: agora fecham sem esperar.
+    std::erase_if(parkedOffline_, [](std::unique_ptr<OfflineFrameRenderer>& parked) {
+        if (parked->opening_in_flight()) return false;
+        parked->shutdown();
+        return true;
+    });
     if (ctx.offline && lostDevice) ctx.offline->forget_device();
+    if (ctx.offline && ctx.offline->opening_in_flight()) {
+        // Abridor da plataforma preso: fechar agora esperaria por ele (e o
+        // export ficava em 0% para sempre). Guarda a sessão inteira — o
+        // aviso de "fonte pronta" do abridor aponta para ela.
+        AUREA_LOG_WARN("export: abridor de video da plataforma preso; sessao guardada ate ele voltar (%zu guardadas)",
+                       parkedOffline_.size() + 1);
+        parkedOffline_.push_back(std::move(ctx.offline));
+    }
     if (ctx.offline) ctx.offline->shutdown();
     ctx.offline.reset();
     if (!retainReadbacks) ctx.audioCache.reset();
@@ -14036,6 +14058,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         if (gpu_ && surfaceAttached_ && !rawPlaybackLayer_.valid() && comp
             && playback_.speed() > 0 && !caps_.thermal().severe() && memory_.pressure() < .85f) {
             playback_.pause(now);
+            // Engasgou desde o último Play (mais de 3 quadros perdidos)? Então
+            // a pré-render deste prepara bem mais antes de soltar.
+            const u32 dropped = frameScheduler_.dropped_total();
+            previewStuttered_ = dropped >= previewDroppedAtPlay_ && dropped - previewDroppedAtPlay_ > 3;
+            previewDroppedAtPlay_ = dropped;
             previewBuffering_ = true;
             previewBufferStart_ = playback_.current().value;
             previewBufferSince_ = now;

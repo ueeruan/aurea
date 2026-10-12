@@ -148,6 +148,8 @@ struct TopBarView: View {
             searchButton()
             linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
             }
+            ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada"), size: 19, width: 44) { duplicateSelection() }
+                .accessibilityIdentifier("layer.duplicate")
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 48) { removeSelection() }
                 .disabled(row.locked).accessibilityIdentifier("layer.delete")
             Button { open(.layerMenu) } label: { MaterialGlyph("filled.MoreHoriz", size: 22, color: AureaColors.text).frame(width: 44, height: 44) }
@@ -172,10 +174,17 @@ struct TopBarView: View {
                     for row in model.layers where model.selection.contains(row.id) && row.kind == 12 { model.ungroup(row.id) }
                 }
             }
+            ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada"), size: 19, tint: AureaColors.text) { duplicateSelection() }
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, tint: AureaColors.text) { removeSelection() }
             ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
                            description: AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"), size: 20, tint: AureaColors.text) { model.playPause() }
         }.padding(.trailing, 2)
+    }
+    /// Duplicar à vista (pedido da beta): a(s) camada(s) escolhida(s), um desfazer.
+    private func duplicateSelection() {
+        let ids = model.layers.filter { model.selection.contains($0.id) }.map { NSNumber(value: $0.id) }
+        guard !ids.isEmpty else { return }
+        model.engine.duplicateLayers(ids); model.refreshModel(force: true)
     }
     private func pickLayerButton(tint: Color, width: CGFloat) -> some View {
         ShellBarButton(glyph: CupertinoGlyph.RectangleStack, description: AureaText.t("editor_selecionar_uma_camada"), size: 19, width: width, tint: tint) { open(.searchLayers) }

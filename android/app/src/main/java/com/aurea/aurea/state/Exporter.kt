@@ -133,6 +133,8 @@ data class ExportOptions(
     /** GIF: largura máxima (px) e quadros por segundo. A sequência usa `fps`. */
     val gifWidth: Int = ImageExportRules.GIF_DEFAULT_WIDTH,
     val gifFps: Double = ImageExportRules.GIF_DEFAULT_FPS,
+    /** Pré-export: o mesmo export em baixa resolução, só para assistir (não vai para a galeria). */
+    val preview: Boolean = false,
 )
 
 enum class ExportPhase { Idle, Running, Publishing, Done, Failed, Cancelled }
@@ -150,6 +152,8 @@ data class ExportUiState(
     /** Aviso durante o export (encoder de software, aparelho quente). Vazio = nada. */
     val notice: String = "",
     val format: ExportFormat = ExportFormat.Video,
+    /** Pré-export pronto: o MP4 temporário para o player da tela (nulo = export de verdade). */
+    val previewFile: File? = null,
 ) {
     val fraction: Float get() = if (framesTotal > 0) (framesDone.toFloat() / framesTotal).coerceIn(0f, 1f) else 0f
 }
@@ -403,7 +407,10 @@ class Exporter internal constructor(
                     return retry
                 }
                 when (progress.result) {
-                    0 -> publish(file, options.format)
+                    0 -> if (options.preview) {
+                        // Pré-export: fica no cache do app, a tela toca em loop.
+                        state = state.copy(phase = ExportPhase.Done, previewFile = file, message = "")
+                    } else publish(file, options.format)
                     // Cancelado pela própria tela (sem progresso por minutos), não
                     // pelo usuário: é falha, com o motivo.
                     CANCELLED -> state = if (watchdog.cancelled && !cancelPending) {
@@ -444,9 +451,24 @@ class Exporter internal constructor(
         engine.cancelExport()
     }
 
+    /**
+     * Pré-export: o vídeo inteiro pelo MESMO caminho do export (mesmos efeitos,
+     * 3D e motion blur), em até 540p e na qualidade rápida — para assistir
+     * liso e pegar um erro de export antes do export de verdade.
+     */
+    fun startPreview(title: String, compWidth: Int, compHeight: Int, compFps: Double) {
+        if (busy) return
+        val short = min(540, max(2, min(compWidth, compHeight))) and 1.inv()
+        start("Pre-export $title", compWidth, compHeight, compFps,
+            ExportOptions(shortSide = short, quality = 0, trimToContent = true, preview = true))
+    }
+
     /** Volta ao estado inicial (tela reaberta ou fechada). */
     fun reset() {
-        if (!busy) state = ExportUiState()
+        if (!busy) {
+            state.previewFile?.let { f -> scope.launch(Dispatchers.IO) { runCatching { f.delete() } } }
+            state = ExportUiState()
+        }
         // Momento ocioso (fora do render): prepara o anúncio da próxima exportação.
         com.aurea.aurea.ads.AureaAdsManager.preloadExportInterstitial()
     }

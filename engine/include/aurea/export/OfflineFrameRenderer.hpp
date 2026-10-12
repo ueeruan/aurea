@@ -18,6 +18,8 @@ public:
                   const RenderSettings& settings, u64& submittedFrame) noexcept;
     void shutdown() noexcept;
     void forget_device() noexcept;
+    /// Um abridor de vídeo da plataforma ainda preso (fechar esperaria por ele).
+    [[nodiscard]] bool opening_in_flight() noexcept { return media_.opening_in_flight(); }
 private:
     Status wait_gpu(u64 frame, const std::atomic<bool>* cancel) noexcept;
     static void source_ready(void* context) noexcept;

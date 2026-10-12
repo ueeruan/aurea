@@ -748,8 +748,23 @@ struct NativeCurvePanel: View {
                 else { model.toast = AureaText.t("pn_curve_symmetric") }
             }.disabled(!ease.supportsInversion)
                 .opacity(ease.supportsInversion ? 1 : 0.35)
-            Spacer().frame(height: 4)
-            RailMoreButton(active: false) { showMenu(segment) }
+            // Copiar e colar à mão (pedido da beta): sem abrir o menu.
+            glyphButton(CupertinoGlyph.DocOnDoc, size: 17, target: 40, label: AureaText.t("panel_copiar_curva")) {
+                CurveClipboard.ease = ease; model.toast = AureaText.t("curve_copied")
+            }.accessibilityIdentifier("curve.copy")
+            glyphButton(CupertinoGlyph.DocOnClipboard, size: 17, target: 40, label: AureaText.t("panel_colar_curva")) {
+                if let copied = CurveClipboard.ease { set(copied, to: segment.start, label: "colar curva") }
+            }.disabled(CurveClipboard.ease == nil).opacity(CurveClipboard.ease == nil ? 0.35 : 1)
+                .accessibilityIdentifier("curve.paste")
+            // Menu nativo pequeno ao lado dos três pontos (antes: folha que cobria a tela).
+            Menu {
+                ForEach(Array(menuActions(segment).enumerated()), id: \.offset) { _, action in
+                    Button(action.label, action: action.onClick).disabled(!action.enabled)
+                }
+            } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: AureaDims.iconLg, color: AureaColors.text)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }.accessibilityLabel(AureaText.t("panel_curva")).accessibilityIdentifier("curve.menu")
             Spacer().frame(height: 8)
         }.frame(width: 44).frame(maxHeight: .infinity).background(curveRailFill, ignoresSafeAreaEdges: [])
     }
@@ -848,7 +863,7 @@ struct NativeCurvePanel: View {
         model.seek(toFrame: local + Int64(model.selectedLayer?.startFrame ?? 0) - Int64(model.selectedLayer?.offsetFrames ?? 0))
         load()
     }
-    private func showMenu(_ segment: Segment) {
+    private func menuActions(_ segment: Segment) -> [SheetAction] {
         let value = ease
         let copied = CurveClipboard.ease
         let actions: [SheetAction] = [
@@ -872,7 +887,7 @@ struct NativeCurvePanel: View {
                 model.endGesture()
             }
         ]
-        model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_curva"), actions: actions)
+        return actions
     }
     /// Presets prontos (menu), salvar a curva e as curvas salvas numa fileira
     /// fina que rola: o painel não cresce.

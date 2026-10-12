@@ -491,7 +491,12 @@ struct EffectAddSheet: View {
                             categoryChip(category.label, id: category.id, active: groupId == category.id) { groupId = category.id }
                         }
                     }.padding(.horizontal, 16)
-                }.accessibilityIdentifier("effects.categories")
+                }
+                // ScrollView horizontal SEM altura própria toma a altura que
+                // sobra no VStack (dividia com a grade): eram os vãos pretos
+                // entre as abas, as categorias e a contagem. Altura da ficha.
+                .fixedSize(horizontal: false, vertical: true).frame(height: 48)
+                .accessibilityIdentifier("effects.categories")
             }
             Text(AureaText.t("fx_browser_count", shown.count)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 12)
@@ -530,6 +535,7 @@ struct EffectAddSheet: View {
         }
         if typeSize > .large {
             ScrollView(.horizontal, showsIndicators: false) { tabs }
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 12).padding(.vertical, 8)
         } else {
             tabs.padding(.horizontal, 12).padding(.vertical, 8)

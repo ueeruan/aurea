@@ -15,6 +15,9 @@ import SwiftUI
     @Published var recording = false
     @Published var sensitivity: Double = 1
     @Published var inverted = false
+    /// Andar (botões de segurar), m/s, e × do frente/trás medido pelo AR.
+    @Published var walkSpeed: Double = 1
+    @Published var depthScale: Double = 1 { didSet { walk(0) } }
     @Published var available = false
     @Published var trackingValid = false
     @Published var positional = false
@@ -243,6 +246,11 @@ import SwiftUI
         if !active { stopSensors() }
     }
 
+    /// +1 frente, −1 trás, 0 parado (o motor soma no rumo da câmera, no plano do chão).
+    func walk(_ direction: Int) {
+        _ = model?.engine.realCameraWalk(Float(max(-1, min(1, direction))) * Float(walkSpeed), depth: Float(depthScale))
+    }
+
     private func stopSensors() {
         motion.stopDeviceMotionUpdates()
         arSession.pause()
@@ -272,6 +280,21 @@ import SwiftUI
         .accessibilityIdentifier(id)
     }
 
+    /// Botão de segurar: true ao apertar, false ao soltar.
+    private func holdChip(_ text: String, _ id: String, _ hold: @escaping (Bool) -> Void) -> some View {
+        Text(text)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(AureaColors.text)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 34)
+            .background(RoundedRectangle(cornerRadius: 8).fill(AureaColors.chip))
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 60, maximumDistance: 80, pressing: { hold($0) }, perform: {})
+            .accessibilityLabel(text)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier(id)
+    }
+
     var body: some View {
         if cam.painting(model) {
             VStack {
@@ -289,6 +312,25 @@ import SwiftUI
                         chip(AureaText.t("real_camera_recenter"), "realcam.recentrar", false) { cam.recenter() }
                         chip(AureaText.t("real_camera_invert"), "realcam.inverter", cam.inverted) { cam.inverted.toggle() }
                         chip(AureaText.t("real_camera_done"), "realcam.concluir", false) { cam.stop(model) }
+                    }
+                    HStack(spacing: 6) {
+                        Text(AureaText.t("real_camera_walk")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                        holdChip(AureaText.t("real_camera_forward"), "realcam.frente") { cam.walk($0 ? 1 : 0) }
+                        holdChip(AureaText.t("real_camera_back"), "realcam.tras") { cam.walk($0 ? -1 : 0) }
+                    }
+                    HStack(spacing: 8) {
+                        Text(AureaText.t("real_camera_walk_speed")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                        Slider(value: $cam.walkSpeed, in: 0.2...3)
+                            .accessibilityLabel(AureaText.t("real_camera_walk_speed"))
+                            .accessibilityIdentifier("realcam.walkspeed")
+                        Text(String(format: "%.1f m/s", cam.walkSpeed)).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                    }
+                    HStack(spacing: 8) {
+                        Text(AureaText.t("real_camera_depth")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                        Slider(value: $cam.depthScale, in: 0.5...5)
+                            .accessibilityLabel(AureaText.t("real_camera_depth"))
+                            .accessibilityIdentifier("realcam.depth")
+                        Text(String(format: "%.1f×", cam.depthScale)).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
                     }
                     HStack(spacing: 8) {
                         Text(AureaText.t("real_camera_sensitivity")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)

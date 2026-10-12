@@ -153,6 +153,9 @@ public:
         char decoderName[64] = {};
     };
     [[nodiscard]] Stats stats() const;
+    /// Algum abridor da plataforma ainda dentro da chamada de abrir (o que
+    /// fechar/destruir teria de esperar)? Não bloqueia.
+    [[nodiscard]] bool opening_in_flight() noexcept;
 
 private:
     struct Opening {

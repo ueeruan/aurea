@@ -151,7 +151,7 @@ jobs:
             adb install -r build/android/app/outputs/apk/androidTest/uiTest/app-uiTest-androidTest.apk
             adb logcat -c
             # SwiftShader on the 2-core CI AVD takes ~25 s/frame for all 60 Full HD motion-blur frames; allow completion without changing quality or the app watchdog.
-            adb shell am instrument -w -e aureaExportDeadlineSeconds 1800 -e class com.aurea.aurea.editor.KeyflowExportDeviceTest,com.aurea.aurea.editor.PreviewVideoLatencyDeviceTest,com.aurea.aurea.editor.CompactToolsDockTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
+            adb shell am instrument -w -e aureaExportDeadlineSeconds 1800 -e class com.aurea.aurea.editor.TextExportDeviceTest,com.aurea.aurea.editor.PreviewVideoLatencyDeviceTest,com.aurea.aurea.editor.CompactToolsDockTest com.aurea.aurea.uitest.test/androidx.test.runner.AndroidJUnitRunner > build/native-editing.log
             adb logcat -d -v threadtime > build/native-engine.log
             cat build/native-editing.log
             python3 engine/platform/android/verify/collect_owned_export_files.py --output build/native-editing-files.tar

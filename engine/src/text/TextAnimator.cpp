@@ -337,7 +337,7 @@ const char* text_preset_name(u32 id) noexcept {
     static const char* names[kTextPresetCount] = {"Pop", "Bounce", "Slide", "Scale", "Fade", "Blur Reveal", "Word Highlight", "Karaoke",
         "Typewriter", "Wave", "Elastic", "Preset Bounce", "Preset Entrada suave", "Preset Revelar",
         "Preset Deslizar", "Preset Entrada rápida", "Preset Salto elástico",
-        "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa"};
+        "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa", "Text Explosion"};
     return id < kTextPresetCount ? names[id] : "";
 }
 
@@ -356,6 +356,44 @@ TextAnimator reveal(u8 basedOn, u8 shape, u32 props) {
 }
 } // namespace
 
+namespace {
+/// Text Explosion: as letras chegam voando de uma explosão — cada uma com
+/// direção, profundidade e giro PRÓPRIOS (seletores wiggly parados, um por
+/// eixo, sementes diferentes), desfocadas, grandes e transparentes — e
+/// montam o texto. Um "quantidade" de 100 → 0 em todos, com saída rápida.
+bool apply_text_explosion(TextData& t, TrackSet& tr, i64 s, i64 d) {
+    auto scatter = [&](u32 seed, Vec3 position, Vec3 rotation, const char* name) {
+        TextAnimator a;
+        a.name = name;
+        a.selector.type = 1;          // wiggly
+        a.selector.wiggleRate = 0;    // parado: um sorteio fixo por letra
+        a.selector.seed = seed;
+        a.props = kTextPropPosition | kTextPropRotation;
+        a.position = position;
+        a.rotation = rotation;
+        t.animators.push_back(a);
+        return static_cast<u32>(t.animators.size() - 1);
+    };
+    const u32 x = scatter(7, Vec3{900, 0, 0}, Vec3{0, 0, 540}, "Explosão X");
+    const u32 y = scatter(23, Vec3{0, 650, 0}, Vec3{420, 0, 0}, "Explosão Y");
+    const u32 z = scatter(41, Vec3{0, 0, -1200}, Vec3{0, 380, 0}, "Explosão Z");
+    TextAnimator glow;
+    glow.name = "Explosão brilho";
+    glow.selector.shape = 0;
+    glow.props = kTextPropOpacity | kTextPropBlur | kTextPropScale;
+    glow.opacity = 0;
+    glow.blur = 18;
+    glow.scale = Vec2{240, 240};
+    t.animators.push_back(glow);
+    const u32 g = static_cast<u32>(t.animators.size() - 1);
+    for (u32 a : {x, y, z, g}) {
+        key(tr, a, kSelAmount, s, 100, Interpolation::EaseOut);
+        key(tr, a, kSelAmount, s + d, 0, Interpolation::EaseOut);
+    }
+    return true;
+}
+} // namespace
+
 #include "JuanTextPresets.inc"
 #include "PackTextPresets.inc"
 
@@ -364,6 +402,7 @@ bool apply_text_preset(u32 id, TextData& t, TrackSet& tr, i64 s, i64 d, f64 fps)
     d = std::max<i64>(2, d);
     tr.remove_if([](const Track& x) { return x.property == TrackProperty::TextAnimParam; });
     t.animators.clear();
+    if (id == 25) return apply_text_explosion(t, tr, s, std::max<i64>(d * 6 / 5, 2));
     if (id >= 19) return apply_pack_text(id, t, tr, s, d);
     if (id >= 11) return apply_juan_text(id, t, tr, s, fps > 0 ? fps : 30.0);
     u32 words = 0;

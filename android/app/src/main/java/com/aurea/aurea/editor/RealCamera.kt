@@ -27,6 +27,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +69,10 @@ object RealCamera {
     var available by mutableStateOf(true)
     var lastFrame by mutableIntStateOf(-1)
     var positional by mutableStateOf(false)
+    /** Andar (botões de segurar): metros por segundo. */
+    var walkSpeed by mutableFloatStateOf(1f)
+    /** × do deslocamento frente/trás medido pelo AR. */
+    var depthScale by mutableFloatStateOf(1f)
     internal var tracking by mutableStateOf(RealCameraTracking.Rotation)
     internal var usesArCore by mutableStateOf(false)
 
@@ -95,6 +101,30 @@ private fun CamChip(label: String, tag: String, on: Boolean, enabled: Boolean = 
     ) {
         Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W600,
             color = if (on) AureaColors.OnAccent else if (enabled) AureaColors.Text else AureaColors.Disabled)))
+    }
+}
+
+/** Botão de segurar: [onHold] true ao apertar, false ao soltar (ou cancelar). */
+@Composable
+private fun WalkButton(label: String, tag: String, onHold: (Boolean) -> Unit) {
+    var held by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .heightIn(min = 34.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (held) AureaColors.Accent else AureaColors.Chip)
+            .testTag(tag)
+            .semantics { role = Role.Button; contentDescription = label }
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    held = true; onHold(true)
+                    try { tryAwaitRelease() } finally { held = false; onHold(false) }
+                })
+            }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W600,
+            color = if (held) AureaColors.OnAccent else AureaColors.Text)))
     }
 }
 
@@ -200,6 +230,36 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
             )
             Spacer(Modifier.width(6.dp))
             Text("${(RealCamera.sensitivity * 100).toInt()}%", style = muted)
+        }
+        // Andar em Z: segurar anda para frente/trás no rumo da câmera (sem AR também).
+        Row(Modifier.padding(top = 4.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.real_camera_walk), style = muted)
+            WalkButton(stringResource(R.string.real_camera_forward), "realcam.frente") { store.realCameraWalk(if (it) 1 else 0) }
+            WalkButton(stringResource(R.string.real_camera_back), "realcam.tras") { store.realCameraWalk(if (it) -1 else 0) }
+        }
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            val speed = stringResource(R.string.real_camera_walk_speed)
+            Text(speed, style = muted)
+            Spacer(Modifier.width(8.dp))
+            Slider(
+                value = RealCamera.walkSpeed, onValueChange = { RealCamera.walkSpeed = it }, valueRange = 0.2f..3f,
+                modifier = Modifier.weight(1f).heightIn(max = 28.dp).testTag("realcam.walkspeed").semantics { contentDescription = speed },
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(String.format(java.util.Locale.ROOT, "%.1f m/s", RealCamera.walkSpeed), style = muted)
+        }
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            val depth = stringResource(R.string.real_camera_depth)
+            Text(depth, style = muted)
+            Spacer(Modifier.width(8.dp))
+            Slider(
+                value = RealCamera.depthScale,
+                onValueChange = { RealCamera.depthScale = it; store.realCameraWalk(0) }, valueRange = 0.5f..5f,
+                modifier = Modifier.weight(1f).heightIn(max = 28.dp).testTag("realcam.depth").semantics { contentDescription = depth },
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(String.format(java.util.Locale.ROOT, "%.1f×", RealCamera.depthScale), style = muted)
         }
         if (RealCamera.usesArCore) {
             Text(stringResource(R.string.real_camera_arcore_privacy), style = muted, modifier = Modifier.padding(top = 4.dp))

@@ -70,6 +70,9 @@ AUREA_TEST(PreviewBuffer, BudgetAndRangeAreHardLimits) {
     AUREA_CHECK_EQ(preview_cache_target(30., 30, 2), 2u);
     AUREA_CHECK_EQ(preview_cache_target(30., 30, 0), 0u);
     AUREA_CHECK_EQ(preview_cache_target(60., 30, 300), 11u);
+    // Depois de engasgar, o próximo Play prepara ~0,75 s (pré-render maior).
+    AUREA_CHECK_EQ(preview_cache_target(30., 300, 600, 1.f, true), 23u);
+    AUREA_CHECK(!preview_buffer_expired(1'000'000'000ull, 5, true) && preview_buffer_expired(1'000'000'000ull, 5, false));
     AUREA_CHECK_EQ(preview_cache_target(30., 30, 300, 2.f), 11u);
     AUREA_CHECK_EQ(preview_cache_target(30., 30, 300, .5f), 3u);
     AUREA_CHECK_EQ(preview_cache_target(240., 30, 300, 16.f), 30u);

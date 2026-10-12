@@ -575,6 +575,10 @@ class AureaEngine private constructor() {
     fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
     fun applyText3dPreset(layer: Long, preset: Int): Boolean = nativeApplyText3dPreset(nativeHandle, layer, preset)
 
+    /** Real Camera: andar (m/s, + frente, 0 parado) e profundidade (× do frente/trás medido). */
+    fun realCameraWalk(speed: Float, depth: Float): Boolean = nativeWork.run(false) { nativeRealCameraWalk(nativeHandle, speed, depth) }
+    private external fun nativeRealCameraWalk(handle: Long, speed: Float, depth: Float): Boolean
+
     /** Sombras do objeto 3D: projeta / recebe. */
     fun setModelShadows(layer: Long, cast: Boolean, receive: Boolean): Boolean =
         nativeSetModelShadows(nativeHandle, layer, cast, receive)

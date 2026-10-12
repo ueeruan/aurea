@@ -315,6 +315,8 @@ NS_SWIFT_NAME(AureaEngine)
     NS_SWIFT_NAME(realCameraSample(_:timestampNs:positional:sensitivity:inverted:));
 - (BOOL)realCameraHold NS_SWIFT_NAME(realCameraHold());
 - (BOOL)realCameraRecenter NS_SWIFT_NAME(realCameraRecenter());
+/// Andar (m/s, + frente, 0 parado) e profundidade (× do frente/trás medido).
+- (BOOL)realCameraWalk:(float)speed depth:(float)depth NS_SWIFT_NAME(realCameraWalk(_:depth:));
 - (void)realCameraStop NS_SWIFT_NAME(realCameraStop());
 /// active, recording, last native frame keyed, actual position tracking mode.
 - (NSArray<NSNumber*>*)realCameraStatus NS_SWIFT_NAME(realCameraStatus());

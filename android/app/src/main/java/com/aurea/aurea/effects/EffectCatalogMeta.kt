@@ -101,6 +101,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.color.threshold", EffectMeta(R.string.fx_desc_color_threshold, AllTargets))
     put("aurea.color.posterize", EffectMeta(R.string.fx_desc_color_posterize, AllTargets))
     put("aurea.color.palettize", EffectMeta(R.string.fx_desc_color_palettize, AllTargets))
+    put("aurea.light.glow_scan", EffectMeta(R.string.fx_desc_light_glow_scan, AllTargets))
+    put("aurea.time.low_fps", EffectMeta(R.string.fx_desc_time_low_fps, AllTargets, "low fps stop motion travado quadros choppy tremido"))
     put("aurea.color.matrix", EffectMeta(R.string.fx_desc_color_matrix, AllTargets))
     put("aurea.color.levels", EffectMeta(R.string.fx_desc_color_levels, AllTargets))
     put("aurea.color.curves", EffectMeta(R.string.fx_desc_color_curves, AllTargets))

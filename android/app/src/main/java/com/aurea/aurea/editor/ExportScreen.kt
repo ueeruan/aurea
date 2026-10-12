@@ -67,6 +67,7 @@ import com.aurea.aurea.R
 import com.aurea.aurea.home.DonationCard
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ExportFormat
+import androidx.compose.ui.platform.testTag
 import com.aurea.aurea.state.ExportOptions
 import com.aurea.aurea.state.ExportPhase
 import com.aurea.aurea.state.ImageExportRules
@@ -164,7 +165,11 @@ internal fun ExportScreen(store: EditorStore, onDismiss: () -> Unit) {
                             ExportFormat.Gif -> R.string.exp2_rendering_gif
                         }),
                     )
-                    ExportPhase.Done -> {
+                    ExportPhase.Done -> if (st.previewFile != null) {
+                        PreExportPlayer(st.previewFile, compW, compH)
+                        Spacer(Modifier.height(18.dp))
+                        Done(stringResource(R.string.preexport_hint), stringResource(R.string.preexport_ready))
+                    } else {
                         PreviewCard(preview, compW, compH)
                         Spacer(Modifier.height(18.dp))
                         Done(st.message, stringResource(when (st.format) {
@@ -755,7 +760,17 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
         when (st.phase) {
             ExportPhase.Running -> WideButton(stringResource(R.string.editor_cancelar), filled = false) { exporter.cancel() }
             ExportPhase.Publishing -> WideButton(stringResource(R.string.editor_salvando), filled = false, enabled = false) {}
-            ExportPhase.Done -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ExportPhase.Done -> if (st.previewFile != null) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.weight(1f)) { WideButton(stringResource(R.string.preexport_back), filled = false) { exporter.reset() } }
+                Box(Modifier.weight(1f)) {
+                    WideButton(stringResource(R.string.preexport_export), filled = true) {
+                        exporter.reset()
+                        if (com.aurea.aurea.state.GalleryPublish.needsLegacyWritePermission(context)) {
+                            legacyStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        } else startExport()
+                    }
+                }
+            } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.weight(1f)) {
                     WideButton(stringResource(R.string.editor_abrir), filled = false) {
                         exporter.viewIntent()?.let { runCatching { context.startActivity(it) }.onFailure { e ->
@@ -766,14 +781,41 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
                     WideButton(stringResource(R.string.editor_compartilhar), filled = true) { exporter.shareIntent()?.let { context.startActivity(it) } }
                 }
             }
-            else -> WideButton(stringResource(R.string.editor_exportar), filled = true, tall = true) {
-                if (com.aurea.aurea.state.GalleryPublish.needsLegacyWritePermission(context)) {
-                    legacyStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                } else {
-                    startExport()
+            else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (options.format == ExportFormat.Video) {
+                    WideButton(stringResource(R.string.preexport_button), filled = false) {
+                        exporter.startPreview(store.project.title, compW, compH, compFps)
+                    }
+                }
+                WideButton(stringResource(R.string.editor_exportar), filled = true, tall = true) {
+                    if (com.aurea.aurea.state.GalleryPublish.needsLegacyWritePermission(context)) {
+                        legacyStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    } else {
+                        startExport()
+                    }
                 }
             }
         }
+    }
+}
+
+/** O pré-export tocando em loop, na proporção da composição. */
+@Composable
+private fun PreExportPlayer(file: java.io.File, compW: Int, compH: Int) {
+    val ratio = if (compW > 0 && compH > 0) compW.toFloat() / compH else 16f / 9f
+    Box(Modifier.fillMaxWidth().aspectRatio(ratio.coerceIn(.3f, 3f)).clip(RoundedCornerShape(12.dp))
+        .background(androidx.compose.ui.graphics.Color.Black).testTag("export.preexport.player"),
+        contentAlignment = Alignment.Center) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { ctx ->
+                android.widget.VideoView(ctx).apply {
+                    setVideoPath(file.absolutePath)
+                    setOnPreparedListener { mp -> mp.isLooping = true; start() }
+                }
+            },
+            onRelease = { it.stopPlayback() },
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

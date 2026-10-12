@@ -139,13 +139,13 @@ import UIKit
     }
 
     func testMotionBlurTextExportCompletesAt1080p() throws {
-        try assertKeyflowTextExport("motion-blur-export")
+        try assertTextExport("motion-blur-export")
     }
-    func testKeyflowPlainTextExportAt1080p() throws {
-        try assertKeyflowTextExport("keyflow-simple-text")
+    func testTextPlainTextExportAt1080p() throws {
+        try assertTextExport("simple-text-export")
     }
-    func testKeyflowTextExportsConsecutivelyAtMultipleResolutions() throws {
-        let initial = try launch("keyflow-multiple-exports")
+    func testTextTextExportsConsecutivelyAtMultipleResolutions() throws {
+        let initial = try launch("multiple-text-exports")
         XCTAssertEqual(initial.compositionWidth, 1920)
         XCTAssertEqual(initial.compositionHeight, 1080)
         let back = app.buttons["Back (clear the selection)"].firstMatch
@@ -159,10 +159,10 @@ import UIKit
             XCTAssertTrue(app.buttons["Export"].firstMatch.waitForExistence(timeout: 5))
         }
     }
-    func testKeyflowVideoWithTextExportsAt1080p() throws {
-        try assertKeyflowTextExport("keyflow-video-text-export")
+    func testTextVideoWithTextExportsAt1080p() throws {
+        try assertTextExport("video-text-export")
     }
-    private func assertKeyflowTextExport(_ scene: String) throws {
+    private func assertTextExport(_ scene: String) throws {
         let snapshot = try launch(scene)
         XCTAssertEqual(snapshot.compositionWidth, 1920)
         XCTAssertEqual(snapshot.compositionHeight, 1080)
@@ -1953,7 +1953,7 @@ import UIKit
     private func launch(_ scene: String) throws -> Snapshot {
         runID = UUID().uuidString
         app = XCUIApplication(bundleIdentifier: "com.aurea.aurea")
-        if ["motion-blur-export", "keyflow-simple-text", "keyflow-multiple-exports", "keyflow-video-text-export"].contains(scene) {
+        if ["motion-blur-export", "simple-text-export", "multiple-text-exports", "video-text-export"].contains(scene) {
             // Reproduce the measured device budget from the failed Metal run,
             // independently of the free RAM on this particular CI runner.
             app.launchArguments.append("--aurea-memory-budget-mb=163")
@@ -1961,8 +1961,8 @@ import UIKit
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID
-        if ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
-        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene) ? 120 : 30
+        if ["video-move", "playback-stress", "clip-edit", "video-text-export"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
+        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit", "video-text-export"].contains(scene) ? 120 : 30
         app.launch()
         guard stage.waitForExistence(timeout: preparationTimeout) else {
             XCTFail("Read-only DEBUG preview probe is missing; inspect the app configuration and INTEGRATION.md")
@@ -1973,7 +1973,7 @@ import UIKit
         }
         XCTAssertTrue(state.coreStarted, state.coreError)
         if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) }
-        else if scene == "keyflow-video-text-export" { XCTAssertEqual(state.layerCount, 2) }
+        else if scene == "video-text-export" { XCTAssertEqual(state.layerCount, 2) }
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
         else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
         else if scene == "parent-new-null" { XCTAssertEqual(state.layerCount, 2) }

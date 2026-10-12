@@ -91,6 +91,31 @@ AUREA_TEST(RealCamera, PanWithTiltedPhoneTurnsAboutSceneVerticalWithoutRollingHo
     AUREA_CHECK_NEAR(std::fabs(capture.rotation().y), 40.f, .05f);
     // No smoothing at 100 %: a single sample already lands the whole motion.
 }
+AUREA_TEST(RealCamera, WalkingMovesAlongTheCameraHeadingWithoutARAndDepthScalesForwardOnly) {
+    // Beta 2 da 0.1.6: "mais opções de movimento em Z, andar para frente".
+    tracking::RealCameraCapture capture;
+    capture.reset({0, 0, -1000}, {}, 500);
+    u64 clock = 1;
+    AUREA_CHECK(capture.sample(camera_pose().data(), clock, false, 1, false));
+    AUREA_CHECK(!capture.walked());
+    capture.set_walk(1.0f);   // 1 m/s para frente, só sensor de giro (sem AR)
+    for (u32 i = 0; i < 10; ++i) AUREA_CHECK(capture.sample(camera_pose().data(), clock += 100'000'000, false, 1, false));
+    AUREA_CHECK(capture.walked());
+    AUREA_CHECK_NEAR(capture.position().z, -500.f, .5f);   // 1 s × 1 m/s × 500 px/m
+    AUREA_CHECK_NEAR(capture.position().x, 0.f, .01f);
+    capture.set_walk(0);
+    AUREA_CHECK(capture.sample(camera_pose().data(), clock += 100'000'000, false, 1, false));
+    AUREA_CHECK_NEAR(capture.position().z, -500.f, .5f);
+    // Profundidade 2×: o passo para frente medido pelo AR dobra; o lateral, não.
+    tracking::RealCameraCapture ar;
+    ar.reset({0, 0, -1000}, {}, 500);
+    ar.set_depth_scale(2.0f);
+    clock = 1;
+    AUREA_CHECK(ar.sample(camera_pose().data(), clock, true, 1, false));
+    AUREA_CHECK(ar.sample(camera_pose({.2f, 0, -.5f}).data(), clock += 16'666'667, true, 1, false));
+    AUREA_CHECK_NEAR(ar.position().z, -500.f, .5f);
+    AUREA_CHECK_NEAR(ar.position().x, 100.f, .5f);
+}
 AUREA_TEST(RealCamera, InvalidStaleAndNonRigidSamplesCannotChangePose) {
     tracking::RealCameraCapture capture;
     capture.reset({1, 2, 3}, {}, 200);

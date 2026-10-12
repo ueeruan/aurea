@@ -837,7 +837,7 @@ private:
 
     GPUBackend* backend_ = nullptr;
     const EffectRegistry* effects_ = nullptr;
-    EffectTypeId posterizeType_ = 0, echoType_ = 0, rgbTimeType_ = 0;
+    EffectTypeId posterizeType_ = 0, echoType_ = 0, rgbTimeType_ = 0, lowFpsType_ = 0;
     EffectTypeId motionDetectType_ = 0;   ///< Detectar movimento: a fonte em t − atraso
     EffectTypeId datamoshType_ = 0;       ///< Datamosh: a fonte presa por "Quadros segurados"
     ShaderLibrary shaders_;

@@ -139,6 +139,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/StarglowEffect.cpp
     src/effects/builtin/PixDitherEffect.cpp
     src/effects/builtin/ColorQuantizeEffects.cpp
+    src/effects/builtin/GlowScanEffect.cpp
     src/effects/builtin/VideoGlitchEffect.cpp
     src/effects/builtin/DisplaceTransformEffect.cpp
     src/effects/builtin/OpticalEffects.cpp

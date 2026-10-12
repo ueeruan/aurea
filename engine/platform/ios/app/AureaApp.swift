@@ -136,7 +136,8 @@ private struct PrivacyMascot: View {
     }
 
     var body: some View {
-        TimelineView(.animation) { timeline in
+        // SwiftUI.: o app tem a própria TimelineView (a timeline do editor).
+        SwiftUI.TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             Canvas { context, size in
                 let px = size.height / 16

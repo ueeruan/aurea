@@ -85,6 +85,8 @@ struct Panel3DView: View {
                 .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // Cada aba começa no topo (antes herdava a rolagem da anterior).
+            .id(currentTab)
             .accessibilityIdentifier("text3d.materialScroll")
         }
         .background(AureaColors.background)

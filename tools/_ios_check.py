@@ -98,6 +98,15 @@ def bloco_tipos():
                 problemas.append("%s declara %s, que já está em %s" % (p.name, nome, dono[nome]))
             else:
                 dono[nome] = p.name
+    # O app declara a própria TimelineView (a timeline do editor): o agendador
+    # do SwiftUI tem de vir qualificado, senão o Swift escolhe o tipo do app
+    # (quebrou o IPA da 0.1.7 BETA 3 só na CI).
+    if "TimelineView" in dono:
+        agenda = re.compile(r"(?<![\w.])TimelineView\(\s*\.(?:animation|periodic|everyMinute|explicit)")
+        for p in swift_files():
+            for n, linha in enumerate(fonte_swift(p).splitlines(), 1):
+                if agenda.search(linha):
+                    problemas.append("%s:%d usa TimelineView(.agenda) sem SwiftUI." % (p.name, n))
     print("tipos:    %d declarados, %d problema(s)" % (len(dono), len(problemas)))
     return problemas
 

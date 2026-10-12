@@ -1116,6 +1116,8 @@
     <string name="lens_fov_readout">FOV %1$s°</string>
     <string name="lens_dof">डेप्थ ऑफ़ फ़ील्ड</string>
     <string name="lens_dof_hint">फ़ोकस तल से दूर की चीज़ें धुंधली करता है</string>
+    <string name="camera_affects_below">नीचे की लेयर पर असर</string>
+    <string name="camera_affects_below_hint">इस कैमरे के नीचे की इमेज, वीडियो, टेक्स्ट और आकृतियाँ हर लेयर पर 3D चालू किए बिना 3D की तरह इससे गुज़रती हैं।</string>
     <string name="lens_focus_distance">फ़ोकस दूरी</string>
     <string name="lens_aperture">अपर्चर</string>
     <string name="lens_blur">धुंधलेपन की ताकत</string>

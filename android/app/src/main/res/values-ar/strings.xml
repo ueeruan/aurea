@@ -1142,6 +1142,8 @@
     <string name="lens_fov_readout">مجال الرؤية ⁨%1$s°⁩</string>
     <string name="lens_dof">عمق الميدان</string>
     <string name="lens_dof_hint">يموّه ما يبعد عن مستوى التركيز</string>
+    <string name="camera_affects_below">يؤثر في الطبقات أدناه</string>
+    <string name="camera_affects_below_hint">تمر الصور ومقاطع الفيديو والنصوص والأشكال أسفل هذه الكاميرا عبرها كثلاثية الأبعاد، دون تشغيل 3D في كل طبقة.</string>
     <string name="lens_focus_distance">مسافة التركيز</string>
     <string name="lens_aperture">فتحة العدسة</string>
     <string name="lens_blur">قوة التمويه</string>

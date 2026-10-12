@@ -3446,6 +3446,8 @@ final class AureaModel: ObservableObject {
     static let cameraLensFocus: UInt32 = 2
     static let cameraLensAperture: UInt32 = 3
     static let cameraLensBlur: UInt32 = 4
+    /// A câmera afeta as camadas 2D abaixo dela (0/1).
+    static let cameraAffectsBelow: UInt32 = 7
 
     /// Trilha animável de um parâmetro da lente (`aurea::TrackProperty`; DOF ligado não anima).
     func cameraLensTrack(_ param: UInt32) -> UInt32? {

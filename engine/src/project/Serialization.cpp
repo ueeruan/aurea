@@ -930,6 +930,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.boolv(l.acceptsLights);
     // v46: efeitos de imagem valem sobre o resultado 3D do modelo.
     w.boolv(l.modelEffects);
+    // v47: câmera "afeta camadas abaixo" (CameraData::affectsLayersBelow).
+    w.boolv(l.camera.affectsLayersBelow);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -961,6 +963,10 @@ void write_layer(ByteWriter& w, const Layer& l) {
 //      da camada). Antes dela: automático.
 // v46: efeitos de imagem no modelo 3D valem (Layer::modelEffects, um bool no
 //      fim da camada). Antes dela: desligado — os efeitos eram ignorados.
+// v47: câmera "afeta camadas abaixo" (CameraData::affectsLayersBelow, um bool
+//      no fim da camada). Antes dela: desligado — só as camadas 3D passam pela câmera.
+// v47: câmera "afeta camadas abaixo" (CameraData::affectsLayersBelow, um bool
+//      no fim da camada). Antes dela: desligado — só as camadas 3D passam pela câmera.
 // v45: "aceita luzes" da camada (Layer::acceptsLights, um bool no fim da
 //      camada). Antes dela: desligado — as luzes não tocam as camadas 2D.
 // v44: parâmetros das formas paramétricas (profundidade, ponta, espessura,
@@ -1532,6 +1538,8 @@ void read_layer(ByteReader& r, Layer& l) {
     // Projeto anterior à v46: efeitos num modelo 3D eram ignorados — continuam
     // assim até a pessoa mexer nos efeitos da camada.
     l.modelEffects = g_readingTimelineVersion >= 46 ? r.boolv() : false;
+    // Projeto anterior à v47: a câmera só afeta as camadas 3D — como era.
+    l.camera.affectsLayersBelow = g_readingTimelineVersion >= 47 ? r.boolv() : false;
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap

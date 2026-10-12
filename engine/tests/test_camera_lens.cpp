@@ -71,7 +71,7 @@ struct LensRig {
     ~LensRig() { if (ok) e.shutdown(); }
     Layer* camera() { return comp_of(e)->layer(LayerId::unpack(cam)); }
     std::vector<f32> query() {
-        std::vector<f32> v(9, 0.0f);
+        std::vector<f32> v(10, 0.0f);
         AUREA_CHECK(e.query_camera_lens(cam, v.data()));
         return v;
     }
@@ -312,4 +312,44 @@ AUREA_TEST(Scene3DLens, PickFocusMeasuresTheDistanceToTheTappedModel) {
     AUREA_CHECK(lens(rig.e, rig.cam, 2, deeper).ok());
     AUREA_CHECK_NEAR(rig.query()[3], deeper, 1e-3f);
     std::remove(mi.path.c_str());
+}
+
+// Comunidade (2026-10-11): a câmera 3D afeta as camadas 2D ABAIXO dela, sem
+// ligar o 3D em cada uma. Câmera nova liga; o parâmetro 7 desliga; camada
+// acima da câmera não muda; o valor sobrevive ao salvar e reabrir.
+AUREA_TEST(CameraLens, NewCameraAffects2DLayersBelowIt) {
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    Engine e;
+    AUREA_CHECK(e.initialize(ec).ok() && e.new_project(320, 180, 30.0, nullptr).ok());
+    std::vector<u8> rgba(16 * 16 * 4, 200);
+    const auto below = e.import_image(rgba.data(), 16, 16, "abaixo");
+    AUREA_CHECK(below.ok()); if (!below.ok()) return;
+    const auto cam = e.add_camera();
+    AUREA_CHECK(cam.ok()); if (!cam.ok()) return;
+    const auto above = e.import_image(rgba.data(), 16, 16, "acima");
+    AUREA_CHECK(above.ok()); if (!above.ok()) return;
+    Composition* comp = comp_of(e);
+    const Layer* lb = comp->layer(LayerId::unpack(*below));
+    const Layer* la = comp->layer(LayerId::unpack(*above));
+    AUREA_CHECK(lb && la && !lb->threeD && !la->threeD);
+    AUREA_CHECK(comp->layer(LayerId::unpack(*cam))->camera.affectsLayersBelow);
+    AUREA_CHECK(wants_layer_3d(*comp, *lb, FrameIndex{0}));
+    AUREA_CHECK(!wants_layer_3d(*comp, *la, FrameIndex{0}));
+    std::vector<f32> v(10, 0.0f);
+    AUREA_CHECK(e.query_camera_lens(*cam, v.data()));
+    AUREA_CHECK_EQ(v[9], 1.0f);
+    AUREA_CHECK(lens(e, *cam, 7, 0.0f).ok());
+    AUREA_CHECK(!wants_layer_3d(*comp, *lb, FrameIndex{0}));
+    AUREA_CHECK(lens(e, *cam, 7, 1.0f).ok());
+    const std::string file = "camera_afeta_abaixo.aurea";
+    AUREA_CHECK(e.save_project(file.c_str()).ok());
+    AUREA_CHECK(e.load_project(file.c_str()).ok());
+    comp = comp_of(e);
+    const Layer* reopened = comp->layer(LayerId::unpack(*cam));
+    AUREA_CHECK(reopened && reopened->camera.affectsLayersBelow);
+    e.shutdown();
+    std::remove(file.c_str());
+    std::remove((file + ".bak").c_str());
 }

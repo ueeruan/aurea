@@ -7363,6 +7363,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val CAMERA_LENS_FOCUS = 2
         const val CAMERA_LENS_APERTURE = 3
         const val CAMERA_LENS_BLUR = 4
+        /** A câmera afeta as camadas 2D abaixo dela (0/1). */
+        const val CAMERA_AFFECTS_BELOW = 7
         /** `ParticleParam::Count` do motor (contrato v21: 70 parâmetros). */
         const val PARTICLE_PARAM_COUNT = 70
         /** Id do "tipo" memória na tela Armazenamento. */

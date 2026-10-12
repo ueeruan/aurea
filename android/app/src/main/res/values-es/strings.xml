@@ -1116,6 +1116,8 @@ para editar la curva.</string>
     <string name="lens_fov_readout">FOV %1$s°</string>
     <string name="lens_dof">Profundidad de campo</string>
     <string name="lens_dof_hint">Desenfoca lo que está lejos del plano de enfoque</string>
+    <string name="camera_affects_below">Afecta a las capas de abajo</string>
+    <string name="camera_affects_below_hint">Las imágenes, videos, textos y formas debajo de esta cámara pasan por ella como 3D, sin activar el 3D en cada capa.</string>
     <string name="lens_focus_distance">Distancia de enfoque</string>
     <string name="lens_aperture">Apertura</string>
     <string name="lens_blur">Fuerza del desenfoque</string>

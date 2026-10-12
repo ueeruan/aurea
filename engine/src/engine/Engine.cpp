@@ -2581,6 +2581,7 @@ bool Engine::query_camera_lens(u64 layerId, f32* values) noexcept {
     for (u32 i = 0; i < 4; ++i) if (const Track* t = layer->tracks.find(props[i]); t && !t->keys.empty()) mask |= 1u << i;
     values[7] = static_cast<f32>(mask);
     values[8] = cam.active ? 1.0f : 0.0f;
+    values[9] = cam.affectsLayersBelow ? 1.0f : 0.0f;
     return true;
 }
 
@@ -2611,6 +2612,8 @@ Result<u64> Engine::add_camera() noexcept {
     if (!camera) return Status{Errc::OutOfMemory, "camada nao criada"};
     const auto fallback = scene3d::default_camera(comp->width(), comp->height());
     camera->threeD = true;
+    // Câmera nova afeta as camadas 2D abaixo dela (sem ligar o 3D em cada uma).
+    camera->camera.affectsLayersBelow = true;
     camera->start = FrameIndex{0};
     camera->end = comp->duration();
     camera->transform.position = fallback.position;
@@ -13911,7 +13914,7 @@ bool command_valid(const Command& c) noexcept {
                               : p == 6 ? 179.f : p == 9 ? .1f : 1000000.f;
             return p <= 10 && finite(v) && v >= 0 && v <= maximum;
         }
-        case CommandType::LayerSetCameraParam: return c.shape_param.param < 5 && finite(c.shape_param.value);
+        case CommandType::LayerSetCameraParam: return (c.shape_param.param < 5 || c.shape_param.param == 7) && finite(c.shape_param.value);
         case CommandType::LayerLayoutTransform: return c.shape_param.param < 15 && finite(c.shape_param.value);
         case CommandType::ShapeSetFill:
         case CommandType::ShapeSetStroke:
@@ -14473,6 +14476,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const f32 v = cmd.shape_param.value;
             const FrameIndex local = l->local_time(playback_.current());
             if (p == 1) { l->camera.dofEnabled = v >= 0.5f; return OkStatus; }
+            if (p == 7) { l->camera.affectsLayersBelow = v >= 0.5f; return OkStatus; }
+            if (p == 7) { l->camera.affectsLayersBelow = v >= 0.5f; return OkStatus; }
             auto keyed = [&](TrackProperty property, f32 value, f32& field) -> Status {
                 Track* track = l->tracks.find(property);
                 if (track && track->has_expression()) return Status{Errc::InvalidState, "lente controlada por expressao"};

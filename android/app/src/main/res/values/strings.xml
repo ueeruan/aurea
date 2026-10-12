@@ -2034,6 +2034,8 @@
     <string name="lens_fov_readout">FOV %1$s°</string>
     <string name="lens_dof">Profundidade de campo</string>
     <string name="lens_dof_hint">Desfoca o que fica longe do plano de foco</string>
+    <string name="camera_affects_below">Afeta camadas abaixo</string>
+    <string name="camera_affects_below_hint">Imagens, vídeos, textos e formas abaixo desta câmera passam por ela como 3D, sem ligar o 3D em cada camada.</string>
     <string name="lens_focus_distance">Distância de foco</string>
     <string name="lens_aperture">Abertura</string>
     <string name="lens_blur">Força do desfoque</string>

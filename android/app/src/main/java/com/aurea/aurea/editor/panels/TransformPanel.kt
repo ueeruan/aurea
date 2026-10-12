@@ -565,6 +565,12 @@ private fun androidx.compose.foundation.layout.ColumnScope.LensFace(env: PanelEn
                 }
             }
         }
+        val affectsBelow = lens.size > 9 && lens[9] >= 0.5f
+        BlurToggleRow(stringResource(R.string.camera_affects_below), stringResource(R.string.camera_affects_below_hint), affectsBelow) { on ->
+            store.beginGesture("camera afeta camadas abaixo")
+            store.setCameraLens(EditorStore.CAMERA_AFFECTS_BELOW, if (on) 1f else 0f)
+            store.endGesture()
+        }
         BlurToggleRow(stringResource(R.string.lens_dof), stringResource(R.string.lens_dof_hint), dof) { on ->
             store.beginGesture("profundidade de campo")
             store.setCameraLens(EditorStore.CAMERA_LENS_DOF, if (on) 1f else 0f)

@@ -3303,9 +3303,9 @@ AUREA_JNI jlong AUREA_FN(nativeAddCamera)(JNIEnv*, jclass, jlong handle) {
 /// 9 valores: mm, FOV°, DOF, foco (px), f/, desfoque ×, px/m, máscara de
 /// trilhas com keyframe, câmera ativa. Falso = não é câmera.
 AUREA_JNI jboolean AUREA_FN(nativeQueryCameraLens)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray output) {
-    auto* c = ctx_of(handle); f32 values[9]{};
-    if (!c || !output || env->GetArrayLength(output) < 9 || !c->engine.query_camera_lens(static_cast<u64>(layer), values)) return JNI_FALSE;
-    env->SetFloatArrayRegion(output, 0, 9, values); return JNI_TRUE;
+    auto* c = ctx_of(handle); f32 values[10]{};
+    if (!c || !output || env->GetArrayLength(output) < 10 || !c->engine.query_camera_lens(static_cast<u64>(layer), values)) return JNI_FALSE;
+    env->SetFloatArrayRegion(output, 0, 10, values); return JNI_TRUE;
 }
 /// Pick Focus: distância ao longo do eixo ótico até a superfície 3D sob o ponto
 /// (px da composição). < 0 = nada 3D ali. Só mede; a UI grava com o comando.

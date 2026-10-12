@@ -941,8 +941,8 @@ class AureaEngine private constructor() {
     private external fun nativeRealCameraStatus(handle: Long): LongArray
 
     fun addCamera(): Long = nativeAddCamera(nativeHandle)
-    /** Lente da câmera 3D (9 valores, ver `nativeQueryCameraLens`); null se a camada não é câmera. */
-    fun cameraLens(layer: Long): FloatArray? = FloatArray(9).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
+    /** Lente da câmera 3D (10 valores, ver `nativeQueryCameraLens`; [9] = afeta camadas abaixo); null se não é câmera. */
+    fun cameraLens(layer: Long): FloatArray? = FloatArray(10).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
     /** Pick Focus: distância no eixo ótico até o 3D sob o ponto (px da composição); < 0 = nada ali. */
     fun pickFocusDistance(layer: Long, compX: Float, compY: Float): Float = nativePickFocusDistance(nativeHandle, layer, compX, compY)
     /** LayerSetCameraParam: 0 mm, 1 DOF, 2 distância de foco, 3 f/, 4 desfoque ×. */

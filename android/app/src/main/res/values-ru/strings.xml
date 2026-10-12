@@ -1120,6 +1120,8 @@
     <string name="lens_fov_readout">FOV %1$s°</string>
     <string name="lens_dof">Глубина резкости</string>
     <string name="lens_dof_hint">Размывает то, что далеко от плоскости фокуса</string>
+    <string name="camera_affects_below">Влияет на слои ниже</string>
+    <string name="camera_affects_below_hint">Изображения, видео, тексты и фигуры ниже этой камеры проходят через неё как 3D, без включения 3D на каждом слое.</string>
     <string name="lens_focus_distance">Дистанция фокуса</string>
     <string name="lens_aperture">Диафрагма</string>
     <string name="lens_blur">Сила размытия</string>

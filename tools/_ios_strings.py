@@ -14,6 +14,7 @@ KEYS = [
     "export_range_content", "export_range_full",
     "real_camera_title", "real_camera_hint", "real_camera_record", "real_camera_stop", "real_camera_recording",
     "real_camera_recenter", "real_camera_invert", "real_camera_sensitivity", "real_camera_done", "real_camera_no_sensor",
+    "camera_affects_below", "camera_affects_below_hint",
     "upscale_title", "upscale_hint", "upscale_pick", "upscale_factor", "upscale_result", "upscale_start",
     "upscale_preparing", "upscale_processing", "upscale_time_note", "upscale_done", "upscale_open", "upscale_share", "upscale_again",
     "roto_frame_ready", "roto_frame_pending", "roto_clip_status", "roto_failed", "roto_view_label",

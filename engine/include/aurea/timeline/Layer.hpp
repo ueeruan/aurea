@@ -303,6 +303,12 @@ struct CameraData {
     bool dofEnabled = false;
     /// Força do desfoque: × o círculo de confusão da lente fina (1 = físico).
     f32 blurAmount = 1.0f;
+    // --- v47 ----------------------------------------------------------------------
+    /// "Afeta camadas abaixo": imagens, vídeos, textos, formas e pré-comps 2D
+    /// ABAIXO desta câmera (na pilha) passam por ela como se fossem 3D, sem
+    /// ligar o 3D em cada uma (pedido da comunidade, estilo Alight Motion).
+    /// Câmera nova liga; projeto anterior à v47 abre DESLIGADO (fica igual).
+    bool affectsLayersBelow = false;
 };
 
 /// LENTE: sensor full frame 36 × 24 mm. A projeção do Aurea é por FOV

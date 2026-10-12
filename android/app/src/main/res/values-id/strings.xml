@@ -1114,6 +1114,8 @@ untuk mengedit kurvanya.</string>
     <string name="lens_fov_readout">FOV %1$s°</string>
     <string name="lens_dof">Kedalaman bidang</string>
     <string name="lens_dof_hint">Mengaburkan yang jauh dari bidang fokus</string>
+    <string name="camera_affects_below">Memengaruhi lapisan di bawah</string>
+    <string name="camera_affects_below_hint">Gambar, video, teks, dan bentuk di bawah kamera ini melewatinya sebagai 3D, tanpa menyalakan 3D di setiap lapisan.</string>
     <string name="lens_focus_distance">Jarak fokus</string>
     <string name="lens_aperture">Bukaan</string>
     <string name="lens_blur">Kekuatan blur</string>

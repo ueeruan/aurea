@@ -291,7 +291,27 @@ Mat4 comp_from_clip(f32 w, f32 h) noexcept {
 /// A camada (ou algum pai) vive no espaço 3D? Marcada como 3D, ou com rotação
 /// em X/Y ou profundidade no instante — aí a perspectiva é a da câmera da
 /// cena, não um "achatado" 2D (rotação X/Y num 2D não mudava nada na tela).
+/// Abaixo (na pilha) de uma câmera ativa com "afeta camadas abaixo"? Só o que
+/// é imagem na tela: vídeo, imagem, texto, forma e pré-composição.
+bool under_layering_camera(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
+    switch (l.kind) {
+        case LayerKind::Video: case LayerKind::Image: case LayerKind::Text:
+        case LayerKind::Shape: case LayerKind::Composition: break;
+        default: return false;
+    }
+    const auto& order = comp.order();
+    for (u32 n = order.size(); n-- > 0;) {
+        const Layer* c = comp.layer(order.at(n));
+        if (!c) continue;
+        if (c == &l) return false;   // chegou na camada sem câmera acima dela
+        if (c->kind == LayerKind::Camera && c->camera.active && c->camera.affectsLayersBelow
+            && c->visible && c->contains_time(time)) return true;
+    }
+    return false;
+}
+
 bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
+    if (under_layering_camera(comp, l, time)) return true;
     const Layer* p = &l;
     for (u32 depth = 0; p && depth < 17; ++depth) {
         if (p->threeD) return true;

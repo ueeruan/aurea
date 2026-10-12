@@ -2145,9 +2145,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 // --- Lente da câmera 3D (ver Engine::query_camera_lens) ----------------------
 - (NSArray<NSNumber*>*)cameraLens:(long long)layer {
-    float values[9]{};
+    float values[10]{};
     if (!self.engine || !self.engine->query_camera_lens(static_cast<aurea::u64>(layer), values)) return @[];
-    return floats_to_array(values, 9);
+    return floats_to_array(values, 10);
 }
 - (float)pickFocusDistance:(long long)layer x:(float)x y:(float)y {
     if (!self.engine) return -1.f;

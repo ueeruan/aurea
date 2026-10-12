@@ -2001,6 +2001,8 @@ to edit the curve.</string>
     <string name="lens_fov_readout">FOV %1$s°</string>
     <string name="lens_dof">Depth of field</string>
     <string name="lens_dof_hint">Blurs what is far from the focus plane</string>
+    <string name="camera_affects_below">Affects layers below</string>
+    <string name="camera_affects_below_hint">Images, videos, texts and shapes below this camera go through it as 3D, without turning on 3D on each layer.</string>
     <string name="lens_focus_distance">Focus distance</string>
     <string name="lens_aperture">Aperture</string>
     <string name="lens_blur">Blur strength</string>

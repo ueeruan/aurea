@@ -836,12 +836,17 @@ ModelImportReport Engine::last_model_import() const noexcept {
     return lastModelImport_;
 }
 
+u64 Engine::process_budget_bytes() const noexcept {
+    u64 budget = config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes();
+    if (config_.memoryBudgetCapBytes && !config_.memoryBudgetBytes) budget = std::min(budget, config_.memoryBudgetCapBytes);
+    return DeviceCapabilities::process_budget_limit(budget);
+}
+
 void Engine::apply_memory_budgets() noexcept {
     renderer_.set_bounded_text_surface_enabled(config_.enableBoundedTextSurface);
     // Uma tabela só (kBudgetShare, em MemoryManager.hpp): cada consumidor com o
     // seu pedaço do orçamento medido do aparelho. Ver PHASE_8_REPORT §8B.
-    const u64 budget = DeviceCapabilities::process_budget_limit(
-        config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+    const u64 budget = process_budget_bytes();
     memory_.apply_budget_table(budget);
     // The rendered-frame category also contains flow/LUT/mask caches. Reserve
     // half for reusable intermediate render targets instead of retaining every
@@ -8448,8 +8453,7 @@ Result<u64> Engine::add_shape(u32 preset) noexcept {
 }
 
 u64 Engine::source_asset_room_locked() const noexcept {
-    const u64 budget = DeviceCapabilities::process_budget_limit(
-        config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+    const u64 budget = process_budget_bytes();
     u64 room = std::min<u64>(budget / 3, 256ull << 20);
     auto consume = [&room](u64 bytes) { room -= std::min(room, bytes); };
     for (const auto& [key, image] : images_) if (image) consume(image->rgba.capacity() + sizeof(*image));
@@ -10149,7 +10153,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
             && !refinePending_ && !refineNow_ && !lastIncomplete_
             && !offscreenReaders_.load(std::memory_order_acquire)
-            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold();
+            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold()
+            && !exportActive_.load(std::memory_order_acquire);
         previewIdle_.observe(idleEligible, idleKey, frameStart, force || !onlyIfChanged);
         const bool unchanged = !force && t.value == lastRenderedFrame_
             && !(lastIncomplete_ && mediaGen != lastMediaGen_);
@@ -10171,7 +10176,9 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         lastMediaGen_ = mediaGen;
 
         rs = current_render_settings();
-        if (caps_.thermal().severe() || memory_.pressure() >= .85f || preview_memory_hold()) rs.previewCacheRevision = 0;
+        // Durante o export a prévia não guarda quadros na GPU (o export precisa dela).
+        if (caps_.thermal().severe() || memory_.pressure() >= .85f || preview_memory_hold()
+            || exportActive_.load(std::memory_order_acquire)) rs.previewCacheRevision = 0;
         const u32 cacheCapacity = renderer_.configure_preview_cache(comp->width(), comp->height(), rs);
         // Corte/aparar de uma camada: só o trecho dela sai da prévia guardada.
         for (const auto& [from, to] : pendingPreviewRanges_) renderer_.invalidate_preview_frames(from, to);
@@ -10480,7 +10487,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             && !playing && !previewBuffering_ && playback_.mode() == PlaybackMode::Paused
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
             && !offscreenReaders_.load(std::memory_order_acquire)
-            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold();
+            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold()
+            && !exportActive_.load(std::memory_order_acquire);
         // Start the quiet interval after the first complete picture/refinement,
         // rather than polling an already-expired idle deadline on an incomplete one.
         previewIdle_.observe(eligible, current, monotonic_ns(), false);
@@ -12566,6 +12574,16 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
         if (const Status admitted = retire_abandoned_export_locked(); !admitted.ok()) return admitted;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        // A prévia guardada (até 512 MB de quadros na GPU) sai ANTES do
+        // export: somada ao export passava de 1 GB de memória de GPU e o
+        // HyperOS/MIUI matava o app no meio ("GpuMemory OOM", Redmi 12 no
+        // quadro 95/590, 12/10/2026). Durante o export a prévia não guarda
+        // quadros (exportActive_). Sem esperar a GPU: as texturas saem no
+        // fence delas e os blocos ficam no pool para os alvos do export (o
+        // total não cresce). Os temporários do render ficam — o export
+        // reaproveita os mesmos alvos.
+        if (const u32 releasedPreview = renderer_.release_preview_cache())
+            AUREA_LOG_INFO("export: previa guardada solta antes de exportar (%u quadros)", releasedPreview);
         // Complete retained GPU ownership before replacing the previous session.
         std::lock_guard<std::mutex> context(exportContextMutex_);
         exportCtx_.reset();
@@ -12673,6 +12691,20 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // Teto do aparelho (a mesma regra lado maior × lado menor da composição).
     const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
     const u32 capShort = std::min(caps_.max_export_width(), caps_.max_export_height());
+    if (capLong > 0 && capShort > 0 && (std::max(ctx->width, ctx->height) > capLong || std::min(ctx->width, ctx->height) > capShort)) {
+        // Acima do teto (encoder/memória do aparelho), a saída desce para o
+        // maior tamanho que ele exporta, na mesma proporção — antes o export
+        // recusava (erro 6): o upscale 2× de um vídeo 1440p pedia 2880p num
+        // Galaxy A05 e nunca saía.
+        const f64 longSide = std::max(ctx->width, ctx->height), shortSide = std::min(ctx->width, ctx->height);
+        const f64 fit = std::min(static_cast<f64>(capLong) / longSide, static_cast<f64>(capShort) / shortSide);
+        const u32 w = std::max<u32>(2, static_cast<u32>(std::floor(ctx->width * fit * 0.5)) * 2);
+        const u32 h = std::max<u32>(2, static_cast<u32>(std::floor(ctx->height * fit * 0.5)) * 2);
+        AUREA_LOG_WARN("export: %ux%u acima do teto do aparelho (%ux%u), saindo em %ux%u", ctx->width, ctx->height,
+                       capLong, capShort, w, h);
+        ctx->width = w;
+        ctx->height = h;
+    }
     // Com upscale na GPU, o que pesa (efeitos, 3D, fila) é renderizado em
     // saída/escala: o teto da memória vale para ESSE tamanho. A saída maior é
     // só o passe de upscale + NV12 — o encoder diz se a aguenta.
@@ -12983,8 +13015,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         // ignorava a tabela e usava 3 em todo celular: um aparelho de 4 GB
         // segurava um slot de leitura a mais do que a política dele manda.
         const u32 policyDepth = caps_.policy().exportPipelineDepth;
-        const u64 trackedBudget = DeviceCapabilities::process_budget_limit(
-            config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+        const u64 trackedBudget = process_budget_bytes();
         // Small envelopes cannot retain readback buffers for several full-HD
         // frames beside a large effect target. Serialize instead of changing
         // output dimensions or shutter samples.
@@ -12994,7 +13025,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                                                          : (policyDepth ? policyDepth : 3u), 1u, 4u);
         const u64 slotBytes = static_cast<u64>(ctx->outputWidth) * ctx->outputHeight * 3 / 2;
         ctx->queueByteLimit = config_.exportFrameQueueBudgetBytes ? config_.exportFrameQueueBudgetBytes
-            : std::min<u64>(64ull << 20, std::max<u64>(8ull << 20, caps_.memory_budget_bytes() / 8));
+            : std::min<u64>(64ull << 20, std::max<u64>(8ull << 20, process_budget_bytes() / 8));
         const u32 boundedSlots = static_cast<u32>(std::min<u64>(want, ctx->queueByteLimit / slotBytes));
         if (!boundedSlots) { ctx->sink->abort(); return Status{Errc::BudgetExceeded, "um quadro nao cabe na fila de exportacao"}; }
         for (u32 k = 0; k < boundedSlots; ++k) {
@@ -13159,7 +13190,7 @@ Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
 Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     ctx.resourceGpuGeneration = gpuGeneration_;
     ctx.offline = std::make_unique<OfflineFrameRenderer>();
-    const u64 renderBudget = std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2);
+    const u64 renderBudget = std::max<u64>(32ull << 20, process_budget_bytes() / 2);
     if (const Status initialized = ctx.offline->initialize(*gpu_, effectRegistry_, config_.mediaFactory,
             &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull); !initialized.ok())
         return initialized;
@@ -13475,8 +13506,7 @@ void Engine::export_thread_main() noexcept {
             // Reclaim completed uploads before admitting another expensive
             // scene. This changes concurrency, never shadows/blur or pixels.
             const auto residency = gpu_->memory_stats();
-            const u64 budget = DeviceCapabilities::process_budget_limit(
-                config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+            const u64 budget = process_budget_bytes();
             if (std::max(residency.usedBytes, residency.reservedBytes) > budget * 3 / 4) allowed = 1;
         }
         if (allowed != previousAdmission) {
@@ -14021,7 +14051,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         return Status{Errc::NotSupported, "resolucao acima do limite de textura da GPU"};
     // Memória da CPU: leitura em meia-precisão + RGBA8 + o PNG/GIF do quadro.
     const u64 working = static_cast<u64>(ctx->width) * ctx->height * 16 + (16ull << 20);
-    if (working > std::max<u64>(64ull << 20, caps_.memory_budget_bytes() / 2))
+    if (working > std::max<u64>(64ull << 20, process_budget_bytes() / 2))
         return Status{Errc::OutOfMemory, "memoria insuficiente para esta resolucao"};
     // Espaço em disco antes de começar (a mesma regra do vídeo: recusa só
     // quando nem metade da estimativa cabe).

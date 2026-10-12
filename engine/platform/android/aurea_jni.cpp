@@ -43,6 +43,7 @@ extern "C" {
 
 #include <cstdio>
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -415,6 +416,23 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     if (debug == JNI_TRUE) __system_property_get("debug.aurea.memory_budget_mb", memoryBudget);
     const auto memoryMiB = std::strtoul(memoryBudget, nullptr, 10);
     if (memoryMiB >= 96 && memoryMiB <= 1024) config.memoryBudgetBytes = memoryMiB << 20;
+    {
+        // Teto do orçamento por fabricante (0.1.8). O HyperOS/MIUI mata o app
+        // que passa de ~600 MB de memória de GPU ("GpuMemory OOM": um Redmi 12
+        // morreu no quadro 95/590 de um export com 1 GB de GPU). Nos outros,
+        // 1 GB cobre o 4K e evita o LMK em aparelhos de 12–16 GB, onde ¼ da RAM
+        // livre passava de 2 GB.
+        char maker[PROP_VALUE_MAX]{}, brand[PROP_VALUE_MAX]{};
+        __system_property_get("ro.product.manufacturer", maker);
+        __system_property_get("ro.product.brand", brand);
+        auto has = [](const char* text, const char* needle) {
+            std::string a(text);
+            for (char& ch : a) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            return a.find(needle) != std::string::npos;
+        };
+        const bool hyperOs = has(maker, "xiaomi") || has(brand, "xiaomi") || has(brand, "redmi") || has(brand, "poco");
+        config.memoryBudgetCapBytes = hyperOs ? (480ull << 20) : (1024ull << 20);
+    }
     config.enableTrackedGpuAdmission = true;
 #if defined(AUREA_GPU_GLES)
     // A debug-only override exercises the real fallback through the app's UI,

@@ -2154,6 +2154,27 @@ AUREA_TEST(ExportStartupRecovery, OpeningFailurePublishesFreshRecoveryAndNeverRe
     AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
 }
 
+// 0.1.8: acima do teto do encoder a saída desce para o maior tamanho que o
+// aparelho exporta (antes: erro 6 — o upscale 2× de um vídeo 1440p pedia
+// 2880p num Galaxy A05 e nunca saía).
+AUREA_TEST(ExportStartupMemory, OutputAboveTheDeviceCeilingExportsAtTheCeiling) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    {
+        Rig r(cfg, 30, 2, 1); AUREA_CHECK(r.ok); if (!r.ok) return;
+        const Outcome o = run_export(r, 4320, 30, false, 300);
+        AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+        AUREA_CHECK_EQ(r.cap.video.width, 3840u);
+        AUREA_CHECK_EQ(r.cap.video.height, 2160u);
+    }
+    {
+        Rig r(cfg, 30, 2, 1); AUREA_CHECK(r.ok); if (!r.ok) return;
+        const Outcome o = run_export(r, 2880, 30, false, 300, 2);
+        AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+        AUREA_CHECK_EQ(r.cap.video.width, 3840u);
+        AUREA_CHECK_EQ(r.cap.video.height, 2160u);
+    }
+}
+
 AUREA_TEST(ExportStartupMemory, PreviewTemporariesArePreservedAndCodecFailureResumesPreview) {
     SyntheticConfig cfg; cfg.width = 128; cfg.height = 72;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
@@ -2167,7 +2188,9 @@ AUREA_TEST(ExportStartupMemory, PreviewTemporariesArePreservedAndCodecFailureRes
     bool checked = false;
     r.cap.beforeOpen = [&]() -> Status {
         checked = true;
-        AUREA_CHECK_EQ(backend->texturesDestroyed, destroyed);
+        // 0.1.8: a prévia GUARDADA sai antes do export (memória de GPU do
+        // HyperOS); os temporários do render ficam e ninguém espera a GPU.
+        AUREA_CHECK(backend->texturesDestroyed >= destroyed);
         AUREA_CHECK_EQ(backend->idleWaits.load(), waits);
         return Status{Errc::OutOfMemory, "injected codec allocation failure"};
     };

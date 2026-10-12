@@ -248,6 +248,11 @@ struct EngineConfig {
     std::string documentsDirectory;
     u32   workerCount = 0;
     u64   memoryBudgetBytes = 0;
+    /// Teto do orçamento medido (0 = sem teto). Android: HyperOS/MIUI mata o
+    /// processo que passa de ~600 MB de memória de GPU ("GpuMemory OOM",
+    /// relatório de 12/10/2026 no meio de um export); o orçamento de ¼ da RAM
+    /// livre chegava a 1 GB num aparelho de 8 GB.
+    u64   memoryBudgetCapBytes = 0;
     bool  enableTelemetry = true;
     bool  disableAutosave = false;
     u32   autosaveJournalIntervalMs  = 3000;
@@ -1776,6 +1781,9 @@ private:
     /// Divide o orçamento de memória pelas categorias. Chamado na subida e de
     /// novo quando a GPU real chega e muda o orçamento.
     void apply_memory_budgets() noexcept;
+    /// Orçamento do processo: o configurado, senão o medido, preso pelo teto
+    /// do aparelho (`memoryBudgetCapBytes`) e pelo espaço de endereços.
+    [[nodiscard]] u64 process_budget_bytes() const noexcept;
     /// Maior lado de textura aceito ao importar modelo 3D — e o MESMO ao
     /// reabrir, senão o quadro muda entre importar e reabrir o projeto.
     [[nodiscard]] u32 model_texture_cap() const noexcept;

@@ -173,6 +173,10 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     // Export retomável (ExportPacketLog): o iOS suspende o app em segundo
     // plano e o export continua do último GOP salvo quando ele volta.
     config.enableResumableExport = true;
+    // Teto do orçamento (0.1.8, igual ao Android fora da Xiaomi): ¼ da RAM
+    // livre passava de 1 GB num iPhone de 6–8 GB e o jetsam encerra o app
+    // muito antes do limite nominal quando GPU e caches crescem juntos.
+    config.memoryBudgetCapBytes = 1024ull << 20;
     // Admit against tracked Metal resources within the existing device budget.
     // The legacy half-share rejects a 101 MiB Motion Tile target even when
     // the measured device envelope is larger and live GPU use is below 8 MiB.

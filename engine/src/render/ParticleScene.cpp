@@ -370,7 +370,7 @@ u32 Renderer::scene_particle_draws(const scene3d::SceneFrame& group, const scene
         key.cull = CullMode::None;
         auto pipe = shaders_.pipeline(key);
         if (!pipe.ok()) {
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             continue;
         }
         auto* uni = arena_.alloc_array<Vec4>(LayerSource::kParticleBlocks);

@@ -164,7 +164,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         // pronto mais recente DESTA fonte (atrasado alguns quadros), não só o
         // último que esta instância já mostrou: no play esse era nenhum, e o
         // efeito nunca aparecia.
-        incomplete_ = true;
+        mark_incomplete(__FILE__, __LINE__);
         u64 latestKey = 0;
         i64 latestUs = 0, latestFrameUs = 1;
         if (ai::DepthMapPtr latest = service->latest_video(sourceKey, latestKey, latestUs, latestFrameUs);
@@ -180,7 +180,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
             if (planDeferLocalAi_) localAiPending_ |= request.foreground ? 2u : 1u;
             return none;
         }
-        incomplete_ = true;
+        mark_incomplete(__FILE__, __LINE__);
         // O último mapa pronto desta instância segura o quadro (melhor
         // atrasado que piscando o original).
         if (auto it = depthTex_.find(st.frameKey); st.frameKey && st.asset == sourceKey && it != depthTex_.end()) {
@@ -191,7 +191,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     }
 
     if (map->disparity.size() != static_cast<usize>(mapSize) * mapSize) {
-        incomplete_ = true;
+        mark_incomplete(__FILE__, __LINE__);
         AUREA_LOG_ERROR("mapa IA com tamanho invalido: %zu, esperado %u x %u", map->disparity.size(), mapSize, mapSize);
         return none;
     }
@@ -217,7 +217,7 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
             }
         }
         auto created = backend_->create_texture(depth_texture_desc(mapSize));
-        if (!created.ok()) { incomplete_ = true; return none; }
+        if (!created.ok()) { mark_incomplete(__FILE__, __LINE__); return none; }
         PendingUpload up;
         up.texture = *created;
         up.bytesPerRow = mapSize * 2;

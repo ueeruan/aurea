@@ -1761,7 +1761,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const LayerId id = order.at(i);
         const Layer* l = comp.layer(id);
         if (!l || !l->contains_time(time)) continue;
-        if (nestSalt_ && id.index > 0xFFFFu) { incomplete_ = true; continue; }
+        if (nestSalt_ && id.index > 0xFFFFu) { mark_incomplete(__FILE__, __LINE__); continue; }
         const bool isMatte = std::find(mattes.begin(), mattes.end(), id.pack()) != mattes.end();
         const bool isInput = std::find(inputLayers.begin(), inputLayers.end(), id.pack()) != inputLayers.end();
         if (!l->visible && !isMatte && !isInput) continue;
@@ -1900,7 +1900,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
             case LayerKind::Image: {
                 const ImagePixels* px = imageLookup ? imageLookup(imageCtx, l->source) : nullptr;
-                if (!px || !px->width || !px->height) { incomplete_ = true; continue; }
+                if (!px || !px->width || !px->height) { mark_incomplete(__FILE__, __LINE__); continue; }
                 rl.source.kind = LayerSource::Kind::Image;
                 rl.source.image = l->source;
                 rl.source.pixels = px;
@@ -2067,7 +2067,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             case LayerKind::Model3D: {
                 std::shared_ptr<const scene3d::SceneAsset> asset =
                     modelLookup_ ? modelLookup_(modelCtx_, l->model.scene) : nullptr;
-                if (!asset) { incomplete_ = true; continue; }
+                if (!asset) { mark_incomplete(__FILE__, __LINE__); continue; }
                 scene3d::SceneInstance inst;
                 fill_object_environment(*l, inst);
                 // Matriz 3D para qualquer pai (num pai 2D comum ela é a mesma
@@ -2341,9 +2341,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const u64 bytesPerSet = (static_cast<u64>(L.quads.size()) * (1u + (T.shadow ? 1u : 0u) + (outlinePass ? 1u : 0u)) + 1u) * sizeof(GlyphInstance);
                 const u32 admitted = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit,
                     exposureBytesRemaining_ / std::max<u64>(1, bytesPerSet)));
-                if (admitted == 0) { incomplete_ = true; continue; }
-                if (sets > admitted) { incomplete_ = true; sets = admitted; }
-                exposureBytesRemaining_ -= bytesPerSet * sets;
+                // O orçamento do quadro é FIXO: recusar aqui deixava o quadro
+                // incompleto para sempre e o export morria em 30 s. Usa as
+                // amostras que cabem (no mínimo o texto sem desfoque).
+                if (sets > admitted) sets = std::max(1u, admitted);
+                exposureBytesRemaining_ -= std::min(exposureBytesRemaining_, bytesPerSet * sets);
                 textShutter.count = sets;
                 for (u32 si = 0; si < sets; ++si) {
                     const f64 lt = static_cast<f64>(local.value) + (sets > 1 ? textShutter.offset(si) : 0.0);
@@ -2447,7 +2449,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             : std::max<f64>(rl.source.height, bmax.y) - top);
                         if (!std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0
                             || width >= std::numeric_limits<u32>::max() || height >= std::numeric_limits<u32>::max()) {
-                            incomplete_ = true;
+                            mark_incomplete(__FILE__, __LINE__);
                             continue;
                         }
                         const Vec2 S{-left, -top};
@@ -2568,7 +2570,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     // Never wrap and silently alias a still-live decoder/cache.
                     if (nestedNamespaces_.size() >= 0x3FFFu) {
                         renderInstancePath_.resize(savedPathSize);
-                        incomplete_ = true;
+                        mark_incomplete(__FILE__, __LINE__);
                         continue;
                     }
                     const u32 next = static_cast<u32>(nestedNamespaces_.size()) + 1u;
@@ -2911,7 +2913,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     if (ns == nestedNamespaces_.end()) {
                         if (nestedNamespaces_.size() >= 0x3FFFu) {
                             renderInstancePath_.resize(savedPathSize);
-                            incomplete_ = true;
+                            mark_incomplete(__FILE__, __LINE__);
                             return ~0u;
                         }
                         const u32 next = static_cast<u32>(nestedNamespaces_.size()) + 1u;
@@ -3591,13 +3593,24 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 && bytesPerSample > batchBudget / desired;
             const u64 admittedBytes = batchExposure ? poseBytesPerSample : bytesPerSample;
             const u32 admitted = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit, stateBudget / std::max<u64>(1, admittedBytes)));
-            if (admitted < 2 && (changing || travel >= .01 || minimum > 1)) { incomplete_ = true; continue; }
-            if (settings.finalQuality && admitted < std::clamp(mb.samples, 2u, 64u)
-                && (changing || travel >= .01 || minimum > 1)) { incomplete_ = true; continue; }
+            // Orçamento de estado do quadro é FIXO (mesmo em toda tentativa):
+            // recusar deixava a cena 3D pesada com motion blur incompleta para
+            // sempre e o export desistia em 30 s ("recurso de composicao
+            // indisponivel"). Agora a cena usa as amostras que CABEM; sem
+            // espaço nem para 2, sai sem desfoque neste grupo — mas sai.
+            if (admitted < 2 && minimum <= 1) {
+                if (settings.finalQuality && (changing || travel >= .01))
+                    AUREA_LOG_WARN("motion blur 3D sem orcamento neste quadro: grupo sem desfoque (%llu bytes por amostra)",
+                                   static_cast<unsigned long long>(admittedBytes));
+                continue;
+            }
+            if (admitted < 2) { mark_incomplete(__FILE__, __LINE__); continue; }
+            if (settings.finalQuality && admitted < std::clamp(mb.samples, 2u, 64u) && (changing || travel >= .01))
+                AUREA_LOG_WARN("motion blur 3D reduzido a %u amostras pelo orcamento do quadro (pedido %u)", admitted, mb.samples);
             shutter.count = std::max(minimum, shutter_sample_count(mb, settings.finalQuality,
                 effective_quality(settings).motionBlurSamples, travel, changing, admitted));
             if (shutter.count <= 1) continue;
-            if (shutter.count > admitted) { incomplete_ = true; continue; }
+            if (shutter.count > admitted) { mark_incomplete(__FILE__, __LINE__); continue; }
             stateBudget -= admittedBytes * shutter.count;
             if (batchExposure) out.sceneExposureBatches.push_back(FrameSnapshot::SceneExposureBatch{
                 static_cast<u32>(&f - out.scenes.data()), 0, bytesPerSample - poseBytesPerSample});
@@ -3688,7 +3701,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const u64 budget = std::min(exposureBytesRemaining_, settings.sceneExposureBatchBudgetBytes);
         batch.samplesPerBatch = static_cast<u32>(std::min<u64>(ShutterPlan::kHardLimit,
             budget / std::max<u64>(1, batch.renderBytesPerSample)));
-        if (!batch.samplesPerBatch) incomplete_ = true;
+        // Sem espaço para um lote: uma amostra por envio (mais lento, completo).
+        if (!batch.samplesPerBatch) batch.samplesPerBatch = 1;
     }
 }
 
@@ -3782,7 +3796,7 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
         env.hdri = hdriLookup_(hdriCtx_, es.hdri);
         env.hdriKey = es.hdri.pack();
         // Nulo = ainda carregando; vazio = arquivo ausente (fica o estúdio neutro).
-        if (!env.hdri) incomplete_ = true;
+        if (!env.hdri) mark_incomplete(__FILE__, __LINE__);
         else if (env.hdri->rgb.empty()) env.hdri.reset();
     } else if (es.studioPreset != 0) {
         // v32: estúdio procedural — o MESMO caminho de um HDRI (chave própria).
@@ -3861,7 +3875,7 @@ void Renderer::fill_object_environment(const Layer& l, scene3d::SceneInstance& i
     } else if (hdri.valid() && hdriLookup_) {
         e.hdri = hdriLookup_(hdriCtx_, hdri);
         e.hdriKey = hdri.pack();
-        if (!e.hdri) incomplete_ = true;
+        if (!e.hdri) mark_incomplete(__FILE__, __LINE__);
         else if (e.hdri->rgb.empty()) e.hdri.reset();
     }
     inst.environment = std::move(e);
@@ -3903,7 +3917,7 @@ void Renderer::upload_glyphs(FrameSnapshot& snap) noexcept {
         glyphCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!glyphBuf_[slot].valid() || !backend_->map_buffer(glyphBuf_[slot], ptr).ok() || !ptr) { incomplete_ = true; return; }
+    if (!glyphBuf_[slot].valid() || !backend_->map_buffer(glyphBuf_[slot], ptr).ok() || !ptr) { mark_incomplete(__FILE__, __LINE__); return; }
     auto* dst = static_cast<GlyphInstance*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->glyphs.begin(), s->glyphs.end(), dst + s->glyphBase);
     backend_->unmap_buffer(glyphBuf_[slot]);
@@ -3941,7 +3955,7 @@ void Renderer::upload_vectors(FrameSnapshot& snap) noexcept {
         vecCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!vecBuf_[slot].valid() || !backend_->map_buffer(vecBuf_[slot], ptr).ok() || !ptr) { incomplete_ = true; return; }
+    if (!vecBuf_[slot].valid() || !backend_->map_buffer(vecBuf_[slot], ptr).ok() || !ptr) { mark_incomplete(__FILE__, __LINE__); return; }
     auto* dst = static_cast<Vec4*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->vec.begin(), s->vec.end(), dst + s->vecBase);
     backend_->unmap_buffer(vecBuf_[slot]);
@@ -3973,7 +3987,7 @@ void Renderer::flush_uploads() noexcept {
         const Status s = enough ? backend_->upload_texture(up.texture, up.data.data(), up.bytesPerRow)
                                 : Status{Errc::InvalidArgument, "pixels insuficientes para a textura"};
         if (!s.ok()) {
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             AUREA_LOG_WARN("upload de textura falhou: %s", s.message().data());
             if (retained != i) uploads_[retained] = std::move(up);
             ++retained;
@@ -4344,12 +4358,12 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                                           nullptr, 0) != kInvalidIndex;
                 if (ok) out.texture = merged;
             }
-            if (!ok) incomplete_ = true;
+            if (!ok) mark_incomplete(__FILE__, __LINE__);
         }
         if (layer.source.nestedHistory != ~0u) {
             const FGTexture past = other(layer.source.nestedHistory);
             if (past.valid()) out.history = past;
-            else incomplete_ = true;
+            else mark_incomplete(__FILE__, __LINE__);
         }
         return true;
     }
@@ -4447,7 +4461,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 }
                 const u32 np = scene_particle_draws(group, group.blurFrames[s], parts);
                 if (!scene3d_.build(graph_, arena_, group.blurFrames[s], compTargetW_, compTargetH_, frameNumber, sample, samplePlanes,
-                                    parts, np, nullptr, &sampleHdr)) { incomplete_ = true; continue; }
+                                    parts, np, nullptr, &sampleHdr)) { mark_incomplete(__FILE__, __LINE__); continue; }
                 struct Cap {
                     FGTexture sample; const u32* count; PipelineHandle p; u64 sampler; f32 w; f32 h; bool hdr = false;
                 } cap{sample, built, *pAdd, shaders_.sampler(CommonSampler::LinearClamp).id,
@@ -4529,7 +4543,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
         case LayerSource::Kind::Video: {
             out.texture = graph_.create_texture("layer-video", d);
             if (!build_video_source(layer, layerIndex, w, h, out.texture, frameNumber)) {
-                incomplete_ = true;
+                mark_incomplete(__FILE__, __LINE__);
                 videoSourceFailed_ = true;
                 return false;
             }
@@ -4559,13 +4573,13 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                          PassTexture{chan[2], {}, CommonSampler::LinearClamp}},
                         nullptr, 0);
                     if (pass != kInvalidIndex) out.texture = merged;
-                    else incomplete_ = true;
+                    else mark_incomplete(__FILE__, __LINE__);
                 }
                 // Sem os três quadros (decoder atrasado), a camada sai da fonte
                 // principal: melhor mostrar o quadro atual do que um buraco.
                 // That fallback is presentable, but cannot complete a cached
                 // preview or an exact capture/export while GPU uploads retry.
-                if (!built || layer.source.channelCount != 3) incomplete_ = true;
+                if (!built || layer.source.channelCount != 3) mark_incomplete(__FILE__, __LINE__);
             }
             // DETECTAR MOVIMENTO: a fonte no instante anterior, na mesma área e
             // densidade; a cadeia de efeitos a leva até o efeito.
@@ -4574,14 +4588,14 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 if (build_video_source(layer, layerIndex, w, h, past, frameNumber, layer.source.historyFrame.get())) {
                     out.history = past;
                     if (layer.source.historyFrame->hardwareBuffer) framesUsed.push_back(layer.source.historyFrame);
-                } else incomplete_ = true;
+                } else mark_incomplete(__FILE__, __LINE__);
             }
             // Quadro seguinte da fonte: mistura, movimento de pixels e/ou
             // desfoque vetorial (os dois últimos pelo optical flow, em cache).
             if (layer.source.frameB) {
                 const FGTexture b = graph_.create_texture("layer-video-seguinte", d);
                 if (!build_video_source(layer, layerIndex, w, h, b, frameNumber, layer.source.frameB.get())) {
-                    incomplete_ = true;
+                    mark_incomplete(__FILE__, __LINE__);
                     return true;
                 }
                 if (layer.source.frameB->hardwareBuffer) framesUsed.push_back(layer.source.frameB);
@@ -4599,7 +4613,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     for (const DecodedFrame* source : {layer.source.frame.get(), layer.source.frameB.get()})
                         pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
                     flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, baseW, baseH, frameNumber);
-                    if (!flow.valid() && layer.source.vectorBlur > 0.0f) incomplete_ = true;
+                    if (!flow.valid() && layer.source.vectorBlur > 0.0f) mark_incomplete(__FILE__, __LINE__);
                 }
                 // Smooth Motion sem fluxo válido (passe não compilou, textura do
                 // cache não criou) cai na mistura: antes a layer ia preta/lixo.
@@ -4652,7 +4666,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     if (ctx.fullscreen_pass("desfoque-vetorial", PassStage::Decode, blurred, ShaderId::video_flow_vblur_frag,
                                            {PassTexture{out.texture}, PassTexture{flow}}, &vp, sizeof(vp)) != kInvalidIndex)
                         out.texture = blurred;
-                    else incomplete_ = true; // Retain valid preview pixels; export retries the requested blur.
+                    else mark_incomplete(__FILE__, __LINE__); // Retain valid preview pixels; export retries the requested blur.
                 }
             }
             return true;
@@ -5127,7 +5141,7 @@ void Renderer::upload_masks(FrameSnapshot& snap) noexcept {
         maskCap_[slot] = b.ok() ? bd.bytes : 0;
     }
     void* ptr = nullptr;
-    if (!maskBuf_[slot].valid() || !backend_->map_buffer(maskBuf_[slot], ptr).ok() || !ptr) { incomplete_ = true; return; }
+    if (!maskBuf_[slot].valid() || !backend_->map_buffer(maskBuf_[slot], ptr).ok() || !ptr) { mark_incomplete(__FILE__, __LINE__); return; }
     auto* dst = static_cast<Vec4*>(ptr);
     for (FrameSnapshot* s : all) std::copy(s->maskData.begin(), s->maskData.end(), dst + s->maskBase);
     backend_->unmap_buffer(maskBuf_[slot]);
@@ -5175,7 +5189,7 @@ void Renderer::apply_masks(const RenderLayer& layer, LayerImage& img, u64 frameN
     if (!cov.valid()) {
         if (!maskFrameBuf_.valid()) return;
         auto pipe = shaders_.pipeline(PipelineKey::fullscreen(ShaderId::mask_raster_frag, SurfaceFormat::R8));
-        if (!pipe.ok()) { incomplete_ = true; return; }
+        if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); return; }
         // A que um quadro em voo pode estar lendo nunca é a que se escreve.
         const u32 slot = mc.next;
         mc.next ^= 1u;
@@ -5220,7 +5234,7 @@ FGTexture Renderer::draw_to_comp(const CompositeDraw& d, const TextureDesc& comp
                                  const char* name) noexcept {
     auto pNormal = shaders_.pipeline(PipelineKey::graphics(
         ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
-    if (!pNormal.ok()) { incomplete_ = true; return FGTexture{}; }
+    if (!pNormal.ok()) { mark_incomplete(__FILE__, __LINE__); return FGTexture{}; }
     TextureDesc td = compDesc;
     td.transferSrc = false;
     const FGTexture t = graph_.create_texture(name, td);
@@ -5275,7 +5289,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         LayerImage src;
         const bool hasEffects = i < snap.plans.size() && !snap.plans[i].empty();
         if (!build_source(layer, i, hasEffects || layer.maskCount > 0, src, framesInFlight_, frameNumber)) {
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             continue;
         }
         apply_masks(layer, src, frameNumber);
@@ -5315,18 +5329,18 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             const u32 count = layer.source.glyphSets;
             auto pipeline = shaders_.pipeline(PipelineKey::graphics(
                 ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
-            if (!pipeline.ok()) { incomplete_ = true; return false; }
+            if (!pipeline.ok()) { mark_incomplete(__FILE__, __LINE__); return false; }
             FGTexture integrated{};
             MotionBlurBounds bounds{Rect{0,0,compW,compH},compDesc.width,compDesc.height};
             const EffectPlan* plan = i < snap.plans.size() ? &snap.plans[i] : nullptr;
             for (u32 s = 0; s < count; ++s) {
                 LayerImage sample;
                 if (!build_source(layer, i, hasEffects || layer.maskCount > 0, sample, framesInFlight_, frameNumber, s)) {
-                    incomplete_ = true; return false;
+                    mark_incomplete(__FILE__, __LINE__); return false;
                 }
                 apply_masks(layer, sample, frameNumber);
                 LayerImage final = sample;
-                if (hasEffects && !EffectGraph::build(*plan, ctx, sample, final).ok()) { incomplete_ = true; return false; }
+                if (hasEffects && !EffectGraph::build(*plan, ctx, sample, final).ok()) { mark_incomplete(__FILE__, __LINE__); return false; }
                 if (s == 0) {
                     // Every glyph set has the same layout and effect plan. Its
                     // final region bounds all its pixels, including padding,
@@ -5369,7 +5383,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         if (!build_source(layer, i, hasEffects || layer.maskCount > 0, src, framesInFlight_, frameNumber)) {
             // Camada fora deste quadro por recurso ainda não pronto (pipeline
             // compilando, textura a caminho): o próximo quadro tenta de novo.
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             return false;
         }
         const LayerImage raw = src;   // antes das máscaras: base das amostras do eco numa pré-composição
@@ -5421,7 +5435,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                         const u32 n = layer.temporal[s].nested;
                         if (n == ~0u || n == layer.source.nestedIndex) continue;
                         const FrameSnapshot* other = n < currentSnap_->nested.size() ? currentSnap_->nested[n].get() : nullptr;
-                        if (!other || !other->target.valid()) { incomplete_ = true; continue; }
+                        if (!other || !other->target.valid()) { mark_incomplete(__FILE__, __LINE__); continue; }
                         LayerImage sample = raw;
                         sample.texture = other->target;
                         apply_masks(layer, sample, frameNumber);
@@ -5465,7 +5479,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 draw.region = bounds.region;
                 draw.compFromLayer = Mat4::identity();
                 draw.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
-            } else incomplete_ = true;
+            } else mark_incomplete(__FILE__, __LINE__);
         }
         return true;
     };
@@ -5621,7 +5635,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 const Vec4 mode{static_cast<f32>(static_cast<u8>(layer.matteMode)), 0, 0, 0};
                 if (!lc.valid() || ctx.fullscreen_pass("track-matte", PassStage::Composite, out, ShaderId::mask_track_matte_frag,
                                                        {PassTexture{lc}, PassTexture{m}}, &mode, sizeof(mode)) == kInvalidIndex) {
-                    incomplete_ = true;
+                    mark_incomplete(__FILE__, __LINE__);
                     continue;
                 }
                 draw.texture = out;
@@ -5678,7 +5692,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         auto c = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat));
         auto b = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_blend_frag, kWorkFormat));
         if (c.ok() && b.ok()) { copyP = *c; blendP = *b; }
-        else incomplete_ = true;   // pipeline compilando: este quadro cai no Normal, o próximo tenta de novo
+        else mark_incomplete(__FILE__, __LINE__);   // pipeline compilando: este quadro cai no Normal, o próximo tenta de novo
     }
     const bool readsBackdrop = lastRead != kInvalidIndex && copyP.valid() && blendP.valid();
     // Máscara/Excluir (AM) recortam as CAMADAS abaixo, não a cor de fundo da
@@ -6026,19 +6040,19 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const u32 count = unblurred_scene_target_count(snap, 0);
         if (count) {
             staged.storage.reset(new (std::nothrow) StagedSceneTarget[count]{});
-            if (!staged.storage) { incomplete_ = true; snap.release_video_frames(); return Errc::OutOfMemory; }
+            if (!staged.storage) { mark_incomplete(__FILE__, __LINE__); snap.release_video_frames(); return Errc::OutOfMemory; }
             staged.targets = {staged.storage.get(), count};
             const Status status = render_staged_scene_targets(snap, settings, offscreen->width, offscreen->height,
                 staged.targets, exposureStats, timings);
             if (!status.ok()) {
                 if (status.code() == Errc::OutOfDeviceMemory) failedGraphFrame_ = backend_->last_submitted_frame();
-                incomplete_ = true; snap.release_video_frames(); return status;
+                mark_incomplete(__FILE__, __LINE__); snap.release_video_frames(); return status;
             }
             // Cold scene resources retain the existing exact-capture retry
             // contract. Do not present or read an unfinished stage as pixels.
             if (scene3d_.incomplete() || std::any_of(staged.targets.begin(), staged.targets.end(),
                 [](const StagedSceneTarget& target) { return !target.texture.valid(); })) {
-                incomplete_ = true; snap.release_video_frames(); return OkStatus;
+                mark_incomplete(__FILE__, __LINE__); snap.release_video_frames(); return OkStatus;
             }
             stagedSceneTargets_ = staged.targets;
         }
@@ -6046,7 +6060,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     if (!snap.sceneExposureBatches.empty()) {
         completed.storage.reset(new (std::nothrow) TextureHandle[snap.scenes.size()]{});
         if (!completed.storage) {
-            incomplete_ = true; snap.release_video_frames();
+            mark_incomplete(__FILE__, __LINE__); snap.release_video_frames();
             return Status{Errc::OutOfMemory, "resultados de exposicao 3D"};
         }
         completed.textures = {completed.storage.get(), snap.scenes.size()};
@@ -6062,7 +6076,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             completed.textures, exposureStats, timings);
         if (!prepared.ok()) {
             if (prepared.code() == Errc::OutOfDeviceMemory) failedGraphFrame_ = backend_->last_submitted_frame();
-            incomplete_ = true; snap.release_video_frames(); return prepared;
+            mark_incomplete(__FILE__, __LINE__); snap.release_video_frames(); return prepared;
         }
         boundedSceneTextures_ = completed.textures;
     }
@@ -6222,7 +6236,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             // Missing RAW pixels are not a successful black video frame. Keep
             // the last visible picture on backends that can discard safely,
             // and let Engine retry without advancing presentation telemetry.
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             previewSourceStatus = Status{Errc::DecodeFailed, "frame RAW indisponivel para GPU"};
         }
     } else {
@@ -6237,7 +6251,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         // A missing main source must not remove a video layer for one display
         // tick. Auxiliary temporal samples retain their existing valid-source
         // fallback; this applies only to absent/unusable main video pixels.
-        incomplete_ = true;
+        mark_incomplete(__FILE__, __LINE__);
         previewSourceStatus = Status{Errc::DecodeFailed, "pixels principais do video indisponiveis"};
     }
     // A raiz de novo (as pré-composições trocaram o estado em curso).
@@ -6275,7 +6289,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         auto pOut = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
                                                             ShaderId::composite_output_frag, bbFormat));
         if (!pOut.ok()) {
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             previewSourceStatus = pOut.status();
         }
         // A composição encaixada (letterbox) no espaço LÓGICO do display, e a
@@ -6456,6 +6470,11 @@ Status Renderer::finish_render(FrameSnapshot& snap, const RenderSettings& settin
         failedGraphFrame_ = backend_->last_submitted_frame();
     if (!endStatus.ok()) for (auto& target : completion.targets)
         if (target.texture.valid()) target.pendingFrame = completion.frame.frameNumber;
+    if (!incomplete_ && scene3d_.incomplete()) {
+        incompleteFile_ = scene3d_.incomplete_file(); incompleteLine_ = scene3d_.incomplete_line();
+    } else if (!incomplete_ && EffectGraph::bypassed_total() != completion.effectsBefore) {
+        incompleteFile_ = "efeito ignorado (EffectGraph)"; incompleteLine_ = 0;
+    }
     incomplete_ = incomplete_ || scene3d_.incomplete()
         || EffectGraph::bypassed_total() != completion.effectsBefore;
     if (completion.cached) completion.cached->complete = result.ok() && endStatus.ok() && !incomplete_

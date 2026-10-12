@@ -569,6 +569,15 @@ public:
     using ModelLookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
     /// O último quadro deixou alguma camada de fora por recurso pendente? (lê e zera)
     [[nodiscard]] bool take_incomplete() noexcept { const bool b = incomplete_; incomplete_ = false; return b; }
+    /// Onde o último quadro incompleto foi marcado (arquivo:linha do motor), para
+    /// o motivo do export dizer QUAL recurso faltou. Nulo = nenhum ainda.
+    /// Export em GPU fraca: degrau de custo 3D (0 = qualidade final cheia).
+    /// Cada degrau corta sombra/MSAA do arquivo para o passe 3D caber no prazo
+    /// do driver móvel (~2 s por envio), em vez de a GPU ser resetada.
+    [[nodiscard]] u32 export_gpu_step() const noexcept { return exportGpuStep_; }
+    u32 raise_export_gpu_step() noexcept { if (exportGpuStep_ < 4) ++exportGpuStep_; return exportGpuStep_; }
+    [[nodiscard]] const char* incomplete_file() const noexcept { return incompleteFile_; }
+    [[nodiscard]] u32 incomplete_line() const noexcept { return incompleteLine_; }
     [[nodiscard]] u32 local_ai_pending() const noexcept { return localAiPending_; }
     void set_model_lookup(ModelLookup fn, void* ctx) noexcept { modelLookup_ = fn; modelCtx_ = ctx; }
     using HdriLookup = std::shared_ptr<const scene3d::HdriPixels> (*)(void* ctx, AssetId id);
@@ -1028,6 +1037,10 @@ private:
     std::vector<PendingUpload> uploads_;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)
+    const char* incompleteFile_ = nullptr;
+    u32 incompleteLine_ = 0;
+    u32 exportGpuStep_ = 0;
+    void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }
     bool videoSourceFailed_ = false; ///< principal source could not supply GPU pixels for this frame
     struct PreviewFrame { i64 time = -1; TextureHandle texture{}; bool complete = false; u64 used = 0, gpuFrame = 0; };
     std::vector<PreviewFrame> previewFrames_;

@@ -487,6 +487,8 @@ public:
     /// Accumulates omitted resources across all groups/subframes of one render.
     /// A fallback may be displayed, but must never become a completed cache entry.
     [[nodiscard]] bool incomplete() const noexcept { return incomplete_; }
+    [[nodiscard]] const char* incomplete_file() const noexcept { return incompleteFile_; }
+    [[nodiscard]] u32 incomplete_line() const noexcept { return incompleteLine_; }
     void reset_incomplete() noexcept { incomplete_ = false; }
     /// Qualidade (HeavyQuality): mapa de sombra (256..4096), nível da sombra
     /// (0 BAIXO = PCF 8, 1 MÉDIO = PCF 16, 2 ALTO = PCSS 12+24, 3 ULTRA =
@@ -625,6 +627,9 @@ private:
     usize envSetFrame_ = 0;
     SceneStats stats_{};
     bool incomplete_ = false;
+    const char* incompleteFile_ = nullptr;
+    u32 incompleteLine_ = 0;
+    void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }
 };
 
 } // namespace aurea::scene3d

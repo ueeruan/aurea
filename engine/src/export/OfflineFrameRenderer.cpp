@@ -2,6 +2,8 @@
 #include "aurea/project/Project.hpp"
 #include "aurea/core/Time.hpp"
 #include <chrono>
+#include <cstdio>
+#include "aurea/core/Log.hpp"
 
 namespace aurea {
 void OfflineFrameRenderer::source_ready(void* p) noexcept {
@@ -88,10 +90,19 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         if (work != lastWork || resources != lastGeneration) {
             lastProgress = now; lastWork = work; lastGeneration = resources;
         }
-        if (now - start > fenceTimeoutNs_ || now - lastProgress > 30'000'000'000ull)
-            return Status{exact ? Errc::Timeout : Errc::DecodeFailed,
-                exact ? "recurso de composicao indisponivel; quadro offline nao foi codificado"
-                      : "a fonte nao entregou o quadro exato; exportacao interrompida"};
+        if (now - start > fenceTimeoutNs_ || now - lastProgress > 30'000'000'000ull) {
+            if (!exact) return Status{Errc::DecodeFailed, "a fonte nao entregou o quadro exato; exportacao interrompida"};
+            // O motivo leva o ponto exato do motor que deixou o quadro incompleto.
+            static thread_local char detail[200];
+            const char* file = renderer_.incomplete_file();
+            const char* base = file ? file : "?";
+            for (const char* c = base; c && *c; ++c) if (*c == '/' || *c == '\\') base = c + 1;
+            std::snprintf(detail, sizeof(detail), "recurso de composicao indisponivel (%s:%u); quadro offline nao foi codificado",
+                          base, renderer_.incomplete_line());
+            AUREA_LOG_ERROR("export offline: quadro %lld incompleto por 30 s em %s:%u", static_cast<long long>(time.value),
+                            base, renderer_.incomplete_line());
+            return Status{Errc::Timeout, detail};
+        }
         std::unique_lock lock(wakeMutex_);
         wake_.wait_for(lock, std::chrono::milliseconds(10), [&] {
             return generation_.load(std::memory_order_acquire) != observed || cancelled();

@@ -246,6 +246,7 @@ struct Engine::ExportContext {
     u64 frozenAssetBudget = 0;
     Status frozenAssetStatus = OkStatus;
     bool promotedOriginalModels = false;
+    i64 gpuStepAt = -100;   ///< quadro em que o export desceu o ultimo degrau de custo 3D
     u64 originalModelBytes = 0; // export-owned CPU sources, retained until actual cleanup
 
     // Plano da sessão, fixado no start (a timeline não muda durante o export:
@@ -12824,6 +12825,31 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
             return nullptr;
         }, &c, settings, gpuFrame);
     c.renderNs.fetch_add(monotonic_ns() - begin, std::memory_order_relaxed);
+    // Diagnóstico de GPU lenta: um pass que passa de ~2 s faz o driver móvel
+    // resetar a GPU (VK_ERROR_DEVICE_LOST). Registra o pass mais lento > 300 ms.
+    if (settings.gpuTimers) {
+        const GpuTiming* passes = nullptr;
+        const u32 n = c.offline->compositor().last_gpu_passes(passes);
+        const GpuTiming* worst = nullptr;
+        f32 total = 0.f;
+        for (u32 i = 0; i < n; ++i) { total += passes[i].ms; if (!worst || passes[i].ms > worst->ms) worst = &passes[i]; }
+        if (worst && worst->ms > 300.f)
+            AUREA_LOG_WARN("export gpu lento quadro=%lld pior=%s %.0f ms total=%.0f ms passes=%u", static_cast<long long>(time.value),
+                worst->label ? worst->label : "?", static_cast<double>(worst->ms), static_cast<double>(total), n);
+        // Um passe 3D acima de ~0,9 s está perto do prazo do driver móvel (~2 s
+        // por envio, KGSL/Adreno): desce um degrau de custo 3D antes de a GPU
+        // ser resetada (VK_ERROR_DEVICE_LOST no meio do export).
+        if (worst && worst->ms > 900.f && worst->label && std::strncmp(worst->label, "3d", 2) == 0) {
+            auto& compositor = c.offline->compositor();
+            const u32 before = compositor.export_gpu_step();
+            if (before < 4 && time.value - c.gpuStepAt >= 3) {
+                c.gpuStepAt = time.value;
+                const u32 step = compositor.raise_export_gpu_step();
+                AUREA_LOG_WARN("export: GPU lenta (%s %.0f ms): qualidade 3D do export no degrau %u", worst->label,
+                               static_cast<double>(worst->ms), step);
+            }
+        }
+    }
     return c.frozenAssetStatus.ok() ? result : c.frozenAssetStatus;
 }
 

@@ -672,7 +672,7 @@ void SceneRenderer::poll_object_environment(u64 frameNumber, bool wait) noexcept
         static_cast<unsigned long long>(key), tier, static_cast<double>(waited - started) * 1e-6,
         static_cast<double>(monotonic_ns() - waited) * 1e-6, uploaded ? 1u : 0u);
     if (!uploaded) {
-        incomplete_ = true;
+        mark_incomplete(__FILE__, __LINE__);
         return;
     }
     next.specularTier = tier;
@@ -708,7 +708,7 @@ const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironme
         if (environmentTrace_) AUREA_LOG_INFO("capture-environment object key=%llu spec=%u background=%u cpu_build_ms=%.3f upload_ms=%.3f result=%d",
             static_cast<unsigned long long>(key), q.specularSize, q.backgroundSize,
             static_cast<double>(built - started) * 1e-6, static_cast<double>(monotonic_ns() - built) * 1e-6, uploaded.raw());
-        if (!uploaded.ok()) { incomplete_ = true; return nullptr; }
+        if (!uploaded.ok()) { mark_incomplete(__FILE__, __LINE__); return nullptr; }
         next.specularTier = q.specularSize;
         next.lastFrame = frameNumber;
         envSets_.emplace_back(key, next);
@@ -723,7 +723,7 @@ const SceneRenderer::EnvSet* SceneRenderer::environment_set(const SceneEnvironme
         pendingObjectKey_ = key;
         pendingObjectSpecTier_ = q.specularSize;
     }
-    incomplete_ = true;
+    mark_incomplete(__FILE__, __LINE__);
     return best;
 }
 
@@ -734,7 +734,7 @@ void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     const u64 key = key_of(env);
     if (pendingEnv_.valid() && pendingEnv_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         const Status s = set_environment(pendingEnv_.get());
-        if (!s.ok()) { incomplete_ = true; AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data()); }
+        if (!s.ok()) { mark_incomplete(__FILE__, __LINE__); AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data()); }
         else { envKey_ = pendingKey_; envSpecTier_ = pendingSpecTier_; envBgTier_ = pendingBgTier_; }
     }
     // Atendido: mesma chave, qualidade ≥ a do preview e fundo (se pedido).
@@ -745,7 +745,7 @@ void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     if (same) envLastFrame_ = statsFrame_ == ~0ull ? 0 : statsFrame_;
     if (same && envSpecTier_ >= envPreview_.specularSize && envBgTier_ >= wantBg
         && (wantBg == 0 || background_.valid())) return;
-    if (pendingEnv_.valid()) { incomplete_ = true; return; }
+    if (pendingEnv_.valid()) { mark_incomplete(__FILE__, __LINE__); return; }
     envRequested_ = true;
     pendingKey_ = key;
     EnvironmentQuality q = envPreview_;
@@ -756,7 +756,7 @@ void SceneRenderer::request_environment(const SceneEnvironment& env) noexcept {
     pendingBgTier_ = q.backgroundSize;
     SceneEnvironment copy = env;
     pendingEnv_ = std::async(std::launch::async, [copy, q] { return build_for(copy, q); });
-    incomplete_ = true;
+    mark_incomplete(__FILE__, __LINE__);
 }
 
 Status SceneRenderer::prepare_environment(const SceneEnvironment& env, u64 frameNumber, bool object) noexcept {
@@ -864,7 +864,7 @@ void SceneRenderer::finish_environment(const SceneEnvironment& env) noexcept {
         static_cast<double>(waited - started) * 1e-6, static_cast<double>(built - waited) * 1e-6,
         static_cast<double>(monotonic_ns() - built) * 1e-6, s.raw());
     if (!s.ok()) {
-        incomplete_ = true;
+        mark_incomplete(__FILE__, __LINE__);
         AUREA_LOG_WARN("3D: ambiente nao subiu: %s", s.message().data());
     }
     else { envKey_ = key; envSpecTier_ = spec; envBgTier_ = backgroundTier; }
@@ -1008,7 +1008,7 @@ const GpuModel* SceneRenderer::model(u64 assetKey, const SceneAsset& asset) noex
     if (e.model) return e.model.get();
     const u64 now = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
-    if (e.failed || !gpu_ || now < e.retryAfterNs) { incomplete_ = true; return nullptr; }
+    if (e.failed || !gpu_ || now < e.retryAfterNs) { mark_incomplete(__FILE__, __LINE__); return nullptr; }
     auto m = std::make_unique<GpuModel>();
     if (const Status s = m->upload(*gpu_, asset); !s.ok()) {
         AUREA_LOG_ERROR("3D: upload do modelo falhou: %s", s.message().data());
@@ -1018,7 +1018,7 @@ const GpuModel* SceneRenderer::model(u64 assetKey, const SceneAsset& asset) noex
         e.failed = s.code() != Errc::OutOfDeviceMemory && s.code() != Errc::OutOfMemory
             && s.code() != Errc::BudgetExceeded && s.code() != Errc::Timeout;
         e.retryAfterNs = now + 500'000'000ull;
-        incomplete_ = true;
+        mark_incomplete(__FILE__, __LINE__);
         return nullptr;
     }
     AUREA_LOG_INFO("3D: modelo na GPU (%.1f MB geometria, %.1f MB texturas)", m->geometryBytes / 1048576.0,
@@ -1605,7 +1605,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             buildModels.emplace(inst.assetKey, instanceModels[i]);
             if (auto it = models_.find(inst.assetKey); it != models_.end()) it->second.lastFrame = frameNumber;
         }
-        if (!instanceModels[i]) incomplete_ = true;
+        if (!instanceModels[i]) mark_incomplete(__FILE__, __LINE__);
     }
 
     // Juntas de todas as instâncias num SSBO só; cada desenho com skin recebe
@@ -1637,7 +1637,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 gpu_->unmap_buffer(buf);
                 joints = buf;
-            } else incomplete_ = true;
+            } else mark_incomplete(__FILE__, __LINE__);
         }
     }
 
@@ -1745,7 +1745,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 morphBuf = buf;
                 stats_.morphUploadBytes += bytes;
             } else {
-                incomplete_ = true;
+                mark_incomplete(__FILE__, __LINE__);
                 morphJobs.clear();
             }
         }
@@ -1839,7 +1839,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     if (mat->factors.alphaMode == AlphaMode::Blend) continue;   // transparente não projeta
                     const bool sk = skinnedNode && p.skinned;
                     auto pipe = shaders_->pipeline(shadow_key(sk));
-                    if (!pipe.ok()) { incomplete_ = true; continue; }
+                    if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
                     ShadowDraw sd{};
                     sd.model = gm;
                     sd.prim = &p;
@@ -1976,15 +1976,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 // which authored surface is its front face.
                 if (mirrored && !mat->factors.doubleSided) key.frontFaceCCW = false;
                 auto pipe = shaders_->pipeline(key);
-                if (!pipe.ok()) { incomplete_ = true; continue; }
+                if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
                 const EnvSlot* env = env_of(inst);
                 const SceneBlock* blk = block_for(mat, env);
-                if (!blk) { incomplete_ = true; continue; }
+                if (!blk) { mark_incomplete(__FILE__, __LINE__); continue; }
                 if (inst.cameraOverride) {
                     if (auto found = sampleBlocks.find(blk)) blk = *found;
                     else {
                         auto* sampled = arena.alloc_array<SceneBlock>(1);
-                        if (!sampled) { incomplete_ = true; continue; }
+                        if (!sampled) { mark_incomplete(__FILE__, __LINE__); continue; }
                         *sampled = *blk;
                         sampled->viewProj = inst.sampleViewProj;
                         sampled->cameraPos = Vec4{inst.sampleCameraPosition, blk->cameraPos.w};
@@ -2166,7 +2166,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     if (planes && !planes->empty()) {
         auto pp = shaders_->pipeline(plane_key());
         auto blend = shaders_->pipeline(plane_key(true));
-        if (!pp.ok() || !blend.ok()) incomplete_ = true;
+        if (!pp.ok() || !blend.ok()) mark_incomplete(__FILE__, __LINE__);
         if (pp.ok() && blend.ok()) {
             planePipe = *pp;
             planeBlendPipe = *blend;
@@ -2195,7 +2195,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             k.sampleCount = static_cast<u8>(passSamples_);
             k.hasColor1 = passMrt_;
             if (auto pp = shaders_->pipeline(k); pp.ok()) partList[i].pipeline = *pp;
-            else { incomplete_ = true; return false; }
+            else { mark_incomplete(__FILE__, __LINE__); return false; }
         }
     }
     const u32 opaqueCount = static_cast<u32>(opaque.size());
@@ -2275,14 +2275,14 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // ===== fim do chão ==========================================================
     PipelineHandle skyPipe{};
     const bool skyReady = frame.environment.showBackground && background_.valid() && envKey_ == key_of(frame.environment);
-    if (frame.environment.showBackground && !skyReady) incomplete_ = true;
+    if (frame.environment.showBackground && !skyReady) mark_incomplete(__FILE__, __LINE__);
     if (skyReady) {
         auto key = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
         key.hasDepth = true; key.depthFormat = SurfaceFormat::Depth32F;
         key.sampleCount = static_cast<u8>(passSamples_);
         key.hasColor1 = passMrt_;
         auto pipe = shaders_->pipeline(key); if (pipe.ok()) skyPipe = *pipe;
-        else incomplete_ = true;
+        else mark_incomplete(__FILE__, __LINE__);
     }
     struct SkyBlock { Mat4 view; Vec4 projection; Vec4 light; Vec4 post; };
     // Fundo: LOD pela pegada do pixel (textureGrad no shader) × o desfoque;
@@ -2303,7 +2303,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             auto key = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag,
                                              SurfaceFormat::RGBA16F);
             if (auto pipe = shaders_->pipeline(key); pipe.ok()) direct = *pipe;
-            else incomplete_ = true;
+            else mark_incomplete(__FILE__, __LINE__);
         }
         SkyBlock skyDirect = sky;
         skyDirect.post = Vec4{std::clamp(frame.environment.exposure, 0.01f, 64.0f),
@@ -2458,7 +2458,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // Com luz de cena: exposição → bloom → tone map → + 2D. Sem (só planos e
     // partículas): o alvo de exibição já é a saída, como sempre foi.
     FGTexture display = color, scene = sceneHdr;
-    if (dofOn && depth1x.valid() && !build_dof(graph, frame, width, height, display, scene, depth1x)) incomplete_ = true;
+    if (dofOn && depth1x.valid() && !build_dof(graph, frame, width, height, display, scene, depth1x)) mark_incomplete(__FILE__, __LINE__);
     if (outExposureHdr) {
         *outExposureHdr = scene;
         outColor = display;
@@ -2480,13 +2480,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
 FGTexture SceneRenderer::finish_exposure(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
                                         FGTexture display, FGTexture scene, bool bloomHasRadiance) noexcept {
     FGTexture result = scene.valid() ? build_post(graph, frame, width, height, display, scene, bloomHasRadiance) : display;
-    if (!result.valid()) { incomplete_ = true; result = display; }
+    if (!result.valid()) { mark_incomplete(__FILE__, __LINE__); result = display; }
     // Sem MSAA (GLES, nível BAIXO): FXAA na imagem já em espaço de exibição.
     // FXAA: nível BAIXO, ou o aparelho não tem o MSAA pedido (GLES).
     if (passSamples_ <= 1 && (postFxaa_ || postMsaa_ > 1) && antialias_) {
         const FGTexture aa = build_fxaa(graph, width, height, result);
         if (aa.valid()) result = aa;
-        else incomplete_ = true;
+        else mark_incomplete(__FILE__, __LINE__);
     }
     return result;
 }
@@ -2512,7 +2512,7 @@ FGTexture SceneRenderer::build_post(FrameGraph& graph, const SceneFrame& frame, 
         auto downPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_post_bloom_down_frag, SurfaceFormat::RGBA16F));
         auto upPipe = shaders_->pipeline(PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_post_bloom_up_frag,
                                                                SurfaceFormat::RGBA16F, true, BlendMode::Add));
-        if (!downPipe.ok() || !upPipe.ok()) incomplete_ = true;
+        if (!downPipe.ok() || !upPipe.ok()) mark_incomplete(__FILE__, __LINE__);
         if (downPipe.ok() && upPipe.ok()) {
             u32 w = std::max(1u, width / bloomDiv_), h = std::max(1u, height / bloomDiv_);
             const u32 want = std::min(bloomLevels_, kMaxLevels);

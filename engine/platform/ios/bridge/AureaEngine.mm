@@ -1540,10 +1540,8 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return e->set_text3d(layerId, spec).ok();
 }
 - (BOOL)applyText3DPreset:(long long)layerId preset:(uint32_t)preset {
-    auto* e = self.engine; aurea::scene3d::Text3DSpec spec;
-    if (!e || !e->query_text3d(layerId, spec) ||
-        !aurea::scene3d::apply_text3d_material_preset(spec, preset)) return NO;
-    return e->set_text3d(layerId, spec).ok();
+    auto* e = self.engine;
+    return e && e->apply_text3d_preset(static_cast<aurea::u64>(layerId), preset);
 }
 - (NSArray<NSNumber*>*)text3DAnim:(long long)layerId {
     auto* e = self.engine;

@@ -1176,6 +1176,10 @@ public:
     /// A bola de um material pronto do texto 3D (0..6, a mesma ordem de
     /// apply_text3d_material_preset). Não depende do projeto.
     bool text3d_preset_preview(u32 preset, u32 size, std::vector<u8>& outRgba) noexcept;
+    /// Aplica o material pronto do Texto 3D. Metal (Cromo, Ouro, Escovado, Metal
+    /// cinemático) numa cena sem estúdio nem HDRI liga o "Estúdio cromado": sem
+    /// ele o metal só refletia o degradê analítico e ficava chapado.
+    bool apply_text3d_preset(u64 layerId, u32 preset) noexcept;
 
     // --- Pré-composição ----------------------------------------------------------
     /// Move as camadas para uma composição nova (mesmo tamanho, taxa e

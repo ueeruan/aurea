@@ -284,7 +284,7 @@ struct Panel3DView: View {
             if sceneSettings.count >= 8 {
                 section("scene_studio")
                 horizontal {
-                    ForEach(Array(["scene_none", "scene_dark", "scene_product", "scene_sky"].enumerated()), id: \.offset) { i, key in
+                    ForEach(Array(["scene_none", "scene_dark", "scene_product", "scene_sky", "scene_chrome"].enumerated()), id: \.offset) { i, key in
                         T3DChip(label: AureaText.t(key), on: Int(sceneSettings[0]) == i) { setScene(0, Float(i)) }
                     }
                 }

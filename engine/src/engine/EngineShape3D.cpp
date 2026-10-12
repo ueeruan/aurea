@@ -14,6 +14,8 @@
 #include "aurea/render/Renderer.hpp"
 #include "aurea/scene3d/MaterialPreview.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/StudioEnvironment.hpp"
+#include "aurea/scene3d/Text3D.hpp"
 #include "aurea/scene3d/ModelBudget.hpp"
 
 #include <algorithm>
@@ -593,6 +595,24 @@ bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u
     }
     out = scene3d::material_ball_cached(ball, size);
     return !out.empty();
+}
+
+bool Engine::apply_text3d_preset(u64 layerId, u32 preset) noexcept {
+    scene3d::Text3DSpec spec;
+    if (!query_text3d(layerId, spec) || !scene3d::apply_text3d_material_preset(spec, preset)) return false;
+    const bool metal = preset == 0 || preset == 1 || preset == 2 || preset == 6;
+    bool bare = false;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        const Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        // Sem estúdio, sem HDRI da cena e sem ambiente próprio do objeto.
+        bare = comp && layer && comp->environment().studioPreset == 0 && !comp->environment().hdri.valid()
+            && layer->environmentSource == 0;
+    }
+    if (metal && bare)
+        (void)set_studio_environment(static_cast<u32>(scene3d::StudioPreset::ChromeStudio));
+    return set_text3d(layerId, spec).ok();
 }
 
 bool Engine::text3d_preset_preview(u32 preset, u32 size, std::vector<u8>& out) noexcept {

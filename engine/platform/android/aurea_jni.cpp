@@ -1690,10 +1690,8 @@ AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, 
 
 AUREA_JNI jboolean AUREA_FN(nativeApplyText3dPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
     NativeContext* c = ctx_of(handle);
-    aurea::scene3d::Text3DSpec s;
-    if (!c || !c->engine.query_text3d(static_cast<u64>(layer), s) ||
-        !aurea::scene3d::apply_text3d_material_preset(s, static_cast<u32>(preset))) return JNI_FALSE;
-    return c->engine.set_text3d(static_cast<u64>(layer), s).ok() ? JNI_TRUE : JNI_FALSE;
+    if (!c || preset < 0) return JNI_FALSE;
+    return c->engine.apply_text3d_preset(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeSetText3dTexture)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring path) {

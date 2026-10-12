@@ -464,7 +464,7 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
     if (settings.size >= 8) {
         KitTitle(stringResource(R.string.scene_studio))
         ChipRow {
-            listOf(R.string.scene_none, R.string.scene_dark, R.string.scene_product, R.string.scene_sky).forEachIndexed { i, label ->
+            listOf(R.string.scene_none, R.string.scene_dark, R.string.scene_product, R.string.scene_sky, R.string.scene_chrome).forEachIndexed { i, label ->
                 KitChip(stringResource(label), on = settings[0].toInt() == i) { change(0, i.toFloat()) }
             }
         }

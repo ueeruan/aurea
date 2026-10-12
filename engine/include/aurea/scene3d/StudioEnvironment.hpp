@@ -16,6 +16,11 @@
 //    3 ceu_sol         — céu azul (gradiente zênite → horizonte com névoa),
 //                        disco do sol com intensidade HDR física e o
 //                        rebatimento do chão.
+//    4 estudio_cromado — o mapa clássico de letra cromada: céu claro com faixa
+//                        brilhante no horizonte, chão escuro com corte nítido
+//                        (o claro/escuro que atravessa cada letra), faixas de
+//                        softbox, um ponto quente e recortes quente/frio que
+//                        acendem os chanfros.
 // =============================================================================
 #pragma once
 
@@ -25,8 +30,8 @@
 
 namespace aurea::scene3d {
 
-enum class StudioPreset : u32 { None = 0, DarkStudio = 1, ProductStudio = 2, SkySun = 3 };
-inline constexpr u32 kStudioPresetCount = 4;   ///< inclui o 0 (nenhum)
+enum class StudioPreset : u32 { None = 0, DarkStudio = 1, ProductStudio = 2, SkySun = 3, ChromeStudio = 4 };
+inline constexpr u32 kStudioPresetCount = 5;   ///< inclui o 0 (nenhum)
 
 /// Chave do ambiente na GPU (SceneEnvironment::hdriKey) de um preset. Fora do
 /// espaço de AssetId::pack (geração 0x53545544 = "STUD"): não colide com HDRI

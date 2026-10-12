@@ -3752,6 +3752,55 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- Gravar voz ---------------------------------------------------------------
+    /**
+     * Arquivo novo para uma narração. Fica com os projetos
+     * (`filesDir/projetos/voz`), fora da limpeza de cache: é mídia do usuário,
+     * como o vídeo gerado pela IA, e o motor lê pelo caminho absoluto.
+     */
+    fun newVoiceRecordingFile(): File {
+        val dir = File(File(getApplication<Application>().filesDir, "projetos"), "voz").apply { mkdirs() }
+        return File(dir, "voz-${System.currentTimeMillis()}.m4a")
+    }
+
+    /**
+     * "Gravar voz": a narração vira camada de áudio pelo MESMO `importAudio`
+     * (desfazer, waveform e export de sempre), com o nome "Voz N". O motor põe
+     * a camada no cabeçote; como a timeline pode ter tocado junto durante a
+     * gravação, o cabeçote volta antes ao quadro onde ela começou — e a camada
+     * entra ali, num passo de desfazer só. Falhou: o arquivo sai (sem mídia órfã).
+     * `interrupted`: a gravação parou sozinha (ligação, app fora da tela) — o
+     * aviso final diz isso em vez do "adicionada".
+     */
+    fun importVoiceRecording(file: File, startFrame: Int, interrupted: Boolean = false) {
+        if (!file.isFile || file.length() == 0L) {
+            file.delete()
+            errorMessage = appText(R.string.voice_save_failed)
+            return
+        }
+        if (!acceptsImport()) {
+            file.delete()
+            return
+        }
+        if (playing) pause()
+        seek(startFrame)
+        val name = com.aurea.aurea.editor.VoiceTake.nextName(appText(R.string.voice_layer_prefix), layers.map { it.name })
+        busyMessage = appText(R.string.voice_saving)
+        launchImport launch@{
+            // A fila de comandos (pausa + seek) é drenada pelo `import_audio` antes de ler o cabeçote.
+            val id = withContext(Dispatchers.IO) { engine.importAudio(file.absolutePath, name) }
+            busyMessage = null
+            if (id < 0) {
+                file.delete()
+                errorMessage = appText(R.string.app_audio_import_failed, humanError((-id).toInt()))
+                return@launch
+            }
+            refreshNow()
+            select(id)
+            showToast(appText(if (interrupted) R.string.voice_interrupted else R.string.voice_saved))
+        }
+    }
+
     /** "Extrair o áudio": o som vira camada própria e o vídeo fica mudo (um passo de desfazer). */
     fun extractAudio(layer: Long? = primary) {
         val id = layer ?: return

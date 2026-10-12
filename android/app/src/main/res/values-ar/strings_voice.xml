@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gravar voz (narração pelo microfone, Adicionar → Áudio). Par do iOS: VoiceRecorder.swift. -->
+<resources>
+    <string name="voice_title">تسجيل صوت</string>
+    <string name="voice_layer_prefix">صوت</string>
+    <string name="voice_record">تسجيل</string>
+    <string name="voice_stop">إيقاف وحفظ</string>
+    <string name="voice_cancel_take">إلغاء وحذف التسجيل</string>
+    <string name="voice_level">مستوى الميكروفون</string>
+    <string name="voice_elapsed">الوقت المسجَّل</string>
+    <string name="voice_hint">اضغط على الزر الأحمر وتحدث. يُضاف التعليق الصوتي إلى المخطط الزمني بدءًا من رأس التشغيل.</string>
+    <string name="voice_recording">جارٍ التسجيل…</string>
+    <string name="voice_countdown">عد تنازلي 3-2-1</string>
+    <string name="voice_play_along">تشغيل الفيديو أثناء التسجيل</string>
+    <string name="voice_headphones">استخدم سماعات الرأس حتى لا يدخل صوت الفيديو في التسجيل.</string>
+    <string name="voice_permission_title">السماح باستخدام الميكروفون</string>
+    <string name="voice_permission_body">لتسجيل تعليقك الصوتي، يحتاج Aurea إلى الميكروفون. يبقى الصوت على جهازك داخل المشروع.</string>
+    <string name="voice_permission_allow">السماح</string>
+    <string name="voice_permission_blocked">الوصول إلى الميكروفون محظور. افتح إعدادات التطبيق واسمح باستخدام الميكروفون.</string>
+    <string name="voice_open_settings">فتح الإعدادات</string>
+    <string name="voice_saving">جارٍ حفظ التعليق الصوتي…</string>
+    <string name="voice_saved">أُضيف التعليق الصوتي إلى المخطط الزمني</string>
+    <string name="voice_save_failed">تعذّر حفظ التسجيل</string>
+    <string name="voice_start_failed">تعذّر استخدام الميكروفون. أغلق التطبيقات الأخرى التي تسجل وحاول مرة أخرى.</string>
+    <string name="voice_too_short">التسجيل قصير جدًا: لم يُضف شيء</string>
+    <string name="voice_interrupted">توقف التسجيل (خرج التطبيق من الشاشة أو وردت مكالمة). تم حفظ ما سُجِّل حتى الآن.</string>
+    <string name="voice_discarded">تم تجاهل التسجيل</string>
+    <string name="voice_countdown_value">يبدأ خلال %1$d</string>
+</resources>

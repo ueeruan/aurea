@@ -125,6 +125,8 @@ struct EditorView: View {
             }
         }
         .overlay { if model.showAddLayer && !model.sceneEditor { ShellAddCategoryDialog() } }
+        // Gravar voz: o painel por cima da timeline, com o palco à vista (VoiceRecorder.swift).
+        .overlay { if shell.voiceRecorder { VoiceRecorderOverlay() } }
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
         .modifier(ModelTexturesPrompt(shell: shell))
@@ -1669,6 +1671,8 @@ private struct AddLayerSheet: View {
                         card("sh_add_ai_video", glyph: CupertinoGlyph.WandStars) { model.openPanel(.aiVideo) }
                     case 2:
                         card("editor_musica_ou_som", glyph: CupertinoGlyph.MusicNote, accent: true) { files(.audioFile) }
+                        card("voice_title", glyph: CupertinoGlyph.MicFill, color: AureaColors.danger) { openVoiceRecorder() }
+                            .accessibilityIdentifier("add.voice")
                         card("sh_add_video_sound", glyph: CupertinoGlyph.Film) { photos(.audioFromVideo) }
                         card("sh_add_marker_at_playhead", glyph: CupertinoGlyph.Bookmark) { close(); model.toggleMarkerAt(model.status.playhead) }
                     case 3:
@@ -1740,6 +1744,18 @@ private struct AddLayerSheet: View {
         }
     }
     private func close() { model.showAddLayer = false }
+    /// "Gravar voz": fecha o diálogo e abre o painel de gravação pela raiz do
+    /// editor (dentro de uma folha, depois que ela fecha).
+    private func openVoiceRecorder() {
+        close()
+        model.pause()
+        let shell = shell
+        if inSheet {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.voiceRecorder = true }
+        } else {
+            shell.voiceRecorder = true
+        }
+    }
     private func photos(_ kind: ShellAddPicker) { request(kind) }
     private func files(_ kind: ShellAddPicker) { request(kind) }
     /// Fecha o diálogo e pede o seletor à raiz do editor (que continua na tela

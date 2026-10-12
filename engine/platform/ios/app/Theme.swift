@@ -1253,6 +1253,9 @@ enum CupertinoGlyph {
     static let LockOpen: Character = "\u{F6FA}"
     static let Minus: Character = "\u{F70F}"
     static let MinusCircle: Character = "\u{F463}"
+    // Microfone (Gravar voz): contorno e cheio.
+    static let Mic: Character = "\u{F460}"
+    static let MicFill: Character = "\u{F461}"
     static let Move: Character = "\u{F8F8}"
     static let MusicNote: Character = "\u{F46B}"
     static let MusicNote2: Character = "\u{F46C}"

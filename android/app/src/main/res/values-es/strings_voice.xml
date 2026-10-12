@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gravar voz (narração pelo microfone, Adicionar → Áudio). Par do iOS: VoiceRecorder.swift. -->
+<resources>
+    <string name="voice_title">Grabar voz</string>
+    <string name="voice_layer_prefix">Voz</string>
+    <string name="voice_record">Grabar</string>
+    <string name="voice_stop">Detener y guardar</string>
+    <string name="voice_cancel_take">Cancelar y descartar la grabación</string>
+    <string name="voice_level">Nivel del micrófono</string>
+    <string name="voice_elapsed">Tiempo grabado</string>
+    <string name="voice_hint">Toca el botón rojo y habla. La narración entra en la línea de tiempo desde el cabezal.</string>
+    <string name="voice_recording">Grabando…</string>
+    <string name="voice_countdown">Cuenta regresiva 3-2-1</string>
+    <string name="voice_play_along">Reproducir el video mientras grabas</string>
+    <string name="voice_headphones">Usa auriculares para que el sonido del video no entre en la grabación.</string>
+    <string name="voice_permission_title">Permitir el micrófono</string>
+    <string name="voice_permission_body">Para grabar tu narración, Aurea necesita el micrófono. El audio se queda en tu dispositivo, dentro del proyecto.</string>
+    <string name="voice_permission_allow">Permitir</string>
+    <string name="voice_permission_blocked">El acceso al micrófono está bloqueado. Abre los ajustes de la app y permite el micrófono.</string>
+    <string name="voice_open_settings">Abrir ajustes</string>
+    <string name="voice_saving">Guardando la narración…</string>
+    <string name="voice_saved">Narración añadida a la línea de tiempo</string>
+    <string name="voice_save_failed">No se pudo guardar la grabación</string>
+    <string name="voice_start_failed">No se pudo usar el micrófono. Cierra otras apps que estén grabando e inténtalo de nuevo.</string>
+    <string name="voice_too_short">Grabación demasiado corta: no se añadió nada</string>
+    <string name="voice_interrupted">La grabación se detuvo (la app salió de la pantalla o hubo una llamada). Lo grabado hasta ahora se guardó.</string>
+    <string name="voice_discarded">Grabación descartada</string>
+    <string name="voice_countdown_value">Empieza en %1$d</string>
+</resources>

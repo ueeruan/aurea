@@ -100,6 +100,8 @@ internal class EditorUi {
     var panel by mutableStateOf<EditorPanel?>(null)
     var adding by mutableStateOf(false)
     var addTab by mutableStateOf(AddTab.Shape)
+    /** Painel "Gravar voz" aberto (VoiceRecorder.kt). */
+    var voice by mutableStateOf(false)
     var fullscreen by mutableStateOf(false)
     /** Grade de terços sobre o quadro (só na prévia, nunca no export). */
     var showGrid by mutableStateOf(false)
@@ -300,6 +302,9 @@ fun EditorScreen(store: EditorStore) {
 
                 // Adicionar continua na barra fixa de categorias.
                 if (ui.adding && !store.sceneEditor) AddLayerOverlay(store, ui)
+                // Gravar voz: o painel por cima da timeline, com o palco à vista
+                // (também na cena 3D, cujo adicionar tem a mesma aba Áudio).
+                if (ui.voice) VoiceRecorderOverlay(store) { ui.voice = false }
                 // A.01: o círculo "Voltar ao editor" no canto (a HEAD perdeu — bug 1).
                 if (ui.fullscreen) {
                     val backLabel = stringResource(R.string.editor_voltar_editor)

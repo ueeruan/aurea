@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gravar voz (narração pelo microfone, Adicionar → Áudio). Par do iOS: VoiceRecorder.swift. -->
+<resources>
+    <string name="voice_title">Записать голос</string>
+    <string name="voice_layer_prefix">Голос</string>
+    <string name="voice_record">Записать</string>
+    <string name="voice_stop">Остановить и сохранить</string>
+    <string name="voice_cancel_take">Отменить и удалить запись</string>
+    <string name="voice_level">Уровень микрофона</string>
+    <string name="voice_elapsed">Время записи</string>
+    <string name="voice_hint">Нажмите красную кнопку и говорите. Озвучка попадёт на таймлайн начиная с указателя.</string>
+    <string name="voice_recording">Запись…</string>
+    <string name="voice_countdown">Отсчёт 3-2-1</string>
+    <string name="voice_play_along">Воспроизводить видео во время записи</string>
+    <string name="voice_headphones">Используйте наушники, чтобы звук видео не попал в запись.</string>
+    <string name="voice_permission_title">Разрешите доступ к микрофону</string>
+    <string name="voice_permission_body">Чтобы записать озвучку, Aurea нужен микрофон. Звук остаётся на вашем устройстве, внутри проекта.</string>
+    <string name="voice_permission_allow">Разрешить</string>
+    <string name="voice_permission_blocked">Доступ к микрофону заблокирован. Откройте настройки приложения и разрешите микрофон.</string>
+    <string name="voice_open_settings">Открыть настройки</string>
+    <string name="voice_saving">Сохранение озвучки…</string>
+    <string name="voice_saved">Озвучка добавлена на таймлайн</string>
+    <string name="voice_save_failed">Не удалось сохранить запись</string>
+    <string name="voice_start_failed">Не удалось использовать микрофон. Закройте другие приложения, которые ведут запись, и попробуйте снова.</string>
+    <string name="voice_too_short">Запись слишком короткая: ничего не добавлено</string>
+    <string name="voice_interrupted">Запись остановлена (приложение ушло с экрана или поступил звонок). Уже записанное сохранено.</string>
+    <string name="voice_discarded">Запись удалена</string>
+    <string name="voice_countdown_value">Начало через %1$d</string>
+</resources>

@@ -165,6 +165,9 @@ object CupertinoGlyph {
     const val LockOpen = '\uF6FA'
     const val Minus = '\uF70F'
     const val MinusCircle = '\uF463'
+    // Microfone (Gravar voz): contorno e cheio.
+    const val Mic = '\uF460'
+    const val MicFill = '\uF461'
     const val Move = '\uF8F8'
     const val MusicNote = '\uF46B'
     const val MusicNote2 = '\uF46C'

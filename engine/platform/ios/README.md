@@ -110,11 +110,11 @@ usa) produz os quadros e o `AVAudioSourceNode` só os entrega ao hardware.
 conferido automaticamente por `verify/check_scope.py`. `CFBundleDisplayName` =
 Aurea; `CFBundleVersion` = 2105 (revisão iOS do porte do editor atual).
 
-**Permissões:** nenhuma. O Android não pede `CAMERA` nem `RECORD_AUDIO` (não há
-captura no editor) e a mídia entra pelo seletor do sistema, que no iOS não pede
-permissão — por isso NÃO há `NSMicrophoneUsageDescription` nem
-`NSPhotoLibraryUsageDescription`. Declarar permissão sem uso é promessa falsa
-(o mesmo critério que tirou as permissões do manifest).
+**Permissões:** só as que um recurso usa de verdade — declarar permissão sem
+uso é promessa falsa (o mesmo critério do manifest do Android). Microfone
+(`NSMicrophoneUsageDescription` / `RECORD_AUDIO`): só o "Gravar voz"
+(Adicionar → Áudio), pedido quando a pessoa toca em Permitir no painel. Câmera:
+a Real Camera. Fotos: a galeria integrada do editor.
 
 ## Piso de iOS: 16.3
 

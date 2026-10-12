@@ -112,7 +112,7 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
             when (ui.addTab) {
                 AddTab.Shape -> ShapesTab(store, close)
                 AddTab.Media -> MediaTab(store, ui, close)
-                AddTab.Audio -> AudioTab(store, close)
+                AddTab.Audio -> AudioTab(store, ui, close)
                 AddTab.Text -> TextTab(store, ui)
                 AddTab.TextPresets -> com.aurea.aurea.editor.panels.TextPresetPicker(store) { ui.adding = false; ui.panel = null }
                 AddTab.Element -> ElementTab(store, close)
@@ -188,6 +188,8 @@ private class AddItem(
     val glyph: Char? = null,
     val tint: Color = ShellColors.DockTileContent,
     val draw: (DrawScope.() -> Unit)? = null,
+    /** Identificador para os testes de UI (nulo = sem). */
+    val tag: String? = null,
     val onClick: () -> Unit,
 )
 
@@ -231,6 +233,7 @@ private fun RowScope.AddCard(item: AddItem) {
             .clip(RoundedCornerShape(12.dp))
             .background(ShellColors.DockTile)
             .semantics { contentDescription = item.label }
+            .then(if (item.tag != null) Modifier.testTag(item.tag) else Modifier)
             .tocavel(onClick = item.onClick)
             .padding(horizontal = 4.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -454,12 +457,13 @@ private fun MediaTab(store: EditorStore, ui: EditorUi, close: () -> Unit) {
 }
 
 /**
- * Áudio: arquivo de som (m4a, mp3, wav, aac, ogg, flac…) ou o som de um vídeo
- * da galeria — os dois viram camada de áudio pelo mesmo `importAudio`. Marca e
- * batidas moram aqui porque servem para sincronizar com a música.
+ * Áudio: arquivo de som (m4a, mp3, wav, aac, ogg, flac…), o som de um vídeo
+ * da galeria ou a voz gravada no microfone ("Gravar voz", VoiceRecorder.kt) —
+ * todos viram camada de áudio pelo mesmo `importAudio`. Marca e batidas moram
+ * aqui porque servem para sincronizar com a música.
  */
 @Composable
-private fun AudioTab(store: EditorStore, close: () -> Unit) {
+private fun AudioTab(store: EditorStore, ui: EditorUi, close: () -> Unit) {
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             store.importAudio(uri)
@@ -479,6 +483,12 @@ private fun AudioTab(store: EditorStore, close: () -> Unit) {
                 // .mp3/.m4a/.opus baixado como genérico ou como vídeo MP4 não ficam
                 // cinza. O motor diz "áudio ilegível" se não for som.
                 files.launch(arrayOf("audio/*", "application/ogg", "video/mp4", "application/octet-stream"))
+            },
+            // Narração: o painel de gravação abre por cima da timeline (o palco fica à vista).
+            AddItem(stringResource(R.string.voice_title), CupertinoGlyph.MicFill, AureaColors.Danger, tag = "add.voice") {
+                close()
+                if (store.playing) store.pause()
+                ui.voice = true
             },
             AddItem(stringResource(R.string.sh_add_video_sound), CupertinoGlyph.Film) {
                 videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))

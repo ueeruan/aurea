@@ -281,6 +281,91 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.3d.stroke", EffectMeta(R.string.fx3d_desc_stroke,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
         "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on"))
+    // --- Pacote CC ---
+    put("aurea.distort.kaleidoscope", EffectMeta(R.string.cc_desc_kaleidoscope,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc kaleida caleidoscopio kaleidoscope espelho mirror simetria symmetry mandala flor flower"))
+    put("aurea.distort.sphere_wrap", EffectMeta(R.string.cc_desc_sphere_wrap,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc sphere esfera sphere globo globe planeta planet bola ball 3d embrulhar wrap"))
+    put("aurea.distort.cylinder_wrap", EffectMeta(R.string.cc_desc_cylinder_wrap,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc cylinder cilindro cylinder tubo tube lata can rolo roll 3d embrulhar wrap"))
+    put("aurea.distort.twister", EffectMeta(R.string.cc_desc_twister,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc twister torcer twist fita ribbon girar espiral spiral virar flip"))
+    put("aurea.distort.flow_pinch", EffectMeta(R.string.cc_desc_flow_pinch,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc flo motion flow fluxo pinca pinch sugar suck buraco negro black hole liquify liquido"))
+    put("aurea.distort.griddler", EffectMeta(R.string.cc_desc_griddler,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc griddler grade grid ladrilhos tiles mosaico mosaic quadrados squares cartoes cards"))
+    put("aurea.stylize.repeat_tile", EffectMeta(R.string.cc_desc_repeat_tile,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc repetile repetir repeat ladrilho tile espelhar mirror expandir expand padrao pattern tijolos bricks"))
+    put("aurea.distort.smear", EffectMeta(R.string.cc_desc_smear,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc smear borrar smear arrastar drag dedo finger liquify esticar stretch"))
+    put("aurea.distort.split", EffectMeta(R.string.cc_desc_split,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc split 2 rasgar split abrir open corte cut fenda slit rachar crack rasgo tear"))
+    put("aurea.distort.slant", EffectMeta(R.string.cc_desc_slant,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc slant inclinar slant italico italic cisalhar shear sombra projetada cast shadow"))
+    put("aurea.stylize.tiler", EffectMeta(R.string.cc_desc_tiler,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc tiler mosaico tiler copias copies repetir repeat grade grid"))
+    put("aurea.stylize.hex_tile", EffectMeta(R.string.cc_desc_hex_tile,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc hextile hexagono hexagon colmeia honeycomb ladrilho tile mosaico mosaic"))
+    put("aurea.blur.vector_blur", EffectMeta(R.string.cc_desc_vector_blur,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc vector blur desfoque vetorial vector blur pinceladas brush strokes pintura painting"))
+    put("aurea.light.light_burst", EffectMeta(R.string.cc_desc_light_burst,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc light burst explosao de luz light burst raios rays brilho glow zoom radial"))
+    put("aurea.stylize.star_field", EffectMeta(R.string.cc_desc_star_field,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc star burst estrelas stars campo field pontos dots espaco space warp voar fly"))
+    put("aurea.color.threshold_rgb", EffectMeta(R.string.cc_desc_threshold_rgb,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc threshold rgb limiar limite threshold canais channels pop art contraste"))
+    put("aurea.color.color_offset", EffectMeta(R.string.cc_desc_color_offset,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc color offset deslocar cor color shift fase phase psicodelico psychedelic matiz hue"))
+    put("aurea.stylize.scatter", EffectMeta(R.string.cc_desc_scatter,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc scatterize espalhar scatter spray grao grain dispersar desintegrar poeira dust"))
+    put("aurea.stylize.blobby", EffectMeta(R.string.cc_desc_blobby,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc blobbylize bolhas blobs liquido liquid gosma goo derretido melt relevo"))
+    put("aurea.stylize.glass", EffectMeta(R.string.cc_desc_glass,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc glass vidro glass relevo emboss refracao refraction bump transparente"))
+    put("aurea.stylize.kernel", EffectMeta(R.string.cc_desc_kernel,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc kernel nucleo kernel convolucao convolution matriz matrix nitidez sharpen relevo emboss bordas edges"))
+    put("aurea.light.spotlight", EffectMeta(R.string.cc_desc_spotlight,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc spotlight holofote spotlight luz light palco stage cone foco focus lanterna"))
+    put("aurea.distort.drizzle", EffectMeta(R.string.cc_desc_drizzle,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc drizzle garoa drizzle chuva rain gotas drops ondas ripples agua water poca puddle"))
+    put("aurea.transition.jaws", EffectMeta(R.string.cc_desc_jaws,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc jaws mandibulas jaws dentes teeth transicao transition abrir open serra saw"))
+    put("aurea.transition.scale_wipe", EffectMeta(R.string.cc_desc_scale_wipe,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc scale wipe esticar stretch varredura wipe riscos streaks transicao transition"))
+    put("aurea.transition.radial_scale_wipe", EffectMeta(R.string.cc_desc_radial_scale_wipe,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc radial scalewipe scale wipe varredura radial radial wipe furo hole escala scale transicao transition"))
+    put("aurea.transition.burn_film", EffectMeta(R.string.cc_desc_burn_film,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc burn film queimar burn filme film fogo fire brasa ember transicao transition"))
+    put("aurea.transition.block_load", EffectMeta(R.string.cc_desc_block_load,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "cc block load blocos blocks carregar loading pixel jpeg progressivo progressive transicao transition"))
     put("aurea.shape3d.layout", EffectMeta(R.string.fx_desc_shape3d_layout, listOf(EffectTarget.Cena3D),
         "forma 3d shape partes parts girar espalhar explodir atraso aleatorio"))
     // --- Ferramentas que moram no catálogo (EffectTool): a ficha e os sinônimos ---

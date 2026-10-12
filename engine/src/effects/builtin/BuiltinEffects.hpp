@@ -87,6 +87,11 @@ void register_disintegrate_effect(EffectRegistry& r);
 void register_mesh_warp_effect(EffectRegistry& r);
 /// Fantoche — pinos com ARAP (PuppetEffect.cpp). No fim.
 void register_puppet_effect(EffectRegistry& r);
+/// Pacote CC: distorções/ladrilhos (CCEffects.cpp), estilo/luz/cor
+/// (CCStylizeEffects.cpp) e transições (CCTransitions.cpp). No fim.
+void register_cc_distort_effects(EffectRegistry& r);
+void register_cc_stylize_effects(EffectRegistry& r);
+void register_cc_transitions(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

@@ -12270,6 +12270,11 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id("aurea.glitch.video_glitch"), effect_type_id("aurea.stylize.pix_dither"),
             effect_type_id("aurea.distort.displace_transform"), effect_type_id("aurea.light.starglow"),
             effect_type_id(effect_keys::kFlowRetime), effect_type_id(effect_keys::kFlowMotionBlur),
+            effect_type_id(effect_keys::kKaleidoscope), effect_type_id(effect_keys::kSphereWrap),
+            effect_type_id(effect_keys::kCylinderWrap), effect_type_id(effect_keys::kTwister),
+            effect_type_id(effect_keys::kGlass), effect_type_id(effect_keys::kLightBurst),
+            effect_type_id(effect_keys::kStarField), effect_type_id(effect_keys::kHexTile),
+            effect_type_id(effect_keys::kBurnFilm), effect_type_id(effect_keys::kJaws),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);

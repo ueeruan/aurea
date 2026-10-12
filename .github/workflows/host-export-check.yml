@@ -138,7 +138,7 @@ jobs:
         run: |
           set -euo pipefail
           FAILED=0
-          for FILTER in FFmpegExport OfflineFrameQueue ExportSinkStartup ExportPixelCopy OfflineAudio RealCamera; do
+          for FILTER in FFmpegExport OfflineFrameQueue ExportSinkStartup ExportPixelCopy OfflineAudio RealCamera GpuUpscale; do
             if ! timeout 600s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/native-$FILTER.log"; then FAILED=1; fi
             if ! grep -Eq '^[1-9][0-9]* testes, [1-9][0-9]* verificacoes, 0 falhas$' "../../host-export-results/native-$FILTER.log"; then FAILED=1; fi
             if grep -Eq 'pulado|skipped' "../../host-export-results/native-$FILTER.log"; then FAILED=1; fi

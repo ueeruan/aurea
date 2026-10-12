@@ -213,6 +213,16 @@ struct EngineConfig {
     /// Opt-in integrity recovery. A checked, frozen export snapshot is
     /// persisted before codec open; version 1 restarts from frame zero.
     bool enableExportRecovery = false;
+    /// Export retomável (export/ExportPacketLog.hpp): os pacotes de vídeo vão
+    /// para `<saída>.aurea-pkt` e o MP4 é montado no fim. Um start_export com
+    /// a MESMA saída, o mesmo projeto e as mesmas configurações continua do
+    /// último GOP íntegro (o app fechou, a GPU caiu, o iOS suspendeu). Qualquer
+    /// diferença recomeça do zero. Desligado = MP4 direto (caminho antigo).
+    bool enableResumableExport = false;
+    /// NV12 do export com 4 bytes por fragmento (yuv_encode_packed.frag), 1/4
+    /// dos fragmentos. Sem dither, os mesmos bytes; com dither, raros pixels
+    /// diferem em 1 nível. DESLIGADO até ser medido no aparelho.
+    bool enablePackedYuvExport = false;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
 
@@ -521,6 +531,21 @@ public:
     [[nodiscard]] Result<text::FontEntry> import_font(const char* path) noexcept;
     [[nodiscard]] Status import_color_lut(u64 layer, u32 effect, const char* path) noexcept;
     [[nodiscard]] std::string color_lut_name(u64 layer, u32 effect) const noexcept;
+    /// "Trocar textura 3D": a imagem `path` (já copiada para a pasta do app;
+    /// decodificada pelo `imageLoader` da plataforma) vira o parâmetro Imagem
+    /// do efeito `effect` da camada. Um passo de desfazer; o projeto guarda o
+    /// caminho e a imagem volta ao reabrir, como as camadas de imagem.
+    [[nodiscard]] Status set_effect_image(u64 layer, u32 effect, const char* path) noexcept;
+    /// Nome do arquivo da imagem do efeito (vazio = nenhuma).
+    [[nodiscard]] std::string effect_image_name(u64 layer, u32 effect) const noexcept;
+    /// As PARTES da camada 3D na ordem dos efeitos de parte (Parte 1, 2...):
+    /// o nome de cada uma (vazio = o arquivo não deu nome). Vazio = não é 3D.
+    [[nodiscard]] std::vector<std::string> model_part_names(u64 layer) noexcept;
+    /// Põe um efeito de PARTE (Animar parte 3D, Esconder partes 3D, Trocar
+    /// textura 3D) na camada 3D já apontando para a parte `part` (0 = a 1ª;
+    /// no Esconder, primeira = última = ela). Um passo de desfazer. Devolve
+    /// o id do efeito.
+    [[nodiscard]] Result<u32> add_part_effect(u64 layer, u32 effectType, u32 part) noexcept;
     /// Fonte da camada de texto: família/peso/itálico e, se importada, o arquivo.
     bool set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept;
     /// Estilo de parágrafo (18 floats): modo da caixa, largura, altura, fundo
@@ -1663,10 +1688,21 @@ public:
         kExportThermalReduced  = 1u << 2,   ///< calor: menos quadros em voo (qualidade igual)
         kExportFrameFallback   = 1u << 3,   ///< algum quadro de vídeo saiu com o decodificado mais próximo
         kExportSafeMode        = 1u << 4,   ///< export no modo de segurança (refeito depois de o encoder travar)
+        kExportResumed         = 1u << 5,   ///< continuou um export interrompido (do último GOP íntegro)
+        kExportResumable       = 1u << 6,   ///< falhou com quadros salvos: o mesmo start_export continua dali
         // Bits 16..17: o próximo modo de segurança sugerido quando o export
         // falhou pelo encoder (kExportRetryShift, export/ExportWatchdog.hpp).
     };
     [[nodiscard]] ExportProgress export_progress() const noexcept;
+
+    /// Export interrompido nesta saída (export retomável): de onde ele continua
+    /// e o total de quadros. `resumeFrame` 0 = nada a continuar.
+    struct ExportResumeInfo { u32 resumeFrame = 0; u32 totalFrames = 0; };
+    [[nodiscard]] ExportResumeInfo export_resume_info(const char* outputPath) const noexcept;
+    /// Apaga o export interrompido desta saída (o usuário desistiu dele).
+    void discard_export_resume(const char* outputPath) noexcept;
+    /// Onde o registro de pacotes de uma saída mora.
+    [[nodiscard]] static std::string export_packet_log_path(const char* outputPath);
 
     /// Export como IMAGEM (export/ImageEncode.hpp): o quadro do playhead em PNG,
     /// a sequência de PNGs do trecho num .zip ou o GIF animado. O MESMO

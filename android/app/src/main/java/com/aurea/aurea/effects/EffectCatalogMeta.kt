@@ -259,6 +259,18 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao"))
     put("aurea.generate.particular", EffectMeta(R.string.afx_desc_particular, AllTargets,
         "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh"))
+    put("aurea.3d.part_transform", EffectMeta(R.string.fx3d_desc_part_transform, listOf(EffectTarget.Cena3D),
+        "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca"))
+    put("aurea.3d.part_hide", EffectMeta(R.string.fx3d_desc_part_hide, listOf(EffectTarget.Cena3D),
+        "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca"))
+    put("aurea.3d.part_texture", EffectMeta(R.string.fx3d_desc_part_texture, listOf(EffectTarget.Cena3D),
+        "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria"))
+    put("aurea.3d.shatter", EffectMeta(R.string.fx3d_desc_shatter,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass"))
+    put("aurea.3d.stroke", EffectMeta(R.string.fx3d_desc_stroke,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on"))
     put("aurea.shape3d.layout", EffectMeta(R.string.fx_desc_shape3d_layout, listOf(EffectTarget.Cena3D),
         "forma 3d shape partes parts girar espalhar explodir atraso aleatorio"))
     // --- Ferramentas que moram no catálogo (EffectTool): a ficha e os sinônimos ---

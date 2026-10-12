@@ -1741,8 +1741,36 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     }
 }
 
-- (void)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId {
-    if (auto* e = self.engine) (void)e->start_camera_track(static_cast<aurea::u64>(layerId), mode);
+- (int)addPartEffect:(uint32_t)type part:(uint32_t)part forLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return -1;
+    const auto id = e->add_part_effect(static_cast<aurea::u64>(layerId), type, part);
+    return id.ok() ? static_cast<int>(*id) : -1;
+}
+
+- (BOOL)setEffectImage:(NSString *)path effect:(uint32_t)effect forLayer:(long long)layerId {
+    auto* e = self.engine;
+    return e && path && e->set_effect_image(static_cast<aurea::u64>(layerId), effect, path.UTF8String).ok();
+}
+
+- (NSString *)effectImageName:(uint32_t)effect forLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @"";
+    return [NSString stringWithUTF8String:e->effect_image_name(static_cast<aurea::u64>(layerId), effect).c_str()] ?: @"";
+}
+
+- (NSArray<NSString *> *)modelPartNames:(long long)layerId {
+    auto* e = self.engine;
+    NSMutableArray<NSString *>* out = [NSMutableArray array];
+    if (!e) return out;
+    for (const auto& name : e->model_part_names(static_cast<aurea::u64>(layerId)))
+        [out addObject:[NSString stringWithUTF8String:name.c_str()] ?: @""];
+    return out;
+}
+
+- (BOOL)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId {
+    auto* e = self.engine;
+    return e && e->start_camera_track(static_cast<aurea::u64>(layerId), mode);
 }
 
 - (void)setModelTransformInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
@@ -3869,6 +3897,18 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 
 - (void)cancelExport {
     if (auto* e = self.engine) (void)e->cancel_export();
+}
+
+- (NSArray<NSNumber*>*)exportResumeInfo:(NSString*)outputPath {
+    if (auto* e = self.engine) {
+        const auto info = e->export_resume_info(outputPath.UTF8String);
+        return @[@(info.resumeFrame), @(info.totalFrames)];
+    }
+    return @[@0, @0];
+}
+
+- (void)discardExportResume:(NSString*)outputPath {
+    if (auto* e = self.engine) e->discard_export_resume(outputPath.UTF8String);
 }
 
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath {

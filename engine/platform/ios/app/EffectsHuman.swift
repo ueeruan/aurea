@@ -113,6 +113,17 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
     ("aurea.shape3d.layout", FxEffectHuman(keywords: "shape parts partes forma 3d rotation rotacao delay atraso spread espalhar explodir twist random aleatorio",
         principal: [0, 1, 2, 12, 13, 9, 4])),
+    // Efeitos 3D (beta 12/10/2026): partes do objeto 3D, Shatter e Stroke.
+    ("aurea.3d.part_transform", FxEffectHuman(name: "fx3d_name_part_transform",
+        keywords: "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca", principal: Array(0...7))),
+    ("aurea.3d.part_hide", FxEffectHuman(name: "fx3d_name_part_hide",
+        keywords: "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca", principal: Array(0...3))),
+    ("aurea.3d.part_texture", FxEffectHuman(name: "fx3d_name_part_texture",
+        keywords: "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria", principal: Array(0...3))),
+    ("aurea.3d.shatter", FxEffectHuman(name: "fx3d_name_shatter",
+        keywords: "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass", principal: [0, 1, 2, 4, 5, 3])),
+    ("aurea.3d.stroke", FxEffectHuman(name: "fx3d_name_stroke",
+        keywords: "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on", principal: [0, 1, 3, 4, 5, 9])),
     ("aurea.transform", FxEffectHuman(
         name: "fx_name_transform",
         keywords: "transform mover posicao escala girar rotacao opacidade",
@@ -1658,6 +1669,11 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.stylize.ball_grid", "afx_desc_balls", FxVisualTargets, "bolas esferas balls spheres grade particulas explodir dispersar torcer cc ball cc ball action")
     put("aurea.transition.disintegrate", "afx_desc_disintegrate", FxVisualTargets, "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao")
     put("aurea.shape3d.layout", "fx_desc_shape3d_layout", [.cena3D], "forma 3d shape partes parts girar espalhar explodir atraso aleatorio")
+    put("aurea.3d.part_transform", "fx3d_desc_part_transform", [.cena3D], "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca")
+    put("aurea.3d.part_hide", "fx3d_desc_part_hide", [.cena3D], "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca")
+    put("aurea.3d.part_texture", "fx3d_desc_part_texture", [.cena3D], "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria")
+    put("aurea.3d.shatter", "fx3d_desc_shatter", FxVisualTargets + [.cena3D], "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass")
+    put("aurea.3d.stroke", "fx3d_desc_stroke", FxVisualTargets + [.cena3D], "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on")
     put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")

@@ -1,7 +1,9 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.presets.readPreset
 import androidx.compose.runtime.rememberCoroutineScope
@@ -289,7 +291,8 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         }
     }
     val hasCameraTrack by remember(store) {
-        derivedStateOf { store.detail?.kind == LayerType.Video.kind && (store.cameraTrack?.state == 2 || store.cameraTrack?.state == 3) }
+        // Só uma análise que deu certo (2) é "câmera analisada"; falha (3) não.
+        derivedStateOf { store.detail?.kind == LayerType.Video.kind && store.cameraTrack?.state == 2 }
     }
     val tools = buildList {
         if (!tabbed) return@buildList
@@ -1097,7 +1100,9 @@ private fun ParamRows(
         ParamType.COLOR -> EffectColorRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         // Outra camada ("Camada de áudio"): escolhe na lista das camadas.
         ParamType.LAYER_REFERENCE -> EffectLayerRow(env, id, s, label, menu)
-        ParamType.TEXTURE_REFERENCE -> CubeLutImportRow(env, id)
+        ParamType.TEXTURE_REFERENCE ->
+            if (typeId == effectTypeId("aurea.3d.part_texture")) PartTextureImageRow(env, id, label)
+            else CubeLutImportRow(env, id)
         ParamType.CURVE -> ColorCurveEditor(env, id, s.index)
         // Curva/degradê/textura: o motor tem, o app ainda não edita — sem botão falso.
         else -> PropertyCustomRow(label = label, selected = false, onSelect = {}) {
@@ -1105,6 +1110,27 @@ private fun ParamRows(
                 stringResource(R.string.panel_ainda_nao_editavel_app),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
+        }
+    }
+}
+
+/** "Trocar textura 3D": a imagem da galeria que cobre a parte (nome + botão grande). */
+@Composable
+private fun PartTextureImageRow(env: PanelEnv, effect: Int, label: String) {
+    val store = env.store
+    store.primary ?: return
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri != null) store.setEffectImage(uri, effect)
+    }
+    val name = remember(store.detail, store.curveRevision, store.effects) { store.effectImageName(effect) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text("$label · " + name.ifBlank { stringResource(R.string.fx3d_image_none) }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        Box(Modifier.fillMaxWidth().height(48.dp).testTag("effect.part_texture.pick")
+            .clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
+            .tocavel(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }),
+            contentAlignment = Alignment.Center) {
+            Text(stringResource(if (name.isBlank()) R.string.fx3d_image_pick else R.string.shape3d_image_change), color = AureaColors.Text)
         }
     }
 }

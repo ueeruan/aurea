@@ -12,4 +12,9 @@
     <string name="expfail_stuck">a exportação parou de avançar por minutos e foi interrompida; feche outros apps e tente de novo</string>
     <!-- Aviso durante o export refeito no modo de segurança (export/ExportWatchdog.hpp). -->
     <string name="app_export_safe_mode">O codificador de vídeo do aparelho travou: exportando de novo no modo compatível (H.264, pode demorar mais).</string>
+    <string name="app_export_paused">Exportação pausada: ela continua sozinha quando você voltar ao Aurea.</string>
+    <string name="app_export_resumed">Continuando a exportação de onde parou.</string>
+    <string name="app_export_resume_title">Exportação interrompida em %1$d%%</string>
+    <string name="app_export_resume_continue">Continuar exportação</string>
+    <string name="app_export_resume_discard">Descartar</string>
 </resources>

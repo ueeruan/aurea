@@ -669,6 +669,15 @@ final class AureaModel: ObservableObject {
         openPanel(property == 44 ? .effects : .curve)
     }
     private var pendingExportURL: URL?
+    /// Export retomável: o iOS suspendeu o app no meio do export; ele continua
+    /// do trecho salvo quando o app volta (enterForeground).
+    @Published private(set) var exportPaused = false
+    /// Falhas recuperáveis seguidas que continuaram do trecho salvo.
+    private var exportFailureResumes = 0
+    /// Export interrompido com o app fechado (o motor ainda tem os trechos).
+    struct PendingExport { let url: URL; let options: ExportOptions; let percent: Int }
+    @Published private(set) var pendingExport: PendingExport?
+    private static let pendingKey = "aurea.export.pendente"
     /// A última rede contra o export parado (ExportStallWatch) e o modo de
     /// segurança do vídeo em andamento (export/ExportWatchdog.hpp).
     private var exportWatch = ExportStallWatch()
@@ -1440,7 +1449,11 @@ final class AureaModel: ObservableObject {
         lifecycleQueue.async { [weak self] in
             lifecycleEngine.resume()
             lifecycleEngine.invalidate()
-            DispatchQueue.main.async { self?.refreshModel(force: true) }
+            DispatchQueue.main.async {
+                self?.refreshModel(force: true)
+                // Export pausado pela suspensão: continua do trecho salvo.
+                self?.resumePausedExport()
+            }
         }
     }
 
@@ -3664,6 +3677,9 @@ final class AureaModel: ObservableObject {
         exportStalled = false
         exportWatch = ExportStallWatch()
         exportSafeMode = 0
+        exportFailureResumes = 0
+        exportPaused = false
+        pendingExport = nil
         exportedKind = exportOptions.kind
         if exportOptions.kind != .video { startImageExport(); return }
         let name = (projectName.isEmpty ? "Aurea" : projectName) + ".mp4"
@@ -3685,7 +3701,100 @@ final class AureaModel: ObservableObject {
         }
         exporting = true
         pendingExportURL = url
+        if !preExporting { rememberPendingExport(url, activeExportOptions) }
         startExportPolling()
+    }
+
+    // MARK: Export retomável
+
+    private func rememberPendingExport(_ url: URL, _ o: ExportOptions) {
+        UserDefaults.standard.set([
+            "projeto": projectURL?.path ?? "", "arquivo": url.path, "codec": Int(o.codec.rawValue),
+            "lado": Int(o.shortSide), "mbps": Int(o.bitrateMbps), "qualidade": Int(o.quality),
+            "audio": Int(o.audioBitrateKbps), "upscale": Int(o.aiUpscale), "trim": o.trimToContent, "fps": o.fps,
+        ] as [String: Any], forKey: Self.pendingKey)
+    }
+
+    private func forgetPendingExport() {
+        UserDefaults.standard.removeObject(forKey: Self.pendingKey)
+        pendingExport = nil
+    }
+
+    /// Procura um export deste projeto interrompido com o app fechado.
+    func refreshPendingExport() {
+        guard !exporting, let saved = UserDefaults.standard.dictionary(forKey: Self.pendingKey),
+              let project = saved["projeto"] as? String, project == projectURL?.path,
+              let path = saved["arquivo"] as? String else { pendingExport = nil; return }
+        var o = ExportOptions()
+        o.codec = AureaExportCodec(rawValue: UInt16((saved["codec"] as? Int) ?? 0)) ?? .h264
+        o.shortSide = UInt32((saved["lado"] as? Int) ?? 1080)
+        o.bitrateMbps = UInt32((saved["mbps"] as? Int) ?? 0)
+        o.quality = UInt32((saved["qualidade"] as? Int) ?? 1)
+        o.audioBitrateKbps = UInt32((saved["audio"] as? Int) ?? 192)
+        o.aiUpscale = UInt32((saved["upscale"] as? Int) ?? 0)
+        o.trimToContent = (saved["trim"] as? Bool) ?? true
+        o.fps = (saved["fps"] as? Double) ?? 0
+        let lifecycleEngine = engine
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let info = lifecycleEngine.exportResumeInfo(path)
+            let resume = info.first?.intValue ?? 0, total = info.count > 1 ? info[1].intValue : 0
+            DispatchQueue.main.async {
+                guard let self, !self.exporting else { return }
+                if resume > 0 && total > 0 {
+                    self.pendingExport = PendingExport(url: URL(fileURLWithPath: path), options: o,
+                                                       percent: min(99, resume * 100 / total))
+                } else {
+                    self.forgetPendingExport()
+                }
+            }
+        }
+    }
+
+    /// Continua o export interrompido: mesma saída e opções (o motor confere o projeto).
+    func resumePendingExport() {
+        guard let pending = pendingExport, !exporting else { return }
+        exportOptions = pending.options
+        preExporting = false
+        exportedURL = nil
+        exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
+        exportStalled = false
+        exportWatch = ExportStallWatch()
+        exportSafeMode = 0
+        exportFailureResumes = 0
+        exportPaused = false
+        exportedKind = .video
+        pendingExport = nil
+        guard startVideoExport(pending.url, safeMode: 0) else {
+            exportMessage = AureaText.t("ios_export_could_not_start")
+            toast = exportMessage
+            return
+        }
+        exporting = true
+        pendingExportURL = pending.url
+        startExportPolling()
+    }
+
+    func discardPendingExport() {
+        guard let pending = pendingExport else { return }
+        forgetPendingExport()
+        let lifecycleEngine = engine
+        DispatchQueue.global(qos: .utility).async { lifecycleEngine.discardExportResume(pending.url.path) }
+    }
+
+    /// O app voltou: o export que a suspensão parou continua do trecho salvo.
+    private func resumePausedExport() {
+        guard exportPaused, exporting, let url = pendingExportURL else { return }
+        exportPaused = false
+        if startVideoExport(url, safeMode: exportSafeMode) {
+            exportWatch = ExportStallWatch()
+            exportProgress = [:]
+            startExportPolling()
+        } else {
+            exporting = false
+            pendingExportURL = nil
+            exportMessage = AureaText.t("ios_export_could_not_start")
+            toast = exportMessage
+        }
     }
 
     /// O vídeo no motor. `safeMode` > 0 só quando o motor sugeriu refazer depois
@@ -3754,6 +3863,16 @@ final class AureaModel: ObservableObject {
     func cancelExport() {
         guard exporting && !exportPublishing else { return }
         exportCancelled = true
+        if exportPaused, let url = pendingExportURL {
+            // Pausado pela suspensão: não há export no motor, só o registro.
+            exportPaused = false
+            exporting = false
+            pendingExportURL = nil
+            forgetPendingExport()
+            let lifecycleEngine = engine
+            DispatchQueue.global(qos: .utility).async { lifecycleEngine.discardExportResume(url.path) }
+            return
+        }
         engine.cancelExport()
     }
 
@@ -3854,6 +3973,26 @@ final class AureaModel: ObservableObject {
                     self.exportTimer?.invalidate()
                     self.exportTimer = nil
                     let result = (self.exportProgress["result"] as? NSNumber)?.intValue ?? 0
+                    let stopFlags = (self.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
+                    // Export retomável: parou com trechos salvos. Suspensão do app
+                    // (cancelado sem o usuário pedir) espera o app voltar; falha
+                    // recuperável continua já, do trecho salvo (até 2 vezes).
+                    if result != 0, self.exportedKind == .video, !self.exportCancelled, !self.exportWatch.cancelled,
+                       stopFlags & AureaExportFlag.resumable.rawValue != 0, let url = self.pendingExportURL,
+                       ExportStallWatch.suggestedSafeMode(flags: stopFlags) == 0 {
+                        if result == 25 {
+                            self.exportPaused = true
+                            return
+                        }
+                        if self.exportFailureResumes < 2, self.startVideoExport(url, safeMode: self.exportSafeMode) {
+                            self.exportFailureResumes += 1
+                            self.exportWatch = ExportStallWatch()
+                            self.exportProgress = [:]
+                            self.startExportPolling()
+                            return
+                        }
+                        self.engine.discardExportResume(url.path)
+                    }
                     // O encoder travou/recusou e o motor sugere o modo de
                     // segurança: refaz o vídeo do começo, com o aviso (nada de
                     // "falhou" na tela).
@@ -3881,6 +4020,8 @@ final class AureaModel: ObservableObject {
                     }
                     self.exportedURL = result == 0 ? self.pendingExportURL : nil
                     self.pendingExportURL = nil
+                    // Terminou (pronto, falhou de vez, cancelado): nada a continuar.
+                    self.forgetPendingExport()
                     if let url = self.exportedURL {
                         self.exportCancelled = false
                         self.publishExportToPhotos(url)
@@ -5198,7 +5339,24 @@ extension AureaModel {
     /// Imagem da galeria na parte (−1 = a forma inteira): normalizada (EXIF,
     /// HEIC → JPEG/PNG, até 2048 px) e gravada em Documentos/formas3d — o
     /// projeto guarda o caminho relativo.
-    func setShapePartImage(_ id: Int64, part: Int, url: URL, textTexture: Bool = false) {
+    /// Efeito de parte 3D já apontando para a parte `part` (0 = a 1ª); par do
+    /// Android (EditorStore.addPartEffect). false = não entrou (avisa).
+    @discardableResult
+    func addPartEffect(_ key: String, part: Int) -> Bool {
+        guard let id = primarySelection else { return false }
+        commitPendingCommands()
+        let fx = engine.addPartEffect(fxEffectTypeId(key), part: UInt32(max(0, part)), forLayer: id)
+        refreshModel(force: true)
+        if fx < 0 { toast = AureaText.t("fx3d_add_failed"); return false }
+        return true
+    }
+
+    /// A imagem do "Trocar textura 3D": a mesma cópia reduzida da imagem das partes.
+    func setEffectImage(_ id: Int64, effect: UInt32, url: URL) {
+        setShapePartImage(id, part: 0, url: url, effect: effect)
+    }
+
+    func setShapePartImage(_ id: Int64, part: Int, url: URL, textTexture: Bool = false, effect: UInt32? = nil) {
         guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
         importingMedia = true
         operationMessage = AureaText.t("ios_importing_media")
@@ -5223,7 +5381,8 @@ extension AureaModel {
                 }
             }
             let ok = path.map { file in
-                textTexture ? engine.setText3D(forLayer: id, property: "texturePath", stringValue: file, numberValue: 0)
+                if let effect { return engine.setEffectImage(file, effect: effect, forLayer: id) }
+                return textTexture ? engine.setText3D(forLayer: id, property: "texturePath", stringValue: file, numberValue: 0)
                     : engine.setShape3DPartStyle(id, part: Int32(part), color: nil, image: file)
             } ?? false
             if !ok, let path { try? FileManager.default.removeItem(atPath: path) }

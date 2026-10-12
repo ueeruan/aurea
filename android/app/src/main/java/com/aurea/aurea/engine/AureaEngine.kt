@@ -663,6 +663,13 @@ class AureaEngine private constructor() {
     fun importFont(path: String): String? = nativeWork.run(null) { nativeImportFont(nativeHandle, path) }
     fun importColorLut(layer: Long, effect: Int, path: String): Int = nativeWork.run(5) { nativeImportColorLut(nativeHandle, layer, effect, path) }
     fun colorLutName(layer: Long, effect: Int): String = nativeColorLutName(nativeHandle, layer, effect)
+    /** Efeito de parte 3D já apontando para a parte `part` (0 = a 1ª). −1 = não entrou. */
+    fun addPartEffect(layer: Long, type: Int, part: Int): Int = nativeAddPartEffect(nativeHandle, layer, type, part)
+    /** Imagem do "Trocar textura 3D" (arquivo já copiado para o app). */
+    fun setEffectImage(layer: Long, effect: Int, path: String): Boolean = nativeWork.run(false) { nativeSetEffectImage(nativeHandle, layer, effect, path) }
+    fun effectImageName(layer: Long, effect: Int): String = nativeEffectImageName(nativeHandle, layer, effect)
+    /** Nome de cada parte da camada 3D (vazio = sem nome no arquivo). */
+    fun modelPartNames(layer: Long): Array<String> = nativeModelPartNames(nativeHandle, layer) ?: emptyArray()
     fun setTextFont(layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean =
         nativeSetTextFont(nativeHandle, layer, family, weight, italic, path)
     fun textFont(layer: Long): String? = nativeTextFont(nativeHandle, layer)
@@ -1024,6 +1031,17 @@ class AureaEngine private constructor() {
         nativeWork.run(5) { nativeRestartExport(nativeHandle, recoveryPath, outputPath) }
 
     /**
+     * Export retomável: o export interrompido nesta saída — [quadro de onde ele
+     * continua, total de quadros]; [0, 0] = nada a continuar. Um [startExport]
+     * com a MESMA saída, o mesmo projeto e as mesmas opções continua dali.
+     */
+    fun exportResumeInfo(outputPath: String): IntArray =
+        nativeWork.run(IntArray(2)) { nativeExportResumeInfo(nativeHandle, outputPath) }
+
+    /** Apaga o export interrompido desta saída (o usuário desistiu dele). */
+    fun discardExportResume(outputPath: String) = nativeWork.run(Unit) { nativeDiscardExportResume(nativeHandle, outputPath) }
+
+    /**
      * Importa um glTF/GLB (arquivo no sandbox do app). Bloqueia: chamar fora da
      * UI. Devolve o id da layer, ou −código de erro; `detail[0]` recebe o
      * motivo (falha) ou os avisos do import (sucesso).
@@ -1155,6 +1173,10 @@ class AureaEngine private constructor() {
     private external fun nativeImportFont(handle: Long, path: String): String?
     private external fun nativeImportColorLut(handle: Long, layer: Long, effect: Int, path: String): Int
     private external fun nativeColorLutName(handle: Long, layer: Long, effect: Int): String
+    private external fun nativeAddPartEffect(handle: Long, layer: Long, type: Int, part: Int): Int
+    private external fun nativeSetEffectImage(handle: Long, layer: Long, effect: Int, path: String): Boolean
+    private external fun nativeEffectImageName(handle: Long, layer: Long, effect: Int): String
+    private external fun nativeModelPartNames(handle: Long, layer: Long): Array<String>?
     private external fun nativeSetTextFont(handle: Long, layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean
     private external fun nativeSetTextStyle(handle: Long, layer: Long, v: FloatArray): Boolean
     private external fun nativeQueryTextStyle(handle: Long, layer: Long, out: FloatArray): Boolean
@@ -1394,6 +1416,8 @@ class AureaEngine private constructor() {
     private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeRestartExport(handle: Long, recoveryPath: String, outputPath: String): Int
+    private external fun nativeExportResumeInfo(handle: Long, outputPath: String): IntArray
+    private external fun nativeDiscardExportResume(handle: Long, outputPath: String)
     private external fun nativeStartImageExport(handle: Long, outputPath: String, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): Int
     private external fun nativeImageExportPlan(handle: Long, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): LongArray?
     private external fun nativeImportModel(handle: Long, path: String, name: String, detail: Array<String?>, quality: Int, memory: LongArray?): Long

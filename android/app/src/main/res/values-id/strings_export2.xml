@@ -11,4 +11,9 @@
     <string name="expfail_unsupported">ponsel ini tidak dapat mengekspor dengan resolusi atau format ini</string>
     <string name="expfail_stuck">ekspor berhenti berjalan selama beberapa menit dan dihentikan; tutup aplikasi lain lalu coba lagi</string>
     <string name="app_export_safe_mode">Encoder video ponsel macet: mengekspor ulang dalam mode kompatibel (H.264, bisa lebih lama).</string>
+    <string name="app_export_paused">Ekspor dijeda: akan berlanjut sendiri saat kamu kembali ke Aurea.</string>
+    <string name="app_export_resumed">Melanjutkan ekspor dari titik terakhir.</string>
+    <string name="app_export_resume_title">Ekspor terhenti di %1$d%%</string>
+    <string name="app_export_resume_continue">Lanjutkan ekspor</string>
+    <string name="app_export_resume_discard">Buang</string>
 </resources>

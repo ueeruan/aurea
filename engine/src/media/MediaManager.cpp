@@ -358,6 +358,18 @@ void MediaManager::close_all() {
     drain_retired();
 }
 
+bool MediaManager::close_all_for(u64 timeoutNs) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (Entry& entry : entries_) retire_locked(std::move(entry));
+        entries_.clear();
+    }
+    std::unique_lock<std::mutex> lock(retireMutex_);
+    return retireWake_.wait_for(lock, std::chrono::nanoseconds(timeoutNs), [this] {
+        return retired_.empty() && !retiring_ && !retireNotifying_;
+    });
+}
+
 void MediaManager::suspend_all() {
     std::lock_guard<std::mutex> lock(mutex_);
     suspended_ = true;

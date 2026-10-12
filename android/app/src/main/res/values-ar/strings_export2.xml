@@ -11,4 +11,9 @@
     <string name="expfail_unsupported">لا يستطيع هذا الهاتف التصدير بهذه الدقة أو هذه الصيغة</string>
     <string name="expfail_stuck">توقف التصدير عن التقدّم لعدة دقائق فأُوقف؛ أغلق التطبيقات الأخرى وحاول مرة أخرى</string>
     <string name="app_export_safe_mode">تجمّد مُرمّز الفيديو في الهاتف: تتم إعادة التصدير في الوضع المتوافق (H.264، قد يستغرق وقتًا أطول).</string>
+    <string name="app_export_paused">التصدير متوقف مؤقتًا: سيستمر تلقائيًا عند عودتك إلى Aurea.</string>
+    <string name="app_export_resumed">متابعة التصدير من حيث توقف.</string>
+    <string name="app_export_resume_title">توقف التصدير عند %1$d%%</string>
+    <string name="app_export_resume_continue">متابعة التصدير</string>
+    <string name="app_export_resume_discard">تجاهل</string>
 </resources>

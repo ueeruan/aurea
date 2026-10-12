@@ -200,6 +200,11 @@ typedef NS_OPTIONS(uint32_t, AureaExportFlag) {
     AureaExportFlagFrameFallback   = 1u << 3,
     /// Export refeito no modo de segurança depois de o encoder travar.
     AureaExportFlagSafeMode        = 1u << 4,
+    /// Continuou um export interrompido, do último trecho salvo.
+    AureaExportFlagResumed         = 1u << 5,
+    /// Parou (suspensão do app, falha recuperável) com trechos salvos: o MESMO
+    /// export (mesma saída e opções) continua dali em vez do zero.
+    AureaExportFlagResumable       = 1u << 6,
 };
 
 /// Códigos de codec de saída (ExportCodec).
@@ -550,7 +555,16 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setShape:(long long)layerId param:(uint32_t)param value:(float)value;
 - (void)setShape:(long long)layerId fillR:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)setShape:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a;
-- (void)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId;
+/// Começa a análise da câmera 3D. NO = não começou (outra análise rodando,
+/// camada que não é vídeo ou com menos de 10 quadros) — par do Android.
+- (BOOL)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId;
+/// Efeito de parte 3D já apontando para a parte `part` (0 = a 1ª). −1 = não entrou.
+- (int)addPartEffect:(uint32_t)type part:(uint32_t)part forLayer:(long long)layerId;
+/// Imagem do "Trocar textura 3D" (arquivo já copiado para o app).
+- (BOOL)setEffectImage:(NSString *)path effect:(uint32_t)effect forLayer:(long long)layerId;
+- (NSString *)effectImageName:(uint32_t)effect forLayer:(long long)layerId;
+/// Nome de cada parte da camada 3D (vazio = sem nome no arquivo).
+- (NSArray<NSString *> *)modelPartNames:(long long)layerId;
 - (void)setModelTransformInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
                           x:(float)x y:(float)y z:(float)z
                          sx:(float)sx sy:(float)sy sz:(float)sz
@@ -990,6 +1004,12 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)cancelExport;
 /// Explicitly restores the checked export snapshot, then restarts from zero.
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;
+/// Export retomável: o export interrompido nesta saída — @[quadro de onde ele
+/// continua, total de quadros]; @[0, 0] = nada a continuar. Lê o registro de
+/// pacotes: chamar fora da main thread.
+- (NSArray<NSNumber*>*)exportResumeInfo:(NSString*)outputPath;
+/// Apaga o export interrompido desta saída (o usuário desistiu dele).
+- (void)discardExportResume:(NSString*)outputPath;
 /// Export como imagem (motor: export/ImageEncode.hpp). `format` 0 = quadro do
 /// playhead em PNG, 1 = sequência PNG num .zip, 2 = GIF. `shortSide` 0 = a
 /// resolução da composição; `maxWidth` = largura máxima do GIF; `fps` 0 =

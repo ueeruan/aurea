@@ -91,6 +91,7 @@ set(AUREA_CORE_SOURCES
     src/project/ProjectPackage.cpp
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp
+    src/export/ExportPacketLog.cpp
     src/export/ExportSinkStartup.cpp
     src/export/OfflineFrameQueue.cpp
     src/export/OfflineFrameRenderer.cpp
@@ -165,6 +166,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/AudioPackEffects.cpp
     src/effects/builtin/ParticularEffect.cpp
     src/effects/builtin/DisintegrateEffect.cpp
+    src/effects/builtin/Object3DEffects.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -218,6 +220,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/Animation.cpp
     src/scene3d/Text3D.cpp
     src/scene3d/Shape3D.cpp
+    src/scene3d/PartEffects.cpp
     src/scene3d/MaterialPreview.cpp
     src/engine/Engine.cpp
     src/engine/EngineRealCamera.cpp

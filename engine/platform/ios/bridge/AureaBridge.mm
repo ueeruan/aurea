@@ -170,6 +170,9 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
 
     config.mediaFactory = media_.get();
     config.exportSinkFactory = &make_ffmpeg_export_sink;
+    // Export retomável (ExportPacketLog): o iOS suspende o app em segundo
+    // plano e o export continua do último GOP salvo quando ele volta.
+    config.enableResumableExport = true;
     // Admit against tracked Metal resources within the existing device budget.
     // The legacy half-share rejects a 101 MiB Motion Tile target even when
     // the measured device envelope is larger and live GPU use is below 8 MiB.

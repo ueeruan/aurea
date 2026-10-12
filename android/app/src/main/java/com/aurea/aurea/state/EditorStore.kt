@@ -1062,6 +1062,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun onEnterForeground() {
         enqueueLifecycle { synchronized(lifecycleLock) { if (ready) engine.resume() } }
         if (ready) startStatusLoop()
+        // Um export que a suspensão parou continua do trecho salvo.
+        exporter.onForeground()
     }
 
     /**
@@ -1074,6 +1076,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun onEnterBackground() {
         stopStatusLoop()
+        exporter.onBackground()
         flushOnLeave(suspendAfter = true)
     }
 
@@ -2290,6 +2293,41 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
         }
     }
+
+    // --- Efeitos de parte 3D (beta 12/10/2026; Object3DEffects.cpp) -------------
+    /** Nome de cada parte da camada 3D escolhida (vazio = o arquivo não deu nome). */
+    fun modelPartNames(): List<String> = primary?.let { engine.modelPartNames(it).toList() } ?: emptyList()
+
+    /**
+     * Põe "Animar parte 3D", "Esconder partes 3D" ou "Trocar textura 3D" já
+     * apontando para a parte `part` (0 = a 1ª). O motor faz tudo num passo de
+     * desfazer; os ajustes e keyframes ficam no painel de Efeitos.
+     */
+    fun addPartEffect(key: String, part: Int): Boolean {
+        val id = primary ?: return false
+        val fx = engine.addPartEffect(id, com.aurea.aurea.editor.panels.effectTypeId(key), part.coerceAtLeast(0))
+        refreshNow()
+        if (fx < 0) { showToast(appText(R.string.fx3d_add_failed)); return false }
+        return true
+    }
+
+    /** A imagem do "Trocar textura 3D" (cópia reduzida em projetos/formas3d, como a imagem das partes). */
+    fun setEffectImage(uri: Uri, effect: Int) {
+        if (!acceptsImport()) return
+        val id = primary ?: return
+        busyMessage = appText(R.string.app_importing_image)
+        launchImport launch@{
+            val ok = withContext(Dispatchers.IO) {
+                val file = saveShapeImage(uri) ?: return@withContext false
+                engine.setEffectImage(id, effect, file.absolutePath)
+            }
+            busyMessage = null
+            if (!ok) errorMessage = appText(R.string.msg_nao_foi_possivel_importar_a_imagem)
+            refreshNow()
+        }
+    }
+
+    fun effectImageName(effect: Int): String = primary?.let { engine.effectImageName(it, effect) } ?: ""
 
     fun clearShapePartImage(part: Int) {
         val id = primary ?: return

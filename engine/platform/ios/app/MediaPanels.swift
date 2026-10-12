@@ -159,9 +159,17 @@ struct TrackingPanel: View {
                 Picker(AureaText.t("cam_camera"), selection: $cameraMotion) { Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("cam_free")).tag(UInt32(1)); Text(AureaText.t("cam_tripod")).tag(UInt32(2)) }
                 Button(knownFov == 0 ? AureaText.t("cam_fov_auto") : AureaText.t("cam_fov_value", Int(knownFov))) { knownFov = knownFov == 0 ? Float(number("fovDeg")).clamped(to: 10...120) : 0 }
                 if knownFov > 0 { Slider(value: $knownFov, in: 10...120).tint(AureaColors.accent) }
-                action("cam_resolve", "cam_resolve_desc") { _ = model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov); reload() }
+                action("cam_resolve", "cam_resolve_desc") {
+                    if !model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov) { model.toast = AureaText.t("app_cam_refine_failed") }
+                    reload()
+                }
                 if model.cameraSelectedCount > 0 {
-                    action("cam_delete_resolve", "cam_delete_resolve_desc") { _ = model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov); model.cameraSelectedCount = 0; reload() }
+                    action("cam_delete_resolve", "cam_delete_resolve_desc") {
+                        // Par do Android: falhou = avisa e mantém a seleção.
+                        if model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov) { model.cameraSelectedCount = 0 }
+                        else { model.toast = AureaText.t("app_cam_refine_failed") }
+                        reload()
+                    }
                 }
                 Spacer().frame(height: 8)
                 action("panel_analisar_novo", "panel_modo_escolhido_acima", run: analyze)
@@ -190,8 +198,15 @@ struct TrackingPanel: View {
     }
     private func analyze() {
         guard let id = model.primarySelection else { return }
+        // Não começou (outra análise rodando, clipe curto): avisa e NÃO adota a
+        // camada — antes o painel desta camada mostrava a análise de outra.
+        guard model.engine.setCameraTrack(mode, forLayer: id) else {
+            model.toast = AureaText.t("msg_nao_foi_possivel_analisar_esta_camada")
+            reload()
+            return
+        }
         sourceLayer = id
-        model.engine.setCameraTrack(mode, forLayer: id); reload()
+        reload()
     }
     private var qualityPicker: some View {
         HStack(spacing: 8) {

@@ -1155,7 +1155,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea Beta 0.1.6 BETA 2 (2179) • 12/10/2026\n\n• Exportación: se acabó el "atascado en 0%": un video que el dispositivo no puede abrir ahora falla al instante y Cancelar responde.\n• Preexportar: renderiza todo el video en baja resolución para verlo fluido y revisarlo antes de la exportación real.\n• Vista previa: tras un tirón, el siguiente Play prepara más cuadros.\n• Cámara 3D: corregida la copia fantasma con motion blur cuando la cámara está vinculada a un nulo.\n• Real Camera: botones Caminar ▲/▼ (adelante y atrás, incluso sin AR), velocidad y Profundidad (Z).\n• Partículas 3D: nuevo preset Red (plexus): puntos unidos por líneas.\n• Nuevos: Glow Scan, Low FPS y el preset de texto Text Explosion. Destello de lente con 8 estilos nuevos (también en Flare 3D). Tracery con detección por brillo, resplandor y red por distancia.\n• Línea de tiempo: arrastrar el borde del clip lo estira cuanto quieras (el video mantiene su último cuadro).\n• Capas: botón de duplicar visible. Curvas: copiar y pegar visibles y menú pequeño.\n• iOS: corregidos los espacios negros en la pantalla de efectos.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.7 BETA 3 (2181) • 12/10/2026\n\n• Exportación hasta un 42% más rápida en proyectos 2D (fotos, títulos, video con efectos), con la misma calidad.\n• La exportación ya no se pierde: salir de la app la pausa y continúa sola cuando vuelves. Si la app se cierra, la pantalla Exportar muestra la exportación interrumpida para continuarla.\n• Los proyectos del iPhone con formas o textos 3D vuelven a exportarse.\n• Línea de tiempo: los keyframes de capas no seleccionadas se ven atenuados y bloqueados — toca la capa para editarlos.\n• Nueva pantalla de privacidad y términos de uso.\n• Máscaras en una sola pantalla: botones grandes de Dibujar, Rectángulo y Elipse siempre a la vista; trazado, modo, borde y seguir objeto uno debajo del otro.\n• Objetos 3D: la pestaña Ambiente quedó solo con luz, fondo y suelo. Cambiar imagen, ocultar y animar partes ahora son efectos con fotogramas clave (Animar parte 3D, Ocultar partes 3D, Cambiar textura 3D).\n• Efectos nuevos: 3D Shatter (la capa se rompe en piezas que explotan en 3D) y 3D Stroke (trazo 3D animado sobre las máscaras o formas listas).\n• Real Camera: los controles salieron de encima de la vista previa y pasaron al área de paneles.\n• Camera Tracker 3D: deshacer ya no borra el análisis, un \"resolver de nuevo\" cancelado ya no bloquea Crear cámara y un video que entra con escala 0% puede tener cámara.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -4075,4 +4075,43 @@ para editar la curva.</string>
     <string name="fxl_lowfps_irregular">Ritmo irregular</string>
     <string name="fx_desc_time_low_fps">Movimiento entrecortado de stop-motion: menos cuadros por segundo, con temblor y ritmo irregular.</string>
     <string name="curve_copied">Curva copiada</string>
+    <string name="fxo_distance_network_24_regions">Red por distancia (24 regiones)</string>
+    <string name="fxl_detect_by">Detectar por</string>
+    <string name="fxo_brightness_2">Brillo</string>
+    <string name="fxl_glow">Resplandor</string>
+    <string name="fxl_glow_radius">Radio del resplandor</string>
+    <string name="fxl_network_distance">Distancia de la red</string>
+    <string name="fxo_game_boy">Game Boy</string>
+    <string name="fxl_part">Parte</string>
+    <string name="fxl_rotation_x">Rotación X</string>
+    <string name="fxl_rotation_y">Rotación Y</string>
+    <string name="fxl_rotation_z">Rotación Z</string>
+    <string name="fxl_hide">Ocultar</string>
+    <string name="fxl_hide_the_others">Ocultar las demás</string>
+    <string name="fxl_image">Imagen</string>
+    <string name="fxl_all_parts">Todas las partes</string>
+    <string name="fxl_explosion">Explosión</string>
+    <string name="fxl_pieces">Piezas</string>
+    <string name="fxo_squares">Cuadrados</string>
+    <string name="fxo_glass">Vidrio</string>
+    <string name="fxl_number_of_pieces">Cantidad de piezas</string>
+    <string name="fxl_explosion_center">Centro de la explosión</string>
+    <string name="fxl_toward_camera">Hacia la cámara</string>
+    <string name="fxl_perspective">Perspectiva</string>
+    <string name="fxl_face_lighting">Luz en las caras</string>
+    <string name="fxo_circle">Círculo</string>
+    <string name="fxo_heart">Corazón</string>
+    <string name="fxo_layer_masks">Máscaras de la capa</string>
+    <string name="fxl_end_color">Color del final</string>
+    <string name="fxl_taper_start">Afinar al inicio</string>
+    <string name="fxl_taper_end">Afinar al final</string>
+    <string name="fxl_repeats">Repeticiones</string>
+    <string name="fxl_repeat_distance">Distancia entre repeticiones</string>
+    <string name="fxl_rotation_per_repeat">Giro por repetición</string>
+    <string name="fxl_scale_per_repeat">Escala por repetición</string>
+    <string name="fxl_fade_repeats">Desvanecer repeticiones</string>
+    <string name="fxl_show">Mostrar</string>
+    <string name="fxo_over_the_layer">Sobre la capa</string>
+    <string name="fxo_stroke_only">Solo el trazo</string>
+    <string name="fxo_behind_the_layer">Detrás de la capa</string>
 </resources>

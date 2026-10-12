@@ -1,16 +1,11 @@
 package com.aurea.aurea.editor.panels
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -43,14 +38,9 @@ import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.Shape3DCatalog
 import com.aurea.aurea.state.Shape3DInfo
 import com.aurea.aurea.ui.ds.ColorWell
-import com.aurea.aurea.ui.ds.PropertyCustomRow
-import com.aurea.aurea.ui.ds.TickRuler
-import com.aurea.aurea.ui.ds.ValueBox
-import com.aurea.aurea.ui.ds.valueDrag
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
-import kotlin.math.roundToInt
 
 /** Qual aba do painel 3D mostra a forma: Material (cor e imagem) ou Forma (partes). */
 internal enum class Shape3DPage { Material, Shape }
@@ -68,9 +58,6 @@ internal enum class Shape3DPage { Material, Shape }
 internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage = Shape3DPage.Material) {
     val store = env.store
     val part = store.shapePartOf(store.primary)
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        if (uri != null) store.setShapePartImage(store.shapePartOf(store.primary), uri)
-    }
     ShapeTitle(stringResource(Shape3DCatalog.names.getOrElse(info.kind) { R.string.shape3d_title }) + " · " + stringResource(R.string.shape3d_parts))
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ShapeChip(stringResource(R.string.shape3d_whole), on = part < 0, modifier = Modifier.testTag("shape3d.part.all")) { store.chooseShapePart(-1) }
@@ -100,58 +87,31 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
                 }, onDone = { store.endGesture() }))
             }
         }
-        // Imagem da galeria (no mapa de cor): na parte, ou em todas.
+        // A imagem da parte virou o efeito "Trocar textura 3D" (aba Partes). Uma
+        // imagem que o projeto já tinha continua: só dá para tirar daqui.
         val hasImage = if (part >= 0) info.images.getOrElse(part) { false } else info.images.any { it }
-        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.shape3d_image), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-            ShapeChip(stringResource(if (hasImage) R.string.shape3d_image_change else R.string.shape3d_image_pick), on = hasImage,
-                modifier = Modifier.testTag("shape3d.image")) {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            }
-            if (hasImage) {
-                Spacer(Modifier.width(6.dp))
-                ShapeChip(stringResource(R.string.shape3d_image_clear), on = false) { store.clearShapePartImage(part) }
+        if (hasImage) {
+            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.shape3d_image), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                ShapeChip(stringResource(R.string.shape3d_image_clear), on = false, modifier = Modifier.testTag("shape3d.image.clear")) { store.clearShapePartImage(part) }
             }
         }
-        if (part < 0) ShapeHint(stringResource(R.string.shape3d_whole_hint))
         Spacer(Modifier.height(14.dp))
         return
     }
     if (part < 0) {
-        ShapeHint(stringResource(R.string.shape3d_whole_hint))
         // Só o cubo (e as fatias dele) divide em partes.
         if (info.kind == 0) SplitCubeBox(store)
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(8.dp))
         return
     }
-    val values = store.shapePartValues(part) ?: return
-    val (animated, here) = store.shapePartKeyBits(part)
+    // A parte se move no palco (gizmo); animar com números e keyframes é o
+    // efeito "Animar parte 3D" (abaixo). Aqui só volta a parte ao lugar.
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        ShapeChip((if (here != 0) "◆ " else "◇ ") + stringResource(if (here != 0) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui),
-            on = here != 0, modifier = Modifier.testTag("shape3d.key")) { store.toggleShapePartKey(part) }
-        ShapeChip(stringResource(R.string.shape3d_reset), on = false) { store.resetShapePart(part) }
-    }
-    val pos = stringResource(R.string.fx_posicao)
-    val rot = stringResource(R.string.panel_rotacao)
-    for (axis in 0..2) {
-        val name = "XYZ"[axis]
-        PartRuler(store, "$pos $name", 0.005f, -5f, 5f, values[axis], "%.2f".format(values[axis]), animated and (1 shl axis) != 0) { v ->
-            store.setShapePartTransform(part, FloatArray(9).also { it[axis] = v }, 1 shl axis)
-        }
-    }
-    for (axis in 0..2) {
-        val name = "XYZ"[axis]
-        val c = 3 + axis
-        PartRuler(store, "$rot $name", 1f, -3600f, 3600f, values[c], "${values[c].roundToInt()}°", animated and (1 shl c) != 0) { v ->
-            store.setShapePartTransform(part, FloatArray(9).also { it[c] = v }, 1 shl c)
-        }
-    }
-    val scale = values[6]
-    PartRuler(store, stringResource(R.string.panel_escala), 0.005f, 0.01f, 20f, scale, "${(scale * 100).roundToInt()}%", animated and (0b111 shl 6) != 0) { v ->
-        store.setShapePartTransform(part, FloatArray(9) { if (it >= 6) v else 0f }, 0b111 shl 6)
+        ShapeChip(stringResource(R.string.shape3d_reset), on = false, modifier = Modifier.testTag("shape3d.reset")) { store.resetShapePart(part) }
     }
     ShapeHint(stringResource(R.string.shape3d_part_hint))
-    Spacer(Modifier.height(14.dp))
+    Spacer(Modifier.height(8.dp))
 }
 
 /**
@@ -229,43 +189,5 @@ private fun ShapeChip(
             Spacer(Modifier.width(6.dp))
         }
         Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
-    }
-}
-
-/** Régua de um canal da parte: arrasto com passo, rótulo e caixa (destaque = tem keyframe). */
-@Composable
-private fun PartRuler(
-    store: EditorStore,
-    label: String,
-    unitsPerDp: Float,
-    min: Float,
-    max: Float,
-    value: Float,
-    shown: String,
-    animated: Boolean,
-    onValue: (Float) -> Unit,
-) {
-    PropertyCustomRow(label, selected = false, onSelect = {}) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).height(40.dp)) {
-                TickRuler(
-                    value = { value },
-                    unitsPerDp = unitsPerDp,
-                    active = true,
-                    modifier = Modifier.fillMaxSize().valueDrag(
-                        enabled = true,
-                        start = { value },
-                        unitsPerDp = { unitsPerDp },
-                        min = min,
-                        max = max,
-                        onStart = { store.beginGesture("parte da forma 3D") },
-                        onValue = onValue,
-                        onEnd = { store.endGesture() },
-                    ),
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            ValueBox(shown, color = if (animated) AureaColors.Accent else AureaColors.Text, onTap = null)
-        }
     }
 }

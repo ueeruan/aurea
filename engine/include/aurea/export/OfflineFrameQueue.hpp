@@ -16,9 +16,11 @@ inline constexpr u32 kExportPhaseShift = 8, kExportPhaseMask = 15u << kExportPha
 // one leased slot cannot be reused until both codec input and PCM are accepted.
 class OfflineFrameQueue final {
 public:
+    /// `first` > 0: export retomado, os quadros anteriores já estão no registro.
     Status prepare(u32 slots, u32 frames, u64 bytesPerSlot, u64 byteLimit,
-                   const std::atomic<bool>* cancellation) noexcept;
-    Result<u32> acquire(u32 admission) noexcept;
+                   const std::atomic<bool>* cancellation, u32 first = 0) noexcept;
+    /// Espera até `waitMs` por um slot livre (0 = só olha).
+    Result<u32> acquire(u32 admission, u32 waitMs = 100) noexcept;
     Status publish(u32 slot, u32 frame) noexcept;
     Result<u32> take() noexcept;
     Status encoded(u32 slot, u32 frame) noexcept;

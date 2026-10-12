@@ -447,6 +447,9 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.hasPlatformInfo = hasInfo;
     config.mediaFactory = &c->media;
     config.exportSinkFactory = &make_ffmpeg_export_sink;
+    // Export retomável (ExportPacketLog): sair do app, a GPU cair ou o
+    // processo morrer no meio não joga fora o que já foi codificado.
+    config.enableResumableExport = true;
     config.exportAssetPathResolver = &preserve_export_asset;
     config.audioOutput = &c->audioOut;
     config.defaultFontPath = config.cacheDirectory + "/Roboto-Regular.ttf";
@@ -2104,6 +2107,41 @@ AUREA_JNI jstring AUREA_FN(nativeColorLutName)(JNIEnv* env, jclass, jlong handle
     return env->NewStringUTF(name.c_str());
 }
 
+// --- Efeitos de parte 3D (Animar parte, Esconder partes, Trocar textura) -----
+AUREA_JNI jint AUREA_FN(nativeAddPartEffect)(JNIEnv*, jclass, jlong handle, jlong layer, jint type, jint part) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || part < 0) return -1;
+    const auto id = c->engine.add_part_effect(static_cast<u64>(layer), static_cast<u32>(type), static_cast<u32>(part));
+    return id.ok() ? static_cast<jint>(*id) : -1;
+}
+AUREA_JNI jboolean AUREA_FN(nativeSetEffectImage)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !path) return JNI_FALSE;
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    if (!p) return JNI_FALSE;
+    const bool ok = c->engine.set_effect_image(static_cast<u64>(layer), static_cast<u32>(effect), p).ok();
+    env->ReleaseStringUTFChars(path, p);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jstring AUREA_FN(nativeEffectImageName)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect) {
+    NativeContext* c = ctx_of(handle);
+    const auto name = c ? c->engine.effect_image_name(static_cast<u64>(layer), static_cast<u32>(effect)) : std::string{};
+    return env->NewStringUTF(name.c_str());
+}
+AUREA_JNI jobjectArray AUREA_FN(nativeModelPartNames)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    const auto names = c ? c->engine.model_part_names(static_cast<u64>(layer)) : std::vector<std::string>{};
+    jclass stringClass = env->FindClass("java/lang/String");
+    jobjectArray out = env->NewObjectArray(static_cast<jsize>(names.size()), stringClass, nullptr);
+    if (!out) return nullptr;
+    for (jsize i = 0; i < static_cast<jsize>(names.size()); ++i) {
+        jstring s = env->NewStringUTF(names[static_cast<usize>(i)].c_str());
+        env->SetObjectArrayElement(out, i, s);
+        env->DeleteLocalRef(s);
+    }
+    return out;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetTextFont)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring family, jint weight,
                                               jboolean italic, jstring path) {
     NativeContext* c = ctx_of(handle);
@@ -3618,6 +3656,26 @@ AUREA_JNI jint AUREA_FN(nativeRestartExport)(JNIEnv* env, jclass, jlong handle, 
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string recovery = to_string(env, recoveryPath), output = to_string(env, outputPath);
     return static_cast<jint>(c->engine.restart_export(recovery.c_str(), output.c_str()).raw());
+}
+
+/// Export interrompido nesta saída (export retomável): [quadro de onde
+/// continua, total de quadros]; [0, 0] = nada a continuar.
+AUREA_JNI jintArray AUREA_FN(nativeExportResumeInfo)(JNIEnv* env, jclass, jlong handle, jstring outputPath) {
+    jintArray out = env->NewIntArray(2);
+    NativeContext* c = ctx_of(handle);
+    if (!out || !c) return out;
+    const std::string output = to_string(env, outputPath);
+    const auto info = c->engine.export_resume_info(output.c_str());
+    const jint values[2]{static_cast<jint>(info.resumeFrame), static_cast<jint>(info.totalFrames)};
+    env->SetIntArrayRegion(out, 0, 2, values);
+    return out;
+}
+
+AUREA_JNI void AUREA_FN(nativeDiscardExportResume)(JNIEnv* env, jclass, jlong handle, jstring outputPath) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return;
+    const std::string output = to_string(env, outputPath);
+    c->engine.discard_export_resume(output.c_str());
 }
 
 /// A taxa de vídeo (bps) que o export usaria — a mesma regra do motor, para a

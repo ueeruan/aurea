@@ -11,4 +11,9 @@
     <string name="expfail_unsupported">este teléfono no puede exportar en esta resolución o formato</string>
     <string name="expfail_stuck">la exportación dejó de avanzar durante minutos y se detuvo; cierra otras apps e inténtalo de nuevo</string>
     <string name="app_export_safe_mode">El codificador de video del teléfono se bloqueó: exportando de nuevo en modo compatible (H.264, puede tardar más).</string>
+    <string name="app_export_paused">Exportación en pausa: continúa sola cuando vuelvas a Aurea.</string>
+    <string name="app_export_resumed">Continuando la exportación desde donde se detuvo.</string>
+    <string name="app_export_resume_title">Exportación interrumpida al %1$d%%</string>
+    <string name="app_export_resume_continue">Continuar exportación</string>
+    <string name="app_export_resume_discard">Descartar</string>
 </resources>

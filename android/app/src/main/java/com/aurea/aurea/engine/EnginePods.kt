@@ -475,6 +475,13 @@ class ExportProgress {
     val frameFallback: Boolean get() = flags and FLAG_FRAME_FALLBACK != 0
     /** Este export roda no modo de segurança (refeito depois de o encoder travar). */
     val safeMode: Boolean get() = flags and FLAG_SAFE_MODE != 0
+    /** Este export continuou um interrompido, do último trecho salvo. */
+    val resumed: Boolean get() = flags and FLAG_RESUMED != 0
+    /**
+     * Parou (app em segundo plano, falha recuperável) com quadros salvos: o
+     * MESMO export (mesma saída e opções) continua dali em vez do zero.
+     */
+    val resumable: Boolean get() = flags and FLAG_RESUMABLE != 0
     /**
      * Falhou pelo encoder: o modo de segurança em que o MOTOR manda refazer
      * (bits 16..17, kExportRetryShift em export/ExportWatchdog.hpp). 0 = não refazer.
@@ -504,6 +511,8 @@ class ExportProgress {
         const val FLAG_THERMAL_REDUCED = 1 shl 2
         const val FLAG_FRAME_FALLBACK = 1 shl 3
         const val FLAG_SAFE_MODE = 1 shl 4
+        const val FLAG_RESUMED = 1 shl 5
+        const val FLAG_RESUMABLE = 1 shl 6
         // aurea::kExportRetryShift (ExportWatchdog.hpp).
         const val RETRY_SHIFT = 16
         // aurea::kExportFailureShift / ExportFailure (ExportRules.hpp).

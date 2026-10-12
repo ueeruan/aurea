@@ -259,26 +259,64 @@ import SwiftUI
     }
 }
 
-/// A faixa no alto do palco enquanto a Real Camera está ligada.
+/// Chip da Real Camera (pílula do palco e painel).
+@MainActor fileprivate func realCameraChip(_ text: String, _ id: String, _ on: Bool, enabled: Bool = true,
+                                           _ action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+        Text(text)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(on ? AureaColors.onAccent : (enabled ? AureaColors.text : AureaColors.disabled))
+            .padding(.horizontal, 10)
+            .frame(minHeight: 34)
+            .background(RoundedRectangle(cornerRadius: 8).fill(on ? AureaColors.accent : AureaColors.chip))
+    }
+    .buttonStyle(.plain)
+    .disabled(!enabled)
+    .accessibilityLabel(text)
+    .accessibilityAddTraits(on ? .isSelected : [])
+    .accessibilityIdentifier(id)
+}
+
+/// Na prévia só a pílula (o painel inteiro cobria o palco — retorno de beta):
+/// status e Gravar/Parar, sempre à vista, também durante a gravação. Os
+/// controles completos ficam na área de painéis (`RealCameraPanelView`).
+/// Par do Android (RealCamera.kt, `RealCameraBar`).
 @MainActor struct RealCameraStageOverlay: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var cam = RealCameraState.shared
 
-    private func chip(_ text: String, _ id: String, _ on: Bool, enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(text)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(on ? AureaColors.onAccent : (enabled ? AureaColors.text : AureaColors.disabled))
-                .padding(.horizontal, 10)
-                .frame(minHeight: 34)
-                .background(RoundedRectangle(cornerRadius: 8).fill(on ? AureaColors.accent : AureaColors.chip))
+    var body: some View {
+        if cam.painting(model) {
+            VStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "camera.fill").font(.system(size: 12))
+                        .foregroundStyle(cam.recording ? AureaColors.danger : AureaColors.accent)
+                    Text(cam.recording ? cam.statusText : AureaText.t("real_camera_title"))
+                        .font(.system(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(1)
+                    realCameraChip(AureaText.t(cam.recording ? "real_camera_stop" : "real_camera_record"), "realcam.gravar",
+                                   cam.recording, enabled: cam.recording || cam.trackingValid) { cam.toggleRecording(model) }
+                }
+                .padding(.leading, 10).padding(.trailing, 4).padding(.vertical, 4)
+                .background(Capsule().fill(AureaColors.editorPanelHigh.opacity(0.92)))
+                .overlay(Capsule().stroke(cam.recording ? AureaColors.danger : AureaColors.accent.opacity(0.5), lineWidth: 1))
+                .padding(.top, 8)
+                .accessibilityIdentifier("realcam.bar")
+                Spacer()
+            }
+            .onDisappear { cam.stop(model) }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                cam.stop(model)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(text)
-        .accessibilityAddTraits(on ? .isSelected : [])
-        .accessibilityIdentifier(id)
     }
+}
+
+/// Os controles da Real Camera na ÁREA DE PAINÉIS, fora da prévia: recentrar,
+/// inverter, andar, velocidade, profundidade, sensibilidade e Concluir.
+/// Par do Android (`RealCameraPanel`).
+@MainActor struct RealCameraPanelView: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var cam = RealCameraState.shared
 
     /// Botão de segurar: true ao apertar, false ao soltar.
     private func holdChip(_ text: String, _ id: String, _ hold: @escaping (Bool) -> Void) -> some View {
@@ -296,61 +334,50 @@ import SwiftUI
     }
 
     var body: some View {
-        if cam.painting(model) {
-            VStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
-                        Image(systemName: "camera.fill").font(.system(size: 12)).foregroundStyle(AureaColors.accent)
-                        Text(AureaText.t("real_camera_title")).font(.system(size: 12, weight: .semibold)).foregroundStyle(AureaColors.text)
-                        Text(cam.statusText)
-                            .font(.system(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    HStack(spacing: 6) {
-                        chip(AureaText.t(cam.recording ? "real_camera_stop" : "real_camera_record"), "realcam.gravar", cam.recording,
-                             enabled: cam.recording || cam.trackingValid) { cam.toggleRecording(model) }
-                        chip(AureaText.t("real_camera_recenter"), "realcam.recentrar", false) { cam.recenter() }
-                        chip(AureaText.t("real_camera_invert"), "realcam.inverter", cam.inverted) { cam.inverted.toggle() }
-                        chip(AureaText.t("real_camera_done"), "realcam.concluir", false) { cam.stop(model) }
-                    }
-                    HStack(spacing: 6) {
-                        Text(AureaText.t("real_camera_walk")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
-                        holdChip(AureaText.t("real_camera_forward"), "realcam.frente") { cam.walk($0 ? 1 : 0) }
-                        holdChip(AureaText.t("real_camera_back"), "realcam.tras") { cam.walk($0 ? -1 : 0) }
-                    }
-                    HStack(spacing: 8) {
-                        Text(AureaText.t("real_camera_walk_speed")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
-                        Slider(value: $cam.walkSpeed, in: 0.2...3)
-                            .accessibilityLabel(AureaText.t("real_camera_walk_speed"))
-                            .accessibilityIdentifier("realcam.walkspeed")
-                        Text(String(format: "%.1f m/s", cam.walkSpeed)).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
-                    }
-                    HStack(spacing: 8) {
-                        Text(AureaText.t("real_camera_depth")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
-                        Slider(value: $cam.depthScale, in: 0.5...5)
-                            .accessibilityLabel(AureaText.t("real_camera_depth"))
-                            .accessibilityIdentifier("realcam.depth")
-                        Text(String(format: "%.1f×", cam.depthScale)).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
-                    }
-                    HStack(spacing: 8) {
-                        Text(AureaText.t("real_camera_sensitivity")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
-                        Slider(value: $cam.sensitivity, in: 0.25...3)
-                            .accessibilityLabel(AureaText.t("real_camera_sensitivity"))
-                            .accessibilityIdentifier("realcam.sens")
-                        Text("\(Int(cam.sensitivity * 100))%").font(.system(size: 11)).foregroundStyle(AureaColors.muted)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 7) {
+                    Image(systemName: "camera.fill").font(.system(size: 12)).foregroundStyle(AureaColors.accent)
+                    Text(AureaText.t("real_camera_title")).font(.system(size: 12, weight: .semibold)).foregroundStyle(AureaColors.text)
+                    Text(cam.statusText)
+                        .font(.system(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, 10).padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 10).fill(AureaColors.editorPanelHigh))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(AureaColors.accent.opacity(0.5), lineWidth: 1))
-                .padding(.horizontal, 8).padding(.top, 8)
-                .accessibilityIdentifier("realcam.bar")
-                Spacer()
+                HStack(spacing: 6) {
+                    realCameraChip(AureaText.t("real_camera_recenter"), "realcam.recentrar", false) { cam.recenter() }
+                    realCameraChip(AureaText.t("real_camera_invert"), "realcam.inverter", cam.inverted) { cam.inverted.toggle() }
+                    realCameraChip(AureaText.t("real_camera_done"), "realcam.concluir", false) { cam.stop(model) }
+                }
+                HStack(spacing: 6) {
+                    Text(AureaText.t("real_camera_walk")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                    holdChip(AureaText.t("real_camera_forward"), "realcam.frente") { cam.walk($0 ? 1 : 0) }
+                    holdChip(AureaText.t("real_camera_back"), "realcam.tras") { cam.walk($0 ? -1 : 0) }
+                }
+                HStack(spacing: 8) {
+                    Text(AureaText.t("real_camera_walk_speed")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                    Slider(value: $cam.walkSpeed, in: 0.2...3)
+                        .accessibilityLabel(AureaText.t("real_camera_walk_speed"))
+                        .accessibilityIdentifier("realcam.walkspeed")
+                    Text(String(format: "%.1f m/s", cam.walkSpeed)).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                }
+                HStack(spacing: 8) {
+                    Text(AureaText.t("real_camera_depth")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                    Slider(value: $cam.depthScale, in: 0.5...5)
+                        .accessibilityLabel(AureaText.t("real_camera_depth"))
+                        .accessibilityIdentifier("realcam.depth")
+                    Text(String(format: "%.1f×", cam.depthScale)).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                }
+                HStack(spacing: 8) {
+                    Text(AureaText.t("real_camera_sensitivity")).font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                    Slider(value: $cam.sensitivity, in: 0.25...3)
+                        .accessibilityLabel(AureaText.t("real_camera_sensitivity"))
+                        .accessibilityIdentifier("realcam.sens")
+                    Text("\(Int(cam.sensitivity * 100))%").font(.system(size: 11)).foregroundStyle(AureaColors.muted)
+                }
             }
-            .onDisappear { cam.stop(model) }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-                cam.stop(model)
-            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
         }
+        .background(AureaColors.editorPanelHigh)
+        .accessibilityIdentifier("realcam.panel")
     }
 }

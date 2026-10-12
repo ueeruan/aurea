@@ -115,6 +115,18 @@ void OfflineFrameRenderer::shutdown() noexcept {
     renderer_.shutdown();
     gpu_ = nullptr;
 }
+bool OfflineFrameRenderer::release(bool deviceLost, u64 timeoutNs) noexcept {
+    if (deviceLost) lostDevice_ = true;
+    snapshot_ = FrameSnapshot{};
+    if (!media_.close_all_for(timeoutNs)) return false;
+    if (gpu_) {
+        if (lostDevice_) renderer_.forget_device();
+        else renderer_.shutdown();
+    }
+    gpu_ = nullptr;
+    return true;
+}
+
 void OfflineFrameRenderer::forget_device() noexcept {
     snapshot_ = FrameSnapshot{};
     media_.close_all();

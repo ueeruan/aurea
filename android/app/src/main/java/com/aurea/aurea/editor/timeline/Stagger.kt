@@ -40,4 +40,18 @@ object KeyframeVisibility {
      */
     fun visible(showAll: Boolean, isPropertyLane: Boolean, selected: Boolean): Boolean =
         showAll || isPropertyLane || selected
+
+    /**
+     * Como no Alight Motion: só a camada SELECIONADA edita os losangos (tocar,
+     * arrastar). Das outras eles aparecem esmaecidos, só de referência, e o
+     * toque cai na camada (que se seleciona). Antes, rolar a timeline arrastava
+     * keyframe de camada que nem estava escolhida. Pedidos explícitos continuam
+     * alcançando: o modo "escolher keyframes" e as trilhas de propriedade que o
+     * usuário abriu.
+     */
+    fun editable(selected: Boolean, keySelectMode: Boolean, isPropertyLane: Boolean = false): Boolean =
+        selected || keySelectMode || isPropertyLane
+
+    /** Opacidade dos losangos só de referência (camada não selecionada). */
+    const val LOCKED_ALPHA = 0.35f
 }

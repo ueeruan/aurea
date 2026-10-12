@@ -8,6 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -168,14 +170,54 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
             delay(50L)
         }
     }
+    // Na prévia só a pílula (o painel inteiro cobria o palco — retorno de beta):
+    // status e Gravar/Parar, sempre à vista, também durante a gravação. Os
+    // controles completos ficam na área de painéis (RealCameraPanel).
+    val muted = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted))
+    Row(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(AureaColors.EditorPanelHigh.copy(alpha = 0.92f))
+            .border(1.dp, if (RealCamera.recording) AureaColors.Danger else ShellColors.AccentHalf, RoundedCornerShape(18.dp))
+            .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+            .testTag("realcam.bar"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CupertinoIcon(CupertinoGlyph.CameraFill, 13.dp, if (RealCamera.recording) AureaColors.Danger else AureaColors.Accent)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            if (RealCamera.recording) stringResource(R.string.real_camera_recording, RealCamera.lastFrame.coerceAtLeast(0))
+            else stringResource(R.string.real_camera_title),
+            maxLines = 1, style = muted,
+        )
+        Spacer(Modifier.width(8.dp))
+        CamChip(
+            stringResource(if (RealCamera.recording) R.string.real_camera_stop else R.string.real_camera_record),
+            "realcam.gravar", RealCamera.recording, enabled = RealCamera.recording || RealCamera.available,
+        ) {
+            store.realCameraRecord(!RealCamera.recording)
+        }
+    }
+}
+
+/** A Real Camera está ligada nesta tela (a área de painéis mostra os controles dela). */
+@Composable
+fun realCameraShowing(store: EditorStore): Boolean = RealCamera.session != null && realCameraActive(store)
+
+/**
+ * Os controles da Real Camera na ÁREA DE PAINÉIS (embaixo; à direita no
+ * largo), fora da prévia: recentrar, inverter, sensibilidade, andar, velocidade,
+ * profundidade e Concluir. O sensor continua com a pílula do palco.
+ */
+@Composable
+fun RealCameraPanel(store: EditorStore, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val muted = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted))
     Column(
         modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(AureaColors.EditorPanelHigh)
-            .border(1.dp, ShellColors.AccentHalf, RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-            .testTag("realcam.bar"),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .testTag("realcam.panel"),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CupertinoIcon(CupertinoGlyph.CameraFill, 13.dp, AureaColors.Accent)
@@ -185,7 +227,6 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
             Text(
                 when {
                     !RealCamera.available -> stringResource(R.string.real_camera_no_sensor)
-                    RealCamera.recording -> stringResource(R.string.real_camera_recording, RealCamera.lastFrame.coerceAtLeast(0))
                     else -> stringResource(when (RealCamera.tracking) {
                         RealCameraTracking.Position -> R.string.real_camera_tracking_position
                         RealCameraTracking.Limited -> R.string.real_camera_tracking_limited
@@ -194,28 +235,13 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
                         RealCameraTracking.Rotation -> R.string.real_camera_tracking_rotation
                     })
                 },
-                maxLines = 2, style = muted, modifier = Modifier.weight(1f),
+                maxLines = 2, style = muted, modifier = Modifier.weight(1f).testTag("realcam.tracking"),
             )
         }
-        Row(Modifier.padding(top = 6.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            CamChip(
-                stringResource(if (RealCamera.recording) R.string.real_camera_stop else R.string.real_camera_record),
-                "realcam.gravar", RealCamera.recording, enabled = RealCamera.recording || RealCamera.available,
-            ) {
-                store.realCameraRecord(!RealCamera.recording)
-            }
+        Row(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CamChip(stringResource(R.string.real_camera_recenter), "realcam.recentrar", false) { store.realCameraRecenter() }
             CamChip(stringResource(R.string.real_camera_invert), "realcam.inverter", RealCamera.inverted) { RealCamera.inverted = !RealCamera.inverted }
             CamChip(stringResource(R.string.real_camera_done), "realcam.concluir", false) { store.realCameraStop() }
-        }
-        if (RealCamera.recording) {
-            Text(stringResource(when (RealCamera.tracking) {
-                RealCameraTracking.Position -> R.string.real_camera_tracking_position
-                RealCameraTracking.Limited -> R.string.real_camera_tracking_limited
-                RealCameraTracking.Permission -> R.string.real_camera_camera_permission
-                RealCameraTracking.Failed -> R.string.real_camera_tracking_failed
-                RealCameraTracking.Rotation -> R.string.real_camera_tracking_rotation
-            }), style = muted, modifier = Modifier.testTag("realcam.tracking"))
         }
         if (RealCamera.tracking == RealCameraTracking.Permission) {
             Text(stringResource(R.string.real_camera_camera_permission_prompt), style = muted)

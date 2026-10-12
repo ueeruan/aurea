@@ -11,4 +11,9 @@
     <string name="expfail_unsupported">यह फ़ोन इस रिज़ॉल्यूशन या फ़ॉर्मैट में एक्सपोर्ट नहीं कर सकता</string>
     <string name="expfail_stuck">एक्सपोर्ट कई मिनट तक आगे नहीं बढ़ा और रोक दिया गया; दूसरे ऐप बंद करके फिर से कोशिश करें</string>
     <string name="app_export_safe_mode">फ़ोन का वीडियो एनकोडर अटक गया: संगत मोड में फिर से एक्सपोर्ट हो रहा है (H.264, ज़्यादा समय लग सकता है)।</string>
+    <string name="app_export_paused">एक्सपोर्ट रुका हुआ है: Aurea पर लौटते ही यह अपने-आप जारी रहेगा।</string>
+    <string name="app_export_resumed">एक्सपोर्ट वहीं से जारी है जहाँ रुका था।</string>
+    <string name="app_export_resume_title">एक्सपोर्ट %1$d%% पर रुका</string>
+    <string name="app_export_resume_continue">एक्सपोर्ट जारी रखें</string>
+    <string name="app_export_resume_discard">हटाएँ</string>
 </resources>

@@ -62,7 +62,7 @@ struct StartupState {
     bool done = false, abandoned = false;
     Errc code = Errc::Ok;
     char detail[256]{};
-    std::string target, staged;
+    std::string target, staged, packetLog;
     VideoStreamConfig video;
     AudioStreamConfig audio;
     bool hasAudio = false;
@@ -164,6 +164,21 @@ public:
         abort_staged(*state_);
     }
     EncoderInfo encoder_info() const noexcept override { return state_->sink->encoder_info(); }
+    Status end_video() noexcept override {
+        Binding binding(*this);
+        if (finalized_) return Status{Errc::InvalidState, "export ja foi finalizado"};
+        return state_->sink->end_video();
+    }
+    Status begin_assembly(const AudioStreamConfig* audio) noexcept override {
+        Binding binding(*this);
+        if (finalized_) return Status{Errc::InvalidState, "export ja foi finalizado"};
+        return state_->sink->begin_assembly(audio);
+    }
+    Status replay_spilled_audio() noexcept override {
+        Binding binding(*this);
+        if (finalized_) return Status{Errc::InvalidState, "export ja foi finalizado"};
+        return state_->sink->replay_spilled_audio();
+    }
 
 private:
     class Binding {
@@ -261,6 +276,9 @@ ExportSinkStartupResult open_export_sink_startup(std::unique_ptr<ExportSink> sin
         state->staged = state->target + ".aurea-startup-" + std::to_string(pid) + "-" +
             std::to_string(monotonic_ns()) + "-" + std::to_string(++generation) + ".mp4";
         state->video = video;
+        // The worker may outlive the caller: the log path lives in the state.
+        state->packetLog = video.packetLogPath ? video.packetLogPath : "";
+        state->video.packetLogPath = state->packetLog.empty() ? nullptr : state->packetLog.c_str();
         state->hasAudio = audio != nullptr;
         if (audio) state->audio = *audio;
         state->beat.store(monotonic_ns(), std::memory_order_release);

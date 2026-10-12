@@ -212,6 +212,15 @@ namespace effect_keys {
     inline constexpr const char* kDatamosh              = "aurea.glitch.datamosh";
     inline constexpr const char* kWipeFlux              = "aurea.transition.wipe_flux";
     inline constexpr const char* kWipePlasma            = "aurea.transition.wipe_plasma";
+
+    // --- Efeitos 3D (pedido de beta 12/10/2026; Object3DEffects.cpp) ---------
+    // Partes dos objetos 3D: lidos pelo renderer 3D (scene3d/PartEffects.cpp).
+    inline constexpr const char* kPart3DTransform       = "aurea.3d.part_transform";
+    inline constexpr const char* kPart3DHide            = "aurea.3d.part_hide";
+    inline constexpr const char* kPart3DTexture         = "aurea.3d.part_texture";
+    // Geometria na GPU, em qualquer camada.
+    inline constexpr const char* kShatter3D             = "aurea.3d.shatter";
+    inline constexpr const char* kStroke3D              = "aurea.3d.stroke";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

@@ -30,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -181,14 +182,81 @@ class Exporter internal constructor(
 
     val busy: Boolean get() = sessionActive || state.phase == ExportPhase.Running || state.phase == ExportPhase.Publishing
 
+    /** O app está na frente. Um export que o sistema suspendeu espera isto para continuar. */
+    private val foreground = MutableStateFlow(true)
+    fun onForeground() { foreground.value = true }
+    fun onBackground() { foreground.value = false }
+
+    /**
+     * Export de vídeo interrompido (o app foi fechado no meio) que o motor pode
+     * continuar do último trecho salvo: mesma saída, mesmo projeto, mesmas opções.
+     */
+    data class PendingExport(val file: File, val title: String, val options: ExportOptions,
+                             val resumeFrame: Int, val totalFrames: Int) {
+        val percent: Int get() = if (totalFrames > 0) (resumeFrame.toLong() * 100 / totalFrames).toInt().coerceIn(0, 99) else 0
+    }
+    private val pendingPrefs get() = app.getSharedPreferences(PENDING_PREFS, android.content.Context.MODE_PRIVATE)
+
     init {
         // Temporário de um export que o sistema matou no meio (o app não teve
         // como apagar): some na abertura, fora da main thread. Só o que é mais
-        // velho que esta sessão — um export novo nunca é tocado.
+        // velho que esta sessão — um export novo nunca é tocado. O registro do
+        // export pendente (export retomável) fica: é ele que continua.
         val sessionStart = System.currentTimeMillis()
         scope.launch(Dispatchers.IO) {
-            File(app.cacheDir, "export").listFiles()?.forEach { if (it.lastModified() < sessionStart) it.delete() }
+            val keep = pendingPrefs.getString(PENDING_FILE, null)?.let { setOf(it, "$it.aurea-pkt") } ?: emptySet()
+            File(app.cacheDir, "export").listFiles()?.forEach {
+                if (it.lastModified() < sessionStart && it.absolutePath !in keep) it.delete()
+            }
         }
+    }
+
+    private fun rememberPending(file: File, title: String, options: ExportOptions) {
+        pendingPrefs.edit()
+            .putString(PENDING_PROJECT, projectPath())
+            .putString(PENDING_FILE, file.absolutePath)
+            .putString(PENDING_TITLE, title)
+            .putInt("lado", options.shortSide)
+            .putString("fps", options.fps.toString())
+            .putBoolean("hevc", options.hevc)
+            .putInt("qualidade", options.quality)
+            .putInt("mbps", options.customMbps)
+            .putInt("upscale", options.aiUpscale)
+            .putBoolean("trim", options.trimToContent)
+            .apply()
+    }
+
+    private fun forgetPending() { pendingPrefs.edit().clear().apply() }
+
+    /**
+     * O export interrompido deste projeto, se o motor ainda pode continuá-lo.
+     * Lê o registro de pacotes: chamar fora da main thread.
+     */
+    fun pendingFor(project: String?): PendingExport? {
+        if (busy || project == null) return null
+        val prefs = pendingPrefs
+        if (prefs.getString(PENDING_PROJECT, null) != project) return null
+        val file = File(prefs.getString(PENDING_FILE, null) ?: return null)
+        val info = runCatching { engine.exportResumeInfo(file.absolutePath) }.getOrNull() ?: return null
+        if (info[0] <= 0 || info[1] <= 0) { forgetPending(); return null }
+        val options = ExportOptions(
+            shortSide = prefs.getInt("lado", 1080), fps = prefs.getString("fps", "0")?.toDoubleOrNull() ?: 0.0,
+            hevc = prefs.getBoolean("hevc", false), quality = prefs.getInt("qualidade", 1),
+            customMbps = prefs.getInt("mbps", 0), aiUpscale = prefs.getInt("upscale", 0),
+            trimToContent = prefs.getBoolean("trim", true))
+        return PendingExport(file, prefs.getString(PENDING_TITLE, "") ?: "", options, info[0], info[1])
+    }
+
+    /** Continua o export interrompido: a mesma saída e as mesmas opções (o motor confere o projeto). */
+    fun resumePending(pending: PendingExport) {
+        if (busy) return
+        launchVideo(pending.file.parentFile ?: File(app.cacheDir, "export"), pending.file, pending.title, pending.options)
+    }
+
+    /** O usuário desistiu do export interrompido: o registro sai do aparelho. */
+    fun discardPending(pending: PendingExport) {
+        forgetPending()
+        scope.launch(Dispatchers.IO) { runCatching { engine.discardExportResume(pending.file.absolutePath) } }
     }
 
     /**
@@ -239,11 +307,18 @@ class Exporter internal constructor(
             return
         }
 
+        // Export de verdade: lembrado até terminar, para continuar se o app
+        // for fechado no meio (o pré-export é só para assistir).
+        if (!options.preview) rememberPending(file, base, options)
+        launchVideo(dir, file, base, options)
+    }
+
+    private fun launchVideo(dir: File, file: File, title: String, options: ExportOptions) {
         // Taxa: o motor calcula pela qualidade (0 = automático); só o Mbps
         // manual do Avançado é passado como número.
         val mbps = options.customMbps.coerceAtLeast(0)
 
-        state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension)
+        state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension.ifBlank { title })
         sessionActive = true
         cancelPending = false
         poll?.cancel()
@@ -309,14 +384,45 @@ class Exporter internal constructor(
      */
     private suspend fun runExport(dir: File, file: File, options: ExportOptions, mbps: Int) {
         var safeMode = 0
+        var failureResumes = 0
+        var resuming = false
         while (true) {
             val level = safeMode
-            val suggested = runEngineJob(dir, file, options, level) {
+            val suggested = runEngineJob(dir, file, options, level, resuming) {
                 engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
                     options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc && level == 0), level)
             }
+            if (suggested == RESUME) {
+                // Export retomável: o motor guardou os trechos já codificados.
+                if (progress.result == CANCELLED) {
+                    // O sistema suspendeu o app (segundo plano): espera voltar.
+                    state = state.copy(phase = ExportPhase.Running, notice = text(R.string.app_export_paused))
+                    while (!foreground.value && !cancelPending) delay(200)
+                } else if (++failureResumes > MAX_FAILURE_RESUMES) {
+                    withContext(Dispatchers.IO) { runCatching { engine.discardExportResume(file.absolutePath) } }
+                    forgetPending()
+                    state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_failed,
+                        failureReason(progress.failure) ?: EngineText.reason(app, progress.message, progress.result)))
+                    return
+                }
+                if (cancelPending) {
+                    withContext(Dispatchers.IO) { runCatching { engine.discardExportResume(file.absolutePath) } }
+                    forgetPending()
+                    state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
+                    return
+                }
+                android.util.Log.w("AureaExport", "Resuming the export from the saved packets (result ${progress.result})")
+                state = state.copy(phase = ExportPhase.Running, notice = text(R.string.app_export_resumed))
+                resuming = true
+                continue
+            }
+            resuming = false
             val next = ExportStallWatchdog.nextSafeMode(level, suggested)
-            if (next == 0) return
+            if (next == 0) {
+                // Terminou (pronto, falhou de vez ou cancelado): nada a continuar.
+                forgetPending()
+                return
+            }
             android.util.Log.w("AureaExport", "Video encoder stalled/refused; exporting again in safe mode $next")
             safeMode = next
             state = state.copy(phase = ExportPhase.Running, framesDone = 0, fps = 0f, etaSeconds = 0, message = "",
@@ -330,16 +436,23 @@ class Exporter internal constructor(
      * 0 = terminou (pronto, falhou ou cancelado — o estado já diz qual).
      */
     private suspend fun runEngineJob(dir: File, file: File, options: ExportOptions, safeMode: Int = 0,
-                                     startJob: () -> Int): Int {
+                                     resuming: Boolean = false, startJob: () -> Int): Int {
         run {
             // Abrir o encoder, o MP4 e os alvos de GPU leva segundos em aparelho
             // lento (e no emulador): na main thread isso dava "Aurea não está
             // respondendo" no toque de Exportar.
-            val code = withContext(Dispatchers.IO) {
+            var code = withContext(Dispatchers.IO) {
                 check(dir.isDirectory || dir.mkdirs()) { "Export directory unavailable" }
                 // Startup removes orphaned files. A previous failed job can still be
                 // unwinding its native writer here; never unlink that writer's output.
                 startJob()
+            }
+            // Voltando do segundo plano: o motor retoma na fila de ciclo de vida;
+            // até lá ele recusa com InvalidState. Espera um pouco, sem desistir.
+            var waits = 0
+            while (resuming && code == INVALID_STATE && !cancelPending && waits++ < 100) {
+                delay(100)
+                code = withContext(Dispatchers.IO) { startJob() }
             }
             if (code != 0) {
                 if (options.format == ExportFormat.Video && !cancelPending && engine.exportProgress(progressBuffer)) {
@@ -406,6 +519,10 @@ class Exporter internal constructor(
                     withContext(Dispatchers.IO) { file.delete() }
                     return retry
                 }
+                // Export retomável: parou (segundo plano ou falha recuperável)
+                // com trechos salvos — continua dali, não do zero.
+                if (options.format == ExportFormat.Video && progress.result != 0 && progress.resumable &&
+                    !cancelPending && !watchdog.cancelled) return RESUME
                 when (progress.result) {
                     0 -> if (options.preview) {
                         // Pré-export: fica no cache do app, a tela toca em loop.
@@ -630,6 +747,9 @@ class Exporter internal constructor(
         if (p.safeMode) {
             lines += text(R.string.app_export_safe_mode)
         }
+        if (p.resumed) {
+            lines += text(R.string.app_export_resumed)
+        }
         if (p.softwareEncoder) {
             // O modo de segurança é sempre H.264 (ExportWatchdog.hpp).
             val codec = if (options.hevc && (!p.safeMode || ((p.flags ushr 8) and 15) != 0)) "HEVC" else "H.264"
@@ -687,6 +807,14 @@ class Exporter internal constructor(
         const val OUT_OF_MEMORY = 8
         const val CANCELLED = 25
         const val STORAGE_FULL = 28
+        /** runEngineJob: parou com trechos salvos; o mesmo export continua (não é um modo de segurança). */
+        const val RESUME = -1
+        /** Falhas recuperáveis seguidas que continuam do ponto salvo antes de desistir. */
+        const val MAX_FAILURE_RESUMES = 2
+        const val PENDING_PREFS = "aurea_export_pendente"
+        const val PENDING_PROJECT = "projeto"
+        const val PENDING_FILE = "arquivo"
+        const val PENDING_TITLE = "titulo"
         /** AAC do export (kExportAudioKbps no motor). */
         const val AUDIO_BPS = 192_000.0
     }

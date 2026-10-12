@@ -81,6 +81,7 @@ add_executable(aurea_tests
     test_editing_tools.cpp
     test_export.cpp
     test_export_recovery.cpp
+    test_export_packet_log.cpp
     test_export_scheduler.cpp
     test_offline_frame_queue.cpp
     test_offline_audio.cpp

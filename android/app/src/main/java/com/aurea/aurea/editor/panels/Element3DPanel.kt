@@ -60,18 +60,18 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
 
 /**
- * PAINEL 3D (texto 3D, forma 3D, modelo importado e câmera), reorganizado em
- * poucas ABAS em vez de uma parede de controles:
+ * PAINEL 3D (texto 3D, forma 3D, modelo importado e câmera), em poucas ABAS:
  *
+ *  - Ambiente (a 1ª nos objetos; retorno de beta 12/10/2026: "só o básico"):
+ *    LUZ (estúdio, imagem de ambiente, intensidade, giro e sombras), FUNDO e
+ *    CHÃO. Nada além disso.
  *  - Material: materiais prontos (amostras), cor, metálico e rugosidade; a
- *    superfície e o resto (especular, emissão, material por região) ficam em
- *    "Avançado", fechado. Forma 3D: cor e imagem por parte. Modelo: os
- *    materiais do arquivo.
- *  - Forma: fonte, alinhamento, profundidade (extrusão) e chanfro do texto;
- *    as partes (posição, giro, escala) e o efeito de partes da forma 3D.
- *  - Luz e cena: sombras do objeto, estúdio, ambiente (HDRI) e, em
- *    "Avançado", qualidade, tom, exposição, brilho e o ambiente do objeto.
- *  - Animação: animação por letra (texto) ou por parte (forma).
+ *    superfície e o resto ficam em "Avançado", fechado. Forma 3D: cor por
+ *    parte. Modelo: os materiais do arquivo.
+ *  - Partes (forma 3D e modelo): escolher a parte e pôr um EFEITO nela —
+ *    Animar parte 3D, Esconder partes 3D, Trocar textura 3D — como o Text 3D
+ *    Layout faz no texto. Os ajustes e keyframes ficam no painel de Efeitos.
+ *  - Forma e Animação (texto 3D): fonte, profundidade, chanfro; animação por letra.
  *
  * Toda linha de valor é a mesma [HumanRow] (rótulo, régua, valor, ↺ ao
  * padrão); interruptores são [ToggleLine]; cores, [ColorLine]. Nada mudou no
@@ -86,10 +86,10 @@ internal fun Element3DPanel(env: PanelEnv) {
     val text = if (camera) null else t3
     val tabs = when {
         camera -> listOf(Tab3D.Light)
-        text != null || shape != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Anim)
-        else -> listOf(Tab3D.Material, Tab3D.Light)
+        text != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Anim)
+        else -> listOf(Tab3D.Light, Tab3D.Material, Tab3D.Parts)
     }
-    var chosen by rememberSaveable { mutableIntStateOf(Tab3D.Material.ordinal) }
+    var chosen by rememberSaveable { mutableIntStateOf(-1) }
     val tab = tabs.firstOrNull { it.ordinal == chosen } ?: tabs.first()
     Column(Modifier.fillMaxSize()) {
         if (tabs.size > 1) {
@@ -111,22 +111,10 @@ internal fun Element3DPanel(env: PanelEnv) {
                     }
                     InteriorToggle(store)
                 }
-                Tab3D.Shape -> when {
-                    text != null -> Text3DShapeTab(env, text)
-                    shape != null -> {
-                        Shape3DSection(env, shape, Shape3DPage.Shape)
-                        ActionCard(stringResource(R.string.shape3d_layout_effect), stringResource(R.string.shape3d_layout_hint)) {
-                            val type = effectTypeId("aurea.shape3d.layout")
-                            if (store.effects.none { e -> e.typeId == type }) store.addEffect(type)
-                            env.onOpenPanel(EditorPanel.Effects)
-                        }
-                    }
-                }
+                Tab3D.Shape -> if (text != null) Text3DShapeTab(env, text)
                 Tab3D.Light -> LightSceneTab(env, objectSettings = !camera)
-                Tab3D.Anim -> when {
-                    text != null -> AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
-                    shape != null -> Text3DAnimSection(env, parts = true)
-                }
+                Tab3D.Anim -> if (text != null) AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
+                Tab3D.Parts -> PartsTab(env, shape)
             }
         }
     }
@@ -136,8 +124,61 @@ internal fun Element3DPanel(env: PanelEnv) {
 internal enum class Tab3D(val label: Int) {
     Material(R.string.ui3d_tab_material),
     Shape(R.string.ui3d_tab_shape),
-    Light(R.string.ui3d_tab_light),
+    Light(R.string.sh_dock_environment),
     Anim(R.string.ui3d_tab_anim),
+    Parts(R.string.shape3d_parts),
+}
+
+/**
+ * PARTES do objeto 3D: escolher a parte (forma 3D: as fichas de sempre, que
+ * também levam o gizmo do palco; modelo: o nome de cada objeto do arquivo) e
+ * pôr um EFEITO nela. Par do iOS (Element3DPanel.swift, `PartsTab`).
+ */
+@Composable
+private fun PartsTab(env: PanelEnv, shape: com.aurea.aurea.state.Shape3DInfo?) {
+    val store = env.store
+    var modelPart by rememberSaveable(store.primary) { mutableIntStateOf(0) }
+    if (shape != null) {
+        Shape3DSection(env, shape, Shape3DPage.Shape)
+    } else {
+        val names = remember(store.primary, store.curveRevision) { store.modelPartNames() }
+        if (names.isNotEmpty()) {
+            KitTitle(stringResource(R.string.shape3d_parts))
+            ChipRow {
+                names.forEachIndexed { i, n ->
+                    Box(Modifier.testTag("panel3d.part.$i")) {
+                        KitChip(n.ifBlank { stringResource(R.string.fx3d_part_n, i + 1) }, on = modelPart == i) { modelPart = i }
+                    }
+                }
+            }
+        }
+    }
+    val part = if (shape != null) store.shapePartOf(store.primary).coerceAtLeast(0) else modelPart
+    Spacer(Modifier.height(6.dp))
+    KitHint(stringResource(R.string.fx3d_parts_hint))
+    Spacer(Modifier.height(8.dp))
+    val add: (String) -> Unit = { key -> if (store.addPartEffect(key, part)) env.onOpenPanel(EditorPanel.Effects) }
+    Box(Modifier.testTag("panel3d.fx.part_transform")) {
+        ActionCard(stringResource(R.string.fx3d_name_part_transform), stringResource(R.string.fx3d_desc_part_transform)) { add("aurea.3d.part_transform") }
+    }
+    Spacer(Modifier.height(6.dp))
+    Box(Modifier.testTag("panel3d.fx.part_hide")) {
+        ActionCard(stringResource(R.string.fx3d_name_part_hide), stringResource(R.string.fx3d_desc_part_hide)) { add("aurea.3d.part_hide") }
+    }
+    Spacer(Modifier.height(6.dp))
+    Box(Modifier.testTag("panel3d.fx.part_texture")) {
+        ActionCard(stringResource(R.string.fx3d_name_part_texture), stringResource(R.string.fx3d_desc_part_texture)) { add("aurea.3d.part_texture") }
+    }
+    if (shape != null) {
+        Spacer(Modifier.height(6.dp))
+        ActionCard(stringResource(R.string.shape3d_layout_effect), stringResource(R.string.shape3d_layout_hint)) {
+            val type = effectTypeId("aurea.shape3d.layout")
+            if (store.effects.none { e -> e.typeId == type }) store.addEffect(type)
+            env.onOpenPanel(EditorPanel.Effects)
+        }
+        // Animações prontas por parte (entrada/saída/loop).
+        Text3DAnimSection(env, parts = true)
+    }
 }
 
 /** Controle segmentado: cada aba divide a largura; a acesa usa o destaque. */
@@ -437,9 +478,11 @@ private fun ImportedMaterialSection(env: PanelEnv) {
 // --- Luz e cena -----------------------------------------------------------------
 
 /**
- * LUZ E CENA: sombras do objeto, estúdio e ambiente na frente; o acabamento
- * da imagem (qualidade, tom, exposição, brilho) e o ambiente próprio do objeto
- * em "Avançado". [objectSettings] = falso na câmera (só a cena).
+ * AMBIENTE (retorno de beta 12/10/2026: "só o básico"): LUZ (estúdio, imagem
+ * de ambiente, intensidade, giro e as sombras do objeto), FUNDO e CHÃO. O que
+ * era avançado (qualidade, tom, exposição, brilho, ambiente próprio do
+ * objeto, trecho do fundo) saiu daqui; o projeto guarda os valores.
+ * [objectSettings] = falso na câmera (sem sombras de objeto).
  */
 @Composable
 private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
@@ -451,26 +494,16 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
     val revision = store.sceneSettingsRevision
     var settings by remember(revision) { mutableStateOf(store.sceneSettings()) }
     fun change(index: Int, value: Float) { store.setSceneSetting(index, value); settings = store.sceneSettings() }
-    var advanced by rememberSaveable { mutableStateOf(false) }
 
-    if (objectSettings) {
-        val sh by remember(store) { derivedStateOf { store.modelShadows } }
-        sh?.let { cur ->
-            KitTitle(stringResource(R.string.ui3d_shadows))
-            ToggleLine(stringResource(R.string.pn_t3d_cast_shadow), cur.first) { store.setModelShadows(it, cur.second) }
-            ToggleLine(stringResource(R.string.pn_t3d_receive_shadow), cur.second) { store.setModelShadows(cur.first, it) }
-        }
-    }
+    // --- Luz ---
+    KitTitle(stringResource(R.string.cat_light))
     if (settings.size >= 8) {
-        KitTitle(stringResource(R.string.scene_studio))
         ChipRow {
             listOf(R.string.scene_none, R.string.scene_dark, R.string.scene_product, R.string.scene_sky, R.string.scene_chrome).forEachIndexed { i, label ->
                 KitChip(stringResource(label), on = settings[0].toInt() == i) { change(0, i.toFloat()) }
             }
         }
-        ToggleLine(stringResource(R.string.scene_floor), settings[1] > 0) { change(1, if (it) 1f else 0f) }
     }
-    KitTitle(stringResource(R.string.environment_texture))
     ChipRow {
         KitChip(stringResource(R.string.panel_estudio_neutro), on = e[0] < 0.5f) { store.clearHdri() }
         KitChip(if (e[0] >= 0.5f) stringResource(R.string.panel_imagem_ambiente) else stringResource(R.string.panel_usar_imagem_ambiente_hdr), on = e[0] >= 0.5f) {
@@ -483,56 +516,22 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
     SceneRow(env, stringResource(R.string.pn_env_rotate_light), e[2], 1f, -360f, 360f, "°", 0f, "ambiente") {
         store.setEnvironment(store.environment[1], it)
     }
+    if (objectSettings) {
+        val sh by remember(store) { derivedStateOf { store.modelShadows } }
+        sh?.let { cur ->
+            ToggleLine(stringResource(R.string.pn_t3d_cast_shadow), cur.first) { store.setModelShadows(it, cur.second) }
+            ToggleLine(stringResource(R.string.pn_t3d_receive_shadow), cur.second) { store.setModelShadows(cur.first, it) }
+        }
+    }
+    // --- Fundo ---
+    KitTitle(stringResource(R.string.fx3d_env_background))
     ToggleLine(stringResource(R.string.environment_background), (e.getOrNull(3) ?: 0f) > .5f, store::setEnvironmentBackground)
-    if ((e.getOrNull(3) ?: 0f) > .5f && e.size >= 6) {
-        val duration = store.project.durationFrames.coerceAtLeast(1)
-        val start = e[4].toLong().coerceIn(0, (duration - 1).toLong())
-        val end = (if (e[5] < 0) duration.toLong() else e[5].toLong()).coerceIn(start + 1, duration.toLong())
-        SceneRow(env, stringResource(R.string.environment_start), start.toFloat(), 1f, 0f, (end - 1).toFloat(), "f", 0f, "ambiente") {
-            store.setEnvironmentBackgroundRange(it.toLong(), end)
-        }
-        SceneRow(env, stringResource(R.string.environment_end), end.toFloat(), 1f, (start + 1).toFloat(), duration.toFloat(), "f", duration.toFloat(), "ambiente") {
-            store.setEnvironmentBackgroundRange(start, it.toLong())
-        }
-        ChipRow {
-            KitChip(stringResource(R.string.environment_full_duration), on = start == 0L && e[5] < 0) {
-                store.setEnvironmentBackgroundRange(0, -1)
-            }
-            store.detail?.let { layer ->
-                KitChip(stringResource(R.string.environment_layer_duration), on = false) {
-                    store.setEnvironmentBackgroundRange(layer.startFrame.toLong().coerceAtLeast(0), layer.endFrame.toLong().coerceAtMost(duration.toLong()))
-                }
-            }
-        }
+    // --- Chão ---
+    if (settings.size >= 8) {
+        KitTitle(stringResource(R.string.fx3d_env_floor))
+        ToggleLine(stringResource(R.string.scene_floor), settings[1] > 0) { change(1, if (it) 1f else 0f) }
     }
-    KitHint(stringResource(R.string.environment_hint))
-    Spacer(Modifier.height(4.dp))
-    AdvancedSection(advanced, { advanced = !advanced }) {
-        if (settings.size >= 8) {
-            KitTitle(stringResource(R.string.scene_quality))
-            ChipRow {
-                listOf(R.string.scene_auto, R.string.scene_low, R.string.scene_medium, R.string.scene_high, R.string.scene_ultra).forEachIndexed { i, label ->
-                    KitChip(stringResource(label), on = settings[2].toInt() == i) { change(2, i.toFloat()) }
-                }
-            }
-            KitTitle(stringResource(R.string.scene_tonemap))
-            ChipRow {
-                listOf("PBR Neutral", "AgX", "AgX Punchy", "AgX Golden", "Uchimura", "ACES SDR").forEachIndexed { i, label ->
-                    KitChip(label, on = settings[3].toInt() == i) { change(3, i.toFloat()) }
-                }
-            }
-            SceneRow(env, stringResource(R.string.scene_exposure), settings[4].coerceIn(.01f, 4f) * 100f, 1f, 1f, 400f, "%", 100f, null) {
-                change(4, it / 100f)
-            }
-            ToggleLine(stringResource(R.string.scene_bloom), settings[5] > 0) { change(5, if (it) 1f else 0f) }
-            if (settings[5] > 0) {
-                SceneRow(env, stringResource(R.string.ui3d_bloom_strength), settings[6].coerceIn(0f, 4f) * 100f, 1f, 0f, 400f, "%", 100f, null) {
-                    change(6, it / 100f)
-                }
-            }
-        }
-        if (objectSettings) ObjectEnvironmentSection(env)
-    }
+    Spacer(Modifier.height(8.dp))
 }
 
 /** Linha de valor da cena/ambiente: um passo de desfazer por arrasto (quando [gesture] existe). */
@@ -559,42 +558,3 @@ private fun SceneRow(
     )
 }
 
-/**
- * AMBIENTE DO OBJETO (v22): este modelo pode ter a luz dele, sem mexer na dos
- * outros. Sem ambiente próprio, vale o do projeto — o de cima.
- */
-@Composable
-private fun ObjectEnvironmentSection(env: PanelEnv) {
-    val store = env.store
-    val oe by remember(store) { derivedStateOf { store.objectEnvironment } }
-    val escolher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) store.importObjectHdri(uri)
-    }
-    val objectEnv = oe?.takeIf { it.size >= 5 } ?: return
-    val proprio = objectEnv[0] >= 0.5f
-    KitTitle(stringResource(R.string.panel_ambiente_do_objeto))
-    ChipRow {
-        KitChip(stringResource(R.string.panel_do_projeto), on = !proprio) { store.setObjectEnvironment(0) }
-        KitChip(stringResource(R.string.panel_proprio), on = proprio) {
-            store.setObjectEnvironment(1)
-            if (objectEnv[1] <= 0f) escolher.launch(arrayOf("image/vnd.radiance", "image/x-exr", "application/zip", "application/octet-stream", "*/*"))
-        }
-        if (proprio) {
-            KitChip(
-                if (objectEnv[1] > 0f) stringResource(R.string.panel_trocar_imagem) else stringResource(R.string.panel_usar_imagem_ambiente_hdr),
-                on = objectEnv[1] > 0f,
-            ) { escolher.launch(arrayOf("image/vnd.radiance", "image/x-exr", "application/zip", "application/octet-stream", "*/*")) }
-        }
-    }
-    if (proprio) {
-        SceneRow(env, stringResource(R.string.panel_intensidade), objectEnv[2] * 100f, 1f, 0f, 2000f, "%", 100f, "ambiente") {
-            store.setObjectEnvironment(1, intensity = it / 100f)
-        }
-        SceneRow(env, stringResource(R.string.pn_env_rotate_light), objectEnv[3], 1f, -360f, 360f, "°", 0f, "ambiente") {
-            store.setObjectEnvironment(1, rotation = it)
-        }
-        SceneRow(env, stringResource(R.string.panel_exposicao), objectEnv[4] * 100f, 1f, 5f, 2000f, "%", 100f, "ambiente") {
-            store.setObjectEnvironment(1, exposure = it / 100f)
-        }
-    }
-}

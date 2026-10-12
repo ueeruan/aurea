@@ -798,7 +798,12 @@ struct TimelineView: View {
         }
         // "Keyframes de todas as camadas" desligado: só as escolhidas mostram os losangos.
         if KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: false, selected: model.selection.contains(row.id)) {
-            drawKeys(&context, row: row, top: top, width: width)
+            // Camada não selecionada: losangos só de referência, esmaecidos.
+            var keys = context
+            if !KeyframeVisibility.editable(selected: model.selection.contains(row.id), keySelectMode: model.timelineKeySelectMode) {
+                keys.opacity = KeyframeVisibility.lockedAlpha
+            }
+            drawKeys(&keys, row: row, top: top, width: width)
         }
     }
 
@@ -1104,6 +1109,8 @@ struct TimelineView: View {
         // escolher keyframes.
         let multi = model.selection.count >= 2 && !model.timelineKeySelectMode
         let keysShown: Bool = !multi && KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: row.track != nil, selected: model.selection.contains(row.id))
+            && KeyframeVisibility.editable(selected: model.selection.contains(row.id), keySelectMode: model.timelineKeySelectMode,
+                                           isPropertyLane: row.track != nil)
         let touchable: [Int32] = keysShown ? row.instants : []
         // Trilha: só a coluna do ▸/▾ (28) é cabeçalho; fileira: a pílula (70), com o olho em x < 28.
         let lane: Bool = row.track != nil

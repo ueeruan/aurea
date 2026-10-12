@@ -782,6 +782,27 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
                 }
             }
             else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Export retomável: o app foi fechado no meio de um export deste
+                // projeto e o motor ainda tem os trechos salvos.
+                var pending by remember { mutableStateOf<com.aurea.aurea.state.Exporter.PendingExport?>(null) }
+                val projectPath = store.project.path
+                LaunchedEffect(projectPath, st.phase) {
+                    pending = withContext(Dispatchers.IO) { runCatching { exporter.pendingFor(projectPath) }.getOrNull() }
+                }
+                pending?.let { p ->
+                    Text(stringResource(R.string.app_export_resume_title, p.percent),
+                        style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Accent)))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            WideButton(stringResource(R.string.app_export_resume_discard), filled = false) {
+                                exporter.discardPending(p); pending = null
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            WideButton(stringResource(R.string.app_export_resume_continue), filled = true) { exporter.resumePending(p) }
+                        }
+                    }
+                }
                 if (options.format == ExportFormat.Video) {
                     WideButton(stringResource(R.string.preexport_button), filled = false) {
                         exporter.startPreview(store.project.title, compW, compH, compFps)

@@ -11,4 +11,9 @@
     <string name="expfail_unsupported">this phone can\'t export at this resolution or format</string>
     <string name="expfail_stuck">the export stopped making progress for minutes and was stopped; close other apps and try again</string>
     <string name="app_export_safe_mode">The phone\'s video encoder froze: exporting again in compatibility mode (H.264, may take longer).</string>
+    <string name="app_export_paused">Export paused: it continues on its own when you come back to Aurea.</string>
+    <string name="app_export_resumed">Continuing the export from where it stopped.</string>
+    <string name="app_export_resume_title">Export interrupted at %1$d%%</string>
+    <string name="app_export_resume_continue">Continue export</string>
+    <string name="app_export_resume_discard">Discard</string>
 </resources>

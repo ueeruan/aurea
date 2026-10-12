@@ -1155,7 +1155,7 @@
     <string name="consent_title">सहमति और ज़िम्मेदारी</string>
     <string name="consent_accept">सहमत होकर जारी रखें</string>
     <string name="consent_body">Aurea डिजिटल सामग्री के संपादन, निर्माण और उत्पादन के लिए एक पेशेवर उपकरण है। ऐप का उपयोग करके उपयोगकर्ता स्वीकार करता है कि वह प्लेटफ़ॉर्म के माध्यम से बनाई, संपादित, आयात, निर्यात, प्रकाशित या साझा की गई सामग्री के लिए पूरी तरह ज़िम्मेदार है।\n\nAurea अवैध, अपमानजनक, धोखाधड़ी वाली, हानिकारक या तीसरे पक्ष के अधिकारों का उल्लंघन करने वाली गतिविधियों के लिए उपकरण के उपयोग को नियंत्रित, प्रोत्साहित, समर्थन या अधिकृत नहीं करता है।\n\nउपयोगकर्ता यह सुनिश्चित करने के लिए ज़िम्मेदार है कि उसके पास उपयोग की गई सामग्री के लिए आवश्यक अनुमतियाँ, लाइसेंस और अधिकार हैं, जिनमें चित्र, वीडियो, संगीत, ट्रेडमार्क, मॉडल, फ़ाइलें और अन्य संरक्षित सामग्री शामिल हैं।\n\nAurea द्वारा दी गई रचनात्मक स्वतंत्रता का अर्थ यह नहीं है कि ऐप उस चीज़ का अनुमोदन करता है, उसमें भाग लेता है या उसकी ज़िम्मेदारी लेता है जिसे प्रत्येक उपयोगकर्ता उपकरण से बनाने या करने का निर्णय लेता है।\n\nउपयोगकर्ता Aurea का उपयोग लागू कानून के अनुसार करने पर सहमत है और अपने कार्यों तथा ऐप के माध्यम से बनाई या वितरित की गई सामग्री की ज़िम्मेदारी स्वीकार करता है।\n\nलागू कानून द्वारा अनुमत अधिकतम सीमा तक, Aurea और उसके ज़िम्मेदार व्यक्ति केवल उपयोगकर्ता द्वारा किए गए कार्यों, उपकरण के दुरुपयोग या उपयोगकर्ता द्वारा बनाई, प्रकाशित या साझा की गई सामग्री से उत्पन्न परिणामों के लिए ज़िम्मेदार नहीं होंगे।\n\nAurea उपकरण प्रदान करता है। उपयोगकर्ता इसके उपयोग के अपने चुने हुए तरीके के लिए ज़िम्मेदार है।\n\nजारी रखकर उपयोगकर्ता घोषणा करता है कि उसने इन शर्तों को पढ़ा, समझा और स्वीकार किया है।</string>
-    <string name="release_notes_body">Aurea Beta 0.1.6 BETA 2 (2179) • 12/10/2026\n\n• एक्सपोर्ट: अब "0% पर अटकना" नहीं — जो वीडियो डिवाइस नहीं खोल पाता, वह तुरंत एरर देता है और रद्द करना काम करता है।\n• प्री-एक्सपोर्ट: पूरा वीडियो कम रेज़ोल्यूशन में रेंडर होता है ताकि असली एक्सपोर्ट से पहले आराम से देख सकें।\n• प्रीव्यू: अटकने के बाद अगला Play ज़्यादा फ़्रेम तैयार करता है।\n• 3D कैमरा: null से जुड़े कैमरे में मोशन ब्लर के साथ भूतिया कॉपी ठीक की गई।\n• Real Camera: चलें ▲/▼ बटन (आगे-पीछे, AR के बिना भी), चलने की गति और गहराई (Z)।\n• 3D पार्टिकल: नया नेटवर्क (plexus) प्रीसेट — लाइनों से जुड़े बिंदु।\n• नया: Glow Scan, Low FPS और Text Explosion टेक्स्ट प्रीसेट। लेंस फ़्लेयर में 8 नए स्टाइल (3D फ़्लेयर में भी)। Tracery में चमक से पहचान, ग्लो और दूरी नेटवर्क।\n• टाइमलाइन: क्लिप का किनारा जितना चाहें खींचें (वीडियो आख़िरी फ़्रेम रोके रखता है)।\n• लेयर: डुप्लिकेट बटन दिखाई देता है। कर्व: कॉपी-पेस्ट दिखाई देते हैं और छोटा मेनू।\n• iOS: इफ़ेक्ट स्क्रीन के काले खाली हिस्से ठीक किए गए।</string>
+    <string name="release_notes_body">Aurea Beta 0.1.7 BETA 3 (2181) • 12/10/2026\n\n• 2D प्रोजेक्ट (फ़ोटो, टाइटल, इफ़ेक्ट वाले वीडियो) में एक्सपोर्ट 42% तक तेज़, उसी क्वालिटी के साथ।\n• एक्सपोर्ट अब नहीं खोता: ऐप से बाहर जाने पर वह रुक जाता है और लौटने पर खुद जारी रहता है। ऐप बंद हो जाए तो एक्सपोर्ट स्क्रीन पर रुका हुआ एक्सपोर्ट जारी रखा जा सकता है।\n• iPhone से आए 3D शेप या 3D टेक्स्ट वाले प्रोजेक्ट फिर से एक्सपोर्ट होते हैं।\n• टाइमलाइन: न चुनी गई लेयर के कीफ़्रेम धुंधले और लॉक रहते हैं — एडिट करने के लिए लेयर पर टैप करें।\n• नई निजता और उपयोग की शर्तों वाली स्क्रीन।\n• मास्क एक ही स्क्रीन पर: ड्रॉ, आयत और दीर्घवृत्त के बड़े बटन हमेशा सामने; पाथ, मोड, किनारा और ऑब्जेक्ट फ़ॉलो एक के नीचे एक।\n• 3D ऑब्जेक्ट: एनवायरनमेंट टैब में अब सिर्फ़ रोशनी, पृष्ठभूमि और फ़र्श। छवि बदलना, भाग छिपाना और एनिमेट करना अब कीफ़्रेम वाले इफ़ेक्ट हैं (3D भाग एनिमेट करें, 3D भाग छिपाएँ, 3D टेक्सचर बदलें)।\n• नए इफ़ेक्ट: 3D Shatter (लेयर टुकड़ों में टूटकर 3D में बिखरती है) और 3D Stroke (मास्क या तैयार आकृतियों पर एनिमेटेड 3D रेखा)।\n• Real Camera: कंट्रोल प्रीव्यू के ऊपर से हटकर पैनल वाले हिस्से में आ गए।\n• 3D कैमरा ट्रैकर: पूर्ववत करने से विश्लेषण नहीं मिटता, रद्द किया गया दोबारा-सॉल्व अब \'कैमरा बनाएँ\' को नहीं रोकता, और 0% स्केल से शुरू होने वाले वीडियो को भी कैमरा मिल सकता है।</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">भरें</string>
@@ -4071,4 +4071,43 @@
     <string name="fxl_lowfps_irregular">अनियमित लय</string>
     <string name="fx_desc_time_low_fps">स्टॉप-मोशन जैसी अटकती चाल: कम फ़्रेम प्रति सेकंड, झटके और अनियमित लय के साथ।</string>
     <string name="curve_copied">कर्व कॉपी हुआ</string>
+    <string name="fxo_distance_network_24_regions">दूरी नेटवर्क (24 क्षेत्र)</string>
+    <string name="fxl_detect_by">इससे पहचानें</string>
+    <string name="fxo_brightness_2">चमक</string>
+    <string name="fxl_glow">चमक प्रभाव</string>
+    <string name="fxl_glow_radius">चमक त्रिज्या</string>
+    <string name="fxl_network_distance">नेटवर्क दूरी</string>
+    <string name="fxo_game_boy">Game Boy</string>
+    <string name="fxl_part">भाग</string>
+    <string name="fxl_rotation_x">घुमाव X</string>
+    <string name="fxl_rotation_y">घुमाव Y</string>
+    <string name="fxl_rotation_z">घुमाव Z</string>
+    <string name="fxl_hide">छिपाएँ</string>
+    <string name="fxl_hide_the_others">बाकी छिपाएँ</string>
+    <string name="fxl_image">छवि</string>
+    <string name="fxl_all_parts">सभी भाग</string>
+    <string name="fxl_explosion">विस्फोट</string>
+    <string name="fxl_pieces">टुकड़े</string>
+    <string name="fxo_squares">वर्ग</string>
+    <string name="fxo_glass">कांच</string>
+    <string name="fxl_number_of_pieces">टुकड़ों की संख्या</string>
+    <string name="fxl_explosion_center">विस्फोट का केंद्र</string>
+    <string name="fxl_toward_camera">कैमरे की ओर</string>
+    <string name="fxl_perspective">परिप्रेक्ष्य</string>
+    <string name="fxl_face_lighting">सतहों पर रोशनी</string>
+    <string name="fxo_circle">वृत्त</string>
+    <string name="fxo_heart">दिल</string>
+    <string name="fxo_layer_masks">लेयर मास्क</string>
+    <string name="fxl_end_color">अंत का रंग</string>
+    <string name="fxl_taper_start">शुरुआत में पतला</string>
+    <string name="fxl_taper_end">अंत में पतला</string>
+    <string name="fxl_repeats">दोहराव</string>
+    <string name="fxl_repeat_distance">दोहरावों के बीच दूरी</string>
+    <string name="fxl_rotation_per_repeat">हर दोहराव पर घुमाव</string>
+    <string name="fxl_scale_per_repeat">हर दोहराव पर स्केल</string>
+    <string name="fxl_fade_repeats">दोहराव धुंधले करें</string>
+    <string name="fxl_show">दिखाएँ</string>
+    <string name="fxo_over_the_layer">लेयर के ऊपर</string>
+    <string name="fxo_stroke_only">सिर्फ़ रेखा</string>
+    <string name="fxo_behind_the_layer">लेयर के पीछे</string>
 </resources>

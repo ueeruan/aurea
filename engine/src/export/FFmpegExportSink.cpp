@@ -1,5 +1,6 @@
 #include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/export/NV12Copy.hpp"
+#include "aurea/export/ExportPacketLog.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/FileIO.hpp"
 
@@ -192,15 +193,19 @@ public:
     }
     Status write_video_timed(const u8* y, u32 ys, const u8* uv, u32 uvs,
                             i64 pts, i64 duration) noexcept override {
+        if (logMode_) return Status{Errc::NotSupported, "registro de pacotes aceita so taxa constante"};
         return write_video_with_fallback(y, ys, uv, uvs, pts, duration, true);
     }
     Status write_audio(const i16* pcm, u32 frames, i64 pts) noexcept override;
     Status finish() noexcept override;
+    Status end_video() noexcept override;
+    Status begin_assembly(const AudioStreamConfig* audio) noexcept override;
+    Status replay_spilled_audio() noexcept override;
     Status validate_output(const ExportOutputValidation& expected) noexcept override;
     void abort() noexcept override;
 
 private:
-    enum class State { Empty, Open, Finalized, Published, Failed } state_ = State::Empty;
+    enum class State { Empty, Open, VideoLogged, Finalized, Published, Failed } state_ = State::Empty;
     enum class Timing { Unknown, Constant, Variable } timing_ = Timing::Unknown;
     struct FrameTiming { i64 pts = 0, duration = 0; };
     const std::atomic<bool>* cancel_ = nullptr;
@@ -234,6 +239,24 @@ private:
     std::string target_, staged_;
     char detail_[256]{};
     Status lastError_{};
+    // Registro de pacotes (export retomável). `logMode_`: o vídeo vai para o
+    // registro; `assembling_`: o MP4 final está sendo montado a partir dele.
+    bool logMode_ = false, assembling_ = false;
+    std::string logPath_;
+    export_log::Writer log_;
+    export_log::Reader logReader_;
+    export_log::StreamInfo logInfo_{};
+    AVCodecParameters* videoParams_ = nullptr;   ///< parâmetros do encoder liberado (end_video)
+    u64 assembledVideo_ = 0;
+    export_log::Packet logged_;
+    // PCM do render guardado ao lado do registro (`<registro>.pcm`, s16
+    // intercalado): o áudio é mixado em paralelo aos quadros e só codificado
+    // na montagem. Nulo = sessão retomada (o motor mixa de novo no fim).
+    std::FILE* spill_ = nullptr;
+    std::string spillPath_;
+    i64 spilledSamples_ = 0;
+    bool spillAudio_ = false;
+    bool wantsAudio_ = false;
 
     void beat() noexcept {
         if (heartbeat_) heartbeat_->store(monotonic_ns(), std::memory_order_release);
@@ -267,12 +290,16 @@ private:
     Status write_video_impl(const u8*, u32, const u8*, u32, i64, i64, bool) noexcept;
     Status send(AVCodecContext*, AVStream*, const AVFrame*, bool video) noexcept;
     Status drain(AVCodecContext*, AVStream*, bool video, bool flushing, unsigned& produced) noexcept;
-    Status mux(AVPacket*, AVCodecContext*, AVStream*) noexcept;
+    Status mux(AVPacket*, AVRational from, AVStream*) noexcept;
     Status append_audio(const i16* pcm, int samples) noexcept;
     Status encode_audio(bool final) noexcept;
     Status flush_resampler() noexcept;
     Status decode_validate(const ExportOutputValidation& expected) noexcept;
     Status publish() noexcept;
+    i64 frame_pts(u64 frame) const noexcept { return av_rescale_q(static_cast<i64>(frame), av_inv_q(rate_), videoTimebase_); }
+    Status open_log() noexcept;
+    Status open_container() noexcept;
+    Status mux_logged_video(u64 untilFrame) noexcept;
 };
 
 void FFmpegSink::release() noexcept {
@@ -285,6 +312,10 @@ void FFmpegSink::release() noexcept {
     av_frame_free(&resampleFrame_);
     av_packet_free(&packet_);
     av_packet_free(&pendingAudio_);
+    avcodec_parameters_free(&videoParams_);
+    if (spill_) { std::fclose(spill_); spill_ = nullptr; }
+    logReader_.close();
+    (void)log_.close();   // o registro é a recuperação: fechado, nunca apagado aqui
     sws_freeContext(scale_); scale_ = nullptr;
     swr_free(&resample_);
     if (audioFifo_) av_audio_fifo_free(audioFifo_);
@@ -315,8 +346,17 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     if (codec_id(video.codec) == AV_CODEC_ID_NONE)
         return Status{Errc::UnsupportedCodec, "codec de exportacao FFmpeg desconhecido"};
     if (cancelled()) return Errc::Cancelled;
-    video_ = video; hasAudio_ = audio != nullptr;
-    if (audio) audio_ = *audio;
+    try { logPath_ = video.packetLogPath ? video.packetLogPath : ""; }
+    catch (...) { return error(Errc::OutOfMemory, "caminho do registro de pacotes"); }
+    logMode_ = !logPath_.empty(); assembling_ = false; assembledVideo_ = 0;
+    if (!logMode_ && video.resumeFrame)
+        return Status{Errc::InvalidArgument, "retomada de exportacao exige registro de pacotes"};
+    video_ = video; video_.packetLogPath = nullptr;
+    // Com registro, o encoder de áudio só abre na montagem (begin_assembly);
+    // durante o render o PCM vai para o arquivo lateral.
+    hasAudio_ = audio != nullptr && !logMode_;
+    wantsAudio_ = audio != nullptr;
+    audio_ = audio ? *audio : AudioStreamConfig{0, 0, 0};
     timing_ = Timing::Unknown; encoder_ = {};
     videoFrames_ = videoPackets_ = 0; videoHash_ = hashSeed;
     completedVideoWrites_ = 0;
@@ -349,26 +389,33 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     format_->max_interleave_delta = 100'000; // bounded muxer wait: 100 ms
     format_->flags |= AVFMT_FLAG_FLUSH_PACKETS;
     if (const Status status = open_video(); !status.ok()) return status;
+    if (logMode_) return open_log();
     if (audio) if (const Status status = open_audio(); !status.ok()) return status;
+    return open_container();
+}
+
+Status FFmpegSink::open_container() noexcept {
     videoStream_ = avformat_new_stream(format_, nullptr);
     if (!videoStream_) return error(Errc::OutOfMemory, "criar faixa de video FFmpeg");
     videoStream_->time_base = videoTimebase_;
     videoStream_->avg_frame_rate = rate_;
-    result = videoCrop_ ? avcodec_parameters_copy(videoStream_->codecpar, videoCrop_->par_out)
-                        : avcodec_parameters_from_context(videoStream_->codecpar, videoCodec_);
+    int result = videoParams_ ? avcodec_parameters_copy(videoStream_->codecpar, videoParams_)
+               : videoCrop_ ? avcodec_parameters_copy(videoStream_->codecpar, videoCrop_->par_out)
+                            : avcodec_parameters_from_context(videoStream_->codecpar, videoCodec_);
     if (result < 0)
         return error(Errc::EncodeFailed, "parametros de video FFmpeg", result);
     videoStream_->codecpar->width = static_cast<int>(video_.width);
     videoStream_->codecpar->height = static_cast<int>(video_.height);
-    if (video.codec == ExportCodec::HEVC) videoStream_->codecpar->codec_tag = MKTAG('h', 'v', 'c', '1');
-    if (audio) {
+    if (video_.codec == ExportCodec::HEVC) videoStream_->codecpar->codec_tag = MKTAG('h', 'v', 'c', '1');
+    if (hasAudio_) {
         audioStream_ = avformat_new_stream(format_, nullptr);
         if (!audioStream_) return error(Errc::OutOfMemory, "criar faixa de audio FFmpeg");
         audioStream_->time_base = audioCodec_->time_base;
         if ((result = avcodec_parameters_from_context(audioStream_->codecpar, audioCodec_)) < 0)
             return error(Errc::EncodeFailed, "parametros de audio FFmpeg", result);
     }
-    packet_ = av_packet_alloc(); pendingAudio_ = av_packet_alloc();
+    if (!packet_) packet_ = av_packet_alloc();
+    if (!pendingAudio_) pendingAudio_ = av_packet_alloc();
     if (!packet_ || !pendingAudio_) return error(Errc::OutOfMemory, "pacotes da exportacao FFmpeg");
     result = avio_open2(&format_->pb, staged_.c_str(), AVIO_FLAG_WRITE, &format_->interrupt_callback, nullptr);
     beat();
@@ -605,9 +652,9 @@ Status FFmpegSink::open_audio() noexcept {
     return OkStatus;
 }
 
-Status FFmpegSink::mux(AVPacket* packet, AVCodecContext* codec, AVStream* stream) noexcept {
+Status FFmpegSink::mux(AVPacket* packet, AVRational from, AVStream* stream) noexcept {
     if (cancelled()) return error(Errc::Cancelled, "exportacao FFmpeg cancelada");
-    av_packet_rescale_ts(packet, codec->time_base, stream->time_base);
+    av_packet_rescale_ts(packet, from, stream->time_base);
     packet->stream_index = stream->index;
     const int result = av_interleaved_write_frame(format_, packet); beat();
     if (result < 0) return error(Errc::EncodeFailed, "multiplexar pacote FFmpeg", result);
@@ -648,7 +695,16 @@ Status FFmpegSink::drain(AVCodecContext* codec, AVStream* stream, bool video,
                 if (filtered >= 0) filtered = av_bsf_receive_packet(videoCrop_, packet_);
                 if (filtered < 0) return error(Errc::EncodeFailed, "aplicar dimensoes HEVC FFmpeg ao frame", filtered);
             }
-            if (const Status status = mux(packet_, codec, stream); !status.ok()) return status;
+            if (logMode_) {
+                // Export retomável: o pacote vai para o registro durável, em ordem.
+                const u64 frame = videoPackets_ - 1;
+                if (packet_->pts != frame_pts(frame) || packet_->size <= 0)
+                    return error(Errc::EncodeFailed, "pacote do encoder fora do relogio do registro");
+                const Status logged = log_.append(static_cast<u32>(frame), packet_->data,
+                    static_cast<usize>(packet_->size), (packet_->flags & AV_PKT_FLAG_KEY) != 0);
+                beat();
+                if (!logged.ok()) return error(logged.code(), logged.detail().empty() ? "registro de pacotes" : logged.detail().data());
+            } else if (const Status status = mux(packet_, codec->time_base, stream); !status.ok()) return status;
             if (videoCrop_) {
                 const int extra = av_bsf_receive_packet(videoCrop_, packet_);
                 if (extra != AVERROR(EAGAIN))
@@ -658,7 +714,7 @@ Status FFmpegSink::drain(AVCodecContext* codec, AVStream* stream, bool video,
             // Keep only the final AAC packet so its exact duration/tail padding
             // can be written after all resampler samples have been accounted.
             if (pendingAudio_->size)
-                if (const Status status = mux(pendingAudio_, codec, stream); !status.ok()) return status;
+                if (const Status status = mux(pendingAudio_, codec->time_base, stream); !status.ok()) return status;
             av_packet_move_ref(pendingAudio_, packet_);
         }
         av_packet_unref(packet_);
@@ -695,13 +751,17 @@ Status FFmpegSink::write_video_with_fallback(const u8* y, u32 ys, const u8* uv, 
     // A late hardware rejection is still part of startup. Delete only our own
     // temporary container, open a fresh software session and resubmit the exact
     // caller-owned frame. Never change encoder or advance PTS mid-session.
+    // Uma sessão retomada não troca de encoder: os parâmetros (SPS/PPS) do
+    // registro são os da sessão anterior. O motor recomeça do zero.
+    if (logMode_ && video_.resumeFrame) return result;
     const VideoStreamConfig requested = video_;
     VideoStreamConfig software = requested; software.preferSoftware = true;
     const AudioStreamConfig audio = audio_;
     const bool withAudio = hasAudio_;
-    std::string path;
-    try { path = target_; }
+    std::string path, log;
+    try { path = target_; log = logPath_; }
     catch (...) { return error(Errc::OutOfMemory, "reinicio de exportacao FFmpeg por software"); }
+    if (!log.empty()) software.packetLogPath = log.c_str();
     if (const Status opened = open(path.c_str(), software, withAudio ? &audio : nullptr); !opened.ok()) return opened;
     result = write_video_impl(y, ys, uv, uvs, pts, duration, timed);
     if (result.ok()) ++completedVideoWrites_;
@@ -711,6 +771,7 @@ Status FFmpegSink::write_video_with_fallback(const u8* y, u32 ys, const u8* uv, 
 Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
                                    i64 pts, i64 duration, bool timed) noexcept {
     if (const Status status = ready(); !status.ok()) return status;
+    if (assembling_) return Status{Errc::InvalidState, "montagem do MP4 nao aceita quadros novos"};
     if (!y || !uv || ys < video_.width || uvs < video_.width || ys > INT_MAX || uvs > INT_MAX || pts < 0 ||
         (timed && (duration <= 0 || duration > INT64_MAX - pts)) || (videoFrames_ == 0 && pts != 0) ||
         (timing_ != Timing::Unknown && (timed != (timing_ == Timing::Variable))))
@@ -843,13 +904,40 @@ Status FFmpegSink::append_audio(const i16* pcm, int samples) noexcept {
 
 Status FFmpegSink::write_audio(const i16* pcm, u32 frames, i64 pts) noexcept {
     if (const Status status = ready(); !status.ok()) return status;
-    if (!hasAudio_) return Status{Errc::InvalidState, "exportacao FFmpeg nao possui faixa de audio"};
+    if (!hasAudio_ && !(logMode_ && !assembling_ && wantsAudio_))
+        return Status{Errc::InvalidState, "exportacao FFmpeg nao possui faixa de audio"};
     if ((!pcm && frames) || pts < 0 || audioInputSamples_ > INT64_MAX - static_cast<i64>(frames))
         return Status{Errc::InvalidArgument, "PCM de exportacao FFmpeg invalido"};
     const i64 expected = av_rescale_q(audioInputSamples_, AVRational{1, static_cast<int>(audio_.sampleRate)}, micros);
     if (expected < 0) return Status{Errc::OutOfRange, "tempo absoluto de audio FFmpeg excedido"};
     if (std::abs(pts - expected) > 2)
         return Status{Errc::InvalidArgument, "PCM FFmpeg descontinuo; amostras ausentes ou duplicadas"};
+    if (logMode_ && !assembling_) {
+        // Durante o render: o PCM vai para o arquivo lateral (codificado na montagem).
+        if (!spillAudio_ || !spill_) {
+            // Sem arquivo lateral: o PCM é descartado e a montagem mixa o áudio de novo.
+            audioInputSamples_ += frames;
+            return OkStatus;
+        }
+        const usize bytes = static_cast<usize>(frames) * audio_.channels * sizeof(i16);
+        if (frames && std::fwrite(pcm, 1, bytes, spill_) != bytes) {
+            std::fclose(spill_); spill_ = nullptr; spillAudio_ = false;
+            return error(errno == ENOSPC ? Errc::StorageFull : Errc::IoError, "gravar PCM do registro");
+        }
+        audioInputSamples_ += frames;
+        spilledSamples_ += frames;
+        beat();
+        return OkStatus;
+    }
+    if (assembling_) {
+        // Montagem: os quadros do registro que começam antes do fim deste
+        // trecho de som entram primeiro — o arquivo sai intercalado.
+        const i64 endSample = audioInputSamples_ + static_cast<i64>(frames);
+        const i64 until = av_rescale_q_rnd(endSample, AVRational{1, static_cast<int>(audio_.sampleRate)},
+            av_inv_q(rate_), static_cast<AVRounding>(AV_ROUND_UP | AV_ROUND_PASS_MINMAX));
+        if (const Status status = mux_logged_video(static_cast<u64>(std::clamp<i64>(until, 0, static_cast<i64>(videoFrames_))));
+            !status.ok()) return status;
+    }
     u32 consumed = 0;
     while (consumed < frames) {
         if (cancelled()) return error(Errc::Cancelled, "conversao de audio FFmpeg cancelada");
@@ -886,6 +974,8 @@ Status FFmpegSink::flush_resampler() noexcept {
 
 Status FFmpegSink::finish() noexcept {
     if (const Status status = ready(); !status.ok()) return status;
+    if (logMode_ && !assembling_)
+        return Status{Errc::InvalidState, "registro de pacotes: end_video e begin_assembly antes de finish"};
     if (!videoFrames_ || (hasAudio_ && !audioInputSamples_))
         return error(Errc::EncodeFailed, "exportacao FFmpeg sem frames ou amostras esperadas");
     if (hasAudio_) {
@@ -895,15 +985,22 @@ Status FFmpegSink::finish() noexcept {
             return error(Errc::EncodeFailed, "audio e video FFmpeg possuem duracoes divergentes");
     }
     unsigned produced = 0;
-    if (const Status status = send(videoCodec_, videoStream_, nullptr, true); !status.ok()) return status;
-    if (const Status status = drain(videoCodec_, videoStream_, true, true, produced); !status.ok()) return status;
-    if (pendingCount_ || videoPackets_ != videoFrames_)
-        return error(Errc::EncodeFailed, "encoder FFmpeg nao entregou todos os frames submetidos");
-    if (videoCrop_) {
-        int result = av_bsf_send_packet(videoCrop_, nullptr);
-        if (result >= 0) result = av_bsf_receive_packet(videoCrop_, packet_);
-        if (result != AVERROR_EOF)
-            return error(Errc::EncodeFailed, "crop HEVC FFmpeg nao concluiu EOS sem frames adicionais", result);
+    if (assembling_) {
+        if (const Status status = mux_logged_video(videoFrames_); !status.ok()) return status;
+        export_log::Packet extra; bool end = false;
+        if (const Status status = logReader_.next(extra, end); !status.ok() || !end)
+            return error(Errc::CorruptData, "registro de pacotes tem quadros alem do video exportado");
+    } else {
+        if (const Status status = send(videoCodec_, videoStream_, nullptr, true); !status.ok()) return status;
+        if (const Status status = drain(videoCodec_, videoStream_, true, true, produced); !status.ok()) return status;
+        if (pendingCount_ || videoPackets_ != videoFrames_)
+            return error(Errc::EncodeFailed, "encoder FFmpeg nao entregou todos os frames submetidos");
+        if (videoCrop_) {
+            int result = av_bsf_send_packet(videoCrop_, nullptr);
+            if (result >= 0) result = av_bsf_receive_packet(videoCrop_, packet_);
+            if (result != AVERROR_EOF)
+                return error(Errc::EncodeFailed, "crop HEVC FFmpeg nao concluiu EOS sem frames adicionais", result);
+        }
     }
     videoStream_->duration = av_rescale_q(lastVideoEnd_, videoTimebase_, videoStream_->time_base);
     if (hasAudio_) {
@@ -928,7 +1025,7 @@ Status FFmpegSink::finish() noexcept {
             audioStream_->codecpar->trailing_padding = static_cast<int>(padding);
         }
         audioStream_->duration = av_rescale_q(audioConvertedSamples_, audioCodec_->time_base, audioStream_->time_base);
-        if (const Status status = mux(pendingAudio_, audioCodec_, audioStream_); !status.ok()) return status;
+        if (const Status status = mux(pendingAudio_, audioCodec_->time_base, audioStream_); !status.ok()) return status;
     }
     int result = av_write_trailer(format_); beat();
     if (result < 0) return error(Errc::EncodeFailed, "finalizar container FFmpeg", result);
@@ -942,6 +1039,164 @@ Status FFmpegSink::finish() noexcept {
     const ExportOutputValidation expected{video_.width, video_.height, static_cast<u32>(videoFrames_), video_.fps, hasAudio_};
     if (const Status status = decode_validate(expected); !status.ok()) return status;
     return publish();
+}
+
+Status FFmpegSink::open_log() noexcept {
+    logInfo_ = {};
+    logInfo_.codec = static_cast<u32>(video_.codec);
+    logInfo_.width = video_.width; logInfo_.height = video_.height;
+    logInfo_.rateNum = rate_.num; logInfo_.rateDen = rate_.den;
+    logInfo_.timebaseNum = videoTimebase_.num; logInfo_.timebaseDen = videoTimebase_.den;
+    logInfo_.sessionKey = video_.sessionKey;
+    logInfo_.totalFrames = video_.totalFrames;
+    const AVCodecParameters* cropped = videoCrop_ ? videoCrop_->par_out : nullptr;
+    const u8* extra = cropped ? cropped->extradata : videoCodec_->extradata;
+    const int extraBytes = cropped ? cropped->extradata_size : videoCodec_->extradata_size;
+    // O MP4 montado no fim precisa dos parâmetros globais (avcC/hvcC); um
+    // encoder que só os manda dentro dos pacotes não serve para o registro.
+    if (!extra || extraBytes <= 0 || static_cast<u32>(extraBytes) > export_log::kMaxExtradataBytes)
+        return error(Errc::EncoderUnavailable, "encoder sem parametros globais para o registro de pacotes");
+    try { logInfo_.extradata.assign(extra, extra + extraBytes); }
+    catch (...) { return error(Errc::OutOfMemory, "parametros do registro de pacotes"); }
+    Status opened = OkStatus;
+    if (!video_.resumeFrame) {
+        opened = log_.create(logPath_, logInfo_);
+    } else {
+        export_log::ScanResult scanned;
+        opened = export_log::scan(logPath_, scanned);
+        if (opened.ok() && scanned.resumeFrame != video_.resumeFrame)
+            opened = Status{Errc::InvalidState, "registro de pacotes mudou desde a varredura"};
+        if (opened.ok()) opened = log_.resume(logPath_, logInfo_, scanned);
+    }
+    beat();
+    if (!opened.ok()) return error(opened.code(), opened.detail().empty() ? "abrir registro de pacotes" : opened.detail().data());
+    if (!packet_) packet_ = av_packet_alloc();
+    if (!packet_) return error(Errc::OutOfMemory, "pacotes da exportacao FFmpeg");
+    // PCM do render: só numa sessão do zero (retomada mixa tudo de novo no fim).
+    spillAudio_ = false; spilledSamples_ = 0;
+    try { spillPath_ = logPath_ + ".pcm"; }
+    catch (...) { return error(Errc::OutOfMemory, "caminho do PCM do registro"); }
+    (void)fileio::remove_file(spillPath_);
+    if (audio_.sampleRate && audio_.channels && !video_.resumeFrame && wantsAudio_) {
+        spill_ = fileio::open_file(spillPath_, "wb");
+        spillAudio_ = spill_ != nullptr;
+    }
+    // A sessão continua o relógio absoluto do registro: quadro i -> PTS de i.
+    const u64 resume = video_.resumeFrame;
+    videoFrames_ = videoPackets_ = resume;
+    for (u64 frame = 0; frame < resume; ++frame) videoHash_ = timestamp_hash(videoHash_, frame_pts(frame));
+    if (resume) { lastVideoPts_ = frame_pts(resume - 1); lastVideoEnd_ = frame_pts(resume); }
+    timing_ = Timing::Constant;
+    state_ = State::Open;
+    return OkStatus;
+}
+
+Status FFmpegSink::end_video() noexcept {
+    if (!logMode_ || assembling_) return Status{Errc::InvalidState, "end_video so vale para o registro de pacotes"};
+    if (const Status status = ready(); !status.ok()) return status;
+    if (!videoFrames_) return error(Errc::EncodeFailed, "registro de pacotes sem quadros");
+    unsigned produced = 0;
+    if (const Status status = send(videoCodec_, nullptr, nullptr, true); !status.ok()) return status;
+    if (const Status status = drain(videoCodec_, nullptr, true, true, produced); !status.ok()) return status;
+    if (pendingCount_ || videoPackets_ != videoFrames_)
+        return error(Errc::EncodeFailed, "encoder FFmpeg nao entregou todos os frames submetidos");
+    if (videoCrop_) {
+        int result = av_bsf_send_packet(videoCrop_, nullptr);
+        if (result >= 0) result = av_bsf_receive_packet(videoCrop_, packet_);
+        if (result != AVERROR_EOF)
+            return error(Errc::EncodeFailed, "crop HEVC FFmpeg nao concluiu EOS sem frames adicionais", result);
+    }
+    if (log_.frames() != videoFrames_) return error(Errc::EncodeFailed, "registro de pacotes perdeu quadros");
+    if (spill_) {
+        const bool flushed = std::fflush(spill_) == 0;
+        const bool closed = std::fclose(spill_) == 0;
+        spill_ = nullptr;
+        if (!flushed || !closed) spillAudio_ = false;   // sem PCM confiável: o motor mixa de novo
+    }
+    videoParams_ = avcodec_parameters_alloc();
+    if (!videoParams_) return error(Errc::OutOfMemory, "parametros de video FFmpeg");
+    const int copied = videoCrop_ ? avcodec_parameters_copy(videoParams_, videoCrop_->par_out)
+                                  : avcodec_parameters_from_context(videoParams_, videoCodec_);
+    if (copied < 0) return error(Errc::EncodeFailed, "parametros de video FFmpeg", copied);
+    // O encoder do aparelho é solto antes da montagem (memória e hardware).
+    avcodec_free_context(&videoCodec_);
+    av_bsf_free(&videoCrop_);
+    av_frame_free(&videoFrame_);
+    sws_freeContext(scale_); scale_ = nullptr;
+    if (const Status closed = log_.close(); !closed.ok())
+        return error(closed.code(), "fechar registro de pacotes");
+    beat();
+    lastVideoEnd_ = frame_pts(videoFrames_);
+    state_ = State::VideoLogged;
+    return OkStatus;
+}
+
+Status FFmpegSink::begin_assembly(const AudioStreamConfig* audio) noexcept {
+    if (cancelled()) return error(Errc::Cancelled, "montagem FFmpeg cancelada");
+    if (state_ != State::VideoLogged || !videoParams_ || !format_)
+        return Status{Errc::InvalidState, "montagem exige o video inteiro no registro"};
+    if (audio && (!audio->sampleRate || audio->sampleRate > 192'000 || !audio->channels ||
+                  audio->channels > 8 || !audio->bitrateBps))
+        return Status{Errc::InvalidArgument, "configuracao de audio FFmpeg invalida"};
+    hasAudio_ = audio != nullptr;
+    if (audio) {
+        // O PCM do render só vale se veio na MESMA configuração de áudio.
+        if (audio->sampleRate != audio_.sampleRate || audio->channels != audio_.channels) spillAudio_ = false;
+        audio_ = *audio;
+    }
+    audioInputSamples_ = audioConvertedSamples_ = audioSubmittedSamples_ = 0;
+    if (const Status opened = logReader_.open(logPath_); !opened.ok())
+        return error(opened.code(), "reabrir registro de pacotes");
+    if (!logReader_.info().same_stream(logInfo_))
+        return error(Errc::CorruptData, "registro de pacotes mudou antes da montagem");
+    if (hasAudio_) if (const Status status = open_audio(); !status.ok()) return status;
+    state_ = State::Open;
+    assembling_ = true;
+    assembledVideo_ = 0;
+    return open_container();
+}
+
+Status FFmpegSink::replay_spilled_audio() noexcept {
+    if (!assembling_ || !hasAudio_) return Status{Errc::InvalidState, "PCM do render so na montagem com audio"};
+    const i64 expected = av_rescale_q(lastVideoEnd_, videoTimebase_, AVRational{1, static_cast<int>(audio_.sampleRate)});
+    if (!spillAudio_ || audioInputSamples_ != 0 || std::abs(spilledSamples_ - expected) > 2)
+        return Status{Errc::NotFound, "sem PCM completo do render"};
+    std::unique_ptr<std::FILE, decltype(&std::fclose)> f(fileio::open_file(spillPath_, "rb"), &std::fclose);
+    if (!f) return Status{Errc::NotFound, "PCM do render ausente"};
+    std::vector<i16> chunk(static_cast<usize>(audioInputChunk) * audio_.channels);
+    i64 done = 0;
+    while (done < spilledSamples_) {
+        const u32 n = static_cast<u32>(std::min<i64>(audioInputChunk, spilledSamples_ - done));
+        if (std::fread(chunk.data(), sizeof(i16) * audio_.channels, n, f.get()) != n)
+            return error(Errc::IoError, "ler PCM do render");
+        const i64 ptsUs = av_rescale_q(done, AVRational{1, static_cast<int>(audio_.sampleRate)}, micros);
+        if (const Status status = write_audio(chunk.data(), n, ptsUs); !status.ok()) return status;
+        done += n;
+    }
+    f.reset();
+    (void)fileio::remove_file(spillPath_);
+    return OkStatus;
+}
+
+Status FFmpegSink::mux_logged_video(u64 untilFrame) noexcept {
+    while (assembledVideo_ < untilFrame) {
+        if (cancelled()) return error(Errc::Cancelled, "montagem FFmpeg cancelada");
+        bool end = false;
+        if (const Status status = logReader_.next(logged_, end); !status.ok())
+            return error(status.code(), "ler registro de pacotes");
+        if (end || logged_.frame != assembledVideo_)
+            return error(Errc::CorruptData, "registro de pacotes terminou antes do video");
+        av_packet_unref(packet_);
+        const int result = av_new_packet(packet_, static_cast<int>(logged_.data.size()));
+        if (result < 0) return error(Errc::OutOfMemory, "pacote da montagem FFmpeg", result);
+        std::memcpy(packet_->data, logged_.data.data(), logged_.data.size());
+        packet_->pts = packet_->dts = frame_pts(assembledVideo_);
+        packet_->duration = frame_pts(assembledVideo_ + 1) - packet_->pts;
+        if (logged_.key) packet_->flags |= AV_PKT_FLAG_KEY;
+        if (const Status status = mux(packet_, videoTimebase_, videoStream_); !status.ok()) return status;
+        ++assembledVideo_;
+    }
+    return OkStatus;
 }
 
 Status FFmpegSink::publish() noexcept {

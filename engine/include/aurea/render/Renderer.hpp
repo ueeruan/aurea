@@ -421,6 +421,9 @@ struct OffscreenTarget {
     TextureHandle yPlane{};
     TextureHandle uvPlane{};
     bool encodeDither = true;
+    /// Planos em RGBA8 de 1/4 da largura (4 bytes por fragmento, os MESMOS
+    /// bytes do R8/RG8): yuv_encode_packed.frag. Exige largura múltipla de 4.
+    bool packedYuv = false;
     /// Export sobreposto: se válidos, os planos Y e CbCr são copiados para
     /// estes buffers de leitura NO MESMO frame (sem submissão extra nem espera);
     /// quem chama espera o fence do frame e lê do buffer mapeado.
@@ -778,6 +781,7 @@ private:
         TextureHandle texture{};
         std::vector<u8> data;
         u32 bytesPerRow = 0;
+        bool mips = false;   ///< gera a cadeia de mips depois de subir o nível 0
     };
 
     void fill_scene_context(const Composition& comp, FrameIndex time, FrameSnapshot& out, const scene3d::SceneCamera& camera) noexcept;
@@ -996,6 +1000,11 @@ public:
     void mask_cache_stats(u32& hits, u32& misses) const noexcept { hits = maskHits_; misses = maskMisses_; }
 private:
     std::unordered_map<u64, ImageTexture> images_;     ///< por AssetId empacotado
+    /// Imagens do "Trocar textura 3D" na GPU (sRGB com mips, o formato das
+    /// texturas de cor dos modelos), por AssetId empacotado.
+    std::unordered_map<u64, ImageTexture> sceneImages_;
+    /// A imagem `key` pronta para cobrir uma parte 3D (sobe na 1ª vez).
+    [[nodiscard]] TextureHandle scene_image_texture(u64 key, const ImagePixels* px, u64 frameNumber) noexcept;
     std::unordered_map<u64, LutTexture> luts_;         ///< por hash da curva
     std::vector<u64> meshDataKeys_;                    ///< data_texture em luts_, da mais velha à mais nova
     // --- Espectro de áudio (EffectResources::audio_spectrum) ----------------

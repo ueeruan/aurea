@@ -1105,6 +1105,16 @@ enum KeyframeVisibility {
     static func visible(showAll: Bool, isPropertyLane: Bool, selected: Bool) -> Bool {
         return showAll || isPropertyLane || selected
     }
+    /// Como no Alight Motion: só a camada SELECIONADA edita os losangos (tocar,
+    /// arrastar); das outras eles aparecem esmaecidos, só de referência, e o
+    /// toque cai na camada. Pedidos explícitos continuam alcançando: o modo
+    /// "escolher keyframes" e as trilhas de propriedade que o usuário abriu.
+    /// Par do Android (`KeyframeVisibility.editable`).
+    static func editable(selected: Bool, keySelectMode: Bool, isPropertyLane: Bool = false) -> Bool {
+        return selected || keySelectMode || isPropertyLane
+    }
+    /// Opacidade dos losangos só de referência.
+    static let lockedAlpha: Double = 0.35
 }
 
 /// O que o dedo QUIS, decidido uma vez por gesto — o mesmo do Android (`Press`).

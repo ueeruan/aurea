@@ -439,6 +439,14 @@ Status SceneRenderer::initialize(GPUBackend& gpu, ShaderLibrary& shaders) noexce
     sd.mipmap = SamplerDesc::Mipmap::Linear;
     auto cs = gpu.create_sampler(sd);
     if (cs.ok()) cubeSampler_ = *cs;
+    {
+        SamplerDesc swap;
+        swap.mipmap = SamplerDesc::Mipmap::Linear;
+        swap.wrapU = swap.wrapV = SamplerDesc::Wrap::Repeat;
+        swap.maxAnisotropy = std::min(8.0f, gpu.capabilities().maxSamplerAnisotropy);
+        auto ss = gpu.create_sampler(swap);
+        if (ss.ok()) swapSampler_ = *ss;
+    }
     if (!white_.valid() || !flatNormal_.valid() || !envCube_.valid() || !cubeSampler_.valid()) {
         return Status{Errc::OutOfDeviceMemory, "texturas padrao do 3D"};
     }
@@ -981,6 +989,8 @@ void SceneRenderer::shutdown() noexcept {
     }
     if (cubeSampler_.valid()) gpu_->destroy_sampler(cubeSampler_);
     cubeSampler_ = SamplerHandle{};
+    if (swapSampler_.valid()) gpu_->destroy_sampler(swapSampler_);
+    swapSampler_ = SamplerHandle{};
     gpu_ = nullptr;
 }
 
@@ -990,6 +1000,7 @@ void SceneRenderer::forget_device() noexcept {
     irradiance_ = prefiltered_ = iblLut_ = background_ = TextureHandle{};
     white_ = flatNormal_ = black_ = envCube_ = brdfLut_ = TextureHandle{};
     cubeSampler_ = SamplerHandle{};
+    swapSampler_ = SamplerHandle{};
     sceneEnvironments_.clear();
     envSets_.clear();
     envKey_ = pendingKey_ = ~0ull;
@@ -1531,6 +1542,28 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         return &mat;
     };
     std::vector<Draw> opaque, blended;
+    // "Trocar textura 3D": cópia do material com a imagem no lugar da textura
+    // de cor (uv do próprio modelo, repetido), cor base branca para a imagem
+    // sair com as cores dela. Uma cópia por (material, imagem, repetição).
+    SceneLookup<std::pair<const GpuMaterial*, u64>, const GpuMaterial*, ScenePairHash> texturedCopies;
+    auto textured = [&](const GpuMaterial* source, const SceneNodeTexture& swap) -> const GpuMaterial* {
+        if (!swap.texture.valid()) return source;
+        u32 repeatBits = 0;
+        std::memcpy(&repeatBits, &swap.repeat, sizeof repeatBits);
+        const auto cacheKey = std::make_pair(source, swap.texture.id * 1099511628211ull ^ repeatBits);
+        if (auto found = texturedCopies.find(cacheKey)) return *found;
+        auto& mat = copy_material(source);
+        mat.tex[0] = swap.texture;
+        mat.samp[0] = swapSampler_;
+        const f32 repeat = std::isfinite(swap.repeat) && swap.repeat > 0.0f ? swap.repeat : 1.0f;
+        mat.factors.baseColorTex.offset = Vec2{0.0f, 0.0f};
+        mat.factors.baseColorTex.scale = Vec2{repeat, repeat};
+        mat.factors.baseColorTex.rotation = 0.0f;
+        mat.factors.baseColorTex.texCoord = 0;
+        mat.factors.baseColor.x = mat.factors.baseColor.y = mat.factors.baseColor.z = 1.0f;
+        texturedCopies.emplace(cacheKey, &mat);
+        return &mat;
+    };
     auto tinted = [&](const GpuMaterial* source, const Vec4& fill) -> const GpuMaterial* {
         if (fill.w <= 0) return source;
         auto& mat = copy_material(source);
@@ -1965,7 +1998,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
                 const i32 materialIndex = nodes[n].material_for(primitive);
-                const GpuMaterial* mat = faded(material_for(inst, *gm, materialIndex), nodeAlpha);
+                const GpuMaterial* mat = material_for(inst, *gm, materialIndex);
+                for (const SceneNodeTexture& swap : inst.nodeTextures)
+                    if (swap.node == n) { mat = textured(mat, swap); break; }
+                mat = faded(mat, nodeAlpha);
                 if (n < inst.pose().nodeFill.size()) mat = tinted(mat, inst.pose().nodeFill[n]);
                 const bool skinDraw = skinnedNode && p.skinned;
                 // Vidro (KHR_materials_transmission) mistura como transparente:

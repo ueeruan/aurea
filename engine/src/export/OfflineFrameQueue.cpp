@@ -5,15 +5,16 @@
 namespace aurea {
 bool OfflineFrameQueue::cancelled() const noexcept { return cancel_ && cancel_->load(std::memory_order_acquire); }
 Status OfflineFrameQueue::prepare(u32 slots, u32 frames, u64 bytes, u64 limit,
-    const std::atomic<bool>* cancel) noexcept {
+    const std::atomic<bool>* cancel, u32 first) noexcept {
     std::lock_guard lock(mutex_);
-    if (capacity_ || !slots || slots > entries_.size() || !frames || !bytes) return Errc::InvalidArgument;
+    if (capacity_ || !slots || slots > entries_.size() || !frames || !bytes || first >= frames) return Errc::InvalidArgument;
     if (bytes > limit / slots) return Errc::BudgetExceeded;
     capacity_ = slots; total_ = frames; reservedBytes_ = bytes * slots; cancel_ = cancel;
+    nextPublish_ = nextEncode_ = first;
     phase_.store(ExportPhase::Rendering);
     return OkStatus;
 }
-Result<u32> OfflineFrameQueue::acquire(u32 admission) noexcept {
+Result<u32> OfflineFrameQueue::acquire(u32 admission, u32 waitMs) noexcept {
     std::unique_lock lock(mutex_);
     if (!capacity_) return Status{Errc::InvalidState};
     auto find = [&]() -> u32 {
@@ -23,7 +24,7 @@ Result<u32> OfflineFrameQueue::acquire(u32 admission) noexcept {
         }
         return occupied < std::clamp(admission, 1u, capacity_) ? free : capacity_;
     };
-    changed_.wait_for(lock, std::chrono::milliseconds(100), [&] {
+    changed_.wait_for(lock, std::chrono::milliseconds(waitMs), [&] {
         return find() != capacity_ || cancelled() || closed_ || error_ != Errc::Ok;
     });
     if (cancelled()) return Status{Errc::Cancelled};

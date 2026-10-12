@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela de entrada: privacidade + termos (0.1.7 BETA 3). -->
+<resources>
+    <string name="privacy_title">We care about your privacy</string>
+    <string name="privacy_body">Your projects, videos and photos stay on your device. We don\'t sell your data and we don\'t send your videos to anyone.\n\nOnly what the app needs to work leaves your device:\n• your account email and password, so you can sign in;\n• app crash reports (without your videos), so we can fix bugs;\n• Google\'s advertising ID, used by the ads;\n• whatever you choose to send to the online AI features and to the community.</string>
+    <string name="terms_liability">You use Aurea at your own risk. Aurea is provided as is, as a beta, without warranties. To the extent permitted by law, Aurea is not responsible for lost projects or files, or for any damage caused by using the app or by the content you create and publish. Keep copies of your important projects.</string>
+    <string name="privacy_mascot_desc">Pixel character sending a heart</string>
+</resources>

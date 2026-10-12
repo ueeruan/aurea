@@ -655,6 +655,7 @@ private struct ShellStageBanner: View {
 // =============================================================================
 private struct ContextSheet: View {
     @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var realCamera = RealCameraState.shared
     let metrics: EditorMetrics
 
     var body: some View {
@@ -666,7 +667,10 @@ private struct ContextSheet: View {
                 AureaColors.editorPanelHigh.frame(height: StageDim.sheetHandle)
             }
 
-            if model.showAddLayer {
+            if realCamera.painting(model) {
+                // Real Camera ligada: os controles saem da prévia e ficam aqui.
+                RealCameraPanelView()
+            } else if model.showAddLayer {
                 AddLayerSheet()
             } else if model.selection.count > 1 && model.panel != .aiVideo && model.panel != .captions {
                 BatchToolsView()

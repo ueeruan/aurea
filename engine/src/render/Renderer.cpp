@@ -15,6 +15,7 @@
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
@@ -486,6 +487,8 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
     scene3d::apply_shape3d_parts(asset, l, materialTime, pose.nodeWorld);
     // Animação de texto 3D (animadores por letra/palavra/linha): mesmo caminho no export.
     scene3d::apply_text3d_animators(asset, l, materialTime, comp.fps(), pose.nodeWorld, inst.nodeOpacity, &inst.nodeFill);
+    // Animar parte 3D / Esconder partes 3D: por último (os animadores refazem a opacidade).
+    scene3d::apply_part_effects(asset, l, materialTime, pose.nodeWorld, inst.nodeOpacity);
     inst.nodeWorld = std::move(pose.nodeWorld);
     inst.jointMatrices = std::move(pose.jointMatrices);
     inst.skinJointOffset = std::move(pose.skinJointOffset);
@@ -498,6 +501,7 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
 bool can_share_static_pose(const Layer& layer, const scene3d::SceneAsset& asset) {
     if (layer.model.animationClip >= 0 && layer.model.animationClip < static_cast<i32>(asset.animations.size())) return false;
     if (!layer.model.materials.empty()) return false;
+    if (scene3d::has_part_effects(layer)) return false;
     for (u32 i = 0; i < layer.tracks.size(); ++i) {
         const auto property = layer.tracks.at(i).property;
         if (property == TrackProperty::MaterialParam || (asset.shapeParts && property == TrackProperty::ShapePart)) return false;
@@ -1143,6 +1147,7 @@ void Renderer::forget_device() noexcept {
     flowCache_.clear();
     heavyStats_.flowCacheBytes = 0;
     images_.clear();
+    sceneImages_.clear();
     luts_.clear();
     spectra_.clear();
     depthTex_.clear();
@@ -1183,6 +1188,8 @@ void Renderer::release_project_resources() noexcept {
         backend_->destroy_texture(i.texture);
     }
     for (auto& [k, l] : luts_) backend_->destroy_texture(l.texture);
+    for (auto& [k, i] : sceneImages_) backend_->destroy_texture(i.texture);
+    sceneImages_.clear();
     for (auto& [k, s] : spectra_) backend_->destroy_texture(s.texture);
     for (auto& [k, f] : flowCache_) for (TextureHandle& t : f.tex) if (t.valid()) backend_->destroy_texture(t);
     flowCache_.clear();
@@ -2139,6 +2146,18 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (inst.sharedPose) inst.world = world_3d_frac(comp, *l, static_cast<f64>(time.value)) * layer_from_model(l->model);
                 else place_model(comp, *l, *asset, static_cast<f64>(time.value), inst, &poseWorkspace_);
                 inst.layerKey = rid.pack();
+                // Trocar textura 3D: a imagem de cada parte, já na GPU.
+                if (scene3d::has_part_textures(*l) && imageLookup) {
+                    std::vector<scene3d::PartTexture> swaps;
+                    const f64 materialTime = static_cast<f64>(time.value) - static_cast<f64>(l->start.value)
+                                           + static_cast<f64>(l->offset.value);
+                    scene3d::collect_part_textures(*asset, *l, materialTime, swaps);
+                    for (const scene3d::PartTexture& swap : swaps) {
+                        const TextureHandle tex = scene_image_texture(
+                            swap.image, imageLookup(imageCtx, AssetId::unpack(swap.image)), frameNumber);
+                        if (tex.valid()) inst.nodeTextures.push_back(scene3d::SceneNodeTexture{swap.node, tex, swap.repeat});
+                    }
+                }
                 inst.motionBlur = l->motionBlur;
                 inst.castShadows = l->model.castShadows;
                 inst.doubleSided = model_interior_visible(l->model.interior, asset->shapeParts);
@@ -3621,7 +3640,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 if (!layer || !in.asset || !in.motionBlur || motion_blur_amount(layer->transform.motionBlurAmount) <= 0.f) continue;
                 deforming[i] = (layer->model.animationClip >= 0 && layer->model.animationClip < static_cast<i32>(in.asset->animations.size()))
-                    || in.asset->textGlyphLayout || in.asset->shapeParts;
+                    || in.asset->textGlyphLayout || in.asset->shapeParts || scene3d::has_part_effects(*layer);
                 for (u32 t = 0; t < layer->tracks.size(); ++t)
                     if (layer->tracks.at(t).property == TrackProperty::MaterialParam && layer->tracks.at(t).animated()) deforming[i] = true;
                 changing |= deforming[i];
@@ -3737,6 +3756,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     in.layerKey = base.layerKey; in.motionBlur = base.motionBlur; in.castShadows = base.castShadows;
                     in.doubleSided = base.doubleSided;
                     in.ownEnvironment = base.ownEnvironment; in.environment = base.environment;
+                    in.nodeTextures = base.nodeTextures;
                     in.sharedPose = poses[i];
                     const Layer* layer = sourceLayer(base.layerKey);
                     const f32 amount = layer && in.motionBlur ? motion_blur_amount(layer->transform.motionBlurAmount) : 0.f;
@@ -4049,6 +4069,9 @@ void Renderer::flush_uploads() noexcept {
             desc.debugName ? desc.debugName : "textura", desc.width, desc.height, up.bytesPerRow, up.data.size());
         const Status s = enough ? backend_->upload_texture(up.texture, up.data.data(), up.bytesPerRow)
                                 : Status{Errc::InvalidArgument, "pixels insuficientes para a textura"};
+        // Sem blit linear no formato: fica sem mips (correto, só mais serrilhado).
+        if (s.ok() && up.mips && !backend_->generate_mipmaps(up.texture).ok())
+            AUREA_LOG_WARN("3D: mips nao gerados para a textura trocada");
         if (!s.ok()) {
             mark_incomplete(__FILE__, __LINE__);
             AUREA_LOG_WARN("upload de textura falhou: %s", s.message().data());
@@ -6432,25 +6455,29 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
                 &uu, sizeof(uu));
             if (pu != kInvalidIndex) { graph_.mark_side_effect(pu); yuvSource = up; }
         }
+        // Empacotado: 4 bytes por fragmento num RGBA8 de 1/4 da largura (a
+        // memória é a mesma do R8/RG8; o custo do passe era por fragmento).
+        const bool packed = offscreen->packedYuv && (ow % 4u) == 0;
         TextureDesc yd;
-        yd.width = ow;
+        yd.width = packed ? ow / 4 : ow;
         yd.height = oh;
-        yd.format = SurfaceFormat::R8;
+        yd.format = packed ? SurfaceFormat::RGBA8 : SurfaceFormat::R8;
         yd.renderTarget = true;
         yd.transferSrc = true;
         TextureDesc uvd = yd;
-        uvd.width = ow / 2;
+        uvd.width = packed ? ow / 4 : ow / 2;
         uvd.height = oh / 2;
-        uvd.format = SurfaceFormat::RG8;
+        uvd.format = packed ? SurfaceFormat::RGBA8 : SurfaceFormat::RG8;
+        const ShaderId yuvShader = packed ? ShaderId::export_yuv_encode_packed_frag : ShaderId::export_yuv_encode_frag;
         const FGTexture yTex = graph_.import_texture("export-y", offscreen->yPlane, yd);
         const FGTexture uvTex = graph_.import_texture("export-cbcr", offscreen->uvPlane, uvd);
         struct YuvUniforms { Vec4 cfg; Vec4 matrix; };
         const f32 dither = offscreen->encodeDither ? 1.0f : 0.0f;
         const YuvUniforms uy{Vec4{0.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
         const YuvUniforms uc{Vec4{1.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
-        const u32 py = ctx.fullscreen_pass("export-y", PassStage::Output, yTex, ShaderId::export_yuv_encode_frag,
+        const u32 py = ctx.fullscreen_pass("export-y", PassStage::Output, yTex, yuvShader,
                                            {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &uy, sizeof(uy));
-        const u32 pc = ctx.fullscreen_pass("export-cbcr", PassStage::Output, uvTex, ShaderId::export_yuv_encode_frag,
+        const u32 pc = ctx.fullscreen_pass("export-cbcr", PassStage::Output, uvTex, yuvShader,
                                            {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &uc, sizeof(uc));
         if (py != kInvalidIndex) graph_.mark_side_effect(py);
         if (pc != kInvalidIndex) graph_.mark_side_effect(pc);
@@ -7023,6 +7050,42 @@ void Renderer::collect_resources(u64 frameNumber) noexcept {
     }
 }
 
+TextureHandle Renderer::scene_image_texture(u64 key, const ImagePixels* px, u64 frameNumber) noexcept {
+    if (!backend_ || key == 0) return TextureHandle{};
+    auto it = sceneImages_.find(key);
+    if (it != sceneImages_.end() && px && (it->second.width != px->width || it->second.height != px->height)) {
+        backend_->destroy_texture(it->second.texture);
+        sceneImages_.erase(it);
+        it = sceneImages_.end();
+    }
+    if (it != sceneImages_.end()) {
+        it->second.lastFrame = frameNumber;
+        return it->second.texture;
+    }
+    if (!px || !px->width || !px->height || px->rgba.size() < static_cast<usize>(px->width) * px->height * 4) return TextureHandle{};
+    // O mesmo formato das texturas de cor dos modelos (GpuModel::upload).
+    TextureDesc d;
+    d.width = px->width;
+    d.height = px->height;
+    u32 levels = 1;
+    for (u32 side = std::max(px->width, px->height); side > 1; side >>= 1) ++levels;
+    d.mipLevels = levels;
+    d.format = SurfaceFormat::RGBA8_sRGB;
+    d.sampled = true;
+    d.transferDst = true;
+    d.debugName = "3d-textura-trocada";
+    auto tex = backend_->create_texture(d);
+    if (!tex.ok()) return TextureHandle{};
+    PendingUpload up;
+    up.texture = *tex;
+    up.bytesPerRow = px->width * 4;
+    up.data = px->rgba;
+    up.mips = true;
+    uploads_.push_back(std::move(up));
+    sceneImages_[key] = ImageTexture{*tex, px->width, px->height, frameNumber};
+    return *tex;
+}
+
 void Renderer::destroy_image_linear(ImageTexture& img) noexcept {
     for (ImageTexture::Linear& L : img.linear) {
         if (L.tex.valid() && backend_) backend_->destroy_texture(L.tex);
@@ -7054,6 +7117,11 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
             if (img.texture.valid()) { backend_->destroy_texture(img.texture); ++n; }
             it = images_.erase(it);
         } else ++it;
+    }
+    for (auto it = sceneImages_.begin(); it != sceneImages_.end();) {
+        if (!unused(it->second.lastFrame)) { ++it; continue; }
+        if (it->second.texture.valid()) { backend_->destroy_texture(it->second.texture); ++n; }
+        it = sceneImages_.erase(it);
     }
     for (auto it = planar_.begin(); it != planar_.end();) {
         if (!unused(it->second.lastFrame)) { ++it; continue; }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela de entrada: privacidade + termos (0.1.7 BETA 3). -->
+<resources>
+    <string name="privacy_title">Kami menjaga privasimu</string>
+    <string name="privacy_body">Proyek, video, dan fotomu tetap ada di perangkatmu. Kami tidak menjual datamu dan tidak mengirim videomu ke siapa pun.\n\nHanya yang dibutuhkan agar aplikasi berjalan yang keluar dari perangkat:\n• email dan kata sandi akunmu, untuk masuk;\n• laporan error aplikasi (tanpa videomu), untuk memperbaiki bug;\n• ID iklan Google, yang dipakai oleh iklan;\n• apa pun yang kamu kirim sendiri ke fitur AI online dan ke komunitas.</string>
+    <string name="terms_liability">Kamu menggunakan Aurea dengan risiko sendiri. Aurea disediakan apa adanya, dalam versi beta, tanpa jaminan. Sejauh diizinkan hukum, Aurea tidak bertanggung jawab atas hilangnya proyek atau file, maupun kerugian akibat penggunaan aplikasi atau konten yang kamu buat dan publikasikan. Simpan salinan proyek pentingmu.</string>
+    <string name="privacy_mascot_desc">Karakter piksel mengirim hati</string>
+</resources>

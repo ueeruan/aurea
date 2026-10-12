@@ -52,6 +52,11 @@ struct SyntheticConfig {
     /// `audioBeatStart` s — para testar a detecção de batidas.
     f64 audioBpm = 0.0;
     f64 audioBeatStart = 0.0;
+    /// Decoder preso DENTRO da plataforma ao fechar (MediaCodec ou glFinish
+    /// que não volta): os decoders criados com `*holdArm` ligado só terminam o
+    /// destrutor quando `*holdClose` desligar.
+    std::atomic<bool>* holdArm = nullptr;
+    std::atomic<bool>* holdClose = nullptr;
 };
 
 /// Centro do quadrado do padrão MovingSquare no quadro `i`.
@@ -200,6 +205,7 @@ public:
 class SyntheticDecoder final : public VideoDecoderBackend {
 public:
     explicit SyntheticDecoder(const SyntheticConfig& c) : cfg_(c) {
+        held_ = c.holdArm && c.holdClose && c.holdArm->load();
         info_.codedWidth = c.width;
         info_.codedHeight = c.height;
         info_.fps = c.fps;
@@ -208,6 +214,10 @@ public:
         info_.rotation = c.rotation;
         std::snprintf(info_.codec, sizeof(info_.codec), "%s", "video/sintetico");
         std::snprintf(info_.decoderName, sizeof(info_.decoderName), "%s", "sintetico");
+    }
+
+    ~SyntheticDecoder() override {
+        while (held_ && cfg_.holdClose->load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     const VideoStreamInfo& info() const noexcept override { return info_; }
@@ -253,6 +263,7 @@ public:
     std::atomic<u32> delivered{0};
 
 private:
+    bool held_ = false;
     DecodedFrame* make_frame(u32 index) {
         auto* f = new SyntheticFrame();
         const u32 w = cfg_.width, h = cfg_.height;

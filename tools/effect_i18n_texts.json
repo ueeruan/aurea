@@ -3215,5 +3215,317 @@
   "hi": "केवल चमक",
   "id": "Hanya cahaya",
   "ar": "التوهج فقط"
+ },
+ "Distance Network (24 regions)": {
+  "en": "Distance Network (24 regions)",
+  "es": "Red por distancia (24 regiones)",
+  "ru": "Сеть по расстоянию (24 области)",
+  "hi": "दूरी नेटवर्क (24 क्षेत्र)",
+  "id": "Jaringan jarak (24 wilayah)",
+  "ar": "شبكة المسافة (24 منطقة)"
+ },
+ "Detect By": {
+  "en": "Detect By",
+  "es": "Detectar por",
+  "ru": "Определять по",
+  "hi": "इससे पहचानें",
+  "id": "Deteksi dengan",
+  "ar": "الكشف حسب"
+ },
+ "Brightness": {
+  "en": "Brightness",
+  "es": "Brillo",
+  "ru": "Яркость",
+  "hi": "चमक",
+  "id": "Kecerahan",
+  "ar": "السطوع"
+ },
+ "Glow": {
+  "en": "Glow",
+  "es": "Resplandor",
+  "ru": "Свечение",
+  "hi": "चमक प्रभाव",
+  "id": "Pendar",
+  "ar": "توهج"
+ },
+ "Glow Radius": {
+  "en": "Glow Radius",
+  "es": "Radio del resplandor",
+  "ru": "Радиус свечения",
+  "hi": "चमक त्रिज्या",
+  "id": "Radius pendar",
+  "ar": "نصف قطر التوهج"
+ },
+ "Network Distance": {
+  "en": "Network Distance",
+  "es": "Distancia de la red",
+  "ru": "Расстояние сети",
+  "hi": "नेटवर्क दूरी",
+  "id": "Jarak jaringan",
+  "ar": "مسافة الشبكة"
+ },
+ "Game Boy": {
+  "en": "Game Boy",
+  "es": "Game Boy",
+  "ru": "Game Boy",
+  "hi": "Game Boy",
+  "id": "Game Boy",
+  "ar": "Game Boy"
+ },
+ "Parte": {
+  "en": "Part",
+  "es": "Parte",
+  "ru": "Часть",
+  "hi": "भाग",
+  "id": "Bagian",
+  "ar": "الجزء"
+ },
+ "Rotação X": {
+  "en": "Rotation X",
+  "es": "Rotación X",
+  "ru": "Поворот X",
+  "hi": "घुमाव X",
+  "id": "Rotasi X",
+  "ar": "الدوران X"
+ },
+ "Rotação Y": {
+  "en": "Rotation Y",
+  "es": "Rotación Y",
+  "ru": "Поворот Y",
+  "hi": "घुमाव Y",
+  "id": "Rotasi Y",
+  "ar": "الدوران Y"
+ },
+ "Rotação Z": {
+  "en": "Rotation Z",
+  "es": "Rotación Z",
+  "ru": "Поворот Z",
+  "hi": "घुमाव Z",
+  "id": "Rotasi Z",
+  "ar": "الدوران Z"
+ },
+ "Esconder": {
+  "en": "Hide",
+  "es": "Ocultar",
+  "ru": "Скрыть",
+  "hi": "छिपाएँ",
+  "id": "Sembunyikan",
+  "ar": "إخفاء"
+ },
+ "Esconder as outras": {
+  "en": "Hide the others",
+  "es": "Ocultar las demás",
+  "ru": "Скрыть остальные",
+  "hi": "बाकी छिपाएँ",
+  "id": "Sembunyikan yang lain",
+  "ar": "إخفاء البقية"
+ },
+ "Imagem": {
+  "en": "Image",
+  "es": "Imagen",
+  "ru": "Изображение",
+  "hi": "छवि",
+  "id": "Gambar",
+  "ar": "صورة"
+ },
+ "Todas as partes": {
+  "en": "All parts",
+  "es": "Todas las partes",
+  "ru": "Все части",
+  "hi": "सभी भाग",
+  "id": "Semua bagian",
+  "ar": "كل الأجزاء"
+ },
+ "Explosão": {
+  "en": "Explosion",
+  "es": "Explosión",
+  "ru": "Взрыв",
+  "hi": "विस्फोट",
+  "id": "Ledakan",
+  "ar": "الانفجار"
+ },
+ "Peças": {
+  "en": "Pieces",
+  "es": "Piezas",
+  "ru": "Осколки",
+  "hi": "टुकड़े",
+  "id": "Kepingan",
+  "ar": "القطع"
+ },
+ "Quadrados": {
+  "en": "Squares",
+  "es": "Cuadrados",
+  "ru": "Квадраты",
+  "hi": "वर्ग",
+  "id": "Persegi",
+  "ar": "مربعات"
+ },
+ "Vidro": {
+  "en": "Glass",
+  "es": "Vidrio",
+  "ru": "Стекло",
+  "hi": "कांच",
+  "id": "Kaca",
+  "ar": "زجاج"
+ },
+ "Quantidade de peças": {
+  "en": "Number of pieces",
+  "es": "Cantidad de piezas",
+  "ru": "Количество осколков",
+  "hi": "टुकड़ों की संख्या",
+  "id": "Jumlah kepingan",
+  "ar": "عدد القطع"
+ },
+ "Centro da explosão": {
+  "en": "Explosion center",
+  "es": "Centro de la explosión",
+  "ru": "Центр взрыва",
+  "hi": "विस्फोट का केंद्र",
+  "id": "Pusat ledakan",
+  "ar": "مركز الانفجار"
+ },
+ "Para a câmera": {
+  "en": "Toward camera",
+  "es": "Hacia la cámara",
+  "ru": "К камере",
+  "hi": "कैमरे की ओर",
+  "id": "Ke arah kamera",
+  "ar": "نحو الكاميرا"
+ },
+ "Perspectiva": {
+  "en": "Perspective",
+  "es": "Perspectiva",
+  "ru": "Перспектива",
+  "hi": "परिप्रेक्ष्य",
+  "id": "Perspektif",
+  "ar": "المنظور"
+ },
+ "Luz nas faces": {
+  "en": "Face lighting",
+  "es": "Luz en las caras",
+  "ru": "Освещение граней",
+  "hi": "सतहों पर रोशनी",
+  "id": "Cahaya pada sisi",
+  "ar": "إضاءة الأوجه"
+ },
+ "Círculo": {
+  "en": "Circle",
+  "es": "Círculo",
+  "ru": "Круг",
+  "hi": "वृत्त",
+  "id": "Lingkaran",
+  "ar": "دائرة"
+ },
+ "Coração": {
+  "en": "Heart",
+  "es": "Corazón",
+  "ru": "Сердце",
+  "hi": "दिल",
+  "id": "Hati",
+  "ar": "قلب"
+ },
+ "Máscaras da camada": {
+  "en": "Layer masks",
+  "es": "Máscaras de la capa",
+  "ru": "Маски слоя",
+  "hi": "लेयर मास्क",
+  "id": "Mask layer",
+  "ar": "أقنعة الطبقة"
+ },
+ "Cor do fim": {
+  "en": "End color",
+  "es": "Color del final",
+  "ru": "Цвет конца",
+  "hi": "अंत का रंग",
+  "id": "Warna akhir",
+  "ar": "لون النهاية"
+ },
+ "Afinar no início": {
+  "en": "Taper start",
+  "es": "Afinar al inicio",
+  "ru": "Сужение в начале",
+  "hi": "शुरुआत में पतला",
+  "id": "Runcing di awal",
+  "ar": "ترقيق البداية"
+ },
+ "Afinar no fim": {
+  "en": "Taper end",
+  "es": "Afinar al final",
+  "ru": "Сужение в конце",
+  "hi": "अंत में पतला",
+  "id": "Runcing di akhir",
+  "ar": "ترقيق النهاية"
+ },
+ "Repetições": {
+  "en": "Repeats",
+  "es": "Repeticiones",
+  "ru": "Повторы",
+  "hi": "दोहराव",
+  "id": "Pengulangan",
+  "ar": "التكرارات"
+ },
+ "Distância entre repetições": {
+  "en": "Repeat distance",
+  "es": "Distancia entre repeticiones",
+  "ru": "Расстояние между повторами",
+  "hi": "दोहरावों के बीच दूरी",
+  "id": "Jarak antar pengulangan",
+  "ar": "المسافة بين التكرارات"
+ },
+ "Giro por repetição": {
+  "en": "Rotation per repeat",
+  "es": "Giro por repetición",
+  "ru": "Поворот на повтор",
+  "hi": "हर दोहराव पर घुमाव",
+  "id": "Putaran per pengulangan",
+  "ar": "دوران لكل تكرار"
+ },
+ "Escala por repetição": {
+  "en": "Scale per repeat",
+  "es": "Escala por repetición",
+  "ru": "Масштаб на повтор",
+  "hi": "हर दोहराव पर स्केल",
+  "id": "Skala per pengulangan",
+  "ar": "مقياس لكل تكرار"
+ },
+ "Esmaecer repetições": {
+  "en": "Fade repeats",
+  "es": "Desvanecer repeticiones",
+  "ru": "Затухание повторов",
+  "hi": "दोहराव धुंधले करें",
+  "id": "Pudarkan pengulangan",
+  "ar": "تلاشي التكرارات"
+ },
+ "Mostrar": {
+  "en": "Show",
+  "es": "Mostrar",
+  "ru": "Показать",
+  "hi": "दिखाएँ",
+  "id": "Tampilkan",
+  "ar": "إظهار"
+ },
+ "Sobre a camada": {
+  "en": "Over the layer",
+  "es": "Sobre la capa",
+  "ru": "Поверх слоя",
+  "hi": "लेयर के ऊपर",
+  "id": "Di atas layer",
+  "ar": "فوق الطبقة"
+ },
+ "Só o traço": {
+  "en": "Stroke only",
+  "es": "Solo el trazo",
+  "ru": "Только обводка",
+  "hi": "सिर्फ़ रेखा",
+  "id": "Hanya garis",
+  "ar": "الخط فقط"
+ },
+ "Atrás da camada": {
+  "en": "Behind the layer",
+  "es": "Detrás de la capa",
+  "ru": "За слоем",
+  "hi": "लेयर के पीछे",
+  "id": "Di belakang layer",
+  "ar": "خلف الطبقة"
  }
 }

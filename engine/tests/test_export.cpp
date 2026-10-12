@@ -307,6 +307,9 @@ ProcMem proc_mem() {
 // -----------------------------------------------------------------------------
 // Cenários
 // -----------------------------------------------------------------------------
+/// Teste do NV12 empacotado: o Rig abre o motor com esta escolha.
+bool g_packedYuv = false;
+
 struct Rig {
     SyntheticFactory factory;
     BenchCapture cap;
@@ -318,8 +321,10 @@ struct Rig {
         ExportExecutionProfile profile = ExportExecutionProfile::Balanced, bool = false,
         ImageLoaderFn imageLoader = nullptr, void* imageLoaderContext = nullptr, bool = false,
         u64 trackedBudget = 0, bool boundedText = true, u32 resourceTimeoutMs = 0,
-        ExportSinkFactory nativeSink = nullptr) : factory(cfg) {
+        ExportSinkFactory nativeSink = nullptr, bool resumable = false) : factory(cfg) {
         EngineConfig ec;
+        ec.enableResumableExport = resumable;
+        ec.enablePackedYuvExport = g_packedYuv;
         ec.exportGpuTimeoutMs = resourceTimeoutMs;
         ec.enableBoundedTextSurface = boundedText;
         ec.memoryBudgetBytes = trackedBudget;
@@ -1131,6 +1136,191 @@ AUREA_TEST(OfflineNativeGpu, CompositionFramesAndStereoReachRealNativeMp4) {
     }
 }
 #endif
+
+// Export retomável (ExportPacketLog): o app vai para segundo plano no meio do
+// export (a suspensão cancela o encoder e a GPU). O registro guarda os GOPs já
+// codificados; o MESMO start_export continua do último keyframe íntegro e o
+// arquivo final tem todos os quadros, o áudio inteiro e os mesmos pixels do
+// export sem interrupção. Editar o projeto ou cancelar recomeça do zero.
+AUREA_TEST(OfflineNativeGpu, SuspendedExportResumesFromLastGopWithSamePictures) {
+    AUREA_CHECK(gpu_ok()); if (!gpu_ok()) return;
+    std::filesystem::create_directories("build/reference/rendercore-resume");
+    SyntheticConfig cfg; cfg.width = 320; cfg.height = 192; cfg.pattern = SyntheticPattern::MovingSquare;
+    cfg.audioRate = 44100; cfg.audioSeconds = 5; cfg.decodeCostUs = 15000; cfg.frameCount = 150;
+    constexpr i64 kFrames = 120;
+    ExportSettings settings; settings.height = cfg.height; settings.fps = 30; settings.dither = false;
+    settings.keyframeIntervalFrames = 15;
+    auto rig = [&] {
+        return std::make_unique<Rig>(cfg, 30, kFrames, 3, nullptr, nullptr, 0, false, "sintetico",
+            ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 30000,
+            &make_ffmpeg_export_sink, true);
+    };
+    auto wait = [](Rig& r, u32 untilFrames = ~0u) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
+        for (;;) {
+            const auto p = r.e.export_progress();
+            if (p.finished || p.framesDone >= untilFrames || std::chrono::steady_clock::now() > deadline) return p;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    };
+    // Referência: o mesmo export, sem interrupção.
+    const std::string reference = "build/reference/rendercore-resume/reference.mp4";
+    std::vector<std::vector<u8>> referenceFrames;
+    {
+        auto r = rig(); AUREA_CHECK(r->ok); if (!r->ok) return;
+        AUREA_CHECK(r->e.start_export(settings, reference.c_str()).ok());
+        const auto p = wait(*r);
+        AUREA_CHECK(p.finished); AUREA_CHECK_EQ(p.result, Errc::Ok);
+        AUREA_CHECK((p.flags & Engine::kExportResumed) == 0);
+        AUREA_CHECK(!fileio::exists(Engine::export_packet_log_path(reference.c_str())));   // sucesso apaga o registro
+        const auto decoded = verify_native_export(reference, kFrames, cfg.width, cfg.height, 30, true, &referenceFrames);
+        AUREA_CHECK(decoded.ok); if (!decoded.ok) std::printf("\n    referencia: %s\n", decoded.error.c_str());
+    }
+    const std::string movie = "build/reference/rendercore-resume/resumed.mp4";
+    (void)fileio::remove_file(movie);
+    auto r = rig(); AUREA_CHECK(r->ok); if (!r->ok) return;
+    // 1) Segundo plano no meio: a suspensão interrompe, o registro fica.
+    AUREA_CHECK(r->e.start_export(settings, movie.c_str()).ok());
+    const auto mid = wait(*r, 70);
+    AUREA_CHECK(!mid.finished && mid.framesDone >= 70);
+    AUREA_CHECK(r->e.suspend().ok());
+    const auto suspended = r->e.export_progress();
+    AUREA_CHECK(suspended.finished); AUREA_CHECK_EQ(suspended.result, Errc::Cancelled);
+    AUREA_CHECK((suspended.flags & Engine::kExportResumable) != 0);
+    AUREA_CHECK(!fileio::exists(movie));
+    const auto info = r->e.export_resume_info(movie.c_str());
+    AUREA_CHECK(info.resumeFrame >= 45 && info.resumeFrame % 15 == 0);
+    AUREA_CHECK_EQ(info.totalFrames, static_cast<u32>(kFrames));
+    // 2) O app voltou: o MESMO export continua do último GOP íntegro.
+    AUREA_CHECK(r->e.resume().ok());
+    AUREA_CHECK(r->e.start_export(settings, movie.c_str()).ok());
+    const auto started = r->e.export_progress();
+    AUREA_CHECK_EQ(started.framesDone, info.resumeFrame);
+    const auto done = wait(*r);
+    AUREA_CHECK(done.finished); AUREA_CHECK_EQ(done.result, Errc::Ok);
+    if (done.result != Errc::Ok) std::printf("\n    retomada falhou: %s\n", done.message);
+    AUREA_CHECK((done.flags & Engine::kExportResumed) != 0);
+    AUREA_CHECK_EQ(done.framesDone, static_cast<u32>(kFrames));
+    AUREA_CHECK(!fileio::exists(Engine::export_packet_log_path(movie.c_str())));
+    std::vector<std::vector<u8>> frames;
+    const auto decoded = verify_native_export(movie, kFrames, cfg.width, cfg.height, 30, true, &frames);
+    AUREA_CHECK(decoded.ok); if (!decoded.ok) std::printf("\n    retomado: %s\n", decoded.error.c_str());
+    AUREA_CHECK_EQ(decoded.pictures, static_cast<u32>(kFrames));
+    AUREA_CHECK(decoded.samples > 0 && decoded.meanSquare > .001);
+    AUREA_CHECK_EQ(frames.size(), referenceFrames.size());
+    // Os mesmos pixels: antes do ponto de retomada, os pacotes são os mesmos
+    // da referência; depois, a sessão nova do encoder diverge só no ruído de
+    // quantização (PSNR alto em todos os quadros).
+    f64 worst = 1e9;
+    for (usize i = 0; i < std::min(frames.size(), referenceFrames.size()); ++i) {
+        if (i < info.resumeFrame) AUREA_CHECK(frames[i] == referenceFrames[i]);
+        f64 mse = 0;
+        for (usize k = 0; k < frames[i].size(); ++k) {
+            const f64 d = static_cast<f64>(frames[i][k]) - referenceFrames[i][k];
+            mse += d * d;
+        }
+        mse /= static_cast<f64>(std::max<usize>(1, frames[i].size()));
+        worst = std::min(worst, mse <= 1e-9 ? 99.0 : 10.0 * std::log10(255.0 * 255.0 / mse));
+    }
+    std::printf("\n    retomada no quadro %u de %lld; pior PSNR(Y) contra o export sem interrupcao: %.1f dB",
+                info.resumeFrame, static_cast<long long>(kFrames), worst);
+    AUREA_CHECK(worst >= 38.0);
+    // 3) Projeto editado depois da interrupção: o registro não serve, recomeça do zero.
+    AUREA_CHECK(r->e.start_export(settings, movie.c_str()).ok());
+    (void)wait(*r, 50);
+    AUREA_CHECK(r->e.suspend().ok());
+    AUREA_CHECK(r->e.resume().ok());
+    AUREA_CHECK(r->e.export_resume_info(movie.c_str()).resumeFrame > 0);
+    r->comp()->layer(r->video_layer())->transform.opacity = .5f;
+    AUREA_CHECK(r->e.start_export(settings, movie.c_str()).ok());
+    AUREA_CHECK_EQ(r->e.export_progress().framesDone, 0u);
+    // 4) Cancelar de verdade (o usuário) apaga o registro.
+    (void)wait(*r, 40);
+    AUREA_CHECK(r->e.cancel_export().ok());
+    const auto cancelled = wait(*r);
+    AUREA_CHECK_EQ(cancelled.result, Errc::Cancelled);
+    AUREA_CHECK((cancelled.flags & Engine::kExportResumable) == 0);
+    AUREA_CHECK(!fileio::exists(Engine::export_packet_log_path(movie.c_str())));
+    AUREA_CHECK_EQ(r->e.export_resume_info(movie.c_str()).resumeFrame, 0u);
+}
+
+// NV12 empacotado (yuv_encode_packed.frag, 4 bytes por fragmento): medido no
+// moto g52, o passe de 1 byte por fragmento era 80% da GPU do export. Sem
+// dither, os bytes que o encoder recebe são EXATAMENTE os do passe antigo; com
+// dither, o compilador pode arredondar o ruído de outro jeito: no máximo 1
+// nível em raros bytes. Largura que não é múltipla de 4 usa o passe antigo.
+AUREA_TEST(Export, PackedNv12IsByteIdenticalToTheOneBytePass) {
+    AUREA_CHECK(gpu_ok()); if (!gpu_ok()) return;
+    for (const u32 width : {320u, 322u}) {
+        for (const bool dither : {false, true}) {
+            std::vector<std::vector<u8>> frames[2];
+            for (int packed = 0; packed < 2; ++packed) {
+                g_packedYuv = packed == 1;
+                SyntheticConfig cfg; cfg.width = width; cfg.height = 180; cfg.pattern = SyntheticPattern::MovingSquare;
+                Rig r(cfg, 30, 12, 2);
+                g_packedYuv = false;
+                AUREA_CHECK(r.ok); if (!r.ok) return;
+                AUREA_CHECK(r.add_effect(r.video_layer(), effect_keys::kGlow) != nullptr);
+                auto& track = r.comp()->layer(r.video_layer())->tracks.get_or_create(TrackProperty::Opacity);
+                AUREA_CHECK(track.set(FrameIndex{0}, .2f, Interpolation::Linear) != kInvalidIndex);
+                AUREA_CHECK(track.set(FrameIndex{11}, 1.f, Interpolation::Linear) != kInvalidIndex);
+                r.cap.keepFrames = true;
+                const Outcome o = run_export(r, 180, 30, dither, 60);
+                AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+                AUREA_CHECK_EQ(r.cap.frames.size(), 12u);
+                frames[packed] = r.cap.frames;
+            }
+            usize differing = 0, firstFrame = ~usize{0}, firstByte = 0, total = 0;
+            int worst = 0;
+            for (usize f = 0; f < std::min(frames[0].size(), frames[1].size()); ++f) {
+                AUREA_CHECK_EQ(frames[0][f].size(), frames[1][f].size());
+                total += frames[0][f].size();
+                for (usize b = 0; b < std::min(frames[0][f].size(), frames[1][f].size()); ++b)
+                    if (frames[0][f][b] != frames[1][f][b]) {
+                        if (!differing) { firstFrame = f; firstByte = b; }
+                        ++differing;
+                        worst = std::max(worst, std::abs(int(frames[0][f][b]) - int(frames[1][f][b])));
+                    }
+            }
+            if (differing) std::printf("\n    largura %u dither %d: %zu bytes diferentes (quadro %zu, byte %zu)",
+                                       width, dither ? 1 : 0, differing, firstFrame, firstByte);
+            if (!dither) AUREA_CHECK_EQ(differing, usize{0});
+            AUREA_CHECK(worst <= 1);
+            AUREA_CHECK(differing * 10000 <= total);   // no máximo 0,01% dos bytes
+        }
+    }
+}
+
+// Decoder preso DENTRO da plataforma ao fechar (MediaCodec ou o glFinish da
+// ponte GL que não volta). Antes o fim do export esperava por ele para sempre
+// segurando o renderMutex_: a tela ficava parada (em 0% se fosse no 1º quadro)
+// e o próximo export dava "ja existe um export em andamento". Agora o export
+// publica o resultado em segundos, a sessão fica guardada e o próximo abre.
+AUREA_TEST(Export, DecoderStuckWhileClosingNeverHoldsTheExportOrTheNextOne) {
+    AUREA_CHECK(gpu_ok()); if (!gpu_ok()) return;
+    std::atomic<bool> arm{false}, hold{true};
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36; cfg.holdArm = &arm; cfg.holdClose = &hold;
+    Rig r(cfg, 30, 30, 2);
+    AUREA_CHECK(r.ok); if (!r.ok) { hold = false; return; }
+    arm = true;   // só os decoders do export travam ao fechar
+    for (int round = 0; round < 2; ++round) {
+        r.cap = BenchCapture{};
+        const auto t0 = std::chrono::steady_clock::now();
+        const Outcome o = run_export(r, 36, 30, false, 60);
+        const f64 seconds = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
+        AUREA_CHECK(o.finished);
+        AUREA_CHECK_EQ(o.p.result, Errc::Ok);
+        AUREA_CHECK_EQ(o.p.framesDone, 30u);
+        AUREA_CHECK(seconds < 30.0);   // prazo de 5 s para fechar + o export
+        std::printf("\n    rodada %d: export com decoder preso ao fechar terminou em %.1f s", round, seconds);
+    }
+    // O "driver" volta: a sessão guardada fecha na próxima limpeza e no fim.
+    hold = false;
+    arm = false;
+    r.cap = BenchCapture{};
+    const Outcome after = run_export(r, 36, 30, false, 60);
+    AUREA_CHECK(after.finished && after.p.result == Errc::Ok);
+}
 
 AUREA_TEST(Export, PipelinedOutputIsByteIdenticalToSerial) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
@@ -2249,8 +2439,7 @@ AUREA_TEST(Export, GpuUpscaleIsSharperThanBilinearAndMeasuresFrameTime) {
         const u32 nicest = mid_edge_pixels(r.cap.frames[0].data(), w, h);
         const std::vector<u8> bi = bilinear_y(base.data(), 160, 90, w, h);
         const u32 bilinear = mid_edge_pixels(bi.data(), w, h);
-        std::printf("
-    upscale %ux: pixels de borda textureNicest %u x bilinear %u", scale, nicest, bilinear);
+        std::printf("\n    upscale %ux: pixels de borda textureNicest %u x bilinear %u", scale, nicest, bilinear);
         AUREA_CHECK(nicest < bilinear);
     }
     // Tempo real: 960x540 -> 3840x2160 (4x) e 1280x720 -> 2560x1440 (2x), 12 quadros.
@@ -2263,8 +2452,7 @@ AUREA_TEST(Export, GpuUpscaleIsSharperThanBilinearAndMeasuresFrameTime) {
         const Outcome o = run_export(r, c.h * c.scale, 0, true, 600, c.scale);
         AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
         AUREA_CHECK_EQ(r.cap.video.width, c.w * c.scale);
-        std::printf("
-    upscale %ux%u -> %ux%u: %.1f ms/quadro (%.2f s para 12 quadros)", c.w, c.h, c.w * c.scale,
+        std::printf("\n    upscale %ux%u -> %ux%u: %.1f ms/quadro (%.2f s para 12 quadros)", c.w, c.h, c.w * c.scale,
                     c.h * c.scale, o.seconds * 1000.0 / 12.0, o.seconds);
     }
 }

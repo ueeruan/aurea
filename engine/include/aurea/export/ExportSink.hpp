@@ -53,6 +53,19 @@ struct VideoStreamConfig {
     /// finish closes the temporary file; independent validation must
     /// succeed before the startup gate atomically replaces the destination.
     bool validateBeforePublish = false;
+    /// Export retomável (export/ExportPacketLog.hpp): os pacotes de vídeo vão
+    /// para este registro durável em vez do MP4. Depois do último quadro o
+    /// motor chama `end_video`, `begin_assembly`, manda TODO o áudio e `finish`
+    /// monta o MP4 a partir do registro. Nulo = MP4 direto (caminho antigo).
+    const char* packetLogPath = nullptr;
+    /// Retomada: o registro já tem os quadros 0..resumeFrame−1 em GOPs
+    /// completos; esta sessão do encoder começa no quadro `resumeFrame`.
+    u32 resumeFrame = 0;
+    /// Identidade do export gravada no registro (um registro de OUTRO export
+    /// nunca é continuado).
+    u64 sessionKey = 0;
+    /// Quadros do export inteiro (vai para o registro: a tela mostra o quanto já foi).
+    u32 totalFrames = 0;
 };
 
 struct AudioStreamConfig {
@@ -99,6 +112,24 @@ public:
 
     /// Fecha os fluxos (EOS), esvazia os encoders e finaliza o contêiner.
     [[nodiscard]] virtual Status finish() noexcept = 0;
+
+    /// Registro de pacotes: EOS do encoder de vídeo, registro sincronizado e
+    /// fechado; o encoder do aparelho é liberado aqui.
+    [[nodiscard]] virtual Status end_video() noexcept { return Status{Errc::NotSupported, "sink sem registro de pacotes"}; }
+    /// Registro de pacotes: abre o MP4 final com a faixa de vídeo do registro e
+    /// o encoder de áudio (`audio` nulo = sem som). Em seguida o motor manda o
+    /// áudio inteiro por `write_audio` e chama `finish`.
+    [[nodiscard]] virtual Status begin_assembly(const AudioStreamConfig* audio) noexcept {
+        (void)audio;
+        return Status{Errc::NotSupported, "sink sem registro de pacotes"};
+    }
+    /// Registro de pacotes: o PCM que o motor mandou DURANTE o render (mixado
+    /// em paralelo aos quadros, guardado num arquivo ao lado do registro) vira
+    /// o AAC da montagem. NotFound = não há PCM completo (export retomado): o
+    /// motor mixa o áudio de novo, do zero.
+    [[nodiscard]] virtual Status replay_spilled_audio() noexcept {
+        return Status{Errc::NotSupported, "sink sem registro de pacotes"};
+    }
 
     [[nodiscard]] virtual Status validate_output(const ExportOutputValidation&) noexcept {
         return Status{Errc::NotSupported, "plataforma sem validacao independente de exportacao"};

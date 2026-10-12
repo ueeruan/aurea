@@ -1153,7 +1153,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea Beta 0.1.6 BETA 2 (2179) • 12/10/2026\n\n• Ekspor: tidak ada lagi "macet di 0%" — video yang tidak bisa dibuka perangkat kini langsung gagal, dan Batal merespons.\n• Pra-ekspor: merender seluruh video dalam resolusi rendah agar bisa ditonton mulus dan dicek sebelum ekspor sungguhan.\n• Pratinjau: setelah tersendat, Play berikutnya menyiapkan lebih banyak frame.\n• Kamera 3D: salinan bayangan dengan motion blur saat kamera ditautkan ke null sudah diperbaiki.\n• Real Camera: tombol Jalan ▲/▼ (maju dan mundur, bahkan tanpa AR), kecepatan jalan dan Kedalaman (Z).\n• Partikel 3D: preset baru Jaringan (plexus) — titik yang dihubungkan garis.\n• Baru: Glow Scan, Low FPS, dan preset teks Text Explosion. Lens flare dengan 8 gaya baru (juga di Flare 3D). Tracery dengan deteksi kecerahan, pendaran, dan jaringan jarak.\n• Timeline: menarik tepi klip memanjangkannya sesuka hati (video menahan frame terakhir).\n• Lapisan: tombol duplikat terlihat. Kurva: salin dan tempel terlihat serta menu kecil.\n• iOS: celah hitam di layar efek sudah diperbaiki.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.7 BETA 3 (2181) • 12/10/2026\n\n• Ekspor hingga 42% lebih cepat pada proyek 2D (foto, judul, video dengan efek), dengan kualitas yang sama.\n• Ekspor tidak hilang lagi: keluar dari aplikasi akan menjedanya, lalu ekspor berlanjut sendiri saat kamu kembali. Jika aplikasi tertutup, layar Ekspor menampilkan ekspor yang terputus agar bisa dilanjutkan.\n• Proyek dari iPhone dengan bentuk atau teks 3D bisa diekspor lagi.\n• Timeline: keyframe pada layer yang tidak dipilih tampak redup dan terkunci — ketuk layer untuk mengeditnya.\n• Layar baru untuk privasi dan syarat penggunaan.\n• Mask dalam satu layar: tombol besar Gambar, Persegi panjang, dan Elips selalu terlihat; jalur, mode, tepi, dan ikuti objek tersusun ke bawah.\n• Objek 3D: tab Lingkungan kini hanya berisi cahaya, latar, dan lantai. Mengganti gambar, menyembunyikan, dan menganimasikan bagian kini menjadi efek dengan keyframe (Animasikan bagian 3D, Sembunyikan bagian 3D, Ganti tekstur 3D).\n• Efek baru: 3D Shatter (layer pecah menjadi kepingan yang meledak dalam 3D) dan 3D Stroke (garis 3D animasi pada mask atau bentuk siap pakai).\n• Real Camera: kontrol dipindah dari atas pratinjau ke area panel.\n• Pelacak Kamera 3D: urungkan tidak lagi menghapus analisis, penyelesaian ulang yang dibatalkan tidak lagi memblokir Buat kamera, dan video yang dimulai dengan skala 0% bisa mendapat kamera.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -4065,4 +4065,43 @@ untuk mengedit kurvanya.</string>
     <string name="fxl_lowfps_irregular">Ritme tidak teratur</string>
     <string name="fx_desc_time_low_fps">Gerakan patah-patah ala stop-motion: lebih sedikit frame per detik, dengan getaran dan ritme tidak teratur.</string>
     <string name="curve_copied">Kurva disalin</string>
+    <string name="fxo_distance_network_24_regions">Jaringan jarak (24 wilayah)</string>
+    <string name="fxl_detect_by">Deteksi dengan</string>
+    <string name="fxo_brightness_2">Kecerahan</string>
+    <string name="fxl_glow">Pendar</string>
+    <string name="fxl_glow_radius">Radius pendar</string>
+    <string name="fxl_network_distance">Jarak jaringan</string>
+    <string name="fxo_game_boy">Game Boy</string>
+    <string name="fxl_part">Bagian</string>
+    <string name="fxl_rotation_x">Rotasi X</string>
+    <string name="fxl_rotation_y">Rotasi Y</string>
+    <string name="fxl_rotation_z">Rotasi Z</string>
+    <string name="fxl_hide">Sembunyikan</string>
+    <string name="fxl_hide_the_others">Sembunyikan yang lain</string>
+    <string name="fxl_image">Gambar</string>
+    <string name="fxl_all_parts">Semua bagian</string>
+    <string name="fxl_explosion">Ledakan</string>
+    <string name="fxl_pieces">Kepingan</string>
+    <string name="fxo_squares">Persegi</string>
+    <string name="fxo_glass">Kaca</string>
+    <string name="fxl_number_of_pieces">Jumlah kepingan</string>
+    <string name="fxl_explosion_center">Pusat ledakan</string>
+    <string name="fxl_toward_camera">Ke arah kamera</string>
+    <string name="fxl_perspective">Perspektif</string>
+    <string name="fxl_face_lighting">Cahaya pada sisi</string>
+    <string name="fxo_circle">Lingkaran</string>
+    <string name="fxo_heart">Hati</string>
+    <string name="fxo_layer_masks">Mask layer</string>
+    <string name="fxl_end_color">Warna akhir</string>
+    <string name="fxl_taper_start">Runcing di awal</string>
+    <string name="fxl_taper_end">Runcing di akhir</string>
+    <string name="fxl_repeats">Pengulangan</string>
+    <string name="fxl_repeat_distance">Jarak antar pengulangan</string>
+    <string name="fxl_rotation_per_repeat">Putaran per pengulangan</string>
+    <string name="fxl_scale_per_repeat">Skala per pengulangan</string>
+    <string name="fxl_fade_repeats">Pudarkan pengulangan</string>
+    <string name="fxl_show">Tampilkan</string>
+    <string name="fxo_over_the_layer">Di atas layer</string>
+    <string name="fxo_stroke_only">Hanya garis</string>
+    <string name="fxo_behind_the_layer">Di belakang layer</string>
 </resources>

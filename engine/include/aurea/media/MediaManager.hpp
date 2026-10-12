@@ -121,6 +121,11 @@ public:
     /// Fecha e espera todas as fontes, inclusive as já retiradas, antes de
     /// substituir/destruir o projeto, a fábrica ou o contexto dos callbacks.
     void close_all();
+    /// Fecha tudo esperando no máximo `timeoutNs` pelos decoders (0 = só
+    /// confere). false = algum decoder ficou preso dentro da plataforma (driver
+    /// que não devolve a chamada): este MediaManager precisa continuar vivo até
+    /// ele voltar — chame de novo depois. Nunca espera para sempre.
+    [[nodiscard]] bool close_all_for(u64 timeoutNs);
 
     void suspend_all();
     void resume_all();

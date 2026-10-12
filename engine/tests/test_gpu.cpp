@@ -8404,6 +8404,9 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         if (fx.type_id() == effect_type_id(effect_keys::kText3DLayout)) continue;
         // Shape 3D Layout idem (só em forma 3D): coberto por Shape3DLayout.* em test_shape3d.cpp.
         if (fx.type_id() == effect_type_id(effect_keys::kShape3DLayout)) continue;
+        // Os efeitos de PARTE 3D só existem em camada 3D: cobertos em test_shape3d.cpp.
+        if (fx.type_id() == effect_type_id(effect_keys::kPart3DTransform) || fx.type_id() == effect_type_id(effect_keys::kPart3DHide)
+            || fx.type_id() == effect_type_id(effect_keys::kPart3DTexture)) continue;
         // Text Transform / Text Animator só existem em camada de texto (o motor recusa
         // pô-los numa foto); o efeito deles no quadro é coberto por TextTransform.* e
         // TextAnimatorEditing.* / Regression2135Gpu.
@@ -13320,6 +13323,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "MaskBlendGpu.inl"
 #include "PuppetGpu.inl"
 #include "DisintegrateBallsGpu.inl"
+#include "Object3DEffectsGpu.inl"
 #include "GlesFallbackGpu.inl"
 
 // -----------------------------------------------------------------------------

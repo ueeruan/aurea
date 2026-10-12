@@ -142,6 +142,17 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
     put("aurea.shape3d.layout", EffectHuman(keywords = "shape parts partes forma 3d rotation rotacao delay atraso spread espalhar explodir twist random aleatorio",
         principal = listOf(0, 1, 2, 12, 13, 9, 4)))
+    // Efeitos 3D (beta 12/10/2026): partes do objeto 3D, Shatter e Stroke.
+    put("aurea.3d.part_transform", EffectHuman(name = R.string.fx3d_name_part_transform,
+        keywords = "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca", principal = (0..7).toList()))
+    put("aurea.3d.part_hide", EffectHuman(name = R.string.fx3d_name_part_hide,
+        keywords = "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca", principal = (0..3).toList()))
+    put("aurea.3d.part_texture", EffectHuman(name = R.string.fx3d_name_part_texture,
+        keywords = "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria", principal = (0..3).toList()))
+    put("aurea.3d.shatter", EffectHuman(name = R.string.fx3d_name_shatter,
+        keywords = "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass", principal = listOf(0, 1, 2, 4, 5, 3)))
+    put("aurea.3d.stroke", EffectHuman(name = R.string.fx3d_name_stroke,
+        keywords = "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on", principal = listOf(0, 1, 3, 4, 5, 9)))
     put("aurea.stylize.omino_diffusion", EffectHuman(
         name = R.string.fx_name_omino_diffusion, keywords = "omino omine diffusion difusao glitch paleta faixas",
         principal = listOf(0, 1, 2, 5, 6), params = mapOf(

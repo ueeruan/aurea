@@ -1181,7 +1181,7 @@
     <string name="consent_title">الموافقة والمسؤولية</string>
     <string name="consent_accept">موافقة ومتابعة</string>
     <string name="consent_body">Aurea أداة احترافية لتحرير المحتوى الرقمي وإنشائه وإنتاجه. باستخدام التطبيق، يقر المستخدم بأنه يتحمل المسؤولية الكاملة عن المحتوى الذي ينشئه أو يحرره أو يستورده أو يصدره أو ينشره أو يشاركه عبر المنصة.\n\nلا يتحكم Aurea في استخدام الأداة لأنشطة غير قانونية أو مسيئة أو احتيالية أو ضارة أو تنتهك حقوق الآخرين، ولا يشجع هذا الاستخدام أو يدعمه أو يصرح به.\n\nيتحمل المستخدم مسؤولية التأكد من امتلاكه التصاريح والتراخيص والحقوق اللازمة للمواد المستخدمة، بما فيها الصور ومقاطع الفيديو والموسيقى والعلامات التجارية والنماذج والملفات وغيرها من المحتويات المحمية.\n\nلا تعني الحرية الإبداعية التي يوفرها Aurea موافقة التطبيق أو مشاركته أو مسؤوليته عما يقرر كل مستخدم إنتاجه أو فعله باستخدام الأداة.\n\nيوافق المستخدم على استخدام Aurea وفقاً للقانون المعمول به ويتحمل مسؤولية أفعاله والمحتوى المنتج أو الموزع عبر التطبيق.\n\nإلى أقصى حد يسمح به القانون المعمول به، لا يتحمل Aurea والمسؤولون عنه المسؤولية عن الأفعال التي يقوم بها المستخدم وحده، أو إساءة استخدام الأداة، أو العواقب الناجمة عن المحتوى الذي ينشئه المستخدم نفسه أو ينشره أو يشاركه.\n\nيوفر Aurea الأداة. ويتحمل المستخدم مسؤولية الطريقة التي يختار استخدامها بها.\n\nبالمتابعة، يقر المستخدم بأنه قرأ هذه الشروط وفهمها ووافق عليها.</string>
-    <string name="release_notes_body">Aurea Beta 0.1.6 BETA 2 (2179) • 12/10/2026\n\n• التصدير: انتهى "التوقف عند 0%" — الفيديو الذي لا يستطيع الجهاز فتحه يفشل فورًا، والإلغاء يستجيب.\n• التصدير المسبق: يُصيّر الفيديو كاملًا بدقة منخفضة لمشاهدته بسلاسة ومراجعته قبل التصدير الفعلي.\n• المعاينة: بعد التقطّع، يحضّر التشغيل التالي إطارات أكثر.\n• كاميرا 3D: إصلاح النسخة الشبحية مع ضبابية الحركة عندما تكون الكاميرا مرتبطة بعنصر فارغ.\n• Real Camera: أزرار المشي ▲/▼ (للأمام وللخلف حتى دون AR) وسرعة المشي والعمق (Z).\n• جسيمات 3D: إعداد جديد "شبكة" (plexus) — نقاط موصولة بخطوط.\n• جديد: Glow Scan وLow FPS وإعداد النص Text Explosion. وهج العدسة بـ 8 أنماط جديدة (وفي Flare 3D أيضًا). Tracery مع الكشف بالسطوع والتوهج والشبكة حسب المسافة.\n• الخط الزمني: سحب حافة المقطع يمده كما تشاء (يحتفظ الفيديو بآخر إطار).\n• الطبقات: زر تكرار ظاهر. المنحنيات: نسخ ولصق ظاهران وقائمة صغيرة.\n• iOS: إصلاح الفراغات السوداء في شاشة التأثيرات.</string>
+    <string name="release_notes_body">Aurea Beta 0.1.7 BETA 3 (2181) • 2026/10/12\n\n• تصدير أسرع حتى 42% في مشاريع ثنائية الأبعاد (صور، عناوين، فيديو مع تأثيرات) بنفس الجودة.\n• لم يعد التصدير يضيع: الخروج من التطبيق يوقفه مؤقتًا، ويستمر وحده عند عودتك. إذا أُغلق التطبيق، تعرض شاشة التصدير التصدير المتوقف لمتابعته.\n• المشاريع القادمة من iPhone بأشكال أو نصوص ثلاثية الأبعاد تُصدَّر من جديد.\n• الخط الزمني: الإطارات المفتاحية للطبقات غير المحددة باهتة ومقفلة — اضغط على الطبقة لتعديلها.\n• شاشة جديدة للخصوصية وشروط الاستخدام.\n• الأقنعة في شاشة واحدة: أزرار كبيرة للرسم والمستطيل والقطع الناقص ظاهرة دائمًا؛ المسار والوضع والحافة وتتبّع الجسم واحدًا تحت الآخر.\n• الكائنات ثلاثية الأبعاد: تبويب البيئة صار يحتوي الإضاءة والخلفية والأرضية فقط. تبديل الصورة وإخفاء الأجزاء وتحريكها أصبحت تأثيرات بإطارات مفتاحية (تحريك جزء ثلاثي الأبعاد، إخفاء أجزاء ثلاثية الأبعاد، تبديل خامة ثلاثية الأبعاد).\n• تأثيرات جديدة: 3D Shatter (تنكسر الطبقة إلى قطع تنفجر في ثلاثة أبعاد) و3D Stroke (خط ثلاثي الأبعاد متحرك على الأقنعة أو الأشكال الجاهزة).\n• Real Camera: انتقلت أدوات التحكم من فوق المعاينة إلى منطقة اللوحات.\n• متتبّع الكاميرا ثلاثي الأبعاد: التراجع لم يعد يحذف التحليل، وإلغاء إعادة الحل لم يعد يمنع إنشاء الكاميرا، والفيديو الذي يبدأ بحجم 0% يمكن أن يحصل على كاميرا.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">تعبئة</string>
@@ -4113,4 +4113,43 @@
     <string name="fxl_lowfps_irregular">إيقاع غير منتظم</string>
     <string name="fx_desc_time_low_fps">حركة متقطعة بأسلوب ستوب موشن: إطارات أقل في الثانية مع اهتزاز وإيقاع غير منتظم.</string>
     <string name="curve_copied">تم نسخ المنحنى</string>
+    <string name="fxo_distance_network_24_regions">شبكة المسافة (24 منطقة)</string>
+    <string name="fxl_detect_by">الكشف حسب</string>
+    <string name="fxo_brightness_2">السطوع</string>
+    <string name="fxl_glow">توهج</string>
+    <string name="fxl_glow_radius">نصف قطر التوهج</string>
+    <string name="fxl_network_distance">مسافة الشبكة</string>
+    <string name="fxo_game_boy">Game Boy</string>
+    <string name="fxl_part">الجزء</string>
+    <string name="fxl_rotation_x">الدوران X</string>
+    <string name="fxl_rotation_y">الدوران Y</string>
+    <string name="fxl_rotation_z">الدوران Z</string>
+    <string name="fxl_hide">إخفاء</string>
+    <string name="fxl_hide_the_others">إخفاء البقية</string>
+    <string name="fxl_image">صورة</string>
+    <string name="fxl_all_parts">كل الأجزاء</string>
+    <string name="fxl_explosion">الانفجار</string>
+    <string name="fxl_pieces">القطع</string>
+    <string name="fxo_squares">مربعات</string>
+    <string name="fxo_glass">زجاج</string>
+    <string name="fxl_number_of_pieces">عدد القطع</string>
+    <string name="fxl_explosion_center">مركز الانفجار</string>
+    <string name="fxl_toward_camera">نحو الكاميرا</string>
+    <string name="fxl_perspective">المنظور</string>
+    <string name="fxl_face_lighting">إضاءة الأوجه</string>
+    <string name="fxo_circle">دائرة</string>
+    <string name="fxo_heart">قلب</string>
+    <string name="fxo_layer_masks">أقنعة الطبقة</string>
+    <string name="fxl_end_color">لون النهاية</string>
+    <string name="fxl_taper_start">ترقيق البداية</string>
+    <string name="fxl_taper_end">ترقيق النهاية</string>
+    <string name="fxl_repeats">التكرارات</string>
+    <string name="fxl_repeat_distance">المسافة بين التكرارات</string>
+    <string name="fxl_rotation_per_repeat">دوران لكل تكرار</string>
+    <string name="fxl_scale_per_repeat">مقياس لكل تكرار</string>
+    <string name="fxl_fade_repeats">تلاشي التكرارات</string>
+    <string name="fxl_show">إظهار</string>
+    <string name="fxo_over_the_layer">فوق الطبقة</string>
+    <string name="fxo_stroke_only">الخط فقط</string>
+    <string name="fxo_behind_the_layer">خلف الطبقة</string>
 </resources>

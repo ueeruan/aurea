@@ -395,7 +395,8 @@ private fun NarrowEditor(
             // volta à timeline inteira. O ícone do tipo abre as trilhas da camada
             // (e a timeline fica inteira enquanto estão abertas); arrastar só rola.
             KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp), compactDock = content == SheetContent.Dock) }
-            if (content != SheetContent.None) {
+            // Real Camera ligada: os controles dela ocupam a área de painéis.
+            if (content != SheetContent.None || realCameraShowing(store)) {
                 ContextArea(store, ui, content, Modifier.fillMaxWidth().height(m.sheet.dp))
             }
         }
@@ -535,6 +536,11 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
             .background(AureaColors.EditorPanelHigh)
             .drawTopHairline(),
     ) {
+        // Real Camera ligada: os controles saem da prévia e ficam aqui.
+        if (realCameraShowing(store)) {
+            RealCameraPanel(store, Modifier.fillMaxSize())
+            return@Column
+        }
         if ((content == SheetContent.Panel || content == SheetContent.Curve) && panel != null) {
             PanelContent(
                 store = store,

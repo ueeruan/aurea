@@ -29,7 +29,7 @@ struct NativeExportVerification {
 
 inline NativeExportVerification verify_native_export(const std::string& path,
     std::uint32_t expectedFrames, std::uint32_t width, std::uint32_t height,
-    double fps, bool expectAudio) {
+    double fps, bool expectAudio, std::vector<std::vector<std::uint8_t>>* grayFrames = nullptr) {
     NativeExportVerification result;
     AVFormatContext* format = nullptr;
     AVCodecContext* video = nullptr; AVCodecContext* audio = nullptr;
@@ -91,6 +91,7 @@ inline NativeExportVerification verify_native_export(const std::string& path,
                         destination, strides) != frame->height) {
                         error("independent video pixel conversion failed"); av_frame_unref(frame); return false;
                     }
+                    if (grayFrames) grayFrames->push_back(gray);
                     std::uint64_t hash = 14695981039346656037ull;
                     std::uint8_t low = 255, high = 0;
                     for (const auto pixel : gray) {

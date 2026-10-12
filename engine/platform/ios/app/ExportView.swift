@@ -450,6 +450,11 @@ struct ExportView: View {
     }
     private var footer: some View {
         Group {
+            footerButtons
+        }.onAppear { model.refreshPendingExport() }
+    }
+    private var footerButtons: some View {
+        Group {
             if model.exportPublishing {
                 wideButton("editor_salvando", filled: false) {}.disabled(true)
             } else if model.exporting {
@@ -470,6 +475,18 @@ struct ExportView: View {
             } else {
                 // A taxa vem do motor pela qualidade; só o Mbps manual vai como número.
                 VStack(spacing: 8) {
+                    // Export retomável: o app foi fechado no meio de um export deste projeto.
+                    if let pending = model.pendingExport {
+                        Text(String(format: AureaText.t("app_export_resume_title"), pending.percent))
+                            .font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                        HStack(spacing: 10) {
+                            wideButton("app_export_resume_discard", filled: false) { model.discardPendingExport() }
+                            wideButton("app_export_resume_continue", filled: true) {
+                                attempted = true; cancelled = false
+                                model.resumePendingExport()
+                            }.accessibilityIdentifier("export.resume")
+                        }
+                    }
                     if model.exportOptions.kind == .video {
                         wideButton("preexport_button", filled: false) {
                             attempted = true; cancelled = false
@@ -553,7 +570,9 @@ struct ExportView: View {
         case 5: notices.append(AureaText.t("export_v2_validating"))
         default: break
         }
+        if model.exportPaused { notices.append(AureaText.t("app_export_paused")) }
         if flags & AureaExportFlag.safeMode.rawValue != 0 { notices.append(AureaText.t("app_export_safe_mode")) }
+        if flags & AureaExportFlag.resumed.rawValue != 0 { notices.append(AureaText.t("app_export_resumed")) }
         if model.exportOptions.aiUpscale > 0, let message = model.exportProgress["message"] as? String, message.hasPrefix("IA:") {
             notices.append(AureaEngineText.aiProgress(message))
         }

@@ -1,16 +1,17 @@
-// Element3DPanel.kt: o painel 3D em ABAS — Material, Forma, Luz e cena e
-// Animação (texto 3D e forma 3D); modelo importado: Material e Luz e cena;
-// câmera: só a cena. Cada linha de valor é a mesma T3DRow (rótulo, régua,
-// valor, ↺ ao padrão), interruptores são AureaToggle e o raro fica em
-// "Avançado", fechado. Os comandos do motor são os mesmos de antes.
+// Element3DPanel.kt: o painel 3D em ABAS. Forma 3D e modelo importado:
+// Ambiente (luz, fundo e chão — "só o básico", beta 12/10/2026), Material e
+// Partes (escolher a parte e pôr um EFEITO nela, como o Text 3D Layout faz
+// no texto). Texto 3D: Material, Forma, Ambiente e Animação. Câmera: só o
+// Ambiente. Cada linha de valor é a mesma T3DRow; os comandos do motor são
+// os mesmos de antes.
 import SwiftUI
 import UniformTypeIdentifiers
 
 /// As abas do painel 3D (a ordem é a da tela; o rawValue é o mesmo do Android).
 enum Panel3DTab: Int, CaseIterable {
-    case material, shape, light, anim
-    var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "ui3d_tab_light", "ui3d_tab_anim"][rawValue] }
-    var id: String { ["material", "shape", "light", "anim"][rawValue] }
+    case material, shape, light, anim, parts
+    var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "sh_dock_environment", "ui3d_tab_anim", "shape3d_parts"][rawValue] }
+    var id: String { ["material", "shape", "light", "anim", "parts"][rawValue] }
 }
 
 struct Panel3DView: View {
@@ -33,9 +34,10 @@ struct Panel3DView: View {
     @State private var closeTyping: DispatchWorkItem?
     @State private var typingActive = false
     @State private var gestureOpen = false
-    @State private var tab: Panel3DTab = .material
+    @State private var tab: Panel3DTab?
     @State private var materialAdvanced = false
-    @State private var sceneAdvanced = false
+    /// Parte escolhida do MODELO importado (forma 3D usa a do palco).
+    @State private var modelPart = 0
     @FocusState private var editingText: Bool
 
     private var layerId: Int64 { model.primarySelection ?? 0 }
@@ -52,9 +54,9 @@ struct Panel3DView: View {
     private var isText: Bool { !isCamera && !text3D.isEmpty }
     private var tabs: [Panel3DTab] {
         if isCamera { return [.light] }
-        return isText || isShape ? [.material, .shape, .light, .anim] : [.material, .light]
+        return isText ? [.material, .shape, .light, .anim] : [.light, .material, .parts]
     }
-    private var currentTab: Panel3DTab { tabs.contains(tab) ? tab : tabs[0] }
+    private var currentTab: Panel3DTab { tab.flatMap { tabs.contains($0) ? $0 : nil } ?? tabs[0] }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -72,12 +74,12 @@ struct Panel3DView: View {
                         interiorToggle
                     case .shape:
                         if isText { textShapeTab }
-                        else if isShape { Shape3DPanelSection(layerId: layerId, page: .shape); shapeLayoutButton }
                     case .light:
                         lightSceneTab
                     case .anim:
                         if isText { NativePanelChip(AureaText.t("la_animators")) { finishEditing(); model.transformTab = 6; model.openPanel(.transform) } }
-                        else if isShape { Text3DAnimSection(layerId: layerId, parts: true) }
+                    case .parts:
+                        partsTab
                     }
                 }
                 .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 24)
@@ -264,33 +266,21 @@ struct Panel3DView: View {
         model.refreshModel(force: true)
     }
 
-    /// LUZ E CENA: sombras do objeto, estúdio e ambiente na frente; qualidade,
-    /// tom, exposição, brilho e o ambiente do objeto em "Avançado".
+    /// AMBIENTE (retorno de beta 12/10/2026: "só o básico"): LUZ (estúdio,
+    /// imagem de ambiente, intensidade, giro e sombras do objeto), FUNDO e
+    /// CHÃO. O avançado (qualidade, tom, exposição, brilho, ambiente próprio
+    /// do objeto, trecho do fundo) saiu daqui; o projeto guarda os valores.
+    /// Par do Android (Element3DPanel.kt `LightSceneTab`).
     private var lightSceneTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !isCamera && shadows.count == 2 {
-                section("ui3d_shadows")
-                toggleRow("pn_t3d_cast_shadow", on: shadows[0] > 0.5) { value in
-                    finishEditing()
-                    _ = model.engine.setModelShadows(layerId, cast: value, receive: shadows[1] > 0.5)
-                    refresh()
-                }
-                toggleRow("pn_t3d_receive_shadow", on: shadows[1] > 0.5) { value in
-                    finishEditing()
-                    _ = model.engine.setModelShadows(layerId, cast: shadows[0] > 0.5, receive: value)
-                    refresh()
-                }
-            }
+            section("cat_light")
             if sceneSettings.count >= 8 {
-                section("scene_studio")
                 horizontal {
                     ForEach(Array(["scene_none", "scene_dark", "scene_product", "scene_sky", "scene_chrome"].enumerated()), id: \.offset) { i, key in
                         T3DChip(label: AureaText.t(key), on: Int(sceneSettings[0]) == i) { setScene(0, Float(i)) }
                     }
                 }
-                toggleRow("scene_floor", on: sceneSettings[1] > 0) { setScene(1, $0 ? 1 : 0) }
             }
-            section("environment_texture")
             horizontal {
                 chip("panel_estudio_neutro", on: environment[0] < 0.5) {
                     finishEditing(); model.engine.clearHdri(); refresh()
@@ -304,62 +294,78 @@ struct Panel3DView: View {
             sceneRow("pn_env_rotate_light", value: environment[2], range: -360...360, unit: "°", reset: 0, gesture: "ambiente") { value in
                 _ = model.engine.setEnvironmentIntensity(environment[1], rotation: value); refresh()
             }
+            if !isCamera && shadows.count == 2 {
+                toggleRow("pn_t3d_cast_shadow", on: shadows[0] > 0.5) { value in
+                    finishEditing()
+                    _ = model.engine.setModelShadows(layerId, cast: value, receive: shadows[1] > 0.5)
+                    refresh()
+                }
+                toggleRow("pn_t3d_receive_shadow", on: shadows[1] > 0.5) { value in
+                    finishEditing()
+                    _ = model.engine.setModelShadows(layerId, cast: shadows[0] > 0.5, receive: value)
+                    refresh()
+                }
+            }
+            section("fx3d_env_background")
             toggleRow("environment_background", on: environment.count > 3 && environment[3] > 0.5) {
                 _ = model.engine.setEnvironmentBackground($0); refresh()
             }
-            if environment.count >= 6 && environment[3] > 0.5 {
-                let duration = Int64(Swift.max(1, model.status.duration))
-                let start = Swift.min(duration - 1, Swift.max(0, Int64(environment[4])))
-                let end = Swift.min(duration, Swift.max(start + 1, environment[5] < 0 ? duration : Int64(environment[5])))
-                sceneRow("environment_start", value: Float(start), range: 0...Float(end - 1), unit: "f", reset: 0, gesture: "ambiente") {
-                    _ = model.engine.setEnvironmentBackgroundRangeStart(Int64($0), end: end); refresh()
-                }
-                sceneRow("environment_end", value: Float(end), range: Float(start + 1)...Float(duration), unit: "f", reset: Float(duration), gesture: "ambiente") {
-                    _ = model.engine.setEnvironmentBackgroundRangeStart(start, end: Int64($0)); refresh()
-                }
+            if sceneSettings.count >= 8 {
+                section("fx3d_env_floor")
+                toggleRow("scene_floor", on: sceneSettings[1] > 0) { setScene(1, $0 ? 1 : 0) }
+            }
+            gap(8)
+        }
+    }
+
+    /// PARTES do objeto 3D (Element3DPanel.kt `PartsTab`): escolher a parte e
+    /// pôr um efeito nela. Os ajustes e keyframes ficam no painel de Efeitos.
+    @ViewBuilder private var partsTab: some View {
+        let names = isShape ? [] : model.engine.modelPartNames(layerId)
+        VStack(alignment: .leading, spacing: 0) {
+            if isShape {
+                Shape3DPanelSection(layerId: layerId, page: .shape)
+            } else if !names.isEmpty {
+                section("shape3d_parts")
                 horizontal {
-                    chip("environment_full_duration", on: start == 0 && environment[5] < 0) {
-                        finishEditing(); _ = model.engine.setEnvironmentBackgroundRangeStart(0, end: -1); refresh()
-                    }
-                    if let layer = model.selectedLayer {
-                        chip("environment_layer_duration", on: false) {
-                            finishEditing()
-                            _ = model.engine.setEnvironmentBackgroundRangeStart(Swift.max(0, Int64(layer.startFrame)),
-                                end: Swift.min(duration, Int64(layer.endFrame))); refresh()
-                        }
+                    ForEach(Array(names.enumerated()), id: \.offset) { i, name in
+                        T3DChip(label: name.isEmpty ? AureaText.t("fx3d_part_n", i + 1) : name, on: modelPart == i) { modelPart = i }
+                            .accessibilityIdentifier("panel3d.part.\(i)")
                     }
                 }
             }
-            note("environment_hint")
-            gap(4)
-            advancedHeader(open: sceneAdvanced) { sceneAdvanced.toggle() }
-            if sceneAdvanced {
-                if sceneSettings.count >= 8 {
-                    section("scene_quality")
-                    horizontal {
-                        ForEach(Array(["scene_auto", "scene_low", "scene_medium", "scene_high", "scene_ultra"].enumerated()), id: \.offset) { i, key in
-                            T3DChip(label: AureaText.t(key), on: Int(sceneSettings[2]) == i) { setScene(2, Float(i)) }
-                        }
-                    }
-                    section("scene_tonemap")
-                    horizontal {
-                        ForEach(Array(["PBR Neutral", "AgX", "AgX Punchy", "AgX Golden", "Uchimura", "ACES SDR"].enumerated()), id: \.offset) { i, label in
-                            T3DChip(label: label, on: Int(sceneSettings[3]) == i) { setScene(3, Float(i)) }
-                        }
-                    }
-                    sceneRow("scene_exposure", value: Swift.min(4, Swift.max(0.01, sceneSettings[4])) * 100, range: 1...400, unit: "%", reset: 100, gesture: nil) {
-                        setScene(4, $0 / 100)
-                    }
-                    toggleRow("scene_bloom", on: sceneSettings[5] > 0) { setScene(5, $0 ? 1 : 0) }
-                    if sceneSettings[5] > 0 {
-                        sceneRow("ui3d_bloom_strength", value: Swift.min(4, Swift.max(0, sceneSettings[6])) * 100, range: 0...400, unit: "%", reset: 100, gesture: nil) {
-                            setScene(6, $0 / 100)
-                        }
-                    }
-                }
-                if !isCamera { objectEnvironmentSection }
+            gap(6)
+            note("fx3d_parts_hint")
+            gap(8)
+            partEffectCard("aurea.3d.part_transform", name: "fx3d_name_part_transform", detail: "fx3d_desc_part_transform")
+            partEffectCard("aurea.3d.part_hide", name: "fx3d_name_part_hide", detail: "fx3d_desc_part_hide")
+            partEffectCard("aurea.3d.part_texture", name: "fx3d_name_part_texture", detail: "fx3d_desc_part_texture")
+            if isShape {
+                shapeLayoutButton
+                // Animações prontas por parte (entrada/saída/loop).
+                Text3DAnimSection(layerId: layerId, parts: true)
             }
         }
+    }
+
+    private func partEffectCard(_ key: String, name: String, detail: String) -> some View {
+        Button {
+            finishEditing()
+            let part = isShape ? max(0, Shape3DState.shared.part(model)) : modelPart
+            if model.addPartEffect(key, part: part) { model.openPanel(.effects) }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(AureaText.t(name)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)
+                Text(AureaText.t(detail)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(AureaPressStyle())
+        .padding(.bottom, 6)
+        .accessibilityIdentifier("panel3d.fx.\(key.replacingOccurrences(of: "aurea.3d.", with: ""))")
     }
 
     /// Linha de valor da cena/ambiente: um passo de desfazer por arrasto (quando há `gesture`).
@@ -369,35 +375,6 @@ struct Panel3DView: View {
                onStart: { if let gesture { beginContinuous(gesture) } }, onValue: onValue,
                onEnd: { if gesture != nil { finishEditing() } },
                onCommit: { v in if let gesture { beginContinuous(gesture) }; onValue(v); if gesture != nil { finishEditing() } })
-    }
-
-    @ViewBuilder private var objectEnvironmentSection: some View {
-        if objectEnvironment.count >= 5 {
-            let own = objectNumber(0) >= 0.5
-            section("panel_ambiente_do_objeto")
-            horizontal {
-                chip("panel_do_projeto", on: !own) { finishEditing(); setObjectEnvironment(0) }
-                chip("panel_proprio", on: own) {
-                    finishEditing(); setObjectEnvironment(1)
-                    if objectEnvironment[1].int64Value <= 0 { pickHdri(object: true) }
-                }
-                if own {
-                    chip(objectEnvironment[1].int64Value > 0 ? "panel_trocar_imagem" : "panel_usar_imagem_ambiente_hdr",
-                         on: objectEnvironment[1].int64Value > 0) { pickHdri(object: true) }
-                }
-            }
-            if own {
-                sceneRow("panel_intensidade", value: objectNumber(2) * 100, range: 0...2000, unit: "%", reset: 100, gesture: "ambiente") {
-                    setObjectEnvironment(1, intensity: $0 / 100)
-                }
-                sceneRow("pn_env_rotate_light", value: objectNumber(3), range: -360...360, unit: "°", reset: 0, gesture: "ambiente") {
-                    setObjectEnvironment(1, rotation: $0)
-                }
-                sceneRow("panel_exposicao", value: objectNumber(4) * 100, range: 5...2000, unit: "%", reset: 100, gesture: "ambiente") {
-                    setObjectEnvironment(1, exposure: $0 / 100)
-                }
-            }
-        }
     }
 
     // --- Peças comuns ---------------------------------------------------------

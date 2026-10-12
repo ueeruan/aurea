@@ -470,7 +470,13 @@ struct EffectsView: View {
         case fxParamCurve:
             if let layer = model.primarySelection { ColorCurveEditor(layer: layer, effect: effect, param: param.index) }
         case fxParamTextureRef:
-            if let layer = model.primarySelection { CubeLutImportRow(layer: layer, effect: effect) }
+            if let layer = model.primarySelection {
+                if model.effects.first(where: { $0.effectId == effect })?.typeId == fxEffectTypeId("aurea.3d.part_texture") {
+                    PartTextureImageRow(layer: layer, effect: effect)
+                } else {
+                    CubeLutImportRow(layer: layer, effect: effect)
+                }
+            }
         case fxParamLayerRef:
             // Outra camada ("Camada de áudio"): o menu lista as camadas da
             // composição; o motor recebe o ÍNDICE da camada (−1 = nenhuma).
@@ -950,6 +956,35 @@ struct EffectsView: View {
         if let here { model.engine.editTrackKey(layer, property: 12, effect: UInt32.max, param: 0, time: here.time, action: 1, value: here.value, targetTime: here.time, interpolation: here.interpolation, handles: []) }
         else { model.engine.keyParameter(layer, property: 12, effect: UInt32.max, param: 0, time: model.localPlayhead, value: (model.detail["opacity"] as? NSNumber)?.floatValue ?? 1) }
         model.commitPendingCommands(); model.refreshModel(force: true)
+    }
+}
+
+/// "Trocar textura 3D": a imagem da galeria que cobre a parte (par do Android,
+/// EffectsPanel.kt `PartTextureImageRow`).
+@MainActor
+private struct PartTextureImageRow: View {
+    let layer: Int64
+    let effect: UInt32
+    @EnvironmentObject private var model: AureaModel
+    @State private var picking = false
+    @State private var filename = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(AureaText.t("fxl_image") + " · " + (filename.isEmpty ? AureaText.t("fx3d_image_none") : filename))
+                .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
+            Button(AureaText.t(filename.isEmpty ? "fx3d_image_pick" : "shape3d_image_change")) { picking = true }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityIdentifier("effect.part_texture.pick")
+        }
+        .onAppear { filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .onChange(of: model.effects) { _ in filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .onChange(of: model.status.modelRevision) { _ in filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .sheet(isPresented: $picking) {
+            ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
+                picking = false
+                if let (url, _) = items.first { model.setEffectImage(layer, effect: effect, url: url) }
+            }
+        }
     }
 }
 

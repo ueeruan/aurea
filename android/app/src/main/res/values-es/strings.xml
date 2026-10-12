@@ -4114,4 +4114,25 @@ para editar la curva.</string>
     <string name="fxo_over_the_layer">Sobre la capa</string>
     <string name="fxo_stroke_only">Solo el trazo</string>
     <string name="fxo_behind_the_layer">Detrás de la capa</string>
+    <string name="speed_tab_normal">Normal</string>
+    <string name="speed_tab_curve">Curva</string>
+    <string name="speed_tab_remap">Remapear</string>
+    <string name="speed_graph_desc">Gráfico de velocidad</string>
+    <string name="speed_at_playhead">En el cabezal: %1$s</string>
+    <string name="speed_curve_hint">Arrastra los puntos: hacia arriba acelera, hacia abajo ralentiza. El clip mantiene su duración y su contenido.</string>
+    <string name="speed_remap_hint">El gráfico muestra la velocidad que la curva de tiempo da al video.</string>
+    <string name="speed_add_point">Añadir punto</string>
+    <string name="speed_delete_point">Borrar punto</string>
+    <string name="speed_smooth">Suavizar</string>
+    <string name="speed_presets">Preajustes</string>
+    <string name="speed_preset_flat">Plana</string>
+    <string name="speed_preset_montage">Montaje</string>
+    <string name="speed_preset_hero">Héroe</string>
+    <string name="speed_preset_bullet">Bala</string>
+    <string name="speed_preset_flash_in">Entrada rápida</string>
+    <string name="speed_preset_flash_out">Salida rápida</string>
+    <string name="speed_preset_jump">Salto</string>
+    <string name="speed_ramp_freeze_all">Congelar todo</string>
+    <string name="fx_desc_time_flow_retime">Cámara lenta fluida: los fotogramas que faltan se crean a partir del movimiento de los píxeles (optical flow), con velocidad animable.</string>
+    <string name="fx_desc_time_flow_motion_blur">Desenfoque de movimiento natural calculado a partir del propio metraje: cada píxel se desenfoca en la dirección en que se mueve.</string>
 </resources>

@@ -67,6 +67,9 @@ void register_displace_transform(EffectRegistry& r);
 /// Animar parte 3D, Esconder partes 3D, Trocar textura 3D, 3D Shatter e
 /// 3D Stroke (Object3DEffects.cpp). No fim.
 void register_object3d_effects(EffectRegistry& r);
+/// Flow Retime (câmera lenta por optical flow) e Flow Motion Blur
+/// (FlowTimeEffects.cpp). No fim.
+void register_flow_time_effects(EffectRegistry& r);
 /// Shape 3D Layout (PatternEffects.cpp): o Text 3D Layout das formas 3D.
 void register_shape3d_layout_effect(EffectRegistry& r);
 /// Detectar movimento (MotionDetectEffect.cpp). Sempre no fim.

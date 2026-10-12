@@ -4194,4 +4194,25 @@
     <string name="fxo_over_the_layer">Sobre a camada</string>
     <string name="fxo_stroke_only">Só o traço</string>
     <string name="fxo_behind_the_layer">Atrás da camada</string>
+    <string name="speed_tab_normal">Normal</string>
+    <string name="speed_tab_curve">Curva</string>
+    <string name="speed_tab_remap">Remapear</string>
+    <string name="speed_graph_desc">Gráfico de velocidade</string>
+    <string name="speed_at_playhead">No cabeçote: %1$s</string>
+    <string name="speed_curve_hint">Arraste os pontos: para cima acelera, para baixo deixa lento. A barra não muda de tamanho e a filmagem é a mesma.</string>
+    <string name="speed_remap_hint">O gráfico mostra a velocidade que a curva de tempo dá ao vídeo.</string>
+    <string name="speed_add_point">Adicionar ponto</string>
+    <string name="speed_delete_point">Apagar ponto</string>
+    <string name="speed_smooth">Suavizar</string>
+    <string name="speed_presets">Prontos</string>
+    <string name="speed_preset_flat">Plana</string>
+    <string name="speed_preset_montage">Montagem</string>
+    <string name="speed_preset_hero">Herói</string>
+    <string name="speed_preset_bullet">Bala</string>
+    <string name="speed_preset_flash_in">Entrada rápida</string>
+    <string name="speed_preset_flash_out">Saída rápida</string>
+    <string name="speed_preset_jump">Pulo</string>
+    <string name="speed_ramp_freeze_all">Congelar tudo</string>
+    <string name="fx_desc_time_flow_retime">Câmera lenta lisa: os quadros que faltam são criados pelo movimento dos pixels (optical flow), com velocidade animável.</string>
+    <string name="fx_desc_time_flow_motion_blur">Desfoque de movimento natural calculado da própria filmagem: cada pixel borra na direção em que se move.</string>
 </resources>

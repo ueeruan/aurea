@@ -167,6 +167,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/ParticularEffect.cpp
     src/effects/builtin/DisintegrateEffect.cpp
     src/effects/builtin/Object3DEffects.cpp
+    src/effects/builtin/FlowTimeEffects.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp

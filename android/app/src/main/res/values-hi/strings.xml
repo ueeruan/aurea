@@ -4110,4 +4110,25 @@
     <string name="fxo_over_the_layer">लेयर के ऊपर</string>
     <string name="fxo_stroke_only">सिर्फ़ रेखा</string>
     <string name="fxo_behind_the_layer">लेयर के पीछे</string>
+    <string name="speed_tab_normal">सामान्य</string>
+    <string name="speed_tab_curve">कर्व</string>
+    <string name="speed_tab_remap">रीमैप</string>
+    <string name="speed_graph_desc">स्पीड ग्राफ़</string>
+    <string name="speed_at_playhead">प्लेहेड पर: %1$s</string>
+    <string name="speed_curve_hint">पॉइंट खींचें: ऊपर तेज़, नीचे धीमा। क्लिप की लंबाई और फ़ुटेज वही रहते हैं।</string>
+    <string name="speed_remap_hint">ग्राफ़ दिखाता है कि टाइम कर्व वीडियो को कौन-सी स्पीड देता है।</string>
+    <string name="speed_add_point">पॉइंट जोड़ें</string>
+    <string name="speed_delete_point">पॉइंट हटाएँ</string>
+    <string name="speed_smooth">स्मूद करें</string>
+    <string name="speed_presets">प्रीसेट</string>
+    <string name="speed_preset_flat">सपाट</string>
+    <string name="speed_preset_montage">मोंटाज</string>
+    <string name="speed_preset_hero">हीरो</string>
+    <string name="speed_preset_bullet">बुलेट</string>
+    <string name="speed_preset_flash_in">फ़्लैश इन</string>
+    <string name="speed_preset_flash_out">फ़्लैश आउट</string>
+    <string name="speed_preset_jump">जंप कट</string>
+    <string name="speed_ramp_freeze_all">सब फ़्रीज़ करें</string>
+    <string name="fx_desc_time_flow_retime">स्मूद स्लो मोशन: छूटे फ़्रेम पिक्सेल की हलचल (optical flow) से बनते हैं, स्पीड एनिमेट हो सकती है।</string>
+    <string name="fx_desc_time_flow_motion_blur">फ़ुटेज से ही गणना किया गया प्राकृतिक मोशन ब्लर: हर पिक्सेल अपनी चाल की दिशा में धुंधला होता है।</string>
 </resources>

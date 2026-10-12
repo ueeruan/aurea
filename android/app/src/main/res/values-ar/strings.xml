@@ -4152,4 +4152,25 @@
     <string name="fxo_over_the_layer">فوق الطبقة</string>
     <string name="fxo_stroke_only">الخط فقط</string>
     <string name="fxo_behind_the_layer">خلف الطبقة</string>
+    <string name="speed_tab_normal">عادية</string>
+    <string name="speed_tab_curve">منحنى</string>
+    <string name="speed_tab_remap">إعادة التوقيت</string>
+    <string name="speed_graph_desc">مخطط السرعة</string>
+    <string name="speed_at_playhead">عند مؤشر التشغيل: %1$s</string>
+    <string name="speed_curve_hint">اسحب النقاط: للأعلى أسرع، وللأسفل أبطأ. يبقى طول المقطع ومحتواه كما هما.</string>
+    <string name="speed_remap_hint">يعرض المخطط السرعة التي يمنحها منحنى الوقت للفيديو.</string>
+    <string name="speed_add_point">إضافة نقطة</string>
+    <string name="speed_delete_point">حذف النقطة</string>
+    <string name="speed_smooth">تنعيم</string>
+    <string name="speed_presets">إعدادات جاهزة</string>
+    <string name="speed_preset_flat">مستوية</string>
+    <string name="speed_preset_montage">مونتاج</string>
+    <string name="speed_preset_hero">بطل</string>
+    <string name="speed_preset_bullet">رصاصة</string>
+    <string name="speed_preset_flash_in">دخول سريع</string>
+    <string name="speed_preset_flash_out">خروج سريع</string>
+    <string name="speed_preset_jump">قفزة</string>
+    <string name="speed_ramp_freeze_all">تجميد الكل</string>
+    <string name="fx_desc_time_flow_retime">حركة بطيئة سلسة: تُنشأ الإطارات الناقصة من حركة البكسلات (optical flow)، مع سرعة قابلة للتحريك.</string>
+    <string name="fx_desc_time_flow_motion_blur">ضبابية حركة طبيعية محسوبة من اللقطات نفسها: يتموّه كل بكسل في اتجاه حركته.</string>
 </resources>

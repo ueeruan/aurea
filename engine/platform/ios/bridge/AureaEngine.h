@@ -852,6 +852,12 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)editTimeRemap:(long long)layerId index:(int32_t)index time:(int64_t)time value:(float)value interpolation:(int32_t)interpolation;
 - (BOOL)setTimeRemapValue:(long long)layerId time:(int64_t)time value:(float)value;
 - (void)removeTimeRemap:(long long)layerId index:(uint32_t)index;
+/// Gráfico de velocidade (`query_speed_curve`): cabeçalho de 8, amostras e chaves (tempo, ×, interpolação).
+- (NSArray<NSNumber*>*)speedCurve:(long long)layerId samples:(uint32_t)samples;
+/// Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar, 8 tirar.
+- (BOOL)applySpeedCurve:(uint32_t)preset forLayer:(long long)layerId;
+- (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation;
+- (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index;
 - (long long)addVector:(uint32_t)preset;
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;
 - (BOOL)editVectorGroup:(long long)layerId group:(uint32_t)group field:(uint32_t)field values:(NSArray<NSNumber*>*)values;

@@ -4161,4 +4161,25 @@ to edit the curve.</string>
     <string name="fxo_over_the_layer">Over the layer</string>
     <string name="fxo_stroke_only">Stroke only</string>
     <string name="fxo_behind_the_layer">Behind the layer</string>
+    <string name="speed_tab_normal">Normal</string>
+    <string name="speed_tab_curve">Curve</string>
+    <string name="speed_tab_remap">Remap</string>
+    <string name="speed_graph_desc">Speed graph</string>
+    <string name="speed_at_playhead">At the playhead: %1$s</string>
+    <string name="speed_curve_hint">Drag the points: up speeds up, down slows down. The clip keeps its length and its footage.</string>
+    <string name="speed_remap_hint">The graph shows the speed the time curve gives the video.</string>
+    <string name="speed_add_point">Add point</string>
+    <string name="speed_delete_point">Delete point</string>
+    <string name="speed_smooth">Smooth</string>
+    <string name="speed_presets">Presets</string>
+    <string name="speed_preset_flat">Flat</string>
+    <string name="speed_preset_montage">Montage</string>
+    <string name="speed_preset_hero">Hero</string>
+    <string name="speed_preset_bullet">Bullet</string>
+    <string name="speed_preset_flash_in">Flash in</string>
+    <string name="speed_preset_flash_out">Flash out</string>
+    <string name="speed_preset_jump">Jump cut</string>
+    <string name="speed_ramp_freeze_all">Freeze all</string>
+    <string name="fx_desc_time_flow_retime">Smooth slow motion: missing frames are created from pixel motion (optical flow), with animatable speed.</string>
+    <string name="fx_desc_time_flow_motion_blur">Natural motion blur computed from the footage itself: each pixel blurs in the direction it moves.</string>
 </resources>

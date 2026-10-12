@@ -1632,6 +1632,81 @@ TextureHandle Renderer::audio_spectrum(const AudioSpectrumRequest& request) noex
 // =============================================================================
 // Fase 1 — prepare (sob o lock do modelo)
 // =============================================================================
+namespace {
+
+/// Parâmetro de efeito no instante LOCAL da camada (trilha, se houver).
+f32 flow_fx_param(const Layer& l, const EffectInstance& e, u32 i, f64 local, f32 fallback, bool stepped) noexcept {
+    f32 v = i < e.params.size() ? e.params[i].constant.as_float() : fallback;
+    if (const Track* t = l.tracks.find(TrackProperty::EffectParam, e.id, param_track_key(i, 0)))
+        v = stepped ? t->value_or(FrameIndex{static_cast<i64>(std::floor(local))}, v) : t->value_or_f(local, v);
+    return std::isfinite(v) ? v : fallback;
+}
+
+/// Flow Retime: o instante da timeline cuja FONTE toca em `timelineTime`. A
+/// velocidade (%) anda dentro da camada desde a entrada: ∫ velocidade dτ.
+f64 flow_retime_timeline(const Layer& l, const EffectInstance& e, f64 timelineTime) noexcept {
+    const f64 elapsed = std::max(0.0, timelineTime - static_cast<f64>(l.start.value));
+    const f64 l0 = static_cast<f64>(l.offset.value);
+    auto speed = [&](f64 local) {
+        return std::clamp(static_cast<f64>(flow_fx_param(l, e, 0, local, 50.0f, false)), 1.0, 1000.0) / 100.0;
+    };
+    const Track* t = l.tracks.find(TrackProperty::EffectParam, e.id, param_track_key(0, 0));
+    if (!t || t->keys.empty()) return static_cast<f64>(l.start.value) + elapsed * speed(l0);
+    // Velocidade animada: ponto médio quadro a quadro (exato no segurado e no
+    // linear; o easing erra muito abaixo de um quadro). Teto de 2^20 passos.
+    const i64 n = std::min<i64>(static_cast<i64>(std::floor(elapsed)), i64{1} << 20);
+    f64 acc = 0.0;
+    for (i64 k = 0; k < n; ++k) acc += speed(l0 + static_cast<f64>(k) + 0.5);
+    const f64 frac = elapsed - static_cast<f64>(n);
+    if (frac > 0.0) acc += frac * speed(l0 + static_cast<f64>(n) + 0.5 * frac);
+    return static_cast<f64>(l.start.value) + acc;
+}
+
+/// Os efeitos de tempo por optical flow da camada de vídeo no instante.
+struct VideoFlowFx {
+    const EffectInstance* retime = nullptr;
+    f64 srcTimeline = 0.0;   ///< o instante da timeline que a fonte mostra
+    f64 rate = 1.0;          ///< velocidade do retime agora (prefetch e direção)
+    u8 frameBlend = 0;       ///< 0 repete, 1 mistura, 2 movimento
+    f32 flowBase = 0.0f;     ///< base do optical flow (0 = padrão)
+    f32 vectorAmount = 0.0f; ///< desfoque vetorial (0 = não)
+    f64 shutter = 0.5;       ///< obturador em fração de quadro
+};
+
+VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noexcept {
+    VideoFlowFx fx;
+    fx.srcTimeline = timelineTime;
+    fx.frameBlend = l.frameBlend;
+    fx.vectorAmount = l.vectorBlur;
+    fx.shutter = compShutter;
+    const EffectTypeId retimeType = effect_type_id(effect_keys::kFlowRetime);
+    const EffectTypeId blurType = effect_type_id(effect_keys::kFlowMotionBlur);
+    static constexpr f32 kBase[3] = {256.0f, 384.0f, 576.0f};
+    const f64 local = timelineTime - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
+    for (const EffectInstance& e : l.effects) {
+        if (!e.enabled) continue;
+        if (e.type == retimeType && !fx.retime) {
+            fx.retime = &e;
+            fx.srcTimeline = flow_retime_timeline(l, e, timelineTime);
+            fx.rate = std::clamp(static_cast<f64>(flow_fx_param(l, e, 0, local, 50.0f, false)), 1.0, 1000.0) / 100.0;
+            fx.frameBlend = static_cast<u8>(std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 1, local, 2.0f, true))), 0, 2));
+            fx.flowBase = kBase[std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 2, local, 1.0f, true))), 0, 2)];
+            const f32 blur = std::clamp(flow_fx_param(l, e, 3, local, 0.0f, false), 0.0f, 400.0f) / 100.0f;
+            if (blur > 0.0f) fx.vectorAmount = std::max(fx.vectorAmount, blur);
+        } else if (e.type == blurType) {
+            const f32 amount = std::clamp(flow_fx_param(l, e, 0, local, 100.0f, false), 0.0f, 400.0f) / 100.0f;
+            if (amount <= 0.0f) continue;
+            fx.vectorAmount = amount;
+            fx.shutter = std::clamp(static_cast<f64>(flow_fx_param(l, e, 1, local, 180.0f, false)), 0.0, 720.0) / 360.0;
+            if (fx.flowBase <= 0.0f)
+                fx.flowBase = kBase[std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 2, local, 1.0f, true))), 0, 2)];
+        }
+    }
+    return fx;
+}
+
+} // namespace
+
 void Renderer::prepare(const Composition& comp, const Project& project, FrameIndex time,
                        MediaManager* media, const ImagePixels* (*imageLookup)(void*, AssetId),
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
@@ -3175,35 +3250,49 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (src) {
                 src->set_epoch(settings.mediaGeneration);
                 const VideoStreamInfo streamInfo = src->info();
-                i64 mediaUs = static_cast<i64>(std::llround(l->source_frame(layerTime) * 1e6 / fps));
+                // Flow Retime / Flow Motion Blur (0.1.8): o instante da fonte, o
+                // modo dos quadros e o desfoque vetorial vêm dos efeitos, se houver.
+                const VideoFlowFx flowFx = video_flow_fx(*l, static_cast<f64>(layerTime.value),
+                                                         static_cast<f64>(comp.motion_blur().shutterAngle) / 360.0);
+                const f64 srcFrameF = l->source_frame_f(flowFx.srcTimeline);
+                const u8 frameBlend = flowFx.frameBlend;
+                i64 mediaUs = static_cast<i64>(std::llround(srcFrameF * 1e6 / fps));
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
                 i64 nextUs = -1;
                 f32 blendT = 0.0f;
-                const f64 shutterTravel = l->vectorBlur > 0.0f
-                    ? l->source_shutter_travel(static_cast<f64>(layerTime.value),
-                        static_cast<f64>(comp.motion_blur().shutterAngle) / 360.0)
-                    : 0.0;
-                const bool wantVector = l->vectorBlur > 0.0f && shutterTravel > 1e-8;
-                if (streamInfo.preciseFrameTiming && (l->frameBlend >= 1 || wantVector)) {
+                f64 shutterTravel = 0.0;
+                if (flowFx.vectorAmount > 0.0f) {
+                    if (flowFx.retime) {
+                        // Retime: o obturador cobre o tempo da fonte que o retime anda.
+                        const f64 h = flowFx.shutter * 0.5, t0 = static_cast<f64>(layerTime.value);
+                        const f64 before = l->source_frame_f(flow_retime_timeline(*l, *flowFx.retime, t0 - h));
+                        const f64 after = l->source_frame_f(flow_retime_timeline(*l, *flowFx.retime, t0 + h));
+                        shutterTravel = std::fabs(srcFrameF - before) + std::fabs(after - srcFrameF);
+                    } else {
+                        shutterTravel = l->source_shutter_travel(static_cast<f64>(layerTime.value), flowFx.shutter);
+                    }
+                }
+                const bool wantVector = flowFx.vectorAmount > 0.0f && shutterTravel > 1e-8;
+                if (streamInfo.preciseFrameTiming && (frameBlend >= 1 || wantVector)) {
                     bool currentReady = false;
                     const FrameRef current = src->frame_for(mediaUs, &currentReady);
                     if (currentReady && current && current->durationUs > 0) {
                         const i64 next = current->ptsUs + current->durationUs;
                         const f64 fraction = static_cast<f64>(mediaUs - current->ptsUs) / current->durationUs;
-                        const bool between = l->frameBlend >= 1 && fraction > 0.01 && fraction < 0.99;
+                        const bool between = frameBlend >= 1 && fraction > 0.01 && fraction < 0.99;
                         if ((streamInfo.durationUs <= 0 || next < streamInfo.durationUs) && (between || wantVector)) {
                             nextUs = next;
                             blendT = between ? static_cast<f32>(fraction) : 0.0f;
                         }
                     }
-                } else if (l->frameBlend >= 1 || wantVector) {
+                } else if (frameBlend >= 1 || wantVector) {
                     if (const f64 srcFps = streamInfo.fps; srcFps > 0.0) {
-                        const f64 pos = l->source_frame(layerTime) / fps * srcFps;
+                        const f64 pos = srcFrameF / fps * srcFps;
                         const f64 idx = std::floor(pos + 1e-3);
                         const f64 frac = pos - idx;
                         const i64 us = static_cast<i64>(std::llround((idx + 1.0) * 1e6 / srcFps));
                         const bool inside = streamInfo.durationUs <= 0 || us < streamInfo.durationUs;
-                        const bool between = l->frameBlend >= 1 && frac > 0.01 && frac < 0.99;
+                        const bool between = frameBlend >= 1 && frac > 0.01 && frac < 0.99;
                         if (inside && (between || wantVector)) {
                             nextUs = us;
                             blendT = between ? static_cast<f32>(frac) : 0.0f;
@@ -3244,7 +3333,12 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 req.mode = decodeMode;
                 // Clipe reverso ou congelado: o decoder não tem embalo para a frente.
                 req.direction = (l->speed == 0.0f || l->timeRemapEnabled) ? 0 : (l->reversed ? -playDirection : playDirection);
-                if (l->timeRemapEnabled && playDirection != 0) {
+                if (flowFx.retime && playDirection != 0) {
+                    // Flow Retime: a direção é a do tempo da fonte no próximo quadro.
+                    const f64 b = l->source_frame_f(flow_retime_timeline(*l, *flowFx.retime,
+                                                                        static_cast<f64>(layerTime.value + playDirection)));
+                    req.direction = b > srcFrameF + 1e-6 ? 1 : (b < srcFrameF - 1e-6 ? -1 : 0);
+                } else if (l->timeRemapEnabled && playDirection != 0) {
                     // Time remap (§16): a direção do DECODER é a da curva no
                     // próximo quadro — subindo, prefetch à frente; descendo,
                     // janela para trás; parada, só o alvo.
@@ -3252,7 +3346,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const f64 b = l->source_frame(FrameIndex{layerTime.value + playDirection});
                     req.direction = b > a + 1e-6 ? 1 : (b < a - 1e-6 ? -1 : 0);
                 }
-                req.speed = speed * std::max(0.0f, l->speed);
+                req.speed = speed * std::max(0.0f, l->speed) * static_cast<f32>(flowFx.rate);
                 bool exact = false;
                 rl.source.frame = src->frame_for(mediaUs, &exact,
                     decodeMode == DecodeMode::Playback && !settings.finalQuality ? req.direction : 0);
@@ -3284,13 +3378,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         rl.source.blendT = blendT;
                         // Aparelho em estado crítico: o preview mistura em vez de
                         // calcular o movimento de pixels (o export mantém o modo).
-                        rl.source.blendMode = (l->frameBlend == 2 && !settings.finalQuality && settings.flowPolicyScale <= 0.25f) ? 1 : l->frameBlend;
+                        rl.source.blendMode = (frameBlend == 2 && !settings.finalQuality && settings.flowPolicyScale <= 0.25f) ? 1 : frameBlend;
+                        rl.source.flowBase = flowFx.flowBase;
                         // Flow spans this actual source pair, not one timeline
                         // frame. Normalize the remapped shutter by its PTS span
                         // so VFR, different frame rates, ramps and freezes agree.
                         const i64 pairUs = rl.source.frameB->ptsUs - rl.source.frame->ptsUs;
                         rl.source.vectorBlur = wantVector && pairUs > 0 && fps > 0.0
-                            ? static_cast<f32>(std::clamp(l->vectorBlur, 0.0f, 2.0f) * shutterTravel * 1e6 / (fps * pairUs))
+                            ? static_cast<f32>(std::clamp(flowFx.vectorAmount, 0.0f, 4.0f) * shutterTravel * 1e6 / (fps * pairUs))
                             : 0.0f;
                     } else {
                         exact = false;   // falta um dos dois: o export espera; o preview mostra o que tem
@@ -4288,10 +4383,12 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
                                &u, sizeof(u)) != kInvalidIndex;
 }
 
-FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
+FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, f32 baseSide, u32& baseW, u32& baseH,
                                u64 frameNumber) noexcept {
-    // Base da pirâmide com o lado maior ≤ 384 (o flow não precisa de 4K).
-    const f32 base = std::max(96.0f, 384.0f * std::clamp(heavyQ_.flow, 0.25f, 1.0f));
+    // Base da pirâmide com o lado maior ≤ 384 (o flow não precisa de 4K); o
+    // Flow Retime/Flow Motion Blur pedem 256 (rápido) ou 576 (melhor).
+    const f32 side = baseSide > 0.0f ? std::clamp(baseSide, 128.0f, 1024.0f) : 384.0f;
+    const f32 base = std::max(96.0f, side * std::clamp(heavyQ_.flow, 0.25f, 1.0f));
     const f32 s = std::min(1.0f, base / static_cast<f32>(std::max(w, h)));
     u32 lw = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(w) * s)));
     u32 lh = std::max(8u, static_cast<u32>(std::lround(static_cast<f32>(h) * s)));
@@ -4361,21 +4458,58 @@ FGTexture Renderer::video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture
         sizes[n][1] = lh = nh;
         ++n;
     }
-    FGTexture flow{};
-    bool haveFlow = false;
-    for (u32 i = n; i-- > 0;) {
-        const f32 fw = static_cast<f32>(sizes[i][0]), fh = static_cast<f32>(sizes[i][1]);
-        struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, 0, 0}};
-        // O nível base vai direto para a textura do cache.
-        const FGTexture f = i == 0 ? graph_.import_texture("flow-cache", fc.tex[slot], fd) : ctx.texture("flow", sizes[i][0], sizes[i][1]);
-        recorded &= ctx.fullscreen_pass("flow-lk", PassStage::Decode, f, ShaderId::video_flow_lk_frag,
-                                        {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp)) != kInvalidIndex;
-        flow = f;
-        haveFlow = true;
+    // 0.1.8: os DOIS sentidos (atual → seguinte e seguinte → atual), cada nível
+    // regularizado pela confiança e pela luminância (flow_smooth.frag). O
+    // quadro intermediário usa os dois para saber quem aparece e quem some
+    // (flow_warp.frag); o nível base dos dois vai junto para o cache (RG/BA).
+    FGTexture baseFlow[2]{};
+    for (u32 dir = 0; dir < 2 && recorded; ++dir) {
+        FGTexture flow{};
+        bool haveFlow = false;
+        for (u32 i = n; i-- > 0;) {
+            const f32 fw = static_cast<f32>(sizes[i][0]), fh = static_cast<f32>(sizes[i][1]);
+            struct { Vec4 texel; Vec4 flags; } lp{Vec4{1.0f / fw, 1.0f / fh, fw, fh},
+                                                  Vec4{haveFlow ? 1.0f : 0.0f, 6.0f, static_cast<f32>(dir), 0}};
+            const FGTexture raw = ctx.texture("flow-bruto", sizes[i][0], sizes[i][1]);
+            recorded &= ctx.fullscreen_pass("flow-lk", PassStage::Decode, raw, ShaderId::video_flow_lk_frag,
+                                            {PassTexture{levels[i]}, PassTexture{haveFlow ? flow : levels[i]}}, &lp, sizeof(lp)) != kInvalidIndex;
+            // Regulariza os níveis de cima (é onde o erro de um nível vira o
+            // ponto de partida do seguinte); o base fica com o LK cru e passa
+            // pelo preenchimento de oclusão — metade do custo, mesma qualidade.
+            if (i == 0) {
+                flow = raw;
+                haveFlow = true;
+                continue;
+            }
+            struct { Vec4 texel; Vec4 flags; } sp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{static_cast<f32>(dir), 0.06f, 0, 0}};
+            const FGTexture smooth = ctx.texture("flow", sizes[i][0], sizes[i][1]);
+            recorded &= ctx.fullscreen_pass("flow-suave", PassStage::Decode, smooth, ShaderId::video_flow_smooth_frag,
+                                            {PassTexture{raw, {}, CommonSampler::NearestClamp}, PassTexture{levels[i]}}, &sp, sizeof(sp)) != kInvalidIndex;
+            flow = smooth;
+            haveFlow = true;
+        }
+        baseFlow[dir] = flow;
     }
+    // Oclusão: onde a ida e volta não fecha (o pixel some no outro quadro), o
+    // fluxo vem dos vizinhos coerentes (flow_fill.frag), nos dois sentidos.
+    FGTexture filled[2]{};
+    for (u32 dir = 0; dir < 2 && recorded; ++dir) {
+        const f32 fw = static_cast<f32>(sizes[0][0]), fh = static_cast<f32>(sizes[0][1]);
+        struct { Vec4 texel; Vec4 flags; } fp{Vec4{1.0f / fw, 1.0f / fh, fw, fh}, Vec4{static_cast<f32>(dir), 0.8f, 0, 0}};
+        filled[dir] = ctx.texture("flow-preenchido", sizes[0][0], sizes[0][1]);
+        recorded &= ctx.fullscreen_pass("flow-oclusao", PassStage::Decode, filled[dir], ShaderId::video_flow_fill_frag,
+                                        {PassTexture{baseFlow[dir], {}, CommonSampler::LinearClamp},
+                                         PassTexture{baseFlow[dir ^ 1u], {}, CommonSampler::LinearClamp},
+                                         PassTexture{levels[0]}}, &fp, sizeof(fp)) != kInvalidIndex;
+    }
+    // O nível base dos dois sentidos vai direto para a textura do cache.
+    const FGTexture packed = graph_.import_texture("flow-cache", fc.tex[slot], fd);
+    recorded &= recorded && ctx.fullscreen_pass("flow-junta", PassStage::Decode, packed, ShaderId::video_flow_pack_frag,
+                                                {PassTexture{filled[0], {}, CommonSampler::NearestClamp},
+                                                 PassTexture{filled[1], {}, CommonSampler::NearestClamp}}, nullptr, 0) != kInvalidIndex;
     if (!recorded) return FGTexture{};
     fc.key[slot] = pairKey;
-    return flow;
+    return packed;
 }
 
 void Renderer::trim_flow_cache(u64 keepLayer, u64 incomingBytes) noexcept {
@@ -4698,7 +4832,8 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     // Content IDs also remain stable for cached decoded frames.
                     for (const DecodedFrame* source : {layer.source.frame.get(), layer.source.frameB.get()})
                         pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
-                    flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, baseW, baseH, frameNumber);
+                    pair ^= static_cast<u64>(std::lround(layer.source.flowBase)) << 20;
+                    flow = video_flow(layer.id.pack(), pair, out.texture, b, w, h, layer.source.flowBase, baseW, baseH, frameNumber);
                     if (!flow.valid() && layer.source.vectorBlur > 0.0f) mark_incomplete(__FILE__, __LINE__);
                 }
                 // Smooth Motion sem fluxo válido (passe não compilou, textura do

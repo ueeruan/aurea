@@ -4122,4 +4122,25 @@
     <string name="fxo_over_the_layer">Поверх слоя</string>
     <string name="fxo_stroke_only">Только обводка</string>
     <string name="fxo_behind_the_layer">За слоем</string>
+    <string name="speed_tab_normal">Обычная</string>
+    <string name="speed_tab_curve">Кривая</string>
+    <string name="speed_tab_remap">Ремап</string>
+    <string name="speed_graph_desc">График скорости</string>
+    <string name="speed_at_playhead">На плейхеде: %1$s</string>
+    <string name="speed_curve_hint">Перетаскивайте точки: вверх — быстрее, вниз — медленнее. Длина клипа и кадры остаются прежними.</string>
+    <string name="speed_remap_hint">График показывает скорость, которую кривая времени задаёт видео.</string>
+    <string name="speed_add_point">Добавить точку</string>
+    <string name="speed_delete_point">Удалить точку</string>
+    <string name="speed_smooth">Сгладить</string>
+    <string name="speed_presets">Пресеты</string>
+    <string name="speed_preset_flat">Ровная</string>
+    <string name="speed_preset_montage">Монтаж</string>
+    <string name="speed_preset_hero">Герой</string>
+    <string name="speed_preset_bullet">Пуля</string>
+    <string name="speed_preset_flash_in">Быстрый вход</string>
+    <string name="speed_preset_flash_out">Быстрый выход</string>
+    <string name="speed_preset_jump">Скачок</string>
+    <string name="speed_ramp_freeze_all">Заморозить всё</string>
+    <string name="fx_desc_time_flow_retime">Плавное замедление: недостающие кадры создаются по движению пикселей (optical flow), скорость можно анимировать.</string>
+    <string name="fx_desc_time_flow_motion_blur">Естественное размытие движения, рассчитанное по самому видео: каждый пиксель размывается в сторону своего движения.</string>
 </resources>

@@ -221,6 +221,12 @@ namespace effect_keys {
     // Geometria na GPU, em qualquer camada.
     inline constexpr const char* kShatter3D             = "aurea.3d.shatter";
     inline constexpr const char* kStroke3D              = "aurea.3d.stroke";
+
+    // --- Tempo por optical flow (0.1.8; FlowTimeEffects.cpp) ----------------
+    // Declarativos: o renderer lê os parâmetros onde escolhe os quadros da
+    // fonte (o mesmo optical flow do Movimento suave). Só o vídeo; o som não muda.
+    inline constexpr const char* kFlowRetime            = "aurea.time.flow_retime";
+    inline constexpr const char* kFlowMotionBlur        = "aurea.time.flow_motion_blur";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

@@ -1014,7 +1014,7 @@ private struct UnevenHomeSheet: Shape {
 
 /// `home/HomeComponents.kt::AureaSegmented`. Text, tracks, separators and
 /// moving thumb retain Android's dimensions instead of the OS Picker style.
-private struct HomeSegmented<Value: Hashable>: View {
+struct HomeSegmented<Value: Hashable>: View {
     let values: [Value]
     @Binding var selected: Value
     let label: (Value) -> String

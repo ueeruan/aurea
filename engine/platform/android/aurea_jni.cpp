@@ -3063,6 +3063,31 @@ AUREA_JNI jboolean AUREA_FN(nativeRemoveTimeRemapKey)(JNIEnv*, jclass, jlong han
     return c && index >= 0 && c->engine.remove_time_remap_key(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jint AUREA_FN(nativeQuerySpeedCurve)(JNIEnv* env, jclass, jlong handle, jlong layer, jint samples, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || samples < 0) return 0;
+    const jsize n = env->GetArrayLength(out);
+    std::vector<f32> v(static_cast<usize>(n));
+    const u32 w = c->engine.query_speed_curve(static_cast<u64>(layer), static_cast<u32>(samples), v.data(), static_cast<u32>(n));
+    if (w) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(w), v.data());
+    return static_cast<jint>(w);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeApplySpeedCurve)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
+    NativeContext* c = ctx_of(handle);
+    return c && preset >= 0 && c->engine.apply_speed_curve(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeEditSpeedKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jlong frame, jfloat speed, jint interp) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.edit_speed_key(static_cast<u64>(layer), index, frame, speed, interp) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveSpeedKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && c->engine.remove_speed_key(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeReverseTimeRemap)(JNIEnv*, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.reverse_time_remap(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;

@@ -994,8 +994,12 @@ struct ExpressionEditor: View {
 /// O dado é a MESMA curva da camada (prévia, exportação e som).
 struct TimeRemapEffectEditor: View {
     @EnvironmentObject private var model: AureaModel
-    let effectId: UInt32
+    /// O efeito antigo (projetos salvos com ele); na aba Remapear do painel de velocidade não há efeito.
+    var effectId: UInt32 = 0
+    var showInterpolation = true
     @State private var values: [Float] = []
+    /// Quadro da fonte no cabeçote (`query_speed_curve` [7]), em quadros da composição.
+    @State private var sourceFrame: Float = 0
     @State private var drag: Float?
     @State private var dragStart: Float?
     @State private var dragLocal: Int32?
@@ -1016,10 +1020,13 @@ struct TimeRemapEffectEditor: View {
         return max(1, values[3] > 0 ? values[3] : values[2])
     }
     private var inside: Bool { values.count >= 5 && model.localPlayhead >= lo && model.localPlayhead <= hi }
-    private var seconds: Float { model.effectParams.first { $0.index == 0 }?.scalar ?? 0 }
     private var keyHere: Int? { keyTimes.firstIndex(of: model.localPlayhead) }
-    private var shownFrames: Float { drag ?? seconds * fps }
-    private func load() { values = model.engine.timeRemap(id).map(\.floatValue) }
+    private var shownFrames: Float { drag ?? sourceFrame }
+    private func load() {
+        values = model.engine.timeRemap(id).map(\.floatValue)
+        let curve = model.engine.speedCurve(id, samples: 0).map(\.floatValue)
+        sourceFrame = curve.count >= 8 ? curve[7] : 0
+    }
     private func refresh() { model.refreshModel(force: true); load() }
     private func seekLocal(_ local: Int32) {
         guard let layer = model.selectedLayer else { return }
@@ -1041,7 +1048,7 @@ struct TimeRemapEffectEditor: View {
                         ValueBox(Self.timecode(Int(shownFrames.rounded()), fps: fps), enabled: inside, width: 112) { openKeypad() }
                             .highPriorityGesture(DragGesture(minimumDistance: 6).onChanged { value in
                                 guard inside else { return }
-                                if dragStart == nil { dragStart = seconds * fps; dragLocal = model.localPlayhead; model.beginGesture("tempo do vídeo") }
+                                if dragStart == nil { dragStart = sourceFrame; dragLocal = model.localPlayhead; model.beginGesture("tempo do vídeo") }
                                 let frames = min(lastFrame, max(0, (dragStart ?? 0) + Float(value.translation.width) * 0.25))
                                 drag = frames.rounded()
                                 _ = model.engine.setTimeRemapValue(id, time: Int64(dragLocal ?? model.localPlayhead), value: frames.rounded())
@@ -1059,7 +1066,7 @@ struct TimeRemapEffectEditor: View {
                     Text(AureaText.t("remap_fora_clipe")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if isVideo {
+                if isVideo && showInterpolation {
                     Text(AureaText.t("remap_interpolacao")).font(.aurea(size: 13)).padding(.top, 6)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {

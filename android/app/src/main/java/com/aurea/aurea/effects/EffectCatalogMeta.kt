@@ -160,6 +160,16 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem, EffectTarget.Ajuste),
         "stop motion quadros taxa travada",
     ))
+    put("aurea.time.flow_retime", EffectMeta(
+        R.string.fx_desc_time_flow_retime,
+        listOf(EffectTarget.Video),
+        "twixtor camera lenta slow motion optical flow quadros inventados",
+    ))
+    put("aurea.time.flow_motion_blur", EffectMeta(
+        R.string.fx_desc_time_flow_motion_blur,
+        listOf(EffectTarget.Video),
+        "rsmb reelsmart desfoque de movimento vetores borrao",
+    ))
     put("aurea.time.warp_rgb", EffectMeta(
         R.string.fx_desc_time_warp_rgb,
         listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem),

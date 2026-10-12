@@ -145,6 +145,9 @@ struct LayerSource {
     u8       blendMode = 0;   ///< 1 mistura, 2 optical flow
     /// Desfoque vetorial: fração do quadro que o obturador cobre (0 = não).
     f32      vectorBlur = 0.0f;
+    /// Lado maior da base do optical flow (px; 0 = o padrão). O Flow Retime e
+    /// o Flow Motion Blur pedem mais (ou menos) detalhe nos vetores.
+    f32      flowBase = 0.0f;
 
     // Imagem
     AssetId  image{};
@@ -986,7 +989,7 @@ private:
     bool flowCacheEnabled_ = true;   ///< do quadro sendo renderizado (RenderSettings::heavyScale)
     bool motionBlurCropEnabled_ = true;
     bool boundedTextSurfaceEnabled_ = true;
-    [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, u32& baseW, u32& baseH,
+    [[nodiscard]] FGTexture video_flow(u64 layerKey, u64 pairKey, FGTexture a, FGTexture b, u32 w, u32 h, f32 baseSide, u32& baseW, u32& baseH,
                                        u64 frameNumber) noexcept;
 public:
     /// Acertos/erros do cache do optical flow (testes e HUD).

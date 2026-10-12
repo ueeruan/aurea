@@ -5105,6 +5105,190 @@ bool Engine::remove_time_remap_key(u64 layerId, u32 index) noexcept {
     return true;
 }
 
+// --- Gráfico de velocidade (painel de velocidade, 0.1.8) --------------------
+// Três jeitos de mexer no tempo do clipe, no MESMO painel: velocidade
+// constante, curva de velocidade (chaves de VELOCIDADE: a barra não muda e a
+// fonte anda a integral) e remapeamento (a curva de tempo). O gráfico mostra a
+// velocidade nos três; os presets da curva gravam chaves suaves.
+namespace {
+/// Fonte percorrida de `lo` a `hi` (tempo local) com o tempo de AGORA, sem a
+/// curva de remapeamento (quadros da composição, sempre ≥ 0).
+f64 speed_source_span(const Layer& l) noexcept {
+    Layer probe = l;
+    probe.timeRemapEnabled = false;
+    const f64 span = std::fabs(probe.source_frame_f(static_cast<f64>(l.end.value)) - probe.source_frame_f(static_cast<f64>(l.start.value)));
+    return std::isfinite(span) ? span : 0.0;
+}
+
+/// Velocidade constante média equivalente à curva (o "tirar a curva").
+void flatten_speed_curve(Layer& l) noexcept {
+    const f64 dur = static_cast<f64>(std::max<i64>(1, l.end.value - l.start.value));
+    const f64 span = speed_source_span(l);
+    l.tracks.remove_if([](const Track& t) { return t.property == TrackProperty::Speed; });
+    l.speed = static_cast<f32>(std::clamp(span / dur, 0.05, 16.0));
+}
+} // namespace
+
+u32 Engine::query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    constexpr u32 kHeader = 8;
+    if (!l || !out || maxFloats < kHeader) return 0;
+    samples = std::min(samples, std::min<u32>(1024, maxFloats - kHeader));
+    const bool remap = l->timeRemapEnabled && !l->timeRemap.keys.empty();
+    const Track* st = l->speed_track();
+    const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
+    const FrameIndex now = playback_.current();
+    const f64 nowLocal = static_cast<f64>(l->local_time(now).value);
+    auto speed_at_local = [&](f64 local) -> f64 {
+        if (remap) {
+            // A inclinação da curva de tempo (quadros da fonte por quadro).
+            const f64 t = local - static_cast<f64>(l->offset.value) + static_cast<f64>(l->start.value);
+            const f64 v = std::fabs(l->source_frame_f(t + 0.5) - l->source_frame_f(t - 0.5));
+            return std::isfinite(v) ? v : 0.0;
+        }
+        if (st) return Layer::speed_value(*st, local);
+        return l->speed;
+    };
+    out[0] = static_cast<f32>(samples);
+    out[1] = 0.0f;
+    out[2] = static_cast<f32>(lo);
+    out[3] = static_cast<f32>(hi);
+    out[4] = static_cast<f32>(nowLocal);
+    out[5] = remap ? 2.0f : st ? 1.0f : 0.0f;
+    out[6] = static_cast<f32>(speed_at_local(std::clamp(nowLocal, static_cast<f64>(lo), static_cast<f64>(hi))));
+    out[7] = static_cast<f32>(l->source_frame(now));
+    u32 w = kHeader;
+    const f64 span = static_cast<f64>(std::max<i64>(1, hi - lo));
+    for (u32 i = 0; i < samples; ++i) {
+        const f64 u = samples > 1 ? static_cast<f64>(i) / static_cast<f64>(samples - 1) : 0.0;
+        out[w++] = static_cast<f32>(speed_at_local(static_cast<f64>(lo) + u * span));
+    }
+    if (st && !remap) {
+        u32 k = 0;
+        for (const Keyframe& key : st->keys) {
+            if (w + 3 > maxFloats) break;
+            out[w++] = static_cast<f32>(key.time.value);
+            out[w++] = key.value;
+            out[w++] = static_cast<f32>(static_cast<u8>(key.interp));
+            ++k;
+        }
+        out[1] = static_cast<f32>(k);
+    }
+    return w;
+}
+
+bool Engine::apply_speed_curve(u64 layerId, u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || preset > 8) return false;
+    const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
+    if (hi - lo < 2) return false;
+    if (preset == 7 && !l->speed_track()) return false;
+    if (preset == 8 && !l->speed_track()) return true;
+    history_.before_mutation(*comp, project_->timeline().current(),
+                             preset == 8 ? "tirar curva de velocidade" : preset == 7 ? "suavizar velocidade" : "curva de velocidade");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    // A curva de velocidade e o remapeamento não valem juntos: quem escolhe a
+    // curva desliga a curva de tempo (que fica guardada).
+    if (preset == 8) {
+        flatten_speed_curve(*l);
+    } else if (preset == 7) {
+        l->timeRemapEnabled = false;
+        Track& t = l->tracks.get_or_create(TrackProperty::Speed);
+        for (Keyframe& k : t.keys) k.interp = Interpolation::EaseInOut;
+        t.lastIndex = 0;
+    } else {
+        const f64 source = speed_source_span(*l);
+        l->timeRemapEnabled = false;
+        struct P { f64 u, r; };
+        static const std::vector<P> kShapes[] = {
+            {{0.0, 1.0}, {1.0, 1.0}},                                                                  // plana
+            {{0.0, 1.0}, {0.25, 0.4}, {0.5, 2.0}, {0.75, 0.4}, {1.0, 1.0}},                           // montagem
+            {{0.0, 1.0}, {0.35, 1.0}, {0.45, 0.15}, {0.6, 0.15}, {0.7, 1.0}, {1.0, 1.0}},             // herói
+            {{0.0, 2.5}, {0.4, 2.5}, {0.48, 0.08}, {0.62, 0.08}, {0.7, 2.5}, {1.0, 2.5}},             // bala
+            {{0.0, 4.0}, {0.3, 1.0}, {1.0, 1.0}},                                                      // entrada rápida
+            {{0.0, 1.0}, {0.7, 1.0}, {1.0, 4.0}},                                                      // saída rápida
+            {{0.0, 1.0}, {0.3, 1.0}, {0.36, 5.0}, {0.44, 5.0}, {0.5, 1.0}, {1.0, 1.0}},               // pulo
+        };
+        Track shape;
+        shape.property = TrackProperty::Speed;
+        for (const P& p : kShapes[preset]) {
+            const FrameIndex at{lo + static_cast<i64>(std::llround(p.u * static_cast<f64>(hi - lo)))};
+            if (shape.find_exact(at) == kInvalidIndex) (void)shape.set(at, static_cast<f32>(p.r), Interpolation::EaseInOut);
+        }
+        // A mesma fonte de antes: escala as velocidades pela integral do desenho.
+        const f64 integral = Layer::speed_integral(shape, static_cast<f64>(hi)) - Layer::speed_integral(shape, static_cast<f64>(lo));
+        const f64 k = integral > 1e-6 && source > 0.0 ? source / integral : 1.0;
+        for (Keyframe& key : shape.keys) key.value = static_cast<f32>(std::clamp(static_cast<f64>(key.value) * k, 0.05, 16.0));
+        Track& t = l->tracks.get_or_create(TrackProperty::Speed);
+        t.keys = shape.keys;
+        t.lastIndex = 0;
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+i32 Engine::edit_speed_key(u64 layerId, i32 index, i64 localFrame, f32 speed, i32 interp) noexcept {
+    if (!std::isfinite(speed)) return -1;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || interp > static_cast<i32>(kLastInterpolation)) return -1;
+    const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
+    Track* existing = l->tracks.find(TrackProperty::Speed);
+    if (index >= 0 && (!existing || static_cast<u32>(index) >= existing->keys.size())) return -1;
+    history_.before_mutation(*comp, project_->timeline().current(), index < 0 ? "ponto na velocidade" : "mover ponto da velocidade");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const f64 before = l->speed_track() ? Layer::speed_value(*l->speed_track(), static_cast<f64>(localFrame)) : static_cast<f64>(l->speed);
+    l->timeRemapEnabled = false;
+    Track& t = l->tracks.get_or_create(TrackProperty::Speed);
+    i32 at = index;
+    if (index < 0) {
+        const FrameIndex f{std::clamp(localFrame, lo, hi)};
+        if (const u32 found = t.find_exact(f); found != kInvalidIndex) return static_cast<i32>(found);
+        const u32 prev = t.find_before(f);
+        const Interpolation in = prev != kInvalidIndex ? t.keys[prev].interp : Interpolation::EaseInOut;
+        at = static_cast<i32>(t.set(f, static_cast<f32>(std::clamp(before, 0.05, 16.0)), interp >= 0 ? static_cast<Interpolation>(interp) : in));
+    } else {
+        Keyframe& k = t.keys[static_cast<u32>(index)];
+        const i64 minT = index > 0 ? t.keys[static_cast<u32>(index) - 1].time.value + 1 : std::min(lo, k.time.value);
+        const i64 maxT = static_cast<u32>(index) + 1 < t.keys.size() ? t.keys[static_cast<u32>(index) + 1].time.value - 1 : std::max(hi, k.time.value);
+        k.time = FrameIndex{std::clamp(localFrame, minT, std::max(minT, maxT))};
+        k.value = std::clamp(speed, 0.05f, 16.0f);
+        if (interp >= 0) k.interp = static_cast<Interpolation>(interp);
+    }
+    t.lastIndex = 0;
+    project_->mark_dirty();
+    request_render();
+    return at;
+}
+
+bool Engine::remove_speed_key(u64 layerId, u32 index) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Track* t = l ? l->tracks.find(TrackProperty::Speed) : nullptr;
+    if (!t || l->locked || index >= t->keys.size()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "apagar ponto da velocidade");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    if (t->keys.size() <= 1) {
+        flatten_speed_curve(*l);
+    } else {
+        t->keys.erase(t->keys.begin() + index);
+        t->lastIndex = 0;
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
 namespace {
 /// O easing do trecho visto de trás para a frente: g(u) = 1 − f(1 − u). Exato
 /// para linear, entrada/saída e bézier (inclusive a força, que é composição e
@@ -11949,6 +12133,7 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id("aurea.distort.lens_gradient"), effect_type_id("aurea.stylize.pixel_encoder"),
             effect_type_id("aurea.glitch.video_glitch"), effect_type_id("aurea.stylize.pix_dither"),
             effect_type_id("aurea.distort.displace_transform"), effect_type_id("aurea.light.starglow"),
+            effect_type_id(effect_keys::kFlowRetime), effect_type_id(effect_keys::kFlowMotionBlur),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);

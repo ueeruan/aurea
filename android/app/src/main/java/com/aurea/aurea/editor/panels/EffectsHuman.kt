@@ -888,6 +888,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
+    // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8). Nomes
+    // próprios; a busca acha pelos nomes dos plugins de mesmo propósito.
+    put("aurea.time.flow_retime", EffectHuman(
+        keywords = "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave",
+        principal = listOf(0, 1, 2, 3)))
+    put("aurea.time.flow_motion_blur", EffectHuman(
+        keywords = "rsmb reelsmart motion blur desfoque de movimento borrao vetores optical flow obturador shutter",
+        principal = listOf(0, 1, 2)))
     put(
         "aurea.time.remap",
         EffectHuman(

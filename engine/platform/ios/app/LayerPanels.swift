@@ -1172,6 +1172,8 @@ struct ClipEditPanel: View {
 
 struct SpeedPanel: View {
     @EnvironmentObject private var model: AureaModel
+    @State private var curve: [Float] = []
+    @State private var selectedKey = -1
     private var id: Int64 { model.primarySelection ?? 0 }
     private var speed: Float { (model.detail["speed"] as? NSNumber)?.floatValue ?? 1 }
     private var flags: UInt32 { (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0 }
@@ -1179,6 +1181,8 @@ struct SpeedPanel: View {
     private var remap: Bool { flags & 4 != 0 }
     /// Velocidade com keyframe (bit 6): `speed` é a do cabeçote e mexer grava keyframe.
     private var animated: Bool { flags & 64 != 0 }
+    /// Normal · Curva · Remapear (`query_speed_curve` [5]): o remapeamento mora aqui (0.1.8).
+    private var mode: Int { curve.count >= 8 ? Int(curve[5]) : remap ? 2 : animated ? 1 : 0 }
     private var speedKeyHere: Bool {
         (model.keyframes[id] ?? []).contains { $0.property == 39 && $0.effectIndex == .max && $0.time == model.localPlayhead }
     }
@@ -1194,7 +1198,8 @@ struct SpeedPanel: View {
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
     private var logarithm: Float { log2(speed.clamped(to: 0.05...16)) * 100 }
-    private func change(_ action: (AureaEngine) -> Void) { model.mutate(action); model.refreshModel(force: true) }
+    private func loadCurve() { curve = kind == 1 || kind == 3 ? model.engine.speedCurve(id, samples: 96).map(\.floatValue) : [] }
+    private func change(_ action: (AureaEngine) -> Void) { model.mutate(action); model.refreshModel(force: true); loadCurve() }
     private func speedText(_ value: Float) -> String { String(format: "%.2f", value).replacingOccurrences(of: ".", with: ",") + "x" }
     private func setSpeed(_ value: Float) {
         let v = value.clamped(to: 0.05...16)
@@ -1206,6 +1211,32 @@ struct SpeedPanel: View {
         for tick: Float in [0.25, 0.5, 1, 2, 4] where abs(value - tick) / tick < 0.03 { return tick }
         return (value * 100).rounded() / 100
     }
+    private func setMode(_ next: Int) {
+        guard next != mode else { return }
+        let wasRemap = remap, wasAnimated = animated
+        model.beginGesture("modo do tempo")
+        model.mutate { core in
+            switch next {
+            case 0:
+                if wasRemap { core.setTimeRemap(false, forLayer: id) }
+                _ = core.applySpeedCurve(8, forLayer: id)
+            case 1:
+                if wasRemap { core.setTimeRemap(false, forLayer: id) }
+                if !wasAnimated { _ = core.applySpeedCurve(0, forLayer: id) }
+            default:
+                core.setTimeRemap(true, forLayer: id)
+            }
+        }
+        model.endGesture()
+        model.unaliasThumbs(id)   // o tempo do pedaço mudou: a tira dele é outra
+        selectedKey = -1
+        loadCurve()
+    }
+    private func seekLocal(_ local: Int32) {
+        guard let layer = model.selectedLayer, curve.count >= 8 else { return }
+        let lo = Int32(curve[2]), hi = Int32(curve[3])
+        model.seek(toFrame: Int64(min(max(local, lo), max(lo, hi - 1))) + Int64(layer.startFrame) - Int64(layer.offsetFrames))
+    }
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_tempo_velocidade")) { model.panel = .none }
@@ -1213,48 +1244,148 @@ struct SpeedPanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if kind != 1 && kind != 3 {
                         hint("panel_velocidade_vale_video_audio_nas_outras", size: 13)
-                    } else if speed == 0 && !animated {
-                        Text(AureaText.t("ios_frozen_frame_at", clock)).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                        hint("panel_este_trecho_quadro_parado_apare_bordas", size: 13).padding(.top, 8)
                     } else {
-                        Text(speedText(speed) + " · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                        hint(animated ? "panel_velocidade_keyframes_duracao_fica" : "panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
-                        // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote.
-                        PropertyCustomRow(AureaText.t("editor_velocidade"), selected: animated, onSelect: toggleSpeedKey, keyframe: speedKeyLook) {
-                            HStack(spacing: 6) {
-                                CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
-                                TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
-                                    .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
-                                        onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
-                                        onEnd: { model.engine.endUndoGroup() })
-                                CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
-                                ValueBox(speedText(speed), width: 64).padding(.leading, 2)
-                            }
-                        }.padding(.top, 12)
-                        HStack(spacing: 6) {
-                            ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in
-                                speedChip(["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
-                            }
-                        }.padding(.top, 12)
+                        HomeSegmented(values: [0, 1, 2], selected: Binding(get: { mode }, set: { setMode($0) }),
+                                      label: { AureaText.t(["speed_tab_normal", "speed_tab_curve", "speed_tab_remap"][$0]) })
+                            .padding(.bottom, 14)
+                        switch mode {
+                        case 1: curveSection
+                        case 2: remapSection
+                        default: normalSection
+                        }
+                        // Quadros entre os da fonte (câmera lenta): valem nos três modos.
                         if kind == 1 {
-                            HStack {
-                                Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
-                            }.frame(height: 48).padding(.top, 8)
-                            HStack(spacing: 6) {
-                                Text(AureaText.t("panel_quadros_camera_lenta")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                ForEach(Array(["panel_repetir_quadro", "panel_misturar", "panel_movimento_suave"].enumerated()), id: \.offset) { index, key in
-                                    speedChip(AureaText.t(key), on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == index, padding: 10) {
-                                        change { $0.setFrameBlendForLayer(id, mode: UInt32(index)) }
+                            Text(AureaText.t("panel_quadros_camera_lenta")).font(.aurea(size: 13)).padding(.top, 8)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(Array(["panel_repetir_quadro", "panel_misturar", "panel_movimento_suave"].enumerated()), id: \.offset) { index, key in
+                                        speedChip(AureaText.t(key), on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == index, padding: 10) {
+                                            change { $0.setFrameBlendForLayer(id, mode: UInt32(index)) }
+                                        }
                                     }
                                 }
-                            }.frame(height: 48)
+                            }.padding(.top, 6)
                         }
                     }
                 }.padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
             }
         }.foregroundStyle(AureaColors.text)
+            .onAppear(perform: loadCurve)
+            .onChange(of: model.status.modelRevision) { _ in loadCurve() }
+            .onChange(of: model.status.playhead) { _ in loadCurve() }
+            .onChange(of: id) { _ in selectedKey = -1; loadCurve() }
     }
+
+    @ViewBuilder private var normalSection: some View {
+        if speed == 0 {
+            Text(AureaText.t("ios_frozen_frame_at", clock)).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+            hint("panel_este_trecho_quadro_parado_apare_bordas", size: 13).padding(.top, 8)
+        } else {
+            Text(speedText(speed) + " · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+            hint("panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
+            // ◇ na etiqueta: grava o keyframe de velocidade no cabeçote (passa para a Curva).
+            PropertyCustomRow(AureaText.t("editor_velocidade"), selected: animated, onSelect: toggleSpeedKey, keyframe: speedKeyLook) {
+                HStack(spacing: 6) {
+                    CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
+                    TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
+                        .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
+                            onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
+                            onEnd: { model.engine.endUndoGroup() })
+                    CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
+                    ValueBox(speedText(speed), width: 64).padding(.leading, 2)
+                }.keepLtr()
+            }.padding(.top, 12)
+            HStack(spacing: 6) {
+                ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in
+                    speedChip(["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
+                }
+            }.padding(.top, 12)
+            if kind == 1 {
+                HStack {
+                    Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                    AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
+                }.frame(height: 48).padding(.top, 8)
+            }
+        }
+    }
+
+    /// CURVA DE VELOCIDADE (SpeedAudioPanels.kt `SpeedCurveSection`).
+    @ViewBuilder private var curveSection: some View {
+        if curve.count >= 8 {
+            let samples = Int(curve[0]), keyCount = Int(curve[1])
+            let keyTimes: [Int32] = (0..<keyCount).compactMap { i in
+                let at = 8 + samples + i * 3
+                return at < curve.count ? Int32(curve[at]) : nil
+            }
+            let local = model.localPlayhead
+            let target = selectedKey >= 0 && selectedKey < keyCount ? selectedKey : (keyTimes.firstIndex(of: local) ?? -1)
+            Text(AureaText.t("speed_at_playhead", speedText(curve[6]))).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+            SpeedGraphView(data: curve, playhead: local, editable: true, selected: selectedKey,
+                           onSelect: { i in selectedKey = i; if i < keyTimes.count { seekLocal(keyTimes[i]) } },
+                           onMoveStart: { model.beginGesture("velocidade") },
+                           onMove: { i, t, v in
+                               let moved = model.engine.editSpeedKey(id, index: Int32(i), time: Int64(t), speed: v, interpolation: -1)
+                               if moved >= 0 { selectedKey = Int(moved) }
+                               loadCurve()
+                           },
+                           onMoveEnd: { model.endGesture(); loadCurve() },
+                           onScrub: { t in selectedKey = -1; seekLocal(t) })
+                .padding(.top, 8)
+            HStack(spacing: 6) {
+                speedChip(AureaText.t("speed_add_point"), on: false) {
+                    var inserted: Int32 = -1
+                    change { inserted = $0.editSpeedKey(id, index: -1, time: Int64(local), speed: 0, interpolation: -1) }
+                    selectedKey = Int(inserted)
+                }
+                if target >= 0 {
+                    speedChip(AureaText.t("speed_delete_point"), on: false) {
+                        change { _ = $0.removeSpeedKey(id, index: UInt32(target)) }
+                        model.unaliasThumbs(id)
+                        selectedKey = -1
+                    }
+                }
+                speedChip(AureaText.t("speed_smooth"), on: false) { change { _ = $0.applySpeedCurve(7, forLayer: id) } }
+            }.padding(.top, 10)
+            Text(AureaText.t("speed_presets")).font(.aurea(size: 13)).padding(.top, 12)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach([(0, "speed_preset_flat"), (1, "speed_preset_montage"), (2, "speed_preset_hero"), (3, "speed_preset_bullet"),
+                             (4, "speed_preset_flash_in"), (5, "speed_preset_flash_out"), (6, "speed_preset_jump")], id: \.0) { preset, key in
+                        speedChip(AureaText.t(key), on: false) {
+                            selectedKey = -1
+                            change { _ = $0.applySpeedCurve(UInt32(preset), forLayer: id) }
+                            model.unaliasThumbs(id)
+                        }
+                    }
+                }
+            }.padding(.top, 6)
+            hint("speed_curve_hint", size: 12).padding(.top, 8)
+        }
+    }
+
+    /// REMAPEAR (SpeedAudioPanels.kt `RemapSection`): gráfico só de leitura, rampas e as linhas do remapeamento.
+    @ViewBuilder private var remapSection: some View {
+        if curve.count >= 8 {
+            Text(AureaText.t("speed_at_playhead", speedText(curve[6]))).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+            SpeedGraphView(data: curve, playhead: model.localPlayhead, editable: false, selected: -1, onScrub: { t in seekLocal(t) })
+                .padding(.top, 8)
+            hint("speed_remap_hint", size: 12).padding(.top, 6)
+        }
+        Text(AureaText.t("speed_presets")).font(.aurea(size: 13)).padding(.top, 10)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach([(0, "panel_linear"), (1, "panel_suave"), (2, "speed_preset_hero"), (3, "remap_acelerar"),
+                         (4, "panel_desacelerar"), (7, "remap_congelar_aqui"), (5, "speed_ramp_freeze_all")], id: \.0) { preset, key in
+                    speedChip(AureaText.t(key), on: false) {
+                        change { $0.applySpeedRamp(UInt32(preset), forLayer: id) }
+                        model.unaliasThumbs(id)
+                    }
+                }
+            }
+        }.padding(.top, 6)
+        TimeRemapEffectEditor(showInterpolation: false).padding(.top, 4)
+    }
+
     private func speedChip(_ label: String, on: Bool, padding: CGFloat = 12, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
@@ -1263,6 +1394,138 @@ struct SpeedPanel: View {
     }
     private func hint(_ key: String, size: CGFloat) -> some View {
         Text(AureaText.t(key)).font(.aurea(size: size)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// SpeedGraph.kt: GRÁFICO DE VELOCIDADE — tempo da camada na horizontal,
+/// velocidade em log2 na vertical (0,1× embaixo, 10× em cima). A curva vem do
+/// motor (`query_speed_curve`). Editável: tocar perto de um ponto o escolhe e
+/// arrastar move; no resto, toque/arrasto move o cabeçote.
+struct SpeedGraphView: View {
+    let data: [Float]
+    let playhead: Int32
+    let editable: Bool
+    let selected: Int
+    var onSelect: (Int) -> Void = { _ in }
+    var onMoveStart: () -> Void = {}
+    var onMove: (Int, Int32, Float) -> Void = { _, _, _ in }
+    var onMoveEnd: () -> Void = {}
+    var onScrub: (Int32) -> Void = { _ in }
+    @State private var grabbed: Int?
+    @State private var grabOffset = CGSize.zero
+    @State private var moving = false
+    @State private var decided = false
+
+    private static let logMin: Float = -3.3219
+    private static let logMax: Float = 3.3219
+    private var samples: Int { data.count >= 8 ? max(0, Int(data[0])) : 0 }
+    private var lo: Int32 { data.count >= 8 ? Int32(data[2].rounded()) : 0 }
+    private var hi: Int32 { data.count >= 8 ? max(lo + 1, Int32(data[3].rounded())) : 1 }
+    private var keys: [(Int32, Float)] {
+        guard data.count >= 8 else { return [] }
+        return (0..<max(0, Int(data[1]))).compactMap { i in
+            let at = 8 + samples + i * 3
+            return at + 1 < data.count ? (Int32(data[at].rounded()), data[at + 1]) : nil
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let size = geometry.size
+            let left: CGFloat = 30, pad: CGFloat = 10
+            let w = max(1, size.width - left - pad), h = max(1, size.height - pad * 2)
+            let lo = self.lo, hi = self.hi, keys = self.keys
+            let xOf: (Float) -> CGFloat = { t in left + w * CGFloat((t - Float(lo)) / Float(hi - lo)) }
+            let yOf: (Float) -> CGFloat = { v in pad + h * CGFloat(1 - (Self.logSpeed(v) - Self.logMin) / (Self.logMax - Self.logMin)) }
+            let timeAt: (CGFloat) -> Int32 = { x in lo + Int32((min(1, max(0, (x - left) / w)) * CGFloat(hi - lo)).rounded()) }
+            let speedAt: (CGFloat) -> Float = { y in
+                let u = Float(min(1, max(0, 1 - (y - pad) / h)))
+                return Self.snap(pow(2, Self.logMin + u * (Self.logMax - Self.logMin)))
+            }
+            Canvas { ctx, _ in
+                ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(AureaColors.surface.opacity(0.6)))
+                for v: Float in [0.25, 0.5, 1, 2, 4, 8] {
+                    let y = yOf(v)
+                    var line = Path()
+                    line.move(to: CGPoint(x: left, y: y)); line.addLine(to: CGPoint(x: size.width - pad, y: y))
+                    ctx.stroke(line, with: .color(v == 1 ? AureaColors.muted.opacity(0.6) : AureaColors.chip), lineWidth: v == 1 ? 1.5 : 1)
+                    ctx.draw(Text(Self.label(v)).font(.aurea(size: 9)).foregroundColor(AureaColors.muted), at: CGPoint(x: left - 4, y: y), anchor: .trailing)
+                }
+                if samples >= 2 {
+                    var line = Path(), fill = Path()
+                    for i in 0..<samples where 8 + i < data.count {
+                        let t = Float(lo) + Float(hi - lo) * Float(i) / Float(samples - 1)
+                        let p = CGPoint(x: xOf(t), y: min(pad + h, max(pad, yOf(data[8 + i]))))
+                        if i == 0 { line.move(to: p); fill.move(to: CGPoint(x: p.x, y: pad + h)); fill.addLine(to: p) }
+                        else { line.addLine(to: p); fill.addLine(to: p) }
+                    }
+                    fill.addLine(to: CGPoint(x: xOf(Float(hi)), y: pad + h)); fill.closeSubpath()
+                    ctx.fill(fill, with: .color(AureaColors.accent.opacity(0.14)))
+                    ctx.stroke(line, with: .color(AureaColors.accent), lineWidth: 2)
+                }
+                for (i, key) in keys.enumerated() {
+                    let c = CGPoint(x: xOf(Float(key.0)), y: min(pad + h, max(pad, yOf(key.1))))
+                    let on = i == selected
+                    let r: CGFloat = on ? 7 : 5.5, inner: CGFloat = on ? 3 : 2.5
+                    ctx.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(on ? AureaColors.accent : AureaColors.text))
+                    ctx.fill(Path(ellipseIn: CGRect(x: c.x - inner, y: c.y - inner, width: inner * 2, height: inner * 2)), with: .color(AureaColors.surface))
+                }
+                let px = xOf(Float(min(max(playhead, lo), hi)))
+                var head = Path()
+                head.move(to: CGPoint(x: px, y: pad * 0.4)); head.addLine(to: CGPoint(x: px, y: size.height - pad * 0.4))
+                ctx.stroke(head, with: .color(AureaColors.playhead), lineWidth: 2)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                if !decided {
+                    decided = true
+                    let start = value.startLocation
+                    var hit: Int?
+                    if editable {
+                        var best = CGFloat.infinity
+                        for (i, key) in keys.enumerated() {
+                            let dx = xOf(Float(key.0)) - start.x, dy = yOf(key.1) - start.y
+                            let d = (dx * dx + dy * dy).squareRoot()
+                            if d < best { best = d; hit = i }
+                        }
+                        if best > 22 { hit = nil }
+                    }
+                    grabbed = hit
+                    if let hit {
+                        grabOffset = CGSize(width: xOf(Float(keys[hit].0)) - start.x, height: yOf(keys[hit].1) - start.y)
+                        onSelect(hit)
+                    } else {
+                        onScrub(timeAt(start.x))
+                    }
+                }
+                if let g = grabbed {
+                    let travel = (value.translation.width * value.translation.width + value.translation.height * value.translation.height).squareRoot()
+                    if !moving && travel < 4 { return }
+                    if !moving { moving = true; onMoveStart() }
+                    onMove(g, timeAt(value.location.x + grabOffset.width), speedAt(value.location.y + grabOffset.height))
+                } else {
+                    onScrub(timeAt(value.location.x))
+                }
+            }.onEnded { _ in
+                if moving { onMoveEnd() }
+                moving = false; decided = false; grabbed = nil
+            })
+        }
+        .frame(height: 176).clipShape(RoundedRectangle(cornerRadius: 10)).keepLtr()
+        .accessibilityLabel(AureaText.t("speed_graph_desc"))
+    }
+
+    private static func logSpeed(_ v: Float) -> Float { log2(min(64, max(0.01, v))) }
+    /// Encosta nos valores redondos do gráfico quando passa perto.
+    private static func snap(_ s: Float) -> Float {
+        for v: Float in [0.25, 0.5, 1, 2, 4, 8] where abs(s - v) / v < 0.04 { return v }
+        return (s * 100).rounded() / 100
+    }
+    private static func label(_ v: Float) -> String {
+        guard v < 1 else { return "\(Int(v.rounded()))x" }
+        var s = String(format: "%.2f", v).replacingOccurrences(of: ".", with: ",")
+        while s.hasSuffix("0") { s.removeLast() }
+        return s + "x"
     }
 }
 

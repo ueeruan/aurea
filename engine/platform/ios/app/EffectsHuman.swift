@@ -692,6 +692,13 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             7: FxParamHuman(label: "fx3_expandir_saida"),
             8: FxParamHuman(label: "fx_mistura", decimals: 0),
         ])),
+    // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8).
+    ("aurea.time.flow_retime", FxEffectHuman(
+        keywords: "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave",
+        principal: [0, 1, 2, 3])),
+    ("aurea.time.flow_motion_blur", FxEffectHuman(
+        keywords: "rsmb reelsmart motion blur desfoque de movimento borrao vetores optical flow obturador shutter",
+        principal: [0, 1, 2])),
     ("aurea.time.remap", FxEffectHuman(
         name: "fx_name_time_remap",
         // O parâmetro Tempo É a curva de remapeamento da camada. O "Manter o tom
@@ -1610,6 +1617,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.glitch.signal", "fx_desc_glitch_signal")
     put("aurea.glitch.cross", "fx_desc_glitch_cross")
     put("aurea.time.posterize", "fx_desc_time_posterize", FxTimeTargets, "stop motion quadros taxa travada")
+    put("aurea.time.flow_retime", "fx_desc_time_flow_retime", [.video], "twixtor camera lenta slow motion optical flow quadros inventados")
+    put("aurea.time.flow_motion_blur", "fx_desc_time_flow_motion_blur", [.video], "rsmb reelsmart desfoque de movimento vetores borrao")
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
     put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")
     put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")

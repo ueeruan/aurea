@@ -3067,6 +3067,22 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     auto* e = self.engine; return e ? e->edit_time_remap_key(layerId, index, time, value, interpolation) : -1;
 }
 - (void)removeTimeRemap:(long long)layerId index:(uint32_t)index { if (auto* e = self.engine) (void)e->remove_time_remap_key(layerId, index); }
+- (NSArray<NSNumber*>*)speedCurve:(long long)layerId samples:(uint32_t)samples {
+    auto* e = self.engine; if (!e) return @[];
+    const u32 n = std::min<u32>(samples, 1024);
+    std::vector<float> v(8 + n + 3 * 512);
+    const auto w = e->query_speed_curve(layerId, n, v.data(), static_cast<u32>(v.size()));
+    return floats_to_array(v.data(), w);
+}
+- (BOOL)applySpeedCurve:(uint32_t)preset forLayer:(long long)layerId {
+    auto* e = self.engine; return e && e->apply_speed_curve(static_cast<aurea::u64>(layerId), preset);
+}
+- (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation {
+    auto* e = self.engine; return e ? e->edit_speed_key(layerId, index, time, speed, interpolation) : -1;
+}
+- (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index {
+    auto* e = self.engine; return e && e->remove_speed_key(layerId, index);
+}
 - (long long)addVector:(uint32_t)preset {
     auto* e = self.engine; if (!e) return -1; const auto r = e->add_vector_layer(preset); return r.ok() ? static_cast<long long>(*r) : -1;
 }

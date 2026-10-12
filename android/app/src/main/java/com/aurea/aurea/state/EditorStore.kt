@@ -1649,6 +1649,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        speedCurve = if (id != null && (detail?.kind == com.aurea.aurea.ui.theme.LayerType.Video.kind || detail?.kind == com.aurea.aurea.ui.theme.LayerType.Audio.kind)) {
+            val out = FloatArray(8 + SPEED_GRAPH_SAMPLES + 3 * 128)
+            val n = engine.querySpeedCurve(id, SPEED_GRAPH_SAMPLES, out)
+            same(speedCurve, if (n >= 8) out.copyOf(n) else null)
+        } else {
+            null
+        }
         // Receita pendente de OUTRA camada (a seleção mudou no meio do arrasto):
         // vai para a dona agora, antes de `text3d` passar a ser a da nova.
         if (text3dPending && text3dPendingLayer != 0L && text3dPendingLayer != id) {
@@ -4896,6 +4903,67 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return ok
     }
 
+    // --- Gráfico de velocidade (0.1.8) -----------------------------------------------
+    /**
+     * `query_speed_curve` da camada principal (vídeo/áudio): [0] amostras, [1] chaves,
+     * [2..3] início/fim locais, [4] cabeçote local, [5] modo (0 constante, 1 curva,
+     * 2 remapear), [6] velocidade no cabeçote, [7] quadro da fonte no cabeçote; depois
+     * as amostras e as chaves (tempo local, ×, interpolação).
+     */
+    var speedCurve by mutableStateOf<FloatArray?>(null)
+        private set
+
+    /** Abas do painel de velocidade: 0 constante, 1 curva de velocidade, 2 remapear tempo. */
+    fun setSpeedMode(mode: Int) {
+        val id = primary ?: return
+        val now = speedCurve?.getOrNull(5)?.toInt() ?: 0
+        if (mode == now) return
+        beginGesture("modo do tempo")
+        when (mode) {
+            0 -> {
+                if (detail?.timeRemap == true) engine.setTimeRemap(id, false)
+                engine.applySpeedCurve(id, 8)
+            }
+            1 -> {
+                if (detail?.timeRemap == true) engine.setTimeRemap(id, false)
+                if (detail?.speedAnimated != true) engine.applySpeedCurve(id, 0)
+            }
+            else -> engine.setTimeRemap(id, true)
+        }
+        endGesture()
+        thumbnails.unalias(id)   // o tempo do pedaço mudou: a tira dele é outra
+        refreshNow()
+    }
+
+    /** Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar. */
+    fun applySpeedCurve(preset: Int) {
+        val id = primary ?: return
+        if (engine.applySpeedCurve(id, preset)) thumbnails.unalias(id)
+        refreshNow()
+    }
+
+    /** Ponto novo na curva de velocidade (no valor que ela já tem). Devolve o índice. */
+    fun speedKeyInsert(localFrame: Int): Int {
+        val id = primary ?: return -1
+        val i = engine.editSpeedKey(id, -1, localFrame.toLong(), 0f, -1)
+        refreshNow()
+        return i
+    }
+
+    /** Arrasto no gráfico (dentro de `beginGesture`/`endGesture`). */
+    fun speedKeyMove(index: Int, localFrame: Int, speed: Float): Int {
+        val id = primary ?: return -1
+        val moved = engine.editSpeedKey(id, index, localFrame.toLong(), speed, -1)
+        refreshDetail()
+        return moved
+    }
+
+    fun speedKeyRemove(index: Int) {
+        val id = primary ?: return
+        if (engine.removeSpeedKey(id, index)) thumbnails.unalias(id)
+        refreshNow()
+    }
+
     // --- Fontes ---------------------------------------------------------------------------
     /** Uma fonte (arquivo) do aparelho ou importada. */
     data class FontItem(val family: String, val style: String, val weight: Int, val italic: Boolean, val path: String, val imported: Boolean)
@@ -7421,6 +7489,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val CAMERA_AFFECTS_BELOW = 7
         /** `ParticleParam::Count` do motor (contrato v21: 70 parâmetros). */
         const val PARTICLE_PARAM_COUNT = 70
+        /** Amostras do gráfico de velocidade (painel de velocidade). */
+        const val SPEED_GRAPH_SAMPLES = 96
         /** Id do "tipo" memória na tela Armazenamento. */
         const val MEMORY = "memoria"
         // ComponentCallbacks2.TRIM_MEMORY_* (valores do SDK).

@@ -4104,4 +4104,25 @@ untuk mengedit kurvanya.</string>
     <string name="fxo_over_the_layer">Di atas layer</string>
     <string name="fxo_stroke_only">Hanya garis</string>
     <string name="fxo_behind_the_layer">Di belakang layer</string>
+    <string name="speed_tab_normal">Normal</string>
+    <string name="speed_tab_curve">Kurva</string>
+    <string name="speed_tab_remap">Remap</string>
+    <string name="speed_graph_desc">Grafik kecepatan</string>
+    <string name="speed_at_playhead">Di playhead: %1$s</string>
+    <string name="speed_curve_hint">Seret titik: ke atas lebih cepat, ke bawah lebih lambat. Panjang klip dan rekamannya tetap sama.</string>
+    <string name="speed_remap_hint">Grafik menunjukkan kecepatan yang diberikan kurva waktu ke video.</string>
+    <string name="speed_add_point">Tambah titik</string>
+    <string name="speed_delete_point">Hapus titik</string>
+    <string name="speed_smooth">Haluskan</string>
+    <string name="speed_presets">Preset</string>
+    <string name="speed_preset_flat">Datar</string>
+    <string name="speed_preset_montage">Montase</string>
+    <string name="speed_preset_hero">Pahlawan</string>
+    <string name="speed_preset_bullet">Peluru</string>
+    <string name="speed_preset_flash_in">Masuk cepat</string>
+    <string name="speed_preset_flash_out">Keluar cepat</string>
+    <string name="speed_preset_jump">Lompat</string>
+    <string name="speed_ramp_freeze_all">Bekukan semua</string>
+    <string name="fx_desc_time_flow_retime">Gerak lambat mulus: frame yang hilang dibuat dari gerakan piksel (optical flow), dengan kecepatan yang bisa dianimasikan.</string>
+    <string name="fx_desc_time_flow_motion_blur">Motion blur alami yang dihitung dari rekamannya sendiri: setiap piksel buram ke arah geraknya.</string>
 </resources>

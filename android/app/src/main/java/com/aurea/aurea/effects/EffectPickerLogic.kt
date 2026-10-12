@@ -71,8 +71,10 @@ fun makesSound(entry: EffectCatalogEntry): Boolean =
     entry.typeId in SoundGeneratorIds || normalizeSearch(entry.name) in SoundGeneratorNames
 
 /** O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som. */
+// Remapear tempo (0.1.8) mora na aba Remapear do painel de velocidade; o efeito
+// fica só para os projetos que já têm (o cartão dele continua funcionando).
 fun pickableEffects(catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean): List<EffectCatalogEntry> =
-    catalog.filter { it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare")) && (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) }
+    catalog.filter { it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare"), effectTypeId("aurea.time.remap")) && (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) }
 
 // --- Ferramentas que moram no catálogo de efeitos ------------------------------
 

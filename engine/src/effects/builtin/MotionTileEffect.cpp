@@ -550,6 +550,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_video_glitch(registry);
     builtin::register_displace_transform(registry);
     builtin::register_object3d_effects(registry);
+    builtin::register_flow_time_effects(registry);
 }
 
 } // namespace aurea

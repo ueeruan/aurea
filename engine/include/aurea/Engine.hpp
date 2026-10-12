@@ -847,6 +847,27 @@ public:
     /// easing de cada trecho espelhado — duas vezes volta exatamente ao que era.
     /// Com o remapeamento desligado, liga antes (curva = o tempo de agora).
     bool reverse_time_remap(u64 layerId) noexcept;
+    /// Gráfico de velocidade (painel de velocidade, 0.1.8). `out` = {nº de
+    /// amostras S, nº de chaves K, início e fim locais da camada, cabeçote
+    /// local, modo (0 constante, 1 curva de velocidade, 2 remapeamento),
+    /// velocidade no cabeçote (×), quadro da fonte no cabeçote (quadros da
+    /// composição)}; depois S velocidades (×) igualmente espaçadas do início
+    /// ao fim (no remapeamento, a inclinação da curva de tempo) e K×3 (tempo
+    /// local, velocidade, interpolação) das chaves de VELOCIDADE.
+    u32 query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats) noexcept;
+    /// Curva de velocidade pronta (desliga o remapeamento): chaves de
+    /// VELOCIDADE suaves com a MESMA quantidade de fonte que o clipe mostra
+    /// agora (a barra não muda). 0 plana, 1 montagem, 2 herói, 3 bala,
+    /// 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar as chaves que
+    /// existem, 8 tirar a curva (volta à velocidade constante média).
+    bool apply_speed_curve(u64 layerId, u32 preset) noexcept;
+    /// Chave de velocidade pelo gráfico: `index` < 0 insere em `localFrame`
+    /// com a velocidade que a curva já tem ali (nada muda até mover); senão
+    /// move (tempo preso entre as vizinhas) e muda a velocidade (×, 0,05…16).
+    /// `interp` < 0 mantém. Devolve o índice da chave, ou −1.
+    i32 edit_speed_key(u64 layerId, i32 index, i64 localFrame, f32 speed, i32 interp) noexcept;
+    /// Apaga uma chave de velocidade (a última que sobra vira velocidade constante).
+    bool remove_speed_key(u64 layerId, u32 index) noexcept;
     /// Manter o tom do áudio quando a fonte não anda a 1× (Layer::keepPitch).
     bool set_keep_pitch(u64 layerId, bool on) noexcept;
 

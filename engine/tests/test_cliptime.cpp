@@ -1376,3 +1376,69 @@ AUREA_TEST(ClipTime, ExtendButtonRestoresAvailableHandleAndUndo) {
         AUREA_CHECK(!r.e.edit_clip_time(r.layer.pack(), 7, 0));
     }
 }
+
+// =============================================================================
+//  Gráfico de velocidade (0.1.8): presets da curva, pontos e os três modos
+// =============================================================================
+AUREA_TEST(ClipTime, SpeedCurvePresetsKeepTheFootageAndTheGraphFollows) {
+    TimeRig r(cfg_with_audio());
+    r.speed(2.0f);   // 150 quadros mostrando 300 da fonte
+    const u64 id = r.layer.pack();
+    const i64 len = r.L()->end.value - r.L()->start.value;
+    const f64 s0 = r.L()->source_frame_f(static_cast<f64>(r.L()->start.value));
+    const f64 s1 = r.L()->source_frame_f(static_cast<f64>(r.L()->end.value));
+    std::vector<f32> q(8 + 32 + 3 * 16);
+    AUREA_CHECK_EQ(r.e.query_speed_curve(id, 32, q.data(), static_cast<u32>(q.size())), 40u);
+    AUREA_CHECK_EQ(q[5], 0.0f);                       // constante
+    AUREA_CHECK_NEAR(q[8], 2.0f, 1e-4f);
+    // Cada preset: a barra não muda e a fonte usada é a mesma (2× em média).
+    for (u32 preset = 0; preset <= 6; ++preset) {
+        AUREA_CHECK(r.e.apply_speed_curve(id, preset));
+        AUREA_CHECK_EQ(r.L()->end.value - r.L()->start.value, len);
+        AUREA_CHECK(r.L()->speed_track() != nullptr);
+        const f64 a = r.L()->source_frame_f(static_cast<f64>(r.L()->start.value));
+        const f64 b = r.L()->source_frame_f(static_cast<f64>(r.L()->end.value));
+        AUREA_CHECK_NEAR(a, s0, 0.01);
+        AUREA_CHECK_NEAR(b, s1, 1.0);
+    }
+    // Herói: o meio é bem mais lento que as pontas, e o gráfico mostra isso.
+    AUREA_CHECK(r.e.apply_speed_curve(id, 2));
+    const u32 w = r.e.query_speed_curve(id, 32, q.data(), static_cast<u32>(q.size()));
+    AUREA_CHECK_EQ(q[5], 1.0f);
+    const u32 keys = static_cast<u32>(q[1]);
+    AUREA_CHECK_EQ(keys, 6u);
+    AUREA_CHECK_EQ(w, 8u + 32u + keys * 3u);
+    AUREA_CHECK(q[8 + 16] < q[8] * 0.3f);
+    AUREA_CHECK(q[8 + 32 + 2] == static_cast<f32>(static_cast<u8>(Interpolation::EaseInOut)));
+    // Arrastar um ponto: tempo preso entre os vizinhos, velocidade nos limites.
+    const i64 k1 = static_cast<i64>(q[8 + 32 + 3]);
+    AUREA_CHECK_EQ(r.e.edit_speed_key(id, 1, k1 + 1000, 99.0f, -1), 1);
+    const Track* st = r.L()->speed_track();
+    AUREA_CHECK(st && st->keys[1].time.value < st->keys[2].time.value);
+    AUREA_CHECK_NEAR(st->keys[1].value, 16.0f, 1e-5f);
+    // Inserir no meio herda o valor que a curva já tem (nada muda).
+    const f64 before = r.L()->source_frame(FrameIndex{100});
+    const i32 ins = r.e.edit_speed_key(id, -1, r.L()->local_time(FrameIndex{80}).value, 0.0f, -1);
+    AUREA_CHECK(ins > 0);
+    AUREA_CHECK_NEAR(r.L()->source_frame(FrameIndex{100}), before, 0.5);
+    AUREA_CHECK(r.e.remove_speed_key(id, static_cast<u32>(ins)));
+    // Tirar a curva: velocidade constante média, a mesma fonte.
+    const f64 endBefore = r.L()->source_frame_f(static_cast<f64>(r.L()->end.value));
+    AUREA_CHECK(r.e.apply_speed_curve(id, 8));
+    AUREA_CHECK(r.L()->speed_track() == nullptr);
+    AUREA_CHECK_NEAR(r.L()->source_frame_f(static_cast<f64>(r.L()->end.value)), endBefore, 0.5);
+    // Remapeamento: o gráfico mostra a inclinação da curva de tempo.
+    AUREA_CHECK(r.e.apply_speed_ramp(id, 0));
+    (void)r.e.query_speed_curve(id, 32, q.data(), static_cast<u32>(q.size()));
+    AUREA_CHECK_EQ(q[5], 2.0f);
+    AUREA_CHECK_EQ(q[1], 0.0f);
+    AUREA_CHECK_NEAR(q[8 + 16], static_cast<f32>(endBefore - s0) / static_cast<f32>(len), 0.05f);
+    // Escolher a curva desliga o remapeamento (a curva de tempo fica guardada).
+    AUREA_CHECK(r.e.apply_speed_curve(id, 0));
+    AUREA_CHECK(!r.L()->timeRemapEnabled);
+    AUREA_CHECK(!r.L()->timeRemap.keys.empty());
+    // Desfazer volta passo a passo.
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK(r.L()->timeRemapEnabled);
+}

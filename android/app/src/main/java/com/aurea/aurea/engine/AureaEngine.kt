@@ -858,6 +858,13 @@ class AureaEngine private constructor() {
     fun editTimeRemapKey(layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int =
         nativeEditTimeRemapKey(nativeHandle, layer, index, frame, value, interp)
     fun removeTimeRemapKey(layer: Long, index: Int): Boolean = nativeRemoveTimeRemapKey(nativeHandle, layer, index)
+    /** Gráfico de velocidade (`query_speed_curve`): cabeçalho de 8, amostras e chaves (tempo, ×, interpolação). */
+    fun querySpeedCurve(layer: Long, samples: Int, out: FloatArray): Int = nativeQuerySpeedCurve(nativeHandle, layer, samples, out)
+    /** Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar, 8 tirar. */
+    fun applySpeedCurve(layer: Long, preset: Int): Boolean = nativeApplySpeedCurve(nativeHandle, layer, preset)
+    fun editSpeedKey(layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int =
+        nativeEditSpeedKey(nativeHandle, layer, index, frame, speed, interp)
+    fun removeSpeedKey(layer: Long, index: Int): Boolean = nativeRemoveSpeedKey(nativeHandle, layer, index)
     /** Ao contrário: espelha a curva de tempo no clipe (liga o remapeamento se preciso). */
     fun reverseTimeRemap(layer: Long): Boolean = nativeReverseTimeRemap(nativeHandle, layer)
     fun setKeepPitch(layer: Long, on: Boolean): Boolean = nativeSetKeepPitch(nativeHandle, layer, on)
@@ -1269,6 +1276,10 @@ class AureaEngine private constructor() {
     private external fun nativeQueryTimeRemap(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeQuerySpeedCurve(handle: Long, layer: Long, samples: Int, out: FloatArray): Int
+    private external fun nativeApplySpeedCurve(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeEditSpeedKey(handle: Long, layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int
+    private external fun nativeRemoveSpeedKey(handle: Long, layer: Long, index: Int): Boolean
     private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
     private external fun nativeSetKeepPitch(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean

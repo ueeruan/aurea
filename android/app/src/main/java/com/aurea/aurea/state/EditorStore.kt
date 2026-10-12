@@ -1672,6 +1672,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         }
         refreshShape3d(id)
+        refreshRigPose(id)
         modelShadows = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
             val sh = FloatArray(2)
             if (engine.queryModelShadows(id, sh)) (sh[0] >= 0.5f) to (sh[1] >= 0.5f) else null
@@ -2111,6 +2112,66 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             if (novo != null && shapeParts?.contentEquals(novo) == true) shapeParts else novo
         } else null
         if (info == null || id != shapePartLayer || shapePart >= info.partCount) shapePart = -1
+    }
+
+    // --- Pose do rig 3D (0.1.8): só na Cena 3D, como o modo de pose do Blender --------
+    /** Ossos do modelo principal (`query_model_bones`, BONE_FLOATS por osso); nulo = sem rig. */
+    var poseBones by mutableStateOf<FloatArray?>(null)
+        private set
+    /** Modo de pose ligado (a Cena 3D desenha as juntas e o dedo gira o osso). */
+    var rigPoseMode by mutableStateOf(false)
+        private set
+    /** Nó do osso escolhido (−1 = nenhum: o dedo orbita a cena). */
+    var poseBone by mutableIntStateOf(-1)
+        private set
+    private var poseGestureSent = false
+
+    private fun refreshRigPose(id: Long?) {
+        val model = id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind
+        poseBones = if (model && id != null) {
+            val need = engine.queryModelBones(id, null)
+            if (need <= 0) null else {
+                val out = FloatArray(need)
+                val n = engine.queryModelBones(id, out)
+                val novo = if (n == need) out else null
+                if (novo != null && poseBones?.contentEquals(novo) == true) poseBones else novo
+            }
+        } else null
+        if (poseBones == null) { rigPoseMode = false; poseBone = -1 }
+    }
+
+    fun setRigPose(on: Boolean) {
+        rigPoseMode = on && poseBones != null
+        if (!rigPoseMode) poseBone = -1
+    }
+
+    fun choosePoseBone(node: Int) { poseBone = node }
+
+    /** Dedo na cena: gira o osso escolhido (px da composição; twist em graus). */
+    fun dragPoseBone(dx: Float, dy: Float, twist: Float) {
+        val id = primary ?: return
+        if (poseBone < 0) return
+        val continuing = gestureDepth > 0 && poseGestureSent
+        if (engine.dragBone(id, poseBone, dx, dy, twist, continuing) && gestureDepth > 0) poseGestureSent = true
+        refreshDetail()
+    }
+
+    fun endPoseGesture() { poseGestureSent = false }
+
+    /** Keyframe da pose no cabeçote: o osso escolhido, ou todos ([all]). */
+    fun togglePoseKey(all: Boolean) {
+        val id = primary ?: return
+        val node = if (all) -1 else poseBone
+        if (!all && node < 0) return
+        if (engine.toggleBoneKey(id, node) < 0) showToast(appText(R.string.shape3d_key_outside))
+        refreshNow()
+    }
+
+    fun resetPose(all: Boolean) {
+        val id = primary ?: return
+        engine.resetBonePose(id, if (all) -1 else poseBone)
+        thumbnails.unalias(id)
+        refreshNow()
     }
 
     /** A parte escolhida vale só para ESTA camada (outra camada = a forma inteira). */

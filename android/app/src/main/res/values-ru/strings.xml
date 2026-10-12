@@ -4144,4 +4144,11 @@
     <string name="fx_desc_time_flow_retime">Плавное замедление: недостающие кадры создаются по движению пикселей (optical flow), скорость можно анимировать.</string>
     <string name="fx_desc_time_flow_motion_blur">Естественное размытие движения, рассчитанное по самому видео: каждый пиксель размывается в сторону своего движения.</string>
     <string name="model3d_cameras_added">Камер из файла на таймлайне: %1$d — глазок слоя включает и выключает.</string>
+    <string name="rig_pose">Поза</string>
+    <string name="rig_pose_hint">Коснитесь сустава, чтобы выбрать кость. Перетаскивание по пустому месту вращает сцену.</string>
+    <string name="rig_pose_hint_bone">Перетаскивайте, чтобы вращать кость; двумя пальцами — вокруг взгляда. Поставьте ключевой кадр для анимации.</string>
+    <string name="rig_key_bone">Ключ кости</string>
+    <string name="rig_key_all">Ключ всех костей</string>
+    <string name="rig_reset_bone">Сбросить кость</string>
+    <string name="rig_reset_all">Сбросить позу</string>
 </resources>

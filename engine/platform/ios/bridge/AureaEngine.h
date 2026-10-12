@@ -860,6 +860,12 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index;
 /// Câmeras do arquivo do modelo 3D (glTF/FBX); a importação já as põe na timeline.
 - (uint32_t)modelCameraCount:(long long)layerId;
+/// Pose do rig 3D (0.1.8): ossos (10 floats por osso, ver Engine::query_model_bones),
+/// giro pelo dedo (trackball), keyframe (node −1 = todos) e reset.
+- (NSArray<NSNumber*>*)modelBones:(long long)layerId;
+- (BOOL)dragBone:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy twist:(float)twist continuing:(BOOL)continuing;
+- (int32_t)toggleBoneKey:(long long)layerId node:(int32_t)node;
+- (BOOL)resetBonePose:(long long)layerId node:(int32_t)node;
 - (uint32_t)addModelCameras:(long long)layerId;
 - (long long)addVector:(uint32_t)preset;
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;

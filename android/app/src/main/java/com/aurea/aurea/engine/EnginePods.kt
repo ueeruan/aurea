@@ -885,6 +885,8 @@ object TrackProperty {
     const val MASK_PARAM = 43
     /** Whole distortion mesh; effect is the stable instance id, param is zero. */
     const val MESH_WARP = 44
+    /** Osso do rig 3D (pose na Cena 3D): effect = nó da junta, param 0..2 = rotação X/Y/Z °. */
+    const val BONE_POSE = 45
     const val VECTOR_PARAM = 34
     const val SHAPE_PARAM = 35
     const val PARTICLE_PARAM = 36

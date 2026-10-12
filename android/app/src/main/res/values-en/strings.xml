@@ -4183,4 +4183,11 @@ to edit the curve.</string>
     <string name="fx_desc_time_flow_retime">Smooth slow motion: missing frames are created from pixel motion (optical flow), with animatable speed.</string>
     <string name="fx_desc_time_flow_motion_blur">Natural motion blur computed from the footage itself: each pixel blurs in the direction it moves.</string>
     <string name="model3d_cameras_added">%1$d camera(s) from the file added to the timeline — the layer\'s eye turns it on and off.</string>
+    <string name="rig_pose">Pose</string>
+    <string name="rig_pose_hint">Tap a joint to pick the bone. Dragging on empty space orbits the scene.</string>
+    <string name="rig_pose_hint_bone">Drag to rotate the bone; two fingers twist around the view. Add a keyframe to animate.</string>
+    <string name="rig_key_bone">Bone keyframe</string>
+    <string name="rig_key_all">Key all bones</string>
+    <string name="rig_reset_bone">Reset bone</string>
+    <string name="rig_reset_all">Reset pose</string>
 </resources>

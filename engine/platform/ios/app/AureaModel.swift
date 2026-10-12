@@ -1773,6 +1773,10 @@ final class AureaModel: ObservableObject {
         if !NSDictionary(dictionary: nextDetail).isEqual(to: detail) { detail = nextDetail }
         let nextLens: [Float] = selectedLayer?.kind == 8 ? engine.cameraLens(layerId).map(\.floatValue) : []
         if nextLens != cameraLens { cameraLens = nextLens }
+        // Pose do rig 3D (0.1.8): ossos do modelo escolhido na Cena 3D.
+        let nextBones: [Float] = sceneEditor && selectedLayer?.kind == 10 ? engine.modelBones(layerId).map(\.floatValue) : []
+        if nextBones != poseBones { poseBones = nextBones }
+        if poseBones.isEmpty && (rigPoseMode || poseBone >= 0) { rigPoseMode = false; poseBone = -1 }
         if panel == .mask || panel == .vector { refreshMasks() }
         if let effectId = selectedEffectId {
             loadParams(layerId: layerId, effectId: effectId)
@@ -3335,6 +3339,10 @@ final class AureaModel: ObservableObject {
     }
 
     @Published var sceneEditor = false
+    /// Pose do rig 3D (0.1.8): ossos do modelo, modo de pose e o osso escolhido (nó; −1 = nenhum).
+    @Published var poseBones: [Float] = []
+    @Published var rigPoseMode = false
+    @Published var poseBone: Int32 = -1
     @Published var sceneYaw: Float = -30
     @Published var scenePitch: Float = 20
     @Published var sceneDistance: Float = 3
@@ -5296,6 +5304,47 @@ extension AureaModel {
     }
 
     /// Os 9 canais da parte no cabeçote (posição, rotação °, escala) + bits de keyframe.
+    // MARK: Pose do rig 3D (0.1.8) — RigPoseStage.kt
+    /// Floats por osso de `Engine::query_model_bones`.
+    static let boneFloats = 10
+    var rigPoseActive: Bool { sceneEditor && rigPoseMode && selection.count == 1 && !poseBones.isEmpty }
+    func setRigPose(_ on: Bool) {
+        rigPoseMode = on && !poseBones.isEmpty
+        if !rigPoseMode { poseBone = -1 }
+    }
+    func choosePoseBone(_ node: Int32) { poseBone = node }
+    /// Junta mais perto (px da composição) dentro de `reach`: o NÓ do osso, ou −1.
+    func pickPoseBone(_ point: SIMD2<Float>, reach: Float) -> Int32 {
+        var best = reach, hit: Int32 = -1
+        let f = Self.boneFloats
+        for i in 0..<(poseBones.count / f) where poseBones[i * f + 9] > 0.5 {
+            let d = hypot(point.x - poseBones[i * f + 7], point.y - poseBones[i * f + 8])
+            if d < best { best = d; hit = Int32(poseBones[i * f]) }
+        }
+        return hit
+    }
+    private var poseGestureSent = false
+    /// Dedo na cena: gira o osso escolhido (px da composição; twist em graus).
+    func dragPoseBone(dx: Float, dy: Float, twist: Float) {
+        guard let id = primarySelection, poseBone >= 0 else { return }
+        if engine.dragBone(id, node: poseBone, dx: dx, dy: dy, twist: twist, continuing: poseGestureSent) { poseGestureSent = true }
+        refreshSelectedLayer(refreshEffectStack: false)
+    }
+    func endPoseGesture() { poseGestureSent = false }
+    func togglePoseKey(all: Bool) {
+        guard let id = primarySelection else { return }
+        let node: Int32 = all ? -1 : poseBone
+        guard all || node >= 0 else { return }
+        if engine.toggleBoneKey(id, node: node) < 0 { toast = AureaText.t("shape3d_key_outside") }
+        refreshModel(force: true)
+    }
+    func resetPose(all: Bool) {
+        guard let id = primarySelection else { return }
+        _ = engine.resetBonePose(id, node: all ? -1 : poseBone)
+        unaliasThumbs(id)
+        refreshModel(force: true)
+    }
+
     func shapePartValues(_ id: Int64, part: Int) -> [Float]? {
         let p = engine.shape3DParts(id).map(\.floatValue)
         let o = part * Shape3DState.partFloats

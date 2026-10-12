@@ -4136,4 +4136,11 @@ para editar la curva.</string>
     <string name="fx_desc_time_flow_retime">Cámara lenta fluida: los fotogramas que faltan se crean a partir del movimiento de los píxeles (optical flow), con velocidad animable.</string>
     <string name="fx_desc_time_flow_motion_blur">Desenfoque de movimiento natural calculado a partir del propio metraje: cada píxel se desenfoca en la dirección en que se mueve.</string>
     <string name="model3d_cameras_added">%1$d cámara(s) del archivo en la línea de tiempo — el ojo de la capa la enciende y apaga.</string>
+    <string name="rig_pose">Posar</string>
+    <string name="rig_pose_hint">Toca una articulación para elegir el hueso. Arrastrar en el vacío gira la escena.</string>
+    <string name="rig_pose_hint_bone">Arrastra para girar el hueso; dos dedos giran alrededor de la vista. Marca el keyframe para animar.</string>
+    <string name="rig_key_bone">Keyframe del hueso</string>
+    <string name="rig_key_all">Keyframe de todos</string>
+    <string name="rig_reset_bone">Restablecer hueso</string>
+    <string name="rig_reset_all">Restablecer pose</string>
 </resources>

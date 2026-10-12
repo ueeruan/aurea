@@ -4132,4 +4132,11 @@
     <string name="fx_desc_time_flow_retime">स्मूद स्लो मोशन: छूटे फ़्रेम पिक्सेल की हलचल (optical flow) से बनते हैं, स्पीड एनिमेट हो सकती है।</string>
     <string name="fx_desc_time_flow_motion_blur">फ़ुटेज से ही गणना किया गया प्राकृतिक मोशन ब्लर: हर पिक्सेल अपनी चाल की दिशा में धुंधला होता है।</string>
     <string name="model3d_cameras_added">फ़ाइल के %1$d कैमरे टाइमलाइन में — लेयर की आँख से चालू/बंद करें।</string>
+    <string name="rig_pose">पोज़</string>
+    <string name="rig_pose_hint">हड्डी चुनने के लिए किसी जोड़ पर टैप करें। खाली जगह पर खींचने से सीन घूमता है।</string>
+    <string name="rig_pose_hint_bone">हड्डी घुमाने के लिए खींचें; दो उँगलियाँ व्यू के चारों ओर घुमाती हैं। एनिमेट करने के लिए कीफ़्रेम लगाएँ।</string>
+    <string name="rig_key_bone">हड्डी का कीफ़्रेम</string>
+    <string name="rig_key_all">सभी का कीफ़्रेम</string>
+    <string name="rig_reset_bone">हड्डी रीसेट</string>
+    <string name="rig_reset_all">पोज़ रीसेट</string>
 </resources>

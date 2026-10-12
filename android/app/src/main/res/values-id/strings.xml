@@ -4126,4 +4126,11 @@ untuk mengedit kurvanya.</string>
     <string name="fx_desc_time_flow_retime">Gerak lambat mulus: frame yang hilang dibuat dari gerakan piksel (optical flow), dengan kecepatan yang bisa dianimasikan.</string>
     <string name="fx_desc_time_flow_motion_blur">Motion blur alami yang dihitung dari rekamannya sendiri: setiap piksel buram ke arah geraknya.</string>
     <string name="model3d_cameras_added">%1$d kamera dari file ada di timeline — ikon mata layer menyalakan dan mematikannya.</string>
+    <string name="rig_pose">Pose</string>
+    <string name="rig_pose_hint">Ketuk sendi untuk memilih tulang. Menyeret di area kosong memutar adegan.</string>
+    <string name="rig_pose_hint_bone">Seret untuk memutar tulang; dua jari memutar mengelilingi pandangan. Tandai keyframe untuk menganimasikan.</string>
+    <string name="rig_key_bone">Keyframe tulang</string>
+    <string name="rig_key_all">Keyframe semua</string>
+    <string name="rig_reset_bone">Atur ulang tulang</string>
+    <string name="rig_reset_all">Atur ulang pose</string>
 </resources>

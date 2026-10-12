@@ -206,6 +206,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineMeshWarp.cpp
     src/engine/EnginePuppet.cpp
     src/engine/EngineShape3D.cpp
+    src/engine/EngineRigPose.cpp
     src/engine/EngineMedia.cpp
     src/engine/EngineLayerAnim.cpp
     src/engine/EngineRoto.cpp
@@ -222,6 +223,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/Text3D.cpp
     src/scene3d/Shape3D.cpp
     src/scene3d/PartEffects.cpp
+    src/scene3d/RigPose.cpp
     src/scene3d/MaterialPreview.cpp
     src/engine/Engine.cpp
     src/engine/EngineRealCamera.cpp

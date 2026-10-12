@@ -867,6 +867,14 @@ class AureaEngine private constructor() {
     fun removeSpeedKey(layer: Long, index: Int): Boolean = nativeRemoveSpeedKey(nativeHandle, layer, index)
     /** Câmeras do arquivo do modelo 3D (glTF/FBX); a importação já as põe na timeline. */
     fun modelCameraCount(layer: Long): Int = nativeModelCameraCount(nativeHandle, layer)
+    /** Ossos posáveis do modelo (`query_model_bones`, BONE_FLOATS por osso); array curto devolve o tamanho pedido. */
+    fun queryModelBones(layer: Long, out: FloatArray?): Int = nativeQueryModelBones(nativeHandle, layer, out)
+    /** Dedo na cena 3D: gira o osso como trackball (px da composição; twist em graus em volta do olhar). */
+    fun dragBone(layer: Long, node: Int, dx: Float, dy: Float, twist: Float, continuing: Boolean): Boolean =
+        nativeDragBone(nativeHandle, layer, node, dx, dy, twist, continuing)
+    /** Keyframe do osso no cabeçote (node −1 = todos): 1 marcou, 0 tirou, −1 fora da camada. */
+    fun toggleBoneKey(layer: Long, node: Int): Int = nativeToggleBoneKey(nativeHandle, layer, node)
+    fun resetBonePose(layer: Long, node: Int): Boolean = nativeResetBonePose(nativeHandle, layer, node)
     fun addModelCameras(layer: Long): Int = nativeAddModelCameras(nativeHandle, layer)
     /** Ao contrário: espelha a curva de tempo no clipe (liga o remapeamento se preciso). */
     fun reverseTimeRemap(layer: Long): Boolean = nativeReverseTimeRemap(nativeHandle, layer)
@@ -1284,6 +1292,10 @@ class AureaEngine private constructor() {
     private external fun nativeEditSpeedKey(handle: Long, layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int
     private external fun nativeRemoveSpeedKey(handle: Long, layer: Long, index: Int): Boolean
     private external fun nativeModelCameraCount(handle: Long, layer: Long): Int
+    private external fun nativeQueryModelBones(handle: Long, layer: Long, out: FloatArray?): Int
+    private external fun nativeDragBone(handle: Long, layer: Long, node: Int, dx: Float, dy: Float, twist: Float, continuing: Boolean): Boolean
+    private external fun nativeToggleBoneKey(handle: Long, layer: Long, node: Int): Int
+    private external fun nativeResetBonePose(handle: Long, layer: Long, node: Int): Boolean
     private external fun nativeAddModelCameras(handle: Long, layer: Long): Int
     private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
     private external fun nativeSetKeepPitch(handle: Long, layer: Long, on: Boolean): Boolean

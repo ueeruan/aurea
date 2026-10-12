@@ -3080,6 +3080,24 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation {
     auto* e = self.engine; return e ? e->edit_speed_key(layerId, index, time, speed, interpolation) : -1;
 }
+- (NSArray<NSNumber*>*)modelBones:(long long)layerId {
+    auto* e = self.engine; if (!e) return @[];
+    const auto need = e->query_model_bones(static_cast<aurea::u64>(layerId), nullptr, 0);
+    if (!need) return @[];
+    std::vector<float> v(need);
+    const auto w = e->query_model_bones(static_cast<aurea::u64>(layerId), v.data(), need);
+    return floats_to_array(v.data(), w);
+}
+- (BOOL)dragBone:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy twist:(float)twist continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && node >= 0 && e->drag_bone(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(node), dx, dy, twist, continuing);
+}
+- (int32_t)toggleBoneKey:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; return e ? e->toggle_bone_key(static_cast<aurea::u64>(layerId), node) : -1;
+}
+- (BOOL)resetBonePose:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; return e && e->reset_bone_pose(static_cast<aurea::u64>(layerId), node);
+}
 - (uint32_t)modelCameraCount:(long long)layerId {
     auto* e = self.engine; return e ? e->model_camera_count(static_cast<aurea::u64>(layerId)) : 0;
 }

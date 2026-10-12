@@ -551,6 +551,23 @@ public:
     /// arquivo em keyframes); `add_model_cameras` põe de novo (um passo de
     /// desfazer) e devolve quantas entraram.
     [[nodiscard]] u32 model_camera_count(u64 layer) noexcept;
+    // --- Pose do rig 3D (0.1.8) — scene3d/RigPose.hpp ----------------------
+    /// Ossos posáveis do modelo no cabeçote, kBoneFloats por osso: [0] nó,
+    /// [1] posição (na lista) do osso pai ou −1, [2..4] rotação da pose X/Y/Z °,
+    /// [5] canais com keyframe (bits), [6] key no cabeçote (0/1), [7..8] posição
+    /// na tela (px da composição, a vista da cena 3D quando ligada), [9] na
+    /// frente da câmera. Devolve os floats necessários (capacity 0 = medir).
+    static constexpr u32 kBoneFloats = 10;
+    u32 query_model_bones(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Dedo na cena: gira o osso como uma trackball (dx, dy em px da
+    /// composição; twist em graus em volta do olhar). Osso com keyframe grava
+    /// keyframe no cabeçote; sem, muda a pose parada. `continuing` = mesmo gesto.
+    bool drag_bone(u64 layerId, u32 node, f32 dxPx, f32 dyPx, f32 twistDeg, bool continuing) noexcept;
+    /// Marca/tira keyframe do osso no cabeçote (node < 0 = todos os ossos, como
+    /// o "inserir keyframe" do Blender). 1 marcou, 0 tirou, −1 fora da camada.
+    i32 toggle_bone_key(u64 layerId, i32 node) noexcept;
+    /// Volta o osso (node < 0 = todos) à pose do arquivo: apaga as trilhas.
+    bool reset_bone_pose(u64 layerId, i32 node) noexcept;
     u32 add_model_cameras(u64 layer) noexcept;
     /// Põe um efeito de PARTE (Animar parte 3D, Esconder partes 3D, Trocar
     /// textura 3D) na camada 3D já apontando para a parte `part` (0 = a 1ª;

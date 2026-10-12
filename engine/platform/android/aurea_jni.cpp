@@ -3081,6 +3081,36 @@ AUREA_JNI jboolean AUREA_FN(nativeRemoveTimeRemapKey)(JNIEnv*, jclass, jlong han
     return c && index >= 0 && c->engine.remove_time_remap_key(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jint AUREA_FN(nativeQueryModelBones)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    const u32 need = c->engine.query_model_bones(static_cast<u64>(layer), nullptr, 0);
+    if (!out || need == 0) return static_cast<jint>(need);
+    const jsize n = env->GetArrayLength(out);
+    if (static_cast<u32>(n) < need) return static_cast<jint>(need);
+    std::vector<f32> v(need);
+    const u32 w = c->engine.query_model_bones(static_cast<u64>(layer), v.data(), need);
+    if (w && w <= need) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(w), v.data());
+    return static_cast<jint>(w);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDragBone)(JNIEnv*, jclass, jlong handle, jlong layer, jint node, jfloat dx, jfloat dy,
+                                           jfloat twist, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && node >= 0 && c->engine.drag_bone(static_cast<u64>(layer), static_cast<u32>(node), dx, dy, twist, continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeToggleBoneKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint node) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.toggle_bone_key(static_cast<u64>(layer), node) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeResetBonePose)(JNIEnv*, jclass, jlong handle, jlong layer, jint node) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.reset_bone_pose(static_cast<u64>(layer), node) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jint AUREA_FN(nativeModelCameraCount)(JNIEnv*, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     return c ? static_cast<jint>(c->engine.model_camera_count(static_cast<u64>(layer))) : 0;

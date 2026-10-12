@@ -136,7 +136,7 @@ struct PreviewMetalView: UIViewRepresentable {
         private var pinchThreeD = false
         private var pinchTracker = StagePinchTracker()
         private var pinchLayer: Int64?
-        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, resize, scene, pivot, view, viewPan }
+        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, resize, scene, pivot, view, viewPan, rigPose }
         // Face Pivô aberta: o arrasto move o pivô (PivotDragSession).
         private var pivotSession: PivotDragSession?
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
@@ -476,6 +476,45 @@ struct PreviewMetalView: UIViewRepresentable {
             startRotation = vector(model.detail["rotation"])
             startKind = Int32(StageGeom.layerKind(model.detail))
         }
+        // Pose do rig: estado do gesto em curso.
+        private var rigNear: Int32 = -1
+        private var rigMoved = false
+        private var rigBegan = false
+        private var rigAngle: CGFloat?
+        private var rigLast = SIMD2<Float>(0, 0)
+        /// Um dedo gira o osso (trackball, px da composição); dois giram em volta do olhar.
+        private func rigPoseEvent(_ pressed: [StageTouchPoint], view: UIView) {
+            if pressed.isEmpty {
+                if rigBegan { model.endGesture(); model.endPoseGesture() }
+                if !rigMoved && rigNear < 0 { model.choosePoseBone(-1) }   // toque no vazio solta o osso
+                stageFinger = nil; stageMode = .idle
+                return
+            }
+            if pressed.count >= 2 {
+                hadMultipleTouches = true
+                let a = pressed[0].position, b = pressed[1].position
+                let angle = atan2(b.y - a.y, b.x - a.x) * 180 / .pi
+                defer { rigAngle = angle }
+                rigMoved = true
+                guard let previous = rigAngle else { return }
+                var twist = Float(angle - previous)
+                while twist > 180 { twist -= 360 }
+                while twist < -180 { twist += 360 }
+                if !rigBegan { model.beginGesture("posar osso"); rigBegan = true }
+                model.dragPoseBone(dx: 0, dy: 0, twist: twist)
+                return
+            }
+            if rigAngle != nil { return }   // voltou a um dedo depois do giro: não vira arrasto
+            guard let finger = pressed.first(where: { $0.id == stageFinger }) ?? pressed.first else { return }
+            if !rigMoved && hypot(finger.position.x - stageDown.x, finger.position.y - stageDown.y) < 8 { return }
+            let point = compositionPoint(finger.position, view: view)
+            rigMoved = true
+            let dx = point.x - rigLast.x, dy = point.y - rigLast.y
+            rigLast = point
+            if dx == 0 && dy == 0 { return }
+            if !rigBegan { model.beginGesture("posar osso"); rigBegan = true }
+            model.dragPoseBone(dx: dx, dy: dy, twist: 0)
+        }
         /// Tipo da camada no toque: a regra de profundidade do motor (Z de conteúdo acompanha X).
         private var startKind: Int32 = 0
         private var previewBasis: [NSNumber] = []
@@ -511,6 +550,14 @@ struct PreviewMetalView: UIViewRepresentable {
                    let session = PivotDragSession(model: model, pivot: pivot) {
                     pivotSession = session; stageMode = .pivot; return
                 }
+                // Pose do rig (RigPoseStage.kt): junta perto do dedo ou osso escolhido = gira o osso.
+                let poseNear = model.rigPoseActive ? model.pickPoseBone(compositionPoint(first.position, view: view), reach: 36 * scaleFactor(view)) : -1
+                if model.rigPoseActive && (poseNear >= 0 || model.poseBone >= 0) {
+                    if poseNear >= 0 && poseNear != model.poseBone { model.choosePoseBone(poseNear) }
+                    stageMode = .rigPose; rigNear = poseNear; rigMoved = false; rigBegan = false; rigAngle = nil
+                    rigLast = compositionPoint(first.position, view: view)
+                    return
+                }
                 if !model.sceneEditor && startShape(at: first.position, view: view) { stageMode = .shape }
                 else if startGizmo(at: first.position, view: view) { stageMode = .gizmo }
                 else if !model.sceneEditor && startResize(at: first.position, view: view) { stageMode = .resize }
@@ -544,6 +591,10 @@ struct PreviewMetalView: UIViewRepresentable {
             }
             if stageMode == .pivot {
                 pivotEvent(pressed, view: view)
+                return
+            }
+            if stageMode == .rigPose {
+                rigPoseEvent(pressed, view: view)
                 return
             }
             if stageMode == .scene {

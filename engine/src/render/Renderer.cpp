@@ -16,6 +16,7 @@
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
+#include "aurea/scene3d/RigPose.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
@@ -479,7 +480,10 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
         const f64 local = time - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
         t = scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale);
     }
-    scene3d::evaluate_pose(asset, clip, t, pose, workspace);
+    // Rig posado pelo usuário (trilhas BonePose): entra antes das juntas.
+    thread_local std::vector<scene3d::BoneOffset> boneOffsets;
+    scene3d::bone_offsets(l, materialTime, boneOffsets);
+    scene3d::evaluate_pose(asset, clip, t, pose, workspace, boneOffsets.data(), boneOffsets.size());
     scene3d::apply_text3d_layout(asset, l, materialTime, pose.nodeWorld);
     // Formas 3D: o layout das partes (Shape 3D Layout) antes das trilhas de cada parte.
     scene3d::apply_shape3d_layout(asset, l, materialTime, pose.nodeWorld);
@@ -502,6 +506,7 @@ bool can_share_static_pose(const Layer& layer, const scene3d::SceneAsset& asset)
     if (layer.model.animationClip >= 0 && layer.model.animationClip < static_cast<i32>(asset.animations.size())) return false;
     if (!layer.model.materials.empty()) return false;
     if (scene3d::has_part_effects(layer)) return false;
+    if (scene3d::has_bone_pose(layer)) return false;
     for (u32 i = 0; i < layer.tracks.size(); ++i) {
         const auto property = layer.tracks.at(i).property;
         if (property == TrackProperty::MaterialParam || (asset.shapeParts && property == TrackProperty::ShapePart)) return false;

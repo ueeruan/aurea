@@ -33,11 +33,20 @@ struct PoseWorkspace {
     std::vector<std::pair<i32, i32>> todo;
 };
 
+/// Pose do usuário por cima da animação (RigPose.hpp): rotação extra no
+/// espaço LOCAL da junta (`euler` em graus é o que a trilha guarda).
+struct BoneOffset {
+    i32 node = -1;
+    Quat rotation = Quat::identity();
+    Vec3 euler{0.0f, 0.0f, 0.0f};
+};
+
 /// Tempo local da layer (s) → tempo do clipe, em laço. Clipe sem duração → 0.
 [[nodiscard]] f32 clip_time(const Animation& clip, f64 layerSeconds) noexcept;
 
 /// Pose do clipe `clip` (−1 = pose de repouso) no instante `t` (s, já no
 /// intervalo do clipe).
-void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWorkspace* workspace = nullptr);
+void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWorkspace* workspace = nullptr,
+                   const BoneOffset* offsets = nullptr, usize offsetCount = 0);
 
 } // namespace aurea::scene3d

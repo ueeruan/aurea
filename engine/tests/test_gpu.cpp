@@ -13502,6 +13502,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "Object3DEffectsGpu.inl"
 #include "FlowTimeGpu.inl"
 #include "ModelCameraGpu.inl"
+#include "RigPoseGpu.inl"
 #include "GlesFallbackGpu.inl"
 
 // -----------------------------------------------------------------------------

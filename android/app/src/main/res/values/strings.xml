@@ -3313,7 +3313,7 @@
     <string name="rig_animate">Animar</string>
     <string name="rig_delete_joint">Apagar junta</string>
     <string name="rig_auto">Automático</string>
-    <string name="rig_done">Pronto</string>
+    <string name="rig_done">Concluir</string>
     <string name="rig_hint_setup">Arraste as juntas até o corpo · toque no vazio cria junta</string>
     <string name="rig_hint_animate">Arraste a mão, o pé ou a cabeça (grava keyframe)</string>
     <!-- Quarentena de projeto (ProjectGuard) -->
@@ -4216,4 +4216,11 @@
     <string name="fx_desc_time_flow_retime">Câmera lenta lisa: os quadros que faltam são criados pelo movimento dos pixels (optical flow), com velocidade animável.</string>
     <string name="fx_desc_time_flow_motion_blur">Desfoque de movimento natural calculado da própria filmagem: cada pixel borra na direção em que se move.</string>
     <string name="model3d_cameras_added">%1$d câmera(s) do arquivo na timeline — o olho da camada liga e desliga.</string>
+    <string name="rig_pose">Posar</string>
+    <string name="rig_pose_hint">Toque numa junta para escolher o osso. Arrastar no vazio gira a cena.</string>
+    <string name="rig_pose_hint_bone">Arraste para girar o osso; dois dedos giram em volta do olhar. Marque o keyframe para animar.</string>
+    <string name="rig_key_bone">Keyframe do osso</string>
+    <string name="rig_key_all">Keyframe de todos</string>
+    <string name="rig_reset_bone">Resetar osso</string>
+    <string name="rig_reset_all">Resetar pose</string>
 </resources>

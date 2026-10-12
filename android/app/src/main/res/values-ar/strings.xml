@@ -4174,4 +4174,11 @@
     <string name="fx_desc_time_flow_retime">حركة بطيئة سلسة: تُنشأ الإطارات الناقصة من حركة البكسلات (optical flow)، مع سرعة قابلة للتحريك.</string>
     <string name="fx_desc_time_flow_motion_blur">ضبابية حركة طبيعية محسوبة من اللقطات نفسها: يتموّه كل بكسل في اتجاه حركته.</string>
     <string name="model3d_cameras_added">%1$d كاميرا من الملف في الخط الزمني — عين الطبقة تشغّلها وتطفئها.</string>
+    <string name="rig_pose">وضعية</string>
+    <string name="rig_pose_hint">اضغط على مفصل لاختيار العظمة. السحب في المساحة الفارغة يدير المشهد.</string>
+    <string name="rig_pose_hint_bone">اسحب لتدوير العظمة؛ إصبعان يديران حول اتجاه النظر. ضع إطارًا مفتاحيًا للتحريك.</string>
+    <string name="rig_key_bone">إطار مفتاحي للعظمة</string>
+    <string name="rig_key_all">إطار مفتاحي للكل</string>
+    <string name="rig_reset_bone">إعادة ضبط العظمة</string>
+    <string name="rig_reset_all">إعادة ضبط الوضعية</string>
 </resources>

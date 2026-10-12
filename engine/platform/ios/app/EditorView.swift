@@ -482,7 +482,31 @@ private struct ShellStageBanner: View {
                     let color: Color = lines[i + 4] == 1 ? .yellow : lines[i + 4] == 2 ? .cyan : .gray.opacity(0.22)
                     context.stroke(line, with: .color(color), lineWidth: 1)
                 }
-                if TrackballOverlay.draw(&context, model: model, screen: screen) {
+                if model.rigPoseActive {
+                    // Pose do rig (RigPoseStage.kt): juntas e ossos no lugar do gizmo.
+                    let b = model.poseBones, f = AureaModel.boneFloats, chosen = model.poseBone
+                    let count = b.count / f
+                    for i in 0..<count {
+                        let parent = Int(b[i * f + 1])
+                        guard parent >= 0, parent < count, b[i * f + 9] > 0.5, b[parent * f + 9] > 0.5 else { continue }
+                        var line = Path()
+                        line.move(to: screen(b[parent * f + 7], b[parent * f + 8])); line.addLine(to: screen(b[i * f + 7], b[i * f + 8]))
+                        let on = Int32(b[i * f]) == chosen || Int32(b[parent * f]) == chosen
+                        context.stroke(line, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        context.stroke(line, with: .color(on ? AureaColors.accent : .white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    }
+                    for i in 0..<count where b[i * f + 9] > 0.5 {
+                        let c = screen(b[i * f + 7], b[i * f + 8])
+                        let on = Int32(b[i * f]) == chosen
+                        let r: CGFloat = on ? 7 : 4.5
+                        circle(&context, c, r + 1.5, StageInk.outlineUnder)
+                        circle(&context, c, r, on ? AureaColors.accent : .white)
+                        if b[i * f + 6] > 0.5 {
+                            context.stroke(Path(ellipseIn: CGRect(x: c.x - r - 4, y: c.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)),
+                                           with: .color(AureaColors.accent), lineWidth: 2)
+                        }
+                    }
+                } else if TrackballOverlay.draw(&context, model: model, screen: screen) {
                     // Ferramenta Girar: o trackball no lugar das setas.
                 } else if let selected = model.selectedLayer {
                     let g = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
@@ -2050,8 +2074,13 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                     if model.selectedLayer?.kind == 9 {
                         Button { lights = true } label: { pill(CupertinoGlyph.Lightbulb, AureaText.t("pn_t3d_lighting")) }.buttonStyle(.plain)
                     }
+                    // Modelo com rig: posar os ossos e marcar keyframes (como no Blender).
+                    if model.selectedLayer?.kind == 10 && !model.poseBones.isEmpty && !model.rigPoseMode {
+                        Button { model.setRigPose(true) } label: { pill(CupertinoGlyph.PersonCropCircle, AureaText.t("rig_pose")) }.buttonStyle(.plain)
+                    }
                     Button { model.resetSceneView() } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("scene_recenter")) }.buttonStyle(.plain)
-                }.padding(.bottom, 12)
+                }.padding(.bottom, model.rigPoseMode ? 8 : 12)
+                if model.rigPoseMode && !model.poseBones.isEmpty { rigPoseBar }
             }
         }
         .frame(height: height)
@@ -2060,6 +2089,24 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         .sheet(isPresented: $lights) { SceneLightControls().environmentObject(model) }
         .sheet(isPresented: $materials) { Panel3DView().environmentObject(model) }
         .onChange(of: model.panel) { panel in if panel == .none { materials = false } }
+    }
+    /// Barra do modo de pose (RigPoseBar do SceneLayoutWorkspace.kt).
+    private var rigPoseBar: some View {
+        let chosen = model.poseBone >= 0
+        return VStack(spacing: 8) {
+            Text(AureaText.t(chosen ? "rig_pose_hint_bone" : "rig_pose_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
+                .multilineTextAlignment(.center).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(StageInk.floatingDark, in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal, 24)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    if chosen { Button { model.togglePoseKey(all: false) } label: { pill(CupertinoGlyph.SuitDiamond, AureaText.t("rig_key_bone")) }.buttonStyle(.plain) }
+                    Button { model.togglePoseKey(all: true) } label: { pill(CupertinoGlyph.SuitDiamond, AureaText.t("rig_key_all")) }.buttonStyle(.plain)
+                    if chosen { Button { model.resetPose(all: false) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_bone")) }.buttonStyle(.plain) }
+                    Button { model.resetPose(all: true) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_all")) }.buttonStyle(.plain)
+                    Button { model.setRigPose(false) } label: { pill(CupertinoGlyph.CheckmarkAlt, AureaText.t("rig_done")) }.buttonStyle(.plain)
+                }.padding(.horizontal, 12)
+            }
+        }.padding(.bottom, 12)
     }
     private func roundButton(_ glyph: Character, _ key: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {

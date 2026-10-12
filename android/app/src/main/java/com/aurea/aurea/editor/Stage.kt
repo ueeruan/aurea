@@ -479,6 +479,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
             val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .22f) }
             drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), 1.dp.toPx())
         }
+        // Pose do rig (RigPoseStage.kt): juntas e ossos no lugar do gizmo da camada.
+        if (rigPoseActive(store)) { drawRigPoseOverlay(store, m); return }
         store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
         return
     }
@@ -1232,6 +1234,13 @@ private suspend fun PointerInputScope.stageGestures(
         }
 
         if (store.sceneEditor) {
+            // Pose do rig: junta perto do dedo ou osso escolhido = gira o osso;
+            // senão o dedo orbita a cena como sempre.
+            if (m.valid && rigPoseActive(store) &&
+                (store.poseBone >= 0 || pickPoseBone(store, m, down.position.x, down.position.y, 36.dp.toPx()) >= 0)) {
+                rigPoseGesture(store, m, down, slop)
+                return@awaitEachGesture
+            }
             if (m.valid) sceneGesture(store, m, edit, down, slop, haptic)
             return@awaitEachGesture
         }

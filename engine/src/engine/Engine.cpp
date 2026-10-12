@@ -5149,9 +5149,14 @@ u32 Engine::query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats)
     const f64 nowLocal = static_cast<f64>(l->local_time(now).value);
     auto speed_at_local = [&](f64 local) -> f64 {
         if (remap) {
-            // A inclinação da curva de tempo (quadros da fonte por quadro).
+            // A inclinação da curva de tempo (quadros da fonte por quadro). Nas
+            // pontas, diferença de um lado só: fora do clipe a curva fica
+            // parada e a média com o lado de fora mostrava meia velocidade.
             const f64 t = local - static_cast<f64>(l->offset.value) + static_cast<f64>(l->start.value);
-            const f64 v = std::fabs(l->source_frame_f(t + 0.5) - l->source_frame_f(t - 0.5));
+            const f64 first = static_cast<f64>(l->start.value), last = static_cast<f64>(std::max(l->start.value, l->end.value - 1));
+            const f64 a = std::clamp(t - 0.5, first, last), b = std::clamp(t + 0.5, first, last);
+            if (b - a < 1e-6) return 0.0;
+            const f64 v = std::fabs(l->source_frame_f(b) - l->source_frame_f(a)) / (b - a);
             return std::isfinite(v) ? v : 0.0;
         }
         if (st) return Layer::speed_value(*st, local);

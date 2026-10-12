@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gravar voz (narração pelo microfone, Adicionar → Áudio). Par do iOS: VoiceRecorder.swift. -->
+<resources>
+    <string name="voice_title">Record voice</string>
+    <string name="voice_layer_prefix">Voice</string>
+    <string name="voice_record">Record</string>
+    <string name="voice_stop">Stop and save</string>
+    <string name="voice_cancel_take">Cancel and discard the recording</string>
+    <string name="voice_level">Microphone level</string>
+    <string name="voice_elapsed">Recorded time</string>
+    <string name="voice_hint">Tap the red button and speak. The narration goes on the timeline starting at the playhead.</string>
+    <string name="voice_recording">Recording…</string>
+    <string name="voice_countdown">3-2-1 countdown</string>
+    <string name="voice_play_along">Play the video while recording</string>
+    <string name="voice_headphones">Use headphones to keep the video sound out of the recording.</string>
+    <string name="voice_permission_title">Allow the microphone</string>
+    <string name="voice_permission_body">To record your narration, Aurea needs the microphone. The audio stays on your device, inside the project.</string>
+    <string name="voice_permission_allow">Allow</string>
+    <string name="voice_permission_blocked">Microphone access is blocked. Open the app settings and allow the microphone.</string>
+    <string name="voice_open_settings">Open settings</string>
+    <string name="voice_saving">Saving the narration…</string>
+    <string name="voice_saved">Narration added to the timeline</string>
+    <string name="voice_save_failed">Could not save the recording</string>
+    <string name="voice_start_failed">Could not use the microphone. Close other apps that are recording and try again.</string>
+    <string name="voice_too_short">Recording too short: nothing was added</string>
+    <string name="voice_interrupted">Recording stopped (the app left the screen or a call came in). What was recorded so far was saved.</string>
+    <string name="voice_discarded">Recording discarded</string>
+    <string name="voice_countdown_value">Starting in %1$d</string>
+</resources>

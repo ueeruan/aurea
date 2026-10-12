@@ -1902,6 +1902,14 @@ final class AureaModel: ObservableObject {
         followPlayback(status.playing != 0)
     }
 
+    /// Toca a partir do cabeçote (o "Gravar voz" narra com o vídeo andando).
+    func play() {
+        pendingPlayhead = nil
+        engine.run { $0.play() }
+        status.playing = 1
+        followPlayback(true)
+    }
+
     /// Pause explicitly even if the last UI snapshot has not caught up yet.
     func pause() {
         pendingPlayhead = nil
@@ -2627,6 +2635,44 @@ final class AureaModel: ObservableObject {
                 self.refreshModel(force: true)
                 if atPlayhead && kind != .hdri { self.moveToPlayhead(importedId) }
                 _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    /// "Gravar voz" (VoiceRecorder.swift): a narração já nasceu em Media/, então
+    /// não há cópia — entra pelo MESMO `importAudio` (desfazer, waveform e export
+    /// de sempre), com o nome "Voz N". O motor põe a camada no cabeçote; como a
+    /// timeline pode ter tocado junto, o cabeçote volta antes ao quadro onde a
+    /// gravação começou (um passo de desfazer só). Falhou: o arquivo sai.
+    /// Par do Android: `EditorStore.importVoiceRecording`.
+    func importVoiceRecording(_ url: URL, atFrame frame: Int64, interrupted: Bool) {
+        guard started, !importingMedia else {
+            try? FileManager.default.removeItem(at: url)
+            toast = AureaText.t(importingMedia ? "ios_importing_media" : "voice_save_failed")
+            return
+        }
+        pause()
+        seek(toFrame: frame)
+        let name = VoiceTake.nextName(prefix: AureaText.t("voice_layer_prefix"), existing: layers.map(\.name))
+        operationMessage = AureaText.t("voice_saving")
+        importingMedia = true
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            // O `import_audio` drena a fila (pausa + seek) antes de ler o cabeçote.
+            let result = importer.importAudio(url.path, name: name)
+            let raw = result < 0 ? importer.lastImportError : ""
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if result < 0 {
+                    try? FileManager.default.removeItem(at: url)
+                    self.toast = raw.isEmpty ? AureaText.t("voice_save_failed") : AureaEngineText.sentence(raw, code: Int(-result))
+                    return
+                }
+                self.engine.selectLayers([NSNumber(value: result)]); self.selection = [result]
+                self.refreshModel(force: true)
+                _ = self.saveProject(writeThumbnail: false)
+                self.toast = AureaText.t(interrupted ? "voice_interrupted" : "voice_saved")
             }
         }
     }

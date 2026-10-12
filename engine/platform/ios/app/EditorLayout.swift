@@ -270,6 +270,8 @@ final class ShellPresentation: ObservableObject {
     /// apresentação presa e invisível (foto/vídeo e depois modelo 3D: nada
     /// entrava e nenhum toque respondia).
     @Published var addPicker: ShellAddPicker?
+    /// Painel "Gravar voz" aberto (VoiceRecorder.swift), pedido pela aba Áudio.
+    @Published var voiceRecorder = false
     func dismiss() { sheet = nil; linkAnchor = nil; resolutionAnchor = nil }
 }
 

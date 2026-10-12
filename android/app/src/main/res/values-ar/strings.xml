@@ -4173,4 +4173,5 @@
     <string name="speed_ramp_freeze_all">تجميد الكل</string>
     <string name="fx_desc_time_flow_retime">حركة بطيئة سلسة: تُنشأ الإطارات الناقصة من حركة البكسلات (optical flow)، مع سرعة قابلة للتحريك.</string>
     <string name="fx_desc_time_flow_motion_blur">ضبابية حركة طبيعية محسوبة من اللقطات نفسها: يتموّه كل بكسل في اتجاه حركته.</string>
+    <string name="model3d_cameras_added">%1$d كاميرا من الملف في الخط الزمني — عين الطبقة تشغّلها وتطفئها.</string>
 </resources>

@@ -3080,6 +3080,12 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation {
     auto* e = self.engine; return e ? e->edit_speed_key(layerId, index, time, speed, interpolation) : -1;
 }
+- (uint32_t)modelCameraCount:(long long)layerId {
+    auto* e = self.engine; return e ? e->model_camera_count(static_cast<aurea::u64>(layerId)) : 0;
+}
+- (uint32_t)addModelCameras:(long long)layerId {
+    auto* e = self.engine; return e ? e->add_model_cameras(static_cast<aurea::u64>(layerId)) : 0;
+}
 - (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index {
     auto* e = self.engine; return e && e->remove_speed_key(layerId, index);
 }

@@ -3081,6 +3081,16 @@ AUREA_JNI jboolean AUREA_FN(nativeRemoveTimeRemapKey)(JNIEnv*, jclass, jlong han
     return c && index >= 0 && c->engine.remove_time_remap_key(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jint AUREA_FN(nativeModelCameraCount)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.model_camera_count(static_cast<u64>(layer))) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativeAddModelCameras)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.add_model_cameras(static_cast<u64>(layer))) : 0;
+}
+
 AUREA_JNI jint AUREA_FN(nativeQuerySpeedCurve)(JNIEnv* env, jclass, jlong handle, jlong layer, jint samples, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out || samples < 0) return 0;

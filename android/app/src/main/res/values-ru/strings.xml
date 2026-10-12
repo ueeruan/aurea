@@ -4143,4 +4143,5 @@
     <string name="speed_ramp_freeze_all">Заморозить всё</string>
     <string name="fx_desc_time_flow_retime">Плавное замедление: недостающие кадры создаются по движению пикселей (optical flow), скорость можно анимировать.</string>
     <string name="fx_desc_time_flow_motion_blur">Естественное размытие движения, рассчитанное по самому видео: каждый пиксель размывается в сторону своего движения.</string>
+    <string name="model3d_cameras_added">Камер из файла на таймлайне: %1$d — глазок слоя включает и выключает.</string>
 </resources>

@@ -546,6 +546,12 @@ public:
     /// As PARTES da camada 3D na ordem dos efeitos de parte (Parte 1, 2...):
     /// o nome de cada uma (vazio = o arquivo não deu nome). Vazio = não é 3D.
     [[nodiscard]] std::vector<std::string> model_part_names(u64 layer) noexcept;
+    /// Câmeras do arquivo do modelo (glTF/FBX) — 0.1.8. A importação já as põe
+    /// na timeline (camadas de câmera filhas do modelo, com a animação do
+    /// arquivo em keyframes); `add_model_cameras` põe de novo (um passo de
+    /// desfazer) e devolve quantas entraram.
+    [[nodiscard]] u32 model_camera_count(u64 layer) noexcept;
+    u32 add_model_cameras(u64 layer) noexcept;
     /// Põe um efeito de PARTE (Animar parte 3D, Esconder partes 3D, Trocar
     /// textura 3D) na camada 3D já apontando para a parte `part` (0 = a 1ª;
     /// no Esconder, primeira = última = ela). Um passo de desfazer. Devolve

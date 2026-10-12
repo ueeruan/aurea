@@ -233,6 +233,10 @@ struct CameraInfo {
     f32 znear = 0.01f;
     f32 zfar = 0.0f;          ///< 0 = infinito
     f32 xmag = 1.0f, ymag = 1.0f;
+    /// Eixos locais do nó da câmera: para onde ela olha e o "para cima" da
+    /// imagem (glTF: −Z e +Y; FBX: os que a ufbx informa em projection_axes).
+    Vec3 forward{0.0f, 0.0f, -1.0f};
+    Vec3 up{0.0f, 1.0f, 0.0f};
 };
 
 enum class LightType : u8 { Directional = 0, Point, Spot };

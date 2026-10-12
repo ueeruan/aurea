@@ -4215,4 +4215,5 @@
     <string name="speed_ramp_freeze_all">Congelar tudo</string>
     <string name="fx_desc_time_flow_retime">Câmera lenta lisa: os quadros que faltam são criados pelo movimento dos pixels (optical flow), com velocidade animável.</string>
     <string name="fx_desc_time_flow_motion_blur">Desfoque de movimento natural calculado da própria filmagem: cada pixel borra na direção em que se move.</string>
+    <string name="model3d_cameras_added">%1$d câmera(s) do arquivo na timeline — o olho da camada liga e desliga.</string>
 </resources>

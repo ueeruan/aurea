@@ -23,6 +23,7 @@
 #include "aurea/animation/KeyframeOptimize.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Trackball.hpp"
+#include "aurea/scene3d/Animation.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
@@ -8649,6 +8650,131 @@ std::string Engine::resolve_asset_path(const std::string& stored) const {
     return stored;
 }
 
+/// Câmeras do arquivo (glTF/FBX) viram camadas de câmera na timeline (0.1.8):
+/// filhas do modelo (mover, girar ou escalar o modelo leva a câmera junto),
+/// com o movimento da animação do arquivo gravado em keyframes por quadro. A
+/// primeira nasce LIGADA só quando a composição ainda não tem câmera ativa;
+/// as outras nascem desligadas — o olho da timeline liga e desliga.
+/// Quem chama já abriu o passo de desfazer.
+u32 add_model_camera_layers(Composition& comp, LayerId modelId, const scene3d::SceneAsset& scene) noexcept {
+    const Layer* model = comp.layer(modelId);
+    if (!model || model->kind != LayerKind::Model3D) return 0;
+    std::vector<i32> nodes;
+    for (usize i = 0; i < scene.nodes.size() && nodes.size() < 4; ++i) {
+        const scene3d::Node& n = scene.nodes[i];
+        if (n.inScene && n.camera >= 0 && static_cast<usize>(n.camera) < scene.cameras.size()) nodes.push_back(static_cast<i32>(i));
+    }
+    if (nodes.empty()) return 0;
+    bool activeCamera = false;
+    for (u32 i = 0; i < comp.order().size(); ++i) {
+        const Layer* o = comp.layer(comp.order().at(i));
+        activeCamera |= o && o->kind == LayerKind::Camera && o->camera.active && o->visible;
+    }
+    const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+    const Model3DData md = model->model;
+    const FrameIndex start = model->start, end = model->end, offset = model->offset;
+    // O mesmo `layer_from_model` do Renderer: espaço do arquivo (Y para cima,
+    // metros) → espaço da camada (Y para baixo, px), centrado no pivô.
+    Mat4 flip;
+    flip.col[1] = Vec4{0, -1, 0, 0};
+    flip.col[2] = Vec4{0, 0, -1, 0};
+    const Mat4 layerFromModel = flip * Mat4::scale(Vec3{md.unitScale, md.unitScale, md.unitScale}) * Mat4::translation(-md.pivot);
+    const i32 clip = md.animationClip >= 0 && md.animationClip < static_cast<i32>(scene.animations.size()) ? md.animationClip : -1;
+    const i64 lo = start.value - start.value + offset.value;      // tempo local da entrada
+    const i64 hi = std::max(lo, end.value - start.value + offset.value);
+    const i64 step = std::max<i64>(1, (hi - lo + 1799) / 1800);   // até ~1800 chaves por eixo
+    scene3d::Pose pose;
+    scene3d::PoseWorkspace workspace;
+    u32 made = 0;
+    for (const i32 node : nodes) {
+        const scene3d::CameraInfo& info = scene.cameras[static_cast<usize>(scene.nodes[static_cast<usize>(node)].camera)];
+        // Quadro da câmera no espaço da camada do modelo: posição e a base
+        // do Aurea (x direita, y para BAIXO na imagem, z para onde olha).
+        auto sample = [&](i64 local, Vec3& position, Quat& rotation) {
+            f32 t = 0.0f;
+            if (clip >= 0) t = scene3d::clip_time(scene.animations[static_cast<usize>(clip)], static_cast<f64>(local) / fps * md.timeScale);
+            scene3d::evaluate_pose(scene, clip, t, pose, &workspace);
+            if (static_cast<usize>(node) >= pose.nodeWorld.size()) return false;
+            const Mat4 m = layerFromModel * pose.nodeWorld[static_cast<usize>(node)];
+            auto dir = [&](Vec3 v) { const Vec4 r = m * Vec4{v.x, v.y, v.z, 0.0f}; return Vec3{r.x, r.y, r.z}; };
+            const Vec3 forward = dir(info.forward).normalized();
+            const Vec3 up = dir(info.up);
+            if (forward.length_sq() < kEpsilon) return false;
+            Vec3 down = (up * -1.0f) - forward * (up * -1.0f).dot(forward);
+            if (down.length_sq() < kEpsilon) down = std::fabs(forward.y) < 0.9f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+            down = down.normalized();
+            const Vec3 right = down.cross(forward).normalized();
+            const f32 frame[9]{right.x, right.y, right.z, down.x, down.y, down.z, forward.x, forward.y, forward.z};
+            const trackball::detail::DQ q = trackball::detail::frame_quat(frame);
+            rotation = Quat{static_cast<f32>(q.x), static_cast<f32>(q.y), static_cast<f32>(q.z), static_cast<f32>(q.w)};
+            position = Vec3{m.col[3].x, m.col[3].y, m.col[3].z};
+            return true;
+        };
+        Vec3 p0;
+        Quat q0;
+        if (!sample(lo, p0, q0)) continue;
+        std::string name = !info.name.empty() ? info.name : scene.nodes[static_cast<usize>(node)].name;
+        if (name.empty()) name = "Camera";
+        const LayerId cid = comp.add_layer(LayerKind::Camera, name);
+        Layer* cam = comp.layer(cid);
+        if (!cam) break;
+        cam->threeD = true;
+        cam->camera.affectsLayersBelow = true;
+        cam->parent = modelId;
+        cam->start = start;
+        cam->end = end;
+        cam->offset = offset;
+        const f32 fov = info.perspective ? std::clamp(info.yfov / kDeg2Rad, 1.0f, 170.0f) : 30.0f;
+        cam->camera.fov = fov;
+        cam->camera.focalLength = camera_focal_from_fov(fov);
+        cam->camera.nearPlane = std::max(0.1f, info.znear * md.unitScale);
+        cam->camera.focusDistance = std::max(1.0f, p0.length());
+        cam->camera.active = true;
+        cam->visible = !activeCamera && made == 0;
+        cam->transform.anchor = Vec3{0, 0, 0};
+        cam->transform.scale = Vec3{1, 1, 1};
+        Vec3 euler = trackball::euler_deg_from_quat(q0, Vec3{0, 0, 0});
+        cam->transform.position = p0;
+        cam->transform.rotation = euler;
+        if (clip >= 0) {
+            // Movimento do arquivo: uma chave por quadro (linear) quando a
+            // câmera anda; parada, fica só o valor.
+            std::vector<std::pair<i64, Vec3>> positions{{lo, p0}}, rotations{{lo, euler}};
+            bool moves = false;
+            for (i64 local = lo + step; local <= hi; local += step) {
+                Vec3 p;
+                Quat q;
+                if (!sample(local, p, q)) break;
+                const Vec3 e = trackball::euler_deg_from_quat(q, rotations.back().second);
+                moves |= (p - p0).length() > 1e-3f || std::fabs(e.x - euler.x) + std::fabs(e.y - euler.y) + std::fabs(e.z - euler.z) > 1e-3f;
+                positions.emplace_back(local, p);
+                rotations.emplace_back(local, e);
+            }
+            if (moves) {
+                const TrackProperty pos[3]{TrackProperty::PositionX, TrackProperty::PositionY, TrackProperty::PositionZ};
+                const TrackProperty rot[3]{TrackProperty::RotationX, TrackProperty::RotationY, TrackProperty::RotationZ};
+                for (u32 axis = 0; axis < 3; ++axis) {
+                    Track& tp = cam->tracks.get_or_create(pos[axis]);
+                    Track& tr = cam->tracks.get_or_create(rot[axis]);
+                    for (usize k = 0; k < positions.size(); ++k) {
+                        const Vec3& p = positions[k].second;
+                        const Vec3& e = rotations[k].second;
+                        (void)tp.set(FrameIndex{positions[k].first}, axis == 0 ? p.x : axis == 1 ? p.y : p.z, Interpolation::Linear);
+                        (void)tr.set(FrameIndex{rotations[k].first}, axis == 0 ? e.x : axis == 1 ? e.y : e.z, Interpolation::Linear);
+                    }
+                }
+            }
+        }
+        ++made;
+    }
+    if (made) {
+        // Uma câmera ligada vale para a composição inteira: as outras câmeras
+        // ativas ficam como estavam (a de cima ligada manda).
+        AUREA_LOG_INFO("modelo 3D: %u camera(s) do arquivo na timeline", made);
+    }
+    return made;
+}
+
 Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProgress* progress,
                                  std::string* detail) noexcept {
     if (request.path.empty()) return Status{Errc::InvalidArgument, "caminho vazio"};
@@ -8748,6 +8874,8 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     l->model.pivot = scene->bounds.center();
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     l->transform.scale = Vec3{1.0f, 1.0f, 1.0f};
+    // Câmeras do arquivo na timeline (mesmo passo de desfazer da importação).
+    (void)add_model_camera_layers(*comp, lid, *scene);
     project_->mark_dirty();
     request_render();
     AUREA_LOG_INFO("modelo 3D importado: %s (%u triangulos, escala %.3f px/m)", scene->sourceName.c_str(),

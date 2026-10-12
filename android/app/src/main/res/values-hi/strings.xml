@@ -4131,4 +4131,5 @@
     <string name="speed_ramp_freeze_all">सब फ़्रीज़ करें</string>
     <string name="fx_desc_time_flow_retime">स्मूद स्लो मोशन: छूटे फ़्रेम पिक्सेल की हलचल (optical flow) से बनते हैं, स्पीड एनिमेट हो सकती है।</string>
     <string name="fx_desc_time_flow_motion_blur">फ़ुटेज से ही गणना किया गया प्राकृतिक मोशन ब्लर: हर पिक्सेल अपनी चाल की दिशा में धुंधला होता है।</string>
+    <string name="model3d_cameras_added">फ़ाइल के %1$d कैमरे टाइमलाइन में — लेयर की आँख से चालू/बंद करें।</string>
 </resources>

@@ -6601,7 +6601,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     val report = engine.lastModelImport()
                     val before = report.getOrElse(0) { 0L }
                     val after = report.getOrElse(1) { 0L }
+                    // Câmeras do arquivo já entraram na timeline (0.1.8): o olho da camada liga/desliga.
+                    val cameras = engine.modelCameraCount(id)
                     if (missing.isNotEmpty() && engine.modelFolder(id).isNotEmpty()) promptModelTextures(MissingModelTextures(id, missing))
+                    else if (cameras > 0) showToast(appText(R.string.model3d_cameras_added, cameras))
                     else if (quality != com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL && before > after) {
                         showToast(appText(R.string.model3d_optimized_toast, modelCount(before), modelCount(after)))
                     } else if (warnings.isNotEmpty()) showToast(

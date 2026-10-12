@@ -858,6 +858,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)applySpeedCurve:(uint32_t)preset forLayer:(long long)layerId;
 - (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation;
 - (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index;
+/// Câmeras do arquivo do modelo 3D (glTF/FBX); a importação já as põe na timeline.
+- (uint32_t)modelCameraCount:(long long)layerId;
+- (uint32_t)addModelCameras:(long long)layerId;
 - (long long)addVector:(uint32_t)preset;
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;
 - (BOOL)editVectorGroup:(long long)layerId group:(uint32_t)group field:(uint32_t)field values:(NSArray<NSNumber*>*)values;

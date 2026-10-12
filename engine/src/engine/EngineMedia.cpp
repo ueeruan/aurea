@@ -166,6 +166,39 @@ std::vector<std::string> Engine::model_part_names(u64 layerId) noexcept {
     return names;
 }
 
+/// Engine.cpp: câmeras do arquivo viram camadas (o passo de desfazer é de quem chama).
+u32 add_model_camera_layers(Composition& comp, LayerId modelId, const scene3d::SceneAsset& scene) noexcept;
+
+u32 Engine::model_camera_count(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Model3D) return 0;
+    const auto it = models_.find(layer->model.scene.pack());
+    if (it == models_.end() || !it->second) return 0;
+    u32 n = 0;
+    for (const auto& node : it->second->nodes)
+        n += node.inScene && node.camera >= 0 && static_cast<usize>(node.camera) < it->second->cameras.size() ? 1u : 0u;
+    return std::min(n, 4u);
+}
+
+u32 Engine::add_model_cameras(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Model3D) return 0;
+    const auto it = models_.find(layer->model.scene.pack());
+    if (it == models_.end() || !it->second) return 0;
+    const std::shared_ptr<const scene3d::SceneAsset> scene = it->second;
+    history_.before_mutation(*comp, project_->timeline().current(), "cameras do modelo");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    const u32 made = add_model_camera_layers(*comp, LayerId::unpack(layerId), *scene);
+    project_->mark_dirty();
+    request_render();
+    return made;
+}
+
 Result<u32> Engine::add_part_effect(u64 layerId, u32 effectType, u32 part) noexcept {
     if (!scene3d::is_part3d_effect(effectType) || part >= scene3d::kPartEffectMaxParts) return Status{Errc::InvalidArgument, "efeito de parte invalido"};
     Command add;

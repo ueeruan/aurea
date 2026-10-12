@@ -2839,6 +2839,8 @@ final class AureaModel: ObservableObject {
             let result = self.runModelImport(importer, path: request.path, name: request.name, quality: quality)
             let failure = result < 0 ? Self.modelImportFailure(importer, code: result) : ""
             let missing = result < 0 ? [] : importer.modelMissingTextures(result)
+            // Câmeras do arquivo já entraram na timeline (0.1.8): o olho da camada liga/desliga.
+            let cameras = result < 0 ? 0 : importer.modelCameraCount(result)
             let report = importer.lastModelImport().map { $0.int64Value }
             if result < 0 { try? FileManager.default.removeItem(at: request.folder) }
             DispatchQueue.main.async {
@@ -2847,6 +2849,7 @@ final class AureaModel: ObservableObject {
                 self.engine.selectLayers([NSNumber(value: result)]); self.selection = [result]
                 self.refreshModel(force: true)
                 if !missing.isEmpty { self.promptModelTextures(layer: result, names: missing) }
+                else if cameras > 0 { self.toast = AureaText.t("model3d_cameras_added", Int(cameras)) }
                 else if quality != 0, report.count >= 2, report[0] > report[1] {
                     self.toast = AureaText.t("model3d_optimized_toast", Self.modelCount(report[0]), Self.modelCount(report[1]))
                 }

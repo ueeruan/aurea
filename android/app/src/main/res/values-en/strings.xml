@@ -4182,4 +4182,5 @@ to edit the curve.</string>
     <string name="speed_ramp_freeze_all">Freeze all</string>
     <string name="fx_desc_time_flow_retime">Smooth slow motion: missing frames are created from pixel motion (optical flow), with animatable speed.</string>
     <string name="fx_desc_time_flow_motion_blur">Natural motion blur computed from the footage itself: each pixel blurs in the direction it moves.</string>
+    <string name="model3d_cameras_added">%1$d camera(s) from the file added to the timeline — the layer\'s eye turns it on and off.</string>
 </resources>

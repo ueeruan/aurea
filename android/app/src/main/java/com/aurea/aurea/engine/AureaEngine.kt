@@ -865,6 +865,9 @@ class AureaEngine private constructor() {
     fun editSpeedKey(layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int =
         nativeEditSpeedKey(nativeHandle, layer, index, frame, speed, interp)
     fun removeSpeedKey(layer: Long, index: Int): Boolean = nativeRemoveSpeedKey(nativeHandle, layer, index)
+    /** Câmeras do arquivo do modelo 3D (glTF/FBX); a importação já as põe na timeline. */
+    fun modelCameraCount(layer: Long): Int = nativeModelCameraCount(nativeHandle, layer)
+    fun addModelCameras(layer: Long): Int = nativeAddModelCameras(nativeHandle, layer)
     /** Ao contrário: espelha a curva de tempo no clipe (liga o remapeamento se preciso). */
     fun reverseTimeRemap(layer: Long): Boolean = nativeReverseTimeRemap(nativeHandle, layer)
     fun setKeepPitch(layer: Long, on: Boolean): Boolean = nativeSetKeepPitch(nativeHandle, layer, on)
@@ -1280,6 +1283,8 @@ class AureaEngine private constructor() {
     private external fun nativeApplySpeedCurve(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeEditSpeedKey(handle: Long, layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int
     private external fun nativeRemoveSpeedKey(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeModelCameraCount(handle: Long, layer: Long): Int
+    private external fun nativeAddModelCameras(handle: Long, layer: Long): Int
     private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
     private external fun nativeSetKeepPitch(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean

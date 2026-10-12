@@ -1119,6 +1119,8 @@ private fun CubeLutImportRow(env: PanelEnv, effect: Int) {
         target = null
     }
     val name = store.colorLutName(layer, effect)
+    // O mesmo importador serve o LUT (.cube) e a paleta do Palettize.
+    val palette = store.typeOf(effect) == effectTypeId("aurea.color.palettize")
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         if (name.isNotBlank()) Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
@@ -1126,7 +1128,7 @@ private fun CubeLutImportRow(env: PanelEnv, effect: Int) {
             .clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
             .tocavel(onClick = { target = layer to effect; picker.launch(arrayOf("*/*")) }),
             contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.lut_import), color = AureaColors.Text)
+            Text(stringResource(if (palette) R.string.palette_import else R.string.lut_import), color = AureaColors.Text)
         }
     }
 }

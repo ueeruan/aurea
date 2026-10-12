@@ -110,6 +110,7 @@ set(AUREA_CORE_SOURCES
     src/render/RendererAudio.cpp
     src/effects/Parameter.cpp
     src/effects/CubeLut.cpp
+    src/effects/Palette.cpp
     src/effects/EffectGraph.cpp
     src/effects/builtin/ColorEffects.cpp
     src/effects/builtin/BlurEffects.cpp
@@ -137,6 +138,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/PixelEncoderEffect.cpp
     src/effects/builtin/StarglowEffect.cpp
     src/effects/builtin/PixDitherEffect.cpp
+    src/effects/builtin/ColorQuantizeEffects.cpp
     src/effects/builtin/VideoGlitchEffect.cpp
     src/effects/builtin/DisplaceTransformEffect.cpp
     src/effects/builtin/OpticalEffects.cpp

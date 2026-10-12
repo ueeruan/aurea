@@ -3997,4 +3997,18 @@ untuk mengedit kurvanya.</string>
     <string name="pn_mask_target">Layer yang dipotong: %1$s</string>
     <string name="export_v2_finalizing">Menyelesaikan video dan audio…</string>
     <string name="export_v2_validating">Memeriksa video dan audio…</string>
+    <string name="fxl_dark_color">Warna gelap</string>
+    <string name="fxl_bright_color">Warna terang</string>
+    <string name="fxl_gamma">Gamma</string>
+    <string name="fxl_luma_only">Hanya kecerahan</string>
+    <string name="fxl_palette_file">File palet</string>
+    <string name="fxl_dither_strength">Kekuatan dither</string>
+    <string name="fxo_nes">NES</string>
+    <string name="fxo_imported">Diimpor</string>
+    <string name="palette_import">Impor palet (PNG, JPG, .gpl, .hex)</string>
+    <string name="palette_imported">Palet diimpor</string>
+    <string name="palette_invalid">Palet tidak dapat diimpor. Gunakan PNG, JPG, .gpl (GIMP), atau .hex (Lospec).</string>
+    <string name="fx_desc_color_threshold">Mengubah gambar menjadi dua warna berdasarkan kecerahan, dengan tepi halus opsional.</string>
+    <string name="fx_desc_color_posterize">Mengurangi jumlah nada di setiap kanal, tanpa membuat piksel.</string>
+    <string name="fx_desc_color_palettize">Mengganti setiap piksel dengan warna terdekat dari palet (Game Boy, NES, PICO-8, atau impor).</string>
 </resources>

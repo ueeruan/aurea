@@ -4015,4 +4015,18 @@
     <string name="pn_mask_target">Обрезаемый слой: %1$s</string>
     <string name="export_v2_finalizing">Завершение видео и аудио…</string>
     <string name="export_v2_validating">Проверка видео и аудио…</string>
+    <string name="fxl_dark_color">Тёмный цвет</string>
+    <string name="fxl_bright_color">Светлый цвет</string>
+    <string name="fxl_gamma">Гамма</string>
+    <string name="fxl_luma_only">Только яркость</string>
+    <string name="fxl_palette_file">Файл палитры</string>
+    <string name="fxl_dither_strength">Сила дизеринга</string>
+    <string name="fxo_nes">NES</string>
+    <string name="fxo_imported">Импортированная</string>
+    <string name="palette_import">Импорт палитры (PNG, JPG, .gpl, .hex)</string>
+    <string name="palette_imported">Палитра импортирована</string>
+    <string name="palette_invalid">Не удалось импортировать палитру. Используйте PNG, JPG, .gpl (GIMP) или .hex (Lospec).</string>
+    <string name="fx_desc_color_threshold">Превращает изображение в два цвета по яркости, с мягкой границей по желанию.</string>
+    <string name="fx_desc_color_posterize">Уменьшает число тонов в каждом канале, без пикселизации.</string>
+    <string name="fx_desc_color_palettize">Заменяет каждый пиксель ближайшим цветом палитры (Game Boy, NES, PICO-8 или своей).</string>
 </resources>

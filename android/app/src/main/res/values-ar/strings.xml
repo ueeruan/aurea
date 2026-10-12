@@ -4045,4 +4045,18 @@
     <string name="pn_mask_target">الطبقة المقصوصة: %1$s</string>
     <string name="export_v2_finalizing">جارٍ إنهاء الفيديو والصوت…</string>
     <string name="export_v2_validating">جارٍ التحقق من الفيديو والصوت…</string>
+    <string name="fxl_dark_color">اللون الداكن</string>
+    <string name="fxl_bright_color">اللون الفاتح</string>
+    <string name="fxl_gamma">جاما</string>
+    <string name="fxl_luma_only">السطوع فقط</string>
+    <string name="fxl_palette_file">ملف لوحة الألوان</string>
+    <string name="fxl_dither_strength">قوة التنقيط</string>
+    <string name="fxo_nes">NES</string>
+    <string name="fxo_imported">مستوردة</string>
+    <string name="palette_import">استيراد لوحة ألوان (PNG وJPG و.gpl و.hex)</string>
+    <string name="palette_imported">تم استيراد لوحة الألوان</string>
+    <string name="palette_invalid">تعذر استيراد لوحة الألوان. استخدم PNG أو JPG أو .gpl (GIMP) أو .hex (Lospec).</string>
+    <string name="fx_desc_color_threshold">يحوّل الصورة إلى لونين حسب السطوع، مع حافة ناعمة اختيارية.</string>
+    <string name="fx_desc_color_posterize">يقلل عدد الدرجات في كل قناة دون تحويلها إلى بكسلات.</string>
+    <string name="fx_desc_color_palettize">يستبدل كل بكسل بأقرب لون من لوحة ألوان (Game Boy أو NES أو PICO-8 أو مستوردة).</string>
 </resources>

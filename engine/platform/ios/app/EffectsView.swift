@@ -962,13 +962,18 @@ private struct CubeLutImportRow: View {
     @State private var lutPick: URL?
     @State private var busy = false
     @State private var filename = ""
+    private var palette: Bool { model.effects.first { $0.effectId == effect }?.typeId == fxEffectTypeId("aurea.color.palettize") }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !filename.isEmpty {
                 Text(filename).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
             }
-            Button(AureaText.t(busy ? "lut_importing" : "lut_import")) {
-                DocumentImportPicker.present(types: [UTType(filenameExtension: "cube") ?? .data, .data]) { urls in lutPick = urls?.first }
+            Button(AureaText.t(palette ? "palette_import" : busy ? "lut_importing" : "lut_import")) {
+                // O mesmo importador serve o LUT (.cube) e a paleta do Palettize.
+                let types: [UTType] = palette
+                    ? [.png, .jpeg, UTType(filenameExtension: "gpl") ?? .data, UTType(filenameExtension: "hex") ?? .data, .data]
+                    : [UTType(filenameExtension: "cube") ?? .data, .data]
+                DocumentImportPicker.present(types: types) { urls in lutPick = urls?.first }
             }
                 .frame(maxWidth: .infinity, minHeight: 44).disabled(busy)
                 .accessibilityIdentifier("effect.lut.import")
@@ -978,7 +983,8 @@ private struct CubeLutImportRow: View {
         .onChange(of: lutPick) { picked in
             guard let url = picked else { return }
             lutPick = nil
-            guard url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t("lut_invalid"); return }
+            let isPalette = ["png", "jpg", "jpeg", "gpl", "hex"].contains(url.pathExtension.lowercased())
+            guard isPalette || url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t(palette ? "palette_invalid" : "lut_invalid"); return }
             busy = true
             let engine = model.engine
             let targetLayer = layer, targetEffect = effect
@@ -1012,7 +1018,7 @@ private struct CubeLutImportRow: View {
                     busy = false
                     filename = engine.colorLutName(targetLayer, effect: targetEffect)
                     model.refreshModel(force: true)
-                    model.toast = AureaText.t(imported ? "lut_imported" : "lut_invalid")
+                    model.toast = AureaText.t(isPalette ? (imported ? "palette_imported" : "palette_invalid") : (imported ? "lut_imported" : "lut_invalid"))
                 }
             }
         }

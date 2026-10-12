@@ -4087,4 +4087,18 @@
     <string name="pn_mask_target">Camada recortada: %1$s</string>
     <string name="export_v2_finalizing">Finalizando vídeo e áudio…</string>
     <string name="export_v2_validating">Verificando vídeo e áudio…</string>
+    <string name="fxl_dark_color">Cor escura</string>
+    <string name="fxl_bright_color">Cor clara</string>
+    <string name="fxl_gamma">Gamma</string>
+    <string name="fxl_luma_only">Só no brilho</string>
+    <string name="fxl_palette_file">Arquivo da paleta</string>
+    <string name="fxl_dither_strength">Força do pontilhado</string>
+    <string name="fxo_nes">NES</string>
+    <string name="fxo_imported">Importada</string>
+    <string name="palette_import">Importar paleta (PNG, JPG, .gpl, .hex)</string>
+    <string name="palette_imported">Paleta importada</string>
+    <string name="palette_invalid">Não foi possível importar a paleta. Use PNG, JPG, .gpl (GIMP) ou .hex (Lospec).</string>
+    <string name="fx_desc_color_threshold">Deixa a imagem em duas cores pelo brilho, com borda suave opcional.</string>
+    <string name="fx_desc_color_posterize">Reduz a quantidade de tons de cada canal, sem pixelar.</string>
+    <string name="fx_desc_color_palettize">Troca cada pixel pela cor mais próxima de uma paleta (Game Boy, NES, PICO-8 ou importada).</string>
 </resources>

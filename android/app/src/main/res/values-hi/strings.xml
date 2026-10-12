@@ -4003,4 +4003,18 @@
     <string name="pn_mask_target">मास्क की गई लेयर: %1$s</string>
     <string name="export_v2_finalizing">वीडियो और ऑडियो पूरा हो रहा है…</string>
     <string name="export_v2_validating">वीडियो और ऑडियो की जाँच हो रही है…</string>
+    <string name="fxl_dark_color">गहरा रंग</string>
+    <string name="fxl_bright_color">हल्का रंग</string>
+    <string name="fxl_gamma">गामा</string>
+    <string name="fxl_luma_only">केवल चमक</string>
+    <string name="fxl_palette_file">पैलेट फ़ाइल</string>
+    <string name="fxl_dither_strength">डिदर की ताकत</string>
+    <string name="fxo_nes">NES</string>
+    <string name="fxo_imported">आयातित</string>
+    <string name="palette_import">पैलेट आयात करें (PNG, JPG, .gpl, .hex)</string>
+    <string name="palette_imported">पैलेट आयात हो गया</string>
+    <string name="palette_invalid">पैलेट आयात नहीं हो सका। PNG, JPG, .gpl (GIMP) या .hex (Lospec) इस्तेमाल करें।</string>
+    <string name="fx_desc_color_threshold">चमक के आधार पर इमेज को दो रंगों में बदलता है, वैकल्पिक नरम किनारे के साथ।</string>
+    <string name="fx_desc_color_posterize">हर चैनल के टोन कम करता है, बिना पिक्सेल बनाए।</string>
+    <string name="fx_desc_color_palettize">हर पिक्सेल को पैलेट के सबसे नज़दीकी रंग से बदलता है (Game Boy, NES, PICO-8 या आयातित)।</string>
 </resources>

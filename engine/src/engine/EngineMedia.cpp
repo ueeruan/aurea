@@ -11,6 +11,7 @@
 // =============================================================================
 #include "aurea/Engine.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/effects/Palette.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,7 +22,7 @@ std::shared_ptr<const CubeLut> Engine::cube_lookup(void* context, AssetId id) {
     if (auto it = engine.cubeLuts_.find(id.pack()); it != engine.cubeLuts_.end()) return it->second;
     const Asset* asset = engine.project_ ? engine.project_->asset(id) : nullptr;
     if (!asset || asset->kind != AssetKind::Lut) return {};
-    auto parsed = read_cube_lut(engine.resolve_asset_path(asset->sourcePath));
+    auto parsed = read_color_table(engine.resolve_asset_path(asset->sourcePath));
     auto data = parsed.ok() ? std::make_shared<const CubeLut>(std::move(*parsed)) : nullptr;
     if (engine.cubeLuts_.size() >= 8) engine.cubeLuts_.clear();
     engine.cubeLuts_[id.pack()] = data;
@@ -30,23 +31,35 @@ std::shared_ptr<const CubeLut> Engine::cube_lookup(void* context, AssetId id) {
 
 Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noexcept {
     if (!path || !*path) return Errc::InvalidArgument;
-    auto parsed = read_cube_lut(path);
+    // .cube = LUT do efeito LUT; PNG/JPG/.gpl/.hex = paleta do Palettize.
+    const bool palette = is_palette_path(path);
+    auto parsed = read_color_table(path);
     if (!parsed.ok()) return parsed.status();
+    const u32 type = effect_type_id(palette ? "aurea.color.palettize" : effect_keys::kCubeLut);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return Errc::InvalidState;
     auto effect = std::find_if(layer->effects.begin(), layer->effects.end(), [&](const EffectInstance& e) {
-        return e.id == effectId && e.type == effect_type_id(effect_keys::kCubeLut);
+        return e.id == effectId && e.type == type;
     });
-    if (effect == layer->effects.end() || effect->params.size() < 6) return Errc::NotFound;
-    history_.before_mutation(*comp, project_->timeline().current(), "importar LUT");
+    if (effect == layer->effects.end() || effect->params.size() < (palette ? 2u : 6u)) return Errc::NotFound;
+    history_.before_mutation(*comp, project_->timeline().current(), palette ? "importar paleta" : "importar LUT");
     Asset asset; asset.kind = AssetKind::Lut;
     asset.sourcePath = store_asset_path(path);
     asset.name = path;
     if (const usize slash = asset.name.find_last_of("/\\"); slash != std::string::npos) asset.name.erase(0, slash + 1);
     const AssetId id = project_->add_asset(std::move(asset));
+    if (palette) {
+        // Palettize: [0] paleta (5 = importada), [1] o arquivo.
+        effect->params[1].constant.ref = id.pack();
+        effect->params[0].constant = ParamValue::scalar(5.0f);
+        if (cubeLuts_.size() >= 8) cubeLuts_.clear();
+        cubeLuts_[id.pack()] = std::make_shared<const CubeLut>(std::move(*parsed));
+        modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+        project_->mark_dirty(); request_render(); return OkStatus;
+    }
     effect->params[0].constant.ref = id.pack();
     effect->params[2].constant = ParamValue::scalar(static_cast<f32>(parsed->size));
     effect->params[3].constant = ParamValue::scalar(static_cast<f32>(parsed->dimensions));
@@ -64,8 +77,11 @@ std::string Engine::color_lut_name(u64 layerId, u32 effectId) const noexcept {
     const Composition* comp = project_ ? project_->timeline().composition(project_->timeline().current()) : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer) return {};
-    for (const auto& e : layer->effects) if (e.id == effectId && e.type == effect_type_id(effect_keys::kCubeLut) && !e.params.empty()) {
-        const Asset* asset = project_->asset(AssetId::unpack(e.params[0].constant.ref));
+    const u32 palettize = effect_type_id("aurea.color.palettize");
+    for (const auto& e : layer->effects) if (e.id == effectId && (e.type == effect_type_id(effect_keys::kCubeLut) || e.type == palettize) && !e.params.empty()) {
+        const usize file = e.type == palettize ? 1 : 0;
+        if (e.params.size() <= file) return {};
+        const Asset* asset = project_->asset(AssetId::unpack(e.params[file].constant.ref));
         return asset ? asset->name : std::string{};
     }
     return {};

@@ -571,6 +571,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     }
 
     val selection = store.selection
+    LayerResizeStage.count = 0
     val d = store.detail ?: return
     if (selection.isEmpty()) return
     val playhead = store.playhead
@@ -619,6 +620,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.markerAnchorX = m.sx(anchor[0]); m.markerAnchorY = m.sy(anchor[1])
     m.markerAnchorValid = store.pointPick == null
     if (gizmo == null) {
+        // Alças brancas de esticar (LayerResizeStage.kt), por baixo das setas.
+        drawLayerResizeHandles(m)
         placeAxisHandles(m)
         m.handlesValid = true
         drawAxisHandles(m, ui.grabbedHandle)
@@ -1190,6 +1193,17 @@ private suspend fun PointerInputScope.stageGestures(
             val sh = pickShapeHandle(downX, downY, 26.dp.toPx())
             if (sh >= 0) {
                 shapeEditGesture(store, m, sh, down)
+                return@awaitEachGesture
+            }
+        }
+
+        // Alças brancas de esticar da camada 2D (desenhadas no último quadro):
+        // as setas de eixo e a âncora ganham empate.
+        if (m.valid && LayerResizeStage.count > 0 && store.gizmo == null && pickHandle(m, downX, downY, axisTarget) < 0 &&
+            hypot(downX - m.markerAnchorX, downY - m.markerAnchorY) > 20.dp.toPx()) {
+            val rh = pickLayerResizeHandle(downX, downY, 22.dp.toPx())
+            if (rh >= 0) {
+                layerResizeGesture(store, m, rh, down)
                 return@awaitEachGesture
             }
         }

@@ -5463,10 +5463,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun colorLutName(layer: Long, effect: Int): String = engine.colorLutName(layer, effect)
 
+    private val PALETTE_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".gpl", ".hex")
+
     fun importColorLut(uri: Uri, layer: Long, effect: Int) {
         if (!acceptsImport()) return
         val name = displayName(uri)?.substringAfterLast('/')?.substringAfterLast('\\') ?: "look.cube"
-        if (!name.endsWith(".cube", ignoreCase = true)) {
+        // Palettize: PNG/JPG, .gpl (GIMP) ou .hex (Lospec); o motor confere o efeito.
+        val palette = PALETTE_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) }
+        if (!palette && !name.endsWith(".cube", ignoreCase = true)) {
             errorMessage = appText(R.string.lut_invalid)
             return
         }
@@ -5496,8 +5500,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
             }
             refreshNow()
-            if (ok) showToast(appText(R.string.lut_imported))
-            else errorMessage = appText(R.string.lut_invalid)
+            if (ok) showToast(appText(if (palette) R.string.palette_imported else R.string.lut_imported))
+            else errorMessage = appText(if (palette) R.string.palette_invalid else R.string.lut_invalid)
         }
     }
 

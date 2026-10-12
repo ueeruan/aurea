@@ -69,6 +69,28 @@ AUREA_TEST(RealCamera, EulerWrapAndSensorToARTransitionDoNotJump) {
     AUREA_CHECK(capture.sample(camera_pose().data(), ++clock, true, 1, false));
     AUREA_CHECK_NEAR(capture.rotation().z, 179.f, .001f);
 }
+AUREA_TEST(RealCamera, PanWithTiltedPhoneTurnsAboutSceneVerticalWithoutRollingHorizon) {
+    // Beta 12/10 ("igual a gravar"): the take starts with the phone tilted 30°
+    // down; a 40° pan about gravity must pan the level virtual camera about the
+    // scene's vertical, not about the tilted phone axis (that rolled the horizon).
+    auto pose_of = [](Quat q) {
+        const Mat4 m = Mat4::from_quat(q.normalized());
+        std::array<f32, 16> out{};
+        for (u32 c = 0; c < 4; ++c) for (u32 r = 0; r < 4; ++r) out[c * 4 + r] = (&m.col[c].x)[r];
+        return out;
+    };
+    tracking::RealCameraCapture capture;
+    capture.reset({0, 0, -1000}, {}, 500);
+    u64 clock = 1;
+    const Quat tilt = Quat::from_axis_angle({1, 0, 0}, -30 * kDeg2Rad);
+    AUREA_CHECK(capture.sample(pose_of(tilt).data(), clock, false, 1, false));
+    const Quat pan = Quat::from_axis_angle({0, 1, 0}, 40 * kDeg2Rad);
+    AUREA_CHECK(capture.sample(pose_of(pan * tilt).data(), clock += 16'666'667, false, 1, false));
+    AUREA_CHECK_NEAR(capture.rotation().x, 0.f, .05f);
+    AUREA_CHECK_NEAR(capture.rotation().z, 0.f, .05f);
+    AUREA_CHECK_NEAR(std::fabs(capture.rotation().y), 40.f, .05f);
+    // No smoothing at 100 %: a single sample already lands the whole motion.
+}
 AUREA_TEST(RealCamera, InvalidStaleAndNonRigidSamplesCannotChangePose) {
     tracking::RealCameraCapture capture;
     capture.reset({1, 2, 3}, {}, 200);

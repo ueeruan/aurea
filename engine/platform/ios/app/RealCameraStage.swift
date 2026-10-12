@@ -183,7 +183,8 @@ import SwiftUI
         trackingMessageKey = reason
         guard available else { return }
         let token = generation
-        motion.deviceMotionUpdateInterval = 1.0 / 30.0
+        // 100 Hz: a 60 fps take gets a fresh measured pose for every frame.
+        motion.deviceMotionUpdateInterval = 1.0 / 100.0
         motion.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] data, _ in
             guard let self, self.active, !self.usingAR, self.generation == token,
                   let model = self.model, let data else { return }
@@ -202,7 +203,10 @@ import SwiftUI
             default: angle = 0
             }
             let display = simd_quatf(angle: angle, axis: SIMD3<Float>(0, 0, 1))
-            let pose = simd_float4x4(orientation * display)
+            // CoreMotion's reference is Z-up; the engine's world is the AR one,
+            // Y-up (-90° about X): gravity is the vertical it pans about.
+            let yUp = simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0))
+            let pose = simd_float4x4(yUp * orientation * display)
             self.trackingValid = model.realCameraSample(pose, timestamp: data.timestamp,
                 positional: false, sensitivity: Float(self.sensitivity), inverted: self.inverted)
             self.synchronize(model)

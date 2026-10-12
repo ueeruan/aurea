@@ -21,6 +21,7 @@ internal object EffectI18nTable {
             part10(this)
             part11(this)
             part12(this)
+            part13(this)
         }
     }
 
@@ -1592,6 +1593,22 @@ internal object EffectI18nTable {
         m.put("aurea.distort.displace_transform", 14, /* edges */ intArrayOf(R.string.fxl_edges, R.string.fxo_transparent, R.string.fxo_repeat, R.string.fxo_reflect, R.string.fx3o_repetir_pixels))
         m.put("aurea.distort.displace_transform", 15, /* filter */ intArrayOf(R.string.fxl_adaptive_filtering))
         m.put("aurea.distort.displace_transform", 16, /* mix */ intArrayOf(R.string.fxl_mix))
+    }
+
+    // Threshold, Posterize e Palettize (Cor e luz), escritos à mão até o catálogo do motor ser regravado.
+    private fun part13(m: HashMap<Long, IntArray>) {
+        m.put("aurea.color.threshold", 0, /* limit */ intArrayOf(R.string.fx_limite))
+        m.put("aurea.color.threshold", 1, /* softness */ intArrayOf(R.string.fx_suavidade))
+        m.put("aurea.color.threshold", 2, /* dark */ intArrayOf(R.string.fxl_dark_color))
+        m.put("aurea.color.threshold", 3, /* light */ intArrayOf(R.string.fxl_bright_color))
+        m.put("aurea.color.posterize", 0, /* levels */ intArrayOf(R.string.fx_name_levels))
+        m.put("aurea.color.posterize", 1, /* gamma */ intArrayOf(R.string.fxl_gamma))
+        m.put("aurea.color.posterize", 2, /* luma_only */ intArrayOf(R.string.fxl_luma_only))
+        m.put("aurea.color.palettize", 0, /* palette */ intArrayOf(R.string.fx_diffusion_palette, R.string.fxo_gameboy, R.string.fxo_nes, R.string.fxo_pico_8, R.string.fxo_cga, R.string.fxo_black_and_white, R.string.fxo_imported))
+        m.put("aurea.color.palettize", 1, /* file */ intArrayOf(R.string.fxl_palette_file))
+        m.put("aurea.color.palettize", 2, /* dither */ intArrayOf(R.string.fxl_dither, R.string.fxo_none_2, R.string.fxo_floyd_steinberg, R.string.fxo_false_floyd_steinberg, R.string.fxo_filter_lite, R.string.fxo_zhigang_fan, R.string.fxo_shiau_fan, R.string.fxo_jarvis_judice_ninke, R.string.fxo_stucki, R.string.fxo_burkes, R.string.fxo_sierra, R.string.fxo_two_row_sierra, R.string.fxo_atkinson, R.string.fxo_bayer_2x2, R.string.fxo_bayer_3x3, R.string.fxo_bayer_5x3, R.string.fxo_bayer_4x4, R.string.fxo_bayer_8x8, R.string.fxo_cluster_dot_4x4, R.string.fxo_cluster_dot_8x8, R.string.fxo_horizontal_2x2, R.string.fxo_horizontal_8x1, R.string.fxo_horizontal_12x4, R.string.fxo_vertical_2x2, R.string.fxo_vertical_1x8, R.string.fxo_vertical_4x12, R.string.fxo_diagonal_5x5))
+        m.put("aurea.color.palettize", 3, /* dither_amount */ intArrayOf(R.string.fxl_dither_strength))
+        m.put("aurea.color.palettize", 4, /* amount */ intArrayOf(R.string.fx_intensidade))
     }
 
     private fun HashMap<Long, IntArray>.put(key: String, index: Int, ids: IntArray) {

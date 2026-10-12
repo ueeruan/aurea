@@ -4054,4 +4054,18 @@ to edit the curve.</string>
     <string name="pn_mask_target">Masked layer: %1$s</string>
     <string name="export_v2_finalizing">Finalizing video and audio…</string>
     <string name="export_v2_validating">Checking video and audio…</string>
+    <string name="fxl_dark_color">Dark color</string>
+    <string name="fxl_bright_color">Light color</string>
+    <string name="fxl_gamma">Gamma</string>
+    <string name="fxl_luma_only">Brightness only</string>
+    <string name="fxl_palette_file">Palette file</string>
+    <string name="fxl_dither_strength">Dither strength</string>
+    <string name="fxo_nes">NES</string>
+    <string name="fxo_imported">Imported</string>
+    <string name="palette_import">Import palette (PNG, JPG, .gpl, .hex)</string>
+    <string name="palette_imported">Palette imported</string>
+    <string name="palette_invalid">Could not import the palette. Use PNG, JPG, .gpl (GIMP) or .hex (Lospec).</string>
+    <string name="fx_desc_color_threshold">Turns the image into two colors by brightness, with an optional soft edge.</string>
+    <string name="fx_desc_color_posterize">Reduces the number of tones in each channel, without pixelating.</string>
+    <string name="fx_desc_color_palettize">Swaps each pixel for the closest color of a palette (Game Boy, NES, PICO-8 or imported).</string>
 </resources>

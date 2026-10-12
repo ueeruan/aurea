@@ -76,6 +76,12 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.stylize.pixel_encoder", EffectHuman(keywords = "pixel encoder pixel_encoder megakrunch ascii letras grunge",
         principal = listOf(0, 1, 2, 3, 4)))
     put("aurea.stylize.pix_dither", EffectHuman(keywords = "pixdither pix dither pontilhado paleta atkinson bayer", principal = listOf(0, 1, 2)))
+    put("aurea.color.threshold", EffectHuman(keywords = "threshold limiar limite preto e branco duas cores 2 cores", principal = listOf(0, 1),
+        params = mapOf(0 to ParamHuman(decimals = 0), 1 to ParamHuman(decimals = 0))))
+    put("aurea.color.posterize", EffectHuman(keywords = "posterize posterizar niveis tons reduzir cores", principal = listOf(0, 1),
+        params = mapOf(0 to ParamHuman(suffix = "", decimals = 0), 1 to ParamHuman(suffix = "", decimals = 2))))
+    put("aurea.color.palettize", EffectHuman(keywords = "palettize paleta gameboy game boy nes pico-8 cga lospec gimp gpl hex retro pontilhado dither oklab",
+        principal = listOf(0, 2, 4), params = mapOf(3 to ParamHuman(decimals = 0), 4 to ParamHuman(decimals = 0))))
     put("aurea.glitch.video_glitch", EffectHuman(keywords = "bcc glitch video continuum blocos flicker tremor", principal = listOf(0, 1, 2, 3, 55)))
     put("aurea.distort.displace_transform", EffectHuman(keywords = "displace displacer pro mapa escala rotacao aberracao", principal = listOf(0, 1, 2, 3, 4),
         params = mapOf(1 to ParamHuman(label = R.string.fx_deslocamento), 2 to ParamHuman(label = R.string.fx_escala))))

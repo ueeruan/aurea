@@ -549,6 +549,14 @@ private struct ShellStageBanner: View {
             let gizmo = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
             if let anchor = model.previewMarkerAnchor {
                 let p = screen(anchor.x, anchor.y)
+                if gizmo.count != 8 && !model.sceneEditor && model.selection.count == 1 && !selected.locked {
+                    // 2D: alças brancas de esticar (LayerResizeGeometry), por baixo das setas.
+                    for (i, h) in LayerResizeGeometry.handles(points).enumerated() {
+                        let r: CGFloat = shell.grabbedResizeHandle == i ? 7 : i < 4 ? 6 : 5
+                        circle(&context, h, r + 1.5, StageInk.outlineUnder); circle(&context, h, r, .white)
+                        context.stroke(Path(ellipseIn: CGRect(x: h.x - r, y: h.y - r, width: r * 2, height: r * 2)), with: .color(AureaColors.accent), lineWidth: 1.5)
+                    }
+                }
                 if gizmo.count != 8 {
                     // 2D: setas X/Y (Stage.kt drawAxisHandles), por baixo da mira.
                     let tips = ShellStageGeometry.axisHandles(p, size: size)

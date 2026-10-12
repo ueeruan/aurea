@@ -19,6 +19,7 @@ add_executable(aurea_tests
     test_regression_2134.cpp
     test_math.cpp
     test_real_camera.cpp
+    test_palette.cpp
     test_mesh_warp_keys.cpp
     test_animation.cpp
     test_core.cpp

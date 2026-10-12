@@ -4007,4 +4007,18 @@ para editar la curva.</string>
     <string name="pn_mask_target">Capa recortada: %1$s</string>
     <string name="export_v2_finalizing">Finalizando vídeo y audio…</string>
     <string name="export_v2_validating">Verificando vídeo y audio…</string>
+    <string name="fxl_dark_color">Color oscuro</string>
+    <string name="fxl_bright_color">Color claro</string>
+    <string name="fxl_gamma">Gamma</string>
+    <string name="fxl_luma_only">Solo en el brillo</string>
+    <string name="fxl_palette_file">Archivo de paleta</string>
+    <string name="fxl_dither_strength">Fuerza del tramado</string>
+    <string name="fxo_nes">NES</string>
+    <string name="fxo_imported">Importada</string>
+    <string name="palette_import">Importar paleta (PNG, JPG, .gpl, .hex)</string>
+    <string name="palette_imported">Paleta importada</string>
+    <string name="palette_invalid">No se pudo importar la paleta. Usa PNG, JPG, .gpl (GIMP) o .hex (Lospec).</string>
+    <string name="fx_desc_color_threshold">Deja la imagen en dos colores según el brillo, con borde suave opcional.</string>
+    <string name="fx_desc_color_posterize">Reduce la cantidad de tonos de cada canal, sin pixelar.</string>
+    <string name="fx_desc_color_palettize">Cambia cada píxel por el color más cercano de una paleta (Game Boy, NES, PICO-8 o importada).</string>
 </resources>

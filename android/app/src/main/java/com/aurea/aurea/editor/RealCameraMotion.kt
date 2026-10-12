@@ -58,7 +58,9 @@ internal class RealCameraMotion(
         active = true
         if (arOwnsPose) RealCamera.tracking = RealCameraTracking.Limited
         if (!registered && sensor != null) {
-            registered = manager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME) == true
+            // 100 Hz: a 60 fps take gets a fresh measured pose for every frame
+            // (SENSOR_DELAY_GAME, ~50 Hz, repeated poses on 60 fps comps).
+            registered = manager?.registerListener(this, sensor, 10_000) == true
         }
         RealCamera.available = registered || arOwnsPose
         val activity = context.realCameraActivity()
@@ -178,7 +180,14 @@ internal class RealCameraMotion(
         }
         if (!SensorManager.remapCoordinateSystem(rotation, axes.first, axes.second, remapped)) return
         pose.fill(0f)
-        for (column in 0..2) for (row in 0..2) pose[column * 4 + row] = remapped[row * 3 + column]
+        // The rotation vector's world is Z-up (east, north, up); the engine's
+        // is the AR one, Y-up: (x, y, z) -> (x, z, -y). Gravity has to be the
+        // vertical the engine pans about, as when filming.
+        for (column in 0..2) {
+            pose[column * 4] = remapped[column]
+            pose[column * 4 + 1] = remapped[6 + column]
+            pose[column * 4 + 2] = -remapped[3 + column]
+        }
         pose[15] = 1f
         // No acceleration integration: a rotation vector provides no position measurement.
         store.realCameraSample(pose, event.timestamp, false)

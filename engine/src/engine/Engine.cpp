@@ -1,3 +1,4 @@
+#include "aurea/effects/Palette.hpp"
 #include "aurea/Engine.hpp"
 #include "aurea/tracking/RealCameraPreviewScope.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
@@ -12756,7 +12757,7 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
         if (const auto it = c.frozenLuts.find(id.pack()); it != c.frozenLuts.end()) return it->second;
         const Asset* asset = c.frozenProject->asset(id);
         if (!asset || asset->kind != AssetKind::Lut) return {};
-        auto parsed = read_cube_lut(asset->sourcePath);
+        auto parsed = read_color_table(asset->sourcePath);
         if (!parsed.ok()) { c.frozenAssetStatus = parsed.status(); return {}; }
         auto lut = std::make_shared<const CubeLut>(std::move(*parsed));
         c.frozenLuts[id.pack()] = lut;

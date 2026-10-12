@@ -136,7 +136,7 @@ struct PreviewMetalView: UIViewRepresentable {
         private var pinchThreeD = false
         private var pinchTracker = StagePinchTracker()
         private var pinchLayer: Int64?
-        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, scene, pivot, view, viewPan }
+        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, resize, scene, pivot, view, viewPan }
         // Face Pivô aberta: o arrasto move o pivô (PivotDragSession).
         private var pivotSession: PivotDragSession?
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
@@ -178,6 +178,12 @@ struct PreviewMetalView: UIViewRepresentable {
         private var shapeV = SIMD2<Float>.zero
         private var shapeScale = SIMD2<Float>(repeating: 1)
         private var shapeLinked = true
+        // Alça branca de esticar: índice, âncora e alça na composição, direção da conta.
+        private var resizeHandle = -1
+        private var resizeAnchor = SIMD2<Float>(0, 0)
+        private var resizeStart = SIMD2<Float>(0, 0)
+        private var resizeAxis = SIMD2<Float>(1, 0)
+        private var resizeBase: Float = 1
         private let snapFeedback = UISelectionFeedbackGenerator()
 
         init(model: AureaModel, shell: ShellPresentation, compositionSize: CGSize, interactive: Bool) {
@@ -462,6 +468,7 @@ struct PreviewMetalView: UIViewRepresentable {
             if editBegan { model.endGesture() }
             editBegan = false; model.stageManipulating = false
             shell.snapX = nil; shell.snapY = nil; shell.grabbedHandle = -1; shell.grabbedShapeHandle = -1
+            shell.grabbedResizeHandle = -1; resizeHandle = -1
         }
         private func keepTransform() {
             startPosition = vector(model.detail["position"])
@@ -506,6 +513,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 }
                 if !model.sceneEditor && startShape(at: first.position, view: view) { stageMode = .shape }
                 else if startGizmo(at: first.position, view: view) { stageMode = .gizmo }
+                else if !model.sceneEditor && startResize(at: first.position, view: view) { stageMode = .resize }
                 else if model.sceneEditor {
                     stageMode = .scene; sceneMode = 0; sceneLast = first.position
                     scenePicked = model.scenePick(compositionPoint(first.position, view: view), radius: 36 * scaleFactor(view))
@@ -567,9 +575,10 @@ struct PreviewMetalView: UIViewRepresentable {
                 }
                 finishStageEdit(); stageFinger = nil; stageMode = .idle; return
             }
-            if stageMode == .shape || stageMode == .gizmo {
+            if stageMode == .shape || stageMode == .gizmo || stageMode == .resize {
                 guard let first = pressed.first(where: { $0.id == stageFinger }) else { finishStageEdit(); stageMode = .idle; return }
                 if stageMode == .shape { stepShape(first.position, view: view) }
+                else if stageMode == .resize { stepResize(first.position, view: view) }
                 else { stepGizmo(first.position, view: view) }
                 return
             }
@@ -1059,6 +1068,53 @@ struct PreviewMetalView: UIViewRepresentable {
             model.refreshSelectedLayer(); model.invalidatePreview()
         }
 
+        /// Alças brancas de esticar (LayerResizeStage.kt): canto = fator uniforme
+        /// pela reta âncora→canto; lado = só aquele eixo, pelo eixo da camada.
+        /// Em volta da âncora, como a pinça; o arrasto = um passo de desfazer.
+        private func startResize(at point: CGPoint, view: UIView) -> Bool {
+            guard editableSelection(), let anchor = model.previewMarkerAnchor, let id = model.primarySelection,
+                  model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty else { return false }
+            // A âncora e as setas de eixo ganham empate.
+            let a = screenPoint(anchor.x, anchor.y, view: view)
+            if hypot(point.x - a.x, point.y - a.y) <= 20 { return false }
+            for tip in ShellStageGeometry.axisHandles(a, size: view.bounds.size)
+                where hypot(point.x - tip.x, point.y - tip.y) <= AureaDims.axisHandleTarget { return false }
+            let points = LayerResizeGeometry.handles(screenCorners(view: view))
+            var closest: CGFloat = 22, hit = -1
+            for i in points.indices {
+                let distance = hypot(point.x - points[i].x, point.y - points[i].y)
+                if distance < closest { closest = distance; hit = i }
+            }
+            guard hit >= 0 else { return false }
+            var c: [Float] = []; guard StageGeom.corners(model.detail, &c) else { return false }
+            let h: SIMD2<Float>
+            if hit < 4 { h = SIMD2(c[hit * 2], c[hit * 2 + 1]) }
+            else { let i = hit - 4, j = (i + 1) % 4; h = SIMD2((c[i * 2] + c[j * 2]) / 2, (c[i * 2 + 1] + c[j * 2 + 1]) / 2) }
+            var e = hit == 5 || hit == 7 ? SIMD2(c[2] - c[0], c[3] - c[1]) : hit == 4 || hit == 6 ? SIMD2(c[6] - c[0], c[7] - c[1]) : h - anchor
+            let length = hypot(e.x, e.y); guard length > 0.0001 else { return false }
+            e /= length
+            let base = (h.x - anchor.x) * e.x + (h.y - anchor.y) * e.y
+            // Âncora em cima da alça: não há o que esticar.
+            guard abs(base) / max(scaleFactor(view), 0.0001) >= 8 else { return false }
+            keepTransform()
+            resizeHandle = hit; resizeAnchor = anchor; resizeStart = h; resizeAxis = e; resizeBase = base
+            shell.grabbedResizeHandle = hit
+            engage(); beginEdit(hit >= 4 ? "esticar camada" : "escalar camada")
+            return true
+        }
+        private func stepResize(_ point: CGPoint, view: UIView) {
+            guard let id = model.primarySelection, resizeHandle >= 0, editableSelection() else { return }
+            let f = scaleFactor(view)
+            let p = resizeStart + SIMD2(Float(point.x - stageDown.x) * f, Float(point.y - stageDown.y) * f)
+            let raw = ((p.x - resizeAnchor.x) * resizeAxis.x + (p.y - resizeAnchor.y) * resizeAxis.y) / resizeBase
+            let k = model.engine.clampPinchFactor(raw, scaleX: startScale.x, scaleY: startScale.y, scaleZ: startScale.z, threeD: false)
+            switch resizeHandle {
+            case 5, 7: model.setTransform(3, value: startScale.x * k, layer: id)
+            case 4, 6: model.setTransform(4, value: startScale.y * k, layer: id)
+            default: model.setTransform2(3, startScale.x * k, 4, startScale.y * k, layer: id)
+            }
+        }
+
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard interactive, model.pointPick == nil, !model.focusPick, let view = gesture.view, model.primarySelection != nil, !(model.selectedLayer?.locked ?? false) else { return }
             if model.panel == .vector && model.vectorFreehand {
@@ -1209,6 +1265,21 @@ struct StageTouchPoint {
             }
             result.append(CGPoint(x: c[0].x + px, y: c[0].y + py))
         }
+        return result
+    }
+}
+
+/// Alças brancas de esticar da camada 2D (Android LayerResizeStage.kt).
+/// Índices: 0 TL, 1 TR, 2 BR, 3 BL, 4 cima, 5 direita, 6 baixo, 7 esquerda.
+/// Camada pequena na tela não ganha alças: o disco roubava o arrasto de mover.
+enum LayerResizeGeometry {
+    static let minSide: CGFloat = 96
+    static func handles(_ c: [CGPoint]) -> [CGPoint] {
+        guard c.count == 4 else { return [] }
+        let lengthU = hypot(c[1].x - c[0].x, c[1].y - c[0].y), lengthV = hypot(c[3].x - c[0].x, c[3].y - c[0].y)
+        guard min(lengthU, lengthV) >= minSide else { return [] }
+        var result = c
+        for i in 0..<4 { let j = (i + 1) % 4; result.append(CGPoint(x: (c[i].x + c[j].x) / 2, y: (c[i].y + c[j].y) / 2)) }
         return result
     }
 }

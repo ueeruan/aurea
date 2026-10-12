@@ -260,6 +260,8 @@ final class ShellPresentation: ObservableObject {
     /// Grade de terços sobre o quadro (só na prévia, nunca no export).
     @Published var showGrid = false
     @Published var grabbedShapeHandle = -1
+    /// Alça branca de esticar em uso (LayerResizeGeometry), ou −1.
+    @Published var grabbedResizeHandle = -1
     @Published var snapX: Float?
     @Published var snapY: Float?
     /// Seletor pedido pelo diálogo de adicionar. Quem APRESENTA é a raiz do

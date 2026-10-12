@@ -78,6 +78,9 @@ private let FxMatrixLabels = [
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.stylize.pixel_encoder", FxEffectHuman(keywords: "pixel encoder pixel_encoder megakrunch ascii letras grunge", principal: [0, 1, 2, 3, 4])),
     ("aurea.stylize.pix_dither", FxEffectHuman(keywords: "pixdither pix dither pontilhado paleta atkinson bayer", principal: [0, 1, 2])),
+    ("aurea.color.threshold", FxEffectHuman(keywords: "threshold limiar limite preto e branco duas cores 2 cores", principal: [0, 1])),
+    ("aurea.color.posterize", FxEffectHuman(keywords: "posterize posterizar niveis tons reduzir cores", principal: [0, 1])),
+    ("aurea.color.palettize", FxEffectHuman(keywords: "palettize paleta gameboy game boy nes pico-8 cga lospec gimp gpl hex retro pontilhado dither oklab", principal: [0, 2, 4])),
     ("aurea.glitch.video_glitch", FxEffectHuman(keywords: "bcc glitch video continuum blocos flicker tremor", principal: [0, 1, 2, 3, 55])),
     ("aurea.distort.displace_transform", FxEffectHuman(keywords: "displace displacer pro mapa escala rotacao aberracao", principal: [0, 1, 2, 3, 4], params: [1: FxParamHuman(label: "fx_deslocamento"), 2: FxParamHuman(label: "fx_escala")])),
     ("aurea.light.starglow", FxEffectHuman(keywords: "starglow trapcode estrela brilho star raios shimmer", principal: [0, 1, 2, 9, 15], params: [0: FxParamHuman(label: "fx_comprimento")])),
@@ -1551,6 +1554,9 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.color.brightness_contrast", "fx_desc_color_brightness_contrast")
     put("aurea.color.saturation", "fx_desc_color_saturation")
     put("aurea.color.tint", "fx_desc_color_tint")
+    put("aurea.color.threshold", "fx_desc_color_threshold")
+    put("aurea.color.posterize", "fx_desc_color_posterize")
+    put("aurea.color.palettize", "fx_desc_color_palettize")
     put("aurea.color.matrix", "fx_desc_color_matrix")
     put("aurea.color.levels", "fx_desc_color_levels")
     put("aurea.color.curves", "fx_desc_color_curves")

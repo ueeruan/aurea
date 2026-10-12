@@ -1548,5 +1548,17 @@ enum EffectI18nTable {
     aurea.distort.displace_transform|14|edges|fxl_edges|fxo_transparent,fxo_repeat,fxo_reflect,fx3o_repetir_pixels
     aurea.distort.displace_transform|15|filter|fxl_adaptive_filtering|
     aurea.distort.displace_transform|16|mix|fxl_mix|
+    aurea.color.threshold|0|limit|fx_limite|
+    aurea.color.threshold|1|softness|fx_suavidade|
+    aurea.color.threshold|2|dark|fxl_dark_color|
+    aurea.color.threshold|3|light|fxl_bright_color|
+    aurea.color.posterize|0|levels|fx_name_levels|
+    aurea.color.posterize|1|gamma|fxl_gamma|
+    aurea.color.posterize|2|luma_only|fxl_luma_only|
+    aurea.color.palettize|0|palette|fx_diffusion_palette|fxo_gameboy,fxo_nes,fxo_pico_8,fxo_cga,fxo_black_and_white,fxo_imported
+    aurea.color.palettize|1|file|fxl_palette_file|
+    aurea.color.palettize|2|dither|fxl_dither|fxo_none_2,fxo_floyd_steinberg,fxo_false_floyd_steinberg,fxo_filter_lite,fxo_zhigang_fan,fxo_shiau_fan,fxo_jarvis_judice_ninke,fxo_stucki,fxo_burkes,fxo_sierra,fxo_two_row_sierra,fxo_atkinson,fxo_bayer_2x2,fxo_bayer_3x3,fxo_bayer_5x3,fxo_bayer_4x4,fxo_bayer_8x8,fxo_cluster_dot_4x4,fxo_cluster_dot_8x8,fxo_horizontal_2x2,fxo_horizontal_8x1,fxo_horizontal_12x4,fxo_vertical_2x2,fxo_vertical_1x8,fxo_vertical_4x12,fxo_diagonal_5x5
+    aurea.color.palettize|3|dither_amount|fxl_dither_strength|
+    aurea.color.palettize|4|amount|fx_intensidade|
     """
 }

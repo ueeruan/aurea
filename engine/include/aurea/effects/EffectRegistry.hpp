@@ -221,6 +221,38 @@ namespace effect_keys {
     // Geometria na GPU, em qualquer camada.
     inline constexpr const char* kShatter3D             = "aurea.3d.shatter";
     inline constexpr const char* kStroke3D              = "aurea.3d.stroke";
+
+    // --- Pacote CC (comportamento dos efeitos "CC" dos editores de movimento) ---
+    // CCEffects.cpp, CCStylizeEffects.cpp e CCTransitions.cpp. Nomes exibidos
+    // genéricos; o nome "CC" fica só nas palavras de busca.
+    inline constexpr const char* kKaleidoscope         = "aurea.distort.kaleidoscope";
+    inline constexpr const char* kSphereWrap           = "aurea.distort.sphere_wrap";
+    inline constexpr const char* kCylinderWrap         = "aurea.distort.cylinder_wrap";
+    inline constexpr const char* kTwister              = "aurea.distort.twister";
+    inline constexpr const char* kFlowPinch            = "aurea.distort.flow_pinch";
+    inline constexpr const char* kGriddler             = "aurea.distort.griddler";
+    inline constexpr const char* kRepeatTile           = "aurea.stylize.repeat_tile";
+    inline constexpr const char* kSmear                = "aurea.distort.smear";
+    inline constexpr const char* kSplit                = "aurea.distort.split";
+    inline constexpr const char* kSlant                = "aurea.distort.slant";
+    inline constexpr const char* kTiler                = "aurea.stylize.tiler";
+    inline constexpr const char* kHexTile              = "aurea.stylize.hex_tile";
+    inline constexpr const char* kVectorBlur           = "aurea.blur.vector_blur";
+    inline constexpr const char* kLightBurst           = "aurea.light.light_burst";
+    inline constexpr const char* kStarField            = "aurea.stylize.star_field";
+    inline constexpr const char* kThresholdRgb         = "aurea.color.threshold_rgb";
+    inline constexpr const char* kColorOffset          = "aurea.color.color_offset";
+    inline constexpr const char* kScatter              = "aurea.stylize.scatter";
+    inline constexpr const char* kBlobby               = "aurea.stylize.blobby";
+    inline constexpr const char* kGlass                = "aurea.stylize.glass";
+    inline constexpr const char* kKernel               = "aurea.stylize.kernel";
+    inline constexpr const char* kSpotlight            = "aurea.light.spotlight";
+    inline constexpr const char* kDrizzle              = "aurea.distort.drizzle";
+    inline constexpr const char* kJaws                 = "aurea.transition.jaws";
+    inline constexpr const char* kScaleWipe            = "aurea.transition.scale_wipe";
+    inline constexpr const char* kRadialScaleWipe      = "aurea.transition.radial_scale_wipe";
+    inline constexpr const char* kBurnFilm             = "aurea.transition.burn_film";
+    inline constexpr const char* kBlockLoad            = "aurea.transition.block_load";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

@@ -550,6 +550,10 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_video_glitch(registry);
     builtin::register_displace_transform(registry);
     builtin::register_object3d_effects(registry);
+    // Pacote CC (distorções, estilo e transições). No fim.
+    builtin::register_cc_distort_effects(registry);
+    builtin::register_cc_stylize_effects(registry);
+    builtin::register_cc_transitions(registry);
 }
 
 } // namespace aurea

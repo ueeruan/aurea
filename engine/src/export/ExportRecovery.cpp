@@ -220,6 +220,18 @@ Status capture(const Project& project, CompositionId composition, const ExportSe
         if (!copy->timeline().composition(composition)) return Errc::NotFound;
         copy->timeline().set_current(composition);
         Status status;
+        // Sem recuperação (Android e iOS hoje), uma fonte de conteúdo da
+        // galeria (content://) fica como está: os decodificadores a abrem
+        // direto, como na prévia. Antes cada vídeo era COPIADO inteiro para o
+        // app na largada (com o editor travado e prazo de 120 s): vídeo grande
+        // travava a tela ou falhava com "não foi possível exportar".
+        auto track = [&](std::string& path) -> Status {
+            if (!requirePersistentSources && !path.empty()) {
+                std::string real = resolve ? resolve(path) : path;
+                if (!real.empty() && unsupported_uri(real)) { path = std::move(real); return OkStatus; }
+            }
+            return add_path(candidate, path, resolve);
+        };
         copy->for_each_asset([&](AssetId, Asset& asset) {
             if (!status.ok()) return;
             scene3d::Text3DSpec text;
@@ -229,19 +241,19 @@ Status capture(const Project& project, CompositionId composition, const ExportSe
                     text.fontPath = font->source_path();
                     TextData data; data.content = text.content;
                     for (auto path : aurea::text::source_dependencies(*font, data)) {
-                        status = add_path(candidate, path, resolve); if (!status.ok()) return;
+                        status = track(path); if (!status.ok()) return;
                     }
-                    status = add_path(candidate, text.fontPath, resolve);
+                    status = track(text.fontPath);
                 }
                 // Fonte nao resolvida: o render usa a de reserva (como na previa);
                 // antes isto derrubava o export inteiro com "midia nao pode ser lida".
-                if (status.ok()) status = add_path(candidate, text.texturePath, resolve);
+                if (status.ok()) status = track(text.texturePath);
                 asset.sourcePath = scene3d::encode_text3d(text);
             } else if (scene3d::decode_shape3d(asset.sourcePath, shape)) {
-                for (auto& part : shape.parts) { status = add_path(candidate, part.image, resolve); if (!status.ok()) break; }
+                for (auto& part : shape.parts) { status = track(part.image); if (!status.ok()) break; }
                 asset.sourcePath = scene3d::encode_shape3d(shape);
             } else if (!asset.sourcePath.empty()) {
-                status = add_path(candidate, asset.sourcePath, resolve);
+                status = track(asset.sourcePath);
                 if (status.ok() && requirePersistentSources && asset.kind == AssetKind::Model3D)
                     status = add_gltf_dependencies(candidate, asset.sourcePath);
             } else if (requirePersistentSources && (asset.kind == AssetKind::Image || asset.kind == AssetKind::Video || asset.kind == AssetKind::Audio || asset.kind == AssetKind::Model3D)) {
@@ -256,9 +268,9 @@ Status capture(const Project& project, CompositionId composition, const ExportSe
                 if (const auto font = text::FontManager::instance().font_for(layer.text)) {
                     layer.text.fontPath = font->source_path();
                     for (auto path : text::source_dependencies(*font, layer.text)) {
-                        status = add_path(candidate, path, resolve); if (!status.ok()) return;
+                        status = track(path); if (!status.ok()) return;
                     }
-                    status = add_path(candidate, layer.text.fontPath, resolve);
+                    status = track(layer.text.fontPath);
                 }   // sem fonte resolvida: a de reserva, igual a previa
             });
         });

@@ -12262,7 +12262,9 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             [&](const std::string& path) {
                 if (const auto found = preparedPaths.find(path); found != preparedPaths.end()) return found->second;
                 std::string resolved = resolve_asset_path(path);
-                if (config_.exportAssetPathResolver) {
+                // Cópia persistente da mídia só serve à recuperação do export
+                // após o app fechar. Desligada, a fonte original é lida direto.
+                if (config_.exportAssetPathResolver && config_.enableExportRecovery) {
                     auto persistent = config_.exportAssetPathResolver(resolved, config_.documentsDirectory, &ctx->cancelRequested);
                     if (!persistent.ok()) { sourceStatus = persistent.status(); return std::string{}; }
                     resolved = std::move(*persistent);

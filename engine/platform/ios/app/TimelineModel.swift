@@ -34,14 +34,14 @@ struct TimelineMetrics {
     /// Primeira linha em 44; pílula em 48 e barra em 50, como no Android.
     var rowsTop: CGFloat { EditorTimelineRefresh.enabled ? rulerTicks + dp(4) : dp(AureaTimeline.rulerTicks + AureaTimeline.rulerGap) }
     /// Passo da fileira: pílula 28 + 4 de vão.
-    var row: CGFloat { dp(EditorTimelineRefresh.enabled ? 24 + 24 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.row) }
+    var row: CGFloat { dp(EditorTimelineRefresh.enabled ? 30 + 24 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.row) }
     /// Topo da pílula dentro da fileira (o vão de 4 fica em cima).
     var pillTop: CGFloat { dp(EditorTimelineRefresh.enabled ? 0 : 4) }
     var pillHeight: CGFloat { EditorTimelineRefresh.enabled ? bar : dp(28) }
     var pillRadius: CGFloat { dp(EditorTimelineRefresh.enabled ? 4 : 14) }
     /// Topo da barra dentro da fileira: 2 abaixo do topo da pílula.
     var barTop: CGFloat { pillTop + dp(EditorTimelineRefresh.enabled ? 0 : 2) }
-    var bar: CGFloat { dp(EditorTimelineRefresh.enabled ? 23 + 20 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.bar) }
+    var bar: CGFloat { dp(EditorTimelineRefresh.enabled ? 29 + 20 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.bar) }
     var barRadius: CGFloat { dp(EditorTimelineRefresh.enabled ? 4 : AureaTimeline.barRadius) }
     var barMinWidth: CGFloat { dp(40) }
     var track: CGFloat { dp(11) }

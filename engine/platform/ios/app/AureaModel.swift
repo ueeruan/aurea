@@ -360,8 +360,10 @@ final class AureaModel: ObservableObject {
             _ = saveProject(writeThumbnail: false)
             upscaleStage = .idle
             exportOptions = ExportOptions()
-            exportOptions.aiUpscale = factor
-            exportOptions.shortSide = min(w, h) * factor
+            // Encoder de celular vai até 4K: 4x de um 1080p (8K) sai em 2x (4K).
+            let effective = factor == 4 && min(w, h) * 4 > 2160 ? 2 : factor
+            exportOptions.aiUpscale = UInt32(effective)
+            exportOptions.shortSide = min(w, h) * UInt32(effective)
             exportOptions.trimToContent = true
             startExport()
             // O fim do export vira "pronto" para a tela (ela observa exportedURL).

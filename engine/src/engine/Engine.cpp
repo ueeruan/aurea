@@ -26,8 +26,6 @@
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/project/FileIO.hpp"
-#include "aurea/ai/Upscaler.hpp"
-#include "aurea/ai/TemporalStabilizer.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportRules.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
@@ -37,7 +35,6 @@
 #include "aurea/export/OfflineFrameRenderer.hpp"
 #include "aurea/export/OfflineAudioSnapshot.hpp"
 #include "aurea/export/OfflineAudioBlockSource.hpp"
-#include "aurea/export/UpscaleColor.hpp"
 #include "aurea/effects/MeshWarp.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
@@ -261,6 +258,9 @@ struct Engine::ExportContext {
     u32 frames = 0;
     bool dither = true;
     TextureHandle comp{}, y{}, uv{};
+    /// Upscale na GPU: composição ampliada (ping-pong com o histórico do TAA).
+    TextureHandle upscale[2]{};
+    bool upscaleTemporal = false;
     // Áudio: o MESMO mixer do preview, com um cache próprio que decodifica
     // na hora (o export não disputa decoder com o preview).
     std::unique_ptr<audio::AudioBlockCache> audioCache;
@@ -12335,7 +12335,12 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // Teto do aparelho (a mesma regra lado maior × lado menor da composição).
     const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
     const u32 capShort = std::min(caps_.max_export_width(), caps_.max_export_height());
-    if (capLong > 0 && (std::max(ctx->width, ctx->height) > capLong || std::min(ctx->width, ctx->height) > capShort)) {
+    // Com upscale na GPU, o que pesa (efeitos, 3D, fila) é renderizado em
+    // saída/escala: o teto da memória vale para ESSE tamanho. A saída maior é
+    // só o passe de upscale + NV12 — o encoder diz se a aguenta.
+    const u32 renderLong = settings.aiUpscale ? std::max(ctx->width, ctx->height) / settings.aiUpscale : std::max(ctx->width, ctx->height);
+    const u32 renderShort = settings.aiUpscale ? std::min(ctx->width, ctx->height) / settings.aiUpscale : std::min(ctx->width, ctx->height);
+    if (capLong > 0 && (renderLong > capLong || renderShort > capShort)) {
         return Status{Errc::NotSupported, "resolucao acima do que este aparelho exporta"};
     }
     const u32 maxTex = gpu_->capabilities().maxTexture2D;
@@ -12345,16 +12350,14 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     ctx->outputWidth = ctx->width;
     ctx->outputHeight = ctx->height;
     if (settings.aiUpscale) {
-        // Keep the entire composition and the selected output exactly. Round the
-        // inference input to even dimensions, then shrink the full neural image.
+        // Upscale na GPU (0.1.7): a composição sai em saída/escala (dimensões
+        // pares) e um passe textureNicest a amplia para a saída exata antes do
+        // NV12 — sem rede neural, sem quadro na CPU. Antes: Real-ESRGAN em
+        // blocos na CPU, ~5 h para 10 s de vídeo.
         const u32 scale = settings.aiUpscale;
-        ctx->width = ((ctx->outputWidth + scale * 2 - 1) / (scale * 2)) * 2;
-        ctx->height = ((ctx->outputHeight + scale * 2 - 1) / (scale * 2)) * 2;
-        const u64 working = static_cast<u64>(ctx->width) * ctx->height * 3 +
-                            static_cast<u64>(ctx->width * scale) * (ctx->height * scale) * 3 / 2 + (64ull << 20);
-        if (working > std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2))
-            return Status{Errc::OutOfMemory, "memoria insuficiente para upscale nesta resolucao"};
-        ctx->dither = false; // Do not feed quantization noise to the neural network.
+        ctx->width = std::max<u32>(2, ((ctx->outputWidth + scale * 2 - 1) / (scale * 2)) * 2);
+        ctx->height = std::max<u32>(2, ((ctx->outputHeight + scale * 2 - 1) / (scale * 2)) * 2);
+        ctx->upscaleTemporal = settings.upscaleTemporal;
     }
 
     if (!ctx->recoveryPath.empty()) {
@@ -12541,11 +12544,13 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         cd.transferSrc = true;
         cd.debugName = "export-composicao";
         TextureDesc yd = cd;
+        yd.width = ctx->outputWidth;
+        yd.height = ctx->outputHeight;
         yd.format = SurfaceFormat::R8;
         yd.debugName = "export-y";
         TextureDesc ud = yd;
-        ud.width = ctx->width / 2;
-        ud.height = ctx->height / 2;
+        ud.width = ctx->outputWidth / 2;
+        ud.height = ctx->outputHeight / 2;
         ud.format = SurfaceFormat::RG8;
         ud.debugName = "export-cbcr";
         auto c = gpu_->create_texture(cd);
@@ -12561,6 +12566,23 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->comp = *c;
         ctx->y = *y;
         ctx->uv = *u;
+        if (ctx->outputWidth != ctx->width || ctx->outputHeight != ctx->height) {
+            // A composição ampliada (RGBA16F, tamanho de saída); com o TAA, duas
+            // em ping-pong (uma é o histórico da outra). Reaproveitadas o export todo.
+            TextureDesc ad = cd;
+            ad.width = ctx->outputWidth; ad.height = ctx->outputHeight;
+            ad.debugName = "export-upscale";
+            for (u32 k = 0; k < (ctx->upscaleTemporal ? 2u : 1u); ++k) {
+                auto t = gpu_->create_texture(ad);
+                if (!t.ok()) {
+                    // Sem memória para o histórico: segue só o espacial.
+                    if (k == 0) { ctx->sink->abort(); return Status{Errc::OutOfMemory, "sem memoria de GPU para o upscale"}; }
+                    ctx->upscaleTemporal = false;
+                    break;
+                }
+                ctx->upscale[k] = *t;
+            }
+        }
 
         // Slots de leitura (host-visible, mapeados de vez). Sem memória para os
         // três, o export segue com menos — mais lento, nunca pior.
@@ -12578,7 +12600,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         const u32 want = limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
             : std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
                                                          : (policyDepth ? policyDepth : 3u), 1u, 4u);
-        const u64 slotBytes = static_cast<u64>(ctx->width) * ctx->height * 3 / 2;
+        const u64 slotBytes = static_cast<u64>(ctx->outputWidth) * ctx->outputHeight * 3 / 2;
         ctx->queueByteLimit = config_.exportFrameQueueBudgetBytes ? config_.exportFrameQueueBudgetBytes
             : std::min<u64>(64ull << 20, std::max<u64>(8ull << 20, caps_.memory_budget_bytes() / 8));
         const u32 boundedSlots = static_cast<u32>(std::min<u64>(want, ctx->queueByteLimit / slotBytes));
@@ -12587,10 +12609,10 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             BufferDesc bd;
             bd.usage = BufferUsage::TransferDst;
             bd.access = MemoryAccess::Readback;
-            bd.bytes = static_cast<usize>(ctx->width) * ctx->height;
+            bd.bytes = static_cast<usize>(ctx->outputWidth) * ctx->outputHeight;
             bd.debugName = "export-leitura-y";
             auto by = gpu_->create_buffer(bd);
-            bd.bytes = static_cast<usize>(ctx->width) * (ctx->height / 2);
+            bd.bytes = static_cast<usize>(ctx->outputWidth) * (ctx->outputHeight / 2);
             bd.debugName = "export-leitura-cbcr";
             auto bu = gpu_->create_buffer(bd);
             void* py = nullptr;
@@ -12825,6 +12847,7 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
     ctx.deferredGpuCleanup = false;
     if (gpu_ && !lostDevice) {
         gpu_->destroy_texture(ctx.comp); gpu_->destroy_texture(ctx.y); gpu_->destroy_texture(ctx.uv);
+        for (auto& t : ctx.upscale) { if (t.valid()) gpu_->destroy_texture(t); t = {}; }
         if (!retainReadbacks) for (auto& slot : ctx.slots) {
             gpu_->destroy_buffer(slot.y); gpu_->destroy_buffer(slot.uv);
             slot.y = {}; slot.uv = {}; slot.yPtr = slot.uvPtr = nullptr;
@@ -12966,6 +12989,9 @@ void Engine::export_thread_main() noexcept {
     target.yPlane = ctx.y;
     target.uvPlane = ctx.uv;
     target.encodeDither = ctx.dither;
+    target.planeWidth = ctx.outputWidth;
+    target.planeHeight = ctx.outputHeight;
+    target.upscaleTemporal = ctx.upscaleTemporal;
 
     ctx.startNs = monotonic_ns();
     ctx.encoder = std::thread([this] { export_encoder_main(); });
@@ -13060,6 +13086,13 @@ void Engine::export_thread_main() noexcept {
         const auto plan = ctx.scheduler.frame(i);
         if (!plan.ok()) { result = plan.status(); break; }
         const u64 renderStarted = monotonic_ns();
+        if (ctx.upscale[0].valid()) {
+            // Ping-pong: o ampliado deste quadro vira o histórico do próximo.
+            const bool pingPong = ctx.upscaleTemporal && ctx.upscale[1].valid();
+            target.upscaled = ctx.upscale[pingPong ? (i & 1u) : 0u];
+            target.upscaleHistory = pingPong ? ctx.upscale[(i + 1) & 1u] : TextureHandle{};
+            target.upscaleHistoryValid = pingPong && i > 0;
+        }
         result = render_export_frame(plan->compositionFrame, target, slot.gpuFrame);
         if (ctx.queue && (i == 0 || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !result.ok()))
             AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
@@ -13272,29 +13305,6 @@ void Engine::export_encoder_main() noexcept {
             }
         }
     } workerExit{ctx};
-    std::unique_ptr<ai::Upscaler> upscaler;
-    ai::TemporalStabilizer temporalUpscale;
-    std::unique_ptr<u8[]> neuralInput, neuralOutput;
-    if (ctx.settings.aiUpscale) {
-        // Loading weights and all inference stay on the encoder worker.
-        Status loaded = Errc::OutOfMemory;
-        upscaler.reset(new (std::nothrow) ai::Upscaler());
-        neuralInput.reset(new (std::nothrow) u8[static_cast<usize>(ctx.width) * ctx.height * 3]);
-        neuralOutput.reset(new (std::nothrow) u8[static_cast<usize>(ctx.width * ctx.settings.aiUpscale) *
-                                               (ctx.height * ctx.settings.aiUpscale) * 3 / 2]);
-        if (upscaler && neuralInput && neuralOutput) {
-            // Tile 128: o halo de 20 px e computado por tile; em 64 ele custava
-            // 2,6x a area util, em 128 custa 1,7x (o maximo que o modelo aceita).
-            loaded = upscaler->load(ctx.settings.aiUpscale, 2, 128);
-        }
-        if (!loaded.ok()) {
-            ctx.queue->fail(loaded);
-            { std::lock_guard<std::mutex> ql(ctx.qMutex);
-              ctx.set_encoder_status(loaded); ctx.encoderFailed = true; ctx.stop = true; }
-            ctx.qCv.notify_all();
-            return;
-        }
-    }
     u32 sinceLog = 0;
     u64 logWrite = 0, logRead = 0, logRender = 0, logDecode = 0;
     for (;;) {
@@ -13322,41 +13332,9 @@ void Engine::export_encoder_main() noexcept {
         // Direto do buffer de leitura para o sink: nenhuma cópia intermediária.
         const u64 w0 = monotonic_ns();
         Status s;
-        ctx.enter(upscaler ? ExportWorkerPhase::Upscale : ExportWorkerPhase::Video);
-        if (upscaler) {
-            ai::nv12_to_rgb709(slot.yPtr, slot.uvPtr, ctx.width, ctx.height, neuralInput.get());
-            struct Destination { ExportContext* exportContext; u8* pixels; u32 frame; } destination{&ctx, neuralOutput.get(), i};
-            s = upscaler->run(neuralInput.get(), ctx.width, ctx.height, ctx.width * 3, ctx.cancelRequested,
-                [](void* opaque, const ai::Upscaler::Tile& tile) {
-                    auto& d = *static_cast<Destination*>(opaque);
-                    auto& c = *d.exportContext;
-                    c.beat();   // a IA anda: um bloco por batida
-                    if (!ai::rgb_tile_to_nv12_709(tile.rgb, tile.stride, tile.x, tile.y,
-                        tile.width, tile.height, c.width * c.settings.aiUpscale,
-                        c.height * c.settings.aiUpscale, d.pixels)) return false;
-                    { std::lock_guard<std::mutex> lock(c.mutex);
-                      std::snprintf(c.progress.message, sizeof(c.progress.message), "IA: %u/%u · %u%%", d.frame + 1,
-                                    c.frames, static_cast<u32>(tile.progress * 100)); }
-                    return !c.cancelRequested.load();
-                }, &destination);
-            if (s.ok() && !ai::resize_nv12_709(neuralOutput.get(), ctx.width * ctx.settings.aiUpscale,
-                    ctx.height * ctx.settings.aiUpscale, neuralOutput.get(), ctx.outputWidth, ctx.outputHeight))
-                s = Status{Errc::InvalidState, "dimensoes invalidas no upscale"};
-            if (s.ok()) {
-                const Status temporal = temporalUpscale.process(neuralInput.get(), ctx.width, ctx.height,
-                    neuralOutput.get(), ctx.outputWidth, ctx.outputHeight, i);
-                if (!temporal.ok()) {
-                    s = Status{temporal.code(), "memoria insuficiente para preservar estabilizacao temporal da IA"};
-                }
-            }
-            if (s.ok()) {
-                ctx.enter(ExportWorkerPhase::Video);
-                s = ctx.sink->write_video(neuralOutput.get(), ctx.outputWidth,
-                    neuralOutput.get() + static_cast<usize>(ctx.outputWidth) * ctx.outputHeight, ctx.outputWidth, pts);
-            }
-        } else {
-            s = ctx.sink->write_video(slot.yPtr, ctx.width, slot.uvPtr, ctx.width, pts);
-        }
+        ctx.enter(ExportWorkerPhase::Video);
+        // Os planos já vêm no tamanho de saída (o upscale, se houver, foi na GPU).
+        s = ctx.sink->write_video(slot.yPtr, ctx.outputWidth, slot.uvPtr, ctx.outputWidth, pts);
         ctx.beat();
         const u64 w1 = monotonic_ns();
         ctx.writeNs.fetch_add(w1 - w0, std::memory_order_relaxed);

@@ -451,6 +451,10 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         // CBR/VBR ceiling already carried by rc_max_rate above.
         av_dict_set(&options, "rc_mode", "bitrate", 0);
         av_dict_set(&options, "allow_skip_frames", "0", 0);
+        // OpenH264 só paraleliza ENTRE fatias: com uma fatia por quadro as 4
+        // threads ficavam paradas (moto g52, 4K do upscale: 306 ms/quadro num
+        // núcleo). 4 fatias = 4 núcleos; a perda de compressão é pequena.
+        if (ctx->height >= 720) ctx->slices = 4;
         if (video_.profile == 1) av_dict_set(&options, "profile", "constrained_baseline", 0);
     } else if (std::strcmp(name, "libsvtav1") == 0) {
         av_dict_set(&options, "preset", "10", 0);

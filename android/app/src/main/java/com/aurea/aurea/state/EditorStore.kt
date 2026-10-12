@@ -428,7 +428,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 project.path?.let { path -> withContext(Dispatchers.IO) { engine.saveProject(path) } }
                 upscaleStage = UpscaleStage.Idle
                 exporter.start(title, w, h, media.fps.toDouble(),
-                    ExportOptions(shortSide = kotlin.math.min(w, h) * factor, aiUpscale = factor, trimToContent = true))
+                    // Encoder de celular vai até 4K: 4x de um 1080p (8K) sai em 2x (4K).
+                    run {
+                        val short = kotlin.math.min(w, h)
+                        val f = if (factor == 4 && short * 4 > 2160) 2 else factor
+                        ExportOptions(shortSide = short * f, aiUpscale = f, trimToContent = true)
+                    })
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {

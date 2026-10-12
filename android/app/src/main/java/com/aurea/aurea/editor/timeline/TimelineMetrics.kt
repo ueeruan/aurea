@@ -19,8 +19,8 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, va
     /** Topo da primeira barra em 44 dp; a pílula começa 2 dp acima. */
     val rowsTop = if (referenceTrial) rulerTicks + dp(4f) else dp(AureaTimeline.RulerTicks.value + AureaTimeline.RulerGap.value)
     // Reference density, expanded for larger system text; drawing and hits share it.
-    val row = dp(if (referenceTrial) 24f + 24f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.Row.value)
-    val bar = dp(if (referenceTrial) 23f + 20f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.Bar.value)
+    val row = dp(if (referenceTrial) 30f + 24f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.Row.value)
+    val bar = dp(if (referenceTrial) 29f + 20f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.Bar.value)
     val barRadius = dp(if (referenceTrial) 4f else AureaTimeline.BarRadius.value)
     val barMinWidth = dp(AureaTimeline.BarMinWidth.value)
     val track = dp(AureaTimeline.KeyframeTrack.value)

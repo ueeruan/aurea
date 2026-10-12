@@ -78,16 +78,7 @@ if(MSVC)
     target_compile_options(ncnn PRIVATE /MP4)
 endif()
 set(ai_model_dir "${CMAKE_CURRENT_SOURCE_DIR}/assets/ai")
-set(ai_model_cpp "${CMAKE_CURRENT_BINARY_DIR}/generated/AiModel.cpp")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
-add_custom_command(OUTPUT "${ai_model_cpp}"
-    COMMAND "${CMAKE_COMMAND}" "-DMODEL_DIR=${ai_model_dir}" "-DOUTPUT=${ai_model_cpp}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedUpscaleModel.cmake"
-    DEPENDS "${ai_model_dir}/realesr-animevideov3.bin"
-            "${ai_model_dir}/realesr-animevideov3-x2.param"
-            "${ai_model_dir}/realesr-animevideov3-x4.param"
-            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedUpscaleModel.cmake"
-    VERBATIM)
 # Depth model (MiDaS v2.1 small): OUR ncnn conversion, fp16 storage, ~33 MB.
 # Provenance, recipe and hashes: assets/ai/README.md. Clang/GCC (Android, iOS)
 # embed the bytes with the assembler's .incbin; MSVC (host tests) has no
@@ -133,15 +124,15 @@ else()
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AiForegroundModel.incbin.cpp.in" "${ai_foreground_cpp}" @ONLY)
     set_source_files_properties("${ai_foreground_cpp}" PROPERTIES OBJECT_DEPENDS "${ai_foreground_bin};${ai_foreground_param}")
 endif()
-target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
-               "${ai_model_cpp}" "${ai_depth_cpp}" "${ai_foreground_cpp}")
+target_sources(aurea_core PRIVATE src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
+               "${ai_depth_cpp}" "${ai_foreground_cpp}")
 target_link_libraries(aurea_core PRIVATE ncnn)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.
 if(MSVC)
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp
+    set_source_files_properties(src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp
                                 PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp
+    set_source_files_properties(src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp
                                 PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()

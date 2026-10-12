@@ -426,6 +426,15 @@ struct OffscreenTarget {
     /// quem chama espera o fence do frame e lê do buffer mapeado.
     BufferHandle yReadback{};
     BufferHandle uvReadback{};
+    /// Upscale do export (0.1.7): planos NV12 de `planeWidth`×`planeHeight`
+    /// (> a composição). `upscaled` recebe a composição ampliada (textureNicest)
+    /// e `upscaleHistory` é a do quadro anterior (TAA modo 4, se válida).
+    u32 planeWidth = 0;
+    u32 planeHeight = 0;
+    TextureHandle upscaled{};
+    TextureHandle upscaleHistory{};
+    bool upscaleTemporal = false;
+    bool upscaleHistoryValid = false;
 
     /// Teste do passe de SAÍDA sem swapchain: quando válido, a composição
     /// (`texture`) ainda é composta, e depois vai para este alvo UNORM pelo

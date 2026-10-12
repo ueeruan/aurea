@@ -976,7 +976,7 @@ AUREA_TEST(Export, MaskScalarAnimationSurvivesProjectReopenInExportedFrames) {
     std::remove(path.c_str());
 }
 
-AUREA_TEST(Export, NeuralUpscaleKeepsOutputTimingAudioAndDimensions) {
+AUREA_TEST(Export, GpuUpscaleKeepsOutputTimingAudioAndDimensions) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;
     cfg.width = 64; cfg.height = 36;
@@ -2164,7 +2164,7 @@ AUREA_TEST(Export, CancelIsResponsiveAndReleasesTheSink) {
     AUREA_CHECK(r.e.capture_frame_rgba(64, rgba, w, h).ok());
 }
 
-AUREA_TEST(Export, NeuralUpscaleCancelReturnsPreviewAndAbortsPartialOutput) {
+AUREA_TEST(Export, GpuUpscaleCancelReturnsPreviewAndAbortsPartialOutput) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg;
     cfg.width = 128; cfg.height = 72;
@@ -2176,7 +2176,7 @@ AUREA_TEST(Export, NeuralUpscaleCancelReturnsPreviewAndAbortsPartialOutput) {
     bool processing = false;
     for (int i=0; i<10000; ++i) {
         const auto p = r.e.export_progress();
-        if (std::strncmp(p.message, "IA:", 3) == 0) { processing = true; break; }
+        if (p.framesDone > 0) { processing = true; break; }   // o upscale na GPU já está entregando quadros
         if (p.finished) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -2189,10 +2189,84 @@ AUREA_TEST(Export, NeuralUpscaleCancelReturnsPreviewAndAbortsPartialOutput) {
     AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
     AUREA_CHECK(r.cap.aborted && !r.cap.finished);
     const auto ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
-    std::printf("neural cancel %.1f ms ", ms);
+    std::printf("upscale cancel %.1f ms ", ms);
     AUREA_CHECK(ms < 2000);
     std::vector<u8> rgba; u32 w=0,h=0;
     AUREA_CHECK(r.e.capture_frame_rgba(64,rgba,w,h).ok());
+}
+
+// Upscale na GPU (0.1.7): textureNicest contra bilinear e o tempo por quadro.
+// Nitidez = quantos pixels ficam "no meio" das bordas (nem um platô nem o
+// outro): o textureNicest deixa a borda mais curta que o bilinear puro.
+namespace {
+u32 mid_edge_pixels(const u8* y, u32 w, u32 h) {
+    u32 lo = 255, hi = 0;
+    for (u32 i = 0; i < w * h; ++i) { lo = std::min<u32>(lo, y[i]); hi = std::max<u32>(hi, y[i]); }
+    const u32 a = lo + (hi - lo) / 6, b = hi - (hi - lo) / 6;
+    u32 n = 0;
+    for (u32 i = 0; i < w * h; ++i) if (y[i] > a && y[i] < b) ++n;
+    return n;
+}
+std::vector<u8> bilinear_y(const u8* src, u32 sw, u32 sh, u32 dw, u32 dh) {
+    std::vector<u8> out(static_cast<usize>(dw) * dh);
+    for (u32 y = 0; y < dh; ++y) for (u32 x = 0; x < dw; ++x) {
+        const f32 fx = std::clamp((x + .5f) * sw / dw - .5f, 0.f, sw - 1.f), fy = std::clamp((y + .5f) * sh / dh - .5f, 0.f, sh - 1.f);
+        const u32 x0 = static_cast<u32>(fx), y0 = static_cast<u32>(fy), x1 = std::min(x0 + 1, sw - 1), y1 = std::min(y0 + 1, sh - 1);
+        const f32 tx = fx - x0, ty = fy - y0;
+        const f32 top = src[y0 * sw + x0] * (1 - tx) + src[y0 * sw + x1] * tx;
+        const f32 bot = src[y1 * sw + x0] * (1 - tx) + src[y1 * sw + x1] * tx;
+        out[static_cast<usize>(y) * dw + x] = static_cast<u8>(std::lround(top * (1 - ty) + bot * ty));
+    }
+    return out;
+}
+} // namespace
+
+AUREA_TEST(Export, GpuUpscaleIsSharperThanBilinearAndMeasuresFrameTime) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 160; cfg.height = 90;
+    cfg.pattern = SyntheticPattern::Quadrants;
+    // 1x: a referência que o bilinear amplia.
+    std::vector<u8> base;
+    {
+        Rig r(cfg, 30.0, 1, 1);
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        r.cap.keepFrames = true;
+        const Outcome o = run_export(r, 90, 0, false, 60, 0);
+        AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+        if (r.cap.frames.empty()) return;
+        base.assign(r.cap.frames[0].begin(), r.cap.frames[0].begin() + 160 * 90);
+    }
+    for (const u32 scale : {2u, 4u}) {
+        Rig r(cfg, 30.0, 1, 1);
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        r.cap.keepFrames = true;
+        const Outcome o = run_export(r, 90 * scale, 0, false, 60, scale);
+        AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+        AUREA_CHECK_EQ(r.cap.video.width, 160u * scale);
+        if (r.cap.frames.empty()) continue;
+        const u32 w = 160 * scale, h = 90 * scale;
+        const u32 nicest = mid_edge_pixels(r.cap.frames[0].data(), w, h);
+        const std::vector<u8> bi = bilinear_y(base.data(), 160, 90, w, h);
+        const u32 bilinear = mid_edge_pixels(bi.data(), w, h);
+        std::printf("
+    upscale %ux: pixels de borda textureNicest %u x bilinear %u", scale, nicest, bilinear);
+        AUREA_CHECK(nicest < bilinear);
+    }
+    // Tempo real: 960x540 -> 3840x2160 (4x) e 1280x720 -> 2560x1440 (2x), 12 quadros.
+    struct Case { u32 w, h, scale; };
+    for (const Case c : {Case{960, 540, 4}, Case{1280, 720, 2}}) {
+        SyntheticConfig big;
+        big.width = c.w; big.height = c.h; big.pattern = SyntheticPattern::MovingSquare;
+        Rig r(big, 30.0, 12, 3);
+        AUREA_CHECK(r.ok); if (!r.ok) return;
+        const Outcome o = run_export(r, c.h * c.scale, 0, true, 600, c.scale);
+        AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
+        AUREA_CHECK_EQ(r.cap.video.width, c.w * c.scale);
+        std::printf("
+    upscale %ux%u -> %ux%u: %.1f ms/quadro (%.2f s para 12 quadros)", c.w, c.h, c.w * c.scale,
+                    c.h * c.scale, o.seconds * 1000.0 / 12.0, o.seconds);
+    }
 }
 
 // =============================================================================

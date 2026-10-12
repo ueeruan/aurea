@@ -6411,15 +6411,36 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         graph_.set_output(bb, displayTest ? ResourceState::ShaderRead : ResourceState::Present);
     } else if (offscreen && offscreen->yPlane.valid() && offscreen->uvPlane.valid()) {
         // Export: composição → NV12 na GPU (o encoder recebe planos prontos).
+        // Com upscale, antes: a composição (cw×ch) vira o tamanho de saída num
+        // passe só (textureNicest + TAA modo 4 opcional), e o NV12 lê dela.
+        const u32 ow = offscreen->planeWidth ? offscreen->planeWidth : cw;
+        const u32 oh = offscreen->planeHeight ? offscreen->planeHeight : ch;
+        FGTexture yuvSource = comp;
+        if (offscreen->upscaled.valid() && (ow != cw || oh != ch)) {
+            TextureDesc ad;
+            ad.width = ow; ad.height = oh;
+            ad.format = SurfaceFormat::RGBA16F;
+            ad.sampled = true; ad.renderTarget = true;
+            const FGTexture up = graph_.import_texture("export-upscale", offscreen->upscaled, ad);
+            const bool history = offscreen->upscaleTemporal && offscreen->upscaleHistoryValid && offscreen->upscaleHistory.valid();
+            const FGTexture prev = history ? graph_.import_texture("export-upscale-historico", offscreen->upscaleHistory, ad) : comp;
+            struct UpscaleUniforms { Vec4 res; Vec4 cfg; } uu{
+                Vec4{static_cast<f32>(cw), static_cast<f32>(ch), 1.0f / static_cast<f32>(cw), 1.0f / static_cast<f32>(ch)},
+                Vec4{offscreen->upscaleTemporal ? 1.0f : 0.0f, history ? 1.0f : 0.0f, 30.0f, 0.0f}};
+            const u32 pu = ctx.fullscreen_pass("export-upscale", PassStage::Output, up, ShaderId::export_upscale_nicest_frag,
+                {PassTexture{comp, {}, CommonSampler::LinearClamp}, PassTexture{prev, {}, CommonSampler::LinearClamp}},
+                &uu, sizeof(uu));
+            if (pu != kInvalidIndex) { graph_.mark_side_effect(pu); yuvSource = up; }
+        }
         TextureDesc yd;
-        yd.width = cw;
-        yd.height = ch;
+        yd.width = ow;
+        yd.height = oh;
         yd.format = SurfaceFormat::R8;
         yd.renderTarget = true;
         yd.transferSrc = true;
         TextureDesc uvd = yd;
-        uvd.width = cw / 2;
-        uvd.height = ch / 2;
+        uvd.width = ow / 2;
+        uvd.height = oh / 2;
         uvd.format = SurfaceFormat::RG8;
         const FGTexture yTex = graph_.import_texture("export-y", offscreen->yPlane, yd);
         const FGTexture uvTex = graph_.import_texture("export-cbcr", offscreen->uvPlane, uvd);
@@ -6428,9 +6449,9 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const YuvUniforms uy{Vec4{0.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
         const YuvUniforms uc{Vec4{1.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
         const u32 py = ctx.fullscreen_pass("export-y", PassStage::Output, yTex, ShaderId::export_yuv_encode_frag,
-                                           {PassTexture{comp, {}, CommonSampler::NearestClamp}}, &uy, sizeof(uy));
+                                           {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &uy, sizeof(uy));
         const u32 pc = ctx.fullscreen_pass("export-cbcr", PassStage::Output, uvTex, ShaderId::export_yuv_encode_frag,
-                                           {PassTexture{comp, {}, CommonSampler::NearestClamp}}, &uc, sizeof(uc));
+                                           {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &uc, sizeof(uc));
         if (py != kInvalidIndex) graph_.mark_side_effect(py);
         if (pc != kInvalidIndex) graph_.mark_side_effect(pc);
         graph_.set_output(comp, ResourceState::ShaderRead);

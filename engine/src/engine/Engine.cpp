@@ -686,14 +686,32 @@ Status prepare_original_export_models(Project& project, CompositionId root,
                 if (!scene.stats.texturesReduced && !scene.stats.texturesSkipped && scene.missingTextures.empty()
                     && scene.stats.sourceTriangles == scene.stats.triangles && model_texture_references_complete(scene)) continue;
             }
+            // A versão Original é uma MELHORIA da exportação, não condição para
+            // exportar. Quando ela não pode ser preparada (memória, formato não
+            // glTF, textura ausente), o export usa o MESMO modelo que a prévia
+            // mostra. Antes, qualquer um desses casos abortava o export inteiro
+            // com erro 9 ("memoria insuficiente para exportar o modelo com
+            // texturas Original") — ex.: um carro de 300 mil triângulos.
+            const bool havePreview = prior != models.end() && prior->second;
+            auto keepPreview = [&](const Status& why) -> bool {
+                if (!havePreview) return false;
+                AUREA_LOG_WARN("export Original: %s exportado com o modelo da previa (%.*s)", source->name.c_str(),
+                    static_cast<int>(why.detail().size()), why.detail().empty() ? "" : why.detail().data());
+                return true;
+            };
             const auto dot = source->sourcePath.find_last_of('.');
             std::string extension = dot == std::string::npos ? std::string{} : source->sourcePath.substr(dot);
             for (char& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-            if (extension != ".glb" && extension != ".gltf")
-                return Status{Errc::NotSupported,
-                    "nao foi possivel restaurar a fonte Original deste formato 3D; exportacao interrompida"};
-            if (room < 4096) return Status{Errc::BudgetExceeded,
-                "memoria insuficiente para preparar as texturas Original da exportacao"};
+            if (extension != ".glb" && extension != ".gltf") {
+                const Status why{Errc::NotSupported, "nao foi possivel restaurar a fonte Original deste formato 3D"};
+                if (keepPreview(why)) continue;
+                return why;
+            }
+            if (room < 4096) {
+                const Status why{Errc::BudgetExceeded, "memoria insuficiente para preparar as texturas Original da exportacao"};
+                if (keepPreview(why)) continue;
+                return why;
+            }
             scene3d::ImportOptions options;
             options.maxTriangles = 0;
             options.simplifyError = 0;
@@ -710,23 +728,32 @@ Status prepare_original_export_models(Project& project, CompositionId root,
             if (!result.ok()) {
                 AUREA_LOG_WARN("export Original: modelo %s recusado: %s", source->name.c_str(), result.detail.c_str());
                 if (result.error == scene3d::ImportError::Cancelled) return Errc::Cancelled;
+                Status why;
                 if (result.error == scene3d::ImportError::TooHeavy || result.error == scene3d::ImportError::OutOfMemory)
-                    return Status{Errc::BudgetExceeded, "memoria insuficiente para exportar o modelo com texturas Original"};
-                if (result.error == scene3d::ImportError::UnsupportedFeature || result.error == scene3d::ImportError::UnsupportedCompression)
-                    return Status{Errc::NotSupported, "uma textura Original usa um formato que este motor nao suporta"};
-                return Status{Errc::AssetCorrupted, "fonte ou textura do modelo Original ausente ou invalida"};
+                    why = Status{Errc::BudgetExceeded, "memoria insuficiente para exportar o modelo com texturas Original"};
+                else if (result.error == scene3d::ImportError::UnsupportedFeature || result.error == scene3d::ImportError::UnsupportedCompression)
+                    why = Status{Errc::NotSupported, "uma textura Original usa um formato que este motor nao suporta"};
+                else
+                    why = Status{Errc::AssetCorrupted, "fonte ou textura do modelo Original ausente ou invalida"};
+                if (keepPreview(why)) continue;
+                return why;
             }
             const auto& full = *result.asset;
+            Status why;
             if (full.stats.texturesReduced)
-                return Status{Errc::NotSupported, "a GPU nao suporta a dimensao de uma textura Original deste modelo"};
-            if (full.stats.texturesSkipped || !full.missingTextures.empty() || !model_texture_references_complete(full))
-                return Status{Errc::AssetCorrupted, "modelo Original nao tem todas as texturas necessarias para exportar"};
-            if (full.stats.sourceTriangles != full.stats.triangles
+                why = Status{Errc::NotSupported, "a GPU nao suporta a dimensao de uma textura Original deste modelo"};
+            else if (full.stats.texturesSkipped || !full.missingTextures.empty() || !model_texture_references_complete(full))
+                why = Status{Errc::AssetCorrupted, "modelo Original nao tem todas as texturas necessarias para exportar"};
+            else if (full.stats.sourceTriangles != full.stats.triangles
                 || (source->model.sourceTriangles && source->model.sourceTriangles != full.stats.sourceTriangles))
-                return Status{Errc::AssetCorrupted, "a geometria Original do modelo difere da fonte do projeto"};
-            const u64 bytes = scene3d::scene_asset_memory_bytes(full);
-            if (bytes > room) return Status{Errc::BudgetExceeded,
-                "memoria insuficiente para manter o modelo Original durante a exportacao"};
+                why = Status{Errc::AssetCorrupted, "a geometria Original do modelo difere da fonte do projeto"};
+            const u64 bytes = why.ok() ? scene3d::scene_asset_memory_bytes(full) : 0;
+            if (why.ok() && bytes > room)
+                why = Status{Errc::BudgetExceeded, "memoria insuficiente para manter o modelo Original durante a exportacao"};
+            if (!why.ok()) {
+                if (keepPreview(why)) continue;
+                return why;
+            }
             // The preview model still belongs to models_ and is counted by the
             // source room. This new immutable export scene consumes additional,
             // measured CPU space; it never replaces the saved/editor asset.

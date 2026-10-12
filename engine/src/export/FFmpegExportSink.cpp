@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cerrno>
 #include <climits>
 #include <cmath>
@@ -48,8 +49,12 @@ namespace {
 
 constexpr AVRational micros{1, 1'000'000};
 constexpr u64 hashSeed = 1469598103934665603ull;
-constexpr unsigned maxPendingVideo = 16;
-constexpr u64 pendingVideoBudget = 64ull * 1024 * 1024;
+// Tempos (PTS/duracao) dos quadros entregues ao encoder e ainda sem pacote.
+// So metadados (16 bytes por quadro), nunca pixels: os pixels vivem nos
+// buffers do proprio encoder, que ja faz contrapressao (send_frame = EAGAIN).
+// Encoders de hardware (MediaCodec, VideoToolbox) seguram dezenas de quadros
+// antes do 1o pacote; 16 derrubava o export no celular com BudgetExceeded (9).
+constexpr unsigned maxPendingVideo = 256;
 constexpr int audioInputChunk = 4096;
 constexpr u64 codecStallNs = 30'000'000'000ull;
 
@@ -319,8 +324,8 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     audioInputSamples_ = audioConvertedSamples_ = audioSubmittedSamples_ = 0;
     pendingHead_ = pendingCount_ = 0; lastError_ = OkStatus;
     const u64 frameBytes = static_cast<u64>(video.width) * video.height * 3 / 2;
-    pendingLimit_ = static_cast<unsigned>(std::max<u64>(1,
-        std::min<u64>(maxPendingVideo, pendingVideoBudget / frameBytes)));
+    (void)frameBytes;
+    pendingLimit_ = maxPendingVideo;
     rate_ = av_d2q(video.fps, 1'000'000);
     if (rate_.num <= 0 || rate_.den <= 0)
         return Status{Errc::InvalidArgument, "taxa de quadros FFmpeg nao possui representacao racional valida"};
@@ -724,8 +729,19 @@ Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
     if (framePts < 0 || frameDuration <= 0 || frameDuration > INT64_MAX - framePts ||
         (lastVideoPts_ != AV_NOPTS_VALUE && framePts <= lastVideoPts_))
         return Status{Errc::InvalidArgument, "PTS de frame FFmpeg duplicado ou nao monotono"};
-    if (pendingCount_ >= pendingLimit_)
-        return error(Errc::BudgetExceeded, "encoder FFmpeg excedeu a fila limitada de frames");
+    if (pendingCount_ >= pendingLimit_) {
+        // Fila cheia: espera o encoder devolver pacotes (o mesmo prazo de
+        // travamento do resto do sink) em vez de abortar na hora com 9.
+        const u64 waitStarted = monotonic_ns();
+        while (pendingCount_ >= pendingLimit_) {
+            unsigned produced = 0;
+            if (const Status status = drain(videoCodec_, videoStream_, true, false, produced); !status.ok()) return status;
+            if (produced) continue;
+            if (monotonic_ns() - waitStarted > codecStallNs)
+                return error(Errc::Timeout, "encoder FFmpeg nao devolveu pacotes com a fila de quadros cheia");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
     int result = av_frame_make_writable(videoFrame_);
     if (result < 0) return error(Errc::OutOfMemory, "tornar frame FFmpeg gravavel", result);
     if (scale_) {

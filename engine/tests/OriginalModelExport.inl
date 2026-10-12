@@ -164,7 +164,10 @@ AUREA_TEST(OriginalModelExportGpu, SourceTexturePixelsSurviveOfflineExportReopen
     AUREA_CHECK(original.cap.frames == savedFrames);
 }
 
-AUREA_TEST(OriginalModelExport, UnsupportedDegradedSourceCannotSilentlyExportPreviewMaps) {
+// Beta 0.1.5: a versão Original é uma melhoria do export, não condição. Fonte
+// que não pode ser restaurada (formato, memória) exporta com o modelo da
+// prévia, que está completo; antes isso abortava o export (erro 9).
+AUREA_TEST(OriginalModelExport, UnsupportedDegradedSourceExportsWithTheCompletePreviewModel) {
     OriginalModelFixture fixture("aurea-original-format");
     const auto source = fixture.glb(4096, "-source.glb");
     AUREA_CHECK(!source.empty()); if (source.empty()) return;
@@ -186,17 +189,18 @@ AUREA_TEST(OriginalModelExport, UnsupportedDegradedSourceCannotSilentlyExportPre
     const auto prior = rig.e.model_asset(key);
     AUREA_CHECK(prior && prior->stats.texturesReduced > 0);
     ExportSettings settings; settings.height = 64;
-    const auto failed = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
-    AUREA_CHECK_EQ(failed.code(), Errc::NotSupported);
-    // The snapshot can fingerprint OBJ, but cannot promote this degraded
-    // Original OBJ texture through the glTF-only source reimporter.
-    AUREA_CHECK(!failed.detail().empty());
-    AUREA_CHECK(failed.detail().find("Original") != std::string_view::npos);
-    AUREA_CHECK(!rig.cap.opened && rig.cap.writes == 0);
+    // The glTF-only source reimporter cannot promote this OBJ: the export
+    // starts with the preview's (complete, reduced) maps instead of failing.
+    const auto started = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
+    AUREA_CHECK(started.ok());
+    (void)rig.e.cancel_export();
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (started.ok() && !rig.e.export_progress().finished && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     AUREA_CHECK(rig.e.model_asset(key) == prior);
 }
 
-AUREA_TEST(OriginalModelExport, InsufficientSourceMemoryFailsBeforeOpeningTheEncoderWithoutChangingPreview) {
+AUREA_TEST(OriginalModelExport, InsufficientSourceMemoryExportsWithThePreviewModelWithoutChangingIt) {
     OriginalModelFixture fixture("aurea-original-budget");
     const auto source = fixture.glb(4096, "-source.glb");
     AUREA_CHECK(!source.empty()); if (source.empty()) return;
@@ -212,10 +216,12 @@ AUREA_TEST(OriginalModelExport, InsufficientSourceMemoryFailsBeforeOpeningTheEnc
     const auto prior = rig.e.model_asset(asset.pack());
     AUREA_CHECK(prior && prior->stats.texturesReduced == 1);
     ExportSettings settings; settings.height = 64;
-    const auto failed = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
-    AUREA_CHECK_EQ(failed.code(), Errc::BudgetExceeded);
-    AUREA_CHECK(failed.detail().find("Original") != std::string_view::npos);
-    AUREA_CHECK(!rig.cap.opened && rig.cap.writes == 0 && !rig.cap.finished);
+    const auto started = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
+    AUREA_CHECK(started.ok());
+    (void)rig.e.cancel_export();
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (started.ok() && !rig.e.export_progress().finished && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     AUREA_CHECK(rig.e.model_asset(asset.pack()) == prior);
     AUREA_CHECK_EQ(rig.e.project()->asset(asset)->model.importQuality, 0u);
     AUREA_CHECK(rig.e.new_project(96, 64, 30, "startup failure released ownership").ok());

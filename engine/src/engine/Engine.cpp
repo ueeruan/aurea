@@ -696,7 +696,10 @@ Status prepare_original_export_models(Project& project, CompositionId root,
             // mostra. Antes, qualquer um desses casos abortava o export inteiro
             // com erro 9 ("memoria insuficiente para exportar o modelo com
             // texturas Original") — ex.: um carro de 300 mil triângulos.
-            const bool havePreview = prior != models.end() && prior->second;
+            // ...desde que a prévia tenha todas as texturas: sem elas o vídeo
+            // sairia sem textura, e aí a recusa continua (AssetCorrupted).
+            const bool havePreview = prior != models.end() && prior->second && prior->second->missingTextures.empty()
+                && !prior->second->stats.texturesSkipped && model_texture_references_complete(*prior->second);
             auto keepPreview = [&](const Status& why) -> bool {
                 if (!havePreview) return false;
                 AUREA_LOG_WARN("export Original: %s exportado com o modelo da previa (%.*s)", source->name.c_str(),

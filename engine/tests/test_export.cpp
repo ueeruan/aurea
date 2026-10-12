@@ -2249,8 +2249,7 @@ AUREA_TEST(Export, GpuUpscaleIsSharperThanBilinearAndMeasuresFrameTime) {
         const u32 nicest = mid_edge_pixels(r.cap.frames[0].data(), w, h);
         const std::vector<u8> bi = bilinear_y(base.data(), 160, 90, w, h);
         const u32 bilinear = mid_edge_pixels(bi.data(), w, h);
-        std::printf("
-    upscale %ux: pixels de borda textureNicest %u x bilinear %u", scale, nicest, bilinear);
+        std::printf("\n    upscale %ux: pixels de borda textureNicest %u x bilinear %u", scale, nicest, bilinear);
         AUREA_CHECK(nicest < bilinear);
     }
     // Tempo real: 960x540 -> 3840x2160 (4x) e 1280x720 -> 2560x1440 (2x), 12 quadros.
@@ -2263,8 +2262,7 @@ AUREA_TEST(Export, GpuUpscaleIsSharperThanBilinearAndMeasuresFrameTime) {
         const Outcome o = run_export(r, c.h * c.scale, 0, true, 600, c.scale);
         AUREA_CHECK(o.finished && o.p.result == Errc::Ok);
         AUREA_CHECK_EQ(r.cap.video.width, c.w * c.scale);
-        std::printf("
-    upscale %ux%u -> %ux%u: %.1f ms/quadro (%.2f s para 12 quadros)", c.w, c.h, c.w * c.scale,
+        std::printf("\n    upscale %ux%u ->%ux%u: %.1f ms/quadro (%.2f s para 12 quadros)", c.w, c.h, c.w * c.scale,
                     c.h * c.scale, o.seconds * 1000.0 / 12.0, o.seconds);
     }
 }

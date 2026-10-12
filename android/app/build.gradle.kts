@@ -100,7 +100,7 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar também os APKs 0.1.4 build 2174 já distribuídos.
-        versionCode = 2176
+        versionCode = 2177
         versionName = "0.1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

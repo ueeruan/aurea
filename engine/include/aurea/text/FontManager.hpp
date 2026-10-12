@@ -40,6 +40,11 @@ struct FontEntry {
 /// carregar o arquivo inteiro. Falso se não for uma fonte legível.
 bool read_font_info(const std::string& path, FontEntry& out);
 
+/// Mais formatos na importação (0.1.8, FontUnpack.cpp): WOFF vira .ttf/.otf e
+/// cada face de uma coleção TTC/OTC vira um arquivo próprio, ao lado do
+/// original. TTF/OTF voltam como estão; vazio = formato não aceito.
+std::vector<std::string> unpack_font_file(const std::string& path);
+
 class FontManager {
 public:
     static FontManager& instance();

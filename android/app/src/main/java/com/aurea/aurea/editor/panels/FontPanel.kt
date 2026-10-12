@@ -102,7 +102,7 @@ internal fun FontPanel(env: PanelEnv) {
             Spacer(Modifier.padding(4.dp))
             Box(
                 Modifier.clip(RoundedCornerShape(10.dp)).background(AureaColors.AccentDim)
-                    .tocavel(onClick = { pick.launch(arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream", "*/*")) })
+                    .tocavel(onClick = { pick.launch(arrayOf("font/ttf", "font/otf", "font/collection", "font/woff", "application/font-woff", "application/x-font-ttf", "application/octet-stream", "*/*")) })
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 Text(stringResource(R.string.panel_importar), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)))

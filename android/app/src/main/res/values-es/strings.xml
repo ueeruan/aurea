@@ -1968,7 +1968,7 @@ para editar la curva.</string>
     <string name="msg_arquivo_do_preset_nao_encontrado">No se encontró el archivo del preset</string>
     <string name="msg_preset_nao_aplicado">Preset no aplicado: %1$s</string>
     <string name="msg_aplicado">\"%1$s\" aplicado</string>
-    <string name="msg_use_uma_fonte_ttf_ou_otf">Usa una fuente TTF u OTF.</string>
+    <string name="msg_use_uma_fonte_ttf_ou_otf">Usa una fuente TTF, OTF, TTC, OTC o WOFF.</string>
     <string name="msg_nao_deu_para_ler_essa_fonte">No se pudo leer esta fuente.</string>
     <string name="msg_fonte_importada">Fuente %1$s importada</string>
     <string name="msg_desfoque_do_movimento_do_video_ligado">Desenfoque de movimiento del video activado</string>

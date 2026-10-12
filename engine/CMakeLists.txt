@@ -195,6 +195,7 @@ set(AUREA_CORE_SOURCES
     src/tracking/MotionGeometry.cpp
     src/text/Text.cpp
     src/text/FontManager.cpp
+    src/text/FontUnpack.cpp
     src/text/TextAnimator.cpp
     src/text/TextTransform.cpp
     src/text/Captions.cpp

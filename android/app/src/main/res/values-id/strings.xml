@@ -1968,7 +1968,7 @@ untuk mengedit kurvanya.</string>
     <string name="msg_arquivo_do_preset_nao_encontrado">File preset tidak ditemukan</string>
     <string name="msg_preset_nao_aplicado">Preset tidak diterapkan: %1$s</string>
     <string name="msg_aplicado">\"%1$s\" diterapkan</string>
-    <string name="msg_use_uma_fonte_ttf_ou_otf">Gunakan font TTF atau OTF.</string>
+    <string name="msg_use_uma_fonte_ttf_ou_otf">Gunakan font TTF, OTF, TTC, OTC, atau WOFF.</string>
     <string name="msg_nao_deu_para_ler_essa_fonte">Tidak bisa membaca font ini.</string>
     <string name="msg_fonte_importada">Font %1$s diimpor</string>
     <string name="msg_desfoque_do_movimento_do_video_ligado">Motion blur video aktif</string>

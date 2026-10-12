@@ -460,3 +460,114 @@ AUREA_TEST(I18n, EveryEffectTextHasEnglish) {
     AUREA_CHECK(checked > 0);
     AUREA_CHECK(missing == 0);
 }
+
+// =============================================================================
+//  Mais formatos de fonte (0.1.8): WOFF e coleções TTC viram TTF/OTF na importação
+// =============================================================================
+#include "aurea/export/ImageEncode.hpp"
+#include "aurea/text/FontManager.hpp"
+
+namespace {
+std::vector<u8> file_bytes(const std::string& path) {
+    std::vector<u8> v;
+    if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
+        std::fseek(f, 0, SEEK_END);
+        v.resize(static_cast<usize>(std::ftell(f)));
+        std::fseek(f, 0, SEEK_SET);
+        if (std::fread(v.data(), 1, v.size(), f) != v.size()) v.clear();
+        std::fclose(f);
+    }
+    return v;
+}
+u32 b32(const u8* p) { return (u32(p[0]) << 24) | (u32(p[1]) << 16) | (u32(p[2]) << 8) | u32(p[3]); }
+void put32(std::vector<u8>& v, u32 x) { for (int s = 24; s >= 0; s -= 8) v.push_back(static_cast<u8>(x >> s)); }
+
+/// WOFF 1.0 de um TTF: tabelas comprimidas com zlib quando encolhem.
+std::vector<u8> make_woff(const std::vector<u8>& ttf) {
+    const u16 n = static_cast<u16>((ttf[4] << 8) | ttf[5]);
+    std::vector<u8> head, dir, data;
+    std::vector<std::vector<u8>> blobs;
+    u32 offset = 44 + 20u * n;
+    for (u16 i = 0; i < n; ++i) {
+        const u8* r = &ttf[12 + 16u * i];
+        const u32 tag = b32(r), sum = b32(r + 4), off = b32(r + 8), len = b32(r + 12);
+        std::vector<u8> z;
+        zlib_compress(&ttf[off], len, z);
+        const bool shrink = z.size() < len;
+        const std::vector<u8> stored = shrink ? z : std::vector<u8>(ttf.begin() + off, ttf.begin() + off + len);
+        put32(dir, tag); put32(dir, offset); put32(dir, static_cast<u32>(stored.size())); put32(dir, len); put32(dir, sum);
+        data.insert(data.end(), stored.begin(), stored.end());
+        while (data.size() % 4) data.push_back(0);
+        offset = 44 + 20u * n + static_cast<u32>(data.size());
+    }
+    put32(head, 0x774F4646u); put32(head, b32(ttf.data())); put32(head, 44 + 20u * n + static_cast<u32>(data.size()));
+    head.push_back(static_cast<u8>(n >> 8)); head.push_back(static_cast<u8>(n)); head.push_back(0); head.push_back(0);
+    put32(head, static_cast<u32>(ttf.size()));
+    for (int k = 0; k < 6; ++k) put32(head, 0);
+    std::vector<u8> out = head;
+    out.insert(out.end(), dir.begin(), dir.end());
+    out.insert(out.end(), data.begin(), data.end());
+    return out;
+}
+} // namespace
+
+AUREA_TEST(I18n, WoffAndCollectionFontsBecomeDrawableTtf) {
+    const std::string roboto = (std::filesystem::path(__FILE__).parent_path().parent_path() / "assets/fonts/Roboto-Regular.ttf").string();
+    const std::vector<u8> ttf = file_bytes(roboto);
+    AUREA_CHECK(ttf.size() > 1000);
+    if (ttf.size() <= 1000) return;
+    const std::vector<u8> woff = make_woff(ttf);
+    AUREA_CHECK(woff.size() < ttf.size());   // as tabelas comprimiram
+    const std::string woffPath = "aurea_teste_fonte.woff";
+    {
+        std::FILE* f = std::fopen(woffPath.c_str(), "wb");
+        std::fwrite(woff.data(), 1, woff.size(), f);
+        std::fclose(f);
+    }
+    const auto files = text::unpack_font_file(woffPath);
+    AUREA_CHECK_EQ(files.size(), usize{1});
+    if (files.size() == 1) {
+        AUREA_CHECK(files[0].size() > 4 && files[0].substr(files[0].size() - 4) == ".ttf");
+        text::FontEntry info;
+        AUREA_CHECK(text::read_font_info(files[0], info));
+        AUREA_CHECK(info.family == "Roboto");
+        // Desenha igual ao original: mesma largura de "Aurea".
+        auto a = text::Font::load(roboto), b = text::Font::load(files[0]);
+        AUREA_CHECK(a && b);
+        if (a && b) {
+            TextData t;
+            t.content = "Aurea";
+            t.size = 64.0f;
+            AUREA_CHECK_NEAR(text::measure(*a, t).width, text::measure(*b, t).width, 0.01f);
+            AUREA_CHECK(text::measure(*b, t).width > 10.0f);
+        }
+        std::remove(files[0].c_str());
+    }
+    std::remove(woffPath.c_str());
+    // Coleção do sistema (Windows): cada face vira um arquivo legível.
+    const char* ttc = "C:/Windows/Fonts/YuGothR.ttc";
+    if (std::filesystem::exists(ttc)) {
+        const std::string copy = "aurea_teste_colecao.ttc";
+        std::filesystem::copy_file(ttc, copy, std::filesystem::copy_options::overwrite_existing);
+        const auto faces = text::unpack_font_file(copy);
+        std::printf("    coleção: %zu face(s)\n", faces.size());
+        AUREA_CHECK(faces.size() >= 2);
+        for (const auto& face : faces) {
+            text::FontEntry info;
+            AUREA_CHECK(text::read_font_info(face, info));
+            AUREA_CHECK(text::Font::load(face) != nullptr);
+            std::remove(face.c_str());
+        }
+        std::remove(copy.c_str());
+    }
+    // WOFF2 não é aceito (sem decodificador Brotli): volta vazio.
+    {
+        const std::string w2 = "aurea_teste_fonte.woff2";
+        std::FILE* f = std::fopen(w2.c_str(), "wb");
+        const char magic[16] = {'w', 'O', 'F', '2'};
+        std::fwrite(magic, 1, sizeof magic, f);
+        std::fclose(f);
+        AUREA_CHECK(text::unpack_font_file(w2).empty());
+        std::remove(w2.c_str());
+    }
+}

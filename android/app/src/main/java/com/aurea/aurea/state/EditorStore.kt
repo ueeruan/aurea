@@ -5662,7 +5662,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         launchImport launch@{
             for (uri in uris.distinct()) {
                 val ext = (displayName(uri) ?: "fonte.ttf").substringAfterLast('.', "ttf").lowercase()
-                if (ext != "ttf" && ext != "otf") {
+                // 0.1.8: coleções (TTC/OTC) e WOFF também — o motor converte em TTF/OTF.
+                if (ext !in FONT_EXTENSIONS) {
                     errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf); continue
                 }
                 val line = withContext(Dispatchers.IO) {
@@ -5672,6 +5673,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val item = line?.let { parseFont(it) }
                 if (item == null) { errorMessage = appText(R.string.msg_nao_deu_para_ler_essa_fonte); continue }
                 fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
+                // Coleção: as outras faces também entraram no motor.
+                if (ext == "ttc" || ext == "otc") loadFonts()
                 // Importing a library must not repeatedly change the selected text.
                 if (uris.size == 1 && primary == targetLayer) {
                     if (forText3d) text3d?.let { setText3D(it.copy(fontPath = item.path)) }
@@ -7602,6 +7605,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val CAMERA_AFFECTS_BELOW = 7
         /** `ParticleParam::Count` do motor (contrato v21: 70 parâmetros). */
         const val PARTICLE_PARAM_COUNT = 70
+        /** Fontes aceitas na importação (o motor converte WOFF e coleções). */
+        val FONT_EXTENSIONS = setOf("ttf", "otf", "ttc", "otc", "woff")
         /** Amostras do gráfico de velocidade (painel de velocidade). */
         const val SPEED_GRAPH_SAMPLES = 96
         /** Id do "tipo" memória na tela Armazenamento. */

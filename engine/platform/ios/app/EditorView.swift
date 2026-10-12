@@ -1240,7 +1240,8 @@ private struct TextPanelView: View {
     /// motor varre ao abrir), registrado no CoreText e no motor e aplicado à
     /// camada que estava escolhida quando o seletor abriu.
     private func importFont(_ url: URL, target: Int64, apply: Bool = true) {
-        guard ["ttf", "otf"].contains(url.pathExtension.lowercased()) else {
+        // 0.1.8: coleções (TTC/OTC) e WOFF também — o motor converte em TTF/OTF.
+        guard ["ttf", "otf", "ttc", "otc", "woff"].contains(url.pathExtension.lowercased()) else {
             model.toast = AureaText.t("msg_use_uma_fonte_ttf_ou_otf"); return
         }
         let scoped = url.startAccessingSecurityScopedResource()
@@ -1253,7 +1254,8 @@ private struct TextPanelView: View {
             try? FileManager.default.removeItem(at: destination)
             model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return
         }
-        FontImportPicker.registerWithCoreText(destination)
+        // O CoreText recebe o arquivo que o motor usa (WOFF/coleção viram TTF/OTF).
+        FontImportPicker.registerWithCoreText((font["path"] as? String).map { URL(fileURLWithPath: $0) } ?? destination)
         query = ""
         fonts = model.engine.availableFonts()
         if apply && model.primarySelection == target { chooseFont(font) }
@@ -1370,7 +1372,7 @@ private struct TextPanelView: View {
 enum FontImportPicker {
     private static var delegate: Delegate?
     static var types: [UTType] {
-        [UTType.font] + ["ttf", "otf"].compactMap { UTType(filenameExtension: $0) }
+        [UTType.font] + ["ttf", "otf", "ttc", "otc", "woff"].compactMap { UTType(filenameExtension: $0) }
     }
     static func presentMultiple(_ picked: @escaping ([URL]) -> Void) {
         let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)

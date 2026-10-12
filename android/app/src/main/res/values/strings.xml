@@ -1553,7 +1553,7 @@
     <string name="msg_arquivo_do_preset_nao_encontrado">Arquivo do preset não encontrado</string>
     <string name="msg_preset_nao_aplicado">Preset não aplicado: %1$s</string>
     <string name="msg_aplicado">\"%1$s\" aplicado</string>
-    <string name="msg_use_uma_fonte_ttf_ou_otf">Use uma fonte TTF ou OTF.</string>
+    <string name="msg_use_uma_fonte_ttf_ou_otf">Use uma fonte TTF, OTF, TTC, OTC ou WOFF.</string>
     <string name="msg_nao_deu_para_ler_essa_fonte">Não deu para ler essa fonte.</string>
     <string name="msg_fonte_importada">Fonte %1$s importada</string>
     <string name="msg_desfoque_do_movimento_do_video_ligado">Desfoque do movimento do vídeo ligado</string>

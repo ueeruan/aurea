@@ -678,7 +678,8 @@ struct Panel3DView: View {
         importedMaterials = stride(from: 0, to: materials.count - materials.count % 8, by: 8).map { Array(materials[$0..<($0 + 8)]) }
     }
     private func importFont(_ url: URL, target: Int64?) {
-        guard ["ttf", "otf"].contains(url.pathExtension.lowercased()) else {
+        // 0.1.8: coleções (TTC/OTC) e WOFF também — o motor converte em TTF/OTF.
+        guard ["ttf", "otf", "ttc", "otc", "woff"].contains(url.pathExtension.lowercased()) else {
             model.toast = AureaText.t("msg_use_uma_fonte_ttf_ou_otf"); return
         }
         let scoped = url.startAccessingSecurityScopedResource()
@@ -693,7 +694,7 @@ struct Panel3DView: View {
             }
             if let target = target, model.primarySelection == target {
                 _ = model.engine.setText3D(forLayer: target, property: "fontPath",
-                                           stringValue: "docs:Media/\(destination.lastPathComponent)", numberValue: 0)
+                                           stringValue: "docs:Media/\((font["path"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? destination.lastPathComponent)", numberValue: 0)
                 refresh()
             }
             model.toast = AureaText.t("msg_fonte_importada", font["family"] as? String ?? "")

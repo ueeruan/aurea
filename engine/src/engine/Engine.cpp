@@ -8902,9 +8902,16 @@ std::vector<text::FontEntry> Engine::list_fonts() noexcept { return text::FontMa
 
 Result<text::FontEntry> Engine::import_font(const char* path) noexcept {
     if (!path || !*path) return Status{Errc::InvalidArgument, "caminho vazio"};
-    const text::FontEntry* e = text::FontManager::instance().add_file(path, true);
-    if (!e) return Status{Errc::UnsupportedFormat, "nao e uma fonte TTF/OTF legivel"};
-    return *e;
+    // TTF/OTF direto; WOFF e coleções TTC/OTC viram arquivos sfnt ao lado do
+    // original (todas as faces da coleção entram na lista; volta a primeira).
+    const std::vector<std::string> files = text::unpack_font_file(path);
+    const text::FontEntry* first = nullptr;
+    for (const std::string& file : files) {
+        const text::FontEntry* e = text::FontManager::instance().add_file(file, true);
+        if (e && !first) first = e;
+    }
+    if (!first) return Status{Errc::UnsupportedFormat, "nao e uma fonte TTF/OTF/TTC/WOFF legivel"};
+    return *first;
 }
 
 bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept {

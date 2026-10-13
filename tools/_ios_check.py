@@ -107,7 +107,36 @@ def bloco_tipos():
             for n, linha in enumerate(fonte_swift(p).splitlines(), 1):
                 if agenda.search(linha):
                     problemas.append("%s:%d usa TimelineView(.agenda) sem SwiftUI." % (p.name, n))
+    problemas += propriedades_em_extensao()
     print("tipos:    %d declarados, %d problema(s)" % (len(dono), len(problemas)))
+    return problemas
+
+
+def propriedades_em_extensao():
+    """Propriedade ARMAZENADA dentro de `extension` não compila ("extensions
+    must not contain stored properties" — quebrou o IPA da 0.1.8 só na CI).
+    Olha o primeiro nível de cada extension: `var/let x = …` ou `var x: T`
+    sem corpo `{`, que não seja `static`."""
+    problemas = []
+    armazenada = re.compile(r"^\s*(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|fileprivate|internal|public)(?:\(set\))?\s+)*"
+                            r"(?:lazy\s+)?(?:var|let)\s+\w+")
+    for p in swift_files():
+        texto = fonte_swift(p)
+        profundidade = 0
+        nivel_ext = None
+        for n, linha in enumerate(texto.splitlines(), 1):
+            sem_texto = re.sub(r'"(?:\\.|[^"\\])*"', '""', linha.split("//")[0])
+            if nivel_ext is None and re.match(r"^\s*(?:(?:private|fileprivate|public|internal)\s+)?extension\s", sem_texto):
+                nivel_ext = profundidade
+            elif nivel_ext is not None and profundidade == nivel_ext + 1 and armazenada.match(sem_texto) \
+                    and " static " not in " " + sem_texto and "class var" not in sem_texto:
+                corpo = sem_texto.rstrip()
+                computada = corpo.endswith("{") or ("{" in corpo and "=" not in corpo.split("{")[0])
+                if not computada:
+                    problemas.append("%s:%d propriedade armazenada em extension: %s" % (p.name, n, linha.strip()[:70]))
+            profundidade += sem_texto.count("{") - sem_texto.count("}")
+            if nivel_ext is not None and profundidade <= nivel_ext:
+                nivel_ext = None
     return problemas
 
 

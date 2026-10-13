@@ -3389,6 +3389,8 @@ final class AureaModel: ObservableObject {
     @Published var poseBones: [Float] = []
     @Published var rigPoseMode = false
     @Published var poseBone: Int32 = -1
+    /// O arrasto de osso em curso já abriu o passo de desfazer (o resto vai junto).
+    var poseGestureSent = false
     @Published var sceneYaw: Float = -30
     @Published var scenePitch: Float = 20
     @Published var sceneDistance: Float = 3
@@ -5369,7 +5371,6 @@ extension AureaModel {
         }
         return hit
     }
-    private var poseGestureSent = false
     /// Dedo na cena: gira o osso escolhido (px da composição; twist em graus).
     func dragPoseBone(dx: Float, dy: Float, twist: Float) {
         guard let id = primarySelection, poseBone >= 0 else { return }

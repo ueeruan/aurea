@@ -3963,7 +3963,15 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 
 - (NSString*)exportDiagnostic {
     auto* e = self.engine;
-    return e ? to_ns(e->export_diagnostic()) : @"";
+    if (!e) return @"";
+    std::string text = e->export_diagnostic();
+    // O degrau do encoder (escada VideoToolbox/software) e os que falharam.
+    char path[640] = {};
+    if (!text.empty() && aurea::last_export_encoder_path(path, sizeof(path)) > 0) {
+        text += " escada=";
+        text += path;
+    }
+    return to_ns(text);
 }
 
 + (BOOL)hardwareHevcEncoderAvailable {

@@ -3740,7 +3740,14 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
 /// tamanho, modo de segurança, onde travou, verificação. ASCII, sem caminhos.
 AUREA_JNI jstring AUREA_FN(nativeExportDiagnostic)(JNIEnv* env, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);
-    const std::string text = c ? c->engine.export_diagnostic() : std::string{};
+    std::string text = c ? c->engine.export_diagnostic() : std::string{};
+    // O degrau do encoder (escada Surface/ByteBuffer/software) e os que falharam.
+    char path[640]{};
+    if (!text.empty() && last_export_encoder_path(path, sizeof(path)) > 0) {
+        for (char& ch : path) if (static_cast<unsigned char>(ch) >= 0x80) ch = '?';   // UTF-8 modificado: só ASCII
+        text += " escada=";
+        text += path;
+    }
     return env->NewStringUTF(text.c_str());
 }
 

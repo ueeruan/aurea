@@ -14109,12 +14109,20 @@ void Engine::export_encoder_main() noexcept {
         }
         ctx.qCv.notify_all();
         if (!s.ok()) return;
-        if (i == ctx.startFrame) {
-            // O sink pode trocar de encoder no primeiro quadro (buffer de
-            // entrada inútil no de hardware → software): o aviso acompanha.
+        {
+            // O sink pode trocar de encoder até sair o primeiro pacote (escada
+            // Surface → ByteBuffer → software: recusa, partida travada ou 1º
+            // quadro reprovado), o que acontece alguns quadros depois do
+            // início. Diagnóstico e aviso acompanham o degrau que ficou.
             const ExportSink::EncoderInfo enc = ctx.sink->encoder_info();
-            { std::lock_guard<std::mutex> ql(ctx.qMutex); ctx.encoderInfo = enc; }
-            if (enc.acceleration == ExportSink::Acceleration::Software) {
+            bool changed = false;
+            {
+                std::lock_guard<std::mutex> ql(ctx.qMutex);
+                changed = i == ctx.startFrame || enc.acceleration != ctx.encoderInfo.acceleration ||
+                    std::strncmp(enc.name, ctx.encoderInfo.name, sizeof(enc.name)) != 0;
+                if (changed) ctx.encoderInfo = enc;
+            }
+            if (changed && enc.acceleration == ExportSink::Acceleration::Software) {
                 std::lock_guard<std::mutex> pl(ctx.mutex);
                 ctx.progress.flags = (ctx.progress.flags & ~kExportHardwareEncoder) | kExportSoftwareEncoder;
             }

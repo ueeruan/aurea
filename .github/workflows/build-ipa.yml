@@ -31,7 +31,7 @@ on:
     branches: ['codex/native-beta2-ipa']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
 concurrency:
-  group: native-ipa-${{ github.ref }}${{ inputs.capture_only && '-capture' || '' }}
+  group: native-ipa-${{ github.ref }}-${{ github.sha }}${{ inputs.capture_only && '-capture' || '' }}
   cancel-in-progress: true
 permissions:
   contents: read
@@ -300,6 +300,22 @@ jobs:
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build/simulator \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee build-simulator.log
+      - name: Prepare official 3D export fixtures
+        env:
+          AUREA_PARITY_SCENES: ${{ inputs.capture_scenes || '' }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import sys
+          requested = os.environ.get('AUREA_PARITY_SCENES', '').strip()
+          if not requested or 'export-render' in {part.strip() for part in requested.split(',')}:
+              sys.path.insert(0, str(Path('tools').resolve()))
+              from run_ios_offline_composition_probe import prepare_models
+              output = Path('build/reference/astra-ios-parity')
+              output.mkdir(parents=True, exist_ok=True)
+              prepare_models(output)
+          PY
       - name: Capture actual iOS UI and core fixture projects
         env:
           AUREA_PARITY_SCENES: ${{ inputs.capture_scenes || '' }}
@@ -313,6 +329,8 @@ jobs:
             build-simulator.log
             build-ffmpeg-simulator.log
             build/ffmpeg/ios-simulator/*/aurea-ffmpeg-build.json
+            build/reference/astra-ios-parity/model-sources.json
+            build/reference/astra-ios-parity/models/LICENSE_*.md
           if-no-files-found: ignore
       - name: Run native preview gestures and undo tests
         if: always() && steps.compile_simulator.outcome == 'success' && !inputs.capture_only

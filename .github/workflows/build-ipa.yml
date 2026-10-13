@@ -181,7 +181,9 @@ jobs:
   simulator-parity:
     if: github.event_name != 'workflow_dispatch' || inputs.run_simulator
     runs-on: macos-15
-    timeout-minutes: 60
+    # Compilar o app do simulador leva 20-25 min; com 60 a suíte de gestos era
+    # cortada no meio em toda beta desde a 0.1.5.
+    timeout-minutes: 120
     env:
       CCACHE_DIR: ${{ github.workspace }}/build/ccache
       CCACHE_BASEDIR: ${{ github.workspace }}

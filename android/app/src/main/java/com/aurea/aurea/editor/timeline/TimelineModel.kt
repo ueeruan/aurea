@@ -546,7 +546,7 @@ internal fun expandedRows(
         val owner = row.segments.firstOrNull { it.id in expanded }
         if (owner == null) listOf(row) else {
             val fx = effects(owner.id)
-            val all = keys[owner.id].orEmpty()
+            val all = keys[owner.id].orEmpty().filter { it.timelineVisible }
             val tracks = all.groupBy { TimelineTrack(it.property, it.effectIndex, it.paramIndex) }
             val lanes = arrayListOf(row)
             fun lane(track: TimelineTrack, name: String, values: List<KeyframeRow> = emptyList()) {

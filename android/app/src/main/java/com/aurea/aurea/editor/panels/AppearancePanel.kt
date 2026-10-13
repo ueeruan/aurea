@@ -145,7 +145,7 @@ internal fun AppearancePanel(env: PanelEnv) {
     }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val look by remember(store) { derivedStateOf { transformLook(store.detail, intArrayOf(TrackProperty.OPACITY)) } }
-    val curveReady by remember(store) { derivedStateOf { store.primaryKeys().transformTrack(TrackProperty.OPACITY).size >= 2 } }
+    val curveReady by remember(store) { derivedStateOf { store.curveStart(store.primaryKeys().transformTrack(TrackProperty.OPACITY)) != null } }
     val exprLook by remember(store) { derivedStateOf { store.expressionLook(OpacityKeys) } }
     val opacityTitle = stringResource(R.string.panel_opacidade)
 
@@ -160,7 +160,7 @@ internal fun AppearancePanel(env: PanelEnv) {
                     val layer = store.primary
                     val t = store.detail?.localPlayhead
                     if (layer != null && t != null) {
-                        store.primaryKeys().transformTrack(TrackProperty.OPACITY).segmentStart(t)?.let {
+                        store.curveStart(store.primaryKeys().transformTrack(TrackProperty.OPACITY))?.let {
                             store.selectKeyframe(layer, it)
                             env.onOpenPanel(EditorPanel.Curve)
                         }

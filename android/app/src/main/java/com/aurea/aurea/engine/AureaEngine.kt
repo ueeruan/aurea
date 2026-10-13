@@ -490,6 +490,17 @@ class AureaEngine private constructor() {
 
     // Pré-composição.
     fun precompose(ids: LongArray): Long = nativePrecompose(nativeHandle, ids)
+    fun groupAndMask(ids: LongArray, exclude: Boolean, name: String? = null): Long = nativeGroupAndMask(nativeHandle, ids, exclude, name)
+    fun queryKeyframeNavigation(layer: Long, property: Int, effect: Int, param: Int, compositionFrame: Int): KeyframeNavigation? {
+        val out = LongArray(7)
+        if (!nativeQueryKeyframeNavigation(nativeHandle, layer, property, effect, param, compositionFrame.toLong(), out)) return null
+        return KeyframeNavigation(out[0].toInt(), out[1].toInt(), out[2].toInt(), out[3].toInt(), out[4].toInt(), out[5].toInt(), out[6].toInt())
+    }
+    /** Null means no marker/selected-layer key lies strictly in that direction. */
+    fun queryTimelineNavigation(layer: Long?, compositionFrame: Int, direction: Int): Int? =
+        nativeQueryTimelineNavigation(nativeHandle, layer ?: 0L, compositionFrame.toLong(), direction)
+            .takeIf { it in 0..Int.MAX_VALUE.toLong() }?.toInt()
+    fun seekTimelineEvent(compositionFrame: Int): Boolean = nativeSeekTimelineEvent(nativeHandle, compositionFrame.toLong())
     fun openPrecomp(layer: Long): Boolean = nativeOpenPrecomp(nativeHandle, layer)
     /** null = desagrupou; senão o motivo da recusa. */
     fun ungroupPrecomp(layer: Long): String? = nativeUngroupPrecomp(nativeHandle, layer)
@@ -1052,6 +1063,7 @@ class AureaEngine private constructor() {
     fun reloadModelTextures(layer: Long, detail: Array<String?>): Int = nativeWork.run(-5) { nativeReloadModelTextures(nativeHandle, layer, detail) }
     fun cancelModelImport() = nativeWork.run(Unit) { nativeCancelModelImport(nativeHandle) }
     fun exportProgress(out: ByteBuffer): Boolean = nativeWork.run(false) { nativeExportProgress(nativeHandle, out) }
+    fun exportDiagnostics(): String = nativeWork.run("{}") { nativeExportDiagnostics(nativeHandle) ?: "{}" }
     /** Copies absolute [start, end) pairs; returns the number of ranges, at most 30. */
     fun localAiStatus(): Int = nativeWork.run(0) { nativeLocalAiStatus(nativeHandle) }
     fun previewBufferRanges(out: LongArray): Int = nativeWork.run(0) { nativePreviewBufferRanges(nativeHandle, out) }
@@ -1317,6 +1329,10 @@ class AureaEngine private constructor() {
     private external fun nativeQueryParticleCurve(handle: Long, layer: Long, kind: Int, out: FloatArray): Int
     private external fun nativeApplySpeedRamp(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
+    private external fun nativeGroupAndMask(handle: Long, ids: LongArray, exclude: Boolean, name: String?): Long
+    private external fun nativeQueryKeyframeNavigation(handle: Long, layer: Long, property: Int, effect: Int, param: Int, frame: Long, out: LongArray): Boolean
+    private external fun nativeQueryTimelineNavigation(handle: Long, layer: Long, frame: Long, direction: Int): Long
+    private external fun nativeSeekTimelineEvent(handle: Long, frame: Long): Boolean
     private external fun nativeUngroupPrecomp(handle: Long, layer: Long): String?
     private external fun nativeImportHdri(handle: Long, path: String): Long
     private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray, localSpace: Boolean): Boolean
@@ -1401,6 +1417,7 @@ class AureaEngine private constructor() {
     private external fun nativeReloadModelTextures(handle: Long, layer: Long, detail: Array<String?>): Int
     private external fun nativeCancelModelImport(handle: Long)
     private external fun nativeExportProgress(handle: Long, out: ByteBuffer): Boolean
+    private external fun nativeExportDiagnostics(handle: Long): String?
     private external fun nativeLocalAiStatus(handle: Long): Int
     private external fun nativePreviewBufferRanges(handle: Long, out: LongArray): Int
 

@@ -167,6 +167,49 @@ enum ProblemReport {
     static let whatHappenedMax = 4000
     static let stepsMax = 4000
     private static let installKey = "aurea.crash.instalacao"   // o mesmo id dos relatórios de crash
+    private static let diagnosticKey = "aurea.export.diagnostic"
+    @MainActor private static var diagnosticPreviousToken = ""
+    @MainActor private static var diagnosticAttempts: [[String: Any]] = []
+
+    // The caller is the main actor's lightweight diagnostics timer. The native
+    // getter reads an independent snapshot; it never waits for codecs or GPU.
+    @MainActor static func beginExportDiagnostics(previous: String) {
+        diagnosticPreviousToken = ((try? JSONSerialization.jsonObject(with: Data(previous.utf8))) as? [String: Any])?["sessionToken"] as? String ?? ""
+        diagnosticAttempts.removeAll()
+        UserDefaults.standard.removeObject(forKey: diagnosticKey)
+    }
+    @MainActor static func recordExportDiagnostics(_ raw: String) {
+        guard raw.utf8.count <= 8192,
+              let item = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any],
+              (item["schema"] as? NSNumber)?.intValue == 1, item["elapsedMs"] != nil,
+              let token = item["sessionToken"] as? String, !token.isEmpty, token != diagnosticPreviousToken else { return }
+        if let index = diagnosticAttempts.firstIndex(where: { ($0["sessionToken"] as? String) == token }) { diagnosticAttempts[index] = item }
+        else { diagnosticAttempts.append(item) }
+        if diagnosticAttempts.count > 3 { diagnosticAttempts.removeFirst() }
+        var attempts = diagnosticAttempts
+        let device: [String: Any] = ["manufacturer": "Apple", "model": deviceModel(), "osVersion": UIDevice.current.systemVersion,
+                                   "socManufacturer": "Apple", "socModel": NSNull(), "process64Bit": true]
+        func encode() -> String? {
+            let report: [String: Any] = ["schema": 1, "device": device, "outputColor": "8-bit SDR BT.709 limited", "attempts": attempts]
+            guard let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        var text = encode()
+        if (text?.count ?? 0) > 3000 {
+            attempts = attempts.enumerated().map { index, value in
+                if index == attempts.count - 1 { return value }
+                return value.filter { ["safeMode", "encoder", "backend", "requestedColor", "elapsedMs", "encoderStage", "result", "firstPacketMs"].contains($0.key) }
+            }
+            text = encode()
+        }
+        if let text, text.count <= 3000 { UserDefaults.standard.set(text, forKey: diagnosticKey) }
+    }
+    static func stepsWithExportDiagnostics(_ steps: String) -> String {
+        guard let evidence = UserDefaults.standard.string(forKey: diagnosticKey), evidence.count <= 3000 else { return steps }
+        let suffix = "[export-diagnostic] " + evidence
+        let own = String(steps.trimmingCharacters(in: .whitespacesAndNewlines).prefix(max(0, stepsMax - suffix.count - 2)))
+        return (own.isEmpty ? "" : own + "\n\n") + suffix
+    }
 
     static var appVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "" }
     static var appBuild: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "" }
@@ -201,7 +244,7 @@ enum ProblemReport {
             "locale": Locale.current.identifier,
             "whatDid": String(whatDid.trimmingCharacters(in: .whitespacesAndNewlines).prefix(whatDidMax)),
             "whatHappened": String(whatHappened.trimmingCharacters(in: .whitespacesAndNewlines).prefix(whatHappenedMax)),
-            "steps": String(steps.trimmingCharacters(in: .whitespacesAndNewlines).prefix(stepsMax)),
+            "steps": String(stepsWithExportDiagnostics(steps).prefix(stepsMax)),
         ]
         if let email = sessao?.email { body["email"] = email }
         let r = await ContaAPI.chamar("/api/report", metodo: "POST", corpo: body, token: sessao?.token)

@@ -36,6 +36,7 @@ struct Panel3DView: View {
     @State private var tab: Panel3DTab = .material
     @State private var materialAdvanced = false
     @State private var sceneAdvanced = false
+    @State private var selectedScalar: String?
     @FocusState private var editingText: Bool
 
     private var layerId: Int64 { model.primarySelection ?? 0 }
@@ -85,6 +86,7 @@ struct Panel3DView: View {
             }
             .accessibilityIdentifier("text3d.materialScroll")
         }
+        .id("panel3d:\(model.projectGeneration):\(model.composition[AureaCompositionId] ?? ""):\(layerId)")
         .background(AureaColors.background)
         .sheet(isPresented: $pickingTextTexture) {
             ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
@@ -250,8 +252,8 @@ struct Panel3DView: View {
     /// malha acompanha), um passo de desfazer por gesto; teclado e ↺ gravam.
     private func textRow(_ label: String, key: String, max: Float, reset: Float, gesture: String,
                          step: Float = 0.5, decimals: Int = 0, localized: Bool = false) -> some View {
-        T3DRow(label: localized ? label : AureaText.t(label), value: number(key) * 100, step: step, range: 0...(max * 100),
-               unit: "%", decimals: decimals, reset: reset * 100,
+        return T3DRow(label: localized ? label : AureaText.t(label), value: number(key) * 100, step: step, range: 0...(max * 100),
+               unit: "%", decimals: decimals, reset: reset * 100, selected: selectedScalar == key, onSelect: { selectedScalar = key },
                onStart: { beginContinuous(gesture) }, onValue: { lazyNumber(key, $0 / 100) }, onEnd: finishEditing,
                onCommit: { value in beginContinuous(gesture); lazyNumber(key, value / 100); finishEditing() })
     }
@@ -366,6 +368,7 @@ struct Panel3DView: View {
     private func sceneRow(_ key: String, value: Float, range: ClosedRange<Float>, unit: String, reset: Float,
                           gesture: String?, onValue: @escaping (Float) -> Void) -> some View {
         T3DRow(label: AureaText.t(key), value: value, step: 1, range: range, unit: unit, decimals: 0, reset: reset,
+               selected: selectedScalar == key, onSelect: { selectedScalar = key },
                onStart: { if let gesture { beginContinuous(gesture) } }, onValue: onValue,
                onEnd: { if gesture != nil { finishEditing() } },
                onCommit: { v in if let gesture { beginContinuous(gesture) }; onValue(v); if gesture != nil { finishEditing() } })
@@ -732,6 +735,8 @@ private struct T3DRow: View {
     var unit = ""
     var decimals = 0
     let reset: Float
+    var selected = false
+    var onSelect: () -> Void = {}
     let onStart: () -> Void
     let onValue: (Float) -> Void
     let onEnd: () -> Void
@@ -742,24 +747,37 @@ private struct T3DRow: View {
     private var resetVisible: Bool { abs(shown - reset) > 0.001 * max(1, abs(reset)) }
     var body: some View {
         HStack(spacing: 0) {
-            PropertyLabelChip(label, expression: .none, keyframe: .none, onTap: nil)
+            PropertyLabelChip(label, expression: .none, keyframe: .none, onTap: onSelect).aureaSelectedProperty(selected ? label : nil)
+                .contextMenu { Button(AureaText.t("panel_voltar_padrao")) { onCommit(reset) }.disabled(!resetVisible) }
             Color.clear.frame(width: 6)
-            TickRuler(value: { shown }, unitsPerDp: step, active: true, height: 40, verticalPadding: 8)
+            TickRuler(value: { shown }, unitsPerDp: step, active: selected || dragging, height: ParamRowDims.labelH, verticalPadding: 4)
                 .frame(maxWidth: .infinity).padding(.vertical, 4)
                 .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
-                           onStart: { live = value; dragging = true; onStart() }, onValue: { live = $0; onValue($0) },
-                           onEnd: { dragging = false; onEnd() })
+                           onStart: { live = value; dragging = true; onSelect(); onStart() }, onValue: { live = $0; onValue($0) },
+                           onEnd: finish)
+                .accessibilityElement().accessibilityLabel(label)
+                .accessibilityValue(comUnidade(numeroPtBr(shown, casas: decimals), unit))
+                .accessibilityAdjustableAction { direction in
+                    let delta = step * 10 * (direction == .increment ? 1 : direction == .decrement ? -1 : 0)
+                    guard delta != 0 else { return }
+                    onSelect(); onCommit((value + delta).clamped(to: range))
+                }
             Color.clear.frame(width: 6)
-            ValueBox(comUnidade(numeroPtBr(shown, casas: decimals), unit), onTap: {
+            ParamValueBox(comUnidade(numeroPtBr(shown, casas: decimals), unit), onTap: {
+                guard !dragging else { return }
+                onSelect()
+                let project = model.projectGeneration, layer = model.primarySelection
+                let composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
                 model.numericKeypad = KeypadRequest(title: label, value: value, unit: unit, min: range.lowerBound, max: range.upperBound,
-                                                    decimals: decimals) { onCommit($0.clamped(to: range)) }
+                                                    decimals: decimals) {
+                    guard model.projectGeneration == project, model.primarySelection == layer,
+                          (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
+                    onCommit($0.clamped(to: range))
+                }
             })
-            Button { onCommit(reset) } label: {
-                CupertinoGlyph.text(CupertinoGlyph.ArrowCounterclockwise, size: 16, color: AureaColors.muted).frame(width: 34, height: 44)
-            }.buttonStyle(AureaPressStyle(shrink: 1)).opacity(resetVisible ? 1 : 0).disabled(!resetVisible)
-                .accessibilityLabel(AureaText.t("panel_voltar_padrao") + " · " + label)
-        }.frame(height: 48).onDisappear { if dragging { dragging = false; onEnd() } }
+        }.frame(height: ParamRowDims.row).onDisappear(perform: finish)
     }
+    private func finish() { if dragging { dragging = false; onEnd() } }
 }
 
 private enum Text3DChange {

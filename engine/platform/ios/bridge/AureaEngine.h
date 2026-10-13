@@ -333,6 +333,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSDictionary<NSString*, NSNumber*>*)deviceReport;
 /// Export em andamento (chaves AureaExport*).
 - (NSDictionary<NSString*, id>*)exportProgress;
+- (NSString*)exportDiagnostics;
 
 // --- Projeto ----------------------------------------------------------------
 - (BOOL)newProjectWidth:(uint32_t)width height:(uint32_t)height fps:(double)fps title:(nullable NSString*)title;
@@ -979,12 +980,32 @@ NS_SWIFT_NAME(AureaEngine)
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
               quality:(uint32_t)quality safeMode:(uint32_t)safeMode;
+/// Exact startup status (0 = started). Preparation may fail before the native
+/// export progress is published; callers must not reuse an earlier session.
+- (int32_t)startExportCheckedTo:(NSString*)path codec:(AureaExportCodec)codec
+                        height:(uint32_t)height fps:(double)fps
+                   bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+                     aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+                       quality:(uint32_t)quality safeMode:(uint32_t)safeMode
+    NS_SWIFT_NAME(startExportChecked(to:codec:height:fps:bitrateMbps:audioBitrateKbps:aiUpscale:trimToContent:quality:safeMode:));
 /// A taxa de vídeo (bps) que o export usaria — a mesma regra do encoder, para a
 /// tela mostrar o tamanho estimado sem conta própria.
 - (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps
                        codec:(AureaExportCodec)codec quality:(uint32_t)quality
                   customMbps:(uint32_t)customMbps;
 - (long long)exportDuration:(BOOL)trimToContent;
+/// One shared undoable operation. A positive ID is the new group; a negative
+/// error code leaves the selection unchanged. The highest selected layer masks
+/// the other selected layers, with exclude selecting its inverse.
+- (long long)groupAndMask:(NSArray<NSNumber*>*)layerIds exclude:(BOOL)exclude name:(nullable NSString*)name NS_SWIFT_NAME(groupAndMask(_:exclude:name:));
+/// The core decides visible keys, neighbors and the editable curve segment.
+/// flags: 1=keyHere, 2=previous, 4=next, 8=segment. Neighbor frames are in the
+/// composition; segment endpoints and localFrame are in layer time.
+- (nullable NSDictionary<NSString*, NSNumber*>*)keyframeNavigation:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param compositionFrame:(long long)compositionFrame NS_SWIFT_NAME(keyframeNavigation(_:property:effect:param:compositionFrame:));
+/// Nearest marker or visible key of this layer; layerId=0 searches only markers.
+/// Nil means no strict neighbor, so transport leaves the playhead unchanged.
+- (nullable NSNumber*)timelineNavigation:(long long)layerId compositionFrame:(long long)compositionFrame direction:(int32_t)direction NS_SWIFT_NAME(timelineNavigation(_:compositionFrame:direction:));
+- (BOOL)seekTimelineEvent:(long long)compositionFrame NS_SWIFT_NAME(seekTimelineEvent(_:));
 - (void)cancelExport;
 /// Explicitly restores the checked export snapshot, then restarts from zero.
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;

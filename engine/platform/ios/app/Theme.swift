@@ -932,7 +932,13 @@ enum AureaTimeline {
     static let row: CGFloat = 32
     static let bar: CGFloat = 26
     static let barRadius: CGFloat = 0
-    static let barMinWidth: CGFloat = 40
+    /// Geometry measured from the 5.0.280 reference; original AUREA graphics.
+    static let referenceRowsTop: CGFloat = 42
+    static let referenceRow: CGFloat = 28
+    static let referenceBar: CGFloat = 23
+    static let referenceBarTop: CGFloat = 2.5
+    static let referenceBarRadius: CGFloat = 1.5
+    static let referenceTrimWidth: CGFloat = 30
     static let keyframeTrack: CGFloat = 11
     /// A pílula da fileira (olho + glifo) cobre de 0 a 78; as barras passam por baixo.
     static let headerColumn: CGFloat = 70
@@ -945,7 +951,7 @@ enum AureaTimeline {
     static let playheadKnob: CGFloat = 8
 
     static let RulerTicks = rulerTicks, RulerGap = rulerGap, Row = row, Bar = bar
-    static let BarRadius = barRadius, BarMinWidth = barMinWidth, KeyframeTrack = keyframeTrack
+    static let BarRadius = barRadius, KeyframeTrack = keyframeTrack
     static let HeaderColumn = headerColumn
     static let Playhead = playhead, PlayheadKnob = playheadKnob
 }

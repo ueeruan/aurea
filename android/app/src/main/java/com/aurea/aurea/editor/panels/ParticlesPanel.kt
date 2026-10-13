@@ -83,12 +83,12 @@ internal fun ParticlesPanel(env: PanelEnv) {
             keyframeLook = railLook,
             onKeyframe = selected?.let { param -> { store.toggleParticleKeyframe(param) } },
             curveAnimated = railTrack.size >= 2,
-            onCurve = if (railTrack.size >= 2) {
+            onCurve = if (store.curveStart(railTrack) != null) {
                 {
                     val layer = store.primary
                     val t = store.detail?.localPlayhead
                     if (layer != null && t != null) {
-                        railTrack.segmentStart(t)?.let { key ->
+                        store.curveStart(railTrack)?.let { key ->
                             store.selectKeyframe(layer, key)
                             env.onOpenPanel(EditorPanel.Curve)
                         }

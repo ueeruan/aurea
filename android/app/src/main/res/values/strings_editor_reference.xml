@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="editor_group_mask">Agrupar e mascarar</string>
+    <string name="editor_group_exclude">Agrupar e excluir</string>
+    <string name="editor_group_mask_hint">A camada visual selecionada mais acima recorta as demais dentro do grupo.</string>
+    <string name="editor_group_exclude_hint">A camada visual selecionada mais acima exclui sua área das demais dentro do grupo.</string>
+    <string name="editor_group_mask_failed">Não foi possível criar o grupo com máscara (erro %1$d).</string>
+    <string name="eng_group_mask_external">A máscara do grupo afetaria outras camadas ao desagrupar</string>
+</resources>

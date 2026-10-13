@@ -4,14 +4,18 @@ import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -194,7 +198,9 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
     }
 
     AureaAdjustSheet(onDismiss = onDismiss, topRadius = 13.5.dp) { sheet ->
-        Column(Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 12.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        Column(Modifier.heightIn(max = maxHeight).padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 12.dp)) {
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             Text(
                 request.title.ifEmpty { stringResource(R.string.i18n_keypad_exact, request.unit) },
                 style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W700)),
@@ -270,6 +276,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                     }
                 }
             } }
+            }
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth()) {
                 Box(
@@ -305,6 +312,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                     )
                 }
             }
+        }
         }
     }
 }

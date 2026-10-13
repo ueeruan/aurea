@@ -3,7 +3,8 @@
 
 Android Windows uses Git Bash plus the NDK's GNU make and clang; Linux/macOS use
 their POSIX shell. iOS always requires a real macOS host with the selected SDK.
-Archives are SHA-256 pinned and native encoder/decoder code remains unchanged.
+Archives are SHA-256 pinned; versioned dependency safety patches are recorded
+with before/after hashes in each installed build manifest.
 """
 from __future__ import annotations
 import argparse
@@ -136,7 +137,58 @@ def write_manifest(path: Path, manifest: dict) -> None:
     temporary.write_text(json.dumps(manifest, indent=2)+"\n", encoding="utf-8")
     os.replace(temporary, path)
 
-def write_dependency_notice(directory: Path, args: argparse.Namespace, arch: str, patch: str) -> None:
+
+def fix_ffmpeg_mediacodec_buffers(source: Path) -> dict[str, str]:
+    """Apply exactly one reviewed LGPL patch to the checksum-pinned release.
+
+    Reject another source version and any locally divergent file rather than
+    silently adapting it. This narrow parser only accepts the one relative
+    target above; patch paths cannot select any other workspace file.
+    """
+    target = source / "libavcodec/mediacodecenc.c"
+    patch = ROOT / "tools/patches/ffmpeg-8.0.3-mediacodec-safety.patch"
+    before = "d65e6f3b4e9d60633ad8f80ec917d77ecab354675497a61c39fbab7f78f222c1"
+    after = "36b1887bb54b63b9981b43bbc9f2c35fa3348b2a14ed22c2bf05afaaa353e8d0"
+    actual = hashlib.sha256(target.read_bytes()).hexdigest()
+    if actual not in (before, after):
+        raise RuntimeError(f"Unexpected FFmpeg {FFMPEG_VERSION} MediaCodec source hash: {actual}")
+    if actual == before:
+        original = target.read_text(encoding="utf-8").splitlines(keepends=True)
+        lines = patch.read_text(encoding="utf-8").splitlines(keepends=True)
+        if lines[:2] != ["--- a/libavcodec/mediacodecenc.c\n", "+++ b/libavcodec/mediacodecenc.c\n"]:
+            raise RuntimeError("MediaCodec safety patch target is not the reviewed file")
+        output: list[str] = []
+        index = cursor = 0
+        for line in lines[2:]:
+            if line.startswith("@@ "):
+                match = re.match(r"@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@", line)
+                if not match:
+                    raise RuntimeError("Invalid MediaCodec safety patch hunk")
+                index = int(match.group(1)) - 1
+                if index < cursor:
+                    raise RuntimeError("Overlapping MediaCodec safety patch hunks")
+                output.extend(original[cursor:index])
+                cursor = index
+            elif line[:1] in (" ", "-"):
+                if cursor >= len(original) or original[cursor] != line[1:]:
+                    raise RuntimeError("MediaCodec safety patch context does not match")
+                if line[0] == " ":
+                    output.append(line[1:])
+                cursor += 1
+            elif line.startswith("+"):
+                output.append(line[1:])
+            else:
+                raise RuntimeError("Invalid MediaCodec safety patch line")
+        output.extend(original[cursor:])
+        data = "".join(output).encode("utf-8")
+        if hashlib.sha256(data).hexdigest() != after:
+            raise RuntimeError("MediaCodec safety patch result does not match the reviewed hash")
+        target.write_bytes(data)
+    return {"patch": patch.name, "patch_sha256": hashlib.sha256(patch.read_bytes()).hexdigest(),
+            "before_sha256": before, "after_sha256": after}
+
+def write_dependency_notice(directory: Path, args: argparse.Namespace, arch: str, patch: str,
+                            ffmpeg_patch: dict[str, str]) -> None:
     """Ship the dependency notices together with reproducible source/build data."""
     dependencies = [
         f"FFmpeg {FFMPEG_VERSION}: {'GPL-2.0-or-later' if args.with_x265 else 'LGPL-2.1-or-later'}",
@@ -168,7 +220,15 @@ def write_dependency_notice(directory: Path, args: argparse.Namespace, arch: str
         "actually opened RD training files, preserving successive export sessions.\n" +
         "The exact patch is in fix_kvazaar_debug_file_lifetime in tools/build_ffmpeg.py.\n" +
         f"Patched src/rdo.c SHA-256: {patch}\n" +
-        "OpenH264 and FFmpeg codec sources are otherwise unmodified. Optional x265\n" +
+        "FFmpeg MediaCodec source adaptation (LGPL-2.1-or-later): validate input/output\n" +
+        "buffer bounds, propagate queue errors, preserve/release final packets with EOS,\n" +
+        "initialize coded padding, and restart the encoder after the header probe\n" +
+        "by retiring the probe instance and creating a fresh one with the same\n" +
+        "codec/format instead of undefined encoder flush.\n" +
+        "The exact versioned patch is included here.\n" +
+        f"MediaCodec patch SHA-256: {ffmpeg_patch['patch_sha256']}\n" +
+        f"Patched mediacodecenc.c SHA-256: {ffmpeg_patch['after_sha256']}\n" +
+        "OpenH264 and other FFmpeg codec sources are unmodified. Optional x265\n" +
         "builds adapt obsolete CMake policy settings; codec algorithms remain intact.\n")
     (directory / "NativeExport-DEPENDENCIES.txt").write_text(text, encoding="utf-8")
 
@@ -216,6 +276,7 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Reconfigure and rebuild even if the native manifest matches")
     args = parser.parse_args()
     ffmpeg, openh264 = checked_sources(args.cache.resolve(), args.with_x265)
+    ffmpeg_patch = fix_ffmpeg_mediacodec_buffers(ffmpeg)
     native_arch = args.arch
     if args.platform.startswith("ios") and native_arch == "arm64-v8a":
         native_arch = "arm64"
@@ -382,7 +443,8 @@ def main() -> None:
         # An explicit prefix can be reused for a different licensed variant.
         for name in ("FFmpeg-GPL-2.0.txt", "x265-GPL-2.0.txt"):
             (license_dir / name).unlink(missing_ok=True)
-    write_dependency_notice(license_dir, args, native_arch, kvazaar_patch)
+    write_dependency_notice(license_dir, args, native_arch, kvazaar_patch, ffmpeg_patch)
+    shutil.copy2(ROOT / "tools/patches" / ffmpeg_patch["patch"], license_dir / ffmpeg_patch["patch"])
     expected_archives = ("avformat", "avcodec", "swscale", "swresample", "avutil", "openh264", "kvazaar") + (("x265",) if args.with_x265 else ())
     if manifest_path.exists() and not args.force:
         previous = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -390,6 +452,7 @@ def main() -> None:
                 and previous.get("openh264") == OPENH264_VERSION
                 and previous.get("kvazaar") == KVAZAAR_VERSION
                 and previous.get("x265") == (X265_VERSION if args.with_x265 else None)
+                and previous.get("ffmpeg_patches", {}).get("mediacodec_safety") == ffmpeg_patch
                 and (prefix / "include/libavcodec/avcodec.h").exists()
                 and all((prefix / f"lib/lib{name}.a").is_file() and (prefix / f"lib/lib{name}.a").stat().st_size > 0 for name in expected_archives)):
             # CI restores installed prefixes without their object trees. Verify
@@ -422,7 +485,8 @@ def main() -> None:
     manifest = {"platform": args.platform, "arch": native_arch, "api": args.api if args.platform == "android" else None,
                 "ffmpeg": FFMPEG_VERSION, "openh264": OPENH264_VERSION, "kvazaar": KVAZAAR_VERSION, "x265": X265_VERSION if args.with_x265 else None,
                 "sources": [{"url": u, "sha256": h} for _, u, h in (*SOURCES, *((X265_SOURCE,) if args.with_x265 else ()))], "configure": steps[1],
-                "public_headers": installed_headers, "kvazaar_patches": {"rdcost_debug_cleanup": kvazaar_patch}}
+                "public_headers": installed_headers, "kvazaar_patches": {"rdcost_debug_cleanup": kvazaar_patch},
+                "ffmpeg_patches": {"mediacodec_safety": ffmpeg_patch}}
     write_manifest(manifest_path, manifest)
     print(f"Built native export libraries at {prefix}", flush=True)
 

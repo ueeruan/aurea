@@ -57,7 +57,6 @@ internal object RowHit {
         // Pílula: o olho no começo (esconde/mostra); o resto é a miniatura do
         // tipo (tocar abre/fecha as trilhas, segurar trava/reordena).
         if (x < m.headerColumn) return if (x < m.eyeHitRight) HitKind.HEADER_EYE else HitKind.HEADER
-        if (m.referenceTrial && x >= width - 28f * m.density) return HitKind.HEADER
 
         // Alvo de toque centrado no mesmo ponto usado pelo desenho. Dois anéis
         // (beta "difícil mover o keyframe"): o NÚCLEO de 28 ganha de tudo; a
@@ -74,15 +73,16 @@ internal object RowHit {
             else if (dx <= m.keyHitHalf) keyWide = i
         }
 
-        // Zonas das alças: o desenho (dentro das pontas) + folga para fora; num clipe
-        // curto as duas param no meio para não se sobreporem.
+        // Wide grips use external touch space; a narrow painted end grip also
+        // owns its visible inset, limited to the right half of the short body.
+        // The boundary diamond still wins its complete core target.
         val overBar = y < m.bodyHitBottom
         val mid = (x0 + x1) / 2f
         val inStart = handles && overBar && startHandleVisible(m, x0) &&
             x >= x0 - m.trimInsetStart - m.trimTouchOut &&
             x < min(x0 - m.trimInsetStart + m.trimWidth, mid)
         val inEnd = handles && overBar && endHandleVisible(x1, width) &&
-            x > max(x1 - m.trimInsetEnd, mid) &&
+            x > max(x1 - ClipGeometry.trimPaintEndInset(x1 - x0, m.trimWidth), mid) &&
             x <= x1 - m.trimInsetEnd + m.trimWidth + m.trimTouchOut
 
         // A visible diamond owns its complete touch target, including at the

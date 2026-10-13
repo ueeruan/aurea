@@ -1,17 +1,15 @@
 package com.aurea.aurea.editor.panels
 
-import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.ui.platform.testTag
 
 import androidx.annotation.StringRes
 import com.aurea.aurea.engine.TrackKey
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,7 +55,6 @@ import com.aurea.aurea.R
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -82,6 +80,8 @@ import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.SheetAction
 import com.aurea.aurea.ui.ds.TickRuler
 import com.aurea.aurea.ui.ds.ValueBox
+import com.aurea.aurea.ui.ds.VectorPropertyRow
+import com.aurea.aurea.ui.ds.compactPropertyNumber
 import com.aurea.aurea.ui.ds.numeroPtBr
 import com.aurea.aurea.ui.ds.valueDrag
 import com.aurea.aurea.ui.theme.AureaColors
@@ -89,14 +89,10 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
-import kotlin.math.sin
 
 /**
  * As faces de Transformar, na ordem do trilho direito (a do pedido do dono:
@@ -119,11 +115,9 @@ enum class TransformTab(@StringRes val title: Int, val icon: ImageVector, @Strin
 
 /**
  * O PAINEL DE TRANSFORMAÇÃO [A] (`PainelDeTransformacao`): trilho esquerdo
- * (‹ · ◇ · curva · ⋯), miolo com os campos no topo e UMA superfície por face
- * (almofada, dial, fitas, régua) e o trilho direito com as faces.
+ * (‹ · ◇ · curva · ⋯), régua com valores XYZ no modo 3D, almofada e fitas
+ * no plano 2D e o trilho direito com as faces.
  */
-/** Eixo do dial de Rotação: 0 = X, 1 = Y, 2 = Z (no plano da tela). */
-private val rotationAxis = androidx.compose.runtime.mutableIntStateOf(2)
 private val RotationProps = intArrayOf(TrackProperty.ROTATION_X, TrackProperty.ROTATION_Y, TrackProperty.ROTATION_Z)
 
 /** The rail diamond keys every axis exposed by the current dimension mode. */
@@ -174,13 +168,18 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
     val tabs = if (isCamera) TransformTab.entries else TransformTab.entries.filter { it != TransformTab.Lente }
     androidx.compose.runtime.LaunchedEffect(isCamera, tab) { if (tab == TransformTab.Lente && !isCamera) onTab(TransformTab.Mover) }
     val show3D by remember(store) { derivedStateOf { uses3D(store.detail) } }
-    val axis = if (show3D) rotationAxis.intValue else 2
-    val props = if (tab == TransformTab.Girar) intArrayOf(RotationProps[axis]) else tab.props
-    // Rotation diamond and timeline focus follow the selected axis.
+    var pickedAxis by rememberSaveable(store.primary, tab) { mutableIntStateOf(if (tab == TransformTab.Girar) 2 else 0) }
+    val axis = if (show3D) pickedAxis else if (tab == TransformTab.Girar) 2 else 0
     val keyProps = transformKeyProperties(tab, show3D, axis)
+    val vectorTab = tab in listOf(TransformTab.Mover, TransformTab.Escalar, TransformTab.Pivo)
+    val props = when {
+        tab == TransformTab.Girar -> intArrayOf(RotationProps[axis])
+        show3D && vectorTab -> intArrayOf(keyProps[axis])
+        else -> tab.props
+    }
     val animator = if (tab == TransformTab.Animadores) animatorRailTrack(store.layerAnimators.size,
         store.timelineFocus?.singleOrNull(), store.transformAnimatorFocus?.takeIf { it.first == store.primary }?.second) else null
-    androidx.compose.runtime.DisposableEffect(store, store.primary, tab, show3D, axis, animator) {
+    androidx.compose.runtime.DisposableEffect(store, store.projectGeneration, store.composition?.id, store.primary, tab, show3D, axis, animator) {
         if (animator != null) store.focusLayerAnimator(animator)
         else store.timelineFocus = keyProps.map { TrackKey(it) }
         onDispose { store.timelineFocus = null }
@@ -228,12 +227,12 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                 else store.toggleTransformKeyframe(keyProps)
             }) else null,
             curveAnimated = look != com.aurea.aurea.ui.ds.KeyframeLook.None,
-            onCurve = if (curveKeys.size >= (if (animator != null) 2 else 1)) {
+            onCurve = if (store.curveStart(curveKeys) != null) {
                 {
                     val layer = store.primary
                     val t = store.detail?.localPlayhead
                     if (layer != null && t != null) {
-                        (curveKeys.segmentStart(t) ?: curveKeys.firstOrNull())?.let { key ->
+                        store.curveStart(curveKeys)?.let { key ->
                             store.selectKeyframe(layer, key)
                             env.onOpenPanel(EditorPanel.Curve)
                         }
@@ -250,19 +249,16 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             if (tab == TransformTab.Girar && store.text3d != null) {
                 androidx.compose.material3.TextButton(onClick = { wholeText = false }) { Text(stringResource(R.string.t3d_letters)) }
             }
+            androidx.compose.runtime.key(store.projectGeneration, store.composition?.id, store.primary, tab, show3D) {
             when (tab) {
-                TransformTab.Mover -> MoveFace(env, pivot = false, depth = show3D)
+                TransformTab.Mover -> MoveFace(env, pivot = false, depth = show3D, axis = axis, onAxis = { pickedAxis = it })
                 TransformTab.Girar -> {
-                    if (show3D) {
-                        AxisRow(axis) { rotationAxis.intValue = it }
-                    } else {
-                        Open3DRow { store.enableLayer3D() }
-                    }
-                    Box(Modifier.weight(1f).fillMaxWidth()) { RotationDial(env, axis) }
+                    if (!show3D) Open3DRow { store.enableLayer3D() }
+                    RotationFace(env, depth = show3D, axis = axis, onAxis = { pickedAxis = it })
                 }
-                TransformTab.Escalar -> ScaleFace(env, depth = show3D)
+                TransformTab.Escalar -> ScaleFace(env, depth = show3D, axis = axis, onAxis = { pickedAxis = it })
                 TransformTab.Opacidade -> OpacityFace(env, look)
-                TransformTab.Pivo -> MoveFace(env, pivot = true, depth = show3D)
+                TransformTab.Pivo -> MoveFace(env, pivot = true, depth = show3D, axis = axis, onAxis = { pickedAxis = it })
                 TransformTab.Desfoque -> MotionBlurFace(env)
                 TransformTab.Animadores -> Column(
                     Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 6.dp, end = 12.dp),
@@ -273,6 +269,7 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
                     }
                 }
                 TransformTab.Lente -> LensFace(env)
+            }
             }
             Spacer(Modifier.height(10.dp))
         }
@@ -289,8 +286,27 @@ internal fun TransformPanel(env: PanelEnv, tab: TransformTab, onTab: (TransformT
             actions = buildList {
                 add(SheetAction(stringResource(R.string.transform_copy)) { store.copyTransform() })
                 if (store.clipboard and 16 != 0) add(SheetAction(stringResource(R.string.transform_paste)) { store.pasteTransform() })
-                add(SheetAction(stringResource(R.string.panel_keyframe_anterior)) { store.pause(); store.stepToKeyframe(-1) })
-                add(SheetAction(stringResource(R.string.panel_proximo_keyframe)) { store.pause(); store.stepToKeyframe(1) })
+                if (tab == TransformTab.Girar) {
+                    val turnsTitle = "$exprTitle · ${stringResource(R.string.edt_rotation_turns)}"
+                    add(SheetAction(turnsTitle) {
+                        val angle = store.detail?.rotation?.get(axis) ?: 0f
+                        val (turns, rest) = rotationTurns(angle)
+                        val owner = store.primary
+                        val generation = store.projectGeneration
+                        val composition = store.composition?.id
+                        env.openKeypad(KeypadRequest(turnsTitle, turns.toFloat(), "x", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 0) {
+                            if (store.primary == owner && store.projectGeneration == generation && store.composition?.id == composition)
+                                store.setTransform(RotationProps[axis], it.roundToInt() * 360f + rest, owner)
+                        })
+                    })
+                }
+                val navigation = store.trackNavigation(curveKeys)
+                add(SheetAction(stringResource(R.string.panel_keyframe_anterior), enabled = navigation?.hasPrevious == true) {
+                    navigation?.takeIf { it.hasPrevious }?.let { store.pause(); store.seek(it.previousFrame) }
+                })
+                add(SheetAction(stringResource(R.string.panel_proximo_keyframe), enabled = navigation?.hasNext == true) {
+                    navigation?.takeIf { it.hasNext }?.let { store.pause(); store.seek(it.nextFrame) }
+                })
                 if (tab != TransformTab.Desfoque && tab != TransformTab.Lente && tab != TransformTab.Animadores) add(SheetAction(stringResource(R.string.panel_voltar_padrao)) { resetTab(env, tab, axis) })
                 if (canKey) add(SheetAction(if (exprLook == com.aurea.aurea.engine.ExpressionLook.None) stringResource(R.string.panel_adicionar_expressao) else stringResource(R.string.panel_editar_expressao)) {
                     store.openExpression(exprTitle, exprKeys, exprScale, exprUnit)
@@ -673,6 +689,77 @@ private fun BlurToggleRow(label: String, hint: String, checked: Boolean, onChang
 // Mover e Pivô: a almofada com cantos em L
 // =============================================================================
 
+@Composable
+private fun androidx.compose.foundation.layout.ColumnScope.MoveVectorFace(env: PanelEnv, pivot: Boolean, axis: Int, onAxis: (Int) -> Unit) {
+    val store = env.store
+    val detail = store.detail ?: return
+    val owner = store.primary
+    val generation = store.projectGeneration
+    val composition = store.composition?.id
+    fun currentOwner() = store.primary == owner && store.projectGeneration == generation && store.composition?.id == composition
+    if (pivot) androidx.compose.runtime.DisposableEffect(Unit) {
+        com.aurea.aurea.editor.PivotStage.active = true
+        onDispose { com.aurea.aurea.editor.PivotStage.active = false }
+    }
+    val label = stringResource(if (pivot) R.string.fx_pivo else R.string.fx_posicao)
+    val properties = if (pivot) intArrayOf(TrackProperty.ANCHOR_X, TrackProperty.ANCHOR_Y, TrackProperty.ANCHOR_Z)
+        else intArrayOf(TrackProperty.POSITION_X, TrackProperty.POSITION_Y, TrackProperty.POSITION_Z)
+    val values = if (pivot) listOf(detail.anchor[0] - detail.sourceWidth / 2f,
+        detail.anchor[1] - detail.sourceHeight / 2f, detail.anchor[2]) else detail.position.toList()
+    fun write(component: Int, value: Float) {
+        if (!currentOwner()) return
+        val current = store.detail ?: return
+        // Numeric anchors retain their local, center-relative units. The stage
+        // and preset controls keep their existing compensated pivot commands.
+        val engineValue = if (pivot) when (component) {
+            0 -> value + current.sourceWidth / 2f
+            1 -> value + current.sourceHeight / 2f
+            else -> value
+        } else value
+        store.setTransform(properties[component], engineValue)
+    }
+    val expressionKeys = listOf(TrackKey(properties[axis]))
+    FocusedVectorFace(extraHeight = if (pivot) 104.dp else 0.dp) { controlHeight ->
+        VectorPropertyRow(label, values, listOf("X", "Y", "Z"), axis,
+            unitsPerDp = max(1, store.project.width) / 360f,
+            min = Float.NEGATIVE_INFINITY, max = Float.POSITIVE_INFINITY,
+            format = { "${numeroPtBr(it, 1)}px" }, selected = true,
+            onSelectAxis = onAxis,
+            onGestureStart = {
+                if (store.playing || store.preview.buffering) store.pause()
+                store.beginGesture(if (pivot) "mover pivô" else "mover")
+            }, onValue = ::write, onGestureEnd = store::endGesture,
+            onTapValue = { component ->
+                onAxis(component)
+                env.openKeypad(KeypadRequest("$label · ${"XYZ"[component]}", values[component], "px",
+                    Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(component, it) })
+            }, keyframes = properties.map { transformLook(detail, intArrayOf(it)) },
+            enabled = !detail.locked, expression = store.expressionLook(expressionKeys),
+            onExpression = { store.openExpression("$label · ${"XYZ"[axis]}", expressionKeys, 1f, "px") },
+            tag = if (pivot) "transform.pivot" else "transform.position", displayFormat = { compactPropertyNumber(it, 1) },
+            modifier = Modifier.height(controlHeight), focusedPanel = true)
+        if (pivot) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).background(AureaColors.ControlButton)
+                    .tocavel(enabled = !detail.locked) {
+                        val current = store.detail ?: return@tocavel
+                        store.setTransform2(TrackProperty.ANCHOR_X, current.sourceWidth / 2f,
+                            TrackProperty.ANCHOR_Y, current.sourceHeight / 2f)
+                    }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                    Text(stringResource(R.string.panel_centro), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp,
+                        fontWeight = FontWeight.W600, color = Color.White)))
+                }
+                Spacer(Modifier.width(10.dp))
+                AnchorPresetGrid { fx, fy -> store.primary?.let { com.aurea.aurea.editor.LayerOps.presetAnchor(store, it, fx, fy) } }
+            }
+            Text(stringResource(R.string.panel_pivo_arraste_preview), textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
+        }
+    }
+}
+
 /**
  * MOVER (e PIVÔ): almofada relativa — 1 dp de dedo vale `largura/360` px da
  * composição. No Mover, os campos x · y · z moram DENTRO dos cantos (cabeçalho
@@ -680,7 +767,11 @@ private fun BlurToggleRow(label: String, hint: String, checked: Boolean, onChang
  * ficam na fileira de cima com o botão "Centro".
  */
 @Composable
-private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEnv, pivot: Boolean, depth: Boolean) {
+private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEnv, pivot: Boolean, depth: Boolean, axis: Int, onAxis: (Int) -> Unit) {
+    if (depth) {
+        MoveVectorFace(env, pivot, axis, onAxis)
+        return
+    }
     val store = env.store
     val xLabel = stringResource(if (pivot) R.string.panel_pivo_x else R.string.panel_posicao_x)
     val yLabel = stringResource(if (pivot) R.string.panel_pivo_y else R.string.panel_posicao_y)
@@ -957,177 +1048,61 @@ private fun CornerMarks(modifier: Modifier) {
 }
 
 // =============================================================================
-// Girar: o dial
+// Girar: a régua de ângulo
 // =============================================================================
 
-/** Raio do botão do dial (alvo grande: o dedo cobre o próprio alvo). */
-private const val KNOB_DP = 15f
-
-/** O miolo não tem ângulo: perto do centro um tremor vira dezenas de graus. */
-private const val DEAD_ZONE_DP = 22f
-
-/**
- * O DIAL [A] (`DialDeAngulo`): anel `#2E3548`, arco `destaque` do 0 até o botão,
- * botão branco de raio 15 e o ângulo no centro. O gesto ACUMULA o quanto o dedo
- * girou (o ângulo não enrola: 361° é mais que uma volta); o toque seco no anel
- * põe o ângulo tocado na volta em que a camada já está.
- */
-/**
- * X · Y · Z: o eixo que o dial gira. X e Y inclinam a camada em perspectiva
- * (com a câmera da cena); Z gira no plano da tela.
- */
+/** Total degrees stay unbounded; the shared ruler edits one visible axis at a time. */
 @Composable
-private fun AxisRow(axis: Int, onAxis: (Int) -> Unit) = KeepLtr {
-    // X · Y · Z nesta ordem em qualquer idioma (eixos não espelham).
-    Row(
-        Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        listOf("X", "Y", "Z").forEachIndexed { i, label ->
-            val on = axis == i
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                    .tocavel(onClick = { onAxis(i) })
-                    .padding(horizontal = 18.dp, vertical = 6.dp),
-            ) {
-                Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700,
-                    color = if (on) AureaColors.Accent else AureaColors.Text)))
-            }
-        }
+private fun androidx.compose.foundation.layout.ColumnScope.RotationFace(env: PanelEnv, depth: Boolean, axis: Int, onAxis: (Int) -> Unit) {
+    val store = env.store
+    val owner = store.primary
+    val generation = store.projectGeneration
+    val composition = store.composition?.id
+    fun write(component: Int, value: Float) {
+        if (store.primary != owner || store.projectGeneration != generation || store.composition?.id != composition) return
+        store.setTransform(RotationProps[component], value, owner)
+    }
+    val exposed = if (depth) listOf(0, 1, 2) else listOf(2)
+    val selected = exposed.indexOf(axis).coerceAtLeast(0)
+    val label = stringResource(R.string.panel_rotacao)
+    val values = exposed.map { store.detail?.rotation?.get(it) ?: 0f }
+    val keys = exposed.map { TrackKey(RotationProps[it]) }
+    val expressionKeys = listOf(keys[selected])
+    FocusedVectorFace { controlHeight ->
+    VectorPropertyRow(
+        label = label, values = values, axisLabels = exposed.map { "XYZ"[it].toString() }, selectedAxis = selected,
+        unitsPerDp = 1f, min = Float.NEGATIVE_INFINITY, max = Float.POSITIVE_INFINITY,
+        format = { "${numeroPtBr(it, 1)}°" }, selected = true,
+        onSelectAxis = { onAxis(exposed[it]) },
+        onGestureStart = { store.beginGesture("girar") },
+        onValue = { component, value -> write(exposed[component], value) },
+        onGestureEnd = store::endGesture,
+        onTapValue = { component ->
+            val currentAxis = exposed[component]
+            onAxis(currentAxis)
+            env.openKeypad(KeypadRequest("$label · ${"XYZ"[currentAxis]}", values[component], "°",
+                Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(currentAxis, it) })
+        },
+        keyframes = exposed.map { transformLook(store.detail, intArrayOf(RotationProps[it])) },
+        enabled = store.detail?.locked != true,
+        expression = store.expressionLook(expressionKeys),
+        onExpression = { store.openExpression("$label · ${"XYZ"[axis]}", expressionKeys, 1f, "°") },
+        modifier = Modifier.height(controlHeight), tag = "transform.rotation",
+        displayFormat = { compactPropertyNumber(it, 1) }, focusedPanel = true,
+    )
     }
 }
 
+/** Give the active transform a broad ruler below its values; small panels can scroll. */
 @Composable
-private fun RotationDial(env: PanelEnv, axis: Int) {
-    val store = env.store
-    val rotationLabel = stringResource(R.string.edt_rotation_axis, "XYZ"[axis].toString())
-    val prop = RotationProps[axis]
-    val angle by remember(store, axis) { derivedStateOf { store.detail?.rotation?.get(axis) ?: 0f } }
-    val current by rememberUpdatedState(angle)
-    Box(
-        Modifier
-            .fillMaxSize()
-            .testTag("transform.rotation.dial")
-            .pointerInput(store, axis) {
-                awaitEachGesture {
-                    val center = Offset(size.width / 2f, size.height / 2f)
-                    val dead = DEAD_ZONE_DP * density
-                    fun raw(p: Offset) = (atan2(p.y - center.y, p.x - center.x) * 180.0 / Math.PI).toFloat()
-                    val down = awaitFirstDown(requireUnconsumed = true)
-                    var last = down.position
-                    var walked = 0f
-                    var prevRaw: Float? = if ((down.position - center).getDistance() >= dead) raw(down.position) else null
-                    var total = if (current.isFinite()) current else 0f
-                    var began = false
-                    var cancelled = false
-                    while (true) {
-                        val ev = awaitPointerEvent()
-                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!ch.pressed) break
-                        if (ch.isConsumed) { cancelled = true; break }
-                        val p = ch.position
-                        walked += (p - last).getDistance()
-                        last = p
-                        if ((p - center).getDistance() < dead) {
-                            prevRaw = null   // sair do miolo recomeça a conta
-                            continue
-                        }
-                        val r = raw(p)
-                        val before = prevRaw
-                        prevRaw = r
-                        if (before == null) continue
-                        var step = r - before
-                        if (step > 180f) step -= 360f
-                        if (step < -180f) step += 360f
-                        if (step == 0f) continue
-                        total += step
-                        if (!began && walked < viewConfiguration.touchSlop) continue
-                        ch.consume()
-                        if (!began) {
-                            began = true
-                            store.beginGesture("girar")
-                        }
-                        store.setTransform(prop, total)
-                    }
-                    if (began) {
-                        store.endGesture()
-                    } else if (!cancelled && walked < 2f * density && (last - center).getDistance() >= dead) {
-                        // Toque seco: o ângulo apontado, na volta atual.
-                        val turns = floor(current / 360f)
-                        store.setTransform(prop, turns * 360f + raw(last))
-                    }
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val knob = KNOB_DP.dp.toPx()
-            val radius = max(0f, (min(size.width, size.height) - (knob * 2 + 2.dp.toPx())) / 2f)
-            if (radius <= 0f) return@Canvas
-            val c = Offset(size.width / 2f, size.height / 2f)
-            drawCircle(AureaColors.DialTrack, radius, c, style = Stroke(2.dp.toPx()))
-            val g = if (angle.isFinite()) angle else 0f
-            if (abs(g) > 0.5f) {
-                val sweep = if (abs(g) > 360f) 360f else g
-                drawArc(
-                    color = AureaColors.Accent,
-                    startAngle = 0f,
-                    sweepAngle = sweep,
-                    useCenter = false,
-                    topLeft = Offset(c.x - radius, c.y - radius),
-                    size = Rect(c, radius).size,
-                    style = Stroke(3.5.dp.toPx(), cap = StrokeCap.Round),
-                )
-            }
-            val rad = Math.toRadians(g.toDouble())
-            drawCircle(Color.White, knob, Offset(c.x + cos(rad).toFloat() * radius, c.y + sin(rad).toFloat() * radius))
-        }
-        // O número no centro como no AE: "2x +30°" (voltas inteiras + resto,
-        // mesmo sinal; "-1x -45°"). O valor guardado continua em graus. Cada
-        // parte abre o próprio teclado: voltas (inteiro) ou graus.
-        val (turns, rest) = rotationTurns(if (angle.isFinite()) angle else 0f)
-        val restText = numeroPtBr(abs(rest), if (rest == rest.roundToInt().toFloat()) 0 else 1)
-        val turnsTitle = "$rotationLabel · ${stringResource(R.string.edt_rotation_turns)}"
-        val degreesTitle = "$rotationLabel · ${stringResource(R.string.edt_rotation_degrees)}"
-        val a11y = stringResource(R.string.edt_rotation_value_a11y, turns.toString(), (if (rest < 0f) "-" else "") + restText)
-        val valueStyle = AureaType.Base.merge(TextStyle(fontSize = 24.sp, fontWeight = FontWeight.W700, color = AureaColors.Accent, fontFeatureSettings = "tnum", textDirection = androidx.compose.ui.text.style.TextDirection.Ltr))
-        Row(
-            Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(AureaColors.DialValueBox)
-                .semantics(mergeDescendants = false) { contentDescription = a11y }
-                .padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "${turns}x",
-                style = valueStyle,
-                modifier = Modifier
-                    .testTag("transform.rotation.turns")
-                    .tocavel(shrink = 1f) {
-                        env.openKeypad(KeypadRequest(turnsTitle, turns.toFloat(), "x", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 0) {
-                            store.setTransform(prop, it.roundToInt() * 360f + rest)
-                        })
-                    }
-                    .semantics { contentDescription = "$turnsTitle: $turns" }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-            )
-            Text(
-                "${if (rest < 0f) "−" else "+"}$restText°",
-                style = valueStyle,
-                modifier = Modifier
-                    .testTag("transform.rotation.degrees")
-                    .tocavel(shrink = 1f) {
-                        env.openKeypad(KeypadRequest(degreesTitle, rest, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) {
-                            store.setTransform(prop, turns * 360f + it)
-                        })
-                    }
-                    .semantics { contentDescription = "$degreesTitle: ${if (rest < 0f) "-" else ""}$restText" }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-            )
+private fun androidx.compose.foundation.layout.ColumnScope.FocusedVectorFace(
+    extraHeight: androidx.compose.ui.unit.Dp = 0.dp,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.(androidx.compose.ui.unit.Dp) -> Unit,
+) {
+    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        val controlHeight = (maxHeight - 16.dp - extraHeight).coerceAtLeast(180.dp)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 8.dp)) {
+            content(controlHeight)
         }
     }
 }
@@ -1147,6 +1122,60 @@ internal fun rotationTurns(angle: Float): Pair<Int, Float> {
 // Escalar: duas fitas e a corrente
 // =============================================================================
 
+@Composable
+private fun androidx.compose.foundation.layout.ColumnScope.ScaleVectorFace(env: PanelEnv, axis: Int, onAxis: (Int) -> Unit) {
+    val store = env.store
+    val detail = store.detail ?: return
+    val owner = store.primary
+    val generation = store.projectGeneration
+    val composition = store.composition?.id
+    val label = stringResource(R.string.panel_escala)
+    val properties = intArrayOf(TrackProperty.SCALE_X, TrackProperty.SCALE_Y, TrackProperty.SCALE_Z)
+    val values = detail.scale.map { it * 100f }
+    var gestureFrom by remember(store.primary) { mutableStateOf<List<Float>?>(null) }
+    val locked = store.scaleAxesLinked
+    fun write(component: Int, value: Float, from: List<Float>) {
+        if (store.primary != owner || store.projectGeneration != generation || store.composition?.id != composition) return
+        if (store.scaleAxesLinked) {
+            val base = from[component]
+            val scale = if (base != 0f) com.aurea.aurea.engine.AureaEngine.gestureScale3D(detail.kind,
+                from[0] / 100f, from[1] / 100f, from[2] / 100f, 3, value / base)
+                else com.aurea.aurea.state.linkedScale(from.toFloatArray(), component, value).map { it / 100f }.toFloatArray()
+            store.setScale3(scale)
+        } else store.setTransform(properties[component], value / 100f)
+    }
+    val expressionKeys = listOf(TrackKey(properties[axis]))
+    val hasFit = com.aurea.aurea.editor.LayerGeometry.hasSize(detail) && detail.kind != LayerType.Audio.kind
+    FocusedVectorFace(extraHeight = if (hasFit) 104.dp else 48.dp) { controlHeight ->
+        VectorPropertyRow(label, values, listOf("X", "Y", "Z"), axis, unitsPerDp = .5f,
+            min = Float.NEGATIVE_INFINITY, max = Float.POSITIVE_INFINITY,
+            format = { "${numeroPtBr(it, 1)}%" }, selected = true, onSelectAxis = onAxis,
+            onGestureStart = { gestureFrom = values; store.beginGesture("escala") },
+            onValue = { component, value -> write(component, value, gestureFrom ?: values) },
+            onGestureEnd = { gestureFrom = null; store.endGesture() },
+            onTapValue = { component ->
+                onAxis(component)
+                env.openKeypad(KeypadRequest("$label · ${"XYZ"[component]}", values[component], "%",
+                    Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(component, it, values) })
+            }, keyframes = properties.map { transformLook(detail, intArrayOf(it)) }, enabled = !detail.locked,
+            expression = store.expressionLook(expressionKeys),
+            onExpression = { store.openExpression("$label · ${"XYZ"[axis]}", expressionKeys, 100f, "%") },
+            tag = "transform.scale", displayFormat = { compactPropertyNumber(it, 1) },
+            modifier = Modifier.height(controlHeight), focusedPanel = true)
+        val linkLabel = stringResource(if (locked) R.string.panel_soltar_largura_altura else R.string.panel_travar_largura_altura)
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("transform.scale.link")
+            .tocavel(enabled = !detail.locked) { store.scaleAxesLinked = !store.scaleAxesLinked }
+            .semantics { contentDescription = linkLabel; stateDescription = if (locked) "X Y Z" else "X / Y / Z" },
+            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (locked) Icons.Rounded.Link else Icons.Rounded.LinkOff, contentDescription = null,
+                tint = Color.White, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(linkLabel, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
+        }
+        if (hasFit) MediaFitChips(env)
+    }
+}
+
 /**
  * ESCALAR [A] (05 / 08): `Largura 🔗 Altura` no topo, "Preencher / Ajustar" em
  * foto e vídeo, e DUAS fitas (Largura com o centro aceso, Altura com o centro
@@ -1155,7 +1184,11 @@ internal fun rotationTurns(angle: Float): Pair<Int, Float> {
  * mentir); solta, cada fita cuida do seu eixo. 0,5 %/dp.
  */
 @Composable
-private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
+private fun androidx.compose.foundation.layout.ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean, axis: Int, onAxis: (Int) -> Unit) {
+    if (depth) {
+        ScaleVectorFace(env, axis, onAxis)
+        return
+    }
     val store = env.store
     val widthLabel = stringResource(R.string.panel_largura)
     val heightLabel = stringResource(R.string.panel_altura)

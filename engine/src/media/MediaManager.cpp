@@ -351,6 +351,25 @@ void MediaManager::suspend_all() {
     for (Entry& e : entries_) if (e.source) e.source->suspend();
 }
 
+Status MediaManager::release_preview_for_export(const std::atomic<bool>* cancel, u64 timeoutNs) noexcept {
+    if (!timeoutNs) return Errc::InvalidArgument;
+    if (cancel && cancel->load(std::memory_order_acquire)) return Errc::Cancelled;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (Entry& entry : entries_) retire_locked(std::move(entry));
+        entries_.clear();
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(timeoutNs);
+    std::unique_lock<std::mutex> lock(retireMutex_);
+    while (!retired_.empty() || retiring_ || retireNotifying_) {
+        if (cancel && cancel->load(std::memory_order_acquire)) return Errc::Cancelled;
+        if (std::chrono::steady_clock::now() >= deadline)
+            return Status{Errc::Timeout, "decoder de previa sem resposta ao preparar exportacao"};
+        retireWake_.wait_for(lock, std::chrono::milliseconds(10));
+    }
+    return OkStatus;
+}
+
 void MediaManager::resume_all() {
     std::lock_guard<std::mutex> lock(mutex_);
     suspended_ = false;

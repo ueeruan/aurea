@@ -23,7 +23,10 @@ struct ExportSinkStartupResult {
 // The platform sink opens a unique sibling staging file on a worker. If its
 // open call hangs, the detached worker retains all input/state/atomics and may
 // only abort its own staging file AFTER open returns. Success returns a proxy
-// that publishes the requested filename only after finish succeeds.
+// that publishes the requested filename only after finish succeeds. Failed
+// opens retire stop/delete under the same deadline. An opened proxy reuses its
+// monitor for final stop/delete, waiting at most 100ms before retaining that
+// worker and its admission permit until actual native destruction completes.
 [[nodiscard]] ExportSinkStartupResult open_export_sink_startup(
     std::unique_ptr<ExportSink> sink, const char* outputPath,
     const VideoStreamConfig& video, const AudioStreamConfig* audio,

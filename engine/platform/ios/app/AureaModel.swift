@@ -181,6 +181,21 @@ struct ExportOptions: Equatable {
     var gifFps: Double = 15
 }
 
+/// Cancel may arrive while the serial media queue is busy or inside native
+/// startup. The worker reads this token without crossing the main actor.
+private final class ExportStartupRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    var isCancelled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancelled
+    }
+    func cancel() {
+        lock.lock(); defer { lock.unlock() }
+        cancelled = true
+    }
+}
+
 /// Formato do export. `engineCode` = ImageExportFormat do motor
 /// (export/ImageEncode.hpp); o vídeo usa o encoder da plataforma.
 enum ExportKind: Int, CaseIterable {
@@ -562,6 +577,7 @@ final class AureaModel: ObservableObject {
     @Published var text3DFontSheet: Text3DFontRequest?
     struct TextContentRequest: Identifiable {
         let id: Int64
+        let presentationID = UUID()
         let content: String
         let is3D: Bool
         let selectAll: Bool
@@ -581,7 +597,8 @@ final class AureaModel: ObservableObject {
     }
 
     func commitTextContent(_ request: TextContentRequest, content: String) -> Bool {
-        guard layers.contains(where: { $0.id == request.id && !$0.locked }) else { return false }
+        guard textContentRequest?.presentationID == request.presentationID,
+              layers.contains(where: { $0.id == request.id && !$0.locked }) else { return false }
         if content != request.content {
             if request.is3D {
                 guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -634,6 +651,7 @@ final class AureaModel: ObservableObject {
     @Published var exportOptions = ExportOptions()
     @Published private(set) var exportProgress: [String: Any] = [:]
     @Published private(set) var exporting = false
+    @Published private(set) var exportPreparing = false
     @Published private(set) var exportedURL: URL?
     @Published private(set) var exportMessage: String?
     @Published private(set) var exportCancelled = false
@@ -654,6 +672,9 @@ final class AureaModel: ObservableObject {
         openPanel(property == 44 ? .effects : .curve)
     }
     private var pendingExportURL: URL?
+    private var pendingExportOptions: ExportOptions?
+    private var exportStartup: ExportStartupRequest?
+    private var exportBackgroundSavePending = false
     /// A última rede contra o export parado (ExportStallWatch) e o modo de
     /// segurança do vídeo em andamento (export/ExportWatchdog.hpp).
     private var exportWatch = ExportStallWatch()
@@ -1345,6 +1366,10 @@ final class AureaModel: ObservableObject {
         // cala a saída; este pedido vai antes da gravação, que drena a fila).
         stopPlayback()
         releaseInterfaceCaches()
+        if exportPreparing {
+            suspendPreparingExport()
+            return
+        }
         // Grava ANTES de suspender (o motor ainda renderiza a capa) e dentro de
         // uma tarefa de segundo plano: o iOS pode congelar o app logo depois do
         // `.background`, e quem arrasta o app para fora do seletor mata o
@@ -1510,6 +1535,12 @@ final class AureaModel: ObservableObject {
         restartAfterStop = false
         guard !stopping else { return }
         stopping = true
+        exportStartup?.cancel(); exportStartup = nil
+        if exporting { exportCancelled = true; engine.cancelExport() }
+        exportTimer?.invalidate(); exportTimer = nil
+        exportDiagnosticsTimer?.invalidate(); exportDiagnosticsTimer = nil
+        exportPreparing = false; exporting = false
+        pendingExportURL = nil; pendingExportOptions = nil
         if let observer = memoryWarningObserver {
             NotificationCenter.default.removeObserver(observer)
             memoryWarningObserver = nil
@@ -1547,7 +1578,9 @@ final class AureaModel: ObservableObject {
     }
 
     private func refreshStatus() {
-        guard started else { return }
+        // Native startup freezes the document under modelMutex. Polling it
+        // here would move that background wait straight back onto UIKit.
+        guard started, !exportPreparing, !exportBackgroundSavePending else { return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         // Detail is evaluated at the native playhead. The optimistic timeline
@@ -1647,7 +1680,7 @@ final class AureaModel: ObservableObject {
     /// Relê o modelo que as telas desenham. Barato o bastante para rodar a cada
     /// mudança de revisão (é UMA travessia por lista, ver Engine::query_*).
     func refreshModel(force: Bool = false) {
-        guard started else { return }
+        guard started, !exportPreparing, !exportBackgroundSavePending else { return }
         refreshPreviewBufferRanges(revision: status.modelRevision)
         let nextEditMode = engine.timelineEditMode
         if editMode != nextEditMode { editMode = nextEditMode }
@@ -1898,7 +1931,7 @@ final class AureaModel: ObservableObject {
 
     /// Um quadro da tela: só o cabeçote do motor vai para a timeline.
     private func playheadTick() {
-        guard started else { followPlayback(false); return }
+        guard started, !exportPreparing, !exportBackgroundSavePending else { followPlayback(false); return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         if playheadClock.frame != out.playhead { playheadClock.frame = out.playhead }
@@ -1972,6 +2005,28 @@ final class AureaModel: ObservableObject {
         selection = [created]
         engine.selectLayers([NSNumber(value: created)])
         refreshModel(force: true)
+    }
+
+    /// The core groups the selected layers and applies the top layer's alpha
+    /// to the whole remaining composition in a single history operation.
+    func groupAndMaskSelection(exclude: Bool = false) {
+        guard selection.count >= 2 else { return }
+        if status.playing != 0 { playPause() }
+        commitPendingCommands()
+        let ids = layers.filter { selection.contains($0.id) }.map { NSNumber(value: $0.id) }
+        let created = engine.groupAndMask(ids, exclude: exclude, name: AureaText.t("editor_grupo"))
+        guard created > 0 else {
+            if created < 0 { toast = AureaText.t("editor_group_mask_failed", Int(clamping: -created)) }
+            return
+        }
+        clearTimelineKeySelection()
+        timelineLayerSelectMode = false
+        selectedMask = nil; selectedMaskPoint = nil; maskDrawing = false
+        timelineFocus = nil; panel = .dock
+        selection = [created]
+        engine.selectLayers([NSNumber(value: created)])
+        refreshModel(force: true)
+        toast = AureaText.t("msg_agrupado_toque_em_editar_o_grupo")
     }
 
     /// Alternar grupo (app antigo): um grupo escolhido desagrupa; senão as escolhidas viram grupo.
@@ -3607,58 +3662,133 @@ final class AureaModel: ObservableObject {
     // Export
     // =========================================================================
     func startExport() {
-        guard !exporting else { return }
+        guard started, !stopping, !exporting else { return }
         exportedURL = nil
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         exportStalled = false
         exportWatch = ExportStallWatch()
         exportSafeMode = 0
-        exportedKind = exportOptions.kind
-        if exportOptions.kind != .video { startImageExport(); return }
-        let name = (projectName.isEmpty ? "Aurea" : projectName) + ".mp4"
-        var url = AureaPaths.documents.appendingPathComponent(name)
+        let options = exportOptions
+        ProblemReport.beginExportDiagnostics(previous: engine.exportDiagnostics())
+        if options.kind == .video { startExportDiagnosticsTimer() }
+        exportedKind = options.kind
+        let base = projectName.isEmpty ? "Aurea" : projectName
+        var url = AureaPaths.documents.appendingPathComponent("\(base).\(options.kind.fileExtension)")
         var counter = 1
         while FileManager.default.fileExists(atPath: url.path) {
-            url = AureaPaths.documents.appendingPathComponent("\(projectName) \(counter).mp4")
+            url = AureaPaths.documents.appendingPathComponent("\(base) \(counter).\(options.kind.fileExtension)")
             counter += 1
         }
-        let ok = startVideoExport(url, safeMode: 0)
-        guard ok else {
-            let progress = engine.exportProgress()
-            let message = progress["message"] as? String ?? ""
-            let code = (progress["result"] as? NSNumber)?.intValue ?? 0
-            exportMessage = message.isEmpty ? AureaText.t("ios_export_could_not_start")
-                : AureaEngineText.sentence(message, code: code)
-            toast = exportMessage
-            return
-        }
-        exporting = true
         pendingExportURL = url
-        startExportPolling()
+        pendingExportOptions = options
+        prepareExport(url, options: options, safeMode: 0)
     }
 
-    /// O vídeo no motor. `safeMode` > 0 só quando o motor sugeriu refazer depois
-    /// de o encoder travar (H.264 Baseline em múltiplos de 16, taxa menor).
-    private func startVideoExport(_ url: URL, safeMode: UInt32) -> Bool {
-        var level = safeMode
-        while true {
-            let ok = engine.startExport(to: url.path,
-                           codec: exportOptions.codec,
-                           height: exportOptions.shortSide,
-                           fps: exportOptions.fps,
-                           bitrateMbps: exportOptions.bitrateMbps,
-                           audioBitrateKbps: exportOptions.audioBitrateKbps,
-                           aiUpscale: exportOptions.aiUpscale, trimToContent: exportOptions.trimToContent,
-                           quality: exportOptions.quality, safeMode: level)
-            if ok { exportSafeMode = level; return true }
-            guard !exportCancelled else { return false }
-            let progress = engine.exportProgress()
-            let flags = (progress["flags"] as? NSNumber)?.uint32Value ?? 0
-            let next = ExportStallWatch.nextSafeMode(current: level,
-                suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
-            guard next > 0 else { return false }
-            level = next
+    /// Cleanup, snapshot and codec startup can wait. Publish busy/preparing
+    /// first, then use the same queue that stop drains before bridge teardown.
+    /// Safe-mode restarts also enter this path with the original frozen options.
+    private func prepareExport(_ url: URL, options: ExportOptions, safeMode: UInt32) {
+        exportTimer?.invalidate(); exportTimer = nil
+        let request = ExportStartupRequest()
+        exportStartup = request
+        exportPreparing = true; exporting = true
+        exportMessage = AureaText.t("msg_preparando")
+        exportProgress = [:]
+        followPlayback(false)
+        releaseInterfaceCaches()
+        let native = engine, project = projectGeneration
+        let imageFps = imageExportFps(options)
+        mediaQueue.async { [weak self] in
+            var ok = false, level = safeMode
+            var imageCode: Int32 = 0
+            var progress: [String: Any] = [:]
+            if options.kind == .video {
+                while !request.isCancelled {
+                    let previous = native.exportProgress()
+                    let previousDiagnostics = native.exportDiagnostics()
+                    let code = native.startExportChecked(to: url.path, codec: options.codec,
+                        height: options.shortSide, fps: options.fps, bitrateMbps: options.bitrateMbps,
+                        audioBitrateKbps: options.audioBitrateKbps, aiUpscale: options.aiUpscale,
+                        trimToContent: options.trimToContent, quality: options.quality, safeMode: level)
+                    let diagnostics = native.exportDiagnostics()
+                    // A fast failed attempt can finish between timer ticks.
+                    // Persist its immutable evidence before beginning a retry.
+                    DispatchQueue.main.async {
+                        guard let self, self.exportStartup === request, self.started,
+                              self.projectGeneration == project, self.pendingExportURL == url else { return }
+                        ProblemReport.recordExportDiagnostics(diagnostics)
+                    }
+                    ok = code == 0
+                    if ok || request.isCancelled { break }
+                    progress = Self.exportStartupProgress(native.exportProgress(), previous: previous, code: code,
+                        previousDiagnostics: previousDiagnostics, diagnostics: diagnostics)
+                    let flags = (progress["flags"] as? NSNumber)?.uint32Value ?? 0
+                    let next = ExportStallWatch.nextSafeMode(current: level,
+                        suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
+                    if next == 0 { break }
+                    level = next
+                }
+            } else if !request.isCancelled {
+                imageCode = native.startImageExport(to: url.path, format: options.kind.engineCode,
+                    shortSide: options.imageShortSide, maxWidth: options.gifWidth,
+                    fps: imageFps, trimToContent: options.trimToContent)
+                ok = imageCode == 0
+            }
+            // Cancel may predate the native startup gate. Reapply it once a
+            // context exists; never turn that race into a successful publish.
+            if request.isCancelled { native.cancelExport() }
+            let succeeded = ok, usedSafeMode = level, finalProgress = progress, finalImageCode = imageCode
+            DispatchQueue.main.async {
+                guard let self, self.exportStartup === request, self.started,
+                      self.projectGeneration == project, self.pendingExportURL == url else { return }
+                self.exportStartup = nil
+                self.exportPreparing = false
+                self.exportSafeMode = usedSafeMode
+                self.exportMessage = nil
+                if succeeded {
+                    if request.isCancelled || self.exportCancelled { native.cancelExport() }
+                    self.exportWatch = ExportStallWatch()
+                    self.startExportPolling()
+                    return
+                }
+                self.exporting = false
+                self.recordExportDiagnostics()
+                self.pendingExportURL = nil; self.pendingExportOptions = nil
+                self.exportProgress = finalProgress
+                if request.isCancelled || self.exportCancelled { return }
+                if options.kind == .video {
+                    let message = finalProgress["message"] as? String ?? ""
+                    let code = (finalProgress["result"] as? NSNumber)?.intValue ?? 0
+                    self.exportMessage = code == 0 ? AureaText.t("ios_export_could_not_start")
+                        : AureaEngineText.sentence(message, code: code)
+                } else {
+                    self.exportMessage = finalImageCode == 6 && options.kind != .frame
+                        ? AureaText.t("exp2_too_long") : AureaEngineText.sentence(nil, code: Int(finalImageCode))
+                }
+                self.toast = self.exportMessage
+            }
         }
+    }
+
+    /// Only a newly published failed startup may suggest a codec retry. The
+    /// native gate clears old progress before preparation; early admission
+    /// errors can still leave the previous session, which must be discarded.
+    nonisolated private static func exportStartupProgress(_ candidate: [String: Any], previous: [String: Any], code: Int32,
+                                                        previousDiagnostics: String = "", diagnostics: String = "") -> [String: Any] {
+        func token(_ raw: String) -> String? {
+            guard let value = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any],
+                  let token = value["sessionToken"] as? String, !token.isEmpty else { return nil }
+            return token
+        }
+        let fresh: Bool
+        if let before = token(previousDiagnostics), let after = token(diagnostics) { fresh = before != after }
+        else { fresh = !NSDictionary(dictionary: candidate).isEqual(to: previous) }
+        guard (candidate["finished"] as? NSNumber)?.boolValue == true,
+              (candidate["result"] as? NSNumber)?.int32Value == code,
+              fresh else {
+            return ["result": NSNumber(value: code)]
+        }
+        return candidate
     }
 
     /// O plano do export como imagem pela regra do motor (dimensões, quadros, bytes).
@@ -3676,36 +3806,63 @@ final class AureaModel: ObservableObject {
         }
     }
 
-    /// PNG, sequência .zip ou GIF: o motor renderiza e codifica; o progresso e
-    /// o cancelamento são os do vídeo.
-    private func startImageExport() {
-        let options = exportOptions
-        let base = projectName.isEmpty ? "Aurea" : projectName
-        var url = AureaPaths.documents.appendingPathComponent("\(base).\(options.kind.fileExtension)")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: url.path) {
-            url = AureaPaths.documents.appendingPathComponent("\(base) \(counter).\(options.kind.fileExtension)")
-            counter += 1
-        }
-        let code = engine.startImageExport(to: url.path, format: options.kind.engineCode, shortSide: options.imageShortSide,
-                                           maxWidth: options.gifWidth, fps: imageExportFps(options), trimToContent: options.trimToContent)
-        guard code == 0 else {
-            exportMessage = code == 6 && options.kind != .frame ? AureaText.t("exp2_too_long") : AureaText.t("ios_export_could_not_start")
-            toast = exportMessage
-            return
-        }
-        exporting = true
-        pendingExportURL = url
-        startExportPolling()
-    }
-
     func cancelExport() {
         guard exporting && !exportPublishing else { return }
         exportCancelled = true
+        exportStartup?.cancel()
         engine.cancelExport()
     }
 
+    /// Save-on-background must not contend with the snapshot on UIKit. Queue
+    /// it after the cancelled startup, then suspend on the ordered lifecycle
+    /// queue so a quick foreground resume cannot overtake this operation.
+    private func suspendPreparingExport() {
+        cancelExport()
+        exportBackgroundSavePending = true
+        homeCardStale = true
+        let native = engine, captures = mediaQueue, project = projectGeneration
+        let save = screen == .editor && projectURL != nil
+        let app = UIApplication.shared
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = app.beginBackgroundTask(withName: "aurea-salvar-suspender") {
+            if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+        }
+        lifecycleQueue.async { [weak self] in
+            let code: Int32 = captures.sync { save ? native.saveProjectIfDirty() : -1 }
+            native.suspend()
+            DispatchQueue.main.async {
+                if let self {
+                    self.exportBackgroundSavePending = false
+                    if self.projectGeneration == project {
+                        if code == 0 || code == -1 { self.dirty = false }
+                        else { self.toast = AureaText.t("ios_save_failed") }
+                    }
+                }
+                if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+            }
+        }
+    }
+
     private var exportTimer: Timer?
+    private var exportDiagnosticsTimer: Timer?
+    private func recordExportDiagnostics() {
+        guard started, exportedKind == .video else { return }
+        ProblemReport.recordExportDiagnostics(engine.exportDiagnostics())
+    }
+    private func startExportDiagnosticsTimer() {
+        exportDiagnosticsTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                guard self.started, self.exporting else {
+                    self.exportDiagnosticsTimer?.invalidate(); self.exportDiagnosticsTimer = nil; return
+                }
+                self.recordExportDiagnostics()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        exportDiagnosticsTimer = timer
+    }
 
     /// A última rede contra "a exportação parou num percentual" — a MESMA regra
     /// do ExportStallWatchdog.kt (kExportUiStallSeconds / kExportUiGiveUpSeconds
@@ -3772,7 +3929,7 @@ final class AureaModel: ObservableObject {
         exportTimer?.invalidate()
         let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.started, self.exporting, !self.exportPreparing else { return }
                 self.exportProgress = self.engine.exportProgress()
                 let running = (self.exportProgress["running"] as? NSNumber)?.boolValue ?? false
                 let finished = (self.exportProgress["finished"] as? NSNumber)?.boolValue ?? false
@@ -3789,6 +3946,7 @@ final class AureaModel: ObservableObject {
                         self.exportTimer?.invalidate()
                         self.exportTimer = nil
                         self.pendingExportURL = nil
+                        self.pendingExportOptions = nil
                         self.exporting = false
                         self.exportStalled = true
                         self.exportMessage = AureaText.t("ios_export_failed_detail", AureaText.t("expfail_stuck"))
@@ -3799,6 +3957,7 @@ final class AureaModel: ObservableObject {
                     }
                 }
                 if !running && finished {
+                    self.recordExportDiagnostics()
                     self.exportTimer?.invalidate()
                     self.exportTimer = nil
                     let result = (self.exportProgress["result"] as? NSNumber)?.intValue ?? 0
@@ -3806,19 +3965,18 @@ final class AureaModel: ObservableObject {
                     // segurança: refaz o vídeo do começo, com o aviso (nada de
                     // "falhou" na tela).
                     if result != 0, self.exportedKind == .video, !self.exportCancelled, !self.exportWatch.cancelled,
-                       let url = self.pendingExportURL {
+                       let url = self.pendingExportURL, let options = self.pendingExportOptions {
                         let flags = (self.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
                         let next = ExportStallWatch.nextSafeMode(current: self.exportSafeMode,
                                                                  suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
-                        if next > 0 && self.startVideoExport(url, safeMode: next) {
-                            self.exportWatch = ExportStallWatch()
-                            self.exportProgress = [:]
-                            self.startExportPolling()
+                        if next > 0 {
+                            self.prepareExport(url, options: options, safeMode: next)
                             return
                         }
                     }
-                    self.exportedURL = result == 0 ? self.pendingExportURL : nil
+                    self.exportedURL = result == 0 && !self.exportCancelled ? self.pendingExportURL : nil
                     self.pendingExportURL = nil
+                    self.pendingExportOptions = nil
                     if let url = self.exportedURL {
                         self.exportCancelled = false
                         self.publishExportToPhotos(url)
@@ -4205,15 +4363,17 @@ final class AureaModel: ObservableObject {
         return kind.uint32Value == 5 && (shape.uint32Value & 0xFFFF) == 11
     }
 
-    /// Vai ao keyframe anterior/seguinte da camada principal (A.01: |◀ ▶|).
+    /// The shared engine merges markers with visible keys of the active layer.
     func stepTransport(_ direction: Int) {
-        if !markerFrames.isEmpty {
-            let now = status.playhead
-            let target = direction > 0
-                ? markerFrames.filter { $0 > now }.min()
-                : markerFrames.filter { $0 < now }.max()
-            if let target { seek(toFrame: target) }
-        } else if !stepToKeyframe(direction) { step(Int32(clamping: direction)) }
+        guard let target = engine.timelineNavigation(primarySelection ?? 0, compositionFrame: status.playhead,
+                                                      direction: Int32(clamping: direction)) else { return }
+        let frame = target.int64Value
+        guard engine.seekTimelineEvent(frame) else { return }
+        pendingPlayhead = frame
+        pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
+        status.playhead = frame
+        playheadClock.frame = frame
+        if primarySelection != nil { refreshSelectedLayer() }
     }
 
     func stepToKeyframe(_ direction: Int) -> Bool {

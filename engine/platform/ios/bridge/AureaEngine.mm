@@ -2107,6 +2107,10 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (NSString*)playbackReport {
     auto* e = self.engine; return e ? [NSString stringWithUTF8String:e->playback_report().c_str()] : @"";
 }
+- (NSString*)exportDiagnostics {
+    auto* e = self.engine;
+    return e ? to_ns(e->export_diagnostics()) : @"{}";
+}
 - (int64_t)audioPositionNs {
     auto* e = self.engine; return e ? e->audio().position_ns() : 0;
 }
@@ -3617,6 +3621,44 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return static_cast<long long>(*r);
 }
 
+- (long long)groupAndMask:(NSArray<NSNumber*>*)layerIds exclude:(BOOL)exclude name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    std::vector<aurea::u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    const std::string label = to_std(name);
+    const auto result = e->group_and_mask(ids.data(), static_cast<aurea::u32>(ids.size()), exclude != NO,
+                                         label.empty() ? nullptr : label.c_str());
+    return result.ok() ? static_cast<long long>(*result) : -static_cast<long long>(result.status().code());
+}
+
+- (nullable NSDictionary<NSString*, NSNumber*>*)keyframeNavigation:(long long)layerId property:(uint32_t)property
+        effect:(uint32_t)effect param:(uint32_t)param compositionFrame:(long long)compositionFrame {
+    auto* e = self.engine;
+    aurea::Engine::KeyframeNavigation result{};
+    if (!e || !e->query_keyframe_navigation(static_cast<aurea::u64>(layerId), property, effect, param,
+                                           static_cast<aurea::i64>(compositionFrame), result)) return nil;
+    return @{ @"visibleCount": @(result.visibleCount), @"flags": @(result.flags),
+              @"localFrame": @(result.localFrame), @"previousFrame": @(result.previousFrame),
+              @"nextFrame": @(result.nextFrame), @"segmentStart": @(result.segmentStart),
+              @"segmentEnd": @(result.segmentEnd) };
+}
+
+- (nullable NSNumber*)timelineNavigation:(long long)layerId compositionFrame:(long long)compositionFrame
+        direction:(int32_t)direction {
+    auto* e = self.engine;
+    aurea::i64 target = 0;
+    if (!e || !e->query_timeline_navigation(static_cast<aurea::u64>(layerId),
+            static_cast<aurea::i64>(compositionFrame), direction, target)) return nil;
+    return @(target);
+}
+
+- (BOOL)seekTimelineEvent:(long long)compositionFrame {
+    auto* e = self.engine;
+    return e && e->seek_timeline_event(static_cast<aurea::i64>(compositionFrame));
+}
+
 - (NSString*)ungroupPrecomp:(long long)layerId {
     auto* e = self.engine;
     if (!e) return @"motor indisponivel";
@@ -3845,8 +3887,18 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
               quality:(uint32_t)quality safeMode:(uint32_t)safeMode {
+    return [self startExportCheckedTo:path codec:codec height:height fps:fps bitrateMbps:bitrateMbps
+                   audioBitrateKbps:audioBitrateKbps aiUpscale:aiUpscale trimToContent:trimToContent
+                           quality:quality safeMode:safeMode] == 0;
+}
+
+- (int32_t)startExportCheckedTo:(NSString*)path codec:(AureaExportCodec)codec
+                        height:(uint32_t)height fps:(double)fps
+                   bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+                     aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+                       quality:(uint32_t)quality safeMode:(uint32_t)safeMode {
     auto* e = self.engine;
-    if (!e) return NO;
+    if (!e) return static_cast<int32_t>(aurea::Errc::InvalidState);
     aurea::ExportSettings settings;
     // `height` é o LADO MENOR pedido; a largura vem da proporção (o motor
     // calcula, e nunca estica).
@@ -3861,7 +3913,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportSafeModeMax);
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
-    return e->start_export(settings, out.c_str()).ok() ? YES : NO;
+    return e->start_export(settings, out.c_str()).raw();
 }
 
 - (void)cancelExport {

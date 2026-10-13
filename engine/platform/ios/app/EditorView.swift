@@ -108,13 +108,15 @@ struct EditorView: View {
             EffectAddSheet(request: request, close: { model.effectSearch = nil })
                 .environmentObject(model)
         }
-        .sheet(item: $model.textContentRequest) { request in
-            TextContentEditor(request: request).environmentObject(model)
-                .presentationDetents([.large]).interactiveDismissDisabled()
+        .overlay {
+            if let request = model.textContentRequest {
+                TextContentEditor(request: request).environmentObject(model).id(request.presentationID)
+            }
         }
         .sheet(item: $model.markerEditingFrame) { marker in
             MarkerEditorSheet(frame: marker.frame, color: marker.color, label: marker.label, isNew: marker.isNew)
                 .environmentObject(model)
+                .presentationDetents([.medium, .large])
         }
         .overlay(alignment: .topTrailing) {
             if model.fullscreen {
@@ -1447,6 +1449,7 @@ private struct TextContentEditor: View {
     @State private var selection: NSRange
     @State private var editing = false
     @State private var failed = false
+    @State private var inputHeight: CGFloat = 96
     init(request: AureaModel.TextContentRequest) {
         self.request = request
         _content = State(initialValue: request.content)
@@ -1455,24 +1458,35 @@ private struct TextContentEditor: View {
     }
     private var valid: Bool { !request.is3D || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        AureaBottomOverlay(modal: true, onDismiss: dismiss, fixedFooter: AnyView(actions)) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text(AureaText.t("sh_dock_edit_text")).font(.aurea(size: 18, weight: .semibold))
-                Spacer()
-                Button(AureaText.t("common_cancel")) { model.textContentRequest = nil }
-                    .frame(minHeight: 44).accessibilityIdentifier("text.content.cancel")
-                Button(AureaText.t("editor_concluir")) {
-                    failed = !model.commitTextContent(request, content: content)
-                }.frame(minHeight: 44).disabled(!valid).accessibilityIdentifier("text.content.done")
+                NativeTextInput(text: $content, selection: $selection, editing: $editing,
+                                autoFocus: true, selectAllOnFocus: request.selectAll, scrollable: true, alignment: request.alignment,
+                                onContentHeight: { inputHeight = AureaSheetLayout.textInputHeight(content: $0) }) { _ in failed = false }
+                    .frame(height: inputHeight)
+                    .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityIdentifier("text.content.input")
+                if !valid { Text(AureaText.t("text_content_3d_required")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
+                if failed { Text(AureaText.t("text_content_save_failed")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
             }
-            NativeTextInput(text: $content, selection: $selection, editing: $editing,
-                            autoFocus: true, selectAllOnFocus: request.selectAll, scrollable: true, alignment: request.alignment) { _ in failed = false }
-                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
-                .accessibilityIdentifier("text.content.input")
-            if !valid { Text(AureaText.t("text_content_3d_required")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
-            if failed { Text(AureaText.t("text_content_save_failed")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
-        }.padding(18).foregroundStyle(AureaColors.text).tint(AureaColors.accent)
-            .background(AureaColors.editorPanel.ignoresSafeArea())
+            .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
+            .foregroundStyle(AureaColors.text).tint(AureaColors.accent)
+        }.accessibilityIdentifier("text.content.sheet")
+    }
+    private var actions: some View {
+        HStack(spacing: 12) {
+            Button(AureaText.t("common_cancel"), action: dismiss)
+                .frame(maxWidth: .infinity, minHeight: 44).accessibilityIdentifier("text.content.cancel")
+            Button(AureaText.t("editor_concluir")) {
+                failed = !model.commitTextContent(request, content: content)
+            }.frame(maxWidth: .infinity, minHeight: 44).disabled(!valid).accessibilityIdentifier("text.content.done")
+        }.font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.accent)
+            .padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 12)
+    }
+    private func dismiss() {
+        guard model.textContentRequest?.presentationID == request.presentationID else { return }
+        model.textContentRequest = nil
     }
 }
 
@@ -1502,6 +1516,7 @@ private struct NativeTextInput: UIViewRepresentable {
     var selectAllOnFocus = false
     var scrollable = false
     var alignment = 0
+    var onContentHeight: (CGFloat) -> Void = { _ in }
     private var nativeAlignment: NSTextAlignment { alignment == 1 ? .center : (alignment == 2 ? .right : .left) }
     let onChange: (String) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -1525,13 +1540,22 @@ private struct NativeTextInput: UIViewRepresentable {
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width else { return nil }
-        if scrollable { return CGSize(width: width, height: max(96, proposal.height ?? 240)) }
+        if scrollable {
+            context.coordinator.publishContentHeight(uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height)
+            return CGSize(width: width, height: max(0, proposal.height ?? 96))
+        }
         let result = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         return CGSize(width: width, height: max(56, result.height))
     }
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: NativeTextInput
+        private var publishedHeight: CGFloat = -1
         init(_ parent: NativeTextInput) { self.parent = parent }
+        func publishContentHeight(_ height: CGFloat) {
+            guard height.isFinite, abs(height - publishedHeight) >= 0.5 else { return }
+            publishedHeight = height
+            DispatchQueue.main.async { [weak self] in self?.parent.onContentHeight(height) }
+        }
         func textViewDidBeginEditing(_ textView: UITextView) { parent.editing = true }
         func textViewDidEndEditing(_ textView: UITextView) { parent.editing = false }
         func textViewDidChange(_ textView: UITextView) {

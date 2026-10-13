@@ -234,6 +234,9 @@ struct EngineConfig {
     /// Fonte padrão do texto (arquivo TTF/OTF); vazio = procurar a do sistema.
     std::string defaultFontPath;
     std::string cacheDirectory;
+    // App-owned intermediate exports only. Empty when output files are final
+    // user documents (iOS); never infer a cleanup directory from outputPath.
+    std::string exportTemporaryDirectory;
     std::string documentsDirectory;
     u32   workerCount = 0;
     u64   memoryBudgetBytes = 0;
@@ -1182,6 +1185,16 @@ public:
     /// duração; fundo transparente) e põe no lugar UMA camada que a mostra, na
     /// posição da mais alta. Os tempos não mudam. Devolve a camada nova.
     [[nodiscard]] Result<u64> precompose(const u64* ids, u32 count, const char* name = nullptr) noexcept;
+    /// Group and mask the composed content with the highest selected visual
+    /// layer. Exclude cuts a hole; otherwise only the source alpha is retained.
+    /// Preserves stack order/local timing and records one undo action. Missing,
+    /// locked or nonvisual layers reject the whole selection before mutation.
+    [[nodiscard]] Result<u64> group_and_mask(const u64* ids, u32 count, bool exclude,
+                                           const char* name = nullptr) noexcept;
+private:
+    [[nodiscard]] Result<u64> precompose_locked(const u64* ids, u32 count, const char* name,
+                                               bool mask, bool exclude) noexcept;
+public:
     /// Desagrupa: as camadas da pré-composição voltam para a composição atual,
     /// no lugar da camada, com os mesmos tempos na tela (aparadas ao trecho que
     /// a camada mostrava). Transform da camada ≠ identidade vira um Nulo pai
@@ -1525,6 +1538,29 @@ public:
     u32 query_layers(bridge::LayerRow* out, u32 capacity,
                      char* outNameBlob, u32 nameBlobCapacity) noexcept;
     u32 query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity) noexcept;
+    struct KeyframeNavigation {
+        u32 visibleCount = 0;
+        u32 flags = 0;           // 1 key here, 2 previous, 4 next, 8 easing segment
+        i64 localFrame = 0;
+        i64 previousFrame = 0;   // composition frame; valid only with flag 2
+        i64 nextFrame = 0;       // composition frame; valid only with flag 4
+        i64 segmentStart = 0;    // local frame; valid only with flag 8
+        i64 segmentEnd = 0;      // local frame; valid only with flag 8
+    };
+    /// Visible keys on one track, with the same inclusive clip-end anchor rule
+    /// as query_keyframes. Previous/next are strict. A segment exists only
+    /// inside the visible key span; its last endpoint selects the prior segment.
+    bool query_keyframe_navigation(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
+                                   i64 compositionFrame, KeyframeNavigation& out) noexcept;
+    /// Transport arrows choose the strict nearest event in composition time.
+    /// With layerId=0 (or a stale id), only composition markers participate.
+    /// A valid layer adds all its visible keys, including the clip-end anchor.
+    /// False means there is no event in that direction; the UI stays put.
+    bool query_timeline_navigation(u64 layerId, i64 compositionFrame, i32 direction,
+                                   i64& targetFrame) noexcept;
+    /// Seek a transport event within the composition, even after the last clip.
+    /// Regular scrubbing/seek and content-bounded playback retain their limits.
+    bool seek_timeline_event(i64 compositionFrame) noexcept;
     /// Keyframes de TODAS as camadas da composição atual numa consulta só (a
     /// timeline relê a cada `modelRevision`: um travamento do modelo e uma
     /// travessia de JNI em vez de uma por camada). Ordem de query_layers
@@ -1660,6 +1696,8 @@ public:
         // falhou pelo encoder (kExportRetryShift, export/ExportWatchdog.hpp).
     };
     [[nodiscard]] ExportProgress export_progress() const noexcept;
+    /// Path-free session evidence, also readable while a codec/provider call stalls.
+    [[nodiscard]] std::string export_diagnostics() const noexcept;
 
     /// Export como IMAGEM (export/ImageEncode.hpp): o quadro do playhead em PNG,
     /// a sequência de PNGs do trecho num .zip ou o GIF animado. O MESMO
@@ -1955,6 +1993,11 @@ private:
     bool refineNow_ = false;                  ///< este quadro é o refino
     u64 refineDueNs_ = 0;                     ///< prazo absoluto; vsync sem mudança não o adia
     bool contentBoundedPlayback_ = false;
+    // A paused transport jump may target a project marker after the last clip.
+    // Keep that cursor across preview reconfiguration while the marker exists.
+    i64 pausedTimelineEventFrame_ = -1;
+    u64 pausedTimelineEventSession_ = 0;
+    CompositionId pausedTimelineEventComposition_{};
     void configure_playback_locked(const Composition* comp, i64 rawDuration = -1) noexcept;
     [[nodiscard]] i64 navigation_end_locked(const Composition* comp) const noexcept;
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
@@ -2005,6 +2048,8 @@ private:
     // Short-lived pointer lock: progress/cancel never wait for encoder startup
     // or for the lifecycle join, only for publication of a new context.
     mutable std::mutex exportContextMutex_;
+    mutable std::mutex exportDiagnosticsMutex_;
+    std::shared_ptr<ExportDiagnostics> exportDiagnostics_;
     std::unique_ptr<ExportContext> exportCtx_;
     // Native calls may return after watchdog abandonment. Keep at most two
     // sessions until their own workers close the sink and publish their exit.
@@ -2030,6 +2075,7 @@ private:
     [[nodiscard]] Status retire_abandoned_export_locked(bool admitNewSession = true) noexcept;
     void image_export_thread_main() noexcept;
     [[nodiscard]] Status initialize_offline_export(ExportContext& ctx) noexcept;
+    [[nodiscard]] Status prepare_export_resources(ExportContext& ctx) noexcept;
     void release_offline_export(ExportContext& ctx, bool retainReadbacks = false) noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status wait_export_gpu(u64 gpuFrame) noexcept; // renderMutex_ held by caller

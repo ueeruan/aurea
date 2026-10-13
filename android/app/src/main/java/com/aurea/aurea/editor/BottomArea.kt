@@ -31,6 +31,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import android.app.Application
@@ -540,6 +541,8 @@ private fun DockVector(icon: ImageVector, size: androidx.compose.ui.unit.Dp) {
  */
 @Composable
 internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER") ui: EditorUi) {
+    var grouping by remember { mutableStateOf(false) }
+    if (grouping) GroupSelectionSheet(store) { grouping = false }
     val count by remember { derivedStateOf { store.selection.size } }
     val intoLayers = stringResource(R.string.editor_leve_cabecote_dentro_camadas)
     Column(Modifier.fillMaxSize().testTag("timeline.batch.tools").verticalScroll(rememberScrollState()).padding(horizontal = 10.dp)) {
@@ -562,7 +565,7 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
             BatchTool(CupertinoGlyph.ArrowLeftToLine, stringResource(R.string.editor_aparar_fim_cabecote)) { batchTrim(store, start = false) }
             Box(Modifier.width(1.dp).height(24.dp).background(AureaColors.Border))
             if (EditorTimelineRefresh.enabled) {
-                BatchTool(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_agrupar_camadas_escolhidas)) { store.precompose() }
+                BatchTool(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_grupo)) { grouping = true }
                 BatchTool(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_camada)) { store.copyLayers() }
                 BatchTool(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar_camada)) { store.duplicateLayers() }
             } else {

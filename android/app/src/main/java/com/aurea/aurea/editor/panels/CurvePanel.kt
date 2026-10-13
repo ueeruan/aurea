@@ -396,13 +396,13 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             val (layer, sel) = store.selectedKeyframe ?: return@derivedStateOf null
             val keys = store.keyframes[layer] ?: return@derivedStateOf null
             val track = keys.track(sel)
-            var i = track.indexOfFirst { it.time == sel.time }
-            if (track.size < 2) return@derivedStateOf null
-            // The engine publishes on its next frame; keep the gesture mounted
-            // while the selected key's new time is still in the command queue.
-            if (i < 0) i = track.indexOfLast { it.time <= sel.time }.coerceAtLeast(0)
-            if (i == track.lastIndex) i-- // a última marca não abre trecho: mostra o que chega nela
-            Triple(layer, track[i], track[i + 1])
+            val detail = store.queryDetail(layer) ?: return@derivedStateOf null
+            val target = com.aurea.aurea.engine.TrackKey(sel.property, sel.effectIndex, sel.paramIndex)
+            val navigation = store.keyframeNavigation(layer, target, detail.timelineFrame(sel.time)) ?: return@derivedStateOf null
+            if (!navigation.hasSegment) return@derivedStateOf null
+            val a = track.firstOrNull { it.time == navigation.segmentStart } ?: return@derivedStateOf null
+            val b = track.firstOrNull { it.time == navigation.segmentEnd } ?: return@derivedStateOf null
+            Triple(layer, a, b)
         }
     }
     val seg = segment
@@ -461,21 +461,33 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     }
 
     fun jump(dir: Int) {
-        val track = (store.keyframes[layer] ?: emptyList()).track(start)
-        val i = track.indexOfFirst { it.time == start.time }
-        val target = (i + dir).coerceIn(0, max(0, track.size - 2))
-        if (target == i || target >= track.lastIndex) return
-        val a = track[target]
-        val b = track[target + 1]
+        val detail = store.queryDetail(layer) ?: return
+        val target = com.aurea.aurea.engine.TrackKey(start.property, start.effectIndex, start.paramIndex)
+        val edge = detail.timelineFrame(if (dir < 0) start.time else end.time)
+        val navigation = store.keyframeNavigation(layer, target, edge) ?: return
+        val frame = if (dir < 0) {
+            if (!navigation.hasPrevious) return
+            navigation.previousFrame
+        } else {
+            if (!navigation.hasNext) return
+            edge
+        }
+        val segment = store.keyframeNavigation(layer, target, frame)?.takeIf { it.hasSegment } ?: return
+        val a = store.keyframes[layer].orEmpty().track(start).firstOrNull { it.time == segment.segmentStart } ?: return
         store.selectKeyframe(layer, a)
-        // Trocar de trecho é escolha da pessoa: aqui mover o cabeçote é legítimo
-        // (pausado, para não disputar com o relógio).
         store.pause()
-        store.detail?.let { d -> store.seek(d.timelineFrame(a.time + (b.time - a.time) / 2)) }
+        store.seek(frame)
     }
+
+    val trackTarget = com.aurea.aurea.engine.TrackKey(start.property, start.effectIndex, start.paramIndex)
+    val curveDetail = store.queryDetail(layer)
+    val before = curveDetail?.let { store.keyframeNavigation(layer, trackTarget, it.timelineFrame(start.time)) }?.hasPrevious == true
+    val after = curveDetail?.let { store.keyframeNavigation(layer, trackTarget, it.timelineFrame(end.time)) }?.hasNext == true
 
     val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
     val needTwoMsg = stringResource(R.string.pn_curve_need_two_keys)
+    val previousLabel = stringResource(R.string.panel_keyframe_anterior)
+    val nextLabel = stringResource(R.string.panel_proximo_keyframe)
     Column(Modifier.fillMaxSize().background(CurvePanelFill)) {
     Row(Modifier.fillMaxWidth().height(48.dp).background(CurveRailFill)) {
         listOf(R.string.panel_easing_curve, R.string.particular_curve_value, R.string.panel_velocidade).forEachIndexed { index, label ->
@@ -583,12 +595,10 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             }
             // ‹ trecho anterior · próximo ›: no sentido do tempo, LTR como o gráfico.
             KeepLtr { Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(48.dp).tocavel { jump(-1) }, contentAlignment = Alignment.Center) {
-                    CupertinoIcon(CupertinoGlyph.ChevronLeft, 16.dp, Color.White)
+                Box(Modifier.size(48.dp).semantics { contentDescription = previousLabel }.tocavel(enabled = before) { jump(-1) }, contentAlignment = Alignment.Center) {
+                    CupertinoIcon(CupertinoGlyph.ChevronLeft, 16.dp, if (before) Color.White else AureaColors.Disabled)
                 }
                 Spacer(Modifier.width(4.dp))
-                val track = (store.keyframes[layer] ?: emptyList()).track(start)
-                val n = track.indexOfFirst { it.time == start.time }
                 // A curva do trecho em números; tocar troca a força (×1 → ×2 → ×3).
                 val powered = graphMode == 0 && ease.hasHandles
                 Text(
@@ -609,8 +619,8 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, fontWeight = FontWeight.W400, color = Color.White.copy(alpha = .6f), textAlign = TextAlign.Center)),
                 )
                 Spacer(Modifier.width(4.dp))
-                Box(Modifier.size(48.dp).tocavel { jump(1) }, contentAlignment = Alignment.Center) {
-                    CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, Color.White)
+                Box(Modifier.size(48.dp).semantics { contentDescription = nextLabel }.tocavel(enabled = after) { jump(1) }, contentAlignment = Alignment.Center) {
+                    CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, if (after) Color.White else AureaColors.Disabled)
                 }
             } }
         }
@@ -987,7 +997,8 @@ private fun followGraphPlayhead(store: EditorStore) {
     val (layer, sel) = store.selectedKeyframe ?: return
     if (layer != store.primary) return
     val track = store.keyframes[layer].orEmpty().track(sel)
-    val local = localPlayhead(store, layer) ?: return
-    val want = segmentIndexAt(track, local)
-    if (want >= 0 && want != segmentIndexOf(track, sel.time)) store.selectKeyframe(layer, track[want])
+    val target = com.aurea.aurea.engine.TrackKey(sel.property, sel.effectIndex, sel.paramIndex)
+    val navigation = store.keyframeNavigation(layer, target)?.takeIf { it.hasSegment } ?: return
+    val start = track.firstOrNull { it.time == navigation.segmentStart } ?: return
+    if (start.time != sel.time) store.selectKeyframe(layer, start)
 }

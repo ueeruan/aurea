@@ -141,6 +141,49 @@ import UIKit
     func testMotionBlurTextExportCompletesAt1080p() throws {
         try assertKeyflowTextExport("motion-blur-export")
     }
+    func testTextContentSheetKeepsActionsAboveKeyboardAndLongTextCompact() throws {
+        let before = try launch("text-edit-2d")
+        let input = app.textViews["text.content.input"].firstMatch
+        let done = app.buttons["text.content.done"].firstMatch
+        let cancel = app.buttons["text.content.cancel"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
+        input.tap()
+        input.typeText(String(repeating: "Aurea line\n", count: 32))
+        func checkCompactEditor() {
+            XCTAssertLessThanOrEqual(input.frame.height, 181, "Long content must scroll inside a compact text input")
+            XCTAssertTrue(done.isHittable && cancel.isHittable, "Actions must remain available with the keyboard")
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists {
+                XCTAssertLessThanOrEqual(done.frame.maxY, keyboard.frame.minY + 1)
+                XCTAssertLessThanOrEqual(cancel.frame.maxY, keyboard.frame.minY + 1)
+            }
+        }
+        checkCompactEditor()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let oriented = NSPredicate { _, _ in self.app.frame.width > self.app.frame.height }
+        expectation(for: oriented, evaluatedWith: app)
+        waitForExpectations(timeout: 8)
+        checkCompactEditor()
+        done.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: input)], timeout: 3), .completed,
+                       "Successful save dismisses the content editor")
+        XCTAssertEqual(try snapshot().layerCount, before.layerCount)
+    }
+    func testText3DEmptyContentKeepsCancelVisibleWithoutAllowingSave() throws {
+        _ = try launch("text-edit-3d")
+        let input = app.textViews["text.content.input"].firstMatch
+        let done = app.buttons["text.content.done"].firstMatch
+        let cancel = app.buttons["text.content.cancel"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
+        // The existing add-text flow selects all initial content on focus.
+        input.typeText(XCUIKeyboardKey.delete.rawValue)
+        XCTAssertFalse(done.isEnabled, "The engine's nonempty 3D text contract is preserved")
+        XCTAssertTrue(cancel.isHittable)
+        cancel.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: input)], timeout: 3), .completed)
+    }
     func testKeyflowPlainTextExportAt1080p() throws {
         try assertKeyflowTextExport("keyflow-simple-text")
     }
@@ -1319,17 +1362,17 @@ import UIKit
         _ = try awaitSnapshot("A deliberate tap opens the layer options") { $0.sheet == "dock" }
     }
 
-    func testRotationDialKeysXYZTogether() throws {
+    func testRotationRulerKeysXYZTogether() throws {
         let before = try launch("rotation-isolation")
         let mode = app.descendants(matching: .any)["aurea.panel.mode.2"].firstMatch
         XCTAssertTrue(mode.waitForExistence(timeout: 5)); mode.tap()
-        let axis = app.buttons["transform.rotation.axis.0"]
+        let axis = app.buttons["transform.rotation.vector.axis.0"]
         XCTAssertTrue(axis.waitForExistence(timeout: 5)); axis.tap()
-        let dial = app.descendants(matching: .any)["transform.rotation.dial"].firstMatch
-        XCTAssertTrue(dial.waitForExistence(timeout: 5))
-        let frame = dial.frame
-        let start = CGPoint(x: frame.midX + frame.width * 0.3, y: frame.midY)
-        let end = CGPoint(x: frame.midX, y: frame.midY - frame.height * 0.3)
+        let ruler = app.descendants(matching: .any)["transform.rotation.vector.ruler"].firstMatch
+        XCTAssertTrue(ruler.waitForExistence(timeout: 5))
+        let frame = ruler.frame
+        let start = CGPoint(x: frame.midX - frame.width * 0.2, y: frame.midY)
+        let end = CGPoint(x: frame.midX + frame.width * 0.2, y: frame.midY)
         app.buttons["stage.autokey"].tap()
         coordinate(start).press(forDuration: 0.05, thenDragTo: coordinate(end), withVelocity: .slow, thenHoldForDuration: 0.1)
         let layout = try awaitSnapshot("Auto-Key off moves existing animation without inserting keys") {
@@ -1990,7 +2033,7 @@ import UIKit
         XCTAssertEqual(state.detail.sourceSize.count, 2)
         // "effects": camada sem efeito abre direto na tela cheia "Adicionar efeito",
         // que cobre o palco de propósito.
-        if scene != "effects" { XCTAssertTrue(stage.isHittable) }
+        if !["effects", "text-edit-2d", "text-edit-3d"].contains(scene) { XCTAssertTrue(stage.isHittable) }
         attach("Initial core probe", stage.value as? String ?? "missing")
         return state
     }

@@ -8,10 +8,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +28,8 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
@@ -59,6 +66,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -88,6 +96,12 @@ fun numeroPtBr(v: Float, casas: Int = 1): String {
     if (s.startsWith("-") && s.drop(1).all { it == '0' || it == '.' }) s = s.drop(1)
     // Vírgula só nos idiomas que usam vírgula decimal (pt, es, ru, id); em inglês "1.5".
     return if (java.text.DecimalFormatSymbols.getInstance(Locale.getDefault()).decimalSeparator == ',') s.replace('.', ',') else s
+}
+
+/** Axis chips omit redundant fractional zeroes; entry and accessibility keep full precision. */
+fun compactPropertyNumber(value: Float, decimals: Int): String {
+    val full = numeroPtBr(value, decimals)
+    return if (decimals > 0) full.trimEnd('0').trimEnd('.', ',') else full
 }
 
 /**
@@ -136,11 +150,11 @@ object ParamRowColors {
 }
 
 object ParamRowDims {
-    val Row = 40.dp
+    val Row = 56.dp
     val Gap = 6.dp
-    val LabelW = 70.dp
-    val LabelH = 36.dp
-    val ValueW = 62.dp
+    val LabelW = 76.dp
+    val LabelH = 52.dp
+    val ValueW = 76.dp
     val Radius = 6.dp
 }
 
@@ -404,10 +418,11 @@ fun PropertyLabelChip(
     expression: ExpressionLook = ExpressionLook.None,
     onLongClick: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
+    width: Dp = ParamRowDims.LabelW,
 ) {
     Box(
         modifier
-            .size(width = ParamRowDims.LabelW, height = ParamRowDims.LabelH)
+            .size(width = width, height = ParamRowDims.LabelH)
             .clip(RoundedCornerShape(ParamRowDims.Radius))
             .background(if (selected) ParamRowColors.LabelOn else ParamRowColors.LabelOff)
             .then(
@@ -427,15 +442,15 @@ fun PropertyLabelChip(
             label,
             maxLines = ParamRowMath.labelMaxLines(label),
             overflow = TextOverflow.Ellipsis,
-            onTextLayout = { if (it.hasVisualOverflow && shrink > 0.72f) shrink -= 0.06f },
+            onTextLayout = { if (it.hasVisualOverflow && shrink > 0.86f) shrink = (shrink - 0.06f).coerceAtLeast(0.86f) },
             style = AureaType.Base.merge(
                 TextStyle(
-                    fontSize = (ParamRowMath.labelFontSp(label) * shrink).sp,
+                    fontSize = (14f * shrink).sp,
                     lineHeight = 1.1.em,
                     fontWeight = if (selected) FontWeight.W700 else FontWeight.W400,
                     textAlign = TextAlign.Center,
                     color = if (selected) AureaColors.Accent else ParamRowColors.LabelOffText,
-                    textDecoration = TextDecoration.Underline,
+                    textDecoration = TextDecoration.None,
                 ),
             ),
         )
@@ -476,30 +491,38 @@ fun ParamValueBox(
     width: Dp = ParamRowDims.ValueW,
     enabled: Boolean = true,
     onTap: (() -> Unit)?,
+    axis: String? = null,
+    selected: Boolean = false,
+    color: Color = AureaColors.Text,
+    onLongPress: (() -> Unit)? = null,
 ) {
     Box(
         modifier
             .size(width = width, height = ParamRowDims.LabelH)
             .clip(RoundedCornerShape(ParamRowDims.Radius))
-            .background(ParamRowColors.ValueBox)
-            .then(if (onTap != null) Modifier.tocavel(enabled = enabled, shrink = 1f, onClick = onTap) else Modifier)
-            .padding(start = 4.dp, end = 8.dp),
-        contentAlignment = Alignment.CenterEnd,
+            .background(if (selected) ParamRowColors.LabelOn else ParamRowColors.ValueBox)
+            .then(if (onTap != null) Modifier.tocavel(enabled = enabled, shrink = 1f, onLongClick = onLongPress, onClick = onTap) else Modifier)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center,
     ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         BasicText(
             text = text,
             maxLines = 1,
-            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 13.sp, stepSize = 0.5.sp),
+            overflow = TextOverflow.Ellipsis,
+            autoSize = TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = 16.sp, stepSize = 0.5.sp),
             style = AureaType.Base.merge(
                 TextStyle(
-                    fontSize = 13.sp,
-                    color = if (enabled) AureaColors.Text else AureaColors.Muted,
-                    textAlign = TextAlign.End,
+                    fontSize = 16.sp,
+                    color = if (enabled) color else AureaColors.Muted,
+                    textAlign = TextAlign.Center,
                     fontFeatureSettings = "tnum",
                     textDirection = TextDirection.Ltr,
                 ),
             ),
         )
+        if (axis != null) Text(axis, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        }
     }
 }
 
@@ -574,7 +597,7 @@ fun PropertyRow(
         TickRuler(
             value = { if (dragging) live else current },
             unitsPerDp = unitsPerDp,
-            active = true,
+            active = selected || dragging,
             verticalPadding = 2.dp,
             modifier = Modifier
                 .weight(1f)
@@ -603,6 +626,134 @@ fun PropertyRow(
         )
         Spacer(Modifier.width(ParamRowDims.Gap))
         ParamValueBox(format(shown), enabled = enabled, onTap = onTapValue)
+    }
+}
+
+/** One label and ruler for a vector; selecting an axis keeps all channels visible. */
+@Composable
+fun VectorPropertyRow(
+    label: String,
+    values: List<Float>,
+    axisLabels: List<String>,
+    selectedAxis: Int,
+    unitsPerDp: Float,
+    min: Float,
+    max: Float,
+    format: (Float) -> String,
+    selected: Boolean,
+    onSelectAxis: (Int) -> Unit,
+    onGestureStart: (Int) -> Unit,
+    onValue: (Int, Float) -> Unit,
+    onGestureEnd: () -> Unit,
+    onTapValue: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    keyframes: List<KeyframeLook> = emptyList(),
+    enabled: Boolean = true,
+    expression: ExpressionLook = ExpressionLook.None,
+    onExpression: (() -> Unit)? = null,
+    tag: String = "property.vector",
+    displayFormat: (Float) -> String = format,
+    focusedPanel: Boolean = false,
+) {
+    if (values.isEmpty() || values.size != axisLabels.size) return
+    val axis = selectedAxis.coerceIn(values.indices)
+    var dragging by remember { mutableStateOf(false) }
+    var gestureAxis by remember { mutableStateOf(axis) }
+    var live by remember { mutableFloatStateOf(values[axis]) }
+    val current by rememberUpdatedState(values)
+    val step by rememberUpdatedState(unitsPerDp)
+    val choose by rememberUpdatedState(onSelectAxis)
+    val begin by rememberUpdatedState(onGestureStart)
+    val send by rememberUpdatedState(onValue)
+    val finish by rememberUpdatedState(onGestureEnd)
+    fun end() { if (dragging) { dragging = false; finish() } }
+    DisposableEffect(Unit) { onDispose { end() } }
+    val shownAxis = if (dragging) gestureAxis else axis
+    val look = keyframes.getOrElse(shownAxis) { KeyframeLook.None }
+    BoxWithConstraints(modifier.fillMaxWidth().heightIn(min = ParamRowDims.Row).testTag(tag)
+        .alpha(if (enabled) 1f else .45f)) {
+        val gaps = 4.dp * (values.size - 1)
+        val desiredWidth = if (values.any { displayFormat(it).length > 6 }) 64.dp else 44.dp
+        val axisWidth = ((maxWidth - gaps) / values.size).coerceIn(44.dp, desiredWidth)
+        val axesWidth = axisWidth * values.size + gaps
+        // A usable ruler takes priority over squeezing everything onto one line.
+        val inline = !focusedPanel && maxWidth >= 44.dp + axesWidth + 84.dp
+        val headerInline = maxWidth >= 44.dp + axesWidth + 12.dp
+        val labelWidth = (maxWidth - axesWidth - if (focusedPanel) 12.dp else 84.dp).coerceIn(44.dp, ParamRowDims.LabelW)
+        val focusedRulerHeight = (maxHeight - if (headerInline) 60.dp else 116.dp).coerceIn(44.dp, 120.dp)
+        @Composable fun name() {
+            PropertyLabelChip(label, selected, keyframe = look, expression = expression,
+                onLongClick = if (enabled) onExpression else null,
+                onClick = if (enabled) ({ choose(axis) }) else null,
+                width = if (inline || focusedPanel && headerInline) labelWidth else ParamRowDims.LabelW)
+        }
+        @Composable fun ruler(rulerModifier: Modifier) {
+            TickRuler(value = { if (dragging) live else current[axis] },
+                unitsPerDp = step, active = selected || dragging, verticalPadding = 4.dp,
+                modifier = rulerModifier.testTag("$tag.ruler")
+                    .semantics {
+                        contentDescription = "$label · ${axisLabels[shownAxis]}"
+                        stateDescription = format(if (dragging) live else values[shownAxis])
+                        if (min.isFinite() && max.isFinite()) progressBarRangeInfo = ProgressBarRangeInfo(values[shownAxis].coerceIn(min, max), min..max)
+                        if (!enabled) disabled() else {
+                            onClick { onTapValue(shownAxis); true }
+                            setProgress { next ->
+                                if (next.isFinite()) { choose(shownAxis); send(shownAxis, next.coerceIn(min, max)); true } else false
+                            }
+                        }
+                    }
+                    .valueDrag(enabled, { current[axis] }, { step }, min, max,
+                        onStart = { gestureAxis = axis; live = current[axis]; dragging = true; choose(axis); begin(axis) },
+                        onValue = { next -> live = next; send(gestureAxis, next) }, onEnd = ::end))
+        }
+        @Composable fun axes() {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    axisLabels.forEachIndexed { component, name ->
+                        val value = if (dragging && component == gestureAxis) live else values[component]
+                        ParamValueBox(displayFormat(value), width = axisWidth, axis = name,
+                            selected = selected && component == shownAxis, enabled = enabled,
+                            color = when (component) { 0 -> AureaColors.Keyframe; 2 -> AureaColors.Accent; else -> AureaColors.Text },
+                            modifier = Modifier.testTag("$tag.axis.$component").semantics(mergeDescendants = true) {
+                                contentDescription = "$label · $name"
+                                stateDescription = format(value)
+                                role = Role.Button
+                                this.selected = selected && component == shownAxis
+                                if (!enabled) disabled()
+                            },
+                            onTap = {
+                                if (!dragging) {
+                                    if (selected && component == axis) onTapValue(component) else choose(component)
+                                }
+                            }, onLongPress = { if (!dragging) { choose(component); onTapValue(component) } })
+                    }
+                }
+            }
+        }
+        @Composable fun RowScope.controls() {
+            ruler(Modifier.weight(1f).height(ParamRowDims.LabelH)); Spacer(Modifier.width(6.dp)); axes()
+        }
+        if (focusedPanel) Column(Modifier.fillMaxWidth().fillMaxHeight()) {
+            if (headerInline) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                name(); Spacer(Modifier.weight(1f).width(12.dp)); axes()
+            } else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                name()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { axes() }
+            }
+            Spacer(Modifier.height(8.dp))
+            // The focused transform owns the space below the values. Keep the
+            // ruler broad and centered there instead of squeezing it beside the name.
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ruler(Modifier.fillMaxWidth().height(focusedRulerHeight))
+            }
+        } else if (inline) Row(verticalAlignment = Alignment.CenterVertically) {
+            name(); Spacer(Modifier.width(6.dp)); controls()
+        } else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                name(); Spacer(Modifier.width(6.dp)); ruler(Modifier.weight(1f).height(ParamRowDims.LabelH))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { axes() }
+        }
     }
 }
 

@@ -1792,7 +1792,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.1.4 BETA 2 (2175) • 2026-10-11\n\n• Export: projects with 3D or motion blur export again (FBX/OBJ models were refused; the GPU budget refused the extra textures). Media that cannot be frozen no longer kills the export.\n• Smoother preview: the GPU no longer waits between passes of every frame, memory is not released every frame, text and blur crops reuse targets.\n• Rotobrush: the frame no longer freezes; the frame you look at has priority; status always visible (this frame, clip, failure); Final/Overlay/Mask inside paint mode; translucent overlay shows what is behind.\n• 3D: FBX/OBJ metal and roughness maps are now read.\n• AI Upscale: its own tool on the Home (pick the video and the factor); 2.5 to 3× faster with the same model.\n• Real Camera: in the 3D scene add menu — the camera follows your phone and Record turns the motion into keyframes.</string>
+    <string name="release_notes_body">Aurea 0.1.8 BETA 3 (2179) • 2026-10-13\n\n• Timeline arrows: with no selected layer, jump between markers; with a selected layer, choose the nearest marker or keyframe. Markers after the last clip are also reachable.\n• Short clips: zooming out no longer makes the bar appear to extend beyond the beat; handles and outlines follow the actual duration.\n• Export: releases preview caches before preparing the file; startup preparation can be cancelled.\n• Effects and 3D: simpler controls with a ruler, per-axis values and a numeric keyboard.\n• Adjustment sheets: compact size, scrollable content and visible actions above the keyboard. The 3D ruler uses the area below the values.\n• Motion Tile on 3D planes: investigating reports of a frozen preview and texture bands.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -3342,8 +3342,8 @@ to edit the curve.</string>
     <string name="shape3d_layout_hint">Per-part rotation, delay, random, bend, twist and spread — the same as 3D text letters.</string>
     <string name="fx_desc_shape3d_layout">Rotates, delays, spreads and randomizes the parts of a 3D shape, like 3D text letters.</string>
     <string name="edt_cmd_select_shape3d">Select a 3D shape</string>
-    <string name="editor_ir_inicio_segure_anterior">Previous marker, keyframe or frame · hold: start</string>
-    <string name="editor_ir_fim_segure_proximo">Next marker, keyframe or frame · hold: end</string>
+    <string name="editor_ir_inicio_segure_anterior">Previous marker or active layer keyframe · hold: start</string>
+    <string name="editor_ir_fim_segure_proximo">Next marker or active layer keyframe · hold: end</string>
     <string name="editor_ajustes_projeto">Project settings</string>
     <string name="editor_ajustes_projeto_mais">Project settings and more options</string>
     <string name="editor_duplicar_camada_segure_copiar">Duplicate layer · hold to copy and paste</string>

@@ -7,6 +7,9 @@ struct TransformView: View {
     private var tab: Int { get { model.transformTab } nonmutating set { model.transformTab = newValue } }
     private var animatorTrack: TimelineTrack? { tab == 6 ? model.animatorRailTrack() : nil }
     @State private var axis = 2
+    @State private var positionAxis = 0
+    @State private var pivotAxis = 0
+    @State private var scaleAxis = 0
     private var linked: Bool { model.scaleAxesLinked }
     @State private var text3D = false
     @State private var wholeText = false
@@ -14,12 +17,11 @@ struct TransformView: View {
     @State private var fineMove = false
     @State private var blurAdvanced = false
     @State private var gestureOpen = false
+    @State private var gestureProject: UUID?
+    @State private var gestureLayer: Int64?
+    @State private var gestureComposition: UInt64?
     @State private var gestureValues: [Float] = []
     @State private var pivotDrag: PivotDragSession?
-    @State private var previousAngle: Float?
-    @State private var dialTotal: Float = 0
-    @State private var dialWalked: CGFloat = 0
-    @State private var dialLast: CGPoint?
     private var baseNames: [String] { ["fx_posicao", "panel_escala", "panel_rotacao", "panel_opacidade", "fx_pivo", "panel_desfoque_movimento", "la_animators"].map { AureaText.t($0) } }
     private let baseIcons = ["material:rounded.OpenWith", "material:rounded.AspectRatio", "material:automirrored.rounded.RotateRight",
                              "material:rounded.Opacity", "material:rounded.FilterCenterFocus", "material:rounded.BlurOn", "sparkles"]
@@ -35,8 +37,9 @@ struct TransformView: View {
     private var threeD: Bool { uses3D }
     private var rotationAxis: Int { threeD ? axis : 2 }
     private var props: [UInt32] {
-        switch tab { case 0: return [0, 1]; case 1: return [3, 4]; case 2: return [UInt32(6 + rotationAxis)]
-        case 3: return [12]; case 4: return [9, 10]; default: return [] }
+        switch tab { case 0: return threeD ? [UInt32(positionAxis)] : [0, 1]
+        case 1: return threeD ? [UInt32(3 + scaleAxis)] : [3, 4]; case 2: return [UInt32(6 + rotationAxis)]
+        case 3: return [12]; case 4: return threeD ? [UInt32(9 + pivotAxis)] : [9, 10]; default: return [] }
     }
     private var keyProps: [UInt32] {
         if tab == 2 { return threeD ? [6, 7, 8] : props }
@@ -131,11 +134,13 @@ struct TransformView: View {
             }
             }
         }
+        .id("transform:\(model.projectGeneration):\(model.composition[AureaCompositionId] ?? ""):\(id)")
         .foregroundStyle(AureaColors.text)
         .onAppear { text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; updateTimelineFocus(); model.pivotStageEdit = tab == 4 }
         // Face Pivô aberta: o arrasto no palco move o pivô (PreviewMetalView.pivotEvent).
         .onChange(of: tab) { model.pivotStageEdit = $0 == 4; updateTimelineFocus() }
         .onChange(of: id) { _ in
+            endGesture()
             text3D = !(model.engine.text3D(forLayer: id) ?? [:]).isEmpty; wholeText = false
             // A face Lente só existe na câmera 3D: trocou de camada com ela aberta → Posição.
             if tab >= baseNames.count && !isCamera { tab = 0 }
@@ -154,7 +159,8 @@ struct TransformView: View {
     }
 
     // Fields are part of the touch pad for Position, above it for Pivot.
-    private func moveFace(pivot: Bool) -> some View {
+    @ViewBuilder private func moveFace(pivot: Bool) -> some View {
+        if threeD { spatialVectorFace(pivot: pivot) } else {
         VStack(spacing: 0) {
             if expressionControlsTransform {
                 Text(AureaText.t("transform_expression_controlled"))
@@ -219,6 +225,8 @@ struct TransformView: View {
                 }
             }
         }
+
+        }
     }
     private func moveFields(pivot: Bool) -> some View {
         let x = value(pivot ? 9 : 0) - (pivot ? sourceSize[0] / 2 : 0)
@@ -262,99 +270,136 @@ struct TransformView: View {
 
     private var rotationFace: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                if threeD {
-                    ForEach(0..<3) { index in
-                        Button { axis = index } label: {
-                            Text(["X", "Y", "Z"][index]).font(.aurea(size: 13, weight: .bold))
-                                .foregroundStyle(axis == index ? AureaColors.accent : AureaColors.text)
-                                .padding(.horizontal, 18).padding(.vertical, 6)
-                                .background(axis == index ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                        }.buttonStyle(.plain)
-                        .accessibilityIdentifier("transform.rotation.axis.\(index)")
-                    }
-                } else {
-                    Button { model.enableLayer3D() } label: {
-                        Text(AureaText.t("panel_girar_3d_x_y")).font(.aurea(size: 12.5, weight: .semibold))
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                    }.buttonStyle(.plain).accessibilityIdentifier("transform.enable3d")
+            if threeD {
+                GeometryReader { bounds in
+                ScrollView(.vertical) {
+                VectorPropertyRow(label: AureaText.t("panel_rotacao"), values: (6...8).map { value(UInt32($0)) },
+                    axes: ["X", "Y", "Z"], selectedAxis: rotationAxis, unitsPerPoint: 0.5,
+                    range: -Float.infinity...Float.infinity,
+                    formattedValue: { _, amount in comUnidade(number(amount, decimals: 1), "°") },
+                    compactValue: { _, amount in compactPropertyNumber(amount, decimals: 1) },
+                    focusedPanel: true,
+                    enabled: !(model.selectedLayer?.locked ?? true),
+                    selected: true, look: look, expression: expressionLook, identifier: "transform.rotation.vector",
+                    onMenu: rotationValueMenu, onSelect: { index in endGesture(); axis = index; updateTimelineFocus() },
+                    onKeypad: { index in rotationKeypad(index) }, onBegin: beginGesture,
+                    onValue: { index, amount in write([UInt32(6 + index): amount]) }, onEnd: endGesture)
+                    .frame(height: max(180, bounds.size.height - 16))
+                    .padding(.vertical, 8)
                 }
-            }.frame(height: 44).frame(maxWidth: .infinity).padding(.horizontal, 12)
-            GeometryReader { bounds in
-                let property = UInt32(6 + rotationAxis)
-                let angle = value(property)
-                let center = CGPoint(x: bounds.size.width / 2, y: bounds.size.height / 2)
-                ZStack {
-                    TransformDial(angle: angle)
-                        .contentShape(Rectangle())
-                        .accessibilityIdentifier("transform.rotation.dial")
-                        .gesture(DragGesture(minimumDistance: 0).onChanged { event in
-                            if dialLast == nil {
-                                dialLast = event.startLocation; dialWalked = 0; dialTotal = angle
-                                previousAngle = dialRaw(event.startLocation, center: center)
-                            }
-                            if let last = dialLast { dialWalked += hypot(event.location.x - last.x, event.location.y - last.y) }
-                            dialLast = event.location
-                            guard let raw = dialRaw(event.location, center: center) else { previousAngle = nil; return }
-                            defer { previousAngle = raw }
-                            guard let before = previousAngle else { return }
-                            var step = raw - before
-                            if step > 180 { step -= 360 }; if step < -180 { step += 360 }
-                            guard step != 0 else { return }
-                            dialTotal += step
-                            guard gestureOpen || dialWalked >= 4 else { return }
-                            beginGesture(); write([property: dialTotal])
-                        }.onEnded { event in
-                            if gestureOpen { endGesture() }
-                            else if dialWalked < 2, let raw = dialRaw(event.location, center: center) {
-                                write([property: floor(angle / 360) * 360 + raw])
-                            }
-                            dialLast = nil; previousAngle = nil
-                        })
-                    // Como no AE: "2x +30°" (voltas inteiras + resto, mesmo
-                    // sinal; "-1x -45°"). O valor guardado continua em graus;
-                    // cada parte abre o próprio teclado (voltas ou graus).
-                    let split = rotationTurns(angle.isFinite ? angle : 0)
-                    let restText = number(abs(split.rest), decimals: split.rest == split.rest.rounded() ? 0 : 1)
-                    let axisTitle = AureaText.t("ios_rotation_axis", ["X", "Y", "Z"][rotationAxis])
-                    let turnsTitle = axisTitle + " · " + AureaText.t("edt_rotation_turns")
-                    let degreesTitle = axisTitle + " · " + AureaText.t("edt_rotation_degrees")
-                    HStack(spacing: 0) {
-                        Button {
-                            keypad(turnsTitle, Float(split.turns), unit: "x", decimals: 0) { write([property: $0.rounded() * 360 + split.rest]) }
-                        } label: {
-                            Text("\(split.turns)x")
-                                .font(.aurea(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.accent)
-                                .padding(.horizontal, 10).padding(.vertical, 8).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                        .accessibilityIdentifier("transform.rotation.turns")
-                        .accessibilityLabel(turnsTitle).accessibilityValue("\(split.turns)")
-                        Button {
-                            keypad(degreesTitle, split.rest, unit: "°", decimals: 1) { write([property: Float(split.turns) * 360 + $0]) }
-                        } label: {
-                            Text((split.rest < 0 ? "−" : "+") + restText + "°")
-                                .font(.aurea(size: 24, weight: .bold).monospacedDigit()).foregroundStyle(AureaColors.accent)
-                                .padding(.horizontal, 10).padding(.vertical, 8).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                        .accessibilityIdentifier("transform.rotation.degrees")
-                        .accessibilityLabel(degreesTitle).accessibilityValue((split.rest < 0 ? "-" : "") + restText)
-                    }
-                    .padding(.horizontal, 6)
-                    .background(AureaColors.dialValueBox, in: RoundedRectangle(cornerRadius: 8))
-                    .environment(\.layoutDirection, .leftToRight)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityHint(AureaText.t("edt_rotation_value_a11y", "\(split.turns)", (split.rest < 0 ? "-" : "") + restText))
                 }
+            } else {
+                NativePanelRuler(label: AureaText.t("panel_rotacao"), value: value(8), step: 0.5,
+                    range: -Float.infinity...Float.infinity, unit: "°", decimals: 1, keypad: true,
+                    look: look, expression: expressionLook, onExpression: rotationValueMenu,
+                    selected: true, onSelect: { updateTimelineFocus() }, identifier: "transform.rotation.ruler") { amount in
+                    write([8: amount])
+                }
+                Button { model.enableLayer3D() } label: {
+                    Text(AureaText.t("panel_girar_3d_x_y")).font(.aurea(size: 12.5, weight: .semibold))
+                        .padding(.horizontal, 14).frame(minHeight: 44)
+                        .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain).accessibilityIdentifier("transform.enable3d")
             }
+        }.padding(.horizontal, 6)
+    }
+    private func rotationKeypad(_ index: Int) {
+        let property = UInt32(6 + index)
+        keypad(AureaText.t("ios_rotation_axis", ["X", "Y", "Z"][index]), value(property), unit: "°", decimals: 1) {
+            write([property: $0])
         }
     }
-    private func dialRaw(_ point: CGPoint, center: CGPoint) -> Float? {
-        guard hypot(point.x - center.x, point.y - center.y) >= 22 else { return nil }
-        return Float(atan2(point.y - center.y, point.x - center.x) * 180 / .pi)
+    private func rotationValueMenu() {
+        let property = UInt32(6 + rotationAxis), split = rotationTurns(value(UInt32(6 + rotationAxis)))
+        let title = AureaText.t("ios_rotation_axis", ["X", "Y", "Z"][rotationAxis])
+        let turns = title + " · " + AureaText.t("edt_rotation_turns")
+        let degrees = title + " · " + AureaText.t("edt_rotation_degrees")
+        model.actionSheet = ActionSheetRequest(title: title, items: [
+            (turns, { keypad(turns, Float(split.turns), unit: "x", decimals: 0) { write([property: $0.rounded() * 360 + split.rest]) } }),
+            (degrees, { keypad(degrees, split.rest, unit: "°", decimals: 1) { write([property: Float(split.turns) * 360 + $0]) } })
+        ])
     }
 
-    private var scaleFace: some View {
+    private func spatialVectorFace(pivot: Bool) -> some View {
+        let base: UInt32 = pivot ? 9 : 0, selectedAxis = pivot ? pivotAxis : positionAxis
+        let values = (0..<3).map { value(base + UInt32($0)) - (pivot && $0 < 2 ? sourceSize[$0] / 2 : 0) }
+        let label = AureaText.t(pivot ? "fx_pivo" : "fx_posicao")
+        let send: (Int, Float) -> Void = { index, amount in
+            write([base + UInt32(index): amount + (pivot && index < 2 ? sourceSize[index] / 2 : 0)])
+        }
+        return GeometryReader { bounds in
+        ScrollView(.vertical) {
+        VStack(spacing: 8) {
+            VectorPropertyRow(label: label, values: values, axes: ["X", "Y", "Z"], selectedAxis: selectedAxis,
+                unitsPerPoint: 1, range: -Float.infinity...Float.infinity,
+                formattedValue: { _, amount in comUnidade(number(amount, decimals: 1), "px") },
+                compactValue: { _, amount in compactPropertyNumber(amount, decimals: 1) },
+                focusedPanel: true,
+                enabled: !(model.selectedLayer?.locked ?? true),
+                selected: true, look: look, expression: expressionLook, identifier: pivot ? "transform.pivot.vector" : "transform.position.vector",
+                onSelect: { index in endGesture(); if pivot { pivotAxis = index } else { positionAxis = index }; updateTimelineFocus() },
+                onKeypad: { index in keypad(label + " · " + ["X", "Y", "Z"][index], values[index], unit: "px", decimals: 1) { send(index, $0) } },
+                onBegin: beginGesture, onValue: send, onEnd: endGesture)
+                .frame(height: max(180, bounds.size.height - 16 - (pivot ? 104 : 0) - (expressionControlsTransform ? 36 : 0)))
+            if pivot {
+                HStack(spacing: 12) {
+                    Button(AureaText.t("panel_centro")) { write([9: sourceSize[0] / 2, 10: sourceSize[1] / 2]) }.frame(minHeight: 44)
+                    AnchorPresetGrid { fx, fy in model.presetAnchor(id, fx: fx, fy: fy) }
+                }
+                Text(AureaText.t("panel_pivo_arraste_preview")).font(.aurea(size: 12.5)).foregroundStyle(AureaColors.accent)
+                    .multilineTextAlignment(.center).accessibilityIdentifier("transform.pivot.hint")
+            }
+            if expressionControlsTransform {
+                Text(AureaText.t("transform_expression_controlled")).font(.aurea(size: 12)).foregroundStyle(AureaColors.warning)
+                    .accessibilityIdentifier("transform.expression.controlled")
+            }
+        }.frame(maxWidth: .infinity).padding(.vertical, 8)
+        }
+        }.padding(.horizontal, 6)
+    }
+
+    private var scaleVectorFace: some View {
+        let values = (3...5).map { value(UInt32($0)) * 100 }
+        let canFit = (model.selectedLayer?.kind ?? 0) != 3 &&
+            (model.selectedLayer.flatMap({ model.queryDetail($0.id) }).map({ StageGeom.hasSize($0) }) ?? false)
+        return GeometryReader { bounds in
+        ScrollView(.vertical) {
+        VStack(spacing: 8) {
+            VectorPropertyRow(label: AureaText.t("panel_escala"), values: values, axes: ["X", "Y", "Z"], selectedAxis: scaleAxis,
+                unitsPerPoint: 0.5, range: -Float.infinity...Float.infinity,
+                formattedValue: { _, amount in comUnidade(number(amount, decimals: 1), "%") },
+                compactValue: { _, amount in compactPropertyNumber(amount, decimals: 1) },
+                focusedPanel: true,
+                enabled: !(model.selectedLayer?.locked ?? true),
+                selected: true, look: look, expression: expressionLook, identifier: "transform.scale.vector",
+                onSelect: { index in endGesture(); scaleAxis = index; updateTimelineFocus() },
+                onKeypad: { index in keypad(AureaText.t("panel_escala") + " · " + ["X", "Y", "Z"][index], values[index], unit: "%", decimals: 1) {
+                    scaleVectorWrite(index, amount: $0, original: values)
+                } }, onBegin: { gestureValues = values; beginGesture() },
+                onValue: { index, amount in scaleVectorWrite(index, amount: amount, original: gestureValues) }, onEnd: endGesture)
+                .frame(height: max(180, bounds.size.height - 16 - (canFit ? 104 : 48)))
+            Button { model.scaleAxesLinked.toggle() } label: {
+                MaterialGlyph(linked ? "rounded.Link" : "rounded.LinkOff", size: 18, color: AureaColors.text).frame(width: 44, height: 44)
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t(linked ? "panel_soltar_largura_altura" : "panel_travar_largura_altura"))
+            if canFit { fitChips }
+        }.frame(maxWidth: .infinity).padding(.vertical, 8)
+        }
+        }.padding(.horizontal, 6)
+    }
+    private func scaleVectorWrite(_ index: Int, amount: Float, original: [Float]) {
+        guard original.count >= 3 else { return }
+        if !linked { write([UInt32(3 + index): amount / 100]); return }
+        if index < 2 { scaleWrite(axisY: index == 1, amount: amount, original: original); return }
+        let from = original[2], factor = from != 0 ? amount / from : 1
+        if from != 0 {
+            let output = model.engine.gestureScale3D(Int32(model.selectedLayer?.kind ?? 0), scaleX: original[0] / 100,
+                scaleY: original[1] / 100, scaleZ: original[2] / 100, axis: 3, factor: factor).map(\.floatValue)
+            guard output.count >= 3 else { return }; write([3: output[0], 4: output[1], 5: output[2]])
+        } else { write([3: amount / 100, 4: amount / 100, 5: amount / 100]) }
+    }
+
+    @ViewBuilder private var scaleFace: some View {
+        if threeD { scaleVectorFace } else {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 field(number(value(3) * 100, decimals: 1) + "%", label: AureaText.t("panel_largura"), width: 61) {
@@ -390,6 +435,8 @@ struct TransformView: View {
             scaleTape(axisY: false)
             Spacer().frame(height: 8)
             scaleTape(axisY: true)
+        }
+
         }
     }
     private func scaleTape(axisY: Bool) -> some View {
@@ -761,6 +808,10 @@ struct TransformView: View {
     /// A 3D vector is keyed as XYZ; unchanged axes retain their evaluated value.
     private func write(_ changes: [UInt32: Float]) {
         guard !(model.selectedLayer?.locked ?? false), !changes.isEmpty, changes.values.allSatisfy(\.isFinite) else { return }
+        if gestureOpen {
+            guard gestureProject == model.projectGeneration, gestureLayer == id,
+                  gestureComposition == (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value else { return }
+        }
         let properties = changes.keys.sorted()
         let base = properties[0] / 3 * 3
         let grouped = threeD && properties[0] < 12 && properties.allSatisfy { $0 >= base && $0 < base + 3 }
@@ -797,15 +848,24 @@ struct TransformView: View {
         guard !gestureOpen else { return }
         // Pin edits to a single timeline instant throughout the drag.
         model.engine.run { $0.pause(); $0.beginUndoGroup() }; gestureOpen = true
+        gestureProject = model.projectGeneration; gestureLayer = id
+        gestureComposition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
         if expressionControlsTransform { model.toast = AureaText.t("transform_expression_controlled") }
     }
     private func endGesture() {
         if gestureOpen { model.engine.run { $0.endUndoGroup() }; gestureOpen = false }
+        gestureProject = nil; gestureLayer = nil; gestureComposition = nil
         gestureValues = []; pivotDrag = nil
     }
     private func keypad(_ title: String, _ value: Float, unit: String, min: Float = -.infinity, max: Float = .infinity,
                         decimals: Int, onValue: @escaping (Float) -> Void) {
-        model.numericKeypad = KeypadRequest(title: title, value: value, unit: unit, min: min, max: max, decimals: decimals, onValue: onValue)
+        let project = model.projectGeneration, layer = id
+        let composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
+        model.numericKeypad = KeypadRequest(title: title, value: value, unit: unit, min: min, max: max, decimals: decimals) { amount in
+            guard model.projectGeneration == project, model.primarySelection == layer,
+                  (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
+            onValue(amount)
+        }
     }
     private func number(_ value: Float, decimals: Int) -> String { numeroPtBr(value, casas: decimals) }
 }

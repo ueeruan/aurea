@@ -106,7 +106,7 @@ fun Timeline(
     }
     // Escolhendo keyframes ou várias camadas, a timeline fica inteira.
     var showAllLayers by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
-    val shownCompact = !showAllLayers && timelineCompact(compact, compactDock && !referenceTrial, tracksOpen, store.keySelectMode || store.layerSelectMode)
+    val shownCompact = !showAllLayers && timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode || store.layerSelectMode)
 
     // Parâmetros entram depois da composição (o desenho e os gestos leem daqui).
     SideEffect {
@@ -151,7 +151,7 @@ fun Timeline(
         // não chega à timeline embaixo dele.
         KeyActionBar(store, shownCompact, Modifier.align(if (shownCompact) Alignment.TopEnd else Alignment.BottomCenter))
         LayerPickBar(store, Modifier.align(Alignment.BottomCenter))
-        if (!referenceTrial && store.selection.isNotEmpty() && (compact || compactDock)) {
+        if (store.selection.isNotEmpty() && (compact || compactDock)) {
             val filterDescription = stringResource(if (showAllLayers) R.string.timeline_selected_only else R.string.timeline_show_all)
             androidx.compose.material3.TextButton(onClick = { showAllLayers = !showAllLayers },
                 modifier = Modifier.align(Alignment.TopStart).width(84.dp).height(44.dp)

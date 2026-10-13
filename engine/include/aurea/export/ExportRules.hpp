@@ -134,7 +134,8 @@ inline constexpr u32 kExportFailureShift = 24;
     }
     switch (stage) {
         case ExportStage::Open:
-            return code == Errc::NotSupported || code == Errc::UnsupportedCodec || code == Errc::UnsupportedFormat
+            return code == Errc::Timeout ? ExportFailure::EncoderStalled
+                 : code == Errc::NotSupported || code == Errc::UnsupportedCodec || code == Errc::UnsupportedFormat
                        ? ExportFailure::Unsupported
                    : code == Errc::IoError ? ExportFailure::File : ExportFailure::Encoder;
         case ExportStage::Render:

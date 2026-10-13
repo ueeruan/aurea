@@ -104,9 +104,16 @@ void OfflineFrameRenderer::shutdown() noexcept {
     renderer_.shutdown();
     gpu_ = nullptr;
 }
-void OfflineFrameRenderer::forget_device() noexcept {
+bool OfflineFrameRenderer::retire_sources() noexcept {
     snapshot_ = FrameSnapshot{};
+    return media_.release_preview_for_export(nullptr, 1).ok();
+}
+void OfflineFrameRenderer::forget_device() noexcept {
+    detach_device();
     media_.close_all();
+}
+void OfflineFrameRenderer::detach_device() noexcept {
+    snapshot_ = FrameSnapshot{};
     renderer_.forget_device();
     gpu_ = nullptr;
 }

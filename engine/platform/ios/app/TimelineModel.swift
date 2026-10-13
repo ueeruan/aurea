@@ -29,21 +29,19 @@ struct TimelineMetrics {
     private func dp(_ v: CGFloat) -> CGFloat { v * density }
 
     // --- Régua e linhas (redesenho 2026-09-29) -----------------------------------
-    /// Riscos em 0..14; relógio e sublinhado logo abaixo.
-    var rulerTicks: CGFloat { dp(EditorTimelineRefresh.enabled ? 18 + 12 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.rulerTicks) }
-    /// Primeira linha em 44; pílula em 48 e barra em 50, como no Android.
-    var rowsTop: CGFloat { EditorTimelineRefresh.enabled ? rulerTicks + dp(4) : dp(AureaTimeline.rulerTicks + AureaTimeline.rulerGap) }
-    /// Passo da fileira: pílula 28 + 4 de vão.
-    var row: CGFloat { dp(EditorTimelineRefresh.enabled ? 24 + 24 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.row) }
-    /// Topo da pílula dentro da fileira (o vão de 4 fica em cima).
-    var pillTop: CGFloat { dp(EditorTimelineRefresh.enabled ? 0 : 4) }
-    var pillHeight: CGFloat { EditorTimelineRefresh.enabled ? bar : dp(28) }
-    var pillRadius: CGFloat { dp(EditorTimelineRefresh.enabled ? 4 : 14) }
-    /// Topo da barra dentro da fileira: 2 abaixo do topo da pílula.
-    var barTop: CGFloat { pillTop + dp(EditorTimelineRefresh.enabled ? 0 : 2) }
-    var bar: CGFloat { dp(EditorTimelineRefresh.enabled ? 23 + 20 * (min(max(fontScale, 1), 2) - 1) : AureaTimeline.bar) }
-    var barRadius: CGFloat { dp(EditorTimelineRefresh.enabled ? 4 : AureaTimeline.barRadius) }
-    var barMinWidth: CGFloat { dp(40) }
+    private var textScale: CGFloat { min(max(fontScale, 1), 2) - 1 }
+    private var reference: Bool { EditorTimelineRefresh.enabled }
+    /// Reference APK: rows 28, bars 23 and top/bottom margin 2.5.
+    /// Large text grows rows without overlapping neighboring interactions.
+    var rulerTicks: CGFloat { dp(AureaTimeline.rulerTicks) }
+    var rowsTop: CGFloat { dp(reference ? AureaTimeline.referenceRowsTop + 14 * textScale : AureaTimeline.rulerTicks + AureaTimeline.rulerGap) }
+    var row: CGFloat { dp(reference ? AureaTimeline.referenceRow + 24 * textScale : AureaTimeline.row) }
+    var pillTop: CGFloat { dp(reference ? 1 : 4) }
+    var pillHeight: CGFloat { reference ? row - dp(2) : dp(28) }
+    var pillRadius: CGFloat { pillHeight / 2 }
+    var barTop: CGFloat { reference ? dp(AureaTimeline.referenceBarTop) : pillTop + dp(2) }
+    var bar: CGFloat { dp(reference ? AureaTimeline.referenceBar + 20 * textScale : AureaTimeline.bar) }
+    var barRadius: CGFloat { dp(reference ? AureaTimeline.referenceBarRadius : AureaTimeline.barRadius) }
     var track: CGFloat { dp(11) }
     /// Começo da faixa dos losangos (medido do topo da barra).
     var trackTop: CGFloat { bar - track }
@@ -52,13 +50,13 @@ struct TimelineMetrics {
 
     // --- Pílula da fileira (olho + quadradinho do glifo, colada à esquerda) -------
     /// Largura da pílula; as barras passam por BAIXO dela (ela é opaca).
-    var headerColumn: CGFloat { dp(EditorTimelineRefresh.enabled ? 28 : AureaTimeline.headerColumn) }
-    /// Olho de 20 centrado em x 16; x < 28 é o toque do olho.
-    let eyeIcon: CGFloat = 20
-    var eyeCx: CGFloat { dp(16) }
-    var eyeHitRight: CGFloat { dp(28) }
-    /// Miniatura de 20 × 20, de x 38 a 58, raio 3.
-    var glyphBoxLeft: CGFloat { dp(38) }
+    var headerColumn: CGFloat { dp(AureaTimeline.headerColumn) }
+    /// Visibility occupies the first 44pt; the thumbnail opens layer tracks.
+    var eyeIcon: CGFloat { reference ? 18 : 20 }
+    var eyeCx: CGFloat { dp(reference ? 23 : 16) }
+    var eyeHitRight: CGFloat { dp(reference ? 40 : 28) }
+    /// Thumbnail 20 × 20 at x42..62 in the expanded 70pt header.
+    var glyphBoxLeft: CGFloat { dp(reference ? 42 : 38) }
     var glyphBox: CGFloat { dp(20) }
     var glyphBoxRadius: CGFloat { dp(3) }
     var glyphBoxStroke: CGFloat { dp(1.5) }
@@ -116,12 +114,12 @@ struct TimelineMetrics {
     let capGlyph: CGFloat = 14
     var capNameGap: CGFloat { dp(10) }
 
-    // --- Alça de trim (16 × (barra − 4), top 2, DENTRO das pontas) ------------------
-    var trimWidth: CGFloat { dp(16) }
-    var trimTop: CGFloat { dp(EditorTimelineRefresh.enabled ? 0 : 2) }
-    var trimInsetStart: CGFloat { dp(EditorTimelineRefresh.enabled ? 16 : 3) }
-    var trimInsetEnd: CGFloat { dp(EditorTimelineRefresh.enabled ? 0 : 13) }
-    var trimRadius: CGFloat { dp(4) }
+    // --- External trim handles: decoration outside the real temporal edges ------
+    var trimWidth: CGFloat { dp(reference ? AureaTimeline.referenceTrimWidth : 16) }
+    var trimTop: CGFloat { dp(reference ? 0 : 2) }
+    var trimInsetStart: CGFloat { trimWidth }
+    var trimInsetEnd: CGFloat { dp(0) }
+    var trimRadius: CGFloat { reference ? barRadius : dp(4) }
     var gripWidth: CGFloat { dp(2) }
     var gripHeight: CGFloat { dp(14) }
     /// Folga de toque para FORA da barra, além do desenho.
@@ -153,7 +151,7 @@ struct TimelineMetrics {
     // --- Cabeçote e relógio ----------------------------------------------------------
     /// Cabeçote branco de 1 pt, de y 36 (abaixo do relógio) até o fim.
     var playhead: CGFloat { dp(AureaTimeline.playhead) }
-    var playheadTop: CGFloat { dp(EditorTimelineRefresh.enabled ? 14 : 36) }
+    var playheadTop: CGFloat { dp(reference ? 34 + 14 * textScale : 36) }
     /// Compacto (painel aberto): o cabeçote vermelho de antes, de cima a baixo.
     var compactPlayhead: CGFloat { dp(1.6) }
     var knob: CGFloat { dp(8) }
@@ -165,8 +163,8 @@ struct TimelineMetrics {
     var timecodeTop: CGFloat { dp(14) }
     var timecodeBottom: CGFloat { dp(36) }
     /// Relógio de 16 pt, sublinhado de 1,5 pt da largura do texto em y 30.
-    let timecodeFont: CGFloat = 16
-    var underlineTop: CGFloat { dp(30) }
+    var timecodeFont: CGFloat { reference ? 14 * min(max(fontScale, 1), 2) : 16 }
+    var underlineTop: CGFloat { dp(reference ? 30 + 14 * textScale : 30) }
     var underlineHeight: CGFloat { dp(1.5) }
     /// Estilo caixa: 26 de alto, borda de 1,5 no destaque, raio 4, 6 de lado, 15 pt.
     let timecodeBoxFont: CGFloat = 15
@@ -179,9 +177,9 @@ struct TimelineMetrics {
     var snapClip: CGFloat { dp(12) }
     var snapKey: CGFloat { dp(8) }
     /// Faixa da auto-rolagem: 48 pt no máximo (menos numa janela baixa, ver `AutoScroll.zone`).
-    var autoEdge: CGFloat { dp(48) }
+    var autoEdge: CGFloat { dp(reference ? 38 : 48) }
     /// Velocidade no fundo da faixa (pt/s); a rampa começa em 0 na entrada dela.
-    var autoSpeed: CGFloat { dp(360) }
+    var autoSpeed: CGFloat { dp(reference ? 120 : 360) }
     /// Trilha baixa: a vizinha também responde até este tanto do centro dela (alvo ≥ 32 pt).
     var laneTouchReach: CGFloat { dp(16) }
     var autoIntent: CGFloat { dp(4) }
@@ -816,7 +814,7 @@ func expandedTimelineRows(_ base: [TimelineRow], expanded: Set<Int64>, openGroup
         }
         lane(TimelineTrack(property: -1), "  " + AureaText.t("panel_transformar"))
         for effect in fx { lane(TimelineTrack(property: 31, effect: effect.effectId, param: .max), "  " + fxEffectDisplayName(effect.typeId, effect.name)) }
-        let tracks = Dictionary(grouping: keys[owner.id] ?? [], by: { TimelineTrack(property: Int($0.property), effect: $0.effectIndex, param: $0.paramIndex) })
+        let tracks = Dictionary(grouping: (keys[owner.id] ?? []).filter { $0.timelineVisible }, by: { TimelineTrack(property: Int($0.property), effect: $0.effectIndex, param: $0.paramIndex) })
         let ordered = tracks.keys.sorted {
             if $0.property != $1.property { return $0.property < $1.property }
             if $0.effect != $1.effect { return $0.effect < $1.effect }

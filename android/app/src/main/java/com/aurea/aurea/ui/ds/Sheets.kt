@@ -4,16 +4,24 @@ import com.aurea.aurea.ui.theme.aureaTracking
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -104,19 +112,23 @@ fun AureaActionSheet(
     onDismiss: () -> Unit,
 ) {
     val cancel = cancelLabel ?: androidx.compose.ui.res.stringResource(com.aurea.aurea.R.string.common_cancel)
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+    Dialog(onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(8.dp),
+            contentAlignment = Alignment.BottomCenter) {
             Column(
                 Modifier
+                    .widthIn(max = 560.dp)
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(8.dp),
+                    .heightIn(max = maxHeight),
             ) {
                 Column(
                     Modifier
+                        .weight(1f, fill = false)
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xF0292929)),
+                        .background(Color(0xF0292929))
+                        .verticalScroll(rememberScrollState()),
                 ) {
                     if (title != null || message != null) {
                         Column(
@@ -197,15 +209,20 @@ fun AureaAlert(
     extra: (@Composable () -> Unit)? = null,
 ) {
     val cancel = cancelLabel ?: androidx.compose.ui.res.stringResource(com.aurea.aurea.R.string.common_cancel)
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp),
+            contentAlignment = Alignment.Center) {
         Column(
             Modifier
-                .width(270.dp)
+                .widthIn(max = 270.dp).fillMaxWidth()
+                .heightIn(max = maxHeight)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color(0xF22D2D2D)),
         ) {
             Column(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 19.dp, bottom = 16.dp),
+                Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp, end = 16.dp, top = 19.dp, bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -231,6 +248,7 @@ fun AureaAlert(
                     onConfirm()
                 }
             }
+        }
         }
     }
 }

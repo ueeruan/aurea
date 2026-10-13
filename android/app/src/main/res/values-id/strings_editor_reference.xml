@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eng_group_mask_external">Jika grup diuraikan, mask grup akan memengaruhi layer lain</string>
+</resources>

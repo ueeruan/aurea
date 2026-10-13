@@ -72,12 +72,14 @@ jobs:
           python3 engine/platform/ios/verify/check_effect_contract.py
           python3 engine/platform/ios/verify/check_metal_frag_outputs.py
           python3 engine/platform/ios/verify/check_editor_layout.py
+          python3 engine/platform/ios/verify/check_sheet_layout.py
           python3 engine/platform/ios/verify/check_preview_buffer.py
           python3 engine/platform/ios/verify/check_ai_sessions.py
           python3 engine/platform/ios/verify/check_project_lifecycle.py
           python3 engine/platform/ios/verify/check_scene_drag.py
           python3 engine/platform/ios/verify/check_memory_pressure.py
           python3 engine/platform/ios/verify/check_motion_blur.py
+          python3 engine/platform/ios/verify/check_export_startup_async.py
       - name: Install shader tools
         run: brew install cmake ninja shaderc ccache
       - name: Identify iOS export dependency SDK
@@ -90,7 +92,7 @@ jobs:
           path: |
             build/ffmpeg/ios/arm64
             build/astra-ffmpeg/downloads
-          key: aurea-ffmpeg-ios-arm64-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'engine/cmake/AureaFFmpeg.cmake') }}
+          key: aurea-ffmpeg-ios-arm64-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'tools/patches/**', 'engine/cmake/AureaFFmpeg.cmake') }}
       - name: Compile FFmpeg and software fallback for physical iOS
         if: steps.export_libraries.outputs.cache-hit != 'true'
         run: |
@@ -218,7 +220,7 @@ jobs:
           path: |
             build/ffmpeg/ios-simulator/${{ steps.export_sdk.outputs.arch }}
             build/astra-ffmpeg/downloads
-          key: aurea-ffmpeg-ios-simulator-${{ steps.export_sdk.outputs.arch }}-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'engine/cmake/AureaFFmpeg.cmake') }}
+          key: aurea-ffmpeg-ios-simulator-${{ steps.export_sdk.outputs.arch }}-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'tools/patches/**', 'engine/cmake/AureaFFmpeg.cmake') }}
       - name: Compile FFmpeg and software fallback for iOS Simulator
         if: steps.export_libraries.outputs.cache-hit != 'true'
         run: |

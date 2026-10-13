@@ -63,6 +63,28 @@ enum TimeAxis {
     }
 }
 
+/// Decoration stays inside the real temporal rectangle even below one point.
+/// Touch padding is independent and must never become painted duration.
+enum ClipGeometry {
+    static func strokeWidth(width: CGFloat, height: CGFloat, requested: CGFloat) -> CGFloat {
+        max(0, min(requested, min(width, height)))
+    }
+
+    static func cornerRadius(width: CGFloat, height: CGFloat, requested: CGFloat) -> CGFloat {
+        max(0, min(requested, min(width, height) / 2))
+    }
+
+    /// A fixed external grip must not dwarf a short clip at low zoom.
+    static func trimPaintWidth(clipWidth: CGFloat, requested: CGFloat) -> CGFloat {
+        max(0, min(requested, clipWidth / 2))
+    }
+
+    /// Narrow end grips finish at the beat; padded hit testing stays external.
+    static func trimPaintEndInset(clipWidth: CGFloat, requested: CGFloat) -> CGFloat {
+        clipWidth < requested * 2 ? trimPaintWidth(clipWidth: clipWidth, requested: requested) : 0
+    }
+}
+
 /// Real cached frames mapped to the same axis as clips; gaps remain gaps.
 enum TimelinePreviewBuffer {
     static let height: CGFloat = 3
@@ -80,14 +102,14 @@ enum TimelinePreviewBuffer {
 enum Zoom {
     static let minPPS: CGFloat = 2
     static let maxPPS: CGFloat = 800
-    /// A.01: 80 dp/s (10 riscos por segundo a 8 dp).
-    static let defaultPPS: CGFloat = 80
+    /// Reference APK: 100 dp/s (ten minor ticks at 10dp intervals).
+    static let defaultPPS: CGFloat = 100
     /// A.01 enquadra projetos longos (≥ 20 s) na largura ao abrir.
     static let autoFitMinSeconds: CGFloat = 20
 
     static func clamp(_ pps: CGFloat) -> CGFloat { pps.isFinite ? min(max(pps, minPPS), maxPPS) : defaultPPS }
 
-    /// `clamp((largura − 32) / segundos, 4, 80)` da A.01.
+    /// Fit long projects without exceeding the initial reference zoom.
     static func autoFit(availableDp: CGFloat, seconds: CGFloat) -> CGFloat {
         !seconds.isFinite || !availableDp.isFinite || seconds <= 0 ? defaultPPS : min(max(availableDp / seconds, 4), defaultPPS)
     }

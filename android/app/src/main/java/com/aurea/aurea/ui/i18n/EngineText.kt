@@ -177,6 +177,7 @@ object EngineText {
         "a camada usa uma matte do grupo" to R.string.eng_group_links,
         "o grupo tem outra taxa de quadros" to R.string.eng_group_timing,
         "o tempo do grupo foi alterado" to R.string.eng_group_timing,
+        "a mascara do grupo afetaria camadas externas" to R.string.eng_group_mask_external,
         "um grupo nao entra nele mesmo" to R.string.eng_group_self,
         "nao deu para agrupar" to R.string.eng_group_failed,
         "nao deu para tirar do grupo" to R.string.eng_group_failed,

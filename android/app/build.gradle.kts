@@ -100,8 +100,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar também os APKs 0.1.4 build 2174 já distribuídos.
-        versionCode = 2175
-        versionName = "0.1.4 BETA 2"
+        versionCode = 2179
+        versionName = "0.1.8 BETA 3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -275,6 +275,7 @@ val ffmpegPrepareTasks = (aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "a
     tasks.register<Exec>("prepareAureaFFmpeg" + abi.replace("-", "").replace("_", "")) {
         val prefix = File(aureaFFmpegRoot ?: rootProject.file("../build/ffmpeg/android").absolutePath, abi)
         inputs.file(rootProject.file("../tools/build_ffmpeg.py"))
+        inputs.file(rootProject.file("../tools/patches/ffmpeg-8.0.3-mediacodec-safety.patch"))
         outputs.files(File(prefix, "lib/libavformat.a"), File(prefix, "lib/libavcodec.a"),
             File(prefix, "lib/libswscale.a"), File(prefix, "lib/libswresample.a"),
             File(prefix, "lib/libavutil.a"), File(prefix, "lib/libopenh264.a"), File(prefix, "lib/libkvazaar.a"),

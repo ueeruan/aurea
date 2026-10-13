@@ -7,6 +7,15 @@ import org.junit.Test
 
 class TimelineExpansionTest {
     private fun row(id: Long, track: TimelineTrack? = null) = RowModel(id, LayerType.Video, 100, 200, 20, true, false, false, true, "Clip", 0, intArrayOf(110), emptyArray(), track)
+    @Test fun expandedPropertiesHideTrimmedKeysAndKeepInclusiveEndAnchor() {
+        val hidden = KeyframeRow(0, -1, 0, 10f, 1, 0, timelineVisible = false)
+        val first = KeyframeRow(0, -1, 20, 20f, 1, 0)
+        val end = KeyframeRow(0, -1, 120, 30f, 1, 0)
+        val expanded = expandedRows(listOf(row(5)), 5L, mapOf(5L to listOf(hidden, first, end)), emptyList())
+        val lane = expanded.single { it.track == TimelineTrack(0, -1, 0) }
+        assertArrayEquals(intArrayOf(100, 200), lane.instants)
+        assertEquals(listOf(first, end), lane.keysAt.flatMap { it })
+    }
     @Test fun expandedKeysPreserveTrackIdentityAndLocalTime() {
         val position = KeyframeRow(0, -1, 30, 10f, 1, 0)
         val effect = KeyframeRow(31, 7, 30, 20f, 1, 2)

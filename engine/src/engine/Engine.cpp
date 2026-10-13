@@ -229,6 +229,10 @@ bool put_string(char* blob, u32 capacity, u32& cursor, const char* s, u32& outOf
 // -----------------------------------------------------------------------------
 struct Engine::ExportContext {
     mutable std::mutex mutex;          ///< protege `progress`
+    std::shared_ptr<ExportDiagnostics> diagnostics;
+    void diagnostic_stage(ExportDiagnostics::Lane lane, ExportDiagnostics::Stage stage) noexcept {
+        if (diagnostics) diagnostics->stage(lane, stage);
+    }
     ExportProgress progress{};
     ExportSettings settings{};
     std::string    outputPath;
@@ -246,6 +250,7 @@ struct Engine::ExportContext {
     u64 frozenAssetBudget = 0;
     Status frozenAssetStatus = OkStatus;
     bool promotedOriginalModels = false;
+    bool deferredSourceCleanup = false;
     u64 originalModelBytes = 0; // export-owned CPU sources, retained until actual cleanup
 
     // Plano da sessão, fixado no start (a timeline não muda durante o export:
@@ -388,6 +393,18 @@ struct Engine::ExportContext {
         std::snprintf(progress.message, sizeof(progress.message), "%s", m);
     }
 };
+
+// Backend details may point into a reusable provider buffer. Preserve the
+// first setup error before another allocation, destruction or sink cleanup.
+static Status own_export_setup_failure(Status status) noexcept {
+    static thread_local char detail[256]{};
+    char copied[256]{};
+    const auto text = status.detail().empty() ? status.message() : status.detail();
+    std::snprintf(copied, sizeof(copied), "%.*s",
+                  static_cast<int>(std::min<usize>(text.size(), sizeof(copied) - 1)), text.data());
+    std::memcpy(detail, copied, sizeof(copied));
+    return Status{status.code(), detail};
+}
 
 /// Maior lado de textura de modelo 3D no celular: 2048 (uma 4K com mips são
 /// ~90 MB de GPU; um personagem com cinco delas estoura a memória de um
@@ -6066,6 +6083,32 @@ bool Engine::query_model_shadows(u64 layerId, f32* out) noexcept {
 // =============================================================================
 Result<u64> Engine::precompose(const u64* ids, u32 count, const char* name) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    return precompose_locked(ids, count, name, false, false);
+}
+
+Result<u64> Engine::group_and_mask(const u64* ids, u32 count, bool exclude, const char* name) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !ids || count < 2) return Status{Errc::InvalidArgument, "selecione duas camadas visuais"};
+    std::unordered_set<u64> unique;
+    for (u32 i = 0; i < count; ++i) {
+        const Layer* layer = comp->layer(LayerId::unpack(ids[i]));
+        if (!layer || layer->locked) return Status{Errc::InvalidArgument, "camada ausente ou bloqueada"};
+        switch (layer->kind) {
+            case LayerKind::Video: case LayerKind::Image: case LayerKind::Text:
+            case LayerKind::Shape: case LayerKind::Model3D: case LayerKind::ParticleSystem:
+            case LayerKind::Composition: break;
+            default: return Status{Errc::InvalidArgument, "selecione duas camadas visuais"};
+        }
+        unique.insert(ids[i]);
+    }
+    if (unique.size() < 2) return Status{Errc::InvalidArgument, "selecione duas camadas visuais"};
+    return precompose_locked(ids, count, name, true, exclude);
+}
+
+Result<u64> Engine::precompose_locked(const u64* ids, u32 count, const char* name, bool mask, bool exclude) noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || count == 0) return Status{Errc::InvalidArgument, "nada para pre-compor"};
     Timeline& tl = project_->timeline();
@@ -6084,10 +6127,11 @@ Result<u64> Engine::precompose(const u64* ids, u32 count, const char* name) noex
             lo = std::min(lo, l->start.value);
             hi = std::max(hi, l->end.value);
             top = static_cast<i32>(i);
+            break; // Duplicate selection IDs never duplicate the layer in a group.
         }
     }
     if (moving.empty()) return Status{Errc::NotFound, "camadas nao encontradas"};
-    history_.before_mutation(*comp, parentId, "pre-compor");
+    history_.before_mutation(*comp, parentId, mask ? (exclude ? "agrupar e excluir" : "agrupar e mascarar") : "pre-compor");
     modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     u32 n = 1;
     tl.for_each_composition([&](CompositionId, const Composition&) { ++n; });
@@ -6127,6 +6171,30 @@ Result<u64> Engine::precompose(const u64* ids, u32 count, const char* name) noex
         if (Layer* dst = child->layer(nid)) {
             *dst = *src;
             map.emplace_back(id, nid);
+        }
+    }
+    // Handles are local to their owning composition. Remap mattes independently
+    // of parenting (including layers with no parent), as with project loading.
+    for (const auto& [oldId, nid] : map) {
+        Layer* dst = child->layer(nid);
+        if (!dst) continue;
+        const LayerId oldMatte = dst->matteSource;
+        dst->matteSource = LayerId{};
+        for (const auto& [oldSource, newSource] : map)
+            if (oldSource == oldMatte) dst->matteSource = newSource;
+        if (!dst->matteSource.valid()) dst->matteMode = MatteMode::None;
+        if (mask && oldId == moving.back()) {
+            dst->blendMode = exclude ? BlendMode::Exclude : BlendMode::Mask;
+            // A matte relationship to the mask source becomes the group mask,
+            // applied once after the entire content has been composited.
+            for (const auto& [oldContent, newContent] : map) {
+                if (oldContent == oldId) continue;
+                Layer* content = child->layer(newContent);
+                if (content && content->matteSource == nid) {
+                    content->matteSource = LayerId{};
+                    content->matteMode = MatteMode::None;
+                }
+            }
         }
     }
     const FrameIndex now = playback_.current();
@@ -6205,15 +6273,36 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
         if (const Layer* x = C->layer(C->order().at(i))) camOrLight |= x->kind == LayerKind::Camera || x->kind == LayerKind::Light;
     }
     if (camOrLight) return refuse("o grupo tem camera ou luz propria");
-
-    history_.before_mutation(*comp, parentId, "desagrupar");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     // Quadro c da filha aparece no quadro c + shift da mãe; só o trecho que a
     // camada mostrava (e que existe na filha) continua visível.
     const i64 shift = P->start.value - P->offset.value;
     const i64 visLo = std::max(P->start.value, shift), visHi = std::min(P->end.value, shift + C->duration().value);
     u32 index = 0;
     for (u32 i = 0; i < comp->order().size(); ++i) if (comp->order().at(i) == pid) index = i;
+    // A group's destination-in/out blend is isolated to its child backdrop.
+    // Exposing it in the parent would also cut unrelated content below it.
+    // Retain the existing result-preserving ungroup contract, but allow groups
+    // with no extra visual target during the mask's actual active interval.
+    for (u32 childIndex = 0; childIndex < C->order().size(); ++childIndex) {
+        const Layer* mask = C->layer(C->order().at(childIndex));
+        if (!mask || !mask->visible || (mask->blendMode != BlendMode::Mask && mask->blendMode != BlendMode::Exclude)) continue;
+        const i64 maskLo = std::max(visLo, mask->start.value + shift);
+        const i64 maskHi = std::min(visHi, mask->end.value + shift);
+        if (maskHi <= maskLo) continue;
+        for (u32 below = 0; below < index; ++below) {
+            const Layer* external = comp->layer(comp->order().at(below));
+            if (!external || !external->visible || external->end.value <= maskLo || external->start.value >= maskHi) continue;
+            switch (external->kind) {
+                case LayerKind::Video: case LayerKind::Image: case LayerKind::Text:
+                case LayerKind::Shape: case LayerKind::Model3D: case LayerKind::ParticleSystem:
+                case LayerKind::Composition: case LayerKind::Adjustment:
+                    return refuse("a mascara do grupo afetaria camadas externas");
+                default: break;
+            }
+        }
+    }
+    history_.before_mutation(*comp, parentId, "desagrupar");
+    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
     // Transform do grupo: identidade = direto; senão um Nulo com o transform
     // (e keyframes) da camada vira o pai das raízes.
     bool identity = !P->tracks.has_animation() && !P->parent.valid();
@@ -6282,6 +6371,10 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
         LayerId np{};
         for (auto& [o, nn] : map) if (o == dst->parent) np = nn;
         dst->parent = np.valid() ? np : nullId;
+        LayerId matte{};
+        for (const auto& [oldSource, newSource] : map) if (oldSource == dst->matteSource) matte = newSource;
+        dst->matteSource = matte;
+        if (!matte.valid()) dst->matteMode = MatteMode::None;
     }
     // Quem era filho da camada do grupo passa a ser do Nulo (ou do pai dela).
     for (u32 i = 0; i < comp->order().size(); ++i) {
@@ -11344,6 +11437,101 @@ u32 Engine::query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity)
     return write_keyframe_rows(*l, out, capacity);
 }
 
+bool Engine::query_keyframe_navigation(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
+                                       i64 compositionFrame, KeyframeNavigation& out) noexcept {
+    out = {};
+    if (property >= static_cast<u32>(TrackProperty::_Count) || compositionFrame < INT32_MIN
+        || compositionFrame > INT32_MAX) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer) return false;
+    out.localFrame = layer->local_time(FrameIndex{compositionFrame}).value;
+    i64 priorLocal = 0;
+    auto visible = [&](i64 local) {
+        const i64 frame = local + layer->start.value - layer->offset.value;
+        if (frame < layer->start.value || frame > layer->end.value) return;
+        if (out.visibleCount && out.localFrame >= priorLocal && out.localFrame <= local) {
+            out.flags |= 8u;
+            out.segmentStart = priorLocal;
+            out.segmentEnd = local;
+        }
+        ++out.visibleCount;
+        priorLocal = local;
+        if (local == out.localFrame) out.flags |= 1u;
+        if (local < out.localFrame) {
+            out.flags |= 2u;
+            out.previousFrame = frame;
+        } else if (local > out.localFrame && !(out.flags & 4u)) {
+            out.flags |= 4u;
+            out.nextFrame = frame;
+        }
+    };
+    const TrackRef ref{LayerId::unpack(layerId), static_cast<TrackProperty>(property), effectIndex, paramIndex};
+    if (ref.property == TrackProperty::MeshWarp) {
+        if (paramIndex != 0) return false;
+        for (const auto& effect : layer->effects) if (effect.id == effectIndex) {
+            if (const auto* data = mesh_warp::animation(effect))
+                for (const auto& key : data->keys) visible(key.frame);
+            break;
+        }
+    } else if (const Track* track = read_command_track(*layer, ref)) {
+        for (const auto& key : track->keys) visible(key.time.value);
+    }
+    return true;
+}
+
+bool Engine::query_timeline_navigation(u64 layerId, i64 compositionFrame, i32 direction,
+                                       i64& targetFrame) noexcept {
+    targetFrame = compositionFrame;
+    if (direction == 0) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    bool found = false;
+    auto consider = [&](i64 frame) {
+        if (frame < 0 || (direction > 0 ? frame <= compositionFrame : frame >= compositionFrame)) return;
+        if (!found || (direction > 0 ? frame < targetFrame : frame > targetFrame)) {
+            targetFrame = frame;
+            found = true;
+        }
+    };
+    for (const auto& marker : comp->markers())
+        if (marker.frame.value < comp->duration().value) consider(marker.frame.value);
+    const Layer* layer = layerId ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer) return found;
+    auto visibleKey = [&](i64 local) {
+        const i64 frame = local + layer->start.value - layer->offset.value;
+        if (frame >= layer->start.value && frame <= layer->end.value) consider(frame);
+    };
+    for (const auto& key : layer->timeRemap.keys) visibleKey(key.time.value);
+    for (u32 t = 0; t < layer->tracks.size(); ++t)
+        for (const auto& key : layer->tracks.at(t).keys) visibleKey(key.time.value);
+    for (const auto& effect : layer->effects)
+        if (const auto* data = mesh_warp::animation(effect))
+            for (const auto& key : data->keys) visibleKey(key.frame);
+    for (const auto& mask : layer->masks)
+        for (const auto& key : mask.pathKeys) visibleKey(key.frame);
+    return found;
+}
+
+bool Engine::seek_timeline_event(i64 compositionFrame) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || compositionFrame < 0 || compositionFrame > std::max(comp->duration().value - 1,
+                                                                       navigation_end_locked(comp))) return false;
+    Command command;
+    command.type = CommandType::PlaybackSeek;
+    command.seek.time = tick_at(FrameIndex{compositionFrame}, comp->fps());
+    command.seek.flags = kSeekTimelineEvent;
+    const bool ok = apply_command_internal(command, nullptr, false).ok();
+    if (ok) request_render();
+    return ok;
+}
+
 u32 Engine::query_all_keyframes(bridge::KeyframeIndexRow* outIndex, u32 layerCapacity,
                                 bridge::KeyframeRow* out, u32 capacity, u32* outLayers) noexcept {
     if (outLayers) *outLayers = 0;
@@ -12123,7 +12311,17 @@ void Engine::configure_playback_locked(const Composition* comp, i64 rawDuration)
     if (!comp) return;
     const bool bounded = contentBoundedPlayback_ && rawDuration < 0;
     const i64 end = bounded ? navigation_end_locked(comp) : 0;
-    playback_.set_navigation_end(FrameIndex{bounded ? end : -1});
+    const bool keepEventCursor = bounded && playback_.mode() == PlaybackMode::Paused
+        && pausedTimelineEventFrame_ > end && pausedTimelineEventSession_ == projectSession_
+        && project_ && pausedTimelineEventComposition_ == project_->timeline().current()
+        && playback_.current().value == pausedTimelineEventFrame_
+        && pausedTimelineEventFrame_ < comp->duration().value
+        && std::any_of(comp->markers().begin(), comp->markers().end(), [&](const Marker& marker) {
+            return marker.frame.value == pausedTimelineEventFrame_;
+        });
+    if (!keepEventCursor) pausedTimelineEventFrame_ = -1;
+    const i64 navigationEnd = keepEventCursor ? pausedTimelineEventFrame_ : end;
+    playback_.set_navigation_end(FrameIndex{bounded ? navigationEnd : -1});
     playback_.configure(comp->fps(), FrameIndex{rawDuration >= 0 ? rawDuration
         : bounded ? std::max<i64>(1, end) : comp->duration().value});
 }
@@ -12159,6 +12357,10 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
 Status Engine::start_export_checked(const ExportSettings& settings, const char* outputPath,
                                   const ExportRestartGuard* restartGuard) noexcept {
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
+    // Only this caller's admitted session may receive its startup result.
+    // Keep finalization under the same lifecycle lock, including recovery.
+    std::shared_ptr<ExportDiagnostics> ownedDiagnostics;
+    const Status result = [&]() noexcept -> Status {
     if (state_ != EngineState::Ready && state_ != EngineState::Rendering) return Errc::InvalidState;
     if (!project_) return Errc::InvalidState;
     if (!std::isfinite(settings.fps) || settings.fps < 0.0 ||
@@ -12190,6 +12392,10 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
 
     auto ctx = std::make_unique<ExportContext>();
     ctx->queue = std::make_unique<OfflineFrameQueue>();
+    try { ctx->diagnostics = std::make_shared<ExportDiagnostics>(); } catch (...) {}
+    ownedDiagnostics = ctx->diagnostics;
+    { std::lock_guard lock(exportDiagnosticsMutex_); exportDiagnostics_ = ctx->diagnostics; }
+    ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Preparation);
     struct StartupCancellation {
         Engine& engine;
         std::atomic<bool>& flag;
@@ -12214,6 +12420,26 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     if (ctx->safeMode) ctx->progress.flags |= kExportSafeMode;
     ctx->workerHangNs = config_.exportWorkerHangMs ? static_cast<u64>(config_.exportWorkerHangMs) * 1'000'000ull
                                                    : kExportWorkerHangNs;
+    struct ExportStartupOwnership {
+        std::atomic<bool>& active;
+        Engine& engine;
+        bool committed = false;
+        ~ExportStartupOwnership() {
+            if (!committed) {
+                active.store(false, std::memory_order_release);
+                engine.request_render();
+            }
+        }
+    } startupOwnership{exportActive_, *this};
+    struct ProxyExportPause {
+        PreviewProxyService& service;
+        bool started = false;
+        ~ProxyExportPause() { if (!started) service.set_pause_reason(PreviewProxyService::Export, false); }
+    } proxyPause{media_.proxies()};
+    media_.proxies().set_pause_reason(PreviewProxyService::Export, true);
+    if (const Status prepared = prepare_export_resources(*ctx); !prepared.ok()) return prepared;
+    std::vector<u8> frozenBytes;
+    CompositionId frozenComposition;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
@@ -12233,32 +12459,45 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                 return Status{Errc::BudgetExceeded, "memoria insuficiente para o snapshot offline de imagens"};
             imageBytes += px.rgba.size();
         }
-        Status sourceStatus;
-        std::unordered_map<std::string, std::string> preparedPaths;
-        const Status captured = export_recovery::capture(*project_, project_->timeline().current(), settings,
-            [&](const std::string& path) {
-                if (const auto found = preparedPaths.find(path); found != preparedPaths.end()) return found->second;
-                std::string resolved = resolve_asset_path(path);
-                if (config_.exportAssetPathResolver) {
-                    auto persistent = config_.exportAssetPathResolver(resolved, config_.documentsDirectory, &ctx->cancelRequested);
-                    if (!persistent.ok()) { sourceStatus = persistent.status(); return std::string{}; }
-                    resolved = std::move(*persistent);
-                }
-                preparedPaths.emplace(path, resolved);
-                return resolved;
-            }, ctx->frozenProject, ctx->recovery, config_.enableExportRecovery);
-        if (!sourceStatus.ok()) return sourceStatus;
-        if (!captured.ok()) return captured;
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Snapshot);
+        SaveOptions save; save.writeThumbnail = false;
+        if (const Status saved = ProjectSerializer::encode(*project_, save, frozenBytes); !saved.ok()) return saved;
+        frozenComposition = project_->timeline().current();
         ctx->frozenImages = images_;
         ctx->frozenModels = models_;
         ctx->frozenHdris = hdris_;
         ctx->frozenLuts = cubeLuts_;
         ctx->frozenAssetBudget = room - imageBytes;
+    }
+    // The immutable bytes and retained originals are the entire export input.
+    // Provider/codec/font I/O must not block read_status or the editor's model.
+    Status sourceStatus;
+    ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Sources);
+    std::unordered_map<std::string, std::string> preparedPaths;
+    const Status captured = export_recovery::capture_snapshot(std::move(frozenBytes), frozenComposition, settings,
+        [&](const std::string& path) {
+            if (ctx->cancelRequested.load(std::memory_order_acquire)) {
+                sourceStatus = Errc::Cancelled; return std::string{};
+            }
+            if (const auto found = preparedPaths.find(path); found != preparedPaths.end()) return found->second;
+            std::string resolved = resolve_asset_path(path);
+            if (config_.exportAssetPathResolver) {
+                auto persistent = config_.exportAssetPathResolver(resolved, config_.documentsDirectory, &ctx->cancelRequested);
+                if (!persistent.ok()) { sourceStatus = persistent.status(); return std::string{}; }
+                resolved = std::move(*persistent);
+            }
+            preparedPaths.emplace(path, resolved);
+            return resolved;
+        }, ctx->frozenProject, ctx->recovery, config_.enableExportRecovery);
+    if (!sourceStatus.ok()) return sourceStatus;
+    if (!captured.ok()) return captured;
+    if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+    {
         if (config_.enableExportRecovery) {
             ctx->recovery.outputPath = outputPath;
             ctx->recoveryPath = std::string(outputPath) + ".aurea-export";
         }
-        comp = ctx->frozenProject->timeline().composition(ctx->recovery.composition);
+        Composition* comp = ctx->frozenProject->timeline().composition(ctx->recovery.composition);
         if (!comp) return Errc::ProjectCorrupted;
         // Taxa de saída livre até o teto dos encoders; acima, o motor recusa
         // com o motivo (as telas já limitam o teclado). Abaixo de 1 fps fica
@@ -12282,6 +12521,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                 config_.exportExecutionProfile); !plan.ok())
             return Status{plan.code(), "tempo de exportacao fora do limite do scheduler"};
         ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::AudioSnapshot);
         auto offlineAudio = OfflineAudioSnapshot::create(*comp, *ctx->frozenProject,
             ctx->audioCache.get(), &Engine::audio_path_resolver, this,
             OfflineAudioSnapshot::kDefaultBlockBudget, &ctx->cancelRequested);
@@ -12319,16 +12559,11 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         if (const Status s = export_recovery::write(ctx->recoveryPath, ctx->recovery); !s.ok()) return s;
     }
 
-    struct ProxyExportPause {
-        PreviewProxyService& service;
-        bool started = false;
-        ~ProxyExportPause() { if (!started) service.set_pause_reason(PreviewProxyService::Export, false); }
-    } proxyPause{media_.proxies()};
-    media_.proxies().set_pause_reason(PreviewProxyService::Export, true);
     ctx->sink = config_.exportSinkFactory(config_.exportSinkContext);
     if (!ctx->sink) return Status{Errc::NotSupported, "encoder indisponivel"};
     ctx->sink->set_cancel_flag(&ctx->cancelRequested);
     ctx->sink->set_heartbeat(&ctx->encoderBeatNs);
+    ctx->sink->set_diagnostics(ctx->diagnostics);
 
     VideoStreamConfig vc;
     vc.width = ctx->outputWidth;
@@ -12346,6 +12581,8 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // CBR só quando pedido; o padrão é VBR com pico limitado no encoder.
     vc.rateMode = settings.rateMode == 0 ? 0u : 1u;
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
+    if (ctx->diagnostics) ctx->diagnostics->format({vc.width, vc.height, vc.bitrateBps,
+        vc.profile, ctx->safeMode, vc.fps});
     // Com som na timeline, o arquivo leva AAC; sem, só vídeo (uma trilha de
     // silêncio não serve para nada e alguns players a mostram como "com som").
     AudioStreamConfig ac;
@@ -12379,21 +12616,6 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->outputDir = dir;
     }
     if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
-    // Transfer renderer ownership BEFORE opening the encoder. Its input/output
-    // buffers are part of the allocation peak too. The previous path kept the
-    // preview's transient texture pool alive until after the codec was opened.
-    // Failed startup releases ownership so preview can resume normally.
-    struct ExportStartupOwnership {
-        std::atomic<bool>& active;
-        Engine& engine;
-        bool committed = false;
-        ~ExportStartupOwnership() {
-            if (!committed) {
-                active.store(false, std::memory_order_release);
-                engine.request_render();
-            }
-        }
-    } startupOwnership{exportActive_, *this};
     struct OfflineStartupCleanup {
         Engine& engine;
         ExportContext& context;
@@ -12430,6 +12652,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         if (const Status initialized = initialize_offline_export(*ctx); !initialized.ok()) return initialized;
     }
     ExportSinkStartupResult startupResult;
+    ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::CodecOpen);
     Status openStatus;
     ExportSinkStartupLimits limits;
     limits.stallNs = ctx->workerHangNs;
@@ -12466,6 +12689,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // Report only acceleration verified by the opened encoder, not a codec
     // capability table that may describe a different device/session.
     {
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::GpuSetup);
         const ExportSink::EncoderInfo enc = ctx->sink->encoder_info();
         bool hw = false, sw = false;
         if (enc.acceleration == ExportSink::Acceleration::Hardware) hw = true;
@@ -12506,14 +12730,17 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ud.format = SurfaceFormat::RG8;
         ud.debugName = "export-cbcr";
         auto c = gpu_->create_texture(cd);
+        Status textureFailure = c.ok() ? OkStatus : own_export_setup_failure(c.status());
         auto y = gpu_->create_texture(yd);
+        if (textureFailure.ok() && !y.ok()) textureFailure = own_export_setup_failure(y.status());
         auto u = gpu_->create_texture(ud);
+        if (textureFailure.ok() && !u.ok()) textureFailure = own_export_setup_failure(u.status());
         if (!c.ok() || !y.ok() || !u.ok()) {
             if (c.ok()) gpu_->destroy_texture(*c);
             if (y.ok()) gpu_->destroy_texture(*y);
             if (u.ok()) gpu_->destroy_texture(*u);
             ctx->sink->abort();
-            return Status{Errc::OutOfMemory, "sem memoria de GPU para o export"};
+            return textureFailure;
         }
         ctx->comp = *c;
         ctx->y = *y;
@@ -12540,6 +12767,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             : std::min<u64>(64ull << 20, std::max<u64>(8ull << 20, caps_.memory_budget_bytes() / 8));
         const u32 boundedSlots = static_cast<u32>(std::min<u64>(want, ctx->queueByteLimit / slotBytes));
         if (!boundedSlots) { ctx->sink->abort(); return Status{Errc::BudgetExceeded, "um quadro nao cabe na fila de exportacao"}; }
+        Status readbackFailure = OkStatus;
         for (u32 k = 0; k < boundedSlots; ++k) {
             BufferDesc bd;
             bd.usage = BufferUsage::TransferDst;
@@ -12547,15 +12775,32 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             bd.bytes = static_cast<usize>(ctx->width) * ctx->height;
             bd.debugName = "export-leitura-y";
             auto by = gpu_->create_buffer(bd);
+            Status slotFailure = by.ok() ? OkStatus : own_export_setup_failure(by.status());
             bd.bytes = static_cast<usize>(ctx->width) * (ctx->height / 2);
             bd.debugName = "export-leitura-cbcr";
             auto bu = gpu_->create_buffer(bd);
+            if (slotFailure.ok() && !bu.ok()) slotFailure = own_export_setup_failure(bu.status());
             void* py = nullptr;
             void* pu = nullptr;
-            if (!by.ok() || !bu.ok() || !gpu_->map_buffer(*by, py).ok() || !py ||
-                !gpu_->map_buffer(*bu, pu).ok() || !pu) {
+            if (slotFailure.ok()) {
+                const Status mapped = gpu_->map_buffer(*by, py);
+                if (!mapped.ok()) slotFailure = own_export_setup_failure(mapped);
+                else if (!py) slotFailure = own_export_setup_failure(Status{Errc::InvalidState, "a leitura GPU nao retornou dados de luminancia"});
+            }
+            if (slotFailure.ok()) {
+                const Status mapped = gpu_->map_buffer(*bu, pu);
+                if (!mapped.ok()) slotFailure = own_export_setup_failure(mapped);
+                else if (!pu) slotFailure = own_export_setup_failure(Status{Errc::InvalidState, "a leitura GPU nao retornou dados de crominancia"});
+            }
+            if (!slotFailure.ok()) {
+                readbackFailure = slotFailure;
                 if (by.ok()) gpu_->destroy_buffer(*by);
                 if (bu.ok()) gpu_->destroy_buffer(*bu);
+                const Errc code = slotFailure.code();
+                if (code != Errc::OutOfMemory && code != Errc::OutOfDeviceMemory && code != Errc::BudgetExceeded) {
+                    ctx->sink->abort();
+                    return slotFailure;
+                }
                 break;
             }
             ExportContext::Slot slot;
@@ -12567,7 +12812,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         }
         if (ctx->slots.empty()) {
             ctx->sink->abort();
-            return Status{Errc::OutOfMemory, "sem memoria para ler os quadros do export"};
+            return readbackFailure.ok() ? Status{Errc::InvalidState, "nenhum buffer de leitura GPU disponivel"} : readbackFailure;
         }
         ctx->depth = static_cast<u32>(ctx->slots.size());
         (void)ctx->scheduler.configure(ctx->frames, ctx->fps, ctx->compFps, ctx->depth,
@@ -12586,6 +12831,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     }
 
     ctx->withAudio = withAudio;
+    ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Render);
     ctx->progress.running = true;
     ctx->progress.framesTotal = ctx->frames;
     ctx->progress.pipelineDepth = ctx->depth;
@@ -12607,6 +12853,13 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     offlineCleanup.committed = true;
     exportCtx_->thread = std::thread([this] { export_thread_main(); });
     return OkStatus;
+    }();
+    if (ownedDiagnostics && !result.ok()) {
+        ownedDiagnostics->result(result.raw());
+        ownedDiagnostics->stage(ExportDiagnostics::Lane::Session, result.code() == Errc::Cancelled
+            ? ExportDiagnostics::Stage::Cancelled : ExportDiagnostics::Stage::Failed);
+    }
+    return result;
 }
 
 Status Engine::restart_export(const char* recoveryPath, const char* outputPath) noexcept {
@@ -12646,7 +12899,7 @@ Status Engine::retire_abandoned_export_locked(bool admitNewSession) noexcept {
     std::lock_guard<std::mutex> context(exportContextMutex_);
     const auto exited = [](ExportContext& session) {
         std::lock_guard<std::mutex> queue(session.qMutex);
-        return session.encoderExited;
+        return session.imageMode || session.encoderExited;
     };
     usize retained = 0;
     for (auto& retired : retiredExports_) {
@@ -12655,16 +12908,18 @@ Status Engine::retire_abandoned_export_locked(bool admitNewSession) noexcept {
             // The flag is the worker's final access, after native codec close.
             // Device generations prevent stale handles from touching a reset GPU.
             release_offline_export(*retired, false);
-            if (!retired->deferredGpuCleanup) retired.reset();
+            if (!retired->deferredGpuCleanup && !retired->deferredSourceCleanup) retired.reset();
         }
         if (retired) ++retained;
     }
-    const bool retiring = exportCtx_ && !exportCtx_->thread.joinable() && exportCtx_->abandoned_worker();
+    const bool retiring = exportCtx_ && !exportCtx_->thread.joinable()
+        && (exportCtx_->abandoned_worker() || exportCtx_->deferredSourceCleanup);
     if (retiring && exited(*exportCtx_)) {
         release_offline_export(*exportCtx_, false);
-        if (!exportCtx_->deferredGpuCleanup) exportCtx_.reset();
+        if (!exportCtx_->deferredGpuCleanup && !exportCtx_->deferredSourceCleanup) exportCtx_.reset();
     }
-    const bool activeRetirement = exportCtx_ && !exportCtx_->thread.joinable() && exportCtx_->abandoned_worker();
+    const bool activeRetirement = exportCtx_ && !exportCtx_->thread.joinable()
+        && (exportCtx_->abandoned_worker() || exportCtx_->deferredSourceCleanup);
     const usize held = retained + static_cast<usize>(activeRetirement);
     if (admitNewSession && held >= retiredExports_.size()) {
         // Preserve the previous progress/error. No third encoder or frame
@@ -12685,6 +12940,7 @@ Status Engine::retire_abandoned_export_locked(bool admitNewSession) noexcept {
 }
 
 Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
+    if (exportCtx_) exportCtx_->diagnostic_stage(ExportDiagnostics::Lane::Producer, ExportDiagnostics::Stage::Readback);
     if (!gpu_) return Status{Errc::InvalidState, "sem GPU"};
     if (!gpuFrame) return OkStatus;
     const u64 deadline = monotonic_ns() + (config_.exportGpuTimeoutMs
@@ -12694,6 +12950,79 @@ Status Engine::wait_export_gpu(u64 gpuFrame) noexcept {
         const Status s = gpu_->wait_frame(gpuFrame, 100'000'000ull);
         if (s.ok() || s.code() != Errc::Timeout || monotonic_ns() >= deadline) return s;
     }
+}
+
+Status Engine::prepare_export_resources(ExportContext& ctx) noexcept {
+    // Preview and export use distinct renderers/codec sessions. Reclaim the
+    // recreatable preview BEFORE cloning images/audio and opening those sessions.
+    // Persistent project/source/undo allocations and files are never discarded.
+    const auto disk = export_recovery::cleanup_temporary_outputs(config_.exportTemporaryDirectory,
+        ctx.outputPath, &ctx.cancelRequested);
+    if (!disk.ok()) {
+        if (disk.status().code() == Errc::Cancelled) return disk.status();
+        AUREA_LOG_WARN("export: temporarios antigos nao puderam ser limpos (%d)", disk.status().raw());
+    } else if (*disk) {
+        AUREA_LOG_INFO("export: temporarios antigos removidos=%u", *disk);
+    }
+    std::unique_lock<std::mutex> rl(renderMutex_);
+    if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+    if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+    cancel_preview_graph_locked();
+    exportActive_.store(true, std::memory_order_release);
+    const u64 frame = gpu_->last_submitted_frame();
+    const u64 timeout = config_.exportGpuTimeoutMs
+        ? static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull : kExportWorkerHangNs;
+    const u64 deadline = monotonic_ns() + timeout;
+    while (frame) {
+        const bool cancelled = ctx.cancelRequested.load(std::memory_order_acquire);
+        const Status completed = gpu_->wait_frame(frame, cancelled ? 0 : 100'000'000ull);
+        if (completed.ok()) break;
+        if (completed.code() != Errc::Timeout) return completed;
+        if (cancelled || monotonic_ns() >= deadline) {
+            // Keep unfinished preview resources fenced. Resume/retry cannot
+            // reuse their GPU allocations before this submission completes.
+            pendingExportGpuFrame_ = frame;
+            pendingExportGpuGeneration_ = gpuGeneration_;
+            return cancelled ? Status{Errc::Cancelled}
+                : Status{Errc::Timeout, "GPU sem resposta ao preparar exportacao"};
+        }
+    }
+    if (ctx.cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        previewBuffering_ = false;
+        previewBufferStatus_.store(0, std::memory_order_release);
+        playback_.pause(monotonic_ns());
+        playingHint_ = false;
+        audio_.stop();
+        snapshot_ = FrameSnapshot{};
+        if (project_) project_->timeline().pause();
+    }
+    media_.proxies().set_pause_reason(PreviewProxyService::Playback, false);
+    previewPressureUntilNs_.store(monotonic_ns() + kPreviewPressureHoldNs, std::memory_order_release);
+    const auto cpu = memory_.trim(TrimStage::Temporaries);
+    const GpuMemoryStats before = gpu_->memory_stats();
+    const u64 unusedAfter = frameCounter_ == UINT64_MAX ? frameCounter_ : frameCounter_ + 1;
+    const u32 textures = renderer_.trim_memory(static_cast<u8>(TrimStage::Temporaries), unusedAfter);
+    // wait_frame retires completed destruction/decoder-image leases. Unlike
+    // wait_idle, this bounded query cannot hide a new indefinite driver wait.
+    if (frame) {
+        if (const Status retired = gpu_->wait_frame(frame, 0); !retired.ok()) return retired;
+    }
+    const GpuMemoryStats after = gpu_->memory_stats();
+    {
+        std::lock_guard<std::mutex> lock(perfMutex_);
+        perf_.gpuMemoryBytes = after.usedBytes;
+        perf_.gpuReservedBytes = after.reservedBytes;
+        perf_.gpuAllocations = after.allocationCount;
+    }
+    const u64 releasedGpu = before.usedBytes > after.usedBytes ? before.usedBytes - after.usedBytes : 0;
+    memory_.note_trim_freed(TrimStage::OldRenderCache, releasedGpu);
+    AUREA_LOG_INFO("export: preparando; CPU descartavel liberada=%llu GPU=%llu texturas=%u decoders=%u",
+        static_cast<unsigned long long>(cpu.total), static_cast<unsigned long long>(releasedGpu),
+        textures, media_.live_sources());
+    rl.unlock(); // Codec teardown is bounded below and cannot hold the renderer.
+    return media_.release_preview_for_export(&ctx.cancelRequested, ctx.workerHangNs);
 }
 
 Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
@@ -12761,6 +13090,16 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
             return;
         }
     }
+    if (ctx.offline && lostDevice) ctx.offline->detach_device();
+    if (ctx.offline && !ctx.offline->retire_sources()) {
+        // A platform opener/decoder may not honor cancellation. Publishing
+        // failure/cancel must not join it. The session, callbacks and immutable
+        // sources stay owned; next admission polls at most two quarantines.
+        ctx.deferredSourceCleanup = true;
+        ctx.retainedReadbacks = retainReadbacks;
+        return;
+    }
+    ctx.deferredSourceCleanup = false;
     if (ctx.offline && lostDevice) ctx.offline->forget_device();
     if (ctx.offline) ctx.offline->shutdown();
     ctx.offline.reset();
@@ -12784,6 +13123,7 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
 
 Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& target, u64& gpuFrame) noexcept {
     ExportContext& c = *exportCtx_;
+    c.diagnostic_stage(ExportDiagnostics::Lane::Producer, ExportDiagnostics::Stage::Render);
     std::lock_guard<std::mutex> renderLock(renderMutex_);
     if (!c.offline || !c.frozenProject) return Errc::InvalidState;
     RenderSettings settings;
@@ -12893,6 +13233,7 @@ void Engine::export_thread_main() noexcept {
             slot.uvPtr = static_cast<const u8*>(pu);
         }
         ctx.readNs.fetch_add(monotonic_ns() - r0, std::memory_order_relaxed);
+        if (ctx.diagnostics) ctx.diagnostics->event(ExportDiagnostics::Counter::Rendered);
         inflight.pop_front();
         return ctx.queue->publish(si, slot.frame);
     };
@@ -13067,6 +13408,11 @@ void Engine::export_thread_main() noexcept {
         ctx.progress.running = false;
         ctx.progress.finished = true;
         ctx.progress.result = result.code();
+        if (ctx.diagnostics) {
+            ctx.diagnostics->result(result.raw());
+            ctx.diagnostic_stage(ExportDiagnostics::Lane::Session, result.ok() ? ExportDiagnostics::Stage::Complete
+                : result.code() == Errc::Cancelled ? ExportDiagnostics::Stage::Cancelled : ExportDiagnostics::Stage::Failed);
+        }
         if (ctx.queue) {
             if (!result.ok()) ctx.queue->fail(result);
             ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
@@ -13375,6 +13721,14 @@ Engine::ExportProgress Engine::export_progress() const noexcept {
     return exportCtx_->progress;
 }
 
+std::string Engine::export_diagnostics() const noexcept {
+    std::shared_ptr<ExportDiagnostics> diagnostics;
+    { std::unique_lock lock(exportDiagnosticsMutex_, std::try_to_lock);
+      if (!lock.owns_lock()) return "{\"schema\":1,\"busy\":true}";
+      diagnostics = exportDiagnostics_; }
+    return diagnostics ? diagnostics->json() : "{}";
+}
+
 // =============================================================================
 // Export como imagem (export/ImageEncode.hpp): PNG do playhead, sequência PNG
 // num .zip e GIF animado. O MESMO renderer, os mesmos quadros exatos e o mesmo
@@ -13411,12 +13765,46 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
         if (const Status admitted = retire_abandoned_export_locked(); !admitted.ok()) return admitted;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
+        std::lock_guard<std::mutex> context(exportContextMutex_);
+        exportCtx_.reset();
     }
 
     auto ctx = std::make_unique<ExportContext>();
     ctx->imageMode = true;
     ctx->image = settings;
     ctx->outputPath = outputPath;
+    ctx->workerHangNs = config_.exportWorkerHangMs ? static_cast<u64>(config_.exportWorkerHangMs) * 1'000'000ull
+                                                 : kExportWorkerHangNs;
+    struct StartupCancellation {
+        Engine& engine;
+        std::atomic<bool>& flag;
+        StartupCancellation(Engine& e, std::atomic<bool>& f) : engine(e), flag(f) {
+            std::lock_guard<std::mutex> lock(engine.exportContextMutex_);
+            engine.exportStartupCancel_ = &flag;
+        }
+        ~StartupCancellation() {
+            std::lock_guard<std::mutex> lock(engine.exportContextMutex_);
+            if (engine.exportStartupCancel_ == &flag) engine.exportStartupCancel_ = nullptr;
+        }
+    } startupCancellation{*this, ctx->cancelRequested};
+    struct ImageStartupOwnership {
+        std::atomic<bool>& active;
+        Engine& engine;
+        bool committed = false;
+        ~ImageStartupOwnership() {
+            if (!committed) { active.store(false, std::memory_order_release); engine.request_render(); }
+        }
+    } startupOwnership{exportActive_, *this};
+    struct ProxyExportPause {
+        PreviewProxyService& service;
+        bool started = false;
+        ~ProxyExportPause() { if (!started) service.set_pause_reason(PreviewProxyService::Export, false); }
+    } proxyPause{media_.proxies()};
+    media_.proxies().set_pause_reason(PreviewProxyService::Export, true);
+    if (const Status prepared = prepare_export_resources(*ctx); !prepared.ok()) return prepared;
+    std::vector<u8> frozenBytes;
+    CompositionId frozenComposition;
+    ExportSettings freezeSettings;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
@@ -13433,18 +13821,20 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         ctx->frames = plan.frames;
         ctx->imageAlpha = plan.alpha;
         ctx->imageFrame = project_->timeline().playhead();
-        ExportSettings freezeSettings;
         freezeSettings.fps = plan.fps;
         freezeSettings.trimToContent = settings.trimToContent;
-        if (const Status frozen = export_recovery::capture(*project_, project_->timeline().current(), freezeSettings,
-                [this](const std::string& path) { return resolve_asset_path(path); },
-                ctx->frozenProject, ctx->recovery, false); !frozen.ok()) return frozen;
+        SaveOptions save; save.writeThumbnail = false;
+        if (const Status saved = ProjectSerializer::encode(*project_, save, frozenBytes); !saved.ok()) return saved;
+        frozenComposition = project_->timeline().current();
         ctx->frozenImages = images_; ctx->frozenModels = models_;
         ctx->frozenHdris = hdris_; ctx->frozenLuts = cubeLuts_;
         ctx->frozenAssetBudget = source_asset_room_locked();
         ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
-
     }
+    if (const Status frozen = export_recovery::capture_snapshot(std::move(frozenBytes), frozenComposition, freezeSettings,
+            [this](const std::string& path) { return resolve_asset_path(path); },
+            ctx->frozenProject, ctx->recovery, false); !frozen.ok()) return frozen;
+    if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
     if (settings.format == ImageExportFormat::Gif && ctx->frames > kGifMaxFrames)
         return Status{Errc::NotSupported, "GIF longo demais: use um trecho menor ou menos quadros por segundo"};
     if (settings.format == ImageExportFormat::PngSequence && ctx->frames > kSequenceMaxFrames)
@@ -13473,14 +13863,6 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         }
         ctx->outputDir = dir;
     }
-    struct ImageStartupOwnership {
-        std::atomic<bool>& active;
-        Engine& engine;
-        bool committed = false;
-        ~ImageStartupOwnership() {
-            if (!committed) { active.store(false, std::memory_order_release); engine.request_render(); }
-        }
-    } startupOwnership{exportActive_, *this};
     struct OfflineStartupCleanup {
         Engine& engine;
         ExportContext& context;
@@ -13511,24 +13893,27 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
         exportActive_.store(true, std::memory_order_release);
         const u64 frame = gpu_->last_submitted_frame();
         if (frame) {
-            const u64 started = monotonic_ns();
+            const u64 timeout = config_.exportGpuTimeoutMs
+                ? static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull : kExportWorkerHangNs;
+            const u64 deadline = monotonic_ns() + timeout;
             for (;;) {
-                const Status ready = gpu_->wait_frame(frame, 100'000'000ull);
+                const bool cancelled = ctx->cancelRequested.load(std::memory_order_acquire);
+                const Status ready = gpu_->wait_frame(frame, cancelled ? 0 : 100'000'000ull);
                 if (ready.ok()) break;
-                if (ready.code() != Errc::Timeout || monotonic_ns() - started > 120'000'000'000ull) return ready;
+                if (ready.code() != Errc::Timeout) return ready;
+                if (cancelled || monotonic_ns() >= deadline) {
+                    pendingExportGpuFrame_ = frame;
+                    pendingExportGpuGeneration_ = gpuGeneration_;
+                    return cancelled ? Status{Errc::Cancelled} : ready;
+                }
             }
         }
+        if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
         if (const Status initialized = initialize_offline_export(*ctx); !initialized.ok()) return initialized;
         auto c = gpu_->create_texture(cd);
-        if (!c.ok()) return Status{Errc::OutOfMemory, "sem memoria de GPU para o export"};
+        if (!c.ok()) return own_export_setup_failure(c.status());
         ctx->comp = *c;
     }
-    struct ProxyExportPause {
-        PreviewProxyService& service;
-        bool started = false;
-        ~ProxyExportPause() { if (!started) service.set_pause_reason(PreviewProxyService::Export, false); }
-    } proxyPause{media_.proxies()};
-    media_.proxies().set_pause_reason(PreviewProxyService::Export, true);
 
     ctx->progress.running = true;
     ctx->progress.framesTotal = ctx->frames;
@@ -13950,6 +14335,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         previewBufferStatus_.store(0);
     };
     auto playWithPreviewBuffer = [&] {
+        pausedTimelineEventFrame_ = -1;
         if (comp) configure_playback_locked(comp);
         playback_.play(now); // applies normal end-of-timeline restart semantics
         if (gpu_ && surfaceAttached_ && !rawPlaybackLayer_.valid() && comp
@@ -15204,20 +15590,51 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             return OkStatus;
         case CommandType::PlaybackSeek: {
             if (cmd.seek.time.value < 0) return Errc::InvalidArgument;
-            cancelPreviewBuffer();
             const f64 fps = comp ? comp->fps() : 30.0;
+            const i64 requested = frame_at(cmd.seek.time, fps).value;
+            const bool timelineEvent = (cmd.seek.flags & kSeekTimelineEvent) != 0;
+            const bool outsideContent = timelineEvent && comp && contentBoundedPlayback_
+                && requested > navigation_end_locked(comp);
+            if (timelineEvent) {
+                if (!comp || requested > std::max(comp->duration().value - 1, navigation_end_locked(comp)))
+                    return Errc::InvalidArgument;
+                const bool validMarker = requested < comp->duration().value
+                    && std::any_of(comp->markers().begin(), comp->markers().end(), [&](const Marker& marker) {
+                        return marker.frame.value == requested;
+                    });
+                if (outsideContent && (playback_.mode() != PlaybackMode::Paused || !validMarker))
+                    return Errc::InvalidArgument;
+            }
+            cancelPreviewBuffer();
+            pausedTimelineEventFrame_ = -1;
             if (comp) configure_playback_locked(comp);
-            playback_.seek(frame_at(cmd.seek.time, fps), now);
+            if (timelineEvent) {
+                // Persist only a paused, valid marker cursor across later preview
+                // configuration. Playback duration remains bounded by the clips.
+                playback_.set_navigation_end(FrameIndex{-1});
+                playback_.seek(FrameIndex{requested}, now);
+                if (outsideContent) {
+                    pausedTimelineEventFrame_ = requested;
+                    pausedTimelineEventSession_ = projectSession_;
+                    pausedTimelineEventComposition_ = timeline.current();
+                }
+                configure_playback_locked(comp);
+                sync_timeline();
+                return OkStatus;
+            }
+            playback_.seek(FrameIndex{requested}, now);
             sync_timeline();
             return OkStatus;
         }
         case CommandType::PlaybackScrubBegin:
+            pausedTimelineEventFrame_ = -1;
             cancelPreviewBuffer();
             playback_.begin_scrub(now);
             sync_timeline();
             return OkStatus;
         case CommandType::PlaybackScrub: {
             if (cmd.seek.time.value < 0) return Errc::InvalidArgument;
+            pausedTimelineEventFrame_ = -1;
             cancelPreviewBuffer();
             const f64 fps = comp ? comp->fps() : 30.0;
             if (comp) configure_playback_locked(comp);
@@ -15230,6 +15647,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             sync_timeline();
             return OkStatus;
         case CommandType::PlaybackStep:
+            pausedTimelineEventFrame_ = -1;
             cancelPreviewBuffer();
             if (comp) configure_playback_locked(comp);
             playback_.step(cmd.step.frames, now);

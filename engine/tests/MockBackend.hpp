@@ -77,6 +77,7 @@ public:
     std::function<void()> beforeBeginLeasedFrame;
     std::function<void()> beforeWaitIdle;
     std::function<Status()> beforeEndFrame;
+    std::function<Status(const TextureDesc&)> beforeCreateTexture;
     std::function<Status(const BufferDesc&)> beforeCreateBuffer;
     std::function<Status(u64, u64)> beforeWaitFrame;
     std::function<Status(TextureHandle, const void*, u32)> beforeTextureUpload;
@@ -190,6 +191,10 @@ public:
     }
 
     Result<TextureHandle> create_texture(const TextureDesc& d) noexcept override {
+        if (beforeCreateTexture) {
+            const Status status = beforeCreateTexture(d);
+            if (!status.ok()) return status;
+        }
         textures.push_back(d);
         textureAlive.push_back(true);
         ++texturesCreated;

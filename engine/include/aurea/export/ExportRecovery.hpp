@@ -3,6 +3,7 @@
 #include "aurea/project/Project.hpp"
 
 #include <functional>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,10 +32,17 @@ using PathResolver = std::function<std::string(const std::string&)>;
 inline constexpr usize kMaxProjectBytes = 64ull << 20;
 inline constexpr usize kMaxPackageBytes = kMaxProjectBytes + (4ull << 20);
 
-// Caller holds the model lock. The strict serialization clone preserves IDs,
+// Caller holds the model lock only while serializing. The strict clone preserves IDs,
 // nested compositions and all authored state. Source paths and the effective
 // fonts are frozen in the clone; the open editor document is never modified.
 [[nodiscard]] Status capture(const Project& project, CompositionId composition,
+                             const ExportSettings& settings, const PathResolver& resolve,
+                             std::unique_ptr<Project>& frozen, Package& package,
+                             bool requirePersistentSources = true) noexcept;
+// Serialize the editor under its lock, then hand ownership of those immutable
+// bytes to this operation. URI materialization, fonts and dependency reads may
+// block; they must not hold the live editor's model/status lock.
+[[nodiscard]] Status capture_snapshot(std::vector<u8> initial, CompositionId composition,
                              const ExportSettings& settings, const PathResolver& resolve,
                              std::unique_ptr<Project>& frozen, Package& package,
                              bool requirePersistentSources = true) noexcept;
@@ -48,5 +56,10 @@ inline constexpr usize kMaxPackageBytes = kMaxProjectBytes + (4ull << 20);
 [[nodiscard]] Status read(const std::string& path, Package& package,
                           std::unique_ptr<Project>& frozen) noexcept;
 [[nodiscard]] Status write_project(const std::string& path, const Package& package) noexcept;
+// Direct regular outputs inside an explicitly owned scratch directory only.
+// Preserve current output, restart packages/companions, subdirectories/symlinks
+// and every in-process startup staging file (native open may outlive timeout).
+[[nodiscard]] Result<u32> cleanup_temporary_outputs(const std::string& directory,
+    const std::string& currentOutput, const std::atomic<bool>* cancel = nullptr) noexcept;
 
 } // namespace aurea::export_recovery

@@ -17,6 +17,10 @@ public:
                   const ImagePixels* (*images)(void*, AssetId), void* imageContext,
                   const RenderSettings& settings, u64& submittedFrame) noexcept;
     void shutdown() noexcept;
+    // Transfer opens/decoders to their owner retirement worker and poll only.
+    // The caller must retain this renderer/factory until this returns true.
+    [[nodiscard]] bool retire_sources() noexcept;
+    void detach_device() noexcept; // Invalidates handles without joining a platform opener.
     void forget_device() noexcept;
 private:
     Status wait_gpu(u64 frame, const std::atomic<bool>* cancel) noexcept;

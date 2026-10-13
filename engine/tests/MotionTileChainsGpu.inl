@@ -222,3 +222,110 @@ AUREA_TEST(Gpu, MotionTileOldProjectRendersLikeTheSameSetupCreatedNew) {
         AUREA_CHECK(worst <= 2u);
     }
 }
+
+// Beta 3's recording changes X from -101.2 to -88.4 degrees while the
+// displayed tile wall stays unchanged. Exercise the editor's command path,
+// rather than only mutating a Scene fixture, with our own asymmetric pixels.
+AUREA_TEST(Gpu, MotionTileBeta3RotationCommandsChangeThePerspectiveAndReopen) {
+    AUREA_REQUIRE_GPU();
+    const std::string folder = "build/reference/beta3-20261013/motion-tile-tests/";
+    std::filesystem::create_directories(folder);
+    const ImagePixels pixels = reference_image(128, 128);
+    Image8 source;
+    source.width = source.height = 128;
+    source.rgba = pixels.rgba;
+    const std::string sourcePath = folder + "own-asymmetric-source.png";
+    AUREA_CHECK(write_png(sourcePath, source));
+    Scene3DRig rig(512, 288, true);
+    const auto image = rig.e.import_image(pixels.rgba.data(), 128, 128, "Own tile texture", sourcePath.c_str());
+    AUREA_CHECK(image.ok()); if (!image.ok()) return;
+    const LayerId id = LayerId::unpack(*image);
+    AUREA_CHECK(rig.e.set_layer_3d(*image, true));
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add = {id, effect_type_id(effect_keys::kMotionTile), kInvalidIndex};
+    AUREA_CHECK(rig.e.apply_command(add).ok());
+    auto* layer = rig.e.project()->timeline().composition(rig.e.project()->timeline().current())->layer(id);
+    Command mirror;
+    mirror.type = CommandType::EffectSetParam;
+    mirror.effect_param = {id, EffectId{layer->effects.back().id, 0}, motion_tile::kMirror, 1.f};
+    AUREA_CHECK(rig.e.apply_command(mirror).ok());
+    auto atAngle = [&](f32 angle) {
+        Command rotate;
+        // Kotlin and Swift both use gestureKeyframe for this knob. The motor
+        // writes the static X value when that axis is not animated.
+        rotate.type = CommandType::KeyframeInsert;
+        rotate.keyframe = {TrackRef{id, TrackProperty::RotationX, kInvalidIndex, 0}, FrameIndex{0}, angle,
+                           kAutoKeyOnlyIfChanged | kAutoKeyAtPlayhead | kAutoKeyStaticWhenUnanimated};
+        AUREA_CHECK(rig.e.apply_command(rotate).ok());
+        return rig.capture(512);
+    };
+    const auto first = atAngle(-101.2f);
+    const auto grazing = atAngle(-88.4f);
+    const auto back = atAngle(-221.2f);
+    auto changedPixels = [](const Image8& a, const Image8& b) {
+        u32 changed = 0;
+        for (usize p = 0; p + 3 < a.rgba.size() && p + 3 < b.rgba.size(); p += 4)
+            changed += std::abs(int(a.rgba[p]) - int(b.rgba[p])) > 8
+                || std::abs(int(a.rgba[p + 1]) - int(b.rgba[p + 1])) > 8
+                || std::abs(int(a.rgba[p + 2]) - int(b.rgba[p + 2])) > 8;
+        return changed;
+    };
+    const u32 firstChange = changedPixels(first, grazing), secondChange = changedPixels(grazing, back);
+    std::printf("    beta3 tile X rotation: %u / %u changed pixels, coverage %.3f / %.3f / %.3f\n",
+                firstChange, secondChange, coverage(first), coverage(grazing), coverage(back));
+    AUREA_CHECK(firstChange > 1000u);
+    AUREA_CHECK(secondChange > 1000u);
+    AUREA_CHECK(back.rgba == rig.capture(512).rgba);
+    const std::string projectPath = folder + "grazing-plane.aurea";
+    AUREA_CHECK(rig.e.save_project(projectPath.c_str()).ok());
+    AUREA_CHECK(rig.e.load_project(projectPath.c_str()).ok());
+    AUREA_CHECK(max_diff(back, rig.capture(512)) <= 2u);
+    AUREA_CHECK(write_png(folder + "x-minus101.png", first));
+    AUREA_CHECK(write_png(folder + "x-minus88.png", grazing));
+    AUREA_CHECK(write_png(folder + "x-minus221.png", back));
+}
+
+// A tiled plane has one physical horizon. Repeating an already projected
+// floor in screen coordinates would put texture on rays whose intersection
+// with that plane is behind the camera. Check that domain independently of
+// the tile shader's lookup, including the recording's grazing angle.
+AUREA_TEST(Gpu, MotionTileBeta3GrazingWallDoesNotRepeatBehindCamera) {
+    AUREA_REQUIRE_GPU();
+    for (const f32 angle : {-101.2f, -88.4f, -221.2f}) {
+        Scene scene(512, 288);
+        const LayerId id = scene.image(reference_image(128, 128), 256, 144);
+        scene.comp->layer(id)->threeD = true;
+        scene.comp->layer(id)->transform.rotation.x = angle;
+        scene.add_effect(id, effect_keys::kMotionTile).params[motion_tile::kMirror].constant = ParamValue::boolean(true);
+        const FloatImage pixels = scene.render();
+        RenderSettings settings;
+        FrameSnapshot snapshot;
+        gpu().renderer.prepare(*scene.comp, scene.project, FrameIndex{0}, &scene.media, &Scene::lookup, &scene,
+                               settings, 1000000, 0, DecodeMode::Still, 1.f, snapshot);
+        const RenderLayer* plane = nullptr;
+        for (const auto& candidate : snapshot.layers)
+            if (candidate.id == id && candidate.source.kind != LayerSource::Kind::Scene3D) plane = &candidate;
+        AUREA_CHECK(plane != nullptr); if (!plane) return;
+        const Mat4& m = plane->compFromLayer;
+        u32 behind = 0, incorrectlyLit = 0;
+        for (u32 y = 4; y + 4 < pixels.height; y += 3) for (u32 x = 4; x + 4 < pixels.width; x += 3) {
+            const f64 qx = x + .5, qy = y + .5;
+            const f64 a = m.col[0].x - qx * m.col[0].w, c = m.col[1].x - qx * m.col[1].w;
+            const f64 b = m.col[0].y - qy * m.col[0].w, d = m.col[1].y - qy * m.col[1].w;
+            const f64 tx = qx * m.col[3].w - m.col[3].x, ty = qy * m.col[3].w - m.col[3].y;
+            const f64 determinant = a * d - b * c;
+            if (std::fabs(determinant) < 1e-10) continue;
+            const f64 px = (d * tx - c * ty) / determinant, py = (a * ty - b * tx) / determinant;
+            const f64 w = m.col[0].w * px + m.col[1].w * py + m.col[3].w;
+            if (w >= -.001) continue;
+            ++behind;
+            const auto* color = pixels.at(x, y);
+            incorrectlyLit += color[0] > .005f || color[1] > .005f || color[2] > .005f;
+        }
+        std::printf("    beta3 tile X %.1f: behind-camera samples %u, erroneously repeated %u\n",
+                    angle, behind, incorrectlyLit);
+        if (angle == -101.2f || angle == -88.4f) AUREA_CHECK(behind > 1000u);
+        AUREA_CHECK_EQ(incorrectlyLit, 0u);
+    }
+}

@@ -74,6 +74,10 @@ import kotlin.math.roundToInt
  */
 @Composable
 internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit) {
+    if (store.selection.size > 1) {
+        GroupSelectionSheet(store, onDismiss)
+        return
+    }
     val id = store.primary
     val index = store.layers.indexOfFirst { it.id == id }
     val row = store.layers.getOrNull(index)
@@ -549,6 +553,29 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             CupertinoGlyph.RectangleStack, stringResource(R.string.editor_agrupar_camadas_escolhidas),
             if (store.selection.isNotEmpty()) act { store.precompose() } else null,
         )
+        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_mask),
+            if (store.selection.size >= 2) act { store.groupAndMask(false) } else null,
+            detail = stringResource(R.string.editor_group_mask_hint))
+        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_exclude),
+            if (store.selection.size >= 2) act { store.groupAndMask(true) } else null,
+            detail = stringResource(R.string.editor_group_exclude_hint))
+    }
+}
+
+/** Group commands use the shared engine's stacking order, regardless of tap order. */
+@Composable
+internal fun GroupSelectionSheet(store: EditorStore, onDismiss: () -> Unit) {
+    fun action(block: () -> Unit): () -> Unit = { onDismiss(); block() }
+    ShellMenuSheet(onDismiss) {
+        MenuSection(stringResource(R.string.editor_grupo))
+        MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_agrupar_camadas_escolhidas),
+            if (store.selection.isNotEmpty()) action { store.precompose() } else null)
+        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_mask),
+            if (store.selection.size >= 2) action { store.groupAndMask(false) } else null,
+            detail = stringResource(R.string.editor_group_mask_hint))
+        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_exclude),
+            if (store.selection.size >= 2) action { store.groupAndMask(true) } else null,
+            detail = stringResource(R.string.editor_group_exclude_hint))
     }
 }
 

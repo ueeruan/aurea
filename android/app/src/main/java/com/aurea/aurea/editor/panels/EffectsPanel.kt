@@ -461,13 +461,13 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     null
                 },
                 curveAnimated = railLook != KeyframeLook.None,
-                onCurve = if (curveTrackReady) {
+                onCurve = if (curveTrackReady && selected?.let { store.curveStart(store.primaryKeys().effectTrack(it.effectId, it.param, it.component)) } != null) {
                     {
                         val k = selected
                         val layer = store.primary
                         val t = store.detail?.localFrame(store.playhead)
                         if (k != null && layer != null && t != null) {
-                            store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
+                            store.curveStart(store.primaryKeys().effectTrack(k.effectId, k.param, k.component))?.let { key ->
                                 store.selectKeyframe(layer, key)
                                 env.onOpenPanel(EditorPanel.Curve)
                             }
@@ -1087,10 +1087,11 @@ private fun ParamRows(
     val label = d.label()
     val menu = { onParamMenu(ParamMenuTarget(id, s.index, label)) }
     when (s.type) {
-        ParamType.FLOAT, ParamType.INT, ParamType.ANGLE ->
+        ParamType.FLOAT, ParamType.INT, ParamType.ANGLE -> androidx.compose.runtime.key(env.store.projectGeneration, env.store.composition?.id, env.store.primary, id, s.index) {
             EffectNumberRow(env, id, s, d, 0, label, selected == ParamKey(id, s.index, 0), onSelect, menu)
-        ParamType.POINT2D, ParamType.POINT3D -> repeat(s.components) { c ->
-            EffectNumberRow(env, id, s, d, c, rowLabel(label, s, c), selected == ParamKey(id, s.index, c), onSelect, menu)
+        }
+        ParamType.POINT2D, ParamType.POINT3D -> androidx.compose.runtime.key(env.store.projectGeneration, env.store.composition?.id, env.store.primary, id, s.index) {
+            EffectVectorRow(env, id, s, d, label, selected, onSelect, menu)
         }
         ParamType.BOOL -> EffectToggleRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         ParamType.ENUM -> EffectChoiceRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
@@ -1183,6 +1184,9 @@ private fun EffectNumberRow(
     onMenu: () -> Unit,
 ) {
     val store = env.store
+    val owner = store.primary
+    val generation = store.projectGeneration
+    val composition = store.composition?.id
     val value = rememberParamValue(env, effectId, s.index, component)
     val look = rememberLook(env, effectId, s.index, component)
     // Duas faixas: a RÉGUA anda só na do slider ([s.min]..[s.max]); o TECLADO
@@ -1197,6 +1201,8 @@ private fun EffectNumberRow(
     val typedShownLo = if (typedLo.isFinite()) d.toDisplay(typedLo) else typedLo
     val typedShownHi = if (typedHi.isFinite()) d.toDisplay(typedHi) else typedHi
     fun write(display: Float) {
+        if (owner == null || store.primary != owner || store.projectGeneration != generation ||
+            store.composition?.id != composition || store.detail?.locked == true || !display.isFinite()) return
         val p = store.paramOf(effectId, s.index) ?: return
         val clamped = d.toEngine(display).coerceIn(typedLo, typedHi)
         store.setEffectParam(effectId, p, if (s.type == ParamType.INT) clamped.roundToInt().toFloat() else clamped, component)
@@ -1230,6 +1236,42 @@ private fun EffectNumberRow(
             )
         },
     )
+}
+
+/** A point uses one ruler and explicit axis selection, preserving its native bindings. */
+@Composable
+private fun EffectVectorRow(env: PanelEnv, effectId: Int, s: ParamSlot, d: ParamDisplay,
+    label: String, selected: ParamKey?, onSelect: (ParamKey) -> Unit, onMenu: () -> Unit) {
+    val store = env.store
+    val owner = store.primary
+    val generation = store.projectGeneration
+    val composition = store.composition?.id
+    val own = selected?.takeIf { it.effectId == effectId && it.param == s.index }
+    val axis = own?.component?.coerceIn(0, s.components - 1) ?: 0
+    val values = (0 until s.components).map { d.toDisplay(rememberParamValue(env, effectId, s.index, it)) }
+    val looks = (0 until s.components).map { rememberLook(env, effectId, s.index, it) }
+    val lo = d.toDisplay(s.min); val hi = d.toDisplay(s.max)
+    val typedLo = d.toDisplay(s.typedLo); val typedHi = d.toDisplay(s.typedHi)
+    fun currentOwner() = owner != null && store.primary == owner && store.projectGeneration == generation && store.composition?.id == composition && store.detail?.locked != true
+    fun choose(c: Int) { if (currentOwner()) onSelect(ParamKey(effectId, s.index, c)) }
+    fun write(c: Int, value: Float) {
+        if (!currentOwner() || !value.isFinite()) return
+        val p = store.paramOf(effectId, s.index) ?: return
+        store.setEffectParam(effectId, p, d.toEngine(value).coerceIn(s.typedLo, s.typedHi), c)
+    }
+    com.aurea.aurea.ui.ds.VectorPropertyRow(label, values, (0 until s.components).map { "XYZ"[it].toString() },
+        selectedAxis = axis, unitsPerDp = s.unitsPerDp * d.scale, min = min(lo, hi), max = max(lo, hi),
+        format = { comUnidade(numeroPtBr(it, d.decimals), d.suffix) }, selected = own != null,
+        onSelectAxis = ::choose, onGestureStart = { store.beginGesture("ajustar $label") },
+        onValue = ::write, onGestureEnd = store::endGesture,
+        onTapValue = { c ->
+            choose(c)
+            env.openKeypad(KeypadRequest("$label · ${"XYZ"[c]}", values[c], d.suffix,
+                min(typedLo, typedHi), max(typedLo, typedHi), d.decimals,
+                percentBase = max(lo, hi)) { write(c, it) })
+        }, keyframes = looks, enabled = currentOwner() && store.detail?.locked != true,
+        expression = rememberExpr(env, effectId, s), onExpression = onMenu,
+        tag = "effects.vector.$effectId.${s.index}", displayFormat = { com.aurea.aurea.ui.ds.compactPropertyNumber(it, d.decimals) })
 }
 
 /** Liga/desliga: valor ≥ 0,5 = ligado; escreve 1/0 num passo. O interruptor mora no lugar da caixa de valor. */

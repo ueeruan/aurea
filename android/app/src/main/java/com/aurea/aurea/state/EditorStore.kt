@@ -290,7 +290,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
-    val exporter = Exporter(app, engine, viewModelScope) { project.path }
+    val exporter = Exporter(app, engine, viewModelScope, releaseUiCaches = { releaseExportUiCaches() }) { project.path }
 
     /**
      * O motor cru, só para o teste de estresse. Ele captura quadro por quadro e
@@ -1119,6 +1119,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return writeHomeCard(path, withThumbnail = true)
     }
 
+    /** Release only recreatable UI bitmaps before native export preparation. */
+    private fun releaseExportUiCaches() {
+        com.aurea.aurea.engine.UiImageCaches.trim()
+        thumbnails.clear()
+        effectPreviews?.trimMemory()
+    }
+
     /**
      * Pressão de memória do SISTEMA (ComponentCallbacks2.onTrimMemory, Fase 8B
      * §13). A UI solta os bitmaps dela (miniaturas e prévias fora da tela) e o
@@ -1267,6 +1274,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Lê o status do motor e publica. Devolve se algo que a UI mostra mudou. */
     private fun pollStatus(): Boolean {
+        if (exporter.state.preparing) return false
         engine.readStatus(statusBuffer)
         status.readFrom(statusBuffer)
         val n = statusSigNow
@@ -1293,7 +1301,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         statusSlow = false
         statusIdleFrames = 0
         statusLoop = RenderLoop { frameTimeNanos ->
-            if (!ready) return@RenderLoop
+            if (!ready || exporter.state.preparing) return@RenderLoop
             checkMemoryPressure()
             engine.readStatus(statusBuffer)
             status.readFrom(statusBuffer)
@@ -2545,7 +2553,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Força a releitura na mesma volta (depois de um comando local). */
     private fun refreshNow() {
-        if (destroyed || !ready) return
+        if (destroyed || !ready || exporter.state.preparing) return
         lastRevision = -1
         wakeStatusLoop()
         // Fase 8D: DENTRO de um gesto (arrasto, slider) a releitura fica para o
@@ -3378,12 +3386,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun step(frames: Int) { pendingPlayhead = null; send { step(frames) } }
 
-    /** Composition markers take precedence even when there is no next marker. */
+    /** The shared engine merges markers with visible keys of the active layer. */
     fun stepTransport(direction: Int) {
-        val target = markerNavigationTarget(markers.frames, playhead, direction)
-        if (target != null) {
-            if (target != playhead) seek(target)
-        } else if (!stepToKeyframe(direction)) step(direction)
+        if (!ready) return
+        val target = engine.queryTimelineNavigation(primary, playhead, direction) ?: return
+        if (engine.seekTimelineEvent(target)) holdPlayhead(target)
     }
 
 
@@ -4061,6 +4068,31 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
         select(id)
         showToast(appText(R.string.msg_agrupado_toque_em_editar_o_grupo))
+    }
+
+    /** The engine chooses the top selected visual layer and commits one undo step. */
+    fun groupAndMask(exclude: Boolean, ids: Collection<Long> = selection) {
+        if (playing) pause()
+        val id = engine.groupAndMask(ids.toLongArray(), exclude, appText(R.string.editor_grupo))
+        if (id < 0) {
+            showToast(appText(R.string.editor_group_mask_failed, -id))
+            return
+        }
+        clearSelectedKeyframe()
+        changeLayerSelectMode(false)
+        timelineFocus = null
+        maskEdit = null
+        maskPoint = -1
+        maskDrawing = false
+        refreshNow()
+        select(id)
+        showToast(appText(R.string.msg_agrupado_toque_em_editar_o_grupo))
+    }
+
+    fun keyframeNavigation(layer: Long, target: com.aurea.aurea.engine.TrackKey,
+                           compositionFrame: Int = playhead): com.aurea.aurea.engine.KeyframeNavigation? {
+        keyframes[layer] ?: return null // Observe the engine's published anchor snapshot.
+        return engine.queryKeyframeNavigation(layer, target.property, target.effectIndex, target.paramIndex, compositionFrame)
     }
 
     /** "Desagrupar": as camadas voltam para cá, no mesmo lugar e tempo da tela. */

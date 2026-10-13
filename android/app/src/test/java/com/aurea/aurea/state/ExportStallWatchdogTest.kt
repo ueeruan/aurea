@@ -65,10 +65,12 @@ class ExportStallWatchdogTest {
 
     @Test fun safeModeOnlyClimbsToTheEngineSuggestionUpToTwo() {
         assertEquals(1, ExportStallWatchdog.nextSafeMode(0, 1))
+        assertEquals(2, ExportStallWatchdog.nextSafeMode(0, 2))
         assertEquals(2, ExportStallWatchdog.nextSafeMode(1, 2))
         assertEquals(0, ExportStallWatchdog.nextSafeMode(0, 0))   // motor não sugeriu
         assertEquals(0, ExportStallWatchdog.nextSafeMode(1, 1))   // nunca repete o mesmo nível
         assertEquals(0, ExportStallWatchdog.nextSafeMode(2, 1))   // nunca volta
+        assertEquals(0, ExportStallWatchdog.nextSafeMode(2, 2))   // nunca repete software
         assertEquals(0, ExportStallWatchdog.nextSafeMode(2, 3))   // acima do máximo
     }
 

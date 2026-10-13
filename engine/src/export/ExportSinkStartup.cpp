@@ -59,7 +59,7 @@ struct StartupState {
     std::atomic<u64> beat{0};
     std::mutex mutex;
     std::condition_variable changed;
-    bool done = false, abandoned = false;
+    bool openReturned = false, accepted = false, done = false, abandoned = false;
     Errc code = Errc::Ok;
     char detail[256]{};
     std::string target, staged;
@@ -92,52 +92,60 @@ void abort_staged(StartupState& state) noexcept {
     remove_staged(state);
 }
 
+struct ProxyBindings {
+    std::mutex mutex;
+    std::condition_variable changed;
+    const std::atomic<bool>* desiredCancel = nullptr;
+    std::atomic<u64>* desiredBeat = nullptr;
+    const std::atomic<bool>* boundCancel = nullptr;
+    std::atomic<u64>* boundBeat = nullptr;
+    bool active = false, stopping = false, published = false, retired = false;
+};
+
 // A single monitor per opened session, sleeping while no sink call is active.
-// The sink ALWAYS sees state-owned atomics. Borrowed Engine pointers are read
-// under this mutex only between a proxy call's binding and unbinding.
+// It also owns final native retirement. It captures shared state, never the
+// proxy address: a delayed stop/delete remains safe after the caller leaves.
+// Cleanup reuses this existing thread and never allocates a new native worker
+// while the device is already under memory pressure.
 class OpenedSink final : public ExportSink {
 public:
     explicit OpenedSink(std::shared_ptr<StartupState> state, u64 pollNs)
-        : state_(std::move(state)), pollNs_(pollNs), monitor_([this] { monitor(); }) {}
+        : state_(std::move(state)), bindings_(std::make_shared<ProxyBindings>()),
+          monitor_([state = state_, bindings = bindings_, pollNs] { monitor(state, bindings, pollNs); }) {}
 
-    ~OpenedSink() override {
-        {
-            std::lock_guard lock(bindMutex_);
-            stopping_ = true;
-            desiredCancel_ = boundCancel_ = nullptr;
-            desiredBeat_ = boundBeat_ = nullptr;
-        }
-        bindingsChanged_.notify_all();
-        if (monitor_.joinable()) monitor_.join();
-        if (!published_) abort_staged(*state_);
-        else {
-            state_->sink->set_cancel_flag(nullptr);
-            state_->sink->set_heartbeat(nullptr);
-        }
-    }
+    ~OpenedSink() override { retire(); }
 
     void set_cancel_flag(const std::atomic<bool>* flag) noexcept override {
-        std::lock_guard lock(bindMutex_); desiredCancel_ = flag;
+        std::lock_guard lock(bindings_->mutex);
+        if (!bindings_->stopping) bindings_->desiredCancel = flag;
     }
     void set_heartbeat(std::atomic<u64>* beat) noexcept override {
-        std::lock_guard lock(bindMutex_); desiredBeat_ = beat;
+        std::lock_guard lock(bindings_->mutex);
+        if (!bindings_->stopping) bindings_->desiredBeat = beat;
+    }
+    void set_diagnostics(std::shared_ptr<ExportDiagnostics> diagnostics) noexcept override {
+        if (!retirementRequested_) state_->sink->set_diagnostics(std::move(diagnostics));
     }
     Status open(const char*, const VideoStreamConfig&, const AudioStreamConfig*) noexcept override {
         return Status{Errc::InvalidState, "encoder ja foi aberto pelo gate de exportacao"};
     }
     Status write_video(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 pts) noexcept override {
+        if (retirementRequested_) return Errc::InvalidState;
         Binding binding(*this);
         return state_->sink->write_video(y, ys, uv, uvs, pts);
     }
     Status write_video_timed(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 pts, i64 duration) noexcept override {
+        if (retirementRequested_) return Errc::InvalidState;
         Binding binding(*this);
         return state_->sink->write_video_timed(y, ys, uv, uvs, pts, duration);
     }
     Status write_audio(const i16* pcm, u32 frames, i64 pts) noexcept override {
+        if (retirementRequested_) return Errc::InvalidState;
         Binding binding(*this);
         return state_->sink->write_audio(pcm, frames, pts);
     }
     Status finish() noexcept override {
+        if (retirementRequested_) return Errc::InvalidState;
         Binding binding(*this);
         if (finalized_) return Status{Errc::InvalidState, "export ja foi finalizado"};
         if (const Status status = state_->sink->finish(); !status.ok()) return status;
@@ -151,6 +159,7 @@ public:
         return OkStatus;
     }
     Status validate_output(const ExportOutputValidation& expected) noexcept override {
+        if (retirementRequested_) return Errc::InvalidState;
         Binding binding(*this);
         if (!finalized_ || published_ || !state_->video.validateBeforePublish) return Errc::InvalidState;
         if (const Status status = state_->sink->validate_output(expected); !status.ok()) return status;
@@ -159,72 +168,97 @@ public:
         published_ = true;
         return OkStatus;
     }
-    void abort() noexcept override {
-        Binding binding(*this);
-        abort_staged(*state_);
+    void abort() noexcept override { retire(); }
+    EncoderInfo encoder_info() const noexcept override {
+        return retirementRequested_ ? EncoderInfo{} : state_->sink->encoder_info();
     }
-    EncoderInfo encoder_info() const noexcept override { return state_->sink->encoder_info(); }
 
 private:
     class Binding {
     public:
         explicit Binding(OpenedSink& sink) : sink_(sink) {
-            std::lock_guard lock(sink_.bindMutex_);
-            sink_.boundCancel_ = sink_.desiredCancel_;
-            sink_.boundBeat_ = sink_.desiredBeat_;
-            sink_.state_->cancel.store(sink_.boundCancel_ && sink_.boundCancel_->load(std::memory_order_acquire),
+            auto& bindings = *sink_.bindings_;
+            std::lock_guard lock(bindings.mutex);
+            bindings.boundCancel = bindings.desiredCancel;
+            bindings.boundBeat = bindings.desiredBeat;
+            sink_.state_->cancel.store(bindings.boundCancel && bindings.boundCancel->load(std::memory_order_acquire),
                                       std::memory_order_release);
             sink_.state_->beat.store(monotonic_ns(), std::memory_order_release);
-            sink_.active_ = true;
-            sink_.sync_bindings();
-            sink_.bindingsChanged_.notify_all();
+            bindings.active = true;
+            sync_bindings(*sink_.state_, bindings);
+            bindings.changed.notify_all();
         }
         ~Binding() {
-            std::lock_guard lock(sink_.bindMutex_);
-            sink_.sync_bindings();
-            sink_.active_ = false;
-            sink_.boundCancel_ = nullptr;
-            sink_.boundBeat_ = nullptr;
-            sink_.bindingsChanged_.notify_all();
+            auto& bindings = *sink_.bindings_;
+            std::lock_guard lock(bindings.mutex);
+            sync_bindings(*sink_.state_, bindings);
+            bindings.active = false;
+            bindings.boundCancel = nullptr;
+            bindings.boundBeat = nullptr;
+            bindings.changed.notify_all();
         }
     private:
         OpenedSink& sink_;
     };
-    void sync_bindings() noexcept {
-        if (boundCancel_ && boundCancel_->load(std::memory_order_acquire))
-            state_->cancel.store(true, std::memory_order_release);
-        if (boundBeat_) boundBeat_->store(state_->beat.load(std::memory_order_acquire), std::memory_order_release);
+    static void sync_bindings(StartupState& state, ProxyBindings& bindings) noexcept {
+        if (bindings.boundCancel && bindings.boundCancel->load(std::memory_order_acquire))
+            state.cancel.store(true, std::memory_order_release);
+        if (bindings.boundBeat) bindings.boundBeat->store(state.beat.load(std::memory_order_acquire), std::memory_order_release);
     }
     bool cancelled_before_publication() noexcept {
         // Native finish/validation may return immediately after the Engine
         // watchdog cancelled this session, before the polling monitor wakes.
         // The borrowed flag is valid throughout Binding; refresh it now,
         // while it is still bound, rather than after committing the file.
-        std::lock_guard lock(bindMutex_);
-        sync_bindings();
+        std::lock_guard lock(bindings_->mutex);
+        sync_bindings(*state_, *bindings_);
         return state_->cancel.load(std::memory_order_acquire);
     }
-    void monitor() noexcept {
-        std::unique_lock lock(bindMutex_);
-        while (!stopping_) {
-            bindingsChanged_.wait(lock, [this] { return stopping_ || active_; });
-            while (!stopping_ && active_) {
-                sync_bindings();
-                bindingsChanged_.wait_for(lock, std::chrono::nanoseconds(pollNs_),
-                    [this] { return stopping_ || !active_; });
+    static void monitor(const std::shared_ptr<StartupState>& state,
+        const std::shared_ptr<ProxyBindings>& bindings, u64 pollNs) noexcept {
+        std::unique_lock lock(bindings->mutex);
+        while (!bindings->stopping) {
+            bindings->changed.wait(lock, [&] { return bindings->stopping || bindings->active; });
+            while (!bindings->stopping && bindings->active) {
+                sync_bindings(*state, *bindings);
+                bindings->changed.wait_for(lock, std::chrono::nanoseconds(pollNs),
+                    [&] { return bindings->stopping || !bindings->active; });
             }
         }
+        const bool published = bindings->published;
+        lock.unlock();
+        if (!published) abort_staged(*state);
+        else {
+            state->sink->set_cancel_flag(nullptr);
+            state->sink->set_heartbeat(nullptr);
+        }
+        state->sink.reset(); // native destructor stays on the retained worker
+        lock.lock(); bindings->retired = true;
+        lock.unlock(); bindings->changed.notify_all();
+    }
+    void retire() noexcept {
+        if (retirementRequested_) return;
+        retirementRequested_ = true;
+        state_->cancel.store(true, std::memory_order_release);
+        std::unique_lock lock(bindings_->mutex);
+        bindings_->stopping = true;
+        bindings_->published = published_;
+        bindings_->desiredCancel = bindings_->boundCancel = nullptr;
+        bindings_->desiredBeat = bindings_->boundBeat = nullptr;
+        bindings_->changed.notify_all();
+        // Normal close completes here. A stuck native stop/delete cannot hold
+        // startup, render/lifecycle locks or final progress beyond this wait.
+        // The admission permit remains owned until native destruction ends.
+        const bool retired = bindings_->changed.wait_for(lock, std::chrono::milliseconds(100),
+            [&] { return bindings_->retired; });
+        lock.unlock();
+        if (retired) monitor_.join();
+        else monitor_.detach();
     }
 
     std::shared_ptr<StartupState> state_;
-    u64 pollNs_;
-    std::mutex bindMutex_;
-    std::condition_variable bindingsChanged_;
-    const std::atomic<bool>* desiredCancel_ = nullptr;
-    std::atomic<u64>* desiredBeat_ = nullptr;
-    const std::atomic<bool>* boundCancel_ = nullptr;
-    std::atomic<u64>* boundBeat_ = nullptr;
-    bool active_ = false, stopping_ = false, published_ = false, finalized_ = false;
+    std::shared_ptr<ProxyBindings> bindings_;
+    bool retirementRequested_ = false, published_ = false, finalized_ = false;
     std::thread monitor_;
 };
 
@@ -272,9 +306,20 @@ ExportSinkStartupResult open_export_sink_startup(std::unique_ptr<ExportSink> sin
             std::unique_lock lock(state->mutex);
             state->code = status.code();
             copy_detail(state->detail, sizeof(state->detail), status);
-            if (state->abandoned) {
+            state->openReturned = true;
+            state->changed.notify_all();
+            // A successful native open stays with this worker until the
+            // caller can construct its proxy. A failure, cancellation or
+            // constructor exception retires the codec HERE, under the same
+            // startup deadline; neither abort nor the platform destructor
+            // may become an unbounded call on the export starter.
+            if (status.ok() && !state->abandoned) {
+                state->changed.wait(lock, [&] { return state->accepted || state->abandoned; });
+            }
+            if (!state->accepted) {
                 lock.unlock();
                 abort_staged(*state);
+                state->sink.reset(); // native delete/stop can stall too
                 lock.lock();
             }
             state->done = true;
@@ -289,30 +334,39 @@ ExportSinkStartupResult open_export_sink_startup(std::unique_ptr<ExportSink> sin
             if (cancelled || now - started > limits.hardNs || (now >= beat && now - beat > limits.stallNs)) {
                 state->abandoned = true;
                 state->cancel.store(true, std::memory_order_release);
-                result.code = cancelled ? Errc::Cancelled : Errc::Timeout;
-                copy_detail(result.detail, sizeof(result.detail), Status{result.code,
-                    cancelled ? "abertura do encoder cancelada" : "encoder parou durante a abertura"});
-                lock.unlock(); worker.detach();
+                // Native open may already have failed while stop/delete is
+                // still blocked. Keep its actionable error and copied detail
+                // rather than replacing them with a teardown timeout.
+                if (!cancelled && state->openReturned && state->code != Errc::Ok) {
+                    result.code = state->code;
+                    std::snprintf(result.detail, sizeof(result.detail), "%s", state->detail);
+                } else {
+                    result.code = cancelled ? Errc::Cancelled : Errc::Timeout;
+                    copy_detail(result.detail, sizeof(result.detail), Status{result.code,
+                        cancelled ? "abertura do encoder cancelada" : "encoder parou durante a abertura"});
+                }
+                lock.unlock(); state->changed.notify_all(); worker.detach();
+                return result;
+            }
+            if (state->openReturned && state->code == Errc::Ok) {
+                result.sink = std::make_unique<OpenedSink>(state, limits.pollNs);
+                result.sink->set_cancel_flag(cancellation);
+                result.sink->set_heartbeat(heartbeat);
+                state->accepted = true;
+                lock.unlock(); state->changed.notify_all();
+                worker.join(); // accepted worker no longer calls the platform
                 return result;
             }
             state->changed.wait_for(lock, std::chrono::nanoseconds(limits.pollNs));
         }
         lock.unlock(); worker.join();
         if (cancellation && cancellation->load(std::memory_order_acquire)) {
-            abort_staged(*state);
             result.code = Errc::Cancelled;
             copy_detail(result.detail, sizeof(result.detail), Status{result.code, "abertura do encoder cancelada"});
             return result;
         }
         result.code = state->code;
         std::snprintf(result.detail, sizeof(result.detail), "%s", state->detail);
-        if (result.code != Errc::Ok) {
-            abort_staged(*state);
-            return result;
-        }
-        result.sink = std::make_unique<OpenedSink>(state, limits.pollNs);
-        result.sink->set_cancel_flag(cancellation);
-        result.sink->set_heartbeat(heartbeat);
         return result;
     } catch (const std::bad_alloc&) {
         result.code = Errc::OutOfMemory;
@@ -324,6 +378,7 @@ ExportSinkStartupResult open_export_sink_startup(std::unique_ptr<ExportSink> sin
     if (worker.joinable()) {
         { std::lock_guard lock(state->mutex); state->abandoned = true; }
         state->cancel.store(true, std::memory_order_release);
+        state->changed.notify_all();
         worker.detach();
     } else if (state && state->sink) {
         abort_staged(*state);

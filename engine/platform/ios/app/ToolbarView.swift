@@ -166,7 +166,17 @@ struct TopBarView: View {
             pickLayerButton(tint: AureaColors.text, width: 40)
             searchButton()
             linkMenuButton(tint: AureaColors.text)
-            ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, tint: AureaColors.text) { model.groupSelection() }
+            Menu {
+                Button(AureaText.t("editor_agrupar")) { model.groupSelection() }
+                Button(AureaText.t("editor_group_mask")) { model.groupAndMaskSelection() }
+                    .accessibilityHint(AureaText.t("editor_group_mask_hint"))
+                Button(AureaText.t("editor_group_exclude")) { model.groupAndMaskSelection(exclude: true) }
+                    .accessibilityHint(AureaText.t("editor_group_exclude_hint"))
+            } label: {
+                CupertinoGlyph.text(ShellGlyph.FolderBadgePlus, size: 19, color: AureaColors.text)
+                    .frame(width: StageDim.barButtonHeight, height: StageDim.barButtonHeight).contentShape(Rectangle())
+            }.accessibilityLabel(AureaText.t("editor_agrupar"))
+                .accessibilityIdentifier("selection.group.menu")
             if model.layers.contains(where: { model.selection.contains($0.id) && $0.kind == 12 }) {
                 ShellBarButton(glyph: ShellGlyph.SquareSplit2x2, description: AureaText.t("editor_desagrupar"), size: 19, tint: AureaColors.text) {
                     for row in model.layers where model.selection.contains(row.id) && row.kind == 12 { model.ungroup(row.id) }
@@ -787,6 +797,8 @@ private struct ShellMenuRow: View {
         ShellMenuRow(ShellGlyph.BookmarkSolid, "editor_ir_proxima_marca", enabled: !model.markerFrames.isEmpty) { act { model.seekToNextMarker() } }
         ShellMenuSection("editor_mais")
         ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas", enabled: !model.selection.isEmpty) { act { model.groupSelection() } }
+        ShellMenuRow(CupertinoGlyph.Crop, "editor_group_mask", enabled: model.selection.count >= 2, detail: "editor_group_mask_hint") { act { model.groupAndMaskSelection() } }
+        ShellMenuRow(CupertinoGlyph.CircleLefthalfFill, "editor_group_exclude", enabled: model.selection.count >= 2, detail: "editor_group_exclude_hint") { act { model.groupAndMaskSelection(exclude: true) } }
         ShellMenuRow(CupertinoGlyph.Speedometer, "ios_perf_test_a11y") { act { shell.performanceTest = true } }
     }
     /// A seção "Projeto" do menu da engrenagem (o que saiu da barra do topo e do transporte).

@@ -63,7 +63,8 @@ import kotlin.math.roundToInt
 
 /**
  * Grade · resolução · marca | ⇤ ▶ ⇥ | camadas · ↶ ↷.
- * Tocar ⇤/⇥ anda de marca/keyframe/quadro; segurar vai ao início/fim.
+ * Tocar ⇤/⇥ busca a marca ou o keyframe da camada ativa mais próximo;
+ * sem camada ativa busca só marcas. Segurar vai ao início/fim.
  * Os três grupos seguem a referência do usuário com os glifos do AUREA.
  * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
  */

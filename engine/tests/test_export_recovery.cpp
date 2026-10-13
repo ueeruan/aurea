@@ -7,6 +7,11 @@
 #include <filesystem>
 #include <algorithm>
 #include <limits>
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 using namespace aurea;
 namespace recovery = aurea::export_recovery;
@@ -218,4 +223,45 @@ AUREA_TEST(ExportRecovery, EffectiveSystemAndFallbackFontsBecomeVerifiedDependen
     }
     AUREA_CHECK(recovery::fingerprint_sources(package).ok());
     AUREA_CHECK(recovery::validate_sources(package).ok());
+}
+
+AUREA_TEST(ExportPreparation, OnlyOwnedOrphanOutputsAreRemovedAndRecoveryRemains) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::absolute("aurea_test_export_cleanup");
+    struct Cleanup { fs::path root; ~Cleanup() { std::error_code ec; fs::remove_all(root, ec); } } cleanup{root};
+    std::error_code ec;
+    fs::create_directories(root / "nested", ec); AUREA_CHECK(!ec);
+    const auto file = [&](const std::string& name) { return (root / fs::u8path(name)).string(); };
+    const auto pid =
+#if defined(_WIN32)
+        _getpid();
+#else
+        getpid();
+#endif
+    const std::string live = "writer.mp4.aurea-startup-" + std::to_string(pid) + "-1-1.mp4";
+    const std::string stale = "writer.mp4.aurea-startup-0-1-1.mp4";
+    for (const auto& name : {std::string("old.mp4"), std::string("old.png"), std::string("old.gif"),
+            std::string("old.zip"), std::string("current.mp4"), std::string("recover.mp4"),
+            std::string("recover.mp4.aurea-export"), std::string("project.aurea"), std::string("original.jpg"),
+            std::string("nested/kept.mp4"), live, stale}) AUREA_CHECK(put(file(name), "owned test bytes"));
+    const auto result = recovery::cleanup_temporary_outputs(root.string(), file("current.mp4"));
+    AUREA_CHECK(result.ok()); if (result.ok()) AUREA_CHECK_EQ(*result, 5u);
+    for (const auto& name : {"old.mp4", "old.png", "old.gif", "old.zip"}) AUREA_CHECK(!fs::exists(file(name)));
+    AUREA_CHECK(!fs::exists(file(stale)));
+    for (const auto* name : {"current.mp4", "recover.mp4", "recover.mp4.aurea-export", "project.aurea",
+                            "original.jpg", "nested/kept.mp4"}) AUREA_CHECK(fs::exists(file(name)));
+    AUREA_CHECK(fs::exists(file(live)));
+    AUREA_CHECK(put(file("cancelled.png"), "keep on cancel"));
+    std::atomic<bool> cancel{true};
+    AUREA_CHECK_EQ(recovery::cleanup_temporary_outputs(root.string(), file("current.mp4"), &cancel).status().code(), Errc::Cancelled);
+    AUREA_CHECK(fs::exists(file("cancelled.png")));
+    // Direct symlinks and redirected directory ancestors must not traverse to
+    // media outside the owned cache. Hosts lacking symlink privilege skip only
+    // this OS setup; all regular file scope assertions above still execute.
+    fs::create_symlink(root / "original.jpg", root / "alias.mp4", ec);
+    if (!ec) {
+        AUREA_CHECK(recovery::cleanup_temporary_outputs(root.string(), file("current.mp4")).ok());
+        AUREA_CHECK(fs::exists(file("original.jpg")));
+        AUREA_CHECK(fs::is_symlink(root / "alias.mp4"));
+    }
 }

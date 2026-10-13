@@ -95,61 +95,29 @@ internal fun HumanRow(
     onKeyframe: (() -> Unit)? = null,
     keyTag: String = "",
 ) {
-    var dragging by remember { mutableStateOf(false) }
-    var live by remember { mutableFloatStateOf(value) }
-    val current by rememberUpdatedState(value)
-    val begin by rememberUpdatedState(onStart)
-    val send by rememberUpdatedState(onValue)
-    val end by rememberUpdatedState(onEnd)
-    val select by rememberUpdatedState(onSelect)
-    val shown = if (dragging) live else value
-    val text = comUnidade(numeroPtBr(shown, decimals), unit)
-    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        PropertyLabelChip(label, selected, keyframe = keyframe, onClick = onSelect)
-        Spacer(Modifier.width(6.dp))
-        TickRuler(
-            value = { if (dragging) live else current },
-            unitsPerDp = step,
-            active = selected || onSelect == null,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .padding(vertical = 4.dp)
-                .valueDrag(
-                    enabled = true,
-                    start = { current },
-                    unitsPerDp = { step },
-                    min = min,
-                    max = max,
-                    onStart = {
-                        live = current
-                        dragging = true
-                        select?.invoke()
-                        begin()
-                    },
-                    onValue = { v ->
-                        live = v
-                        send(v)
-                    },
-                    onEnd = {
-                        dragging = false
-                        end()
-                    },
-                ),
-        )
-        Spacer(Modifier.width(6.dp))
-        ValueBox(text, onTap = {
-            env.openKeypad(KeypadRequest(label, current, unit, min, max, decimals) { onCommit(it.coerceIn(min, max)) })
-        })
-        ResetButton(visible = default != null && abs(shown - default) > 1e-3f * maxOf(1f, abs(default))) {
-            if (default != null) onCommit(default)
-        }
+    val owner = env.store.primary; val generation = env.store.projectGeneration; val composition = env.store.composition?.id
+    fun currentOwner() = env.store.primary == owner && env.store.projectGeneration == generation && env.store.composition?.id == composition
+    androidx.compose.runtime.key(generation, composition, owner, label, keyTag) {
+    var menu by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+        com.aurea.aurea.ui.ds.PropertyRow(label, value, step, min, max,
+            { comUnidade(numeroPtBr(it, decimals), unit) }, selected, { onSelect?.invoke() },
+            onStart, { if (currentOwner()) onValue(it) }, onEnd, onTapValue = {
+                env.openKeypad(KeypadRequest(label, value, unit, min, max, decimals) { if (currentOwner()) onCommit(it.coerceIn(min, max)) })
+            }, modifier = Modifier.weight(1f), keyframe = keyframe,
+            onExpression = if (default != null) ({ menu = true }) else null)
         if (onKeyframe != null) {
             val action = stringResource(if (keyframe == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
-            Box(Modifier.size(40.dp, 44.dp).testTag(keyTag).semantics { contentDescription = "$action · $label" }.tocavel(onClick = onKeyframe), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp, 52.dp).testTag(keyTag).semantics { contentDescription = "$action · $label" }.tocavel(onClick = onKeyframe), contentAlignment = Alignment.Center) {
                 com.aurea.aurea.ui.ds.KeyframeDiamondIcon(keyframe, enabled = true)
             }
         }
+    }
+    if (menu && default != null) com.aurea.aurea.ui.ds.AureaActionSheet(
+        title = label,
+        actions = listOf(com.aurea.aurea.ui.ds.SheetAction(stringResource(R.string.panel_voltar_padrao),
+            enabled = abs(value - default) > 1e-3f * maxOf(1f, abs(default))) { if (currentOwner()) onCommit(default); menu = false }),
+        onDismiss = { menu = false })
     }
 }
 

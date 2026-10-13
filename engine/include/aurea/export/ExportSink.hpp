@@ -20,6 +20,7 @@
 #include "aurea/core/Result.hpp"
 #include "aurea/core/Types.hpp"
 #include "aurea/export/ExportOutputValidation.hpp"
+#include "aurea/export/ExportDiagnostics.hpp"
 
 namespace aurea {
 
@@ -76,6 +77,8 @@ public:
     /// com prazo" de "preso dentro do encoder do aparelho" e desiste do segundo
     /// em vez de esperar para sempre. Vive até o sink ser destruído.
     virtual void set_heartbeat(std::atomic<u64>* beatNs) noexcept { (void)beatNs; }
+
+    virtual void set_diagnostics(std::shared_ptr<ExportDiagnostics> diagnostics) noexcept { (void)diagnostics; }
 
     /// Abre o arquivo e configura os encoders. `audio` nulo = vídeo sem som.
     [[nodiscard]] virtual Status open(const char* outputPath, const VideoStreamConfig& video,

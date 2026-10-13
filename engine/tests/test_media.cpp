@@ -469,6 +469,66 @@ AUREA_TEST(MediaManager, RetirementDoesNotBlockFramesAndShutdownDrainsEveryCodec
     }
 }
 
+AUREA_TEST(MediaManager, ExportPreparationBoundsAndCancelsCodecRetirement) {
+    struct Factory : VideoSourceFactory {
+        std::atomic<bool> entered{false}, release{false};
+        std::atomic<u32> destroyed{0};
+        struct Decoder : VideoDecoderBackend {
+            Factory& factory;
+            SyntheticDecoder decoder{SyntheticConfig{}};
+            explicit Decoder(Factory& f) : factory(f) {}
+            ~Decoder() override { ++factory.destroyed; }
+            const VideoStreamInfo& info() const noexcept override { return decoder.info(); }
+            Status seek_to_keyframe(i64 us) noexcept override { return decoder.seek_to_keyframe(us); }
+            Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+                return decoder.next_frame(from, out, pts, eos);
+            }
+        };
+        bool probe(const char*, MediaProbe&) override { return false; }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+            entered.store(true);
+            while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return std::make_unique<Decoder>(*this);
+        }
+    };
+    for (bool cancelDuringWait : {false, true}) {
+        Factory factory;
+        MediaManager manager; manager.set_factory(&factory);
+        Asset asset;
+        (void)manager.source_for(LayerId{0, 1}, AssetId{0, 1}, asset, 1);
+        wait_until([&] { return factory.entered.load(); });
+        AUREA_CHECK(factory.entered.load());
+        std::atomic<bool> cancel{false}, returned{false};
+        Status result;
+        const auto started = std::chrono::steady_clock::now();
+        std::thread prepare([&] {
+            result = manager.release_preview_for_export(&cancel,
+                cancelDuringWait ? 5'000'000'000ull : 60'000'000ull);
+            returned.store(true);
+        });
+        wait_until([&] { return manager.live_sources() == 0; }, 500);
+        AUREA_CHECK_EQ(manager.live_sources(), 0u);
+        if (cancelDuringWait) cancel.store(true);
+        wait_until([&] { return returned.load(); }, 500);
+        const bool bounded = returned.load();
+        AUREA_CHECK(bounded);
+        AUREA_CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+        AUREA_CHECK_EQ(manager.stats().sources, 0u);
+        if (!bounded) factory.release.store(true); // Never hang the regression suite.
+        prepare.join();
+        AUREA_CHECK_EQ(result.code(), cancelDuringWait ? Errc::Cancelled : Errc::Timeout);
+        // Timed-out opening stays owned by retirement; shutdown cannot race the
+        // factory or create replacement codec pressure while it is still alive.
+        AUREA_CHECK_EQ(factory.destroyed.load(), 0u);
+        AUREA_CHECK(manager.source_for(LayerId{1, 1}, AssetId{0, 1}, asset, 2) == nullptr);
+        factory.release.store(true);
+        manager.close_all();
+        AUREA_CHECK_EQ(factory.destroyed.load(), 1u);
+        cancel.store(false);
+        AUREA_CHECK(manager.release_preview_for_export(&cancel, 60'000'000ull).ok());
+    }
+}
+
 // =============================================================================
 // DecodedFrameCache
 // =============================================================================

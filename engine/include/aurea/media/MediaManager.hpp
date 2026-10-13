@@ -121,6 +121,9 @@ public:
     /// Fecha e espera todas as fontes, inclusive as já retiradas, antes de
     /// substituir/destruir o projeto, a fábrica ou o contexto dos callbacks.
     void close_all();
+    /// Release recreatable preview decoders before export opens its own sessions.
+    /// Vendor shutdown runs on the retirement worker, with bounded caller wait.
+    [[nodiscard]] Status release_preview_for_export(const std::atomic<bool>* cancel, u64 timeoutNs) noexcept;
 
     void suspend_all();
     void resume_all();

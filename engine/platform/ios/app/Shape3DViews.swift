@@ -302,6 +302,10 @@ struct Shape3DPanelSection: View {
     @State private var gestureOpen = false
     @State private var splitAxis = 0
     @State private var splitCount = 3
+    @State private var positionAxis = 0
+    @State private var rotationAxis = 0
+    @State private var selectedVector: String?
+    @State private var scaleDragging = false
 
     var body: some View {
         let _ = model.status.modelRevision
@@ -380,26 +384,44 @@ struct Shape3DPanelSection: View {
                 model.refreshModel(force: true)
             }
         }.padding(.vertical, 4)
-        ForEach(0..<3, id: \.self) { axis in
-            ruler("\(AureaText.t("fx_posicao")) \(["X", "Y", "Z"][axis])", value: v[axis], step: 0.005, min: -5, max: 5,
-                  shown: String(format: "%.2f", v[axis]), animated: animated & (1 << UInt32(axis)) != 0) { value in
-                var out = [Float](repeating: 0, count: 9); out[axis] = value
-                model.setShapePart(layerId, part: part, values: out, mask: 1 << UInt32(axis), inGesture: true)
-            }
-        }
-        ForEach(0..<3, id: \.self) { axis in
-            let c = 3 + axis
-            ruler("\(AureaText.t("panel_rotacao")) \(["X", "Y", "Z"][axis])", value: v[c], step: 1, min: -3600, max: 3600,
-                  shown: "\(Int(v[c].rounded()))°", animated: animated & (1 << UInt32(c)) != 0) { value in
-                var out = [Float](repeating: 0, count: 9); out[c] = value
-                model.setShapePart(layerId, part: part, values: out, mask: 1 << UInt32(c), inGesture: true)
-            }
-        }
+        partVector(part, values: Array(v[0..<3]), base: 0, label: AureaText.t("fx_posicao"), step: 0.005,
+                   range: -5...5, unit: "", decimals: 2, animated: animated, here: here)
+        partVector(part, values: Array(v[3..<6]), base: 3, label: AureaText.t("panel_rotacao"), step: 1,
+                   range: -3600...3600, unit: "°", decimals: 0, animated: animated, here: here)
         ruler(AureaText.t("panel_escala"), value: v[6], step: 0.005, min: 0.01, max: 20,
               shown: "\(Int((v[6] * 100).rounded()))%", animated: animated & (0b111 << 6) != 0) { value in
             model.setShapePart(layerId, part: part, values: (0..<9).map { $0 >= 6 ? value : 0 }, mask: 0b111 << 6, inGesture: true)
         }
         hint("shape3d_part_hint")
+    }
+
+    private func partVector(_ part: Int, values: [Float], base: Int, label: String, step: Float,
+                            range: ClosedRange<Float>, unit: String, decimals: Int, animated: UInt32, here: UInt32) -> some View {
+        let project = model.projectGeneration, composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
+        let key = base == 0 ? "position" : "rotation"
+        let axis = base == 0 ? positionAxis : rotationAxis
+        let mask = UInt32(0b111) << UInt32(base)
+        let send: (Int, Float) -> Void = { index, amount in
+            guard model.projectGeneration == project, model.primarySelection == layerId,
+                  (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
+            var out = [Float](repeating: 0, count: 9); out[base + index] = amount
+            model.setShapePart(layerId, part: part, values: out, mask: 1 << UInt32(base + index), inGesture: true)
+        }
+        return VectorPropertyRow(label: label, values: values, axes: ["X", "Y", "Z"], selectedAxis: axis,
+            unitsPerPoint: step, range: range, formattedValue: { _, value in comUnidade(numeroPtBr(value, casas: decimals), unit) },
+            compactValue: { _, value in compactPropertyNumber(value, decimals: decimals) },
+            enabled: !(model.layers.first { $0.id == layerId }?.locked ?? true),
+            selected: selectedVector == key, look: here & mask != 0 ? .keyHere : animated & mask != 0 ? .animated : .none,
+            identifier: "shape3d.part.\(key)", onSelect: { index in
+                selectedVector = key
+                if base == 0 { positionAxis = index } else { rotationAxis = index }
+            }, onKeypad: { index in
+                model.numericKeypad = KeypadRequest(title: label + " · " + ["X", "Y", "Z"][index],
+                    value: values[index], unit: unit, min: range.lowerBound, max: range.upperBound, decimals: decimals) { amount in
+                    model.beginShapeGesture("parte da forma 3D"); send(index, amount); model.endShapeGesture()
+                }
+            }, onBegin: { model.beginShapeGesture("parte da forma 3D") }, onValue: send, onEnd: { model.endShapeGesture() })
+            .id("shape.vector:\(model.projectGeneration):\(model.composition[AureaCompositionId] ?? ""):\(layerId):\(part):\(base)")
     }
 
     /// "Dividir em partes" do cubo (Shape3DSection.kt SplitCubeBox): eixo, quantas
@@ -493,15 +515,30 @@ struct Shape3DPanelSection: View {
 
     private func ruler(_ label: String, value: Float, step: Float, min: Float, max: Float, shown: String, animated: Bool,
                        onValue: @escaping (Float) -> Void) -> some View {
-        PropertyCustomRow(label, selected: false, onSelect: {}) {
+        let project = model.projectGeneration, composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
+        let finish = { if scaleDragging { scaleDragging = false; model.endShapeGesture() } }
+        let send: (Float) -> Void = { amount in
+            guard model.projectGeneration == project, model.primarySelection == layerId,
+                  (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
+            onValue(amount)
+        }
+        return PropertyCustomRow(label, selected: selectedVector == "scale", onSelect: { selectedVector = "scale" }) {
             HStack(spacing: 8) {
-                TickRuler(value: { value }, unitsPerDp: step, active: true)
+                TickRuler(value: { value }, unitsPerDp: step, active: selectedVector == "scale" || scaleDragging, height: ParamRowDims.labelH)
                     .frame(maxWidth: .infinity)
                     .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: min, max: max,
-                               onStart: { model.beginShapeGesture("parte da forma 3D") }, onValue: onValue,
-                               onEnd: { model.endShapeGesture() })
-                ValueBox(shown, enabled: true, tint: animated ? AureaColors.accent : AureaColors.text)
+                               onStart: { selectedVector = "scale"; scaleDragging = true; model.beginShapeGesture("parte da forma 3D") }, onValue: send,
+                               onEnd: finish)
+                ParamValueBox(shown, onTap: {
+                    guard !scaleDragging else { return }; selectedVector = "scale"
+                    model.numericKeypad = KeypadRequest(title: label, value: value * 100, unit: "%", min: min * 100, max: max * 100, decimals: 1) { amount in
+                        guard model.projectGeneration == project, model.primarySelection == layerId,
+                              (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
+                        model.beginShapeGesture("parte da forma 3D"); send(amount / 100); model.endShapeGesture()
+                    }
+                })
             }
-        }
+        }.onDisappear(perform: finish)
+         .id("shape.scale:\(project):\(composition ?? 0):\(layerId):\(state.part(model))")
     }
 }

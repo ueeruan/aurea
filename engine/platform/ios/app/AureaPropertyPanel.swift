@@ -123,15 +123,26 @@ struct AureaPropertyPanel: View {
             }
         }
         .disabled(locked)
+        .id("\(prefix):\(projectGeneration):\(compositionId)")
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(prefix)
         // These controls also appear inside native sheets. Hosting their
         // existing pickers locally prevents the root overlay being underneath.
         .sheet(item: $keypad) { request in
-            NumericKeypadSheet(request: request) { keypad = nil }.environmentObject(model)
+            NumericKeypadSheet(request: request) {
+                guard keypad?.id == request.id else { return }
+                keypad = nil
+            }.environmentObject(model)
+                .presentationDetents([.height(456)])
+                .presentationDragIndicator(.hidden).interactiveDismissDisabled()
         }
-        .sheet(item: $picker, onDismiss: finishColorGesture) { request in
-            ColorPickerSheet(request: request) { picker = nil; request.onDone() }.environmentObject(model)
+        .sheet(item: $picker) { request in
+            ColorPickerSheet(request: request) {
+                guard picker?.id == request.id else { return }
+                picker = nil; request.onDone()
+            }.environmentObject(model)
+                .presentationDetents([.height(560)])
+                .presentationDragIndicator(.hidden).interactiveDismissDisabled()
         }
         .onDisappear { finishColorGesture(); if model.timelineFocus == selected.map({ [$0] }) { model.timelineFocus = nil } }
     }
@@ -215,9 +226,6 @@ struct AureaPropertyPanel: View {
         case fxParamFloat, fxParamInt: numeric(p, component: 0)
         case fxParamAngle:
             numeric(p, component: 0)
-            AureaAngleControl(value: value(p, 0), range: p.typedMin...p.typedMax, label: label(p), identifier: prefix + "." + p.id + ".angle") {
-                select(p, 0); write(p, 0, $0)
-            }
         case fxParamPoint2D, fxParamPoint3D:
             ForEach(0..<p.components, id: \.self) { numeric(p, component: $0) }
         case fxParamColor: color(p)
@@ -328,41 +336,4 @@ struct AureaPropertyPanel: View {
     private func finishColorGesture() {
         if colorGestureOpen { colorGestureOpen = false; model.endGesture() }
     }
-}
-
-/// Reuses the existing rotation dial artwork; only this property's range and
-/// the existing native setter determine the editable cone angle.
-@MainActor private struct AureaAngleControl: View {
-    let value: Float
-    let range: ClosedRange<Float>
-    let label: String
-    let identifier: String
-    let onValue: (Float) -> Void
-    @EnvironmentObject private var model: AureaModel
-    @State private var previous: Float?
-    @State private var accumulated: Float = 0
-    @State private var editing = false
-    var body: some View {
-        TransformDial(angle: editing ? accumulated : value)
-            .frame(width: 112, height: 112).contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { event in
-                let dx = event.location.x - 56, dy = event.location.y - 56
-                guard hypot(dx, dy) >= 22 else { previous = nil; return }
-                let angle = Float(atan2(dy, dx) * 180 / .pi)
-                if !editing { accumulated = value; editing = true; model.beginGesture(label) }
-                if let previous {
-                    var delta = angle - previous
-                    if delta > 180 { delta -= 360 }; if delta < -180 { delta += 360 }
-                    accumulated = (accumulated + delta).clamped(to: range); onValue(accumulated)
-                }
-                previous = angle
-            }.onEnded { _ in end() })
-            .accessibilityElement().accessibilityLabel(label).accessibilityValue(comUnidade(numeroPtBr(value, casas: 1), "°"))
-            .accessibilityAdjustableAction { direction in
-                let delta: Float = direction == .increment ? 1 : direction == .decrement ? -1 : 0
-                guard delta != 0 else { return }
-                model.beginGesture(label); onValue((value + delta).clamped(to: range)); model.endGesture()
-            }.accessibilityIdentifier(identifier).onDisappear(perform: end)
-    }
-    private func end() { previous = nil; if editing { editing = false; model.endGesture() } }
 }

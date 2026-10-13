@@ -217,6 +217,7 @@ struct NativePanelColorWell: View {
 }
 struct NativePanelRuler: View {
     @EnvironmentObject private var model: AureaModel
+    @Environment(\.isEnabled) private var enabled
     let label: String
     let value: Float
     let step: Float
@@ -250,40 +251,50 @@ struct NativePanelRuler: View {
             else {
                 PropertyLabelChip(label, expression: expression, keyframe: look, onTap: { onSelect?() })
                     .transformEnvironment(\.aureaSelectedProperty) { if onSelect != nil { $0 = selected ? label : nil } }
-                    .onLongPressGesture(minimumDuration: 0.5) { onExpression?() }
+                    .onLongPressGesture(minimumDuration: 0.5) { if reset == nil { onExpression?() } }
+                    .contextMenu {
+                        if let reset {
+                            Button(AureaText.t("panel_voltar_padrao")) { set(reset) }
+                                .disabled(abs(shown - reset) <= 0.001 * max(1, abs(reset)))
+                            if let onExpression { Button(AureaText.t("panel_expressao"), action: onExpression) }
+                        }
+                    }
             }
             Color.clear.frame(width: plainLabelWidth != nil ? 0 : keypad ? 6 : 8)
-            TickRuler(value: { shown }, unitsPerDp: step, active: true, height: controlHeight).frame(maxWidth: .infinity).frame(height: controlHeight)
-                .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
-                           onStart: { live = value; dragging = true; model.beginGesture(label) }, onValue: { live = $0; set($0) }, onEnd: { dragging = false; model.endGesture() })
+            TickRuler(value: { shown }, unitsPerDp: step, active: enabled && (selected || dragging), height: ParamRowDims.labelH).frame(maxWidth: .infinity).frame(minWidth: 30, minHeight: ParamRowDims.labelH)
+                .valueDrag(enabled: enabled, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
+                           onStart: { live = value; dragging = true; onSelect?(); model.beginGesture(label) }, onValue: { live = $0; set($0) }, onEnd: finish)
                 .accessibilityElement()
                 .accessibilityLabel(accessibilityName ?? label)
                 .accessibilityValue(comUnidade(numeroPtBr(shown, casas: decimals), unit))
                 .accessibilityAdjustableAction { direction in
                     let delta = step * 10 * (direction == .increment ? 1 : direction == .decrement ? -1 : 0)
-                    guard delta != 0 else { return }
-                    model.beginGesture(label); set((value + delta).clamped(to: range)); model.endGesture()
+                    guard enabled, delta != 0 else { return }
+                    onSelect?(); model.beginGesture(label); set((value + delta).clamped(to: range)); model.endGesture()
                 }
                 .accessibilityIdentifier(identifier)
             Color.clear.frame(width: keypad ? 6 : 8)
-            ValueBox(compactUnit ? numeroPtBr(shown, casas: decimals) + unit : comUnidade(numeroPtBr(shown, casas: decimals), unit), onTap: keypad ? openKeypad : nil)
+            ParamValueBox(compactUnit ? numeroPtBr(shown, casas: decimals) + unit : comUnidade(numeroPtBr(shown, casas: decimals), unit), enabled: enabled, onTap: keypad ? openKeypad : nil)
                 .accessibilityLabel(accessibilityName ?? label)
                 .accessibilityValue(comUnidade(numeroPtBr(shown, casas: decimals), unit))
                 .accessibilityIdentifier(identifier.isEmpty ? "" : identifier + ".value")
-            if let reset {
-                Button { set(reset) } label: { CupertinoGlyph.text(CupertinoGlyph.ArrowCounterclockwise, size: 16, color: AureaColors.muted).frame(width: 34, height: 44) }
-                    .buttonStyle(.plain).opacity(abs(shown - reset) > 0.001 * max(1, abs(reset)) ? 1 : 0).disabled(abs(shown - reset) <= 0.001 * max(1, abs(reset)))
-            }
             if let toggleKey {
                 Color.clear.frame(width: 4)
-                Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: true).frame(width: max(40, controlHeight), height: 44) }.buttonStyle(.plain)
+                Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: enabled).frame(width: max(44, controlHeight), height: ParamRowDims.labelH) }.buttonStyle(.plain)
                     .accessibilityLabel(AureaText.t(look == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui") + " · " + label)
             }
-        }.frame(height: 48).onDisappear { if dragging { dragging = false; model.endGesture() } }
+        }.frame(height: ParamRowDims.row).onDisappear(perform: finish)
     }
+    private func finish() { if dragging { dragging = false; model.endGesture() } }
     private func openKeypad() {
+        guard enabled, !dragging else { return }
+        onSelect?()
         let limits = typedRange ?? range
+        let project = model.projectGeneration, layer = model.primarySelection
+        let composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
         let request = KeypadRequest(title: label, value: value, unit: unit, min: limits.lowerBound, max: limits.upperBound, decimals: decimals, percentBase: range.upperBound) {
+            guard model.projectGeneration == project, model.primarySelection == layer,
+                  (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
             model.beginGesture(label); set($0.clamped(to: limits)); model.endGesture()
         }
         if let presentKeypad { presentKeypad(request) } else { model.numericKeypad = request }
@@ -2171,25 +2182,27 @@ struct NativeAnimationTrackActions: View {
     let track: TimelineTrack
     let curveTag: String
     private var id: Int64 { model.primarySelection ?? 0 }
-    private var keys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { Int($0.property) == track.property && $0.effectIndex == track.effect && $0.paramIndex == track.param }.sorted { $0.time < $1.time } }
     var body: some View {
-            let previous = keys.last { $0.time < model.localPlayhead }
-            let next = keys.first { $0.time > model.localPlayhead }
+            let navigation = model.engine.keyframeNavigation(id, property: UInt32(track.property), effect: track.effect,
+                param: track.param, compositionFrame: model.status.playhead)
+            let flags = navigation?["flags"]?.uint32Value ?? 0
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    Button(AureaText.t("panel_keyframe_anterior")) { if let previous { seek(previous) } }.disabled(previous == nil)
-                    Button(AureaText.t("panel_proximo_keyframe")) { if let next { seek(next) } }.disabled(next == nil)
+                    Button(AureaText.t("panel_keyframe_anterior")) {
+                        if let frame = navigation?["previousFrame"]?.int64Value { model.seek(toFrame: frame) }
+                    }.disabled(flags & 2 == 0).frame(minHeight: 44)
+                        .accessibilityIdentifier(curveTag + ".previous")
+                    Button(AureaText.t("panel_proximo_keyframe")) {
+                        if let frame = navigation?["nextFrame"]?.int64Value { model.seek(toFrame: frame) }
+                    }.disabled(flags & 4 == 0).frame(minHeight: 44)
+                        .accessibilityIdentifier(curveTag + ".next")
                     Button(AureaText.t("panel_curva")) {
-                        let key = keys.dropLast().last { $0.time <= model.localPlayhead } ?? keys.first
-                        model.openCurve(property: UInt32(track.property), effect: track.effect, param: track.param, time: key?.time)
-                    }.disabled(keys.count < 2).accessibilityIdentifier(curveTag)
+                        guard let start = navigation?["segmentStart"]?.int64Value else { return }
+                        model.openCurve(property: UInt32(track.property), effect: track.effect, param: track.param,
+                                        time: Int32(clamping: start))
+                    }.disabled(flags & 8 == 0).frame(minHeight: 44).accessibilityIdentifier(curveTag)
                 }.buttonStyle(.borderless).frame(minHeight: 44)
             }
-    }
-    private func seek(_ key: KeyframeItem) {
-        guard let detail = model.engine.layerDetail(id), let start = (detail["startFrame"] as? NSNumber)?.int64Value,
-              let offset = (detail["offsetFrames"] as? NSNumber)?.int64Value else { return }
-        model.seek(toFrame: Int64(key.time) + start - offset)
     }
 }
 

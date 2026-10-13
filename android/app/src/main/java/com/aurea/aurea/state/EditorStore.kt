@@ -3409,6 +3409,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    /**
+     * Ponto (X e Y) de efeito num comando só — o arrasto no palco (pontos do
+     * Saber). Dois `setEffectParam` seguidos releriam o vetor velho entre um e
+     * outro. Animado → um keyframe por eixo no playhead.
+     */
+    fun setEffectPoint(effectId: Int, param: EffectParam, x: Float, y: Float) {
+        if (!x.isFinite() || !y.isFinite()) return
+        val id = primary ?: return
+        val d = detail ?: return
+        val local = d.localFrame(playhead)
+        send {
+            if (param.animated) {
+                insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4, local, x)
+                insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4 + 1, local, y)
+            } else {
+                val v = param.value
+                setEffectVector(id, effectId, param.index, x, y, v.getOrElse(2) { 0f }, v.getOrElse(3) { 0f })
+            }
+        }
+        refreshNow()
+    }
+
     fun effectCurve(effect: Int, param: Int, channel: Int, samples: Boolean = false): FloatArray =
         primary?.let { engine.effectCurve(it, effect, param, channel, samples) } ?: FloatArray(0)
 

@@ -499,6 +499,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawPuppetOverlay(store, m)
         return
     }
+    // Saber com o cartão aberto (núcleo único): início e fim do núcleo (SaberStage.kt).
+    if (saberActive(store)) drawSaberOverlay(store, m)
     // Forma 3D com parte escolhida: um ponto no centro de cada parte (o gizmo segue abaixo).
     if (shapePartActive(store)) drawShapePartOverlay(store, m)
     // Roto Brush: o traço ao vivo no lugar das alças da camada.
@@ -1169,6 +1171,15 @@ private suspend fun PointerInputScope.stageGestures(
         if (puppetActive(store)) {
             puppetGesture(store, m, down)
             return@awaitEachGesture
+        }
+        // Saber (cartão aberto, núcleo único): os pontos de início/fim têm a vez;
+        // fora deles, o palco segue normal.
+        if (m.valid && saberActive(store)) {
+            val handle = pickSaberHandle(store, m, downX, downY, 24.dp.toPx())
+            if (handle >= 0) {
+                saberGesture(store, m, down, handle)
+                return@awaitEachGesture
+            }
         }
         // Roto Brush (RotoPaint.kt): o dedo pinta traços de objeto/fundo.
         if (rotoPaintActive(store)) {

@@ -300,8 +300,10 @@ let builtinPresetNameKeys: [String: [String]] = [
                  "app_preset_anim_zoom_in", "app_preset_anim_pulse", "app_preset_anim_spin_in"],
     "curva": ["app_preset_curve_cubic", "app_preset_curve_strong_inout", "app_preset_curve_expo_out", "app_preset_curve_expo_in",
               "app_preset_curve_back_out", "app_preset_curve_back_in"],
+    // "" = fica o nome do arquivo (os de marca: "CC · Detail", "Omino · Diffusion").
     "efeitos": ["app_preset_fx_soft_blur", "app_preset_fx_focus_in", "app_preset_fx_neon_glow", "app_preset_fx_bw",
-                "app_preset_fx_strong_contrast", "app_preset_fx_sepia", "app_preset_fx_dream", "app_preset_fx_turbulence"],
+                "app_preset_fx_strong_contrast", "app_preset_fx_sepia", "app_preset_fx_dream", "app_preset_fx_turbulence",
+                "", "", "", "", "app_preset_fx_luma_in", "app_preset_fx_luma_out"],
     "legenda": ["app_preset_caption_viral", "app_preset_caption_karaoke", "app_preset_caption_subtle", "pack_text_4", "pack_text_5"],
 ]
 
@@ -361,7 +363,7 @@ extension PanelPresetEntry {
                     if let bytes = AureaJSONData(object, false), let json = String(data: bytes, encoding: .utf8) {
                         // Nome no idioma do app (o JSON fala pt-BR); sem recurso, o do arquivo.
                         let keys = builtinPresetNameKeys[kind.rawValue] ?? []
-                        let name = index < keys.count ? AureaText.t(keys[index]) : object["name"] as? String ?? ""
+                        let name = index < keys.count && !keys[index].isEmpty ? AureaText.t(keys[index]) : object["name"] as? String ?? ""
                         result.append(PanelPresetEntry(id: "b:\(kind.rawValue):\(index)", name: name.isEmpty ? AureaText.t("pn_preset_n", index + 1) : name, kind: kind, json: json))
                     }
                 }

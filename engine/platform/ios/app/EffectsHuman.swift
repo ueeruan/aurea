@@ -181,6 +181,13 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         keywords: "cc burn film queimar burn filme film fogo fire brasa ember transicao transition", principal: [0, 1, 2])),
     ("aurea.transition.block_load", FxEffectHuman(name: "cc_name_block_load",
         keywords: "cc block load blocos blocks carregar loading pixel jpeg progressivo progressive transicao transition", principal: [0, 1, 2, 3])),
+    // --- 0.1.8 BETA 2: Saber (o plugin de sabre/neon) e Luma Dissolve ---
+    ("aurea.light.saber", FxEffectHuman(
+        keywords: "saber video copilot sabre de luz lightsaber neon energia energy brilho glow raio laser traco stroke contorno outline eletrico electric fogo fire plasma magia magic write on desenhar mascara mask texto",
+        principal: [6, 7, 8, 1, 2, 3, 4, 5, 11, 12, 31])),
+    ("aurea.transition.luma_dissolve", FxEffectHuman(
+        keywords: "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn",
+        principal: [0, 3, 1, 10, 2, 8, 9])),
     ("aurea.transform", FxEffectHuman(
         name: "fx_name_transform",
         keywords: "transform mover posicao escala girar rotacao opacidade",
@@ -1769,6 +1776,9 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.transition.radial_scale_wipe", "cc_desc_radial_scale_wipe", FxVisualTargets + [.cena3D], "cc radial scalewipe scale wipe varredura radial radial wipe furo hole escala scale transicao transition")
     put("aurea.transition.burn_film", "cc_desc_burn_film", FxVisualTargets + [.cena3D], "cc burn film queimar burn filme film fogo fire brasa ember transicao transition")
     put("aurea.transition.block_load", "cc_desc_block_load", FxVisualTargets + [.cena3D], "cc block load blocos blocks carregar loading pixel jpeg progressivo progressive transicao transition")
+    // --- 0.1.8 BETA 2 (também em camada de ajuste: vale para o que está abaixo) ---
+    put("aurea.light.saber", "saber_desc", FxVisualTargets + [.cena3D], "saber sabre lightsaber neon energia energy brilho glow laser eletrico electric fogo fire plasma световой меч неон नियॉन نيون")
+    put("aurea.transition.luma_dissolve", "luma_dissolve_desc", FxVisualTargets + [.cena3D], "luma dissolve dissolveluma dissolver luminancia luminance transicao transition fade disolver растворение विलय تلاشي")
     put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")

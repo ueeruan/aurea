@@ -67,6 +67,7 @@
 		AE0000000000000000000083 /* LayerPanels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000082 /* LayerPanels.swift */; };
 		AE00000000000000000027C1 /* AureaPropertyPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000027C0 /* AureaPropertyPanel.swift */; };
 		AE00000000000000B1E0C004 /* PuppetStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000B1E0C003 /* PuppetStage.swift */; };
+		AE00000000000000B2FE5A02 /* SaberStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000B2FE5A01 /* SaberStage.swift */; };
 		AE00000000000000B1E0C002 /* BlendCutThumb.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000B1E0C001 /* BlendCutThumb.swift */; };
 		AE0000000000000000000085 /* ParticleControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000084 /* ParticleControls.swift */; };
 		AE0000000000000000000087 /* presets in Resources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000086 /* presets */; };
@@ -181,6 +182,7 @@
 		AE0000000000000000000082 /* LayerPanels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerPanels.swift; sourceTree = "<group>"; };
 		AE00000000000000000027C0 /* AureaPropertyPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AureaPropertyPanel.swift; sourceTree = "<group>"; };
 		AE00000000000000B1E0C003 /* PuppetStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PuppetStage.swift; sourceTree = "<group>"; };
+		AE00000000000000B2FE5A01 /* SaberStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaberStage.swift; sourceTree = "<group>"; };
 		AE00000000000000B1E0C001 /* BlendCutThumb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlendCutThumb.swift; sourceTree = "<group>"; };
 		AE0000000000000000000084 /* ParticleControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticleControls.swift; sourceTree = "<group>"; };
 		AE0000000000000000000086 /* presets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/presets; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 				AE0000000000000000000082 /* LayerPanels.swift */,
 				AE00000000000000000027C0 /* AureaPropertyPanel.swift */,
 				AE00000000000000B1E0C003 /* PuppetStage.swift */,
+				AE00000000000000B2FE5A01 /* SaberStage.swift */,
 				AE00000000000000B1E0C001 /* BlendCutThumb.swift */,
 				AE0000000000000000000088 /* MediaPanels.swift */,
 				AE000000000000000000008A /* AnimationTools.swift */,
@@ -566,6 +569,7 @@
 				AE0000000000000000000083 /* LayerPanels.swift in Sources */,
 				AE00000000000000000027C1 /* AureaPropertyPanel.swift in Sources */,
 				AE00000000000000B1E0C004 /* PuppetStage.swift in Sources */,
+				AE00000000000000B2FE5A02 /* SaberStage.swift in Sources */,
 				AE00000000000000B1E0C002 /* BlendCutThumb.swift in Sources */,
 				AE0000000000000000000089 /* MediaPanels.swift in Sources */,
 				AE000000000000000000008B /* AnimationTools.swift in Sources */,

@@ -37,6 +37,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/project/Serialization.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/audio/AudioEffects.hpp"
@@ -13504,6 +13505,7 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "ModelCameraGpu.inl"
 #include "RigPoseGpu.inl"
 #include "CCEffectsGpu.inl"
+#include "SaberLumaDissolveGpu.inl"
 #include "GlesFallbackGpu.inl"
 
 // -----------------------------------------------------------------------------

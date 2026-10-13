@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.1.8 BETA 2: Saber e Luma Dissolve (nomes de efeito em inglês em todo idioma; descrição traduzida). -->
+    <string name="saber_desc">सफ़ेद-गर्म कोर और चौड़ी चमक वाली ऊर्जा रेखा — दो बिंदुओं के बीच, मास्क पर या टेक्स्ट की रूपरेखा पर। लाइटसेबर, नियॉन, इलेक्ट्रिक और आग के प्रीसेट।</string>
+    <string name="luma_dissolve_desc">लेयर चमक के हिसाब से गायब या प्रकट होती है: पहले गहरे हिस्से, या नॉइज़, ग्रेडिएंट या किसी दूसरी लेयर से, वैकल्पिक रंगीन किनारे के साथ।</string>
+    <string name="fxp_saber_default">डिफ़ॉल्ट</string>
+    <string name="fxp_saber_lightsaber">लाइटसेबर</string>
+    <string name="fxp_saber_neon">नियॉन</string>
+    <string name="fxp_saber_electric">इलेक्ट्रिक</string>
+    <string name="fxp_saber_fire">आग</string>
+    <string name="fxp_saber_plasma">प्लाज़्मा</string>
+    <string name="fxp_saber_energy">ऊर्जा</string>
+    <string name="fxp_saber_soft">हल्की चमक</string>
+    <string name="fxp_saber_magic">जादू</string>
+    <string name="app_preset_fx_luma_in">Luma Dissolve (प्रवेश)</string>
+    <string name="app_preset_fx_luma_out">Luma Dissolve (निकास)</string>
+    <string name="saber_point_start">सेबर की शुरुआत</string>
+    <string name="saber_point_end">सेबर का अंत</string>
+    <string name="saber_points_hint">सेबर का बिंदु खिसकाने के लिए खींचें</string>
+</resources>

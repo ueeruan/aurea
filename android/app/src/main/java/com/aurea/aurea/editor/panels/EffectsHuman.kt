@@ -210,6 +210,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "cc burn film queimar burn filme film fogo fire brasa ember transicao transition", principal = listOf(0, 1, 2)))
     put("aurea.transition.block_load", EffectHuman(name = R.string.cc_name_block_load,
         keywords = "cc block load blocos blocks carregar loading pixel jpeg progressivo progressive transicao transition", principal = listOf(0, 1, 2, 3)))
+    // --- 0.1.8 BETA 2: Saber (o plugin de sabre/neon) e Luma Dissolve ---
+    put("aurea.light.saber", EffectHuman(
+        keywords = "saber video copilot sabre de luz lightsaber neon energia energy brilho glow raio laser traco stroke contorno outline eletrico electric fogo fire plasma magia magic write on desenhar mascara mask texto",
+        principal = listOf(6, 7, 8, 1, 2, 3, 4, 5, 11, 12, 31)))
+    put("aurea.transition.luma_dissolve", EffectHuman(
+        keywords = "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn",
+        principal = listOf(0, 3, 1, 10, 2, 8, 9)))
     put("aurea.stylize.omino_diffusion", EffectHuman(
         name = R.string.fx_name_omino_diffusion, keywords = "omino omine diffusion difusao glitch paleta faixas",
         principal = listOf(0, 1, 2, 5, 6), params = mapOf(

@@ -135,10 +135,12 @@ struct LayerPlacement {
 [[nodiscard]] Rect visible_layer_rect(const LayerPlacement& placement) noexcept;
 
 /// Um valor de preset: parâmetro (índice da declaração) e valor parado
-/// (componente 0; bool = 0/1, enum = índice).
+/// (bool = 0/1, enum = índice). `component` escolhe o componente de ponto e
+/// cor (0 = x/r ... 3 = w/a); os escalares usam só o 0.
 struct EffectPresetValue {
     u32 param;
     f32 value;
+    u32 component = 0;
 };
 /// Preset de um efeito (Effect::presets). `id` é estável — a interface traduz
 /// o nome por ele; `name` é o texto do motor (pt-BR).

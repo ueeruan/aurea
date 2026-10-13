@@ -303,6 +303,8 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     NSString* _cacheDirectory;
     NSString* _documentsDirectory;
     NSString* _lastImportError;
+    int32_t _lastExportStartCode;
+    NSString* _lastExportStartMessage;
     aurea::scene3d::ImportProgress _importProgress;   ///< o import 3D em curso (um por vez)
 #if DEBUG
     NSDictionary<NSString*, id>* _lastCaptureDiagnostics;
@@ -3932,8 +3934,13 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportSafeModeMax);
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
-    return e->start_export(settings, out.c_str()).ok() ? YES : NO;
+    const aurea::Status status = e->start_export(settings, out.c_str());
+    _lastExportStartCode = status.ok() ? 0 : static_cast<int32_t>(status.code());
+    _lastExportStartMessage = status.ok() || status.detail().empty() ? @"" : to_ns(std::string(status.detail()));
+    return status.ok() ? YES : NO;
 }
+- (int32_t)lastExportStartCode { return _lastExportStartCode; }
+- (NSString*)lastExportStartMessage { return _lastExportStartMessage ?: @""; }
 
 - (void)cancelExport {
     if (auto* e = self.engine) (void)e->cancel_export();

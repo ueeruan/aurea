@@ -692,6 +692,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)freezeFrameForLayer:(long long)layerId frame:(int32_t)frame hold:(int32_t)holdFrames;
 /// Motivo legível da última importação que falhou ("" quando deu certo).
 @property (nonatomic, readonly, copy) NSString* lastImportError;
+/// Motivo da última recusa de `startExportTo:` (0.1.8): o código Errc e a frase
+/// do motor. Antes a recusa chegava vazia e o iPhone só dizia "Não foi possível
+/// iniciar a exportação".
+@property (nonatomic, readonly) int32_t lastExportStartCode;
+@property (nonatomic, readonly, copy) NSString* lastExportStartMessage;
 
 // --- Consultas --------------------------------------------------------------
 /// Uma linha por camada, da frente para o fundo (chaves AureaLayer*).

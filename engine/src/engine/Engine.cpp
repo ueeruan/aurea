@@ -720,19 +720,23 @@ Status prepare_original_export_models(Project& project, CompositionId root,
             // mostra. Antes, qualquer um desses casos abortava o export inteiro
             // com erro 9 ("memoria insuficiente para exportar o modelo com
             // texturas Original") — ex.: um carro de 300 mil triângulos.
-            // ...desde que a prévia tenha todas as texturas: sem elas o vídeo
-            // sairia sem textura, e aí a recusa continua (AssetCorrupted).
-            const bool havePreview = prior != models.end() && prior->second && prior->second->missingTextures.empty()
-                && !prior->second->stats.texturesSkipped && model_texture_references_complete(*prior->second);
+            // 0.1.8: mesmo com a prévia sem alguma textura (FBX/OBJ trazido do
+            // app Arquivos sem a pasta de imagens, textura corrompida), o
+            // vídeo sai como a prévia mostra. Antes a exportação inteira era
+            // recusada e o iPhone só dizia "Não foi possível iniciar a
+            // exportação" (iPhone 16 com modelo 3D, 12/10/2026).
+            const bool havePreview = prior != models.end() && prior->second;
             auto keepPreview = [&](const Status& why) -> bool {
                 if (!havePreview) {
-                    AUREA_LOG_WARN("export Original: %s recusado (previa sem todas as texturas: faltam %u, puladas %u): %.*s",
-                        source->name.c_str(), prior != models.end() && prior->second
-                            ? static_cast<u32>(prior->second->missingTextures.size()) : 0u,
-                        prior != models.end() && prior->second ? static_cast<u32>(prior->second->stats.texturesSkipped) : 0u,
+                    AUREA_LOG_WARN("export Original: %s recusado (sem modelo da previa): %.*s", source->name.c_str(),
                         static_cast<int>(why.detail().size()), why.detail().empty() ? "" : why.detail().data());
                     return false;
                 }
+                if (!prior->second->missingTextures.empty() || prior->second->stats.texturesSkipped
+                    || !model_texture_references_complete(*prior->second))
+                    AUREA_LOG_WARN("export Original: %s sai como a previa, sem %u textura(s) ausente(s) e %u pulada(s)",
+                        source->name.c_str(), static_cast<u32>(prior->second->missingTextures.size()),
+                        static_cast<u32>(prior->second->stats.texturesSkipped));
                 AUREA_LOG_WARN("export Original: %s exportado com o modelo da previa (%.*s)", source->name.c_str(),
                     static_cast<int>(why.detail().size()), why.detail().empty() ? "" : why.detail().data());
                 return true;
@@ -13346,15 +13350,21 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
         return {};
     }, &ctx);
     offlineRenderer.set_hdri_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::HdriPixels> {
+        // O mesmo contrato da prévia (Engine::hdri_lookup): nulo = AINDA
+        // carregando; panorama vazio = falta de vez, e o quadro sai com o
+        // estúdio neutro, como a prévia mostrou. Antes um HDRI que não coube
+        // na prévia vinha nulo do cache e o export esperava até o prazo e
+        // falhava sem mensagem ("Não foi possível iniciar" no iPhone com 3D).
+        static const std::shared_ptr<const scene3d::HdriPixels> missing = std::make_shared<const scene3d::HdriPixels>();
         auto& c = *static_cast<ExportContext*>(p);
-        if (const auto it = c.frozenHdris.find(id.pack()); it != c.frozenHdris.end()) return it->second;
+        if (const auto it = c.frozenHdris.find(id.pack()); it != c.frozenHdris.end()) return it->second ? it->second : missing;
         const Asset* asset = c.frozenProject->asset(id);
-        if (!asset || asset->kind != AssetKind::Environment) return {};
+        if (!asset || asset->kind != AssetKind::Environment) return missing;
         const auto pixels = read_hdri_file(asset->sourcePath, c.frozenAssetBudget).pixels;
-        if (!pixels) c.frozenAssetStatus = Errc::MediaSourceMissing;
+        if (!pixels) AUREA_LOG_WARN("export: ambiente HDRI nao carregou; sai com o estudio neutro, como na previa");
         else c.frozenAssetBudget -= std::min<u64>(c.frozenAssetBudget, pixels->rgb.capacity() * sizeof(f32));
         c.frozenHdris[id.pack()] = pixels;
-        return pixels;
+        return pixels ? pixels : missing;
     }, &ctx);
     offlineRenderer.set_cube_lookup([](void* p, AssetId id) -> std::shared_ptr<const CubeLut> {
         auto& c = *static_cast<ExportContext*>(p);
@@ -13362,7 +13372,13 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
         const Asset* asset = c.frozenProject->asset(id);
         if (!asset || asset->kind != AssetKind::Lut) return {};
         auto parsed = read_color_table(asset->sourcePath);
-        if (!parsed.ok()) { c.frozenAssetStatus = parsed.status(); return {}; }
+        if (!parsed.ok()) {
+            // Como a prévia (Engine::cube_lookup): LUT ilegível = efeito sem
+            // a tabela, nunca o export inteiro falhando no fim (0.1.8).
+            AUREA_LOG_WARN("export: LUT/paleta ilegivel; o efeito sai sem a tabela, como na previa");
+            c.frozenLuts[id.pack()] = nullptr;
+            return {};
+        }
         auto lut = std::make_shared<const CubeLut>(std::move(*parsed));
         c.frozenLuts[id.pack()] = lut;
         return lut;

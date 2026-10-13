@@ -227,7 +227,10 @@ AUREA_TEST(OriginalModelExport, InsufficientSourceMemoryExportsWithThePreviewMod
     AUREA_CHECK(rig.e.new_project(96, 64, 30, "startup failure released ownership").ok());
 }
 
-AUREA_TEST(OriginalModelExport, MissingRequiredTextureDoesNotPublishAnUntexturedVideo) {
+// 0.1.8: a textura que a prévia já não tem não impede o export — o vídeo sai
+// como a prévia mostra (antes: AssetCorrupted e "Não foi possível iniciar a
+// exportação" no iPhone com modelo 3D).
+AUREA_TEST(OriginalModelExport, MissingTextureExportsWhatThePreviewShows) {
     OriginalModelFixture fixture("aurea-original-missing");
     const auto source = fixture.glb(4096, "-bad.glb", true);
     AUREA_CHECK(!source.empty()); if (source.empty()) return;
@@ -243,9 +246,12 @@ AUREA_TEST(OriginalModelExport, MissingRequiredTextureDoesNotPublishAnUntextured
     AUREA_CHECK(scene && scene->images[0].pixels().empty());
     AUREA_CHECK_EQ(rig.e.last_model_import().texturesSkipped, 0u); // Legacy decode warnings are not counted here.
     ExportSettings settings; settings.height = 64;
-    const auto failed = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
-    AUREA_CHECK_EQ(failed.code(), Errc::AssetCorrupted);
-    AUREA_CHECK(!rig.cap.opened && rig.cap.writes == 0 && !rig.cap.finished);
+    const auto started = rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str());
+    AUREA_CHECK(started.ok());
+    for (int i = 0; i < 20000 && !rig.e.export_progress().finished; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const auto p = rig.e.export_progress();
+    AUREA_CHECK(p.finished && p.result == Errc::Ok);
+    AUREA_CHECK(rig.cap.opened && rig.cap.finished);
 }
 
 AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRestoresPreviewProxyWithoutWaitingIdle) {
@@ -328,4 +334,32 @@ AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRes
             previewTexture = true;
     AUREA_CHECK(previewTexture);
     AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+}
+
+// 0.1.8: imagem de ambiente (HDRI) que não carregou — nem na prévia — sai com o
+// estúdio neutro, como a prévia mostra. Antes o cache da prévia guardava nulo,
+// o export lia "ainda carregando", esperava o prazo e falhava sem mensagem
+// ("Não foi possível iniciar a exportação" no iPhone com 3D).
+AUREA_TEST(OriginalModelExport, MissingEnvironmentImageExportsWithTheNeutralStudio) {
+    SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig rig(cfg, 30, 4, 1, nullptr, backend);
+    AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    AUREA_CHECK(rig.e.add_shape3d(0).ok());
+    Asset env;
+    env.kind = AssetKind::Environment;
+    env.name = "ambiente sumido";
+    env.sourcePath = "aurea_teste_ambiente_que_nao_existe.hdr";
+    const AssetId id = rig.e.project()->add_asset(std::move(env));
+    rig.comp()->environment().hdri = id;
+    rig.comp()->environment().showBackground = true;
+    AUREA_CHECK(rig.e.attach_surface(reinterpret_cast<void*>(1), 96, 64).ok());
+    AUREA_CHECK(rig.e.render_frame().ok());   // a prévia tenta, falha e guarda nulo
+    ExportSettings settings; settings.height = 64;
+    AUREA_CHECK(rig.e.start_export(settings, "aurea_teste_ambiente.mp4").ok());
+    for (int i = 0; i < 30000 && !rig.e.export_progress().finished; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const auto p = rig.e.export_progress();
+    AUREA_CHECK(p.finished);
+    AUREA_CHECK_EQ(p.result, Errc::Ok);
+    AUREA_CHECK(rig.cap.finished);
 }

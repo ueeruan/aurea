@@ -3711,9 +3711,10 @@ final class AureaModel: ObservableObject {
         guard startVideoExport(url, safeMode: 0) else {
             preExporting = false
             let progress = engine.exportProgress()
-            let message = progress["message"] as? String ?? ""
-            let code = (progress["result"] as? NSNumber)?.intValue ?? 0
-            exportMessage = message.isEmpty ? AureaText.t("ios_export_could_not_start") : AureaEngineText.sentence(message, code: code)
+            let startCode = Int(engine.lastExportStartCode)
+            let message = startCode != 0 ? engine.lastExportStartMessage : (progress["message"] as? String ?? "")
+            let code = startCode != 0 ? startCode : (progress["result"] as? NSNumber)?.intValue ?? 0
+            exportMessage = message.isEmpty && code == 0 ? AureaText.t("ios_export_could_not_start") : AureaEngineText.sentence(message, code: code)
             toast = exportMessage
             return
         }
@@ -3750,10 +3751,13 @@ final class AureaModel: ObservableObject {
         }
         let ok = startVideoExport(url, safeMode: 0)
         guard ok else {
+            // O motivo da recusa vem da própria largada (0.1.8); o progresso do
+            // export anterior não diz nada sobre esta.
             let progress = engine.exportProgress()
-            let message = progress["message"] as? String ?? ""
-            let code = (progress["result"] as? NSNumber)?.intValue ?? 0
-            exportMessage = message.isEmpty ? AureaText.t("ios_export_could_not_start")
+            let startCode = Int(engine.lastExportStartCode)
+            let message = startCode != 0 ? engine.lastExportStartMessage : (progress["message"] as? String ?? "")
+            let code = startCode != 0 ? startCode : (progress["result"] as? NSNumber)?.intValue ?? 0
+            exportMessage = message.isEmpty && code == 0 ? AureaText.t("ios_export_could_not_start")
                 : AureaEngineText.sentence(message, code: code)
             toast = exportMessage
             return
@@ -3824,7 +3828,9 @@ final class AureaModel: ObservableObject {
         exportedKind = .video
         pendingExport = nil
         guard startVideoExport(pending.url, safeMode: 0) else {
-            exportMessage = AureaText.t("ios_export_could_not_start")
+            exportMessage = engine.lastExportStartCode != 0
+                ? AureaEngineText.sentence(engine.lastExportStartMessage, code: Int(engine.lastExportStartCode))
+                : AureaText.t("ios_export_could_not_start")
             toast = exportMessage
             return
         }
@@ -3910,7 +3916,7 @@ final class AureaModel: ObservableObject {
         let code = engine.startImageExport(to: url.path, format: options.kind.engineCode, shortSide: options.imageShortSide,
                                            maxWidth: options.gifWidth, fps: imageExportFps(options), trimToContent: options.trimToContent)
         guard code == 0 else {
-            exportMessage = code == 6 && options.kind != .frame ? AureaText.t("exp2_too_long") : AureaText.t("ios_export_could_not_start")
+            exportMessage = code == 6 && options.kind != .frame ? AureaText.t("exp2_too_long") : AureaEngineText.sentence(nil, code: Int(code))
             toast = exportMessage
             return
         }

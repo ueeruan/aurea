@@ -66,6 +66,10 @@ enum class Errc : i32 {
     ProjectCorrupted,     ///< PROJECT_CORRUPTED: nenhuma cópia válida do projeto (principal, .tmp, .bak)
     EncoderUnavailable,   ///< ENCODER_UNAVAILABLE: o aparelho não tem encoder para o pedido
     Busy,                 ///< Renderer owned by another bounded operation; retry without replacing the displayed image.
+    /// CODEC_HUNG: o codec do APARELHO (encoder ou decoder da plataforma) parou
+    /// de responder dentro de uma chamada e a sessão ficou presa na quarentena.
+    /// Não é falta de memória (antes saía como BudgetExceeded = "erro 9").
+    CodecHung,
 };
 
 // Contrato com a UI (EditorStore.kt): os números abaixo são lidos lá.
@@ -77,6 +81,7 @@ static_assert(static_cast<i32>(Errc::ShuttingDown) == 27);
 static_assert(static_cast<i32>(Errc::StorageFull) == 28);
 static_assert(static_cast<i32>(Errc::EncoderUnavailable) == 31);
 static_assert(static_cast<i32>(Errc::Busy) == 32);
+static_assert(static_cast<i32>(Errc::CodecHung) == 33);
 
 [[nodiscard]] constexpr std::string_view to_string(Errc e) noexcept {
     switch (e) {
@@ -113,6 +118,7 @@ static_assert(static_cast<i32>(Errc::Busy) == 32);
         case Errc::ProjectCorrupted:      return "projeto corrompido";
         case Errc::EncoderUnavailable:    return "encoder indisponivel";
         case Errc::Busy:                  return "motor ocupado";
+        case Errc::CodecHung:             return "codec do aparelho travou";
     }
     return "erro desconhecido";
 }
@@ -136,6 +142,7 @@ static_assert(static_cast<i32>(Errc::Busy) == 32);
         case Errc::MediaSourceMissing: return "MEDIA_MISSING";
         case Errc::DeviceLost:         return "GPU_DEVICE_LOST";
         case Errc::Busy:               return "RENDER_BUSY";
+        case Errc::CodecHung:          return "CODEC_HUNG";
         default:                       return "ERRC_OTHER";
     }
 }

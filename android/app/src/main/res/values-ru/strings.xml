@@ -3080,6 +3080,9 @@
     <string name="report_what_happened">Что вы ожидали и что произошло</string>
     <string name="report_steps">Шаги для воспроизведения (необязательно)</string>
     <string name="report_device">Устройство</string>
+    <string name="msg_codec_do_aparelho_travou">Видеокодер телефона завис. Попробуйте H.264 или меньшее разрешение.</string>
+    <string name="report_attach_export">Приложить диагностику последнего экспорта</string>
+    <string name="report_attach_export_hint">Только технические данные последнего экспорта с проблемой: модель и чип устройства, кодек и кодировщик, разрешение, fps, где он остановился и почему. Без проектов, медиафайлов и имён файлов.</string>
     <string name="report_send">Отправить</string>
     <string name="report_sending">Отправка…</string>
     <string name="report_sent">Спасибо! Сообщение отправлено.</string>

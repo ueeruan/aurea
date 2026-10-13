@@ -346,7 +346,12 @@ struct Engine::ExportContext {
     std::atomic<u64> encoderBeatNs{0};
     std::atomic<bool> encoderBusy{false};      ///< fora da fila (sink, mix, IA)
     std::atomic<u32> encoderPhase{0};          ///< ExportWorkerPhase
-    u64 workerHangNs = kExportWorkerHangNs;
+    /// Prazo fixo do watchdog (EngineConfig::exportWorkerHangMs); 0 = adaptativo
+    /// pela fase e pelo tempo médio medido (export_worker_hang_limit_ns).
+    u64 workerHangNs = 0;
+    /// Quadros que o worker já entregou ao sink nesta sessão (o tempo médio
+    /// por quadro do watchdog é (writeNs + audioNs) / isto).
+    std::atomic<u64> encodedFrames{0};
     bool encoderExited = false;                ///< qMutex: o worker saiu (arquivo fechado ou abortado)
     bool abandoned = false;                    ///< qMutex: worker travado; nada mais toca no sink
     bool finishCalled = false;                 ///< qMutex: o worker chamou sink->finish
@@ -354,6 +359,18 @@ struct Engine::ExportContext {
     ExportWorkerPhase hungPhase = ExportWorkerPhase::Idle;   ///< qMutex: onde travou
     /// Nível do modo de segurança desta sessão (ExportSettings::safeMode).
     u32 safeMode = 0;
+    /// Decodificação compatível da mídia nesta sessão (ExportSettings::softwareDecode).
+    bool softwareDecode = false;
+    /// qMutex: a verificação pós-export reprovou o arquivo (conselho: software).
+    bool validationFailed = false;
+    /// O decoder da mídia de origem travou (fonte sem quadro exato por todo o
+    /// prazo, ou o worker preso no mix de áudio): conselho com decodificação compatível.
+    bool sourceDecoderHung = false;
+    /// Diagnóstico (export_diagnostic): o encoder aberto e os avisos da
+    /// verificação tolerante (cópia: o sink some antes de a tela ler).
+    ExportSink::EncoderInfo encoderInfo{};
+    ExportCodec codec = ExportCodec::H264;
+    char validationWarnings[384]{};   ///< qMutex
 
     void beat() noexcept { encoderBeatNs.store(monotonic_ns(), std::memory_order_release); }
     void enter(ExportWorkerPhase p) noexcept {
@@ -370,10 +387,13 @@ struct Engine::ExportContext {
     [[nodiscard]] bool worker_hung_locked(u64 now) const noexcept {
         if (encoderExited) return false;
         const auto phase = static_cast<ExportWorkerPhase>(encoderPhase.load(std::memory_order_relaxed));
+        const u64 measured = encodedFrames.load(std::memory_order_relaxed);
+        const u64 busyNs = writeNs.load(std::memory_order_relaxed) + audioNs.load(std::memory_order_relaxed);
         return export_worker_hung(encoderBusy.load(std::memory_order_acquire), now,
                                   encoderBeatNs.load(std::memory_order_acquire),
                                   export_worker_hang_limit_ns(phase, workerHangNs,
-                                                              cancelRequested.load(std::memory_order_acquire)));
+                                                              cancelRequested.load(std::memory_order_acquire),
+                                                              measured, measured ? busyNs / measured : 0));
     }
     /// Chamado com qMutex: desiste do worker (ele não chama mais o sink se
     /// voltar) e devolve o motivo.
@@ -381,6 +401,8 @@ struct Engine::ExportContext {
         abandoned = true;
         stop = true;
         hungPhase = static_cast<ExportWorkerPhase>(encoderPhase.load(std::memory_order_relaxed));
+        // Preso no mix de áudio = o DECODER da mídia de origem travou.
+        if (hungPhase == ExportWorkerPhase::AudioMix) sourceDecoderHung = true;
         // Retired native calls must observe cancellation before they can publish
         // a staging file or decode/mix another block when the platform returns.
         cancelRequested.store(true, std::memory_order_release);
@@ -12762,8 +12784,9 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // depois de o encoder travar; acima do máximo vale o máximo.
     ctx->safeMode = std::min(settings.safeMode, kExportSafeModeMax);
     if (ctx->safeMode) ctx->progress.flags |= kExportSafeMode;
-    ctx->workerHangNs = config_.exportWorkerHangMs ? static_cast<u64>(config_.exportWorkerHangMs) * 1'000'000ull
-                                                   : kExportWorkerHangNs;
+    ctx->softwareDecode = settings.softwareDecode;
+    if (ctx->softwareDecode) ctx->progress.flags |= kExportSoftwareDecode;
+    ctx->workerHangNs = config_.exportWorkerHangMs ? static_cast<u64>(config_.exportWorkerHangMs) * 1'000'000ull : 0;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
@@ -12830,6 +12853,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                 config_.exportExecutionProfile); !plan.ok())
             return Status{plan.code(), "tempo de exportacao fora do limite do scheduler"};
         ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
+        ctx->audioCache->set_software_decode(ctx->softwareDecode);
         auto offlineAudio = OfflineAudioSnapshot::create(*comp, *ctx->frozenProject,
             ctx->audioCache.get(), &Engine::audio_path_resolver, this,
             OfflineAudioSnapshot::kDefaultBlockBudget, &ctx->cancelRequested);
@@ -12900,7 +12924,9 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     vc.height = ctx->outputHeight;
     vc.fps = ctx->fps;
     vc.codec = settings.videoCodec;
+    ctx->codec = vc.codec;
     vc.validateBeforePublish = true;
+    vc.strictValidation = config_.strictExportVerification;
     // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
     // 1080p30 Normal ≈ 8 Mbps, 4K30 ≈ 32 Mbps; Mbps manual só com teto. No
     // modo de segurança, o bitrate continua sendo o solicitado.
@@ -13029,7 +13055,8 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     ExportSinkStartupResult startupResult;
     Status openStatus;
     ExportSinkStartupLimits limits;
-    limits.stallNs = ctx->workerHangNs;
+    // Abrir o encoder é a fase de PREPARAÇÃO do watchdog (ExportWatchdog.hpp).
+    limits.stallNs = ctx->workerHangNs ? ctx->workerHangNs : export_watch_deadline_ns(ExportWatchStage::Preparing, 0);
     startupResult = open_export_sink_startup(std::move(ctx->sink), outputPath, vc, withAudio ? &ac : nullptr,
         &ctx->cancelRequested, &ctx->encoderBeatNs, limits);
     ctx->sink = std::move(startupResult.sink);
@@ -13065,7 +13092,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->progress.result = code;
         ctx->progress.failure = static_cast<u32>(failure);
         ctx->progress.flags = (ctx->progress.flags & ~kExportRetryMask) |
-            (export_retry_safe_mode(failure, ctx->safeMode) << kExportRetryShift);
+            export_retry_flags(export_retry_advice(failure, ctx->safeMode, false, false, ctx->softwareDecode));
         ctx->set_message(detail);
         if (ctx->sink) ctx->sink->abort();
         ctx->sink.reset();
@@ -13083,6 +13110,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // capability table that may describe a different device/session.
     {
         const ExportSink::EncoderInfo enc = ctx->sink->encoder_info();
+        ctx->encoderInfo = enc;
         bool hw = false, sw = false;
         if (enc.acceleration == ExportSink::Acceleration::Hardware) hw = true;
         else if (enc.acceleration == ExportSink::Acceleration::Software) sw = true;
@@ -13309,7 +13337,10 @@ Status Engine::retire_abandoned_export_locked(bool admitNewSession) noexcept {
     if (admitNewSession && held >= retiredExports_.size()) {
         // Preserve the previous progress/error. No third encoder or frame
         // buffers are created while two native calls remain quarantined.
-        return Status{Errc::BudgetExceeded, "duas sessoes de exportacao ainda presas; aguarde os encoders encerrarem"};
+        // CodecHung, não BudgetExceeded: a tela dizia "sem memória" (erro 9)
+        // quando o que travou foi o codec do aparelho. Uma sessão presa ainda
+        // admite a nova tentativa (a compatível, em software): o limite é 2.
+        return Status{Errc::CodecHung, "duas sessoes de exportacao ainda presas no codec do aparelho"};
     }
     if (activeRetirement) {
         for (auto& retired : retiredExports_) {
@@ -13319,7 +13350,7 @@ Status Engine::retire_abandoned_export_locked(bool admitNewSession) noexcept {
                 static_cast<void*>(retired.get()));
             return OkStatus;
         }
-        return Status{Errc::BudgetExceeded, "limite de sessoes nativas de exportacao atingido"};
+        return Status{Errc::CodecHung, "limite de sessoes nativas de exportacao presas atingido"};
     }
     return OkStatus;
 }
@@ -13343,6 +13374,7 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     if (const Status initialized = ctx.offline->initialize(*gpu_, effectRegistry_, config_.mediaFactory,
             &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull); !initialized.ok())
         return initialized;
+    ctx.offline->set_software_decode(ctx.softwareDecode);
     auto& offlineRenderer = ctx.offline->compositor();
     offlineRenderer.set_model_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::SceneAsset> {
         const auto& c = *static_cast<ExportContext*>(p);
@@ -13729,7 +13761,17 @@ void Engine::export_thread_main() noexcept {
             target.upscaleHistory = pingPong ? ctx.upscale[(i + 1) & 1u] : TextureHandle{};
             target.upscaleHistoryValid = pingPong && i > ctx.startFrame;
         }
+        if (ctx.offline) {
+            // Prazo da fonte (decoder da mídia): preparação até o 1º quadro,
+            // depois max(12 s, 8 × tempo médio de render por quadro).
+            // Prazo fixo da config (testes) vale aqui também.
+            const u64 rendered = ctx.profiledFrames;
+            ctx.offline->set_stall_patience_ns(ctx.workerHangNs ? ctx.workerHangNs : export_watch_deadline_ns(
+                rendered ? ExportWatchStage::Steady : ExportWatchStage::Preparing,
+                rendered ? ctx.renderNs.load(std::memory_order_relaxed) / rendered : 0));
+        }
         result = render_export_frame(plan->compositionFrame, target, slot.gpuFrame);
+        if (!result.ok() && ctx.offline && ctx.offline->source_stalled()) ctx.sourceDecoderHung = true;
         if (ctx.queue && (i == 0 || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !result.ok()))
             AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
             i, static_cast<long long>(plan->ptsUs), static_cast<unsigned long long>(monotonic_ns()),
@@ -13860,11 +13902,17 @@ void Engine::export_thread_main() noexcept {
         }
         const ExportFailure failure = export_failure_reason(stage, result.code());
         ctx.progress.failure = static_cast<u32>(failure);
-        // O encoder travou ou recusou: a tela refaz no próximo modo de
-        // segurança que o MOTOR sugere (as duas telas só obedecem).
-        const u32 retry = result.ok() ? 0u : export_retry_safe_mode(failure, ctx.safeMode);
-        ctx.progress.flags = (ctx.progress.flags & ~kExportRetryMask) | (retry << kExportRetryShift);
-        if (retry) AUREA_LOG_WARN("export: refazer no modo de seguranca %u e sugerido a tela", retry);
+        // O encoder travou ou recusou, a verificação reprovou ou o decoder da
+        // mídia travou: a tela refaz no modo que o MOTOR sugere (as duas
+        // telas só obedecem). Cancelamento nunca é refeito.
+        bool validationFailed = false;
+        { std::lock_guard<std::mutex> ql(ctx.qMutex); validationFailed = ctx.validationFailed; }
+        const ExportRetryAdvice advice = result.ok() || result.code() == Errc::Cancelled ? ExportRetryAdvice{}
+            : export_retry_advice(failure, ctx.safeMode, validationFailed && stage == ExportStage::Finish,
+                                  ctx.sourceDecoderHung && failure == ExportFailure::Media, ctx.softwareDecode);
+        ctx.progress.flags = (ctx.progress.flags & ~kExportRetryMask) | export_retry_flags(advice);
+        if (advice.level) AUREA_LOG_WARN("export: refazer no modo de seguranca %u%s e sugerido a tela", advice.level,
+                                         advice.softwareDecode ? " com decodificacao compativel" : "");
         if (resumable) ctx.progress.flags |= kExportResumable;
         if (result.ok()) ctx.set_message("concluido");
         else if (result.code() == Errc::Cancelled) ctx.set_message("cancelado");
@@ -13952,9 +14000,24 @@ void Engine::export_encoder_main() noexcept {
                     if (fin.ok() && c.queue) {
                         fin = c.queue->begin_validating();
                         c.publish_export_phase("validando");
-                        if (fin.ok()) fin = c.sink->validate_output({c.outputWidth, c.outputHeight,
-                            c.frames, c.fps, c.withAudio});
+                        ExportOutputValidation expected{c.outputWidth, c.outputHeight, c.frames, c.fps, c.withAudio};
+                        expected.strict = e.config_.strictExportVerification;
+                        const bool validating = fin.ok();
+                        if (fin.ok()) fin = c.sink->validate_output(expected);
                         if (c.abandoned_worker()) { retiredExit(); return; }
+                        {
+                            const char* warned = c.sink->validation_warnings();
+                            std::lock_guard<std::mutex> ql(c.qMutex);
+                            std::snprintf(c.validationWarnings, sizeof(c.validationWarnings), "%s", warned ? warned : "");
+                            if (validating && !fin.ok() && fin.code() != Errc::Cancelled) c.validationFailed = true;
+                        }
+                        if (fin.ok() && c.validationWarnings[0]) {
+                            // Divergência aceita (verificação tolerante): o arquivo é
+                            // publicado; o aviso vai para o log e o diagnóstico.
+                            AUREA_LOG_WARN("export: verificacao tolerante publicou com avisos: %s", c.validationWarnings);
+                            std::lock_guard<std::mutex> pl(c.mutex);
+                            c.progress.flags |= Engine::kExportVerifyWarnings;
+                        }
                         c.queue->validated(fin);
                         c.publish_export_phase(fin.ok() ? "concluido" : "falha na validacao");
                     }
@@ -14025,6 +14088,7 @@ void Engine::export_encoder_main() noexcept {
             ctx.audioNs.fetch_add(monotonic_ns() - w1, std::memory_order_relaxed);
         }
         ctx.leave();
+        if (s.ok()) ctx.encodedFrames.fetch_add(1, std::memory_order_relaxed);
         if (ctx.queue) {
             if (s.ok()) s = ctx.queue->encoded(si, i);
             else ctx.queue->fail(s);
@@ -14048,6 +14112,7 @@ void Engine::export_encoder_main() noexcept {
             // O sink pode trocar de encoder no primeiro quadro (buffer de
             // entrada inútil no de hardware → software): o aviso acompanha.
             const ExportSink::EncoderInfo enc = ctx.sink->encoder_info();
+            { std::lock_guard<std::mutex> ql(ctx.qMutex); ctx.encoderInfo = enc; }
             if (enc.acceleration == ExportSink::Acceleration::Software) {
                 std::lock_guard<std::mutex> pl(ctx.mutex);
                 ctx.progress.flags = (ctx.progress.flags & ~kExportHardwareEncoder) | kExportSoftwareEncoder;
@@ -14131,6 +14196,49 @@ Engine::ExportProgress Engine::export_progress() const noexcept {
     if (!exportCtx_) return ExportProgress{};
     std::lock_guard<std::mutex> pl(exportCtx_->mutex);
     return exportCtx_->progress;
+}
+
+std::string Engine::export_diagnostic() const noexcept {
+    try {
+        std::lock_guard<std::mutex> context(exportContextMutex_);
+        if (!exportCtx_) return {};
+        const ExportContext& c = *exportCtx_;
+        if (c.imageMode) return {};
+        ExportSink::EncoderInfo enc{};
+        ExportWorkerPhase hung = ExportWorkerPhase::Idle;
+        bool abandoned = false, validationFailed = false;
+        char warnings[sizeof(c.validationWarnings)]{};
+        {
+            std::lock_guard<std::mutex> ql(const_cast<ExportContext&>(c).qMutex);
+            enc = c.encoderInfo;
+            abandoned = c.abandoned;
+            hung = c.hungPhase;
+            validationFailed = c.validationFailed;
+            std::memcpy(warnings, c.validationWarnings, sizeof(warnings));
+        }
+        ExportProgress p;
+        { std::lock_guard<std::mutex> pl(const_cast<ExportContext&>(c).mutex); p = c.progress; }
+        const char* accel = enc.acceleration == ExportSink::Acceleration::Hardware ? "hw"
+                          : enc.acceleration == ExportSink::Acceleration::Software ? "sw" : "?";
+        const char* codec = c.codec == ExportCodec::HEVC ? "HEVC" : c.codec == ExportCodec::H264 ? "H.264"
+                          : c.codec == ExportCodec::AV1 ? "AV1" : "ProRes";
+        static constexpr const char* kPhases[] = {"ocioso", "video", "mix-audio", "audio", "ia", "finalizar", "soltar"};
+        const u32 phaseIndex = static_cast<u32>(hung);
+        char line[768]{};
+        std::snprintf(line, sizeof(line),
+            "codec=%s encoder=%s(%s) saida=%ux%u@%.3f seguranca=%u decod=%s quadro=%u/%u resultado=%d motivo=%u "
+            "travou=%s%s%s verificacao=%s%s%s",
+            codec, enc.name[0] ? enc.name : "?", accel, c.outputWidth, c.outputHeight, c.fps, c.safeMode,
+            c.softwareDecode ? "compativel" : "padrao", p.framesDone, p.framesTotal, static_cast<int>(p.result),
+            p.failure, abandoned ? kPhases[phaseIndex < 7 ? phaseIndex : 0] : "nao",
+            c.sourceDecoderHung ? " fonte=decoder-preso" : "",
+            (p.flags & kExportRetryMask) ? (p.flags & kExportRetrySoftwareDecode ? " refazer=sw+decod" : " refazer=sw") : "",
+            validationFailed ? "reprovou" : warnings[0] ? "avisos" : "ok",
+            warnings[0] ? ": " : "", warnings);
+        return std::string(line);
+    } catch (...) {
+        return {};
+    }
 }
 
 // =============================================================================

@@ -106,6 +106,10 @@ enum class ExportFailure : u32 {
     File = 6,             ///< o arquivo de saída não pôde ser gravado
     Storage = 7,          ///< armazenamento cheio
     Unsupported = 8,      ///< resolução/codec acima do que o aparelho exporta
+    /// O codec do aparelho travou dentro da plataforma (o watchdog abandonou o
+    /// worker, ou sessões presas recusam um novo export). Não é memória: antes
+    /// a recusa saía como BudgetExceeded → motivo 4 ("sem memória de vídeo").
+    CodecHung = 9,
     Other = 15,
 };
 
@@ -119,6 +123,7 @@ inline constexpr u32 kExportFailureShift = 24;
     switch (code) {
         case Errc::Ok:
         case Errc::Cancelled: return ExportFailure::None;
+        case Errc::CodecHung: return ExportFailure::CodecHung;
         case Errc::StorageFull: return ExportFailure::Storage;
         case Errc::OutOfMemory:
         case Errc::BudgetExceeded:

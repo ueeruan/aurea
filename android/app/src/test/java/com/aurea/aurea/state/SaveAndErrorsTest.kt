@@ -33,6 +33,9 @@ class SaveAndErrorsTest {
             assertFalse("código $code sem mensagem própria", msg.startsWith("Erro inesperado"))
         }
         assertTrue(localizedError(28).contains("espaço"))
+        // CodecHung (33): o codec do aparelho travou — nunca mais "memória" (9).
+        assertTrue(localizedError(33).contains("travou"))
+        assertFalse(localizedError(33).contains("memória"))
         assertTrue(localizedError(12).contains("versão mais nova"))
         assertTrue(localizedError(999).contains("999"))
     }

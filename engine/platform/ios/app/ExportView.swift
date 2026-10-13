@@ -571,7 +571,12 @@ struct ExportView: View {
         default: break
         }
         if model.exportPaused { notices.append(AureaText.t("app_export_paused")) }
-        if flags & AureaExportFlag.safeMode.rawValue != 0 { notices.append(AureaText.t("app_export_safe_mode")) }
+        if flags & AureaExportFlag.safeMode.rawValue != 0 {
+            // Nova tentativa no modo compatível: o aviso dela (no lugar do erro).
+            notices.append(model.exportRetryNotice.isEmpty ? AureaText.t("app_export_safe_mode") : model.exportRetryNotice)
+        } else if model.exportHevcNote != nil {
+            notices.append(AureaText.t("app_export_hevc_to_h264"))
+        }
         if flags & AureaExportFlag.resumed.rawValue != 0 { notices.append(AureaText.t("app_export_resumed")) }
         if model.exportOptions.aiUpscale > 0, let message = model.exportProgress["message"] as? String, message.hasPrefix("IA:") {
             notices.append(AureaEngineText.aiProgress(message))

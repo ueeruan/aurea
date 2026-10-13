@@ -22,11 +22,12 @@
 //     chamada da plataforma que RETORNA; sem batida por `limite`, o motor desiste
 //     daquele worker em vez de esperar o join para sempre.
 //
-//  4) MODO DE SEGURANÇA (export_retry_safe_mode e afins). Quando o encoder
+//  4) MODO DE SEGURANÇA (export_retry_advice e afins). Quando o encoder
 //     trava ou recusa no meio, a tela refaz o export num modo mais compatível:
-//     nível 1 = H.264 Baseline, lados em múltiplos de 16, bitrate preservado; nível 2 =
-//     o mesmo no encoder de SOFTWARE (Android). Quem decide o próximo nível é o
-//     motor (vai nos bits 16..17 de `flags` do progresso); as telas só obedecem.
+//     nível 1 = H.264 Baseline, bitrate preservado; nível 2 = o mesmo no
+//     encoder de SOFTWARE (libopenh264, Android e iOS). Decoder da mídia preso:
+//     também a decodificação compatível. Quem decide é o motor (bits 16..18 de
+//     `flags` do progresso); as telas só obedecem.
 //
 //  5) FIM SEM EOS (export_*_complete_without_eos). Encoder que entrega todos os
 //     quadros mas perde a marca de fim do fluxo não pode custar o arquivo.
@@ -137,21 +138,71 @@ enum class ExportWorkerPhase : u32 {
     Abort = 6,      ///< sink.abort (soltar o encoder)
 };
 
-/// Sem batida por isto, o worker está preso dentro da plataforma. Os laços dos
-/// sinks voltam em milissegundos (dequeue de 2 a 10 ms) e têm prazo próprio de
-/// 10 s (hardware) / 30 s (software); uma única chamada que segura 45 s não
-/// volta mais.
-inline constexpr u64 kExportWorkerHangNs = 45'000'000'000ull;
-/// Soltar o encoder (abort) não codifica nada: 10 s bastam.
-inline constexpr u64 kExportWorkerAbortHangNs = 10'000'000'000ull;
-/// Cancelado, todo laço de sink volta em milissegundos (eles olham o
-/// cancelamento a cada volta): 3 s sem batida = preso na plataforma.
-inline constexpr u64 kExportWorkerCancelHangNs = 3'000'000'000ull;
+// -----------------------------------------------------------------------------
+// 3a) Prazos por fase, adaptados ao ritmo medido (0.1.8 BETA 2)
+// -----------------------------------------------------------------------------
+// Antes: 45 s fixos sem batida (qualquer fase), 3 s depois do cancelamento e
+// 10 s para soltar o encoder. Os testers viam o export "parado" quase um
+// minuto antes de o motor desistir de um decoder/encoder preso (MediaTek,
+// HyperOS, Qualcomm antigos), e 3 s depois do cancelamento abandonava um
+// worker que só estava no meio de um quadro pesado — mais uma sessão na
+// quarentena, e o export seguinte recusado. Agora o prazo segue a fase:
+//
+//  · PREPARANDO (nenhum quadro passou ainda): 20 s. Abrir encoder/decoder,
+//    primeiro quadro do HAL, compilar shaders — sem tempo medido ainda; 20 s
+//    sem NENHUM sinal de vida já é várias vezes o pior caso visto em aparelho
+//    (abrir MediaCodec leva < 5 s até nos de entrada).
+//  · REGIME (já há tempo médio por quadro): max(12 s, 8 × média). Uma única
+//    chamada da plataforma que segura 8 quadros médios sem voltar não é lenta,
+//    está presa; o piso de 12 s cobre GC/térmico de um aparelho lento.
+//  · RECUPERAÇÃO (cancelado ou soltando o encoder): max(10 s, 4 × média). O
+//    laço do sink olha o cancelamento a cada volta, mas uma chamada já em
+//    curso (quadro 3D pesado, software em 4K) termina o que começou.
+//
+// Todo prazo tem teto de 45 s (o valor fixo de antes: nunca mais paciente que
+// a versão anterior) — a tela (kExportUiStallSeconds = 180 s) continua acima
+// de qualquer prazo do motor somado ao da GPU (120 s).
+enum class ExportWatchStage : u32 { Preparing = 0, Steady = 1, Recovery = 2 };
 
-[[nodiscard]] inline u64 export_worker_hang_limit_ns(ExportWorkerPhase phase, u64 baseNs, bool cancelled = false) noexcept {
-    if (baseNs == 0) baseNs = kExportWorkerHangNs;
-    if (cancelled) baseNs = std::min(baseNs, kExportWorkerCancelHangNs);
-    return phase == ExportWorkerPhase::Abort ? std::min(baseNs, kExportWorkerAbortHangNs) : baseNs;
+inline constexpr u64 kExportPrepareHangNs = 20'000'000'000ull;
+inline constexpr u64 kExportSteadyHangFloorNs = 12'000'000'000ull;
+inline constexpr u64 kExportSteadyHangFrames = 8;
+inline constexpr u64 kExportRecoveryHangFloorNs = 10'000'000'000ull;
+inline constexpr u64 kExportRecoveryHangFrames = 4;
+inline constexpr u64 kExportWatchCapNs = 45'000'000'000ull;
+
+/// Prazo sem sinal de vida de uma fase (função pura: testada no host).
+/// `avgFrameNs` = tempo médio medido por quadro na etapa vigiada (0 = nada medido).
+[[nodiscard]] inline u64 export_watch_deadline_ns(ExportWatchStage stage, u64 avgFrameNs) noexcept {
+    const auto scaled = [&](u64 frames) noexcept {
+        return avgFrameNs > kExportWatchCapNs / frames ? kExportWatchCapNs : avgFrameNs * frames;
+    };
+    switch (stage) {
+        case ExportWatchStage::Preparing: return kExportPrepareHangNs;
+        case ExportWatchStage::Steady:
+            return std::min(kExportWatchCapNs, std::max(kExportSteadyHangFloorNs, scaled(kExportSteadyHangFrames)));
+        case ExportWatchStage::Recovery:
+            return std::min(kExportWatchCapNs, std::max(kExportRecoveryHangFloorNs, scaled(kExportRecoveryHangFrames)));
+    }
+    return kExportWatchCapNs;
+}
+
+/// A fase vista pelo vigia do worker: cancelado ou soltando o encoder =
+/// recuperação; sem quadro medido = preparando; o resto, regime.
+[[nodiscard]] inline ExportWatchStage export_watch_stage(ExportWorkerPhase phase, bool cancelled, u64 measuredFrames) noexcept {
+    if (cancelled || phase == ExportWorkerPhase::Abort) return ExportWatchStage::Recovery;
+    return measuredFrames == 0 ? ExportWatchStage::Preparing : ExportWatchStage::Steady;
+}
+
+/// Sem batida por isto, o worker está preso dentro da plataforma. `overrideNs`
+/// (EngineConfig::exportWorkerHangMs, testes) fixa o prazo de todas as fases
+/// — na recuperação, nunca acima do prazo adaptativo. 0 = adaptativo.
+[[nodiscard]] inline u64 export_worker_hang_limit_ns(ExportWorkerPhase phase, u64 overrideNs, bool cancelled = false,
+                                                     u64 measuredFrames = 0, u64 avgFrameNs = 0) noexcept {
+    const ExportWatchStage stage = export_watch_stage(phase, cancelled, measuredFrames);
+    const u64 adaptive = export_watch_deadline_ns(stage, avgFrameNs);
+    if (overrideNs == 0) return adaptive;
+    return stage == ExportWatchStage::Recovery ? std::min(overrideNs, adaptive) : overrideNs;
 }
 
 /// `busy` = o worker está fora da fila (dentro do sink, do mix ou da IA).
@@ -168,7 +219,7 @@ inline constexpr u64 kExportWorkerCancelHangNs = 3'000'000'000ull;
 
 /// A tela é a última rede: sem nenhuma mudança no progresso por isto, ela
 /// cancela; sem conclusão `kExportUiGiveUpSeconds` depois, desiste e libera a
-/// tela. Acima de todos os prazos do motor (GPU 120 s, quadro 60 s, worker 45 s).
+/// tela. Acima de todos os prazos do motor (GPU 120 s, worker até 45 s).
 /// Exporter.kt e AureaModel.swift repetem os dois números.
 inline constexpr u32 kExportUiStallSeconds = 180;
 inline constexpr u32 kExportUiGiveUpSeconds = 15;
@@ -180,17 +231,58 @@ inline constexpr u32 kExportSafeModeMax = 2;
 /// Próximo nível sugerido nos bits 16..17 de `flags` do progresso (0 = não
 /// refazer). Abaixo dos bits do motivo (24..31, kExportFailureShift).
 inline constexpr u32 kExportRetryShift = 16;
-inline constexpr u32 kExportRetryMask = 0x3u << kExportRetryShift;
+inline constexpr u32 kExportRetryMask = (0x3u << kExportRetryShift) | (1u << 18);
 
-/// Encoder travou ou recusou no meio: refazer no próximo nível (até o 2).
-/// Qualquer outro motivo (mídia, GPU, disco, cancelamento) não muda refazendo.
+/// Conselho de nova tentativa (bits 16..18 de `flags` do progresso).
+///  · Encoder RECUSOU (abrir/configurar/primeiro quadro): a escada de sempre,
+///    um nível por vez (1 = H.264 Baseline no hardware, 2 = software).
+///  · Encoder PAROU de responder, worker abandonado pelo watchdog, codec preso
+///    na quarentena ou o arquivo reprovado na verificação (agora tolerante: só
+///    reprova arquivo que nem abre/decodifica): direto o nível 2, H.264 por
+///    SOFTWARE — o mesmo encoder do aparelho travaria de novo e a 2ª sessão
+///    presa recusaria o export seguinte. Uma vez só: no nível 2 não há outra.
+///  · O DECODER da mídia de origem travou (fonte sem quadro, mix de áudio
+///    preso): nível 2 E decodificação compatível (software no Android; planos
+///    na CPU no iOS).
+/// Qualquer outro motivo (mídia ilegível, GPU, disco, cancelamento) não muda refazendo.
+struct ExportRetryAdvice {
+    u32 level = 0;               ///< 0 = não refazer
+    bool softwareDecode = false; ///< refazer também com a decodificação compatível
+};
+
+/// Bit 18 de `flags`: o conselho inclui a decodificação compatível.
+inline constexpr u32 kExportRetrySoftwareDecode = 1u << 18;
+
+[[nodiscard]] inline ExportRetryAdvice export_retry_advice(ExportFailure failure, u32 currentLevel,
+                                                           bool verificationFailed = false,
+                                                           bool sourceDecoderHung = false,
+                                                           bool softwareDecodeActive = false) noexcept {
+    if (currentLevel >= kExportSafeModeMax) return {};
+    if (sourceDecoderHung) return {kExportSafeModeMax, true};
+    switch (failure) {
+        case ExportFailure::Encoder:
+            return {verificationFailed ? kExportSafeModeMax : currentLevel + 1, softwareDecodeActive};
+        case ExportFailure::EncoderStalled:
+        case ExportFailure::CodecHung:
+            return {kExportSafeModeMax, softwareDecodeActive};
+        default:
+            return {};
+    }
+}
+
+/// Só o nível (a escada antiga, sem os sinais de verificação/decoder).
 [[nodiscard]] inline u32 export_retry_safe_mode(ExportFailure failure, u32 currentLevel) noexcept {
-    if (failure != ExportFailure::EncoderStalled && failure != ExportFailure::Encoder) return 0;
-    return currentLevel < kExportSafeModeMax ? currentLevel + 1 : 0;
+    return export_retry_advice(failure, currentLevel).level;
+}
+
+/// Bits do conselho no progresso (nível 16..17, decodificação compatível 18).
+[[nodiscard]] inline u32 export_retry_flags(const ExportRetryAdvice& advice) noexcept {
+    if (!advice.level) return 0;
+    return (advice.level << kExportRetryShift) | (advice.softwareDecode ? kExportRetrySoftwareDecode : 0u);
 }
 
 [[nodiscard]] inline u32 export_retry_from_flags(u32 flags) noexcept {
-    return (flags & kExportRetryMask) >> kExportRetryShift;
+    return (flags >> kExportRetryShift) & 0x3u;
 }
 
 /// Perfil pedido ao encoder (VideoStreamConfig::profile).

@@ -208,8 +208,16 @@ struct EngineConfig {
     /// Watchdog do worker do encoder (export/ExportWatchdog.hpp): sem batida
     /// da plataforma por isto, o motor desiste do worker travado e conclui o
     /// export com falha (EncoderStalled) em vez de esperar o join para sempre.
-    /// 0 = 45 s. Os testes usam menos.
+    /// 0 = adaptativo por fase (export_worker_hang_limit_ns: preparação 20 s,
+    /// regime max(12 s, 8 × média por quadro), teto 45 s). Os testes usam menos.
     u32 exportWorkerHangMs = 0;
+    /// Verificação pós-export ESTRITA (ExportOutputValidation::strict): toda
+    /// divergência de PTS/duração/contagem/dimensão/áudio reprova o arquivo.
+    /// Os apps ficam no tolerante (padrão): divergência vira aviso no
+    /// diagnóstico e o arquivo é publicado; só reprova o que não abre, vazio,
+    /// sem vídeo ou sem nenhum quadro decodificável. Os testes de host que
+    /// guardam o export (retomável, registro de pacotes, PTS) ligam o estrito.
+    bool strictExportVerification = false;
     /// Opt-in integrity recovery. A checked, frozen export snapshot is
     /// persisted before codec open; version 1 restarts from frame zero.
     bool enableExportRecovery = false;
@@ -1739,10 +1747,19 @@ public:
         kExportSafeMode        = 1u << 4,   ///< export no modo de segurança (refeito depois de o encoder travar)
         kExportResumed         = 1u << 5,   ///< continuou um export interrompido (do último GOP íntegro)
         kExportResumable       = 1u << 6,   ///< falhou com quadros salvos: o mesmo start_export continua dali
+        kExportSoftwareDecode  = 1u << 7,   ///< sessão com decodificação compatível da mídia (ExportSettings::softwareDecode)
+        // Bits 8..11: fase do export (kExportPhaseShift, OfflineFrameQueue.hpp).
+        kExportVerifyWarnings  = 1u << 12,  ///< publicado com avisos da verificação tolerante (ver export_diagnostic)
         // Bits 16..17: o próximo modo de segurança sugerido quando o export
-        // falhou pelo encoder (kExportRetryShift, export/ExportWatchdog.hpp).
+        // falhou pelo encoder; bit 18: com decodificação compatível
+        // (kExportRetryShift / kExportRetrySoftwareDecode, export/ExportWatchdog.hpp).
     };
     [[nodiscard]] ExportProgress export_progress() const noexcept;
+    /// Diagnóstico do último export (relato de problema, "anexar diagnóstico"):
+    /// codec e encoder abertos (nome, hardware/software), tamanho/fps, modo de
+    /// segurança, decodificação, onde o worker travou, avisos ou reprovação da
+    /// verificação. Uma linha, sem caminhos. "" = nenhum export nesta sessão.
+    [[nodiscard]] std::string export_diagnostic() const noexcept;
 
     /// Export interrompido nesta saída (export retomável): de onde ele continua
     /// e o total de quadros. `resumeFrame` 0 = nada a continuar.

@@ -190,6 +190,8 @@ internal fun humanErrorResource(code: Int): Int = when (code) {
     29 -> R.string.msg_o_arquivo_de_midia_esta_danificado
     30 -> R.string.msg_o_projeto_esta_danificado_e_nao
     31 -> R.string.msg_este_aparelho_nao_tem_codificador_para
+    // CodecHung: o codec do aparelho travou (antes saía como 9 = "memória").
+    33 -> R.string.msg_codec_do_aparelho_travou
     else -> R.string.msg_erro_inesperado_codigo
 }
 

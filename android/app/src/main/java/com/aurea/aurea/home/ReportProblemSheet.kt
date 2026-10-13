@@ -3,6 +3,8 @@ package com.aurea.aurea.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -28,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
@@ -53,6 +57,9 @@ internal fun ReportProblemSheet(sessao: () -> SessaoGuardada?, onResult: (String
     var whatHappened by rememberSaveable { mutableStateOf("") }
     var steps by rememberSaveable { mutableStateOf("") }
     var sending by rememberSaveable { mutableStateOf(false) }
+    // "Anexar diagnóstico do último export": só aparece quando há um, ligado por padrão.
+    val lastExport = remember { ProblemReport.lastExport(context.applicationContext) }
+    var attachExport by rememberSaveable { mutableStateOf(true) }
     val canSend = whatHappened.trim().length >= 3 && !sending
     val msgSent = stringResource(R.string.report_sent)
     val msgOffline = stringResource(R.string.report_offline)
@@ -73,6 +80,21 @@ internal fun ReportProblemSheet(sessao: () -> SessaoGuardada?, onResult: (String
             CapsLabel(stringResource(R.string.report_device))
             Spacer(Modifier.height(4.dp))
             Text(ProblemReport.deviceSummary(), style = AureaType.Note)
+            if (!lastExport.isNullOrBlank()) {
+                Spacer(Modifier.height(16.dp))
+                val attachLabel = stringResource(R.string.report_attach_export)
+                // A linha inteira é o interruptor (o leitor de tela anuncia o
+                // rótulo e ligado/desligado).
+                Row(
+                    Modifier.fillMaxWidth().toggleable(value = attachExport, role = Role.Switch) { attachExport = it },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(attachLabel, style = AureaType.Body, modifier = Modifier.weight(1f))
+                    AureaSwitch(attachExport) { attachExport = it }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(stringResource(R.string.report_attach_export_hint), style = AureaType.Note)
+            }
             Spacer(Modifier.height(20.dp))
             Box(
                 Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(14.dp))
@@ -82,7 +104,8 @@ internal fun ReportProblemSheet(sessao: () -> SessaoGuardada?, onResult: (String
                         sending = true
                         scope.launch {
                             val r = withContext(Dispatchers.IO) {
-                                ProblemReport.send(context.applicationContext, sessao(), whatDid, whatHappened, steps)
+                                ProblemReport.send(context.applicationContext, sessao(), whatDid, whatHappened, steps,
+                                    attachExport = attachExport)
                             }
                             sending = false
                             when (r) {

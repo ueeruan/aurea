@@ -16,4 +16,9 @@
     <string name="app_export_resume_title">Export interrupted at %1$d%%</string>
     <string name="app_export_resume_continue">Continue export</string>
     <string name="app_export_resume_discard">Discard</string>
+    <!-- BETA 2: codec do aparelho travou (CodecHung), nova tentativa compatível, HEVC sem encoder. -->
+    <string name="expfail_codec_hung">the phone\'s video encoder froze; try H.264 or a lower resolution</string>
+    <string name="app_export_codec_hung_retry">The phone\'s video encoder froze. We\'ll try again in compatibility mode.</string>
+    <string name="app_export_retry_compatible">Trying again in compatibility mode…</string>
+    <string name="app_export_hevc_to_h264">This phone has no HEVC encoder for this size: exporting in H.264.</string>
 </resources>

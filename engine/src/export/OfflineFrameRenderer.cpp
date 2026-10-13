@@ -1,4 +1,5 @@
 #include "aurea/export/OfflineFrameRenderer.hpp"
+#include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/core/Time.hpp"
 #include <chrono>
@@ -52,6 +53,8 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     settings.dither = false;
     const auto cancelled = [&] { return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
     const u64 start = monotonic_ns();
+    const u64 patience = stallPatienceNs_ ? stallPatienceNs_ : 30'000'000'000ull;
+    sourceStalled_ = false;
     u64 lastProgress = start, lastWork = media_.decode_work(), lastGeneration = generation_.load();
     bool reclaimed = false;
     for (;;) {
@@ -90,8 +93,24 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         if (work != lastWork || resources != lastGeneration) {
             lastProgress = now; lastWork = work; lastGeneration = resources;
         }
-        if (now - start > fenceTimeoutNs_ || now - lastProgress > 30'000'000'000ull) {
-            if (!exact) return Status{Errc::DecodeFailed, "a fonte nao entregou o quadro exato; exportacao interrompida"};
+        // A fonte (decoder da mídia) segue o prazo adaptativo; recurso de
+        // composição incompleto (shader, ambiente) mantém os 30 s de antes.
+        const u64 idle = now - lastProgress;
+        // Um decoder ABRINDO (clipe novo no meio do export) é preparação, não
+        // regime: o prazo dele é o da preparação (20 s), nunca o piso de 12 s.
+        const bool sourceStuck = !exact && idle > patience &&
+            (idle > kExportPrepareHangNs || stallPatienceNs_ == 0 || !media_.opening_in_flight());
+        if (now - start > fenceTimeoutNs_ || sourceStuck || (exact && idle > 30'000'000'000ull)) {
+            if (!exact) {
+                // Sem nenhum trabalho do decoder por todo o prazo: o decoder da
+                // mídia de origem está preso (a nova tentativa usa o compatível).
+                sourceStalled_ = sourceStuck;
+                AUREA_LOG_ERROR("export offline: quadro %lld sem a fonte exata por %llu ms (prazo %llu ms)",
+                                static_cast<long long>(time.value),
+                                static_cast<unsigned long long>(idle / 1'000'000ull),
+                                static_cast<unsigned long long>(patience / 1'000'000ull));
+                return Status{Errc::DecodeFailed, "a fonte nao entregou o quadro exato; exportacao interrompida"};
+            }
             // O motivo leva o ponto exato do motor que deixou o quadro incompleto.
             static thread_local char detail[200];
             const char* file = renderer_.incomplete_file();
@@ -99,8 +118,8 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             for (const char* c = base; c && *c; ++c) if (*c == '/' || *c == '\\') base = c + 1;
             std::snprintf(detail, sizeof(detail), "recurso de composicao indisponivel (%s:%u); quadro offline nao foi codificado",
                           base, renderer_.incomplete_line());
-            AUREA_LOG_ERROR("export offline: quadro %lld incompleto por 30 s em %s:%u", static_cast<long long>(time.value),
-                            base, renderer_.incomplete_line());
+            AUREA_LOG_ERROR("export offline: quadro %lld incompleto por %llu ms em %s:%u", static_cast<long long>(time.value),
+                            static_cast<unsigned long long>((now - lastProgress) / 1'000'000ull), base, renderer_.incomplete_line());
             return Status{Errc::Timeout, detail};
         }
         std::unique_lock lock(wakeMutex_);

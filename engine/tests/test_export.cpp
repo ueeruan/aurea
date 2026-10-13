@@ -330,6 +330,9 @@ struct Rig {
         ec.memoryBudgetBytes = trackedBudget;
         if (trackedBudget) ec.enableTrackedGpuAdmission = true;
         ec.exportWorkerHangMs = workerHangMs;
+        // Guarda do host: o export retomável e o registro de pacotes continuam
+        // reprovando qualquer divergência (os apps usam a verificação tolerante).
+        ec.strictExportVerification = true;
         ec.enableExportRecovery = recovery;
         ec.imageLoader = imageLoader;
         ec.imageLoaderContext = imageLoaderContext;
@@ -2997,20 +3000,98 @@ AUREA_TEST(ExportWatchdogRules, OnlyAWorkerStuckInsideThePlatformIsHung) {
     AUREA_CHECK(!export_worker_hung(true, 100 * s, 99 * s, 45 * s));
     // Relógio da batida à frente (outra thread acabou de bater) não é travar.
     AUREA_CHECK(!export_worker_hung(true, 10 * s, 11 * s, 1));
-    // Limites: 45 s padrão; soltar o encoder 10 s; cancelado 3 s.
-    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Video, 0), kExportWorkerHangNs);
-    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Abort, 0), kExportWorkerAbortHangNs);
-    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Finish, 0, true), kExportWorkerCancelHangNs);
+    // Limites por fase (adaptativos): preparando 20 s; soltar o encoder e
+    // cancelado = recuperação (piso de 10 s); prazo fixo da config manda,
+    // na recuperação nunca acima do adaptativo.
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Video, 0), 20 * s);
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Abort, 0), 10 * s);
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Finish, 0, true), 10 * s);
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Video, 0, false, 30, 30'000'000ull), 12 * s);
     AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Video, 400'000'000ull, true), u64{400'000'000});
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Video, 400'000'000ull), u64{400'000'000});
+    AUREA_CHECK_EQ(export_worker_hang_limit_ns(ExportWorkerPhase::Video, 90 * s, true), 10 * s);
     AUREA_CHECK(export_worker_hang_code(ExportWorkerPhase::AudioMix) == Errc::DecodeFailed);
     AUREA_CHECK(export_worker_hang_code(ExportWorkerPhase::Video) == Errc::Timeout);
     // A tela só desiste bem depois de todos os prazos do motor.
-    AUREA_CHECK(u64{kExportUiStallSeconds} * s > kExportWorkerHangNs + 120 * s);
+    AUREA_CHECK(u64{kExportUiStallSeconds} * s > kExportWatchCapNs + 120 * s);
+}
+
+/// 0.1.8 BETA 2: o prazo do watchdog segue a fase e o ritmo medido, em vez
+/// de 45 s fixos (decoder preso esperava quase um minuto) e 3 s depois do
+/// cancelamento (abandonava um quadro 3D pesado ainda em curso).
+AUREA_TEST(ExportWatchdogRules, AdaptiveDeadlinesFollowPhaseAndMeasuredPace) {
+    using namespace aurea;
+    const u64 s = 1'000'000'000ull, ms = 1'000'000ull;
+    // Preparação: sem tempo medido, 20 s (o ritmo não importa).
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Preparing, 0), 20 * s);
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Preparing, 900 * ms), 20 * s);
+    // Regime: max(12 s, 8 × média). Encoder de hardware (30 ms) = piso.
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Steady, 0), 12 * s);
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Steady, 30 * ms), 12 * s);
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Steady, 2 * s), 16 * s);   // cena 3D pesada
+    // Recuperação: max(10 s, 4 × média) — não mais 3 s.
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Recovery, 0), 10 * s);
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Recovery, 4 * s), 16 * s);
+    // Teto: nunca mais paciente que os 45 s fixos de antes, nem com média absurda.
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Steady, 30 * s), kExportWatchCapNs);
+    AUREA_CHECK_EQ(export_watch_deadline_ns(ExportWatchStage::Recovery, ~0ull), kExportWatchCapNs);
+    AUREA_CHECK_EQ(kExportWatchCapNs, 45 * s);
+    // Monótono no ritmo (mais lento = mais paciente) e nunca abaixo do piso.
+    u64 previous = 0;
+    for (u64 avg = 0; avg <= 10 * s; avg += 250 * ms) {
+        const u64 d = export_watch_deadline_ns(ExportWatchStage::Steady, avg);
+        AUREA_CHECK(d >= previous && d >= 12 * s && d <= kExportWatchCapNs);
+        previous = d;
+    }
+    // A fase: cancelado/soltando = recuperação; sem quadro = preparando.
+    AUREA_CHECK(export_watch_stage(ExportWorkerPhase::Video, false, 0) == ExportWatchStage::Preparing);
+    AUREA_CHECK(export_watch_stage(ExportWorkerPhase::Video, false, 1) == ExportWatchStage::Steady);
+    AUREA_CHECK(export_watch_stage(ExportWorkerPhase::Finish, true, 100) == ExportWatchStage::Recovery);
+    AUREA_CHECK(export_watch_stage(ExportWorkerPhase::Abort, false, 0) == ExportWatchStage::Recovery);
+}
+
+/// "Erro 9 = sem memória" era o codec do aparelho preso na quarentena. Agora o
+/// motivo é próprio, e travada/verificação/decoder preso refazem UMA vez em
+/// H.264 por software (com decodificação compatível quando foi o decoder).
+AUREA_TEST(ExportWatchdogRules, CodecHangIsNotMemoryAndRetriesOnceInSoftware) {
+    using namespace aurea;
+    AUREA_CHECK_EQ(static_cast<i32>(Errc::CodecHung), 33);
+    AUREA_CHECK(export_failure_reason(ExportStage::Open, Errc::CodecHung) == ExportFailure::CodecHung);
+    AUREA_CHECK(export_failure_reason(ExportStage::Encode, Errc::CodecHung) == ExportFailure::CodecHung);
+    AUREA_CHECK(export_failure_reason(ExportStage::Open, Errc::BudgetExceeded) == ExportFailure::GpuMemory);
+    AUREA_CHECK_EQ(static_cast<u32>(ExportFailure::CodecHung), 9u);
+    // Travou/abandonado/quarentena: direto o software, uma vez só.
+    for (ExportFailure f : {ExportFailure::EncoderStalled, ExportFailure::CodecHung}) {
+        AUREA_CHECK_EQ(export_retry_advice(f, 0).level, 2u);
+        AUREA_CHECK_EQ(export_retry_advice(f, 1).level, 2u);
+        AUREA_CHECK_EQ(export_retry_advice(f, 2).level, 0u);
+        AUREA_CHECK(!export_retry_advice(f, 0).softwareDecode);
+    }
+    // Recusa na abertura: a escada de sempre (Baseline no hardware, depois software).
+    AUREA_CHECK_EQ(export_retry_advice(ExportFailure::Encoder, 0).level, 1u);
+    AUREA_CHECK_EQ(export_retry_advice(ExportFailure::Encoder, 1).level, 2u);
+    // Verificação reprovou (arquivo que nem decodifica): software.
+    AUREA_CHECK_EQ(export_retry_advice(ExportFailure::Encoder, 0, true).level, 2u);
+    // Decoder da mídia preso: software + decodificação compatível.
+    const ExportRetryAdvice decoder = export_retry_advice(ExportFailure::Media, 0, false, true);
+    AUREA_CHECK_EQ(decoder.level, 2u);
+    AUREA_CHECK(decoder.softwareDecode);
+    AUREA_CHECK_EQ(export_retry_advice(ExportFailure::Media, 2, false, true).level, 0u);
+    // Mídia ilegível sem trava, GPU, disco: refazer não muda nada.
+    for (ExportFailure f : {ExportFailure::Media, ExportFailure::Render, ExportFailure::GpuMemory, ExportFailure::Storage})
+        AUREA_CHECK_EQ(export_retry_advice(f, 0).level, 0u);
+    // Bits do progresso: nível 16..17, decodificação compatível 18, motivo 24..31 intacto.
+    const u32 flags = export_retry_flags(decoder) | (static_cast<u32>(ExportFailure::Media) << kExportFailureShift);
+    AUREA_CHECK_EQ(export_retry_from_flags(flags), 2u);
+    AUREA_CHECK((flags & kExportRetrySoftwareDecode) != 0);
+    AUREA_CHECK_EQ(flags >> kExportFailureShift, static_cast<u32>(ExportFailure::Media));
+    AUREA_CHECK_EQ(export_retry_flags(ExportRetryAdvice{}), 0u);
 }
 
 AUREA_TEST(ExportWatchdogRules, SafeModeLadderAndItsVideoRecipe) {
     using namespace aurea;
-    AUREA_CHECK_EQ(export_retry_safe_mode(ExportFailure::EncoderStalled, 0), 1u);
+    AUREA_CHECK_EQ(export_retry_safe_mode(ExportFailure::EncoderStalled, 0), 2u);   // travou: direto o software
+    AUREA_CHECK_EQ(export_retry_safe_mode(ExportFailure::Encoder, 0), 1u);
     AUREA_CHECK_EQ(export_retry_safe_mode(ExportFailure::Encoder, 1), 2u);
     AUREA_CHECK_EQ(export_retry_safe_mode(ExportFailure::EncoderStalled, 2), 0u);   // última volta
     for (ExportFailure f : {ExportFailure::None, ExportFailure::Render, ExportFailure::GpuMemory, ExportFailure::Media,

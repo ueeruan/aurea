@@ -138,6 +138,9 @@ public:
 
     void register_asset(u64 key, AudioAssetRef ref);
     [[nodiscard]] bool knows(u64 key) const;
+    /// Decoders abertos daqui em diante usam o de SOFTWARE da plataforma
+    /// (export compatível, VideoSourceFactory::open_audio_software).
+    void set_software_decode(bool enabled) noexcept { softwareDecode_.store(enabled, std::memory_order_relaxed); }
 
     /// Bloco pronto, ou nulo (nunca bloqueia; o chamador pede com `want`).
     [[nodiscard]] std::shared_ptr<const AudioBlock> find(u64 key, i64 block) const;
@@ -210,6 +213,7 @@ private:
 
     VideoSourceFactory* factory_;
     u64 budget_;
+    std::atomic<bool> softwareDecode_{false};
     struct Entry {
         std::shared_ptr<const AudioBlock> block;
         mutable u64 lastUse = 0;

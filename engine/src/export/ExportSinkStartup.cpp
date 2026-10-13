@@ -164,6 +164,7 @@ public:
         abort_staged(*state_);
     }
     EncoderInfo encoder_info() const noexcept override { return state_->sink->encoder_info(); }
+    const char* validation_warnings() const noexcept override { return state_->sink->validation_warnings(); }
     Status end_video() noexcept override {
         Binding binding(*this);
         if (finalized_) return Status{Errc::InvalidState, "export ja foi finalizado"};
@@ -259,7 +260,9 @@ ExportSinkStartupResult open_export_sink_startup(std::unique_ptr<ExportSink> sin
     try {
         state = std::make_shared<StartupState>();
         if (!state->permit.acquire()) {
-            result.code = Errc::BudgetExceeded;
+            // Duas aberturas nativas presas = o codec do aparelho travou (não
+            // é memória: BudgetExceeded virava "sem memória de vídeo" na tela).
+            result.code = Errc::CodecHung;
             copy_detail(result.detail, sizeof(result.detail), Status{result.code,
                 "duas sessoes nativas de exportacao ainda abertas; aguarde os encoders encerrarem"});
             return result; // no worker, native open or staging file is created

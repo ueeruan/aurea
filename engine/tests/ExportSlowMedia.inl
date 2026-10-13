@@ -94,6 +94,61 @@ AUREA_TEST(ExportSlowMedia, DeadDecoderStillFailsAsMediaQuickly) {
     AUREA_CHECK(o.seconds < 9.0);
 }
 
+namespace {
+/// O decoder do APARELHO não trabalha (preso); o de software funciona.
+class HardwareStallingFactory final : public VideoSourceFactory {
+public:
+    explicit HardwareStallingFactory(const SyntheticConfig& cfg) : cfg_(cfg) {}
+    bool probe(const char* path, MediaProbe& out) override { return SyntheticFactory(cfg_).probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority priority) override {
+        if (priority == MediaPriority::ExportSoftwareDecode) {
+            ++softwareOpens;
+            return std::make_unique<SyntheticDecoder>(cfg_);
+        }
+        return std::make_unique<StallingDecoder>(cfg_, 0);
+    }
+    std::atomic<u32> softwareOpens{0};
+private:
+    SyntheticConfig cfg_;
+};
+} // namespace
+
+/// BETA 2: o decoder da mídia de origem trava (nenhum trabalho pelo prazo
+/// todo). O motor reconhece a FONTE presa e sugere o modo compatível com a
+/// decodificação por software; a nova tentativa abre os decoders compatíveis
+/// e termina com todos os quadros.
+AUREA_TEST(ExportSlowMedia, StuckSourceDecoderRetriesWithSoftwareDecode) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 64; cfg.height = 36;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    HardwareStallingFactory factory(cfg);
+    // Prazo fixo de 800 ms (a regra adaptativa é testada à parte).
+    Rig r(cfg, 30.0, 3, 3, &factory, nullptr, 800);
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    const Outcome o = run_export(r, 36, 30, false, 30);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::DecodeFailed);
+    AUREA_CHECK_EQ(o.p.failure, static_cast<u32>(ExportFailure::Media));
+    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 2u);
+    AUREA_CHECK((o.p.flags & kExportRetrySoftwareDecode) != 0);
+    AUREA_CHECK(r.e.export_diagnostic().find("fonte=decoder-preso") != std::string::npos);
+    AUREA_CHECK_EQ(factory.softwareOpens.load(), 0u);
+    r.cap.hashes.clear(); r.cap.pts.clear(); r.cap.writes = 0; r.cap.finished = r.cap.aborted = false;
+    ExportSettings s; s.height = 36; s.fps = 30; s.dither = false;
+    s.safeMode = export_retry_from_flags(o.p.flags);
+    s.softwareDecode = (o.p.flags & kExportRetrySoftwareDecode) != 0;
+    const Outcome retry = run_export_with(r, s, 30);
+    AUREA_CHECK(retry.finished);
+    AUREA_CHECK_EQ(retry.p.result, Errc::Ok);
+    AUREA_CHECK((retry.p.flags & Engine::kExportSoftwareDecode) != 0);
+    AUREA_CHECK(factory.softwareOpens.load() > 0);
+    AUREA_CHECK_EQ(export_retry_from_flags(retry.p.flags), 0u);
+    AUREA_CHECK(r.cap.finished);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), usize{3});
+    AUREA_CHECK(r.e.export_diagnostic().find("decod=compativel") != std::string::npos);
+}
+
 /// Quadro de GPU pesado (3D denso, motion blur de 64 amostras num aparelho
 /// fraco): o fence demora 3 s. Não é travamento — o export espera e termina.
 AUREA_TEST(ExportSlowMedia, SlowGpuFrameFinishes) {

@@ -4,7 +4,7 @@ package com.aurea.aurea.state
  * A última rede contra "a exportação parou num percentual e nunca termina".
  *
  * O motor já tem prazo em toda espera (export/ExportWatchdog.hpp: GPU 120 s,
- * quadro 60 s, worker do encoder 45 s) e conclui com falha em vez de travar.
+ * worker do encoder por fase, até 45 s) e conclui com falha em vez de travar.
  * Isto é para o caso que nem ele vê: o progresso (quadros e mensagem) não muda
  * por [stallMs] → a tela pede o cancelamento; sem conclusão [giveUpMs] depois,
  * a tela desiste, mostra o motivo e se libera (o motor termina sozinho depois).
@@ -60,5 +60,21 @@ class ExportStallWatchdog(
          */
         fun nextSafeMode(current: Int, suggested: Int): Int =
             if (suggested > current && suggested <= SAFE_MODE_MAX) suggested else 0
+
+        /** Bit do resultado de [nextAttempt]: refazer também com a decodificação compatível. */
+        const val ATTEMPT_SOFTWARE_DECODE = 1 shl 2
+
+        /**
+         * A próxima tentativa pelos bits do progresso (nível 16..17 e
+         * decodificação compatível 18, export/ExportWatchdog.hpp): o nível nos
+         * bits 0..1 e [ATTEMPT_SOFTWARE_DECODE]. 0 = não refazer. O nível só
+         * sobe: travada/verificação/decoder preso pulam direto para o 2 (H.264
+         * por software), então refazem UMA vez por export pedido.
+         */
+        fun nextAttempt(current: Int, flags: Int): Int {
+            val level = nextSafeMode(current, (flags ushr 16) and 0x3)
+            if (level == 0) return 0
+            return level or (if (flags and (1 shl 18) != 0) ATTEMPT_SOFTWARE_DECODE else 0)
+        }
     }
 }

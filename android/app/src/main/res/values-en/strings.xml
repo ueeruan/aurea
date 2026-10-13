@@ -3120,6 +3120,9 @@ to edit the curve.</string>
     <string name="report_what_happened">What you expected, and what happened instead</string>
     <string name="report_steps">Steps to repeat (optional)</string>
     <string name="report_device">Device</string>
+    <string name="msg_codec_do_aparelho_travou">The phone\'s video encoder froze. Try H.264 or a lower resolution.</string>
+    <string name="report_attach_export">Attach diagnostics from the last export</string>
+    <string name="report_attach_export_hint">Includes only technical data from the last export with a problem: device model and chip, codec and encoder used, resolution, fps, where it stopped and why. No projects, media or file names.</string>
     <string name="report_send">Send</string>
     <string name="report_sending">Sending…</string>
     <string name="report_sent">Thanks! Your report was sent.</string>

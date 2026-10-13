@@ -25,6 +25,7 @@
 #import "AureaEngine.h"
 
 #import "AureaBridge.h"
+#import <VideoToolbox/VideoToolbox.h>
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
@@ -3918,6 +3919,16 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
               quality:(uint32_t)quality safeMode:(uint32_t)safeMode {
+    return [self startExportTo:path codec:codec height:height fps:fps bitrateMbps:bitrateMbps
+             audioBitrateKbps:audioBitrateKbps aiUpscale:aiUpscale trimToContent:trimToContent quality:quality
+                     safeMode:safeMode softwareDecode:NO];
+}
+
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+              quality:(uint32_t)quality safeMode:(uint32_t)safeMode softwareDecode:(BOOL)softwareDecode {
     auto* e = self.engine;
     if (!e) return NO;
     aurea::ExportSettings settings;
@@ -3932,6 +3943,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     settings.trimToContent = trimToContent != NO;
     settings.quality = std::min<uint32_t>(quality, 2u);
     settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportSafeModeMax);
+    settings.softwareDecode = softwareDecode != NO;
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
     const aurea::Status status = e->start_export(settings, out.c_str());
@@ -3940,6 +3952,43 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return status.ok() ? YES : NO;
 }
 - (int32_t)lastExportStartCode { return _lastExportStartCode; }
+
+- (NSString*)exportDiagnostic {
+    auto* e = self.engine;
+    return e ? to_ns(e->export_diagnostic()) : @"";
+}
+
++ (BOOL)hardwareHevcEncoderAvailable {
+    // A mesma lista que a ficha do aparelho usa (IOSVideoDecoder.mm): o
+    // encoder HEVC com o flag de hardware.
+    static BOOL cached = NO, known = NO;
+    if (known) return cached;
+    BOOL hardware = NO;
+    CFArrayRef list = nullptr;
+    // A lista é marcada obsoleta no iOS 17 (o par "perguntar por configuração"
+    // não enumera); continua sendo a resposta para "o que este aparelho tem".
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    const OSStatus listed = VTCopyVideoEncoderList(nullptr, &list);
+#pragma clang diagnostic pop
+    if (listed == noErr && list) {
+        const CFIndex count = CFArrayGetCount(list);
+        for (CFIndex i = 0; i < count && !hardware; ++i) {
+            CFDictionaryRef entry = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+            if (!entry) continue;
+            CFNumberRef codecNumber = (CFNumberRef)CFDictionaryGetValue(entry, kVTVideoEncoderList_CodecType);
+            int codec = 0;
+            if (!codecNumber || !CFNumberGetValue(codecNumber, kCFNumberIntType, &codec)) continue;
+            if (codec != (int)kCMVideoCodecType_HEVC) continue;
+            CFBooleanRef hw = (CFBooleanRef)CFDictionaryGetValue(entry, kVTVideoEncoderList_IsHardwareAccelerated);
+            hardware = hw && CFBooleanGetValue(hw);
+        }
+        CFRelease(list);
+    }
+    cached = hardware;
+    known = YES;
+    return cached;
+}
 - (NSString*)lastExportStartMessage { return _lastExportStartMessage ?: @""; }
 
 - (void)cancelExport {

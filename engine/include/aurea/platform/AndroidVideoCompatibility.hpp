@@ -43,6 +43,23 @@ inline const char* software_video_decoder(std::string_view mime, bool legacy = f
     return nullptr;
 }
 
+// O decoder de ÁUDIO de software do AOSP para o tipo (export compatível,
+// refeito depois de o decoder do aparelho travar no mix). nullptr = sem um
+// conhecido; quem chama usa o decoder padrão do tipo.
+inline const char* software_audio_decoder(std::string_view mime, bool legacy = false) noexcept {
+    if (mime == "audio/mp4a-latm") return legacy ? "OMX.google.aac.decoder" : "c2.android.aac.decoder";
+    if (mime == "audio/mpeg") return legacy ? "OMX.google.mp3.decoder" : "c2.android.mp3.decoder";
+    if (mime == "audio/opus") return legacy ? "OMX.google.opus.decoder" : "c2.android.opus.decoder";
+    if (mime == "audio/vorbis") return legacy ? "OMX.google.vorbis.decoder" : "c2.android.vorbis.decoder";
+    if (mime == "audio/flac") return legacy ? "OMX.google.flac.decoder" : "c2.android.flac.decoder";
+    if (mime == "audio/3gpp") return legacy ? "OMX.google.amrnb.decoder" : "c2.android.amrnb.decoder";
+    if (mime == "audio/amr-wb") return legacy ? "OMX.google.amrwb.decoder" : "c2.android.amrwb.decoder";
+    if (mime == "audio/g711-alaw") return legacy ? "OMX.google.g711.alaw.decoder" : "c2.android.g711.alaw.decoder";
+    if (mime == "audio/g711-mlaw") return legacy ? "OMX.google.g711.mlaw.decoder" : "c2.android.g711.mlaw.decoder";
+    if (mime == "audio/raw") return legacy ? "OMX.google.raw.decoder" : "c2.android.raw.decoder";
+    return nullptr;
+}
+
 // Readable-planes mode (Samsung, and the sticky "safe video mode" any device
 // enters after a crash with a video open): the hardware codec renders into a
 // YUV_420_888 ImageReader that the CPU reads. A vendor codec that cannot fill

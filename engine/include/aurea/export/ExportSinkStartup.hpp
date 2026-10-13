@@ -6,7 +6,7 @@
 namespace aurea {
 
 struct ExportSinkStartupLimits {
-    u64 stallNs = kExportWorkerHangNs;
+    u64 stallNs = kExportPrepareHangNs;   ///< abrir o encoder é a fase de preparação
     u64 hardNs = 120'000'000'000ull;
     u64 pollNs = 5'000'000ull;
 };

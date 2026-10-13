@@ -192,7 +192,47 @@ enum ProblemReport {
 
     enum Result { case sent, invalid, rateLimited, offline, failed }
 
-    static func send(sessao: ContaSessao?, whatDid: String, whatHappened: String, steps: String) async -> Result {
+    // --- Diagnóstico do último export (o par de ProblemReport.kt) -----------
+    private static let lastExportKey = "aurea.problem_report.last_export"
+    static let lastExportMax = 1200
+
+    /// O export com problema (falha na largada ou no meio, nova tentativa, HEVC
+    /// trocado, verificação com avisos) vai junto do próximo relato. Sem caminhos.
+    static func noteExport(_ summary: String) {
+        UserDefaults.standard.set(String(sanitize(summary).prefix(lastExportMax)), forKey: lastExportKey)
+    }
+    static func lastExport() -> String? { UserDefaults.standard.string(forKey: lastExportKey) }
+
+    /// Caminhos de arquivo saem do diagnóstico (nada de mídia ou pasta no relato).
+    static func sanitize(_ text: String) -> String {
+        text.replacingOccurrences(of: #"(/[^\s/]+){2,}/?"#, with: "<arquivo>", options: .regularExpression)
+    }
+
+    /// Os passos que a pessoa escreveu + o diagnóstico do export, dentro do limite.
+    static func stepsWithExport(_ steps: String, _ lastExport: String?) -> String {
+        guard let last = lastExport, !last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return steps }
+        let own = steps.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(((own.isEmpty ? "" : own + "\n\n") + "[export] " + last).prefix(stepsMax))
+    }
+
+    /// A mesma linha do Android (ProblemReport.exportDiagnosticLine).
+    static func exportDiagnosticLine(platform: String, device: String, chip: String, event: String, percent: Int,
+                                     failure: Int, code: Int, safeMode: Int, softwareDecode: Bool, retry: String,
+                                     hevcNote: String?, engineLine: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        var line = "\(formatter.string(from: Date())) \(platform) · \(device) · chip \(chip) | \(event)"
+        line += " | parou em \(min(100, max(0, percent)))% motivo=\(failure) codigo=\(code)"
+        line += " seguranca=\(safeMode) decod=\(softwareDecode ? "compativel" : "padrao") refez=\(retry.isEmpty ? "nao" : retry)"
+        if let hevc = hevcNote, !hevc.isEmpty { line += " | hevc->h264: \(hevc)" }
+        if !engineLine.isEmpty { line += " | motor: \(engineLine)" }
+        return line
+    }
+
+    static func send(sessao: ContaSessao?, whatDid: String, whatHappened: String, steps: String,
+                     attachExport: Bool = true) async -> Result {
+        let fullSteps = stepsWithExport(steps, attachExport ? lastExport() : nil)
         var body: [String: Any] = [
             "reportId": "report-\(Int64(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString.prefix(8).lowercased())",
             "installId": installationId(), "platform": "ios",
@@ -201,7 +241,7 @@ enum ProblemReport {
             "locale": Locale.current.identifier,
             "whatDid": String(whatDid.trimmingCharacters(in: .whitespacesAndNewlines).prefix(whatDidMax)),
             "whatHappened": String(whatHappened.trimmingCharacters(in: .whitespacesAndNewlines).prefix(whatHappenedMax)),
-            "steps": String(steps.trimmingCharacters(in: .whitespacesAndNewlines).prefix(stepsMax)),
+            "steps": String(fullSteps.trimmingCharacters(in: .whitespacesAndNewlines).prefix(stepsMax)),
         ]
         if let email = sessao?.email { body["email"] = email }
         let r = await ContaAPI.chamar("/api/report", metodo: "POST", corpo: body, token: sessao?.token)
@@ -223,6 +263,9 @@ struct ReportProblemView: View {
     @State private var whatHappened = ""
     @State private var steps = ""
     @State private var sending = false
+    /// "Anexar diagnóstico do último export": só aparece quando há um, ligado por padrão.
+    @State private var attachExport = true
+    private let lastExport = ProblemReport.lastExport()
 
     private var canSend: Bool { whatHappened.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 && !sending }
 
@@ -236,6 +279,20 @@ struct ReportProblemView: View {
                     field("report_steps", $steps, ProblemReport.stepsMax)
                     Text(AureaText.t("report_device").uppercased()).font(.aurea(size: 11, weight: .semibold)).foregroundStyle(AureaColors.muted)
                     Text(ProblemReport.deviceSummary()).font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted)
+                    if !(lastExport ?? "").isEmpty {
+                        HStack(spacing: 12) {
+                            Text(AureaText.t("report_attach_export")).font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
+                            Spacer(minLength: 0)
+                            AureaToggle(checked: attachExport) { attachExport = $0 }
+                        }
+                        .contentShape(Rectangle())
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(AureaText.t("report_attach_export"))
+                        .accessibilityValue(AureaText.t(attachExport ? "common_on" : "common_off"))
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { attachExport.toggle() }
+                        Text(AureaText.t("report_attach_export_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    }
                     Button(action: send) {
                         Text(AureaText.t(sending ? "report_sending" : "report_send"))
                             .font(.aurea(size: 17, weight: .semibold)).foregroundStyle(.white)
@@ -265,7 +322,8 @@ struct ReportProblemView: View {
         guard canSend else { return }
         sending = true
         Task { @MainActor in
-            let r = await ProblemReport.send(sessao: sessao, whatDid: whatDid, whatHappened: whatHappened, steps: steps)
+            let r = await ProblemReport.send(sessao: sessao, whatDid: whatDid, whatHappened: whatHappened, steps: steps,
+                                             attachExport: attachExport)
             sending = false
             switch r {
             case .sent: onResult(AureaText.t("report_sent")); dismiss()

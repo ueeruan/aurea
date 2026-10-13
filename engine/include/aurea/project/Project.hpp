@@ -89,6 +89,11 @@ struct ExportSettings {
     /// encoder de software. A tela só passa o nível que o motor sugeriu depois
     /// de o encoder travar. Não persiste.
     u32 safeMode = 0;
+    /// Decodificação compatível da mídia de origem (export/ExportWatchdog.hpp,
+    /// export_retry_advice): o decoder do aparelho travou na tentativa
+    /// anterior. Android = decoder de SOFTWARE do sistema; iOS = planos na CPU.
+    /// Só a sessão de export; não persiste.
+    bool softwareDecode = false;
 };
 
 /// Ajustes de interface persistidos com o projeto — zoom da timeline, escala

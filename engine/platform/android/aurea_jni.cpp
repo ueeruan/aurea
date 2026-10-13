@@ -3712,10 +3712,11 @@ AUREA_JNI jint AUREA_FN(nativeRecoverSession)(JNIEnv*, jclass, jlong handle) {
 /// composição; `codec` 0 = H.264, 1 = HEVC; `bitrateMbps` 0 = automático;
 /// `quality` 0 Baixa / 1 Normal / 2 Alta; `rateMode` 0 CBR / 1 VBR;
 /// `safeMode` 0..2 = o modo de segurança que o motor sugeriu depois de o
-/// encoder travar (export/ExportWatchdog.hpp).
+/// encoder travar (export/ExportWatchdog.hpp); `softwareDecode` = a mídia de
+/// origem pelo decoder de software (o do aparelho travou na tentativa anterior).
 AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint shortSide,
                                            jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale, jboolean trimToContent,
-                                           jint quality, jint rateMode, jint safeMode) {
+                                           jint quality, jint rateMode, jint safeMode, jboolean softwareDecode) {
     NativeContext* c = ctx_of(handle);
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string p = to_string(env, outputPath);
@@ -3730,8 +3731,17 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
     settings.quality = static_cast<u32>(std::clamp<jint>(quality, 0, 2));
     settings.rateMode = rateMode == 0 ? 0u : 1u;
     settings.safeMode = static_cast<u32>(std::clamp<jint>(safeMode, 0, static_cast<jint>(kExportSafeModeMax)));
+    settings.softwareDecode = softwareDecode == JNI_TRUE;
     settings.audioBitrateKbps = kExportAudioKbps;
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
+}
+
+/// Diagnóstico do último export (relato de problema): codec/encoder abertos,
+/// tamanho, modo de segurança, onde travou, verificação. ASCII, sem caminhos.
+AUREA_JNI jstring AUREA_FN(nativeExportDiagnostic)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    const std::string text = c ? c->engine.export_diagnostic() : std::string{};
+    return env->NewStringUTF(text.c_str());
 }
 
 AUREA_JNI jint AUREA_FN(nativeRestartExport)(JNIEnv* env, jclass, jlong handle, jstring recoveryPath, jstring outputPath) {

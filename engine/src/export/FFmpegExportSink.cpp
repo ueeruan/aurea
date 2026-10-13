@@ -202,6 +202,7 @@ public:
     Status begin_assembly(const AudioStreamConfig* audio) noexcept override;
     Status replay_spilled_audio() noexcept override;
     Status validate_output(const ExportOutputValidation& expected) noexcept override;
+    const char* validation_warnings() const noexcept override { return warningText_; }
     void abort() noexcept override;
 
 private:
@@ -295,6 +296,14 @@ private:
     Status encode_audio(bool final) noexcept;
     Status flush_resampler() noexcept;
     Status decode_validate(const ExportOutputValidation& expected) noexcept;
+    // Avisos da validação tolerante: cada divergência (texto estático) com a
+    // contagem, sem alocar; o texto final é montado no fim da validação.
+    struct Warning { const char* what = nullptr; u32 count = 0; };
+    std::array<Warning, 8> warnings_{};
+    char warningText_[384]{};
+    void clear_warnings() noexcept;
+    void note_warning(const char* what) noexcept;
+    void finish_warnings(u64 decodedFrames) noexcept;
     Status publish() noexcept;
     i64 frame_pts(u64 frame) const noexcept { return av_rescale_q(static_cast<i64>(frame), av_inv_q(rate_), videoTimebase_); }
     Status open_log() noexcept;
@@ -327,6 +336,7 @@ void FFmpegSink::release() noexcept {
 
 void FFmpegSink::abort() noexcept {
     release();
+    clear_warnings();
     if (!staged_.empty()) fileio::remove_file(staged_);
     staged_.clear();
     state_ = State::Empty;
@@ -1036,7 +1046,8 @@ Status FFmpegSink::finish() noexcept {
     release(); state_ = State::Finalized;
     if (video_.validateBeforePublish) return OkStatus;
     if (videoFrames_ > UINT32_MAX) return error(Errc::OutOfRange, "validacao FFmpeg excedeu contador de frames");
-    const ExportOutputValidation expected{video_.width, video_.height, static_cast<u32>(videoFrames_), video_.fps, hasAudio_};
+    ExportOutputValidation expected{video_.width, video_.height, static_cast<u32>(videoFrames_), video_.fps, hasAudio_};
+    expected.strict = video_.strictValidation;
     if (const Status status = decode_validate(expected); !status.ok()) return status;
     return publish();
 }
@@ -1216,10 +1227,23 @@ Status FFmpegSink::validate_output(const ExportOutputValidation& expected) noexc
 }
 
 Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexcept {
+    clear_warnings();
+    const bool strict = expected.strict;
+    const State entryState = state_;
+    // Divergência que um encoder de hardware produz legitimamente (PTS,
+    // duração, contagem, dimensão de 16, amostras de áudio): estrito = erro;
+    // tolerante = aviso registrado e a validação segue. O que torna o arquivo
+    // inútil (não abre, vazio, sem vídeo, nenhum quadro) reprova nos dois.
+    auto soft = [&](Errc code, const char* what, int result = 0) noexcept -> Status {
+        if (strict) return error(code, what, result);
+        note_warning(what);
+        return OkStatus;
+    };
     if (!expected.frames || expected.frames != videoFrames_ || expected.width != video_.width ||
         expected.height != video_.height || expected.audio != hasAudio_ ||
         !std::isfinite(expected.fps) || std::abs(expected.fps - video_.fps) > 0.000001)
-        return error(Errc::CorruptData, "expectativa de validacao FFmpeg diverge dos frames submetidos");
+        if (const Status s = soft(Errc::CorruptData, "expectativa de validacao FFmpeg diverge dos frames submetidos"); !s.ok())
+            return s;
     struct DecoderResources {
         AVFormatContext* format = nullptr;
         AVCodecContext* video = nullptr;
@@ -1244,15 +1268,25 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
     for (unsigned i = 0; i < decoded.format->nb_streams; ++i) {
         const AVMediaType type = decoded.format->streams[i]->codecpar->codec_type;
         if (type == AVMEDIA_TYPE_VIDEO) {
-            if (videoIndex >= 0) return error(Errc::CorruptData, "exportacao FFmpeg com video duplicado");
+            if (videoIndex >= 0) {
+                if (const Status s = soft(Errc::CorruptData, "exportacao FFmpeg com video duplicado"); !s.ok()) return s;
+                continue;
+            }
             videoIndex = static_cast<int>(i);
         } else if (type == AVMEDIA_TYPE_AUDIO) {
-            if (audioIndex >= 0) return error(Errc::CorruptData, "exportacao FFmpeg com audio duplicado");
+            if (audioIndex >= 0) {
+                if (const Status s = soft(Errc::CorruptData, "exportacao FFmpeg com audio duplicado"); !s.ok()) return s;
+                continue;
+            }
             audioIndex = static_cast<int>(i);
         }
     }
-    if (videoIndex < 0 || ((audioIndex >= 0) != hasAudio_))
-        return error(Errc::CorruptData, "arquivo FFmpeg sem faixas esperadas");
+    if (videoIndex < 0) return error(Errc::CorruptData, "arquivo FFmpeg sem faixa de video");
+    if ((audioIndex >= 0) != hasAudio_) {
+        if (const Status s = soft(Errc::CorruptData, "arquivo FFmpeg sem faixas esperadas"); !s.ok()) return s;
+    }
+    // Tolerante: o áudio só é conferido quando o arquivo tem a faixa pedida.
+    const bool checkAudio = hasAudio_ && audioIndex >= 0;
     auto openDecoder = [&](int index, AVCodecContext*& context) noexcept -> Status {
         const AVStream* stream = decoded.format->streams[index];
         const char* software = nullptr;
@@ -1274,14 +1308,24 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
         if (code < 0) return error(Errc::DecodeFailed, "parametros do decoder independente FFmpeg", code);
         context->pkt_timebase = stream->time_base;
         context->thread_count = 4;
-        context->err_recognition = AV_EF_CRCCHECK | AV_EF_BITSTREAM | AV_EF_BUFFER | AV_EF_EXPLODE;
+        // Tolerante: o decoder esconde o erro do pacote (o quadro sai marcado)
+        // em vez de explodir — a contagem de quadros decodificáveis é o que vale.
+        context->err_recognition = AV_EF_CRCCHECK | AV_EF_BITSTREAM | AV_EF_BUFFER | (strict ? AV_EF_EXPLODE : 0);
         code = avcodec_open2(context, codec, nullptr); beat();
         return code < 0 ? error(Errc::DecodeFailed, "abrir decoder independente FFmpeg", code) : OkStatus;
     };
     if (decoded.format->streams[videoIndex]->codecpar->codec_id != codec_id(video_.codec))
-        return error(Errc::CorruptData, "arquivo FFmpeg mudou o codec de video solicitado");
+        if (const Status s = soft(Errc::CorruptData, "arquivo FFmpeg mudou o codec de video solicitado"); !s.ok()) return s;
     if (const Status status = openDecoder(videoIndex, decoded.video); !status.ok()) return status;
-    if (hasAudio_) if (const Status status = openDecoder(audioIndex, decoded.audio); !status.ok()) return status;
+    bool audioDecoding = checkAudio;
+    if (checkAudio) if (const Status status = openDecoder(audioIndex, decoded.audio); !status.ok()) {
+        if (strict || status.code() == Errc::Cancelled) return status;
+        // Arquivo com vídeo bom e áudio que o validador não abre: aviso.
+        state_ = entryState;
+        note_warning("decoder de audio da validacao FFmpeg nao abriu");
+        avcodec_free_context(&decoded.audio);
+        audioDecoding = false;
+    }
     decoded.packet = av_packet_alloc(); decoded.frame = av_frame_alloc();
     if (!decoded.packet || !decoded.frame) return error(Errc::OutOfMemory, "buffers do decoder independente FFmpeg");
     u64 frames = 0, hash = hashSeed;
@@ -1297,52 +1341,64 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
             const int code = avcodec_receive_frame(context, decoded.frame); beat();
             if (code == AVERROR_EOF) return OkStatus;
             if (code == AVERROR(EAGAIN)) {
-                if (final) return error(Errc::DecodeFailed, "decoder FFmpeg nao concluiu drenagem EOS");
+                if (final) return soft(Errc::DecodeFailed, "decoder FFmpeg nao concluiu drenagem EOS");
                 return OkStatus;
             }
-            if (code < 0) return error(Errc::DecodeFailed, "decodificar arquivo exportado FFmpeg", code);
+            // Tolerante: um pacote que não decodifica é aviso; o que conta no
+            // fim é haver quadros decodificados.
+            if (code < 0) return soft(Errc::DecodeFailed, "decodificar arquivo exportado FFmpeg", code);
             progressAt = monotonic_ns(); ++obtained;
             const AVFrame* frame = decoded.frame;
-            if ((frame->flags & AV_FRAME_FLAG_CORRUPT) || frame->decode_error_flags)
-                return error(Errc::CorruptData, "frame exportado FFmpeg corrompido");
-            const i64 pts = frame->best_effort_timestamp;
-            if (pts == AV_NOPTS_VALUE) return error(Errc::CorruptData, "frame exportado FFmpeg sem PTS");
             const AVStream* stream = decoded.format->streams[index];
-            if (video) {
+            Status checked = OkStatus;
+            if ((frame->flags & AV_FRAME_FLAG_CORRUPT) || frame->decode_error_flags)
+                checked = soft(Errc::CorruptData, "frame exportado FFmpeg corrompido");
+            const i64 pts = frame->best_effort_timestamp;
+            if (checked.ok() && pts == AV_NOPTS_VALUE) {
+                checked = soft(Errc::CorruptData, "frame exportado FFmpeg sem PTS");
+                if (checked.ok() && video) ++frames;   // decodificou; só não tem relógio
+            } else if (checked.ok() && video) {
                 if (frame->width != static_cast<int>(expected.width) || frame->height != static_cast<int>(expected.height))
-                    return error(Errc::CorruptData, "dimensoes exportadas FFmpeg divergentes");
+                    checked = soft(Errc::CorruptData, "dimensoes exportadas FFmpeg divergentes");
                 const i64 normalized = av_rescale_q(pts, stream->time_base, videoTimebase_);
-                if (normalized < 0 || (frames == 0 && normalized != 0) ||
-                    (previousVideo != AV_NOPTS_VALUE && normalized <= previousVideo))
-                    return error(Errc::CorruptData, "PTS de video FFmpeg duplicado, ausente ou fora de ordem");
-                if (timing_ == Timing::Constant && normalized !=
+                if (checked.ok() && (normalized < 0 || (frames == 0 && normalized != 0) ||
+                    (previousVideo != AV_NOPTS_VALUE && normalized <= previousVideo)))
+                    checked = soft(Errc::CorruptData, "PTS de video FFmpeg duplicado, ausente ou fora de ordem");
+                if (checked.ok() && timing_ == Timing::Constant && normalized !=
                     av_rescale_q(static_cast<i64>(frames), av_inv_q(rate_), videoTimebase_))
-                    return error(Errc::CorruptData, "arquivo FFmpeg perdeu um frame do relogio absoluto");
-                hash = timestamp_hash(hash, normalized); previousVideo = normalized;
-                if (++frames > videoFrames_) return error(Errc::CorruptData, "arquivo FFmpeg possui frames adicionais");
-            } else {
+                    checked = soft(Errc::CorruptData, "arquivo FFmpeg perdeu um frame do relogio absoluto");
+                if (checked.ok()) {
+                    hash = timestamp_hash(hash, normalized); previousVideo = normalized;
+                    if (++frames > videoFrames_) checked = soft(Errc::CorruptData, "arquivo FFmpeg possui frames adicionais");
+                }
+            } else if (checked.ok()) {
                 if (frame->sample_rate != audioRate_ || frame->ch_layout.nb_channels != static_cast<int>(audio_.channels) ||
-                    frame->nb_samples <= 0)
-                    return error(Errc::CorruptData, "layout de audio FFmpeg divergente");
-                const i64 start = av_rescale_q(pts, stream->time_base, AVRational{1, audioRate_});
-                if (start > INT64_MAX - frame->nb_samples)
-                    return error(Errc::CorruptData, "PTS de audio FFmpeg excedeu faixa de amostras");
-                const i64 end = start + frame->nb_samples;
-                if (start < -audioFrameSamples_ || end > audioConvertedSamples_ + audioFrameSamples_ ||
-                    (previousAudioRawEnd != AV_NOPTS_VALUE && std::abs(start - previousAudioRawEnd) > 1))
-                    return error(Errc::CorruptData, "AAC FFmpeg possui pacote repetido, lacuna ou padding excessivo");
-                previousAudioRawEnd = end;
-                // AAC priming is removed by the MP4 edit list / decoder. The
-                // final coded frame may extend past the exact stream duration.
-                const i64 clippedStart = std::max<i64>(0, start);
-                const i64 clippedEnd = std::min<i64>(audioConvertedSamples_, end);
-                if (clippedEnd > clippedStart) {
-                    if (std::abs(clippedStart - previousAudioEnd) > 1)
-                        return error(Errc::CorruptData, "audio exportado FFmpeg possui lacuna ou sobreposicao");
-                    audioCovered += clippedEnd - clippedStart; previousAudioEnd = clippedEnd;
+                    frame->nb_samples <= 0) {
+                    checked = soft(Errc::CorruptData, "layout de audio FFmpeg divergente");
+                } else {
+                    const i64 start = av_rescale_q(pts, stream->time_base, AVRational{1, audioRate_});
+                    if (start > INT64_MAX - frame->nb_samples) {
+                        checked = soft(Errc::CorruptData, "PTS de audio FFmpeg excedeu faixa de amostras");
+                    } else {
+                        const i64 end = start + frame->nb_samples;
+                        if (start < -audioFrameSamples_ || end > audioConvertedSamples_ + audioFrameSamples_ ||
+                            (previousAudioRawEnd != AV_NOPTS_VALUE && std::abs(start - previousAudioRawEnd) > 1))
+                            checked = soft(Errc::CorruptData, "AAC FFmpeg possui pacote repetido, lacuna ou padding excessivo");
+                        previousAudioRawEnd = end;
+                        // AAC priming is removed by the MP4 edit list / decoder. The
+                        // final coded frame may extend past the exact stream duration.
+                        const i64 clippedStart = std::max<i64>(0, start);
+                        const i64 clippedEnd = std::min<i64>(audioConvertedSamples_, end);
+                        if (checked.ok() && clippedEnd > clippedStart) {
+                            if (std::abs(clippedStart - previousAudioEnd) > 1)
+                                checked = soft(Errc::CorruptData, "audio exportado FFmpeg possui lacuna ou sobreposicao");
+                            audioCovered += clippedEnd - clippedStart; previousAudioEnd = clippedEnd;
+                        }
+                    }
                 }
             }
             av_frame_unref(decoded.frame);
+            if (!checked.ok()) return checked;
         }
     };
     auto submit = [&](AVCodecContext* context, int index, bool video, const AVPacket* packet) noexcept -> Status {
@@ -1351,10 +1407,13 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
             if (code == AVERROR(EAGAIN)) {
                 unsigned obtained = 0;
                 if (const Status status = receive(context, index, video, false, obtained); !status.ok()) return status;
-                if (!obtained) return error(Errc::DecodeFailed, "decoder FFmpeg recusou entrada sem produzir frame");
+                if (!obtained) return soft(Errc::DecodeFailed, "decoder FFmpeg recusou entrada sem produzir frame");
                 continue;
             }
-            if (code < 0) return error(Errc::DecodeFailed, "alimentar decoder independente FFmpeg", code);
+            if (code < 0) {
+                if (!strict && code == AVERROR_EOF && !packet) return OkStatus;   // tolerante: já drenado
+                return soft(Errc::DecodeFailed, "alimentar decoder independente FFmpeg", code);
+            }
             unsigned obtained = 0;
             return receive(context, index, video, packet == nullptr, obtained);
         }
@@ -1363,37 +1422,78 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
         if (cancelled()) return error(Errc::Cancelled, "leitura para validacao FFmpeg cancelada");
         result = av_read_frame(decoded.format, decoded.packet); beat();
         if (result == AVERROR_EOF) break;
-        if (result < 0) return error(Errc::CorruptData, "ler todos os pacotes exportados FFmpeg", result);
+        if (result < 0) {
+            // Tolerante: arquivo truncado no fim ainda serve se tem quadros.
+            if (const Status s = soft(Errc::CorruptData, "ler todos os pacotes exportados FFmpeg", result); !s.ok()) return s;
+            if (cancelled()) return error(Errc::Cancelled, "leitura para validacao FFmpeg cancelada");
+            break;
+        }
         if (decoded.packet->flags & AV_PKT_FLAG_CORRUPT)
-            return error(Errc::CorruptData, "pacote exportado FFmpeg corrompido");
+            if (const Status s = soft(Errc::CorruptData, "pacote exportado FFmpeg corrompido"); !s.ok()) return s;
         if (decoded.packet->stream_index == videoIndex) {
             if (const Status status = submit(decoded.video, videoIndex, true, decoded.packet); !status.ok()) return status;
-        } else if (decoded.packet->stream_index == audioIndex) {
+        } else if (audioDecoding && decoded.packet->stream_index == audioIndex) {
             if (const Status status = submit(decoded.audio, audioIndex, false, decoded.packet); !status.ok()) return status;
         }
         av_packet_unref(decoded.packet);
     }
     if (const Status status = submit(decoded.video, videoIndex, true, nullptr); !status.ok()) return status;
-    if (hasAudio_) if (const Status status = submit(decoded.audio, audioIndex, false, nullptr); !status.ok()) return status;
+    if (audioDecoding) if (const Status status = submit(decoded.audio, audioIndex, false, nullptr); !status.ok()) return status;
+    // Nos dois modos: um arquivo sem nenhum quadro decodificável não é vídeo.
+    if (frames == 0) return error(Errc::CorruptData, "arquivo exportado FFmpeg sem nenhum quadro decodificavel");
     if (frames != videoFrames_ || hash != videoHash_)
-        return error(Errc::CorruptData, "validacao FFmpeg encontrou frames ausentes ou PTS alterados");
+        if (const Status s = soft(Errc::CorruptData, "validacao FFmpeg encontrou frames ausentes ou PTS alterados"); !s.ok())
+            return s;
     const AVStream* videoStream = decoded.format->streams[videoIndex];
     const i64 videoDuration = videoStream->duration == AV_NOPTS_VALUE ? -1 :
         av_rescale_q(videoStream->duration, videoStream->time_base, videoTimebase_);
     const i64 durationTolerance = hasAudio_ ?
         std::max<i64>(2, av_rescale_q(1, AVRational{1, audioRate_}, videoTimebase_) + 1) : 2;
     if (videoDuration < 0 || std::abs(videoDuration - lastVideoEnd_) > durationTolerance)
-        return error(Errc::CorruptData, "container FFmpeg alterou a duracao final do video");
-    if (hasAudio_) {
+        if (const Status s = soft(Errc::CorruptData, "container FFmpeg alterou a duracao final do video"); !s.ok()) return s;
+    if (audioDecoding) {
         const AVStream* stream = decoded.format->streams[audioIndex];
         const i64 declared = stream->duration == AV_NOPTS_VALUE ? -1 :
             av_rescale_q(stream->duration, stream->time_base, AVRational{1, audioRate_});
         if (std::abs(declared - audioConvertedSamples_) > 1 ||
             std::abs(audioCovered - audioConvertedSamples_) > 1 ||
             std::abs(previousAudioEnd - audioConvertedSamples_) > 1)
-            return error(Errc::CorruptData, "duracao ou amostras de audio FFmpeg divergentes apos decode");
+            if (const Status s = soft(Errc::CorruptData, "duracao ou amostras de audio FFmpeg divergentes apos decode"); !s.ok())
+                return s;
     }
+    finish_warnings(frames);
     return OkStatus;
+}
+
+void FFmpegSink::clear_warnings() noexcept {
+    warnings_ = {};
+    warningText_[0] = '\0';
+}
+
+void FFmpegSink::note_warning(const char* what) noexcept {
+    for (Warning& w : warnings_) {
+        if (w.what == what) { ++w.count; return; }
+        if (!w.what) { w.what = what; w.count = 1; return; }
+    }
+    ++warnings_.back().count;   // lista cheia: conta no último (o texto já diz que houve mais)
+}
+
+void FFmpegSink::finish_warnings(u64 decodedFrames) noexcept {
+    warningText_[0] = '\0';
+    usize used = 0;
+    for (const Warning& w : warnings_) {
+        if (!w.what || used + 1 >= sizeof(warningText_)) break;
+        const int n = std::snprintf(warningText_ + used, sizeof(warningText_) - used, "%s%s (x%u)",
+                                    used ? "; " : "", w.what, w.count);
+        if (n <= 0) break;
+        used = std::min(sizeof(warningText_) - 1, used + static_cast<usize>(n));
+    }
+    if (used) {
+        const int n = std::snprintf(warningText_ + used, sizeof(warningText_) - used, " [%llu/%llu quadros]",
+                                    static_cast<unsigned long long>(decodedFrames),
+                                    static_cast<unsigned long long>(videoFrames_));
+        (void)n;
+    }
 }
 
 } // namespace

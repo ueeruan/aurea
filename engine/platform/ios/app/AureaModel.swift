@@ -3828,7 +3828,7 @@ final class AureaModel: ObservableObject {
             if task != .invalid { app.endBackgroundTask(task); task = .invalid }
         }
         lifecycleQueue.async { [weak self] in
-            let code: Int32 = captures.sync { save ? native.saveProjectIfDirty() : -1 }
+            let code = captures.sync { save ? native.saveProjectIfDirty() : -1 }
             native.suspend()
             DispatchQueue.main.async {
                 if let self {

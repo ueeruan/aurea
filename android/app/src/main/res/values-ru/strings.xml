@@ -4013,4 +4013,16 @@
     <string name="pn_mask_target">Обрезаемый слой: %1$s</string>
     <string name="export_v2_finalizing">Завершение видео и аудио…</string>
     <string name="export_v2_validating">Проверка видео и аудио…</string>
+    <string name="fx_name_raster_extrude">3D-экструзия</string>
+    <string name="fx_desc_raster_extrude">Добавляет реальную глубину силуэту слоя по альфа-каналу. Используйте существующие элементы управления 3D-вращением и камерой.</string>
+    <string name="fxl_side_color">Цвет боковин</string>
+    <string name="fxl_shading">Затенение</string>
+    <string name="prerender_forward">PreRender вперёд</string>
+    <string name="prerender_backward">PreRender назад</string>
+    <string name="prerender_cancel">Отменить PreRender</string>
+    <string name="prerender_gesture_hint">Удерживайте полсекунды, затем ведите вправо или влево. Отпустите без движения, чтобы переключить повтор.</string>
+    <string name="prerender_preparing">Подготовка PreRender…</string>
+    <string name="prerender_progress">PreRender: %1$d%%</string>
+    <string name="prerender_ready">PreRender готов</string>
+    <string name="prerender_failed">Не удалось подготовить воспроизведение: %1$s</string>
 </resources>

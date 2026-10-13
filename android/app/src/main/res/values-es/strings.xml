@@ -4005,4 +4005,16 @@ para editar la curva.</string>
     <string name="pn_mask_target">Capa recortada: %1$s</string>
     <string name="export_v2_finalizing">Finalizando vídeo y audio…</string>
     <string name="export_v2_validating">Verificando vídeo y audio…</string>
+    <string name="fx_name_raster_extrude">Extrusión 3D</string>
+    <string name="fx_desc_raster_extrude">Añade profundidad real a la silueta alfa de la capa. Usa los controles 3D de rotación y cámara existentes.</string>
+    <string name="fxl_side_color">Color lateral</string>
+    <string name="fxl_shading">Sombreado</string>
+    <string name="prerender_forward">PreRender hacia adelante</string>
+    <string name="prerender_backward">PreRender hacia atrás</string>
+    <string name="prerender_cancel">Cancelar PreRender</string>
+    <string name="prerender_gesture_hint">Mantén pulsado medio segundo y arrastra a la derecha o izquierda. Suelta sin arrastrar para cambiar la repetición.</string>
+    <string name="prerender_preparing">Preparando PreRender…</string>
+    <string name="prerender_progress">PreRender: %1$d%%</string>
+    <string name="prerender_ready">PreRender listo</string>
+    <string name="prerender_failed">No se pudo preparar la reproducción: %1$s</string>
 </resources>

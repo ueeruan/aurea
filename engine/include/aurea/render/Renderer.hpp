@@ -342,6 +342,10 @@ struct RenderSettings {
     u64 previewCacheComposition = 0;
     bool previewCacheOnly = false; // prepare a future frame without presenting it
     bool rawPlayback = false;
+    /// Opt-in completed540p composition. Default leaves ordinary preview/export
+    /// unchanged; presentation still applies the normal zoom/color/checkerboard.
+    TextureHandle cachedComposition{};
+    const u16* cachedCompositionPixels = nullptr; // one-frame upload, copied during begin_frame
     u64 mediaGeneration = 0;
     SceneEditorView sceneEditor{}; ///< transient preview observer; ignored by finalQuality/export
 

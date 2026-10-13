@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.floor
+import kotlin.math.ceil
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
@@ -140,12 +141,20 @@ class MotionTilePreviewRotationDeviceTest {
             assertEquals("Actual presented surface must contain a frame", PixelCopy.SUCCESS, status)
             return bitmap
         }
+        var presentationSupportX = 3f
+        var presentationSupportY = 3f
         fun samples(bitmap: Bitmap): IntArray {
             // Crop the fitted composition, excluding letterbox bars. PixelCopy
             // already excludes the Compose gizmo, outline and diagnostic HUD.
             val scale = min(bitmap.width / 512f, bitmap.height / 288f)
             val width = (512 * scale).roundToInt().coerceIn(1, bitmap.width)
             val height = (288 * scale).roundToInt().coerceIn(1, bitmap.height)
+            // Display bilinear reconstruction spans one composition texel;
+            // Bitmap resizing plus fitted-rectangle rounding adds at most
+            //1.5 viewport texels. A center behind the horizon can therefore
+            // legitimately contain front-facing color in this capture.
+            presentationSupportX = ceil(1f + 1.5f * 512 / width)
+            presentationSupportY = ceil(1f + 1.5f * 288 / height)
             val crop = Bitmap.createBitmap(bitmap, (bitmap.width - width) / 2, (bitmap.height - height) / 2, width, height)
             val sampled = Bitmap.createScaledBitmap(crop, 256, 144, true)
             val colors = IntArray(256 * 144)
@@ -221,8 +230,12 @@ class MotionTilePreviewRotationDeviceTest {
                 val color = colors[y * 256 + x]
                 val w = denominator(qx, qy)
                 if (w * centerW < 0f) {
-                    // Leave a narrow horizon band to coverage filtering.
-                    if (abs(w / centerW) > .05f) {
+                    // Require the ENTIRE presented sampling support behind
+                    // the physical horizon, rather than only its center.
+                    val fullSupportBehind = listOf(-1f, 1f).all { sx -> listOf(-1f, 1f).all { sy ->
+                        denominator(qx + sx * presentationSupportX, qy + sy * presentationSupportY) * centerW < 0f
+                    } }
+                    if (fullSupportBehind) {
                         behind++
                         if (maxOf(Color.red(color), Color.green(color), Color.blue(color)) > 12) litBehind++
                     }

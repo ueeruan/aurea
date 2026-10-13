@@ -166,6 +166,37 @@ AUREA_TEST(RealCamera, LostTrackingRecordsConstantPoseUntilTrackingReturns) {
     }
     AUREA_CHECK(e.real_camera_record(false).ok());
 }
+AUREA_TEST(RealCamera, SameFrameSampleThenHoldDoesNotRelabelAnEarlierPoseAsNewHeldKey) {
+    Engine e;AUREA_CHECK(e.initialize(camera_config()).ok());
+    AUREA_CHECK(e.new_project(800,600,30,"own same-frame hold proof").ok());
+    const auto camera=e.add_camera();AUREA_CHECK(camera.ok());if(!camera.ok())return;
+    const u64 id=*camera;AUREA_CHECK(e.real_camera_start(id).ok());AUREA_CHECK(e.real_camera_record(true).ok());
+    AUREA_CHECK(e.real_camera_sample(camera_pose().data(),1,true,1,false).ok());
+    auto* z=camera_layer(e,id)->tracks.find(TrackProperty::PositionZ);AUREA_CHECK(z && z->keys.size()==1);
+    if(!z || z->keys.size()!=1)return;
+    const f32 keyF=z->keys[0].value;const i64 sampledFrame=e.real_camera_status().lastFrame;
+    AUREA_CHECK_EQ(sampledFrame,i64{0});
+    // The sensor updates its current pose while the same timeline frame still
+    // contains its first recorded key. This successful sample is a key no-op.
+    AUREA_CHECK(e.real_camera_sample(camera_pose({0,0,-.5f}).data(),100'000'001,true,1,false).ok());
+    AUREA_CHECK_EQ(e.real_camera_status().lastFrame,sampledFrame);
+    AUREA_CHECK_EQ(z->keys.size(),usize{1});AUREA_CHECK_EQ(z->keys[0].value,keyF);
+    const i64 beforeHold=e.real_camera_status().lastFrame;AUREA_CHECK(e.real_camera_hold().ok());
+    const i64 sameFrameHold=e.real_camera_status().lastFrame;
+    AUREA_CHECK_EQ(sameFrameHold,beforeHold);AUREA_CHECK_EQ(z->keys.size(),usize{1});
+    AUREA_CHECK_EQ(z->keys[0].value,keyF);
+    e.playback().seek(FrameIndex{1},monotonic_ns());AUREA_CHECK(e.real_camera_hold().ok());
+    const i64 firstNewHold=e.real_camera_status().lastFrame;AUREA_CHECK_EQ(firstNewHold,i64{1});
+    z=camera_layer(e,id)->tracks.find(TrackProperty::PositionZ);AUREA_CHECK(z && z->keys.size()==2);if(!z || z->keys.size()!=2)return;
+    const f32 keyNext=z->keys[1].value;AUREA_CHECK(std::abs(keyNext-keyF)>1.f);
+    e.playback().seek(FrameIndex{2},monotonic_ns());AUREA_CHECK(e.real_camera_hold().ok());
+    const i64 secondNewHold=e.real_camera_status().lastFrame;AUREA_CHECK_EQ(secondNewHold,i64{2});
+    z=camera_layer(e,id)->tracks.find(TrackProperty::PositionZ);AUREA_CHECK(z && z->keys.size()==3);if(!z || z->keys.size()!=3)return;
+    AUREA_CHECK_EQ(z->keys[1].value,z->keys[2].value);
+    std::printf("    own same-frame hold: before=%lld after=%lld keyF=%.6f; newHoldFrames=%lld,%lld keyNext=%.6f keyAfter=%.6f; relabelingNoopAsHoldChangesPose=1\n",
+        static_cast<long long>(beforeHold),static_cast<long long>(sameFrameHold),keyF,static_cast<long long>(firstNewHold),static_cast<long long>(secondNewHold),keyNext,z->keys[2].value);
+    AUREA_CHECK(e.real_camera_record(false).ok());
+}
 AUREA_TEST(RealCamera, LivePreviewAfterRecordingDoesNotEditAnyRecordedKey) {
     Engine e;
     AUREA_CHECK(e.initialize(camera_config()).ok());

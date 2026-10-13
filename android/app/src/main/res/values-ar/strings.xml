@@ -4043,4 +4043,16 @@
     <string name="pn_mask_target">الطبقة المقصوصة: %1$s</string>
     <string name="export_v2_finalizing">جارٍ إنهاء الفيديو والصوت…</string>
     <string name="export_v2_validating">جارٍ التحقق من الفيديو والصوت…</string>
+    <string name="fx_name_raster_extrude">بثق ثلاثي الأبعاد</string>
+    <string name="fx_desc_raster_extrude">يضيف عمقًا حقيقيًا إلى شكل الطبقة المحدد بقناة ألفا. استخدم عناصر التحكم الحالية للدوران ثلاثي الأبعاد والكاميرا.</string>
+    <string name="fxl_side_color">لون الجوانب</string>
+    <string name="fxl_shading">التظليل</string>
+    <string name="prerender_forward">PreRender للأمام</string>
+    <string name="prerender_backward">PreRender للخلف</string>
+    <string name="prerender_cancel">إلغاء PreRender</string>
+    <string name="prerender_gesture_hint">اضغط باستمرار لنصف ثانية، ثم اسحب يمينًا أو يسارًا. ارفع إصبعك دون سحب لتبديل التكرار.</string>
+    <string name="prerender_preparing">جارٍ تجهيز PreRender…</string>
+    <string name="prerender_progress">PreRender: %1$d%%</string>
+    <string name="prerender_ready">PreRender جاهز</string>
+    <string name="prerender_failed">تعذّر تجهيز التشغيل: %1$s</string>
 </resources>

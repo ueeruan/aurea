@@ -24,6 +24,7 @@ add_executable(aurea_tests
     test_core.cpp
     test_timeline.cpp
     test_render.cpp
+    test_prerender_cache.cpp
     test_motion_blur.cpp
     test_serialization.cpp
     test_engine.cpp

@@ -1224,42 +1224,52 @@ struct SpeedPanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if kind != 1 && kind != 3 {
                         hint("panel_velocidade_vale_video_audio_nas_outras", size: 13)
-                    } else if speed == 0 && !animated {
-                        Text(AureaText.t("ios_frozen_frame_at", clock)).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                        hint("panel_este_trecho_quadro_parado_apare_bordas", size: 13).padding(.top, 8)
                     } else {
-                        Text(speedText(speed) + " · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                        hint(animated ? "panel_velocidade_keyframes_duracao_fica" : "panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
-                        // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote.
-                        PropertyCustomRow(AureaText.t("editor_velocidade"), selected: animated, onSelect: toggleSpeedKey, keyframe: speedKeyLook) {
-                            HStack(spacing: 6) {
-                                CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
-                                TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
-                                    .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
-                                        onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
-                                        onEnd: { model.engine.endUndoGroup() })
-                                CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
-                                ValueBox(speedText(speed), width: 64).padding(.leading, 2)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                speedChip(AureaText.t("remap_normal"), on: !remap) { change { $0.setTimeRemap(false, forLayer: id) } }
+                                speedChip(AureaText.t("remap_linha_tempo"), on: remap) { change { $0.setTimeRemap(true, forLayer: id) } }
                             }
-                        }.padding(.top, 12)
-                        HStack(spacing: 6) {
-                            ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in
-                                speedChip(["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
-                            }
-                        }.padding(.top, 12)
-                        if kind == 1 {
-                            HStack {
-                                Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
-                            }.frame(height: 48).padding(.top, 8)
-                            HStack(spacing: 6) {
-                                Text(AureaText.t("panel_quadros_camera_lenta")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                ForEach(Array(["panel_repetir_quadro", "panel_misturar", "panel_movimento_suave"].enumerated()), id: \.offset) { index, key in
-                                    speedChip(AureaText.t(key), on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == index, padding: 10) {
-                                        change { $0.setFrameBlendForLayer(id, mode: UInt32(index)) }
-                                    }
+                        }.padding(.bottom, 12)
+                        if remap {
+                            TimeRemapEffectEditor(effectId: .max)
+                        } else if speed == 0 && !animated {
+                            Text(AureaText.t("ios_frozen_frame_at", clock)).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+                            hint("panel_este_trecho_quadro_parado_apare_bordas", size: 13).padding(.top, 8)
+                        } else {
+                            Text(speedText(speed) + " · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+                            hint(animated ? "panel_velocidade_keyframes_duracao_fica" : "panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
+                            // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote.
+                            PropertyCustomRow(AureaText.t("editor_velocidade"), selected: animated, onSelect: toggleSpeedKey, keyframe: speedKeyLook) {
+                                HStack(spacing: 6) {
+                                    CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
+                                    TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
+                                        .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
+                                            onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
+                                            onEnd: { model.engine.endUndoGroup() })
+                                    CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
+                                    ValueBox(speedText(speed), width: 64).padding(.leading, 2)
                                 }
-                            }.frame(height: 48)
+                            }.padding(.top, 12)
+                            HStack(spacing: 6) {
+                                ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in
+                                    speedChip(["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
+                                }
+                            }.padding(.top, 12)
+                            if kind == 1 {
+                                HStack {
+                                    Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                                    AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
+                                }.frame(height: 48).padding(.top, 8)
+                                HStack(spacing: 6) {
+                                    Text(AureaText.t("panel_quadros_camera_lenta")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                                    ForEach(Array(["panel_repetir_quadro", "panel_misturar", "panel_movimento_suave"].enumerated()), id: \.offset) { index, key in
+                                        speedChip(AureaText.t(key), on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == index, padding: 10) {
+                                            change { $0.setFrameBlendForLayer(id, mode: UInt32(index)) }
+                                        }
+                                    }
+                                }.frame(height: 48)
+                            }
                         }
                     }
                 }.padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
@@ -1269,8 +1279,8 @@ struct SpeedPanel: View {
     private func speedChip(_ label: String, on: Bool, padding: CGFloat = 12, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                .padding(.horizontal, padding).padding(.vertical, 6).background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(.plain)
+                .padding(.horizontal, padding).frame(minHeight: 44).background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
     }
     private func hint(_ key: String, size: CGFloat) -> some View {
         Text(AureaText.t(key)).font(.aurea(size: size)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)

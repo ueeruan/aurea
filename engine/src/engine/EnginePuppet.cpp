@@ -225,7 +225,7 @@ i32 Engine::puppet_add_pin(u64 layerId, u32 effectId, f32 u, f32 v) noexcept {
     f32 rows[puppet::kOutline];
     const bool outlined = first && puppet_capture_outline(*comp, *l, local, rows);
     history_.before_mutation(*comp, project_->timeline().current(), "pino do fantoche");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     if (first) {
         for (u32 r = 0; r < puppet::kOutline; ++r) e->params[puppet::kOutlineFirst + r].constant.v[0] = outlined ? rows[r] : 0.0f;
     }
@@ -253,7 +253,7 @@ bool Engine::puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, b
     EffectInstance* e = puppet_effect(l, effectId);
     if (!e || pin >= puppet::kMaxPins || !pin_on(*e, pin) || !std::isfinite(u) || !std::isfinite(v)) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "mover pino");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const FrameIndex local = l->local_time(playback_.current());
     const u32 param = puppet::pin_pos(pin);
     const f32 value[2] = {u, v};
@@ -286,7 +286,7 @@ bool Engine::puppet_remove_pin(u64 layerId, u32 effectId, u32 pin) noexcept {
     EffectInstance* e = puppet_effect(l, effectId);
     if (!e || pin >= puppet::kMaxPins || !pin_on(*e, pin)) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "apagar pino");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     e->params[puppet::pin_on(pin)].constant.v[0] = 0.0f;
     const u32 rest = puppet::pin_rest(pin), pos = puppet::pin_pos(pin);
     l->tracks.remove_if([&](const Track& t) {

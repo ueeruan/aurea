@@ -4085,4 +4085,16 @@
     <string name="pn_mask_target">Camada recortada: %1$s</string>
     <string name="export_v2_finalizing">Finalizando vídeo e áudio…</string>
     <string name="export_v2_validating">Verificando vídeo e áudio…</string>
+    <string name="fx_name_raster_extrude">Extrusão 3D</string>
+    <string name="fx_desc_raster_extrude">Dá profundidade real à silhueta alfa da camada. Use os controles 3D de rotação e câmera.</string>
+    <string name="fxl_side_color">Cor lateral</string>
+    <string name="fxl_shading">Sombreamento</string>
+    <string name="prerender_forward">PreRender à frente</string>
+    <string name="prerender_backward">PreRender para trás</string>
+    <string name="prerender_cancel">Cancelar PreRender</string>
+    <string name="prerender_gesture_hint">Segure por meio segundo e arraste para a direita ou esquerda. Solte sem arrastar para alternar o loop.</string>
+    <string name="prerender_preparing">Preparando PreRender…</string>
+    <string name="prerender_progress">PreRender: %1$d%%</string>
+    <string name="prerender_ready">PreRender pronto</string>
+    <string name="prerender_failed">Não foi possível preparar a reprodução: %1$s</string>
 </resources>

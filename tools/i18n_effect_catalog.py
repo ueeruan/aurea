@@ -40,6 +40,7 @@ OUT_KT = os.path.join(ROOT, "android/app/src/main/java/com/aurea/aurea/effects/E
 OUT_SWIFT = os.path.join(ROOT, "engine/platform/ios/app/EffectI18nTable.swift")
 LANGS = ["en", "es", "ru", "hi", "id", "ar"]
 REUSE_PREFIXES = ("fx_", "afx_", "fxl_", "fxo_", "fx3_", "fx3o_", "core2_fx_", "core2_fxo_")
+REUSE_KEYS = {"scene_low", "scene_medium", "scene_high"}
 
 
 def load_strings(folder):
@@ -95,7 +96,7 @@ def main():
 
     by_pt = {}
     for key in sorted(pt, key=lambda k: (not k.startswith(("fxl_", "fxo_")), len(k), k)):
-        if key.startswith(REUSE_PREFIXES) and key in en:
+        if (key.startswith(REUSE_PREFIXES) or key in REUSE_KEYS) and key in en:
             by_pt.setdefault(pt[key].strip(), key)
 
     rows, new, todo = [], {}, []

@@ -38,7 +38,7 @@ u32 reduction_for_reach(f32 reach, f32 limit) noexcept {
 // -----------------------------------------------------------------------------
 class StrokeOutline final : public Effect {
 public:
-    enum : u32 { kWidth = 0, kColor, kSoftness, kPosition, kOpacity };
+    enum : u32 { kWidth = 0, kColor, kSoftness, kPosition, kOpacity, kDepth };
     static constexpr f32 kMaxTaps = 48.0f;   ///< laço fixo do shader, por passe
 
     const EffectInfo& info() const noexcept override {
@@ -56,6 +56,9 @@ public:
         p.typed_range(0.0f, 500.0f);
         p.add_enum("position", "Posição", kPositions, 3, 0);
         p.add_float("opacity", "Opacidade", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        // Append-only: files/curves addressing slots0..4 retain their meaning.
+        p.add_float("depth", "Profundidade", 0.0f, 0.0f, 512.0f, kParamAnimatable | kParamPixels, "px");
+        p.typed_range(0.0f, 4096.0f);
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         // Por dentro: a prévia do catálogo é uma foto que enche o quadro, e um
@@ -66,6 +69,7 @@ public:
         return true;
     }
     bool is_identity(const EffectEval& e) const noexcept override {
+        if (e.count > kDepth && finite_or(e.f(kDepth),0.0f)>0.0f) return false;
         return !(finite_or(e.f(kWidth), 0.0f) > 0.01f) || !(finite_or(e.f(kOpacity), 0.0f) > 0.01f);
     }
     /// Até onde o traço chega fora da silhueta (px): a largura que sai, mais
@@ -91,6 +95,7 @@ public:
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         const f32 width = std::clamp(finite_or(e.f(kWidth), 0.0f), 0.0f, 1000.0f);
+        if (width <= .01f || finite_or(e.f(kOpacity),0.0f) <= .01f) { out=input; return OkStatus; }
         const f32 soft = std::clamp(finite_or(e.f(kSoftness), 0.0f), 0.0f, 500.0f);
         const f32 grow = reach(e);
         const f32 look = search(e);

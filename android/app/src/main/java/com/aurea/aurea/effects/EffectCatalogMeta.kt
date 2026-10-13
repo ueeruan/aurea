@@ -201,6 +201,9 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "4 color gradient quatro cores degrade"))
     put("aurea.generate.audio_spectrum", EffectMeta(R.string.fx_desc_generate_audio_spectrum, AllTargets,
         "audio spectrum espectro som musica barras visualizador"))
+    put("aurea.generate.raster_extrude", EffectMeta(R.string.fx_desc_raster_extrude,
+        listOf(EffectTarget.Texto, EffectTarget.Forma, EffectTarget.Vetor, EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao),
+        "extrusao extrusion extrude depth profundidade volume silhueta alpha alfa 3d"))
     put("aurea.stylize.stroke_outline", EffectMeta(R.string.fx_desc_stylize_stroke_outline, AllTargets,
         "stroke contorno traco borda silhueta outline"))
     put("aurea.key.matte_refine", EffectMeta(R.string.fx_desc_key_matte_refine,

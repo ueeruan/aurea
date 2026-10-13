@@ -3995,4 +3995,16 @@ untuk mengedit kurvanya.</string>
     <string name="pn_mask_target">Layer yang dipotong: %1$s</string>
     <string name="export_v2_finalizing">Menyelesaikan video dan audio…</string>
     <string name="export_v2_validating">Memeriksa video dan audio…</string>
+    <string name="fx_name_raster_extrude">Ekstrusi 3D</string>
+    <string name="fx_desc_raster_extrude">Menambahkan kedalaman nyata pada siluet alfa layer. Gunakan kontrol rotasi 3D dan kamera yang tersedia.</string>
+    <string name="fxl_side_color">Warna sisi</string>
+    <string name="fxl_shading">Peneduhan</string>
+    <string name="prerender_forward">PreRender maju</string>
+    <string name="prerender_backward">PreRender mundur</string>
+    <string name="prerender_cancel">Batalkan PreRender</string>
+    <string name="prerender_gesture_hint">Tahan setengah detik, lalu geser ke kanan atau kiri. Lepaskan tanpa menggeser untuk mengaktifkan atau mematikan pengulangan.</string>
+    <string name="prerender_preparing">Menyiapkan PreRender…</string>
+    <string name="prerender_progress">PreRender: %1$d%%</string>
+    <string name="prerender_ready">PreRender siap</string>
+    <string name="prerender_failed">Tidak dapat menyiapkan pemutaran: %1$s</string>
 </resources>

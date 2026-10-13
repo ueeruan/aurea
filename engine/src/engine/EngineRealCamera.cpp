@@ -130,7 +130,7 @@ Status Engine::real_camera_commit_locked() noexcept {
             }
         }
     }
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     project_->mark_dirty();
     request_render();
     return OkStatus;

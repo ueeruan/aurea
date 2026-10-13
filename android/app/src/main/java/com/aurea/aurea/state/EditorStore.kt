@@ -55,6 +55,7 @@ import com.aurea.aurea.engine.ParamType
 import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.PodLayout
 import com.aurea.aurea.engine.PreviewBufferRange
+import com.aurea.aurea.engine.PreRenderProgress
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.engine.directBuffer
@@ -68,6 +69,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -454,6 +456,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var playhead by mutableIntStateOf(0)
         private set
     var playing by mutableStateOf(false)
+    var preRenderPreparing by mutableStateOf(false)
+        private set
+    var preRenderProgress by mutableStateOf(PreRenderProgress())
+        private set
+    private var preRenderRequest: AtomicBoolean? = null
+    private var preRenderCancelled = false
         private set
     var preview by mutableStateOf(PreviewState())
         private set
@@ -1202,6 +1210,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (destroyed) return
         val path = project.path.takeIf { screen == Screen.Editor && ready }
         destroyed = true
+        preRenderRequest?.set(true)
+        preRenderRequest = null
+        preRenderPreparing = false
         ready = false
         engineReady = false
         stopStatusLoop()
@@ -1274,7 +1285,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Lê o status do motor e publica. Devolve se algo que a UI mostra mudou. */
     private fun pollStatus(): Boolean {
-        if (exporter.state.preparing) return false
+        if (exporter.state.preparing || preRenderPreparing) return false
         engine.readStatus(statusBuffer)
         status.readFrom(statusBuffer)
         val n = statusSigNow
@@ -1301,7 +1312,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         statusSlow = false
         statusIdleFrames = 0
         statusLoop = RenderLoop { frameTimeNanos ->
-            if (!ready || exporter.state.preparing) return@RenderLoop
+            if (!ready || exporter.state.preparing || preRenderPreparing) return@RenderLoop
             checkMemoryPressure()
             engine.readStatus(statusBuffer)
             status.readFrom(statusBuffer)
@@ -1439,6 +1450,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (status.modelRevision != lastPreviewAuxRevision || auxNow - lastPreviewAuxNs >= 200_000_000L) {
             previewBufferRanges = readPreviewBufferRanges()
             localAiActivity = engine.localAiStatus()
+            updatePreRenderProgress()
             lastPreviewAuxNs = auxNow
             lastPreviewAuxRevision = status.modelRevision
         }
@@ -2553,7 +2565,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Força a releitura na mesma volta (depois de um comando local). */
     private fun refreshNow() {
-        if (destroyed || !ready || exporter.state.preparing) return
+        if (destroyed || !ready || exporter.state.preparing || preRenderPreparing) return
         lastRevision = -1
         wakeStatusLoop()
         // Fase 8D: DENTRO de um gesto (arrasto, slider) a releitura fica para o
@@ -3355,6 +3367,62 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun pause() = send { pause() }
     fun togglePlayback() { pendingPlayhead = null; send { togglePlayback() } }
 
+    /** Pause immediately; the native snapshot/startup stays off the UI thread. */
+    fun startPreRender(direction: Int) {
+        if (destroyed || !ready || screen != Screen.Editor || projectWork || exporter.busy || preRenderPreparing || preRenderProgress.running) return
+        pause()
+        playing = false
+        val request = AtomicBoolean(false)
+        val session = projectGeneration
+        val compositionId = composition?.id
+        val normalized = if (direction < 0) -1 else 1
+        preRenderRequest = request
+        preRenderCancelled = false
+        preRenderPreparing = true
+        preRenderProgress = PreRenderProgress(direction = normalized)
+        enqueueLifecycle {
+            var code = 5
+            try {
+                synchronized(lifecycleLock) {
+                    if (ready && !request.get()) {
+                        code = engine.startPreRender(normalized)
+                        if (request.get()) engine.cancelPreRender()
+                    }
+                }
+            } catch (failure: Exception) {
+                Log.w(TAG, "PreRender startup failed", failure)
+                code = 10
+            } catch (failure: OutOfMemoryError) { code = 8 }
+            finally {
+                val result = code
+                main.post {
+                    if (destroyed || preRenderRequest !== request) return@post
+                    preRenderRequest = null
+                    preRenderPreparing = false
+                    if (!ready || projectGeneration != session || composition?.id != compositionId) return@post
+                    if (!request.get()) {
+                        updatePreRenderProgress()
+                        if (result != 0 && preRenderProgress.error != result) showToast(appText(R.string.prerender_failed, humanError(result)))
+                    }
+                    wakeStatusLoop()
+                }
+            }
+        }
+    }
+
+    fun cancelPreRender() {
+        preRenderCancelled = true
+        preRenderRequest?.set(true)
+        viewModelScope.launch(Dispatchers.Default) { engine.cancelPreRender() }
+    }
+
+    private fun updatePreRenderProgress() {
+        val progress = engine.preRenderProgress()
+        if (progress.error != 0 && progress.error != preRenderProgress.error && !preRenderCancelled && progress.error != 25)
+            showToast(appText(R.string.prerender_failed, humanError(progress.error)))
+        if (progress != preRenderProgress) preRenderProgress = progress
+    }
+
     fun seek(frame: Int) {
         val f = clampFrame(frame)
         send { seek(frameToNs(f)) }
@@ -3521,6 +3589,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun acceptsProjectChange(): Boolean {
+        if (preRenderPreparing) { showToast(appText(R.string.prerender_preparing)); return false }
         if (destroyed || !ready || projectWork) return false
         if (exporter.busy) { showToast(appText(R.string.msg_aguarde_a_exportacao_terminar)); return false }
         if (activeImports > 0 || busyMessage != null || captions.busy != null || tracking || maskTracking || detectingBeats) return false
@@ -4622,6 +4691,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Remapeamento de tempo -----------------------------------------------------------
+    fun timeRemapCurrentSource(layer: Long): Double = engine.timeRemapCurrentSource(layer)
+
     fun enableManualTimeRemap() {
         val id = primary ?: return
         if (detail?.timeRemap != true) engine.setTimeRemap(id, true)

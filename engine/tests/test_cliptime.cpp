@@ -1373,3 +1373,5 @@ AUREA_TEST(ClipTime, ExtendButtonRestoresAvailableHandleAndUndo) {
         AUREA_CHECK(!r.e.edit_clip_time(r.layer.pack(), 7, 0));
     }
 }
+
+#include "TimeRemapSourceGetter.inl"

@@ -73,6 +73,7 @@ public:
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
+    std::function<Status()> beforeBeginFrameStatus;
     std::function<void()> beforeBeginOffscreenFrame;
     std::function<void()> beforeBeginLeasedFrame;
     std::function<void()> beforeWaitIdle;
@@ -125,6 +126,10 @@ public:
 
     Status begin_frame(FrameBegin& out) noexcept override {
         if (beforeBeginFrame) beforeBeginFrame();
+        if (beforeBeginFrameStatus) {
+            const Status ready = beforeBeginFrameStatus();
+            if (!ready.ok()) return ready;
+        }
         if (presentableLeaseActive) return Errc::Busy;
         out = FrameBegin{};
         out.commands = this;

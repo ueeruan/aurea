@@ -616,6 +616,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_pix_dither(registry);
     builtin::register_video_glitch(registry);
     builtin::register_displace_transform(registry);
+    builtin::register_raster_extrude(registry);
 }
 
 } // namespace aurea

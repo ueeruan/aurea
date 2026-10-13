@@ -51,6 +51,29 @@ struct MotionBlurControls: Equatable {
     }
 }
 
+struct PreRenderState: Equatable {
+    var running = false
+    var complete = false
+    var framesDone: Int64 = 0
+    var framesTotal: Int64 = 0
+    var width: Int = 0
+    var height: Int = 0
+    var direction = 1
+    var error = 0
+    var diskBytes: Int64 = 0
+    var residentBytes: Int64 = 0
+    var fraction: Double { framesTotal > 0 ? min(1, max(0, Double(framesDone) / Double(framesTotal))) : 0 }
+    init() {}
+    init(_ values: [NSNumber]) {
+        guard values.count >= 10 else { return }
+        running = values[0].boolValue; complete = values[1].boolValue
+        framesDone = max(0, values[2].int64Value); framesTotal = max(0, values[3].int64Value)
+        width = max(0, values[4].intValue); height = max(0, values[5].intValue)
+        direction = values[6].intValue < 0 ? -1 : 1; error = values[7].intValue
+        diskBytes = max(0, values[8].int64Value); residentBytes = max(0, values[9].int64Value)
+    }
+}
+
 struct LayerItem: Identifiable, Equatable {
     var id: Int64
     var kind: UInt32
@@ -194,6 +217,13 @@ private final class ExportStartupRequest: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         cancelled = true
     }
+}
+
+private final class PreRenderStartupRequest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+    func cancel() { lock.lock(); defer { lock.unlock() }; cancelled = true }
 }
 
 /// Formato do export. `engineCode` = ImageExportFormat do motor
@@ -650,6 +680,10 @@ final class AureaModel: ObservableObject {
     // --- Export -------------------------------------------------------------
     @Published var exportOptions = ExportOptions()
     @Published private(set) var exportProgress: [String: Any] = [:]
+    @Published private(set) var preRenderPreparing = false
+    @Published private(set) var preRenderProgress = PreRenderState()
+    private var preRenderStartup: PreRenderStartupRequest?
+    private var preRenderCancelled = false
     @Published private(set) var exporting = false
     @Published private(set) var exportPreparing = false
     @Published private(set) var exportedURL: URL?
@@ -1535,6 +1569,8 @@ final class AureaModel: ObservableObject {
         restartAfterStop = false
         guard !stopping else { return }
         stopping = true
+        preRenderStartup?.cancel(); preRenderStartup = nil
+        preRenderPreparing = false
         exportStartup?.cancel(); exportStartup = nil
         if exporting { exportCancelled = true; engine.cancelExport() }
         exportTimer?.invalidate(); exportTimer = nil
@@ -1555,6 +1591,7 @@ final class AureaModel: ObservableObject {
             // Suspend cancels a cold capture. Drain the queue before deleting
             // the native host; neither the AI wait nor shutdown blocks UIKit.
             native.suspend()
+            native.cancelPreRender()
             captures.sync {}
             native.stop()
             DispatchQueue.main.async {
@@ -1580,7 +1617,7 @@ final class AureaModel: ObservableObject {
     private func refreshStatus() {
         // Native startup freezes the document under modelMutex. Polling it
         // here would move that background wait straight back onto UIKit.
-        guard started, !exportPreparing, !exportBackgroundSavePending else { return }
+        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing else { return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         // Detail is evaluated at the native playhead. The optimistic timeline
@@ -1589,6 +1626,7 @@ final class AureaModel: ObservableObject {
         let playheadChanged = nativePlayhead != lastEnginePlayhead
         lastEnginePlayhead = nativePlayhead
         refreshPreviewBufferRanges(revision: out.modelRevision)
+        updatePreRenderProgress()
         if let pending = pendingPlayhead {
             if out.playhead == pending || ProcessInfo.processInfo.systemUptime >= pendingPlayheadUntil { pendingPlayhead = nil }
             else { out.playhead = pending }
@@ -1680,7 +1718,7 @@ final class AureaModel: ObservableObject {
     /// Relê o modelo que as telas desenham. Barato o bastante para rodar a cada
     /// mudança de revisão (é UMA travessia por lista, ver Engine::query_*).
     func refreshModel(force: Bool = false) {
-        guard started, !exportPreparing, !exportBackgroundSavePending else { return }
+        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing else { return }
         refreshPreviewBufferRanges(revision: status.modelRevision)
         let nextEditMode = engine.timelineEditMode
         if editMode != nextEditMode { editMode = nextEditMode }
@@ -1756,6 +1794,7 @@ final class AureaModel: ObservableObject {
 
     /// O que depende da camada escolhida: efeitos, parâmetros e o inspetor.
     func refreshSelectedLayer(refreshEffectStack: Bool = true) {
+        guard !preRenderPreparing else { return }
         guard let layerId = primarySelection, started else {
             if !effects.isEmpty { effects = [] }
             if !effectParams.isEmpty { effectParams = [] }
@@ -1915,6 +1954,64 @@ final class AureaModel: ObservableObject {
         followPlayback(false)
     }
 
+    func startPreRender(_ direction: Int) {
+        guard started, screen == .editor, !exporting, !exportPreparing, !openingProject, !importingMedia,
+              !preRenderPreparing, !preRenderProgress.running else { return }
+        pause()
+        let request = PreRenderStartupRequest(), project = projectGeneration
+        let native = engine, normalized = direction < 0 ? -1 : 1
+        preRenderStartup = request
+        preRenderCancelled = false
+        preRenderPreparing = true
+        preRenderProgress = PreRenderState()
+        lifecycleQueue.async { [weak self] in
+            let code: Int32 = request.isCancelled ? 25 : native.startPreRender(direction: Int32(normalized))
+            if request.isCancelled { native.cancelPreRender() }
+            DispatchQueue.main.async {
+                guard let self, self.preRenderStartup === request else { return }
+                self.preRenderStartup = nil
+                self.preRenderPreparing = false
+                guard self.started, self.projectGeneration == project else { return }
+                if !request.isCancelled {
+                    self.updatePreRenderProgress()
+                    if code != 0, self.preRenderProgress.error != Int(code) {
+                        self.toast = AureaText.t("prerender_failed", Self.preRenderErrorText(Int(code)))
+                    }
+                }
+            }
+        }
+    }
+
+    func cancelPreRender() {
+        preRenderCancelled = true
+        preRenderStartup?.cancel()
+        // Cancellation only flips native flags and takes short state locks.
+        // It must enter while lifecycleQueue is still preparing the snapshot.
+        // started is cleared on Main before that queue can destroy the host.
+        if started { engine.cancelPreRender() }
+    }
+
+    private func updatePreRenderProgress() {
+        let progress = PreRenderState(engine.preRenderProgress())
+        if progress.error != 0, progress.error != preRenderProgress.error, !preRenderCancelled, progress.error != 25 {
+            toast = AureaText.t("prerender_failed", Self.preRenderErrorText(progress.error))
+        }
+        if progress != preRenderProgress { preRenderProgress = progress }
+    }
+
+    private static func preRenderErrorText(_ code: Int) -> String {
+        switch code {
+        case 6, 24: return AureaText.t("msg_recurso_nao_suportado_neste_aparelho")
+        case 8, 9: return AureaText.t("msg_memoria_insuficiente_feche_outros_apps_e")
+        case 10: return AureaText.t("msg_erro_ao_ler_ou_gravar_o")
+        case 14: return AureaText.t("msg_nao_foi_possivel_decodificar_a_midia")
+        case 19: return AureaText.t("msg_a_gpu_foi_reiniciada_tente_de")
+        case 20: return AureaText.t("msg_memoria_de_video_gpu_insuficiente_baixe")
+        case 28: return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
+        default: return AureaText.t("msg_erro_inesperado_codigo", code)
+        }
+    }
+
     /// Liga/desliga o relógio da timeline (um CADisplayLink só enquanto toca).
     private func followPlayback(_ playing: Bool) {
         if playing {
@@ -1931,7 +2028,7 @@ final class AureaModel: ObservableObject {
 
     /// Um quadro da tela: só o cabeçote do motor vai para a timeline.
     private func playheadTick() {
-        guard started, !exportPreparing, !exportBackgroundSavePending else { followPlayback(false); return }
+        guard started, !exportPreparing, !exportBackgroundSavePending, !preRenderPreparing else { followPlayback(false); return }
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         if playheadClock.frame != out.playhead { playheadClock.frame = out.playhead }
@@ -2509,6 +2606,7 @@ final class AureaModel: ObservableObject {
     // Importação
     // =========================================================================
     private func canChangeProject() -> Bool {
+        if preRenderPreparing { toast = AureaText.t("prerender_preparing"); return false }
         if exporting { toast = AureaText.t("editor_mantenha_aurea_aberto_ate_terminar"); return false }
         if importingMedia { toast = operationMessage; return false }
         if !projectOperations.isEmpty { toast = AureaText.t("ios_importing_media"); return false }

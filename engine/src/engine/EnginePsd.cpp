@@ -201,7 +201,7 @@ Result<u64> Engine::import_psd(const std::string& path, const char* name, bool* 
     *original = std::move(*stagedParent);
     stagingGuard.committed = true; folderGuard.keep = true;
     if (approximated) *approximated=doc.approximated;
-    modelRevision_.fetch_add(1,std::memory_order_acq_rel); project_->mark_dirty(); request_render();
+    bump_model_revision_locked(); project_->mark_dirty(); request_render();
     return id.pack();
 } catch (const std::bad_alloc&) {
     return Status{Errc::OutOfMemory};

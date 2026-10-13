@@ -55,7 +55,7 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
     effect->params[5].constant = ParamValue::vec3(hi.x, hi.y, hi.z);
     if (cubeLuts_.size() >= 8) cubeLuts_.clear();
     cubeLuts_[id.pack()] = std::make_shared<const CubeLut>(std::move(*parsed));
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     project_->mark_dirty(); request_render(); return OkStatus;
 }
 
@@ -171,7 +171,7 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
         }
     }
     history_.before_mutation(*comp, project_->timeline().current(), "substituir midia");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
 
     Asset asset;
     asset.kind = AssetKind::Video;
@@ -239,7 +239,7 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
     try { px.rgba.assign(rgba, rgba + static_cast<usize>(bytes)); }
     catch (const std::bad_alloc&) { return Status{Errc::OutOfMemory}; }
     history_.before_mutation(*comp, project_->timeline().current(), "substituir midia");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
 
     f32 oldW = 0.0f, oldH = 0.0f;
     const bool hadSize = current_media_size(*project_, images_, *l, oldW, oldH);

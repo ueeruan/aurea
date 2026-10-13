@@ -62,6 +62,7 @@ void register_starglow(EffectRegistry& r);
 void register_pix_dither(EffectRegistry& r);
 void register_video_glitch(EffectRegistry& r);
 void register_displace_transform(EffectRegistry& r);
+void register_raster_extrude(EffectRegistry& r);
 /// Shape 3D Layout (PatternEffects.cpp): o Text 3D Layout das formas 3D.
 void register_shape3d_layout_effect(EffectRegistry& r);
 /// Detectar movimento (MotionDetectEffect.cpp). Sempre no fim.

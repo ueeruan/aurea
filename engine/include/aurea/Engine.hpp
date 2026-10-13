@@ -58,6 +58,8 @@
 #include "aurea/render/Renderer.hpp"
 #include "aurea/render/PreviewRefill.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
+#include "aurea/render/PreRender.hpp"
+#include "aurea/render/PreRenderCache.hpp"
 
 #include <array>
 #include <atomic>
@@ -69,6 +71,7 @@
 #include <vector>
 
 namespace aurea {
+class PreRenderCache;
 
 /// Stable bridge values. Timing arrangements move whole layers without trimming.
 enum class LayerTimeArrangement : u32 {
@@ -810,6 +813,9 @@ public:
     /// velocidade no cabeçote} e depois 7 floats por ponto: tempo local, quadro
     /// da fonte, interpolação, bx1, by1, bx2, by2. Devolve os floats escritos.
     u32 query_time_remap(u64 layerId, f32* out, u32 maxFloats) noexcept;
+    /// Momento atual da fonte, em quadros da composição, avaliado pelo motor
+    /// (inclui remap/easing/expressão). NaN quando projeto/camada não existem.
+    [[nodiscard]] f64 query_time_remap_current_source(u64 layerId) noexcept;
     /// Ponto da curva: `index` < 0 insere em `localFrame` com o valor que a
     /// curva JÁ tem ali (nada muda até mover); senão move o ponto (tempo
     /// preso entre os vizinhos, valor dentro da fonte). `interp` < 0 mantém.
@@ -1709,6 +1715,12 @@ public:
     /// regra do motor — o que a tela Exportar mostra é o que sai.
     [[nodiscard]] ImageExportPlan query_image_export_plan(const ImageExportSettings& settings) noexcept;
 
+    /// Whole current composition at540p in either timeline direction. The
+    /// private cache preserves alpha and expires on any content revision.
+    [[nodiscard]] Status start_prerender(i32 direction) noexcept;
+    void cancel_prerender() noexcept;
+    [[nodiscard]] PreRenderProgress query_prerender_progress() noexcept;
+
     // =========================================================================
     // Acesso de baixo nível (testes e painel de debug)
     // =========================================================================
@@ -2059,6 +2071,7 @@ private:
     // Bound from startup context creation through publication when gated. The pointer lock prevents a
     // public cancellation from racing its scoped removal/context destruction.
     std::atomic<bool>* exportStartupCancel_ = nullptr;
+    std::atomic<bool>* preRenderStartupCancel_ = nullptr; // same short context lock
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).
     std::atomic<bool> exportActive_{false};
@@ -2074,6 +2087,25 @@ private:
     /// another export starts. Called after producer join with renderMutex_.
     [[nodiscard]] Status retire_abandoned_export_locked(bool admitNewSession = true) noexcept;
     void image_export_thread_main() noexcept;
+    [[nodiscard]] Status start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
+                                                     i32 preRenderDirection) noexcept;
+    void invalidate_prerender() noexcept;
+    u32 bump_model_revision_locked() noexcept;
+    [[nodiscard]] bool prerender_valid_locked() noexcept; // modelMutex_
+    void clear_prerender_gpu_locked() noexcept; // renderMutex_, backend owns deferred destruction
+    std::unique_ptr<PreRenderCache> preRenderCache_;
+    mutable std::mutex preRenderStateMutex_;
+    PreRenderProgress preRenderProgress_{};
+    PreRenderCache::Key preRenderKey_{};
+    std::atomic<u64> preRenderToken_{0};
+    std::atomic<bool> preRenderCancel_{false}, preRenderActive_{false};
+    struct PreRenderGpuSlot {
+        TextureHandle texture{};
+        u64 generation = 0, gpuFrame = 0, token = 0;
+        i64 time = -1;
+    };
+    std::array<PreRenderGpuSlot, 2> preRenderTextures_{};
+    std::vector<u16> preRenderUpload_;
     [[nodiscard]] Status initialize_offline_export(ExportContext& ctx) noexcept;
     [[nodiscard]] Status prepare_export_resources(ExportContext& ctx) noexcept;
     void release_offline_export(ExportContext& ctx, bool retainReadbacks = false) noexcept;

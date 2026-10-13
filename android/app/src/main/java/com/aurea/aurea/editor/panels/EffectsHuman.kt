@@ -1226,6 +1226,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             13 to ParamHuman(label = R.string.fx_compor_original),
             14 to ParamHuman(label = R.string.fx_sensibilidade, decimals = 0),
         )))
+    put("aurea.generate.raster_extrude", EffectHuman(
+        name = R.string.fx_name_raster_extrude,
+        keywords = "extrusao extrusion extrude depth profundidade volume silhueta alpha alfa 3d",
+        principal = listOf(0, 1, 2, 3),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fxo_depth, suffix = "px", decimals = 1),
+            1 to ParamHuman(label = R.string.fxl_side_color),
+            2 to ParamHuman(label = R.string.fxl_shading, scale = 100f, suffix = "%", decimals = 0),
+            3 to ParamHuman(label = R.string.fxl_quality),
+        )))
     put("aurea.stylize.stroke_outline", EffectHuman(
         name = R.string.fx_name_stroke_outline,
         keywords = "contorno stroke outline traco borda silhueta",
@@ -1235,6 +1245,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             2 to ParamHuman(label = R.string.fx_suavidade, suffix = "px", decimals = 1),
             3 to ParamHuman(label = R.string.fx_posicao),
             4 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
+            5 to ParamHuman(label = R.string.fxo_depth, suffix = "px", decimals = 1),
         )))
     put("aurea.key.matte_refine", EffectHuman(
         name = R.string.fx_name_matte_refine,

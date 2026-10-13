@@ -210,6 +210,7 @@ class AureaEngine private constructor() {
         if (nativeHandle != 0L) {
             nativeCancelModelImport(nativeHandle)
             nativeCancelExport(nativeHandle)
+            nativeCancelPreRender(nativeHandle)
             nativeCaptionProgress(nativeHandle, true)
         }
     }) { if (nativeHandle != 0L) nativeShutdown(nativeHandle) }
@@ -824,6 +825,7 @@ class AureaEngine private constructor() {
     /** PowerManager.THERMAL_STATUS_* → o preview reduz o que é caro sob calor. */
     fun setThermal(status: Int) = nativeSetThermal(nativeHandle, status)
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
+    fun timeRemapCurrentSource(layer: Long): Double = nativeWork.run(Double.NaN) { nativeQueryTimeRemapCurrentSource(nativeHandle, layer) }
 
     // Rastreio de câmera 3D.
     fun startMotionTrack(layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float): Boolean = nativeStartMotionTrack(nativeHandle, layer, tool, model, backward, points, feature, search)
@@ -1012,6 +1014,16 @@ class AureaEngine private constructor() {
         nativeWork.run(5) { nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent, quality, rateMode, safeMode) }
 
     fun exportDuration(trimToContent: Boolean = true): Long = nativeExportDuration(nativeHandle, trimToContent)
+
+    /** Native startup may freeze a document; call from the lifecycle worker. */
+    fun startPreRender(direction: Int): Int =
+        nativeWork.run(5) { nativeStartPreRender(nativeHandle, if (direction < 0) -1 else 1) }
+
+    fun cancelPreRender() = nativeWork.run(Unit) { nativeCancelPreRender(nativeHandle) }
+
+    /** Atomic counters only: no file access or GPU wait. */
+    fun preRenderProgress(): PreRenderProgress =
+        PreRenderProgress.from(nativeWork.run(longArrayOf()) { nativePreRenderProgress(nativeHandle) })
 
     /**
      * Export como imagem (motor: export/ImageEncode.hpp). `format` 0 = quadro do
@@ -1253,6 +1265,7 @@ class AureaEngine private constructor() {
     private external fun nativeSelectCameraTrackPoints(handle: Long, ids: IntArray, operation: Int): Int
     private external fun nativeCreateCameraTrackObject(handle: Long, kind: Int): Long
     private external fun nativeQueryTimeRemap(handle: Long, layer: Long, out: FloatArray): Int
+    private external fun nativeQueryTimeRemapCurrentSource(handle: Long, layer: Long): Double
     private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
     private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
@@ -1404,6 +1417,9 @@ class AureaEngine private constructor() {
     private external fun nativeRecoverSession(handle: Long): Int
     private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int, safeMode: Int): Int
     private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
+    private external fun nativeStartPreRender(handle: Long, direction: Int): Int
+    private external fun nativeCancelPreRender(handle: Long)
+    private external fun nativePreRenderProgress(handle: Long): LongArray
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeRestartExport(handle: Long, recoveryPath: String, outputPath: String): Int
     private external fun nativeStartImageExport(handle: Long, outputPath: String, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): Int
@@ -1484,4 +1500,29 @@ class AureaEngine private constructor() {
     private external fun nativeImportSvg(handle: Long, bytes: ByteArray, name: String): Long
     private external fun nativeSetTextPath(handle: Long, layer: Long, pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean): Boolean
     private external fun nativeQueryTextPath(handle: Long, layer: Long): LongArray?
+}
+
+/** The ten-slot JNI contract uses integers, including cache byte counters. */
+data class PreRenderProgress(
+    val running: Boolean = false,
+    val complete: Boolean = false,
+    val framesDone: Long = 0,
+    val framesTotal: Long = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    val direction: Int = 1,
+    val error: Int = 0,
+    val diskBytes: Long = 0,
+    val residentBytes: Long = 0,
+) {
+    val fraction: Float get() = if (framesTotal > 0) (framesDone.toDouble() / framesTotal).coerceIn(0.0, 1.0).toFloat() else 0f
+    companion object {
+        fun from(values: LongArray): PreRenderProgress {
+            if (values.size < 10) return PreRenderProgress()
+            return PreRenderProgress(values[0] != 0L, values[1] != 0L,
+                values[2].coerceAtLeast(0), values[3].coerceAtLeast(0),
+                values[4].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), values[5].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+                if (values[6] < 0) -1 else 1, values[7].toInt(), values[8].coerceAtLeast(0), values[9].coerceAtLeast(0))
+        }
+    }
 }

@@ -344,6 +344,24 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     return _host ? _host->engine() : nullptr;
 }
 
+- (int32_t)startPreRender:(int32_t)direction {
+    auto* e = self.engine;
+    return e ? e->start_prerender(direction < 0 ? -1 : 1).raw()
+             : static_cast<int32_t>(aurea::Errc::InvalidState);
+}
+
+- (void)cancelPreRender {
+    if (auto* e = self.engine) e->cancel_prerender();
+}
+
+- (NSArray<NSNumber*>*)preRenderProgress {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto p = e->query_prerender_progress();
+    return @[@(p.running), @(p.complete), @(p.framesDone), @(p.framesTotal),
+             @(p.width), @(p.height), @(p.direction), @(p.error), @(p.diskBytes), @(p.residentBytes)];
+}
+
 // =============================================================================
 // Ciclo de vida
 // =============================================================================
@@ -3025,6 +3043,11 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     const auto diagnostic = aurea::expr::check_syntax(to_std(source));
     return @{@"accepted": @YES, @"ok": @(diagnostic.ok), @"message": to_ns(diagnostic.message), @"line": @(diagnostic.line), @"column": @(diagnostic.column)};
 }
+- (double)timeRemapCurrentSource:(int64_t)layerId {
+    auto* e = self.engine;
+    return e ? e->query_time_remap_current_source(static_cast<u64>(layerId)) : std::nan("");
+}
+
 - (NSArray<NSNumber*>*)timeRemap:(long long)layerId {
     auto* e = self.engine; if (!e) return @[];
     float header[5]{}; if (e->query_time_remap(layerId, header, 5) < 5) return @[];

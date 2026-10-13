@@ -4052,4 +4052,16 @@ to edit the curve.</string>
     <string name="pn_mask_target">Masked layer: %1$s</string>
     <string name="export_v2_finalizing">Finalizing video and audio…</string>
     <string name="export_v2_validating">Checking video and audio…</string>
+    <string name="fx_name_raster_extrude">3D Extrusion</string>
+    <string name="fx_desc_raster_extrude">Adds real depth to the layer\'s alpha silhouette. Use the existing 3D rotation and camera controls.</string>
+    <string name="fxl_side_color">Side color</string>
+    <string name="fxl_shading">Shading</string>
+    <string name="prerender_forward">PreRender forward</string>
+    <string name="prerender_backward">PreRender backward</string>
+    <string name="prerender_cancel">Cancel PreRender</string>
+    <string name="prerender_gesture_hint">Hold for half a second, then drag right or left. Release without dragging to toggle looping.</string>
+    <string name="prerender_preparing">Preparing PreRender…</string>
+    <string name="prerender_progress">PreRender: %1$d%%</string>
+    <string name="prerender_ready">PreRender ready</string>
+    <string name="prerender_failed">Could not prepare playback: %1$s</string>
 </resources>

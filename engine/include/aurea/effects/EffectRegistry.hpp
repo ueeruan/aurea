@@ -154,6 +154,7 @@ namespace effect_keys {
     /// Contorno da silhueta (alfa) de QUALQUER camada — o traço de forma e
     /// texto continua sendo o deles; este é o do pixel.
     inline constexpr const char* kStrokeOutline      = "aurea.stylize.stroke_outline";
+    inline constexpr const char* kRasterExtrude      = "aurea.generate.raster_extrude";
     // Geradores (ver GenerateEffects.cpp)
     inline constexpr const char* kFractalNoise       = "aurea.generate.fractal_noise";
     inline constexpr const char* kGradientRamp       = "aurea.generate.gradient_ramp";

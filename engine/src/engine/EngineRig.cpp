@@ -84,7 +84,7 @@ i32 Engine::rig_add_joint(u64 layerId, i32 parentId, f32 compX, f32 compY) noexc
     Vec2 p;
     if (!plane_of(*comp, *l, playback_.current()).to_layer(Vec2{compX, compY}, p)) return -1;
     history_.before_mutation(*comp, project_->timeline().current(), "junta do rig");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     RigJoint j;
     j.id = l->rig.nextJointId++;
     j.parent = hasParent ? static_cast<u32>(parentId) : kInvalidIndex;
@@ -104,7 +104,7 @@ bool Engine::rig_move_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool
     Vec2 p;
     if (!plane_of(*comp, *l, playback_.current()).to_layer(Vec2{compX, compY}, p)) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "mover junta");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->rig.joints[static_cast<u32>(i)].pos = p;
     project_->mark_dirty();
     request_render();
@@ -118,7 +118,7 @@ bool Engine::rig_remove_joint(u64 layerId, u32 jointId) noexcept {
     const i32 i = l ? rig::index_of(l->rig, jointId) : -1;
     if (i < 0) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "apagar junta");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const u32 up = l->rig.joints[static_cast<u32>(i)].parent;
     l->rig.joints.erase(l->rig.joints.begin() + i);
     for (RigJoint& j : l->rig.joints)
@@ -135,7 +135,7 @@ bool Engine::rig_clear(u64 layerId) noexcept {
     Layer* l = rig_layer(comp, layerId);
     if (!l || l->rig.joints.empty()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "tirar rig");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->rig = RigData{};
     l->tracks.remove_if([](const Track& t) { return t.property == TrackProperty::RigBone; });
     project_->mark_dirty();
@@ -191,7 +191,7 @@ u32 Engine::rig_auto_humanoid(u64 layerId) noexcept {
     const T* tpl = fullBody ? full : bust;
     const u32 n = fullBody ? static_cast<u32>(std::size(full)) : static_cast<u32>(std::size(bust));
     history_.before_mutation(*comp, project_->timeline().current(), "esqueleto automatico");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->rig = RigData{};
     l->tracks.remove_if([](const Track& t) { return t.property == TrackProperty::RigBone; });
     for (u32 i = 0; i < n; ++i) {
@@ -239,7 +239,7 @@ bool Engine::rig_pose_joint(u64 layerId, u32 jointId, f32 compX, f32 compY, bool
         changes[count++] = Change{i, d};
     }
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "posar rig");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     for (u32 k = 0; k < count; ++k) {
         const Change& c = changes[k];
         Track& tr = l->tracks.get_or_create(TrackProperty::RigBone, kInvalidIndex, l->rig.joints[c.index].id);

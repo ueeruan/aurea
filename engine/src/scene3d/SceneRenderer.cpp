@@ -1141,9 +1141,9 @@ PipelineKey SceneRenderer::key_for(AlphaMode mode, bool doubleSided, bool skinne
     return k;
 }
 
-PipelineKey SceneRenderer::plane_key(bool translucent, bool periodic) const noexcept {
-    PipelineKey k = PipelineKey::graphics(periodic ? ShaderId::scene3d_plane_tile_vert : ShaderId::composite_layer_vert,
-                                          periodic ? ShaderId::scene3d_plane_tile_frag : ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F, true,
+PipelineKey SceneRenderer::plane_key(bool translucent, bool periodic, bool extruded) const noexcept {
+    PipelineKey k = PipelineKey::graphics((periodic||extruded) ? ShaderId::scene3d_plane_tile_vert : ShaderId::composite_layer_vert,
+                                          extruded ? ShaderId::scene3d_raster_extrude_frag : periodic ? ShaderId::scene3d_plane_tile_frag : ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F, true,
                                           BlendMode::Normal);
     k.hasDepth = true;
     k.depthTest = true;
@@ -1191,6 +1191,8 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
         out.push_back(plane_key(true));
         out.push_back(plane_key(false, true));
         out.push_back(plane_key(true, true));
+        out.push_back(plane_key(false,false,true));
+        out.push_back(plane_key(true,false,true));
         self->passMrt_ = false;
         // A plane-only group checks this PBR key before its MSAA pass,
         // even though it has no model and no HDR attachment.
@@ -1199,6 +1201,8 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
         out.push_back(plane_key(true));
         out.push_back(plane_key(false, true));
         out.push_back(plane_key(true, true));
+        out.push_back(plane_key(false,false,true));
+        out.push_back(plane_key(true,false,true));
         auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
         sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
         sky.sampleCount = static_cast<u8>(passSamples_);
@@ -2167,7 +2171,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // mais perto, antes dos modelos transparentes.
     u32 planeCount = 0;
     ScenePlane* planeList = nullptr;
-    PipelineHandle planePipe{}, planeBlendPipe{}, tilePlanePipe{}, tilePlaneBlendPipe{};
+    PipelineHandle planePipe{}, planeBlendPipe{}, tilePlanePipe{}, tilePlaneBlendPipe{}, volumePipe{}, volumeBlendPipe{};
     if (planes && !planes->empty()) {
         auto pp = shaders_->pipeline(plane_key());
         auto blend = shaders_->pipeline(plane_key(true));
@@ -2178,6 +2182,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             if (!tile.ok() || !tileBlend.ok()) { incomplete_ = true; return false; }
             tilePlanePipe = *tile; tilePlaneBlendPipe = *tileBlend;
         }
+        const bool hasVolume=std::any_of(planes->begin(),planes->end(),[](const ScenePlane& p){return p.extrusion.count!=0;});
+        if(hasVolume) {
+            auto solid=shaders_->pipeline(plane_key(false,false,true));
+            auto transparent=shaders_->pipeline(plane_key(true,false,true));
+            if(!solid.ok()||!transparent.ok()){incomplete_=true;return false;}
+            volumePipe=*solid;volumeBlendPipe=*transparent;
+        }
         if (!pp.ok() || !blend.ok()) incomplete_ = true;
         if (pp.ok() && blend.ok()) {
             planePipe = *pp;
@@ -2187,6 +2198,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             if (!planeList) return false;
             for (u32 i = 0; i < planeCount; ++i) {
                 planeList[i] = (*planes)[i];
+                if(planeList[i].extrusion.count && !raster_extrude::update_projection(planeList[i].extrusion,planeList[i].clipFromLayer,viewProj,&planeList[i].light.worldFromLayer)) {
+                    incomplete_=true;return false;
+                }
                 // A face vista é a iluminada: a câmera DESTE (sub)quadro.
                 PlaneLightBlock& lb = planeList[i].light;
                 lb.cameraPos = Vec4{frame.camera.position.x, frame.camera.position.y, frame.camera.position.z, lb.cameraPos.w};
@@ -2231,7 +2245,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         ScenePlane* planes;
         u32 planeCount;
         u32 opaqueCount;
-        PipelineHandle planePipe, planeBlendPipe, tilePlanePipe, tilePlaneBlendPipe;
+        PipelineHandle planePipe, planeBlendPipe, tilePlanePipe, tilePlaneBlendPipe, volumePipe, volumeBlendPipe;
         SceneParticleDraw* parts;
         u32 partCount;
         EnvSlot sceneEnv;             ///< o ambiente do grupo (d.env nulo)
@@ -2239,7 +2253,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
           shaders_->sampler(CommonSampler::NearestClamp).id, shaders_->sampler(CommonSampler::ShadowCompare).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe, planeBlendPipe, tilePlanePipe, tilePlaneBlendPipe,
-          partList, partList ? particleCount : 0u, envSlots[0]};
+          volumePipe,volumeBlendPipe,partList, partList ? particleCount : 0u, envSlots[0]};
 
     // ===== CHÃO DO GRUPO 3D (Ground.cpp) =========================================
     // Reflexo planar (os opacos espelhados, 1 amostra) e sombra de contato
@@ -2360,9 +2374,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 for (u32 k = 0; k < cap.planeCount; ++k) {
                     const ScenePlane& p = cap.planes[k];
                     const bool tile = p.periodic.count != 0;
-                    c.bind_pipeline(tile ? (phase ? cap.tilePlaneBlendPipe : cap.tilePlanePipe)
+                    const bool volume=p.extrusion.count!=0;
+                    c.bind_pipeline(volume ? (phase?cap.volumeBlendPipe:cap.volumePipe) : tile ? (phase ? cap.tilePlaneBlendPipe : cap.tilePlanePipe)
                                          : (phase ? cap.planeBlendPipe : cap.planePipe));
-                    if (tile) {
+                    if(volume) {
+                        for(u32 n=0;n<raster_extrude::kTextureSlots;++n)c.bind_texture(n,pc.texture(p.extrusion.textures[n]),SamplerHandle{p.sampler});
+                        struct VolumeBlock { PlaneLightBlock light; Mat4 inverseClip,inverseWorld;Vec4 box,params,side,sizes; }
+                            uniforms{p.light,p.extrusion.layerFromClip,p.extrusion.layerFromWorld,p.extrusion.box,p.extrusion.params,p.extrusion.sideColor,p.extrusion.sizes};
+                        static_assert(sizeof(VolumeBlock)==sizeof(PlaneLightBlock)+2*sizeof(Mat4)+4*sizeof(Vec4));
+                        c.set_uniforms(&uniforms,sizeof(uniforms));
+                    } else if (tile) {
                         for (u32 n = 0; n < motion_tile::kSceneTileSlots; ++n)
                             c.bind_texture(n, pc.texture(p.periodic.textures[n]), SamplerHandle{p.sampler});
                         struct TileBlock { PlaneLightBlock light; Vec4 ix, iy, iw, box, tile, flags, mips, window; }
@@ -2473,6 +2494,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     for (u32 k = 0; k < planeCount; ++k) {
         graph.read(pbrPass, planeList[k].texture);
         for (u32 n = 0; n < planeList[k].periodic.count; ++n) graph.read(pbrPass, planeList[k].periodic.textures[n]);
+        for(u32 n=0;n<planeList[k].extrusion.count;++n)graph.read(pbrPass,planeList[k].extrusion.textures[n]);
     }
     // Memória residente: por modelo (instâncias do mesmo asset dividem malha,
     // texturas e materiais — um GpuModel por asset).

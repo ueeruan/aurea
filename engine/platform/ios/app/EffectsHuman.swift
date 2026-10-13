@@ -1030,6 +1030,16 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             13: FxParamHuman(label: "fx_compor_original"),
             14: FxParamHuman(label: "fx_sensibilidade", decimals: 0),
         ])),
+    ("aurea.generate.raster_extrude", FxEffectHuman(
+        name: "fx_name_raster_extrude",
+        keywords: "extrusao extrusion extrude depth profundidade volume silhueta alpha alfa 3d",
+        principal: [0, 1, 2, 3],
+        params: [
+            0: FxParamHuman(label: "fxo_depth", suffix: "px", decimals: 1),
+            1: FxParamHuman(label: "fxl_side_color"),
+            2: FxParamHuman(label: "fxl_shading", scale: 100, suffix: "%", decimals: 0),
+            3: FxParamHuman(label: "fxl_quality"),
+        ])),
     ("aurea.stylize.stroke_outline", FxEffectHuman(
         name: "fx_name_stroke_outline",
         keywords: "contorno stroke outline traco borda silhueta",
@@ -1039,6 +1049,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             2: FxParamHuman(label: "fx_suavidade", suffix: "px", decimals: 1),
             3: FxParamHuman(label: "fx_posicao"),
             4: FxParamHuman(label: "fx_opacidade", decimals: 0),
+            5: FxParamHuman(label: "fxo_depth", suffix: "px", decimals: 1),
         ])),
     ("aurea.key.matte_refine", FxEffectHuman(
         name: "fx_name_matte_refine",
@@ -1621,6 +1632,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.generate.gradient_ramp", "fx_desc_generate_gradient_ramp", FxAllTargets, "ramp gradiente degrade linear radial")
     put("aurea.generate.four_color_gradient", "fx_desc_generate_four_color_gradient", FxAllTargets, "4 color gradient quatro cores degrade")
     put("aurea.generate.audio_spectrum", "fx_desc_generate_audio_spectrum", FxAllTargets, "audio spectrum espectro som musica barras visualizador")
+    put("aurea.generate.raster_extrude", "fx_desc_raster_extrude", [.texto, .forma, .vetor, .imagem, .video, .preComposicao], "extrusao extrusion extrude depth profundidade volume silhueta alpha alfa 3d")
     put("aurea.stylize.stroke_outline", "fx_desc_stylize_stroke_outline", FxAllTargets, "stroke contorno traco borda silhueta outline")
     put("aurea.key.matte_refine", "fx_desc_key_matte_refine", [.imagem, .video, .preComposicao, .texto, .forma], "choke feather encolher suavizar mascara matte recorte")
     // --- Pacote do editor antigo: o que só ele tinha ---

@@ -58,7 +58,7 @@ bool Engine::apply_caption_bundle(u64 layerId, const std::string& data) noexcept
     candidate.transform.opacity = std::clamp(f(9), 0.f, 1.f);
     history_.before_mutation(*comp, project_->timeline().current(), "aplicar preset de legenda");
     *layer = std::move(candidate); recenter_text(*layer);
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel); project_->mark_dirty(); request_render();
+    bump_model_revision_locked(); project_->mark_dirty(); request_render();
     return true;
 }
 }

@@ -100,7 +100,7 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar também os APKs 0.1.4 build 2174 já distribuídos.
-        versionCode = 2179
+        versionCode = 2180
         versionName = "0.1.8 BETA 3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -71,8 +71,12 @@ fun makesSound(entry: EffectCatalogEntry): Boolean =
     entry.typeId in SoundGeneratorIds || normalizeSearch(entry.name) in SoundGeneratorNames
 
 /** O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som. */
-fun pickableEffects(catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean): List<EffectCatalogEntry> =
-    catalog.filter { it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare")) && (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) }
+fun pickableEffects(catalog: List<EffectCatalogEntry>, layerHasAudio: Boolean, layerKind: Int = 0): List<EffectCatalogEntry> =
+    catalog.filter {
+        it.typeId !in setOf(effectTypeId("aurea.motion.oscillate"), effectTypeId("aurea.layout.grid_builder"), effectTypeId("aurea.layout.grid_item"), effectTypeId("aurea.light.scene_flare")) &&
+            (layerHasAudio || !isAudioCategory(it.category) || makesSound(it)) &&
+            (it.typeId != effectTypeId("aurea.generate.raster_extrude") || layerKind in setOf(1, 2, 4, 5, 12))
+    }
 
 // --- Ferramentas que moram no catálogo de efeitos ------------------------------
 
@@ -152,6 +156,7 @@ private val GroupByCategory: Map<String, EffectGroup> = buildMap {
 /** Efeitos que moram num grupo diferente do da categoria do motor (o que eles FAZEM manda). */
 private val GroupByKey: Map<Int, EffectGroup> by lazy {
     buildMap {
+        put(effectTypeId("aurea.generate.raster_extrude"), EffectGroup.ThreeD)
         listOf(
             "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow",
             "aurea.stylize.find_edges", "aurea.stylize.bevel_alpha",

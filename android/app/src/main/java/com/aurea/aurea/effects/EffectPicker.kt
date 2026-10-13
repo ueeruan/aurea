@@ -144,7 +144,7 @@ private fun EffectAddSheetBody(
     val toolNames = EffectTool.entries.associateWith { stringResource(toolLabelRes(it)) }
     val sorted = remember(catalog, layerHasAudio, kind, text3dLayer, toolNames) {
         val textLayer = kind == 4
-        val effects = pickableEffects(catalog, layerHasAudio).filter {
+        val effects = pickableEffects(catalog, layerHasAudio, layerKind = kind).filter {
             (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform")) &&
                 (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator"))
         }

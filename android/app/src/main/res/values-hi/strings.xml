@@ -4001,4 +4001,16 @@
     <string name="pn_mask_target">मास्क की गई लेयर: %1$s</string>
     <string name="export_v2_finalizing">वीडियो और ऑडियो पूरा हो रहा है…</string>
     <string name="export_v2_validating">वीडियो और ऑडियो की जाँच हो रही है…</string>
+    <string name="fx_name_raster_extrude">3D एक्सट्रूज़न</string>
+    <string name="fx_desc_raster_extrude">लेयर की अल्फ़ा आकृति में वास्तविक गहराई जोड़ता है। मौजूदा 3D रोटेशन और कैमरा कंट्रोल इस्तेमाल करें।</string>
+    <string name="fxl_side_color">किनारों का रंग</string>
+    <string name="fxl_shading">छायांकन</string>
+    <string name="prerender_forward">आगे PreRender</string>
+    <string name="prerender_backward">पीछे PreRender</string>
+    <string name="prerender_cancel">PreRender रद्द करें</string>
+    <string name="prerender_gesture_hint">आधा सेकंड दबाए रखें, फिर दाएँ या बाएँ खींचें। बिना खींचे छोड़ने पर लूप चालू या बंद होता है।</string>
+    <string name="prerender_preparing">PreRender तैयार हो रहा है…</string>
+    <string name="prerender_progress">PreRender: %1$d%%</string>
+    <string name="prerender_ready">PreRender तैयार</string>
+    <string name="prerender_failed">प्लेबैक तैयार नहीं हो सका: %1$s</string>
 </resources>

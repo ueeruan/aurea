@@ -27,6 +27,6 @@ Result<u64> Engine::create_grid(const u64* ids,u32 count) noexcept {
         EffectInstance item;item.id=l->alloc_effect_id();item.type=effect_type_id(grid::kItem);initialize_instance(item,*effectRegistry_.params(item.type));
         item.params[0].constant=ParamValue::scalar(static_cast<f32>(i));item.params[1].constant=ParamValue::scalar(static_cast<f32>(members.size()));l->effects.push_back(std::move(item));
     }
-    modelRevision_.fetch_add(1,std::memory_order_acq_rel);project_->mark_dirty();request_render();return controller.pack();
+    bump_model_revision_locked();project_->mark_dirty();request_render();return controller.pack();
 }
 }

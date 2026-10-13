@@ -179,7 +179,7 @@ def collect_export_artifacts(documents, output, record):
     for pattern in ('paper-*.png', 'paper-*.aurea', 'paper-effects-ready.json',
                     'particle-camera-*.rgba', 'particle-camera-*.png',
                     'particle-camera-*.aurea', 'particle-camera-ready.json',
-                    'astra-*.mp4', 'astra-*.png', 'astra-*.aurea', 'astra-offline-ready.json'):
+                    'astra-*.mp4', 'astra-*.png', 'astra-*.aurea', 'astra-smoke-*.rgba', 'astra-real-camera-hold.json', 'astra-offline-ready.json'):
         for source in sorted(documents.glob(pattern)):
             if source.is_file() and source.name not in record['exportArtifacts']:
                 shutil.copy2(source, output / source.name)

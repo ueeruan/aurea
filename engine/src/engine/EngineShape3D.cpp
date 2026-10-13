@@ -101,7 +101,7 @@ Result<u64> Engine::add_shape3d(u32 kind, const char* name) noexcept {
     if (!comp) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Status{Errc::BudgetExceeded};
     history_.before_mutation(*comp, project_->timeline().current(), "forma 3D");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const AssetId assetId = add_shape_asset(*project_, *scene, label, scene3d::encode_shape3d(spec));
     models_[assetId.pack()] = scene;
     const LayerId lid = comp->add_layer(LayerKind::Model3D, label);
@@ -152,7 +152,7 @@ Status Engine::set_shape3d(u64 layerId, const scene3d::Shape3DSpec& in) noexcept
     if (!old || !scene3d::decode_shape3d(old->sourcePath, prev)) return Status{Errc::InvalidArgument, "selecione uma forma 3D"};
     if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Errc::BudgetExceeded;
     history_.before_mutation(*comp, project_->timeline().current(), "editar forma 3D");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const AssetId assetId = add_shape_asset(*project_, *scene, old->name, scene3d::encode_shape3d(spec));
     models_[assetId.pack()] = scene;
     l->model.scene = assetId;
@@ -250,7 +250,7 @@ bool Engine::set_shape3d_part(u64 layerId, u32 part, const f32* values, u32 mask
         if (t && !t->keys.empty() && !inside) return false;
     }
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "mover parte");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     for (u32 c = 0; c < scene3d::kShape3DChannels; ++c) {
         if (!(mask & (1u << c)) || !std::isfinite(values[c])) continue;
         const f32 v = c >= 6 ? std::clamp(values[c], -100.0f, 100.0f) : std::clamp(values[c], -1.0e5f, 1.0e5f);
@@ -282,7 +282,7 @@ i32 Engine::toggle_shape3d_part_key(u64 layerId, u32 part) noexcept {
     f32 cur[scene3d::kShape3DChannels];
     part_channels(*l, part, local, cur);
     history_.before_mutation(*comp, project_->timeline().current(), any ? "tirar keyframe da parte" : "keyframe da parte");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     for (u32 c = 0; c < scene3d::kShape3DChannels; ++c) {
         if (any) {
             Track* t = l->tracks.find(TrackProperty::ShapePart, part, c);
@@ -313,7 +313,7 @@ bool Engine::reset_shape3d_part(u64 layerId, i32 part) noexcept {
     }
     if (!has) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "resetar parte");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->tracks.remove_if([&](const Track& t) {
         return t.property == TrackProperty::ShapePart && (part < 0 || t.effectIndex == static_cast<u32>(part));
     });
@@ -453,7 +453,7 @@ Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<
     if (held > source_asset_room_locked()) return Status{Errc::BudgetExceeded};
 
     history_.before_mutation(*comp, project_->timeline().current(), "dividir forma 3D");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
 
     // Cópia do original ANTES de criar camadas (a tabela pode realocar).
     const Layer source = *orig;
@@ -533,7 +533,7 @@ bool Engine::set_model_interior(u64 layerId, bool on) noexcept {
     const ModelInterior mode = on ? ModelInterior::On : ModelInterior::Off;
     if (l->model.interior == mode) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "interior do objeto 3D");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->model.interior = mode;
     project_->mark_dirty();
     request_render();

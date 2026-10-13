@@ -102,6 +102,7 @@ set(AUREA_CORE_SOURCES
     src/render/ShaderLibrary.cpp
     src/render/RenderScheduler.cpp
     src/render/Renderer.cpp
+    src/render/PreRenderCache.cpp
     src/render/MaskRaster.cpp
     src/render/ParticleExtras.cpp
     src/render/ParticleScene.cpp
@@ -156,6 +157,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/FinishingEffects.cpp
     src/effects/builtin/GenerateEffects.cpp
     src/effects/builtin/MatteEffects.cpp
+    src/effects/builtin/RasterExtrudeEffect.cpp
     src/effects/builtin/VhsLookEffect.cpp
     src/effects/builtin/DepthEffects.cpp
     src/effects/builtin/RotobrushEffect.cpp

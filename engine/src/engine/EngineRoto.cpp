@@ -141,7 +141,7 @@ bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 rad
     for (const auto& s : strokes) total += s.points.size();
     if (total > ai::kRotoMaxPoints || strokes.size() >= 4000) return false;   // teto do formato
     history_.before_mutation(*comp, project_->timeline().current(), background ? "traço de fundo" : "traço de objeto");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     strokes.push_back(std::move(stroke));
     ai::roto_encode(strokes, *curve);
     project_->mark_dirty();
@@ -171,7 +171,7 @@ bool Engine::roto_undo_stroke(u64 layerId, u32 effectId) noexcept try {
     for (usize i = strokes.size(); i-- > 0;) if (strokes[i].frame == frame) { at = i; break; }
     if (at == strokes.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "desfazer traço");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     strokes.erase(strokes.begin() + static_cast<std::ptrdiff_t>(at));
     ai::roto_encode(strokes, *curve);
     project_->mark_dirty();
@@ -252,7 +252,7 @@ bool Engine::roto_set_view(u64 layerId, u32 effectId, u32 mode) noexcept {
     if (!e || !specs || !roto_curve(*e, *specs)) return false;
     constexpr u32 kView = 10;
     e->params[kView].constant = ParamValue::scalar(static_cast<f32>(std::min(mode, 2u)));
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     // Salva: sem isso, "Concluir" (volta a Final) não marcava o projeto e a
     // sobreposição vermelha reabria no projeto.
     project_->mark_dirty();

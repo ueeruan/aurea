@@ -20,6 +20,7 @@
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/scene3d/Environment.hpp"
 #include "aurea/effects/MotionTile.hpp"
+#include "aurea/effects/RasterExtrude.hpp"
 
 #include <utility>
 #include <vector>
@@ -250,6 +251,7 @@ struct ScenePlane {
     /// Luzes da composição e o mundo da camada (a câmera entra no build).
     PlaneLightBlock light{};
     motion_tile::PeriodicPlane periodic{}; ///< enabled only for a terminal Motion Tile
+    raster_extrude::Volume extrusion{};
 };
 
 /// Pós do grupo 3D vindo da composição (PostProcessSettings): o que a pessoa
@@ -427,7 +429,7 @@ public:
     /// Profundidade de campo: amostras do disco por pixel (o preview usa
     /// poucas, o export muitas). 0 = desligada mesmo com a lente pedindo.
     void set_dof_quality(u32 taps) noexcept { dofTaps_ = std::min(taps, 256u); }
-    [[nodiscard]] PipelineKey plane_key(bool translucent = false, bool periodic = false) const noexcept;
+    [[nodiscard]] PipelineKey plane_key(bool translucent = false, bool periodic = false, bool extruded = false) const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;

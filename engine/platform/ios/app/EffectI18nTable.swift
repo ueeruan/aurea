@@ -1548,5 +1548,10 @@ enum EffectI18nTable {
     aurea.distort.displace_transform|14|edges|fxl_edges|fxo_transparent,fxo_repeat,fxo_reflect,fx3o_repetir_pixels
     aurea.distort.displace_transform|15|filter|fxl_adaptive_filtering|
     aurea.distort.displace_transform|16|mix|fxl_mix|
+    aurea.stylize.stroke_outline|5|depth|fxo_depth|
+    aurea.generate.raster_extrude|0|depth|fxo_depth|
+    aurea.generate.raster_extrude|1|side_color|fxl_side_color|
+    aurea.generate.raster_extrude|2|shading|fxl_shading|
+    aurea.generate.raster_extrude|3|quality|fxl_quality|scene_low,scene_medium,fxo_high
     """
 }

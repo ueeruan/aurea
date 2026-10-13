@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -156,6 +157,7 @@ internal fun SpeedPanel(env: PanelEnv) {
     val reversed by remember(store) { derivedStateOf { store.detail?.reversed ?: false } }
     val frameBlend by remember(store) { derivedStateOf { store.detail?.frameBlendMode ?: 0 } }
     val animated by remember(store) { derivedStateOf { store.detail?.speedAnimated ?: false } }
+    val remapping by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
     val keyHere by remember(store) {
         derivedStateOf {
             val d = store.detail
@@ -169,6 +171,15 @@ internal fun SpeedPanel(env: PanelEnv) {
                 stringResource(R.string.panel_velocidade_vale_video_audio_nas_outras),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, lineHeight = 18.2.sp, color = AureaColors.Muted)),
             )
+            return@Column
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            RemapChip(stringResource(R.string.remap_normal), on = !remapping) { store.applySpeedRamp(-1) }
+            RemapChip(stringResource(R.string.remap_linha_tempo), on = remapping) { store.enableManualTimeRemap() }
+        }
+        Spacer(Modifier.height(12.dp))
+        if (remapping) {
+            TimeRemapEffectEditor(env, -1)
             return@Column
         }
         if (speed == 0f && !animated) {
@@ -451,7 +462,17 @@ internal fun TimeRemapEffectEditor(env: PanelEnv, effectId: Int) {
     val store = env.store
     val q by remember(store) { derivedStateOf { store.timeRemap } }
     val local by remember(store) { derivedStateOf { store.detail?.localPlayhead ?: 0 } }
-    val seconds by remember(store, effectId) { derivedStateOf { store.paramOf(effectId, 0)?.value?.getOrNull(0) ?: 0f } }
+    // Manual remap has no effect id. Read the source moment from the same core
+    // curve used by preview/export instead of looking up an effect parameter.
+    val sourceFrames by remember(store) {
+        derivedStateOf {
+            if (store.timeRemap == null) 0f else store.detail?.let { detail ->
+                // detail is observable and includes localPlayhead; the curve
+                // state above also invalidates this value when keys change.
+                store.timeRemapCurrentSource(detail.id).takeIf { it.isFinite() }?.toFloat()
+            } ?: 0f
+        }
+    }
     val keepPitch by remember(store) { derivedStateOf { store.detail?.keepPitch ?: false } }
     val frameBlend by remember(store) { derivedStateOf { store.detail?.frameBlendMode ?: 0 } }
     val reversed by remember(store) { derivedStateOf { store.detail?.remapReversed ?: false } }
@@ -482,7 +503,7 @@ internal fun TimeRemapEffectEditor(env: PanelEnv, effectId: Int) {
         // 2) Remapear tempo: ◇ no rótulo, timecode arrastável/digitável e a curva.
         var drag by remember { mutableStateOf<Float?>(null) }
         var dragLocal by remember(store.primary, effectId) { mutableStateOf<Int?>(null) }
-        val shownFrames = drag ?: (seconds * fps)
+        val shownFrames = drag ?: sourceFrames
         val title = stringResource(R.string.remap_linha_tempo)
         val curveDesc = stringResource(R.string.remap_editar_curva)
         PropertyCustomRow(
@@ -499,7 +520,7 @@ internal fun TimeRemapEffectEditor(env: PanelEnv, effectId: Int) {
                 Box(
                     Modifier.weight(1f).height(48.dp).valueDrag(
                         enabled = inside,
-                        start = { store.paramOf(effectId, 0)?.value?.getOrNull(0)?.times(fps) ?: 0f },
+                        start = { sourceFrames },
                         unitsPerDp = { 0.25f },
                         min = 0f,
                         max = lastFrame,
@@ -595,8 +616,9 @@ private fun openRemapCurve(env: PanelEnv, local: Int) {
 @Composable
 private fun RemapChip(label: String, on: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.height(36.dp).clip(RoundedCornerShape(8.dp))
+        Modifier.height(44.dp).clip(RoundedCornerShape(8.dp))
             .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+            .semantics { selected = on }
             .tocavel(onClick = onClick).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {

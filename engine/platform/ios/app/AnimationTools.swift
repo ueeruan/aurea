@@ -1026,9 +1026,12 @@ struct TimeRemapEffectEditor: View {
         return max(1, values[3] > 0 ? values[3] : values[2])
     }
     private var inside: Bool { values.count >= 5 && model.localPlayhead >= lo && model.localPlayhead <= hi }
-    private var seconds: Float { model.effectParams.first { $0.index == 0 }?.scalar ?? 0 }
+    private var sourceFrames: Float {
+        let source = model.engine.timeRemapCurrentSource(id)
+        return source.isFinite ? Float(source) : 0
+    }
     private var keyHere: Int? { keyTimes.firstIndex(of: model.localPlayhead) }
-    private var shownFrames: Float { drag ?? seconds * fps }
+    private var shownFrames: Float { drag ?? sourceFrames }
     private func load() { values = model.engine.timeRemap(id).map(\.floatValue) }
     private func refresh() { model.refreshModel(force: true); load() }
     private func seekLocal(_ local: Int32) {
@@ -1051,7 +1054,7 @@ struct TimeRemapEffectEditor: View {
                         ValueBox(Self.timecode(Int(shownFrames.rounded()), fps: fps), enabled: inside, width: 112) { openKeypad() }
                             .highPriorityGesture(DragGesture(minimumDistance: 6).onChanged { value in
                                 guard inside else { return }
-                                if dragStart == nil { dragStart = seconds * fps; dragLocal = model.localPlayhead; model.beginGesture("tempo do vídeo") }
+                                if dragStart == nil { dragStart = sourceFrames; dragLocal = model.localPlayhead; model.beginGesture("tempo do vídeo") }
                                 let frames = min(lastFrame, max(0, (dragStart ?? 0) + Float(value.translation.width) * 0.25))
                                 drag = frames.rounded()
                                 _ = model.engine.setTimeRemapValue(id, time: Int64(dragLocal ?? model.localPlayhead), value: frames.rounded())
@@ -1192,9 +1195,9 @@ struct TimeRemapEffectEditor: View {
     private func chip(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                .padding(.horizontal, 12).frame(height: 36)
+                .padding(.horizontal, 12).frame(height: 44)
                 .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(AureaPressStyle())
+        }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

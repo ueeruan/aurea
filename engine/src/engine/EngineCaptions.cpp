@@ -188,7 +188,7 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
         layer->text.content = layer->captions.front().text;
         recenter_text(*layer);
     }
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel); project_->mark_dirty(); request_render();
+    bump_model_revision_locked(); project_->mark_dirty(); request_render();
     return true;
 }
 }

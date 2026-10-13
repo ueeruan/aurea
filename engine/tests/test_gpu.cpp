@@ -13458,3 +13458,6 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "RaysFootprintGpu.inl"
 #include "SceneWarmupGpu.inl"
 #include "VulkanMrtGpu.inl"
+#include "Reference3DRegression.inl"
+#include "RasterExtrudeGpu.inl"
+#include "PreRenderIntegration.inl"

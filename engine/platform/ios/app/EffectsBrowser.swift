@@ -68,8 +68,12 @@ func fxMakesSound(_ entry: EffectCatalogItem) -> Bool {
 }
 
 /// O que o catálogo oferece para ESTA camada: sem som, some o que só mexe no som.
-func fxPickableEffects(_ catalog: [EffectCatalogItem], layerHasAudio: Bool) -> [EffectCatalogItem] {
-    catalog.filter { !["aurea.motion.oscillate", "aurea.layout.grid_builder", "aurea.layout.grid_item", "aurea.light.scene_flare"].map(fxEffectTypeId).contains($0.typeId) && (layerHasAudio || !fxIsAudioCategory($0.category) || fxMakesSound($0)) }
+func fxPickableEffects(_ catalog: [EffectCatalogItem], layerHasAudio: Bool, layerKind: UInt32 = 0) -> [EffectCatalogItem] {
+    catalog.filter {
+        !["aurea.motion.oscillate", "aurea.layout.grid_builder", "aurea.layout.grid_item", "aurea.light.scene_flare"].map(fxEffectTypeId).contains($0.typeId) &&
+        (layerHasAudio || !fxIsAudioCategory($0.category) || fxMakesSound($0)) &&
+        ($0.typeId != fxEffectTypeId("aurea.generate.raster_extrude") || [1, 2, 4, 5, 12].contains(layerKind))
+    }
 }
 
 /// A grade sem busca: tudo (categoria nula) ou só a categoria escolhida.
@@ -339,6 +343,7 @@ private let fxGroupByCategory: [String: FxEffectGroup] = {
 
 private let fxGroupByKey: [UInt32: FxEffectGroup] = {
     var map: [UInt32: FxEffectGroup] = [:]
+    map[fxEffectTypeId("aurea.generate.raster_extrude")] = .threeD
     for key in ["aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow",
                 "aurea.stylize.find_edges", "aurea.stylize.bevel_alpha"] { map[fxEffectTypeId(key)] = .drawEdge }
     for key in ["aurea.transform", "aurea.motion.oscillate.cycles", "aurea.motion.swing", "aurea.motion.wiggle",
@@ -391,7 +396,7 @@ func fxFeaturedEntries(_ sorted: [EffectCatalogItem]) -> [EffectCatalogItem] {
 func fxPickerEntries(_ model: AureaModel, layerHasAudio: Bool) -> [EffectCatalogItem] {
     let text3D = !(model.engine.text3D(forLayer: model.primarySelection ?? 0) ?? [:]).isEmpty
     let textLayer = model.selectedLayer?.kind == 4
-    let effects = fxPickableEffects(model.effectCatalog, layerHasAudio: layerHasAudio).filter {
+    let effects = fxPickableEffects(model.effectCatalog, layerHasAudio: layerHasAudio, layerKind: model.selectedLayer?.kind ?? 0).filter {
         (textLayer || text3D || $0.typeId != fxEffectTypeId("aurea.text.transform")) &&
         (textLayer || text3D || $0.typeId != fxEffectTypeId("aurea.text.animator"))
     }

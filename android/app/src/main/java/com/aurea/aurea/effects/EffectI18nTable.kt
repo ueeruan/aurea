@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(3062).apply {
+        HashMap<Long, IntArray>(3072).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -1592,6 +1592,11 @@ internal object EffectI18nTable {
         m.put("aurea.distort.displace_transform", 14, /* edges */ intArrayOf(R.string.fxl_edges, R.string.fxo_transparent, R.string.fxo_repeat, R.string.fxo_reflect, R.string.fx3o_repetir_pixels))
         m.put("aurea.distort.displace_transform", 15, /* filter */ intArrayOf(R.string.fxl_adaptive_filtering))
         m.put("aurea.distort.displace_transform", 16, /* mix */ intArrayOf(R.string.fxl_mix))
+        m.put("aurea.stylize.stroke_outline", 5, /* depth */ intArrayOf(R.string.fxo_depth))
+        m.put("aurea.generate.raster_extrude", 0, /* depth */ intArrayOf(R.string.fxo_depth))
+        m.put("aurea.generate.raster_extrude", 1, /* side_color */ intArrayOf(R.string.fxl_side_color))
+        m.put("aurea.generate.raster_extrude", 2, /* shading */ intArrayOf(R.string.fxl_shading))
+        m.put("aurea.generate.raster_extrude", 3, /* quality */ intArrayOf(R.string.fxl_quality, R.string.scene_low, R.string.scene_medium, R.string.fxo_high))
     }
 
     private fun HashMap<Long, IntArray>.put(key: String, index: Int, ids: IntArray) {

@@ -4455,7 +4455,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                         if (bm.empty()) continue;
                         const usize si = std::min<usize>(bm.size() - 1, static_cast<usize>(s) * bm.size() / k);
                         p.clipFromLayer = clipComp * bm[si];
-                        const Vec4 c = p.clipFromLayer * Vec4{p.region.x + p.region.z * 0.5f, p.region.y + p.region.w * 0.5f, 0, 1};
+                        const Vec4 c = p.clipFromLayer * Vec4{p.region.x + p.region.z * 0.5f, p.region.y + p.region.w * 0.5f, p.extrusion.count?p.extrusion.params.x*.5f:0.f, 1};
                         p.viewDepth = c.w;
                     }
                     samplePlanes = &blurPlanes_;
@@ -5296,6 +5296,12 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         apply_masks(layer, src, frameNumber);
         LayerImage fin = src;
         motion_tile::PeriodicPlane periodic;
+        raster_extrude::Options extrusionOptions;
+        if (i<snap.plans.size()) for (const EffectEval& item:snap.plans[i].evals) {
+            EffectEval eval=item;eval.values=snap.plans[i].values.data()+item.valueOffset;
+            const auto options=raster_extrude::options_from(eval);
+            if(options.depth>0)extrusionOptions=options;
+        }
         bool periodicReady = false;
         if (hasEffects) {
             const auto& plan = snap.plans[i];
@@ -5305,7 +5311,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             // established raster graph; its sampling region remains meaningful.
             const bool terminalTile = !plan.hasFold && last.kind == EffectStage::Kind::Single && last.count == 1
                 && plan.evals[last.begin].effect->type_id() == effect_type_id(effect_keys::kMotionTile);
-            if (terminalTile) {
+            if (terminalTile && !(extrusionOptions.depth>0)) {
                 EffectPlan prefix = plan;
                 prefix.stages.pop_back();
                 (void)EffectGraph::build(prefix, ctx, src, fin);
@@ -5314,7 +5320,10 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 eval.placement = &plan.placement;
                 periodicReady = motion_tile::build_scene_plane(ctx, eval, fin, periodic);
             }
-            if (!periodicReady) (void)EffectGraph::build(plan, ctx, src, fin);
+            if (!periodicReady) {
+                const Status built=EffectGraph::build(plan,ctx,src,fin);
+                if(extrusionOptions.depth>0 && !built.ok()){incomplete_=true;continue;}
+            }
         }
         scene3d::ScenePlane p;
         p.texture = periodicReady ? periodic.textures[0] : fin.texture;
@@ -5328,7 +5337,17 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         p.clipFromLayer = clip_from_comp(static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)) * layer.compFromLayer;
         p.region = Vec4{fin.region.x, fin.region.y, fin.region.w, fin.region.h};
         p.opacity = layer.opacity;
-        const Vec4 c = p.clipFromLayer * Vec4{fin.region.x + fin.region.w * 0.5f, fin.region.y + fin.region.h * 0.5f, 0, 1};
+        if (extrusionOptions.depth>0) {
+            const auto& plan=snap.plans[i];
+            const Mat4 fold=plan.hasFold?plan.foldMatrix:Mat4::identity();
+            p.clipFromLayer=p.clipFromLayer*fold;
+            p.opacity*=plan.hasFold?plan.foldOpacity:1.f;
+            if (!raster_extrude::build_volume(ctx,fin,extrusionOptions,p.clipFromLayer,layer.worldFromLayer*fold,p.extrusion)) {
+                incomplete_=true;continue;
+            }
+            if(!p.extrusion.count)continue;
+        }
+        const Vec4 c = p.clipFromLayer * Vec4{fin.region.x + fin.region.w * 0.5f, fin.region.y + fin.region.h * 0.5f, p.extrusion.count?p.extrusion.params.x*.5f:0.f, 1};
         p.viewDepth = c.w;
         p.sourceLayer = i;
         // Luzes da composição (o bloco do grupo) no mundo desta camada.
@@ -6018,7 +6037,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     // swapchain (compilar segurando a imagem atrasaria a apresentação).
     quality_ = effective_quality(settings);
     heavyQ_ = resolve_heavy(settings);
-    if (!settings.rawPlayback) {
+    if (!settings.rawPlayback && !settings.cachedComposition.valid()) {
         warm_scene_pipelines(snap);
         flush_warmup();
     }
@@ -6178,7 +6197,10 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
 
     // --- Alvo da composição: resolução de PREVIEW, coordenadas de COMPOSIÇÃO.
     u32 cw = 0, ch = 0;
-    if (offscreen && offscreen->texture.valid()) {
+    if (settings.cachedComposition.valid()) {
+        const auto desc = backend_->texture_desc(settings.cachedComposition);
+        cw = desc.width; ch = desc.height;
+    } else if (offscreen && offscreen->texture.valid()) {
         cw = offscreen->width;
         ch = offscreen->height;
     } else {
@@ -6207,7 +6229,8 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     cacheDesc.format = kPreviewCacheFormat;
     PreviewFrame* cached = nullptr;
     previewCacheHit_ = false;
-    const bool usePreviewCache = (!offscreen || offscreen->display.valid()) && !settings.finalQuality && !settings.rawPlayback
+    const bool usePreviewCache = !settings.cachedComposition.valid()
+        && (!offscreen || offscreen->display.valid()) && !settings.finalQuality && !settings.rawPlayback
         && settings.previewCacheRevision && previewCacheCapacity_;
     if (usePreviewCache) {
         for (auto& f : previewFrames_) if (f.time == snap.time.value) { cached = &f; break; }
@@ -6238,7 +6261,19 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         }
     }
     const FGTexture cacheTex = cached ? graph_.import_texture("preview-cache", cached->texture, cacheDesc) : FGTexture{};
-    const FGTexture comp = previewCacheHit_ ? cacheTex
+    if (settings.cachedComposition.valid() && settings.cachedCompositionPixels) {
+        // Inside the opened frame: backend copies CPU bytes into its ordinary
+        // upload stream. No synchronous submit/readback on the UI/display path.
+        const Status uploaded = backend_->upload_texture(settings.cachedComposition, settings.cachedCompositionPixels, cw * 8);
+        if (!uploaded.ok()) {
+            pool_.end_frame();
+            (void)backend_->discard_frame();
+            snap.release_video_frames(); return uploaded;
+        }
+    }
+    const FGTexture comp = settings.cachedComposition.valid()
+                         ? graph_.import_texture("prerender-540p", settings.cachedComposition, compDesc)
+                         : previewCacheHit_ ? cacheTex
                          : (offscreen && offscreen->texture.valid())
                          ? graph_.import_texture("composicao", offscreen->texture, compDesc)
                          : graph_.create_texture("composicao", compDesc);
@@ -6249,7 +6284,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     compTargetW_ = cw;
     compTargetH_ = ch;
 
-    if (previewCacheHit_) {
+    if (previewCacheHit_ || settings.cachedComposition.valid()) {
         // The complete composition already contains text, effects and 3D.
         // Only the ordinary output pass (zoom, pan, display transform) remains.
     } else if (settings.rawPlayback) {

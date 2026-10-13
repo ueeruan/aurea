@@ -377,6 +377,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)play;
 - (void)pause;
 - (void)togglePlayback;
+/// Startup runs on the lifecycle queue; progress is a no-I/O snapshot.
+- (int32_t)startPreRender:(int32_t)direction NS_SWIFT_NAME(startPreRender(direction:));
+- (void)cancelPreRender NS_SWIFT_NAME(cancelPreRender());
+/// running, complete, framesDone, framesTotal, width, height, direction, error, diskBytes, residentBytes.
+- (NSArray<NSNumber*>*)preRenderProgress NS_SWIFT_NAME(preRenderProgress());
 - (void)seekToFrame:(int64_t)frame;
 - (void)stepFrames:(int32_t)frames;
 - (void)scrubToFrame:(int64_t)frame;
@@ -834,6 +839,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)enableExpressions:(long long)layerId tracks:(NSArray<NSNumber*>*)tracks enabled:(BOOL)enabled NS_SWIFT_NAME(enableExpressions(_:tracks:enabled:));
 - (NSDictionary<NSString*, id>*)checkExpressionSyntax:(NSString*)source NS_SWIFT_NAME(checkExpressionSyntax(_:));
 - (NSArray<NSNumber*>*)timeRemap:(long long)layerId;
+- (double)timeRemapCurrentSource:(int64_t)layerId NS_SWIFT_NAME(timeRemapCurrentSource(_:));
 - (int32_t)editTimeRemap:(long long)layerId index:(int32_t)index time:(int64_t)time value:(float)value interpolation:(int32_t)interpolation;
 - (BOOL)setTimeRemapValue:(long long)layerId time:(int64_t)time value:(float)value;
 - (void)removeTimeRemap:(long long)layerId index:(uint32_t)index;

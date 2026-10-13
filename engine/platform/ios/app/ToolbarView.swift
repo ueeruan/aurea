@@ -333,14 +333,7 @@ struct TransportView: View {
             .accessibilityIdentifier("transport.next")
     }
     private func playButton(_ side: CGFloat) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
-                           description: AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" : (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")),
-                           size: 22, width: side, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
-                           onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
-                .accessibilityIdentifier("transport.play")
-            if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false) }
-        }
+        PreRenderPlayControl(side: side)
     }
     /// Marcar o instante atual continua acessível durante a reprodução.
     private func markerButton(_ side: CGFloat) -> some View {
@@ -350,6 +343,92 @@ struct TransportView: View {
                               tint: marked ? AureaColors.accent : AureaColors.text,
                               onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
             .accessibilityIdentifier("transport.marker")
+    }
+}
+
+private struct PreRenderPlayControl: View {
+    @EnvironmentObject private var model: AureaModel
+    let side: CGFloat
+    @State private var pressed = false
+    @State private var began: Double?
+    @State private var pressID: UUID?
+    @State private var hold: DispatchWorkItem?
+    @State private var armed = false
+    @State private var cancelled = false
+    @State private var fired = false
+
+    private var progressText: String {
+        if model.preRenderPreparing { return AureaText.t("prerender_preparing") }
+        if model.preRenderProgress.running { return AureaText.t("prerender_progress", Int((model.preRenderProgress.fraction * 100).rounded())) }
+        if model.preRenderProgress.complete { return AureaText.t("prerender_ready") }
+        return ""
+    }
+
+    var body: some View {
+        Button { model.playPause() } label: {
+            ZStack(alignment: .bottomTrailing) {
+                ZStack {
+                    CupertinoGlyph.text(model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
+                        size: 22, color: model.looping ? AureaColors.accent : AureaColors.text)
+                    if model.preRenderPreparing || model.preRenderProgress.running || model.preRenderProgress.complete {
+                        Circle().trim(from: 0, to: CGFloat(model.preRenderPreparing ? 0.08 : model.preRenderProgress.fraction))
+                            .stroke(AureaColors.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .frame(width: 30, height: 30).rotationEffect(.degrees(-90)).allowsHitTesting(false)
+                    }
+                }.frame(width: side, height: 48).contentShape(Rectangle())
+                if model.looping {
+                    CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent)
+                        .padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false)
+                }
+            }.opacity(pressed ? 0.65 : 1)
+        }.buttonStyle(.plain)
+            .highPriorityGesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if began == nil {
+                        let id = UUID()
+                        began = ProcessInfo.processInfo.systemUptime; pressID = id
+                        pressed = true; armed = false; cancelled = false; fired = false
+                        let work = DispatchWorkItem {
+                            guard pressID == id, !cancelled else { return }
+                            armed = true
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
+                        hold = work
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                    }
+                    if !armed, !cancelled, let began, ProcessInfo.processInfo.systemUptime - began >= 0.5 {
+                        armed = true; hold?.cancel()
+                    }
+                    let delta = value.translation
+                    if !armed && hypot(delta.width, delta.height) > 10 { cancelled = true; hold?.cancel() }
+                    if armed && abs(delta.height) >= 24 && abs(delta.height) > abs(delta.width) { cancelled = true }
+                    if armed && !cancelled && !fired && abs(delta.width) >= 24 && abs(delta.width) > abs(delta.height) {
+                        fired = true
+                        model.startPreRender(delta.width > 0 ? 1 : -1)
+                    }
+                }
+                .onEnded { _ in
+                    if !cancelled && !fired {
+                        if armed || began.map({ ProcessInfo.processInfo.systemUptime - $0 >= 0.5 }) == true { model.setLooping(!model.looping) }
+                        else { model.playPause() }
+                    }
+                    resetPress()
+                })
+            .accessibilityIdentifier("transport.play")
+            .accessibilityLabel(AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" :
+                (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")))
+            .accessibilityHint(AureaText.t("prerender_gesture_hint"))
+            .accessibilityValue(progressText)
+            .accessibilityAction(named: Text(AureaText.t("prerender_forward"))) { model.startPreRender(1) }
+            .accessibilityAction(named: Text(AureaText.t("prerender_backward"))) { model.startPreRender(-1) }
+            .accessibilityAction(named: Text(AureaText.t("prerender_cancel"))) { model.cancelPreRender() }
+            .accessibilityAction(named: Text(AureaText.t("editor_reproducao_loop"))) { model.setLooping(!model.looping) }
+            .onDisappear { resetPress() }
+    }
+
+    private func resetPress() {
+        hold?.cancel(); hold = nil; pressID = nil; began = nil
+        pressed = false; armed = false; cancelled = false; fired = false
     }
 }
 

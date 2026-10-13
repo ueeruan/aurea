@@ -3076,6 +3076,9 @@ para editar la curva.</string>
     <string name="report_what_happened">Qué esperabas y qué pasó en su lugar</string>
     <string name="report_steps">Pasos para repetirlo (opcional)</string>
     <string name="report_device">Dispositivo</string>
+    <string name="msg_codec_do_aparelho_travou">El codificador de video del teléfono se bloqueó. Prueba H.264 o una resolución menor.</string>
+    <string name="report_attach_export">Adjuntar diagnóstico de la última exportación</string>
+    <string name="report_attach_export_hint">Incluye solo datos técnicos de la última exportación con problemas: modelo y chip del dispositivo, códec y codificador usados, resolución, fps, dónde se detuvo y el motivo. Ningún proyecto, medio ni nombre de archivo.</string>
     <string name="report_send">Enviar</string>
     <string name="report_sending">Enviando…</string>
     <string name="report_sent">¡Gracias! Se envió el informe.</string>

@@ -53,6 +53,9 @@ struct VideoStreamConfig {
     /// finish closes the temporary file; independent validation must
     /// succeed before the startup gate atomically replaces the destination.
     bool validateBeforePublish = false;
+    /// Validação feita dentro de `finish` (sem validateBeforePublish): estrita
+    /// ou tolerante (ExportOutputValidation::strict).
+    bool strictValidation = true;
     /// Export retomável (export/ExportPacketLog.hpp): os pacotes de vídeo vão
     /// para este registro durável em vez do MP4. Depois do último quadro o
     /// motor chama `end_video`, `begin_assembly`, manda TODO o áudio e `finish`
@@ -134,6 +137,10 @@ public:
     [[nodiscard]] virtual Status validate_output(const ExportOutputValidation&) noexcept {
         return Status{Errc::NotSupported, "plataforma sem validacao independente de exportacao"};
     }
+    /// Avisos da última validação tolerante (divergências aceitas: PTS,
+    /// duração, contagem, dimensão, áudio). "" = nenhum. Vive até o próximo
+    /// open/abort do sink; o motor copia para o diagnóstico do export.
+    [[nodiscard]] virtual const char* validation_warnings() const noexcept { return ""; }
 
     /// Cancelamento: solta tudo e apaga o arquivo parcial.
     virtual void abort() noexcept = 0;

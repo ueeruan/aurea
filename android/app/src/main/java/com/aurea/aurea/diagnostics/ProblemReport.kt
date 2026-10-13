@@ -44,7 +44,35 @@ object ProblemReport {
 
     private const val PREFS = "aurea_problem_report"
     private const val KEY_LAST_EXPORT = "last_export"
-    private const val LAST_EXPORT_MAX = 600
+    const val LAST_EXPORT_MAX = 1200
+
+    /** O chip do aparelho: SoC (API 31+) e a placa (`Build.HARDWARE`, ex.: mt6768, qcom). */
+    fun chipset(): String {
+        val soc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            listOf(Build.SOC_MANUFACTURER, Build.SOC_MODEL).filter { !it.isNullOrBlank() && it != Build.UNKNOWN }.joinToString(" ")
+        else ""
+        return listOf(soc, Build.HARDWARE.orEmpty()).filter { it.isNotBlank() }.joinToString(" / ").ifBlank { "?" }
+    }
+
+    /**
+     * O diagnóstico de um export com problema (falha na largada ou no meio —
+     * watchdog, verificação, encoder parado —, nova tentativa, HEVC trocado por
+     * H.264). Pura (testada na JVM). `engine` = Engine::export_diagnostic
+     * (codec e encoder abertos, tamanho/fps, onde travou, verificação).
+     */
+    fun exportDiagnosticLine(
+        platform: String, device: String, chip: String, event: String, percent: Int, failure: Int, code: Int,
+        safeMode: Int, softwareDecode: Boolean, retry: String, hevcNote: String?, engine: String, timestamp: String,
+    ): String = buildString {
+        append(timestamp).append(' ').append(platform).append(" · ").append(device).append(" · chip ").append(chip)
+        append(" | ").append(event)
+        append(" | parou em ").append(percent.coerceIn(0, 100)).append('%')
+        append(" motivo=").append(failure).append(" codigo=").append(code)
+        append(" seguranca=").append(safeMode).append(" decod=").append(if (softwareDecode) "software" else "padrao")
+        append(" refez=").append(retry.ifBlank { "nao" })
+        if (!hevcNote.isNullOrBlank()) append(" | hevc->h264: ").append(hevcNote)
+        if (engine.isNotBlank()) append(" | motor: ").append(engine)
+    }
 
     /**
      * A última falha de export (etapa, motivo, código, quadro, modo de
@@ -72,9 +100,15 @@ object ProblemReport {
         return (prefix + "[export] " + lastExport).take(STEPS_MAX)
     }
 
-    /** Envia (IO). A sessão, quando há, dá ao relato o e-mail da conta. */
-    fun send(context: Context, sessao: SessaoGuardada?, whatDid: String, whatHappened: String, steps: String): Result {
-        val corpo = body(CrashReporter.installationId(context), whatDid, whatHappened, stepsWithExport(steps, lastExport(context)))
+    /**
+     * Envia (IO). A sessão, quando há, dá ao relato o e-mail da conta.
+     * `attachExport` = a chave "Anexar diagnóstico do último export" (ligada
+     * por padrão); desligada, o relato vai sem ele.
+     */
+    fun send(context: Context, sessao: SessaoGuardada?, whatDid: String, whatHappened: String, steps: String,
+             attachExport: Boolean = true): Result {
+        val corpo = body(CrashReporter.installationId(context), whatDid, whatHappened,
+            stepsWithExport(steps, if (attachExport) lastExport(context) else null))
         if (sessao != null) corpo.put("email", sessao.email)
         val r = ContaApi.relatar(corpo, sessao?.token)
         return when {

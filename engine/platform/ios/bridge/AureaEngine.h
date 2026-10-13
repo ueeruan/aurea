@@ -205,6 +205,13 @@ typedef NS_OPTIONS(uint32_t, AureaExportFlag) {
     /// Parou (suspensão do app, falha recuperável) com trechos salvos: o MESMO
     /// export (mesma saída e opções) continua dali em vez do zero.
     AureaExportFlagResumable       = 1u << 6,
+    /// Decodificação compatível da mídia (planos na CPU; o decoder travou antes).
+    AureaExportFlagSoftwareDecode  = 1u << 7,
+    /// Publicado com avisos da verificação tolerante (detalhe em -exportDiagnostic).
+    AureaExportFlagVerifyWarnings  = 1u << 12,
+    /// Conselho do motor: refazer também com a decodificação compatível
+    /// (bit 18, kExportRetrySoftwareDecode; o nível vai nos bits 16..17).
+    AureaExportFlagRetrySoftwareDecode = 1u << 18,
 };
 
 /// Códigos de codec de saída (ExportCodec).
@@ -1015,6 +1022,19 @@ NS_SWIFT_NAME(AureaEngine)
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
               quality:(uint32_t)quality safeMode:(uint32_t)safeMode;
+/// `softwareDecode`: a mídia de origem na decodificação compatível (o decoder
+/// do aparelho travou na tentativa anterior; AureaExportFlagRetrySoftwareDecode).
+- (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
+               height:(uint32_t)height fps:(double)fps
+          bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+            aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+              quality:(uint32_t)quality safeMode:(uint32_t)safeMode softwareDecode:(BOOL)softwareDecode;
+/// Diagnóstico do último export (relato de problema): codec e encoder abertos,
+/// tamanho/fps, modo de segurança, onde travou, verificação. "" = nenhum.
+- (NSString*)exportDiagnostic;
+/// O aparelho tem encoder HEVC de HARDWARE (VTCopyVideoEncoderList)? Sem um,
+/// o export pede H.264 direto (HEVC por software é lento demais no celular).
++ (BOOL)hardwareHevcEncoderAvailable;
 /// A taxa de vídeo (bps) que o export usaria — a mesma regra do encoder, para a
 /// tela mostrar o tamanho estimado sem conta própria.
 - (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps

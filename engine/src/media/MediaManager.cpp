@@ -233,11 +233,12 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     auto* factory = factory_;
     auto ready = readyFn_;
     auto* context = readyCtx_;
-    pending->worker = std::thread([pending, factory, asset, decodeAsset, proxy, ready, context] {
-        pending->decoder = factory->open_video(decodeAsset, MediaPriority::Preview);
+    const MediaPriority openPriority = openPriority_.load(std::memory_order_relaxed);
+    pending->worker = std::thread([pending, factory, asset, decodeAsset, proxy, ready, context, openPriority] {
+        pending->decoder = factory->open_video(decodeAsset, openPriority);
         if (proxy) {
             pending->decoder = proxy_decoder(std::move(pending->decoder), proxy);
-            if (!pending->decoder) pending->decoder = factory->open_video(asset, MediaPriority::Preview);
+            if (!pending->decoder) pending->decoder = factory->open_video(asset, openPriority);
         }
         pending->ready.store(true, std::memory_order_release);
         if (ready) ready(context);

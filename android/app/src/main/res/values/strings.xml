@@ -3153,6 +3153,9 @@
     <string name="report_what_happened">O que você esperava e o que aconteceu</string>
     <string name="report_steps">Passos para repetir (opcional)</string>
     <string name="report_device">Aparelho</string>
+    <string name="msg_codec_do_aparelho_travou">O codificador de vídeo do aparelho travou. Tente H.264 ou uma resolução menor.</string>
+    <string name="report_attach_export">Anexar diagnóstico do último export</string>
+    <string name="report_attach_export_hint">Inclui só dados técnicos do último export com problema: modelo e chip do aparelho, codec e codificador usados, resolução, fps, em que ponto parou e o motivo. Nenhum projeto, mídia ou nome de arquivo.</string>
     <string name="report_send">Enviar</string>
     <string name="report_sending">Enviando…</string>
     <string name="report_sent">Obrigado! O relato foi enviado.</string>

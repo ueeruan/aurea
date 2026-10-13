@@ -396,6 +396,129 @@ AUREA_TEST(FFmpegExport, RejectsDiscontinuousVideoAudioAndWrongValidationCount) 
     if (!good(sink->finish())) return;
     AUREA_CHECK(!sink->validate_output(ExportOutputValidation{kWidth, kHeight, 2, 30, false}).ok());
 }
+namespace {
+// Remuxa o MP4 no lugar: os pacotes de vídeo depois do primeiro andam
+// `shiftDen`-avos de segundo no relógio (o que um encoder de hardware faz de
+// verdade: PTS arredondado, duração diferente) ou a faixa de vídeo some.
+bool remux_in_place(const std::filesystem::path& path, int shiftDen, bool dropVideo) {
+    const std::string source = path.string(), temporary = source + ".remux.mp4";
+    AVFormatContext* in = nullptr; AVFormatContext* out = nullptr;
+    if (avformat_open_input(&in, source.c_str(), nullptr, nullptr) < 0) return false;
+    bool ok = avformat_find_stream_info(in, nullptr) >= 0 &&
+              avformat_alloc_output_context2(&out, nullptr, "mp4", temporary.c_str()) >= 0 && out;
+    std::vector<int> map(in->nb_streams, -1);
+    for (unsigned i = 0; ok && i < in->nb_streams; ++i) {
+        if (dropVideo && in->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) continue;
+        AVStream* stream = avformat_new_stream(out, nullptr);
+        ok = stream && avcodec_parameters_copy(stream->codecpar, in->streams[i]->codecpar) >= 0;
+        if (!ok) break;
+        stream->codecpar->codec_tag = 0;
+        stream->time_base = in->streams[i]->time_base;
+        map[i] = stream->index;
+    }
+    ok = ok && avio_open(&out->pb, temporary.c_str(), AVIO_FLAG_WRITE) >= 0 && avformat_write_header(out, nullptr) >= 0;
+    AVPacket* packet = av_packet_alloc();
+    u32 videoPackets = 0;
+    while (ok && packet && av_read_frame(in, packet) >= 0) {
+        const int target = map[packet->stream_index];
+        const AVStream* from = in->streams[packet->stream_index];
+        if (target >= 0) {
+            if (from->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && videoPackets++ > 0 && shiftDen > 0) {
+                const i64 shift = av_rescale_q(1, AVRational{1, shiftDen}, from->time_base);
+                packet->pts += shift; packet->dts += shift;
+            }
+            av_packet_rescale_ts(packet, from->time_base, out->streams[target]->time_base);
+            packet->stream_index = target; packet->pos = -1;
+            ok = av_interleaved_write_frame(out, packet) >= 0;
+        }
+        av_packet_unref(packet);
+    }
+    av_packet_free(&packet);
+    if (ok) ok = av_write_trailer(out) >= 0;
+    if (out && out->pb) avio_closep(&out->pb);
+    avformat_free_context(out);
+    avformat_close_input(&in);
+    std::error_code ec;
+    if (!ok) { std::filesystem::remove(temporary, ec); return false; }
+    std::filesystem::remove(path, ec);
+    std::filesystem::rename(temporary, path, ec);
+    return !ec;
+}
+
+// Três quadros no temporário (validateBeforePublish): o arquivo que o motor
+// valida antes de publicar. Devolve o caminho do temporário.
+std::filesystem::path staged_export(ExportSink& sink, const std::string& path, bool withAudio) {
+    std::error_code ec; std::filesystem::remove(path, ec);
+    auto video = configuration(); video.validateBeforePublish = true;
+    AudioStreamConfig audio; Picture picture;
+    if (!good(sink.open(path.c_str(), video, withAudio ? &audio : nullptr))) return {};
+    std::vector<i16> pcm(1600 * 2, 900);
+    for (u32 i = 0; i < 3; ++i) {
+        picture.numbered(i);
+        if (!good(sink.write_video(picture.y.data(), kStride, picture.uv.data(), kStride, std::llround(i * 1'000'000.0 / 30)))) return {};
+        if (withAudio && !good(sink.write_audio(pcm.data(), 1600, std::llround(i * 1600 * 1'000'000.0 / kRate)))) return {};
+    }
+    if (!good(sink.finish())) return {};
+    const auto target = std::filesystem::path(path);
+    for (const auto& entry : std::filesystem::directory_iterator(target.parent_path()))
+        if (entry.path().filename().string().rfind(target.filename().string() + ".aurea-ffmpeg-", 0) == 0) return entry.path();
+    return {};
+}
+} // namespace
+
+// Encoder de hardware que entrega PTS/duração diferentes do relógio exato:
+// o estrito (host) reprova; o tolerante (apps) publica com aviso registrado.
+AUREA_TEST(FFmpegExport, TolerantValidationPublishesDivergentClockWithWarnings) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("tolerant-divergent-clock");
+    ExportOutputValidation expected{kWidth, kHeight, 3, 30, false};
+    // Estrito: a guarda de sempre.
+    auto staged = staged_export(*sink, path, false); AUREA_CHECK(!staged.empty()); if (staged.empty()) return;
+    AUREA_CHECK(remux_in_place(staged, 60, false));
+    AUREA_CHECK(sink->validate_output(expected).code() == Errc::CorruptData);
+    AUREA_CHECK(!std::filesystem::exists(path));
+    sink->abort();
+    // Tolerante: o mesmo arquivo é publicado e o motivo fica nos avisos.
+    staged = staged_export(*sink, path, false); AUREA_CHECK(!staged.empty()); if (staged.empty()) return;
+    AUREA_CHECK(remux_in_place(staged, 60, false));
+    expected.strict = false;
+    if (!good(sink->validate_output(expected))) return;
+    AUREA_CHECK(std::filesystem::exists(path));
+    const std::string warnings = sink->validation_warnings();
+    std::printf("\n    tolerant warnings: %s\n", warnings.c_str());
+    AUREA_CHECK(!warnings.empty());
+    AUREA_CHECK(warnings.find("PTS") != std::string::npos || warnings.find("relogio") != std::string::npos);
+    const auto decoded = decode(path, 30);
+    AUREA_CHECK(decoded.opened); AUREA_CHECK_EQ(decoded.videoFrames, 3u);
+    // A contagem divergente (encoder que perdeu/duplicou quadro) também é aviso.
+    staged = staged_export(*sink, path, false); AUREA_CHECK(!staged.empty()); if (staged.empty()) return;
+    ExportOutputValidation wrongCount{kWidth, kHeight, 3, 30, false};
+    wrongCount.strict = false; wrongCount.frames = 4;
+    AUREA_CHECK(sink->validate_output(wrongCount).ok());
+    AUREA_CHECK(std::string(sink->validation_warnings()).find("diverge") != std::string::npos);
+}
+
+// O tolerante ainda reprova o arquivo que não serve: vazio ou sem vídeo.
+AUREA_TEST(FFmpegExport, TolerantValidationRejectsEmptyAndVideoLessFiles) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    const auto path = output("tolerant-rejects");
+    ExportOutputValidation expected{kWidth, kHeight, 3, 30, false};
+    expected.strict = false;
+    auto staged = staged_export(*sink, path, false); AUREA_CHECK(!staged.empty()); if (staged.empty()) return;
+    std::error_code ec; std::filesystem::resize_file(staged, 0, ec); AUREA_CHECK(!ec);
+    AUREA_CHECK(!sink->validate_output(expected).ok());
+    AUREA_CHECK(!std::filesystem::exists(path));
+    sink->abort();
+    // Só áudio (a faixa de vídeo sumiu no contêiner).
+    expected.audio = true;
+    staged = staged_export(*sink, path, true); AUREA_CHECK(!staged.empty()); if (staged.empty()) return;
+    AUREA_CHECK(remux_in_place(staged, 0, true));
+    const Status videoLess = sink->validate_output(expected);
+    AUREA_CHECK(videoLess.code() == Errc::CorruptData);
+    AUREA_CHECK(!std::filesystem::exists(path));
+    sink->abort();
+}
+
 AUREA_TEST(FFmpegExport, CancellationAbortsPartialFileAndAllowsNewSession) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
     std::atomic<bool> cancel{false}; sink->set_cancel_flag(&cancel);

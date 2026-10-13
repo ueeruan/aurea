@@ -16,4 +16,9 @@
     <string name="app_export_resume_title">Экспорт прерван на %1$d%%</string>
     <string name="app_export_resume_continue">Продолжить экспорт</string>
     <string name="app_export_resume_discard">Сбросить</string>
+    <!-- BETA 2: codec do aparelho travou (CodecHung), nova tentativa compatível, HEVC sem encoder. -->
+    <string name="expfail_codec_hung">видеокодер телефона завис; попробуйте H.264 или меньшее разрешение</string>
+    <string name="app_export_codec_hung_retry">Видеокодер телефона завис. Попробуем ещё раз в режиме совместимости.</string>
+    <string name="app_export_retry_compatible">Пробуем ещё раз в режиме совместимости…</string>
+    <string name="app_export_hevc_to_h264">У этого телефона нет кодировщика HEVC для такого размера: экспорт в H.264.</string>
 </resources>

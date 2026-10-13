@@ -16,4 +16,9 @@
     <string name="app_export_resume_title">Ekspor terhenti di %1$d%%</string>
     <string name="app_export_resume_continue">Lanjutkan ekspor</string>
     <string name="app_export_resume_discard">Buang</string>
+    <!-- BETA 2: codec do aparelho travou (CodecHung), nova tentativa compatível, HEVC sem encoder. -->
+    <string name="expfail_codec_hung">encoder video ponsel macet; coba H.264 atau resolusi yang lebih rendah</string>
+    <string name="app_export_codec_hung_retry">Encoder video ponsel macet. Kami akan mencoba lagi dalam mode kompatibel.</string>
+    <string name="app_export_retry_compatible">Mencoba lagi dalam mode kompatibel…</string>
+    <string name="app_export_hevc_to_h264">Ponsel ini tidak punya encoder HEVC untuk ukuran ini: mengekspor dalam H.264.</string>
 </resources>

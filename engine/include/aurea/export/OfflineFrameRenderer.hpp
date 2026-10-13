@@ -27,7 +27,20 @@ public:
     [[nodiscard]] bool release(bool deviceLost, u64 timeoutNs) noexcept;
     /// Um abridor de vídeo da plataforma ainda preso (fechar esperaria por ele).
     [[nodiscard]] bool opening_in_flight() noexcept { return media_.opening_in_flight(); }
+    /// Decodificação compatível (MediaPriority::ExportSoftwareDecode) para os
+    /// decoders abertos daqui em diante.
+    void set_software_decode(bool enabled) noexcept {
+        media_.set_open_priority(enabled ? MediaPriority::ExportSoftwareDecode : MediaPriority::Preview);
+    }
+    /// Paciência SEM nenhum trabalho do decoder nem recurso novo antes de dar a
+    /// fonte como presa (export_watch_deadline_ns: preparação/regime). 0 = 30 s.
+    void set_stall_patience_ns(u64 ns) noexcept { stallPatienceNs_ = ns; }
+    /// O último `render` desistiu porque a fonte não entregou o quadro exato
+    /// (decoder da mídia preso), não por recurso de GPU/composição.
+    [[nodiscard]] bool source_stalled() const noexcept { return sourceStalled_; }
 private:
+    u64 stallPatienceNs_ = 0;
+    bool sourceStalled_ = false;
     bool lostDevice_ = false;
     Status wait_gpu(u64 frame, const std::atomic<bool>* cancel) noexcept;
     static void source_ready(void* context) noexcept;

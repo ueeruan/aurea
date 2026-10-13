@@ -59,7 +59,10 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     AUREA_CHECK(o.finished);
     AUREA_CHECK_EQ(o.p.result, Errc::Timeout);
     AUREA_CHECK_EQ(o.p.failure, static_cast<u32>(ExportFailure::EncoderStalled));
-    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 1u);
+    // Travou (BETA 2): direto o software — o mesmo encoder travaria de novo.
+    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 2u);
+    AUREA_CHECK((o.p.flags & kExportRetrySoftwareDecode) == 0);
+    AUREA_CHECK(r.e.export_diagnostic().find("travou=video") != std::string::npos);
     std::printf("travado detectado em %.1f s ", o.seconds);
     AUREA_CHECK(o.seconds < 5.0);
     // Ninguém chamou o sink preso de novo: abort/finish prenderiam também.
@@ -67,7 +70,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     // O que vai para as duas telas (ABI da bridge) leva a sugestão e o motivo.
     bridge::ExportProgressPOD pod;
     r.e.fill_export_progress(pod);
-    AUREA_CHECK_EQ(export_retry_from_flags(pod.flags), 1u);
+    AUREA_CHECK_EQ(export_retry_from_flags(pod.flags), 2u);
     AUREA_CHECK_EQ(pod.flags >> kExportFailureShift, static_cast<u32>(ExportFailure::EncoderStalled));
 
     // A tela refaz no modo sugerido: o contexto preso fica de lado (vivo) e o
@@ -87,7 +90,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     AUREA_CHECK_EQ(export_retry_from_flags(retry.p.flags), 0u);
     AUREA_CHECK(r.cap.video.codec == ExportCodec::HEVC);
     AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
-    AUREA_CHECK(!r.cap.video.preferSoftware);
+    AUREA_CHECK(r.cap.video.preferSoftware);
     AUREA_CHECK_EQ(r.cap.video.width, 64u);
     AUREA_CHECK_EQ(r.cap.video.height, 36u);
     AUREA_CHECK_EQ(r.cap.video.bitrateBps,
@@ -107,7 +110,7 @@ AUREA_TEST(ExportWatchdog, HungFinishIsAbandonedAsEncoderStall) {
     AUREA_CHECK(o.finished);
     AUREA_CHECK_EQ(o.p.result, Errc::Timeout);
     AUREA_CHECK_EQ(o.p.failure, static_cast<u32>(ExportFailure::EncoderStalled));
-    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 1u);
+    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 2u);
     AUREA_CHECK_EQ(r.cap.hashes.size(), usize{3});
     AUREA_CHECK(!r.cap.aborted);
     AUREA_CHECK(o.seconds < 5.0);
@@ -149,9 +152,10 @@ AUREA_TEST(ExportWatchdog, LateValidationCannotPublishAnAbandonedSession) {
     }
 }
 
-/// Cancelar com o encoder preso na plataforma: o limite cai para 3 s (todo
-/// laço de sink olha o cancelamento a cada volta), mesmo com o prazo padrão de
-/// 45 s — o botão Cancelar nunca fica sem resposta.
+/// Cancelar com o encoder preso na plataforma: o prazo cai para o da
+/// RECUPERAÇÃO — max(10 s, 4 × média por quadro), não mais 3 s (que abandonava
+/// um quadro pesado ainda em curso e enchia a quarentena) — mesmo sem prazo
+/// fixo: o botão Cancelar sempre termina.
 AUREA_TEST(ExportWatchdog, CancelNeverWaitsForAnEncoderStuckInThePlatform) {
     SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
@@ -174,7 +178,7 @@ AUREA_TEST(ExportWatchdog, CancelNeverWaitsForAnEncoderStuckInThePlatform) {
     const f64 secs = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
     std::printf("cancelado com o encoder preso em %.1f s ", secs);
     AUREA_CHECK(done);
-    AUREA_CHECK(secs < 5.0);
+    AUREA_CHECK(secs < 12.0);
     AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Cancelled);
     AUREA_CHECK_EQ(export_retry_from_flags(r.e.export_progress().flags), 0u);
     release_hung(gate.release, gate.returned);
@@ -252,7 +256,9 @@ AUREA_TEST(ExportWatchdog, TwoStuckSessionsBoundRetriesAndReturnedWorkersRelease
     ExportSettings settings; settings.height = 36; settings.fps = 30; settings.dither = false;
     const auto started = std::chrono::steady_clock::now();
     const Status refused = r.e.start_export(settings, "nao-usado.mp4");
-    AUREA_CHECK_EQ(refused.code(), Errc::BudgetExceeded);
+    // O codec do aparelho travou — não é memória (antes: BudgetExceeded = erro 9).
+    AUREA_CHECK_EQ(refused.code(), Errc::CodecHung);
+    AUREA_CHECK(export_failure_reason(ExportStage::Open, refused.code()) == ExportFailure::CodecHung);
     AUREA_CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
     AUREA_CHECK_EQ(backend->mappedBuffers.size(), twoHungBuffers);
     AUREA_CHECK_EQ(r.e.export_progress().result, Errc::Timeout);

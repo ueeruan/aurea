@@ -16,4 +16,9 @@
     <string name="app_export_resume_title">एक्सपोर्ट %1$d%% पर रुका</string>
     <string name="app_export_resume_continue">एक्सपोर्ट जारी रखें</string>
     <string name="app_export_resume_discard">हटाएँ</string>
+    <!-- BETA 2: codec do aparelho travou (CodecHung), nova tentativa compatível, HEVC sem encoder. -->
+    <string name="expfail_codec_hung">फ़ोन का वीडियो एनकोडर अटक गया; H.264 या कम रिज़ॉल्यूशन आज़माएँ</string>
+    <string name="app_export_codec_hung_retry">फ़ोन का वीडियो एनकोडर अटक गया। हम संगत मोड में फिर से कोशिश करेंगे।</string>
+    <string name="app_export_retry_compatible">संगत मोड में फिर से कोशिश की जा रही है…</string>
+    <string name="app_export_hevc_to_h264">इस फ़ोन में इस साइज़ के लिए HEVC एनकोडर नहीं है: H.264 में एक्सपोर्ट हो रहा है।</string>
 </resources>

@@ -16,4 +16,9 @@
     <string name="app_export_resume_title">توقف التصدير عند %1$d%%</string>
     <string name="app_export_resume_continue">متابعة التصدير</string>
     <string name="app_export_resume_discard">تجاهل</string>
+    <!-- BETA 2: codec do aparelho travou (CodecHung), nova tentativa compatível, HEVC sem encoder. -->
+    <string name="expfail_codec_hung">توقف مُرمِّز الفيديو في الهاتف عن الاستجابة؛ جرّب H.264 أو دقة أقل</string>
+    <string name="app_export_codec_hung_retry">توقف مُرمِّز الفيديو في الهاتف عن الاستجابة. سنحاول مرة أخرى في وضع التوافق.</string>
+    <string name="app_export_retry_compatible">نحاول مرة أخرى في وضع التوافق…</string>
+    <string name="app_export_hevc_to_h264">لا يحتوي هذا الهاتف على مُرمِّز HEVC لهذا الحجم: يتم التصدير بصيغة H.264.</string>
 </resources>

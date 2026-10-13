@@ -16,4 +16,9 @@
     <string name="app_export_resume_title">Exportación interrumpida al %1$d%%</string>
     <string name="app_export_resume_continue">Continuar exportación</string>
     <string name="app_export_resume_discard">Descartar</string>
+    <!-- BETA 2: codec do aparelho travou (CodecHung), nova tentativa compatível, HEVC sem encoder. -->
+    <string name="expfail_codec_hung">el codificador de video del teléfono se bloqueó; prueba H.264 o una resolución menor</string>
+    <string name="app_export_codec_hung_retry">El codificador de video del teléfono se bloqueó. Lo intentaremos de nuevo en modo compatible.</string>
+    <string name="app_export_retry_compatible">Intentando de nuevo en modo compatible…</string>
+    <string name="app_export_hevc_to_h264">Este teléfono no tiene codificador HEVC para este tamaño: exportando en H.264.</string>
 </resources>

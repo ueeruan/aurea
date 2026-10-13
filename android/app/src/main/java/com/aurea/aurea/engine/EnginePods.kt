@@ -487,6 +487,12 @@ class ExportProgress {
      * (bits 16..17, kExportRetryShift em export/ExportWatchdog.hpp). 0 = não refazer.
      */
     val retrySafeMode: Int get() = (flags ushr RETRY_SHIFT) and 0x3
+    /** O conselho inclui a decodificação compatível (o decoder da mídia travou; bit 18). */
+    val retrySoftwareDecode: Boolean get() = flags and RETRY_SOFTWARE_DECODE != 0
+    /** Esta sessão decodifica a mídia pelo decoder de software (modo compatível). */
+    val softwareDecode: Boolean get() = flags and FLAG_SOFTWARE_DECODE != 0
+    /** Publicado com avisos da verificação tolerante (detalhe no diagnóstico do motor). */
+    val verifyWarnings: Boolean get() = flags and FLAG_VERIFY_WARNINGS != 0
 
     internal fun readFrom(buffer: ByteBuffer) {
         running = buffer.getInt(PodLayout.EPD_OFF_RUNNING) != 0
@@ -513,8 +519,11 @@ class ExportProgress {
         const val FLAG_SAFE_MODE = 1 shl 4
         const val FLAG_RESUMED = 1 shl 5
         const val FLAG_RESUMABLE = 1 shl 6
-        // aurea::kExportRetryShift (ExportWatchdog.hpp).
+        const val FLAG_SOFTWARE_DECODE = 1 shl 7
+        const val FLAG_VERIFY_WARNINGS = 1 shl 12
+        // aurea::kExportRetryShift / kExportRetrySoftwareDecode (ExportWatchdog.hpp).
         const val RETRY_SHIFT = 16
+        const val RETRY_SOFTWARE_DECODE = 1 shl 18
         // aurea::kExportFailureShift / ExportFailure (ExportRules.hpp).
         const val FAILURE_SHIFT = 24
         const val FAILURE_NONE = 0
@@ -526,6 +535,8 @@ class ExportProgress {
         const val FAILURE_FILE = 6
         const val FAILURE_STORAGE = 7
         const val FAILURE_UNSUPPORTED = 8
+        /** O codec do aparelho travou (watchdog/quarentena) — não é memória. */
+        const val FAILURE_CODEC_HUNG = 9
     }
 }
 

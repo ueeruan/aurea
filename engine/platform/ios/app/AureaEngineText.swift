@@ -296,6 +296,8 @@ enum AureaEngineText {
         case 29: return "msg_o_arquivo_de_midia_esta_danificado"
         case 30: return "msg_o_projeto_esta_danificado_e_nao"
         case 31: return "msg_este_aparelho_nao_tem_codificador_para"
+        // CodecHung: o codec do aparelho travou (antes saía como 9 = "memória").
+        case 33: return "msg_codec_do_aparelho_travou"
         default: return nil
         }
     }

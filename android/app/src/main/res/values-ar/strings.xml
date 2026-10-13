@@ -3102,6 +3102,9 @@
     <string name="report_what_happened">ما الذي توقعته، وما الذي حدث بدلاً منه</string>
     <string name="report_steps">خطوات تكرار المشكلة (اختياري)</string>
     <string name="report_device">الجهاز</string>
+    <string name="msg_codec_do_aparelho_travou">توقف مُرمِّز الفيديو في الهاتف عن الاستجابة. جرّب H.264 أو دقة أقل.</string>
+    <string name="report_attach_export">إرفاق تشخيص آخر عملية تصدير</string>
+    <string name="report_attach_export_hint">يتضمن بيانات تقنية فقط عن آخر عملية تصدير بها مشكلة: طراز الجهاز وشريحته، والترميز والمُرمِّز المستخدمان، والدقة، وعدد الإطارات في الثانية، وأين توقفت ولماذا. لا مشاريع ولا وسائط ولا أسماء ملفات.</string>
     <string name="report_send">إرسال</string>
     <string name="report_sending">جارٍ الإرسال…</string>
     <string name="report_sent">شكرًا! تم إرسال البلاغ.</string>

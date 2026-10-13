@@ -177,6 +177,12 @@ class Exporter internal constructor(
     private val progressBuffer = directBuffer(128)
     private val progress = ExportProgress()
     private var poll: Job? = null
+    /** Aviso da nova tentativa no modo compatível (aparece no lugar do erro). */
+    private var retryNotice = ""
+    /** HEVC trocado por H.264 neste export: o motivo (diagnóstico). null = não trocou. */
+    private var hevcNote: String? = null
+    /** As tentativas deste export pedido pelo usuário (diagnóstico: "refez=..."). */
+    private var retries = ""
     private var sessionActive by mutableStateOf(false)
     @Volatile private var cancelPending = false
 
@@ -308,12 +314,14 @@ class Exporter internal constructor(
         }
 
         // Export de verdade: lembrado até terminar, para continuar se o app
-        // for fechado no meio (o pré-export é só para assistir).
-        if (!options.preview) rememberPending(file, base, options)
-        launchVideo(dir, file, base, options)
+        // for fechado no meio (o pré-export é só para assistir) — com o codec
+        // que vai mesmo sair (HEVC sem encoder vira H.264 antes).
+        launchVideo(dir, file, base, options, remember = !options.preview,
+            comp = Triple(compWidth, compHeight, compFps))
     }
 
-    private fun launchVideo(dir: File, file: File, title: String, options: ExportOptions) {
+    private fun launchVideo(dir: File, file: File, title: String, options: ExportOptions, remember: Boolean = false,
+                            comp: Triple<Int, Int, Double>? = null) {
         // Taxa: o motor calcula pela qualidade (0 = automático); só o Mbps
         // manual do Avançado é passado como número.
         val mbps = options.customMbps.coerceAtLeast(0)
@@ -321,15 +329,41 @@ class Exporter internal constructor(
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension.ifBlank { title })
         sessionActive = true
         cancelPending = false
+        retryNotice = ""
+        hevcNote = null
+        retries = ""
         poll?.cancel()
         val guarded = projectPath()
         poll = scope.launch {
             // Galaxy A32 "fecha em 70%": o marcador diz no próximo crash que foi
             // no export, e em que quadro (atualizado a cada 1% abaixo).
             guardedExport(guarded) {
-                runExport(dir, file, options, mbps)
+                val resolved = if (comp != null) resolveCodec(options, comp) else options
+                if (remember) rememberPending(file, title, resolved)
+                runExport(dir, file, resolved, mbps)
             }
         }
+    }
+
+    /**
+     * HEVC só com ENCODER HEVC de hardware que aceita o tamanho/fps do export
+     * (HevcEncoderCheck). Sem um: H.264 direto, sem erro; o motivo vai para o
+     * diagnóstico e um aviso na tela.
+     */
+    private suspend fun resolveCodec(options: ExportOptions, comp: Triple<Int, Int, Double>): ExportOptions {
+        if (!options.hevc) return options
+        val (width, height) = HevcEncoderCheck.exportSize(comp.first, comp.second, options.shortSide)
+        val fps = if (options.fps > 0.0) options.fps else comp.third.takeIf { it > 0.0 } ?: 30.0
+        if (width <= 0 || height <= 0) return options
+        val choice = withContext(Dispatchers.IO) { HevcEncoderCheck.probe(width, height, fps) }
+        if (choice.hevc) {
+            android.util.Log.i("AureaExport", "HEVC: ${choice.reason}")
+            return options
+        }
+        android.util.Log.w("AureaExport", "HEVC unavailable, exporting H.264: ${choice.reason}")
+        hevcNote = choice.reason
+        state = state.copy(notice = text(R.string.app_export_hevc_to_h264))
+        return options.copy(hevc = false)
     }
 
     /** PNG, sequência .zip ou GIF: o motor renderiza e codifica; aqui, só publicar. */
@@ -384,13 +418,18 @@ class Exporter internal constructor(
      */
     private suspend fun runExport(dir: File, file: File, options: ExportOptions, mbps: Int) {
         var safeMode = 0
+        var softwareDecode = false
         var failureResumes = 0
         var resuming = false
         while (true) {
             val level = safeMode
-            val suggested = runEngineJob(dir, file, options, level, resuming) {
-                engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
-                    options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc && level == 0), level)
+            val decodeInSoftware = softwareDecode
+            // Modo de segurança = sempre H.264 (export_safe_codec): o HEVC dos
+            // aparelhos de entrada é o encoder que mais trava.
+            val hevc = options.hevc && level == 0
+            val suggested = runEngineJob(dir, file, options, level, resuming, decodeInSoftware) {
+                engine.startExport(file.absolutePath, options.shortSide, options.fps, if (hevc) 1 else 0, mbps, options.aiUpscale,
+                    options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(hevc), level, decodeInSoftware)
             }
             if (suggested == RESUME) {
                 // Export retomável: o motor guardou os trechos já codificados.
@@ -417,16 +456,19 @@ class Exporter internal constructor(
                 continue
             }
             resuming = false
-            val next = ExportStallWatchdog.nextSafeMode(level, suggested)
-            if (next == 0) {
+            val next = suggested and 0x3
+            if (suggested <= 0 || next <= level) {
                 // Terminou (pronto, falhou de vez ou cancelado): nada a continuar.
                 forgetPending()
                 return
             }
-            android.util.Log.w("AureaExport", "Video encoder stalled/refused; exporting again in safe mode $next")
+            softwareDecode = softwareDecode || (suggested and ExportStallWatchdog.ATTEMPT_SOFTWARE_DECODE != 0)
+            android.util.Log.w("AureaExport", "Video export failed (reason ${progress.failure}); exporting again in safe mode " +
+                "$next${if (softwareDecode) " with software decode" else ""}")
             safeMode = next
+            // Nada de "falhou" na tela: a mesma barra, com o aviso do modo compatível.
             state = state.copy(phase = ExportPhase.Running, framesDone = 0, fps = 0f, etaSeconds = 0, message = "",
-                notice = text(R.string.app_export_safe_mode))
+                notice = retryNotice)
         }
     }
 
@@ -436,7 +478,7 @@ class Exporter internal constructor(
      * 0 = terminou (pronto, falhou ou cancelado — o estado já diz qual).
      */
     private suspend fun runEngineJob(dir: File, file: File, options: ExportOptions, safeMode: Int = 0,
-                                     resuming: Boolean = false, startJob: () -> Int): Int {
+                                     resuming: Boolean = false, softwareDecode: Boolean = false, startJob: () -> Int): Int {
         run {
             // Abrir o encoder, o MP4 e os alvos de GPU leva segundos em aparelho
             // lento (e no emulador): na main thread isso dava "Aurea não está
@@ -458,17 +500,22 @@ class Exporter internal constructor(
                 if (options.format == ExportFormat.Video && !cancelPending && engine.exportProgress(progressBuffer)) {
                     progress.readFrom(progressBuffer)
                     val retry = if (progress.finished && progress.result == code)
-                        ExportStallWatchdog.nextSafeMode(safeMode, progress.retrySafeMode) else 0
-                    if (retry > 0) return retry
+                        ExportStallWatchdog.nextAttempt(safeMode, progress.flags) else 0
+                    if (retry > 0) {
+                        prepareRetry(safeMode, softwareDecode, retry, "nao iniciou codigo=$code")
+                        return retry
+                    }
                 }
-                val nativeCause = if (options.format == ExportFormat.Video && progress.finished &&
+                val nativeCause = if (code == CODEC_HUNG) startError(code, options)
+                    else if (options.format == ExportFormat.Video && progress.finished &&
                     progress.result == code && progress.message.isNotBlank())
                     EngineText.reason(app, progress.message, code) else startError(code, options)
                 state = state.copy(phase = ExportPhase.Failed, message = nativeCause)
                 android.util.Log.e("AureaExport", "Export did not start: code=$code safeMode=$safeMode format=${options.format}")
-                com.aurea.aurea.diagnostics.ProblemReport.noteExport(app,
-                    "Android ${Build.VERSION.SDK_INT}: nao iniciou codigo=$code seguranca=$safeMode formato=${options.format} " +
-                        "lado=${options.shortSide} hevc=${options.hevc}")
+                noteDiagnostic("nao iniciou codigo=$code formato=${options.format} lado=${options.shortSide} hevc=${options.hevc}",
+                    code, 0, safeMode, softwareDecode,
+                    options.format == ExportFormat.Video && (code == CODEC_HUNG || (progress.finished && progress.result == code)),
+                    startFailed = true)
                 return 0
             }
             if (cancelPending) engine.cancelExport()
@@ -512,10 +559,12 @@ class Exporter internal constructor(
                 // O encoder travou/recusou e o motor sugere o modo de segurança:
                 // nada de "falhou" na tela — o vídeo é refeito (runExport).
                 val retry = if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending &&
-                    !watchdog.cancelled) ExportStallWatchdog.nextSafeMode(safeMode, progress.retrySafeMode) else 0
+                    !watchdog.cancelled) ExportStallWatchdog.nextAttempt(safeMode, progress.flags) else 0
                 if (retry > 0) {
                     android.util.Log.w("AureaExport", "Export failed (reason ${progress.failure}, ${progress.message}); " +
-                        "engine suggests safe mode $retry")
+                        "engine suggests safe mode ${retry and 0x3}${if (retry and ExportStallWatchdog.ATTEMPT_SOFTWARE_DECODE != 0) " + software decode" else ""}")
+                    prepareRetry(safeMode, softwareDecode, retry,
+                        "falhou no meio quadro=${progress.framesDone}/${progress.framesTotal}")
                     withContext(Dispatchers.IO) { file.delete() }
                     return retry
                 }
@@ -523,6 +572,13 @@ class Exporter internal constructor(
                 // com trechos salvos — continua dali, não do zero.
                 if (options.format == ExportFormat.Video && progress.result != 0 && progress.resumable &&
                     !cancelPending && !watchdog.cancelled) return RESUME
+                if (options.format == ExportFormat.Video && progress.result == 0 &&
+                    (retries.isNotEmpty() || hevcNote != null || progress.verifyWarnings)) {
+                    // Concluiu, mas com história (nova tentativa, HEVC trocado,
+                    // verificação tolerante com avisos): fica para o relato.
+                    noteDiagnostic(if (progress.verifyWarnings) "concluiu com avisos da verificacao" else "concluiu",
+                        0, 0, safeMode, softwareDecode, true)
+                }
                 when (progress.result) {
                     0 -> if (options.preview) {
                         // Pré-export: fica no cache do app, a tela toca em loop.
@@ -554,7 +610,8 @@ class Exporter internal constructor(
                         "quadro=${progress.framesDone}/${progress.framesTotal} seguranca=$safeMode " +
                         "travou=${watchdog.cancelled} formato=${options.format} motor=\"${progress.message}\""
                     android.util.Log.e("AureaExport", "Export $cause")
-                    com.aurea.aurea.diagnostics.ProblemReport.noteExport(app, "Android ${Build.VERSION.SDK_INT}: $cause")
+                    noteDiagnostic("falhou formato=${options.format} tela-travou=${watchdog.cancelled} motor=\"${progress.message}\"",
+                        progress.result, progress.failure, safeMode, softwareDecode, options.format == ExportFormat.Video)
                 }
                 break
             }
@@ -735,7 +792,43 @@ class Exporter internal constructor(
         ExportProgress.FAILURE_FILE -> text(R.string.expfail_file)
         ExportProgress.FAILURE_STORAGE -> text(R.string.msg_sem_espaco_no_aparelho_libere_espaco).trimEnd('.', ' ')
         ExportProgress.FAILURE_UNSUPPORTED -> text(R.string.expfail_unsupported)
+        ExportProgress.FAILURE_CODEC_HUNG -> text(R.string.expfail_codec_hung)
         else -> null
+    }
+
+    /**
+     * A nova tentativa no modo compatível: o aviso da tela (no lugar do erro)
+     * e o diagnóstico para o relato, ANTES de refazer (se o app cair na nova
+     * tentativa, o relato ainda diz o que aconteceu).
+     */
+    private suspend fun prepareRetry(level: Int, softwareDecode: Boolean, next: Int, event: String) {
+        val hung = progress.failure == ExportProgress.FAILURE_ENCODER_STALLED || progress.failure == ExportProgress.FAILURE_CODEC_HUNG
+        retryNotice = if (hung) text(R.string.app_export_codec_hung_retry) else text(R.string.app_export_retry_compatible)
+        val decode = next and ExportStallWatchdog.ATTEMPT_SOFTWARE_DECODE != 0
+        val attempt = "nivel ${next and 0x3}${if (decode) "+decod-sw" else ""}"
+        retries = if (retries.isEmpty()) attempt else "$retries,$attempt"
+        noteDiagnostic("$event; refazendo no modo compativel ($attempt) motor=\"${progress.message}\"",
+            progress.result, progress.failure, level, softwareDecode, true)
+    }
+
+    /**
+     * Grava o diagnóstico do export no relato de problema (SharedPreferences
+     * "aurea_problem_report"): aparelho, chip, o que aconteceu, % em que parou,
+     * motivo, modo de segurança, novas tentativas, HEVC trocado e a linha do
+     * motor (codec, encoder, tamanho/fps, onde travou, verificação).
+     */
+    private suspend fun noteDiagnostic(event: String, code: Int, failure: Int, level: Int, softwareDecode: Boolean,
+                                       withEngine: Boolean, startFailed: Boolean = false) {
+        val engineLine = if (withEngine) withContext(Dispatchers.IO) { runCatching { engine.exportDiagnostic() }.getOrDefault("") } else ""
+        val percent = if (!startFailed && progress.framesTotal > 0) (progress.framesDone.toLong() * 100 / progress.framesTotal).toInt() else 0
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT).format(Date())
+        val line = com.aurea.aurea.diagnostics.ProblemReport.exportDiagnosticLine(
+            platform = "Android ${Build.VERSION.SDK_INT}", device = "${Build.MANUFACTURER} ${Build.MODEL}",
+            chip = com.aurea.aurea.diagnostics.ProblemReport.chipset(), event = event, percent = percent,
+            failure = failure, code = code, safeMode = level, softwareDecode = softwareDecode, retry = retries,
+            hevcNote = hevcNote, engine = engineLine, timestamp = stamp)
+        android.util.Log.i("AureaExport", "diagnostico: $line")
+        com.aurea.aurea.diagnostics.ProblemReport.noteExport(app, line)
     }
 
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
@@ -745,7 +838,10 @@ class Exporter internal constructor(
             5 -> lines += text(R.string.export_v2_validating)
         }
         if (p.safeMode) {
-            lines += text(R.string.app_export_safe_mode)
+            // Nova tentativa no modo compatível: o aviso dela (no lugar do erro).
+            lines += retryNotice.ifBlank { text(R.string.app_export_safe_mode) }
+        } else if (hevcNote != null) {
+            lines += text(R.string.app_export_hevc_to_h264)
         }
         if (p.resumed) {
             lines += text(R.string.app_export_resumed)
@@ -794,6 +890,8 @@ class Exporter internal constructor(
         OUT_OF_MEMORY -> text(R.string.app_export_no_vram)
         INVALID_STATE -> text(R.string.app_export_busy)
         STORAGE_FULL -> text(R.string.msg_sem_espaco_no_aparelho_libere_espaco)
+        // Sessões presas no codec do aparelho (antes "erro 9" = "memória").
+        CODEC_HUNG -> text(R.string.app_export_failed, text(R.string.expfail_codec_hung))
         else -> text(R.string.app_export_start_failed, code)
     }
 
@@ -807,6 +905,7 @@ class Exporter internal constructor(
         const val OUT_OF_MEMORY = 8
         const val CANCELLED = 25
         const val STORAGE_FULL = 28
+        const val CODEC_HUNG = 33
         /** runEngineJob: parou com trechos salvos; o mesmo export continua (não é um modo de segurança). */
         const val RESUME = -1
         /** Falhas recuperáveis seguidas que continuam do ponto salvo antes de desistir. */

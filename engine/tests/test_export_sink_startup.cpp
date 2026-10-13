@@ -314,7 +314,7 @@ AUREA_TEST(ExportSinkStartup, TwoHungNativeOpensRejectThirdAndReturnedOpenRestor
     auto third = std::make_shared<Control>();
     const auto begin = std::chrono::steady_clock::now();
     const auto refused = run(third, files.target());
-    AUREA_CHECK(refused.code == Errc::BudgetExceeded); AUREA_CHECK(!refused.sink);
+    AUREA_CHECK(refused.code == Errc::CodecHung); AUREA_CHECK(!refused.sink);
     AUREA_CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(1));
     AUREA_CHECK(!third->entered.load()); AUREA_CHECK(third->staged.empty());
     AUREA_CHECK_EQ(contents(files.target()), std::string("previous complete export"));
@@ -326,7 +326,7 @@ AUREA_TEST(ExportSinkStartup, TwoHungNativeOpensRejectThirdAndReturnedOpenRestor
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     do {
         opened = run(retry, files.target());
-        if (opened.code != Errc::BudgetExceeded) break;
+        if (opened.code != Errc::CodecHung) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     } while (std::chrono::steady_clock::now() < deadline);
     AUREA_CHECK(opened.status().ok());
@@ -362,7 +362,7 @@ AUREA_TEST(ExportSinkStartup, ConcurrentRequestsNeverCreateMoreThanTwoNativeOpen
         if (controls[i]->entered.load()) {
             ++entered; AUREA_CHECK(results[i].code == Errc::Timeout);
         } else {
-            ++refused; AUREA_CHECK(results[i].code == Errc::BudgetExceeded);
+            ++refused; AUREA_CHECK(results[i].code == Errc::CodecHung);
             AUREA_CHECK(controls[i]->staged.empty());
         }
     }

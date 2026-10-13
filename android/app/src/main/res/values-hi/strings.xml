@@ -3076,6 +3076,9 @@
     <string name="report_what_happened">आपने क्या उम्मीद की थी और क्या हुआ</string>
     <string name="report_steps">दोहराने के चरण (वैकल्पिक)</string>
     <string name="report_device">डिवाइस</string>
+    <string name="msg_codec_do_aparelho_travou">फ़ोन का वीडियो एनकोडर अटक गया। H.264 या कम रिज़ॉल्यूशन आज़माएँ।</string>
+    <string name="report_attach_export">पिछले एक्सपोर्ट का डायग्नोस्टिक जोड़ें</string>
+    <string name="report_attach_export_hint">इसमें समस्या वाले पिछले एक्सपोर्ट का सिर्फ़ तकनीकी डेटा होता है: डिवाइस का मॉडल और चिप, इस्तेमाल हुआ कोडेक और एनकोडर, रिज़ॉल्यूशन, fps, यह कहाँ रुका और क्यों। कोई प्रोजेक्ट, मीडिया या फ़ाइल का नाम नहीं।</string>
     <string name="report_send">भेजें</string>
     <string name="report_sending">भेजा जा रहा है…</string>
     <string name="report_sent">धन्यवाद! आपकी रिपोर्ट भेज दी गई।</string>

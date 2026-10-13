@@ -837,7 +837,10 @@ public:
             NSArray<AVAssetTrack*>* tracks = [av tracksWithMediaType:AVMediaTypeVideo];
             if (tracks.count == 0) return nullptr;
             return std::unique_ptr<VideoDecoderBackend>(
-                new (std::nothrow) AVFoundationVideoDecoder(av, tracks.firstObject, priority != MediaPriority::Thumbnail && zeroCopy_.load(), priority == MediaPriority::Thumbnail));
+                new (std::nothrow) AVFoundationVideoDecoder(av, tracks.firstObject,
+                    // Export compatível (o decoder travou antes): planos na CPU, sem IOSurface.
+                    priority != MediaPriority::Thumbnail && priority != MediaPriority::ExportSoftwareDecode && zeroCopy_.load(),
+                    priority == MediaPriority::Thumbnail));
         }
     }
 

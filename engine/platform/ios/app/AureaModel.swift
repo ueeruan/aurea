@@ -682,6 +682,15 @@ final class AureaModel: ObservableObject {
     /// segurança do vídeo em andamento (export/ExportWatchdog.hpp).
     private var exportWatch = ExportStallWatch()
     private var exportSafeMode: UInt32 = 0
+    /// Decodificação compatível da mídia nesta tentativa (o decoder do aparelho
+    /// travou na anterior; AureaExportFlagRetrySoftwareDecode).
+    private var exportSoftwareDecode = false
+    /// Aviso da nova tentativa no modo compatível (aparece no lugar do erro).
+    @Published private(set) var exportRetryNotice = ""
+    /// HEVC trocado por H.264 neste export (sem encoder HEVC de hardware): o motivo.
+    @Published private(set) var exportHevcNote: String?
+    /// As novas tentativas deste export pedido pelo usuário (diagnóstico "refez=...").
+    private var exportRetries = ""
     private let mediaQueue = DispatchQueue(label: "com.aurea.media-import", qos: .userInitiated)
     private let autosaveQueue = DispatchQueue(label: "com.aurea.autosave", qos: .utility)
     private let lifecycleQueue = DispatchQueue(label: "com.aurea.lifecycle", qos: .userInitiated)
@@ -3704,7 +3713,7 @@ final class AureaModel: ObservableObject {
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         exportStalled = false
         exportWatch = ExportStallWatch()
-        exportSafeMode = 0
+        resetExportAttempts()
         exportedKind = .video
         preExporting = true
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("aurea-preexport-\(UUID().uuidString).mp4")
@@ -3736,7 +3745,7 @@ final class AureaModel: ObservableObject {
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         exportStalled = false
         exportWatch = ExportStallWatch()
-        exportSafeMode = 0
+        resetExportAttempts()
         exportFailureResumes = 0
         exportPaused = false
         pendingExport = nil
@@ -3757,9 +3766,11 @@ final class AureaModel: ObservableObject {
             let startCode = Int(engine.lastExportStartCode)
             let message = startCode != 0 ? engine.lastExportStartMessage : (progress["message"] as? String ?? "")
             let code = startCode != 0 ? startCode : (progress["result"] as? NSNumber)?.intValue ?? 0
-            exportMessage = message.isEmpty && code == 0 ? AureaText.t("ios_export_could_not_start")
+            exportMessage = code == 33 ? AureaText.t("ios_export_failed_detail", AureaText.t("expfail_codec_hung"))
+                : message.isEmpty && code == 0 ? AureaText.t("ios_export_could_not_start")
                 : AureaEngineText.sentence(message, code: code)
             toast = exportMessage
+            noteExportDiagnostic(event: "nao iniciou codigo=\(code)", code: code, failure: 0, withEngine: code == 33)
             return
         }
         exporting = true
@@ -3822,7 +3833,7 @@ final class AureaModel: ObservableObject {
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         exportStalled = false
         exportWatch = ExportStallWatch()
-        exportSafeMode = 0
+        resetExportAttempts()
         exportFailureResumes = 0
         exportPaused = false
         exportedKind = .video
@@ -3850,7 +3861,7 @@ final class AureaModel: ObservableObject {
     private func resumePausedExport() {
         guard exportPaused, exporting, let url = pendingExportURL else { return }
         exportPaused = false
-        if startVideoExport(url, safeMode: exportSafeMode) {
+        if startVideoExport(url, safeMode: exportSafeMode, softwareDecode: exportSoftwareDecode) {
             exportWatch = ExportStallWatch()
             exportProgress = [:]
             startExportPolling()
@@ -3863,28 +3874,79 @@ final class AureaModel: ObservableObject {
     }
 
     /// O vídeo no motor. `safeMode` > 0 só quando o motor sugeriu refazer depois
-    /// de o encoder travar (H.264 Baseline em múltiplos de 16, taxa menor).
-    private func startVideoExport(_ url: URL, safeMode: UInt32) -> Bool {
+    /// de o encoder travar (H.264 Baseline; nível 2 = o encoder de software);
+    /// `softwareDecode` quando o decoder da mídia travou (planos na CPU).
+    private func startVideoExport(_ url: URL, safeMode: UInt32, softwareDecode: Bool = false) -> Bool {
         var level = safeMode
+        var decode = softwareDecode
         while true {
             let options = activeExportOptions
+            // Modo de segurança = sempre H.264 (export_safe_codec). HEVC só com
+            // encoder HEVC de HARDWARE no aparelho; sem um, H.264 direto.
+            var codec = options.codec
+            if codec == .hevc && level == 0 && !AureaEngine.hardwareHevcEncoderAvailable() {
+                exportHevcNote = "sem encoder HEVC de hardware (VideoToolbox)"
+                codec = .h264
+            }
+            if level > 0 { codec = .h264 }
             let ok = engine.startExport(to: url.path,
-                           codec: options.codec,
+                           codec: codec,
                            height: options.shortSide,
                            fps: options.fps,
                            bitrateMbps: options.bitrateMbps,
                            audioBitrateKbps: options.audioBitrateKbps,
                            aiUpscale: options.aiUpscale, trimToContent: options.trimToContent,
-                           quality: options.quality, safeMode: level)
-            if ok { exportSafeMode = level; return true }
+                           quality: options.quality, safeMode: level, softwareDecode: decode)
+            if ok { exportSafeMode = level; exportSoftwareDecode = decode; return true }
             guard !exportCancelled else { return false }
             let progress = engine.exportProgress()
             let flags = (progress["flags"] as? NSNumber)?.uint32Value ?? 0
-            let next = ExportStallWatch.nextSafeMode(current: level,
-                suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
+            let next = ExportStallWatch.nextAttempt(current: level, flags: flags)
             guard next > 0 else { return false }
-            level = next
+            prepareExportRetry(progress, next: next, level: level, event: "nao iniciou")
+            level = next & 0x3
+            decode = decode || next & ExportStallWatch.attemptSoftwareDecode != 0
         }
+    }
+
+    private func resetExportAttempts() {
+        exportSafeMode = 0
+        exportSoftwareDecode = false
+        exportRetryNotice = ""
+        exportHevcNote = nil
+        exportRetries = ""
+    }
+
+    /// A nova tentativa no modo compatível: o aviso da tela (no lugar do erro)
+    /// e o diagnóstico para o relato ANTES de refazer.
+    private func prepareExportRetry(_ progress: [String: Any], next: UInt32, level: UInt32, event: String) {
+        let failure = (progress[AureaExportFailure] as? NSNumber)?.intValue ?? 0
+        let result = (progress["result"] as? NSNumber)?.intValue ?? 0
+        exportRetryNotice = AureaText.t(failure == 2 || failure == 9 ? "app_export_codec_hung_retry" : "app_export_retry_compatible")
+        let decode = next & ExportStallWatch.attemptSoftwareDecode != 0
+        let attempt = "nivel \(next & 0x3)" + (decode ? "+decod-cpu" : "")
+        exportRetries = exportRetries.isEmpty ? attempt : exportRetries + "," + attempt
+        let message = progress["message"] as? String ?? ""
+        noteExportDiagnostic(event: "\(event); refazendo no modo compativel (\(attempt)) motor=\"\(message)\"",
+                             code: result, failure: failure, withEngine: true, progress: progress, level: level)
+    }
+
+    /// Diagnóstico do export para o relato de problema (UserDefaults): aparelho,
+    /// o que aconteceu, % em que parou, motivo, modo de segurança, novas
+    /// tentativas, HEVC trocado e a linha do motor (codec, encoder, tamanho/fps,
+    /// onde travou, verificação). Mesma linha do Android (ProblemReport.kt).
+    private func noteExportDiagnostic(event: String, code: Int, failure: Int, withEngine: Bool,
+                                      progress: [String: Any]? = nil, level: UInt32? = nil) {
+        let p = progress ?? exportProgress
+        let done = (p["framesDone"] as? NSNumber)?.intValue ?? 0
+        let total = (p["framesTotal"] as? NSNumber)?.intValue ?? 0
+        let line = ProblemReport.exportDiagnosticLine(
+            platform: "iOS \(UIDevice.current.systemVersion)", device: "Apple \(ProblemReport.deviceModel())",
+            chip: ProblemReport.deviceModel(), event: event, percent: total > 0 ? done * 100 / total : 0,
+            failure: failure, code: code, safeMode: Int(level ?? exportSafeMode), softwareDecode: exportSoftwareDecode,
+            retry: exportRetries, hevcNote: exportHevcNote, engineLine: withEngine ? engine.exportDiagnostic() : "")
+        NSLog("%@", "AureaExport: diagnostico \(line)")
+        ProblemReport.noteExport(line)
     }
 
     /// O plano do export como imagem pela regra do motor (dimensões, quadros, bytes).
@@ -3984,6 +4046,17 @@ final class AureaModel: ObservableObject {
         static func nextSafeMode(current: UInt32, suggested: UInt32) -> UInt32 {
             suggested > current && suggested <= safeModeMax ? suggested : 0
         }
+        /// Bit do resultado de `nextAttempt`: refazer também com a decodificação compatível.
+        static let attemptSoftwareDecode: UInt32 = 1 << 2
+        /// A próxima tentativa pelos bits do progresso (nível 16..17 e
+        /// decodificação compatível 18): o nível nos bits 0..1 e
+        /// `attemptSoftwareDecode`. 0 = não refazer. A mesma regra do
+        /// ExportStallWatchdog.nextAttempt (Android).
+        static func nextAttempt(current: UInt32, flags: UInt32) -> UInt32 {
+            let level = nextSafeMode(current: current, suggested: suggestedSafeMode(flags: flags))
+            guard level > 0 else { return 0 }
+            return level | (flags & AureaExportFlag.retrySoftwareDecode.rawValue != 0 ? attemptSoftwareDecode : 0)
+        }
     }
 
     /// Texto do motivo da falha (aurea::ExportFailure, export/ExportRules.hpp)
@@ -4000,6 +4073,7 @@ final class AureaModel: ObservableObject {
         case 6: return AureaText.t("expfail_file")
         case 7: return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
         case 8: return AureaText.t("expfail_unsupported")
+        case 9: return AureaText.t("expfail_codec_hung")
         default: return nil
         }
     }
@@ -4064,13 +4138,20 @@ final class AureaModel: ObservableObject {
                     if result != 0, self.exportedKind == .video, !self.exportCancelled, !self.exportWatch.cancelled,
                        let url = self.pendingExportURL {
                         let flags = (self.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
-                        let next = ExportStallWatch.nextSafeMode(current: self.exportSafeMode,
-                                                                 suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
-                        if next > 0 && self.startVideoExport(url, safeMode: next) {
-                            self.exportWatch = ExportStallWatch()
-                            self.exportProgress = [:]
-                            self.startExportPolling()
-                            return
+                        let next = ExportStallWatch.nextAttempt(current: self.exportSafeMode, flags: flags)
+                        if next > 0 {
+                            // Nada de "falhou": a mesma barra, com o aviso do modo compatível.
+                            let done = (self.exportProgress["framesDone"] as? NSNumber)?.intValue ?? 0
+                            let total = (self.exportProgress["framesTotal"] as? NSNumber)?.intValue ?? 0
+                            self.prepareExportRetry(self.exportProgress, next: next, level: self.exportSafeMode,
+                                                    event: "falhou no meio quadro=\(done)/\(total)")
+                            let decode = self.exportSoftwareDecode || next & ExportStallWatch.attemptSoftwareDecode != 0
+                            if self.startVideoExport(url, safeMode: next & 0x3, softwareDecode: decode) {
+                                self.exportWatch = ExportStallWatch()
+                                self.exportProgress = [:]
+                                self.startExportPolling()
+                                return
+                            }
                         }
                     }
                     if self.preExporting {
@@ -4082,6 +4163,14 @@ final class AureaModel: ObservableObject {
                             self.preExportURL = url
                             return
                         }
+                    }
+                    if result == 0, self.exportedKind == .video,
+                       !self.exportRetries.isEmpty || self.exportHevcNote != nil || stopFlags & AureaExportFlag.verifyWarnings.rawValue != 0 {
+                        // Concluiu, mas com história (nova tentativa, HEVC trocado,
+                        // verificação tolerante com avisos): fica para o relato.
+                        self.noteExportDiagnostic(event: stopFlags & AureaExportFlag.verifyWarnings.rawValue != 0
+                                                  ? "concluiu com avisos da verificacao" : "concluiu",
+                                                  code: 0, failure: 0, withEngine: true)
                     }
                     self.exportedURL = result == 0 ? self.pendingExportURL : nil
                     self.pendingExportURL = nil
@@ -4100,6 +4189,8 @@ final class AureaModel: ObservableObject {
                             let total = (self.exportProgress["framesTotal"] as? NSNumber)?.intValue ?? 0
                             NSLog("%@", "AureaExport: falhou motivo=\(failure) codigo=\(result) quadro=\(done)/\(total) " +
                                   "seguranca=\(self.exportSafeMode) travou=\(self.exportStalled) motor=\(message)")
+                            self.noteExportDiagnostic(event: "falhou tela-travou=\(self.exportStalled) motor=\"\(message)\"",
+                                                      code: result, failure: failure, withEngine: self.exportedKind == .video)
                             // O motivo (código estável do motor) vira texto do
                             // catálogo; a frase crua do motor (português) não
                             // vai para a tela.

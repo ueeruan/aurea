@@ -3074,6 +3074,9 @@ untuk mengedit kurvanya.</string>
     <string name="report_what_happened">Apa yang Anda harapkan, dan apa yang terjadi</string>
     <string name="report_steps">Langkah untuk mengulang (opsional)</string>
     <string name="report_device">Perangkat</string>
+    <string name="msg_codec_do_aparelho_travou">Encoder video ponsel macet. Coba H.264 atau resolusi yang lebih rendah.</string>
+    <string name="report_attach_export">Lampirkan diagnostik ekspor terakhir</string>
+    <string name="report_attach_export_hint">Hanya berisi data teknis dari ekspor terakhir yang bermasalah: model dan chip perangkat, codec dan encoder yang dipakai, resolusi, fps, di mana berhenti dan alasannya. Tanpa proyek, media, atau nama file.</string>
     <string name="report_send">Kirim</string>
     <string name="report_sending">Mengirim…</string>
     <string name="report_sent">Terima kasih! Laporan telah dikirim.</string>

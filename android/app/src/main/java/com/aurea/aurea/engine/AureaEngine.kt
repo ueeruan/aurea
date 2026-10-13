@@ -1022,12 +1022,24 @@ class AureaEngine private constructor() {
      * Exporta a composição atual para MP4. `shortSide` = lado menor (720…2160),
      * `fps` 0 = o da composição, `codec` 0 = H.264 / 1 = HEVC, `bitrateMbps` 0 =
      * automático. `safeMode` = o modo de segurança que o motor sugeriu depois de
-     * o encoder travar ([ExportProgress.retrySafeMode]; 0 = o pedido). Devolve o
+     * o encoder travar ([ExportProgress.retrySafeMode]; 0 = o pedido);
+     * `softwareDecode` = a mídia pelo decoder de software (o do aparelho travou
+     * na tentativa anterior, [ExportProgress.retrySoftwareDecode]). Devolve o
      * código de erro do motor (0 = começou).
      */
     fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int = 0, trimToContent: Boolean = false,
-                    quality: Int = 1, rateMode: Int = 1, safeMode: Int = 0): Int =
-        nativeWork.run(5) { nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent, quality, rateMode, safeMode) }
+                    quality: Int = 1, rateMode: Int = 1, safeMode: Int = 0, softwareDecode: Boolean = false): Int =
+        nativeWork.run(5) {
+            nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent, quality, rateMode,
+                safeMode, softwareDecode)
+        }
+
+    /**
+     * Diagnóstico do último export no motor (codec e encoder abertos, tamanho,
+     * modo de segurança, onde travou, verificação) — vai para o relato de
+     * problema. Uma linha ASCII, sem caminhos; "" = nenhum export.
+     */
+    fun exportDiagnostic(): String = nativeWork.run("") { nativeExportDiagnostic(nativeHandle) }
 
     fun exportDuration(trimToContent: Boolean = true): Long = nativeExportDuration(nativeHandle, trimToContent)
 
@@ -1440,7 +1452,8 @@ class AureaEngine private constructor() {
     private external fun nativeLoadNotice(handle: Long): Int
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int
-    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int, safeMode: Int): Int
+    private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int, safeMode: Int, softwareDecode: Boolean): Int
+    private external fun nativeExportDiagnostic(handle: Long): String
     private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeRestartExport(handle: Long, recoveryPath: String, outputPath: String): Int

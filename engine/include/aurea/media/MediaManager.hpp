@@ -57,6 +57,11 @@ public:
         (void)sourcePath;
         return nullptr;
     }
+    /// O mesmo, com o decoder de SOFTWARE da plataforma (export refeito depois
+    /// de o decoder do aparelho travar). Sem um, o decoder de sempre.
+    [[nodiscard]] virtual std::unique_ptr<audio::AudioDecoderBackend> open_audio_software(const char* sourcePath) {
+        return open_audio(sourcePath);
+    }
 };
 
 class MediaManager {
@@ -132,6 +137,9 @@ public:
 
     /// Callback de frame pronto, repassado a toda fonte.
     void set_ready_callback(void (*fn)(void*), void* ctx) noexcept;
+    /// Prioridade com que os decoders NOVOS são abertos (o export compatível
+    /// abre com MediaPriority::ExportSoftwareDecode). Padrão: Preview.
+    void set_open_priority(MediaPriority priority) noexcept { openPriority_.store(priority, std::memory_order_relaxed); }
     /// O mesmo callback, para outro trabalho de fundo que o quadro espera (o
     /// mapa de profundidade de um vídeo) acordar o render do mesmo jeito.
     void ready_callback(void (*&fn)(void*), void*& ctx) const noexcept;
@@ -187,6 +195,7 @@ private:
     std::vector<Entry> entries_;
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
+    std::atomic<MediaPriority> openPriority_{MediaPriority::Preview};
     std::atomic<u64> decodeWork_{0};   ///< decode_work(); as fontes incrementam
     bool suspended_ = false;
     u32 pointerBits_ = kPointerBits;   ///< guarded by mutex_; AddressSpace.hpp

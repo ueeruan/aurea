@@ -1403,7 +1403,8 @@
     <string name="fx_name_gaussian_blur">تمويه غاوسي</string>
     <string name="fx_name_sharpen">زيادة الحدة</string>
     <string name="fx_name_glow">توهج</string>
-    <string name="fx_name_motion_tile">تبليط</string>
+    <string name="fx_search_tile">motion tile تبليط بلاط فسيفساء تكرار الحواف مرآة</string>
+    <string name="fx_name_motion_tile">Motion Tile (تبليط)</string>
     <string name="fx_name_luma_key">مفتاح السطوع</string>
     <string name="fx_name_chroma_key">مفتاح الكروما</string>
     <string name="fx_name_echo_trail">صدى وأثر</string>

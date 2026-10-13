@@ -164,6 +164,11 @@ struct LayerImage {
     /// A cropped source's original transparent canvas. Motion Tile keeps this
     /// domain for its period instead of treating the occupied crop as a tile.
     Rect virtualSourceRegion{};
+    /// A PAREDE do Motion Tile: a imagem continua além da caixa da camada (o
+    /// EffectGraph leva a marca adiante enquanto a região passar da caixa).
+    /// Efeitos que mapeiam a caixa (Corner Pin) estendem o mapa à parede em
+    /// vez de recortá-la.
+    bool tiled = false;
 
     [[nodiscard]] bool valid() const noexcept { return texture.valid() && width && height; }
     /// Texels por pixel de layer.
@@ -207,6 +212,9 @@ struct DepthMapRequest {
     /// os seus; perto de 1 = os limites andam devagar e o mapa não "respira".
     f32 smoothing = 0.7f;
     bool foreground = false;
+    /// Separa o estado da suavização de quem pede o mapa de OUTRA camada
+    /// (a camada de ajuste lê o da foto/vídeo abaixo dela).
+    u64 stateSalt = 0;
 };
 
 /// A disparidade 256×256 da FONTE da camada (R: normalizada pelos percentis
@@ -218,6 +226,11 @@ struct DepthMapResult {
     f32 hi = 1.0f;
     bool failed = false;
     i64 sourceTimeUs = -1; ///< foreground preview must pair this source frame with its mask
+    /// O mapa é de OUTRA camada (camada de ajuste): px de quem pede → px da
+    /// fonte do mapa, por linha (x, y, deslocamento) e o tamanho natural dela
+    /// em `w`. Zero = o mapa cobre a caixa natural de quem pede.
+    Vec4 mapX{};
+    Vec4 mapY{};
 };
 
 /// O que a Forma de onda e o Espectro de áudio pedem ao renderer: o som de
@@ -317,6 +330,9 @@ struct EffectEval {
     f64                   auxTimeFrames = std::numeric_limits<f64>::quiet_NaN();
     i64                   foregroundSourceTimeUs = -1;
     std::shared_ptr<const std::vector<Vec4>> pathSamples;
+    /// Mapa de profundidade de outra camada (ver DepthMapResult::mapX).
+    Vec4 auxMapX{};
+    Vec4 auxMapY{};
     f64 fractionalTime = std::numeric_limits<f64>::quiet_NaN();
 
     [[nodiscard]] f64 time_frames() const noexcept {

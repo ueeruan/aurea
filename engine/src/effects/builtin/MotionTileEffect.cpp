@@ -461,6 +461,7 @@ public:
             return Errc::PipelineCompileFailed;
         }
         out = LayerImage{tex, region, w, h};
+        out.tiled = true;
         return OkStatus;
     }
 };

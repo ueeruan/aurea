@@ -8603,7 +8603,8 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         const bool shadow = fx.type_id() == effect_type_id(effect_keys::kShadowStudio3);
         const bool cubeLut = fx.type_id() == effect_type_id(effect_keys::kCubeLut);
         const bool repeat = std::strncmp(key, "aurea.repeat.", 13) == 0;
-        const bool repeatPath = std::strcmp(key, "aurea.repeat.path") == 0;
+        // Repeat/Move Along Path: o caminho é a camada logo abaixo.
+        const bool repeatPath = std::strcmp(key, "aurea.repeat.path") == 0 || std::strcmp(key, "aurea.move.path") == 0;
         const bool solidMatte = std::strcmp(key, "aurea.key.solid_matte") == 0;
         const bool timedMotion = std::strcmp(key, "aurea.motion.blink") == 0 || std::strcmp(key, "aurea.motion.swing_range") == 0;
         const FrameIndex sampleFrame{timedMotion ? 11 : 0};
@@ -13642,3 +13643,5 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "RaysFootprintGpu.inl"
 #include "SceneWarmupGpu.inl"
 #include "VulkanMrtGpu.inl"
+#include "AdjustmentEffectsGpu.inl"
+#include "MotionTileWallGpu.inl"

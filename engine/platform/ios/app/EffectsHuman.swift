@@ -1362,6 +1362,32 @@ private let FxEnglishEffectNames: [UInt32: String] = Dictionary(uniqueKeysWithVa
 /// A ordem declarada do efeito; fora da tabela vai para o fim.
 func fxEffectNameRank(_ typeId: UInt32) -> Int { FxTableOrder[typeId] ?? Int.max }
 
+/// O Motion Tile e os efeitos com opção de LADRILHO / repetição de borda:
+/// buscar "motion tile", "mosaico", "tile", "ladrilho"... acha todos, nos 7
+/// idiomas ("fx_search_tile"). Mesma lista no Android (TileSearchEffects).
+let FxTileSearchEffects: Set<UInt32> = Set([
+    "aurea.stylize.motion_tile",
+    "aurea.distort.shake",
+    "aurea.distort.turbulence",
+    "aurea.distort.wave_warp",
+    "aurea.distort.warp",
+    "aurea.distort.flow_pinch",
+    "aurea.stylize.repeat_tile",
+    "aurea.stylize.tiler",
+    "aurea.stylize.hex_tile",
+    "aurea.distort.displace_transform",
+    "aurea.glitch.video_glitch",
+    "aurea.distort.lens_gradient",
+    "aurea.distort.displacement_map",
+    "aurea.transform.offset",
+    "aurea.repeat.grid",
+].map { fxEffectTypeId($0) })
+
+/// Os termos de ladrilho do efeito no idioma atual (vazio = não ladrilha).
+func fxTileSearchTerms(_ typeId: UInt32) -> String {
+    FxTileSearchEffects.contains(typeId) ? AureaText.t("fx_search_tile") : ""
+}
+
 /// O texto onde a busca procura: nome humano, nome do motor, categoria e os
 /// sinônimos da tabela.
 func fxEffectSearchText(_ typeId: UInt32, _ engineName: String, _ category: String) -> String {
@@ -1369,6 +1395,7 @@ func fxEffectSearchText(_ typeId: UInt32, _ engineName: String, _ category: Stri
         fxEffectDisplayName(typeId, engineName), engineName, category,
         (FxTableById[typeId]?.name).map { AureaText.t($0) } ?? "",
         FxTableById[typeId]?.keywords ?? "",
+        fxTileSearchTerms(typeId),
     ].joined(separator: " "))
 }
 
@@ -1858,6 +1885,7 @@ func fxCatalogHaystack(_ catalog: [EffectCatalogItem]) -> [UInt32: String] {
             FxTableById[entry.typeId]?.keywords ?? "",
             FxMetaTable[entry.typeId]?.keywords ?? "",
             fxEffectDescription(entry.typeId, entry.category),
+            fxTileSearchTerms(entry.typeId),
         ].joined(separator: " ")
         out[entry.typeId] = fxNormalizeSearch(text)
     }

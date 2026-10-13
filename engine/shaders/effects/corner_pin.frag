@@ -12,7 +12,9 @@ void main() {
     if(p.p2.w<0.5 || abs(z)<0.000001){o_color=vec4(0);return;}
     vec2 unit=vec2(dot(p.p0.xyz,point),dot(p.p1.xyz,point))/z;
     vec2 uv=(unit*p.color.xy-p.p3.xy)/p.p3.zw;
-    if(any(lessThan(unit,vec2(0)))||any(greaterThan(unit,vec2(1)))||
+    // color.z = 1: parede do Motion Tile — o plano continua além da caixa.
+    bool outsideBox=p.color.z<0.5&&(any(lessThan(unit,vec2(0)))||any(greaterThan(unit,vec2(1))));
+    if(outsideBox||(p.color.z>0.5&&z*p.color.w<=0.0)||
        any(lessThan(uv,vec2(0)))||any(greaterThan(uv,vec2(1)))){o_color=vec4(0);return;}
     o_color=texture(u_tex0,uv);
 }

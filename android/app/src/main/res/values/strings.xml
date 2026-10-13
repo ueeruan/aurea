@@ -991,7 +991,8 @@
     <string name="fx_name_gaussian_blur">Desfoque</string>
     <string name="fx_name_sharpen">Nitidez</string>
     <string name="fx_name_glow">Brilho</string>
-    <string name="fx_name_motion_tile">Mosaico</string>
+    <string name="fx_search_tile">motion tile mosaico ladrilho ladrilhos azulejo tile repetir bordas espelhar parede</string>
+    <string name="fx_name_motion_tile">Motion Tile (Mosaico)</string>
     <string name="fx_name_luma_key">Recorte por brilho</string>
     <string name="fx_name_chroma_key">Recorte por cor</string>
     <string name="fx_name_echo_trail">Eco e rastro</string>

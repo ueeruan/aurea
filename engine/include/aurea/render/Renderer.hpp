@@ -261,6 +261,32 @@ struct RenderLayer {
     /// abaixo (um grupo conta como uma camada), 2 = só as de `adjustTargets`.
     u8   adjustScope = 0;
     std::vector<u64> adjustTargets;   ///< escopo 2: ids (com sal) das camadas escolhidas
+    /// Camada de ajuste com efeito de TEMPO (Eco, RGB no tempo, Posterizar,
+    /// Low FPS, Remapear tempo, Flow Retime/Motion Blur, Detectar movimento,
+    /// Datamosh...): a entrada dela é a composição abaixo, e o passado dessa
+    /// composição só existe renderizando-a de novo NAQUELE instante. Índices
+    /// em `FrameSnapshot::nested` (~0u = a composição de agora, a de sempre).
+    /// Um por alvo no escopo 2 (mesma ordem de `adjustTargets`), um nos outros.
+    struct AdjustTime {
+        u32 now = ~0u;                 ///< o instante mostrado no lugar do atual
+        u32 next = ~0u;                ///< o quadro seguinte (mistura, optical flow)
+        f32 blendT = 0.0f;             ///< peso do seguinte (0 = só `now`)
+        u8  blendMode = 0;             ///< 1 mistura, 2 movimento (optical flow)
+        f32 vectorBlur = 0.0f;         ///< Flow Motion Blur: fração do par que o obturador cobre
+        f32 flowBase = 0.0f;
+        u32 channel[3] = {~0u, ~0u, ~0u};   ///< RGB no tempo (~0u = agora)
+        bool rgb = false;
+        u32 history = ~0u;             ///< o passado (Detectar movimento, Datamosh...)
+        bool hasHistory = false;
+        /// A composição de agora SEM a cor de fundo (efeitos que leem o alfa:
+        /// sombra, borda, contorno, Solid Matte). Só no escopo 0.
+        u32 bare = ~0u;
+        std::vector<TemporalSample> echo;   ///< Eco: amostras (nested ~0u = agora)
+        [[nodiscard]] bool active() const noexcept {
+            return now != ~0u || rgb || hasHistory || bare != ~0u || !echo.empty() || vectorBlur > 0.0f;
+        }
+    };
+    std::vector<AdjustTime> adjustTime;
     /// Partículas (8.2): cena 3D, espaço mundo, histórico e desfoque por tempo.
     ParticleSpace particle;
 };
@@ -731,6 +757,19 @@ private:
     void composite_draws(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc,
                          const std::vector<CompositeDraw>& draws, EffectBuildContext& ctx,
                          u32 firstDraw = 0) noexcept;
+    /// Camada de ajuste: a entrada dos efeitos (o fundo de agora, `in`) passa
+    /// pelos efeitos de TEMPO (`RenderLayer::AdjustTime`): instante trocado,
+    /// mistura/optical flow, RGB no tempo, eco, passado (`in.history`).
+    void adjust_time_input(const FrameSnapshot& snap, const RenderLayer& layer, u32 target, LayerImage& in,
+                           const TextureDesc& compDesc, u64 frameNumber) noexcept;
+    /// O resultado dos efeitos de uma camada de ajuste no quadro inteiro: a
+    /// geometria dobrada (Transform/Agitar... no fim da pilha) e, se pedido,
+    /// a cor de fundo por baixo (o que a geometria descobre mostra o fundo).
+    /// Mapa de profundidade numa camada de ajuste: o da foto/vídeo de cima
+    /// entre as que ela ajusta, com a conta quadro → px dessa camada.
+    [[nodiscard]] DepthMapResult depth_map_below(const DepthMapRequest& request) noexcept;
+    [[nodiscard]] FGTexture adjust_full_frame(const LayerImage& fin, const Mat4& fold, f32 opacity, Vec4 under,
+                                              const TextureDesc& compDesc, f32 compW, f32 compH) noexcept;
 
     /// Textura persistente de planos de vídeo (fallback sem zero-copy): uma
     /// por layer, reaproveitada frame a frame.
@@ -1110,6 +1149,15 @@ private:
     // run at different source times and must not share decoders/GPU uploads.
     std::vector<u64> renderInstancePath_;
     std::map<std::vector<u64>, u32> nestedNamespaces_;
+    // O fundo de uma camada de ajuste em OUTRO instante (efeitos de tempo):
+    // o próximo `prepare` desenha só as camadas da pilha em [from, limit)
+    // (ou só as `only`, escopo 2) sobre fundo transparente se `bare`. Lidos
+    // e zerados na entrada do prepare — a filha de uma pré-composição dentro
+    // dele não herda o recorte.
+    u32 backdropLimit_ = ~0u, backdropFrom_ = 0;
+    std::vector<LayerId> backdropOnly_;
+    bool backdropBare_ = false;
+    u32 backdropBudget_ = 0;   ///< fundos re-renderizados restantes neste quadro (raiz)
     u32 compTargetW_ = 0, compTargetH_ = 0;
     u32 prewarmed_ = 0;
     // --- Pré-aquecimento preguiçoso (Fase 8I, §60–62) ------------------------

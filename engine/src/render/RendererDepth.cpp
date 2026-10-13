@@ -93,6 +93,9 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
         ai::RotoStrokes strokes;
         if (ai::roto_instance_strokes(*request.instance, strokes)) return roto_map(request, strokes);
     }
+    // CAMADA DE AJUSTE: a profundidade da foto/vídeo que ela ajusta, levada
+    // ao quadro (Renderer.cpp, depth_map_below).
+    if (request.host && request.host->adjustment && !request.foreground) return depth_map_below(request);
     auto& service = request.foreground ? foreground_ : depth_;
     const u32 mapSize = request.foreground ? ai::ForegroundEstimator::kSize : ai::DepthEstimator::kSize;
     if (!backend_) return none;
@@ -153,7 +156,8 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
             if (planComp_->layer(order.at(i)) == request.host) { layerKey = order.at(i).pack(); break; }
         }
     }
-    const u64 stateKey = mix64(mix64(layerKey, request.instance ? request.instance->id : 0u), planFinal_ ? 1u : 0u);
+    const u64 stateKey = mix64(mix64(mix64(layerKey, request.instance ? request.instance->id : 0u), planFinal_ ? 1u : 0u),
+                               request.stateSalt);
     DepthState& st = depthState_[stateKey];
     st.lastFrame = frameNumber_;
 

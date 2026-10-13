@@ -297,6 +297,15 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
             Mat4 m = Mat4::identity();
             f32 opacity = 1.0f;
             if (effect->fold_into_composite(e, m, opacity)) {
+                // A pose que só existe depois dos recursos (a fase integrada do
+                // Oscilar, o ponto do Move Along Path): sem ela a geometria
+                // seguinte saía errada e a parede do Motion Tile abria buraco
+                // quando o efeito andava.
+                e.resources = resources;
+                effect->resolve_resources(e);
+                m = Mat4::identity();
+                opacity = 1.0f;
+                (void)effect->fold_into_composite(e, m, opacity);
                 acc = acc * m;   // T_n · … · T_i: o mais tardio fica à esquerda
                 any = true;
             }
@@ -603,6 +612,13 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
             return false;
         }
         next.history = FGTexture{};
+        // A parede do Motion Tile segue parede enquanto a imagem passar da
+        // caixa da camada (um efeito que recorta à caixa a encerra).
+        if (img.tiled && !next.tiled) {
+            const f32 lw = static_cast<f32>(plan.placement.layerWidth), lh = static_cast<f32>(plan.placement.layerHeight);
+            next.tiled = lw > 0.0f && lh > 0.0f && (next.region.x < -0.5f || next.region.y < -0.5f
+                || next.region.x + next.region.w > lw + 0.5f || next.region.y + next.region.h > lh + 0.5f);
+        }
         img = next;
         return true;
     };

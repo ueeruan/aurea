@@ -1433,6 +1433,7 @@
     <string name="fx_name_gaussian_blur">Gaussian Blur</string>
     <string name="fx_name_sharpen">Sharpen</string>
     <string name="fx_name_glow">Glow</string>
+    <string name="fx_search_tile">motion tile टाइल मोज़ेक दोहराना किनारे दर्पण</string>
     <string name="fx_name_motion_tile">Motion Tile</string>
     <string name="fx_name_luma_key">Luma Key</string>
     <string name="fx_name_chroma_key">Color Key</string>

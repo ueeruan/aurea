@@ -14518,6 +14518,10 @@ std::optional<std::pair<i64, i64>> preview_local_range(const Composition& comp, 
             if (!safe) return;
             const Effect* fx = registry.find(e.type);
             if (!fx || fx->effect_class() == EffectClass::Temporal) { safe = false; return; }
+            // Camada de ajuste com efeito que lê o PASSADO da composição abaixo
+            // (Datamosh, Glitch de vídeo, Low FPS): editar uma camada abaixo
+            // muda quadros DEPOIS do trecho dela.
+            if (l.adjustment && (fx->wants_history() || e.type == effect_type_id(effect_keys::kLowFps))) { safe = false; return; }
             if (const auto* specs = registry.params(e.type)) {
                 for (u32 p = 0; p < specs->count(); ++p)
                     if (specs->at(p).type == ParamType::LayerReference) { safe = false; return; }

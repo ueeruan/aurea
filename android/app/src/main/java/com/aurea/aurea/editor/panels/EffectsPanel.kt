@@ -1028,6 +1028,7 @@ private fun EffectCardItem(
         }
         if (effect.typeId == effectTypeId("aurea.distort.mesh_warp")) com.aurea.aurea.editor.MeshWarpCardTools(store, id, meshSelected, onSelectMesh)
         if (effect.typeId == effectTypeId("aurea.distort.puppet")) com.aurea.aurea.editor.PuppetCardTools(store, id)
+        if (effect.typeId == effectTypeId("aurea.light.saber")) com.aurea.aurea.editor.SaberCardTools(store, id)
         val visible = slots.filter { !it.hidden }
         if (visible.isEmpty()) {
             PanelNotice(stringResource(R.string.panel_este_efeito_nao_tem_ajustes))
@@ -1054,6 +1055,15 @@ private fun effectPresetLabel(id: String): Int? = when (id) {
     "impact" -> R.string.fxp_impact
     "handheld" -> R.string.fxp_handheld
     "glitch" -> R.string.fxp_glitch
+    "saber_default" -> R.string.fxp_saber_default
+    "saber_lightsaber" -> R.string.fxp_saber_lightsaber
+    "saber_neon" -> R.string.fxp_saber_neon
+    "saber_electric" -> R.string.fxp_saber_electric
+    "saber_fire" -> R.string.fxp_saber_fire
+    "saber_plasma" -> R.string.fxp_saber_plasma
+    "saber_energy" -> R.string.fxp_saber_energy
+    "saber_soft" -> R.string.fxp_saber_soft
+    "saber_magic" -> R.string.fxp_saber_magic
     else -> null
 }
 

@@ -366,6 +366,13 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.transition.block_load", EffectMeta(R.string.cc_desc_block_load,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
         "cc block load blocos blocks carregar loading pixel jpeg progressivo progressive transicao transition"))
+    // --- 0.1.8 BETA 2 (também em camada de ajuste: a luz/o dissolver vale para o que está abaixo) ---
+    put("aurea.light.saber", EffectMeta(R.string.saber_desc,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D, EffectTarget.Ajuste),
+        "saber sabre lightsaber neon energia energy brilho glow laser eletrico electric fogo fire plasma световой меч неон नियॉन نيون"))
+    put("aurea.transition.luma_dissolve", EffectMeta(R.string.luma_dissolve_desc,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D, EffectTarget.Ajuste),
+        "luma dissolve dissolveluma dissolver luminancia luminance transicao transition fade disolver растворение विलय تلاشي"))
     put("aurea.shape3d.layout", EffectMeta(R.string.fx_desc_shape3d_layout, listOf(EffectTarget.Cena3D),
         "forma 3d shape partes parts girar espalhar explodir atraso aleatorio"))
     // --- Ferramentas que moram no catálogo (EffectTool): a ficha e os sinônimos ---

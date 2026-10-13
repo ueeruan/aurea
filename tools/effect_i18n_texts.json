@@ -4319,5 +4319,357 @@
   "hi": "शटर",
   "id": "Rana",
   "ar": "الغالق"
+ },
+ "Ativar brilho": {
+  "en": "Enable glow",
+  "es": "Activar brillo",
+  "ru": "Включить свечение",
+  "hi": "ग्लो चालू करें",
+  "id": "Aktifkan cahaya",
+  "ar": "تفعيل التوهج"
+ },
+ "Intensidade do brilho": {
+  "en": "Glow intensity",
+  "es": "Intensidad del brillo",
+  "ru": "Интенсивность свечения",
+  "hi": "ग्लो की तीव्रता",
+  "id": "Intensitas cahaya",
+  "ar": "شدة التوهج"
+ },
+ "Espalhamento do brilho": {
+  "en": "Glow spread",
+  "es": "Dispersión del brillo",
+  "ru": "Рассеивание свечения",
+  "hi": "ग्लो का फैलाव",
+  "id": "Sebaran cahaya",
+  "ar": "انتشار التوهج"
+ },
+ "Viés do brilho": {
+  "en": "Glow bias",
+  "es": "Sesgo del brillo",
+  "ru": "Смещение свечения",
+  "hi": "ग्लो बायस",
+  "id": "Bias cahaya",
+  "ar": "انحياز التوهج"
+ },
+ "Tamanho do núcleo": {
+  "en": "Core size",
+  "es": "Tamaño del núcleo",
+  "ru": "Размер ядра",
+  "hi": "कोर का आकार",
+  "id": "Ukuran inti",
+  "ar": "حجم النواة"
+ },
+ "Tipo de núcleo": {
+  "en": "Core type",
+  "es": "Tipo de núcleo",
+  "ru": "Тип ядра",
+  "hi": "कोर का प्रकार",
+  "id": "Jenis inti",
+  "ar": "نوع النواة"
+ },
+ "Único": {
+  "en": "Single",
+  "es": "Único",
+  "ru": "Одиночное",
+  "hi": "एकल",
+  "id": "Tunggal",
+  "ar": "مفردة"
+ },
+ "Camada / texto": {
+  "en": "Layer / text",
+  "es": "Capa / texto",
+  "ru": "Слой / текст",
+  "hi": "लेयर / टेक्स्ट",
+  "id": "Layer / teks",
+  "ar": "طبقة / نص"
+ },
+ "Início do núcleo": {
+  "en": "Core start",
+  "es": "Inicio del núcleo",
+  "ru": "Начало ядра",
+  "hi": "कोर की शुरुआत",
+  "id": "Awal inti",
+  "ar": "بداية النواة"
+ },
+ "Fim do núcleo": {
+  "en": "Core end",
+  "es": "Fin del núcleo",
+  "ru": "Конец ядра",
+  "hi": "कोर का अंत",
+  "id": "Akhir inti",
+  "ar": "نهاية النواة"
+ },
+ "Camada do núcleo": {
+  "en": "Core layer",
+  "es": "Capa del núcleo",
+  "ru": "Слой ядра",
+  "hi": "कोर लेयर",
+  "id": "Layer inti",
+  "ar": "طبقة النواة"
+ },
+ "Usar alfa da camada": {
+  "en": "Use layer alpha",
+  "es": "Usar alfa de la capa",
+  "ru": "Использовать альфу слоя",
+  "hi": "लेयर का अल्फ़ा इस्तेमाल करें",
+  "id": "Gunakan alfa layer",
+  "ar": "استخدام ألفا الطبقة"
+ },
+ "Deslocamento inicial": {
+  "en": "Start offset",
+  "es": "Desplazamiento inicial",
+  "ru": "Начальное смещение",
+  "hi": "शुरुआती ऑफ़सेट",
+  "id": "Offset awal",
+  "ar": "إزاحة البداية"
+ },
+ "Deslocamento final": {
+  "en": "End offset",
+  "es": "Desplazamiento final",
+  "ru": "Конечное смещение",
+  "hi": "अंतिम ऑफ़सेट",
+  "id": "Offset akhir",
+  "ar": "إزاحة النهاية"
+ },
+ "Brilho do deslocamento": {
+  "en": "Offset brightness",
+  "es": "Brillo del desplazamiento",
+  "ru": "Яркость смещения",
+  "hi": "ऑफ़सेट की चमक",
+  "id": "Kecerahan offset",
+  "ar": "سطوع الإزاحة"
+ },
+ "Tamanho inicial": {
+  "en": "Start size",
+  "es": "Tamaño inicial",
+  "ru": "Начальный размер",
+  "hi": "शुरुआती आकार",
+  "id": "Ukuran awal",
+  "ar": "حجم البداية"
+ },
+ "Arredondamento inicial": {
+  "en": "Start roundness",
+  "es": "Redondez inicial",
+  "ru": "Начальное скругление",
+  "hi": "शुरुआती गोलाई",
+  "id": "Kebulatan awal",
+  "ar": "استدارة البداية"
+ },
+ "Arredondamento final": {
+  "en": "End roundness",
+  "es": "Redondez final",
+  "ru": "Конечное скругление",
+  "hi": "अंतिम गोलाई",
+  "id": "Kebulatan akhir",
+  "ar": "استدارة النهاية"
+ },
+ "Suavidade do núcleo": {
+  "en": "Core softness",
+  "es": "Suavidad del núcleo",
+  "ru": "Мягкость ядра",
+  "hi": "कोर की कोमलता",
+  "id": "Kelembutan inti",
+  "ar": "نعومة النواة"
+ },
+ "Cor do núcleo": {
+  "en": "Core color",
+  "es": "Color del núcleo",
+  "ru": "Цвет ядра",
+  "hi": "कोर का रंग",
+  "id": "Warna inti",
+  "ar": "لون النواة"
+ },
+ "Saturação do núcleo": {
+  "en": "Core saturation",
+  "es": "Saturación del núcleo",
+  "ru": "Насыщенность ядра",
+  "hi": "कोर की संतृप्ति",
+  "id": "Saturasi inti",
+  "ar": "تشبع النواة"
+ },
+ "Intensidade do núcleo": {
+  "en": "Core intensity",
+  "es": "Intensidad del núcleo",
+  "ru": "Интенсивность ядра",
+  "hi": "कोर की तीव्रता",
+  "id": "Intensitas inti",
+  "ar": "شدة النواة"
+ },
+ "Evolução das máscaras": {
+  "en": "Mask evolution",
+  "es": "Evolución de las máscaras",
+  "ru": "Эволюция масок",
+  "hi": "मास्क का विकास",
+  "id": "Evolusi mask",
+  "ar": "تطور الأقنعة"
+ },
+ "Aleatoriedade das máscaras": {
+  "en": "Mask randomness",
+  "es": "Aleatoriedad de las máscaras",
+  "ru": "Случайность масок",
+  "hi": "मास्क की यादृच्छिकता",
+  "id": "Keacakan mask",
+  "ar": "عشوائية الأقنعة"
+ },
+ "Intensidade da cintilação": {
+  "en": "Flicker intensity",
+  "es": "Intensidad del parpadeo",
+  "ru": "Интенсивность мерцания",
+  "hi": "झिलमिलाहट की तीव्रता",
+  "id": "Intensitas kedip",
+  "ar": "شدة الوميض"
+ },
+ "Velocidade da cintilação": {
+  "en": "Flicker speed",
+  "es": "Velocidad del parpadeo",
+  "ru": "Скорость мерцания",
+  "hi": "झिलमिलाहट की गति",
+  "id": "Kecepatan kedip",
+  "ar": "سرعة الوميض"
+ },
+ "Aleatoriedade por máscara": {
+  "en": "Per-mask randomness",
+  "es": "Aleatoriedad por máscara",
+  "ru": "Случайность по маскам",
+  "hi": "हर मास्क की यादृच्छिकता",
+  "id": "Keacakan per mask",
+  "ar": "عشوائية لكل قناع"
+ },
+ "Tipo de distorção": {
+  "en": "Distortion type",
+  "es": "Tipo de distorsión",
+  "ru": "Тип искажения",
+  "hi": "विकृति का प्रकार",
+  "id": "Jenis distorsi",
+  "ar": "نوع التشويه"
+ },
+ "Turbulenta": {
+  "en": "Turbulent",
+  "es": "Turbulenta",
+  "ru": "Турбулентное",
+  "hi": "अशांत",
+  "id": "Turbulen",
+  "ar": "مضطرب"
+ },
+ "Elétrica": {
+  "en": "Electric",
+  "es": "Eléctrica",
+  "ru": "Электрическое",
+  "hi": "विद्युत",
+  "id": "Listrik",
+  "ar": "كهربائي"
+ },
+ "Fumaça": {
+  "en": "Smoke",
+  "es": "Humo",
+  "ru": "Дым",
+  "hi": "धुआँ",
+  "id": "Asap",
+  "ar": "دخان"
+ },
+ "Quantidade da distorção": {
+  "en": "Distortion amount",
+  "es": "Cantidad de distorsión",
+  "ru": "Сила искажения",
+  "hi": "विकृति की मात्रा",
+  "id": "Jumlah distorsi",
+  "ar": "مقدار التشويه"
+ },
+ "Velocidade da distorção": {
+  "en": "Distortion speed",
+  "es": "Velocidad de distorsión",
+  "ru": "Скорость искажения",
+  "hi": "विकृति की गति",
+  "id": "Kecepatan distorsi",
+  "ar": "سرعة التشويه"
+ },
+ "Escala da distorção": {
+  "en": "Distortion scale",
+  "es": "Escala de distorsión",
+  "ru": "Масштаб искажения",
+  "hi": "विकृति का पैमाना",
+  "id": "Skala distorsi",
+  "ar": "مقياس التشويه"
+ },
+ "Somar sobre a camada": {
+  "en": "Add over layer",
+  "es": "Sumar sobre la capa",
+  "ru": "Добавить поверх слоя",
+  "hi": "लेयर के ऊपर जोड़ें",
+  "id": "Tambahkan di atas layer",
+  "ar": "إضافة فوق الطبقة"
+ },
+ "Mapa": {
+  "en": "Map",
+  "es": "Mapa",
+  "ru": "Карта",
+  "hi": "मैप",
+  "id": "Peta",
+  "ar": "الخريطة"
+ },
+ "Luminância da camada": {
+  "en": "Layer luminance",
+  "es": "Luminancia de la capa",
+  "ru": "Яркость слоя",
+  "hi": "लेयर की ल्यूमिनेंस",
+  "id": "Luminans layer",
+  "ar": "إضاءة الطبقة"
+ },
+ "Gradiente linear": {
+  "en": "Linear gradient",
+  "es": "Degradado lineal",
+  "ru": "Линейный градиент",
+  "hi": "रेखीय ग्रेडिएंट",
+  "id": "Gradien linear",
+  "ar": "تدرج خطي"
+ },
+ "Gradiente radial": {
+  "en": "Radial gradient",
+  "es": "Degradado radial",
+  "ru": "Радиальный градиент",
+  "hi": "रेडियल ग्रेडिएंट",
+  "id": "Gradien radial",
+  "ar": "تدرج شعاعي"
+ },
+ "Outra camada": {
+  "en": "Another layer",
+  "es": "Otra capa",
+  "ru": "Другой слой",
+  "hi": "दूसरी लेयर",
+  "id": "Layer lain",
+  "ar": "طبقة أخرى"
+ },
+ "Escala do ruído": {
+  "en": "Noise scale",
+  "es": "Escala del ruido",
+  "ru": "Масштаб шума",
+  "hi": "नॉइज़ का पैमाना",
+  "id": "Skala noise",
+  "ar": "مقياس الضوضاء"
+ },
+ "Semente do ruído": {
+  "en": "Noise seed",
+  "es": "Semilla del ruido",
+  "ru": "Зерно шума",
+  "hi": "नॉइज़ सीड",
+  "id": "Seed noise",
+  "ar": "بذرة الضوضاء"
+ },
+ "Aparecer": {
+  "en": "Appear",
+  "es": "Aparecer",
+  "ru": "Появление",
+  "hi": "प्रकट होना",
+  "id": "Muncul",
+  "ar": "ظهور"
+ },
+ "Centro do gradiente": {
+  "en": "Gradient center",
+  "es": "Centro del degradado",
+  "ru": "Центр градиента",
+  "hi": "ग्रेडिएंट का केंद्र",
+  "id": "Pusat gradien",
+  "ar": "مركز التدرج"
  }
 }

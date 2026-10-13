@@ -1848,5 +1848,50 @@ enum EffectI18nTable {
     aurea.transition.block_load|1|scanlines|fxl_scanlines|
     aurea.transition.block_load|2|end_cleared|fxl_end_cleared|
     aurea.transition.block_load|3|bilinear|fxl_bilinear|
+    aurea.light.saber|0|glow_enabled|fxl_enable_glow|
+    aurea.light.saber|1|glow_color|fxl_scan_color|
+    aurea.light.saber|2|glow_intensity|fxl_glow_intensity|
+    aurea.light.saber|3|glow_spread|fxl_glow_spread|
+    aurea.light.saber|4|glow_bias|fxl_glow_bias|
+    aurea.light.saber|5|core_size|fxl_core_size|
+    aurea.light.saber|6|core_type|fxl_core_type|fxo_single,fxo_layer_masks,fxo_layer_text
+    aurea.light.saber|7|core_start|fxl_core_start|
+    aurea.light.saber|8|core_end|fxl_core_end|
+    aurea.light.saber|9|core_layer|fxl_core_layer|
+    aurea.light.saber|10|use_alpha|fxl_use_layer_alpha|
+    aurea.light.saber|11|start_offset|fxl_start_offset|
+    aurea.light.saber|12|end_offset|fxl_end_offset|
+    aurea.light.saber|13|offset_brightness|fxl_offset_brightness|
+    aurea.light.saber|14|start_size|fxl_start_size|
+    aurea.light.saber|15|end_size|fxl_end_size|
+    aurea.light.saber|16|start_roundness|fxl_start_roundness|
+    aurea.light.saber|17|end_roundness|fxl_end_roundness|
+    aurea.light.saber|18|core_softness|fxl_core_softness|
+    aurea.light.saber|19|core_color|fxl_core_color|
+    aurea.light.saber|20|core_saturation|fxl_core_saturation|
+    aurea.light.saber|21|core_intensity|fxl_core_intensity|
+    aurea.light.saber|22|mask_evolution|fxl_mask_evolution|
+    aurea.light.saber|23|mask_random|fxl_mask_randomness|
+    aurea.light.saber|24|flicker_intensity|fxl_flicker_intensity|
+    aurea.light.saber|25|flicker_speed|fxl_flicker_speed|
+    aurea.light.saber|26|flicker_mask_random|fxl_per_mask_randomness|
+    aurea.light.saber|27|distortion_type|fxl_distortion_type|fxo_none,fxo_smooth,fxo_turbulent_2,fxo_electric,fxo_smoke
+    aurea.light.saber|28|distortion_amount|fxl_distortion_amount|
+    aurea.light.saber|29|distortion_speed|fxl_distortion_speed|
+    aurea.light.saber|30|distortion_scale|fxl_distortion_scale|
+    aurea.light.saber|31|composite|fxo_composite|fxo_add_over_layer,fxo_transparent,fxo_over_black
+    aurea.light.saber|32|seed|fxl_seed|
+    aurea.transition.luma_dissolve|0|progress|fx_progresso|
+    aurea.transition.luma_dissolve|1|softness|fx_suavidade_borda|
+    aurea.transition.luma_dissolve|2|invert|fx_inverter|
+    aurea.transition.luma_dissolve|3|map|fxl_map|fxo_layer_luminance,fx_ruido,fxo_linear_gradient,fxo_radial_gradient,fxo_another_layer
+    aurea.transition.luma_dissolve|4|map_layer|fx3_camada_mapa|
+    aurea.transition.luma_dissolve|5|noise_scale|fxl_noise_scale|
+    aurea.transition.luma_dissolve|6|seed|fxl_noise_seed|
+    aurea.transition.luma_dissolve|7|angle|fxl_gradient_angle|
+    aurea.transition.luma_dissolve|8|edge_width|fxl_edge_width|
+    aurea.transition.luma_dissolve|9|edge_color|fxl_edge_color|
+    aurea.transition.luma_dissolve|10|mode|fxl_mode|fxl_fade_out,fxo_appear
+    aurea.transition.luma_dissolve|11|center|fxl_gradient_center|
     """
 }

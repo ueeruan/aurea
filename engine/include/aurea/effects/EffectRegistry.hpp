@@ -258,6 +258,11 @@ namespace effect_keys {
     inline constexpr const char* kRadialScaleWipe      = "aurea.transition.radial_scale_wipe";
     inline constexpr const char* kBurnFilm             = "aurea.transition.burn_film";
     inline constexpr const char* kBlockLoad            = "aurea.transition.block_load";
+    // --- 0.1.8 BETA 2 ---
+    /// Saber (Luz): núcleo + brilho de energia (SaberEffect.cpp).
+    inline constexpr const char* kSaber                = "aurea.light.saber";
+    /// Luma Dissolve (Transição): some/aparece pelo brilho (LumaDissolveEffect.cpp).
+    inline constexpr const char* kLumaDissolve         = "aurea.transition.luma_dissolve";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

@@ -492,6 +492,43 @@ AUREA_TEST(LayerAnim, EffectPresetAppliesAllValuesInOneUndo) {
     e.shutdown();
 }
 
+// Presets do Saber: a COR do brilho entra componente a componente (R, G, B,
+// A) — o preset que só escrevia o componente 0 deixava a cor pela metade.
+AUREA_TEST(LayerAnim, SaberPresetWritesTheWholeGlowColor) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    AUREA_CHECK(a.ok());
+    if (!a.ok()) return;
+    const u32 type = e.effects().find_key(effect_keys::kSaber);
+    const auto presets = e.effect_presets(type);
+    AUREA_CHECK_EQ(presets.size(), usize{9});
+    if (presets.size() != 9) return;
+    AUREA_CHECK(presets[4].first == "saber_fire");
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add = EffectAddPayload{LayerId::unpack(*a), type, 0};
+    AUREA_CHECK(e.apply_command(add).ok());
+    Layer* l = layer(e, *a);
+    AUREA_CHECK(l && l->effects.size() == 1);
+    if (!l || l->effects.empty()) return;
+    const u32 fx = l->effects[0].id;
+    AUREA_CHECK(e.apply_effect_preset(*a, fx, 4));   // fogo
+    const ParameterRegistry* specs = e.effects().params(type);
+    const auto& p = layer(e, *a)->effects[0].params;
+    const u32 color = specs->find("glow_color");
+    AUREA_CHECK_NEAR(p[color].constant.v[0], 1.00f, 1e-6f);
+    AUREA_CHECK_NEAR(p[color].constant.v[1], 0.38f, 1e-6f);
+    AUREA_CHECK_NEAR(p[color].constant.v[2], 0.05f, 1e-6f);
+    AUREA_CHECK_NEAR(p[color].constant.v[3], 1.00f, 1e-6f);
+    AUREA_CHECK_NEAR(p[specs->find("distortion_type")].constant.v[0], 4.0f, 1e-6f);
+    AUREA_CHECK_NEAR(p[specs->find("core_size")].constant.v[0], 9.0f, 1e-6f);
+    undo(e);
+    AUREA_CHECK_NEAR(layer(e, *a)->effects[0].params[color].constant.v[1], 0.45f, 1e-6f);   // padrão
+    e.shutdown();
+}
+
 // Expressão num valor do animador de camada: vale como keyframe (a conta da
 // entrada lê a trilha) e a interface a encontra pela mesma chave.
 AUREA_TEST(LayerAnim, ExpressionDrivesALayerAnimatorValue) {

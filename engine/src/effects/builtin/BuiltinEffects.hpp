@@ -92,6 +92,9 @@ void register_puppet_effect(EffectRegistry& r);
 void register_cc_distort_effects(EffectRegistry& r);
 void register_cc_stylize_effects(EffectRegistry& r);
 void register_cc_transitions(EffectRegistry& r);
+/// Saber (SaberEffect.cpp) e Luma Dissolve (LumaDissolveEffect.cpp). No fim.
+void register_saber_effect(EffectRegistry& r);
+void register_luma_dissolve_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

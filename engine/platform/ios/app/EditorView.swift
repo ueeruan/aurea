@@ -285,6 +285,7 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { RigStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { MeshWarpStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { PuppetStageOverlay() } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { SaberStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RotoPaintStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RealCameraStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }

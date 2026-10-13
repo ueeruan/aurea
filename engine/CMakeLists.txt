@@ -171,6 +171,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/CCEffects.cpp
     src/effects/builtin/CCStylizeEffects.cpp
     src/effects/builtin/CCTransitions.cpp
+    src/effects/builtin/SaberEffect.cpp
+    src/effects/builtin/LumaDissolveEffect.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp

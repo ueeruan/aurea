@@ -500,7 +500,7 @@ bool Engine::apply_effect_preset(u64 layerId, u32 effectId, u32 preset) noexcept
         switch (spec.type) {
             case ParamType::Bool: dst = ParamValue::boolean(v.value >= 0.5f); break;
             case ParamType::Int: case ParamType::Enum: dst.v[0] = std::round(v.value); break;
-            default: dst.v[0] = v.value; break;
+            default: dst.v[std::min<u32>(v.component, component_count(spec.type) > 0 ? component_count(spec.type) - 1 : 0)] = v.value; break;
         }
     }
     project_->mark_dirty();

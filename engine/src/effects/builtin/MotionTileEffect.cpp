@@ -555,6 +555,9 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_cc_distort_effects(registry);
     builtin::register_cc_stylize_effects(registry);
     builtin::register_cc_transitions(registry);
+    // Saber (Luz) e Luma Dissolve (Transição) — 0.1.8 BETA 2. No fim.
+    builtin::register_saber_effect(registry);
+    builtin::register_luma_dissolve_effect(registry);
 }
 
 } // namespace aurea

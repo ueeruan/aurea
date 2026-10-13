@@ -12291,6 +12291,7 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id(effect_keys::kGlass), effect_type_id(effect_keys::kLightBurst),
             effect_type_id(effect_keys::kStarField), effect_type_id(effect_keys::kHexTile),
             effect_type_id(effect_keys::kBurnFilm), effect_type_id(effect_keys::kJaws),
+            effect_type_id(effect_keys::kSaber), effect_type_id(effect_keys::kLumaDissolve),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);

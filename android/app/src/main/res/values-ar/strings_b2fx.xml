@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.1.8 BETA 2: Saber e Luma Dissolve (nomes de efeito em inglês em todo idioma; descrição traduzida). -->
+    <string name="saber_desc">خط طاقة بنواة بيضاء متوهجة وتوهج واسع — بين نقطتين، أو على الأقنعة، أو حول حدود النص. إعدادات سيف ضوئي ونيون وكهرباء ونار.</string>
+    <string name="luma_dissolve_desc">تختفي الطبقة أو تظهر حسب السطوع: الأجزاء الداكنة أولًا، أو حسب الضوضاء أو تدرج أو طبقة أخرى، مع حافة ملوّنة اختيارية.</string>
+    <string name="fxp_saber_default">افتراضي</string>
+    <string name="fxp_saber_lightsaber">سيف ضوئي</string>
+    <string name="fxp_saber_neon">نيون</string>
+    <string name="fxp_saber_electric">كهربائي</string>
+    <string name="fxp_saber_fire">نار</string>
+    <string name="fxp_saber_plasma">بلازما</string>
+    <string name="fxp_saber_energy">طاقة</string>
+    <string name="fxp_saber_soft">توهج ناعم</string>
+    <string name="fxp_saber_magic">سحر</string>
+    <string name="app_preset_fx_luma_in">Luma Dissolve (دخول)</string>
+    <string name="app_preset_fx_luma_out">Luma Dissolve (خروج)</string>
+    <string name="saber_point_start">بداية السيف</string>
+    <string name="saber_point_end">نهاية السيف</string>
+    <string name="saber_points_hint">اسحب لتحريك نقطة السيف</string>
+</resources>

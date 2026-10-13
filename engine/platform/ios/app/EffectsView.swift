@@ -310,6 +310,7 @@ struct EffectsView: View {
                     else {
                         if effect.typeId == fxEffectTypeId("aurea.distort.mesh_warp") { MeshWarpCardTools(effectId: effect.effectId, selected: meshSelected, onSelect: { selected = nil }) }
                         if effect.typeId == fxEffectTypeId("aurea.distort.puppet") { PuppetCardTools(effectId: effect.effectId) }
+                        if effect.typeId == fxEffectTypeId("aurea.light.saber") { SaberCardTools(effectId: effect.effectId) }
                         if effect.typeId == fxEffectTypeId("aurea.key.rotobrush") {
                             PanelNotice(AureaText.t("roto_note"))
                             RotoPaintCardTools(effectId: effect.effectId,
@@ -1190,6 +1191,9 @@ struct FxPresetRow: View {
         case "impact": return AureaText.t("fxp_impact")
         case "handheld": return AureaText.t("fxp_handheld")
         case "glitch": return AureaText.t("fxp_glitch")
+        case "saber_default", "saber_lightsaber", "saber_neon", "saber_electric", "saber_fire",
+             "saber_plasma", "saber_energy", "saber_soft", "saber_magic":
+            return AureaText.t("fxp_" + pid)
         default: return fallback
         }
     }

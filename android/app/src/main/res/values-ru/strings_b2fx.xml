@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.1.8 BETA 2: Saber e Luma Dissolve (nomes de efeito em inglês em todo idioma; descrição traduzida). -->
+    <string name="saber_desc">Энергетический штрих с раскалённо-белым ядром и широким свечением — между двумя точками, по маскам или по контуру текста. Пресеты: световой меч, неон, электричество и огонь.</string>
+    <string name="luma_dissolve_desc">Слой исчезает или появляется по яркости: сначала тёмные участки, либо по шуму, градиенту или другому слою, с цветной кромкой по желанию.</string>
+    <string name="fxp_saber_default">По умолчанию</string>
+    <string name="fxp_saber_lightsaber">Световой меч</string>
+    <string name="fxp_saber_neon">Неон</string>
+    <string name="fxp_saber_electric">Электрический</string>
+    <string name="fxp_saber_fire">Огонь</string>
+    <string name="fxp_saber_plasma">Плазма</string>
+    <string name="fxp_saber_energy">Энергия</string>
+    <string name="fxp_saber_soft">Мягкое свечение</string>
+    <string name="fxp_saber_magic">Магия</string>
+    <string name="app_preset_fx_luma_in">Luma Dissolve (появление)</string>
+    <string name="app_preset_fx_luma_out">Luma Dissolve (исчезновение)</string>
+    <string name="saber_point_start">Начало меча</string>
+    <string name="saber_point_end">Конец меча</string>
+    <string name="saber_points_hint">Перетащите, чтобы сдвинуть точку меча</string>
+</resources>

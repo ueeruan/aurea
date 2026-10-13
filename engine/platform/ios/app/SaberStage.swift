@@ -46,17 +46,46 @@ import SwiftUI
 
 private let saberInk = Color(red: 0.44, green: 0.76, blue: 1.0)
 
+/// Homografia do quadrado unitário da camada (u, v) para os 4 cantos na
+/// composição — (0,0) (1,0) (1,1) (0,1). Exata também com a camada girada em
+/// 3D (cantos em perspectiva); com um paralelogramo é a conta afim de antes.
+private func saberHomography(_ c: [Float]) -> [Float] {
+    let x0 = c[0], y0 = c[1], x1 = c[2], y1 = c[3]
+    let x2 = c[4], y2 = c[5], x3 = c[6], y3 = c[7]
+    let sx = x0 - x1 + x2 - x3
+    let sy = y0 - y1 + y2 - y3
+    var g: Float = 0
+    var h: Float = 0
+    if abs(sx) > 1e-4 || abs(sy) > 1e-4 {
+        let dx1 = x1 - x2, dx2 = x3 - x2
+        let dy1 = y1 - y2, dy2 = y3 - y2
+        let den = dx1 * dy2 - dx2 * dy1
+        if abs(den) > 1e-9 {
+            g = (sx * dy2 - dx2 * sy) / den
+            h = (dx1 * sy - sx * dy1) / den
+        }
+    }
+    return [x1 - x0 + g * x1, x3 - x0 + h * x3, x0,
+            y1 - y0 + g * y1, y3 - y0 + h * y3, y0, g, h]
+}
+
 private func saberToComp(_ c: [Float], _ u: Float, _ v: Float) -> CGPoint {
-    CGPoint(x: CGFloat(c[0] + u * (c[2] - c[0]) + v * (c[6] - c[0])),
-            y: CGFloat(c[1] + u * (c[3] - c[1]) + v * (c[7] - c[1])))
+    let m = saberHomography(c)
+    var w = m[6] * u + m[7] * v + 1
+    if abs(w) < 1e-6 { w = 1e-6 }
+    return CGPoint(x: CGFloat((m[0] * u + m[1] * v + m[2]) / w),
+                   y: CGFloat((m[3] * u + m[4] * v + m[5]) / w))
 }
 
 private func saberToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)? {
-    let ax = c[2] - c[0], ay = c[3] - c[1], bx = c[6] - c[0], by = c[7] - c[1]
-    let det = ax * by - ay * bx
+    // x·(g u + h v + 1) = a u + b v + c  →  sistema 2×2 em (u, v).
+    let m = saberHomography(c)
+    let a11 = m[0] - m[6] * x, a12 = m[1] - m[7] * x
+    let a21 = m[3] - m[6] * y, a22 = m[4] - m[7] * y
+    let det = a11 * a22 - a12 * a21
     guard abs(det) > 1e-6 else { return nil }
-    let px = x - c[0], py = y - c[1]
-    return ((px * by - py * bx) / det, (ax * py - ay * px) / det)
+    let r1 = x - m[2], r2 = y - m[5]
+    return ((r1 * a22 - a12 * r2) / det, (a11 * r2 - r1 * a21) / det)
 }
 
 /// Os dois pontos do núcleo único. Só eles recebem toque.

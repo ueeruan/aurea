@@ -74,19 +74,49 @@ private fun saberCorners(store: EditorStore, m: StageMapper): FloatArray? {
     return if (LayerGeometry.corners(d, c)) c else null
 }
 
+/**
+ * Homografia do quadrado unitário da camada (u, v) para os 4 cantos na
+ * composição — (0,0) (1,0) (1,1) (0,1). Exata também com a camada girada em
+ * 3D (cantos em perspectiva, que um paralelogramo de 3 cantos deslocava);
+ * com os cantos num paralelogramo vira a mesma conta afim de antes.
+ */
+private fun saberHomography(c: FloatArray): FloatArray {
+    val x0 = c[0]; val y0 = c[1]; val x1 = c[2]; val y1 = c[3]
+    val x2 = c[4]; val y2 = c[5]; val x3 = c[6]; val y3 = c[7]
+    val sx = x0 - x1 + x2 - x3
+    val sy = y0 - y1 + y2 - y3
+    var g = 0f
+    var h = 0f
+    if (kotlin.math.abs(sx) > 1e-4f || kotlin.math.abs(sy) > 1e-4f) {
+        val dx1 = x1 - x2; val dx2 = x3 - x2
+        val dy1 = y1 - y2; val dy2 = y3 - y2
+        val den = dx1 * dy2 - dx2 * dy1
+        if (kotlin.math.abs(den) > 1e-9f) {
+            g = (sx * dy2 - dx2 * sy) / den
+            h = (dx1 * sy - sx * dy1) / den
+        }
+    }
+    return floatArrayOf(x1 - x0 + g * x1, x3 - x0 + h * x3, x0,
+                        y1 - y0 + g * y1, y3 - y0 + h * y3, y0, g, h)
+}
+
 private fun saberUvToComp(c: FloatArray, u: Float, v: Float, out: FloatArray) {
-    out[0] = c[0] + u * (c[2] - c[0]) + v * (c[6] - c[0])
-    out[1] = c[1] + u * (c[3] - c[1]) + v * (c[7] - c[1])
+    val m = saberHomography(c)
+    val w = (m[6] * u + m[7] * v + 1f).let { if (kotlin.math.abs(it) < 1e-6f) 1e-6f else it }
+    out[0] = (m[0] * u + m[1] * v + m[2]) / w
+    out[1] = (m[3] * u + m[4] * v + m[5]) / w
 }
 
 private fun saberCompToUv(c: FloatArray, x: Float, y: Float, out: FloatArray): Boolean {
-    val ax = c[2] - c[0]; val ay = c[3] - c[1]
-    val bx = c[6] - c[0]; val by = c[7] - c[1]
-    val det = ax * by - ay * bx
+    // x·(g u + h v + 1) = a u + b v + c  →  sistema 2×2 em (u, v).
+    val m = saberHomography(c)
+    val a11 = m[0] - m[6] * x; val a12 = m[1] - m[7] * x
+    val a21 = m[3] - m[6] * y; val a22 = m[4] - m[7] * y
+    val det = a11 * a22 - a12 * a21
     if (kotlin.math.abs(det) < 1e-6f) return false
-    val px = x - c[0]; val py = y - c[1]
-    out[0] = (px * by - py * bx) / det
-    out[1] = (ax * py - ay * px) / det
+    val r1 = x - m[2]; val r2 = y - m[5]
+    out[0] = (r1 * a22 - a12 * r2) / det
+    out[1] = (a11 * r2 - r1 * a21) / det
     return true
 }
 

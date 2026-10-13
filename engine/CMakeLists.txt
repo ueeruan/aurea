@@ -98,6 +98,7 @@ set(AUREA_CORE_SOURCES
     src/export/OfflineAudioSnapshot.cpp
     src/export/OfflineAudioBlockSource.cpp
     src/export/FFmpegExportSink.cpp
+    src/export/AndroidVideoEncoder.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
@@ -302,6 +303,9 @@ if(AUREA_PLATFORM_ANDROID)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VideoColorGlsl.hpp.in"
         "${AUREA_GENERATED_INCLUDE}/aurea/shaders/VideoColorGlsl.hpp" @ONLY)
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_ANDROID=1)
+    # Encoder do aparelho com entrada por Surface (export/AndroidVideoEncoder):
+    # contexto EGL próprio que desenha o quadro na Surface do MediaCodec.
+    target_link_libraries(aurea_core PUBLIC EGL GLESv3)
 elseif(AUREA_PLATFORM_IOS)
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_IOS=1)
 else()
@@ -335,7 +339,7 @@ set(AUREA_IMPORT_BOUNDARIES
     src/scene3d/EnvironmentJob.cpp
 )
 list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportSinkStartup.cpp
-    src/export/FFmpegExportSink.cpp
+    src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp
     src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)
 if(MSVC)
     set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS /EHsc)

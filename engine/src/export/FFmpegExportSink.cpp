@@ -1,8 +1,10 @@
 #include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/export/NV12Copy.hpp"
 #include "aurea/export/ExportPacketLog.hpp"
+#include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/export/AndroidVideoEncoder.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,9 +15,11 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <new>
 #include <string>
 #include <thread>
+#include <vector>
 
 #if defined(AUREA_HAS_FFMPEG) && AUREA_HAS_FFMPEG
 extern "C" {
@@ -31,13 +35,8 @@ extern "C" {
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
-#if defined(__ANDROID__)
-#include <libavcodec/jni.h>
-#endif
 }
-#if defined(__ANDROID__)
-#include <jni.h>
-#elif defined(__APPLE__)
+#if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
 
@@ -58,6 +57,34 @@ constexpr u64 hashSeed = 1469598103934665603ull;
 constexpr unsigned maxPendingVideo = 256;
 constexpr int audioInputChunk = 4096;
 constexpr u64 codecStallNs = 30'000'000'000ull;
+// Partida do encoder (escada de abertura): sem o 1o pacote neste prazo
+// esperando por ele, o degrau é dado como travado e o próximo assume os
+// quadros guardados. Só conta tempo ESPERANDO o encoder (fila cheia, teto da
+// Surface, EOS) — um projeto lento de renderizar não dispara.
+constexpr u64 startupStallNs = 5'000'000'000ull;
+// Quadros guardados até o 1o pacote (para refazer no próximo degrau).
+constexpr u64 probationBytes = 64ull << 20;
+
+// Quadro do 1o pacote decodificado × NV12 entregue: média por bloco (Y e
+// CbCr, em níveis de 8 bits). Conversão certa fica abaixo de ~1; padrão de
+// cor/faixa trocado, quadro invertido ou layout errado passam de longe.
+constexpr f64 verifyMeanLimit = 3.0, verifyBlockLimit = 16.0;
+
+// Degraus que falharam neste processo (encoder do aparelho): o próximo export
+// começa direto no degrau que funciona, sem esperar a partida travar de novo.
+std::mutex failedRungMutex;
+std::vector<std::string> failedRungs;
+bool rung_failed_before(const char* key) noexcept {
+    std::lock_guard lock(failedRungMutex);
+    return std::find(failedRungs.begin(), failedRungs.end(), key) != failedRungs.end();
+}
+void remember_failed_rung(const char* key) noexcept {
+    std::lock_guard lock(failedRungMutex);
+    try {
+        if (std::find(failedRungs.begin(), failedRungs.end(), key) == failedRungs.end() && failedRungs.size() < 32)
+            failedRungs.emplace_back(key);
+    } catch (...) {}
+}
 
 u64 timestamp_hash(u64 hash, i64 value) noexcept {
     for (unsigned shift = 0; shift < 64; shift += 8) {
@@ -87,97 +114,40 @@ bool has_pixel_format(const AVCodec* codec, AVPixelFormat wanted) noexcept {
     return false;
 }
 
-// Never infer hardware acceleration from an OMX/c2 name. API 29's explicit
-// platform classification and size/rate support select the exact codec passed
-// to FFmpeg. Missing JVM/API/support simply takes the software path.
-#if defined(__ANDROID__)
-bool android_codec(AVCodecID id, const VideoStreamConfig& config, bool wantHardware,
-                   char* output, usize capacity) noexcept {
-    output[0] = '\0';
-    auto* vm = static_cast<JavaVM*>(av_jni_get_java_vm(nullptr));
-    if (!vm) return false;
-    JNIEnv* env = nullptr;
-    bool detach = false;
-    const jint state = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
-    if (state == JNI_EDETACHED) {
-        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return false;
-        detach = true;
-    } else if (state != JNI_OK || !env) return false;
-    if (env->PushLocalFrame(64) < 0) {
-        env->ExceptionClear();
-        if (detach) vm->DetachCurrentThread();
-        return false;
-    }
-    do {
-        const jclass version = env->FindClass("android/os/Build$VERSION");
-        if (!version) break;
-        const jfieldID sdk = env->GetStaticFieldID(version, "SDK_INT", "I");
-        if (!sdk || env->GetStaticIntField(version, sdk) < 29) break;
-        const jclass listClass = env->FindClass("android/media/MediaCodecList");
-        const jclass infoClass = env->FindClass("android/media/MediaCodecInfo");
-        const jclass capClass = env->FindClass("android/media/MediaCodecInfo$CodecCapabilities");
-        const jclass videoClass = env->FindClass("android/media/MediaCodecInfo$VideoCapabilities");
-        if (!listClass || !infoClass || !capClass || !videoClass) break;
-        const auto ctor = env->GetMethodID(listClass, "<init>", "(I)V");
-        const auto infos = env->GetMethodID(listClass, "getCodecInfos", "()[Landroid/media/MediaCodecInfo;");
-        const auto encoder = env->GetMethodID(infoClass, "isEncoder", "()Z");
-        const auto hardware = env->GetMethodID(infoClass, "isHardwareAccelerated", "()Z");
-        const auto software = env->GetMethodID(infoClass, "isSoftwareOnly", "()Z");
-        const auto types = env->GetMethodID(infoClass, "getSupportedTypes", "()[Ljava/lang/String;");
-        const auto name = env->GetMethodID(infoClass, "getName", "()Ljava/lang/String;");
-        const auto capabilities = env->GetMethodID(infoClass, "getCapabilitiesForType",
-            "(Ljava/lang/String;)Landroid/media/MediaCodecInfo$CodecCapabilities;");
-        const auto videoCaps = env->GetMethodID(capClass, "getVideoCapabilities",
-            "()Landroid/media/MediaCodecInfo$VideoCapabilities;");
-        const auto supports = env->GetMethodID(videoClass, "areSizeAndRateSupported", "(IID)Z");
-        if (!ctor || !infos || !encoder || !hardware || !software || !types || !name ||
-            !capabilities || !videoCaps || !supports) break;
-        const jobject list = env->NewObject(listClass, ctor, 1 /* ALL_CODECS */);
-        if (!list) break;
-        const auto array = static_cast<jobjectArray>(env->CallObjectMethod(list, infos));
-        if (!array || env->ExceptionCheck()) break;
-        const char* mime = id == AV_CODEC_ID_HEVC ? "video/hevc" : "video/avc";
-        const jsize n = env->GetArrayLength(array);
-        for (jsize i = 0; i < n && !output[0]; ++i) {
-            if (env->PushLocalFrame(16) < 0) { env->ExceptionClear(); break; }
-            const jobject info = env->GetObjectArrayElement(array, i);
-            if (info && env->CallBooleanMethod(info, encoder) &&
-                (wantHardware ? env->CallBooleanMethod(info, hardware)
-                              : env->CallBooleanMethod(info, software)) && !env->ExceptionCheck()) {
-                const auto supported = static_cast<jobjectArray>(env->CallObjectMethod(info, types));
-                if (supported && !env->ExceptionCheck()) {
-                    for (jsize t = 0; t < env->GetArrayLength(supported); ++t) {
-                        const auto type = static_cast<jstring>(env->GetObjectArrayElement(supported, t));
-                        const char* text = type ? env->GetStringUTFChars(type, nullptr) : nullptr;
-                        const bool matches = text && std::strcmp(text, mime) == 0;
-                        if (text) env->ReleaseStringUTFChars(type, text);
-                        if (matches) {
-                            const jobject cap = env->CallObjectMethod(info, capabilities, type);
-                            const jobject vc = cap ? env->CallObjectMethod(cap, videoCaps) : nullptr;
-                            if (vc && env->CallBooleanMethod(vc, supports, static_cast<jint>(config.width),
-                                static_cast<jint>(config.height), config.fps) && !env->ExceptionCheck()) {
-                                const auto codecName = static_cast<jstring>(env->CallObjectMethod(info, name));
-                                const char* textName = codecName ? env->GetStringUTFChars(codecName, nullptr) : nullptr;
-                                if (textName && std::strlen(textName) < capacity)
-                                    std::snprintf(output, capacity, "%s", textName);
-                                if (textName) env->ReleaseStringUTFChars(codecName, textName);
-                            }
-                            break;
-                        }
-                        if (type) env->DeleteLocalRef(type);
-                    }
-                }
+// Never infer hardware acceleration from an OMX/c2 name: API 29's explicit
+// platform classification and size/rate support select the exact codec
+// (export/AndroidVideoEncoder.hpp). Missing JVM/API/support simply takes the
+// software path.
+
+// Parâmetros globais (SPS/PPS, e VPS no HEVC) dentro de um pacote Annex-B:
+// encoders que não mandam BUFFER_FLAG_CODEC_CONFIG os trazem no 1o pacote.
+std::vector<u8> annexb_parameter_sets(const u8* data, usize size, bool hevc) {
+    std::vector<u8> out;
+    usize i = 0;
+    auto start_code = [&](usize at) -> usize {
+        if (at + 3 <= size && data[at] == 0 && data[at + 1] == 0 && data[at + 2] == 1) return 3;
+        if (at + 4 <= size && data[at] == 0 && data[at + 1] == 0 && data[at + 2] == 0 && data[at + 3] == 1) return 4;
+        return 0;
+    };
+    while (i < size) {
+        const usize sc = start_code(i);
+        if (!sc) { ++i; continue; }
+        usize j = i + sc;
+        while (j < size && !start_code(j)) ++j;
+        if (i + sc < size) {
+            const u8 header = data[i + sc];
+            const int type = hevc ? (header >> 1) & 63 : header & 31;
+            const bool parameters = hevc ? (type >= 32 && type <= 34) : (type == 7 || type == 8);
+            if (parameters) {
+                static constexpr u8 code[4] = {0, 0, 0, 1};
+                out.insert(out.end(), code, code + 4);
+                out.insert(out.end(), data + i + sc, data + j);
             }
-            if (env->ExceptionCheck()) env->ExceptionClear();
-            env->PopLocalFrame(nullptr);
         }
-    } while (false);
-    if (env->ExceptionCheck()) env->ExceptionClear();
-    env->PopLocalFrame(nullptr);
-    if (detach) vm->DetachCurrentThread();
-    return output[0] != '\0';
+        i = j;
+    }
+    return out;
 }
-#endif
 
 class FFmpegSink final : public ExportSink {
 public:
@@ -207,7 +177,7 @@ public:
 private:
     enum class State { Empty, Open, VideoLogged, Finalized, Published, Failed } state_ = State::Empty;
     enum class Timing { Unknown, Constant, Variable } timing_ = Timing::Unknown;
-    struct FrameTiming { i64 pts = 0, duration = 0; };
+    struct FrameTiming { i64 pts = 0, duration = 0, us = 0; };   ///< `us`: o tempo que o encoder do aparelho recebeu
     const std::atomic<bool>* cancel_ = nullptr;
     std::atomic<u64>* heartbeat_ = nullptr;
     AVFormatContext* format_ = nullptr;
@@ -257,6 +227,33 @@ private:
     i64 spilledSamples_ = 0;
     bool spillAudio_ = false;
     bool wantsAudio_ = false;
+    bool logStarted_ = false;                ///< o registro abre no 1o pacote (com os parâmetros do encoder que deu certo)
+    export_log::ScanResult resumeScan_{};    ///< varredura da retomada, feita antes de qualquer degrau mexer no registro
+
+    // --- Escada de abertura do encoder de vídeo -----------------------------
+    // Android: Surface do encoder do aparelho → ByteBuffer no formato que ele
+    // anuncia → o caminho FFmpeg/MediaCodec antigo → software do app. iOS:
+    // VideoToolbox NV12 → VideoToolbox I420 → software. Cada degrau cai para o
+    // próximo quando não abre OU quando o 1o pacote não chega/não confere
+    // ("liberdade condicional"): os quadros entregues até o 1o pacote ficam
+    // guardados e o próximo degrau os recebe de novo — sem erro na tela.
+    enum class Rung : u8 { Surface, Buffer, Legacy, VideoToolbox, VideoToolboxPlanar, Software, PlatformSoftware };
+    struct RungEntry { Rung kind = Rung::Software; bool hardware = false; char codec[128]{}; };
+    struct Retained { std::vector<u8> y, uv; i64 pts = 0, duration = 0; bool timed = false; };
+    std::vector<RungEntry> rungs_;
+    usize rung_ = 0, reopenFrom_ = 0;
+    std::unique_ptr<android_video::Encoder> native_;
+    android_video::CodecInfo deviceCodec_{};
+    android_video::Packet nativePacket_;
+    bool nativeActive_ = false, nativeEos_ = false;
+    std::vector<u8> extradata_;              ///< parâmetros globais do encoder atual (Annex-B ou avcC)
+    std::vector<Retained> retained_;
+    bool probation_ = false;                 ///< quadros guardados; falha aqui = próximo degrau
+    bool firstPacketPending_ = false;        ///< o 1o pacote ainda confere/abre o registro
+    u32 maxRetained_ = 8;
+    char rungName_[192]{};
+    char attempts_[384]{};                   ///< degraus que falharam nesta sessão (diagnóstico)
+    char rungDetail_[256]{};
 
     void beat() noexcept {
         if (heartbeat_) heartbeat_->store(monotonic_ns(), std::memory_order_release);
@@ -283,13 +280,38 @@ private:
         return OkStatus;
     }
     void release() noexcept;
-    Status open_video() noexcept;
-    Status try_video(const char* name, bool hardware, const char* nativeName = nullptr) noexcept;
+    Status open_video(usize firstRung) noexcept;
+    Status try_video(const char* name, bool hardware, const char* nativeName = nullptr,
+                     AVPixelFormat pixel = AV_PIX_FMT_NONE) noexcept;
+    Status prepare_ffmpeg_video() noexcept;
     Status open_audio() noexcept;
     Status write_video_with_fallback(const u8*, u32, const u8*, u32, i64, i64, bool) noexcept;
     Status write_video_impl(const u8*, u32, const u8*, u32, i64, i64, bool) noexcept;
     Status send(AVCodecContext*, AVStream*, const AVFrame*, bool video) noexcept;
     Status drain(AVCodecContext*, AVStream*, bool video, bool flushing, unsigned& produced) noexcept;
+    Status video_packet(AVRational from) noexcept;
+    // Escada de abertura (ver os membros acima).
+    void build_rungs() noexcept;
+    Status open_rung(const RungEntry& rung) noexcept;
+    void close_video() noexcept;
+    void reset_video_clock() noexcept;
+    void describe_rung(const RungEntry& rung, char* out, usize capacity) const noexcept;
+    void note_failure(const char* why) noexcept;
+    void publish_path(const char* state) const noexcept;
+    bool fallback_allowed(Status status) const noexcept;
+    Status fallback(Status reason) noexcept;
+    Status retain(const u8*, u32, const u8*, u32, i64, i64, bool) noexcept;
+    Status resubmit_retained() noexcept;
+    Status wait_first_packet() noexcept;
+    Status first_packet() noexcept;
+    Status verify_first_frame() noexcept;
+    Status start_log() noexcept;
+    Status finish_video_stream() noexcept;
+    Status drain_native(bool flushing, unsigned& produced) noexcept;
+    Status send_native(const u8*, u32, const u8*, u32, i64 us) noexcept;
+    void fill_native_parameters(AVCodecParameters* par) const noexcept;
+    void fill_log_info(export_log::StreamInfo& info) const noexcept;
+    u64 stall_ns() const noexcept { return probation_ ? startupStallNs : codecStallNs; }
     Status mux(AVPacket*, AVRational from, AVStream*) noexcept;
     Status append_audio(const i16* pcm, int samples) noexcept;
     Status encode_audio(bool final) noexcept;
@@ -302,12 +324,22 @@ private:
     Status mux_logged_video(u64 untilFrame) noexcept;
 };
 
-void FFmpegSink::release() noexcept {
-    if (format_ && format_->pb) avio_closep(&format_->pb);
+void FFmpegSink::close_video() noexcept {
     avcodec_free_context(&videoCodec_);
-    avcodec_free_context(&audioCodec_);
     av_bsf_free(&videoCrop_);
     av_frame_free(&videoFrame_);
+    sws_freeContext(scale_); scale_ = nullptr;
+    if (native_) native_->close();
+    nativeActive_ = nativeEos_ = false;
+    extradata_.clear();
+}
+
+void FFmpegSink::release() noexcept {
+    if (format_ && format_->pb) avio_closep(&format_->pb);
+    close_video();
+    std::vector<Retained>().swap(retained_);
+    probation_ = false;
+    avcodec_free_context(&audioCodec_);
     av_frame_free(&audioFrame_);
     av_frame_free(&resampleFrame_);
     av_packet_free(&packet_);
@@ -316,7 +348,6 @@ void FFmpegSink::release() noexcept {
     if (spill_) { std::fclose(spill_); spill_ = nullptr; }
     logReader_.close();
     (void)log_.close();   // o registro é a recuperação: fechado, nunca apagado aqui
-    sws_freeContext(scale_); scale_ = nullptr;
     swr_free(&resample_);
     if (audioFifo_) av_audio_fifo_free(audioFifo_);
     audioFifo_ = nullptr;
@@ -334,6 +365,10 @@ void FFmpegSink::abort() noexcept {
 
 Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
                        const AudioStreamConfig* audio) noexcept {
+    // Reabertura pela escada (contêiner direto, sem registro): continua do
+    // degrau seguinte, com a mesma lista.
+    const usize firstRung = reopenFrom_;
+    reopenFrom_ = 0;
     abort();
     if (!output || !*output || !video.width || !video.height ||
         video.width > 16'384 || video.height > 16'384 ||
@@ -364,7 +399,7 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     audioInputSamples_ = audioConvertedSamples_ = audioSubmittedSamples_ = 0;
     pendingHead_ = pendingCount_ = 0; lastError_ = OkStatus;
     const u64 frameBytes = static_cast<u64>(video.width) * video.height * 3 / 2;
-    (void)frameBytes;
+    maxRetained_ = static_cast<u32>(std::clamp<u64>(probationBytes / std::max<u64>(frameBytes, 1), 3, 8));
     pendingLimit_ = maxPendingVideo;
     rate_ = av_d2q(video.fps, 1'000'000);
     if (rate_.num <= 0 || rate_.den <= 0)
@@ -388,7 +423,19 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     format_->interrupt_callback = AVIOInterruptCB{&FFmpegSink::interrupted, this};
     format_->max_interleave_delta = 100'000; // bounded muxer wait: 100 ms
     format_->flags |= AVFMT_FLAG_FLUSH_PACKETS;
-    if (const Status status = open_video(); !status.ok()) return status;
+    if (logMode_ && video_.resumeFrame) {
+        // A varredura vem ANTES de qualquer degrau: o registro só é cortado
+        // quando um encoder provou que continua o mesmo fluxo (1o pacote).
+        const Status scanned = export_log::scan(logPath_, resumeScan_);
+        if (!scanned.ok()) return error(scanned.code(), "varrer registro de pacotes");
+        if (resumeScan_.resumeFrame != video_.resumeFrame)
+            return error(Errc::InvalidState, "registro de pacotes mudou desde a varredura");
+    }
+    if (!firstRung) {
+        build_rungs();
+        attempts_[0] = '\0';
+    }
+    if (const Status status = open_video(firstRung); !status.ok()) return status;
     if (logMode_) return open_log();
     if (audio) if (const Status status = open_audio(); !status.ok()) return status;
     return open_container();
@@ -399,9 +446,11 @@ Status FFmpegSink::open_container() noexcept {
     if (!videoStream_) return error(Errc::OutOfMemory, "criar faixa de video FFmpeg");
     videoStream_->time_base = videoTimebase_;
     videoStream_->avg_frame_rate = rate_;
-    int result = videoParams_ ? avcodec_parameters_copy(videoStream_->codecpar, videoParams_)
-               : videoCrop_ ? avcodec_parameters_copy(videoStream_->codecpar, videoCrop_->par_out)
-                            : avcodec_parameters_from_context(videoStream_->codecpar, videoCodec_);
+    int result = 0;
+    if (videoParams_) result = avcodec_parameters_copy(videoStream_->codecpar, videoParams_);
+    else if (nativeActive_) fill_native_parameters(videoStream_->codecpar);   // SPS/PPS chegam no 1o pacote
+    else result = videoCrop_ ? avcodec_parameters_copy(videoStream_->codecpar, videoCrop_->par_out)
+                             : avcodec_parameters_from_context(videoStream_->codecpar, videoCodec_);
     if (result < 0)
         return error(Errc::EncodeFailed, "parametros de video FFmpeg", result);
     videoStream_->codecpar->width = static_cast<int>(video_.width);
@@ -432,14 +481,21 @@ Status FFmpegSink::open_container() noexcept {
     return OkStatus;
 }
 
-Status FFmpegSink::try_video(const char* name, bool hardware, const char* nativeName) noexcept {
+Status FFmpegSink::try_video(const char* name, bool hardware, const char* nativeName, AVPixelFormat wanted) noexcept {
     const AVCodec* codec = avcodec_find_encoder_by_name(name);
     if (!codec) return Status{Errc::EncoderUnavailable, "encoder FFmpeg ausente nesta compilacao"};
     avcodec_free_context(&videoCodec_);
     videoCodec_ = avcodec_alloc_context3(codec);
     if (!videoCodec_) return error(Errc::OutOfMemory, "contexto de video FFmpeg");
     AVPixelFormat pixel = AV_PIX_FMT_NV12;
-    if (!has_pixel_format(codec, pixel)) {
+    if (wanted != AV_PIX_FMT_NONE) {
+        // Degrau com formato alternativo (VideoToolbox I420): só ele, sem trocar.
+        if (!has_pixel_format(codec, wanted)) {
+            avcodec_free_context(&videoCodec_);
+            return Status{Errc::UnsupportedFormat, "encoder FFmpeg sem o formato alternativo pedido"};
+        }
+        pixel = wanted;
+    } else if (!has_pixel_format(codec, pixel)) {
         pixel = video_.codec == ExportCodec::ProRes ? AV_PIX_FMT_YUV422P10LE : AV_PIX_FMT_YUV420P;
         if (!has_pixel_format(codec, pixel)) {
             avcodec_free_context(&videoCodec_);
@@ -477,7 +533,10 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
     } else if (std::strstr(name, "mediacodec")) {
         av_dict_set(&options, "codec_name", nativeName, 0);
         av_dict_set(&options, "ndk_codec", "1", 0);
-        av_dict_set(&options, "bitrate_mode", video_.rateMode == 0 ? "cbr" : "vbr", 0);
+        // Modo de taxa só quando o encoder o anuncia (consultado na escada).
+        const bool known = nativeName && std::strcmp(nativeName, deviceCodec_.name) == 0;
+        if (!known || (video_.rateMode == 0 ? deviceCodec_.cbr : deviceCodec_.vbr))
+            av_dict_set(&options, "bitrate_mode", video_.rateMode == 0 ? "cbr" : "vbr", 0);
     } else if (std::strcmp(name, "libx264") == 0) {
         av_dict_set(&options, "preset", "veryfast", 0);
         av_dict_set(&options, "tune", "zerolatency", 0);
@@ -527,80 +586,689 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
     return OkStatus;
 }
 
-Status FFmpegSink::open_video() noexcept {
-    Status selected{Errc::EncoderUnavailable, "nenhum encoder FFmpeg compativel disponivel"};
-    if (!video_.preferSoftware && (video_.codec == ExportCodec::H264 || video_.codec == ExportCodec::HEVC)) {
+void FFmpegSink::describe_rung(const RungEntry& rung, char* out, usize capacity) const noexcept {
+    const char* kind = "software";
+    switch (rung.kind) {
+        case Rung::Surface: kind = "surface"; break;
+        case Rung::Buffer: kind = "buffer"; break;
+        case Rung::Legacy: kind = "legacy"; break;
+        case Rung::VideoToolbox: kind = "videotoolbox"; break;
+        case Rung::VideoToolboxPlanar: kind = "videotoolbox-i420"; break;
+        case Rung::Software: kind = "software"; break;
+        case Rung::PlatformSoftware: kind = "platform-software"; break;
+    }
+    std::snprintf(out, capacity, "%s:%s", kind, rung.codec);
+}
+
+void FFmpegSink::build_rungs() noexcept {
+    rungs_.clear();
+    rung_ = 0;
+    auto add = [&](Rung kind, const char* codec, bool hardware) {
+        RungEntry entry;
+        entry.kind = kind;
+        entry.hardware = hardware;
+        std::snprintf(entry.codec, sizeof(entry.codec), "%s", codec);
+        char key[192];
+        describe_rung(entry, key, sizeof(key));
+        if ((kind == Rung::Surface || kind == Rung::Buffer) && rung_failed_before(key)) {
+            AUREA_LOG_INFO("export: degrau %s falhou antes neste processo; pulado", key);
+            return;
+        }
+        try { rungs_.push_back(entry); } catch (...) {}
+    };
+    const bool h26x = video_.codec == ExportCodec::H264 || video_.codec == ExportCodec::HEVC;
+    [[maybe_unused]] const bool hevc = video_.codec == ExportCodec::HEVC;
+    if (!video_.preferSoftware && h26x) {
 #if defined(__ANDROID__)
-        char hardwareName[256]{};
-        if (android_codec(codec_id(video_.codec), video_, true, hardwareName, sizeof(hardwareName)))
-            selected = try_video(video_.codec == ExportCodec::HEVC ? "hevc_mediacodec" : "h264_mediacodec", true, hardwareName);
+        namespace avenc = android_video;
+        bool found = avenc::find_encoder(hevc, video_.width, video_.height, video_.fps, true, deviceCodec_);
+        // Emulador/teste: os degraus do aparelho com o encoder de software do sistema.
+        if (!found && avenc::debug_flag("debug.aurea.enc.allowsw", nullptr))
+            found = avenc::find_encoder(hevc, video_.width, video_.height, video_.fps, false, deviceCodec_);
+        if (found) {
+            // A Surface recebe R'G'B' de 8 bits (SDR); proxy HDR vai pelo buffer.
+            const u8 t = video_.color.transfer;
+            const bool sdr = t == 1 || t == 6 || t == 14 || t == 15;
+            if (deviceCodec_.surface && sdr && !avenc::debug_flag("debug.aurea.enc.skip", "surface"))
+                add(Rung::Surface, deviceCodec_.name, deviceCodec_.hardware);
+            if (!avenc::debug_flag("debug.aurea.enc.skip", "buffer"))
+                add(Rung::Buffer, deviceCodec_.name, deviceCodec_.hardware);
+            // O caminho de sempre (FFmpeg + MediaCodec por buffer NV12): nada
+            // que funcionava antes deixa de ser tentado.
+            if (!avenc::debug_flag("debug.aurea.enc.skip", "legacy"))
+                add(Rung::Legacy, deviceCodec_.name, deviceCodec_.hardware);
+        }
 #elif defined(__APPLE__)
-        selected = try_video(video_.codec == ExportCodec::HEVC ? "hevc_videotoolbox" : "h264_videotoolbox", true);
+        const char* vt = hevc ? "hevc_videotoolbox" : "h264_videotoolbox";
+        add(Rung::VideoToolbox, vt, true);
+        add(Rung::VideoToolboxPlanar, vt, true);
 #endif
     }
-    if (!selected.ok()) {
-        const char* candidates[4]{};
-        switch (video_.codec) {
-            case ExportCodec::H264: candidates[0] = "libopenh264"; candidates[1] = "libx264"; break;
-            case ExportCodec::HEVC: candidates[0] = "libkvazaar"; candidates[1] = "libx265"; break;
-            case ExportCodec::AV1: candidates[0] = "libsvtav1"; candidates[1] = "libaom-av1"; candidates[2] = "librav1e"; break;
-            case ExportCodec::ProRes: candidates[0] = "prores_ks"; candidates[1] = "prores_aw"; break;
-        }
-        for (const char* candidate : candidates) {
-            if (!candidate || cancelled()) break;
-            selected = try_video(candidate, false);
-            if (selected.ok() || selected.code() == Errc::OutOfMemory) break;
-        }
+    const char* candidates[4]{};
+    switch (video_.codec) {
+        case ExportCodec::H264: candidates[0] = "libopenh264"; candidates[1] = "libx264"; break;
+        case ExportCodec::HEVC: candidates[0] = "libkvazaar"; candidates[1] = "libx265"; break;
+        case ExportCodec::AV1: candidates[0] = "libsvtav1"; candidates[1] = "libaom-av1"; candidates[2] = "librav1e"; break;
+        case ExportCodec::ProRes: candidates[0] = "prores_ks"; candidates[1] = "prores_aw"; break;
+    }
+    for (const char* candidate : candidates)
+        if (candidate && avcodec_find_encoder_by_name(candidate)) add(Rung::Software, candidate, false);
 #if defined(__ANDROID__)
-        // Android can provide an explicitly classified software HEVC encoder
-        // even when this FFmpeg distribution has no libx265. It is still
-        // encoded/muxed through the same shared FFmpeg pipeline.
-        if (!selected.ok() && selected.code() != Errc::OutOfMemory && !cancelled() &&
-            (video_.codec == ExportCodec::H264 || video_.codec == ExportCodec::HEVC)) {
-            char softwareName[256]{};
-            if (android_codec(codec_id(video_.codec), video_, false, softwareName, sizeof(softwareName)))
-                selected = try_video(video_.codec == ExportCodec::HEVC ? "hevc_mediacodec" : "h264_mediacodec", false, softwareName);
-        }
-#endif
+    // Android can provide an explicitly classified software encoder even when
+    // this FFmpeg distribution has no libx265. It is still encoded/muxed
+    // through the same shared FFmpeg pipeline.
+    if (h26x) {
+        android_video::CodecInfo software;
+        if (android_video::find_encoder(hevc, video_.width, video_.height, video_.fps, false, software))
+            add(Rung::PlatformSoftware, software.name, false);
     }
-    if (!selected.ok()) return error(cancelled() ? Errc::Cancelled :
-        selected.code() == Errc::OutOfMemory ? Errc::OutOfMemory : Errc::EncoderUnavailable,
-        "FFmpeg nao abriu encoder solicitado nem fallback por software");
+#endif
+}
+
+Status FFmpegSink::prepare_ffmpeg_video() noexcept {
+    auto fail = [&](Errc code, const char* what, int result = 0) noexcept {
+        char fferror[AV_ERROR_MAX_STRING_SIZE]{};
+        if (result < 0) av_strerror(result, fferror, sizeof(fferror));
+        std::snprintf(rungDetail_, sizeof(rungDetail_), result < 0 ? "%s: %s" : "%s%s", what, fferror);
+        return Status{code, rungDetail_};
+    };
     if (videoCodec_->width != static_cast<int>(video_.width) ||
         videoCodec_->height != static_cast<int>(video_.height)) {
         const AVBitStreamFilter* crop = av_bsf_get_by_name("hevc_metadata");
         int result = crop ? av_bsf_alloc(crop, &videoCrop_) : AVERROR_BSF_NOT_FOUND;
-        if (result < 0) return error(Errc::EncoderUnavailable, "filtro de dimensoes HEVC FFmpeg ausente", result);
+        if (result < 0) return fail(Errc::EncoderUnavailable, "filtro de dimensoes HEVC FFmpeg ausente", result);
         if ((result = avcodec_parameters_from_context(videoCrop_->par_in, videoCodec_)) < 0)
-            return error(Errc::EncodeFailed, "parametros do crop HEVC FFmpeg", result);
+            return fail(Errc::EncodeFailed, "parametros do crop HEVC FFmpeg", result);
         videoCrop_->time_base_in = videoTimebase_;
         if ((result = av_opt_set_int(videoCrop_->priv_data, "crop_left", 0, 0)) < 0 ||
             (result = av_opt_set_int(videoCrop_->priv_data, "crop_top", 0, 0)) < 0 ||
             (result = av_opt_set_int(videoCrop_->priv_data, "crop_right", videoCodec_->width - video_.width, 0)) < 0 ||
             (result = av_opt_set_int(videoCrop_->priv_data, "crop_bottom", videoCodec_->height - video_.height, 0)) < 0 ||
             (result = av_bsf_init(videoCrop_)) < 0)
-            return error(Errc::EncodeFailed, "preservar dimensoes visiveis HEVC FFmpeg", result);
+            return fail(Errc::EncodeFailed, "preservar dimensoes visiveis HEVC FFmpeg", result);
     }
     videoFrame_ = av_frame_alloc();
-    if (!videoFrame_) return error(Errc::OutOfMemory, "frame de video FFmpeg");
+    if (!videoFrame_) return fail(Errc::OutOfMemory, "frame de video FFmpeg");
     videoFrame_->format = videoCodec_->pix_fmt;
     videoFrame_->width = videoCodec_->width; videoFrame_->height = videoCodec_->height;
     videoFrame_->color_primaries = videoCodec_->color_primaries;
     videoFrame_->color_trc = videoCodec_->color_trc; videoFrame_->colorspace = videoCodec_->colorspace;
     videoFrame_->color_range = videoCodec_->color_range;
     const int result = av_frame_get_buffer(videoFrame_, 32);
-    if (result < 0) return error(Errc::OutOfMemory, "pixels do frame FFmpeg", result);
+    if (result < 0) return fail(Errc::OutOfMemory, "pixels do frame FFmpeg", result);
     if (videoCodec_->pix_fmt != AV_PIX_FMT_NV12) {
         scale_ = sws_getContext(static_cast<int>(video_.width), static_cast<int>(video_.height), AV_PIX_FMT_NV12,
             static_cast<int>(video_.width), static_cast<int>(video_.height), videoCodec_->pix_fmt,
             SWS_BILINEAR, nullptr, nullptr, nullptr);
-        if (!scale_) return error(Errc::OutOfMemory, "conversor libswscale");
+        if (!scale_) return fail(Errc::OutOfMemory, "conversor libswscale");
         const int* coefficients = sws_getCoefficients(SWS_CS_ITU709);
         if (sws_setColorspaceDetails(scale_, coefficients, video_.color.fullRange ? 1 : 0,
             coefficients, video_.color.fullRange ? 1 : 0, 0, 1 << 16, 1 << 16) < 0)
-            return error(Errc::EncodeFailed, "configurar cor libswscale");
+            return fail(Errc::EncodeFailed, "configurar cor libswscale");
     }
     return OkStatus;
+}
+
+Status FFmpegSink::open_rung(const RungEntry& rung) noexcept {
+    close_video();
+    describe_rung(rung, rungName_, sizeof(rungName_));
+    const bool hevc = video_.codec == ExportCodec::HEVC;
+    Status opened = OkStatus;
+    switch (rung.kind) {
+    case Rung::Surface:
+    case Rung::Buffer: {
+#if defined(__ANDROID__)
+        namespace avenc = android_video;
+        const bool surface = rung.kind == Rung::Surface;
+        const char* tag = surface ? "surface" : "buffer";
+        char flag[32];
+        std::snprintf(flag, sizeof(flag), "%s-open", tag);
+        if (avenc::debug_flag("debug.aurea.enc.fail", flag))
+            return Status{Errc::EncoderUnavailable, "falha simulada na abertura (debug.aurea.enc.fail)"};
+        if (!native_) native_.reset(new (std::nothrow) avenc::Encoder());
+        if (!native_) return Status{Errc::OutOfMemory, "encoder do aparelho"};
+        avenc::Request request;
+        request.hevc = hevc;
+        request.width = video_.width;
+        request.height = video_.height;
+        request.fps = video_.fps;
+        request.bitrateBps = video_.bitrateBps;
+        request.rateMode = video_.rateMode;
+        request.keyframeFrames = video_.keyframeIntervalFrames;
+        request.baseline = video_.profile == 1;
+        request.color = video_.color;
+        request.input = surface ? avenc::Input::Surface : avenc::Input::Buffer;
+        std::snprintf(flag, sizeof(flag), "%s-stall", tag);
+        request.simulateStall = avenc::debug_flag("debug.aurea.enc.fail", flag);
+        request.heartbeat = heartbeat_;
+        request.simulateHang = surface && avenc::debug_flag("debug.aurea.enc.fail", "surface-hang");
+        opened = native_->open(request, deviceCodec_);
+        beat();
+        if (!opened.ok()) {
+            const auto text = opened.detail().empty() ? opened.message() : opened.detail();
+            std::snprintf(rungDetail_, sizeof(rungDetail_), "%.*s", static_cast<int>(text.size()), text.data());
+            native_->close();
+            return Status{opened.code(), rungDetail_};
+        }
+        std::snprintf(rungName_, sizeof(rungName_), "%s", native_->describe());
+        nativeActive_ = true;
+        std::snprintf(encoder_.name, sizeof(encoder_.name), "%s", rung.codec);
+        encoder_.acceleration = rung.hardware ? Acceleration::Hardware : Acceleration::Software;
+        return OkStatus;
+#else
+        return Status{Errc::NotSupported, "encoder do aparelho so no Android"};
+#endif
+    }
+    case Rung::Legacy:
+        opened = try_video(hevc ? "hevc_mediacodec" : "h264_mediacodec", rung.hardware, rung.codec);
+        break;
+    case Rung::PlatformSoftware:
+        opened = try_video(hevc ? "hevc_mediacodec" : "h264_mediacodec", false, rung.codec);
+        break;
+    case Rung::VideoToolbox:
+        opened = try_video(rung.codec, true);
+        break;
+    case Rung::VideoToolboxPlanar:
+        opened = try_video(rung.codec, true, nullptr, AV_PIX_FMT_YUV420P);
+        break;
+    case Rung::Software:
+        opened = try_video(rung.codec, false);
+        break;
+    }
+    if (opened.ok()) opened = prepare_ffmpeg_video();
+    if (!opened.ok()) {
+        close_video();
+        return opened;
+    }
+    // Parâmetros globais do contêiner/registro (o crop do HEVC reescreve o SPS).
+    const AVCodecParameters* cropped = videoCrop_ ? videoCrop_->par_out : nullptr;
+    const u8* extra = cropped ? cropped->extradata : videoCodec_->extradata;
+    const int extraBytes = cropped ? cropped->extradata_size : videoCodec_->extradata_size;
+    try {
+        if (extra && extraBytes > 0) extradata_.assign(extra, extra + extraBytes);
+    } catch (...) {
+        close_video();
+        return Status{Errc::OutOfMemory, "parametros do encoder"};
+    }
+    return OkStatus;
+}
+
+Status FFmpegSink::open_video(usize firstRung) noexcept {
+    Status last{Errc::EncoderUnavailable, "nenhum encoder FFmpeg compativel disponivel"};
+    for (usize i = firstRung; i < rungs_.size(); ++i) {
+        if (cancelled()) break;
+        rung_ = i;
+        last = open_rung(rungs_[i]);
+        if (last.ok() && logMode_ && video_.resumeFrame && !extradata_.empty()) {
+            // Retomada: outro SPS/PPS não continua o registro. Encoder do
+            // aparelho só mostra os parâmetros no 1o pacote (start_log).
+            export_log::StreamInfo candidate;
+            fill_log_info(candidate);
+            try { candidate.extradata = extradata_; } catch (...) { candidate.extradata.clear(); }
+            if (!resumeScan_.info.same_stream(candidate)) {
+                close_video();
+                last = Status{Errc::UnsupportedFormat, "o encoder desta sessao difere do registro"};
+            }
+        }
+        if (last.ok()) {
+            probation_ = firstPacketPending_ = true;
+            AUREA_LOG_INFO("export: encoder de video %s (degrau %u de %u)", rungName_,
+                           static_cast<unsigned>(i + 1), static_cast<unsigned>(rungs_.size()));
+            publish_path("abrindo");
+            return OkStatus;
+        }
+        const auto text = last.detail().empty() ? last.message() : last.detail();
+        char why[160];
+        std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
+        note_failure(why);
+        if (last.code() == Errc::OutOfMemory) break;
+    }
+    rung_ = rungs_.size();
+    return error(cancelled() ? Errc::Cancelled :
+        last.code() == Errc::OutOfMemory ? Errc::OutOfMemory : Errc::EncoderUnavailable,
+        "FFmpeg nao abriu encoder solicitado nem fallback por software");
+}
+
+void FFmpegSink::note_failure(const char* why) noexcept {
+    AUREA_LOG_WARN("export: degrau %s falhou: %s", rungName_, why);
+    const usize used = std::strlen(attempts_);
+    if (used + 8 < sizeof(attempts_))
+        std::snprintf(attempts_ + used, sizeof(attempts_) - used, "%s%s=%.60s", used ? "; " : "", rungName_, why);
+    if (rung_ < rungs_.size() && (rungs_[rung_].kind == Rung::Surface || rungs_[rung_].kind == Rung::Buffer) && !cancelled()) {
+        char key[192];
+        describe_rung(rungs_[rung_], key, sizeof(key));
+        remember_failed_rung(key);
+    }
+    publish_path("falhou");
+}
+
+void FFmpegSink::publish_path(const char* state) const noexcept {
+    // Só o export (a prévia em proxy usa o mesmo sink e não conta).
+    if (!logMode_ && !video_.validateBeforePublish) return;
+    char text[640];
+    std::snprintf(text, sizeof(text), "%s %s%s%s", rungName_, state, attempts_[0] ? " | falhas: " : "", attempts_);
+    set_last_export_encoder_path(text);
+}
+
+void FFmpegSink::reset_video_clock() noexcept {
+    pendingHead_ = pendingCount_ = 0;
+    const u64 resume = logMode_ ? video_.resumeFrame : 0;
+    videoFrames_ = videoPackets_ = resume;
+    videoHash_ = hashSeed;
+    for (u64 frame = 0; frame < resume; ++frame) videoHash_ = timestamp_hash(videoHash_, frame_pts(frame));
+    lastVideoPts_ = resume ? frame_pts(resume - 1) : AV_NOPTS_VALUE;
+    lastVideoEnd_ = resume ? frame_pts(resume) : 0;
+    timing_ = logMode_ ? Timing::Constant : Timing::Unknown;
+    nativeEos_ = false;
+}
+
+bool FFmpegSink::fallback_allowed(Status status) const noexcept {
+    if (!probation_ || cancelled() || rung_ + 1 >= rungs_.size()) return false;
+    // Contêiner direto: trocar o encoder reabre o arquivo; só sem áudio gravado.
+    if (!logMode_ && audioInputSamples_) return false;
+    switch (status.code()) {
+        case Errc::EncodeFailed: case Errc::EncoderUnavailable: case Errc::UnsupportedFormat:
+        case Errc::UnsupportedCodec: case Errc::Timeout: case Errc::CorruptData: case Errc::DecodeFailed:
+        case Errc::NotSupported:
+            return true;
+        default:
+            return false;
+    }
+}
+
+Status FFmpegSink::fallback(Status reason) noexcept {
+    for (;;) {
+        const auto text = reason.detail().empty() ? reason.message() : reason.detail();
+        char why[160];
+        std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
+        if (!fallback_allowed(reason)) {
+            if (probation_ && !cancelled() && reason.code() != Errc::Cancelled) note_failure(why);
+            return reason;
+        }
+        note_failure(why);
+        const usize next = rung_ + 1;
+        Status opened = OkStatus;
+        if (logMode_) {
+            // Registro: nada foi gravado antes do 1o pacote; só o encoder muda.
+            close_video();
+            opened = open_video(next);
+            if (opened.ok()) {
+                state_ = State::Open;
+                lastError_ = OkStatus;
+                reset_video_clock();
+            }
+        } else {
+            std::string path;
+            try { path = target_; } catch (...) { return error(Errc::OutOfMemory, "reabrir exportacao no proximo encoder"); }
+            const VideoStreamConfig video = video_;
+            const AudioStreamConfig audio = audio_;
+            const bool withAudio = hasAudio_;
+            std::vector<Retained> keep = std::move(retained_);
+            reopenFrom_ = next;
+            opened = open(path.c_str(), video, withAudio ? &audio : nullptr);
+            retained_ = std::move(keep);
+        }
+        if (!opened.ok()) return opened;
+        AUREA_LOG_WARN("export: seguindo no degrau %s com %u quadros guardados", rungName_,
+                       static_cast<unsigned>(retained_.size()));
+        const Status resent = resubmit_retained();
+        if (resent.ok()) return OkStatus;
+        reason = resent;
+    }
+}
+
+Status FFmpegSink::retain(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 pts, i64 duration, bool timed) noexcept {
+    try {
+        Retained frame;
+        const usize w = video_.width, h = video_.height;
+        frame.y.resize(w * h);
+        frame.uv.resize(w * (h / 2));
+        export_detail::copy_nv12_plane(frame.y.data(), w, y, ys, video_.width, video_.height);
+        export_detail::copy_nv12_plane(frame.uv.data(), w, uv, uvs, video_.width, video_.height / 2);
+        frame.pts = pts;
+        frame.duration = duration;
+        frame.timed = timed;
+        retained_.push_back(std::move(frame));
+    } catch (...) {
+        // Sem memória para guardar: o degrau atual segue sem rede (sem troca).
+        AUREA_LOG_WARN("export: sem memoria para guardar quadros da partida; %s segue sem troca de degrau", rungName_);
+        std::vector<Retained>().swap(retained_);
+        probation_ = false;
+    }
+    return OkStatus;
+}
+
+Status FFmpegSink::resubmit_retained() noexcept {
+    std::vector<Retained> frames = std::move(retained_);
+    retained_.clear();
+    try { retained_.reserve(frames.size()); } catch (...) { return error(Errc::OutOfMemory, "quadros da partida"); }
+    const u32 stride = video_.width;
+    for (usize i = 0; i < frames.size(); ++i) {
+        Retained* frame = &frames[i];
+        if (probation_) {
+            retained_.push_back(std::move(frames[i]));   // capacidade reservada: não realoca
+            frame = &retained_.back();
+        }
+        const Status written = write_video_impl(frame->y.data(), stride, frame->uv.data(), stride,
+                                                frame->pts, frame->duration, frame->timed);
+        if (!written.ok()) {
+            if (probation_)
+                for (usize j = i + 1; j < frames.size(); ++j) retained_.push_back(std::move(frames[j]));
+            return written;
+        }
+    }
+    return OkStatus;
+}
+
+Status FFmpegSink::wait_first_packet() noexcept {
+    const u64 started = monotonic_ns();
+    while (probation_) {
+        if (cancelled()) return error(Errc::Cancelled, "exportacao FFmpeg cancelada");
+        unsigned produced = 0;
+        if (const Status status = drain(videoCodec_, videoStream_, true, false, produced); !status.ok()) return status;
+        if (!probation_ || produced) continue;
+        if (monotonic_ns() - started > startupStallNs)
+            return error(Errc::Timeout, "o encoder nao entregou o primeiro pacote (partida travada)");
+        beat();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return OkStatus;
+}
+
+void FFmpegSink::fill_native_parameters(AVCodecParameters* par) const noexcept {
+    par->codec_type = AVMEDIA_TYPE_VIDEO;
+    par->codec_id = codec_id(video_.codec);
+    par->codec_tag = 0;
+    par->format = AV_PIX_FMT_YUV420P;
+    par->width = static_cast<int>(video_.width);
+    par->height = static_cast<int>(video_.height);
+    par->bit_rate = video_.bitrateBps;
+    par->sample_aspect_ratio = AVRational{1, 1};
+    par->framerate = rate_;
+    par->color_primaries = static_cast<AVColorPrimaries>(video_.color.primaries);
+    par->color_trc = static_cast<AVColorTransferCharacteristic>(video_.color.transfer);
+    par->color_space = static_cast<AVColorSpace>(video_.color.matrix);
+    par->color_range = video_.color.fullRange ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+    par->chroma_location = AVCHROMA_LOC_LEFT;
+    av_freep(&par->extradata);
+    par->extradata_size = 0;
+    if (!extradata_.empty()) {
+        par->extradata = static_cast<u8*>(av_mallocz(extradata_.size() + AV_INPUT_BUFFER_PADDING_SIZE));
+        if (par->extradata) {
+            std::memcpy(par->extradata, extradata_.data(), extradata_.size());
+            par->extradata_size = static_cast<int>(extradata_.size());
+        }
+    }
+}
+
+Status FFmpegSink::first_packet() noexcept {
+    if (extradata_.empty() && nativeActive_) {
+        try { extradata_ = native_->codec_config(); } catch (...) { extradata_.clear(); }
+    }
+    if (extradata_.empty() && packet_->data && packet_->size > 0) {
+        try { extradata_ = annexb_parameter_sets(packet_->data, static_cast<usize>(packet_->size), video_.codec == ExportCodec::HEVC); }
+        catch (...) { extradata_.clear(); }
+    }
+    // Encoder do aparelho (os dois degraus novos e o caminho FFmpeg/MediaCodec
+    // antigo, que presume o layout do buffer): o 1o quadro decodificado tem de
+    // bater com o NV12 entregue. Software do app é confiável: não confere.
+    const bool legacy = rung_ < rungs_.size() && rungs_[rung_].kind == Rung::Legacy;
+    if (nativeActive_ || legacy) {
+#if defined(__ANDROID__)
+        const bool surface = rung_ < rungs_.size() && rungs_[rung_].kind == Rung::Surface;
+        if (nativeActive_ && android_video::debug_flag("debug.aurea.enc.fail", surface ? "surface-verify" : "buffer-verify"))
+            return error(Errc::CorruptData, "verificacao do 1o quadro reprovada (simulada, debug.aurea.enc.fail)");
+#endif
+        if (const Status verified = verify_first_frame(); !verified.ok()) return verified;
+    }
+    if (logMode_) {
+        if (const Status started = start_log(); !started.ok()) return started;
+    } else if (videoStream_ && videoStream_->codecpar->extradata_size <= 0 && !extradata_.empty()) {
+        // O cabeçalho já foi escrito sem SPS/PPS (encoder do aparelho): o MP4
+        // os copia da faixa no 1o pacote.
+        videoStream_->codecpar->extradata = static_cast<u8*>(av_mallocz(extradata_.size() + AV_INPUT_BUFFER_PADDING_SIZE));
+        if (!videoStream_->codecpar->extradata) return error(Errc::OutOfMemory, "parametros de video do contêiner");
+        std::memcpy(videoStream_->codecpar->extradata, extradata_.data(), extradata_.size());
+        videoStream_->codecpar->extradata_size = static_cast<int>(extradata_.size());
+    }
+    probation_ = firstPacketPending_ = false;
+    AUREA_LOG_INFO("export: encoder de video %s confirmado no 1o pacote", rungName_);
+    publish_path("ok");
+    return OkStatus;
+}
+
+Status FFmpegSink::verify_first_frame() noexcept {
+    if (retained_.empty()) return OkStatus;
+    const AVCodec* decoder = avcodec_find_decoder(codec_id(video_.codec));
+    if (!decoder) {
+        AUREA_LOG_WARN("export: sem decoder para conferir o 1o quadro de %s", rungName_);
+        return OkStatus;
+    }
+    struct Resources {
+        AVCodecContext* context = nullptr;
+        AVPacket* packet = nullptr;
+        AVFrame* frame = nullptr;
+        ~Resources() { avcodec_free_context(&context); av_packet_free(&packet); av_frame_free(&frame); }
+    } r;
+    r.context = avcodec_alloc_context3(decoder);
+    r.packet = av_packet_alloc();
+    r.frame = av_frame_alloc();
+    if (!r.context || !r.packet || !r.frame) return OkStatus;   // sem memória para conferir: segue
+    if (!extradata_.empty()) {
+        r.context->extradata = static_cast<u8*>(av_mallocz(extradata_.size() + AV_INPUT_BUFFER_PADDING_SIZE));
+        if (!r.context->extradata) return OkStatus;
+        std::memcpy(r.context->extradata, extradata_.data(), extradata_.size());
+        r.context->extradata_size = static_cast<int>(extradata_.size());
+    }
+    r.context->thread_count = 1;
+    if (avcodec_open2(r.context, decoder, nullptr) < 0 || av_packet_ref(r.packet, packet_) < 0) return OkStatus;
+    int code = avcodec_send_packet(r.context, r.packet);
+    if (code >= 0) code = avcodec_send_packet(r.context, nullptr);
+    if (code >= 0) code = avcodec_receive_frame(r.context, r.frame);
+    beat();
+    if (code < 0) return error(Errc::CorruptData, "o 1o pacote do encoder nao decodifica");
+    const AVFrame* f = r.frame;
+    const u32 w = video_.width, h = video_.height;
+    if (f->width != static_cast<int>(w) || f->height != static_cast<int>(h)) {
+        char why[128];
+        std::snprintf(why, sizeof(why), "1o quadro do encoder saiu %dx%d em vez de %ux%u", f->width, f->height, w, h);
+        return error(Errc::CorruptData, why);
+    }
+    const bool planar = f->format == AV_PIX_FMT_YUV420P || f->format == AV_PIX_FMT_YUVJ420P;
+    if (!planar && f->format != AV_PIX_FMT_NV12) {
+        AUREA_LOG_WARN("export: 1o quadro de %s em formato %d; conferencia de cor pulada", rungName_, f->format);
+        return OkStatus;
+    }
+    // Média por bloco (≈ 16 × 9 blocos): ruído de compressão some na média;
+    // matriz/faixa trocada, quadro de cabeça para baixo ou layout errado não.
+    const Retained& source = retained_.front();
+    const u32 blocksX = std::clamp<u32>(w / 16u, 1u, 16u), blocksY = std::clamp<u32>(h / 16u, 1u, 9u);
+    const u32 bw = std::max<u32>(2, (w / blocksX) & ~1u), bh = std::max<u32>(2, (h / blocksY) & ~1u);
+    f64 sumY = 0.0, sumC = 0.0, worstY = 0.0, worstC = 0.0;
+    u32 blocks = 0;
+    for (u32 by = 0; by + bh <= h; by += bh) {
+        for (u32 bx = 0; bx + bw <= w; bx += bw) {
+            f64 ys = 0.0, yd = 0.0, cbs = 0.0, cbd = 0.0, crs = 0.0, crd = 0.0;
+            for (u32 y = by; y < by + bh; ++y) {
+                const u8* s = source.y.data() + static_cast<usize>(y) * w;
+                const u8* d = f->data[0] + static_cast<usize>(y) * static_cast<usize>(f->linesize[0]);
+                for (u32 x = bx; x < bx + bw; ++x) { ys += s[x]; yd += d[x]; }
+            }
+            for (u32 y = by / 2; y < (by + bh) / 2; ++y) {
+                const u8* s = source.uv.data() + static_cast<usize>(y) * w;
+                for (u32 x = bx / 2; x < (bx + bw) / 2; ++x) {
+                    cbs += s[2 * x];
+                    crs += s[2 * x + 1];
+                    if (planar) {
+                        cbd += f->data[1][static_cast<usize>(y) * static_cast<usize>(f->linesize[1]) + x];
+                        crd += f->data[2][static_cast<usize>(y) * static_cast<usize>(f->linesize[2]) + x];
+                    } else {
+                        const u8* d = f->data[1] + static_cast<usize>(y) * static_cast<usize>(f->linesize[1]);
+                        cbd += d[2 * x];
+                        crd += d[2 * x + 1];
+                    }
+                }
+            }
+            const f64 lumaCount = static_cast<f64>(bw) * bh, chromaCount = lumaCount / 4.0;
+            const f64 ey = std::abs(ys - yd) / lumaCount;
+            const f64 ec = std::max(std::abs(cbs - cbd), std::abs(crs - crd)) / chromaCount;
+            sumY += ey; sumC += ec;
+            worstY = std::max(worstY, ey); worstC = std::max(worstC, ec);
+            ++blocks;
+        }
+    }
+    if (!blocks) return OkStatus;
+    const f64 meanY = sumY / blocks, meanC = sumC / blocks;
+    AUREA_LOG_INFO("export: 1o quadro de %s x NV12 entregue: Y media %.2f pior %.1f, CbCr media %.2f pior %.1f (%u blocos)",
+                   rungName_, meanY, worstY, meanC, worstC, blocks);
+    if (meanY > verifyMeanLimit || meanC > verifyMeanLimit || worstY > verifyBlockLimit || worstC > verifyBlockLimit) {
+        char why[160];
+        std::snprintf(why, sizeof(why), "1o quadro do encoder diverge do original (Y %.1f/%.0f, CbCr %.1f/%.0f)",
+                      meanY, worstY, meanC, worstC);
+        return error(Errc::CorruptData, why);
+    }
+    return OkStatus;
+}
+
+Status FFmpegSink::start_log() noexcept {
+    if (logStarted_) return OkStatus;
+    if (extradata_.empty() || extradata_.size() > export_log::kMaxExtradataBytes)
+        return error(Errc::EncoderUnavailable, "encoder sem parametros globais para o registro de pacotes");
+    try { logInfo_.extradata = extradata_; }
+    catch (...) { return error(Errc::OutOfMemory, "parametros do registro de pacotes"); }
+    const Status opened = video_.resumeFrame ? log_.resume(logPath_, logInfo_, resumeScan_)
+                                             : log_.create(logPath_, logInfo_);
+    beat();
+    if (!opened.ok()) {
+        char why[200];
+        const auto text = opened.detail().empty() ? std::string_view{"abrir registro de pacotes"} : opened.detail();
+        std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
+        return error(opened.code(), why);
+    }
+    logStarted_ = true;
+    return OkStatus;
+}
+
+Status FFmpegSink::send_native(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 us) noexcept {
+    auto failed = [&](Status status) noexcept {
+        const auto text = status.detail().empty() ? status.message() : status.detail();
+        char why[200];
+        std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
+        return error(status.code(), why);
+    };
+    // Surface: no máximo `limit` quadros sem pacote. Passar disso travaria
+    // DENTRO do EGL se o encoder parasse; aqui a espera tem prazo.
+    const u32 limit = native_->max_in_flight();
+    u64 waited = monotonic_ns();
+    while (limit && pendingCount_ >= limit) {
+        if (cancelled()) return error(Errc::Cancelled, "encoder do aparelho cancelado");
+        unsigned produced = 0;
+        if (const Status status = drain_native(false, produced); !status.ok()) return status;
+        if (produced) { waited = monotonic_ns(); continue; }
+        if (monotonic_ns() - waited > stall_ns())
+            return error(Errc::Timeout, probation_ ? "o encoder nao entregou o primeiro pacote (partida travada)"
+                                                   : "o encoder do aparelho parou de devolver quadros");
+        beat();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    u64 started = monotonic_ns();
+    for (;;) {
+        if (cancelled()) return error(Errc::Cancelled, "encoder do aparelho cancelado");
+        const Status sent = native_->send(y, ys, uv, uvs, us, stall_ns());
+        beat();
+        if (sent.ok()) return OkStatus;
+        if (sent.code() != Errc::Busy) return failed(sent);
+        unsigned produced = 0;
+        if (const Status status = drain_native(false, produced); !status.ok()) return status;
+        if (produced) { started = monotonic_ns(); continue; }
+        if (monotonic_ns() - started > stall_ns())
+            return error(Errc::Timeout, probation_ ? "o encoder nao entregou o primeiro pacote (partida travada)"
+                                                   : "encoder do aparelho sem entrada livre");
+    }
+}
+
+Status FFmpegSink::drain_native(bool flushing, unsigned& produced) noexcept {
+    produced = 0;
+    u64 progress = monotonic_ns();
+    for (;;) {
+        if (cancelled()) return error(Errc::Cancelled, "drenagem do encoder cancelada");
+        if (nativeEos_) return OkStatus;
+        bool got = false, eos = false;
+        const Status received = native_->receive(nativePacket_, got, eos, flushing ? 10'000 : 0);
+        beat();
+        if (received.code() == Errc::Busy) {
+            if (!flushing) return OkStatus;
+            if (monotonic_ns() - progress > stall_ns())
+                return error(Errc::Timeout, "encoder do aparelho nao concluiu EOS");
+            continue;
+        }
+        if (!received.ok()) {
+            const auto text = received.detail().empty() ? received.message() : received.detail();
+            char why[200];
+            std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
+            return error(received.code(), why);
+        }
+        if (got) {
+            ++produced;
+            progress = monotonic_ns();
+            if (!pendingCount_ || nativePacket_.ptsUs != pendingVideo_[pendingHead_].us)
+                return error(Errc::EncodeFailed, "encoder do aparelho omitiu, duplicou ou reordenou quadro");
+            av_packet_unref(packet_);
+            const int made = av_new_packet(packet_, static_cast<int>(nativePacket_.data.size()));
+            if (made < 0) return error(Errc::OutOfMemory, "pacote do encoder do aparelho", made);
+            std::memcpy(packet_->data, nativePacket_.data.data(), nativePacket_.data.size());
+            packet_->pts = packet_->dts = pendingVideo_[pendingHead_].pts;
+            if (nativePacket_.key) packet_->flags |= AV_PKT_FLAG_KEY;
+            if (const Status status = video_packet(videoTimebase_); !status.ok()) return status;
+            av_packet_unref(packet_);
+        }
+        if (eos) {
+            nativeEos_ = true;
+            return OkStatus;
+        }
+    }
+}
+
+Status FFmpegSink::finish_video_stream() noexcept {
+    for (;;) {
+        Status result = OkStatus;
+        if (nativeActive_) {
+            const u64 started = monotonic_ns();
+            for (;;) {
+                if (cancelled()) { result = error(Errc::Cancelled, "EOS do encoder cancelado"); break; }
+                const Status eos = native_->end_of_stream();
+                beat();
+                if (eos.ok()) break;
+                if (eos.code() != Errc::Busy) { result = error(eos.code(), "encoder do aparelho recusou o EOS"); break; }
+                unsigned produced = 0;
+                if (const Status status = drain_native(false, produced); !status.ok()) { result = status; break; }
+                if (!produced && monotonic_ns() - started > stall_ns()) {
+                    result = error(Errc::Timeout, "encoder do aparelho sem entrada para o EOS");
+                    break;
+                }
+            }
+            unsigned produced = 0;
+            if (result.ok()) result = drain_native(true, produced);
+            if (result.ok() && !nativeEos_) result = error(Errc::EncodeFailed, "encoder do aparelho terminou sem EOS");
+        } else {
+            unsigned produced = 0;
+            result = send(videoCodec_, videoStream_, nullptr, true);
+            if (result.ok()) result = drain(videoCodec_, videoStream_, true, true, produced);
+        }
+        if (result.ok() && (pendingCount_ || videoPackets_ != videoFrames_))
+            result = error(Errc::EncodeFailed, "encoder FFmpeg nao entregou todos os frames submetidos");
+        if (result.ok() && videoCrop_) {
+            int code = av_bsf_send_packet(videoCrop_, nullptr);
+            if (code >= 0) code = av_bsf_receive_packet(videoCrop_, packet_);
+            if (code != AVERROR_EOF)
+                result = error(Errc::EncodeFailed, "crop HEVC FFmpeg nao concluiu EOS sem frames adicionais", code);
+        }
+        if (result.ok()) return OkStatus;
+        // Clipe curto: o encoder travou/recusou antes do 1o pacote — o
+        // próximo degrau recebe todos os quadros guardados e fecha de novo.
+        if (!probation_) return result;
+        if (const Status moved = fallback(result); !moved.ok()) return moved;
+    }
 }
 
 Status FFmpegSink::open_audio() noexcept {
@@ -663,8 +1331,40 @@ Status FFmpegSink::mux(AVPacket* packet, AVRational from, AVStream* stream) noex
     return OkStatus;
 }
 
+Status FFmpegSink::video_packet(AVRational from) noexcept {
+    packet_->duration = pendingVideo_[pendingHead_].duration;
+    pendingHead_ = (pendingHead_ + 1) % maxPendingVideo; --pendingCount_;
+    ++videoPackets_;
+    if (videoCrop_) {
+        int filtered = av_bsf_send_packet(videoCrop_, packet_);
+        if (filtered >= 0) filtered = av_bsf_receive_packet(videoCrop_, packet_);
+        if (filtered < 0) return error(Errc::EncodeFailed, "aplicar dimensoes HEVC FFmpeg ao frame", filtered);
+    }
+    // 1o pacote do degrau: confere o quadro e abre o registro com os
+    // parâmetros deste encoder. Falha aqui ainda troca de degrau.
+    if (firstPacketPending_)
+        if (const Status status = first_packet(); !status.ok()) return status;
+    if (logMode_) {
+        // Export retomável: o pacote vai para o registro durável, em ordem.
+        const u64 frame = videoPackets_ - 1;
+        if (packet_->pts != frame_pts(frame) || packet_->size <= 0)
+            return error(Errc::EncodeFailed, "pacote do encoder fora do relogio do registro");
+        const Status logged = log_.append(static_cast<u32>(frame), packet_->data,
+            static_cast<usize>(packet_->size), (packet_->flags & AV_PKT_FLAG_KEY) != 0);
+        beat();
+        if (!logged.ok()) return error(logged.code(), logged.detail().empty() ? "registro de pacotes" : logged.detail().data());
+    } else if (const Status status = mux(packet_, from, videoStream_); !status.ok()) return status;
+    if (videoCrop_) {
+        const int extra = av_bsf_receive_packet(videoCrop_, packet_);
+        if (extra != AVERROR(EAGAIN))
+            return error(Errc::EncodeFailed, "crop HEVC FFmpeg alterou a quantidade de frames", extra);
+    }
+    return OkStatus;
+}
+
 Status FFmpegSink::drain(AVCodecContext* codec, AVStream* stream, bool video,
                          bool flushing, unsigned& produced) noexcept {
+    if (video && nativeActive_) return drain_native(flushing, produced);
     produced = 0;
     const u64 started = monotonic_ns();
     for (;;) {
@@ -675,7 +1375,7 @@ Status FFmpegSink::drain(AVCodecContext* codec, AVStream* stream, bool video,
             if (!flushing) return OkStatus;
             // Real-time hardware wrappers may need another poll after EOS.
             // A bounded timeout is an error, never a discarded final frame.
-            if (monotonic_ns() - started > codecStallNs)
+            if (monotonic_ns() - started > (video ? stall_ns() : codecStallNs))
                 return error(Errc::Timeout, "encoder FFmpeg nao concluiu EOS");
             std::this_thread::yield();
             continue;
@@ -687,29 +1387,7 @@ Status FFmpegSink::drain(AVCodecContext* codec, AVStream* stream, bool video,
                 av_packet_unref(packet_);
                 return error(Errc::EncodeFailed, "encoder FFmpeg omitiu, duplicou ou reordenou frame sem autorizacao");
             }
-            packet_->duration = pendingVideo_[pendingHead_].duration;
-            pendingHead_ = (pendingHead_ + 1) % maxPendingVideo; --pendingCount_;
-            ++videoPackets_;
-            if (videoCrop_) {
-                int filtered = av_bsf_send_packet(videoCrop_, packet_);
-                if (filtered >= 0) filtered = av_bsf_receive_packet(videoCrop_, packet_);
-                if (filtered < 0) return error(Errc::EncodeFailed, "aplicar dimensoes HEVC FFmpeg ao frame", filtered);
-            }
-            if (logMode_) {
-                // Export retomável: o pacote vai para o registro durável, em ordem.
-                const u64 frame = videoPackets_ - 1;
-                if (packet_->pts != frame_pts(frame) || packet_->size <= 0)
-                    return error(Errc::EncodeFailed, "pacote do encoder fora do relogio do registro");
-                const Status logged = log_.append(static_cast<u32>(frame), packet_->data,
-                    static_cast<usize>(packet_->size), (packet_->flags & AV_PKT_FLAG_KEY) != 0);
-                beat();
-                if (!logged.ok()) return error(logged.code(), logged.detail().empty() ? "registro de pacotes" : logged.detail().data());
-            } else if (const Status status = mux(packet_, codec->time_base, stream); !status.ok()) return status;
-            if (videoCrop_) {
-                const int extra = av_bsf_receive_packet(videoCrop_, packet_);
-                if (extra != AVERROR(EAGAIN))
-                    return error(Errc::EncodeFailed, "crop HEVC FFmpeg alterou a quantidade de frames", extra);
-            }
+            if (const Status status = video_packet(codec->time_base); !status.ok()) return status;
         } else {
             // Keep only the final AAC packet so its exact duration/tail padding
             // can be written after all resampler samples have been accounted.
@@ -730,7 +1408,7 @@ Status FFmpegSink::send(AVCodecContext* codec, AVStream* stream, const AVFrame* 
         if (result == AVERROR(EAGAIN)) {
             unsigned produced = 0;
             if (const Status status = drain(codec, stream, video, false, produced); !status.ok()) return status;
-            if (!produced && monotonic_ns() - started > codecStallNs)
+            if (!produced && monotonic_ns() - started > (video ? stall_ns() : codecStallNs))
                 return error(Errc::Timeout, "encoder FFmpeg bloqueou sem produzir pacote");
             if (!produced) std::this_thread::yield();
             continue; // retry exactly the same frame; no skip/advance
@@ -742,29 +1420,27 @@ Status FFmpegSink::send(AVCodecContext* codec, AVStream* stream, const AVFrame* 
 
 Status FFmpegSink::write_video_with_fallback(const u8* y, u32 ys, const u8* uv, u32 uvs,
                                            i64 pts, i64 duration, bool timed) noexcept {
+    if (const Status status = ready(); !status.ok()) return status;
+    if (assembling_) return Status{Errc::InvalidState, "montagem do MP4 nao aceita quadros novos"};
+    if (!y || !uv || ys < video_.width || uvs < video_.width || ys > INT_MAX || uvs > INT_MAX)
+        return Status{Errc::InvalidArgument, "pixels ou tempo de frame FFmpeg invalidos"};
+    if (!probation_ && !retained_.empty()) std::vector<Retained>().swap(retained_);
+    if (probation_ && retained_.size() >= maxRetained_) {
+        // Guardados no limite e nenhum pacote ainda: o encoder tem um prazo
+        // curto para mostrar que anda; senão o próximo degrau assume.
+        Status waited = wait_first_packet();
+        if (!waited.ok()) waited = fallback(waited);
+        if (!waited.ok()) return waited;
+        if (!probation_) std::vector<Retained>().swap(retained_);
+    }
+    if (probation_)
+        if (const Status kept = retain(y, ys, uv, uvs, pts, duration, timed); !kept.ok()) return kept;
     Status result = write_video_impl(y, ys, uv, uvs, pts, duration, timed);
-    if (result.ok()) { ++completedVideoWrites_; return result; }
-    if (state_ != State::Failed || completedVideoWrites_ || audioInputSamples_ ||
-        video_.preferSoftware || encoder_.acceleration == Acceleration::Software ||
-        (result.code() != Errc::EncodeFailed && result.code() != Errc::EncoderUnavailable &&
-         result.code() != Errc::UnsupportedFormat && result.code() != Errc::Timeout)) return result;
-    // A late hardware rejection is still part of startup. Delete only our own
-    // temporary container, open a fresh software session and resubmit the exact
-    // caller-owned frame. Never change encoder or advance PTS mid-session.
-    // Uma sessão retomada não troca de encoder: os parâmetros (SPS/PPS) do
-    // registro são os da sessão anterior. O motor recomeça do zero.
-    if (logMode_ && video_.resumeFrame) return result;
-    const VideoStreamConfig requested = video_;
-    VideoStreamConfig software = requested; software.preferSoftware = true;
-    const AudioStreamConfig audio = audio_;
-    const bool withAudio = hasAudio_;
-    std::string path, log;
-    try { path = target_; log = logPath_; }
-    catch (...) { return error(Errc::OutOfMemory, "reinicio de exportacao FFmpeg por software"); }
-    if (!log.empty()) software.packetLogPath = log.c_str();
-    if (const Status opened = open(path.c_str(), software, withAudio ? &audio : nullptr); !opened.ok()) return opened;
-    result = write_video_impl(y, ys, uv, uvs, pts, duration, timed);
+    // Recusa/travada do encoder antes do 1o pacote: o quadro atual já está
+    // guardado e vai junto com os outros para o próximo degrau.
+    if (!result.ok() && probation_) result = fallback(result);
     if (result.ok()) ++completedVideoWrites_;
+    if (!probation_ && !retained_.empty()) std::vector<Retained>().swap(retained_);
     return result;
 }
 
@@ -802,10 +1478,23 @@ Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
             unsigned produced = 0;
             if (const Status status = drain(videoCodec_, videoStream_, true, false, produced); !status.ok()) return status;
             if (produced) continue;
-            if (monotonic_ns() - waitStarted > codecStallNs)
+            if (monotonic_ns() - waitStarted > stall_ns())
                 return error(Errc::Timeout, "encoder FFmpeg nao devolveu pacotes com a fila de quadros cheia");
+            beat();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
+    }
+    // O tempo que o encoder do aparelho recebe (us) e devolve no pacote.
+    const i64 frameUs = timed ? pts : av_rescale_q(framePts, videoTimebase_, micros);
+    if (nativeActive_) {
+        if (const Status status = send_native(y, ys, uv, uvs, frameUs); !status.ok()) return status;
+        pendingVideo_[(pendingHead_ + pendingCount_) % maxPendingVideo] = {framePts, frameDuration, frameUs};
+        ++pendingCount_; ++videoFrames_;
+        videoHash_ = timestamp_hash(videoHash_, framePts);
+        lastVideoPts_ = framePts; lastVideoEnd_ = framePts + frameDuration;
+        timing_ = timed ? Timing::Variable : Timing::Constant;
+        unsigned produced = 0;
+        return drain_native(false, produced);
     }
     int result = av_frame_make_writable(videoFrame_);
     if (result < 0) return error(Errc::OutOfMemory, "tornar frame FFmpeg gravavel", result);
@@ -838,7 +1527,7 @@ Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
     }
     videoFrame_->pts = framePts; videoFrame_->duration = frameDuration;
     if (const Status status = send(videoCodec_, videoStream_, videoFrame_, true); !status.ok()) return status;
-    pendingVideo_[(pendingHead_ + pendingCount_) % maxPendingVideo] = {framePts, frameDuration};
+    pendingVideo_[(pendingHead_ + pendingCount_) % maxPendingVideo] = {framePts, frameDuration, frameUs};
     ++pendingCount_; ++videoFrames_;
     videoHash_ = timestamp_hash(videoHash_, framePts);
     lastVideoPts_ = framePts; lastVideoEnd_ = framePts + frameDuration;
@@ -990,17 +1679,8 @@ Status FFmpegSink::finish() noexcept {
         export_log::Packet extra; bool end = false;
         if (const Status status = logReader_.next(extra, end); !status.ok() || !end)
             return error(Errc::CorruptData, "registro de pacotes tem quadros alem do video exportado");
-    } else {
-        if (const Status status = send(videoCodec_, videoStream_, nullptr, true); !status.ok()) return status;
-        if (const Status status = drain(videoCodec_, videoStream_, true, true, produced); !status.ok()) return status;
-        if (pendingCount_ || videoPackets_ != videoFrames_)
-            return error(Errc::EncodeFailed, "encoder FFmpeg nao entregou todos os frames submetidos");
-        if (videoCrop_) {
-            int result = av_bsf_send_packet(videoCrop_, nullptr);
-            if (result >= 0) result = av_bsf_receive_packet(videoCrop_, packet_);
-            if (result != AVERROR_EOF)
-                return error(Errc::EncodeFailed, "crop HEVC FFmpeg nao concluiu EOS sem frames adicionais", result);
-        }
+    } else if (const Status status = finish_video_stream(); !status.ok()) {
+        return status;
     }
     videoStream_->duration = av_rescale_q(lastVideoEnd_, videoTimebase_, videoStream_->time_base);
     if (hasAudio_) {
@@ -1041,35 +1721,22 @@ Status FFmpegSink::finish() noexcept {
     return publish();
 }
 
+void FFmpegSink::fill_log_info(export_log::StreamInfo& info) const noexcept {
+    info.codec = static_cast<u32>(video_.codec);
+    info.width = video_.width; info.height = video_.height;
+    info.rateNum = rate_.num; info.rateDen = rate_.den;
+    info.timebaseNum = videoTimebase_.num; info.timebaseDen = videoTimebase_.den;
+    info.sessionKey = video_.sessionKey;
+    info.totalFrames = video_.totalFrames;
+}
+
 Status FFmpegSink::open_log() noexcept {
     logInfo_ = {};
-    logInfo_.codec = static_cast<u32>(video_.codec);
-    logInfo_.width = video_.width; logInfo_.height = video_.height;
-    logInfo_.rateNum = rate_.num; logInfo_.rateDen = rate_.den;
-    logInfo_.timebaseNum = videoTimebase_.num; logInfo_.timebaseDen = videoTimebase_.den;
-    logInfo_.sessionKey = video_.sessionKey;
-    logInfo_.totalFrames = video_.totalFrames;
-    const AVCodecParameters* cropped = videoCrop_ ? videoCrop_->par_out : nullptr;
-    const u8* extra = cropped ? cropped->extradata : videoCodec_->extradata;
-    const int extraBytes = cropped ? cropped->extradata_size : videoCodec_->extradata_size;
-    // O MP4 montado no fim precisa dos parâmetros globais (avcC/hvcC); um
-    // encoder que só os manda dentro dos pacotes não serve para o registro.
-    if (!extra || extraBytes <= 0 || static_cast<u32>(extraBytes) > export_log::kMaxExtradataBytes)
-        return error(Errc::EncoderUnavailable, "encoder sem parametros globais para o registro de pacotes");
-    try { logInfo_.extradata.assign(extra, extra + extraBytes); }
-    catch (...) { return error(Errc::OutOfMemory, "parametros do registro de pacotes"); }
-    Status opened = OkStatus;
-    if (!video_.resumeFrame) {
-        opened = log_.create(logPath_, logInfo_);
-    } else {
-        export_log::ScanResult scanned;
-        opened = export_log::scan(logPath_, scanned);
-        if (opened.ok() && scanned.resumeFrame != video_.resumeFrame)
-            opened = Status{Errc::InvalidState, "registro de pacotes mudou desde a varredura"};
-        if (opened.ok()) opened = log_.resume(logPath_, logInfo_, scanned);
-    }
-    beat();
-    if (!opened.ok()) return error(opened.code(), opened.detail().empty() ? "abrir registro de pacotes" : opened.detail().data());
+    fill_log_info(logInfo_);
+    // O registro abre no 1o pacote (start_log), com os parâmetros globais
+    // (avcC/hvcC) do degrau que provou funcionar — o encoder do aparelho só os
+    // entrega junto com a saída. A retomada já foi varrida em open().
+    logStarted_ = false;
     if (!packet_) packet_ = av_packet_alloc();
     if (!packet_) return error(Errc::OutOfMemory, "pacotes da exportacao FFmpeg");
     // PCM do render: só numa sessão do zero (retomada mixa tudo de novo no fim).
@@ -1082,11 +1749,7 @@ Status FFmpegSink::open_log() noexcept {
         spillAudio_ = spill_ != nullptr;
     }
     // A sessão continua o relógio absoluto do registro: quadro i -> PTS de i.
-    const u64 resume = video_.resumeFrame;
-    videoFrames_ = videoPackets_ = resume;
-    for (u64 frame = 0; frame < resume; ++frame) videoHash_ = timestamp_hash(videoHash_, frame_pts(frame));
-    if (resume) { lastVideoPts_ = frame_pts(resume - 1); lastVideoEnd_ = frame_pts(resume); }
-    timing_ = Timing::Constant;
+    reset_video_clock();
     state_ = State::Open;
     return OkStatus;
 }
@@ -1095,18 +1758,8 @@ Status FFmpegSink::end_video() noexcept {
     if (!logMode_ || assembling_) return Status{Errc::InvalidState, "end_video so vale para o registro de pacotes"};
     if (const Status status = ready(); !status.ok()) return status;
     if (!videoFrames_) return error(Errc::EncodeFailed, "registro de pacotes sem quadros");
-    unsigned produced = 0;
-    if (const Status status = send(videoCodec_, nullptr, nullptr, true); !status.ok()) return status;
-    if (const Status status = drain(videoCodec_, nullptr, true, true, produced); !status.ok()) return status;
-    if (pendingCount_ || videoPackets_ != videoFrames_)
-        return error(Errc::EncodeFailed, "encoder FFmpeg nao entregou todos os frames submetidos");
-    if (videoCrop_) {
-        int result = av_bsf_send_packet(videoCrop_, nullptr);
-        if (result >= 0) result = av_bsf_receive_packet(videoCrop_, packet_);
-        if (result != AVERROR_EOF)
-            return error(Errc::EncodeFailed, "crop HEVC FFmpeg nao concluiu EOS sem frames adicionais", result);
-    }
-    if (log_.frames() != videoFrames_) return error(Errc::EncodeFailed, "registro de pacotes perdeu quadros");
+    if (const Status status = finish_video_stream(); !status.ok()) return status;
+    if (!logStarted_ || log_.frames() != videoFrames_) return error(Errc::EncodeFailed, "registro de pacotes perdeu quadros");
     if (spill_) {
         const bool flushed = std::fflush(spill_) == 0;
         const bool closed = std::fclose(spill_) == 0;
@@ -1115,14 +1768,13 @@ Status FFmpegSink::end_video() noexcept {
     }
     videoParams_ = avcodec_parameters_alloc();
     if (!videoParams_) return error(Errc::OutOfMemory, "parametros de video FFmpeg");
-    const int copied = videoCrop_ ? avcodec_parameters_copy(videoParams_, videoCrop_->par_out)
-                                  : avcodec_parameters_from_context(videoParams_, videoCodec_);
+    int copied = 0;
+    if (nativeActive_) fill_native_parameters(videoParams_);
+    else copied = videoCrop_ ? avcodec_parameters_copy(videoParams_, videoCrop_->par_out)
+                             : avcodec_parameters_from_context(videoParams_, videoCodec_);
     if (copied < 0) return error(Errc::EncodeFailed, "parametros de video FFmpeg", copied);
     // O encoder do aparelho é solto antes da montagem (memória e hardware).
-    avcodec_free_context(&videoCodec_);
-    av_bsf_free(&videoCrop_);
-    av_frame_free(&videoFrame_);
-    sws_freeContext(scale_); scale_ = nullptr;
+    close_video();
     if (const Status closed = log_.close(); !closed.ok())
         return error(closed.code(), "fechar registro de pacotes");
     beat();
@@ -1410,3 +2062,22 @@ bool ffmpeg_export_available() noexcept { return false; }
 std::unique_ptr<ExportSink> make_ffmpeg_export_sink(void*) noexcept { return nullptr; }
 } // namespace aurea
 #endif
+
+namespace aurea {
+namespace {
+std::mutex exportPathMutex;
+char exportPath[640]{};
+} // namespace
+
+void set_last_export_encoder_path(const char* text) noexcept {
+    std::lock_guard lock(exportPathMutex);
+    std::snprintf(exportPath, sizeof(exportPath), "%s", text ? text : "");
+}
+
+usize last_export_encoder_path(char* out, usize capacity) noexcept {
+    std::lock_guard lock(exportPathMutex);
+    const usize length = std::strlen(exportPath);
+    if (out && capacity) std::snprintf(out, capacity, "%s", exportPath);
+    return length;
+}
+} // namespace aurea

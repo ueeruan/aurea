@@ -3770,6 +3770,16 @@ AUREA_JNI jlong AUREA_FN(nativeExportBitrateBps)(JNIEnv*, jclass, jint width, ji
         static_cast<u32>(std::max(0, customMbps))));
 }
 
+/// O degrau do encoder de vídeo do último export (escada do FFmpegExportSink:
+/// surface / buffer / legacy / software, e os que falharam antes): para o log
+/// e o diagnóstico do relato de bug. Vazio = nenhum export neste processo.
+AUREA_JNI jstring AUREA_FN(nativeLastExportEncoderPath)(JNIEnv* env, jclass) {
+    char text[640]{};
+    (void)last_export_encoder_path(text, sizeof(text));
+    for (char& c : text) if (static_cast<unsigned char>(c) >= 0x80) c = '?';   // UTF-8 modificado: só ASCII
+    return env->NewStringUTF(text);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeExportDuration)(JNIEnv*, jclass, jlong handle, jboolean trimToContent) {
     NativeContext* c = ctx_of(handle);
     return c ? c->engine.query_export_duration(trimToContent == JNI_TRUE) : 0;

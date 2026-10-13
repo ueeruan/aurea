@@ -1021,6 +1021,11 @@ NS_SWIFT_NAME(AureaEngine)
                        codec:(AureaExportCodec)codec quality:(uint32_t)quality
                   customMbps:(uint32_t)customMbps;
 - (long long)exportDuration:(BOOL)trimToContent;
+/// O degrau do encoder de vídeo que o último export usou (escada do motor,
+/// FFmpegExportSink: "videotoolbox:…", "videotoolbox-i420:…", "software:…",
+/// com os que falharam antes), para o log e o diagnóstico do relato de bug.
+/// Vazio = nenhum export neste processo. Mesmo texto do Android.
++ (NSString*)lastExportEncoderPath;
 - (void)cancelExport;
 /// Explicitly restores the checked export snapshot, then restarts from zero.
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;

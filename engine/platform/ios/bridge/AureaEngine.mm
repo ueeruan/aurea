@@ -32,6 +32,7 @@
 #include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
+#include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/ui/BuiltinPropertySchema.hpp"
 
@@ -3868,6 +3869,13 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 // =============================================================================
 // Export
 // =============================================================================
++ (NSString*)lastExportEncoderPath {
+    char text[640] = {};
+    (void)aurea::last_export_encoder_path(text, sizeof(text));
+    NSString* path = [NSString stringWithUTF8String:text];
+    return path ? path : @"";
+}
+
 - (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps {

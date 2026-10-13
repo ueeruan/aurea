@@ -1141,8 +1141,9 @@ PipelineKey SceneRenderer::key_for(AlphaMode mode, bool doubleSided, bool skinne
     return k;
 }
 
-PipelineKey SceneRenderer::plane_key(bool translucent) const noexcept {
-    PipelineKey k = PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F, true,
+PipelineKey SceneRenderer::plane_key(bool translucent, bool periodic) const noexcept {
+    PipelineKey k = PipelineKey::graphics(periodic ? ShaderId::scene3d_plane_tile_vert : ShaderId::composite_layer_vert,
+                                          periodic ? ShaderId::scene3d_plane_tile_frag : ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F, true,
                                           BlendMode::Normal);
     k.hasDepth = true;
     k.depthTest = true;
@@ -1188,12 +1189,16 @@ void SceneRenderer::collect_pipelines(std::vector<PipelineKey>& out) const {
         out.push_back(shadow_key(true));
         out.push_back(plane_key());
         out.push_back(plane_key(true));
+        out.push_back(plane_key(false, true));
+        out.push_back(plane_key(true, true));
         self->passMrt_ = false;
         // A plane-only group checks this PBR key before its MSAA pass,
         // even though it has no model and no HDR attachment.
         out.push_back(key_for(AlphaMode::Opaque, false, false));
         out.push_back(plane_key());
         out.push_back(plane_key(true));
+        out.push_back(plane_key(false, true));
+        out.push_back(plane_key(true, true));
         auto sky = PipelineKey::graphics(ShaderId::common_fullscreen_vert, ShaderId::scene3d_environment_frag, SurfaceFormat::RGBA16F);
         sky.hasDepth = true; sky.depthFormat = SurfaceFormat::Depth32F;
         sky.sampleCount = static_cast<u8>(passSamples_);
@@ -2162,10 +2167,17 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // mais perto, antes dos modelos transparentes.
     u32 planeCount = 0;
     ScenePlane* planeList = nullptr;
-    PipelineHandle planePipe{}, planeBlendPipe{};
+    PipelineHandle planePipe{}, planeBlendPipe{}, tilePlanePipe{}, tilePlaneBlendPipe{};
     if (planes && !planes->empty()) {
         auto pp = shaders_->pipeline(plane_key());
         auto blend = shaders_->pipeline(plane_key(true));
+        const bool hasPeriodic = std::any_of(planes->begin(), planes->end(), [](const ScenePlane& plane) { return plane.periodic.count != 0; });
+        if (hasPeriodic) {
+            auto tile = shaders_->pipeline(plane_key(false, true));
+            auto tileBlend = shaders_->pipeline(plane_key(true, true));
+            if (!tile.ok() || !tileBlend.ok()) { incomplete_ = true; return false; }
+            tilePlanePipe = *tile; tilePlaneBlendPipe = *tileBlend;
+        }
         if (!pp.ok() || !blend.ok()) incomplete_ = true;
         if (pp.ok() && blend.ok()) {
             planePipe = *pp;
@@ -2219,14 +2231,14 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         ScenePlane* planes;
         u32 planeCount;
         u32 opaqueCount;
-        PipelineHandle planePipe, planeBlendPipe;
+        PipelineHandle planePipe, planeBlendPipe, tilePlanePipe, tilePlaneBlendPipe;
         SceneParticleDraw* parts;
         u32 partCount;
         EnvSlot sceneEnv;             ///< o ambiente do grupo (d.env nulo)
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
-          shaders_->sampler(CommonSampler::NearestClamp).id, shaders_->sampler(CommonSampler::ShadowCompare).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe, planeBlendPipe,
+          shaders_->sampler(CommonSampler::NearestClamp).id, shaders_->sampler(CommonSampler::ShadowCompare).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe, planeBlendPipe, tilePlanePipe, tilePlaneBlendPipe,
           partList, partList ? particleCount : 0u, envSlots[0]};
 
     // ===== CHÃO DO GRUPO 3D (Ground.cpp) =========================================
@@ -2345,11 +2357,23 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             // A tilted translucent pixel must blend over the already drawn background,
             // even when the plane centers sort in the opposite depth order.
             for (u32 phase = 0; phase < 2; ++phase) {
-                c.bind_pipeline(phase ? cap.planeBlendPipe : cap.planePipe);
                 for (u32 k = 0; k < cap.planeCount; ++k) {
                     const ScenePlane& p = cap.planes[k];
-                    c.bind_texture(0, pc.texture(p.texture), SamplerHandle{p.sampler});
-                    c.set_uniforms(&p.light, sizeof(p.light));   // luzes da composição (plane.frag)
+                    const bool tile = p.periodic.count != 0;
+                    c.bind_pipeline(tile ? (phase ? cap.tilePlaneBlendPipe : cap.tilePlanePipe)
+                                         : (phase ? cap.planeBlendPipe : cap.planePipe));
+                    if (tile) {
+                        for (u32 n = 0; n < motion_tile::kSceneTileSlots; ++n)
+                            c.bind_texture(n, pc.texture(p.periodic.textures[n]), SamplerHandle{p.sampler});
+                        struct TileBlock { PlaneLightBlock light; Vec4 ix, iy, iw, box, tile, flags, mips, window; }
+                            uniforms{p.light, p.periodic.inverseX, p.periodic.inverseY, p.periodic.inverseW,
+                                p.periodic.box, p.periodic.tile, p.periodic.flags, p.periodic.mips, p.periodic.window};
+                        static_assert(sizeof(TileBlock) == sizeof(PlaneLightBlock) + 8 * sizeof(Vec4));
+                        c.set_uniforms(&uniforms, sizeof(uniforms));
+                    } else {
+                        c.bind_texture(0, pc.texture(p.texture), SamplerHandle{p.sampler});
+                        c.set_uniforms(&p.light, sizeof(p.light));
+                    }
                     struct { Mat4 m; Vec4 region; Vec4 uv; Vec4 params; } push{p.clipFromLayer, p.region, Vec4{0, 0, 1, 1}, Vec4{p.opacity, static_cast<f32>(phase), 0, 0}};
                     c.push_constants(&push, sizeof(push));
                     c.draw(6);
@@ -2358,6 +2382,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             bound = PipelineHandle{};
             boundMat = nullptr;
             boundModel = nullptr;
+            boundEnv = nullptr; // Periodic planes used slots that also carry PBR environment/shadows.
         };
         for (u32 i = 0; i < cap.count; ++i) {
             if (i == cap.opaqueCount) {
@@ -2445,7 +2470,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     if (outDepth) *outDepth = depth1x;
     if (shadowTex.valid()) graph.read(pbrPass, shadowTex);
     ground_reads(graph, pbrPass, groundDraw);   // chão
-    for (u32 k = 0; k < planeCount; ++k) graph.read(pbrPass, planeList[k].texture);
+    for (u32 k = 0; k < planeCount; ++k) {
+        graph.read(pbrPass, planeList[k].texture);
+        for (u32 n = 0; n < planeList[k].periodic.count; ++n) graph.read(pbrPass, planeList[k].periodic.textures[n]);
+    }
     // Memória residente: por modelo (instâncias do mesmo asset dividem malha,
     // texturas e materiais — um GpuModel por asset).
     stats_.geometryBytes = stats_.textureBytes = 0;

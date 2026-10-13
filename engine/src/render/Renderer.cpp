@@ -1042,12 +1042,20 @@ void Renderer::flush_warmup() noexcept {
 }
 
 void Renderer::shutdown() noexcept {
+    shutdown_impl(false);
+}
+
+void Renderer::shutdown_after_gpu_done() noexcept {
+    shutdown_impl(true);
+}
+
+void Renderer::shutdown_impl(bool gpuDone) noexcept {
     cancel_preview_graph();
     staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {};
     if (!backend_) return;
-    backend_->wait_idle();
+    if (!gpuDone) backend_->wait_idle();
     framesInFlight_.clear();
-    release_project_resources();
+    release_project_resources_impl(gpuDone);
     if (glyphAtlas_.valid()) backend_->destroy_texture(glyphAtlas_);
     glyphAtlas_ = TextureHandle{};
     if (particleQuad_.valid()) backend_->destroy_buffer(particleQuad_);
@@ -1118,6 +1126,10 @@ void Renderer::forget_device() noexcept {
 }
 
 void Renderer::release_project_resources() noexcept {
+    release_project_resources_impl(false);
+}
+
+void Renderer::release_project_resources_impl(bool gpuDone) noexcept {
     cancel_preview_graph();
     staticPoses_.clear(); staticPoseBytes_ = 0; poseWorkspace_ = {};
     warmSceneQualities_ = 0;
@@ -1128,11 +1140,14 @@ void Renderer::release_project_resources() noexcept {
     incomplete_ = false;
     // Called between frames under the engine's render mutex. Complete the old
     // project's submissions before releasing their imported images/buffers.
-    backend_->wait_idle();
+    if (!gpuDone) backend_->wait_idle();
     clear_preview_cache();
     // Imported native buffers are backend caches, outside planar_/images_.
     // Leaving them behind retained entire closed decoder pools after reload.
-    (void)backend_->trim_external_images();
+    // The export renderer shares the backend import cache with preview. Its
+    // certified teardown releases only its own resources; a global import
+    // trim could invalidate another renderer's retained handles.
+    if (!gpuDone) (void)backend_->trim_external_images();
     pool_.clear();
     failedGraphFrame_ = 0;
     for (auto& [k, p] : planar_) {
@@ -1166,7 +1181,7 @@ void Renderer::release_project_resources() noexcept {
     scene3d_.release_all();
     // Backends may defer destruction even after the first wait. Drain those
     // releases now, so the next project does not overlap the old one's VRAM.
-    backend_->wait_idle();
+    if (!gpuDone) backend_->wait_idle();
 }
 
 void Renderer::clear_preview_cache() noexcept {
@@ -5280,13 +5295,36 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         }
         apply_masks(layer, src, frameNumber);
         LayerImage fin = src;
-        if (hasEffects) (void)EffectGraph::build(snap.plans[i], ctx, src, fin);
+        motion_tile::PeriodicPlane periodic;
+        bool periodicReady = false;
+        if (hasEffects) {
+            const auto& plan = snap.plans[i];
+            const auto& last = plan.stages.back();
+            // Only the terminal domain operation can move to plane sampling.
+            // Later effects and a folded downstream transform retain the
+            // established raster graph; its sampling region remains meaningful.
+            const bool terminalTile = !plan.hasFold && last.kind == EffectStage::Kind::Single && last.count == 1
+                && plan.evals[last.begin].effect->type_id() == effect_type_id(effect_keys::kMotionTile);
+            if (terminalTile) {
+                EffectPlan prefix = plan;
+                prefix.stages.pop_back();
+                (void)EffectGraph::build(prefix, ctx, src, fin);
+                EffectEval eval = plan.evals[last.begin];
+                eval.values = plan.values.data() + eval.valueOffset;
+                eval.placement = &plan.placement;
+                periodicReady = motion_tile::build_scene_plane(ctx, eval, fin, periodic);
+            }
+            if (!periodicReady) (void)EffectGraph::build(plan, ctx, src, fin);
+        }
         scene3d::ScenePlane p;
-        p.texture = fin.texture;
+        p.texture = periodicReady ? periodic.textures[0] : fin.texture;
+        if (periodicReady) p.periodic = periodic;
         // Sólido otimizado (1×1): clamp, como na composição (a borda transparente
         // viraria um degradê).
-        p.sampler = shaders_.sampler(layer.source.kind == LayerSource::Kind::Solid && fin.width == 1 ? CommonSampler::LinearClamp
-                                                                                                      : CommonSampler::LinearBorder).id;
+        p.sampler = shaders_.sampler(periodicReady
+            ? (periodic.flags.x > .5f ? CommonSampler::LinearClamp : CommonSampler::LinearRepeat)
+            : (layer.source.kind == LayerSource::Kind::Solid && fin.width == 1)
+                ? CommonSampler::LinearClamp : CommonSampler::LinearBorder).id;
         p.clipFromLayer = clip_from_comp(static_cast<f32>(snap.compWidth), static_cast<f32>(snap.compHeight)) * layer.compFromLayer;
         p.region = Vec4{fin.region.x, fin.region.y, fin.region.w, fin.region.h};
         p.opacity = layer.opacity;

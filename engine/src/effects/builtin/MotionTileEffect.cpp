@@ -220,6 +220,75 @@ bool upgrade_legacy_layout(Layer& layer, EffectInstance& fx) noexcept {
     return true;
 }
 
+bool build_scene_plane(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input,
+                       PeriodicPlane& out) noexcept {
+    out = {};
+    if (!e.placement || !e.placement->inScene3d || !input.valid()) return false;
+    const auto& pl = *e.placement;
+    if (!pl.compWidth || !pl.compHeight) return false;
+    const Params p = params_from(e);
+    Rect box = input.virtualSourceRegion.w > 0.f && input.virtualSourceRegion.h > 0.f
+        ? input.virtualSourceRegion : input.region;
+    if (pl.layerWidth && pl.layerHeight) {
+        const Rect overlap = Rect::intersect(box, {0,0,static_cast<f32>(pl.layerWidth),static_cast<f32>(pl.layerHeight)});
+        if (overlap.w > .5f && overlap.h > .5f) box = overlap;
+    }
+    if (!(box.w>0 && box.h>0)) return false;
+    // Invert the plane homography in double precision. Coordinates are NDC,
+    // so fragment interpolation never subtracts a huge finite tile-wall box.
+    const Mat4& m=pl.compFromLayer;
+    const f64 sx=2./pl.compWidth, sy=2./pl.compHeight;
+    const f64 a=sx*m.col[0].x-m.col[0].w,b=sx*m.col[1].x-m.col[1].w,c=sx*m.col[3].x-m.col[3].w;
+    const f64 d=sy*m.col[0].y-m.col[0].w,f=sy*m.col[1].y-m.col[1].w,g=sy*m.col[3].y-m.col[3].w;
+    const f64 h=m.col[0].w,i=m.col[1].w,j=m.col[3].w;
+    const f64 determinant=a*(f*j-g*i)-b*(d*j-g*h)+c*(d*i-f*h);
+    if (!std::isfinite(determinant)||std::fabs(determinant)<1e-15) return false;
+    out.inverseX={static_cast<f32>((f*j-g*i)/determinant),static_cast<f32>((c*i-b*j)/determinant),static_cast<f32>((b*g-c*f)/determinant),0};
+    out.inverseY={static_cast<f32>((g*h-d*j)/determinant),static_cast<f32>((a*j-c*h)/determinant),static_cast<f32>((c*d-a*g)/determinant),0};
+    out.inverseW={static_cast<f32>((d*i-f*h)/determinant),static_cast<f32>((b*h-a*i)/determinant),static_cast<f32>((a*f-b*d)/determinant),0};
+    out.box={box.x,box.y,box.w,box.h};
+    out.tile={std::max(p.tileX,1e-4f),std::max(p.tileY,1e-4f),p.centerX,p.centerY};
+    out.flags={p.mirror?1.f:0.f,p.phaseTurns,p.horizontalPhase?1.f:0.f,p.legacyClamp?1.f:0.f};
+    out.window={p.outputX>=1.f?kNoWindowHalf:p.outputX,p.outputY>=1.f?kNoWindowHalf:p.outputY,0,0};
+    // The pyramid contains one source tile, never the projected wall. Reductions
+    // add at most one source's pixel count plus14texels (about1/3 for large2D
+    // inputs). Only a cropped source needs a separate level zero; otherwise the
+    // existing source texture is borrowed from the normal FrameGraph budget.
+    u32 w=0,height=0;ctx.region_size(box,input.texel_scale_x(),w,height);
+    if (!w||!height) return false;
+    FGTexture base=input.texture;
+    const bool sameBox=std::fabs(box.x-input.region.x)<1e-4f&&std::fabs(box.y-input.region.y)<1e-4f
+        &&std::fabs(box.w-input.region.w)<1e-4f&&std::fabs(box.h-input.region.h)<1e-4f;
+    if (!sameBox||w!=input.width||height!=input.height) {
+        base=ctx.texture("scene-tile-source",w,height);
+        const Vec4 map=EffectBuildContext::uv_map(box,input.region);
+        if(ctx.fullscreen_pass("scene-tile-source",PassStage::Effects,base,ShaderId::common_copy_frag,
+            {PassTexture{input.texture,{},CommonSampler::LinearClamp}},&map,sizeof(map))==kInvalidIndex)return false;
+    }
+    std::array<FGTexture,14> all{};all[0]=base;u32 fullCount=1;
+    const u32 baseW=w,baseH=height; u64 reducedPixels=0;
+    while ((w>1||height>1)&&fullCount<all.size()) {
+        const u32 nextW=std::max(1u,(w+1)/2),nextH=std::max(1u,(height+1)/2);
+        reducedPixels+=static_cast<u64>(nextW)*nextH;
+        if(reducedPixels>static_cast<u64>(baseW)*baseH+14)return false;
+        const auto reduced=ctx.texture("scene-tile-prefilter",nextW,nextH);
+        // A mip level integrates a2x2 footprint. The blur downsample's4x4
+        // filter has a different support and must not replace that footprint.
+        const Vec4 uniforms{1,1,0,0};
+        if(ctx.fullscreen_pass("scene-tile-prefilter",PassStage::Effects,reduced,ShaderId::common_copy_frag,
+            {PassTexture{all[fullCount-1],{},p.mirror?CommonSampler::LinearClamp:CommonSampler::LinearRepeat}},
+            &uniforms,sizeof(uniforms))==kInvalidIndex)return false;
+        all[fullCount++]=reduced;w=nextW;height=nextH;
+    }
+    if(w!=1||height!=1)return false;
+    out.count=std::min<u32>(fullCount,kSceneTileSlots);
+    for(u32 n=0;n<out.count;++n)out.textures[n]=all[n];
+    if(fullCount>kSceneTileSlots)out.textures[kSceneTileSlots-1]=all[fullCount-1];
+    for(u32 n=out.count;n<kSceneTileSlots;++n)out.textures[n]=out.textures[out.count-1];
+    out.mips={static_cast<f32>(baseW),static_cast<f32>(baseH),static_cast<f32>(fullCount-1),static_cast<f32>(out.count)};
+    return true;
+}
+
 } // namespace motion_tile
 
 namespace builtin {

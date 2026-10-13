@@ -268,6 +268,29 @@ void Backend::wait_idle() noexcept {
     glFinish(); (void)d.check("wait_idle");
     for (auto& f : d.frames) if (&f != d.current) d.retire(f);
 }
+Status Backend::poll_export_work(Status* completedFailure) noexcept {
+    if (completedFailure) *completedFailure = OkStatus;
+    auto& d = *impl_; Impl::Scope scope(d);
+    if (!scope.valid) return d.deviceLost ? Status{Errc::DeviceLost} : Status{Errc::InvalidState};
+    if (d.deviceLost) return Status{Errc::DeviceLost};
+    if (d.current || d.frameOpen) return Status{Errc::Timeout, "comandos GPU ainda em gravacao"};
+    // Cover commands queued outside a normal frame as well. Engine blocks new
+    // GPU work while this export retirement marker remains pending.
+    if (!d.exportRetirementFence) {
+        d.exportRetirementFence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (!d.exportRetirementFence) return Status{Errc::OutOfMemory, "fence do encerramento do export"};
+        glFlush();
+    }
+    const GLenum status = glClientWaitSync(d.exportRetirementFence, 0, 0);
+    if (status == GL_TIMEOUT_EXPIRED) return Status{Errc::Timeout, "comandos GPU do export pendentes"};
+    if (status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED) {
+        d.deviceLost = true;
+        return Status{Errc::DeviceLost, "consulta do fence do export falhou"};
+    }
+    glDeleteSync(d.exportRetirementFence); d.exportRetirementFence = nullptr;
+    for (auto& frame : d.frames) if (frame.fence) d.retire(frame);
+    return OkStatus;
+}
 u64 Backend::last_submitted_frame() const noexcept { return impl_->last ? impl_->last->number : 0; }
 Status Backend::wait_frame(u64 number, u64 timeout) noexcept {
     auto& d = *impl_; Impl::Scope scope(d); if (!scope.valid) return Errc::InvalidState;
@@ -307,6 +330,8 @@ void Backend::shutdown() noexcept {
     end_presentable_frame_lease();
     if (d.context != EGL_NO_CONTEXT && d.make_current()) {
         d.frameOpen = false; d.current = nullptr; wait_idle(); save_pipeline_cache();
+        if (d.exportRetirementFence) glDeleteSync(d.exportRetirementFence);
+        d.exportRetirementFence = nullptr;
         for (auto& [id, p] : d.pipelines) glDeleteProgram(p.id);
         for (auto& [id, s] : d.shaders) glDeleteShader(s.id);
         for (auto& [id, s] : d.samplers) glDeleteSamplers(1, &s.id);
@@ -335,5 +360,6 @@ void Backend::shutdown() noexcept {
     // the completion boundary for callbacks whose fences cannot be queried.
     for (auto& f : d.frames) { for (const auto& callback : f.deferred) if (callback.fn) callback.fn(callback.context); f = {}; }
     d.bytesBuffers = d.bytesTextures = 0; d.last = d.current = nullptr; d.backbuffer = {};
+    d.exportRetirementFence = nullptr;
 }
 } // namespace aurea::gles

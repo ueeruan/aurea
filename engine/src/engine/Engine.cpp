@@ -287,6 +287,9 @@ struct Engine::ExportContext {
     std::unique_ptr<OfflineFrameQueue> queue;
     std::unique_ptr<OfflineFrameRenderer> offline;
     bool deferredGpuCleanup = false, retainedReadbacks = false;
+    bool gpuResourcesRetired = false;
+    Status gpuRetirementFailure = OkStatus;
+    char gpuRetirementFailureDetail[192]{};
     u64 deferredGpuFrame = 0, deferredGpuGeneration = 0;
     u64 resourceGpuGeneration = 0; // mapped readbacks belong only to this device generation
     u64 queueByteLimit = 0;
@@ -9750,21 +9753,31 @@ void Engine::drain_capture_target_locked() noexcept {
 
 Status Engine::poll_export_gpu_locked(u64 timeoutNs) noexcept {
     drain_capture_target_locked();
-    if (!pendingExportGpuFrame_) return OkStatus;
-    if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
-        pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
-    } else {
-        const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, timeoutNs);
-        if (!ready.ok()) return ready;
-        pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
+    if (!pendingExportGpuFrame_ && !pendingExportStartup_) {
+        std::lock_guard<std::mutex> context(exportContextMutex_);
+        if (!exportCtx_ || !exportCtx_->deferredGpuCleanup) return OkStatus;
+    }
+    if (pendingExportGpuFrame_) {
+        if (!gpu_ || pendingExportGpuGeneration_ != gpuGeneration_ || gpu_->is_device_lost()) {
+            pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
+        } else {
+            const Status ready = gpu_->wait_frame(pendingExportGpuFrame_, timeoutNs);
+            if (!ready.ok()) return ready;
+            pendingExportGpuFrame_ = pendingExportGpuGeneration_ = 0;
+        }
     }
     if (pendingExportStartup_) {
         release_offline_export(*pendingExportStartup_, pendingExportStartup_->retainedReadbacks);
+        if (pendingExportStartup_->deferredGpuCleanup || pendingExportStartup_->deferredSourceCleanup)
+            return Status{Errc::Timeout, "recursos do export anterior ainda em uso"};
         pendingExportStartup_.reset();
     }
     std::lock_guard<std::mutex> context(exportContextMutex_);
-    if (exportCtx_ && exportCtx_->deferredGpuCleanup)
+    if (exportCtx_ && exportCtx_->deferredGpuCleanup) {
         release_offline_export(*exportCtx_, exportCtx_->retainedReadbacks);
+        if (exportCtx_->deferredGpuCleanup)
+            return Status{Errc::Timeout, "comandos GPU do export anterior ainda pendentes"};
+    }
     return OkStatus;
 }
 
@@ -12625,7 +12638,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             if (committed) return;
             std::lock_guard<std::mutex> lock(engine.renderMutex_);
             engine.release_offline_export(context);
-            if (context.deferredGpuCleanup && owner)
+            if ((context.deferredGpuCleanup || context.deferredSourceCleanup) && owner)
                 engine.pendingExportStartup_ = std::move(owner);
         }
     } offlineCleanup{*this, *ctx, ctx};
@@ -13076,13 +13089,25 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
     bool lostDevice = !gpu_ || gpu_->is_device_lost()
         || (ctx.resourceGpuGeneration && ctx.resourceGpuGeneration != gpuGeneration_)
         || (ctx.deferredGpuCleanup && ctx.deferredGpuGeneration != gpuGeneration_);
-    if (ctx.offline && !lostDevice) {
-        const u64 fence = ctx.deferredGpuCleanup ? ctx.deferredGpuFrame : gpu_->last_submitted_frame();
-        const Status ready = fence ? gpu_->wait_frame(fence, 0) : OkStatus;
+    const u64 retirementFrame = !ctx.gpuResourcesRetired && gpu_ && !lostDevice
+        ? gpu_->last_submitted_frame() : 0;
+    if (ctx.offline && !lostDevice && !ctx.gpuResourcesRetired) {
+        const u64 fence = gpu_->last_submitted_frame();
+        Status completedFailure;
+        const Status ready = gpu_->poll_export_work(&completedFailure);
+        const Status failure = !completedFailure.ok() ? completedFailure
+            : (!ready.ok() && ready.code() != Errc::Timeout ? ready : OkStatus);
+        if (!failure.ok() && ctx.gpuRetirementFailure.ok()) {
+            std::snprintf(ctx.gpuRetirementFailureDetail, sizeof(ctx.gpuRetirementFailureDetail), "%.*s",
+                static_cast<int>((failure.detail().empty() ? failure.message() : failure.detail()).size()),
+                (failure.detail().empty() ? failure.message() : failure.detail()).data());
+            ctx.gpuRetirementFailure = Status{failure.code(), ctx.gpuRetirementFailureDetail};
+            AUREA_LOG_ERROR("export: comando GPU terminou com erro [%d]: %s", failure.raw(), ctx.gpuRetirementFailureDetail);
+        }
         if (ready.code() == Errc::DeviceLost) lostDevice = true;
-        if (ready.code() == Errc::Timeout) {
-            // Renderer::shutdown waits for the device. Retain its decoders,
-            // snapshots and targets instead of entering that wait after timeout.
+        if (!ready.ok() && !lostDevice) {
+            // A signaled frame does not cover newer auxiliary uploads. Keep
+            // the entire context even when no normal frame was ever submitted.
             ctx.deferredGpuCleanup = true;
             ctx.deferredGpuFrame = fence; ctx.deferredGpuGeneration = gpuGeneration_;
             ctx.retainedReadbacks = retainReadbacks;
@@ -13090,7 +13115,30 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
             return;
         }
     }
-    if (ctx.offline && lostDevice) ctx.offline->detach_device();
+    ctx.deferredGpuCleanup = false;
+    if (!ctx.gpuResourcesRetired) {
+        if (ctx.offline && lostDevice) ctx.offline->detach_device();
+        else if (ctx.offline) ctx.offline->retire_gpu_after_done();
+        if (gpu_ && !lostDevice) {
+            gpu_->destroy_texture(ctx.comp); gpu_->destroy_texture(ctx.y); gpu_->destroy_texture(ctx.uv);
+        }
+        ctx.comp = {}; ctx.y = {}; ctx.uv = {};
+        // Record completed retirement, never a proof to use later against a
+        // shared backend. Preview can now advance while CPU sources close.
+        ctx.gpuResourcesRetired = true;
+    }
+    if (!retainReadbacks) {
+        for (auto& slot : ctx.slots) {
+            if (gpu_ && !lostDevice) {
+                gpu_->destroy_buffer(slot.y); gpu_->destroy_buffer(slot.uv);
+            }
+            slot.y = {}; slot.uv = {}; slot.yPtr = slot.uvPtr = nullptr;
+        }
+    }
+    // Vulkan defers destruction onto the last completed frame. Drain the
+    // releases just queued above without another device-wide wait; no new GPU
+    // submission is permitted between the full proof and this retirement.
+    if (retirementFrame && gpu_ && !lostDevice) (void)gpu_->wait_frame(retirementFrame, 0);
     if (ctx.offline && !ctx.offline->retire_sources()) {
         // A platform opener/decoder may not honor cancellation. Publishing
         // failure/cancel must not join it. The session, callbacks and immutable
@@ -13101,18 +13149,12 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
     }
     ctx.deferredSourceCleanup = false;
     if (ctx.offline && lostDevice) ctx.offline->forget_device();
+    // GPU already detached/retired above. This closes only returned source
+    // workers; destructor calls are idempotent and cannot wait for the GPU.
     if (ctx.offline) ctx.offline->shutdown();
     ctx.offline.reset();
     if (!retainReadbacks) ctx.audioCache.reset();
     ctx.deferredGpuCleanup = false;
-    if (gpu_ && !lostDevice) {
-        gpu_->destroy_texture(ctx.comp); gpu_->destroy_texture(ctx.y); gpu_->destroy_texture(ctx.uv);
-        if (!retainReadbacks) for (auto& slot : ctx.slots) {
-            gpu_->destroy_buffer(slot.y); gpu_->destroy_buffer(slot.uv);
-            slot.y = {}; slot.uv = {}; slot.yPtr = slot.uvPtr = nullptr;
-        }
-    }
-    ctx.comp = {}; ctx.y = {}; ctx.uv = {};
     ctx.frozenProject.reset();
     ctx.frozenImages.clear(); ctx.frozenModels.clear(); ctx.frozenHdris.clear(); ctx.frozenLuts.clear();
     if (ctx.originalModelBytes) {
@@ -13386,6 +13428,18 @@ void Engine::export_thread_main() noexcept {
     // An abandoned native call still owns its sink. Its worker closes it
     // before publishing the exit flag; the bounded quarantine then reclaims it.
     if (!abandonedWorker) ctx.sink.reset();
+    log_export_profile();
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        release_offline_export(ctx, abandonedWorker);
+        retain_failed_export_gpu_locked();
+        // GPU completion and GPU success are different. A terminal failed
+        // upload is safe to retire but must not publish a successful export.
+        if (result.ok() && !ctx.gpuRetirementFailure.ok()) {
+            result = ctx.gpuRetirementFailure;
+            stage = ExportStage::Render;
+        }
+    }
     if (!ctx.recoveryPath.empty()) {
         ctx.recovery.state = result.ok() ? export_recovery::State::Complete : export_recovery::State::Failed;
         ctx.recovery.result = result.code();
@@ -13397,12 +13451,6 @@ void Engine::export_thread_main() noexcept {
         if (!persisted.ok()) AUREA_LOG_WARN("export: recuperacao manteve estado anterior (%d)", persisted.raw());
     }
     std::vector<u8>().swap(ctx.recovery.projectBytes);
-    log_export_profile();
-    {
-        std::lock_guard<std::mutex> rl(renderMutex_);
-        release_offline_export(ctx, abandonedWorker);
-        retain_failed_export_gpu_locked();
-    }
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);
         ctx.progress.running = false;
@@ -13872,7 +13920,7 @@ Status Engine::start_image_export(const ImageExportSettings& settings, const cha
             if (committed) return;
             std::lock_guard<std::mutex> lock(engine.renderMutex_);
             engine.release_offline_export(context);
-            if (context.deferredGpuCleanup && owner)
+            if ((context.deferredGpuCleanup || context.deferredSourceCleanup) && owner)
                 engine.pendingExportStartup_ = std::move(owner);
         }
     } offlineCleanup{*this, *ctx, ctx};
@@ -14033,6 +14081,7 @@ void Engine::image_export_thread_main() noexcept {
         std::lock_guard<std::mutex> rl(renderMutex_);
         release_offline_export(ctx);
         retain_failed_export_gpu_locked();
+        if (result.ok() && !ctx.gpuRetirementFailure.ok()) result = ctx.gpuRetirementFailure;
     }
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);

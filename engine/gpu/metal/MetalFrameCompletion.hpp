@@ -22,6 +22,34 @@ inline void commit_presentable_frame(id<MTLCommandBuffer> command, id<MTLDrawabl
     return state == MTLCommandBufferStatusCompleted || state == MTLCommandBufferStatusError;
 }
 
+// Export cleanup separates safe completion from the original command error.
+// A terminal Error owns no outstanding GPU work, but remains a failed export;
+// a generic error without actual completion never permits resource retirement.
+[[nodiscard]] inline Status export_command_completion(id<MTLCommandBuffer> command,
+        Status reported, Status& firstFailure) noexcept {
+    if (reported.code() == Errc::DeviceLost) return reported;
+    if (!command_buffer_terminal(command))
+        return reported.ok() ? Status{Errc::Timeout} : reported;
+    if (!reported.ok() && firstFailure.ok()) firstFailure = reported;
+    return OkStatus;
+}
+
+// Observe every submitted command before retiring any slot. Slots are recycled
+// out of frame-number order; retiring a recent frame first can consume an older
+// terminal Error before its original status is recorded by export cleanup.
+template<class Frame, class Wait>
+[[nodiscard]] Status observe_export_frames(Frame* frames, u32 count, Frame* current,
+                                           Status& firstFailure, Wait&& wait) noexcept {
+    if (current) return Status{Errc::Timeout};
+    for (u32 i = 0; i < count; ++i) {
+        const Frame& frame = frames[i];
+        if (!frame.submitted) continue;
+        const Status ready = export_command_completion(frame.cmd, wait(frame), firstFailure);
+        if (!ready.ok()) return ready;
+    }
+    return OkStatus;
+}
+
 // Shared by the backend and the native fault-injection regression. Completion
 // with an error is still completion, but a generic error alone proves nothing
 // about ownership: inspect each actual command buffer before retiring it.

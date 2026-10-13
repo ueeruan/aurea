@@ -19,6 +19,7 @@
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/scene3d/Environment.hpp"
+#include "aurea/effects/MotionTile.hpp"
 
 #include <utility>
 #include <vector>
@@ -248,6 +249,7 @@ struct ScenePlane {
     u32  sourceLayer = ~0u;        ///< índice da camada no snapshot (desfoque por sub-quadro)
     /// Luzes da composição e o mundo da camada (a câmera entra no build).
     PlaneLightBlock light{};
+    motion_tile::PeriodicPlane periodic{}; ///< enabled only for a terminal Motion Tile
 };
 
 /// Pós do grupo 3D vindo da composição (PostProcessSettings): o que a pessoa
@@ -425,7 +427,7 @@ public:
     /// Profundidade de campo: amostras do disco por pixel (o preview usa
     /// poucas, o export muitas). 0 = desligada mesmo com a lente pedindo.
     void set_dof_quality(u32 taps) noexcept { dofTaps_ = std::min(taps, 256u); }
-    [[nodiscard]] PipelineKey plane_key(bool translucent = false) const noexcept;
+    [[nodiscard]] PipelineKey plane_key(bool translucent = false, bool periodic = false) const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;

@@ -329,3 +329,354 @@ AUREA_TEST(Gpu, MotionTileBeta3GrazingWallDoesNotRepeatBehindCamera) {
         AUREA_CHECK_EQ(incorrectlyLit, 0u);
     }
 }
+
+// Covers the horizon excluded by the old point-color oracle. A white periodic
+// source has no sampling ambiguity; an opaque in-frustum ray must stay white.
+// Alternating own 4-texel rows have an independent area average: integrate the
+// inverse homography over the screen pixel, including the original bilinear
+// source reconstruction, rather than expecting one arbitrary high-frequency
+// point value. This is an own regression, not a claim about the unidentified APK.
+AUREA_TEST(Gpu, MotionTileGrazingCoverageAndIntegratedStripeColor) {
+    AUREA_REQUIRE_GPU();
+    const std::string folder = "build/reference/motion-tile-finish-20261013/";
+    std::filesystem::create_directories(folder);
+    for (const bool stripes : {false, true}) for (const f32 angle : {-88.4f, -101.2f}) {
+        Scene scene(512, 288);
+        auto source = uniform_image(128, 128, 255, 255, 255);
+        if (stripes) for (u32 y = 0; y < 128; ++y) for (u32 x = 0; x < 128; ++x) {
+            auto* value = source.rgba.data() + (y * 128 + x) * 4;
+            value[0] = value[1] = value[2] = (y / 4) % 2 ? 255 : 0;
+        }
+        const auto id = scene.image(std::move(source), 256, 144);
+        scene.comp->layer(id)->threeD = true;
+        scene.comp->layer(id)->transform.rotation.x = angle;
+        scene.add_effect(id, effect_keys::kMotionTile).params[motion_tile::kMirror].constant = ParamValue::boolean(true);
+        const auto actual = scene.render();
+        FrameSnapshot snapshot;
+        RenderSettings settings;
+        gpu().renderer.prepare(*scene.comp, scene.project, FrameIndex{0}, &scene.media, &Scene::lookup, &scene,
+            settings, 9000001, 0, DecodeMode::Still, 1.f, snapshot);
+        const RenderLayer* plane = nullptr;
+        for (const auto& layer : snapshot.layers)
+            if (layer.id == id && layer.source.kind != LayerSource::Kind::Scene3D) plane = &layer;
+        AUREA_CHECK(plane != nullptr); if (!plane) return;
+        const Mat4& m = plane->compFromLayer;
+        struct Point { f64 x=0, y=0; bool valid=false; };
+        auto ray = [&](f64 qx, f64 qy) {
+            Point result;
+            const f64 a=m.col[0].x-qx*m.col[0].w,c=m.col[1].x-qx*m.col[1].w;
+            const f64 b=m.col[0].y-qy*m.col[0].w,d=m.col[1].y-qy*m.col[1].w;
+            const f64 tx=qx*m.col[3].w-m.col[3].x,ty=qy*m.col[3].w-m.col[3].y;
+            const f64 det=a*d-b*c;
+            if (std::fabs(det)<1e-10) return result;
+            result.x=(d*tx-c*ty)/det;result.y=(a*ty-b*tx)/det;
+            // clip_from_comp changes only X/Y. The homogeneous Z/W used by
+            // the Vulkan depth frustum are already present in compFromLayer.
+            const Vec4 projected=m*Vec4{static_cast<f32>(result.x),static_cast<f32>(result.y),0,1};
+            result.valid=std::isfinite(result.x)&&std::isfinite(result.y)&&projected.w>1e-5f
+                &&projected.z>=0.f&&projected.z<=projected.w;
+            return result;
+        };
+        u32 front=0, missing=0, integratedRows=0, badRows=0;
+        f64 maxError=0;
+        if (!stripes) {
+            for (u32 y=2;y+2<288;++y) for (u32 x=2;x+2<512;x+=3) {
+                if (!ray(x+.01,y+.01).valid || !ray(x+.99,y+.99).valid) continue;
+                ++front;const auto* value=actual.at(x,y);
+                missing+=value[0]<.98f||value[1]<.98f||value[2]<.98f;
+            }
+            AUREA_CHECK(front>1000u);
+            AUREA_CHECK_EQ(missing,0u);
+        } else {
+            motion_tile::Params p;p.mirror=true;
+            for (u32 y=2;y+2<288;++y) {
+                const auto lo=ray(256.5,y+.0001),hi=ray(256.5,y+.9999);
+                // Isolate filtering from the finite raster cutoff: both ends
+                // must be inside the existing 24x fallback wall for this case.
+                if (!lo.valid||!hi.valid||std::min(lo.y,hi.y)<-1472.||std::max(lo.y,hi.y)>1600.)continue;
+                const f64 span=std::fabs(hi.y-lo.y);
+                if (span<32.||span>2048.)continue;
+                f64 average=0;
+                for (u32 n=0;n<4096;++n) {
+                    const auto pos=ray(256.5,y+(n+.5)/4096.);
+                    const auto local=motion_tile::reference_lookup(p,{static_cast<f32>(pos.x/128.),static_cast<f32>(pos.y/128.)});
+                    const f64 sy=std::clamp(static_cast<f64>(local.y),.5/128.,127.5/128.)*128.-.5;
+                    const int first=static_cast<int>(std::floor(sy));const f64 frac=sy-first;
+                    average+=(first/4)%2*(1-frac)+((std::min(first+1,127)/4)%2)*frac;
+                }
+                average/=4096.;++integratedRows;
+                const f64 error=std::fabs(actual.at(256,y)[0]-average);
+                maxError=std::max(maxError,error);badRows+=error>.12;
+                std::printf("    tile stripe X%.1f row%u footprint%.1f expected%.4f actual%.4f error%.4f\n",
+                    angle,y,span,average,actual.at(256,y)[0],error);
+            }
+            AUREA_CHECK(integratedRows>0u);
+            AUREA_CHECK_EQ(badRows,0u);
+        }
+        std::printf("    grazing tile %s X%.1f front%u missing%u integratedRows%u badRows%u maxError%.4f\n",
+            stripes?"stripes":"white",angle,front,missing,integratedRows,badRows,maxError);
+        const std::string label=stripes?"stripes":"white";
+        AUREA_CHECK(write_png(folder+label+"-"+std::to_string(angle)+".png",actual.encoded()));
+    }
+}
+
+namespace {
+Mat4 tile_test_plane_matrix(Scene& scene, LayerId id, f32* texelScale = nullptr) {
+    FrameSnapshot snapshot;
+    RenderSettings settings;
+    gpu().renderer.prepare(*scene.comp, scene.project, FrameIndex{0}, &scene.media, &Scene::lookup, &scene,
+        settings, 9100001, 0, DecodeMode::Still, 1.f, snapshot);
+    for (const auto& layer : snapshot.layers)
+        if (layer.id == id && layer.source.kind != LayerSource::Kind::Scene3D) {
+            if (texelScale) *texelScale = layer.texelScale;
+            return layer.compFromLayer;
+        }
+    AUREA_CHECK_MSG(false, "own periodic plane missing from snapshot");
+    return Mat4::identity();
+}
+
+struct TileTestRay { Vec2 pixel{}; bool valid = false; };
+TileTestRay tile_test_ray(const Mat4& m, f64 x, f64 y) {
+    const f64 a = m.col[0].x - x * m.col[0].w, b = m.col[1].x - x * m.col[1].w;
+    const f64 c = m.col[0].y - y * m.col[0].w, d = m.col[1].y - y * m.col[1].w;
+    const f64 tx = x * m.col[3].w - m.col[3].x, ty = y * m.col[3].w - m.col[3].y;
+    const f64 determinant = a * d - b * c;
+    if (std::fabs(determinant) < 1e-10) return {};
+    TileTestRay result;
+    result.pixel = {static_cast<f32>((d * tx - b * ty) / determinant),
+                    static_cast<f32>((a * ty - c * tx) / determinant)};
+    const Vec4 projected = m * Vec4{result.pixel.x, result.pixel.y, 0, 1};
+    result.valid = std::isfinite(result.pixel.x) && std::isfinite(result.pixel.y) && projected.w > 1e-5f
+        && projected.z >= 0 && projected.z <= projected.w;
+    return result;
+}
+
+// Decode and premultiply BEFORE bilinear interpolation, as required for a
+// filtered transparent source. Hidden RGB cannot leak into the periodic wall.
+Vec4 tile_test_source_sample(const ImagePixels& pixels, Vec2 uv) {
+    const f32 x = std::clamp(uv.x * pixels.width - .5f, 0.f, static_cast<f32>(pixels.width - 1));
+    const f32 y = std::clamp(uv.y * pixels.height - .5f, 0.f, static_cast<f32>(pixels.height - 1));
+    const u32 x0 = static_cast<u32>(std::floor(x)), y0 = static_cast<u32>(std::floor(y));
+    const u32 x1 = std::min(x0 + 1, pixels.width - 1), y1 = std::min(y0 + 1, pixels.height - 1);
+    const f32 fx = x - x0, fy = y - y0;
+    auto texel = [&](u32 px, u32 py) {
+        const auto* p = pixels.rgba.data() + (py * pixels.width + px) * 4;
+        const f32 alpha = p[3] / 255.f;
+        return Vec4{srgb_decode(p[0] / 255.f) * alpha, srgb_decode(p[1] / 255.f) * alpha,
+                    srgb_decode(p[2] / 255.f) * alpha, alpha};
+    };
+    return texel(x0, y0) * ((1 - fx) * (1 - fy)) + texel(x1, y0) * (fx * (1 - fy))
+         + texel(x0, y1) * ((1 - fx) * fy) + texel(x1, y1) * (fx * fy);
+}
+}
+
+AUREA_TEST(Gpu, MotionTilePeriodicControlsMatchLinearPremultipliedSource) {
+    AUREA_REQUIRE_GPU();
+    for (u32 kind = 0; kind < 6; ++kind) {
+        Scene scene(384, 216);
+        scene.comp->set_background(Color{0, 0, 0, 0});
+        scene.comp->set_transparent_background(true);
+        auto source = uniform_image(128, 96, 0, 0, 0);
+        for (u32 y = 0; y < source.height; ++y) for (u32 x = 0; x < source.width; ++x) {
+            auto* p = source.rgba.data() + (y * source.width + x) * 4;
+            p[0] = static_cast<u8>(30 + x * 180 / 127); p[1] = static_cast<u8>(45 + y * 140 / 95);
+            p[2] = static_cast<u8>(80 + (x + y) * 65 / 222); p[3] = static_cast<u8>(45 + (x + y) * 150 / 222);
+        }
+        const auto id = scene.image(source, 192, 108, 2.f);
+        auto* layer = scene.comp->layer(id);
+        layer->threeD = true; layer->transform.rotation.x = 22; layer->transform.opacity = .73f;
+        if (kind == 5) scene.add_effect(id, effect_keys::kExposure).params[0].constant.v[0] = -1;
+        auto& effect = scene.add_effect(id, effect_keys::kMotionTile);
+        motion_tile::Params p;
+        p.mirror = kind == 1 || kind == 2 || kind >= 4;
+        if (kind == 2) { p.centerX = .2f; p.centerY = .85f; p.tileX = .9f; p.tileY = 1.3f; }
+        if (kind == 3) p.phaseTurns = 1.75f;
+        if (kind == 4) { p.phaseTurns = -.5f; p.horizontalPhase = true; }
+        if (kind == 5) {
+            p.tileX = .75f; p.tileY = .9f; p.centerX = 1.2f; p.centerY = -.1f;
+            p.outputX = .65f; p.outputY = .7f;
+            effect.params[motion_tile::kScale].constant.v[0] = 60;
+        }
+        effect.params[motion_tile::kCenter].constant = ParamValue::vec2(p.centerX, p.centerY);
+        const f32 scale = kind == 5 ? .6f : 1.f;
+        effect.params[motion_tile::kTileWidth].constant.v[0] = p.tileX * 100 / scale;
+        effect.params[motion_tile::kTileHeight].constant.v[0] = p.tileY * 100 / scale;
+        effect.params[motion_tile::kOutputWidth].constant.v[0] = p.outputX * 100;
+        effect.params[motion_tile::kOutputHeight].constant.v[0] = p.outputY * 100;
+        effect.params[motion_tile::kMirror].constant = ParamValue::boolean(p.mirror);
+        effect.params[motion_tile::kPhase].constant.v[0] = p.phaseTurns * 360;
+        effect.params[motion_tile::kHorizontalPhase].constant = ParamValue::boolean(p.horizontalPhase);
+        const auto actual = scene.render(); const Mat4 m = tile_test_plane_matrix(scene, id);
+        u32 compared = 0, outside = 0, leaked = 0; f32 worst = 0;
+        for (u32 y = 3; y + 3 < 216; y += 3) for (u32 x = 3; x + 3 < 384; x += 3) {
+            const auto ray = tile_test_ray(m, x + .5, y + .5);
+            if (!ray.valid) continue;
+            const f32 ndcX = 2 * (x + .5f) / 384 - 1, ndcY = 2 * (y + .5f) / 216 - 1;
+            if (std::fabs(ndcX) > p.outputX || std::fabs(ndcY) > p.outputY) {
+                ++outside; const Vec4 value = actual.v(x, y);
+                leaked += value.x > .001f || value.y > .001f || value.z > .001f || value.w > .001f;
+                continue;
+            }
+            const Vec2 uv = motion_tile::reference_lookup(p, {ray.pixel.x / 128, ray.pixel.y / 96});
+            // Magnified smooth source: point sampling is well-defined away
+            // from a tile edge; the separate horizon test integrates pixels.
+            if (uv.x < .08f || uv.y < .08f || uv.x > .92f || uv.y > .92f) continue;
+            Vec4 expected = tile_test_source_sample(source, uv) * .73f;
+            if (kind == 5) { expected.x *= .5f; expected.y *= .5f; expected.z *= .5f; }
+            const Vec4 got = actual.v(x, y);
+            const f32 expectedChannels[]{expected.x, expected.y, expected.z, expected.w};
+            const f32 actualChannels[]{got.x, got.y, got.z, got.w};
+            for (u32 channel = 0; channel < 4; ++channel)
+                worst = std::max(worst, std::fabs(actualChannels[channel] - expectedChannels[channel]));
+            ++compared;
+        }
+        std::printf("    periodic controls %u: compared%u outside%u leaked%u maxRGBAerror%.5f\n",
+                    kind, compared, outside, leaked, worst);
+        AUREA_CHECK(compared > 300u); AUREA_CHECK(worst < .015f);
+        if (kind == 5) { AUREA_CHECK(outside > 100u); AUREA_CHECK_EQ(leaked, 0u); }
+    }
+}
+
+AUREA_TEST(Gpu, MotionTilePeriodicPrefixColorAndBlurKeepTheirMirroredPeriod) {
+    AUREA_REQUIRE_GPU();
+    for (f32 angle : {0.f, -75.f, -88.4f}) {
+        Scene scene(256, 144);
+        auto source = reference_image(128, 72);
+        for (usize pixel = 3; pixel < source.rgba.size(); pixel += 4) source.rgba[pixel] = 150;
+        const auto id = scene.image(std::move(source), 128, 72);
+        auto* layer = scene.comp->layer(id);
+        layer->threeD = true; layer->transform.rotation.x = angle;
+        scene.add_effect(id, effect_keys::kExposure).params[0].constant.v[0] = -.5f;
+        scene.add_effect(id, effect_keys::kGaussianBlur).params[0].constant.v[0] = 4;
+        auto& tile = scene.add_effect(id, effect_keys::kMotionTile);
+        tile.params[motion_tile::kTileWidth].constant.v[0] = 50;
+        tile.params[motion_tile::kTileHeight].constant.v[0] = 50;
+        tile.params[motion_tile::kMirror].constant = ParamValue::boolean(true);
+        tile.params[motion_tile::kPhase].constant.v[0] = 180;
+        const auto centered = scene.render();
+        layer->transform.position.x -= 128; // two 64px mirrored cells
+        const auto moved = scene.render(); f32 worst = 0; f64 energy = 0;
+        for (usize channel = 0; channel < moved.px.size(); ++channel) {
+            worst = std::max(worst, std::fabs(centered.px[channel] - moved.px[channel]));
+            if (channel % 4 < 3) energy += centered.px[channel];
+        }
+        std::printf("    3D prefix color+blur X%.1f: periodic error%.5f energy%.2f\n", angle, worst, energy);
+        AUREA_CHECK(energy > 100); AUREA_CHECK(worst < .015f);
+    }
+}
+
+AUREA_TEST(Gpu, MotionTilePeriodicPyramidHasBoundedTransientCostAndPoolReuse) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(256, 144);
+    const auto id = scene.image(uniform_image(512, 256, 200, 130, 80), 128, 72);
+    auto* layer = scene.comp->layer(id); layer->threeD = true;
+    scene.add_effect(id, effect_keys::kMotionTile).params[motion_tile::kMirror].constant = ParamValue::boolean(true);
+    u64 peak = 0;
+    for (const f32 angle : {0.f, -88.4f, -101.2f, 0.f}) {
+        layer->transform.rotation.x = angle; (void)scene.render();
+        const auto stats = gpu().renderer.graph_stats(); peak = std::max(peak, stats.transientBytes);
+        const std::string dump = gpu().renderer.graph_dump();
+        AUREA_CHECK(dump.find("scene-tile-prefilter") != std::string::npos);
+        AUREA_CHECK(dump.find("motion-tile") == std::string::npos);
+        AUREA_CHECK(stats.transientTextures < 30u);
+        AUREA_CHECK(stats.transientBytes < (8ull << 20));
+        std::printf("    periodic pyramid X%.1f: passes%u textures%u bytes%llu\n", angle,
+                    stats.passesExecuted, stats.transientTextures, stats.transientBytes);
+    }
+    (void)scene.render(); (void)scene.render();
+    const u64 created = gpu().renderer.pool_stats().createdTotal;
+    for (u32 frame = 0; frame < 6; ++frame) (void)scene.render();
+    std::printf("    periodic pyramid peak%llu reused pool created%llu ->%llu\n", peak,
+                created, gpu().renderer.pool_stats().createdTotal);
+    AUREA_CHECK_EQ(gpu().renderer.pool_stats().createdTotal, created);
+}
+
+AUREA_TEST(Gpu, MotionTilePeriodicPlaneDepthIntersectsAnOwnOpaqueModel) {
+    AUREA_REQUIRE_GPU();
+    u32 centerBlue[3]{};
+    for (u32 kind = 0; kind < 3; ++kind) {
+        Scene3DRig rig(320, 180);
+        ModelImport model; model.path = write_triangle_gltf(true, 1.f, 0.f, 0.f);
+        const auto modelId = rig.e.import_model(model);
+        const auto reference = rig.capture(320);
+        const auto imageId = rig.e.import_image(uniform_image(64, 64, 0, 80, 255).rgba.data(), 64, 64,
+                                               "Own periodic blue", nullptr);
+        AUREA_CHECK(modelId.ok() && imageId.ok()); if (!modelId.ok() || !imageId.ok()) return;
+        auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        const LayerId id = LayerId::unpack(*imageId); auto* layer = comp->layer(id);
+        layer->threeD = true; layer->transform.position = {160, 90, kind == 0 ? 100.f : kind == 1 ? -100.f : 0.f};
+        layer->transform.rotation.y = kind == 2 ? 60.f : 0.f;
+        push_effect(rig, id, effect_keys::kMotionTile);
+        const auto image = rig.capture(320); u32 blue = 0, red = 0;
+        for (u32 y = 75; y < 105; ++y) for (u32 x = 130; x < 190; ++x) {
+            // The own model is a triangle, not a rectangle. Only its opaque
+            // reference silhouette has a depth-occlusion expectation.
+            if (reference.at(x, y)[0] <= 220) continue;
+            const auto* pixel = image.at(x, y);
+            blue += pixel[2] > 220 && pixel[0] < 10; red += pixel[0] > 220 && pixel[2] < 10;
+        }
+        centerBlue[kind] = blue;
+        std::printf("    periodic plane/model %u: blue%u red%u\n", kind, blue, red);
+        if (kind == 0) { AUREA_CHECK_EQ(blue, 0u); AUREA_CHECK(red > 1000u); }
+        if (kind == 1) { AUREA_CHECK(blue > 1000u); AUREA_CHECK_EQ(red, 0u); }
+        if (kind == 2) { AUREA_CHECK(blue > 100u); AUREA_CHECK(red > 100u); }
+    }
+    AUREA_CHECK(centerBlue[2] < centerBlue[1]);
+}
+
+AUREA_TEST(Gpu, MotionTilePeriodicPlanePreservesTheAcceptsLightsSetting) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(128, 128);
+    const auto id = scene.image(uniform_image(96, 96, 255, 255, 255), 64, 64);
+    auto* plane = scene.comp->layer(id); plane->threeD = true;
+    scene.add_effect(id, effect_keys::kMotionTile).params[motion_tile::kMirror].constant = ParamValue::boolean(true);
+    const auto lightId = scene.comp->add_layer(LayerKind::Light, "Own point light");
+    auto* light = scene.comp->layer(lightId); light->threeD = true;
+    light->end = scene.comp->duration(); light->light.kind = LightKind::Point;
+    light->light.intensity = 1; light->light.range = 0;
+    light->transform.position = {64, 64, -100};
+    const f32 refused = scene.render().v(64, 64).x;
+    plane->acceptsLights = true;
+    const f32 face = scene.render().v(64, 64).x;
+    plane->transform.rotation.y = 70;
+    const f32 angled = scene.render().v(64, 64).x;
+    plane->transform.rotation.y = 0; light->transform.position.z = 100;
+    const f32 behind = scene.render().v(64, 64).x;
+    std::printf("    periodic accepts lights: refused%.4f face%.4f angled%.4f behind%.4f\n", refused, face, angled, behind);
+    AUREA_CHECK_NEAR(refused, 1.f, .005f); AUREA_CHECK_NEAR(face, 1.f, .01f);
+    AUREA_CHECK(angled > .1f && angled < .6f); AUREA_CHECK(behind < .005f);
+}
+
+AUREA_TEST(Gpu, MotionTilePeriodicMinificationIntegratesTheUnmirroredTileSeam) {
+    AUREA_REQUIRE_GPU();
+    for (const bool mirror : {false, true}) {
+        Scene scene(96, 96);
+        auto source = uniform_image(128, 128, 0, 0, 0);
+        for (u32 y = 0; y < 128; ++y) for (u32 x = 64; x < 128; ++x) {
+            auto* p = source.rgba.data() + (y * 128 + x) * 4; p[0] = p[1] = p[2] = 255;
+        }
+        const auto id = scene.image(source, 48.5f, 48, .125f);
+        scene.comp->layer(id)->threeD = true;
+        scene.add_effect(id, effect_keys::kMotionTile).params[motion_tile::kMirror].constant = ParamValue::boolean(mirror);
+        const auto actual = scene.render(); f32 texelScale = 0;
+        const Mat4 m = tile_test_plane_matrix(scene, id, &texelScale);
+        std::printf("    seam graph mirror%d:\n%s\n", mirror, gpu().renderer.graph_dump().c_str());
+        const auto center = tile_test_ray(m, 40.5, 48.5), next = tile_test_ray(m, 41.5, 48.5);
+        const f32 logicalFootprint = std::fabs(next.pixel.x - center.pixel.x);
+        std::printf("    seam density%.9f base%.1fx%.1f logicalFootprint%.9f workingFootprint%.9f\n",
+            texelScale, source.width * texelScale, source.height * texelScale, logicalFootprint, logicalFootprint * texelScale);
+        motion_tile::Params params; params.mirror = mirror;
+        f64 expected = 0;
+        for (u32 sample = 0; sample < 4096; ++sample) {
+            const auto ray = tile_test_ray(m, 40 + (sample + .5) / 4096, 48.5);
+            AUREA_CHECK(ray.valid);
+            expected += tile_test_source_sample(source, motion_tile::reference_lookup(params,
+                {ray.pixel.x / 128, ray.pixel.y / 128})).x;
+        }
+        expected /= 4096;
+        const f64 error = std::fabs(expected - actual.at(40, 48)[0]);
+        std::printf("    isotropic seam mirror%d: expected%.5f actual%.5f error%.5f\n",
+                    mirror, expected, actual.at(40, 48)[0], error);
+        AUREA_CHECK(error < .03);
+    }
+}

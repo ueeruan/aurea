@@ -150,7 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           FAILED=0
-          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary VulkanReturnsEmptySlabsAndPreservesLiveAllocations VulkanMemoryPackingGpu VulkanMrtGpu SceneWarmupGpu OriginalModelExport FrameGraphSegments PreviewGraphLifecycle PreviewIdle ExportSourceStartupGpu VulkanDispatchOwnersGpu BoundedCommandsGpu UploadLifetimeGpu MemoryPressureGpu VulkanDescriptorsGpu VulkanAllocationFailure VulkanRecoveryGpu; do
+          for FILTER in PreviewRetry MissingMainVideoPreservesPresentationAndRecoversInRawAndCompositor PreviewDiscardGpu SceneTargets MorphSharing HostRingGpu ShaderLibrary VulkanReturnsEmptySlabsAndPreservesLiveAllocations VulkanMemoryPackingGpu VulkanMrtGpu SceneWarmupGpu OriginalModelExport ExportGpuRetirement MotionTile FrameGraphSegments PreviewGraphLifecycle PreviewIdle ExportSourceStartupGpu VulkanDispatchOwnersGpu BoundedCommandsGpu UploadLifetimeGpu MemoryPressureGpu VulkanDescriptorsGpu VulkanAllocationFailure VulkanRecoveryGpu; do
             # Preserve independent GPU evidence even if another group fails.
             if ! timeout 180s ./aurea_tests "$FILTER" 2>&1 | tee "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi
             if ! grep -Eq '^[1-9][0-9]* testes, [0-9]+ verificacoes, 0 falhas$' "../../host-export-results/preview-$FILTER.log"; then FAILED=1; fi

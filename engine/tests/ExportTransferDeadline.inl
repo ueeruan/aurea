@@ -2,6 +2,180 @@
 
 #include "OldKeyframeProject.hpp"
 #include "aurea/project/Serialization.hpp"
+#include "aurea/export/OfflineFrameRenderer.hpp"
+
+AUREA_TEST(ExportGpuRetirement, RetiredOfflineRendererRejectsLateGpuCommandsAndRepeatedShutdown) {
+    MockBackend backend;
+    EffectRegistry effects;
+    OfflineFrameRenderer offline;
+    AUREA_CHECK(offline.initialize(backend, effects, nullptr, nullptr, 32ull << 20, 0).ok());
+    AUREA_CHECK(backend.poll_export_work().ok());
+    const u32 idle = backend.idleWaits.load();
+    offline.retire_gpu_after_done();
+    const u32 submissions = backend.framesSubmitted;
+    Project project; u64 frame = 123;
+    AUREA_CHECK_EQ(offline.render(project, {}, {}, {}, nullptr, nullptr, {}, frame).code(), Errc::InvalidState);
+    AUREA_CHECK_EQ(frame, 0u);
+    AUREA_CHECK_EQ(backend.framesSubmitted, submissions);
+    offline.shutdown(); offline.shutdown();
+    AUREA_CHECK_EQ(backend.idleWaits.load(), idle);
+}
+
+AUREA_TEST(ExportGpuRetirement, TerminalGpuErrorRetiresSafelyButNeverPublishesSuccess) {
+    for (const Errc expected : {Errc::OutOfDeviceMemory, Errc::InvalidState}) {
+        SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+        const std::string output = "terminal-gpu-error-" + std::to_string(static_cast<int>(expected)) + ".mp4";
+        struct Cleanup {
+            std::string output;
+            ~Cleanup() {
+                fileio::remove_file(output + ".aurea-export");
+                fileio::remove_file(output + ".aurea-export.project.aurea");
+            }
+        } cleanup{output};
+        auto* backend = new MockBackend(); backend->mapBuffers = true;
+        char detail[] = "original terminal auxiliary error";
+        backend->completedExportWorkFailure = Status{expected, detail};
+        Rig rig(cfg, 30, 3, 1, nullptr, backend, 0, true);
+        AUREA_CHECK(rig.ok); if (!rig.ok) return;
+        const u32 idle = backend->idleWaits.load();
+        ExportSettings settings; settings.height = 64;
+        AUREA_CHECK(rig.e.start_export(settings, output.c_str()).ok());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (!rig.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        const auto progress = rig.e.export_progress();
+        AUREA_CHECK(progress.finished);
+        AUREA_CHECK_EQ(progress.result, expected);
+        AUREA_CHECK_EQ(progress.framesDone, 3u);
+        AUREA_CHECK(std::strcmp(progress.message, "original terminal auxiliary error") == 0);
+        // Provider storage may change after cleanup; the owning result/message
+        // and recovery must keep the actual code/detail, not a borrowed view.
+        std::memset(detail, '?', sizeof(detail) - 1);
+        AUREA_CHECK(std::strcmp(rig.e.export_progress().message, "original terminal auxiliary error") == 0);
+        const std::string diagnostics = rig.e.export_diagnostics();
+        AUREA_CHECK(diagnostics.find("\"sessionStage\":\"failed\"") != std::string::npos);
+        AUREA_CHECK(diagnostics.find("\"result\":" + std::to_string(static_cast<int>(expected))) != std::string::npos);
+        export_recovery::Package package; std::unique_ptr<Project> project;
+        AUREA_CHECK(export_recovery::read(output + ".aurea-export", package, project).ok());
+        AUREA_CHECK_EQ(package.state, export_recovery::State::Failed);
+        AUREA_CHECK_EQ(package.result, expected);
+        AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+        for (usize i = 0; i < backend->textures.size(); ++i)
+            if (backend->textures[i].debugName && std::strncmp(backend->textures[i].debugName, "export-", 7) == 0)
+                AUREA_CHECK(!backend->textureAlive[i]);
+        backend->completedExportWorkFailure = OkStatus;
+        AUREA_CHECK(rig.e.render_frame().ok());
+        AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+    }
+}
+
+AUREA_TEST(ExportGpuRetirement, PreviewCanAdvanceWhileCpuSourceRetiresAndLateReadyDoesNotSubmit) {
+    using namespace export_source_startup_test;
+    OwnedFiles files; AUREA_CHECK(files.create());
+    OpeningFactory factory(config(), Mode::Held);
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig rig(config(), 30, 4, 1, &factory, backend, 0, false, OwnedFiles::primary,
+        ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 500);
+    ReleaseBeforeRigDestruction guard{factory.state};
+    AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    AUREA_CHECK(rig.e.attach_surface(reinterpret_cast<void*>(1), 64, 36).ok());
+    rig.e.media().close_all(); factory.arm(0);
+    ExportSettings settings; settings.height = 36;
+    AUREA_CHECK(rig.e.start_export(settings, "cpu-retirement-preview.mp4").ok());
+    AUREA_CHECK(wait_active(*factory.state));
+    (void)rig.e.cancel_export();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!rig.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(rig.e.export_progress().finished);
+    AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Cancelled);
+    AUREA_CHECK(factory.state->active.load() > 0u);
+    rig.comp()->layer(rig.video_layer())->visible = false;
+    const u32 previousFrames = backend->framesSubmitted;
+    AUREA_CHECK(rig.e.render_frame().ok());
+    AUREA_CHECK(backend->framesSubmitted > previousFrames);
+    // This late opener belongs to the retired offline session. Its callback
+    // only advances CPU readiness, never the detached private renderer.
+    const u32 framesBeforeReady = backend->framesSubmitted;
+    factory.state->release = true;
+    const auto readyDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!factory.state->returned.load() && std::chrono::steady_clock::now() < readyDeadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(factory.state->returned.load() > 0u);
+    AUREA_CHECK_EQ(backend->framesSubmitted, framesBeforeReady);
+    AUREA_CHECK(rig.e.render_frame().ok());
+}
+
+AUREA_TEST(ExportGpuRetirement, AuxiliaryUploadAfterTheFrameRetainsResourcesUntilCompletion) {
+    SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> auxiliaryComplete{false};
+    std::atomic<u32> polls{0};
+    backend->beforeExportWorkPoll = [&] {
+        ++polls;
+        return auxiliaryComplete.load() ? OkStatus : Status{Errc::Timeout};
+    };
+    // Poll observes all normal frames as ready. Only the newer auxiliary
+    // submission remains pending; last_submitted_frame is not enough.
+    Rig rig(cfg, 30, 3, 1, nullptr, backend);
+    AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    const u32 idle = backend->idleWaits.load();
+    ExportSettings settings; settings.height = 64;
+    AUREA_CHECK(rig.e.start_export(settings, "auxiliary-after-frame.mp4").ok());
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!rig.e.export_progress().finished && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    AUREA_CHECK(rig.e.export_progress().finished);
+    AUREA_CHECK_EQ(rig.e.export_progress().result, Errc::Ok);
+    AUREA_CHECK(polls.load() > 0u);
+    AUREA_CHECK_EQ(rig.e.start_export(settings, "auxiliary-after-frame.mp4").code(), Errc::Timeout);
+    AUREA_CHECK_EQ(rig.e.render_frame().code(), Errc::Timeout);
+    std::vector<usize> retained;
+    for (usize i = 0; i < backend->textures.size(); ++i)
+        if (backend->textures[i].debugName && std::strncmp(backend->textures[i].debugName, "export-", 7) == 0)
+            retained.push_back(i);
+    AUREA_CHECK_EQ(retained.size(), 3u);
+    for (const auto i : retained) AUREA_CHECK(backend->textureAlive[i]);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+    auxiliaryComplete = true;
+    Status restored{Errc::Timeout};
+    const auto restoreDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    do {
+        restored = rig.e.render_frame();
+        if (!restored.ok()) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    } while (!restored.ok() && std::chrono::steady_clock::now() < restoreDeadline);
+    AUREA_CHECK(restored.ok());
+    for (const auto i : retained) AUREA_CHECK(!backend->textureAlive[i]);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+}
+
+AUREA_TEST(ExportGpuRetirement, FramelessStartupWithPendingAuxiliaryWorkKeepsItsContext) {
+    SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    std::atomic<bool> auxiliaryComplete{false};
+    backend->beforeExportWorkPoll = [&] {
+        return auxiliaryComplete.load() ? OkStatus : Status{Errc::Timeout};
+    };
+    backend->beforeCreateBuffer = [&](const BufferDesc& desc) {
+        return desc.access == MemoryAccess::Readback ? Status{Errc::NotSupported, "readback rejeitado"} : OkStatus;
+    };
+    Rig rig(cfg, 30, 3, 1, nullptr, backend);
+    AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    ExportSettings settings; settings.height = 64;
+    const u32 idle = backend->idleWaits.load();
+    const u32 destroyedShaders = backend->shadersDestroyed;
+    AUREA_CHECK_EQ(rig.e.start_export(settings, "auxiliary-no-frame.mp4").code(), Errc::NotSupported);
+    AUREA_CHECK_EQ(backend->last_submitted_frame(), 0u);
+    AUREA_CHECK_EQ(rig.e.start_export(settings, "auxiliary-no-frame.mp4").code(), Errc::Timeout);
+    AUREA_CHECK_EQ(rig.e.render_frame().code(), Errc::Timeout);
+    AUREA_CHECK_EQ(backend->shadersDestroyed, destroyedShaders);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+    auxiliaryComplete = true;
+    backend->beforeCreateBuffer = {};
+    AUREA_CHECK(rig.e.render_frame().ok());
+    AUREA_CHECK(backend->shadersDestroyed > destroyedShaders);
+    AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+}
 
 AUREA_TEST(ExportSetupErrors, TextureAndReadbackFailuresKeepTheirActualCause) {
     for (const bool texture : {true, false}) {

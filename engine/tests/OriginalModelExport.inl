@@ -249,6 +249,16 @@ AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRes
     SyntheticConfig cfg; cfg.width = 96; cfg.height = 64;
     auto* backend = new MockBackend(); backend->mapBuffers = true;
     std::atomic<bool> waiting{false}, completed{false};
+    std::atomic<u32> idlePhase{0};
+    std::atomic<bool> idleDelayUsed{false};
+    const auto callerThread = std::this_thread::get_id();
+    backend->beforeWaitIdle = [&] {
+        std::printf("    original-cancel idle: phase=%u fenceCompleted=%u callerThread=%u idleBefore=%u\n",
+            idlePhase.load(), completed.load() ? 1u : 0u,
+            std::this_thread::get_id() == callerThread ? 1u : 0u, backend->idleWaits.load());
+        if (idlePhase.load() == 2 && !idleDelayUsed.exchange(true))
+            std::this_thread::sleep_for(std::chrono::milliseconds(700));
+    };
     backend->beforeWaitFrame = [&](u64 frame, u64 timeout) {
         if (!frame || completed.load()) return OkStatus;
         if (timeout) { waiting = true; std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
@@ -263,6 +273,7 @@ AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRes
     AUREA_CHECK(id.valid()); if (!id.valid()) return;
     AUREA_CHECK(rig.e.attach_surface(reinterpret_cast<void*>(1), 96, 64).ok());
     ExportSettings settings; settings.height = 64;
+    idlePhase = 1;
     AUREA_CHECK(rig.e.start_export(settings, (fixture.prefix + ".mp4").c_str()).ok());
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (!waiting && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -314,7 +325,12 @@ AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRes
     AUREA_CHECK_EQ(rig.e.capture_preview_frame_rgba(96, preserved, captureWidth, captureHeight).code(), Errc::Timeout);
     AUREA_CHECK(backend->textureAlive[sourceTexture - 1]);
     AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+    idlePhase = 2;
+    const auto releaseStarted = std::chrono::steady_clock::now();
     completed = true; AUREA_CHECK(rig.e.render_frame().ok());
+    std::printf("    original-cancel fence-ready caller: %.1fms idleDelayUsed=%u idleAdded=%u\n",
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - releaseStarted).count(),
+        idleDelayUsed.load() ? 1u : 0u, backend->idleWaits.load() - idle);
     AUREA_CHECK(!backend->textureAlive[sourceTexture - 1]);
     bool previewTexture = false;
     for (usize i = 0; i < backend->textures.size(); ++i)
@@ -322,4 +338,5 @@ AUREA_TEST(OriginalModelExport, CancellationKeepsSourceTexturesUntilFenceThenRes
             previewTexture = true;
     AUREA_CHECK(previewTexture);
     AUREA_CHECK_EQ(backend->idleWaits.load(), idle);
+    idlePhase = 3;
 }

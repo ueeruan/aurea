@@ -730,6 +730,17 @@ public:
     // --- Sincronização e medição ----------------------------------------------
     virtual void wait_idle() noexcept = 0;
 
+    /// Export-only retirement proof, without waiting for the entire device.
+    /// Covers normal submissions AND auxiliary uploads, including no-frame
+    /// initialization. Caller excludes new GPU work from first poll through
+    /// retirement. An unknown implementation must retain resources.
+    /// completedFailure reports an already terminal command's original error
+    /// separately from the proof; completion must never turn failure into Ok.
+    [[nodiscard]] virtual Status poll_export_work(Status* completedFailure = nullptr) noexcept {
+        if (completedFailure) *completedFailure = OkStatus;
+        return Status{Errc::Timeout, "backend sem prova de conclusao do export"};
+    }
+
     /// Número do último frame submetido (o `FrameBegin::frameNumber` dele).
     /// 0 = nenhum / backend sem essa noção.
     [[nodiscard]] virtual u64 last_submitted_frame() const noexcept { return 0; }

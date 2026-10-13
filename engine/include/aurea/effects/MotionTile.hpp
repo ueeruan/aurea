@@ -26,6 +26,7 @@
 #pragma once
 
 #include "aurea/effects/Effect.hpp"
+#include <array>
 
 namespace aurea {
 struct Layer;
@@ -96,6 +97,19 @@ inline constexpr f32 kMaxOutput = 5.0f;
 
 /// A janela de saída contém o ponto `compUv` (0..1 no quadro)?
 [[nodiscard]] bool inside_output(const Params& p, Vec2 compUv) noexcept;
+
+/// A terminal tile in a 3D plane samples a bounded pyramid of ONE source tile.
+/// Rays cover the visible plane without an arbitrarily large raster wall.
+inline constexpr u32 kSceneTileSlots = 12;
+static_assert(kSceneTileSlots <= binding::kTextureSlots);
+struct PeriodicPlane {
+    std::array<FGTexture, kSceneTileSlots> textures{};
+    Vec4 inverseX{}, inverseY{}, inverseW{};
+    Vec4 box{}, tile{}, flags{}, mips{}, window{};
+    u32 count = 0;
+};
+[[nodiscard]] bool build_scene_plane(EffectBuildContext& ctx, const EffectEval& eval,
+                                    const LayerImage& input, PeriodicPlane& out) noexcept;
 
 /// Converte, NO LUGAR, um Motion Tile gravado na disposição anterior (menos de
 /// `kLayout + 1` slots) para a atual, junto com os keyframes dele na layer:

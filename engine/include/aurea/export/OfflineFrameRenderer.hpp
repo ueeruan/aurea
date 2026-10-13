@@ -17,6 +17,9 @@ public:
                   const ImagePixels* (*images)(void*, AssetId), void* imageContext,
                   const RenderSettings& settings, u64& submittedFrame) noexcept;
     void shutdown() noexcept;
+    // Engine proved all normal/auxiliary GPU work; no renderer command may be
+    // submitted after this. Source callbacks remain CPU-only until retired.
+    void retire_gpu_after_done() noexcept;
     // Transfer opens/decoders to their owner retirement worker and poll only.
     // The caller must retain this renderer/factory until this returns true.
     [[nodiscard]] bool retire_sources() noexcept;

@@ -472,6 +472,9 @@ public:
     /// Cria shaders, samplers e PRÉ-AQUECE todos os pipelines embutidos.
     [[nodiscard]] Status initialize(GPUBackend& backend, const EffectRegistry& effects) noexcept;
     void shutdown() noexcept;
+    /// Offline export only: caller proved every submission/upload completed
+    /// and excludes new work referencing this renderer through retirement.
+    void shutdown_after_gpu_done() noexcept;
     /// O dispositivo morreu: esquece todos os objetos de GPU sem destruí-los.
     void forget_device() noexcept;
     [[nodiscard]] bool ready() const noexcept { return backend_ != nullptr; }
@@ -813,6 +816,8 @@ private:
     void read_timings(RenderTimings& t) noexcept;
 
     GPUBackend* backend_ = nullptr;
+    void shutdown_impl(bool gpuDone) noexcept;
+    void release_project_resources_impl(bool gpuDone) noexcept;
     const EffectRegistry* effects_ = nullptr;
     EffectTypeId posterizeType_ = 0, echoType_ = 0, rgbTimeType_ = 0;
     EffectTypeId motionDetectType_ = 0;   ///< Detectar movimento: a fonte em t − atraso

@@ -8,6 +8,10 @@
 playServicesAds = "25.5.0"
 ump = "4.0.0"
 appset = "16.1.0"
+# 12/01/2026: Google service-binding message queues/callbacks moved off main
+# by default. Older transitive base/basement versions retain the ANR lock path.
+gmsServiceBinding = "18.10.0"
+gmsTasks = "18.4.1"
 levelplay = "9.6.0"
 levelplayUnityAdapter = "5.13.0"
 unityAds = "4.20.1"
@@ -28,6 +32,9 @@ play-services-ads = { group = "com.google.android.gms", name = "play-services-ad
 ump = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "ump" }
 # App Set ID: identidade do aparelho para o limite diario da IA (prevencao de abuso).
 appset = { group = "com.google.android.gms", name = "play-services-appset", version.ref = "appset" }
+play-services-base = { group = "com.google.android.gms", name = "play-services-base", version.ref = "gmsServiceBinding" }
+play-services-basement = { group = "com.google.android.gms", name = "play-services-basement", version.ref = "gmsServiceBinding" }
+play-services-tasks = { group = "com.google.android.gms", name = "play-services-tasks", version.ref = "gmsTasks" }
 levelplay = { group = "com.unity3d.ads-mediation", name = "mediation-sdk", version.ref = "levelplay" }
 levelplay-unityads-adapter = { group = "com.unity3d.ads-mediation", name = "unityads-adapter", version.ref = "levelplayUnityAdapter" }
 unity-ads = { group = "com.unity3d.ads", name = "unity-ads", version.ref = "unityAds" }

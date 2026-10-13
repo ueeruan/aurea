@@ -1166,6 +1166,29 @@ void Backend::wait_idle() noexcept {
     allocator_.trim_empty_blocks();
 }
 
+Status Backend::poll_export_work(Status* completedFailure) noexcept {
+    if (completedFailure) *completedFailure = OkStatus;
+    if (!device_) return Status{Errc::InvalidState, "backend nao inicializado"};
+    if (deviceLost_) return Status{Errc::DeviceLost};
+    if (current_) return Status{Errc::Timeout, "comandos GPU ainda em gravacao"};
+    for (u32 i = 0; i < framesInFlight_; ++i) {
+        const auto& frame = frames_[i];
+        if (frame.submitted) {
+            if (const Status status = wait_frame(frame.frameNumber, 0); !status.ok()) return status;
+        }
+    }
+    // An immediate upload can be newer than last_submitted_frame(). Its own
+    // command pool/staging must survive until its own fence is signaled.
+    for (const auto& submission : pendingImmediate_) {
+        const VkResult result = deviceFunctions_.vkWaitForFences(device_, 1, &submission.fence, VK_TRUE, 0);
+        if (note_device_lost(result)) return Status{Errc::DeviceLost};
+        if (result == VK_TIMEOUT) return Status{Errc::Timeout, "upload GPU do export pendente"};
+        if (const Status status = check(result, "fence auxiliar do export"); !status.ok()) return status;
+    }
+    collect_immediate();
+    return pendingImmediate_.empty() ? OkStatus : Status{Errc::Timeout};
+}
+
 u64 Backend::last_submitted_frame() const noexcept {
     return lastSubmitted_ && lastSubmitted_->submitted ? lastSubmitted_->frameNumber : 0;
 }

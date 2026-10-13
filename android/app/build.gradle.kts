@@ -334,6 +334,22 @@ dependencies {
     implementation(libs.play.services.ads)
     implementation(libs.ump)
     implementation(libs.appset)
+    // GoogleApiHandler can hold the service map during Binder IPC while the
+    // supervisor's main-thread Handler waits for it (reported ANR). Keep the
+    // documented background-callback fix even when Ads/AppSet request older
+    // transitive libraries. Constraints do not add unused Google components.
+    // https://developers.google.com/android/guides/releases#january_12_2026
+    constraints {
+        implementation(libs.play.services.base) {
+            because("Google service-binding callbacks must not share the UI message queue")
+        }
+        implementation(libs.play.services.basement) {
+            because("Use the supervisor with background callbacks enabled by default")
+        }
+        implementation(libs.play.services.tasks) {
+            because("Match the documented 18.10 service-binding dependency family")
+        }
+    }
     // Unity LevelPlay (mediação) — o provedor ATIVO no Android. O AdMob acima
     // fica para entrar depois como rede mediada pelo LevelPlay; o UMP segue
     // sendo o consentimento (TCF) que o LevelPlay e as redes leem.

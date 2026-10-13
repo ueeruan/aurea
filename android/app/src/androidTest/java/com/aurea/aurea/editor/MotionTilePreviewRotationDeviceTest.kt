@@ -33,6 +33,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.floor
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /** Reads the presented SurfaceView, without asking captureFrame to render a fresh frame. */
@@ -43,11 +45,17 @@ class MotionTilePreviewRotationDeviceTest {
 
     @Test fun rotationGestureProjectsAnImageWithoutAnExplicit3DFlag() = verifyPreview(explicit3D = false)
 
-    private fun verifyPreview(explicit3D: Boolean) {
+    @Test fun grazingWhitePlaneCoversFrontFacingRaysBeyondTheOldRasterWall() =
+        verifyPreview(explicit3D = true, pattern = "white")
+
+    @Test fun grazingStripePreviewMatchesAnIntegratedPixelInsteadOfAliasedBands() =
+        verifyPreview(explicit3D = true, pattern = "stripes")
+
+    private fun verifyPreview(explicit3D: Boolean, pattern: String = "gradient") {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         check(context.packageName.endsWith(".uitest"))
-        val mode = if (explicit3D) "explicit" else "implicit"
+        val mode = (if (explicit3D) "explicit" else "implicit") + if (pattern == "gradient") "" else "-$pattern"
         val directory = File(context.getExternalFilesDir(null), "motion-tile-preview-beta3/$mode").apply { mkdirs() }
         val report = File(directory, "result.txt").apply { writeText("Live SurfaceView, own texture, paused frame 0, explicit3D=$explicit3D\n") }
         lateinit var store: EditorStore
@@ -64,7 +72,11 @@ class MotionTilePreviewRotationDeviceTest {
         val engine = store.engineForStress
         val source = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888)
         for (y in 0 until 128) for (x in 0 until 128) {
-            source.setPixel(x, y, Color.rgb(35 + x * 210 / 127, 40 + y * 180 / 127, if (x < 45) 220 else 65))
+            source.setPixel(x, y, when (pattern) {
+                "white" -> Color.WHITE
+                "stripes" -> if ((y / 4) % 2 == 0) Color.BLACK else Color.WHITE
+                else -> Color.rgb(35 + x * 210 / 127, 40 + y * 180 / 127, if (x < 45) 220 else 65)
+            })
         }
         val sourcePath = File(context.filesDir, "motion-tile-preview-own.png")
         sourcePath.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.PNG, 100, it)) }
@@ -172,6 +184,38 @@ class MotionTilePreviewRotationDeviceTest {
                 return (mirrored * 128f - .5f).coerceIn(0f, 127f)
             }
             var count = 0; var wrong = 0; var behind = 0; var litBehind = 0; var totalError = 0L
+            if (pattern == "stripes") {
+                fun localY(x: Float, y: Float): Float =
+                    (coefficients[3] * x + coefficients[4] * y + coefficients[5]) / denominator(x, y)
+                fun linear(value: Int): Double {
+                    val v = value / 255.0
+                    return if (v <= .04045) v / 12.92 else ((v + .055) / 1.055).pow(2.4)
+                }
+                // PixelCopy is cropped and reduced to256x144, hence each
+                // measured pixel spans2x2 composition pixels. Integrate the
+                // inverse homography over its full height; the source rows
+                // are independent of X. Keep the old24x domain here to
+                // isolate filtering from the separate white coverage case.
+                for (y in 3 until 141) {
+                    val low = localY(257f, y * 2f + .0002f)
+                    val high = localY(257f, y * 2f + 1.9998f)
+                    if (!low.isFinite() || !high.isFinite() || minOf(low, high) < -11.5f || maxOf(low, high) > 12.5f) continue
+                    if (denominator(257f, y * 2f) * centerW <= 0 || denominator(257f, y * 2f + 2) * centerW <= 0) continue
+                    val span = abs(high - low) * 128
+                    if (span < 32 || span > 2048) continue
+                    var expected = 0.0
+                    repeat(2048) { n ->
+                        val sample = sourceCoordinate(localY(257f, y * 2f + (n + .5f) * 2 / 2048))
+                        val first = floor(sample).toInt()
+                        val fraction = sample - first
+                        expected += (first / 4 % 2) * (1 - fraction) + (minOf(first + 1, 127) / 4 % 2) * fraction
+                    }
+                    expected /= 2048
+                    val error = abs(linear(Color.red(colors[y * 256 + 128])) - expected)
+                    count++; if (error > .14) wrong++; totalError += (error * 255).roundToInt()
+                }
+                return Domain(count, wrong, 0, 0, totalError.toDouble() / count.coerceAtLeast(1))
+            }
             for (y in 3 until 141 step 3) for (x in 3 until 253 step 3) {
                 val qx = (x + .5f) * 2f; val qy = (y + .5f) * 2f
                 val color = colors[y * 256 + x]
@@ -187,6 +231,17 @@ class MotionTilePreviewRotationDeviceTest {
                 val points = floatArrayOf(qx, qy, qx + 2f, qy, qx, qy + 2f)
                 inverse.mapPoints(points)
                 if (points.any { !it.isFinite() }) continue
+                if (pattern == "white") {
+                    // Exclude a footprint crossing the physical horizon and
+                    // rays beyond100 source tiles (the far depth frustum).
+                    // This still reaches well beyond the old24x raster wall.
+                    if (denominator(qx + 2, qy + 2) * centerW <= 0 || points.any { abs(it) > 100 }) continue
+                    count++
+                    val error = 255 - minOf(Color.red(color), Color.green(color), Color.blue(color))
+                    totalError += error * 2
+                    if (error > 15) wrong++
+                    continue
+                }
                 // At the horizon a screen pixel can contain many whole tiles.
                 // Compare only resolvable texture points, without imposing a
                 // point-sample oracle on a minified/antialiased footprint.
@@ -220,7 +275,12 @@ class MotionTilePreviewRotationDeviceTest {
                     colored = visible(current)
                     difference = previous?.let { changes(it, current) } ?: 0
                     measured = domain(current, corners)
-                    val passed = measured.matches && colored > current.size / 5 && (previous == null || difference > current.size / 12)
+                    val matches = when (pattern) {
+                        "white" -> measured.compared > 500 && measured.wrong == 0 && measured.litBehind == 0
+                        "stripes" -> measured.compared > 0 && measured.wrong == 0
+                        else -> measured.matches
+                    }
+                    val passed = matches && colored > current.size / 5 && (previous == null || difference > current.size / 12)
                     if (passed || SystemClock.elapsedRealtime() >= deadline) {
                         File(directory, "$label.png").outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
                         val result = "$label changed=$difference/${current.size} visible=$colored/${current.size} domain=$measured lowMemory=${store.appMemory.lowMemory} corners=${corners.contentToString()}"
@@ -230,7 +290,7 @@ class MotionTilePreviewRotationDeviceTest {
                         assertTrue("Own texture must remain visible: $result", colored > current.size / 5)
                         assertTrue("Rotation changed only the overlay or retained a stale tile preview: $result",
                             previous == null || difference > current.size / 12)
-                        assertTrue("Presented texture does not follow the projected layer's mirrored domain: $result", measured.matches)
+                        assertTrue("Presented texture does not follow the projected layer's mirrored domain: $result", matches)
                         return current
                     }
                 } finally { bitmap.recycle() }
@@ -239,9 +299,13 @@ class MotionTilePreviewRotationDeviceTest {
             fail("No updated live preview for $label: changed=$difference visible=$colored domain=$measured")
             return current
         }
-        var previous = readChanged("x-zero", null, checkNotNull(store.detail).worldCorners.copyOf())
+        if (pattern == "stripes") {
+            compose.runOnIdle { store.setTransform(TrackProperty.ROTATION_X, -101.2f) }
+            compose.waitUntil(10000) { abs((store.detail?.rotation?.get(0) ?: 0f) + 101.2f) < .01f }
+        }
+        var previous = readChanged(if (pattern == "stripes") "x-initial-minus101" else "x-zero", null, checkNotNull(store.detail).worldCorners.copyOf())
         compose.runOnIdle { store.beginGesture("rotação") }
-        for (angle in listOf(-101.2f, -88.4f, -221.2f)) {
+        for (angle in if (pattern == "stripes") listOf(-88.4f, -101.2f) else listOf(-101.2f, -88.4f, -221.2f)) {
             compose.runOnIdle { store.setTransform(TrackProperty.ROTATION_X, angle) }
             compose.waitUntil(10000) { abs((store.detail?.rotation?.get(0) ?: 0f) - angle) < .01f }
             // Keep the same selection, effect and modes. A deselect/seek or

@@ -514,6 +514,41 @@ void Backend::wait_idle() noexcept {
     }
 }
 
+Status Backend::poll_export_work(Status* completedFailure) noexcept {
+    if (completedFailure) *completedFailure = OkStatus;
+    Status ignoredFailure;
+    Status& observedFailure = completedFailure ? *completedFailure : ignoredFailure;
+    Impl& d = *impl_;
+    if (!d.device) return Status{Errc::InvalidState, "backend nao inicializado"};
+    if (d.deviceLost) return Status{Errc::DeviceLost};
+    if (d.current) return Status{Errc::Timeout, "comandos GPU ainda em gravacao"};
+    const Status framesReady = observe_export_frames(d.frames, d.framesInFlight, d.current, observedFailure,
+        [](const FrameContext& frame) {
+            return wait_command_buffer(frame.cmd, frame.completion, 0, "comando do export");
+        });
+    if (!framesReady.ok()) {
+        if (framesReady.code() == Errc::DeviceLost) d.deviceLost = true;
+        return framesReady;
+    }
+    for (const PendingSubmission& pending : d.pendingImmediate) {
+        const Status status = wait_command_buffer(pending.cmd, pending.completion, 0, "upload auxiliar do export");
+        if (status.code() == Errc::DeviceLost) d.deviceLost = true;
+        const Status ready = export_command_completion(pending.cmd, status, observedFailure);
+        if (!ready.ok()) return ready;
+    }
+    d.pendingImmediate.clear();
+    // Every original result was observed and all auxiliary work completed.
+    // Only now may completion callbacks retire other frame slots.
+    for (u32 i = 0; i < d.framesInFlight; ++i) {
+        FrameContext& frame = d.frames[i];
+        if (!frame.submitted) continue;
+        d.collect_timings(frame);
+        d.run_deferred(frame);
+        frame.submitted = false;
+    }
+    return OkStatus;
+}
+
 u64 Backend::last_submitted_frame() const noexcept {
     const Impl& d = *impl_;
     return d.lastSubmitted && d.lastSubmitted->submitted ? d.lastSubmitted->frameNumber : 0;

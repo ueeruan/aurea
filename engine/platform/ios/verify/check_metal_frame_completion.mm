@@ -102,6 +102,41 @@ int main() {
         frames[2].submitted = true; frames[2].releases = 0; frames[2].cmd = nil;
         REQUIRE(wait(Status{Errc::InvalidState}).code() == Errc::InvalidState);
         REQUIRE(frames[2].submitted && frames[2].releases == 0); // no actual completion proof
+
+        // Export-only auxiliary cleanup: success of retirement must preserve
+        // failure of the actual command, and unknown completion stays owned.
+        Status auxiliaryFailure;
+        id<MTLCommandBuffer> auxiliary = buffer(MTLCommandBufferStatusScheduled);
+        REQUIRE(export_command_completion(auxiliary, Status{Errc::InvalidState}, auxiliaryFailure).code() == Errc::InvalidState);
+        REQUIRE(auxiliaryFailure.ok());
+        REQUIRE(export_command_completion(auxiliary, OkStatus, auxiliaryFailure).code() == Errc::Timeout);
+        ((TestCommandBufferState*)auxiliary).status = MTLCommandBufferStatusError;
+        REQUIRE(export_command_completion(auxiliary, Status{Errc::OutOfDeviceMemory, "auxiliary OOM"}, auxiliaryFailure).ok());
+        REQUIRE(auxiliaryFailure.code() == Errc::OutOfDeviceMemory && auxiliaryFailure.detail() == "auxiliary OOM");
+        REQUIRE(export_command_completion(auxiliary, Status{Errc::InvalidState}, auxiliaryFailure).ok());
+        REQUIRE(auxiliaryFailure.code() == Errc::OutOfDeviceMemory); // first original failure survives
+        REQUIRE(export_command_completion(auxiliary, Status{Errc::DeviceLost}, auxiliaryFailure).code() == Errc::DeviceLost);
+        REQUIRE(export_command_completion(nil, Status{Errc::InvalidState}, auxiliaryFailure).code() == Errc::InvalidState);
+
+        TestFrame unordered[2];
+        unordered[0].frameNumber = 40;
+        unordered[0].cmd = buffer(MTLCommandBufferStatusCompleted);
+        unordered[1].frameNumber = 29;
+        unordered[1].cmd = buffer(MTLCommandBufferStatusError);
+        const auto observe = [](const TestFrame& frame) {
+            if (frame.cmd.status == MTLCommandBufferStatusError)
+                return Status{Errc::OutOfDeviceMemory, "older terminal frame"};
+            return command_buffer_terminal(frame.cmd) ? OkStatus : Status{Errc::Timeout};
+        };
+        Status originalFrameError;
+        REQUIRE(observe_export_frames(unordered, 2, static_cast<TestFrame*>(nullptr), originalFrameError, observe).ok());
+        REQUIRE(originalFrameError.code() == Errc::OutOfDeviceMemory && originalFrameError.detail() == "older terminal frame");
+        REQUIRE(unordered[0].submitted && unordered[1].submitted && unordered[0].releases == 0 && unordered[1].releases == 0);
+        ((TestCommandBufferState*)unordered[1].cmd).status = MTLCommandBufferStatusScheduled;
+        originalFrameError = OkStatus;
+        REQUIRE(observe_export_frames(unordered, 2, static_cast<TestFrame*>(nullptr), originalFrameError, observe).code() == Errc::Timeout);
+        REQUIRE(unordered[0].submitted && unordered[1].submitted && originalFrameError.ok());
+        REQUIRE(observe_export_frames(unordered, 2, &unordered[0], originalFrameError, observe).code() == Errc::Timeout);
     }
     std::printf("Metal frame completion: %d checks passed; no GPU fault injected\n", checks);
     return 0;

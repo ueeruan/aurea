@@ -229,6 +229,7 @@ public:
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 
     void wait_idle() noexcept override;
+    [[nodiscard]] Status poll_export_work(Status* completedFailure = nullptr) noexcept override;
     [[nodiscard]] u64 last_submitted_frame() const noexcept override;
     [[nodiscard]] Status wait_frame(u64 frameNumber, u64 timeoutNs) noexcept override;
     [[nodiscard]] u32 read_gpu_timings(GpuTiming* out, u32 capacity, f32* totalMs) noexcept override;

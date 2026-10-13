@@ -51,6 +51,7 @@ public:
     void release_external_image(TextureHandle) noexcept override;
     void defer_until_gpu_done(void (*)(void*), void*) noexcept override;
     void wait_idle() noexcept override;
+    Status poll_export_work(Status* completedFailure = nullptr) noexcept override;
     u64 last_submitted_frame() const noexcept override;
     Status wait_frame(u64, u64) noexcept override;
     u32 read_gpu_timings(GpuTiming*, u32, f32*) noexcept override;

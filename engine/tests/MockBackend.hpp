@@ -76,6 +76,8 @@ public:
     std::function<void()> beforeBeginOffscreenFrame;
     std::function<void()> beforeBeginLeasedFrame;
     std::function<void()> beforeWaitIdle;
+    std::function<Status()> beforeExportWorkPoll;
+    Status completedExportWorkFailure = OkStatus;
     std::function<Status()> beforeEndFrame;
     std::function<Status(const TextureDesc&)> beforeCreateTexture;
     std::function<Status(const BufferDesc&)> beforeCreateBuffer;
@@ -269,6 +271,15 @@ public:
     void wait_idle() noexcept override {
         if (beforeWaitIdle) beforeWaitIdle();
         ++idleWaits;
+    }
+    Status poll_export_work(Status* completedFailure = nullptr) noexcept override {
+        if (completedFailure) *completedFailure = completedExportWorkFailure;
+        if (frameOpen) return Status{Errc::Timeout};
+        if (beforeExportWorkPoll) {
+            const Status status = beforeExportWorkPoll();
+            if (!status.ok()) return status;
+        }
+        return wait_frame(last_submitted_frame(), 0);
     }
     u64 last_submitted_frame() const noexcept override { return framesSubmitted ? frame_ : 0; }
     Status wait_frame(u64 frame, u64 timeout) noexcept override {

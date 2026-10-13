@@ -136,6 +136,35 @@ jobs:
             build 2>&1 | tee build-ios.log
       - name: Validate compiled app with Foundation
         run: swift engine/platform/ios/verify/check_bundle.swift build/ios/Build/Products/Release-iphoneos/Aurea.app
+      - name: Preserve symbols matching the packaged executable
+        run: |
+          app="build/ios/Build/Products/Release-iphoneos/Aurea.app"
+          dsym="build/ios/Build/Products/Release-iphoneos/Aurea.app.dSYM"
+          test -s "$dsym/Contents/Resources/DWARF/Aurea"
+          xcrun dwarfdump --uuid "$app/Aurea" > build/ios-executable-uuid.txt
+          xcrun dwarfdump --uuid "$dsym" > build/ios-symbols-uuid.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os, re
+          expression = r'UUID: ([0-9A-Fa-f-]+) \(([^)]+)\)'
+          binary = re.findall(expression, Path('build/ios-executable-uuid.txt').read_text())
+          symbols = re.findall(expression, Path('build/ios-symbols-uuid.txt').read_text())
+          assert binary and sorted(binary) == sorted(symbols), (binary, symbols)
+          Path('build/ios-symbols-identity.json').write_text(json.dumps({
+              'source_commit': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'matching_uuids': binary,
+          }, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurea-ios-dsym
+          path: |
+            build/ios/Build/Products/Release-iphoneos/Aurea.app.dSYM/
+            build/ios-symbols-identity.json
+            build/ios-executable-uuid.txt
+            build/ios-symbols-uuid.txt
+          if-no-files-found: error
       - name: Validate shaders with Apple Metal compiler
         run: |
           set -o pipefail

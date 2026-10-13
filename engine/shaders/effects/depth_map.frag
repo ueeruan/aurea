@@ -23,11 +23,11 @@ layout(set = 0, binding = AUREA_TEX1) uniform sampler2D u_tex1;   // a disparida
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 uvMap;
     vec4 texel;
-    vec4 p0;      // x = mistura 0..1, y = inverter, z = 1 há mapa
+    vec4 p0;      // x = mistura 0..1, y = inverter, z = 1 há mapa, w = 1 mapa de outra camada
     vec4 p1;      // x = limite de longe, y = limite de perto (espaço da textura)
     vec4 p2;      // região da imagem (px da camada)
-    vec4 p3;      // xy = tamanho natural da camada (px) — o que o mapa cobre
-    vec4 color;
+    vec4 p3;      // xy = tamanho natural da camada (px) — o que o mapa cobre; zw = deslocamento (w = 1 em p0)
+    vec4 color;   // p0.w = 1: linhas (x, y) do ponto da camada → px da fonte do mapa
 } p;
 
 void main() {
@@ -36,7 +36,9 @@ void main() {
         o_color = base;
         return;
     }
-    const vec2 point = p.p2.xy + v_uv * p.p2.zw;
+    vec2 point = p.p2.xy + v_uv * p.p2.zw;
+    // Camada de ajuste: o mapa é da foto/vídeo abaixo dela.
+    if (p.p0.w > 0.5) point = vec2(dot(p.color.xy, point) + p.p3.z, dot(p.color.zw, point) + p.p3.w);
     const vec2 uv = clamp(point / max(p.p3.xy, vec2(1.0)), vec2(0.0), vec2(1.0));
     const float raw = texture(u_tex1, uv).r;
     float d = clamp((raw - p.p1.x) / max(p.p1.y - p.p1.x, 1e-5), 0.0, 1.0);

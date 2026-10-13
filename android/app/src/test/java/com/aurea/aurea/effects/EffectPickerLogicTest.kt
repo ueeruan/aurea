@@ -226,6 +226,39 @@ class EffectPickerLogicTest {
         assertEquals(radial, groupBannerEntry(EffectGroup.Blur, listOf(gaussian, radial)))
     }
 
+    /** O texto de uma chave em cada um dos 7 catálogos (a mesma leitura do EnglishCatalogTest). */
+    private fun catalogText(key: String): Map<String, String> =
+        listOf("values", "values-en", "values-es", "values-ar", "values-hi", "values-id", "values-ru").associateWith { folder ->
+            val file = listOf("src/main/res/$folder/strings.xml", "app/src/main/res/$folder/strings.xml").map { java.io.File(it) }.first { it.isFile }
+            Regex("""<string name="$key">([^<]*)</string>""").find(file.readText())?.groupValues?.get(1).orEmpty()
+        }
+
+    @Test
+    fun motionTileSearchFindsTheTileAndEveryEffectWithTilingInEveryLanguage() {
+        val terms = catalogText("fx_search_tile")
+        val names = catalogText("fx_name_motion_tile")
+        // Todo idioma tem os termos (com "motion tile" literal) e o nome mostra o termo conhecido.
+        terms.forEach { (folder, text) -> assertTrue("$folder sem fx_search_tile", text.contains("motion tile")) }
+        names.forEach { (folder, text) -> assertTrue("$folder: $text esconde Motion Tile", text.contains("Motion Tile")) }
+        val tile = fx("aurea.stylize.motion_tile", "Motion Tile", "Estilizar")
+        val shake = fx("aurea.distort.shake", "Shake", "Distort")
+        val offset = fx("aurea.transform.offset", "Offset", "Distorcer")
+        for (e in listOf(tile, shake, offset)) assertTrue(e.typeId in com.aurea.aurea.editor.panels.TileSearchEffects)
+        assertFalse(gaussian.typeId in com.aurea.aurea.editor.panels.TileSearchEffects)
+        val tileDocs = docs + mapOf(
+            tile.typeId to effectSearchDoc(listOf("Motion Tile") + names.values, terms.values),
+            shake.typeId to effectSearchDoc(listOf("Shake"), terms.values),
+            offset.typeId to effectSearchDoc(listOf("Offset"), terms.values),
+        )
+        // Ordem do catálogo: o Motion Tile vem antes dos outros que ladrilham.
+        val all = listOf(gaussian, lens, glow, tile, vhs, shake, offset)
+        for (query in listOf("motion tile", "mosaico", "tile", "ladrilho", "плитка", "мозаика", "ubin", "baldosa", "टाइल", "بلاط")) {
+            val found = searchEffects(all, tileDocs, query)
+            assertEquals("busca '$query'", tile, found.first())
+            assertTrue("busca '$query'", shake in found && offset in found && gaussian !in found)
+        }
+    }
+
     @Test
     fun featuredFollowsTheCuratedOrderAndOnlyWhatExists() {
         val deep = fx("aurea.light.deep_glow", "Deep Glow", "Luz")

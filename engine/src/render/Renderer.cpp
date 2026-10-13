@@ -1504,7 +1504,10 @@ std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase,
         if(!mask.closed&&!edges.empty())contour.pts.push_back({edges.back().z,edges.back().w});
     }
     auto affine=[](const Mat4& m){return vector::Affine2{m.col[0].x,m.col[0].y,m.col[1].x,m.col[1].y,m.col[3].x,m.col[3].y};};
-    const auto toHost=affine(layer_world_matrix(comp,*host,planTime_)).inverse()*affine(layer_world_matrix(comp,*guide,planTime_));
+    // Camada de ajuste: o plano dela é o da composição (os pixels são os da
+    // pilha abaixo), não o do sólido que a representa na timeline.
+    const Mat4 hostMatrix = host->adjustment ? Mat4::identity() : layer_world_matrix(comp,*host,planTime_);
+    const auto toHost=affine(hostMatrix).inverse()*affine(layer_world_matrix(comp,*guide,planTime_));
     for(auto& point:contour.pts)point=toHost.apply(point);
     const double length=vector::length_of(contour); if(length<1e-6)return result;
     count=std::min(count,64u); result.reserve(count);
@@ -1514,6 +1517,54 @@ std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase,
         Vec2 point,tangent; if(!vector::sample_at(contour,unit*length,point,tangent))return {};
         result.push_back({point.x,point.y,std::atan2(tangent.y,tangent.x),0});
     }
+    return result;
+}
+
+DepthMapResult Renderer::depth_map_below(const DepthMapRequest& request) noexcept {
+    DepthMapResult none;
+    none.failed = false;
+    if (!planComp_ || !request.host) return none;
+    const Composition& comp = *planComp_;
+    const Layer& adj = *request.host;
+    const OrderedIds<LayerId>& order = comp.order();
+    u32 at = order.size();
+    for (u32 i = 0; i < order.size(); ++i) if (comp.layer(order.at(i)) == &adj) { at = i; break; }
+    // A de cima entre as que ela ajusta: a logo abaixo (escopo 1), uma das
+    // escolhidas (escopo 2) ou a foto/vídeo mais alta abaixo (escopo 0).
+    const Layer* src = nullptr;
+    for (u32 i = at; i-- > 0;) {
+        const Layer* c = comp.layer(order.at(i));
+        if (!c || !c->visible || !c->contains_time(planTime_) || c->adjustment || (c->guide && planFinal_)) continue;
+        if (adj.adjustmentScope == 2 && std::find(adj.adjustmentTargets.begin(), adj.adjustmentTargets.end(), order.at(i))
+                                            == adj.adjustmentTargets.end()) continue;
+        if (c->kind == LayerKind::Image || c->kind == LayerKind::Video) { src = c; break; }
+        if (adj.adjustmentScope == 1) break;
+    }
+    // Camada 3D: a projeção não é afim; o efeito devolve o quadro intacto.
+    if (!src || wants_3d(comp, *src, planTime_)) return none;
+    u32 w = 0, h = 0;
+    if (src->kind == LayerKind::Image) {
+        const ImagePixels* px = planImageLookup_ ? planImageLookup_(planImageCtx_, src->source) : nullptr;
+        if (px) { w = px->width; h = px->height; }
+    } else if (const Asset* asset = planProject_ ? planProject_->asset(src->source) : nullptr) {
+        w = asset->video.width; h = asset->video.height;
+    }
+    if (!w || !h) return none;
+    DepthMapRequest r = request;
+    r.host = src;
+    r.localTime = src->local_time(planTime_);
+    r.stateSalt = 0xAD7A000000000000ull ^ reinterpret_cast<uintptr_t>(&adj);
+    DepthMapResult result = depth_map(r);
+    if (!result.texture.valid()) return result;
+    // px do quadro → px da fonte: a inversa da matriz 2D dela (com os pais).
+    const Mat4 m = world_2d_frac(comp, *src, static_cast<f64>(planTime_.value));
+    const f32 a = m.col[0].x, b = m.col[0].y, c = m.col[1].x, d = m.col[1].y;
+    const f32 det = a * d - b * c;
+    if (!std::isfinite(det) || std::fabs(det) < 1e-9f) return none;
+    const f32 inv = 1.0f / det;
+    const f32 tx = m.col[3].x, ty = m.col[3].y;
+    result.mapX = Vec4{d * inv, -c * inv, (c * ty - d * tx) * inv, static_cast<f32>(w)};
+    result.mapY = Vec4{-b * inv, a * inv, (b * tx - a * ty) * inv, static_cast<f32>(h)};
     return result;
 }
 
@@ -1710,6 +1761,171 @@ VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noe
     return fx;
 }
 
+// =============================================================================
+// CAMADA DE AJUSTE COM EFEITO DE TEMPO (0.1.8 BETA 2). Numa camada comum os
+// efeitos de tempo pedem a FONTE noutro instante ao decoder; numa camada de
+// ajuste a fonte é a composição abaixo, e o passado dela só existe
+// renderizando-a de novo naquele instante. Aqui só se leem os parâmetros (a
+// mesma conta do caminho da camada comum); o prepare pede os fundos.
+// =============================================================================
+struct AdjustTimeTypes { EffectTypeId echo, rgb, motionDetect, datamosh; };
+
+struct AdjustTimeAsk {
+    f64 shown = 0.0;          ///< instante da composição mostrado no lugar do atual
+    bool replaced = false;
+    u8 frameBlend = 0;        ///< 0 repete, 1 mistura, 2 movimento
+    f32 flowBase = 0.0f;
+    f32 vector = 0.0f;        ///< Flow Motion Blur (quantidade)
+    f64 travel = 0.0;         ///< quadros do fundo que o obturador cobre
+    bool rgb = false;
+    f64 rgbAt[3]{};
+    i64 historyDelay = 0;
+    struct Echo { f64 at; f32 weight; Vec3 mask; };
+    std::vector<Echo> echo;
+    bool bare = false;        ///< efeito que lê o alfa: a pilha sem a cor de fundo
+    [[nodiscard]] bool any() const noexcept {
+        return replaced || rgb || historyDelay > 0 || !echo.empty() || bare || vector > 0.0f || frameBlend > 0;
+    }
+};
+
+/// Efeitos que leem o ALFA da camada (desenham fora dela ou no transparente):
+/// numa camada de ajuste de tudo abaixo eles veem a pilha SEM a cor de fundo
+/// (como no After Effects, onde o fundo da composição não é pixel de camada).
+bool adjust_reads_alpha(EffectTypeId t) noexcept {
+    static const EffectTypeId kTypes[] = {
+        effect_type_id(effect_keys::kDropShadow), effect_type_id(effect_keys::kBorder),
+        effect_type_id(effect_keys::kShadowStudio3), effect_type_id("aurea.key.solid_matte"),
+        effect_type_id("aurea.stylize.stroke"), effect_type_id("aurea.stylize.stroke_outline"),
+        effect_type_id("aurea.stylize.bevel_alpha"), effect_type_id("aurea.key.matte_choker"),
+        effect_type_id("aurea.key.matte_refine"),
+    };
+    return std::find(std::begin(kTypes), std::end(kTypes), t) != std::end(kTypes);
+}
+
+AdjustTimeAsk adjust_time_ask(const Layer& l, const EffectRegistry& registry, const EffectPlan& plan, FrameIndex time,
+                              FrameIndex layerTime, f64 fps, f64 compShutter, bool allBelow, AdjustTimeTypes types) {
+    AdjustTimeAsk ask;
+    const FrameIndex local = l.local_time(layerTime);
+    // Posterizar tempo / Low FPS: o prepare já travou `layerTime`.
+    ask.shown = static_cast<f64>(layerTime.value);
+    ask.replaced = layerTime != time;
+    // Remapear tempo: a curva da camada diz que quadro da "fonte" (a
+    // composição abaixo, com o quadro 0 na entrada da camada) toca agora.
+    const EffectTypeId remapType = effect_type_id(effect_keys::kTimeRemap);
+    const bool remap = l.timeRemapEnabled && !l.timeRemap.keys.empty()
+        && std::any_of(l.effects.begin(), l.effects.end(), [&](const EffectInstance& e) { return e.enabled && e.type == remapType; });
+    const EffectTypeId retimeType = effect_type_id(effect_keys::kFlowRetime);
+    const EffectTypeId flowBlurType = effect_type_id(effect_keys::kFlowMotionBlur);
+    const bool flowFx = std::any_of(l.effects.begin(), l.effects.end(), [&](const EffectInstance& e) {
+        return e.enabled && (e.type == retimeType || e.type == flowBlurType);
+    });
+    const VideoFlowFx flow = flowFx ? video_flow_fx(l, ask.shown, compShutter) : VideoFlowFx{};
+    auto shown_at = [&](f64 timeline) {
+        f64 t = flow.retime ? flow_retime_timeline(l, *flow.retime, timeline) : timeline;
+        if (remap) t = static_cast<f64>(l.start.value - l.offset.value) + l.source_frame_f(t);
+        return t;
+    };
+    if (remap || flow.retime) {
+        ask.shown = shown_at(static_cast<f64>(layerTime.value));
+        ask.replaced = true;
+    }
+    if (flowFx) {
+        ask.frameBlend = flow.retime ? flow.frameBlend : 0;
+        ask.flowBase = flow.flowBase;
+        if (flow.vectorAmount > 0.0f) {
+            const f64 h = flow.shutter * 0.5, t0 = static_cast<f64>(layerTime.value);
+            const f64 c = shown_at(t0);
+            ask.travel = std::fabs(c - shown_at(t0 - h)) + std::fabs(shown_at(t0 + h) - c);
+            ask.vector = flow.vectorAmount;
+        }
+    }
+    // RGB no tempo: cada canal de um instante (o mesmo do caminho comum).
+    if (types.rgb) {
+        if (const ParameterRegistry* rp = registry.params(types.rgb); rp && rp->count() >= 6) {
+            for (const EffectInstance& inst : l.effects) {
+                if (!inst.enabled || inst.type != types.rgb) continue;
+                const bool seconds = evaluate_param(l.tracks, inst, 3, rp->at(3), local).as_enum() == 1;
+                const f32 amount = std::clamp(evaluate_param(l.tracks, inst, 4, rp->at(4), local).v[0] / 100.0f, 0.0f, 1.0f);
+                const f64 unit = seconds ? fps : 1.0;
+                if (amount >= 0.01f) {
+                    ask.rgb = true;
+                    for (u32 c = 0; c < 3; ++c)
+                        ask.rgbAt[c] = static_cast<f64>(time.value)
+                            + static_cast<f64>(evaluate_param(l.tracks, inst, c, rp->at(c), local).v[0]) * unit * amount;
+                }
+                break;
+            }
+        }
+    }
+    // O passado: Detectar movimento, Datamosh e quem pede `history_delay_frames`.
+    const ParameterRegistry* mp = types.motionDetect ? registry.params(types.motionDetect) : nullptr;
+    const ParameterRegistry* dp = types.datamosh ? registry.params(types.datamosh) : nullptr;
+    const u32 holdIndex = dp ? dp->find("hold_frames") : kInvalidIndex;
+    for (const EffectInstance& inst : l.effects) {
+        if (!inst.enabled) continue;
+        if (types.datamosh && inst.type == types.datamosh && dp && holdIndex < dp->count()) {
+            const f32 q = evaluate_param(l.tracks, inst, holdIndex, dp->at(holdIndex), local).v[0];
+            const i64 hold = std::isfinite(q) ? std::clamp<i64>(std::llround(q), 1, kDatamoshMaxHold) : 12;
+            ask.historyDelay = ((local.value % hold) + hold) % hold + 1;
+            break;
+        }
+        if (inst.type == types.motionDetect && mp && mp->count() >= 1) {
+            const f32 d = evaluate_param(l.tracks, inst, 0, mp->at(0), local).v[0];
+            ask.historyDelay = std::isfinite(d) ? std::clamp<i64>(std::llround(d), 1, kMotionDetectMaxDelay) : 1;
+            break;
+        }
+        const Effect* fx = registry.find(inst.type);
+        const ParameterRegistry* specs = fx && fx->wants_history() ? registry.params(inst.type) : nullptr;
+        if (!specs) continue;
+        std::vector<ParamValue> values;
+        values.reserve(specs->count());
+        for (u32 p = 0; p < specs->count(); ++p) values.push_back(evaluate_param(l.tracks, inst, p, specs->at(p), local));
+        EffectEval evaluation;
+        evaluation.effect = fx; evaluation.instance = &inst; evaluation.layer = &l;
+        evaluation.values = values.data(); evaluation.count = specs->count();
+        evaluation.localTime = local; evaluation.framesPerSecond = fps;
+        const f64 delay = fx->history_delay_frames(evaluation);
+        if (std::isfinite(delay) && delay >= 1.0) {
+            ask.historyDelay = std::clamp<i64>(static_cast<i64>(std::floor(delay)), 1, 1200);
+            break;
+        }
+    }
+    // Eco e rastro: cópias atrasadas que vão sumindo (somadas, como numa
+    // pré-composição) e o atraso RGB. Com o RGB no tempo ligado, ele manda.
+    if (types.echo && !ask.rgb) {
+        if (const ParameterRegistry* ep = registry.params(types.echo); ep && ep->count() >= 4) {
+            for (const EffectInstance& inst : l.effects) {
+                if (!inst.enabled || inst.type != types.echo) continue;
+                const u32 count = static_cast<u32>(std::clamp(evaluate_param(l.tracks, inst, 0, ep->at(0), local).v[0], 0.0f, 16.0f) + 0.5f);
+                const f32 delay = evaluate_param(l.tracks, inst, 1, ep->at(1), local).v[0];
+                const f32 decay = evaluate_param(l.tracks, inst, 2, ep->at(2), local).v[0];
+                const f32 rgbDelay = evaluate_param(l.tracks, inst, 3, ep->at(3), local).v[0];
+                if (count == 0 && !(rgbDelay > 0.0f)) break;
+                const f64 t0 = static_cast<f64>(time.value);
+                if (rgbDelay > 0.0f) {
+                    const f64 d = std::clamp(static_cast<f64>(rgbDelay), 0.0, 60.0);
+                    ask.echo.push_back({t0, 1.0f, Vec3{1, 0, 0}});
+                    ask.echo.push_back({t0 - d, 1.0f, Vec3{0, 1, 0}});
+                    ask.echo.push_back({t0 - 2.0 * d, 1.0f, Vec3{0, 0, 1}});
+                } else {
+                    ask.echo.push_back({t0, 1.0f, Vec3{0, 0, 0}});
+                }
+                const f64 d = std::clamp(static_cast<f64>(delay), 0.25, 120.0);
+                f32 w = 1.0f;
+                for (u32 k = 1; k <= std::min<u32>(count, 16u); ++k) {
+                    w *= std::clamp(decay, 0.0f, 1.0f);
+                    if (w < 0.01f) break;
+                    ask.echo.push_back({t0 - static_cast<f64>(k) * d, w, Vec3{0, 0, 0}});
+                }
+                break;
+            }
+        }
+    }
+    if (allBelow)
+        for (const EffectEval& ev : plan.evals) ask.bare |= ev.effect && adjust_reads_alpha(ev.effect->type_id());
+    return ask;
+}
+
 } // namespace
 
 void Renderer::prepare(const Composition& comp, const Project& project, FrameIndex time,
@@ -1748,7 +1964,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         ~DepthScope() { r.planImageLookup_ = lookup; r.planImageCtx_ = ctx; r.planFinal_ = final; r.planDeferLocalAi_ = defer; }
     } depthScope{*this, imageLookup, imageCtx, settings.finalQuality, settings.deferLocalAi};
     planPlayback_ = decodeMode == DecodeMode::Playback;
+    // FUNDO DE UMA CAMADA DE AJUSTE noutro instante (efeitos de tempo): só as
+    // camadas abaixo dela (no escopo dela). Vale só para ESTA composição: as
+    // pré-composições lá dentro se desenham inteiras.
+    const u32 stackLimit = backdropLimit_;
+    const u32 stackFrom = backdropFrom_;
+    std::vector<LayerId> stackOnly;
+    stackOnly.swap(backdropOnly_);
+    const bool stackBare = backdropBare_;
+    backdropLimit_ = ~0u;
+    backdropFrom_ = 0;
+    backdropBare_ = false;
     if (prepareDepth_ == 0) {
+        // Um eco de 16 cópias sobre outro eco de 16 seriam 256 composições:
+        // o teto vale por quadro inteiro, igual na prévia e no export.
+        backdropBudget_ = 24;
         CompositionId rootComposition{};
         project.timeline().for_each_composition([&](CompositionId id, const Composition& candidate) {
             if (&candidate == &comp) rootComposition = id;
@@ -1788,7 +2018,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     // com a cor guardada e alfa 0 somava essa cor às bordas semitransparentes
     // (fundo branco "sem fundo" clareava tudo no preview e no PNG).
     const Color bg = comp.background();
-    out.background = comp.transparent_background()
+    out.background = comp.transparent_background() || stackBare
         ? Vec4{0.0f, 0.0f, 0.0f, 0.0f}
         : Vec4{srgb_to_linear(bg.r), srgb_to_linear(bg.g), srgb_to_linear(bg.b), 1.0f};
     out.time = time;
@@ -1825,7 +2055,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     out.scenes.clear();
     // The panorama is a bottom layer, even in a camera-only scene. Never
     // repeat it in subsequent 3D groups (which would hide lower 2D layers).
-    if (comp.environment().background_at(time) && (comp.environment().hdri.valid() || comp.environment().studioPreset != 0)) {
+    if (stackFrom == 0 && stackOnly.empty()
+        && comp.environment().background_at(time) && (comp.environment().hdri.valid() || comp.environment().studioPreset != 0)) {
         out.scenes.emplace_back();
         out.scenes.back().environment.showBackground = true;
         RenderLayer sky;
@@ -1884,7 +2115,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
         }
     }
-    for (u32 i = 0; i < n; ++i) {
+    // Escopo 1 de uma camada de ajuste: onde começa o último desenho da pilha
+    // (um grupo 3D conta como um). ~0u = nada que ela possa ajustar.
+    u32 lastDrawOrder = ~0u;
+    for (u32 i = 0; i < n && i < stackLimit; ++i) {
         const LayerId id = order.at(i);
         const Layer* l = comp.layer(id);
         if (!l || !l->contains_time(time)) continue;
@@ -1892,10 +2126,15 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const bool isMatte = std::find(mattes.begin(), mattes.end(), id.pack()) != mattes.end();
         const bool isInput = std::find(inputLayers.begin(), inputLayers.end(), id.pack()) != inputLayers.end();
         if (!l->visible && !isMatte && !isInput) continue;
+        // Fundo de camada de ajuste de escopo 1/2: fora do escopo, só como
+        // matte ou entrada de outra (não desenha).
+        const bool outsideStack = i < stackFrom
+            || (!stackOnly.empty() && std::find(stackOnly.begin(), stackOnly.end(), id) == stackOnly.end());
+        if (outsideStack && !isMatte && !isInput) continue;
         // Guia: referência de trabalho no editor, nunca no arquivo final.
         if (l->guide && settings.finalQuality) continue;
         if (anySolo && !l->solo && !isMatte && !isInput) continue;
-        const bool inputOnly = isInput && (!l->visible || (anySolo && !l->solo));
+        const bool inputOnly = isInput && (!l->visible || (anySolo && !l->solo) || outsideStack);
         // POSTERIZAR TEMPO (Fase 7.3 §26): o tempo da camada é travado numa
         // taxa menor ANTES de tudo. Trava o TEMPO DA TIMELINE, não o "tempo
         // local": quem decide o quadro do vídeo é `source_frame(timelineTime)`,
@@ -1986,6 +2225,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (out.plans[used].empty()) continue;
             groupOpen = false;
             out.layers.push_back(std::move(rl)); ++used;
+            lastDrawOrder = i;
             continue;
         }
 
@@ -2021,12 +2261,115 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             pl.layerWidth = out.compWidth;
             pl.layerHeight = out.compHeight;
             EffectGraph::plan(*l, *effects_, local, rl.texelScale, pl, this, out.plans[used], fps);
-            if (out.plans[used].empty()) {   // nenhum efeito vivo: não muda nada
-                out.plans[used].clear();
+            EffectPlan& adjustPlan = out.plans[used];
+            // Só Transform/Agitar/Oscilar... (dobrados na matriz): a pilha fica
+            // sem etapa, mas a geometria do fundo muda (antes a camada saía).
+            if (adjustPlan.hasFold)
+                for (auto& column : adjustPlan.foldMatrix.col) column.z = 0.0f;   // 2D: sem profundidade
+            // TEMPO e ALFA: a entrada é a composição abaixo em OUTRO instante
+            // ou sem a cor de fundo — renderizada de novo, só com as camadas
+            // abaixo (no escopo). Determinístico: o mesmo quadro dá o mesmo
+            // resultado no scrub, na reprodução e no export.
+            const AdjustTimeAsk ask = adjust_time_ask(*l, *effects_, adjustPlan, time, layerTime, fps,
+                static_cast<f64>(comp.motion_blur().shutterAngle) / 360.0, rl.adjustScope == 0,
+                AdjustTimeTypes{echoType_, rgbTimeType_, motionDetectType_, datamoshType_});
+            const bool canAdjust = !(rl.adjustScope == 1 && lastDrawOrder == ~0u);
+            if (ask.any() && canAdjust && prepareDepth_ < 8) {
+                const u32 targets = rl.adjustScope == 2 ? static_cast<u32>(l->adjustmentTargets.size()) : 1u;
+                rl.adjustTime.resize(targets);
+                for (u32 target = 0; target < targets; ++target) {
+                    // (instante, sem fundo) -> índice em out.nested, por alvo.
+                    std::vector<std::pair<std::pair<i64, bool>, u32>> made;
+                    auto backdropAt = [&](f64 at, u32 purpose, bool bare) -> u32 {
+                        const i64 frame = std::max<i64>(0, static_cast<i64>(std::floor(at + 1e-6)));
+                        if (frame == time.value && !bare) return ~0u;   // o fundo de agora
+                        for (const auto& [key, index] : made) if (key.first == frame && key.second == bare) return index;
+                        if (backdropBudget_ == 0) return ~0u;
+                        --backdropBudget_;
+                        auto snap = std::make_unique<FrameSnapshot>();
+                        const u32 savedSalt = nestSalt_;
+                        const usize savedPathSize = renderInstancePath_.size();
+                        renderInstancePath_.push_back(id.pack());
+                        renderInstancePath_.push_back(0x7D000000ull + (static_cast<u64>(target) << 8) + purpose);
+                        auto ns = nestedNamespaces_.find(renderInstancePath_);
+                        if (ns == nestedNamespaces_.end()) {
+                            if (nestedNamespaces_.size() >= 0x3FFFu) {
+                                renderInstancePath_.resize(savedPathSize);
+                                mark_incomplete(__FILE__, __LINE__);
+                                return ~0u;
+                            }
+                            const u32 next = static_cast<u32>(nestedNamespaces_.size()) + 1u;
+                            ns = nestedNamespaces_.emplace(renderInstancePath_, next).first;
+                        }
+                        nestSalt_ = ns->second;
+                        backdropLimit_ = i;
+                        backdropFrom_ = rl.adjustScope == 1 ? lastDrawOrder : 0u;
+                        backdropOnly_.clear();
+                        if (rl.adjustScope == 2) backdropOnly_.push_back(l->adjustmentTargets[target]);
+                        backdropBare_ = bare || rl.adjustScope != 0;
+                        ++prepareDepth_;
+                        prepare(comp, project, FrameIndex{frame}, media, imageLookup, imageCtx, settings, frameNumber,
+                                playDirection, decodeMode, speed, *snap);
+                        --prepareDepth_;
+                        nestSalt_ = savedSalt;
+                        renderInstancePath_.resize(savedPathSize);
+                        frameNumber_ = frameNumber;
+                        out.videoLayers += snap->videoLayers;
+                        out.staleVideoFrames += snap->staleVideoFrames;
+                        out.missingVideoFrames += snap->missingVideoFrames;
+                        out.videoSourceWaits.insert(out.videoSourceWaits.end(),
+                            snap->videoSourceWaits.begin(), snap->videoSourceWaits.end());
+                        const u32 index = static_cast<u32>(out.nested.size());
+                        out.nested.push_back(std::move(snap));
+                        made.push_back({{frame, bare}, index});
+                        return index;
+                    };
+                    RenderLayer::AdjustTime& at = rl.adjustTime[target];
+                    if (ask.replaced) at.now = backdropAt(ask.shown, 0, false);
+                    const f64 base = std::floor(ask.shown + 1e-6);
+                    const f64 frac = ask.shown - base;
+                    if (ask.frameBlend >= 1 && frac > 0.01 && frac < 0.99) {
+                        at.next = backdropAt(base + 1.0, 1, false);
+                        at.blendT = static_cast<f32>(frac);
+                        at.blendMode = (ask.frameBlend == 2 && !settings.finalQuality && settings.flowPolicyScale <= 0.25f)
+                            ? u8{1} : ask.frameBlend;
+                    }
+                    if (ask.vector > 0.0f && ask.travel > 1e-8) {
+                        if (at.next == ~0u) at.next = backdropAt(base + 1.0, 1, false);
+                        at.vectorBlur = static_cast<f32>(std::clamp(ask.vector, 0.0f, 4.0f) * ask.travel);
+                    }
+                    at.flowBase = ask.flowBase;
+                    if (ask.rgb) {
+                        at.rgb = true;
+                        for (u32 c = 0; c < 3; ++c) at.channel[c] = backdropAt(ask.rgbAt[c], 2 + c, false);
+                    }
+                    if (ask.historyDelay > 0) {
+                        at.hasHistory = true;
+                        at.history = backdropAt(static_cast<f64>(time.value - ask.historyDelay), 5, false);
+                    }
+                    if (ask.bare) at.bare = backdropAt(static_cast<f64>(time.value), 6, true);
+                    for (u32 k = 0; k < ask.echo.size(); ++k) {
+                        RenderLayer::TemporalSample sample;
+                        sample.weight = ask.echo[k].weight;
+                        sample.mask = ask.echo[k].mask;
+                        sample.time = ask.echo[k].at;
+                        sample.nested = backdropAt(ask.echo[k].at, 7 + k, false);
+                        at.echo.push_back(sample);
+                    }
+                }
+            }
+            const bool timeLive = std::any_of(rl.adjustTime.begin(), rl.adjustTime.end(),
+                [](const RenderLayer::AdjustTime& t) { return t.active(); });
+            if (adjustPlan.empty() && !adjustPlan.hasFold && !timeLive) {   // nenhum efeito vivo: não muda nada
+                adjustPlan.clear();
+                rl.adjustTime.clear();
                 if (rl.maskCount > 0) out.maskData.resize(rl.maskFirst);
                 continue;
             }
             groupOpen = false;   // fecha o grupo 3D: o que vem acima vê o ajuste
+            // O ajuste de tudo abaixo vira um desenho: um escopo 1 acima dele
+            // não tem camada para ajustar (a montagem faz o mesmo).
+            if (rl.adjustScope == 0) lastDrawOrder = ~0u;
             out.layers.push_back(std::move(rl));
             ++used;
             continue;
@@ -2786,6 +3129,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (!sceneFx) out.plans[used].clear();
             out.layers.push_back(std::move(rl));
             ++used;
+            lastDrawOrder = i;
             continue;
         }
 
@@ -3592,6 +3936,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (out.plans.size() <= used) out.plans.emplace_back();
                 out.plans[used] = std::move(planeFx);
                 groupOpen = true;
+                if (!rl.matteOnly) lastDrawOrder = i;
             }
             if (particles) {
                 out.scenes.back().particleLayers.push_back(used);
@@ -3605,6 +3950,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
         } else {
             groupOpen = false;
+            if (!rl.matteOnly && !rl.particle.inScene) lastDrawOrder = i;
         }
         out.layers.push_back(std::move(rl));
         ++used;
@@ -3615,7 +3961,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     // no quadro do corte (abrir + seek + decode) e o preview mostrava a
     // composição sem a camada: o preto que piscava ao passar por um split. O
     // export não passa aqui: ele espera o quadro exato de cada camada.
-    if (media && !settings.finalQuality && playDirection > 0 && decodeMode == DecodeMode::Playback) {
+    if (media && !settings.finalQuality && playDirection > 0 && decodeMode == DecodeMode::Playback
+        && stackLimit == ~0u) {   // o fundo de um ajuste noutro instante não pré-rola
         const i64 ahead = static_cast<i64>(std::ceil(fps * 1.5 * std::max(1.0f, speed)));
         for (u32 i = 0; i < n; ++i) {
             const LayerId id = order.at(i);
@@ -5481,6 +5828,181 @@ FGTexture Renderer::draw_to_comp(const CompositeDraw& d, const TextureDesc& comp
     return t;
 }
 
+FGTexture Renderer::adjust_full_frame(const LayerImage& fin, const Mat4& fold, f32 opacity, Vec4 under,
+                                      const TextureDesc& compDesc, f32 compW, f32 compH) noexcept {
+    auto pNormal = shaders_.pipeline(PipelineKey::graphics(
+        ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
+    if (!pNormal.ok() || !fin.valid()) { mark_incomplete(__FILE__, __LINE__); return FGTexture{}; }
+    TextureDesc td = compDesc;
+    td.transferSrc = false;
+    td.sampled = true;
+    td.renderTarget = true;
+    const FGTexture t = graph_.create_texture("ajuste-quadro", td);
+    struct Cap { PipelineHandle p; FGTexture src; u64 sampler; Mat4 m; Vec4 region; f32 w, h, opacity; } cap{
+        *pNormal, fin.texture, shaders_.sampler(CommonSampler::LinearBorder).id, fold,
+        Vec4{fin.region.x, fin.region.y, fin.region.w, fin.region.h}, compW, compH, std::clamp(opacity, 0.0f, 1.0f)};
+    const u32 pass = graph_.add_raster_pass("ajuste-quadro", PassStage::Composite, t, LoadOp::Clear, under,
+                                            [cap](PassContext& pc) {
+        pc.cmds.bind_pipeline(cap.p);
+        LayerPush push;
+        push.clipFromLayer = clip_from_comp(cap.w, cap.h) * cap.m;
+        push.region = cap.region;
+        push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+        push.params = Vec4{cap.opacity, 0.0f, 0.0f, 0.0f};
+        pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+        pc.cmds.push_constants(&push, sizeof(push));
+        pc.cmds.draw(6);
+    });
+    graph_.read(pass, fin.texture);
+    return t;
+}
+
+void Renderer::adjust_time_input(const FrameSnapshot& snap, const RenderLayer& layer, u32 target, LayerImage& in,
+                                 const TextureDesc& compDesc, u64 frameNumber) noexcept {
+    if (target >= layer.adjustTime.size() || !in.valid()) return;
+    const RenderLayer::AdjustTime& at = layer.adjustTime[target];
+    if (!at.active()) return;
+    // Um fundo re-renderizado (pré-composição da mesma composição, no mesmo
+    // tamanho do alvo). Faltou (orçamento, recurso a caminho): o de agora.
+    auto backdrop = [&](u32 index, FGTexture present) -> FGTexture {
+        if (index == ~0u) return present;
+        const FrameSnapshot* s = index < snap.nested.size() ? snap.nested[index].get() : nullptr;
+        if (!s || !s->target.valid()) { mark_incomplete(__FILE__, __LINE__); return present; }
+        const TextureDesc& d = graph_.desc(s->target);
+        if (d.width != in.width || d.height != in.height) { mark_incomplete(__FILE__, __LINE__); return present; }
+        return s->target;
+    };
+    const u32 maxTex = std::min<u32>(backend_->capabilities().maxTexture2D, 8192);
+    EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+    TextureDesc d = compDesc;
+    d.transferSrc = false;
+    d.sampled = true;
+    d.renderTarget = true;
+    d.width = in.width;
+    d.height = in.height;
+    const f32 w = static_cast<f32>(in.width), h = static_cast<f32>(in.height);
+    auto pNormal = shaders_.pipeline(PipelineKey::graphics(
+        ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
+    auto pAdd = shaders_.pipeline(PipelineKey::graphics(
+        ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Add));
+    // 0. Sem a cor de fundo (efeitos que leem o alfa da pilha).
+    if (at.bare != ~0u) in.texture = backdrop(at.bare, in.texture);
+    // 1. O instante mostrado (Posterizar, Low FPS, Remapear tempo, Flow Retime).
+    const FGTexture present = in.texture;
+    if (at.now != ~0u) in.texture = backdrop(at.now, present);
+    // 1b. O quadro seguinte: mistura, movimento de pixels, desfoque vetorial.
+    if (at.next != ~0u) {
+        const FGTexture b = backdrop(at.next, FGTexture{});
+        if (b.valid()) {
+            FGTexture flow{};
+            u32 baseW = 0, baseH = 0;
+            if ((at.blendMode == 2 && at.blendT > 0.0f) || at.vectorBlur > 0.0f) {
+                // O fundo muda com qualquer edição: o fluxo é deste quadro
+                // (a chave leva o número do quadro; nada velho sai do cache).
+                u64 pair = frameNumber * 0x9E3779B97F4A7C15ull ^ (static_cast<u64>(at.now) << 32) ^ at.next;
+                pair ^= static_cast<u64>(std::lround(at.flowBase)) << 20;
+                const u64 key = layer.id.pack() ^ (0xAD7ull << 52) ^ (static_cast<u64>(target) << 44);
+                flow = video_flow(key, pair, in.texture, b, in.width, in.height, at.flowBase, baseW, baseH, frameNumber);
+                if (!flow.valid()) mark_incomplete(__FILE__, __LINE__);
+            }
+            bool warped = false;
+            if (at.blendT > 0.0f && at.blendMode == 2 && flow.valid()) {
+                const FGTexture moved = graph_.create_texture("ajuste-movimento", d);
+                const Vec4 wp{at.blendT, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH), 0};
+                if (ctx.fullscreen_pass("ajuste-flow-deforma", PassStage::Effects, moved, ShaderId::video_flow_warp_frag,
+                                        {PassTexture{in.texture}, PassTexture{b}, PassTexture{flow}}, &wp, sizeof(wp)) != kInvalidIndex) {
+                    in.texture = moved;
+                    warped = true;
+                }
+            }
+            if (!warped && at.blendT > 0.0f && at.blendMode >= 1 && pNormal.ok()) {
+                const FGTexture mix = graph_.create_texture("ajuste-mistura", d);
+                struct Cap { PipelineHandle p; FGTexture a; FGTexture b; u64 sampler; f32 w; f32 h; f32 t; }
+                    cap{*pNormal, in.texture, b, shaders_.sampler(CommonSampler::LinearClamp).id, w, h, at.blendT};
+                const u32 pass = graph_.add_raster_pass("ajuste-mistura", PassStage::Effects, mix, LoadOp::Clear,
+                                                        Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                    pc.cmds.bind_pipeline(cap.p);
+                    LayerPush push;
+                    push.clipFromLayer = clip_from_comp(cap.w, cap.h);
+                    push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
+                    push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                    pc.cmds.bind_texture(0, pc.texture(cap.a), SamplerHandle{cap.sampler});
+                    push.params = Vec4{1.0f, 0, 0, 0};
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(6);
+                    pc.cmds.bind_texture(0, pc.texture(cap.b), SamplerHandle{cap.sampler});
+                    push.params = Vec4{cap.t, 0, 0, 0};
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(6);
+                });
+                graph_.read(pass, in.texture);
+                graph_.read(pass, b);
+                in.texture = mix;
+            }
+            if (at.vectorBlur > 0.0f && flow.valid()) {
+                const FGTexture blurred = graph_.create_texture("ajuste-desfoque-vetorial", d);
+                const Vec4 vp{at.vectorBlur, 1.0f / static_cast<f32>(baseW), 1.0f / static_cast<f32>(baseH),
+                              static_cast<f32>(std::clamp<u32>(heavyQ_.flowBlurSamples, 8u, 64u))};
+                if (ctx.fullscreen_pass("ajuste-desfoque-vetorial", PassStage::Effects, blurred, ShaderId::video_flow_vblur_frag,
+                                        {PassTexture{in.texture}, PassTexture{flow}}, &vp, sizeof(vp)) != kInvalidIndex)
+                    in.texture = blurred;
+                else mark_incomplete(__FILE__, __LINE__);
+            }
+        }
+    }
+    // 2. RGB no tempo: um canal de cada instante.
+    if (at.rgb) {
+        const FGTexture chan[3] = {backdrop(at.channel[0], in.texture), backdrop(at.channel[1], in.texture),
+                                   backdrop(at.channel[2], in.texture)};
+        const FGTexture merged = graph_.create_texture("ajuste-rgb-no-tempo", d);
+        if (ctx.fullscreen_pass("ajuste-rgb-no-tempo", PassStage::Effects, merged, ShaderId::effects_rgb_merge_frag,
+                                {PassTexture{chan[0], {}, CommonSampler::LinearClamp},
+                                 PassTexture{chan[1], {}, CommonSampler::LinearClamp},
+                                 PassTexture{chan[2], {}, CommonSampler::LinearClamp}}, nullptr, 0) != kInvalidIndex)
+            in.texture = merged;
+        else mark_incomplete(__FILE__, __LINE__);
+    }
+    // 3. Eco: as cópias atrasadas somadas com o peso (e o canal do atraso RGB),
+    //    como o eco de uma pré-composição.
+    if (!at.echo.empty() && pAdd.ok()) {
+        const u32 k = static_cast<u32>(at.echo.size());
+        FGTexture* sources = arena_.alloc_array<FGTexture>(k);
+        Vec4* params = arena_.alloc_array<Vec4>(k);
+        if (sources && params) {
+            for (u32 s = 0; s < k; ++s) {
+                sources[s] = backdrop(at.echo[s].nested, in.texture);
+                params[s] = Vec4{at.echo[s].weight, at.echo[s].mask.x, at.echo[s].mask.y, at.echo[s].mask.z};
+            }
+            const FGTexture acc = graph_.create_texture("ajuste-eco", d);
+            struct Cap { PipelineHandle p; const FGTexture* src; const Vec4* params; u32 k; u64 sampler; f32 w, h; }
+                cap{*pAdd, sources, params, k, shaders_.sampler(CommonSampler::LinearClamp).id, w, h};
+            const u32 pass = graph_.add_raster_pass("ajuste-eco", PassStage::Effects, acc, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                                    [cap](PassContext& pc) {
+                pc.cmds.bind_pipeline(cap.p);
+                LayerPush push;
+                push.clipFromLayer = clip_from_comp(cap.w, cap.h);
+                push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
+                push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                for (u32 s = 0; s < cap.k; ++s) {
+                    pc.cmds.bind_texture(0, pc.texture(cap.src[s]), SamplerHandle{cap.sampler});
+                    push.params = cap.params[s];
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(6);
+                }
+            });
+            for (u32 s = 0; s < k; ++s) {
+                bool seen = false;
+                for (u32 q = 0; q < s; ++q) seen |= sources[q] == sources[s];
+                if (!seen) graph_.read(pass, sources[s]);
+            }
+            in.texture = acc;
+        }
+    }
+    // 4. O passado (Detectar movimento, Datamosh, Glitch de vídeo): o
+    //    EffectGraph o leva pelas etapas anteriores até o efeito que pede.
+    if (at.hasHistory) in.history = backdrop(at.history, present);
+}
+
 void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
                               std::vector<CompositeDraw>& draws, u32 depth) noexcept {
     // Pré-composições primeiro: cada uma no seu alvo, na MESMA escala de
@@ -5786,7 +6308,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             // antigo). Cada uma vai sozinha para um alvo do tamanho da
             // composição, os efeitos rodam nela e o resultado toma o lugar
             // dela na pilha. A opacidade do ajuste mistura original e ajustado.
-            auto adjust_draw = [&](usize at) {
+            auto adjust_draw = [&](usize at, u32 target) {
                 const CompositeDraw below = draws[at];
                 const FGTexture lc = draw_to_comp(below, compDesc, compW, compH, "ajuste-camada-abaixo");
                 if (!lc.valid()) return;
@@ -5795,6 +6317,8 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 in.region = Rect{0.0f, 0.0f, compW, compH};
                 in.width = compDesc.width;
                 in.height = compDesc.height;
+                // Efeitos de tempo: a camada (só ela) noutros instantes.
+                adjust_time_input(snap, layer, target, in, compDesc, frameNumber);
                 LayerImage fin = in;
                 const EffectPlan& plan = snap.plans[i];
                 (void)EffectGraph::build(plan, ctx, in, fin);
@@ -5811,31 +6335,37 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 fx.texture = fin.texture;
                 fx.region = fin.region;
                 if (plan.hasFold) fx.compFromLayer = plan.foldMatrix;
-                const f32 op = std::clamp(layer.opacity * (plan.hasFold ? plan.foldOpacity : 1.0f), 0.0f, 1.0f);
+                // A opacidade da camada de ajuste mistura original e ajustado;
+                // a dobrada (Piscar, Cintilar, opacidade do Transform) é a do
+                // conteúdo ajustado, como numa pré-composição.
+                const f32 op = std::clamp(layer.opacity, 0.0f, 1.0f);
+                const f32 content = std::clamp(plan.hasFold ? plan.foldOpacity : 1.0f, 0.0f, 1.0f);
                 if (masked) {
                     // Com máscara: o original inteiro e, por cima, o ajustado
                     // recortado (transparente fora da máscara) na opacidade.
-                    fx.opacity = op;
+                    fx.opacity = op * content;
                     draws[at] = orig;
                     draws.insert(draws.begin() + static_cast<std::ptrdiff_t>(at) + 1, fx);
                 } else if (op >= 0.999f) {
+                    fx.opacity = content;
                     draws[at] = fx;
                 } else {
                     orig.opacity = 1.0f - op;
-                    fx.opacity = op;
+                    fx.opacity = op * content;
                     draws[at] = orig;
                     draws.insert(draws.begin() + static_cast<std::ptrdiff_t>(at) + 1, fx);
                 }
             };
             if (layer.adjustScope == 1) {
-                if (!draws.empty() && draws.back().adjustPlan == kInvalidIndex) adjust_draw(draws.size() - 1);
+                if (!draws.empty() && draws.back().adjustPlan == kInvalidIndex) adjust_draw(draws.size() - 1, 0);
                 continue;
             }
             for (usize at = draws.size(); at-- > 0;) {
                 const CompositeDraw& d = draws[at];
                 if (d.adjustPlan != kInvalidIndex || !d.layer) continue;
-                if (std::find(layer.adjustTargets.begin(), layer.adjustTargets.end(), d.layer) == layer.adjustTargets.end()) continue;
-                adjust_draw(at);
+                const auto hit = std::find(layer.adjustTargets.begin(), layer.adjustTargets.end(), d.layer);
+                if (hit == layer.adjustTargets.end()) continue;
+                adjust_draw(at, static_cast<u32>(hit - layer.adjustTargets.begin()));
             }
             continue;
         }
@@ -6011,27 +6541,46 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             in.region = Rect{0.0f, 0.0f, compW, compH};
             in.width = compDesc.width;
             in.height = compDesc.height;
+            const RenderLayer* adjustLayer = d.adjustPlan < snap.layers.size() ? &snap.layers[d.adjustPlan] : nullptr;
+            // Efeitos de tempo / que leem o alfa: o fundo noutro instante ou
+            // sem a cor de fundo (ver RenderLayer::AdjustTime).
+            if (adjustLayer) adjust_time_input(snap, *adjustLayer, 0, in, compDesc, frameNumber_);
+            const bool bare = adjustLayer && !adjustLayer->adjustTime.empty() && adjustLayer->adjustTime[0].bare != ~0u;
             LayerImage fin = in;
             const EffectPlan& plan = snap.plans[d.adjustPlan];
             (void)EffectGraph::build(plan, ctx, in, fin);
-            if (d.adjustPlan < snap.layers.size() && snap.layers[d.adjustPlan].maskCount > 0 && fin.valid() && !(fin.texture == cur)) {
-                apply_masks(snap.layers[d.adjustPlan], fin, frameNumber_);
+            if (fin.valid() && (plan.hasFold || bare)) {
+                // A geometria dobrada (Transform, Agitar, Oscilar, Tremor... no
+                // fim da pilha) leva o fundo INTEIRO, e o que ela descobre
+                // mostra a cor de fundo — antes a borda descoberta mantinha o
+                // fundo parado por baixo (imagem dupla) e só Transform na
+                // pilha nem chegava aqui. Sem fundo (efeito de alfa), a cor de
+                // fundo volta por baixo do resultado.
+                // A opacidade dobrada (Piscar, Cintilar, opacidade do
+                // Transform) é a do CONTEÚDO, como numa pré-composição: o
+                // fundo aparece por baixo.
+                const FGTexture full = adjust_full_frame(fin, plan.hasFold ? plan.foldMatrix : Mat4::identity(),
+                                                         plan.hasFold ? plan.foldOpacity : 1.0f,
+                                                         snap.background, compDesc, compW, compH);
+                if (full.valid()) {
+                    fin.texture = full;
+                    fin.region = Rect{0.0f, 0.0f, compW, compH};
+                    fin.width = compDesc.width;
+                    fin.height = compDesc.height;
+                }
+            }
+            if (adjustLayer && adjustLayer->maskCount > 0 && fin.valid() && !(fin.texture == cur)) {
+                apply_masks(*adjustLayer, fin, frameNumber_);
                 rc->masked = 1.0f;
             }
             rc->drawSrc = fin.valid() && !(fin.texture == cur) ;
             rc->src = fin.texture;
             rc->region = Vec4{fin.region.x, fin.region.y, fin.region.w, fin.region.h};
-            rc->compFromLayer = plan.hasFold ? plan.foldMatrix : Mat4::identity();
-            rc->opacity = d.opacity * (plan.hasFold ? plan.foldOpacity : 1.0f);
+            rc->compFromLayer = Mat4::identity();
+            rc->opacity = d.opacity;
             rc->srcSampler = shaders_.sampler(CommonSampler::LinearClamp).id;
             // 100 + modo: a mistura da camada de ajuste com o modo dela.
             rc->mode = 100.0f + static_cast<f32>(static_cast<u16>(d.blend));
-            if (plan.hasFold && !rc->drawSrc) {
-                // Só o Transform (dobrado na matriz): o fundo movido é a fonte.
-                rc->drawSrc = true;
-                rc->src = cur;
-                rc->srcSampler = shaders_.sampler(CommonSampler::LinearBorder).id;
-            }
         } else {
             rc->drawSrc = d.texture.valid();
             rc->src = d.texture;

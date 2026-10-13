@@ -1578,10 +1578,39 @@ private val EnglishEffectNames = mapOf(
     "aurea.transition.block_dissolve" to "Block Dissolve",
 ).mapKeys { effectTypeId(it.key) }
 
+/**
+ * O Motion Tile e os efeitos com opção de LADRILHO / repetição de borda (tile,
+ * repetir, espelhar): buscar "motion tile", "mosaico", "tile", "ladrilho"...
+ * acha todos, nos 7 idiomas (`R.string.fx_search_tile`). Mesma lista no iOS
+ * (`FxTileSearchEffects`, EffectsHuman.swift).
+ */
+internal val TileSearchEffects: Set<Int> = listOf(
+    "aurea.stylize.motion_tile",
+    "aurea.distort.shake",
+    "aurea.distort.turbulence",
+    "aurea.distort.wave_warp",
+    "aurea.distort.warp",
+    "aurea.distort.flow_pinch",
+    "aurea.stylize.repeat_tile",
+    "aurea.stylize.tiler",
+    "aurea.stylize.hex_tile",
+    "aurea.distort.displace_transform",
+    "aurea.glitch.video_glitch",
+    "aurea.distort.lens_gradient",
+    "aurea.distort.displacement_map",
+    "aurea.transform.offset",
+    "aurea.repeat.grid",
+).map { effectTypeId(it) }.toSet()
+
+/** Os termos de ladrilho deste efeito no idioma de `res` (vazio = não ladrilha). */
+internal fun tileSearchTerms(typeId: Int, res: android.content.res.Resources): String =
+    if (typeId in TileSearchEffects) res.getString(R.string.fx_search_tile) else ""
+
 /** Texto onde a busca procura: nome humano, nome do motor, categoria e sinônimos. */
 @Composable
 internal fun effectSearchText(typeId: Int, engineName: String, category: String): String =
-    normalizeSearch(listOf(effectDisplayName(typeId, engineName), Table[typeId]?.name?.let { stringResource(it) }.orEmpty(), engineName, category, Table[typeId]?.keywords.orEmpty()).joinToString(" "))
+    normalizeSearch(listOf(effectDisplayName(typeId, engineName), Table[typeId]?.name?.let { stringResource(it) }.orEmpty(), engineName, category, Table[typeId]?.keywords.orEmpty(),
+        tileSearchTerms(typeId, LocalContext.current.resources)).joinToString(" "))
 
 /** Ícone da categoria (rótulo visual do cartão do navegador — não é prévia). */
 internal fun categoryGlyph(category: String): Char = when (normalizeSearch(category)) {

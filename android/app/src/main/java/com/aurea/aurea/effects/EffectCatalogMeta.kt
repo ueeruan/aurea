@@ -593,6 +593,7 @@ fun catalogHaystack(catalog: List<EffectCatalogEntry>): Map<Int, String> {
             e.category,
             Table[e.typeId]?.keywords.orEmpty(),
             effectDescription(e.typeId, e.category),
+            com.aurea.aurea.editor.panels.tileSearchTerms(e.typeId, androidx.compose.ui.platform.LocalContext.current.resources),
         ).joinToString(" ")
     }
     return remember(catalog, locale) { parts.mapValues { (_, text) -> normalizeSearch(text) } }

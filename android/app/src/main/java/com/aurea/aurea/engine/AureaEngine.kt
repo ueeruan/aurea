@@ -145,6 +145,12 @@ class AureaEngine private constructor() {
         @JvmStatic external fun nativeSampleEase(interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int, out: FloatArray): Int
         /** Taxa de vídeo (bps) que o export usaria: a regra do motor (BitratePolicy). `quality` 0/1/2. */
         @JvmStatic external fun nativeExportBitrateBps(width: Int, height: Int, fps: Double, codec: Int, quality: Int, customMbps: Int): Long
+        /**
+         * O degrau do encoder de vídeo que o último export usou (escada do motor:
+         * "surface:…", "buffer:…", "legacy:…", "software:…", com os que falharam
+         * antes). Para o diagnóstico do relato de bug; vazio = nenhum export ainda.
+         */
+        @JvmStatic external fun nativeLastExportEncoderPath(): String
     }
 
     /** Ponteiro para o contexto nativo. 0 = destruído. */

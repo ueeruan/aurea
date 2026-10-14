@@ -353,8 +353,8 @@ struct Shape3DPanelSection: View {
                             }.accessibilityIdentifier("shape3d.image.clear")
                         }.frame(height: 44)
                     }
-                } else if part >= 0 {
-                    partControls(part)
+                } else if part >= 0, let values = model.shapePartValues(layerId, part: part) {
+                    partControls(part, values)
                 } else if info.kind == 0 {
                     // Só o cubo (e as fatias dele) divide em partes.
                     splitControls()
@@ -370,9 +370,10 @@ struct Shape3DPanelSection: View {
         }
     }
 
-    /// A parte anda no palco (gizmo); animar com números e keyframes é o
-    /// efeito "Animar parte 3D". Aqui só volta a parte ao lugar.
-    @ViewBuilder private func partControls(_ part: Int) -> some View {
+    /// Numeric part controls read the same native pose and keyframe flags as
+    /// the stage gizmo; the reset button remains in the existing part panel.
+    @ViewBuilder private func partControls(_ part: Int, _ v: [Float]) -> some View {
+        let animated = UInt32(v[9]), here = UInt32(v[10])
         HStack(spacing: 6) {
             chip(AureaText.t("shape3d_reset"), on: false) {
                 _ = model.engine.resetShape3DPart(layerId, part: Int32(part))

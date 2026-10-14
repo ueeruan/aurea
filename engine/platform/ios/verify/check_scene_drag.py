@@ -55,6 +55,7 @@ final class Subject {
     let engine = Native()
     var sceneDragSnapshot: SceneDragSnapshot?
     var transformGestureDepth = 0
+    var toastAction: Int? = nil
     SNAPSHOT
     func refreshModel(force: Bool) {}
     func applyGizmoComponents(_ id: Int64, base: UInt32, previous: [Float], next: [Float]) {

@@ -34,7 +34,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>AureaReleaseLabel</key>
-    <string>BETA 3</string>
+    <string></string>
     <key>CFBundleShortVersionString</key>
     <string>$(MARKETING_VERSION)</string>
     <!-- Build iOS do porte do editor Android atual. -->

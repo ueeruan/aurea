@@ -117,6 +117,9 @@ public:
         p.add_float("reflection","Reflexo do ambiente",1,0,1,kParamAnimatable|kParamLegacyZero);
         p.add_float("metal","Metal",0,0,1,kParamAnimatable);
         p.add_float("roughness","Rugosidade",.3f,0,1,kParamAnimatable);
+        // Seção do painel (só apresentação; índices intactos).
+        p.add_section("material","Material",{1,2,4,5,6});
+        p.set_tip(4,"O reflexo usa o HDRI ou o estúdio da cena 3D.");
     }
     bool is_identity(const EffectEval& e) const noexcept override { return !(e.f(0)>0); }
     void pipelines(std::vector<PipelineKey>& out,SurfaceFormat f) const override {

@@ -22,6 +22,7 @@
 #include "aurea/effects/MeshWarp.hpp"
 
 #include <cmath>
+#include <initializer_list>
 #include <limits>
 #include <string_view>
 #include <vector>
@@ -126,6 +127,14 @@ struct ParamSpec {
     const char* unit = nullptr;   ///< "px", "%", "°"
     u32         enumCount = 0;
     const char* const* enumLabels = nullptr;
+    /// SEÇÃO do painel a que o parâmetro pertence: ordinal 1..N na tabela de
+    /// seções do efeito (`ParameterRegistry::section`), 0 = fora de seção.
+    /// Só apresentação: o índice do parâmetro (a chave no projeto) não muda.
+    u16         section = 0;
+    /// DICA só de leitura (ⓘ + texto) mostrada logo ACIMA da linha do
+    /// parâmetro; nula = sem dica. Texto do motor (pt-BR) — a UI traduz pela
+    /// identidade (chave do efeito + índice), como o rótulo.
+    const char* tip = nullptr;
 
     [[nodiscard]] bool animatable() const noexcept {
         return (flags & kParamAnimatable) != 0 && component_count(type) > 0;
@@ -138,6 +147,22 @@ struct ParamSpec {
         return !std::isnan(hardMax) && hardMax > maxValue ? hardMax : maxValue;
     }
 };
+
+/// Uma SEÇÃO do painel de controles: título recolhível que agrupa parâmetros
+/// já declarados (os índices continuam os de sempre — seção é só como o painel
+/// mostra, nunca muda o projeto salvo). `toggle` é o parâmetro Bool que LIGA a
+/// seção (mostrado como interruptor no cabeçalho, não como linha); kInvalidIndex
+/// = seção sem interruptor. `open` é como a seção nasce (aberta/recolhida).
+struct ParamSection {
+    const char* id = "";        ///< chave estável ("glow"): estado e tradução
+    const char* label = "";     ///< título (texto do motor, pt-BR)
+    u32         toggle = kInvalidIndex;
+    bool        open = true;
+};
+
+/// Máximo de seções por efeito: o estado aberto/recolhido de cada uma é
+/// gravado em 7 bits do byte `expanded` da instância (ver `EffectInstance`).
+inline constexpr u32 kMaxParamSections = 7;
 
 /// Onde um efeito declara os parâmetros. Construído uma vez por tipo de efeito.
 class ParameterRegistry {
@@ -175,13 +200,45 @@ public:
         return specs_.empty() ? kInvalidIndex : set_typed_range(count() - 1, hardMin, hardMax);
     }
 
+    /// Abre uma SEÇÃO com os parâmetros `members`, JÁ declarados (efeito antigo
+    /// ganha seções sem mexer em índice nenhum; a seção mostra os membros na
+    /// ordem dos índices). `toggle` (opcional) é o Bool que liga a seção: ele
+    /// sai das linhas e vira o interruptor do cabeçalho. Membro inexistente ou
+    /// já em outra seção, `toggle` que não é Bool ou mais de
+    /// `kMaxParamSections` seções: recusado (kInvalidIndex, nada muda).
+    /// Devolve o ordinal da seção (1..N).
+    u32 add_section(const char* id, const char* label, std::initializer_list<u32> members,
+                    u32 toggle = kInvalidIndex, bool open = true) noexcept;
+    /// Atalho: seção com os parâmetros [first, last].
+    u32 add_section_range(const char* id, const char* label, u32 first, u32 last,
+                          u32 toggle = kInvalidIndex, bool open = true) noexcept;
+    /// Põe uma DICA (ⓘ, só leitura) acima do parâmetro `index`. Devolve `index`.
+    u32 set_tip(u32 index, const char* text) noexcept;
+
     [[nodiscard]] u32 count() const noexcept { return static_cast<u32>(specs_.size()); }
     [[nodiscard]] const ParamSpec& at(u32 i) const noexcept { return specs_[i]; }
     [[nodiscard]] u32 find(std::string_view id) const noexcept;
+    /// Seções declaradas (ordinal 1..section_count()).
+    [[nodiscard]] u32 section_count() const noexcept { return static_cast<u32>(sections_.size()); }
+    /// Seção de ordinal `ordinal` (1-based); nula fora da faixa.
+    [[nodiscard]] const ParamSection* section(u32 ordinal) const noexcept {
+        return ordinal >= 1 && ordinal <= sections_.size() ? &sections_[ordinal - 1] : nullptr;
+    }
 
 private:
+    u32 add_section_of(const char* id, const char* label, const u32* members, u32 count, u32 toggle,
+                       bool open) noexcept;
+
     std::vector<ParamSpec> specs_;
+    std::vector<ParamSection> sections_;
 };
+
+/// A seção `ordinal` (1-based) da instância está ABERTA? O declarado
+/// (`ParamSection::open`) trocado pelo bit da instância (`sectionsFlipped`).
+[[nodiscard]] inline bool section_open(const ParamSection& s, u8 flipped, u32 ordinal) noexcept {
+    const bool flip = ordinal >= 1 && ordinal <= kMaxParamSections && ((flipped >> (ordinal - 1)) & 1u) != 0;
+    return s.open != flip;
+}
 
 // -----------------------------------------------------------------------------
 // Dado de instância
@@ -240,6 +297,11 @@ struct EffectInstance {
     EffectTypeId type = 0;
     bool         enabled = true;
     bool         expanded = true;          ///< estado do painel (persistido)
+    /// Seções do painel cujo estado (aberta/recolhida) foi TROCADO em relação
+    /// ao declarado: bit (ordinal − 1). Persistido sem mudar o formato: vai
+    /// nos bits 1..7 do mesmo byte de `expanded` — leitor antigo lê o byte
+    /// como bool (≠ 0) e não usa; projeto antigo traz 0 (tudo como declarado).
+    u8           sectionsFlipped = 0;
     std::vector<ParamSlot>    params;
     std::vector<CurveData>    curves;      ///< indexado por ParamValue::ref
     std::vector<GradientData> gradients;

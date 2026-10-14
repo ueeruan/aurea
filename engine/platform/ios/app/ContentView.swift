@@ -65,15 +65,32 @@ struct ContentView: View {
             if let toast = model.toast {
                 VStack {
                     Spacer()
-                    Text(toast)
-                        .font(.aurea(size: 13))
-                        .foregroundStyle(AureaColors.text)
+                    if let action = model.toastAction {
+                        // Aviso com ação ("Efeito apagado · Desfazer"): o botão é um toque só.
+                        HStack(spacing: 12) {
+                            Text(toast).font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+                            Button(action.label) { model.runToastAction() }
+                                .font(.aurea(size: 13, weight: .semibold))
+                                .foregroundStyle(AureaColors.accent)
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("toast.action")
+                        }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
+                        .padding(.vertical, 2)
                         .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 12))
                         .padding(.horizontal, 24)
                         .padding(.bottom, 96)
-                        .onTapGesture { model.toast = nil }
+                    } else {
+                        Text(toast)
+                            .font(.aurea(size: 13))
+                            .foregroundStyle(AureaColors.text)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 12))
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 96)
+                            .onTapGesture { model.toast = nil }
+                    }
                 }
                 .transition(.opacity)
             }
@@ -107,10 +124,11 @@ struct ContentView: View {
         .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.5), value: model.screen)
         .overlay(alignment: .bottom) { PerformanceTestBadge().padding(.bottom, 6) }
         .onChange(of: model.toast) { value in
-            guard value != nil else { return }
+            guard value != nil else { model.toastAction = nil; return }
             // O aviso some sozinho, como o do Android. Tocar nele também fecha.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) {
-                if model.toast == value { model.toast = nil }
+            // Com ação ("Desfazer"), 4 s para dar tempo do toque.
+            DispatchQueue.main.asyncAfter(deadline: .now() + (model.toastAction != nil ? 4.0 : 3.2)) {
+                if model.toast == value { model.toast = nil; model.toastAction = nil }
             }
         }
     }

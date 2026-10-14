@@ -67,7 +67,7 @@ internal fun saberActive(store: EditorStore): Boolean {
 }
 
 /** Cantos da caixa da camada na composição; a camada de ajuste cobre a composição. */
-private fun saberCorners(store: EditorStore, m: StageMapper): FloatArray? {
+internal fun saberCorners(store: EditorStore, m: StageMapper): FloatArray? {
     val d = store.detail ?: return null
     if (d.adjustment) return floatArrayOf(0f, 0f, m.compW, 0f, m.compW, m.compH, 0f, m.compH)
     val c = FloatArray(8)
@@ -100,14 +100,14 @@ private fun saberHomography(c: FloatArray): FloatArray {
                         y1 - y0 + g * y1, y3 - y0 + h * y3, y0, g, h)
 }
 
-private fun saberUvToComp(c: FloatArray, u: Float, v: Float, out: FloatArray) {
+internal fun saberUvToComp(c: FloatArray, u: Float, v: Float, out: FloatArray) {
     val m = saberHomography(c)
     val w = (m[6] * u + m[7] * v + 1f).let { if (kotlin.math.abs(it) < 1e-6f) 1e-6f else it }
     out[0] = (m[0] * u + m[1] * v + m[2]) / w
     out[1] = (m[3] * u + m[4] * v + m[5]) / w
 }
 
-private fun saberCompToUv(c: FloatArray, x: Float, y: Float, out: FloatArray): Boolean {
+internal fun saberCompToUv(c: FloatArray, x: Float, y: Float, out: FloatArray): Boolean {
     // x·(g u + h v + 1) = a u + b v + c  →  sistema 2×2 em (u, v).
     val m = saberHomography(c)
     val a11 = m[0] - m[6] * x; val a12 = m[1] - m[7] * x

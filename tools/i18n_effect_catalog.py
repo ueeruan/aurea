@@ -12,7 +12,9 @@ Entrada:
     escritos à mão têm precedência e são reaproveitados.
 
 Saída (tudo gerado, não editar à mão):
-  - `tools/effect_i18n.tsv` — chave, índice, id, opção (-1 = rótulo), recurso.
+  - `tools/effect_i18n.tsv` — chave, índice, id, opção (-1 = rótulo, -2 = dica
+    do parâmetro, -3 = título de seção: índice = ordinal, id = chave da seção),
+    recurso.
     É o que o teste do motor `I18n.EveryEffectTextHasEnglish` confere;
   - `android/.../effects/EffectI18nTable.kt` e `engine/platform/ios/app/EffectI18nTable.swift`;
   - recursos `fxl_*` (rótulo) e `fxo_*` (opção) novos nos 7 catálogos.
@@ -134,6 +136,12 @@ def main():
             rows.append((e["key"], p["index"], p["id"], -1, res))
             for k, opt in enumerate(p["enum"]):
                 rows.append((e["key"], p["index"], p["id"], k, resource(opt, "fxo_")))
+            # Dica (ⓘ) do parâmetro: opção -2.
+            if p.get("tip"):
+                rows.append((e["key"], p["index"], p["id"], -2, resource(p["tip"], "fxt_")))
+        # Título de cada seção do painel: opção -3, índice = ordinal.
+        for sec in e.get("sections", []):
+            rows.append((e["key"], sec["ordinal"], sec["id"], -3, resource(sec["label"], "fxs_")))
 
     if todo or todo_only:
         for t in dict.fromkeys(todo):
@@ -156,19 +164,27 @@ def main():
             f.write("\t".join(str(x) for x in r) + "\n")
     write_kotlin(rows)
     write_swift(rows)
-    print(f"{len(rows)} linha(s): {sum(1 for r in rows if r[3] < 0)} rótulos, {sum(1 for r in rows if r[3] >= 0)} opções")
+    print(f"{len(rows)} linha(s): {sum(1 for r in rows if r[3] == -1)} rótulos, {sum(1 for r in rows if r[3] >= 0)} opções, "
+          f"{sum(1 for r in rows if r[3] == -2)} dicas, {sum(1 for r in rows if r[3] == -3)} seções")
 
 
 def grouped(rows):
     """[(chave, índice, id, rótulo, [opções])] na ordem do catálogo."""
     out, cur = [], None
     for key, index, pid, opt, res in rows:
-        if opt < 0:
+        if opt < -1:
+            continue   # dica / seção: tabelas próprias (`extras`)
+        if opt == -1:
             cur = [key, index, pid, res, []]
             out.append(cur)
         else:
             cur[4].append(res)
     return out
+
+
+def extras(rows, option):
+    """[(chave, índice, id, recurso)] das dicas (-2) ou das seções (-3)."""
+    return [(key, index, pid, res) for key, index, pid, opt, res in rows if opt == option]
 
 
 def write_kotlin(rows):
@@ -195,6 +211,12 @@ def write_kotlin(rows):
             ids = ", ".join(f"R.string.{r}" for r in [label] + opts)
             lines.append(f'        m.put("{key}", {index}, /* {pid} */ intArrayOf({ids}))')
         lines += ["    }", ""]
+    for name, option, doc in (("tips", -2, "(typeId << 16 | índice do parâmetro) → dica (recurso)."),
+                              ("sections", -3, "(typeId << 16 | ordinal da seção) → título (recurso).")):
+        lines += [f"    /** {doc} */", f"    val {name}: Map<Long, Int> by lazy {{", "        HashMap<Long, Int>().apply {"]
+        for key, index, pid, res in extras(rows, option):
+            lines.append(f'            put(slot(com.aurea.aurea.editor.panels.effectTypeId("{key}"), {index}), R.string.{res}) // {pid}')
+        lines += ["        }", "    }", ""]
     lines += [
         "    private fun HashMap<Long, IntArray>.put(key: String, index: Int, ids: IntArray) {",
         "        put(slot(com.aurea.aurea.editor.panels.effectTypeId(key), index), ids)",
@@ -233,7 +255,25 @@ def write_swift(rows):
     ]
     for key, index, pid, label, opts in groups:
         lines.append(f"    {key}|{index}|{pid}|{label}|{','.join(opts)}")
-    lines += ['    """', "}", ""]
+    lines += ['    """', ""]
+    # Dicas (ⓘ) e títulos de seção: "typeId#índice" / "typeId#ordinal" → chave do AureaText.
+    for name, option, doc in (("tips", -2, "dica do parâmetro"), ("sections", -3, "título da seção (índice = ordinal)")):
+        lines += [f"    /// \"typeId#índice\" → {doc}.",
+                  f"    static let {name}: [String: String] = {{",
+                  "        var out: [String: String] = [:]",
+                  f"        for line in {name}Table.split(separator: \"\\n\") {{",
+                  "            let f = line.split(separator: \"|\", omittingEmptySubsequences: false).map(String.init)",
+                  "            guard f.count == 4, let index = Int(f[1]) else { continue }",
+                  "            out[\"\\(fxEffectTypeId(f[0]))#\\(index)\"] = f[3]",
+                  "        }",
+                  "        return out",
+                  "    }()",
+                  "",
+                  f'    private static let {name}Table = """']
+        for key, index, pid, res in extras(rows, option):
+            lines.append(f"    {key}|{index}|{pid}|{res}")
+        lines += ['    """', ""]
+    lines += ["}", ""]
     with open(OUT_SWIFT, "w", encoding="utf-8", newline="\n") as output:
         output.write("\n".join(lines))
 

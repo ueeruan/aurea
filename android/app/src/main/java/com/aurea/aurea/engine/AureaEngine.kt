@@ -365,6 +365,10 @@ class AureaEngine private constructor() {
     fun editEffectCurve(layer: Long, effect: Int, param: Int, channel: Int, action: Int, point: Int, x: Float, y: Float): Int =
         nativeWork.run(-1) { nativeEditEffectCurve(nativeHandle, layer, effect, param, channel, action, point, x, y) }
 
+    /** Abre/recolhe a seção [section] (ordinal 1..N) do efeito no painel; sem passo de desfazer. */
+    fun setEffectSectionOpen(layer: Long, effect: Int, section: Int, open: Boolean): Boolean =
+        nativeWork.run(false) { nativeSetEffectSectionOpen(nativeHandle, layer, effect, section, open) }
+
     /** Declaração dos parâmetros de um TIPO de efeito (a ficha do catálogo). */
     fun queryEffectSpecs(typeId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int =
         nativeQueryEffectSpecs(nativeHandle, typeId, rows, capacity, blob)
@@ -1149,6 +1153,7 @@ class AureaEngine private constructor() {
     ): Int
     private external fun nativeQueryEffectCurve(handle: Long, layer: Long, effect: Int, param: Int, channel: Int, samples: Boolean, out: FloatArray): Int
     private external fun nativeEditEffectCurve(handle: Long, layer: Long, effect: Int, param: Int, channel: Int, action: Int, point: Int, x: Float, y: Float): Int
+    private external fun nativeSetEffectSectionOpen(handle: Long, layer: Long, effect: Int, section: Int, open: Boolean): Boolean
     private external fun nativeQueryEffectCatalog(handle: Long, rows: ByteBuffer, capacity: Int, blob: ByteBuffer): Int
     private external fun nativeQueryEffectSpecs(
         handle: Long, typeId: Int, rows: ByteBuffer, capacity: Int, blob: ByteBuffer,

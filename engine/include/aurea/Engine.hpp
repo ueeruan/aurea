@@ -1739,6 +1739,11 @@ public:
     u32 query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capacity,
                            char* blob, u32 blobCapacity) noexcept;
 
+    /// Abre/recolhe a SEÇÃO `section` (ordinal 1..N, ParamSection) do efeito no
+    /// painel. Estado de apresentação da instância: gravado no projeto (byte
+    /// `expanded`), sem passo de desfazer. Devolve false se a seção não existe.
+    bool set_effect_section_open(u64 layerId, u32 effectId, u32 section, bool open) noexcept;
+
     // =========================================================================
     // Seleção
     // =========================================================================

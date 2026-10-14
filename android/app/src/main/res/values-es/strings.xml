@@ -4309,4 +4309,27 @@ para editar la curva.</string>
     <string name="batch_one_layer_selected">1 capa seleccionada</string>
     <string name="batch_group_mask_a11y">Agrupar y enmascarar: la capa superior recorta las demás</string>
     <string name="batch_group_exclude_a11y">Agrupar y excluir: la capa superior abre un hueco en las demás</string>
+    <string name="fxt_pinning_holds_the_image_at_the_layer_s_e">Fijar mantiene la imagen junto al borde de la capa.</string>
+    <string name="fxs_output">Salida</string>
+    <string name="fxt_only_what_is_brighter_than_the_threshold">Solo brilla lo que es más claro que el umbral.</string>
+    <string name="fxs_elements">Elementos</string>
+    <string name="fxt_the_reflection_uses_the_3d_scene_s_hdri">El reflejo usa el HDRI o el estudio de la escena 3D.</string>
+    <string name="fxs_material">Material</string>
+    <string name="fxt_tap_the_point_s_name_then_drag_it_on_the">Toca el nombre del punto y arrástralo en la vista previa.</string>
+    <string name="fxs_physics">Física</string>
+    <string name="fxs_appearance">Apariencia</string>
+    <string name="fxt_used_when_the_core_is_layer_text">Se usa cuando el núcleo es “Capa / texto”.</string>
+    <string name="fxt_applies_to_the_layer_masks_core">Vale para el núcleo “Máscaras de la capa”.</string>
+    <string name="fxs_core">Núcleo</string>
+    <string name="fxs_core_shape">Forma del núcleo</string>
+    <string name="fxs_masks">Máscaras</string>
+    <string name="fxs_distortion">Distorsión</string>
+    <string name="fxs_outer_glow">Brillo exterior</string>
+    <string name="fxui_effect_deleted">Efecto eliminado</string>
+    <string name="fxui_a11y_section_expand">Expandir la sección %1$s</string>
+    <string name="fxui_a11y_section_collapse">Contraer la sección %1$s</string>
+    <string name="fxui_a11y_tip">Consejo: %1$s</string>
+    <string name="fxui_a11y_swipe_delete">Desliza a la izquierda para eliminar</string>
+    <string name="fxui_stage_point">Punto: %1$s</string>
+    <string name="fxui_stage_point_hint">Arrastra en la vista previa para mover el punto</string>
 </resources>

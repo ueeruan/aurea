@@ -12713,6 +12713,37 @@ i32 Engine::edit_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
     return static_cast<i32>(point);
 }
 
+namespace {
+
+/// Seção e dica de uma linha de parâmetro (`EffectParamRow` +100..+135). As
+/// strings de cada seção entram no blob UMA vez; as linhas seguintes da mesma
+/// seção reaproveitam o trecho. Sem instância (`flipped` = 0), a seção sai como
+/// foi declarada.
+struct SectionBlob { u32 idOff = 0, idLen = 0, labelOff = 0, labelLen = 0; bool done = false; };
+
+void fill_param_section(const ParameterRegistry& params, const ParamSpec& spec, u8 flipped,
+                        bridge::EffectParamRow& row, char* blob, u32 blobCapacity, u32& cursor,
+                        SectionBlob (&cache)[kMaxParamSections + 1]) noexcept {
+    (void)put_string(blob, blobCapacity, cursor, spec.tip, row.tipOffset, row.tipLength);
+    const ParamSection* sec = params.section(spec.section);
+    if (!sec || spec.section > kMaxParamSections) return;
+    row.section = spec.section;
+    row.sectionToggle = sec->toggle == kInvalidIndex ? -1 : static_cast<i32>(sec->toggle);
+    row.sectionFlags = section_open(*sec, flipped, spec.section) ? bridge::kEffectSectionOpen : 0u;
+    SectionBlob& c = cache[spec.section];
+    if (!c.done) {
+        (void)put_string(blob, blobCapacity, cursor, sec->id, c.idOff, c.idLen);
+        (void)put_string(blob, blobCapacity, cursor, sec->label, c.labelOff, c.labelLen);
+        c.done = true;
+    }
+    row.sectionIdOffset = c.idOff;
+    row.sectionIdLength = c.idLen;
+    row.sectionLabelOffset = c.labelOff;
+    row.sectionLabelLength = c.labelLen;
+}
+
+} // namespace
+
 u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRow* out, u32 capacity,
                                 char* blob, u32 blobCapacity) noexcept {
     if (!out) return 0;
@@ -12745,6 +12776,7 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         if (a < params->count() && (a >= inst->params.size() || inst->params[a].constant.v[0] < 0.5f)) glowAlgorithmSlot = a;
     }
     u32 cursor = 0, written = 0;
+    SectionBlob sectionBlob[kMaxParamSections + 1]{};
     for (u32 i = 0; i < params->count() && written < capacity; ++i) {
         // Extruded glyphs support geometry, opacity and fill. Raster-only
         // blur/stroke controls belong to 2D text and its 3D planes.
@@ -12792,6 +12824,7 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         // O id por último: se o blob encher, perde-se só a chave de tradução
         // (a UI cai no rótulo do motor), nunca o rótulo.
         (void)put_string(blob, blobCapacity, cursor, spec.id, row.idOffset, row.idLength);
+        fill_param_section(*params, spec, inst->sectionsFlipped, row, blob, blobCapacity, cursor, sectionBlob);
         const u32 comps = component_count(spec.type);
         for (u32 c = 0; c < comps; ++c) {
             const Track* t = l->tracks.find(TrackProperty::EffectParam, inst->id, param_track_key(i, c));
@@ -12822,6 +12855,7 @@ u32 Engine::query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capa
     const ParameterRegistry* params = effectRegistry_.params(typeId);
     if (!params) return 0;
     u32 cursor = 0, written = 0;
+    SectionBlob sectionBlob[kMaxParamSections + 1]{};
     for (u32 i = 0; i < params->count() && written < capacity; ++i) {
         const ParamSpec& spec = params->at(i);
         bridge::EffectParamRow row;
@@ -12851,9 +12885,32 @@ u32 Engine::query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capa
             row.enumLength = cursor - row.enumOffset;
         }
         (void)put_string(blob, blobCapacity, cursor, spec.id, row.idOffset, row.idLength);
+        fill_param_section(*params, spec, 0u, row, blob, blobCapacity, cursor, sectionBlob);
         out[written++] = row;
     }
     return written;
+}
+
+bool Engine::set_effect_section_open(u64 layerId, u32 effectId, u32 section, bool open) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    EffectInstance* inst = l ? l->find_effect(EffectId{effectId, 0}) : nullptr;
+    const ParameterRegistry* params = inst ? effectRegistry_.params(inst->type) : nullptr;
+    const ParamSection* sec = params ? params->section(section) : nullptr;
+    if (!sec || section > kMaxParamSections) return false;
+    // O bit guarda a TROCA em relação ao declarado: projeto antigo (0) = tudo
+    // como o efeito declara.
+    const u8 bit = static_cast<u8>(1u << (section - 1));
+    const u8 next = open == sec->open ? static_cast<u8>(inst->sectionsFlipped & ~bit)
+                                      : static_cast<u8>(inst->sectionsFlipped | bit);
+    if (next == inst->sectionsFlipped) return true;
+    // Apresentação, não edição: sem passo de desfazer; o projeto guarda.
+    inst->sectionsFlipped = next;
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    return true;
 }
 
 // =============================================================================

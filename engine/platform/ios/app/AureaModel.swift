@@ -157,9 +157,26 @@ struct EffectParamItem: Identifiable, Equatable {
     var hardMax: Float
     var animated: Bool
     var enumLabels: [String]
+    /// Seção do painel (1..N; 0 = solto), a chave dela, o título, o interruptor
+    /// (índice do Bool que liga a seção; −1 = sem) e se está aberta.
+    var section: Int = 0
+    var sectionId: String = ""
+    var sectionLabel: String = ""
+    var sectionToggle: Int = -1
+    var sectionOpen: Bool = true
+    /// Dica (ⓘ, só leitura) mostrada acima da linha; vazia = sem dica.
+    var tip: String = ""
     var id: UInt32 { index }
 
     var scalar: Float { value.first ?? 0 }
+}
+
+/// Botão de um aviso: o rótulo e o que ele faz (uma vez).
+struct ToastActionItem: Equatable {
+    let id = UUID()
+    let label: String
+    let run: () -> Void
+    static func == (a: ToastActionItem, b: ToastActionItem) -> Bool { a.id == b.id }
 }
 
 struct EffectCatalogItem: Identifiable, Equatable {
@@ -654,6 +671,31 @@ final class AureaModel: ObservableObject {
     /// Efeitos que o painel já mostrou, por camada (EffectsView revela o novo).
     var seenEffectIds: [Int64: Set<UInt32>] = [:]
     @Published var toast: String?
+    /// Ação do aviso ("Desfazer"), quando há; some junto com ele. Qualquer
+    /// comando novo (`mutate`, `commitPendingCommands`, `beginGesture`) a tira:
+    /// o passo desfeito tem de ser o que o aviso anuncia (EditorStore.kt).
+    @Published var toastAction: ToastActionItem?
+
+    /// Aviso com UMA ação; tocar roda uma vez e fecha o aviso.
+    func runToastAction() {
+        guard let action = toastAction else { return }
+        toastAction = nil
+        toast = nil
+        action.run()
+    }
+
+    /// Deslizar o cartão de efeito para a esquerda: apaga (um passo) e oferece
+    /// "Desfazer" no aviso — paridade com `EditorStore.removeEffectWithUndo`.
+    func removeEffectWithUndo(_ effectId: UInt32) {
+        guard let layer = primarySelection, selectedLayer?.locked != true else { return }
+        mutate { $0.removeEffect(effectId, fromLayer: layer) }
+        refreshSelectedLayer()
+        toast = AureaText.t("fxui_effect_deleted")
+        toastAction = ToastActionItem(label: AureaText.t("common_undo")) { [weak self] in
+            guard let self, self.primarySelection == layer else { return }
+            self.undo()
+        }
+    }
 
     // --- Modelo em memória (o que a timeline e os painéis desenham) ---------
     @Published private(set) var layers: [LayerItem] = []
@@ -1873,6 +1915,7 @@ final class AureaModel: ObservableObject {
             let index = (row["index"] as? NSNumber)?.uint32Value ?? 0
             let text = fxLocalizedParam(typeId, index: Int(index), label: row["label"] as? String ?? "", unit: row["unit"] as? String ?? "",
                                         options: row["enumLabels"] as? [String] ?? [])
+            let section = (row["section"] as? NSNumber)?.intValue ?? 0
             return EffectParamItem(flags: (row["flags"] as? NSNumber)?.uint32Value ?? 0, index: index,
                                    type: (row["type"] as? NSNumber)?.uint32Value ?? 0,
                                    label: text.label,
@@ -1885,7 +1928,13 @@ final class AureaModel: ObservableObject {
                                    hardMin: hardLo,
                                    hardMax: hardHi,
                                    animated: row["animated"] as? Bool ?? false,
-                                   enumLabels: text.options)
+                                   enumLabels: text.options,
+                                   section: section,
+                                   sectionId: row["sectionId"] as? String ?? "",
+                                   sectionLabel: fxLocalizedSection(typeId, ordinal: section, label: row["sectionLabel"] as? String ?? ""),
+                                   sectionToggle: (row["sectionToggle"] as? NSNumber)?.intValue ?? -1,
+                                   sectionOpen: (row["sectionOpen"] as? NSNumber)?.boolValue ?? true,
+                                   tip: fxLocalizedTip(typeId, index: Int(index), tip: row["tip"] as? String ?? ""))
         }
         if nextParams != effectParams { effectParams = nextParams }
     }
@@ -1955,6 +2004,7 @@ final class AureaModel: ObservableObject {
     /// custa UMA travessia de fronteira, não duas.
     func mutate(_ body: (AureaEngine) -> Void) {
         guard started else { return }
+        if toastAction != nil { toastAction = nil }
         engine.beginBatch()
         body(engine)
         _ = engine.flush()
@@ -2128,7 +2178,10 @@ final class AureaModel: ObservableObject {
     /// o motor aplica todos no mesmo bloco — uma travessia por dedo, não por
     /// pixel. Diferir este `flush` para o próximo ciclo seria pior: o
     /// `beginBatch` do próximo gesto limpa o que ainda não foi enviado.
-    func commitPendingCommands() { _ = engine.flush() }
+    func commitPendingCommands() {
+        if toastAction != nil { toastAction = nil }
+        _ = engine.flush()
+    }
 
     /// Agrupa a seleção numa pré-composição (o "agrupar" do Android). Uma ação
     /// de desfazer, como qualquer outra edição.
@@ -4803,6 +4856,7 @@ final class AureaModel: ObservableObject {
     /// Um gesto contínuo (arrasto, alça, pinça) = UM passo de desfazer. Abra no
     /// começo e feche no fim; tudo que for enviado no meio desfaz junto.
     func beginGesture(_ label: String) {
+        if toastAction != nil { toastAction = nil }
         if transformGestureDepth == 0 { sceneDragSnapshot = nil }
         transformGestureDepth += 1
         engine.run { $0.beginUndoGroup() }

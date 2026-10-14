@@ -4305,4 +4305,27 @@
     <string name="batch_one_layer_selected">1 लेयर चुनी गई</string>
     <string name="batch_group_mask_a11y">समूह और मास्क: सबसे ऊपर की लेयर बाकी को काटती है</string>
     <string name="batch_group_exclude_a11y">समूह और बहिष्कार: सबसे ऊपर की लेयर बाकी में छेद करती है</string>
+    <string name="fxt_pinning_holds_the_image_at_the_layer_s_e">पिन करने से छवि लेयर के किनारे पर टिकी रहती है।</string>
+    <string name="fxs_output">आउटपुट</string>
+    <string name="fxt_only_what_is_brighter_than_the_threshold">केवल सीमा से अधिक चमकीला हिस्सा चमकता है।</string>
+    <string name="fxs_elements">तत्व</string>
+    <string name="fxt_the_reflection_uses_the_3d_scene_s_hdri">प्रतिबिंब 3D दृश्य के HDRI या स्टूडियो का उपयोग करता है।</string>
+    <string name="fxs_material">मटेरियल</string>
+    <string name="fxt_tap_the_point_s_name_then_drag_it_on_the">बिंदु के नाम पर टैप करें और उसे प्रीव्यू में खींचें।</string>
+    <string name="fxs_physics">भौतिकी</string>
+    <string name="fxs_appearance">रूप</string>
+    <string name="fxt_used_when_the_core_is_layer_text">तब उपयोग होता है जब कोर “लेयर / टेक्स्ट” हो।</string>
+    <string name="fxt_applies_to_the_layer_masks_core">“लेयर मास्क” कोर पर लागू होता है।</string>
+    <string name="fxs_core">कोर</string>
+    <string name="fxs_core_shape">कोर का आकार</string>
+    <string name="fxs_masks">मास्क</string>
+    <string name="fxs_distortion">विकृति</string>
+    <string name="fxs_outer_glow">बाहरी चमक</string>
+    <string name="fxui_effect_deleted">इफ़ेक्ट हटाया गया</string>
+    <string name="fxui_a11y_section_expand">सेक्शन %1$s खोलें</string>
+    <string name="fxui_a11y_section_collapse">सेक्शन %1$s बंद करें</string>
+    <string name="fxui_a11y_tip">सुझाव: %1$s</string>
+    <string name="fxui_a11y_swipe_delete">हटाने के लिए बाईं ओर स्वाइप करें</string>
+    <string name="fxui_stage_point">बिंदु: %1$s</string>
+    <string name="fxui_stage_point_hint">बिंदु हिलाने के लिए प्रीव्यू पर खींचें</string>
 </resources>

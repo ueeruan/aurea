@@ -202,3 +202,139 @@ private func saberToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)? 
         model.endGesture()
     }
 }
+
+// =============================================================================
+// PONTO DE EFEITO no palco (P1-5) — port de editor/EffectPointStage.kt.
+//
+// O parâmetro Point2D (ou os X/Y de um Point3D) em fração da camada que a
+// pessoa tocou no cartão aparece como uma alça sobre a camada. Arrastar a alça
+// escreve o ponto (o mesmo valor dos campos X/Y) num passo de desfazer; com o
+// ponto animado, vira keyframe no cabeçote. Só aparece com o parâmetro ATIVO
+// (cartão aberto e o ponto escolhido por toque): o palco 3D continua seco no
+// resto do tempo. Mesma geometria do Saber (homografia da caixa da camada).
+// =============================================================================
+@MainActor final class EffectPointStageState: ObservableObject {
+    static let shared = EffectPointStageState()
+
+    @Published var layer: Int64 = 0
+    @Published var effect: UInt32 = 0
+    @Published var param: Int32 = -1
+    @Published var revision = 0
+
+    func show(_ layerId: Int64, effect effectId: UInt32, param index: UInt32) {
+        if layer != layerId { layer = layerId }
+        if effect != effectId { effect = effectId }
+        if param != Int32(index) { param = Int32(index) }
+    }
+    func hide() { if param != -1 { param = -1 } }
+}
+
+/// A alça do ponto ativo. Só ela recebe toque: fora dela, o palco segue normal.
+@MainActor struct EffectPointStageOverlay: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var point = EffectPointStageState.shared
+    @ObservedObject private var saber = SaberStageState.shared
+    @ObservedObject private var viewZoom = StageViewZoom.shared
+    @State private var dragging = false
+
+    var body: some View {
+        if let active = activePoint(), let c = corners() {
+            GeometryReader { geo in
+                let placed = StageZoomMath.fit(size: geo.size,
+                                               composition: CGSize(width: CGFloat(model.compositionWidth), height: CGFloat(model.compositionHeight)),
+                                               zoom: viewZoom.zoom, pan: viewZoom.pan)
+                let q = saberToComp(c, Float(active.uv.x), Float(active.uv.y))
+                let p = CGPoint(x: placed.origin.x + q.x * placed.scale, y: placed.origin.y + q.y * placed.scale)
+                ZStack {
+                    handle(at: p, label: active.label, fit: placed.scale, origin: placed.origin)
+                }
+                .coordinateSpace(name: "effectPointStage")
+            }
+        }
+    }
+
+    /// (ponto em fração da camada, nome do parâmetro), ou nil fora do modo.
+    private func activePoint() -> (uv: CGPoint, label: String)? {
+        guard point.param >= 0, model.selection.count == 1, model.primarySelection == point.layer,
+              let l = model.selectedLayer, !l.locked else { return nil }
+        _ = point.revision
+        _ = model.status.playhead
+        guard let row = model.effectParams.first(where: { $0.index == UInt32(point.param) }), model.selectedEffectId == point.effect,
+              fxStagePointEligible(type: Int(row.type), flags: row.flags), row.value.count >= 2,
+              row.value[0].isFinite, row.value[1].isFinite else { return nil }
+        // O Saber (núcleo único) já desenha os dois pontos dele.
+        if saber.effect >= 0, UInt32(truncatingIfNeeded: saber.effect) == point.effect,
+           UInt32(point.param) == SaberStageState.start || UInt32(point.param) == SaberStageState.end { return nil }
+        return (CGPoint(x: CGFloat(row.value[0]), y: CGFloat(row.value[1])), row.label)
+    }
+
+    /// Cantos da caixa da camada na composição; a camada de ajuste cobre a composição.
+    private func corners() -> [Float]? {
+        if model.selectedLayer?.adjustment == true {
+            let w = Float(model.compositionWidth), h = Float(model.compositionHeight)
+            return [0, 0, w, 0, w, h, 0, h]
+        }
+        var c: [Float] = []
+        return StageGeom.corners(model.detail, &c) && c.count == 8 ? c : nil
+    }
+
+    /// Anel com miolo e cruz fina (lê como "posição", não como o anel do Saber).
+    private func handle(at p: CGPoint, label: String, fit: CGFloat, origin: CGPoint) -> some View {
+        ZStack {
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: 22)); path.addLine(to: CGPoint(x: 44, y: 22))
+                path.move(to: CGPoint(x: 22, y: 0)); path.addLine(to: CGPoint(x: 22, y: 44))
+            }.stroke(StageInk.outlineUnder, lineWidth: 3)
+            Path { path in
+                path.move(to: CGPoint(x: 7, y: 22)); path.addLine(to: CGPoint(x: 13, y: 22))
+                path.move(to: CGPoint(x: 31, y: 22)); path.addLine(to: CGPoint(x: 37, y: 22))
+                path.move(to: CGPoint(x: 22, y: 7)); path.addLine(to: CGPoint(x: 22, y: 13))
+                path.move(to: CGPoint(x: 22, y: 31)); path.addLine(to: CGPoint(x: 22, y: 37))
+            }.stroke(Color.white, lineWidth: 1.5)
+            Circle().fill(StageInk.outlineUnder).frame(width: 22, height: 22)
+            Circle().stroke(saberInk, lineWidth: 2.5).frame(width: 15, height: 15)
+            Circle().fill(saberInk).frame(width: 6, height: 6)
+        }
+        .frame(width: 44, height: 44)
+        .contentShape(Circle())
+        .position(p)
+        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("effectPointStage"))
+            .onChanged { v in drag(v.location, fit: fit, origin: origin) }
+            .onEnded { _ in end() })
+        .accessibilityElement()
+        .accessibilityLabel(AureaText.t("fxui_stage_point", label))
+        .accessibilityHint(AureaText.t("fxui_stage_point_hint"))
+        .accessibilityIdentifier("stage.effect_point")
+    }
+
+    private func drag(_ location: CGPoint, fit: CGFloat, origin: CGPoint) {
+        guard fit > 0, let c = corners(), let layer = model.primarySelection, point.param >= 0 else { return }
+        guard let uv = saberToUv(c, Float((location.x - origin.x) / fit), Float((location.y - origin.y) / fit)),
+              uv.0.isFinite, uv.1.isFinite else { return }
+        let effect = point.effect, index = UInt32(point.param)
+        let rows = model.engine.effectParams(forLayer: layer, effectId: effect)
+        guard let row = rows.first(where: { ($0["index"] as? NSNumber)?.uint32Value == index }) else { return }
+        if !dragging {
+            dragging = true
+            model.beginGesture("mover ponto do efeito")
+        }
+        if row["animated"] as? Bool ?? false {
+            model.engine.keyParameter(layer, property: 31, effect: effect, param: index * 4, time: model.localPlayhead, value: uv.0)
+            model.engine.keyParameter(layer, property: 31, effect: effect, param: index * 4 + 1, time: model.localPlayhead, value: uv.1)
+        } else {
+            // O vetor inteiro num comando só (como o writeVector do cartão).
+            let old = (row["value"] as? [NSNumber])?.map(\.floatValue) ?? []
+            model.engine.setEffectColor(effect, forLayer: layer, paramIndex: index, r: uv.0, g: uv.1,
+                                        b: old.count > 2 ? old[2] : 0, a: old.count > 3 ? old[3] : 0)
+        }
+        model.commitPendingCommands()
+        model.loadParams(layerId: layer, effectId: effect)
+        point.revision += 1
+    }
+
+    private func end() {
+        guard dragging else { return }
+        dragging = false
+        model.endGesture()
+    }
+}

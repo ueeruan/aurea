@@ -139,6 +139,44 @@ u32 ParameterRegistry::add_texture_ref(const char* id, const char* label) {
     return add(s);
 }
 
+u32 ParameterRegistry::add_section(const char* id, const char* label, std::initializer_list<u32> members,
+                                   u32 toggle, bool open) noexcept {
+    return add_section_of(id, label, members.begin(), static_cast<u32>(members.size()), toggle, open);
+}
+
+u32 ParameterRegistry::add_section_range(const char* id, const char* label, u32 first, u32 last, u32 toggle,
+                                         bool open) noexcept {
+    if (first > last || last >= specs_.size() || last - first >= 64) return kInvalidIndex;
+    u32 members[64];
+    for (u32 i = first; i <= last; ++i) members[i - first] = i;
+    return add_section_of(id, label, members, last - first + 1, toggle, open);
+}
+
+u32 ParameterRegistry::add_section_of(const char* id, const char* label, const u32* members, u32 count,
+                                      u32 toggle, bool open) noexcept {
+    if (sections_.size() >= kMaxParamSections || count == 0) return kInvalidIndex;
+    if (toggle != kInvalidIndex && (toggle >= specs_.size() || specs_[toggle].type != ParamType::Bool ||
+                                    specs_[toggle].section != 0)) {
+        return kInvalidIndex;
+    }
+    // Um parâmetro mora numa seção só: todos os membros têm de estar livres.
+    for (u32 k = 0; k < count; ++k) {
+        if (members[k] >= specs_.size() || specs_[members[k]].section != 0) return kInvalidIndex;
+    }
+    sections_.push_back(ParamSection{id ? id : "", label ? label : "", toggle, open});
+    const u16 ordinal = static_cast<u16>(sections_.size());
+    for (u32 k = 0; k < count; ++k) specs_[members[k]].section = ordinal;
+    // O interruptor é o cabeçalho da seção: pertence a ela (sai das linhas soltas).
+    if (toggle != kInvalidIndex) specs_[toggle].section = ordinal;
+    return ordinal;
+}
+
+u32 ParameterRegistry::set_tip(u32 index, const char* text) noexcept {
+    if (index >= specs_.size()) return kInvalidIndex;
+    specs_[index].tip = text && *text ? text : nullptr;
+    return index;
+}
+
 u32 ParameterRegistry::find(std::string_view id) const noexcept {
     for (u32 i = 0; i < specs_.size(); ++i) {
         if (id == specs_[i].id) return i;

@@ -27,7 +27,11 @@ internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<Effe
     params.map { p ->
         val ids = EffectI18nTable.entries[EffectI18nTable.slot(typeId, p.index)]
         val unit = UnitRes[p.unit]?.let(res::getString) ?: p.unit
-        if (ids == null && unit == p.unit) return@map p
+        // Dica (ⓘ) e título da seção: também pela identidade (efeito + índice / ordinal).
+        val tip = if (p.tip.isEmpty()) p.tip else EffectI18nTable.tips[EffectI18nTable.slot(typeId, p.index)]?.let(res::getString) ?: p.tip
+        val sectionLabel = if (p.section <= 0) p.sectionLabel
+            else EffectI18nTable.sections[EffectI18nTable.slot(typeId, p.section)]?.let(res::getString) ?: p.sectionLabel
+        if (ids == null && unit == p.unit && tip == p.tip && sectionLabel == p.sectionLabel) return@map p
         val label = ids?.let { res.getString(it[0]) } ?: p.label
         // Opções só pela identidade completa: se o motor mudou a lista, fica a dele.
         val options = if (ids != null && ids.size - 1 == p.enumLabels.size) {
@@ -39,5 +43,7 @@ internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<Effe
             index = p.index, type = p.type, flags = p.flags, min = p.min, max = p.max,
             value = p.value, defaultValue = p.defaultValue, label = label, unit = unit,
             enumLabels = options, animated = p.animated, hardMin = p.hardMin, hardMax = p.hardMax,
+            section = p.section, sectionId = p.sectionId, sectionLabel = sectionLabel, sectionToggle = p.sectionToggle,
+            sectionOpen = p.sectionOpen, tip = tip,
         )
     }

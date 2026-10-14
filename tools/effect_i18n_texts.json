@@ -4679,5 +4679,133 @@
   "hi": "परिवेश का प्रतिबिंब",
   "id": "Pantulan lingkungan",
   "ar": "انعكاس البيئة"
+ },
+ "Fixar segura a imagem junto à borda da camada.": {
+  "en": "Pinning holds the image at the layer's edge.",
+  "es": "Fijar mantiene la imagen junto al borde de la capa.",
+  "ru": "Закрепление удерживает изображение у края слоя.",
+  "hi": "पिन करने से छवि लेयर के किनारे पर टिकी रहती है।",
+  "id": "Sematkan menahan gambar di tepi layer.",
+  "ar": "التثبيت يُبقي الصورة عند حافة الطبقة."
+ },
+ "Saída": {
+  "en": "Output",
+  "es": "Salida",
+  "ru": "Вывод",
+  "hi": "आउटपुट",
+  "id": "Keluaran",
+  "ar": "الإخراج"
+ },
+ "Só o que é mais claro que o limite brilha.": {
+  "en": "Only what is brighter than the threshold glows.",
+  "es": "Solo brilla lo que es más claro que el umbral.",
+  "ru": "Светится только то, что ярче порога.",
+  "hi": "केवल सीमा से अधिक चमकीला हिस्सा चमकता है।",
+  "id": "Hanya bagian yang lebih terang dari ambang yang bercahaya.",
+  "ar": "يتوهج فقط ما هو أفتح من العتبة."
+ },
+ "Elementos": {
+  "en": "Elements",
+  "es": "Elementos",
+  "ru": "Элементы",
+  "hi": "तत्व",
+  "id": "Elemen",
+  "ar": "العناصر"
+ },
+ "O reflexo usa o HDRI ou o estúdio da cena 3D.": {
+  "en": "The reflection uses the 3D scene's HDRI or studio.",
+  "es": "El reflejo usa el HDRI o el estudio de la escena 3D.",
+  "ru": "Отражение использует HDRI или студию 3D-сцены.",
+  "hi": "प्रतिबिंब 3D दृश्य के HDRI या स्टूडियो का उपयोग करता है।",
+  "id": "Pantulan memakai HDRI atau studio adegan 3D.",
+  "ar": "يستخدم الانعكاس HDRI أو استوديو المشهد ثلاثي الأبعاد."
+ },
+ "Material": {
+  "en": "Material",
+  "es": "Material",
+  "ru": "Материал",
+  "hi": "मटेरियल",
+  "id": "Material",
+  "ar": "الخامة"
+ },
+ "Toque no nome do ponto e arraste-o no preview.": {
+  "en": "Tap the point's name, then drag it on the preview.",
+  "es": "Toca el nombre del punto y arrástralo en la vista previa.",
+  "ru": "Нажмите на название точки и перетащите её в превью.",
+  "hi": "बिंदु के नाम पर टैप करें और उसे प्रीव्यू में खींचें।",
+  "id": "Ketuk nama titik, lalu seret di pratinjau.",
+  "ar": "اضغط على اسم النقطة ثم اسحبها في المعاينة."
+ },
+ "Física": {
+  "en": "Physics",
+  "es": "Física",
+  "ru": "Физика",
+  "hi": "भौतिकी",
+  "id": "Fisika",
+  "ar": "الفيزياء"
+ },
+ "Aparência": {
+  "en": "Appearance",
+  "es": "Apariencia",
+  "ru": "Внешний вид",
+  "hi": "रूप",
+  "id": "Tampilan",
+  "ar": "المظهر"
+ },
+ "Usada quando o núcleo é “Camada / texto”.": {
+  "en": "Used when the core is “Layer / text”.",
+  "es": "Se usa cuando el núcleo es “Capa / texto”.",
+  "ru": "Используется, когда ядро — «Слой / текст».",
+  "hi": "तब उपयोग होता है जब कोर “लेयर / टेक्स्ट” हो।",
+  "id": "Dipakai saat inti adalah “Layer / teks”.",
+  "ar": "تُستخدم عندما تكون النواة «طبقة / نص»."
+ },
+ "Vale para o núcleo “Máscaras da camada”.": {
+  "en": "Applies to the “Layer masks” core.",
+  "es": "Vale para el núcleo “Máscaras de la capa”.",
+  "ru": "Действует для ядра «Маски слоя».",
+  "hi": "“लेयर मास्क” कोर पर लागू होता है।",
+  "id": "Berlaku untuk inti “Mask layer”.",
+  "ar": "ينطبق على نواة «أقنعة الطبقة»."
+ },
+ "Núcleo": {
+  "en": "Core",
+  "es": "Núcleo",
+  "ru": "Ядро",
+  "hi": "कोर",
+  "id": "Inti",
+  "ar": "النواة"
+ },
+ "Forma do núcleo": {
+  "en": "Core shape",
+  "es": "Forma del núcleo",
+  "ru": "Форма ядра",
+  "hi": "कोर का आकार",
+  "id": "Bentuk inti",
+  "ar": "شكل النواة"
+ },
+ "Máscaras": {
+  "en": "Masks",
+  "es": "Máscaras",
+  "ru": "Маски",
+  "hi": "मास्क",
+  "id": "Mask",
+  "ar": "الأقنعة"
+ },
+ "Distorção": {
+  "en": "Distortion",
+  "es": "Distorsión",
+  "ru": "Искажение",
+  "hi": "विकृति",
+  "id": "Distorsi",
+  "ar": "التشويه"
+ },
+ "Brilho externo": {
+  "en": "Outer glow",
+  "es": "Brillo exterior",
+  "ru": "Внешнее свечение",
+  "hi": "बाहरी चमक",
+  "id": "Cahaya luar",
+  "ar": "التوهج الخارجي"
  }
 }

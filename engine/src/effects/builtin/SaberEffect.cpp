@@ -157,6 +157,18 @@ public:
         p.typed_range(1.0f, 10000.0f);
         p.add_enum("composite", "Composição", kComposites, 3, kAdd);
         p.add_int("seed", "Semente", 0, 0, 1000);
+        // Seções do painel (só apresentação: os índices acima não mudam). Fora
+        // de seção ficam o tipo de núcleo e os pontos — o que se mexe sempre.
+        p.add_section("glow", "Brilho externo", {kGlowColor, kGlowIntensity, kGlowSpread, kGlowBias}, kGlowEnabled);
+        p.add_section("core", "Núcleo", {kCoreSize, kCoreSoftness, kCoreColor, kCoreSaturation, kCoreIntensity});
+        p.add_section_range("core_shape", "Forma do núcleo", kStartOffset, kEndRoundness, kInvalidIndex, false);
+        p.add_section("masks", "Máscaras", {kMaskEvolution, kMaskRandom}, kInvalidIndex, false);
+        p.add_section("flicker", "Cintilação", {kFlickerIntensity, kFlickerSpeed, kFlickerMaskRandom}, kInvalidIndex, false);
+        p.add_section("distortion", "Distorção", {kDistortionType, kDistortionAmount, kDistortionSpeed, kDistortionScale},
+                      kInvalidIndex, false);
+        p.add_section("output", "Saída", {kComposite, kSeed}, kInvalidIndex, false);
+        p.set_tip(kCoreLayer, "Usada quando o núcleo é “Camada / texto”.");
+        p.set_tip(kMaskEvolution, "Vale para o núcleo “Máscaras da camada”.");
     }
 
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {

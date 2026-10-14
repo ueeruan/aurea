@@ -288,6 +288,8 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { MeshWarpStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { PuppetStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { SaberStageOverlay() } }
+                // Ponto de efeito ativo (parâmetro tocado no cartão): a alça dele (SaberStage.swift).
+                .overlay { if !model.fullscreen && !model.rawPlayback { EffectPointStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RotoPaintStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RealCameraStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }

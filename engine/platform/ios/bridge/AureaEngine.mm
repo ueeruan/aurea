@@ -165,6 +165,12 @@ NSString* const AureaParamHardMin    = @"hardMin";
 NSString* const AureaParamHardMax    = @"hardMax";
 NSString* const AureaParamAnimated   = @"animated";
 NSString* const AureaParamEnumLabels = @"enumLabels";
+NSString* const AureaParamSection       = @"section";
+NSString* const AureaParamSectionId     = @"sectionId";
+NSString* const AureaParamSectionLabel  = @"sectionLabel";
+NSString* const AureaParamSectionToggle = @"sectionToggle";
+NSString* const AureaParamSectionOpen   = @"sectionOpen";
+NSString* const AureaParamTip           = @"tip";
 
 NSString* const AureaExportRunning     = @"running";
 NSString* const AureaExportFinished    = @"finished";
@@ -292,6 +298,12 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         AureaParamHardMax:    @(p.hardMax),
         AureaParamAnimated:   @(p.animated != 0),
         AureaParamEnumLabels: enums,
+        AureaParamSection:       @(p.section),
+        AureaParamSectionId:     slice(blob, p.sectionIdOffset, p.sectionIdLength),
+        AureaParamSectionLabel:  slice(blob, p.sectionLabelOffset, p.sectionLabelLength),
+        AureaParamSectionToggle: @(p.sectionToggle),
+        AureaParamSectionOpen:   @((p.sectionFlags & aurea::bridge::kEffectSectionOpen) != 0),
+        AureaParamTip:           slice(blob, p.tipOffset, p.tipLength),
     };
 }
 
@@ -2524,6 +2536,11 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y {
     auto* e = self.engine;
     return e ? e->edit_effect_curve(layerId, effect, param, channel, action, point, x, y) : -1;
+}
+
+- (BOOL)setEffectSection:(long long)layerId effect:(uint32_t)effect section:(uint32_t)section open:(BOOL)open {
+    auto* e = self.engine;
+    return e && section > 0 && e->set_effect_section_open(static_cast<aurea::u64>(layerId), effect, section, open == YES);
 }
 
 - (NSArray<NSDictionary<NSString*, id>*>*)effectSpecs:(uint32_t)typeId {

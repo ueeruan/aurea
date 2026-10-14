@@ -837,6 +837,15 @@ AUREA_JNI jint AUREA_FN(nativeEditEffectCurve)(JNIEnv*, jclass, jlong handle, jl
         static_cast<u32>(param), static_cast<u32>(channel), static_cast<u32>(action), static_cast<u32>(point), x, y);
 }
 
+/// Abre/recolhe uma seção do painel de efeitos (ordinal 1..N). Apresentação: sem desfazer.
+AUREA_JNI jboolean AUREA_FN(nativeSetEffectSectionOpen)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect,
+                                                       jint section, jboolean open) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || effect < 0 || section <= 0) return JNI_FALSE;
+    return c->engine.set_effect_section_open(static_cast<u64>(layer), static_cast<u32>(effect),
+                                             static_cast<u32>(section), open == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jint AUREA_FN(nativeQueryEffectSpecs)(JNIEnv* env, jclass, jlong handle, jint typeId,
                                                 jobject rows, jint capacity, jobject blob) {
     NativeContext* c = ctx_of(handle);

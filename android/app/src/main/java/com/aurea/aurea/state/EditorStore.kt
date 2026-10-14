@@ -4321,6 +4321,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         showToast(appText(R.string.msg_agrupado_toque_em_editar_o_grupo))
     }
 
+    /**
+     * A regra do motor para "Agrupar e mascarar/excluir" (>= 2 camadas visuais
+     * destravadas), sem mudar nada. Sem a biblioteca nativa (testes JVM), a
+     * contagem.
+     */
+    fun canGroupAndMask(ids: Collection<Long> = selection): Boolean =
+        runCatching { engine.canGroupAndMask(ids.toLongArray()) }.getOrElse { ids.size >= 2 }
+
     /** The engine chooses the top selected visual layer and commits one undo step. */
     fun groupAndMask(exclude: Boolean, ids: Collection<Long> = selection) {
         if (playing) pause()

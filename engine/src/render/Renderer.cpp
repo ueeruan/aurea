@@ -3955,6 +3955,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 out.scenes.back().particleLayers.push_back(used);
             } else {
                 rl.planeGroup = static_cast<i32>(out.scenes.size() - 1);
+                out.plans[used].placement.scenePlane = true;
                 // O mundo da camada (o mesmo de `m`, sem a projeção): as luzes
                 // da composição iluminam o plano pela normal dele.
                 rl.worldFromLayer = shifted ? world_3d(comp, *l, time) * shiftM : world_3d(comp, *l, time);
@@ -6057,10 +6058,14 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         LayerImage fin = src;
         motion_tile::PeriodicPlane periodic;
         raster_extrude::Options extrusionOptions;
+        // 3D Shatter num plano da cena: o efeito devolve a camada intacta e o
+        // grupo desenha as peças como geometria (scene3d/shatter.vert).
+        const EffectEval* shatterItem=nullptr;
         if (i<snap.plans.size()) for (const EffectEval& item:snap.plans[i].evals) {
             EffectEval eval=item;eval.values=snap.plans[i].values.data()+item.valueOffset;
             const auto options=raster_extrude::options_from(eval);
             if(options.depth>0)extrusionOptions=options;
+            if(shatter3d::is_shatter(item.effect->type_id()))shatterItem=&item;
         }
         bool periodicReady = false;
         if (hasEffects) {
@@ -6106,6 +6111,12 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 incomplete_=true;continue;
             }
             if(!p.extrusion.count)continue;
+        }
+        if (shatterItem && !p.extrusion.count && !periodicReady) {
+            EffectEval eval=*shatterItem;
+            eval.values=snap.plans[i].values.data()+eval.valueOffset;
+            eval.placement=&snap.plans[i].placement;
+            p.shatter.pieces=shatter3d::fill(eval,fin,p.shatter.uniforms);
         }
         const Vec4 c = p.clipFromLayer * Vec4{fin.region.x + fin.region.w * 0.5f, fin.region.y + fin.region.h * 0.5f, p.extrusion.count?p.extrusion.params.x*.5f:0.f, 1};
         p.viewDepth = c.w;

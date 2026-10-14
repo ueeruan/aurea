@@ -421,9 +421,44 @@ void Backend::destroy_sampler(SamplerHandle h) noexcept {
     }, new Node{this, dead.sampler});
 }
 
+namespace {
+// FNV-1a de 64 bits; `basis` diferente dá o segundo hash independente.
+u64 fnv1a(const void* data, usize bytes, u64 basis) noexcept {
+    const auto* p = static_cast<const u8*>(data);
+    u64 h = basis;
+    for (usize i = 0; i < bytes; ++i) { h ^= p[i]; h *= 0x100000001b3ull; }
+    return h;
+}
+constexpr u64 kFnvBasis = 0xcbf29ce484222325ull;
+constexpr u64 kFnvCheckBasis = 0x84222325cbf29ce4ull;
+} // namespace
+
+u64 PipelineIdentity::hash() const noexcept {
+    const u64 h = fnv1a(words, count * sizeof(u64), kFnvBasis);
+    return h ? h : 1;   // 0 é "exclusivo"
+}
+
 Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
     if (!desc.spirv || desc.spirvBytes < 20 || desc.spirvBytes % 4 != 0) {
         return Status{Errc::InvalidArgument, "SPIR-V invalido"};
+    }
+    // O mesmo SPIR-V no mesmo estágio é o mesmo módulo: o renderer do export
+    // não passa de novo pelo parser do driver.
+    u64 key = fnv1a(desc.spirv, desc.spirvBytes, kFnvBasis) ^ (static_cast<u64>(desc.stage) + 1) * 0x9e3779b97f4a7c15ull;
+    if (!key) key = 1;
+    const u64 contentCheck = fnv1a(desc.spirv, desc.spirvBytes, kFnvCheckBasis);
+    const auto found = sharedShaders_.find(key);
+    if (found != sharedShaders_.end()) {
+        SharedShader& shared = found->second;
+        if (shared.stage == desc.stage && shared.bytes == desc.spirvBytes && shared.check == contentCheck) {
+            ShaderModule m;
+            m.module = shared.module;
+            m.stage = desc.stage;
+            m.sharedKey = key;
+            const u64 id = shaders_.add(std::move(m));
+            ++shared.refs;
+            return ShaderHandle{id};
+        }
     }
     VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     info.codeSize = desc.spirvBytes;
@@ -434,12 +469,24 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
         return Status{Errc::ShaderCompileFailed, desc.debugName};
     }
     set_object_name(VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<u64>(m.module), desc.debugName);
+    // Chave já ocupada por outro conteúdo (colisão): módulo exclusivo.
+    if (found == sharedShaders_.end()) {
+        sharedShaders_.emplace(key, SharedShader{m.module, desc.stage, desc.spirvBytes, contentCheck, 1});
+        m.sharedKey = key;
+    }
     return ShaderHandle{shaders_.add(std::move(m))};
 }
 
 void Backend::destroy_shader(ShaderHandle h) noexcept {
     ShaderModule m;
     if (!shaders_.remove(h.id, m)) return;
+    if (m.sharedKey) {
+        const auto it = sharedShaders_.find(m.sharedKey);
+        if (it != sharedShaders_.end() && it->second.module == m.module) {
+            if (--it->second.refs) return;   // outro renderer ainda usa
+            sharedShaders_.erase(it);
+        }
+    }
     // Um módulo pode ser destruído logo depois de criar os pipelines que o
     // usam: o pipeline não depende dele. Mesmo assim, adiado por simetria.
     struct Node { Backend* b; VkShaderModule m; };
@@ -901,10 +948,78 @@ VkFramebuffer Backend::framebuffer(const RenderPassKey& k, const u64 ids[6], VkI
 // =============================================================================
 // Pipelines
 // =============================================================================
+bool Backend::pipeline_identity(const PipelineDesc& desc, PipelineIdentity& out) noexcept {
+    out = PipelineIdentity{};
+    const auto content = [&](ShaderHandle h, u64& key) {
+        const ShaderModule* m = shaders_.get(h.id);
+        key = m ? m->sharedKey : 0;
+        return key != 0;
+    };
+    u64 vertex = 0, fragment = 0, compute = 0;
+    if (desc.isCompute) {
+        if (!content(desc.computeShader, compute)) return false;
+    } else if (!content(desc.vertexShader, vertex) || !content(desc.fragmentShader, fragment)) {
+        return false;
+    }
+    // O layout vem do sampler imutável (mesmo id = mesmo layout em cache).
+    out.push(desc.isCompute ? 1u : 0u);
+    out.push(vertex); out.push(fragment); out.push(compute);
+    out.push(desc.immutableSampler0.id);
+    if (desc.isCompute) return true;
+    const auto bits = [](f32 v) { u32 b = 0; std::memcpy(&b, &v, sizeof b); return static_cast<u64>(b); };
+    out.push(static_cast<u64>(desc.blendEnabled) | static_cast<u64>(desc.blend) << 8
+             | static_cast<u64>(desc.topology) << 16 | static_cast<u64>(desc.alphaToCoverage) << 24
+             | static_cast<u64>(desc.hasColor1) << 32 | static_cast<u64>(desc.hasDepth) << 40
+             | static_cast<u64>(desc.depthOnly) << 48 | static_cast<u64>(desc.frontFaceCCW) << 56);
+    out.push(static_cast<u64>(desc.colorFormat) | static_cast<u64>(desc.colorFormat1) << 16
+             | static_cast<u64>(desc.depthFormat) << 32 | static_cast<u64>(desc.cull) << 48);
+    out.push(desc.sampleCount);
+    out.push(static_cast<u64>(desc.depth.test) | static_cast<u64>(desc.depth.write) << 8
+             | static_cast<u64>(desc.depth.compare) << 16);
+    out.push(bits(desc.depth.biasConstant) | bits(desc.depth.biasSlope) << 32);
+    const VertexLayout& vl = desc.vertexLayout;
+    out.push(static_cast<u64>(vl.attributeCount) | static_cast<u64>(vl.bindingCount) << 32);
+    for (u32 i = 0; i < vl.attributeCount && i < VertexLayout::kMaxAttributes; ++i) {
+        out.push(static_cast<u64>(vl.attributes[i].location) | static_cast<u64>(vl.attributes[i].binding) << 32);
+        out.push(static_cast<u64>(vl.attributes[i].format) | static_cast<u64>(vl.attributes[i].offset) << 32);
+    }
+    for (u32 b = 0; b < vl.bindingCount && b < VertexLayout::kMaxBindings; ++b)
+        out.push(static_cast<u64>(vl.bindings[b].stride) | static_cast<u64>(vl.bindings[b].perInstance) << 32);
+    return out.count < PipelineIdentity::kMaxWords;   // nunca truncar a identidade
+}
+
+u64 Backend::publish_pipeline(PipelineObject&& p, const PipelineIdentity* identity) noexcept {
+    if (identity) {
+        const u64 key = identity->hash();
+        // Chave já ocupada por outra identidade (colisão): pipeline exclusivo.
+        if (sharedPipelines_.find(key) == sharedPipelines_.end()) {
+            sharedPipelines_.emplace(key, SharedPipeline{p.pipeline, p.bindPoint, *identity, 1});
+            p.sharedKey = key;
+        }
+    }
+    return pipelines_.add(std::move(p));
+}
+
 Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexcept {
     PipelineObject p;
     p.layout = pipeline_layout(desc.immutableSampler0.id, p.setLayout);
     if (!p.layout) return Status{Errc::PipelineCompileFailed, "layout de pipeline"};
+
+    // A mesma identidade já compilada (por outro renderer): o mesmo VkPipeline,
+    // sem passar pelo compilador do driver.
+    PipelineIdentity identity;
+    const bool shareable = pipeline_identity(desc, identity);
+    if (shareable) {
+        const auto it = sharedPipelines_.find(identity.hash());
+        if (it != sharedPipelines_.end() && it->second.identity == identity) {
+            p.pipeline = it->second.pipeline;
+            p.bindPoint = it->second.bindPoint;
+            p.sharedKey = it->first;
+            const u64 id = pipelines_.add(std::move(p));
+            ++it->second.refs;
+            return PipelineHandle{id};
+        }
+    }
 
     if (desc.isCompute) {
         const ShaderModule* cs = shaders_.get(desc.computeShader.id);
@@ -920,7 +1035,7 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
         }
         p.bindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
         set_object_name(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<u64>(p.pipeline), desc.debugName);
-        return PipelineHandle{pipelines_.add(std::move(p))};
+        return PipelineHandle{publish_pipeline(std::move(p), shareable ? &identity : nullptr)};
     }
 
     const ShaderModule* vs = shaders_.get(desc.vertexShader.id);
@@ -1057,12 +1172,19 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     }
     p.bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     set_object_name(VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<u64>(p.pipeline), desc.debugName);
-    return PipelineHandle{pipelines_.add(std::move(p))};
+    return PipelineHandle{publish_pipeline(std::move(p), shareable ? &identity : nullptr)};
 }
 
 void Backend::destroy_pipeline(PipelineHandle h) noexcept {
     PipelineObject p;
     if (!pipelines_.remove(h.id, p)) return;
+    if (p.sharedKey) {
+        const auto it = sharedPipelines_.find(p.sharedKey);
+        if (it != sharedPipelines_.end() && it->second.pipeline == p.pipeline) {
+            if (--it->second.refs) return;   // outro renderer ainda usa
+            sharedPipelines_.erase(it);
+        }
+    }
     struct Node { Backend* b; VkPipeline p; };
     defer_until_gpu_done([](void* ptr) {
         auto* n = static_cast<Node*>(ptr);

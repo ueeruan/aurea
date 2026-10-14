@@ -446,7 +446,8 @@ private fun TopBarHost(store: EditorStore, ui: EditorUi) {
     val id = primary
     val section = ui.panel
     when {
-        size >= 2 -> BatchTopBar(store, ui)
+        // Segurar uma camada liga a seleção: a barra das ações de grupo já com 1.
+        size >= 2 || (size >= 1 && store.layerSelectMode) -> BatchTopBar(store, ui)
         // Seção da camada aberta (redesenho 2026-09-29): `‹` + título centrado.
         id != null && section != null -> SectionTopBar(store, section, onBack = { ui.panel = null })
         id != null -> LayerTopBar(store, ui, id)

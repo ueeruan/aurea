@@ -132,7 +132,9 @@ struct TimelineView: View {
     /// `.step`: fileira compacta — o arrasto vertical passa pelas camadas (roda).
     /// `.box`: modo "Selecionar" — arrastar no vazio desenha o retângulo de seleção dos losangos.
     /// `.lift`: toque longo + vertical num trecho — só ELE sobe/desce (a linha não vai junto).
-    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked, box, lift }
+    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked, box, lift, sweep }
+    /// Varredura do modo de escolher várias camadas: as que o dedo já somou.
+    @State private var sweepSeen = Set<Int64>()
     private struct Interaction {
         var mode: Mode
         var start: CGPoint
@@ -638,8 +640,15 @@ struct TimelineView: View {
             context.stroke(shape, with: .color(AureaColors.accent), lineWidth: m.glyphBoxStroke)
         }
         let cy = top + m.pillHeight / 2
-        glyph(&context, row.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: m.eyeIcon,
-              tint: row.visible ? AureaColors.text : AureaColors.muted, x: m.eyeCx, y: cy)
+        if model.timelineLayerSelectMode {
+            // Escolhendo várias camadas: o olho dá lugar ao ✓ das escolhidas (TimelinePainter.kt).
+            if row.segments.contains(where: { model.selection.contains($0.id) }) {
+                glyph(&context, CupertinoGlyph.CheckmarkCircleFill, size: m.eyeIcon, tint: AureaColors.accent, x: m.eyeCx, y: cy)
+            }
+        } else {
+            glyph(&context, row.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: m.eyeIcon,
+                  tint: row.visible ? AureaColors.text : AureaColors.muted, x: m.eyeCx, y: cy)
+        }
         let box = CGRect(x: m.glyphBoxLeft, y: cy - m.glyphBox / 2, width: m.glyphBox, height: m.glyphBox)
         var inner = context
         inner.opacity = row.visible ? 1 : AureaTimeline.hiddenAlpha + 0.2
@@ -1222,6 +1231,8 @@ struct TimelineView: View {
             if !model.timelineLayerSelectMode { model.editorBackFromTimeline() }
         case .eye:
             guard let row else { return }
+            // Escolhendo várias camadas o olho vira o ✓: o toque soma/tira a camada.
+            if model.timelineLayerSelectMode && row.track == nil { model.toggleTimelineLayerPick(row.id); return }
             // Numa fileira compartilhada o olho vale para a LINHA toda, num passo de desfazer.
             let visible = !row.visible
             if row.shared != nil { model.engine.run { $0.beginUndoGroup() } }
@@ -1471,8 +1482,12 @@ struct TimelineView: View {
             // Modo "Selecionar": arrastar no VAZIO (ou no fundo de uma trilha) desenha o
             // retângulo e escolhe os losangos dentro; fora do modo, rola/scrub.
             else if boxStarts(row, touched) { mode = .box }
+            // Escolhendo várias camadas: arrastar na vertical pela coluna das
+            // pílulas soma cada camada por onde o dedo passa (TimelineController.kt).
+            else if model.timelineLayerSelectMode && touched.kind == .header && row?.track == nil && !compact && !horizontal { mode = .sweep }
             else { mode = horizontal ? .scrub : (compact ? .step : .scroll) }
             begin(mode, start: start, width: size.width)
+            if mode == .sweep { sweepSeen = []; sweep(at: start, start: start, width: size.width) }
         }
         if state == .began || state == .changed { lastPointer = point; pendingPointer = true }
         if state == .ended {
@@ -1541,10 +1556,19 @@ struct TimelineView: View {
         } else if state == .cancelled || state == .failed { finish(cancelled: true) }
     }
 
+    /// Cada camada sob o dedo (na coluna das pílulas) entra na seleção uma vez.
+    private func sweep(at point: CGPoint, start: CGPoint, width: CGFloat) {
+        let (row, _) = hit(CGPoint(x: start.x, y: point.y), width: width)
+        guard let row, row.track == nil, sweepSeen.insert(row.id).inserted, !model.selection.contains(row.id) else { return }
+        model.toggleTimelineLayerPick(row.id)
+        haptics.tick()
+    }
     private func update(_ point: CGPoint, size: CGSize) {
         guard var g = gesture else { return }
         let delta = frame(point.x, width: size.width) - TimeAxis.frameAt(x: g.start.x, view: g.view, pxPerFrame: ppf, centerX: size.width / 2)
         switch g.mode {
+        case .sweep:
+            sweep(at: point, start: g.start, width: size.width)
         case .scrub:
             let desired = g.view - Double((point.x - g.start.x) / ppf)
             holdView(desired)

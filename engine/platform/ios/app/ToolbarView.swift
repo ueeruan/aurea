@@ -10,11 +10,14 @@ struct TopBarView: View {
     private var layer: LayerItem? { model.selectedLayer }
     private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
     private var count: Int { model.selection.count }
+    /// `›` da barra de seleção: a segunda fileira de ações.
+    @State private var batchMore = false
     private var parent: Int64 { (model.detail["parentId"] as? NSNumber)?.int64Value ?? 0 }
 
     var body: some View {
         Group {
-            if count >= 2 { batchBar }
+            // Segurar uma camada liga a seleção: a barra das ações de grupo já com 1 (BatchTopBar.kt).
+            if count >= 2 || (count >= 1 && model.timelineLayerSelectMode) { batchBar }
             // Seção da camada aberta (redesenho 2026-09-29): `‹` + título centrado (SectionTopBar.kt).
             else if layer != nil, let title = sectionTitle { sectionBar(title) }
             else if let layer { layerBar(layer) }
@@ -157,38 +160,63 @@ struct TopBarView: View {
         }.padding(.trailing, 4).frame(height: geometry.size.height)
         }
     }
-    /// Lote: o mesmo conteúdo de antes, agora sobre o fundo do editor (a
-    /// contagem no destaque diz que é um lote).
+    /// Seleção de camadas (segurar uma camada): ✕ · "N camadas selecionadas" e, no
+    /// canto superior direito, as ações de grupo à vista — Agrupar · Agrupar e
+    /// mascarar · Agrupar e excluir · Apagar · ›. O `›` troca a fileira pelas
+    /// outras ações. Mascarar/excluir seguem a regra do motor (≥ 2 camadas
+    /// visuais destravadas); fora dela o botão fica apagado e o toque explica.
     private var batchBar: some View {
-        HStack(spacing: 0) {
-            ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 44, tint: AureaColors.text) { model.clearSelection() }
-            Text(AureaText.t("ios_layers_selected_n", count)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.accent)
+        let ink = AureaColors.onAccent
+        let canMask = count >= 2 && model.engine.canGroupAndMask(ids)
+        let dim = ink.opacity(0.38)
+        func finish() { model.changeTimelineLayerSelectMode(false) }
+        return HStack(spacing: 0) {
+            ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 44, tint: ink) {
+                model.clearSelection(); finish()
+            }.accessibilityIdentifier("batch.cancel")
+            Text(count >= 2 ? AureaText.t("ios_layers_selected_n", count) : AureaText.t("batch_one_layer_selected"))
+                .font(.aurea(size: 13, weight: .bold)).foregroundStyle(ink)
                 .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-            // Ficar com UMA só: a lista troca o lote por ela num toque.
-            pickLayerButton(tint: AureaColors.text, width: 40)
-            searchButton()
-            linkMenuButton(tint: AureaColors.text)
-            Menu {
-                Button(AureaText.t("editor_agrupar")) { model.groupSelection() }
-                Button(AureaText.t("editor_group_mask")) { model.groupAndMaskSelection() }
-                    .accessibilityHint(AureaText.t("editor_group_mask_hint"))
-                Button(AureaText.t("editor_group_exclude")) { model.groupAndMaskSelection(exclude: true) }
-                    .accessibilityHint(AureaText.t("editor_group_exclude_hint"))
-            } label: {
-                CupertinoGlyph.text(ShellGlyph.FolderBadgePlus, size: 19, color: AureaColors.text)
-                    .frame(width: StageDim.barButtonHeight, height: StageDim.barButtonHeight).contentShape(Rectangle())
-            }.accessibilityLabel(AureaText.t("editor_agrupar"))
-                .accessibilityIdentifier("selection.group.menu")
-            if model.layers.contains(where: { model.selection.contains($0.id) && $0.kind == 12 }) {
-                ShellBarButton(glyph: ShellGlyph.SquareSplit2x2, description: AureaText.t("editor_desagrupar"), size: 19, tint: AureaColors.text) {
-                    for row in model.layers where model.selection.contains(row.id) && row.kind == 12 { model.ungroup(row.id) }
+            Group {
+                if !batchMore {
+                    HStack(spacing: 0) {
+                        ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, tint: ink) {
+                            model.groupSelection(); finish()
+                        }.accessibilityIdentifier("batch.group")
+                        ShellBarButton(glyph: CupertinoGlyph.CircleLefthalfFill, description: AureaText.t("batch_group_mask_a11y"), size: 19, tint: canMask ? ink : dim) {
+                            if canMask { model.groupAndMaskSelection() } else { model.toast = AureaText.t("batch_need_two_visual") }
+                        }.accessibilityIdentifier("batch.groupMask")
+                        ShellBarButton(glyph: CupertinoGlyph.MinusCircle, description: AureaText.t("batch_group_exclude_a11y"), size: 19, tint: canMask ? ink : dim) {
+                            if canMask { model.groupAndMaskSelection(exclude: true) } else { model.toast = AureaText.t("batch_need_two_visual") }
+                        }.accessibilityIdentifier("batch.groupExclude")
+                        ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, tint: ink) {
+                            removeSelection(); finish()
+                        }.accessibilityIdentifier("batch.delete")
+                        ShellBarButton(glyph: CupertinoGlyph.ChevronRight, description: AureaText.t("batch_more_actions"), size: 17, width: 36, tint: ink) {
+                            withAnimation(.easeOut(duration: 0.2)) { batchMore = true }
+                        }.accessibilityIdentifier("batch.more")
+                    }.transition(.move(edge: .leading).combined(with: .opacity))
+                } else {
+                    HStack(spacing: 0) {
+                        ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("batch_group_actions"), size: 17, width: 36, tint: ink) {
+                            withAnimation(.easeOut(duration: 0.2)) { batchMore = false }
+                        }.accessibilityIdentifier("batch.less")
+                        // Ficar com UMA só: a lista troca o lote por ela num toque.
+                        pickLayerButton(tint: ink, width: 40)
+                        searchButton(tint: ink)
+                        linkMenuButton(tint: ink)
+                        if model.layers.contains(where: { model.selection.contains($0.id) && $0.kind == 12 }) {
+                            ShellBarButton(glyph: ShellGlyph.SquareSplit2x2, description: AureaText.t("editor_desagrupar"), size: 19, tint: ink) {
+                                for row in model.layers where model.selection.contains(row.id) && row.kind == 12 { model.ungroup(row.id) }
+                            }
+                        }
+                        ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada"), size: 19, tint: ink) { duplicateSelection() }
+                        ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
+                                       description: AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"), size: 20, tint: ink) { model.playPause() }
+                    }.transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada"), size: 19, tint: AureaColors.text) { duplicateSelection() }
-            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, tint: AureaColors.text) { removeSelection() }
-            ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
-                           description: AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"), size: 20, tint: AureaColors.text) { model.playPause() }
-        }.padding(.trailing, 2)
+        }.padding(.trailing, 2).background(AureaColors.accent)
     }
     /// Duplicar à vista (pedido da beta): a(s) camada(s) escolhida(s), um desfazer.
     private func duplicateSelection() {

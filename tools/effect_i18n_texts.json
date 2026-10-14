@@ -4671,5 +4671,13 @@
   "hi": "ग्रेडिएंट का केंद्र",
   "id": "Pusat gradien",
   "ar": "مركز التدرج"
+ },
+ "Reflexo do ambiente": {
+  "en": "Environment reflection",
+  "es": "Reflejo del entorno",
+  "ru": "Отражение окружения",
+  "hi": "परिवेश का प्रतिबिंब",
+  "id": "Pantulan lingkungan",
+  "ar": "انعكاس البيئة"
  }
 }

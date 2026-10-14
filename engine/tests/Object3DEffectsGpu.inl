@@ -73,6 +73,76 @@ AUREA_TEST(Shatter3DGpu, TinyExplosionKeepsFarPiecesExactlyInPlace) {
     AUREA_CHECK(far < 2e-3f);
 }
 
+// 3D Shatter num plano da cena 3D: as peças são GEOMETRIA da cena. Uma camada
+// vista de perfil (Y 90°) quase some; explodida, as peças giram para fora do
+// plano e aparecem — no desenho 2D (peças pintadas na imagem da camada) elas
+// sumiriam junto com ela.
+namespace {
+u32 object3d_visible(const FloatImage& img) {
+    u32 n = 0;
+    for (u32 y = 0; y < img.height; ++y) for (u32 x = 0; x < img.width; ++x) n += img.v(x, y).w > .02f;
+    return n;
+}
+f32 object3d_centroid_y(const FloatImage& img) {
+    f64 sum = 0, weight = 0;
+    for (u32 y = 0; y < img.height; ++y) for (u32 x = 0; x < img.width; ++x) {
+        const f32 a = img.v(x, y).w;
+        if (a > .02f) { sum += static_cast<f64>(y) * a; weight += a; }
+    }
+    return weight > 0 ? static_cast<f32>(sum / weight) : -1.0f;
+}
+}
+
+AUREA_TEST(Shatter3DGpu, InTheSceneThePiecesAreRealGeometry) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(192, 128);
+    scene.comp->set_transparent_background(true);
+    const auto layer = scene.image(reference_image(96, 64), 96, 64);
+    scene.comp->layer(layer)->threeD = true;
+    const auto plane = scene.render();
+    auto& fx = scene.add_effect(layer, effect_keys::kShatter3D);
+    // Parado: o plano exato.
+    AUREA_CHECK_NEAR(object3d_difference(plane, scene.render()), 0, 1e-4f);
+    fx.params[0].constant.v[0] = 45;
+    fx.params[5].constant.v[0] = 160;
+    const auto a = scene.render(FrameIndex{2});
+    const auto b = scene.render(FrameIndex{8});
+    AUREA_CHECK_NEAR(object3d_difference(a, b), 0, 1e-5f);
+    AUREA_CHECK(object3d_difference(plane, a) > .2f);
+    for (const f32 value : a.px) AUREA_CHECK(std::isfinite(value));
+    // De perfil: o plano é uma linha; as peças explodidas não.
+    scene.comp->layer(layer)->transform.rotation.y = 90;
+    fx.params[0].constant.v[0] = 0;
+    const u32 edgeOn = object3d_visible(scene.render());
+    fx.params[0].constant.v[0] = 60;
+    const u32 exploded = object3d_visible(scene.render());
+    std::printf("    de perfil: plano %u px, explodido %u px\n", edgeOn, exploded);
+    AUREA_CHECK(edgeOn < 300u);
+    AUREA_CHECK(exploded > edgeOn + 400u);
+}
+
+AUREA_TEST(Shatter3DGpu, InTheSceneGravityPullsTowardTheWorldFloor) {
+    AUREA_REQUIRE_GPU();
+    // A camada de cabeça para baixo (Z 180°): a gravidade continua puxando as
+    // peças para baixo NA TELA (o chão do mundo), não para a "base" da camada.
+    for (const f32 roll : {0.0f, 180.0f}) {
+        Scene scene(192, 192);
+        scene.comp->set_transparent_background(true);
+        const auto layer = scene.image(reference_image(64, 48), 96, 72);
+        scene.comp->layer(layer)->threeD = true;
+        scene.comp->layer(layer)->transform.rotation.z = roll;
+        auto& fx = scene.add_effect(layer, effect_keys::kShatter3D);
+        fx.params[0].constant.v[0] = 70;
+        fx.params[5].constant.v[0] = 0;       // sem força: só a queda
+        fx.params[6].constant.v[0] = 0;       // nada para a câmera
+        fx.params[7].constant.v[0] = 0;       // sem giro
+        fx.params[8].constant.v[0] = 120;     // gravidade
+        const f32 y = object3d_centroid_y(scene.render());
+        std::printf("    Z%.0f: centro das peças y=%.1f (camada em 72)\n", roll, y);
+        AUREA_CHECK(y > 80.0f);
+    }
+}
+
 namespace {
 /// Quantos dos 64 pontos do anel (raio 56 em volta de 128,128) têm traço.
 u32 ring_hits(const FloatImage& img, f32 radius) {

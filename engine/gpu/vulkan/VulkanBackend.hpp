@@ -211,6 +211,9 @@ struct Buffer {
 struct ShaderModule {
     VkShaderModule module = VK_NULL_HANDLE;
     ShaderStage stage = ShaderStage::Fragment;
+    /// Chave do conteúdo (SPIR-V + estágio) no cache de módulos; 0 = módulo
+    /// exclusivo deste handle (não entra na identidade de pipeline).
+    u64 sharedKey = 0;
 };
 
 struct PipelineObject {
@@ -218,6 +221,22 @@ struct PipelineObject {
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
     VkPipelineBindPoint bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    u64 sharedKey = 0;   ///< chave no cache de pipelines; 0 = exclusivo deste handle
+};
+
+/// Tudo que `create_pipeline` entrega ao driver, em palavras: dois pedidos
+/// com a mesma identidade recebem o MESMO VkPipeline.
+struct PipelineIdentity {
+    static constexpr u32 kMaxWords = 64;
+    u64 words[kMaxWords]{};
+    u32 count = 0;
+    void push(u64 v) noexcept { if (count < kMaxWords) words[count++] = v; }
+    [[nodiscard]] u64 hash() const noexcept;
+    friend bool operator==(const PipelineIdentity& a, const PipelineIdentity& b) noexcept {
+        if (a.count != b.count) return false;
+        for (u32 i = 0; i < a.count; ++i) if (a.words[i] != b.words[i]) return false;
+        return true;
+    }
 };
 
 struct SamplerObject {
@@ -385,6 +404,12 @@ public:
 
     [[nodiscard]] const char* name() const noexcept override { return "Vulkan"; }
     [[nodiscard]] const GPUCapabilities& capabilities() const noexcept override { return caps_; }
+    /// Módulos sob demanda (como no GLES): cada renderer (prévia, export,
+    /// pré-render) cria só os shaders dos pipelines que usa. Nos ANRs do vivo
+    /// V2026 (PowerVR GE8320) a thread de render passa dezenas de segundos no
+    /// parser de SPIR-V do driver (libufwriter BILParseStream); criar todos os
+    /// ~200 módulos a cada renderer multiplicava esse custo no "Preparando".
+    [[nodiscard]] bool defer_shader_creation() const noexcept override { return true; }
 
     [[nodiscard]] Status initialize(const BackendConfig& config) noexcept override;
     void shutdown() noexcept override;
@@ -466,6 +491,9 @@ public:
     [[nodiscard]] Buffer* buffer(u64 id) noexcept { return buffers_.get(id); }
     [[nodiscard]] SamplerObject* sampler(u64 id) noexcept { return samplers_.get(id); }
     [[nodiscard]] const PipelineObject* pipeline(u64 id) noexcept { return pipelines_.get(id); }
+    /// Objetos do driver no cache de compartilhamento (diagnóstico e testes).
+    [[nodiscard]] usize shared_shader_count() const noexcept { return sharedShaders_.size(); }
+    [[nodiscard]] usize shared_pipeline_count() const noexcept { return sharedPipelines_.size(); }
     [[nodiscard]] VkRenderPass render_pass(VkFormat format, LoadOp load) noexcept;
     /// Passe com profundidade. `format` UNDEFINED = só profundidade (sombra).
     [[nodiscard]] VkRenderPass render_pass(VkFormat format, LoadOp load, VkFormat depth, LoadOp depthLoad,
@@ -522,6 +550,10 @@ private:
     [[nodiscard]] Status recreate_swapchain() noexcept;
     [[nodiscard]] Status create_dummies() noexcept;
     [[nodiscard]] VkPipelineLayout pipeline_layout(u64 immutableSampler, VkDescriptorSetLayout& outSet) noexcept;
+    /// Identidade de `desc`; falso quando algum shader é exclusivo (sem chave).
+    [[nodiscard]] bool pipeline_identity(const PipelineDesc& desc, PipelineIdentity& out) noexcept;
+    /// Guarda o pipeline recém-criado no cache (se a chave estiver livre).
+    [[nodiscard]] u64 publish_pipeline(PipelineObject&& p, const PipelineIdentity* identity) noexcept;
     void run_deferred(FrameContext& f) noexcept;
     void collect_timings(FrameContext& f) noexcept;
     [[nodiscard]] Status submit_immediate(void (*record)(Backend&, VkCommandBuffer, void*), void* ctx,
@@ -591,6 +623,27 @@ private:
     HandlePool<ShaderModule> shaders_;
     HandlePool<PipelineObject> pipelines_;
     HandlePool<SamplerObject> samplers_;
+
+    // Módulos e pipelines idênticos são UM objeto do driver, com contagem de
+    // referências: o renderer do export (e o do pré-render) reaproveita o que
+    // a prévia já compilou em vez de reentrar no compilador. Mesma regra de
+    // acesso dos outros caches abaixo (criação/destruição serializadas pelo
+    // motor). Saem no shutdown junto com o dispositivo.
+    struct SharedShader {
+        VkShaderModule module = VK_NULL_HANDLE;
+        ShaderStage stage = ShaderStage::Fragment;
+        usize bytes = 0;
+        u64 check = 0;   ///< segundo hash do SPIR-V: colisão da chave não compartilha
+        u32 refs = 0;
+    };
+    struct SharedPipeline {
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        VkPipelineBindPoint bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        PipelineIdentity identity{};
+        u32 refs = 0;
+    };
+    std::unordered_map<u64, SharedShader> sharedShaders_;
+    std::unordered_map<u64, SharedPipeline> sharedPipelines_;
 
     // Caches
     std::unordered_map<u64, VkRenderPass> renderPasses_;          ///< (formato, load)

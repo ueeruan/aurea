@@ -21,6 +21,7 @@
 #include "aurea/scene3d/Environment.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/RasterExtrude.hpp"
+#include "aurea/effects/Shatter3D.hpp"
 
 #include <utility>
 #include <vector>
@@ -263,6 +264,9 @@ struct ScenePlane {
     PlaneLightBlock light{};
     motion_tile::PeriodicPlane periodic{}; ///< enabled only for a terminal Motion Tile
     raster_extrude::Volume extrusion{};
+    /// 3D Shatter de um plano da cena: peças com espessura no mundo (no lugar
+    /// do quad). `pieces` 0 = plano normal.
+    shatter3d::ScenePieces shatter{};
 };
 
 /// Pós do grupo 3D vindo da composição (PostProcessSettings): o que a pessoa
@@ -440,7 +444,8 @@ public:
     /// Profundidade de campo: amostras do disco por pixel (o preview usa
     /// poucas, o export muitas). 0 = desligada mesmo com a lente pedindo.
     void set_dof_quality(u32 taps) noexcept { dofTaps_ = std::min(taps, 256u); }
-    [[nodiscard]] PipelineKey plane_key(bool translucent = false, bool periodic = false, bool extruded = false) const noexcept;
+    [[nodiscard]] PipelineKey plane_key(bool translucent = false, bool periodic = false, bool extruded = false,
+                                        bool shattered = false) const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;

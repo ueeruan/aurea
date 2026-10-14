@@ -100,6 +100,9 @@ struct LayerPlacement {
     /// região que o efeito devolve — o brilho (que depende dela) saía 1x1 e a
     /// camada 3D sumia.
     bool inScene3d = false;
+    /// A camada é um PLANO do grupo 3D (desenhada pela cena, com profundidade).
+    /// O 3D Shatter devolve a camada intacta e o grupo desenha as peças.
+    bool scenePlane = false;
     /// A later tiling stage can read any part of this image, including pixels
     /// outside the final viewport. Earlier effects must retain their bounds.
     bool preserveFullExtent = false;

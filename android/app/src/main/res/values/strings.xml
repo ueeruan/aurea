@@ -1825,7 +1825,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea 0.1.8 BETA 3 (2179) • 13/10/2026\n\n• Setas da timeline: sem camada selecionada, navegam pelas marcas; com camada selecionada, escolhem a marca ou keyframe mais próximo. Marcas depois do último clipe também podem ser alcançadas.\n• Clipes curtos: diminuir o zoom não prolonga visualmente a barra além da batida; alças e contornos acompanham a duração real.\n• Exportação: libera caches de prévia antes de preparar o arquivo; a etapa de preparação pode ser cancelada.\n• Efeitos e 3D: controles simplificados com régua, valores por eixo e teclado numérico.\n• Telas de ajuste: tamanho compacto, conteúdo rolável e ações visíveis acima do teclado. A régua 3D fica na área abaixo dos valores.\n• Motion Tile em planos 3D: investigação dos relatos de prévia parada e faixas na textura.</string>
+    <string name="release_notes_body">Aurea 0.1.9 (2185) • 14/10/2026\n\n• Exportação: corrigido o \"Preparando\" sem fim em celulares com GPU PowerVR (ex.: vivo, Helio P35). O export reaproveita o que a prévia já preparou na GPU.\n• Extrusão 3D: novos controles Reflexo do ambiente, Metal e Rugosidade — reflete o HDRI/estúdio da cena como os modelos 3D.\n• 3D Shatter de verdade: na cena 3D as peças usam a câmera, a profundidade e as luzes da cena e caem para o chão do mundo.\n• Seleção de camadas: segure uma camada (no palco ou na timeline) e use Agrupar, Agrupar e mascarar, Agrupar e excluir ou Apagar no canto superior direito.\n• Timeline: no modo de escolher várias, arraste o dedo pelas pílulas para somar camadas; as escolhidas mostram um ✓.\n• Diagnóstico de fechamentos: lista os codificadores de vídeo do aparelho.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -4382,4 +4382,11 @@
     <string name="fxl_noise_seed">Semente do ruído</string>
     <string name="fxo_appear">Aparecer</string>
     <string name="fxl_gradient_center">Centro do gradiente</string>
+    <string name="fxl_environment_reflection">Reflexo do ambiente</string>
+    <string name="batch_need_two_visual">Selecione pelo menos duas camadas visuais</string>
+    <string name="batch_more_actions">Mais ações da seleção</string>
+    <string name="batch_group_actions">Voltar às ações de grupo e máscara</string>
+    <string name="batch_one_layer_selected">1 camada selecionada</string>
+    <string name="batch_group_mask_a11y">Agrupar e mascarar: a camada de cima recorta as outras</string>
+    <string name="batch_group_exclude_a11y">Agrupar e excluir: a camada de cima abre um furo nas outras</string>
 </resources>

@@ -1119,13 +1119,17 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.generate.raster_extrude", FxEffectHuman(
         name: "fx_name_raster_extrude",
-        keywords: "extrusao extrusion extrude depth profundidade volume silhueta alpha alfa 3d",
-        principal: [0, 1, 2, 3],
+        keywords: "extrusao extrusion extrude depth profundidade volume silhueta alpha alfa 3d reflexo reflection metal hdri",
+        principal: [0, 1, 4, 5, 6],
         params: [
             0: FxParamHuman(label: "fxo_depth", suffix: "px", decimals: 1),
             1: FxParamHuman(label: "fxl_side_color"),
             2: FxParamHuman(label: "fxl_shading", scale: 100, suffix: "%", decimals: 0),
             3: FxParamHuman(label: "fxl_quality"),
+            // Reflexo do ambiente, como nos modelos 3D (HDRI/estúdio da cena).
+            4: FxParamHuman(label: "fxl_environment_reflection", scale: 100, suffix: "%", decimals: 0),
+            5: FxParamHuman(label: "fxl_metal", scale: 100, suffix: "%", decimals: 0),
+            6: FxParamHuman(label: "fx_rugosidade", scale: 100, suffix: "%", decimals: 0),
         ])),
     ("aurea.stylize.stroke_outline", FxEffectHuman(
         name: "fx_name_stroke_outline",

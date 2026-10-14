@@ -492,6 +492,8 @@ class AureaEngine private constructor() {
     // Pré-composição.
     fun precompose(ids: LongArray): Long = nativePrecompose(nativeHandle, ids)
     fun groupAndMask(ids: LongArray, exclude: Boolean, name: String? = null): Long = nativeGroupAndMask(nativeHandle, ids, exclude, name)
+    /** A mesma regra de [groupAndMask], sem mudar nada (habilita os botões da seleção). */
+    fun canGroupAndMask(ids: LongArray): Boolean = nativeWork.run(false) { nativeCanGroupAndMask(nativeHandle, ids) }
     fun queryKeyframeNavigation(layer: Long, property: Int, effect: Int, param: Int, compositionFrame: Int): KeyframeNavigation? {
         val out = LongArray(7)
         if (!nativeQueryKeyframeNavigation(nativeHandle, layer, property, effect, param, compositionFrame.toLong(), out)) return null
@@ -1387,6 +1389,7 @@ class AureaEngine private constructor() {
     private external fun nativeApplySpeedRamp(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
     private external fun nativeGroupAndMask(handle: Long, ids: LongArray, exclude: Boolean, name: String?): Long
+    private external fun nativeCanGroupAndMask(handle: Long, ids: LongArray): Boolean
     private external fun nativeQueryKeyframeNavigation(handle: Long, layer: Long, property: Int, effect: Int, param: Int, frame: Long, out: LongArray): Boolean
     private external fun nativeQueryTimelineNavigation(handle: Long, layer: Long, frame: Long, direction: Int): Long
     private external fun nativeSeekTimelineEvent(handle: Long, frame: Long): Boolean

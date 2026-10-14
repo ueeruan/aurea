@@ -2,7 +2,11 @@
 AUREA_TEST(RasterExtrude, NativeSchemaAndUndoKeep3dActivationAtomic) {
     EffectRegistry registry;register_builtin_effects(registry);
     const auto* parameters=registry.params(effect_type_id(effect_keys::kRasterExtrude));
-    AUREA_CHECK(parameters&&parameters->count()==4);if(!parameters)return;
+    AUREA_CHECK(parameters&&parameters->count()==7);if(!parameters)return;
+    // Reflexo do ambiente (como nos modelos 3D): ligado no efeito novo, 0 no
+    // projeto salvo sem o slot (o visual de antes); metal e rugosidade.
+    AUREA_CHECK_NEAR(parameters->at(4).defaultValue.v[0],1,.001f);AUREA_CHECK((parameters->at(4).flags&kParamLegacyZero)!=0);
+    AUREA_CHECK_NEAR(parameters->at(5).defaultValue.v[0],0,.001f);AUREA_CHECK_NEAR(parameters->at(6).defaultValue.v[0],.3f,.001f);
     AUREA_CHECK_NEAR(parameters->at(0).defaultValue.v[0],32,.001f);
     AUREA_CHECK_NEAR(parameters->at(0).maxValue,512,.001f);AUREA_CHECK_NEAR(parameters->at(0).typed_max(),4096,.001f);
     AUREA_CHECK_NEAR(parameters->at(2).defaultValue.v[0],.7f,.001f);AUREA_CHECK_EQ(parameters->at(3).enumCount,3u);
@@ -86,4 +90,22 @@ AUREA_TEST(RasterExtrude, LegacyStrokeProjectGetsOnlyAnAppendOnlyZeroDepthSlot) 
     const auto* track=layer()->tracks.find(TrackProperty::EffectParam,effectId,param_track_key(4,0));
     AUREA_CHECK(track&&track->keys.size()==1);if(track)AUREA_CHECK_NEAR(track->keys[0].value,67,.001f);
     engine.shutdown();
+}
+
+// 3D Shatter de verdade: pôr o efeito leva a camada para a cena 3D (as peças
+// voam no mundo), na MESMA transação do histórico — desfazer tira os dois.
+AUREA_TEST(Shatter3D, AddingTheEffectMakesThePlaneLayer3dAtomically) {
+    for(LayerKind kind:{LayerKind::Text,LayerKind::Shape,LayerKind::Image,LayerKind::Video,LayerKind::Composition}) {
+        Engine engine;AUREA_CHECK(engine.initialize(headless_config()).ok());AUREA_CHECK(engine.new_project(192,144,30,nullptr).ok());
+        Command create;create.type=CommandType::LayerCreate;create.layer_create.kind=kind;AUREA_CHECK(engine.apply_command(create).ok());
+        const LayerId id=first_layer(engine);
+        AUREA_CHECK(!layer_of(engine,id)->threeD);
+        Command add;add.type=CommandType::EffectAdd;add.effect_add.layer=id;add.effect_add.effectType=effect_type_id(effect_keys::kShatter3D);add.effect_add.index=kInvalidIndex;
+        AUREA_CHECK(engine.apply_command(add).ok());AUREA_CHECK(layer_of(engine,id)->threeD);
+        Command history;history.type=CommandType::Undo;AUREA_CHECK(engine.apply_command(history).ok());
+        AUREA_CHECK(!layer_of(engine,id)->threeD);AUREA_CHECK(layer_of(engine,id)->effects.empty());
+        history.type=CommandType::Redo;AUREA_CHECK(engine.apply_command(history).ok());
+        AUREA_CHECK(layer_of(engine,id)->threeD);AUREA_CHECK_EQ(layer_of(engine,id)->effects.size(),1u);
+        engine.shutdown();
+    }
 }

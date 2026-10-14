@@ -3741,6 +3741,15 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return result.ok() ? static_cast<long long>(*result) : -static_cast<long long>(result.status().code());
 }
 
+- (BOOL)canGroupAndMask:(NSArray<NSNumber*>*)layerIds {
+    auto* e = self.engine;
+    if (!e) return NO;
+    std::vector<aurea::u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    return e->can_group_and_mask(ids.data(), static_cast<aurea::u32>(ids.size())) ? YES : NO;
+}
+
 - (nullable NSDictionary<NSString*, NSNumber*>*)keyframeNavigation:(long long)layerId property:(uint32_t)property
         effect:(uint32_t)effect param:(uint32_t)param compositionFrame:(long long)compositionFrame {
     auto* e = self.engine;

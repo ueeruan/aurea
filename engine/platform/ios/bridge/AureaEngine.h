@@ -1036,6 +1036,8 @@ NS_SWIFT_NAME(AureaEngine)
 /// error code leaves the selection unchanged. The highest selected layer masks
 /// the other selected layers, with exclude selecting its inverse.
 - (long long)groupAndMask:(NSArray<NSNumber*>*)layerIds exclude:(BOOL)exclude name:(nullable NSString*)name NS_SWIFT_NAME(groupAndMask(_:exclude:name:));
+/// Mesma regra de groupAndMask, sem mudar nada (habilita os botões da seleção).
+- (BOOL)canGroupAndMask:(NSArray<NSNumber*>*)layerIds NS_SWIFT_NAME(canGroupAndMask(_:));
 /// The core decides visible keys, neighbors and the editable curve segment.
 /// flags: 1=keyHere, 2=previous, 4=next, 8=segment. Neighbor frames are in the
 /// composition; segment endpoints and localFrame are in layer time.

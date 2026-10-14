@@ -1498,9 +1498,16 @@ private suspend fun PointerInputScope.stageGestures(
                 && LayerGeometry.contains(it, cx, cy, if (m.fit > 0f) hitSlack * (20f / 12f) / m.fit else 0f) }?.id
             val hit = selected3D ?: hitLayer(store, cx, cy, 0f, includeLocked = false)
                 ?: hitLayer(store, cx, cy, if (m.fit > 0f) hitSlack / m.fit else 0f, includeLocked = false)
-            if (hit != null) {
+            // Segurar uma camada no palco soma (ou tira) ela da seleção e liga o
+            // modo de escolher várias — a barra de grupo/máscara aparece no topo.
+            val held = lastTouchTime - down.uptimeMillis >= viewConfiguration.longPressTimeoutMillis
+            if (hit != null && held) {
+                if (store.selection.isEmpty()) store.select(hit) else store.toggleLayerPick(hit)
+                store.changeLayerSelectMode(true)
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            } else if (hit != null) {
                 if (store.primary != hit || store.selection.size != 1) store.select(hit)
-            } else {
+            } else if (!held) {
                 store.clearSelection()
             }
         }

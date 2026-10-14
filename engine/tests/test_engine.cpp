@@ -2996,6 +2996,7 @@ AUREA_TEST(Engine, LinkedAxisGroupsCoverTransformLightAndShapeParts) {
 
 #include "EffectCompatibility.inl"
 #include "PreviewViewport.inl"
+#include "RasterExtrudeCommands.inl"
 #include "ImportInsertion.inl"
 #include "TransformClipboard.inl"
 

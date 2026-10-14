@@ -47,6 +47,10 @@ Options options_from(const EffectEval& e) noexcept {
         result.sideColor=e.color(kSideColor);
         result.shading=std::clamp(finite(e.f(kShading),.7f),0.f,1.f);
         result.quality=std::min(e.e(kQuality),2u);
+        // Instância salva antes destes slots: sem reflexo (o visual de antes).
+        if(e.count>kReflection)result.reflection=std::clamp(finite(e.f(kReflection),0),0.f,1.f);
+        if(e.count>kMetal)result.metal=std::clamp(finite(e.f(kMetal),0),0.f,1.f);
+        if(e.count>kRoughness)result.roughness=std::clamp(finite(e.f(kRoughness),.3f),0.f,1.f);
     } else if(e.effect->type_id()==effect_type_id(effect_keys::kStrokeOutline)) {
         result.depth=e.count>kStrokeDepth?std::clamp(finite(e.f(kStrokeDepth),0),0.f,kMaxDepth):0.f;
         result.sideColor=e.color(1);
@@ -72,6 +76,7 @@ bool build_volume(EffectBuildContext& ctx,const LayerImage& input,const Options&
     const u32 steps[3]={64,192,512};
     out.params={std::clamp(options.depth,0.f,kMaxDepth),options.shading,static_cast<f32>(steps[std::min(options.quality,2u)]),0};
     out.sideColor=options.sideColor;
+    out.material={options.reflection,options.metal,options.roughness,0};
     std::array<FGTexture,14> levels{};levels[0]=input.texture;
     u32 count=1,w=input.width,h=input.height;u64 pixels=0;
     while((w>1||h>1)&&count<levels.size()) {
@@ -107,6 +112,11 @@ public:
         p.add_float("shading","Sombreamento",.7f,0,1,kParamAnimatable);
         static const char* const qualities[]={"Baixa","Média","Alta"};
         p.add_enum("quality","Qualidade",qualities,3,1);
+        // Como nos modelos 3D: o HDRI/estúdio da cena reflete na face e nas
+        // laterais. Projeto salvo sem o slot fica sem reflexo (visual de antes).
+        p.add_float("reflection","Reflexo do ambiente",1,0,1,kParamAnimatable|kParamLegacyZero);
+        p.add_float("metal","Metal",0,0,1,kParamAnimatable);
+        p.add_float("roughness","Rugosidade",.3f,0,1,kParamAnimatable);
     }
     bool is_identity(const EffectEval& e) const noexcept override { return !(e.f(0)>0); }
     void pipelines(std::vector<PipelineKey>& out,SurfaceFormat f) const override {

@@ -1321,13 +1321,17 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.generate.raster_extrude", EffectHuman(
         name = R.string.fx_name_raster_extrude,
-        keywords = "extrusao extrusion extrude depth profundidade volume silhueta alpha alfa 3d",
-        principal = listOf(0, 1, 2, 3),
+        keywords = "extrusao extrusion extrude depth profundidade volume silhueta alpha alfa 3d reflexo reflection metal hdri",
+        principal = listOf(0, 1, 4, 5, 6),
         params = mapOf(
             0 to ParamHuman(label = R.string.fxo_depth, suffix = "px", decimals = 1),
             1 to ParamHuman(label = R.string.fxl_side_color),
             2 to ParamHuman(label = R.string.fxl_shading, scale = 100f, suffix = "%", decimals = 0),
             3 to ParamHuman(label = R.string.fxl_quality),
+            // Reflexo do ambiente, como nos modelos 3D (HDRI/estúdio da cena).
+            4 to ParamHuman(label = R.string.fxl_environment_reflection, scale = 100f, suffix = "%", decimals = 0),
+            5 to ParamHuman(label = R.string.fxl_metal, scale = 100f, suffix = "%", decimals = 0),
+            6 to ParamHuman(label = R.string.fx_rugosidade, scale = 100f, suffix = "%", decimals = 0),
         )))
     put("aurea.stylize.stroke_outline", EffectHuman(
         name = R.string.fx_name_stroke_outline,

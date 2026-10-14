@@ -1,5 +1,12 @@
 package com.aurea.aurea.editor
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -493,9 +500,12 @@ private fun InlineName(
 // =============================================================================
 
 /**
- * ✕ · "N camadas selecionadas" · vincular · agrupar · desagrupar (só com grupo
- * na seleção) · lixeira · play. Dividir/aparar e alinhar ficam na barra de
- * baixo ([MultiSelectionPanel]).
+ * Seleção de camadas (segurar uma camada): ✕ · "N camadas selecionadas" e, no
+ * canto superior direito, as ações de grupo à vista — Agrupar · Agrupar e
+ * mascarar · Agrupar e excluir · Apagar · ›. O `›` troca a fileira pelas
+ * outras ações (escolher uma, busca, vincular, desagrupar, duplicar, play).
+ * Mascarar/excluir seguem a regra do motor (≥ 2 camadas visuais destravadas);
+ * fora dela o botão fica apagado e o toque explica o porquê.
  */
 @Composable
 internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
@@ -503,8 +513,13 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
     val groups by remember {
         derivedStateOf { store.layers.filter { it.id in store.selection && it.kind == LayerType.Group.kind }.map { it.id } }
     }
+    val canMask by remember { derivedStateOf { store.selection.size >= 2 && store.canGroupAndMask(store.selection.toList()) } }
     var linking by remember { mutableStateOf(false) }
+    var more by remember { mutableStateOf(false) }
     val ink = AureaColors.OnAccent
+    val dim = ink.copy(alpha = 0.38f)
+    val needTwo = stringResource(R.string.batch_need_two_visual)
+    fun finish() = store.changeLayerSelectMode(false)
     Row(
         Modifier
             .fillMaxWidth()
@@ -513,39 +528,77 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
             .padding(end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_cancelar_selecao), onClick = { store.clearSelection() }, size = 18.dp, width = 44.dp, tint = ink)
+        ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_cancelar_selecao), onClick = {
+            store.clearSelection()
+            finish()
+        }, Modifier.testTag("batch.cancel"), size = 18.dp, width = 44.dp, tint = ink)
         Text(
-            if (count >= 2) stringResource(R.string.edt_layers_selected, count) else stringResource(R.string.editor_selecione_menos_duas_camadas),
+            when {
+                count >= 2 -> stringResource(R.string.edt_layers_selected, count)
+                count == 1 -> stringResource(R.string.batch_one_layer_selected)
+                else -> stringResource(R.string.editor_selecione_menos_duas_camadas)
+            },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = ink)),
             modifier = Modifier.weight(1f),
         )
-        // Ficar com UMA só: a lista troca o lote por ela num toque.
-        ChromeButton(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), onClick = { openSheet(store, ui, ShellSheet.SearchLayers) }, size = 19.dp, width = 40.dp, tint = ink)
-        ChromeButton(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp, tint = ink)
-        Box {
-            ChromeButton(CupertinoGlyph.Link, stringResource(R.string.editor_vincular_escolhidas_camada), onClick = {
-                if (store.playing) store.pause()
-                linking = true
-            }, size = 19.dp, tint = ink)
-            if (linking) LinkMenu(store, store.selection.toList()) { linking = false }
+        AnimatedContent(
+            targetState = more,
+            transitionSpec = {
+                val dir = if (targetState) 1 else -1
+                (slideInHorizontally(tween(200)) { it / 2 * dir } + fadeIn(tween(200))) togetherWith
+                    (slideOutHorizontally(tween(200)) { -it / 2 * dir } + fadeOut(tween(120)))
+            },
+            label = "batchRow",
+        ) { showMore ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!showMore) {
+                    ChromeButton(ShellGlyph.FolderBadgePlus, stringResource(R.string.editor_agrupar), onClick = {
+                        store.precompose()
+                        finish()
+                    }, Modifier.testTag("batch.group"), size = 19.dp, tint = ink)
+                    ChromeButton(CupertinoGlyph.CircleLefthalfFill, stringResource(R.string.batch_group_mask_a11y), onClick = {
+                        if (canMask) store.groupAndMask(false) else store.showToast(needTwo)
+                    }, Modifier.testTag("batch.groupMask"), size = 19.dp, tint = if (canMask) ink else dim)
+                    ChromeButton(CupertinoGlyph.MinusCircle, stringResource(R.string.batch_group_exclude_a11y), onClick = {
+                        if (canMask) store.groupAndMask(true) else store.showToast(needTwo)
+                    }, Modifier.testTag("batch.groupExclude"), size = 19.dp, tint = if (canMask) ink else dim)
+                    ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_selecao), onClick = {
+                        LayerOps.delete(store, store.selection)
+                        finish()
+                    }, Modifier.testTag("batch.delete"), size = 19.dp, tint = ink)
+                    ChromeButton(CupertinoGlyph.ChevronRight, stringResource(R.string.batch_more_actions), onClick = { more = true },
+                        Modifier.testTag("batch.more"), size = 17.dp, width = 36.dp, tint = ink)
+                } else {
+                    ChromeButton(CupertinoGlyph.ChevronLeft, stringResource(R.string.batch_group_actions), onClick = { more = false },
+                        Modifier.testTag("batch.less"), size = 17.dp, width = 36.dp, tint = ink)
+                    // Ficar com UMA só: a lista troca o lote por ela num toque.
+                    ChromeButton(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), onClick = { openSheet(store, ui, ShellSheet.SearchLayers) }, size = 19.dp, width = 40.dp, tint = ink)
+                    ChromeButton(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp, tint = ink)
+                    Box {
+                        ChromeButton(CupertinoGlyph.Link, stringResource(R.string.editor_vincular_escolhidas_camada), onClick = {
+                            if (store.playing) store.pause()
+                            linking = true
+                        }, size = 19.dp, tint = ink)
+                        if (linking) LinkMenu(store, store.selection.toList()) { linking = false }
+                    }
+                    if (groups.isNotEmpty()) {
+                        ChromeButton(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), onClick = {
+                            val ids = groups
+                            ids.forEach { store.ungroupPrecomp(it) }
+                        }, size = 19.dp, tint = ink)
+                    }
+                    ChromeButton(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar_camada), onClick = { store.duplicateLayers() }, size = 19.dp, tint = ink)
+                    ChromeButton(
+                        if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
+                        if (store.playing) stringResource(R.string.editor_pausar) else stringResource(R.string.editor_reproduzir),
+                        onClick = { store.togglePlayback() },
+                        size = 20.dp,
+                        tint = ink,
+                    )
+                }
+            }
         }
-        ChromeButton(ShellGlyph.FolderBadgePlus, stringResource(R.string.editor_agrupar), onClick = { store.precompose() }, size = 19.dp, tint = ink)
-        if (groups.isNotEmpty()) {
-            ChromeButton(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), onClick = {
-                val ids = groups
-                ids.forEach { store.ungroupPrecomp(it) }
-            }, size = 19.dp, tint = ink)
-        }
-        ChromeButton(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar_camada), onClick = { store.duplicateLayers() }, size = 19.dp, tint = ink)
-        ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_selecao), onClick = { LayerOps.delete(store, store.selection) }, size = 19.dp, tint = ink)
-        ChromeButton(
-            if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
-            if (store.playing) stringResource(R.string.editor_pausar) else stringResource(R.string.editor_reproduzir),
-            onClick = { store.togglePlayback() },
-            size = 20.dp,
-            tint = ink,
-        )
     }
 }

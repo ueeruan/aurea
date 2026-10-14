@@ -135,6 +135,25 @@ AUREA_TEST(EditorReference, GroupMaskRejectsMissingLockedNonvisualAndSingleSelec
     AUREA_CHECK_EQ(rig.layer(b)->blendMode, BlendMode::Normal);
 }
 
+// As telas habilitam "Agrupar e mascarar/excluir" pela MESMA regra, sem mudar nada.
+AUREA_TEST(EditorReference, CanGroupMaskMatchesTheCommandRuleWithoutMutating) {
+    EditorReferenceRig rig;
+    const u64 a = rig.add("a"), b = rig.add("b"), control = rig.add("control", LayerKind::Null);
+    const u32 history = rig.engine.history().depth();
+    const u64 one[]{a}, single[]{a, a}, nonvisual[]{a, control}, valid[]{b, a};
+    AUREA_CHECK(!rig.engine.can_group_and_mask(one, 1));
+    AUREA_CHECK(!rig.engine.can_group_and_mask(single, 2));
+    AUREA_CHECK(!rig.engine.can_group_and_mask(nonvisual, 2));
+    AUREA_CHECK(rig.engine.can_group_and_mask(valid, 2));
+    rig.layer(b)->locked = true;
+    AUREA_CHECK(!rig.engine.can_group_and_mask(valid, 2));
+    rig.layer(b)->locked = false;
+    AUREA_CHECK_EQ(rig.engine.history().depth(), history);
+    AUREA_CHECK_EQ(rig.comp()->order().size(), 3u);
+    const bool admitted = rig.engine.can_group_and_mask(valid, 2);   // antes: agrupar consome as camadas
+    AUREA_CHECK(admitted && rig.engine.group_and_mask(valid, 2, false).ok());
+}
+
 AUREA_TEST(EditorReference, GroupMaskConsumesQueuedReorderBeforeChoosingTheSource) {
     EditorReferenceRig rig;
     const u64 a = rig.add("a"), b = rig.add("b");

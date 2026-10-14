@@ -6406,10 +6406,8 @@ Result<u64> Engine::precompose(const u64* ids, u32 count, const char* name) noex
     return precompose_locked(ids, count, name, false, false);
 }
 
-Result<u64> Engine::group_and_mask(const u64* ids, u32 count, bool exclude, const char* name) noexcept {
-    std::lock_guard<std::mutex> lock(modelMutex_);
-    drain_commands_locked();
-    Composition* comp = project_ ? current_composition() : nullptr;
+Status Engine::group_and_mask_admission_locked(const u64* ids, u32 count) const noexcept {
+    const Composition* comp = project_ ? project_->timeline().composition(project_->timeline().current()) : nullptr;
     if (!comp || !ids || count < 2) return Status{Errc::InvalidArgument, "selecione duas camadas visuais"};
     std::unordered_set<u64> unique;
     for (u32 i = 0; i < count; ++i) {
@@ -6424,6 +6422,19 @@ Result<u64> Engine::group_and_mask(const u64* ids, u32 count, bool exclude, cons
         unique.insert(ids[i]);
     }
     if (unique.size() < 2) return Status{Errc::InvalidArgument, "selecione duas camadas visuais"};
+    return OkStatus;
+}
+
+bool Engine::can_group_and_mask(const u64* ids, u32 count) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    return group_and_mask_admission_locked(ids, count).ok();
+}
+
+Result<u64> Engine::group_and_mask(const u64* ids, u32 count, bool exclude, const char* name) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    if (const Status admitted = group_and_mask_admission_locked(ids, count); !admitted.ok()) return admitted;
     return precompose_locked(ids, count, name, true, exclude);
 }
 
@@ -12964,6 +12975,22 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         if (running) return Status{Errc::InvalidState, "ja existe um export em andamento"};
         exportCtx_->thread.join();
     }
+    struct ExportStartupOwnership {
+        std::atomic<bool>& active;
+        Engine& engine;
+        bool committed = false;
+        ~ExportStartupOwnership() {
+            if (!committed) {
+                active.store(false, std::memory_order_release);
+                engine.request_render();
+            }
+        }
+    } startupOwnership{exportActive_, *this};
+    // A prévia cede a GPU ANTES de o export disputar renderMutex_: a thread de
+    // render (prioridade de exibição) emendava compilações de pipeline uma
+    // atrás da outra e o "Preparando" esperava o mutex sem fim (vivo V2026,
+    // PowerVR GE8320). Com a marca, ela termina o quadro atual e estaciona.
+    exportActive_.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
@@ -13004,17 +13031,6 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     if (ctx->safeMode) ctx->progress.flags |= kExportSafeMode;
     ctx->workerHangNs = config_.exportWorkerHangMs ? static_cast<u64>(config_.exportWorkerHangMs) * 1'000'000ull
                                                    : kExportWorkerHangNs;
-    struct ExportStartupOwnership {
-        std::atomic<bool>& active;
-        Engine& engine;
-        bool committed = false;
-        ~ExportStartupOwnership() {
-            if (!committed) {
-                active.store(false, std::memory_order_release);
-                engine.request_render();
-            }
-        }
-    } startupOwnership{exportActive_, *this};
     struct ProxyExportPause {
         PreviewProxyService& service;
         bool started = false;
@@ -14468,6 +14484,16 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         if (running) return Status{Errc::InvalidState, "ja existe um export em andamento"};
         exportCtx_->thread.join();
     }
+    struct ImageStartupOwnership {
+        std::atomic<bool>& active;
+        Engine& engine;
+        bool committed = false;
+        ~ImageStartupOwnership() {
+            if (!committed) { active.store(false, std::memory_order_release); engine.request_render(); }
+        }
+    } startupOwnership{exportActive_, *this};
+    // Como no vídeo: a prévia estaciona antes de o export disputar renderMutex_.
+    exportActive_.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
@@ -14500,14 +14526,6 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
             if (engine.preRenderStartupCancel_ == &flag) engine.preRenderStartupCancel_ = nullptr;
         }
     } startupCancellation{*this, ctx->cancelRequested, ctx->preRenderMode};
-    struct ImageStartupOwnership {
-        std::atomic<bool>& active;
-        Engine& engine;
-        bool committed = false;
-        ~ImageStartupOwnership() {
-            if (!committed) { active.store(false, std::memory_order_release); engine.request_render(); }
-        }
-    } startupOwnership{exportActive_, *this};
     struct ProxyExportPause {
         PreviewProxyService& service;
         bool started = false;
@@ -15931,6 +15949,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             initialize_instance(e, *params);
             // One history transaction owns both the effect and3D activation.
             if (type == effect_type_id(effect_keys::kRasterExtrude)) l->threeD = true;
+            // 3D Shatter de verdade: a camada entra na cena 3D e as peças voam
+            // no mundo (câmera, profundidade e luzes da cena) — ver Shatter3D.hpp.
+            if (type == effect_type_id(effect_keys::kShatter3D) && raster_extrude::accepts(l->kind)) l->threeD = true;
             if (cmd.effect_add.index < l->effects.size()) {
                 l->effects.insert(l->effects.begin() + cmd.effect_add.index, std::move(e));
             } else {

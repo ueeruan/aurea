@@ -1336,6 +1336,13 @@ AUREA_JNI jlong AUREA_FN(nativeGroupAndMask)(JNIEnv* env, jclass, jlong handle, 
     return r.ok() ? static_cast<jlong>(*r) : -static_cast<jlong>(r.status().code());
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeCanGroupAndMask)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    const auto v = jlongs(env, ids);
+    return c->engine.can_group_and_mask(v.data(), static_cast<u32>(v.size())) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeQueryKeyframeNavigation)(JNIEnv* env, jclass, jlong handle, jlong layer,
         jint property, jint effect, jint param, jlong frame, jlongArray out) {
     NativeContext* c = ctx_of(handle);

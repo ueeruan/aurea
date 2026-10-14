@@ -18,6 +18,7 @@
 // =============================================================================
 #include "BuiltinEffects.hpp"
 
+#include "aurea/effects/Shatter3D.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/timeline/Layer.hpp"
@@ -171,13 +172,14 @@ public:
         return true;
     }
 
-    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
-                 LayerImage& out) const override {
-        struct Uniforms { Vec4 src, dst, grid, motion, shape, view, misc; } u{};
-        static_assert(sizeof(Uniforms) == 112);
+    /// O bloco comum ao desenho 2D e ao da cena (sem `dst` e sem a câmera
+    /// própria, view.z). Devolve o número de peças; 0 = camada intacta.
+    static u32 fill_uniforms(const EffectEval& e, const LayerImage& input, shatter3d::Uniforms& u) noexcept {
+        u = {};
         const Rect src = input.region;
-        if (!(src.w > 0.0f) || !(src.h > 0.0f)) { out = input; return OkStatus; }
-
+        if (!(src.w > 0.0f) || !(src.h > 0.0f)) return 0;
+        const f32 progress = std::clamp(finite_or(e.f(kProgress), 0.0f) / 100.0f, 0.0f, 1.0f);
+        if (!(progress > 0.0f)) return 0;
         const bool triangles = e.e(kShape) != 0;
         const f32 cols = static_cast<f32>(std::clamp(e.value(kPieces).as_int(), 2, 48));
         const f32 rows = std::clamp(std::round(cols * src.h / src.w), 1.0f, 96.0f);
@@ -188,12 +190,31 @@ public:
         for (const Vec2 c : {Vec2{src.x, src.y}, Vec2{src.x + src.w, src.y}, Vec2{src.x, src.y + src.h},
                              Vec2{src.x + src.w, src.y + src.h}})
             far = std::max(far, std::hypot(c.x - center.x, c.y - center.y));
-
-        const f32 progress = std::clamp(finite_or(e.f(kProgress), 0.0f) / 100.0f, 0.0f, 1.0f);
         const f32 force = std::clamp(finite_or(e.f(kForce), 900.0f), 0.0f, 40000.0f);
         const f32 toward = std::clamp(finite_or(e.f(kTowardCamera), 40.0f) / 100.0f, -1.0f, 1.0f);
         const f32 gravity = std::clamp(finite_or(e.f(kGravity), 600.0f), -30000.0f, 30000.0f);
         const f32 thickness = std::clamp(finite_or(e.f(kThickness), 12.0f), 0.0f, 2000.0f);
+        u.src = Vec4{src.x, src.y, src.w, src.h};
+        u.grid = Vec4{cols, rows, static_cast<f32>(e.e(kShape)), static_cast<f32>(std::clamp(e.value(kSeed).as_int(), 0, 9999))};
+        u.motion = Vec4{progress, force, std::clamp(finite_or(e.f(kSpin), 540.0f), 0.0f, 3600.0f) * kDeg, gravity};
+        u.shape = Vec4{thickness, toward, std::clamp(finite_or(e.f(kRandomness), 50.0f) / 100.0f, 0.0f, 1.0f),
+                       std::clamp(finite_or(e.f(kWave), 60.0f) / 100.0f, 0.0f, 1.0f)};
+        u.view = Vec4{center.x, center.y, 0.0f, std::clamp(finite_or(e.f(kLight), 60.0f) / 100.0f, 0.0f, 1.0f)};
+        u.misc = Vec4{std::clamp(finite_or(e.f(kFade), 0.0f) / 100.0f, 0.0f, 1.0f), src.w / cols, src.h / rows, far};
+        return static_cast<u32>(cols * rows) * (triangles ? 2u : 1u);
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        // Plano da cena 3D: o grupo desenha as peças como geometria de verdade
+        // (scene3d/shatter.vert) a partir da imagem final da camada.
+        if (e.placement && e.placement->scenePlane) { out = input; return OkStatus; }
+        shatter3d::Uniforms u{};
+        const u32 pieces = fill_uniforms(e, input, u);
+        if (!pieces) { out = input; return OkStatus; }
+        const Rect src = input.region;
+        const f32 cols = u.grid.x, rows = u.grid.y;
+        const f32 force = u.motion.y, toward = u.shape.y, gravity = u.motion.w, thickness = u.shape.x;
         const f32 persp = std::clamp(finite_or(e.f(kPerspective), 50.0f) / 100.0f, 0.0f, 1.0f);
         const f32 camera = (8.0f + (1.5f - 8.0f) * persp) * std::max(src.w, src.h);
 
@@ -209,17 +230,10 @@ public:
         ctx.region_size(region, input.texel_scale_x(), w, h);
         if (!w || !h) { out = input; return OkStatus; }
 
-        u.src = Vec4{src.x, src.y, src.w, src.h};
         u.dst = Vec4{region.x, region.y, region.w, region.h};
-        u.grid = Vec4{cols, rows, static_cast<f32>(e.e(kShape)), static_cast<f32>(std::clamp(e.value(kSeed).as_int(), 0, 9999))};
-        u.motion = Vec4{progress, force, std::clamp(finite_or(e.f(kSpin), 540.0f), 0.0f, 3600.0f) * kDeg, gravity};
-        u.shape = Vec4{thickness, toward, std::clamp(finite_or(e.f(kRandomness), 50.0f) / 100.0f, 0.0f, 1.0f),
-                       std::clamp(finite_or(e.f(kWave), 60.0f) / 100.0f, 0.0f, 1.0f)};
-        u.view = Vec4{center.x, center.y, camera, std::clamp(finite_or(e.f(kLight), 60.0f) / 100.0f, 0.0f, 1.0f)};
-        u.misc = Vec4{std::clamp(finite_or(e.f(kFade), 0.0f) / 100.0f, 0.0f, 1.0f), src.w / cols, src.h / rows, far};
+        u.view.z = camera;
 
         out = LayerImage{ctx.texture("3d-shatter", w, h), region, w, h};
-        const u32 pieces = static_cast<u32>(cols * rows) * (triangles ? 2u : 1u);
         if (ctx.geometry_pass("3d-shatter", PassStage::Effects, out.texture, ShaderId::effects_shatter3d_vert,
                               ShaderId::effects_shatter3d_frag,
                               {PassTexture{input.texture, {}, CommonSampler::LinearBorder}}, &u, sizeof(u),
@@ -551,3 +565,12 @@ void register_object3d_effects(EffectRegistry& r) {
 }
 
 } // namespace aurea::builtin
+
+namespace aurea::shatter3d {
+bool is_shatter(EffectTypeId type) noexcept { return type == effect_type_id(effect_keys::kShatter3D); }
+u32 fill(const EffectEval& e, const LayerImage& input, Uniforms& out) noexcept {
+    out = {};
+    if (!e.effect || !is_shatter(e.effect->type_id())) return 0;
+    return builtin::Shatter3D::fill_uniforms(e, input, out);
+}
+} // namespace aurea::shatter3d

@@ -1152,10 +1152,13 @@ PipelineKey SceneRenderer::key_for(AlphaMode mode, bool doubleSided, bool skinne
     return k;
 }
 
-PipelineKey SceneRenderer::plane_key(bool translucent, bool periodic, bool extruded) const noexcept {
-    PipelineKey k = PipelineKey::graphics((periodic||extruded) ? ShaderId::scene3d_plane_tile_vert : ShaderId::composite_layer_vert,
-                                          extruded ? ShaderId::scene3d_raster_extrude_frag : periodic ? ShaderId::scene3d_plane_tile_frag : ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F, true,
-                                          BlendMode::Normal);
+PipelineKey SceneRenderer::plane_key(bool translucent, bool periodic, bool extruded, bool shattered) const noexcept {
+    PipelineKey k = shattered
+        ? PipelineKey::graphics(ShaderId::scene3d_shatter_vert, ShaderId::scene3d_shatter_frag, SurfaceFormat::RGBA16F, true,
+                                BlendMode::Normal)
+        : PipelineKey::graphics((periodic||extruded) ? ShaderId::scene3d_plane_tile_vert : ShaderId::composite_layer_vert,
+                                extruded ? ShaderId::scene3d_raster_extrude_frag : periodic ? ShaderId::scene3d_plane_tile_frag : ShaderId::scene3d_plane_frag, SurfaceFormat::RGBA16F, true,
+                                BlendMode::Normal);
     k.hasDepth = true;
     k.depthTest = true;
     k.depthWrite = !translucent;               // só pixels opacos podem bloquear o fundo
@@ -2208,6 +2211,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     u32 planeCount = 0;
     ScenePlane* planeList = nullptr;
     PipelineHandle planePipe{}, planeBlendPipe{}, tilePlanePipe{}, tilePlaneBlendPipe{}, volumePipe{}, volumeBlendPipe{};
+    PipelineHandle shatterPipe{}, shatterBlendPipe{};
     if (planes && !planes->empty()) {
         auto pp = shaders_->pipeline(plane_key());
         auto blend = shaders_->pipeline(plane_key(true));
@@ -2224,6 +2228,13 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             auto transparent=shaders_->pipeline(plane_key(true,false,true));
             if(!solid.ok()||!transparent.ok()){incomplete_=true;return false;}
             volumePipe=*solid;volumeBlendPipe=*transparent;
+        }
+        const bool hasShatter=std::any_of(planes->begin(),planes->end(),[](const ScenePlane& p){return p.shatter.pieces!=0;});
+        if(hasShatter) {
+            auto solid=shaders_->pipeline(plane_key(false,false,false,true));
+            auto transparent=shaders_->pipeline(plane_key(true,false,false,true));
+            if(!solid.ok()||!transparent.ok()){incomplete_=true;return false;}
+            shatterPipe=*solid;shatterBlendPipe=*transparent;
         }
         if (!pp.ok() || !blend.ok()) mark_incomplete(__FILE__, __LINE__);
         if (pp.ok() && blend.ok()) {
@@ -2285,11 +2296,12 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         SceneParticleDraw* parts;
         u32 partCount;
         EnvSlot sceneEnv;             ///< o ambiente do grupo (d.env nulo)
+        PipelineHandle shatterPipe, shatterBlendPipe;
     } cap{list, total, white_, flatNormal_, ibl ? irradiance_ : envCube_, ibl ? prefiltered_ : envCube_,
           ibl ? iblLut_ : brdfLut_, cubeSampler_, shaders_->sampler(CommonSampler::LinearRepeat).id,
           shaders_->sampler(CommonSampler::LinearClamp).id, joints, shadowTex,
           shaders_->sampler(CommonSampler::NearestClamp).id, shaders_->sampler(CommonSampler::ShadowCompare).id, morphBuf, instBuf, planeList, planeCount, opaqueCount, planePipe, planeBlendPipe, tilePlanePipe, tilePlaneBlendPipe,
-          volumePipe,volumeBlendPipe,partList, partList ? particleCount : 0u, envSlots[0]};
+          volumePipe,volumeBlendPipe,partList, partList ? particleCount : 0u, envSlots[0], shatterPipe, shatterBlendPipe};
 
     // ===== CHÃO DO GRUPO 3D (Ground.cpp) =========================================
     // Reflexo planar (os opacos espelhados, 1 amostra) e sombra de contato
@@ -2411,13 +2423,29 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     const ScenePlane& p = cap.planes[k];
                     const bool tile = p.periodic.count != 0;
                     const bool volume=p.extrusion.count!=0;
-                    c.bind_pipeline(volume ? (phase?cap.volumeBlendPipe:cap.volumePipe) : tile ? (phase ? cap.tilePlaneBlendPipe : cap.tilePlanePipe)
+                    const bool shattered=!volume&&p.shatter.pieces!=0;
+                    c.bind_pipeline(shattered ? (phase?cap.shatterBlendPipe:cap.shatterPipe)
+                                  : volume ? (phase?cap.volumeBlendPipe:cap.volumePipe) : tile ? (phase ? cap.tilePlaneBlendPipe : cap.tilePlanePipe)
                                          : (phase ? cap.planeBlendPipe : cap.planePipe));
-                    if(volume) {
+                    if(shattered) {
+                        // As peças no mundo: luzes do plano + o bloco do efeito.
+                        c.bind_texture(0, pc.texture(p.texture), SamplerHandle{p.sampler});
+                        struct ShatterBlock { PlaneLightBlock light; shatter3d::Uniforms pieces; } uniforms{p.light, p.shatter.uniforms};
+                        static_assert(sizeof(ShatterBlock)==sizeof(PlaneLightBlock)+sizeof(shatter3d::Uniforms));
+                        static_assert(sizeof(ShatterBlock)<=binding::kMaxUniformBytes);
+                        c.set_uniforms(&uniforms,sizeof(uniforms));
+                    } else if(volume) {
                         for(u32 n=0;n<raster_extrude::kTextureSlots;++n)c.bind_texture(n,pc.texture(p.extrusion.textures[n]),SamplerHandle{p.sampler});
-                        struct VolumeBlock { PlaneLightBlock light; Mat4 inverseClip,inverseWorld;Vec4 box,params,side,sizes; }
-                            uniforms{p.light,p.extrusion.layerFromClip,p.extrusion.layerFromWorld,p.extrusion.box,p.extrusion.params,p.extrusion.sideColor,p.extrusion.sizes};
-                        static_assert(sizeof(VolumeBlock)==sizeof(PlaneLightBlock)+2*sizeof(Mat4)+4*sizeof(Vec4));
+                        // O ambiente do grupo, como nos modelos 3D (reflexo na face e nas laterais).
+                        const EnvSlot& env=cap.sceneEnv;
+                        c.bind_texture(raster_extrude::kIrradianceSlot,env.irradiance,cap.cubeSampler);
+                        c.bind_texture(raster_extrude::kPrefilterSlot,env.prefiltered,cap.cubeSampler);
+                        c.bind_texture(raster_extrude::kBrdfSlot,env.brdf,SamplerHandle{cap.clampSampler});
+                        struct VolumeBlock { PlaneLightBlock light; Mat4 inverseClip,inverseWorld;Vec4 box,params,side,sizes,envParams,sky,ground,material; }
+                            uniforms{p.light,p.extrusion.layerFromClip,p.extrusion.layerFromWorld,p.extrusion.box,p.extrusion.params,p.extrusion.sideColor,p.extrusion.sizes,
+                                env.block->envParams,env.block->skyColor,env.block->groundColor,p.extrusion.material};
+                        static_assert(sizeof(VolumeBlock)==sizeof(PlaneLightBlock)+2*sizeof(Mat4)+8*sizeof(Vec4));
+                        static_assert(sizeof(VolumeBlock)<=binding::kMaxUniformBytes);
                         c.set_uniforms(&uniforms,sizeof(uniforms));
                     } else if (tile) {
                         for (u32 n = 0; n < motion_tile::kSceneTileSlots; ++n)
@@ -2433,7 +2461,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     }
                     struct { Mat4 m; Vec4 region; Vec4 uv; Vec4 params; } push{p.clipFromLayer, p.region, Vec4{0, 0, 1, 1}, Vec4{p.opacity, static_cast<f32>(phase), 0, 0}};
                     c.push_constants(&push, sizeof(push));
-                    c.draw(6);
+                    c.draw(shattered ? p.shatter.vertex_count() : 6u);
                 }
             }
             bound = PipelineHandle{};

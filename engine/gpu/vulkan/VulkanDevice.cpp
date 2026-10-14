@@ -102,10 +102,19 @@ void Backend::shutdown() noexcept {
         textures_.clear();
         buffers_.for_each([this](u64, Buffer& b) { destroy_buffer_now(b); });
         buffers_.clear();
-        pipelines_.for_each([this](u64, PipelineObject& p) { deviceFunctions_.vkDestroyPipeline(device_, p.pipeline, nullptr); });
+        // Compartilhados: vários handles, um objeto — destruído uma vez, pelo cache.
+        pipelines_.for_each([this](u64, PipelineObject& p) {
+            if (!p.sharedKey) deviceFunctions_.vkDestroyPipeline(device_, p.pipeline, nullptr);
+        });
         pipelines_.clear();
-        shaders_.for_each([this](u64, ShaderModule& s) { deviceFunctions_.vkDestroyShaderModule(device_, s.module, nullptr); });
+        for (auto& [k, p] : sharedPipelines_) deviceFunctions_.vkDestroyPipeline(device_, p.pipeline, nullptr);
+        sharedPipelines_.clear();
+        shaders_.for_each([this](u64, ShaderModule& s) {
+            if (!s.sharedKey) deviceFunctions_.vkDestroyShaderModule(device_, s.module, nullptr);
+        });
         shaders_.clear();
+        for (auto& [k, s] : sharedShaders_) deviceFunctions_.vkDestroyShaderModule(device_, s.module, nullptr);
+        sharedShaders_.clear();
         samplers_.for_each([this](u64, SamplerObject& s) {
             deviceFunctions_.vkDestroySampler(device_, s.sampler, nullptr);
             if (s.conversion) deviceFunctions_.vkDestroySamplerYcbcrConversion(device_, s.conversion, nullptr);

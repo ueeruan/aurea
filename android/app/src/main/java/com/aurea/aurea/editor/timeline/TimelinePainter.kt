@@ -910,7 +910,10 @@ internal class TimelinePainter(
             if (inBatch) drawPath(pillPath, AureaColors.Accent, style = glyphRing)
         }
         val cy = pillTop + m.pillHeight / 2f
-        drawGlyph(
+        if (c.store.layerSelectMode) {
+            // Escolhendo várias camadas: o olho dá lugar ao ✓ das escolhidas.
+            if (r.id in c.store.selection) drawGlyph(CupertinoGlyph.CheckmarkCircleFill, m.gutterEye, AureaColors.Accent, m.gutterEyeCx, cy)
+        } else drawGlyph(
             if (r.visible) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash,
             m.gutterEye,
             if (r.visible) AureaTimeline.GutterEye else AureaTimeline.GutterIcon,

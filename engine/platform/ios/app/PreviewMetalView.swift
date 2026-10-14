@@ -149,6 +149,8 @@ struct PreviewMetalView: UIViewRepresentable {
         private var sceneTapPoint = CGPoint.zero
         private var stageMode: StageMode = .idle
         private var stageDown = CGPoint.zero
+        /// Quando o dedo pousou no palco (segurar uma camada = escolher várias).
+        private var stageDownTime: CFTimeInterval = 0
         private var stageFinger: ObjectIdentifier?
         private var markerAnchorLayer: Int64?
         private var markerHold: DispatchWorkItem?
@@ -541,7 +543,7 @@ struct PreviewMetalView: UIViewRepresentable {
             let pressed = points.filter(\.pressed)
             if stageFinger == nil {
                 guard let first = pressed.first else { return }
-                stageFinger = first.id; stageDown = first.position; hadMultipleTouches = false
+                stageFinger = first.id; stageDown = first.position; stageDownTime = CACurrentMediaTime(); hadMultipleTouches = false
                 stageMode = .pending; handle = -1; shapeHandle = -1; gizmoAxis = -1; targetLayer = nil
                 axisLock = 0; pinchRotationActive = false
                 rotationSnap = nil; scaleSnap = nil; groupMove = []; groupCentre = nil
@@ -619,9 +621,16 @@ struct PreviewMetalView: UIViewRepresentable {
                             return row.id
                         }
                         let hit = selected3D ?? hitLayer(point, slack: 0, includeLocked: false) ?? hitLayer(point, slack: scaleFactor(view) * 12, includeLocked: false)
-                        if let hit {
+                        // Segurar uma camada soma (ou tira) ela da seleção e liga o modo de
+                        // escolher várias — a barra de grupo/máscara aparece no topo (Stage.kt).
+                        let held = CACurrentMediaTime() - stageDownTime >= 0.5
+                        if let hit, held {
+                            if model.selection.isEmpty { model.select(layerId: hit, additive: false) } else { model.toggleTimelineLayerPick(hit) }
+                            model.changeTimelineLayerSelectMode(true)
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        } else if let hit {
                             if model.primarySelection != hit || model.selection.count != 1 { model.select(layerId: hit, additive: false) }
-                        } else { model.clearSelection() }
+                        } else if !held { model.clearSelection() }
                     }
                 }
                 finishStageEdit(); stageFinger = nil; stageMode = .idle; return

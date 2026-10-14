@@ -1792,7 +1792,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea 0.1.8 BETA 3 (2179) • 2026-10-13\n\n• Timeline arrows: with no selected layer, jump between markers; with a selected layer, choose the nearest marker or keyframe. Markers after the last clip are also reachable.\n• Short clips: zooming out no longer makes the bar appear to extend beyond the beat; handles and outlines follow the actual duration.\n• Export: releases preview caches before preparing the file; startup preparation can be cancelled.\n• Effects and 3D: simpler controls with a ruler, per-axis values and a numeric keyboard.\n• Adjustment sheets: compact size, scrollable content and visible actions above the keyboard. The 3D ruler uses the area below the values.\n• Motion Tile on 3D planes: investigating reports of a frozen preview and texture bands.</string>
+    <string name="release_notes_body">Aurea 0.1.9 (2185) • 2026-10-14\n\n• Export: fixed the endless \"Preparing\" on phones with PowerVR GPUs (e.g. vivo, Helio P35). Export reuses what the preview already prepared on the GPU.\n• 3D Extrusion: new Environment reflection, Metal and Roughness controls — reflects the scene HDRI/studio like 3D models.\n• Real 3D Shatter: in the 3D scene the pieces use the scene camera, depth and lights and fall to the world floor.\n• Layer selection: hold a layer (on the stage or the timeline) and use Group, Group and mask, Group and exclude or Delete in the top-right corner.\n• Timeline: while picking several layers, slide your finger along the pills to add layers; picked ones show a ✓.\n• Crash diagnostics: lists the device\'s video encoders.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -4349,4 +4349,11 @@ to edit the curve.</string>
     <string name="fxl_noise_seed">Noise seed</string>
     <string name="fxo_appear">Appear</string>
     <string name="fxl_gradient_center">Gradient center</string>
+    <string name="fxl_environment_reflection">Environment reflection</string>
+    <string name="batch_need_two_visual">Select at least two visual layers</string>
+    <string name="batch_more_actions">More selection actions</string>
+    <string name="batch_group_actions">Back to group and mask actions</string>
+    <string name="batch_one_layer_selected">1 layer selected</string>
+    <string name="batch_group_mask_a11y">Group and mask: the top layer clips the others</string>
+    <string name="batch_group_exclude_a11y">Group and exclude: the top layer cuts a hole in the others</string>
 </resources>

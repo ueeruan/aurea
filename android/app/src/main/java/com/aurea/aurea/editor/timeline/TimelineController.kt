@@ -516,7 +516,9 @@ internal class TimelineController(
             }
             HitKind.HEADER_EYE -> if (r != null) {
                 light()
-                setRowVisible(r, !r.visible)
+                // Escolhendo várias camadas o olho vira o ✓: o toque soma/tira a camada.
+                if (store.layerSelectMode && r.track == null) store.toggleLayerPick(r.id)
+                else setRowVisible(r, !r.visible)
             }
             // A.01: ‹ = selectNeighbor(+1), › = selectNeighbor(−1).
             HitKind.ARROW_PREV -> {
@@ -762,6 +764,10 @@ internal class TimelineController(
         val edit = Press.timeEdit(d.x, d.y)
         val r = hit.row
         when {
+            // Escolhendo várias camadas: arrastar na vertical pela coluna das
+            // pílulas soma cada camada por onde o dedo passa (sem rolar).
+            r != null && store.layerSelectMode && hit.kind == HitKind.HEADER && r.track == null && !state.compact && !horizontal ->
+                sweepSelect(down.id, slopAt, r)
             r != null && edit && hit.kind == HitKind.KEYFRAME -> keyframeDrag(r, hit.keyIndex, down)
             r != null && edit && hit.kind == HitKind.TRIM_START -> trimDrag(r, true, down)
             r != null && edit && hit.kind == HitKind.TRIM_END -> trimDrag(r, false, down)
@@ -771,6 +777,34 @@ internal class TimelineController(
             horizontal -> scrub(down.id, slopAt, tracker)
             !state.compact -> scroll(down.id, slopAt, tracker)
             else -> compactStep(down.id, slopAt)
+        }
+    }
+
+    /**
+     * Varredura do modo "Selecionar várias camadas": cada camada sob o dedo (na
+     * coluna das pílulas) entra na seleção uma vez, com um toque háptico curto.
+     */
+    private suspend fun AwaitPointerEventScope.sweepSelect(id: PointerId, start: Offset, first: RowModel) {
+        val seen = HashSet<Long>()
+        fun visit(r: RowModel?) {
+            if (r == null || r.track != null || !seen.add(r.id)) return
+            if (!isSelected(r.id)) {
+                store.toggleLayerPick(r.id)
+                tick()
+            }
+        }
+        visit(first)
+        visit(hitAt(start).row)
+        while (true) {
+            val ev = awaitPointerEvent()
+            if (pressedCount(ev) >= 2) return pinch()
+            val ch = changeOf(ev, id) ?: return
+            if (!ch.pressed) {
+                ch.consume()
+                return
+            }
+            ch.consume()
+            visit(hitAt(Offset(start.x, ch.position.y)).row)
         }
     }
 

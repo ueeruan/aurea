@@ -15,15 +15,19 @@ layout(set=0,binding=AUREA_TEX5) uniform sampler2D u_tex5;
 layout(set=0,binding=AUREA_TEX6) uniform sampler2D u_tex6;
 layout(set=0,binding=AUREA_TEX7) uniform sampler2D u_tex7;
 layout(set=0,binding=AUREA_TEX8) uniform sampler2D u_tex8;
-layout(set=0,binding=AUREA_TEX9) uniform sampler2D u_tex9;
-layout(set=0,binding=AUREA_TEX10) uniform sampler2D u_tex10;
-layout(set=0,binding=AUREA_TEX11) uniform sampler2D u_tex11;
+// O ambiente da cena, o mesmo dos modelos 3D (pbr.frag).
+layout(set=0,binding=AUREA_TEX9) uniform samplerCube u_irradiance;
+layout(set=0,binding=AUREA_TEX10) uniform samplerCube u_prefilter;
+layout(set=0,binding=AUREA_TEX11) uniform sampler2D u_brdf;
 const int MAX_LIGHTS=8;
 layout(set=0,binding=AUREA_PARAMS,std140) uniform VolumeLights {
     mat4 worldFromLayer;vec4 cameraPos;vec4 ambient;vec4 lightCount;
     vec4 lightPos[MAX_LIGHTS];vec4 lightColor[MAX_LIGHTS];vec4 lightSpot[MAX_LIGHTS];vec4 lightSpot2[MAX_LIGHTS];
     mat4 layerFromClip;mat4 layerFromWorld;
     vec4 box;vec4 volume;vec4 side;vec4 sizes;
+    vec4 envParams;   // x = intensidade, y = tem IBL, z = mips do pré-filtrado, w = rotação (rad)
+    vec4 skyColor;vec4 groundColor;   // ambiente analítico (sem IBL)
+    vec4 material;    // x = reflexo do ambiente, y = metal, z = rugosidade
 } u;
 
 vec4 fetch_source(ivec2 p) {
@@ -44,7 +48,7 @@ float maximum_read(sampler2D s,ivec2 p) {
     return texelFetch(s,p,0).a;
 }
 // Constant sampler access supports Vulkan1/ES3.1/Metal without a nonuniform
-// indexing extension. Slot11 may be the global max for sources above2048.
+// indexing extension. Slot8 may be the global max for sources above128.
 float maximum(int level,ivec2 p) {
     if(level==0)return maximum_read(u_tex0,p);
     if(level==1)return maximum_read(u_tex1,p);
@@ -54,10 +58,7 @@ float maximum(int level,ivec2 p) {
     if(level==5)return maximum_read(u_tex5,p);
     if(level==6)return maximum_read(u_tex6,p);
     if(level==7)return maximum_read(u_tex7,p);
-    if(level==8)return maximum_read(u_tex8,p);
-    if(level==9)return maximum_read(u_tex9,p);
-    if(level==10)return maximum_read(u_tex10,p);
-    return maximum_read(u_tex11,p);
+    return maximum_read(u_tex8,p);
 }
 float support_max(int level,vec2 texel) {
     float block=exp2(float(level));
@@ -111,6 +112,53 @@ vec3 illumination(vec3 local,vec3 N) {
     }
     return sum;
 }
+// Ambiente: as mesmas fórmulas do pbr.frag (IBL ou céu/chão analítico).
+vec2 env_brdf_approx(float NdotV,float roughness) {
+    const vec4 c0=vec4(-1.0,-0.0275,-0.572,0.022);
+    const vec4 c1=vec4(1.0,0.0425,1.04,-0.04);
+    vec4 r=roughness*c0+c1;
+    float a004=min(r.x*r.x,exp2(-9.28*NdotV))*r.x+r.y;
+    return vec2(-1.04,1.04)*a004+r.zw;
+}
+vec3 analytic_env(vec3 dir,float blur) {
+    float up=-dir.y;
+    vec3 horizon=mix(u.groundColor.rgb,u.skyColor.rgb,0.5);
+    float k=mix(0.25,1.0,blur);
+    return up>=0.0?mix(horizon,u.skyColor.rgb,pow(clamp(up,0.0,1.0),k))
+                  :mix(horizon,u.groundColor.rgb,pow(clamp(-up,0.0,1.0),k));
+}
+vec3 env_dir(vec3 d) {
+    d=vec3(d.x,-d.y,-d.z);
+    float r=u.envParams.w;
+    if(r==0.0)return d;
+    float c=cos(r),s=sin(r);
+    return vec3(c*d.x+s*d.z,d.y,-s*d.x+c*d.z);
+}
+float env_lod(float roughness){float r=clamp(roughness,0.0,1.0);return max(u.envParams.z-1.0,0.0)*r*(1.7-0.7*r);}
+// Premultiplied surface: metal tira o difuso; o especular do ambiente soma.
+vec4 environment(vec4 color,vec3 local,vec3 N) {
+    float amount=u.material.x;
+    if(amount<=0.0||color.a<=1e-6)return color;
+    vec3 P=(u.worldFromLayer*vec4(local,1.0)).xyz;
+    vec3 V=normalize(u.cameraPos.xyz-P);
+    if(dot(N,V)<0.0)N=-N;
+    float NdotV=clamp(dot(N,V),1e-4,1.0);
+    vec3 R=reflect(-V,N);
+    float metal=clamp(u.material.y,0.0,1.0),roughness=clamp(u.material.z,0.02,1.0);
+    vec3 albedo=color.rgb/color.a;
+    vec3 F0=mix(vec3(0.04),albedo,metal);
+    vec3 prefiltered;vec2 dfg;
+    if(u.envParams.y>0.5) {
+        prefiltered=textureLod(u_prefilter,env_dir(R),env_lod(roughness)).rgb;
+        dfg=texture(u_brdf,vec2(NdotV,roughness)).rg;
+    } else {
+        prefiltered=analytic_env(R,roughness);
+        dfg=env_brdf_approx(NdotV,roughness);
+    }
+    vec3 specular=prefiltered*(F0*dfg.x+dfg.y)*u.envParams.x;
+    vec3 diffuse=albedo*(1.0-metal*amount);
+    return vec4((diffuse+specular*amount)*color.a,color.a);
+}
 vec3 linear_rgb(vec3 color) {
     return mix(color/12.92,pow((color+0.055)/1.055,vec3(2.4)),step(vec3(0.04045),color));
 }
@@ -145,13 +193,13 @@ void main() {
     // of the wall's half-height contour used for stable geometry.
     if(cap&&color.a>1e-6)hit=true;
     vec2 velocity=direction.xy*u.sizes.xy/u.box.zw;
-    int maxLevel=min(int(u.sizes.z)-1,10);
+    int maxLevel=min(int(u.sizes.z)-1,int(u.sizes.w)-2);
     for(int stepIndex=0;stepIndex<512;++stepIndex) {
         if(hit||stepIndex>=int(u.volume.z)||t>=end)break;
         point=origin+direction*t;
         vec2 pixel=(point.xy-u.box.xy)*u.sizes.xy/u.box.zw-0.5;
         int level=0;bool empty=false;
-        for(int rank=10;rank>=0;--rank) {
+        for(int rank=7;rank>=0;--rank) {
             if(rank>maxLevel)continue;
             if(support_max(rank,pixel)<threshold){level=rank;empty=true;break;}
         }
@@ -189,6 +237,7 @@ void main() {
         color=vec4(linear_rgb(u.side.rgb)*shade*alpha,alpha);
     }
     if(u.cameraPos.w>0.5)color.rgb*=illumination(point,N);
+    color=environment(color,point,N);
     color*=pc.params.x;
     if(pc.params.y<0.5){if(color.a<0.999)discard;}
     else {if(color.a<=1e-6||color.a>=0.999)discard;}

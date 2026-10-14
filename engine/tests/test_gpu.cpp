@@ -226,6 +226,56 @@ AUREA_TEST(Regression2130, VulkanReturnsEmptySlabsAndPreservesLiveAllocations) {
         AUREA_CHECK_EQ(b.allocator().reserved_bytes(),baseReserved);
     }
 }
+
+// vivo V2026 (PowerVR GE8320): o export sobe um renderer próprio e repetia no
+// compilador do driver cada módulo e pipeline que a prévia já tinha — o
+// "Preparando" não saía nem para um PNG. Agora é o MESMO objeto do driver.
+AUREA_TEST(Regression2185, SecondRendererReusesTheDriverShadersAndPipelines) {
+    auto& g = gpu();
+    AUREA_CHECK(g.ok); if (!g.ok) return;
+    auto& b = g.backend;
+    AUREA_CHECK(b.defer_shader_creation());
+    const u32 errors = vk::Backend::validation_errors();
+    const usize baseShaders = b.shared_shader_count(), basePipelines = b.shared_pipeline_count();
+    const PipelineKey keys[] = {
+        PipelineKey::fullscreen(ShaderId::common_copy_frag, SurfaceFormat::RGBA8),
+        PipelineKey::fullscreen(ShaderId::shape_shape_frag, SurfaceFormat::RGBA16F),
+        PipelineKey::graphics(ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, SurfaceFormat::RGBA16F,
+                              true, BlendMode::Add),
+    };
+    ShaderLibrary preview, exporter;
+    AUREA_CHECK(preview.initialize(b).ok());
+    AUREA_CHECK(exporter.initialize(b).ok());
+    AUREA_CHECK_EQ(preview.prewarm(keys, 3), 3u);
+    const usize shaders = b.shared_shader_count(), pipelines = b.shared_pipeline_count();
+    AUREA_CHECK(shaders >= baseShaders && pipelines >= basePipelines);
+    AUREA_CHECK_EQ(exporter.prewarm(keys, 3), 3u);
+    AUREA_CHECK_EQ(b.shared_shader_count(), shaders);       // nenhum módulo novo no driver
+    AUREA_CHECK_EQ(b.shared_pipeline_count(), pipelines);   // nenhum pipeline novo no driver
+    for (const PipelineKey& key : keys) {
+        const auto a = preview.pipeline(key), c = exporter.pipeline(key);
+        AUREA_CHECK(a.ok() && c.ok());
+        if (!a.ok() || !c.ok()) continue;
+        AUREA_CHECK(!(*a == *c));
+        AUREA_CHECK(b.pipeline(a->id) && b.pipeline(c->id) && b.pipeline(a->id)->pipeline == b.pipeline(c->id)->pipeline);
+    }
+    // Outra variante de blend é outro pipeline (a identidade inclui o estado).
+    const auto normal = exporter.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
+        ShaderId::composite_layer_frag, SurfaceFormat::RGBA16F, true, BlendMode::Normal));
+    const auto add = exporter.pipeline(keys[2]);
+    AUREA_CHECK(normal.ok() && add.ok());
+    if (normal.ok() && add.ok()) AUREA_CHECK(b.pipeline(normal->id)->pipeline != b.pipeline(add->id)->pipeline);
+    // A prévia sai primeiro: o export continua com o objeto vivo.
+    preview.shutdown();
+    if (const auto c = exporter.pipeline(keys[1]); c.ok()) {
+        AUREA_CHECK(b.pipeline(c->id) && b.pipeline(c->id)->pipeline != VK_NULL_HANDLE);
+    }
+    exporter.shutdown();
+    b.wait_idle();
+    AUREA_CHECK_EQ(b.shared_shader_count(), baseShaders);
+    AUREA_CHECK_EQ(b.shared_pipeline_count(), basePipelines);
+    AUREA_CHECK_EQ(vk::Backend::validation_errors(), errors);
+}
 #endif
 
 #define AUREA_REQUIRE_GPU()                                            \

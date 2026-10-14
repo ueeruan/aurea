@@ -176,6 +176,27 @@ object ExitDiagnostics {
                 if (types.isNotEmpty()) appendLine("  ${codec.name}: ${types.joinToString()}")
             }
         }.onFailure { appendLine("  sondagem indisponível: ${it.javaClass.simpleName}") }
+        // O export tenta os de hardware, depois os de software (OpenH264/Kvazaar
+        // dentro do app e os do Android). O vivo V2026 rodava o app em 32 bits.
+        appendLine("Processo do app: ${if (android.os.Process.is64Bit()) "64" else "32"} bits")
+        appendLine("Codificadores de vídeo disponíveis (o export tenta hardware, depois software):")
+        runCatching {
+            MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+                .filter { it.isEncoder && (Build.VERSION.SDK_INT < 29 || !it.isAlias) }
+                .forEach { codec ->
+                    val types = codec.supportedTypes.filter { it.startsWith("video/") }
+                    if (types.isEmpty()) return@forEach
+                    val kind = when {
+                        Build.VERSION.SDK_INT < 29 -> "?"
+                        codec.isHardwareAccelerated -> "hardware"
+                        codec.isSoftwareOnly -> "software"
+                        else -> "?"
+                    }
+                    appendLine("  ${codec.name} [$kind]: ${types.joinToString()}")
+                }
+        }.onFailure { appendLine("  sondagem indisponível: ${it.javaClass.simpleName}") }
+        appendLine("  libopenh264 [software, no app]: video/avc")
+        appendLine("  libkvazaar [software, no app]: video/hevc")
         appendLine()
         if (Build.VERSION.SDK_INT < 30) {
             appendLine("O Android oferece o histórico de encerramentos a partir do Android 11.")

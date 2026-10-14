@@ -1288,7 +1288,11 @@ public:
     /// locked or nonvisual layers reject the whole selection before mutation.
     [[nodiscard]] Result<u64> group_and_mask(const u64* ids, u32 count, bool exclude,
                                            const char* name = nullptr) noexcept;
+    /// A MESMA regra de `group_and_mask`, sem mudar nada: as telas habilitam
+    /// "Agrupar e mascarar/excluir" por ela (≥ 2 camadas visuais destravadas).
+    [[nodiscard]] bool can_group_and_mask(const u64* ids, u32 count) noexcept;
 private:
+    [[nodiscard]] Status group_and_mask_admission_locked(const u64* ids, u32 count) const noexcept;
     [[nodiscard]] Result<u64> precompose_locked(const u64* ids, u32 count, const char* name,
                                                bool mask, bool exclude) noexcept;
 public:

@@ -15,6 +15,8 @@ void configure(Scene& s,LayerId id,f32 depth,u32 quality=1) {
     effect.params[1].constant=ParamValue::color(0,1,0,1);
     effect.params[2].constant=ParamValue::scalar(0);
     effect.params[3].constant=ParamValue::scalar(static_cast<f32>(quality));
+    // Estes testes medem a forma do volume: sem o reflexo do ambiente.
+    if(effect.params.size()>4)effect.params[4].constant=ParamValue::scalar(0);
 }
 }
 AUREA_TEST(RasterExtrudeGpu, FrontalCapsPreservePremultipliedColorAndTransparentHoles) {
@@ -150,5 +152,42 @@ AUREA_TEST(RasterExtrudeGpu, DegenerateScaleIsEmptyWithoutAnUnresolvedFrame) {
     raster_volume_test::configure(s,id,32);s.comp->layer(id)->transform.scale={0,1,1};
     const auto image=s.render();AUREA_CHECK_EQ(raster_volume_test::count_color(image,0),0u);
     AUREA_CHECK_EQ(raster_volume_test::count_color(image,1),0u);
+}
+// Reflexo do ambiente, como nos modelos 3D: um volume metálico deixa de ser a
+// cor lateral chapada; a instância salva antes do slot (4 parâmetros) sai
+// idêntica ao visual de antes.
+AUREA_TEST(RasterExtrudeGpu, EnvironmentReflectionTintsMetalAndLegacyInstancesStayUnchanged) {
+    AUREA_REQUIRE_GPU();
+    Scene s(192,144);
+    const LayerId id=s.image(uniform_image(64,48,255,0,0),96,72);
+    raster_volume_test::configure(s,id,40,1);
+    s.comp->layer(id)->transform.rotation.y=55;
+    const auto plain=s.render();
+    auto& fx=s.comp->layer(id)->effects.back();
+    AUREA_CHECK_EQ(fx.params.size(),7u);
+    fx.params[4].constant=ParamValue::scalar(1);
+    fx.params[5].constant=ParamValue::scalar(1);
+    fx.params[6].constant=ParamValue::scalar(.15f);
+    const auto metal=s.render();
+    f32 largest=0;u32 changed=0;
+    for(usize i=0;i<plain.px.size();i+=4) {
+        if(plain.px[i+3]<.999f)continue;
+        f32 d=0;for(u32 c=0;c<3;++c)d=std::max(d,std::abs(metal.px[i+c]-plain.px[i+c]));
+        largest=std::max(largest,d);changed+=d>.02f;
+    }
+    std::printf("    metal: maior diferenca %.4f, pixels mudados %u, paredes verdes %u -> %u\n",largest,changed,
+        raster_volume_test::count_color(plain,1),raster_volume_test::count_color(metal,1));
+    AUREA_CHECK(largest>.05f);AUREA_CHECK(changed>300);
+    for(const f32 v:metal.px)AUREA_CHECK(std::isfinite(v));
+    // Dielétrico (metal 0): a face continua com a cor da camada, só ganha brilho.
+    fx.params[5].constant=ParamValue::scalar(0);
+    const auto dielectric=s.render();
+    AUREA_CHECK(raster_volume_test::count_color(dielectric,0)>300);
+    // Projeto antigo: o slot não existe e o volume sai exatamente como antes.
+    fx.params.resize(4);
+    const auto legacy=s.render();
+    f32 legacyDiff=0;
+    for(usize i=0;i<plain.px.size();++i)legacyDiff=std::max(legacyDiff,std::abs(legacy.px[i]-plain.px[i]));
+    AUREA_CHECK(legacyDiff<1e-5f);
 }
 #endif

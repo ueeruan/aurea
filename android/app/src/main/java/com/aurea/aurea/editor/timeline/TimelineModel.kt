@@ -54,6 +54,8 @@ internal class RowModel(
      * Vazio sem painel focado — aí [instants] já tem todos.
      */
     val dimInstants: IntArray = NO_INSTANTS,
+    /** Máscara de recorte: recortada pela camada abaixo (indicador na pílula). */
+    val clipToBelow: Boolean = false,
 ) {
     /** Tem losango à vista, forte ou esmaecido (o trilho e o nome sobem). */
     val hasKeys: Boolean get() = instants.isNotEmpty() || dimInstants.isNotEmpty()
@@ -208,6 +210,7 @@ internal fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name
         instants = times.toIntArray(),
         keysAt = groups.toTypedArray(),
         line = l.trackId,
+        clipToBelow = l.clipToBelow,
     )
 }
 
@@ -285,7 +288,7 @@ private fun sharedRow(line: Int, segs: Array<RowModel>): RowModel {
         id = head.id, type = head.type, start = start, end = end, offset = 0,
         visible = visible, locked = locked, magnetic = magnetic, animated = animated,
         name = head.name, label = head.label, instants = IntArray(0), keysAt = emptyArray(),
-        line = line, shared = segs,
+        line = line, shared = segs, clipToBelow = head.clipToBelow,
     )
 }
 

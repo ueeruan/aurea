@@ -4370,4 +4370,8 @@
     <string name="fxui_a11y_swipe_delete">اسحب لليسار للحذف</string>
     <string name="fxui_stage_point">النقطة: %1$s</string>
     <string name="fxui_stage_point_hint">اسحب في المعاينة لتحريك النقطة</string>
+    <string name="editor_criar_mascara_recorte">إنشاء قناع قص</string>
+    <string name="editor_liberar_mascara_recorte">تحرير قناع القص</string>
+    <string name="editor_mascara_recorte_detalhe">تظهر الطبقة داخل الطبقة التي تحتها فقط</string>
+    <string name="editor_recortada_camada_abaixo">مقصوصة بالطبقة التي تحتها</string>
 </resources>

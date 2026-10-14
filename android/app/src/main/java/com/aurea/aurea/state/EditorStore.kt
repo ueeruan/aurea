@@ -2978,6 +2978,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (engine.setLayerLabel(layer, label)) refreshNow()
     }
 
+    /**
+     * Máscara de recorte ("Criar/Liberar máscara de recorte"): a regra mora no
+     * motor (elegibilidade e cadeias); aqui só pede e relê.
+     */
+    fun setLayerClipToBelow(layer: Long, on: Boolean) {
+        if (engine.setLayerClipToBelow(layer, on)) refreshNow()
+    }
+
     /** Solo: com alguma camada em solo, a prévia e o som só tocam as que estão. */
     fun setLayerSolo(layer: Long, on: Boolean) {
         if (!engine.setLayerSolo(layer, on)) return

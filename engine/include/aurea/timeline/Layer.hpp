@@ -721,6 +721,13 @@ struct Layer {
     /// A matte deixa de ser desenhada por conta própria enquanto é usada.
     LayerId   matteSource{};
     MatteMode matteMode = MatteMode::None;
+    /// MÁSCARA DE RECORTE ("Criar/Liberar máscara de recorte"): esta camada só
+    /// aparece onde a camada ABAIXO dela tem alfa. "Abaixo" é a anterior em
+    /// `Composition::order()` (a ordem de desenho), não a linha (`trackId`).
+    /// Camadas recortadas seguidas formam uma cadeia sobre a mesma base. As
+    /// regras que mantêm as cadeias coerentes moram em `enforce_clip_chains`
+    /// (Composition.hpp). Gravado na v48; projeto anterior abre desligado.
+    bool      clipToBelow = false;
 
     // --- Conteúdo ------------------------------------------------------------
     AssetId source{};              ///< vídeo, imagem, áudio ou modelo

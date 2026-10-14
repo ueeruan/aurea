@@ -2063,6 +2063,11 @@ AUREA_JNI jboolean AUREA_FN(nativeSetLayerLabel)(JNIEnv*, jclass, jlong handle, 
     return c && label >= 0 && c->engine.set_layer_label(static_cast<u64>(layer), static_cast<u32>(label)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerClipToBelow)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_clip_to_below(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetLayerSolo)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_layer_solo(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;

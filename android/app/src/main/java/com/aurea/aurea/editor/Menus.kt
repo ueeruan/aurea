@@ -216,6 +216,18 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
 
         if (visual) {
             MenuSection(stringResource(R.string.editor_grupo))
+            // Máscara de recorte: só quando a camada pode ser recortada pela de
+            // baixo (o motor decide: camada visual com base visual abaixo) ou já
+            // está recortada. Liberar solta também a cadeia logo acima.
+            if (row.clipToBelow || row.clipCandidate) {
+                MenuItemRow(
+                    CupertinoGlyph.ArrowDownRightSquare,
+                    stringResource(if (row.clipToBelow) R.string.editor_liberar_mascara_recorte else R.string.editor_criar_mascara_recorte),
+                    act { store.setLayerClipToBelow(id, !row.clipToBelow) },
+                    detail = stringResource(R.string.editor_mascara_recorte_detalhe),
+                    tag = "layer.clipMask",
+                )
+            }
             if (type != LayerType.Group) {
                 MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_converter_grupo), act { store.precompose(listOf(id)) })
             } else {

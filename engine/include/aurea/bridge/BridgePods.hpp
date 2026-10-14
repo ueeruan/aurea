@@ -95,6 +95,11 @@ inline constexpr u32 kLayerRowFlagCaptions = 1u << 12;
 /// Linha magnética: os cortes desta camada andam como faixa de montagem de
 /// vídeo (aparar e apagar puxam os vizinhos da MESMA linha).
 inline constexpr u32 kLayerRowFlagMagnetic = 1u << 13;
+/// Máscara de recorte: a camada só aparece onde a de baixo tem alfa.
+inline constexpr u32 kLayerRowFlagClipToBelow = 1u << 14;
+/// "Criar máscara de recorte" vale agora: camada visual, não recortada, com
+/// uma base visual (ou uma cadeia) logo abaixo na ordem de desenho.
+inline constexpr u32 kLayerRowFlagClipCandidate = 1u << 15;
 /// Etiqueta de cor (0 = nenhuma) nos bits 8..11.
 inline constexpr u32 kLayerRowLabelShift   = 8;
 inline constexpr u32 kLayerRowLabelMask    = 0xFu << kLayerRowLabelShift;

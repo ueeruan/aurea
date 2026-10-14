@@ -938,6 +938,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.boolv(l.modelEffects);
     // v47: preserve the camera's projection of 2D layers below it.
     w.boolv(l.camera.affectsLayersBelow);
+    // v48: máscara de recorte (recortada pela camada abaixo).
+    w.boolv(l.clipToBelow);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -967,6 +969,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
 //      grupo fechado para a câmera (o render de sempre).
 // v43: mostrar interior do objeto 3D (Model3DData::interior, um byte no fim
 //      da camada). Antes dela: automático.
+// v48: máscara de recorte da camada (Layer::clipToBelow, um bool no fim da
+//      camada). Antes dela: desligada — nenhuma camada recortada.
 // v47: CameraData::affectsLayersBelow, one bool at the end of each layer.
 //      Earlier timelines retain the original 3D-only camera behavior.
 // v46: efeitos de imagem no modelo 3D valem (Layer::modelEffects, um bool no
@@ -1547,6 +1551,8 @@ void read_layer(ByteReader& r, Layer& l) {
     // assim até a pessoa mexer nos efeitos da camada.
     l.modelEffects = g_readingTimelineVersion >= 46 ? r.boolv() : false;
     l.camera.affectsLayersBelow = g_readingTimelineVersion >= 47 ? r.boolv() : false;
+    // Projeto anterior à v48: nenhuma camada recortada (abre como foi feito).
+    l.clipToBelow = g_readingTimelineVersion >= 48 ? r.boolv() : false;
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap
@@ -2131,6 +2137,9 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
             else env.backgroundEnd = FrameIndex{std::max(env.backgroundStart.value, env.backgroundEnd.value)};
         }
         c->rebuild_draw_order();
+        // Máscara de recorte de um arquivo mexido à mão (ou de versão futura):
+        // só as regras de validade (fundo, elegibilidade, base).
+        (void)enforce_clip_chains(*c, nullptr);
     }
 
     // Pré-composições apontam para a composição pelo id do ARQUIVO: com uma

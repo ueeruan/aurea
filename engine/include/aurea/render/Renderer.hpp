@@ -257,6 +257,13 @@ struct RenderLayer {
     i32  matteIndex = -1;
     /// Usada como matte por outra camada: não desenha por conta própria.
     bool matteOnly = false;
+    /// MÁSCARA DE RECORTE neste instante: id (com sal) da base que recorta
+    /// esta camada (0 = não recortada). A base é a camada de baixo na pilha
+    /// das que existem no instante (ver `Layer::clipToBelow`).
+    u64  clipBase = 0;
+    /// Esta camada é a base de recortadas neste instante: ela e as de cima
+    /// viram um grupo isolado, composto na cena com a mistura dela.
+    bool clipParent = false;
     /// Camada de ajuste: 0 = vale para tudo abaixo, 1 = só para a camada logo
     /// abaixo (um grupo conta como uma camada), 2 = só as de `adjustTargets`.
     u8   adjustScope = 0;
@@ -758,12 +765,18 @@ private:
         u32       adjustPlan = kInvalidIndex;
         /// Id (com sal) da camada que gerou o desenho (ajuste de escopo 2).
         u64       layer = 0;
+        /// Recortada (máscara de recorte): entra no grupo da base como
+        /// SOURCE-ATOP — fonte·α_destino + destino·(1 − α_fonte), com a
+        /// mistura dela; o alfa do grupo continua o da base.
+        bool      clipAtop = false;
     };
     /// Os desenhos da pilha → alvo: lotes de blend de hardware (Normal, Add)
     /// no mesmo alvo; modo que lê o fundo ou camada de ajuste = ping-pong.
+    /// `isolated`: grupo de recorte — monta sobre transparente (sem a cor de
+    /// fundo da composição).
     void composite_draws(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc,
                          const std::vector<CompositeDraw>& draws, EffectBuildContext& ctx,
-                         u32 firstDraw = 0) noexcept;
+                         u32 firstDraw = 0, bool isolated = false) noexcept;
     /// Camada de ajuste: a entrada dos efeitos (o fundo de agora, `in`) passa
     /// pelos efeitos de TEMPO (`RenderLayer::AdjustTime`): instante trocado,
     /// mistura/optical flow, RGB no tempo, eco, passado (`in.history`).

@@ -2131,10 +2131,35 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     // Escopo 1 de uma camada de ajuste: onde começa o último desenho da pilha
     // (um grupo 3D conta como um). ~0u = nada que ela possa ajustar.
     u32 lastDrawOrder = ~0u;
+    // MÁSCARA DE RECORTE: a base de cada recortada NESTE instante. A pilha é a
+    // das camadas que existem no tempo (fora do trecho dela a camada não conta):
+    // o 2º pedaço de uma base dividida recorta as de cima no trecho dele, o 1º
+    // no dele. Uma base escondida (olho, opacidade 0, solo) continua sendo a
+    // base — e não desenha nada, então as recortadas somem junto (como no
+    // Photoshop). Recortada sem base válida embaixo: não aparece. Contado no
+    // próprio laço (nenhuma alocação por quadro).
+    i32 clipBaseIndex = -1;
+    bool clipBaseOk = false;
     for (u32 i = 0; i < n && i < stackLimit; ++i) {
         const LayerId id = order.at(i);
         const Layer* l = comp.layer(id);
         if (!l || !l->contains_time(time)) continue;
+        u64 clipBaseOf = 0;          // id com sal da base; 0 = não recortada
+        bool clipHidden = false;     // recortada sem base válida embaixo
+        bool clipHasChild = false;   // a próxima camada no instante é recortada por esta
+        if (l->clipToBelow && can_be_clip_child(*l)) {
+            if (clipBaseIndex >= 0 && clipBaseOk) clipBaseOf = render_id(order.at(static_cast<u32>(clipBaseIndex))).pack();
+            else clipHidden = true;
+        } else {
+            clipBaseIndex = static_cast<i32>(i);
+            clipBaseOk = can_be_clip_base(*l);
+            for (u32 j = i + 1; clipBaseOk && j < n; ++j) {
+                const Layer* above = comp.layer(order.at(j));
+                if (!above || !above->contains_time(time)) continue;
+                clipHasChild = above->clipToBelow && can_be_clip_child(*above);
+                break;
+            }
+        }
         if (nestSalt_ && id.index > 0xFFFFu) { mark_incomplete(__FILE__, __LINE__); continue; }
         const bool isMatte = std::find(mattes.begin(), mattes.end(), id.pack()) != mattes.end();
         const bool isInput = std::find(inputLayers.begin(), inputLayers.end(), id.pack()) != inputLayers.end();
@@ -2148,6 +2173,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         if (l->guide && settings.finalQuality) continue;
         if (anySolo && !l->solo && !isMatte && !isInput) continue;
         const bool inputOnly = isInput && (!l->visible || (anySolo && !l->solo) || outsideStack);
+        if (clipHidden && !isMatte && !isInput) continue;   // recortada sem base: nada aparece
         // POSTERIZAR TEMPO (Fase 7.3 §26): o tempo da camada é travado numa
         // taxa menor ANTES de tudo. Trava o TEMPO DA TIMELINE, não o "tempo
         // local": quem decide o quadro do vídeo é `source_frame(timelineTime)`,
@@ -2199,6 +2225,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const LayerId rid = render_id(id);
         RenderLayer rl;
         rl.matteOnly = isMatte || inputOnly;
+        rl.clipBase = clipBaseOf;
+        rl.clipParent = clipHasChild;
+        // No grupo de recorte a camada é um desenho 2D próprio (como a matte):
+        // não vira plano da cena 3D nem divide a cena de outro modelo.
+        const bool clipInvolved = rl.clipBase != 0 || rl.clipParent;
         if (l->matteMode != MatteMode::None && l->matteSource.valid() && l->matteSource.pack() != id.pack()) {
             rl.matteMode = l->matteMode;
             rl.matteId = render_id(l->matteSource).pack();
@@ -2617,7 +2648,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     sceneFx = !out.plans[used].empty() || out.plans[used].hasFold;
                     if (!sceneFx) out.plans[used].clear();
                 }
-                if (groupOpen && !out.scenes.empty() && !sceneFx) {
+                if (groupOpen && !out.scenes.empty() && !sceneFx && !clipInvolved) {
                     out.scenes.back().instances.push_back(std::move(inst));
                     continue;   // entra no grupo aberto; nenhuma layer nova na pilha
                 }
@@ -2631,7 +2662,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 rl.texelScale = previewFactor;
                 // Com efeitos a cena é só desta camada: o 3D seguinte abre outra
                 // (os efeitos não podem pegar os vizinhos).
-                groupOpen = !sceneFx;
+                groupOpen = !sceneFx && !clipInvolved;
                 break;
             }
             case LayerKind::Camera:
@@ -3929,7 +3960,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         const bool particles = rl.source.kind == LayerSource::Kind::Particles;
         const bool asPlane = inScene3d && rl.temporal.empty() && rl.blend == BlendMode::Normal
                           && (!particles || rl.particle.inScene) && !out.plans[used].hasFold
-                          && rl.matteMode == MatteMode::None && !rl.matteOnly;
+                          && rl.matteMode == MatteMode::None && !rl.matteOnly && !clipInvolved;
         if (asPlane) {
             if (!groupOpen || out.scenes.empty()) {
                 out.scenes.emplace_back();
@@ -6364,9 +6395,50 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             return layer.source.kind == LayerSource::Kind::Adjustment || layer.blend != BlendMode::Normal;
         });
     u32 streamedDraws = 0;
+    auto push_draw = [&](const CompositeDraw& d) {
+        draws.push_back(d);
+        if (streamNormal) {
+            composite_draws(snap, comp, compDesc, draws, ctx, streamedDraws);
+            streamedDraws = static_cast<u32>(draws.size());
+        }
+    };
+    // MÁSCARA DE RECORTE: a base abre um grupo; as recortadas seguidas entram
+    // nele como source-atop (cada uma com a própria mistura e opacidade). O
+    // grupo monta num alvo próprio, transparente, e entra na cena com a
+    // mistura e a opacidade da base. Sem nenhuma recortada desenhada no
+    // quadro, a base vai sozinha, exatamente como sempre.
+    u64 clipOpen = 0;                         // id da base do grupo aberto
+    CompositeDraw clipBaseDraw;
+    std::vector<CompositeDraw> clipDraws;
+    auto close_clip = [&] {
+        if (!clipOpen) return;
+        clipOpen = 0;
+        if (clipDraws.size() <= 1) {
+            clipDraws.clear();
+            push_draw(clipBaseDraw);
+            return;
+        }
+        TextureDesc gd = compDesc;
+        gd.transferSrc = false;
+        gd.sampled = true;
+        gd.renderTarget = true;
+        const FGTexture group = graph_.create_texture("recorte-grupo", gd);
+        composite_draws(snap, group, compDesc, clipDraws, ctx, 0, true);
+        clipDraws.clear();
+        CompositeDraw g;
+        g.texture = group;
+        g.region = Rect{0.0f, 0.0f, compW, compH};
+        g.compFromLayer = Mat4::identity();
+        g.opacity = clipBaseDraw.opacity;
+        g.blend = clipBaseDraw.blend;
+        g.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
+        g.layer = clipBaseDraw.layer;
+        push_draw(g);
+    };
     for (u32 i = 0; i < snap.layers.size(); ++i) {
         const RenderLayer& layer = snap.layers[i];
         if (layer.planeGroup >= 0 || layer.matteOnly || layer.particle.inScene) continue;   // na cena 3D / só recorta
+        if (!layer.clipBase) close_clip();   // fora da cadeia: o grupo aberto termina aqui
         CompositeDraw draw;
         if (layer.source.kind == LayerSource::Kind::Adjustment && (layer.adjustScope == 1 || layer.adjustScope == 2)) {
             // Ajuste SÓ em camadas escolhidas: a logo abaixo (escopo 1; um
@@ -6470,12 +6542,26 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             continue;
         }
         draw.layer = layer.id.pack();
-        draws.push_back(draw);
-        if (streamNormal) {
-            composite_draws(snap, comp, compDesc, draws, ctx, streamedDraws);
-            streamedDraws = static_cast<u32>(draws.size());
+        if (layer.clipBase) {
+            // A base não desenhou neste quadro (escondida, fora da tela, matte):
+            // a recortada some com ela.
+            if (layer.clipBase != clipOpen) continue;
+            draw.clipAtop = true;
+            clipDraws.push_back(draw);
+            continue;
         }
+        if (layer.clipParent) {
+            clipOpen = draw.layer;
+            clipBaseDraw = draw;
+            CompositeDraw inner = draw;   // dentro do grupo: a base inteira, sem a mistura dela
+            inner.opacity = 1.0f;
+            inner.blend = BlendMode::Normal;
+            clipDraws.assign(1, inner);
+            continue;
+        }
+        push_draw(draw);
     }
+    close_clip();
 
     if (!streamedDraws || streamedDraws < draws.size())
         composite_draws(snap, comp, compDesc, draws, ctx, streamedDraws);
@@ -6497,7 +6583,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
 // =============================================================================
 void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc,
                                const std::vector<CompositeDraw>& draws, EffectBuildContext& ctx,
-                               u32 firstDraw) noexcept {
+                               u32 firstDraw, bool isolated) noexcept {
     auto pNormal = shaders_.pipeline(PipelineKey::graphics(
         ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
     auto pAdd = shaders_.pipeline(PipelineKey::graphics(
@@ -6505,7 +6591,8 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
     const f32 compW = static_cast<f32>(snap.compWidth), compH = static_cast<f32>(snap.compHeight);
     const u32 count = static_cast<u32>(draws.size());
     auto hardware = [](const CompositeDraw& d) noexcept {
-        return d.adjustPlan == kInvalidIndex && d.blend == BlendMode::Normal;
+        // Recortada: source-atop lê o alfa do destino (passe com blend.frag).
+        return d.adjustPlan == kInvalidIndex && d.blend == BlendMode::Normal && !d.clipAtop;
     };
     u32 lastRead = kInvalidIndex;   // último desenho que lê o fundo
     for (u32 i = firstDraw; i < count; ++i) if (!hardware(draws[i])) lastRead = i;
@@ -6520,11 +6607,12 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
     // Máscara/Excluir (AM) recortam as CAMADAS abaixo, não a cor de fundo da
     // composição: a pilha monta sobre transparente e o fundo entra por baixo
     // num último passe (fundo + resultado "sobre" ele).
-    const bool bgUnder = readsBackdrop && pNormal.ok() && firstDraw == 0 && snap.background.w > 0.0f
+    const bool bgUnder = !isolated && readsBackdrop && pNormal.ok() && firstDraw == 0 && snap.background.w > 0.0f
         && std::any_of(draws.begin() + firstDraw, draws.end(), [](const CompositeDraw& d) {
                return d.adjustPlan == kInvalidIndex && (d.blend == BlendMode::Mask || d.blend == BlendMode::Exclude);
            });
-    const Vec4 stackClear = bgUnder ? Vec4{0.0f, 0.0f, 0.0f, 0.0f} : snap.background;
+    // Grupo de recorte: isolado sobre transparente (o fundo entra com a cena).
+    const Vec4 stackClear = bgUnder || isolated ? Vec4{0.0f, 0.0f, 0.0f, 0.0f} : snap.background;
     TextureDesc pingDesc = compDesc;
     pingDesc.transferSrc = false;
     pingDesc.sampled = true;
@@ -6556,6 +6644,8 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
                 // ainda não existe: Add cai na soma de hardware, o resto no Normal.
                 // Máscara/Excluir sem o pipeline: não pinta (a camada nunca aparece).
                 if (d.blend == BlendMode::Mask || d.blend == BlendMode::Exclude) continue;
+                // Recortada sem o pipeline: não pinta (por cima sairia sem recorte).
+                if (d.clipAtop) continue;
                 const PipelineHandle p = d.blend == BlendMode::Add && cap.add.valid() ? cap.add : cap.normal;
                 if (!p.valid()) continue;
                 if (!(p == bound)) { pc.cmds.bind_pipeline(p); bound = p; }
@@ -6581,6 +6671,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         Vec4 region{};
         f32 opacity = 1.0f, mode = 0.0f, compW = 0.0f, compH = 0.0f;
         f32 masked = 0.0f;   ///< ajuste com máscara: fora dela o fundo fica
+        f32 atop = 0.0f;     ///< recortada: source-atop (alfa do grupo = o da base)
         bool drawSrc = false;
         bool copyBackdrop = true;   ///< false = BlendMode::Mask: fora da camada fica transparente
     };
@@ -6657,6 +6748,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             // Máscara (AM): só sobra o fundo sob o alfa da camada — o que
             // está fora do quad dela some, então o fundo não é copiado.
             rc->copyBackdrop = d.blend != BlendMode::Mask;
+            rc->atop = d.clipAtop ? 1.0f : 0.0f;
         }
         const FGTexture next = i == lastRead && !bgUnder ? comp : graph_.create_texture("composicao-mistura", pingDesc);
         const u32 pass = graph_.add_raster_pass("mistura", PassStage::Composite, next, LoadOp::Clear, Vec4{0, 0, 0, 0},
@@ -6680,7 +6772,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             push.clipFromLayer = clip * rc->compFromLayer;
             push.region = rc->region;
             push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};   // também sem a cópia do fundo (Máscara)
-            push.params = Vec4{rc->opacity, rc->mode, rc->masked, 0.0f};
+            push.params = Vec4{rc->opacity, rc->mode, rc->masked, rc->atop};
             pc.cmds.bind_texture(0, pc.texture(rc->src), SamplerHandle{rc->srcSampler});
             pc.cmds.bind_texture(1, pc.texture(rc->backdrop), SamplerHandle{rc->copySampler});
             pc.cmds.push_constants(&push, sizeof(push));

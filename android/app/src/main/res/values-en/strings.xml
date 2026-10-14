@@ -4379,4 +4379,8 @@ to edit the curve.</string>
     <string name="fxui_a11y_swipe_delete">Swipe left to delete</string>
     <string name="fxui_stage_point">Point: %1$s</string>
     <string name="fxui_stage_point_hint">Drag on the preview to move the point</string>
+    <string name="editor_criar_mascara_recorte">Create clipping mask</string>
+    <string name="editor_liberar_mascara_recorte">Release clipping mask</string>
+    <string name="editor_mascara_recorte_detalhe">The layer only shows inside the layer below</string>
+    <string name="editor_recortada_camada_abaixo">Clipped by the layer below</string>
 </resources>

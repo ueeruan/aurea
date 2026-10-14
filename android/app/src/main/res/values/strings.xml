@@ -4412,4 +4412,8 @@
     <string name="fxui_a11y_swipe_delete">Deslize para a esquerda para apagar</string>
     <string name="fxui_stage_point">Ponto: %1$s</string>
     <string name="fxui_stage_point_hint">Arraste no preview para mover o ponto</string>
+    <string name="editor_criar_mascara_recorte">Criar máscara de recorte</string>
+    <string name="editor_liberar_mascara_recorte">Liberar máscara de recorte</string>
+    <string name="editor_mascara_recorte_detalhe">A camada só aparece dentro da camada abaixo</string>
+    <string name="editor_recortada_camada_abaixo">Recortada pela camada abaixo</string>
 </resources>

@@ -4332,4 +4332,8 @@ para editar la curva.</string>
     <string name="fxui_a11y_swipe_delete">Desliza a la izquierda para eliminar</string>
     <string name="fxui_stage_point">Punto: %1$s</string>
     <string name="fxui_stage_point_hint">Arrastra en la vista previa para mover el punto</string>
+    <string name="editor_criar_mascara_recorte">Crear máscara de recorte</string>
+    <string name="editor_liberar_mascara_recorte">Liberar máscara de recorte</string>
+    <string name="editor_mascara_recorte_detalhe">La capa solo aparece dentro de la capa de abajo</string>
+    <string name="editor_recortada_camada_abaixo">Recortada por la capa de abajo</string>
 </resources>

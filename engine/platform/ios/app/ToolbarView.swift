@@ -806,6 +806,14 @@ private struct ShellMenuRow: View {
             }.padding(.horizontal, 14).padding(.vertical, 4)
             if row.kind != 3 {
                 ShellMenuSection("editor_grupo")
+                // Máscara de recorte: só quando a camada pode ser recortada pela de
+                // baixo (o motor decide: camada visual com base visual abaixo) ou já
+                // está recortada. Liberar solta também a cadeia logo acima.
+                if row.clipToBelow || row.clipCandidate {
+                    ShellMenuRow(CupertinoGlyph.ArrowDownRightSquare, row.clipToBelow ? "editor_liberar_mascara_recorte" : "editor_criar_mascara_recorte",
+                                 detail: "editor_mascara_recorte_detalhe") { act { model.setLayerClipToBelow(row.id, !row.clipToBelow) } }
+                        .accessibilityIdentifier("layer.clipMask")
+                }
                 if row.kind == 12 {
                     ShellMenuRow(CupertinoGlyph.ArrowDownRightSquare, "editor_entrar_grupo") { act { model.openGroup(row.id) } }
                     ShellMenuRow(ShellGlyph.SquareSplit2x2, "editor_desagrupar") { act { model.ungroup(row.id) } }

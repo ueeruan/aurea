@@ -20,6 +20,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace aurea {
@@ -378,6 +379,85 @@ private:
     u64 revision_       = 1;
     u64 formatRevision_ = 1;
     u32 nestingDepth_   = 0;
+};
+
+// =============================================================================
+// Máscara de recorte por camada (`Layer::clipToBelow`)
+//
+// Uma camada recortada só aparece onde a camada de baixo (a anterior em
+// `order()`) tem alfa. A base mais as recortadas seguidas logo acima dela são
+// uma CADEIA. Só camadas visuais entram: vídeo, imagem, texto, forma, modelo
+// 3D, partículas e grupo. Áudio, câmera, luz, null e ajuste não recortam nem
+// servem de base.
+// =============================================================================
+
+/// Pode ser recortada pela camada de baixo?
+[[nodiscard]] bool can_be_clip_child(const Layer& l) noexcept;
+/// Pode servir de base de uma cadeia de recorte?
+[[nodiscard]] bool can_be_clip_base(const Layer& l) noexcept;
+
+/// Índice (em `order()`) da base da cadeia da camada recortada em `index`, ou
+/// −1 se ela não está recortada. Pelo DADO (ordem), sem olhar o tempo.
+[[nodiscard]] i32 clip_base_index(const Composition& comp, u32 index) noexcept;
+
+/// A camada em `index` pode ganhar "Criar máscara de recorte" agora: é visual,
+/// não está recortada e a de baixo é base (ou já faz parte de uma cadeia).
+[[nodiscard]] bool can_create_clip(const Composition& comp, u32 index) noexcept;
+
+/// Cadeias de recorte ANTES de uma edição estrutural: quem recortava quem.
+/// `enforce_clip_chains` compara com o depois para saber o que mudou.
+struct ClipChainState {
+    struct Entry {
+        u64 base = 0;    ///< base da cadeia (0 = não recortada)
+        u32 index = 0;   ///< posição em `order()` antes da edição
+    };
+    std::vector<std::pair<u64, Entry>> entries;            ///< por id empacotado (ordenado)
+    /// Cópias feitas pela edição (duplicar, dividir): a cópia conta como o
+    /// original nas comparações — o 2º pedaço de uma base continua base.
+    std::vector<std::pair<u64, u64>> aliases;               ///< cópia → original
+    /// Quem a edição andou (reordenar, mudar de fileira). Vazio = deduz pela
+    /// ordem (as que saíram da maior sequência que manteve a ordem de antes);
+    /// a dica desfaz o empate de um passo só (trocar duas vizinhas).
+    std::vector<u64> moved;
+
+    void alias(LayerId copy, LayerId source);
+    [[nodiscard]] u64 key(u64 id) const noexcept;
+    [[nodiscard]] const Entry* find(u64 id) const noexcept;        ///< com as cópias
+    [[nodiscard]] const Entry* find_exact(u64 id) const noexcept;  ///< só a própria
+};
+[[nodiscard]] ClipChainState capture_clip_chains(const Composition& comp);
+
+/// Regras que mantêm as cadeias coerentes. Rodar depois de TODA edição
+/// estrutural (reordenar, mudar de linha, apagar, duplicar, dividir, colar,
+/// agrupar, desagrupar), com o estado de antes:
+///
+///  - a camada no fundo da pilha não pode estar recortada (vira a base);
+///  - uma base que não pode ser base faz a cadeia acima perder o recorte;
+///  - uma recortada que saiu de perto das outras recortadas (ou cuja base
+///    andou para longe) perde o recorte; ao lado de uma cadeia intacta, entra
+///    nela. Base APAGADA (ou levada para um grupo): a cadeia recorta pela
+///    camada que ficou embaixo — dividir e apagar um pedaço da base não solta;
+///  - uma camada normal que entrou no MEIO de uma cadeia vira parte dela.
+///
+/// Sem `before` só valem as regras de validade (fundo, elegibilidade, base).
+/// Devolve quantas camadas mudaram.
+u32 enforce_clip_chains(Composition& comp, const ClipChainState* before) noexcept;
+
+/// Edição estrutural numa composição: guarda as cadeias de antes e, ao sair do
+/// escopo (depois da edição, ainda com o lock do modelo), aplica as regras.
+class ClipChainEdit {
+public:
+    explicit ClipChainEdit(Composition* comp) : comp_(comp) { if (comp_) before_ = capture_clip_chains(*comp_); }
+    ~ClipChainEdit() { if (comp_) (void)enforce_clip_chains(*comp_, &before_); }
+    ClipChainEdit(const ClipChainEdit&) = delete;
+    ClipChainEdit& operator=(const ClipChainEdit&) = delete;
+    /// `copy` nasceu de `source` nesta edição (duplicar, dividir).
+    void alias(LayerId copy, LayerId source) { before_.alias(copy, source); }
+    /// `id` é a camada que esta edição anda na pilha.
+    void moved(LayerId id) { if (id.valid()) before_.moved.push_back(id.pack()); }
+private:
+    Composition* comp_ = nullptr;
+    ClipChainState before_;
 };
 
 } // namespace aurea

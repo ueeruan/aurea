@@ -2236,6 +2236,7 @@ Result<u64> Engine::freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcep
     holdFrames = std::max<i64>(1, holdFrames);
     history_.before_mutation(*comp, project_->timeline().current(), "congelar quadro");
     bump_model_revision_locked();
+    ClipChainEdit clipChains(comp);
 
     // Quadro exato da fonte no cabeçote (antes de mexer em qualquer coisa).
     const i64 srcFrame = static_cast<i64>(std::floor(l->source_frame(FrameIndex{frame}) + 1e-6));
@@ -2260,8 +2261,10 @@ Result<u64> Engine::freeze_frame(u64 layerId, i64 frame, i64 holdFrames) noexcep
         a->start = FrameIndex{a->start.value + holdFrames};
         a->end = FrameIndex{a->end.value + holdFrames};
     }
+    if (after != id) clipChains.alias(after, id);
     // 2) O quadro parado, no lugar.
     const LayerId hold = comp->duplicate_layer(id, FrameIndex{frame});
+    clipChains.alias(hold, id);
     Layer* h = comp->layer(hold);
     if (!h) return Status{Errc::OutOfMemory, "camada nao criada"};
     h->name = (srcName.empty() ? std::string("Video") : srcName) + " (congelado)";
@@ -5565,6 +5568,8 @@ bool Engine::set_layer_adjustment(u64 layerId, bool on) noexcept {
     history_.before_mutation(*comp, project_->timeline().current(), on ? "camada de ajuste" : "desligar camada de ajuste");
     bump_model_revision_locked();
     l->adjustment = on;
+    // Camada de ajuste não recorta nem serve de base: a cadeia acima solta.
+    (void)enforce_clip_chains(*comp, nullptr);
     project_->mark_dirty();
     request_render();
     return true;
@@ -5596,6 +5601,36 @@ bool Engine::set_layer_label(u64 layerId, u32 label) noexcept {
     l->label = static_cast<u8>(label);
     project_->mark_dirty();
     return true;   // só organização: nenhum pixel muda
+}
+
+bool Engine::set_layer_clip_to_below(u64 layerId, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const LayerId id = LayerId::unpack(layerId);
+    Layer* l = comp ? comp->layer(id) : nullptr;
+    if (!l) return false;
+    if (l->clipToBelow == on) return true;
+    const i32 index = comp->z_index_of(id);
+    if (index < 0 || (on && !can_create_clip(*comp, static_cast<u32>(index)))) return false;
+    history_.before_mutation(*comp, project_->timeline().current(),
+                             on ? "criar máscara de recorte" : "liberar máscara de recorte");
+    bump_model_revision_locked();
+    l->clipToBelow = on;
+    if (!on) {
+        // Liberar uma camada solta também a cadeia recortada logo acima dela
+        // (senão elas passariam a recortar pela que acabou de sair).
+        const auto& order = comp->order();
+        for (u32 i = static_cast<u32>(index) + 1; i < order.size(); ++i) {
+            Layer* above = comp->layer(order.at(i));
+            if (!above || !above->clipToBelow) break;
+            above->clipToBelow = false;
+        }
+    }
+    (void)enforce_clip_chains(*comp, nullptr);
+    comp->touch();
+    project_->mark_dirty();
+    request_render();
+    return true;
 }
 
 bool Engine::set_layer_solo(u64 layerId, bool on) noexcept {
@@ -6470,6 +6505,7 @@ Result<u64> Engine::precompose_locked(const u64* ids, u32 count, const char* nam
     Composition* child = tl.composition(cid);
     comp = tl.composition(parentId);   // a criação pode ter realocado
     if (!child || !comp) return Status{Errc::OutOfMemory, "composicao nao criada"};
+    ClipChainEdit clipChains(comp);
     child->set_duration(comp->duration());
     child->set_transparent_background(true);
     child->set_nesting_depth(comp->nesting_depth() + 1);
@@ -6546,6 +6582,8 @@ Result<u64> Engine::precompose_locked(const u64* ids, u32 count, const char* nam
         dst->parent = np;
     }
     child->rebuild_draw_order();
+    // Dentro do grupo: uma recortada que entrou sem a base fica no fundo e solta.
+    (void)enforce_clip_chains(*child, nullptr);
     for (LayerId id : moving) {
         media_.close_layer(id);
         comp->remove_layer(id);
@@ -6633,6 +6671,7 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
     }
     history_.before_mutation(*comp, parentId, "desagrupar");
     bump_model_revision_locked();
+    ClipChainEdit clipChains(comp);
     // Transform do grupo: identidade = direto; senão um Nulo com o transform
     // (e keyframes) da camada vira o pai das raízes.
     bool identity = !P->tracks.has_animation() && !P->parent.valid();
@@ -6911,6 +6950,7 @@ u32 Engine::paste_layers(i64 frame) noexcept {
     restore_clipboard_media_locked(clipboard_.layerMedia, copied);
     // Importing nested compositions may relocate the destination pool.
     comp = current_composition();
+    ClipChainEdit clipChains(comp);   // recortada colada sem a base perde o recorte
     const i64 delta = std::max<i64>(0, frame) - static_cast<i64>(std::llround(clipboard_.layersAnchor * fpsScale));
     std::vector<std::pair<u64, LayerId>> made;
     std::vector<std::pair<u32, u32>> tracks;   // (linha no recorte, linha nova aqui)
@@ -7765,6 +7805,7 @@ bool Engine::ripple_delete(const u64* ids, u32 count) noexcept {
     const bool closeAll = tracks.empty();
     history_.before_mutation(*comp, project_->timeline().current(), "excluir e fechar o espaco");
     bump_model_revision_locked();
+    ClipChainEdit clipChains(comp);
     for (u32 i = 0; i < count; ++i) {
         const LayerId id = LayerId::unpack(ids[i]);
         const Layer* layer = comp->layer(id);
@@ -8071,6 +8112,7 @@ bool Engine::reorder_clip(u64 layerId, i64 targetFrame) noexcept {
 
     history_.before_mutation(*comp, project_->timeline().current(), "reordenar a linha");
     bump_model_revision_locked();
+    ClipChainEdit clipChains(comp);
     const LayerId id = LayerId::unpack(layerId);
     // 1. Tira o trecho da fita: o buraco que ele deixou fecha sozinho.
     comp->shift_track(FrameIndex{start + length}, -length, track, id);
@@ -8168,6 +8210,8 @@ bool Engine::move_layer_to_row(u64 layerId, u64 anchorId, i32 mode) noexcept {
 
     history_.before_mutation(*comp, project_->timeline().current(), "mover para outra fileira");
     bump_model_revision_locked();
+    ClipChainEdit clipChains(comp);   // a fileira muda a ordem de desenho: as cadeias de recorte também
+    clipChains.moved(id);
     layer = comp->layer(id);
     if (!layer) return false;
     const u32 oldTrack = layer->trackId;
@@ -8220,6 +8264,7 @@ bool Engine::trim_composition(i64 frame) noexcept {
     if (!comp || frame <= 0 || frame >= comp->duration().value) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "aparar o projeto");
     bump_model_revision_locked();
+    ClipChainEdit clipChains(comp);
     std::vector<LayerId> gone;
     comp->layers().for_each([&](LayerId id, Layer& l) {
         if (l.start.value >= frame) gone.push_back(id);
@@ -11938,6 +11983,8 @@ u32 Engine::query_layers(bridge::LayerRow* out, u32 capacity, char* outNameBlob,
         if (l->guide)   flags |= bridge::kLayerRowFlagGuide;
         if (!l->captions.empty()) flags |= bridge::kLayerRowFlagCaptions;
         if (l->magneticTrack) flags |= bridge::kLayerRowFlagMagnetic;
+        if (l->clipToBelow) flags |= bridge::kLayerRowFlagClipToBelow;
+        if (can_create_clip(*comp, n - 1 - i)) flags |= bridge::kLayerRowFlagClipCandidate;
         flags |= (static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask;
         row.flags = flags;
         row.parentIndex = kInvalidIndex;
@@ -12409,7 +12456,10 @@ bool Engine::fill_layer_detail_locked(u64 layerId, bridge::LayerDetailPOD& out) 
               | (l->threeD ? bridge::kLayerRowFlagThreeD : 0u)
               | (l->captions.empty() ? 0u : bridge::kLayerRowFlagCaptions)
               | (l->magneticTrack ? bridge::kLayerRowFlagMagnetic : 0u)
+              | (l->clipToBelow ? bridge::kLayerRowFlagClipToBelow : 0u)
               | ((static_cast<u32>(l->label) << bridge::kLayerRowLabelShift) & bridge::kLayerRowLabelMask);
+    if (const i32 zi = comp->z_index_of(LayerId::unpack(layerId)); zi >= 0 && can_create_clip(*comp, static_cast<u32>(zi)))
+        out.flags |= bridge::kLayerRowFlagClipCandidate;
     out.startFrame = static_cast<i32>(l->start.value);
     out.endFrame = static_cast<i32>(l->end.value);
     out.offsetFrames = static_cast<i32>(l->offset.value);
@@ -15229,6 +15279,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!comp) return Errc::InvalidState;
             const Layer* dead = need_layer(cmd.layer_ref.layer);
             if (!dead) return Errc::NotFound;
+            ClipChainEdit clipChains(comp);   // apagar a base solta a cadeia de recorte
             // Null deletion removes the rig's influence without rewriting the
             // children's authored transforms. Other parent deletion compensates
             // world motion. Both operations remain one undo step.
@@ -15280,8 +15331,10 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             }
             // A cópia entra LOGO ACIMA do original na ordem do Core — e é essa
             // ordem que a composição desenha (teste de regressão em test_engine).
+            ClipChainEdit clipChains(comp);
             const LayerId id = comp->duplicate_layer(cmd.layer_ref.layer, timeline.playhead());
             if (!id.valid()) return Errc::OutOfMemory;
+            clipChains.alias(id, cmd.layer_ref.layer);   // a cópia de uma base continua base
             if (groupCopy.valid()) comp->layer(id)->nested.composition = groupCopy;
             // The next gesture belongs to the copy. Update selection with creation,
             // before either native UI has had time to refresh its layer snapshot.
@@ -15294,6 +15347,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
 
         case CommandType::LayerReorder: {
             if (!comp) return Errc::InvalidState;
+            ClipChainEdit clipChains(comp);
+            clipChains.moved(cmd.layer_reorder.layer);
             if (!comp->reorder_layer(cmd.layer_reorder.layer, cmd.layer_reorder.newIndex)) return Errc::OutOfRange;
             return OkStatus;
         }
@@ -15358,8 +15413,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const FrameIndex at = cmd.layer_split.at;
             if (at.value <= l->start.value || at.value >= l->end.value) return Errc::OutOfRange;
             const FrameIndex originalStart = l->start, originalEnd = l->end, originalOffset = l->offset;
+            ClipChainEdit clipChains(comp);
             const LayerId second = comp->duplicate_layer(cmd.layer_ref.layer, at);
             if (!second.valid()) return Errc::OutOfMemory;
+            // O 2º pedaço de uma base continua base; o de uma recortada, recortado.
+            clipChains.alias(second, cmd.layer_ref.layer);
             l = need_layer(cmd.layer_ref.layer);
             if (!l) return Errc::NotFound;
             const f64 sourceLimit = clip_source_limit(*project_, *comp, *l);

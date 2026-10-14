@@ -4322,4 +4322,8 @@ untuk mengedit kurvanya.</string>
     <string name="fxui_a11y_swipe_delete">Geser ke kiri untuk menghapus</string>
     <string name="fxui_stage_point">Titik: %1$s</string>
     <string name="fxui_stage_point_hint">Seret di pratinjau untuk memindahkan titik</string>
+    <string name="editor_criar_mascara_recorte">Buat clipping mask</string>
+    <string name="editor_liberar_mascara_recorte">Lepas clipping mask</string>
+    <string name="editor_mascara_recorte_detalhe">Lapisan hanya tampil di dalam lapisan di bawahnya</string>
+    <string name="editor_recortada_camada_abaixo">Dipotong oleh lapisan di bawahnya</string>
 </resources>

@@ -456,6 +456,7 @@ Result<u64> Engine::split_shape3d(u64 layerId, u32 axis, u32 count, std::vector<
 
     history_.before_mutation(*comp, project_->timeline().current(), "dividir forma 3D");
     bump_model_revision_locked();
+    ClipChainEdit clipChains(comp);   // o original vira nulo: não é mais base de recorte
 
     // Cópia do original ANTES de criar camadas (a tabela pode realocar).
     const Layer source = *orig;

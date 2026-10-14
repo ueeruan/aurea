@@ -22,6 +22,14 @@
 //  Modo (params.y) = valor de `BlendMode` no C++. 100 = mistura de camada de
 //  ajuste: mix(fundo, efeitos-sobre-o-fundo, opacidade).
 //
+//  params.w = 1: MÁSCARA DE RECORTE (source-atop). O fundo é o grupo da base;
+//  a camada só pinta onde ele tem alfa e o alfa do grupo não muda:
+//
+//      co = as·ab·((1 − ab)·cs + ab·B(Cb, Cs)) + cb·(1 − as)
+//      ao = ab
+//
+//  No Normal: fonte·α_destino + destino·(1 − α_fonte).
+//
 //  As fórmulas que supõem cor em [0,1] (Screen, Overlay, Dodge, Burn, luz...)
 //  recebem as cores presas em [0,1]; as que valem para HDR (Add, Multiply,
 //  Darken, Lighten, Difference, Subtract) usam o valor linear inteiro.
@@ -34,7 +42,7 @@ layout(push_constant) uniform Push {
     mat4 clipFromLayer;
     vec4 region;
     vec4 uvRect;
-    vec4 params;   // x = opacidade, y = modo
+    vec4 params;   // x = opacidade, y = modo, z = ajuste com máscara, w = recorte (source-atop)
 } pc;
 
 layout(location = 0) in vec2 v_uv;
@@ -189,6 +197,10 @@ void main() {
     const vec3 cs = as > 1e-6 ? src.rgb / as : vec3(0.0);
     const vec3 cb = ab > 1e-6 ? dst.rgb / ab : vec3(0.0);
     const vec3 B = blend(mode, cb, cs);
+    if (pc.params.w > 0.5) {
+        o_color = vec4(as * ab * ((1.0 - ab) * cs + ab * B) + dst.rgb * (1.0 - as), ab);
+        return;
+    }
     o_color = vec4(src.rgb * (1.0 - ab) + as * ab * B + dst.rgb * (1.0 - as),
                    as + ab * (1.0 - as));
 }

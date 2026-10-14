@@ -4340,4 +4340,8 @@
     <string name="fxui_a11y_swipe_delete">Смахните влево, чтобы удалить</string>
     <string name="fxui_stage_point">Точка: %1$s</string>
     <string name="fxui_stage_point_hint">Перетащите в превью, чтобы сдвинуть точку</string>
+    <string name="editor_criar_mascara_recorte">Создать обтравочную маску</string>
+    <string name="editor_liberar_mascara_recorte">Отменить обтравочную маску</string>
+    <string name="editor_mascara_recorte_detalhe">Слой виден только внутри слоя ниже</string>
+    <string name="editor_recortada_camada_abaixo">Обрезан слоем ниже</string>
 </resources>

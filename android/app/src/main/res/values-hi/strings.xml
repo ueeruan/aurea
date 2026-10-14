@@ -4328,4 +4328,8 @@
     <string name="fxui_a11y_swipe_delete">हटाने के लिए बाईं ओर स्वाइप करें</string>
     <string name="fxui_stage_point">बिंदु: %1$s</string>
     <string name="fxui_stage_point_hint">बिंदु हिलाने के लिए प्रीव्यू पर खींचें</string>
+    <string name="editor_criar_mascara_recorte">क्लिपिंग मास्क बनाएँ</string>
+    <string name="editor_liberar_mascara_recorte">क्लिपिंग मास्क हटाएँ</string>
+    <string name="editor_mascara_recorte_detalhe">लेयर केवल नीचे वाली लेयर के अंदर दिखती है</string>
+    <string name="editor_recortada_camada_abaixo">नीचे वाली लेयर से क्लिप की गई</string>
 </resources>

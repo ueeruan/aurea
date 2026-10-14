@@ -160,6 +160,14 @@ internal class TimelinePainter(
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
     private var glyphT: TextLayoutResult? = null
+    /** "↳" da camada recortada pela de baixo (desenho próprio do AUREA). */
+    private val clipGlyphStyle = TextStyle(
+        color = AureaTimeline.GutterIcon,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.W700,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+    )
+    private var glyphClip: TextLayoutResult? = null
     private val labelStyle = TextStyle(
         color = AureaTimeline.TickMajor,
         fontSize = 9.sp,
@@ -980,9 +988,16 @@ internal class TimelinePainter(
             m.gutterEyeCx,
             cy,
         )
-        val box = m.glyphBox
-        val bl = m.glyphBoxLeft
+        // Máscara de recorte: o quadradinho encolhe e encosta à direita, "pendurado"
+        // na camada de baixo, com o "↳" na frente dele.
+        val clipped = r.clipToBelow
+        val box = if (clipped) m.glyphBox * CLIP_BOX_SCALE else m.glyphBox
+        val bl = if (clipped) m.glyphBoxLeft + m.glyphBox - box else m.glyphBoxLeft
         val bt = cy - box / 2f
+        if (clipped) {
+            val layout = glyphClip ?: measurer.measure("\u21B3", clipGlyphStyle).also { glyphClip = it }
+            drawText(layout, topLeft = Offset(bl - layout.size.width - m.density, cy - layout.size.height / 2f))
+        }
         val radius = CornerRadius(m.glyphBoxRadius)
         val boxAlpha = if (r.visible) 1f else AureaTimeline.HiddenAlpha
         drawRoundRect(AureaColors.EditorGlyphBox, Offset(bl, bt), Size(box, box), radius)
@@ -1225,6 +1240,8 @@ internal class TimelinePainter(
 
     private companion object {
         const val THUMB_MAX_PX = 512
+        /** Quadradinho da camada recortada: um pouco menor, encostado à direita. */
+        const val CLIP_BOX_SCALE = 0.82f
         /** Perguntas de miniatura ao motor por quadro (o resto no quadro seguinte). */
         const val THUMB_QUERIES_PER_FRAME = 6
         const val NAME_STEP_DP = 12f

@@ -1959,6 +1959,45 @@ internal object EffectI18nTable {
         m.put("aurea.transition.luma_dissolve", 11, /* center */ intArrayOf(R.string.fxl_gradient_center))
     }
 
+    /** (typeId << 16 | índice do parâmetro) → dica (recurso). */
+    val tips: Map<Long, Int> by lazy {
+        HashMap<Long, Int>().apply {
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 11), R.string.fxt_pinning_holds_the_image_at_the_layer_s_e) // pinning
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.deep_glow"), 0), R.string.fxt_only_what_is_brighter_than_the_threshold) // threshold
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.raster_extrude"), 4), R.string.fxt_the_reflection_uses_the_3d_scene_s_hdri) // reflection
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 4), R.string.fxt_tap_the_point_s_name_then_drag_it_on_the) // center
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 9), R.string.fxt_used_when_the_core_is_layer_text) // core_layer
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 22), R.string.fxt_applies_to_the_layer_masks_core) // mask_evolution
+        }
+    }
+
+    /** (typeId << 16 | ordinal da seção) → título (recurso). */
+    val sections: Map<Long, Int> by lazy {
+        HashMap<Long, Int>().apply {
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 1), R.string.fxl_cycle_evolution) // cycle
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 2), R.string.fxl_offset) // offset
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 3), R.string.fxl_edges) // edges
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 4), R.string.fxs_output) // output
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.deep_glow"), 1), R.string.fxl_threshold) // threshold
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.deep_glow"), 2), R.string.fxl_color) // color
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.lens_flare"), 1), R.string.fxl_color) // color
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.lens_flare"), 2), R.string.fxs_elements) // elements
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.scene_flare"), 1), R.string.fxl_color) // color
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.scene_flare"), 2), R.string.fxs_elements) // elements
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.raster_extrude"), 1), R.string.fxs_material) // material
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 1), R.string.fxl_pieces) // pieces
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 2), R.string.fxs_physics) // physics
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 3), R.string.fxs_appearance) // look
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 1), R.string.fxs_outer_glow) // glow
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 2), R.string.fxs_core) // core
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 3), R.string.fxs_core_shape) // core_shape
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 4), R.string.fxs_masks) // masks
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 5), R.string.fxl_flicker) // flicker
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 6), R.string.fxs_distortion) // distortion
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 7), R.string.fxs_output) // output
+        }
+    }
+
     private fun HashMap<Long, IntArray>.put(key: String, index: Int, ids: IntArray) {
         put(slot(com.aurea.aurea.editor.panels.effectTypeId(key), index), ids)
     }

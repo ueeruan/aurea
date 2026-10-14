@@ -99,6 +99,7 @@ add_executable(aurea_tests
     test_startup.cpp
     test_heavy.cpp
     test_i18n.cpp
+    test_effect_sections.cpp
     test_project_package.cpp
     test_model_probe.cpp
     test_layer_anim.cpp

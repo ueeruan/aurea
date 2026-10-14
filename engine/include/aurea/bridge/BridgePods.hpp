@@ -505,15 +505,29 @@ struct EffectParamRow {
     // a faixa do slider. O motor prende o valor nesta, não na do slider.
     f32 hardMin         = 0.0f; // +92
     f32 hardMax         = 0.0f; // +96
-    u32 reserved        = 0;    // +100
+    // SEÇÃO do painel (ParamSection): ordinal 1..N, 0 = fora de seção (era o
+    // `reserved`, sempre 0 — linha antiga continua "sem seção").
+    u32 section         = 0;    // +100
+    i32 sectionToggle   = -1;   // +104 índice do Bool que liga a seção (−1 = sem)
+    u32 sectionFlags    = 0;    // +108 bit 0 = seção aberta nesta instância
+    u32 sectionIdOffset = 0;    // +112 chave estável da seção ("glow")
+    u32 sectionIdLength = 0;    // +116
+    u32 sectionLabelOffset = 0; // +120 título (texto do motor)
+    u32 sectionLabelLength = 0; // +124
+    u32 tipOffset       = 0;    // +128 dica (ⓘ) acima da linha; vazia = sem
+    u32 tipLength       = 0;    // +132
 };
-static_assert(sizeof(EffectParamRow) == 104, "EffectParamRow e contrato de ABI");
+static_assert(sizeof(EffectParamRow) == 136, "EffectParamRow e contrato de ABI");
 static_assert(offsetof(EffectParamRow, value) == 24);
 static_assert(offsetof(EffectParamRow, labelOffset) == 56);
 static_assert(offsetof(EffectParamRow, animated) == 80);
 static_assert(offsetof(EffectParamRow, idOffset) == 84);
 static_assert(offsetof(EffectParamRow, hardMin) == 92);
 static_assert(offsetof(EffectParamRow, hardMax) == 96);
+static_assert(offsetof(EffectParamRow, section) == 100);
+static_assert(offsetof(EffectParamRow, sectionIdOffset) == 112);
+static_assert(offsetof(EffectParamRow, tipOffset) == 128);
+inline constexpr u32 kEffectSectionOpen = 1u << 0;   ///< EffectParamRow::sectionFlags
 
 // -----------------------------------------------------------------------------
 // Trava final: tudo que atravessa a fronteira precisa ser copiável byte a byte.

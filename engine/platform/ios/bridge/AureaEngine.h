@@ -178,6 +178,14 @@ extern NSString* const AureaParamHardMin;     ///< faixa DIGITADA (teclado); con
 extern NSString* const AureaParamHardMax;
 extern NSString* const AureaParamAnimated;
 extern NSString* const AureaParamEnumLabels;   ///< NSArray<NSString*>
+/// Seção do painel (ParamSection): ordinal 1..N (0 = solto), chave, título,
+/// interruptor (índice do Bool que liga a seção, −1 = sem), aberta, e a dica (ⓘ).
+extern NSString* const AureaParamSection;
+extern NSString* const AureaParamSectionId;
+extern NSString* const AureaParamSectionLabel;
+extern NSString* const AureaParamSectionToggle;
+extern NSString* const AureaParamSectionOpen;
+extern NSString* const AureaParamTip;
 
 /// Progresso do export (`-exportProgress`).
 extern NSString* const AureaExportRunning;
@@ -941,6 +949,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y NS_SWIFT_NAME(editEffectCurve(_:effect:param:channel:action:point:x:y:));
 /// Declaração dos parâmetros de um TIPO (o catálogo, sem camada).
 - (NSArray<NSDictionary<NSString*, id>*>*)effectSpecs:(uint32_t)typeId;
+/// Abre/recolhe a seção `section` (ordinal 1..N) do efeito no painel. Apresentação:
+/// sem passo de desfazer; o estado vai no projeto. NO = seção inexistente.
+- (BOOL)setEffectSection:(long long)layerId effect:(uint32_t)effect section:(uint32_t)section open:(BOOL)open NS_SWIFT_NAME(setEffectSection(_:effect:section:open:));
 /// Curva de uma propriedade: `count` amostras entre `from` e `to` (frames).
 - (NSArray<NSNumber*>*)curveForLayer:(long long)layerId property:(uint32_t)property
                                 from:(int32_t)from to:(int32_t)to count:(uint32_t)count;

@@ -151,6 +151,11 @@ public:
         p.add_float("light", "Luz nas faces", 60.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_float("fade", "Esmaecer", 0.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_int("seed", "Semente", 0, 0, 9999, kAnim);
+        // Seções do painel (só apresentação; índices intactos).
+        p.add_section("pieces", "Peças", {kShape, kPieces, kThickness});
+        p.add_section("physics", "Física", {kForce, kTowardCamera, kSpin, kGravity, kRandomness, kWave});
+        p.add_section("look", "Aparência", {kPerspective, kLight, kFade, kSeed}, kInvalidIndex, false);
+        p.set_tip(kCenter, "Toque no nome do ponto e arraste-o no preview.");
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return !(finite_or(e.f(kProgress), 0.0f) > 0.0f);

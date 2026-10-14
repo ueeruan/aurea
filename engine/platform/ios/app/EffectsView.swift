@@ -37,6 +37,15 @@ struct EffectsView: View {
     @State private var lastTranslation: CGFloat = 0
     @State private var dragOrder: [UInt32]?
     @State private var cardFrames: [UInt32: CGRect] = [:]
+    /// O ponto (Point2D/3D em fração da camada) que a pessoa TOCOU: a alça dele
+    /// aparece no preview enquanto for o parâmetro escolhido do cartão aberto.
+    @State private var stagePoint: EffectParamSelection?
+    /// Deslizar para apagar: o cartão sob o dedo, o deslocamento lógico (negativo
+    /// = para o início da linha) e o eixo travado (0 indeciso, 1 horizontal, 2 vertical).
+    @State private var swipeId: UInt32?
+    @State private var swipeOffset: CGFloat = 0
+    @State private var swipeAxis = 0
+    @Environment(\.layoutDirection) private var layoutDirection
     private var ordered: [EffectItem] {
         let byId = Dictionary(uniqueKeysWithValues: model.effects.map { ($0.effectId, $0) })
         return (dragOrder ?? model.effects.map(\.effectId)).compactMap { byId[$0] }
@@ -81,7 +90,7 @@ struct EffectsView: View {
                         if tabbed && ordered.isEmpty && tools.isEmpty { PanelNotice(AureaText.t("effects_applied_empty")) }
                         ForEach(tools, id: \.key) { tool in toolCard(tool).padding(.bottom, 8) }
                         ForEach(ordered) { effect in
-                            card(effect).padding(.bottom, 8).id(effect.effectId)
+                            swipeable(effect) { card(effect) }.padding(.bottom, 8).id(effect.effectId)
                                 .background(GeometryReader { geometry in
                                     Color.clear.preference(key: EffectCardFrames.self, value: [effect.effectId: geometry.frame(in: .named("effect-stack"))])
                                 })
@@ -110,15 +119,20 @@ struct EffectsView: View {
         .background(ParamRowColors.panel)
         .onAppear { refreshTools(); enterLayer(); model.refreshSelectedLayer(); refreshExpressions() }
         .onChange(of: model.primarySelection) { _ in refreshTools(); enterLayer() }
-        .onChange(of: selected) { _ in updateTimelineFocus() }
-        .onChange(of: openId) { _ in updateTimelineFocus() }
+        .onChange(of: selected) { value in
+            // Escolher outro parâmetro (ou o cartão trocar) apaga a alça do palco.
+            if let point = stagePoint, value?.effect != point.effect || value?.param != point.param { stagePoint = nil }
+            updateTimelineFocus(); updateStagePoint()
+        }
+        .onChange(of: openId) { _ in updateTimelineFocus(); updateStagePoint() }
+        .onChange(of: stagePoint) { _ in updateStagePoint() }
         .onChange(of: puppet.layer) { _ in updateTimelineFocus() }
         .onChange(of: puppet.effect) { _ in updateTimelineFocus() }
         .onChange(of: puppet.editing) { _ in updateTimelineFocus() }
         .onChange(of: puppet.selected) { _ in updateTimelineFocus() }
         .onChange(of: puppet.revision) { _ in updateTimelineFocus() }
         .onAppear { updateTimelineFocus() }
-        .onDisappear { model.timelineFocus = nil }
+        .onDisappear { model.timelineFocus = nil; EffectPointStageState.shared.hide() }
         .onChange(of: model.effects.map(\.effectId)) { ids in
             let added = Set(ids).subtracting(known); known = Set(ids)
             if let id = model.requestedEffectFocusId ?? ids.last(where: { added.contains($0) }) {
@@ -211,7 +225,11 @@ struct EffectsView: View {
         if model.curveProperty == 44 { open(model.curveEffect); selected = nil; return }
         let entry = EffectParamSelection(effect: model.curveEffect, param: model.curveParam / 4, component: Int(model.curveParam % 4))
         selected = entry; open(entry.effect)
-        if parameterGroups(entry.effect).rest.contains(where: { $0.index == entry.param }) { advanced.insert(entry.effect) }
+        let entryLayout = layout(entry.effect)
+        if entryLayout.advanced.contains(where: { $0.index == entry.param }) { advanced.insert(entry.effect) }
+        // Parâmetro numa seção recolhida: a seção abre (EffectsPanel.kt faz igual).
+        let closed = fxClosedSection(entryLayout, param: entry.param)
+        if closed > 0 { setSectionOpen(entry.effect, ordinal: closed, open: true) }
     }
     /// Efeito novo na camada (busca, navegador, colar): abre o cartão e rola
     /// até ele — paridade com o Android. Os ids vistos ficam no MODELO: o painel
@@ -232,9 +250,9 @@ struct EffectsView: View {
         if model.effects.contains(where: { $0.effectId == id && $0.typeId == fxEffectTypeId("aurea.distort.mesh_warp") }) {
             selected = nil
         } else if selected?.effect != id {
-            let groups = parameterGroups(id)
-            let first = (groups.main + groups.rest).first(where: { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 })
-                ?? groups.main.first(where: { fxComponentCount(Int($0.type)) > 0 })
+            let all = layout(id).all
+            let first = all.first(where: { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 })
+                ?? all.first(where: { fxComponentCount(Int($0.type)) > 0 })
             selected = first.map { EffectParamSelection(effect: id, param: $0.index, component: 0) }
         }
         refreshExpressions()
@@ -244,12 +262,25 @@ struct EffectsView: View {
     private func slot(_ param: EffectParamItem) -> FxParamSlot {
         FxParamSlot(index: Int(param.index), type: Int(param.type), min: param.minValue, max: param.maxValue, label: param.label, unit: param.unit, enumLabels: param.enumLabels)
     }
-    private func parameterGroups(_ id: UInt32) -> (main: [EffectParamItem], rest: [EffectParamItem]) {
+    /// O corpo do cartão (soltas, "Avançado" e seções) — regra de `fxEffectLayout`.
+    private func layout(_ id: UInt32) -> FxLayout {
         let visible = model.effectParams.filter { $0.flags & 16 == 0 }
         let type = model.effects.first { $0.effectId == id }?.typeId ?? 0
-        let groups = fxSplitPrincipal(type, visible.map { slot($0) })
-        let byIndex = Dictionary(uniqueKeysWithValues: visible.map { (Int($0.index), $0) })
-        return (groups.main.compactMap { byIndex[$0.index] }, groups.rest.compactMap { byIndex[$0.index] })
+        return fxEffectLayout(type, visible)
+    }
+    /// Abre/recolhe uma seção (apresentação: sem desfazer) e relê o cartão.
+    private func setSectionOpen(_ effect: UInt32, ordinal: Int, open: Bool) {
+        guard let layer = model.primarySelection, ordinal > 0 else { return }
+        if model.engine.setEffectSection(layer, effect: effect, section: UInt32(ordinal), open: open) {
+            model.loadParams(layerId: layer, effectId: effect)
+        }
+    }
+    /// Publica a alça do ponto ativo para o palco (EffectPointStageOverlay).
+    private func updateStagePoint() {
+        let stage = EffectPointStageState.shared
+        guard let point = stagePoint, let chosen = selected, chosen.effect == point.effect, chosen.param == point.param,
+              openId == point.effect, let layer = model.primarySelection else { stage.hide(); return }
+        stage.show(layer, effect: point.effect, param: point.param)
     }
     private func display(_ param: EffectParamItem, effectId: UInt32) -> FxParamDisplay {
         fxParamDisplay(model.effects.first { $0.effectId == effectId }?.typeId ?? 0, slot(param))
@@ -329,8 +360,8 @@ struct EffectsView: View {
                                     .accessibilityIdentifier("effects.local_ai.failed")
                             }
                         }
-                        let groups = parameterGroups(effect.effectId)
-                        if groups.main.isEmpty && groups.rest.isEmpty { PanelNotice(AureaText.t("panel_este_efeito_nao_tem_ajustes")) }
+                        let bodyLayout = layout(effect.effectId)
+                        if bodyLayout.isEmpty { PanelNotice(AureaText.t("panel_este_efeito_nao_tem_ajustes")) }
                         // EQ paramétrico: o gráfico da resposta em cima das bandas.
                         if effect.typeId == fxEffectTypeId("aurea.audio.parametric_eq") {
                             FxEqResponseGraph(values: (0..<12).map { i in model.effectParams.first { $0.index == UInt32(i) }?.scalar ?? 0 })
@@ -344,19 +375,71 @@ struct EffectsView: View {
                                 if model.engine.applyEffectPreset(UInt32(preset), effect: effect.effectId, forLayer: layer) { model.refreshModel(force: true) }
                             }
                         }
-                        ForEach(groups.main) { param in parameter(param, effect: effect.effectId) }
-                        if !groups.rest.isEmpty {
-                            AdvancedToggle(open: advanced.contains(effect.effectId), count: groups.rest.count) {
+                        ForEach(bodyLayout.main) { param in parameter(param, effect: effect.effectId) }
+                        if !bodyLayout.advanced.isEmpty {
+                            AdvancedToggle(open: advanced.contains(effect.effectId), count: bodyLayout.advanced.count) {
                                 if advanced.contains(effect.effectId) { advanced.remove(effect.effectId) } else { advanced.insert(effect.effectId) }
                             }
-                            if creatorMode == 1 || advanced.contains(effect.effectId) { ForEach(groups.rest) { param in parameter(param, effect: effect.effectId) } }
+                            if creatorMode == 1 || advanced.contains(effect.effectId) { ForEach(bodyLayout.advanced) { param in parameter(param, effect: effect.effectId) } }
                         }
+                        // SEÇÕES (P1-4): cabeçalho recolhível com o interruptor que liga a
+                        // seção; desligada, as linhas dela ficam a 45 % (continuam editáveis).
+                        ForEach(bodyLayout.sections) { section in sectionView(section, effect: effect) }
                     }
                 }.padding(.horizontal, 6).opacity(effect.enabled ? 1 : 0.45)
             }
         }.padding(.bottom, expanded ? 6 : 0)
             .background(lifted ? AureaColors.surfaceHigh : ParamRowColors.card, in: RoundedRectangle(cornerRadius: 10))
             .overlay { if lifted { RoundedRectangle(cornerRadius: 10).stroke(AureaColors.accent, lineWidth: 1) } }
+    }
+    /// DESLIZAR PARA A ESQUERDA (P2-9): só no cartão recolhido — aberto, as réguas
+    /// usam o arrasto horizontal. Passou de 35 % da largura (`fxSwipeCommits`),
+    /// apaga com "Desfazer" no aviso; antes, volta. Atrás aparece a faixa com 🗑.
+    /// O leitor de tela ganha a mesma ação ("Remover …") sem o gesto.
+    private func swipeable<Content: View>(_ effect: EffectItem, @ViewBuilder content: () -> Content) -> some View {
+        let active = swipeId == effect.effectId
+        let enabled = openId != effect.effectId && dragId == nil && model.selectedLayer?.locked != true
+        let name = fxEffectDisplayName(effect.typeId, effect.name)
+        return ZStack(alignment: .trailing) {
+            if active && swipeOffset < 0 {
+                RoundedRectangle(cornerRadius: 10).fill(AureaColors.danger)
+                    .overlay(alignment: .trailing) {
+                        CupertinoGlyph.text(CupertinoGlyph.Trash, size: 20, color: AureaColors.text).padding(.trailing, 20)
+                    }
+                    .accessibilityHidden(true)
+            }
+            content().offset(x: active ? swipeOffset : 0)
+        }
+        .simultaneousGesture(DragGesture(minimumDistance: 12, coordinateSpace: .global)
+            .onChanged { value in swipeChanged(effect, value, enabled: enabled) }
+            .onEnded { value in swipeEnded(effect, value) }, including: enabled ? .all : .subviews)
+        .accessibilityAction(named: AureaText.t("fxui_a11y_remove", name)) { model.removeEffectWithUndo(effect.effectId) }
+        .accessibilityHint(enabled ? AureaText.t("fxui_a11y_swipe_delete") : "")
+    }
+    private func swipeChanged(_ effect: EffectItem, _ value: DragGesture.Value, enabled: Bool) {
+        guard enabled else { return }
+        if swipeId != effect.effectId { swipeId = effect.effectId; swipeOffset = 0; swipeAxis = 0 }
+        let dx = value.translation.width, dy = value.translation.height
+        // Trava o eixo no primeiro movimento: vertical é a rolagem da pilha.
+        if swipeAxis == 0 { swipeAxis = abs(dx) > abs(dy) ? 1 : 2 }
+        guard swipeAxis == 1 else { return }
+        // Tela em árabe: o "para o início da linha" é para a direita.
+        let logical = layoutDirection == .rightToLeft ? -dx : dx
+        let width = cardFrames[effect.effectId]?.width ?? 0
+        swipeOffset = Swift.min(0, Swift.max(-width, logical))
+    }
+    private func swipeEnded(_ effect: EffectItem, _ value: DragGesture.Value) {
+        guard swipeId == effect.effectId else { return }
+        let width = cardFrames[effect.effectId]?.width ?? 0
+        if swipeAxis == 1 && fxSwipeCommits(dx: swipeOffset, width: width, minimum: 96) {
+            withAnimation(.easeOut(duration: 0.16)) { swipeOffset = -width }
+            if openId == effect.effectId { closeCard() }
+            model.removeEffectWithUndo(effect.effectId)
+            swipeId = nil; swipeOffset = 0; swipeAxis = 0
+        } else {
+            withAnimation(.easeOut(duration: 0.2)) { swipeOffset = 0 }
+            swipeAxis = 0
+        }
     }
     private func cardButton(_ glyph: Character, tint: Color = AureaColors.text, action: @escaping () -> Void) -> some View {
         Button(action: action) { CupertinoGlyph.text(glyph, size: 19, color: tint).frame(width: 40, height: 40).contentShape(Rectangle()) }.buttonStyle(AureaPressStyle())
@@ -450,7 +533,28 @@ struct EffectsView: View {
         }
         model.refreshModel(force: true); refreshTools()
     }
+    /// Uma seção do cartão: cabeçalho (seta, título, interruptor) e, aberta, as linhas.
+    private func sectionView(_ section: FxSection, effect: EffectItem) -> some View {
+        let on = section.toggle.map { $0.scalar >= 0.5 } ?? true
+        let toggleLabel = section.toggle.map { display($0, effectId: effect.effectId).label } ?? section.label
+        return VStack(spacing: 4) {
+            FxSectionHeader(effectId: effect.effectId, section: section, toggleLabel: toggleLabel, toggleOn: on,
+                            onOpen: { setSectionOpen(effect.effectId, ordinal: section.ordinal, open: $0) },
+                            onToggle: { value in
+                                guard let toggle = section.toggle else { return }
+                                selected = EffectParamSelection(effect: effect.effectId, param: toggle.index, component: 0)
+                                writeComponent(toggle.index, effect: effect.effectId, component: 0, value: value ? 1 : 0)
+                            })
+            if section.open {
+                VStack(spacing: 4) {
+                    ForEach(section.params) { param in parameter(param, effect: effect.effectId) }
+                }.opacity(on ? 1 : 0.45)
+            }
+        }.padding(.top, 4)
+    }
     @ViewBuilder private func parameter(_ param: EffectParamItem, effect: UInt32) -> some View {
+        // Dica (ⓘ) do motor, só leitura, logo acima da linha.
+        if !param.tip.isEmpty { FxTipRow(effectId: effect, index: param.index, text: param.tip) }
         switch Int(param.type) {
         case fxParamFloat, fxParamInt, fxParamAngle: numberRow(param, effect: effect, component: 0)
         case fxParamPoint2D, fxParamPoint3D:
@@ -634,7 +738,12 @@ struct EffectsView: View {
         let span = param.maxValue - param.minValue
         let step: Float = span.isFinite && span > 0 ? min(span / 500, 2) : 0.5
         let values = (0..<count).map { d.toDisplay($0 < param.value.count ? param.value[$0] : 0) }
-        let select: (Int) -> Void = { selected = EffectParamSelection(effect: effect, param: param.index, component: $0) }
+        let select: (Int) -> Void = {
+            selected = EffectParamSelection(effect: effect, param: param.index, component: $0)
+            // Tocar num ponto (rótulo ou eixo) o acende no palco (P1-5).
+            stagePoint = fxStagePointEligible(type: Int(param.type), flags: param.flags)
+                ? EffectParamSelection(effect: effect, param: param.index, component: 0) : nil
+        }
         let send: (Int, Float) -> Void = { component, amount in
             guard model.projectGeneration == project, model.primarySelection == layer,
                   (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition, openId == effect else { return }
@@ -1406,5 +1515,78 @@ private struct ColorCurveEditor: View {
                     .disabled(selected == 0 || selected + 1 >= points.count / 2).accessibilityIdentifier("fx.curve.delete")
             }.font(.aurea(size: 13)).tint(AureaColors.accent)
         }.onAppear { reload() }.onChange(of: model.status.modelRevision) { _ in if !gesturing { reload() } }.onDisappear { finish() }
+    }
+}
+
+/// Cabeçalho de SEÇÃO (43 pt de faixa): seta que gira 0→90° em 300 ms, título,
+/// contagem quando recolhida e o interruptor que liga a seção. Tocar na faixa
+/// abre/recolhe; o interruptor escreve o Bool (um passo de desfazer).
+/// Ids `effects.section.<efeito>.<ordinal>` e `effects.section.toggle.<efeito>.<ordinal>` (iguais no Android).
+struct FxSectionHeader: View {
+    let effectId: UInt32
+    let section: FxSection
+    let toggleLabel: String
+    let toggleOn: Bool
+    let onOpen: (Bool) -> Void
+    let onToggle: (Bool) -> Void
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    var body: some View {
+        let count = section.params.count
+        let countText = count == 1 ? AureaText.t("ds_1_ajuste") : AureaText.t("ds_adjustment_count", count)
+        let angle: Double = section.open ? (layoutDirection == .rightToLeft ? -90 : 90) : 0
+        return HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 13, color: AureaColors.muted).mirrorsInRtl()
+                    .rotationEffect(.degrees(angle))
+                    .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.3), value: section.open)
+                Text(section.label).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)
+                    .lineLimit(1).truncationMode(.tail)
+                if !section.open {
+                    Text(countText).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 10)
+            .frame(maxWidth: .infinity).frame(height: 43).contentShape(Rectangle())
+            .onTapGesture { onOpen(!section.open) }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AureaText.t(section.open ? "fxui_a11y_section_collapse" : "fxui_a11y_section_expand", section.label))
+            .accessibilityValue(section.open ? "" : countText)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onOpen(!section.open) }
+            .accessibilityIdentifier("effects.section.\(effectId).\(section.ordinal)")
+            if section.toggle != nil {
+                AureaToggle(checked: toggleOn) { onToggle($0) }
+                    .accessibilityLabel(toggleLabel)
+                    .accessibilityValue(AureaText.t(toggleOn ? "common_on" : "common_off"))
+                    .accessibilityIdentifier("effects.section.toggle.\(effectId).\(section.ordinal)")
+                Spacer().frame(width: 8)
+            } else {
+                Spacer().frame(width: 6)
+            }
+        }
+        .frame(height: 43)
+        .background(ParamRowColors.valueBox, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// DICA só de leitura: ⓘ + texto, acima da linha do parâmetro. Id `effects.tip.<efeito>.<índice>`.
+struct FxTipRow: View {
+    let effectId: UInt32
+    let index: UInt32
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            CupertinoGlyph.text(CupertinoGlyph.InfoCircle, size: 14, color: AureaColors.muted).padding(.top, 1)
+            Text(text).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 6).padding(.top, 4).padding(.bottom, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AureaText.t("fxui_a11y_tip", text))
+        .accessibilityIdentifier("effects.tip.\(effectId).\(index)")
     }
 }

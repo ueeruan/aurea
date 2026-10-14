@@ -84,6 +84,27 @@ class EffectCatalogTests(unittest.TestCase):
         self.assertEqual(spanish.read_bytes(), prior_spanish)
         self.assertEqual(catalog.load_strings("values-es")["fxl_new"], "Traducción revisada")
 
+    def test_tips_and_section_titles_get_their_own_tables(self):
+        self.input.write_text(json.dumps([{"key": "aurea.test", "params": [
+            {"index": 0, "id": "amount", "label": "Novo", "hidden": False, "section": 1, "tip": "Dica nova", "enum": []},
+            {"index": 1, "id": "secret", "label": "Novo", "hidden": True, "section": 0, "tip": "Oculta", "enum": []},
+        ], "sections": [{"ordinal": 1, "id": "main", "label": "Seção nova"}]}], ensure_ascii=False), encoding="utf-8")
+        self.texts.write_text(json.dumps({t: {lang: t + " en" for lang in catalog.LANGS}
+                                          for t in ("Novo", "Dica nova", "Seção nova")}, ensure_ascii=False), encoding="utf-8")
+        self.run_generator()
+        tsv = self.outputs[0].read_text(encoding="utf-8")
+        self.assertIn("aurea.test\t0\tamount\t-2\tfxt_dica_nova_en", tsv)
+        self.assertIn("aurea.test\t1\tmain\t-3\tfxs_secao_nova_en", tsv)
+        self.assertNotIn("Oculta", tsv)   # parâmetro oculto não ganha dica
+        kotlin = self.outputs[1].read_text(encoding="utf-8")
+        self.assertIn('effectTypeId("aurea.test"), 0), R.string.fxt_dica_nova_en) // amount', kotlin)
+        self.assertIn('effectTypeId("aurea.test"), 1), R.string.fxs_secao_nova_en) // main', kotlin)
+        swift = self.outputs[2].read_text(encoding="utf-8")
+        self.assertIn("aurea.test|0|amount|fxt_dica_nova_en", swift)
+        self.assertIn("aurea.test|1|main|fxs_secao_nova_en", swift)
+        # A tabela dos rótulos continua com uma linha por parâmetro (sem as extras).
+        self.assertIn("aurea.test|0|amount|fxl_novo_en|", swift)
+
     def test_generated_tables_and_resources_are_idempotent(self):
         self.source()
         self.texts.write_text(json.dumps({"Novo": {lang: "New" for lang in catalog.LANGS}}), encoding="utf-8")

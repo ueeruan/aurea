@@ -137,6 +137,14 @@ internal data class ParamSlot(
     /** Faixa DIGITADA (teclado), na unidade do motor; [min]..[max] é só a da régua. */
     val hardMin: Float = min,
     val hardMax: Float = max,
+    /** Seção do painel (1..N; 0 = solto), o interruptor dela (−1 = sem) e se está aberta. */
+    val section: Int = 0,
+    val sectionId: String = "",
+    val sectionLabel: String = "",
+    val sectionToggle: Int = -1,
+    val sectionOpen: Boolean = true,
+    /** Dica (ⓘ, só leitura) mostrada acima da linha; vazia = sem dica. */
+    val tip: String = "",
 ) {
     val hidden get() = (flags and ParamType.FLAG_HIDDEN) != 0
 
@@ -171,7 +179,8 @@ internal data class ParamSlot(
 
     companion object {
         fun of(p: EffectParam) =
-            ParamSlot(p.index, p.type, p.flags, p.min, p.max, p.label, p.unit, p.enumLabels, p.hardMin, p.hardMax)
+            ParamSlot(p.index, p.type, p.flags, p.min, p.max, p.label, p.unit, p.enumLabels, p.hardMin, p.hardMax,
+                p.section, p.sectionId, p.sectionLabel, p.sectionToggle, p.sectionOpen, p.tip)
     }
 }
 
@@ -338,7 +347,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             entry?.let { k ->
                 val type = store.typeOf(k.effectIndex)
                 val visible = store.effectParams[k.effectIndex].orEmpty().map { ParamSlot.of(it) }.filter { !it.hidden }
-                if (splitPrincipal(type, visible).second.any { it.index == k.paramIndex / 4 }) setOf(k.effectIndex) else emptySet()
+                if (effectLayout(type, visible).advanced.any { it.index == k.paramIndex / 4 }) setOf(k.effectIndex) else emptySet()
             } ?: emptySet(),
         )
     }
@@ -402,10 +411,35 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         if (selected?.effectId == id) return@LaunchedEffect
         selectedMesh = null
         val visible = store.effectParams[id].orEmpty().map { ParamSlot.of(it) }.filter { !it.hidden }
-        val groups = splitPrincipal(store.typeOf(id), visible)
-        val first = (groups.first + groups.second).firstOrNull { it.animatable }
-            ?: groups.first.firstOrNull { it.components > 0 }
+        val layout = effectLayout(store.typeOf(id), visible)
+        val first = layout.all.firstOrNull { it.animatable }
+            ?: layout.all.firstOrNull { it.components > 0 }
         selected = first?.let { ParamKey(id, it.index, 0) }
+    }
+    // Entrou pelo losango de um parâmetro que mora numa seção recolhida: a seção abre.
+    LaunchedEffect(entry) {
+        val k = entry?.takeIf { it.property == TrackProperty.EFFECT_PARAM } ?: return@LaunchedEffect
+        val visible = store.effectParams[k.effectIndex].orEmpty().map { ParamSlot.of(it) }.filter { !it.hidden }
+        val closed = closedSectionOf(effectLayout(store.typeOf(k.effectIndex), visible), k.paramIndex / 4)
+        if (closed > 0) store.setEffectSectionOpen(k.effectIndex, closed, true)
+    }
+    // ALÇA NO PALCO (P1-5): o ponto (Point2D/3D em fração da camada) que a pessoa
+    // TOCOU no cartão aparece no preview enquanto for o parâmetro escolhido do
+    // cartão aberto. Escolha automática (abrir o cartão) não acende: o palco
+    // continua seco até o toque no rótulo.
+    var stagePoint by remember(layerId) { mutableStateOf<ParamKey?>(null) }
+    // Escolher outro parâmetro (ou o cartão trocar) apaga a alça (igual ao iOS).
+    LaunchedEffect(selected) {
+        val p = stagePoint
+        if (p != null && (selected?.effectId != p.effectId || selected?.param != p.param)) stagePoint = null
+    }
+    val pointOnStage = stagePoint?.takeIf { p ->
+        openId == p.effectId && selected?.let { it.effectId == p.effectId && it.param == p.param } == true
+    }
+    androidx.compose.runtime.DisposableEffect(layerId, pointOnStage?.effectId, pointOnStage?.param) {
+        val p = pointOnStage
+        if (layerId != null && p != null) com.aurea.aurea.editor.EffectPointStage.show(layerId, p.effectId, p.param)
+        onDispose { com.aurea.aurea.editor.EffectPointStage.hide() }
     }
 
     // O trilho só precisa do ESTADO do losango — derivado, não do valor que anda.
@@ -534,6 +568,18 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                 }
                 items(order, key = { it.effectId }) { e ->
                     val dragged = reorder.dragging == e.effectId
+                    // Deslizar para a esquerda apaga (com "Desfazer" no aviso); só no
+                    // cartão recolhido — aberto, as réguas usam o arrasto horizontal.
+                    FxSwipeToDelete(
+                        enabled = openId != e.effectId && !dragged && store.detail?.locked != true,
+                        removeLabel = stringResource(R.string.fxui_a11y_remove, effectDisplayName(e.typeId, e.name)),
+                        onDelete = { store.removeEffectWithUndo(e.effectId) },
+                        modifier = if (dragged) {
+                            Modifier.zIndex(1f).graphicsLayer { translationY = reorder.offset }
+                        } else {
+                            Modifier.animateItem()
+                        },
+                    ) {
                     EffectCardItem(
                         env = env,
                         effect = e,
@@ -545,19 +591,19 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                         onToggleAdvanced = {
                             advancedOpen = if (e.effectId in advancedOpen) advancedOpen - e.effectId else advancedOpen + e.effectId
                         },
-                        onSelect = { selectedMesh = null; selected = it },
+                        onSelect = { k ->
+                            selectedMesh = null; selected = k
+                            // Tocar num ponto (rótulo ou eixo) o acende no palco.
+                            stagePoint = k.takeIf { store.paramOf(k.effectId, k.param)?.let { p -> stagePointEligible(p.type, p.flags) } == true }
+                        },
                         meshSelected = meshSelected && openId == e.effectId,
                         onSelectMesh = { selected = null; selectedMesh = e.effectId },
                         onParamMenu = { paramMenu = it },
                         onMenu = { menuFor = e },
                         onRemove = { store.removeEffect(e.effectId) },
                         dragHandle = Modifier.reorderHandle(e.effectId, reorder, listState, store),
-                        modifier = if (dragged) {
-                            Modifier.zIndex(1f).graphicsLayer { translationY = reorder.offset }
-                        } else {
-                            Modifier.animateItem()
-                        },
                     )
+                    }
                 }
                 item(key = "rodape") {
                     if (focusedType == null) EffectsFooter(env, kind, onAdd = openAdd)
@@ -1038,13 +1084,41 @@ private fun EffectCardItem(
         // uma fileira de fichas no topo do cartão; tocar = um passo de desfazer.
         val presets = remember(effect.typeId) { store.effectPresets(effect.typeId) }
         if (presets.isNotEmpty()) EffectPresetRow(presets) { store.applyEffectPreset(id, it) }
-        val (main, rest) = remember(visible, effect.typeId) { splitPrincipal(effect.typeId, visible) }
+        val layout = remember(visible, effect.typeId) { effectLayout(effect.typeId, visible) }
         // EQ paramétrico: o gráfico da resposta em cima das bandas.
         if (effect.typeId == effectTypeId("aurea.audio.parametric_eq")) EqResponseGraph(env, id)
-        main.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
-        if (rest.isNotEmpty()) {
-            AdvancedToggle(open = advanced, count = rest.size, onToggle = onToggleAdvanced)
-            if (advanced) rest.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
+        layout.main.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
+        if (layout.advanced.isNotEmpty()) {
+            AdvancedToggle(open = advanced, count = layout.advanced.size, onToggle = onToggleAdvanced)
+            if (advanced) layout.advanced.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
+        }
+        // SEÇÕES (P1-4): cabeçalho recolhível com o interruptor que liga a seção;
+        // desligada, as linhas dela ficam a 45 % (continuam editáveis).
+        layout.sections.forEach { sec ->
+            val toggle = sec.toggle
+            val on = if (toggle != null) rememberParamValue(env, id, toggle.index, 0) >= 0.5f else true
+            val toggleLabel = toggle?.let { paramDisplay(effect.typeId, it).label() } ?: sec.label
+            FxSectionHeader(
+                effectId = id,
+                section = sec,
+                toggleLabel = toggleLabel,
+                toggleOn = on,
+                onOpen = { open -> store.setEffectSectionOpen(id, sec.ordinal, open) },
+                onToggle = { value ->
+                    if (toggle != null) {
+                        onSelect(ParamKey(id, toggle.index, 0))
+                        store.paramOf(id, toggle.index)?.let { store.setEffectParam(id, it, if (value) 1f else 0f) }
+                    }
+                },
+            )
+            if (sec.open) {
+                Column(
+                    Modifier.fillMaxWidth().alpha(if (on) 1f else 0.45f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    sec.params.forEach { s -> ParamRows(env, id, effect.typeId, s, selected, onSelect, onParamMenu) }
+                }
+            }
         }
     }
 }
@@ -1099,6 +1173,8 @@ private fun ParamRows(
     val d = remember(typeId, s) { paramDisplay(typeId, s) }
     val label = d.label()
     val menu = { onParamMenu(ParamMenuTarget(id, s.index, label)) }
+    // Dica (ⓘ) do motor, só leitura, logo acima da linha.
+    if (s.tip.isNotEmpty()) FxTipRow(id, s.index, s.tip)
     when (s.type) {
         ParamType.FLOAT, ParamType.INT, ParamType.ANGLE -> androidx.compose.runtime.key(env.store.projectGeneration, env.store.composition?.id, env.store.primary, id, s.index) {
             EffectNumberRow(env, id, s, d, 0, label, selected == ParamKey(id, s.index, 0), onSelect, menu)

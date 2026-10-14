@@ -148,6 +148,7 @@ aurea.distort.turbulence	11	pinning	7	fxo_vertical_edges
 aurea.distort.turbulence	11	pinning	8	fxo_all_locked
 aurea.distort.turbulence	11	pinning	9	fxo_horizontal_edges_locked
 aurea.distort.turbulence	11	pinning	10	fxo_vertical_edges_locked
+aurea.distort.turbulence	11	pinning	-2	fxt_pinning_holds_the_image_at_the_layer_s_e
 aurea.distort.turbulence	12	displacement	-1	fxl_displacement_type
 aurea.distort.turbulence	12	displacement	0	fxo_turbulent
 aurea.distort.turbulence	12	displacement	1	fxo_bulge
@@ -160,6 +161,10 @@ aurea.distort.turbulence	12	displacement	7	fxo_horizontal
 aurea.distort.turbulence	12	displacement	8	fxo_cross_2
 aurea.distort.turbulence	13	cycle_evolution	-1	fxl_cycle_evolution
 aurea.distort.turbulence	14	cycle	-1	fxl_cycle_in_revolutions
+aurea.distort.turbulence	1	cycle	-3	fxl_cycle_evolution
+aurea.distort.turbulence	2	offset	-3	fxl_offset
+aurea.distort.turbulence	3	edges	-3	fxl_edges
+aurea.distort.turbulence	4	output	-3	fxs_output
 aurea.distort.wave_warp	0	height	-1	fx_altura_onda
 aurea.distort.wave_warp	1	wavelength	-1	fx_largura_onda
 aurea.distort.wave_warp	2	speed	-1	fx_velocidade
@@ -301,6 +306,7 @@ aurea.blur.unsharp	2	threshold	-1	fx_limiar
 aurea.blur.unsharp	3	only_detail	-1	fxl_detail_only
 aurea.blur.unsharp	4	blend	-1	fx_mistura
 aurea.light.deep_glow	0	threshold	-1	fx_limite
+aurea.light.deep_glow	0	threshold	-2	fxt_only_what_is_brighter_than_the_threshold
 aurea.light.deep_glow	2	halo_radius	-1	fx_raio_halo
 aurea.light.deep_glow	5	glow_color	-1	fx_cor_brilho
 aurea.light.deep_glow	10	only_glow	-1	fx_so_brilho
@@ -310,6 +316,8 @@ aurea.light.deep_glow	17	falloff	-1	fxl_falloff
 aurea.light.deep_glow	18	tint_amount	-1	fxl_tint_amount_2
 aurea.light.deep_glow	19	chromatic	-1	fxl_chromatic_aberration
 aurea.light.deep_glow	20	add_mode	-1	fxl_add_mode_2
+aurea.light.deep_glow	1	threshold	-3	fxl_threshold
+aurea.light.deep_glow	2	color	-3	fxl_color
 aurea.light.hotspots	0	threshold	-1	fxl_threshold
 aurea.light.hotspots	1	brightness	-1	fxo_tracery_brightness
 aurea.light.hotspots	2	blur_input	-1	fxl_input_blur
@@ -567,6 +575,8 @@ aurea.light.lens_flare	8	rotation	-1	fxl_flare_rotation
 aurea.light.lens_flare	9	streak	-1	fxl_flare_streak
 aurea.light.lens_flare	10	rays	-1	fxl_rays
 aurea.light.lens_flare	11	flicker	-1	fxl_flicker
+aurea.light.lens_flare	1	color	-3	fxl_color
+aurea.light.lens_flare	2	elements	-3	fxs_elements
 aurea.distort.ripple	0	center_x	-1	fxl_center_x
 aurea.distort.ripple	1	center_y	-1	fxl_center_y
 aurea.distort.ripple	2	amplitude	-1	fx_amplitude
@@ -596,6 +606,8 @@ aurea.light.scene_flare	8	rotation	-1	fxl_flare_rotation
 aurea.light.scene_flare	9	streak	-1	fxl_flare_streak
 aurea.light.scene_flare	10	rays	-1	fxl_rays
 aurea.light.scene_flare	11	flicker	-1	fxl_flicker
+aurea.light.scene_flare	1	color	-3	fxl_color
+aurea.light.scene_flare	2	elements	-3	fxs_elements
 aurea.color.rgb_split	0	red_x	-1	fxl_red_x
 aurea.color.rgb_split	1	red_y	-1	fxl_red_y
 aurea.color.rgb_split	2	green_x	-1	fxl_green_x
@@ -2132,8 +2144,10 @@ aurea.generate.raster_extrude	3	quality	0	scene_low
 aurea.generate.raster_extrude	3	quality	1	scene_medium
 aurea.generate.raster_extrude	3	quality	2	fxo_high
 aurea.generate.raster_extrude	4	reflection	-1	fxl_environment_reflection
+aurea.generate.raster_extrude	4	reflection	-2	fxt_the_reflection_uses_the_3d_scene_s_hdri
 aurea.generate.raster_extrude	5	metal	-1	fxl_metal
 aurea.generate.raster_extrude	6	roughness	-1	fx_rugosidade
+aurea.generate.raster_extrude	1	material	-3	fxs_material
 aurea.3d.part_transform	0	part	-1	fxl_part
 aurea.3d.part_transform	1	position_x	-1	fx_posicao_x
 aurea.3d.part_transform	2	position_y	-1	fx_posicao_y
@@ -2158,6 +2172,7 @@ aurea.3d.shatter	1	shape	2	fxo_glass
 aurea.3d.shatter	2	pieces	-1	fxl_number_of_pieces
 aurea.3d.shatter	3	thickness	-1	fx_espessura
 aurea.3d.shatter	4	center	-1	fxl_explosion_center
+aurea.3d.shatter	4	center	-2	fxt_tap_the_point_s_name_then_drag_it_on_the
 aurea.3d.shatter	5	force	-1	fxl_strength
 aurea.3d.shatter	6	toward_camera	-1	fxl_toward_camera
 aurea.3d.shatter	7	spin	-1	fxo_spin
@@ -2168,6 +2183,9 @@ aurea.3d.shatter	11	perspective	-1	fxl_perspective
 aurea.3d.shatter	12	light	-1	fxl_face_lighting
 aurea.3d.shatter	13	fade	-1	fxl_fade
 aurea.3d.shatter	14	seed	-1	fxl_seed
+aurea.3d.shatter	1	pieces	-3	fxl_pieces
+aurea.3d.shatter	2	physics	-3	fxs_physics
+aurea.3d.shatter	3	look	-3	fxs_appearance
 aurea.3d.stroke	0	path	-1	fxo_path
 aurea.3d.stroke	0	path	0	fxo_circle
 aurea.3d.stroke	0	path	1	fxo_spiral
@@ -2470,6 +2488,7 @@ aurea.light.saber	6	core_type	2	fxo_layer_text
 aurea.light.saber	7	core_start	-1	fxl_core_start
 aurea.light.saber	8	core_end	-1	fxl_core_end
 aurea.light.saber	9	core_layer	-1	fxl_core_layer
+aurea.light.saber	9	core_layer	-2	fxt_used_when_the_core_is_layer_text
 aurea.light.saber	10	use_alpha	-1	fxl_use_layer_alpha
 aurea.light.saber	11	start_offset	-1	fxl_start_offset
 aurea.light.saber	12	end_offset	-1	fxl_end_offset
@@ -2483,6 +2502,7 @@ aurea.light.saber	19	core_color	-1	fxl_core_color
 aurea.light.saber	20	core_saturation	-1	fxl_core_saturation
 aurea.light.saber	21	core_intensity	-1	fxl_core_intensity
 aurea.light.saber	22	mask_evolution	-1	fxl_mask_evolution
+aurea.light.saber	22	mask_evolution	-2	fxt_applies_to_the_layer_masks_core
 aurea.light.saber	23	mask_random	-1	fxl_mask_randomness
 aurea.light.saber	24	flicker_intensity	-1	fxl_flicker_intensity
 aurea.light.saber	25	flicker_speed	-1	fxl_flicker_speed
@@ -2501,6 +2521,13 @@ aurea.light.saber	31	composite	0	fxo_add_over_layer
 aurea.light.saber	31	composite	1	fxo_transparent
 aurea.light.saber	31	composite	2	fxo_over_black
 aurea.light.saber	32	seed	-1	fxl_seed
+aurea.light.saber	1	glow	-3	fxs_outer_glow
+aurea.light.saber	2	core	-3	fxs_core
+aurea.light.saber	3	core_shape	-3	fxs_core_shape
+aurea.light.saber	4	masks	-3	fxs_masks
+aurea.light.saber	5	flicker	-3	fxl_flicker
+aurea.light.saber	6	distortion	-3	fxs_distortion
+aurea.light.saber	7	output	-3	fxs_output
 aurea.transition.luma_dissolve	0	progress	-1	fx_progresso
 aurea.transition.luma_dissolve	1	softness	-1	fx_suavidade_borda
 aurea.transition.luma_dissolve	2	invert	-1	fx_inverter

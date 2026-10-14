@@ -161,6 +161,9 @@ public:
             p.add_float("streak", "Risco", 100.f, 0.f, 400.f, kParamAnimatable | kParamPercent, "%");
             p.add_float("rays", "Raios", 100.f, 0.f, 400.f, kParamAnimatable | kParamPercent, "%");
             p.add_float("flicker", "Cintilação", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
+            // Seções do painel (só apresentação; índices intactos).
+            p.add_section("color", "Cor", {5, 7});
+            p.add_section("elements", "Elementos", {4, 8, 9, 10, 11}, kInvalidIndex, false);
         } else if (mode_ == 1) {
             p.add_float("amplitude", "Amplitude", 12.f, 0.f, 128.f, kParamAnimatable | kParamPixels, "px");
             p.typed_range(0.f, 1000.f);

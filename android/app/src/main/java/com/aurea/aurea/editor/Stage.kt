@@ -212,6 +212,8 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
             }
         }
         PerfHud(store, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 6.dp))
+        // A alça do ponto de efeito para o leitor de tela (o desenho é do Canvas).
+        EffectPointA11y(store, mapper)
     }
 }
 
@@ -501,6 +503,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     }
     // Saber com o cartão aberto (núcleo único): início e fim do núcleo (SaberStage.kt).
     if (saberActive(store)) drawSaberOverlay(store, m)
+    // Ponto de efeito ativo (parâmetro tocado no cartão): a alça dele (EffectPointStage.kt).
+    if (effectPointActive(store)) drawEffectPointOverlay(store, m)
     // Forma 3D com parte escolhida: um ponto no centro de cada parte (o gizmo segue abaixo).
     if (shapePartActive(store)) drawShapePartOverlay(store, m)
     // Roto Brush: o traço ao vivo no lugar das alças da camada.
@@ -1174,6 +1178,11 @@ private suspend fun PointerInputScope.stageGestures(
         }
         // Saber (cartão aberto, núcleo único): os pontos de início/fim têm a vez;
         // fora deles, o palco segue normal.
+        // Ponto de efeito ativo: a alça tem a vez; fora dela, o palco segue normal.
+        if (m.valid && effectPointActive(store) && pickEffectPoint(store, m, downX, downY, 24.dp.toPx())) {
+            effectPointGesture(store, m, down)
+            return@awaitEachGesture
+        }
         if (m.valid && saberActive(store)) {
             val handle = pickSaberHandle(store, m, downX, downY, 24.dp.toPx())
             if (handle >= 0) {

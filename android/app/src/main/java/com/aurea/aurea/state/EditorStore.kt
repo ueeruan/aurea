@@ -616,12 +616,36 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Aviso curto e não bloqueante (ex.: "Salvo na galeria"). A UI some com ele em ~2 s. */
     var toast by mutableStateOf<String?>(null)
         private set
+    /** Ação do aviso ("Desfazer"), quando há; some junto com ele. */
+    var toastAction by mutableStateOf<ToastAction?>(null)
+        private set
     private var toastSerial = 0
+
+    /** Botão de um aviso: o rótulo e o que ele faz (uma vez). */
+    class ToastAction(val label: String, val run: () -> Unit)
 
     fun showToast(message: String) {
         toast = message
+        toastAction = null
         val serial = ++toastSerial
         main.postDelayed({ if (serial == toastSerial) toast = null }, 2200)
+    }
+
+    /** Aviso com UMA ação (ex.: "Desfazer"); fica 4 s para dar tempo do toque. */
+    fun showToast(message: String, action: ToastAction) {
+        toast = message
+        toastAction = action
+        val serial = ++toastSerial
+        main.postDelayed({ if (serial == toastSerial) { toast = null; toastAction = null } }, 4000)
+    }
+
+    /** Toque na ação do aviso: roda uma vez e fecha o aviso. */
+    fun runToastAction() {
+        val action = toastAction ?: return
+        toastAction = null
+        toast = null
+        ++toastSerial
+        action.run()
     }
 
     fun selectKeyframe(layer: Long, key: KeyframeRow) {
@@ -2696,6 +2720,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     private inline fun send(block: CommandBatch.() -> Unit) {
         if (destroyed || !ready) return
+        // "Desfazer" do aviso vale só para o último passo: comando novo o invalida.
+        if (toastAction != null) toastAction = null
         engine.beginCommandBatch()
         batch.block()
         engine.submitCommands()
@@ -3391,6 +3417,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         send { removeEffect(id, effectId) }
         refreshNow()
+    }
+
+    /**
+     * Deslizar o cartão para a esquerda: apaga o efeito (um passo) e oferece
+     * "Desfazer" no aviso. Qualquer comando novo depois disso tira a ação do
+     * aviso (`send`): o passo desfeito tem de ser o do apagar.
+     */
+    fun removeEffectWithUndo(effectId: Int) {
+        val id = primary ?: return
+        removeEffect(effectId)
+        showToast(appText(R.string.fxui_effect_deleted), ToastAction(appText(R.string.common_undo)) {
+            if (primary == id) undo()
+        })
+    }
+
+    /** Abre/recolhe uma seção do cartão de efeito (apresentação: sem desfazer). */
+    fun setEffectSectionOpen(effectId: Int, section: Int, open: Boolean) {
+        val id = primary ?: return
+        if (engine.setEffectSectionOpen(id, effectId, section, open)) refreshNow()
     }
 
     fun setEffectEnabled(effectId: Int, enabled: Boolean) {

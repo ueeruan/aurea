@@ -9,7 +9,7 @@ import java.nio.ByteOrder
 
 /**
  * Faixa do SLIDER x faixa DIGITADA (edição extrema): a linha da ponte
- * (`bridge::EffectParamRow`, 104 bytes) traz as duas; a régua anda na primeira,
+ * (`bridge::EffectParamRow`, 136 bytes) traz as duas; a régua anda na primeira,
  * o teclado aceita a segunda, e o arrasto que começa fora da régua não salta.
  */
 class EffectParamRowTest {
@@ -29,8 +29,8 @@ class EffectParamRowTest {
     private val emptyBlob: ByteBuffer = ByteBuffer.allocate(0)
 
     @Test
-    fun rowIs104BytesWithTheTypedRangeAfterTheId() {
-        assertEquals(104, EffectParam.ROW_BYTES)
+    fun rowIs136BytesWithTheTypedRangeAfterTheId() {
+        assertEquals(136, EffectParam.ROW_BYTES)
         val p = EffectParam.read(row(0f, 500f, 0f, 3000f, 1200f), 0, emptyBlob)
         assertEquals(3, p.index)
         assertEquals(0f, p.min)

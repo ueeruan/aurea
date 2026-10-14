@@ -4299,4 +4299,27 @@ untuk mengedit kurvanya.</string>
     <string name="batch_one_layer_selected">1 layer dipilih</string>
     <string name="batch_group_mask_a11y">Grup dan masker: layer teratas memotong yang lain</string>
     <string name="batch_group_exclude_a11y">Grup dan kecualikan: layer teratas melubangi yang lain</string>
+    <string name="fxt_pinning_holds_the_image_at_the_layer_s_e">Sematkan menahan gambar di tepi layer.</string>
+    <string name="fxs_output">Keluaran</string>
+    <string name="fxt_only_what_is_brighter_than_the_threshold">Hanya bagian yang lebih terang dari ambang yang bercahaya.</string>
+    <string name="fxs_elements">Elemen</string>
+    <string name="fxt_the_reflection_uses_the_3d_scene_s_hdri">Pantulan memakai HDRI atau studio adegan 3D.</string>
+    <string name="fxs_material">Material</string>
+    <string name="fxt_tap_the_point_s_name_then_drag_it_on_the">Ketuk nama titik, lalu seret di pratinjau.</string>
+    <string name="fxs_physics">Fisika</string>
+    <string name="fxs_appearance">Tampilan</string>
+    <string name="fxt_used_when_the_core_is_layer_text">Dipakai saat inti adalah “Layer / teks”.</string>
+    <string name="fxt_applies_to_the_layer_masks_core">Berlaku untuk inti “Mask layer”.</string>
+    <string name="fxs_core">Inti</string>
+    <string name="fxs_core_shape">Bentuk inti</string>
+    <string name="fxs_masks">Mask</string>
+    <string name="fxs_distortion">Distorsi</string>
+    <string name="fxs_outer_glow">Cahaya luar</string>
+    <string name="fxui_effect_deleted">Efek dihapus</string>
+    <string name="fxui_a11y_section_expand">Buka bagian %1$s</string>
+    <string name="fxui_a11y_section_collapse">Tutup bagian %1$s</string>
+    <string name="fxui_a11y_tip">Tips: %1$s</string>
+    <string name="fxui_a11y_swipe_delete">Geser ke kiri untuk menghapus</string>
+    <string name="fxui_stage_point">Titik: %1$s</string>
+    <string name="fxui_stage_point_hint">Seret di pratinjau untuk memindahkan titik</string>
 </resources>

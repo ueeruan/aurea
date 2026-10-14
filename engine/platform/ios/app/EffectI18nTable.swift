@@ -1902,4 +1902,60 @@ enum EffectI18nTable {
     aurea.transition.luma_dissolve|10|mode|fxl_mode|fxl_fade_out,fxo_appear
     aurea.transition.luma_dissolve|11|center|fxl_gradient_center|
     """
+
+    /// "typeId#índice" → dica do parâmetro.
+    static let tips: [String: String] = {
+        var out: [String: String] = [:]
+        for line in tipsTable.split(separator: "\n") {
+            let f = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 4, let index = Int(f[1]) else { continue }
+            out["\(fxEffectTypeId(f[0]))#\(index)"] = f[3]
+        }
+        return out
+    }()
+
+    private static let tipsTable = """
+    aurea.distort.turbulence|11|pinning|fxt_pinning_holds_the_image_at_the_layer_s_e
+    aurea.light.deep_glow|0|threshold|fxt_only_what_is_brighter_than_the_threshold
+    aurea.generate.raster_extrude|4|reflection|fxt_the_reflection_uses_the_3d_scene_s_hdri
+    aurea.3d.shatter|4|center|fxt_tap_the_point_s_name_then_drag_it_on_the
+    aurea.light.saber|9|core_layer|fxt_used_when_the_core_is_layer_text
+    aurea.light.saber|22|mask_evolution|fxt_applies_to_the_layer_masks_core
+    """
+
+    /// "typeId#índice" → título da seção (índice = ordinal).
+    static let sections: [String: String] = {
+        var out: [String: String] = [:]
+        for line in sectionsTable.split(separator: "\n") {
+            let f = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 4, let index = Int(f[1]) else { continue }
+            out["\(fxEffectTypeId(f[0]))#\(index)"] = f[3]
+        }
+        return out
+    }()
+
+    private static let sectionsTable = """
+    aurea.distort.turbulence|1|cycle|fxl_cycle_evolution
+    aurea.distort.turbulence|2|offset|fxl_offset
+    aurea.distort.turbulence|3|edges|fxl_edges
+    aurea.distort.turbulence|4|output|fxs_output
+    aurea.light.deep_glow|1|threshold|fxl_threshold
+    aurea.light.deep_glow|2|color|fxl_color
+    aurea.light.lens_flare|1|color|fxl_color
+    aurea.light.lens_flare|2|elements|fxs_elements
+    aurea.light.scene_flare|1|color|fxl_color
+    aurea.light.scene_flare|2|elements|fxs_elements
+    aurea.generate.raster_extrude|1|material|fxs_material
+    aurea.3d.shatter|1|pieces|fxl_pieces
+    aurea.3d.shatter|2|physics|fxs_physics
+    aurea.3d.shatter|3|look|fxs_appearance
+    aurea.light.saber|1|glow|fxs_outer_glow
+    aurea.light.saber|2|core|fxs_core
+    aurea.light.saber|3|core_shape|fxs_core_shape
+    aurea.light.saber|4|masks|fxs_masks
+    aurea.light.saber|5|flicker|fxl_flicker
+    aurea.light.saber|6|distortion|fxs_distortion
+    aurea.light.saber|7|output|fxs_output
+    """
+
 }

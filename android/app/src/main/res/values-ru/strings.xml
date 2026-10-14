@@ -4317,4 +4317,27 @@
     <string name="batch_one_layer_selected">Выбран 1 слой</string>
     <string name="batch_group_mask_a11y">Группа с маской: верхний слой обрезает остальные</string>
     <string name="batch_group_exclude_a11y">Группа с исключением: верхний слой вырезает дыру в остальных</string>
+    <string name="fxt_pinning_holds_the_image_at_the_layer_s_e">Закрепление удерживает изображение у края слоя.</string>
+    <string name="fxs_output">Вывод</string>
+    <string name="fxt_only_what_is_brighter_than_the_threshold">Светится только то, что ярче порога.</string>
+    <string name="fxs_elements">Элементы</string>
+    <string name="fxt_the_reflection_uses_the_3d_scene_s_hdri">Отражение использует HDRI или студию 3D-сцены.</string>
+    <string name="fxs_material">Материал</string>
+    <string name="fxt_tap_the_point_s_name_then_drag_it_on_the">Нажмите на название точки и перетащите её в превью.</string>
+    <string name="fxs_physics">Физика</string>
+    <string name="fxs_appearance">Внешний вид</string>
+    <string name="fxt_used_when_the_core_is_layer_text">Используется, когда ядро — «Слой / текст».</string>
+    <string name="fxt_applies_to_the_layer_masks_core">Действует для ядра «Маски слоя».</string>
+    <string name="fxs_core">Ядро</string>
+    <string name="fxs_core_shape">Форма ядра</string>
+    <string name="fxs_masks">Маски</string>
+    <string name="fxs_distortion">Искажение</string>
+    <string name="fxs_outer_glow">Внешнее свечение</string>
+    <string name="fxui_effect_deleted">Эффект удалён</string>
+    <string name="fxui_a11y_section_expand">Развернуть раздел %1$s</string>
+    <string name="fxui_a11y_section_collapse">Свернуть раздел %1$s</string>
+    <string name="fxui_a11y_tip">Подсказка: %1$s</string>
+    <string name="fxui_a11y_swipe_delete">Смахните влево, чтобы удалить</string>
+    <string name="fxui_stage_point">Точка: %1$s</string>
+    <string name="fxui_stage_point_hint">Перетащите в превью, чтобы сдвинуть точку</string>
 </resources>

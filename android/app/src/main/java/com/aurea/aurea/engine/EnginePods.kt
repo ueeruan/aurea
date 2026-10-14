@@ -643,9 +643,12 @@ object ParamType {
 }
 
 /**
- * Espelho de `bridge::EffectParamRow` (104 bytes). `value` é o valor no playhead.
+ * Espelho de `bridge::EffectParamRow` (136 bytes). `value` é o valor no playhead.
  * [min]..[max] é a faixa do SLIDER; [hardMin]..[hardMax] é a faixa DIGITADA
  * (teclado numérico) — sempre a contém, e é a que o motor impõe.
+ * [section] (1..N, 0 = nenhuma) agrupa a linha sob um título recolhível do
+ * painel (`ParamSection` do motor); [sectionToggle] é o Bool que liga a seção
+ * (−1 = sem interruptor); [tip] é a dica (ⓘ) mostrada acima da linha.
  */
 class EffectParam(
     val index: Int,
@@ -661,17 +664,26 @@ class EffectParam(
     val animated: Boolean,
     val hardMin: Float = min,
     val hardMax: Float = max,
+    val section: Int = 0,
+    val sectionId: String = "",
+    val sectionLabel: String = "",
+    val sectionToggle: Int = -1,
+    val sectionOpen: Boolean = true,
+    val tip: String = "",
 ) {
     val hidden: Boolean get() = (flags and ParamType.FLAG_HIDDEN) != 0
 
     override fun equals(other: Any?): Boolean =
         other is EffectParam && index == other.index && type == other.type &&
-            value.contentEquals(other.value) && label == other.label && animated == other.animated
+            value.contentEquals(other.value) && label == other.label && animated == other.animated &&
+            section == other.section && sectionOpen == other.sectionOpen && tip == other.tip
 
     override fun hashCode(): Int = 31 * (31 * index + type) + value.contentHashCode()
 
     companion object {
-        const val ROW_BYTES = 104
+        const val ROW_BYTES = 136
+        /** `bridge::kEffectSectionOpen` (EffectParamRow::sectionFlags). */
+        const val SECTION_OPEN = 1
 
         internal fun read(rows: ByteBuffer, i: Int, blob: ByteBuffer): EffectParam {
             val b = i * ROW_BYTES
@@ -695,6 +707,12 @@ class EffectParam(
                 unit = blob.utf8(rows.getInt(b + 64), rows.getInt(b + 68)),
                 enumLabels = if (enumText.isEmpty()) emptyList() else enumText.split('|'),
                 animated = rows.getInt(b + 80) != 0,
+                section = rows.getInt(b + 100),
+                sectionToggle = rows.getInt(b + 104),
+                sectionOpen = (rows.getInt(b + 108) and SECTION_OPEN) != 0,
+                sectionId = blob.utf8(rows.getInt(b + 112), rows.getInt(b + 116)),
+                sectionLabel = blob.utf8(rows.getInt(b + 120), rows.getInt(b + 124)),
+                tip = blob.utf8(rows.getInt(b + 128), rows.getInt(b + 132)),
             )
         }
     }

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,9 +73,22 @@ fun AureaApp(store: EditorStore) {
                         .padding(bottom = 96.dp, start = 24.dp, end = 24.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(AureaColors.SurfaceHigh)
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(horizontal = 16.dp, vertical = if (store.toastAction != null) 2.dp else 10.dp),
                 ) {
-                    Text(msg, style = AureaType.Body)
+                    val action = store.toastAction
+                    if (action == null) {
+                        Text(msg, style = AureaType.Body)
+                    } else {
+                        // Aviso com ação ("Efeito apagado · Desfazer"): o botão é um toque só.
+                        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(msg, style = AureaType.Body)
+                            androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp))
+                            androidx.compose.material3.TextButton(
+                                onClick = store::runToastAction,
+                                modifier = Modifier.testTag("toast.action"),
+                            ) { Text(action.label, style = AureaType.Body, color = AureaColors.Accent) }
+                        }
+                    }
                 }
             }
             // "Importar texturas": o modelo procura arquivos que não vieram junto.

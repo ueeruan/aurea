@@ -57,12 +57,20 @@ AUREA_TEST(I18n, EffectCatalogHasStableIdsForEveryLabel) {
             ++params;
             json += std::string(j ? ", " : "") + "{\"index\": " + std::to_string(j) + ", \"id\": " + json_str(s.id) +
                     ", \"label\": " + json_str(s.label) + ", \"hidden\": " +
-                    ((s.flags & kParamHidden) ? "true" : "false") + ", \"enum\": [";
+                    ((s.flags & kParamHidden) ? "true" : "false") + ", \"section\": " + std::to_string(s.section) +
+                    ", \"tip\": " + json_str(s.tip) + ", \"enum\": [";
             for (u32 k = 0; k < s.enumCount && s.enumLabels; ++k) {
                 json += std::string(k ? ", " : "") + json_str(s.enumLabels[k]);
                 ++enums;
             }
             json += "]}";
+        }
+        // Seções do painel (ordinal 1..N): título traduzido pela chave da seção.
+        json += "], \"sections\": [";
+        for (u32 k = 1; k <= p.section_count(); ++k) {
+            const ParamSection* sec = p.section(k);
+            json += std::string(k > 1 ? ", " : "") + "{\"ordinal\": " + std::to_string(k) + ", \"id\": " +
+                    json_str(sec->id) + ", \"label\": " + json_str(sec->label) + "}";
         }
         json += std::string("]}") + (i + 1 < reg.count() ? "," : "") + "\n";
     }
@@ -454,7 +462,11 @@ AUREA_TEST(I18n, EveryEffectTextHasEnglish) {
             if (s.flags & kParamHidden) continue;
             need(info, j, s.id, -1, s.label);
             for (u32 k = 0; k < s.enumCount && s.enumLabels; ++k) need(info, j, s.id, static_cast<int>(k), s.enumLabels[k]);
+            // Dica (ⓘ): opção −2 na tabela.
+            if (s.tip) need(info, j, s.id, -2, s.tip);
         }
+        // Título de seção: opção −3, índice = ordinal, id = chave da seção.
+        for (u32 k = 1; k <= p.section_count(); ++k) need(info, k, p.section(k)->id, -3, p.section(k)->label);
     }
     std::printf("    textos de efeito conferidos: %u; sem ingles: %u (regere: python tools/i18n_effect_catalog.py)\n", checked, missing);
     AUREA_CHECK(checked > 0);

@@ -75,6 +75,10 @@ public:
         p.add_float("tint_amount", "Quantidade da cor", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("chromatic", "Aberração cromática", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_bool("add_mode", "Modo somar", false);
+        // Seções do painel (só apresentação; índices intactos).
+        p.add_section("threshold", "Limite", {kThreshold, kSoftness});
+        p.add_section("color", "Cor", {kColor, kTintAmount, kChromatic});
+        p.set_tip(kThreshold, "Só o que é mais claro que o limite brilha.");
     }
     static bool octaves(const EffectEval& e) noexcept { return e.f(kAlgorithm) >= 0.5f; }
     bool is_identity(const EffectEval& e) const noexcept override {

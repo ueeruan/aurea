@@ -190,6 +190,12 @@ public:
         p.add_enum("displacement", "Tipo de deslocamento", types, kTypeCount, 0);
         p.add_bool("cycle_evolution", "Ciclo de evolução", false);
         p.add_int("cycle", "Ciclo (em revoluções)", 1, 1, static_cast<i32>(kMaxCycle));
+        // Seções do painel (só apresentação; índices intactos).
+        p.add_section("cycle", "Ciclo de evolução", {kCycle}, kCycleOn, false);
+        p.add_section("offset", "Deslocamento", {kOffsetX, kOffsetY, kSpin}, kInvalidIndex, false);
+        p.add_section("edges", "Bordas", {kHorizontal, kEdges, kPin}, kInvalidIndex, false);
+        p.add_section("output", "Saída", {kSeed, kMix}, kInvalidIndex, false);
+        p.set_tip(kPin, "Fixar segura a imagem junto à borda da camada.");
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return e.f(kMix) < 0.01f || e.f(kAmount) < 0.01f;

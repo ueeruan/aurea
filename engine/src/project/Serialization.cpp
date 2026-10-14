@@ -249,7 +249,9 @@ void write_effect(ByteWriter& w, const EffectInstance& e) {
     w.u32v(e.id);
     w.u32v(e.type);
     w.boolv(e.enabled);
-    w.boolv(e.expanded);
+    // Bit 0 = `expanded`; bits 1..7 = seções do painel trocadas (sectionsFlipped).
+    // Leitor antigo lê o byte como bool: nada muda para ele.
+    w.u8v(static_cast<u8>((e.expanded ? 1u : 0u) | ((e.sectionsFlipped & 0x7Fu) << 1)));
     w.u32v(static_cast<u32>(e.params.size()));
     for (const ParamSlot& s : e.params) {
         for (f32 f : s.constant.v) w.f32v(f);
@@ -294,7 +296,11 @@ void read_effect(ByteReader& r, EffectInstance& e) {
     e.id = r.u32v();
     e.type = r.u32v();
     e.enabled = r.boolv();
-    e.expanded = r.boolv();
+    {
+        const u8 panel = r.u8v();
+        e.expanded = (panel & 1u) != 0;
+        e.sectionsFlipped = static_cast<u8>(panel >> 1);
+    }
     const u32 paramCount = r.u32v();
     if (paramCount > 256) { r.skip_to_end(); return; }
     e.params.resize(paramCount);

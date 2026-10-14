@@ -1581,6 +1581,87 @@ func fxSplitPrincipal(_ typeId: UInt32, _ visible: [FxParamSlot]) -> (main: [FxP
 }
 
 // =============================================================================
+// SEÇÕES, DICAS, ALÇA DE PONTO E DESLIZAR PARA APAGAR (EffectSections.kt)
+//
+// O motor declara as seções (`ParamSection`): título recolhível, interruptor
+// opcional (o Bool que liga a seção) e a dica (ⓘ) acima de um parâmetro. A
+// ORDEM da tela é a do Android (`effectLayout`): linhas soltas primeiro, depois
+// as seções pelo ordinal, cada uma com os parâmetros na ordem dos índices.
+// =============================================================================
+
+/// Uma seção do cartão: título, interruptor (o Bool que liga a seção), estado e linhas.
+struct FxSection: Identifiable {
+    let ordinal: Int
+    let key: String
+    let label: String
+    let toggle: EffectParamItem?
+    let open: Bool
+    let params: [EffectParamItem]
+    var id: Int { ordinal }
+}
+
+/// O corpo do cartão: linhas soltas (principais + "Avançado") e as seções.
+struct FxLayout {
+    var main: [EffectParamItem]
+    var advanced: [EffectParamItem]
+    var sections: [FxSection]
+    /// Todas as linhas, na ordem da tela (o interruptor conta antes da sua seção).
+    var all: [EffectParamItem] {
+        var out = main + advanced
+        for section in sections {
+            if let toggle = section.toggle { out.append(toggle) }
+            out += section.params
+        }
+        return out
+    }
+    var isEmpty: Bool { main.isEmpty && advanced.isEmpty && sections.isEmpty }
+}
+
+/// Monta o corpo do cartão a partir dos parâmetros VISÍVEIS. Efeito sem seção:
+/// o de sempre (principais e "Avançado", `fxSplitPrincipal`). Com seção: as
+/// linhas soltas na ordem dos índices e cada seção (com pelo menos uma linha
+/// além do interruptor) na ordem do ordinal — as seções substituem o "Avançado".
+func fxEffectLayout(_ typeId: UInt32, _ visible: [EffectParamItem]) -> FxLayout {
+    guard visible.contains(where: { $0.section > 0 }) else {
+        let slots = visible.map { FxParamSlot(index: Int($0.index), type: Int($0.type), min: $0.minValue, max: $0.maxValue,
+                                              label: $0.label, unit: $0.unit, enumLabels: $0.enumLabels) }
+        let groups = fxSplitPrincipal(typeId, slots)
+        let byIndex = Dictionary(visible.map { (Int($0.index), $0) }, uniquingKeysWith: { first, _ in first })
+        return FxLayout(main: groups.main.compactMap { byIndex[$0.index] }, advanced: groups.rest.compactMap { byIndex[$0.index] }, sections: [])
+    }
+    let loose = visible.filter { $0.section <= 0 }.sorted { $0.index < $1.index }
+    let grouped = Dictionary(grouping: visible.filter { $0.section > 0 }, by: \.section)
+    let sections: [FxSection] = grouped.keys.sorted().compactMap { ordinal in
+        guard let members = grouped[ordinal], let head = members.first else { return nil }
+        let toggle = members.first { Int($0.index) == head.sectionToggle && Int($0.type) == fxParamBool }
+        let rows = members.filter { Int($0.index) != head.sectionToggle }.sorted { $0.index < $1.index }
+        guard !rows.isEmpty else { return nil }
+        return FxSection(ordinal: ordinal, key: head.sectionId, label: head.sectionLabel, toggle: toggle, open: head.sectionOpen, params: rows)
+    }
+    return FxLayout(main: loose, advanced: [], sections: sections)
+}
+
+/// A seção recolhida que contém o parâmetro `param` (0 = nenhuma).
+func fxClosedSection(_ layout: FxLayout, param: UInt32) -> Int {
+    for section in layout.sections where !section.open {
+        if section.toggle?.index == param || section.params.contains(where: { $0.index == param }) { return section.ordinal }
+    }
+    return 0
+}
+
+/// Ponto que ganha ALÇA no palco quando é o parâmetro ativo: Point2D (ou os X/Y
+/// de um Point3D) em FRAÇÃO da camada (`kParamRelative` = 8) e visível (16).
+func fxStagePointEligible(type: Int, flags: UInt32) -> Bool {
+    (type == fxParamPoint2D || type == fxParamPoint3D) && flags & 8 != 0 && flags & 16 == 0
+}
+
+/// Deslizar para a ESQUERDA apaga o efeito quando o dedo passa de 35 % da
+/// largura do cartão (nunca menos que `minimum`); para a direita não faz nada.
+func fxSwipeCommits(dx: CGFloat, width: CGFloat, minimum: CGFloat) -> Bool {
+    dx < 0 && -dx >= Swift.max(minimum, width * 0.35)
+}
+
+// =============================================================================
 // Categorias, descrições, alvos e custo (EffectCatalogMeta.kt)
 // =============================================================================
 
@@ -2003,6 +2084,18 @@ func fxLocalizedParam(_ typeId: UInt32, index: Int, label: String, unit: String,
     // Opções só pela identidade completa: se o motor mudou a lista, fica a dele.
     let localizedOptions = entry.options.count == options.count ? entry.options.map { AureaText.t($0) } : options
     return (AureaText.t(entry.label), localizedUnit, localizedOptions)
+}
+
+/// Título da seção do painel pela identidade (efeito + ordinal); sem entrada, o do motor.
+func fxLocalizedSection(_ typeId: UInt32, ordinal: Int, label: String) -> String {
+    guard ordinal > 0, let key = EffectI18nTable.sections["\(typeId)#\(ordinal)"] else { return label }
+    return AureaText.t(key)
+}
+
+/// Dica (ⓘ) do parâmetro pela identidade (efeito + índice); sem entrada, a do motor.
+func fxLocalizedTip(_ typeId: UInt32, index: Int, tip: String) -> String {
+    guard !tip.isEmpty, let key = EffectI18nTable.tips["\(typeId)#\(index)"] else { return tip }
+    return AureaText.t(key)
 }
 
 /// A ficha de um parâmetro do catálogo (`effectSpecs`) com rótulo, opções e unidade traduzidos.

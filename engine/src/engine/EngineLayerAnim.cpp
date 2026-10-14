@@ -647,6 +647,9 @@ Result<u32> Engine::add_layers_to_group(const u64* ids, u32 count, u64 groupLaye
     if (!NC || !comp || !C) return refuse(Errc::OutOfMemory, "composicao nao criada");
     NC->restore_from(*C);
     NC->set_name(childName);
+    // Máscara de recorte: fora, quem perdeu a base continua pela de baixo;
+    // dentro, uma recortada que entrou sem a base perde o recorte.
+    ClipChainEdit clipOutside(comp), clipInside(NC);
     std::vector<std::pair<LayerId, LayerId>> map;
     // Linhas de FORA não valem dentro do grupo (lá os números são outros): as
     // que entram ganham linhas novas, e as que dividiam linha seguem juntas.
@@ -760,6 +763,7 @@ Result<u64> Engine::remove_layer_from_group(u64 layerId, std::string* why) noexc
     if (!NC || !P || !C) return refuse(Errc::OutOfMemory, "composicao nao criada");
     NC->restore_from(*C);
     NC->set_name(childName);
+    ClipChainEdit clipOutside(P), clipInside(NC);   // máscara de recorte dos dois lados
     const Layer moved = *C->layer(lid);
     NC->remove_layer(lid);
     NC->rebuild_draw_order();

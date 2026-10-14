@@ -52,7 +52,8 @@ AUREA_TEST(Serialization, Timeline47CameraLayeringPreservesMultipleLayersAndNest
     AUREA_CHECK(ProjectSerializer::encode(original, SaveOptions{}, bytes).ok());
     Project restored; LoadReport report;
     AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}, &report).ok());
-    AUREA_CHECK_EQ(report.timelineVersion, 47u);
+    // v47 ou mais nova (a v48 acrescentou a máscara de recorte no fim da camada).
+    AUREA_CHECK(report.timelineVersion >= 47u);
     AUREA_CHECK(!report.partial);
     const auto* restoredRoot = restored.timeline().composition(restored.timeline().root());
     AUREA_CHECK_EQ(restoredRoot->order().size(), 2u);

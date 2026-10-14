@@ -4317,4 +4317,8 @@
     <string name="batch_one_layer_selected">Выбран 1 слой</string>
     <string name="batch_group_mask_a11y">Группа с маской: верхний слой обрезает остальные</string>
     <string name="batch_group_exclude_a11y">Группа с исключением: верхний слой вырезает дыру в остальных</string>
+    <string name="editor_criar_mascara_recorte">Создать обтравочную маску</string>
+    <string name="editor_liberar_mascara_recorte">Отменить обтравочную маску</string>
+    <string name="editor_mascara_recorte_detalhe">Слой виден только внутри слоя ниже</string>
+    <string name="editor_recortada_camada_abaixo">Обрезан слоем ниже</string>
 </resources>

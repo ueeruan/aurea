@@ -544,4 +544,189 @@ void Composition::restore_from(const Composition& snapshot) {
     rebuild_draw_order();
 }
 
+// =============================================================================
+// Máscara de recorte por camada
+// =============================================================================
+
+namespace {
+bool clip_visual_kind(LayerKind k) noexcept {
+    switch (k) {
+        case LayerKind::Video: case LayerKind::Image: case LayerKind::Text: case LayerKind::Shape:
+        case LayerKind::Model3D: case LayerKind::ParticleSystem: case LayerKind::Composition:
+            return true;
+        default:
+            return false;   // áudio, null, ajuste, câmera, luz: nada para recortar
+    }
+}
+} // namespace
+
+bool can_be_clip_child(const Layer& l) noexcept { return clip_visual_kind(l.kind) && !l.adjustment; }
+bool can_be_clip_base(const Layer& l) noexcept { return clip_visual_kind(l.kind) && !l.adjustment; }
+
+i32 clip_base_index(const Composition& comp, u32 index) noexcept {
+    const auto& order = comp.order();
+    if (index >= order.size()) return -1;
+    const Layer* l = comp.layer(order.at(index));
+    if (!l || !l->clipToBelow) return -1;
+    for (u32 j = index; j-- > 0;) {
+        const Layer* b = comp.layer(order.at(j));
+        if (!b) return -1;
+        if (!b->clipToBelow) return static_cast<i32>(j);
+    }
+    return -1;
+}
+
+bool can_create_clip(const Composition& comp, u32 index) noexcept {
+    const auto& order = comp.order();
+    if (index == 0 || index >= order.size()) return false;
+    const Layer* l = comp.layer(order.at(index));
+    const Layer* below = comp.layer(order.at(index - 1));
+    if (!l || !below || l->clipToBelow || !can_be_clip_child(*l)) return false;
+    // A de baixo já recortada: a cadeia dela foi validada, a base é boa.
+    return below->clipToBelow || can_be_clip_base(*below);
+}
+
+void ClipChainState::alias(LayerId copy, LayerId source) {
+    if (copy.valid() && source.valid()) aliases.emplace_back(copy.pack(), key(source.pack()));
+}
+
+u64 ClipChainState::key(u64 id) const noexcept {
+    for (const auto& a : aliases) if (a.first == id) return a.second;
+    return id;
+}
+
+const ClipChainState::Entry* ClipChainState::find_exact(u64 id) const noexcept {
+    const auto it = std::lower_bound(entries.begin(), entries.end(), id,
+                                     [](const std::pair<u64, Entry>& e, u64 v) { return e.first < v; });
+    return it != entries.end() && it->first == id ? &it->second : nullptr;
+}
+
+const ClipChainState::Entry* ClipChainState::find(u64 id) const noexcept { return find_exact(key(id)); }
+
+ClipChainState capture_clip_chains(const Composition& comp) {
+    ClipChainState s;
+    const auto& order = comp.order();
+    s.entries.reserve(order.size());
+    u64 base = 0;
+    for (u32 i = 0; i < order.size(); ++i) {
+        const Layer* l = comp.layer(order.at(i));
+        if (!l) continue;
+        ClipChainState::Entry e;
+        e.index = i;
+        if (l->clipToBelow && i > 0) e.base = base;
+        else base = order.at(i).pack();
+        s.entries.emplace_back(order.at(i).pack(), e);
+    }
+    std::sort(s.entries.begin(), s.entries.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    return s;
+}
+
+u32 enforce_clip_chains(Composition& comp, const ClipChainState* before) noexcept {
+    const auto& order = comp.order();
+    const u32 n = order.size();
+    auto key = [&](u64 id) { return before ? before->key(id) : id; };
+    // Quem andou na pilha: a dica da edição ou, sem ela, as camadas fora da
+    // maior sequência que manteve a ordem de antes. Camada nova (colada,
+    // desagrupada) conta como andada; cópia (duplicar, dividir) não.
+    std::vector<u8> moved(before ? n : 0, 0);
+    if (before) {
+        std::vector<i32> oldIndex(n, -1);
+        for (u32 i = 0; i < n; ++i) {
+            const u64 id = order.at(i).pack();
+            if (before->key(id) != id) continue;                     // cópia: fica onde nasceu
+            const ClipChainState::Entry* e = before->find_exact(id);
+            if (!e) moved[i] = 1;                                     // nova
+            else oldIndex[i] = static_cast<i32>(e->index);
+        }
+        if (!before->moved.empty()) {
+            for (u32 i = 0; i < n; ++i)
+                if (std::find(before->moved.begin(), before->moved.end(), order.at(i).pack()) != before->moved.end())
+                    moved[i] = 1;
+        } else {
+            // Maior subsequência crescente dos índices de antes (paciência).
+            std::vector<u32> tails, tailAt, prev(n, kInvalidIndex);
+            for (u32 i = 0; i < n; ++i) {
+                if (oldIndex[i] < 0) continue;
+                const auto it = std::lower_bound(tails.begin(), tails.end(), static_cast<u32>(oldIndex[i]));
+                const usize k = static_cast<usize>(it - tails.begin());
+                if (k > 0) prev[i] = tailAt[k - 1];
+                if (it == tails.end()) { tails.push_back(static_cast<u32>(oldIndex[i])); tailAt.push_back(i); }
+                else { *it = static_cast<u32>(oldIndex[i]); tailAt[k] = i; }
+            }
+            std::vector<u8> stable(n, 0);
+            for (u32 i = tailAt.empty() ? kInvalidIndex : tailAt.back(); i != kInvalidIndex; i = prev[i]) stable[i] = 1;
+            for (u32 i = 0; i < n; ++i) if (oldIndex[i] >= 0 && !stable[i]) moved[i] = 1;
+        }
+    }
+    // A cadeia de uma vizinha recortada continua a mesma de antes (a base
+    // dela não mudou)? Então a camada está ao lado de uma cadeia intacta.
+    auto intact = [&](u32 j, u64 baseKey) {
+        if (j >= n || moved[j]) return false;
+        const Layer* m = comp.layer(order.at(j));
+        if (!m || !m->clipToBelow) return false;
+        const ClipChainState::Entry* w = before->find(order.at(j).pack());
+        return w && w->base != 0 && w->base == baseKey;
+    };
+    u64 base = 0;            // base da cadeia em que a camada atual entraria
+    bool baseOk = false;
+    bool releasing = false;  // cadeia inválida: as recortadas seguidas acima também saem
+    u32 changed = 0;
+    for (u32 i = 0; i < n; ++i) {
+        const LayerId id = order.at(i);
+        Layer* l = comp.layer(id);
+        if (!l) continue;
+        bool clip = l->clipToBelow;
+        if (clip) {
+            const bool valid = i > 0 && !releasing && baseOk && can_be_clip_child(*l);
+            bool keep = valid;
+            if (keep && before) {
+                const ClipChainState::Entry* was = before->find(id.pack());
+                const u64 baseKey = key(base);
+                if (was && was->base != 0 && was->base == baseKey) {
+                    // mesma cadeia de antes (reordenada por dentro, ou intacta)
+                } else if (!was) {
+                    // nova: entrou junto com a camada de baixo (colar ou
+                    // desagrupar um bloco) ou caiu ao lado de uma cadeia
+                    keep = !before->find(order.at(i - 1).pack()) || intact(i - 1, baseKey) || intact(i + 1, baseKey);
+                } else if (moved[i]) {
+                    // saiu de perto da cadeia dela: fica só se caiu ao lado de
+                    // uma cadeia intacta (e entra nela)
+                    keep = intact(i - 1, baseKey) || intact(i + 1, baseKey);
+                } else {
+                    // ficou no lugar e a base mudou: base APAGADA (ou levada
+                    // para um grupo) = recorta pela que ficou embaixo; base que
+                    // andou para longe = a cadeia solta
+                    keep = was->base != 0 && !comp.layer(LayerId::unpack(was->base));
+                }
+            }
+            if (!keep) {
+                clip = false;
+                // Base que não pode ser base (ou recortada inválida): a cadeia
+                // acima também solta. No fundo da pilha ela vira a nova base.
+                releasing = !valid && i > 0;
+            }
+        } else {
+            releasing = false;
+            // Camada normal que entrou no MEIO de uma cadeia: vira parte dela.
+            // (Não vale para a base da vizinha de cima, nem para a cópia dela.)
+            if (before && moved[i] && i > 0 && i + 1 < n && !moved[i + 1] && baseOk && can_be_clip_child(*l)) {
+                const Layer* above = comp.layer(order.at(i + 1));
+                const ClipChainState::Entry* w = above && above->clipToBelow ? before->find(order.at(i + 1).pack()) : nullptr;
+                if (w && w->base != 0 && w->base == key(base) && w->base != key(id.pack())) clip = true;
+            }
+        }
+        if (clip != l->clipToBelow) {
+            l->clipToBelow = clip;
+            ++changed;
+        }
+        if (!clip) {
+            base = id.pack();
+            baseOk = can_be_clip_base(*l);
+        }
+    }
+    if (changed) comp.touch();
+    return changed;
+}
+
 } // namespace aurea

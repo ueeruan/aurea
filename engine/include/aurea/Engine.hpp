@@ -1069,6 +1069,11 @@ public:
     bool set_layer_guide(u64 layerId, bool on) noexcept;
     /// Etiqueta de cor (0 = nenhuma, até kLayerLabelCount − 1).
     bool set_layer_label(u64 layerId, u32 label) noexcept;
+    /// Máscara de recorte ("Criar/Liberar máscara de recorte"): a camada só
+    /// aparece onde a camada de baixo (ordem de desenho) tem alfa. Criar exige
+    /// camada visual com base visual abaixo (`can_create_clip`); liberar solta
+    /// também a cadeia recortada logo acima. Um passo de desfazer.
+    bool set_layer_clip_to_below(u64 layerId, bool on) noexcept;
     /// Solo: com alguma camada em solo, o preview (e o áudio) só tocam as em solo.
     bool set_layer_solo(u64 layerId, bool on) noexcept;
     /// Camadas da composição atual cujo nome ou texto contém `query` (sem

@@ -4389,4 +4389,8 @@
     <string name="batch_one_layer_selected">1 camada selecionada</string>
     <string name="batch_group_mask_a11y">Agrupar e mascarar: a camada de cima recorta as outras</string>
     <string name="batch_group_exclude_a11y">Agrupar e excluir: a camada de cima abre um furo nas outras</string>
+    <string name="editor_criar_mascara_recorte">Criar máscara de recorte</string>
+    <string name="editor_liberar_mascara_recorte">Liberar máscara de recorte</string>
+    <string name="editor_mascara_recorte_detalhe">A camada só aparece dentro da camada abaixo</string>
+    <string name="editor_recortada_camada_abaixo">Recortada pela camada abaixo</string>
 </resources>

@@ -405,6 +405,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setLayer:(long long)layerId locked:(BOOL)locked;
 - (void)setLayer:(long long)layerId solo:(BOOL)solo;
 - (void)setLayer:(long long)layerId label:(uint32_t)label;
+/// Máscara de recorte: a camada só aparece onde a de baixo (ordem de desenho)
+/// tem alfa. Criar exige o bit `clipCandidate`; liberar solta também a cadeia
+/// recortada logo acima. Um passo de desfazer. NO = recusado.
+- (BOOL)setLayer:(long long)layerId clipToBelow:(BOOL)on;
 - (void)setLayer:(long long)layerId blendMode:(uint32_t)blendMode;
 - (void)setLayer:(long long)layerId parent:(long long)parentId;
 - (void)setLayer:(long long)layerId startFrame:(int32_t)start endFrame:(int32_t)end offsetFrames:(int32_t)offset setOffset:(BOOL)setOffset;

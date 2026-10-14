@@ -276,6 +276,8 @@ struct TimelineRow {
     /// (ela mesma). Os campos desta fileira são só o resumo dela (pílula,
     /// altura); quem se desenha, se toca e se edita é cada trecho de `segments`.
     var shared: [TimelineRow]? = nil
+    /// Máscara de recorte: recortada pela camada abaixo (indicador na pílula).
+    var clipToBelow: Bool = false
 
     /// Os trechos desenhados e tocados nesta fileira: os da linha, ou só ela.
     var segments: [TimelineRow] { shared ?? [self] }
@@ -321,7 +323,8 @@ func buildTimelineRow(_ l: LayerItem, _ all: [KeyframeItem]) -> TimelineRow {
                        label: l.label,
                        instants: instants,
                        keysAt: groups,
-                       line: l.trackId)
+                       line: l.trackId,
+                       clipToBelow: l.clipToBelow)
 }
 
 /**
@@ -390,7 +393,7 @@ private func timelineSharedRow(line: UInt32, _ segments: [TimelineRow]) -> Timel
     return TimelineRow(id: head.id, type: head.type, start: start, end: end, offset: 0,
                        visible: visible, locked: locked, magnetic: magnetic, animated: animated,
                        name: head.name, label: head.label, instants: [], keysAt: [],
-                       line: line, shared: segments)
+                       line: line, shared: segments, clipToBelow: head.clipToBelow)
 }
 
 /// Chave de GRUPO de cada fileira para reordenar na vertical (o mesmo do

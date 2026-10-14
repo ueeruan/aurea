@@ -48,6 +48,8 @@ internal class RowModel(
      * desenha, se toca e se edita é cada trecho de [segments].
      */
     val shared: Array<RowModel>? = null,
+    /** Máscara de recorte: recortada pela camada abaixo (indicador na pílula). */
+    val clipToBelow: Boolean = false,
 ) {
     /** Os trechos desenhados e tocados nesta fileira: os da linha, ou só ela. */
     val segments: Array<RowModel> = shared ?: arrayOf(this)
@@ -179,6 +181,7 @@ internal fun buildRow(l: LayerRow, all: List<KeyframeRow>, name: String = l.name
         instants = times.toIntArray(),
         keysAt = groups.toTypedArray(),
         line = l.trackId,
+        clipToBelow = l.clipToBelow,
     )
 }
 
@@ -256,7 +259,7 @@ private fun sharedRow(line: Int, segs: Array<RowModel>): RowModel {
         id = head.id, type = head.type, start = start, end = end, offset = 0,
         visible = visible, locked = locked, magnetic = magnetic, animated = animated,
         name = head.name, label = head.label, instants = IntArray(0), keysAt = emptyArray(),
-        line = line, shared = segs,
+        line = line, shared = segs, clipToBelow = head.clipToBelow,
     )
 }
 

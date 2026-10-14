@@ -4356,4 +4356,8 @@ to edit the curve.</string>
     <string name="batch_one_layer_selected">1 layer selected</string>
     <string name="batch_group_mask_a11y">Group and mask: the top layer clips the others</string>
     <string name="batch_group_exclude_a11y">Group and exclude: the top layer cuts a hole in the others</string>
+    <string name="editor_criar_mascara_recorte">Create clipping mask</string>
+    <string name="editor_liberar_mascara_recorte">Release clipping mask</string>
+    <string name="editor_mascara_recorte_detalhe">The layer only shows inside the layer below</string>
+    <string name="editor_recortada_camada_abaixo">Clipped by the layer below</string>
 </resources>

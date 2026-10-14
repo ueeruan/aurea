@@ -4305,4 +4305,8 @@
     <string name="batch_one_layer_selected">1 लेयर चुनी गई</string>
     <string name="batch_group_mask_a11y">समूह और मास्क: सबसे ऊपर की लेयर बाकी को काटती है</string>
     <string name="batch_group_exclude_a11y">समूह और बहिष्कार: सबसे ऊपर की लेयर बाकी में छेद करती है</string>
+    <string name="editor_criar_mascara_recorte">क्लिपिंग मास्क बनाएँ</string>
+    <string name="editor_liberar_mascara_recorte">क्लिपिंग मास्क हटाएँ</string>
+    <string name="editor_mascara_recorte_detalhe">लेयर केवल नीचे वाली लेयर के अंदर दिखती है</string>
+    <string name="editor_recortada_camada_abaixo">नीचे वाली लेयर से क्लिप की गई</string>
 </resources>

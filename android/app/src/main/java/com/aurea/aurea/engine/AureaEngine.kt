@@ -666,6 +666,12 @@ class AureaEngine private constructor() {
     fun setLayerAdjustment(layer: Long, on: Boolean): Boolean = nativeSetLayerAdjustment(nativeHandle, layer, on)
     fun setLayerGuide(layer: Long, on: Boolean): Boolean = nativeSetLayerGuide(nativeHandle, layer, on)
     fun setLayerLabel(layer: Long, label: Int): Boolean = nativeSetLayerLabel(nativeHandle, layer, label)
+    /**
+     * Máscara de recorte: a camada só aparece onde a de baixo (ordem de desenho)
+     * tem alfa. Criar exige `LayerRow.clipCandidate`; liberar solta também a
+     * cadeia recortada logo acima. Um passo de desfazer.
+     */
+    fun setLayerClipToBelow(layer: Long, on: Boolean): Boolean = nativeSetLayerClipToBelow(nativeHandle, layer, on)
     fun setLayerSolo(layer: Long, on: Boolean): Boolean = nativeSetLayerSolo(nativeHandle, layer, on)
     /** Camadas cujo nome/texto contém [query] (sem maiúscula nem acento), da frente para o fundo. */
     fun searchLayers(query: String): LongArray = nativeSearchLayers(nativeHandle, query)
@@ -1200,6 +1206,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetLayerAdjustment(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerGuide(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerLabel(handle: Long, layer: Long, label: Int): Boolean
+    private external fun nativeSetLayerClipToBelow(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerSolo(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSearchLayers(handle: Long, query: String): LongArray
     private external fun nativeSetThermal(handle: Long, status: Int)

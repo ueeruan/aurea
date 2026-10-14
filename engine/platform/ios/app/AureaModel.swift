@@ -103,6 +103,10 @@ struct LayerItem: Identifiable, Equatable {
     /// dividem a mesma fileira, lado a lado no tempo. 0 = projeto antigo sem
     /// linha (a camada é a linha dela).
     var trackId: UInt32 = 0
+    /// Máscara de recorte: recortada pela camada abaixo (bit 14 das flags).
+    var clipToBelow: Bool = false
+    /// "Criar máscara de recorte" vale agora (bit 15): o motor decide.
+    var clipCandidate: Bool = false
 
     var duration: Int32 { max(0, endFrame - startFrame) }
 }
@@ -1781,7 +1785,9 @@ final class AureaModel: ObservableObject {
                       adjustment: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 6) != 0,
                       guide: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 7) != 0,
                       magnetic: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 13) != 0,
-                      trackId: (row["trackId"] as? NSNumber)?.uint32Value ?? 0)
+                      trackId: (row["trackId"] as? NSNumber)?.uint32Value ?? 0,
+                      clipToBelow: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 14) != 0,
+                      clipCandidate: ((row["flags"] as? NSNumber)?.uint32Value ?? 0) & (1 << 15) != 0)
         }
         if nextLayers != layers { layers = nextLayers }
         resolvePendingSplit()
@@ -4501,6 +4507,13 @@ final class AureaModel: ObservableObject {
     /// LINHA MAGNÉTICA da camada: ligada, os cortes dela andam como faixa de
     /// montagem (aparar e apagar puxam os vizinhos DA MESMA linha; quem está em
     /// outra linha não anda). Um passo de desfazer.
+    /// Máscara de recorte ("Criar/Liberar máscara de recorte"): a regra mora no
+    /// motor (elegibilidade e cadeias); aqui só pede e relê.
+    func setLayerClipToBelow(_ id: Int64, _ on: Bool) {
+        mutate { engine in _ = engine.setLayer(id, clipToBelow: on) }
+        refreshModel(force: true)
+    }
+
     func setLayerMagneticTrack(_ id: Int64, _ on: Bool) {
         mutate { engine in _ = engine.setLayer(id, magneticTrack: on) }
         refreshModel(force: true)

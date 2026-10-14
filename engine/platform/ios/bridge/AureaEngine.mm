@@ -1035,6 +1035,11 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     if (auto* e = self.engine) (void)e->set_layer_label(static_cast<aurea::u64>(layerId), label);
 }
 
+- (BOOL)setLayer:(long long)layerId clipToBelow:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_layer_clip_to_below(static_cast<aurea::u64>(layerId), on != NO);
+}
+
 - (void)setLayer:(long long)layerId adjustment:(BOOL)on {
     if (auto* e = self.engine) (void)e->set_layer_adjustment(static_cast<aurea::u64>(layerId), on != NO);
 }

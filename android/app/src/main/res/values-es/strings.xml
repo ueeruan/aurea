@@ -4309,4 +4309,8 @@ para editar la curva.</string>
     <string name="batch_one_layer_selected">1 capa seleccionada</string>
     <string name="batch_group_mask_a11y">Agrupar y enmascarar: la capa superior recorta las demás</string>
     <string name="batch_group_exclude_a11y">Agrupar y excluir: la capa superior abre un hueco en las demás</string>
+    <string name="editor_criar_mascara_recorte">Crear máscara de recorte</string>
+    <string name="editor_liberar_mascara_recorte">Liberar máscara de recorte</string>
+    <string name="editor_mascara_recorte_detalhe">La capa solo aparece dentro de la capa de abajo</string>
+    <string name="editor_recortada_camada_abaixo">Recortada por la capa de abajo</string>
 </resources>

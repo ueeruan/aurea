@@ -3045,3 +3045,4 @@ AUREA_TEST(EffectCurves, EditingUsesSharedBoundsPreservesChannelsUndoAndSave) {
     AUREA_CHECK_EQ(points[1], 0.f); AUREA_CHECK_EQ(points[3], 1.f);
     AUREA_CHECK_EQ(e.query_effect_curve(layer, effect, 0, 1, false, points, 128), 6u);
 }
+#include "ClipMask.inl"

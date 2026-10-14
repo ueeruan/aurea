@@ -73,6 +73,10 @@ internal object PodLayout {
      * vídeo — aparar e apagar puxam os vizinhos da MESMA linha.
      */
     const val FLAG_MAGNETIC = 1 shl 13
+    /** Máscara de recorte: a camada só aparece onde a de baixo tem alfa. */
+    const val FLAG_CLIP_TO_BELOW = 1 shl 14
+    /** "Criar máscara de recorte" vale agora (camada visual com base visual abaixo). */
+    const val FLAG_CLIP_CANDIDATE = 1 shl 15
     /** Etiqueta de cor (0 = nenhuma) nos bits 8..11 (`kLayerRowLabelShift`). */
     const val LABEL_SHIFT = 8
     const val LABEL_MASK = 0xF
@@ -219,6 +223,10 @@ class LayerRow internal constructor(
     val adjustment: Boolean get() = (flags and PodLayout.FLAG_ADJUSTMENT) != 0
     val guide: Boolean get() = (flags and PodLayout.FLAG_GUIDE) != 0
     val magnetic: Boolean get() = (flags and PodLayout.FLAG_MAGNETIC) != 0
+    /** Recortada pela camada abaixo (máscara de recorte). */
+    val clipToBelow: Boolean get() = (flags and PodLayout.FLAG_CLIP_TO_BELOW) != 0
+    /** Pode ganhar "Criar máscara de recorte" agora. */
+    val clipCandidate: Boolean get() = (flags and PodLayout.FLAG_CLIP_CANDIDATE) != 0
     /** Etiqueta de cor: 0 = nenhuma, 1..12 = `ShellColors.LabelPalette[label - 1]`. */
     val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
@@ -1020,6 +1028,8 @@ data class LayerDetail(
     val adjustment: Boolean get() = (flags and PodLayout.FLAG_ADJUSTMENT) != 0
     val guide: Boolean get() = (flags and PodLayout.FLAG_GUIDE) != 0
     val magnetic: Boolean get() = (flags and PodLayout.FLAG_MAGNETIC) != 0
+    val clipToBelow: Boolean get() = (flags and PodLayout.FLAG_CLIP_TO_BELOW) != 0
+    val clipCandidate: Boolean get() = (flags and PodLayout.FLAG_CLIP_CANDIDATE) != 0
     val label: Int get() = (flags ushr PodLayout.LABEL_SHIFT) and PodLayout.LABEL_MASK
 
     companion object {

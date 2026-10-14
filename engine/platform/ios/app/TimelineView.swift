@@ -232,6 +232,11 @@ struct TimelineView: View {
                             model.engine.setLayer(layer.id, visible: !layer.visible); model.refreshModel(force: true)
                         }
                         .accessibilityIdentifier("timeline.layer.\(layer.id)")
+                    if layer.clipToBelow {
+                        // Mesmo id do Android: o leitor de tela ouve a máscara de recorte.
+                        Text(layer.name + ": " + AureaText.t("editor_recortada_camada_abaixo"))
+                            .accessibilityIdentifier("timeline.layer.\(layer.id).clip")
+                    }
                 }
                 if !model.previewBufferRanges.isEmpty {
                     Text(AureaText.t("preview_buffer_timeline", model.previewTimelineCachedFrames))
@@ -649,7 +654,14 @@ struct TimelineView: View {
             glyph(&context, row.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: m.eyeIcon,
                   tint: row.visible ? AureaColors.text : AureaColors.muted, x: m.eyeCx, y: cy)
         }
-        let box = CGRect(x: m.glyphBoxLeft, y: cy - m.glyphBox / 2, width: m.glyphBox, height: m.glyphBox)
+        // Máscara de recorte: o quadradinho encolhe e encosta à direita, "pendurado"
+        // na camada de baixo, com o "↳" na frente dele (TimelinePainter.kt).
+        let side: CGFloat = row.clipToBelow ? m.glyphBox * 0.82 : m.glyphBox
+        let box = CGRect(x: m.glyphBoxLeft + m.glyphBox - side, y: cy - side / 2, width: side, height: side)
+        if row.clipToBelow {
+            context.draw(Text("\u{21B3}").font(.aurea(size: 11, weight: .bold)).foregroundColor(AureaColors.muted),
+                         at: CGPoint(x: box.minX - 1, y: cy), anchor: .trailing)
+        }
         var inner = context
         inner.opacity = row.visible ? 1 : AureaTimeline.hiddenAlpha + 0.2
         drawGlyphBox(&inner, row: row, box: box)

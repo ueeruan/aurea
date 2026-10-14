@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -213,6 +214,8 @@ internal fun MenuItemRow(
     radio: Boolean = false,
     danger: Boolean = false,
     icon: ImageVector? = null,
+    /** Id de teste/acessibilidade (o mesmo do iOS). */
+    tag: String? = null,
 ) {
     val active = onClick != null
     val color = when {
@@ -224,6 +227,7 @@ internal fun MenuItemRow(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .tocavel(enabled = active, haptic = true) { onClick?.invoke() }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

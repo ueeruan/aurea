@@ -134,8 +134,9 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
     // eco. Senão, billboards num alvo do tamanho da composição.
     bool fx = false;
     for (const EffectInstance& e : l.effects) fx |= e.enabled;
+    // Máscara de recorte (base ou recortada) também: o grupo precisa do desenho 2D.
     ps.inScene = in3d && !fx && l.masks.empty() && rl.matteMode == MatteMode::None && !rl.matteOnly
-              && rl.blend == BlendMode::Normal && rl.temporal.empty();
+              && rl.blend == BlendMode::Normal && rl.temporal.empty() && !rl.clipBase && !rl.clipParent;
     ps.compSpace = !ps.inScene && (in3d || world || blur);
 
     // Saída ← camada num quadro LOCAL (fracionário): mundo no 3D, composição

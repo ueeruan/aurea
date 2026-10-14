@@ -142,6 +142,15 @@ fun Timeline(
                 .pointerInput(controller) { with(controller) { handleGestures() } }
                 .drawBehind { painter.draw(this, controller) },
         )
+        // Máscara de recorte: a pílula desenha o "↳"; o leitor de tela ouve
+        // "Recortada pela camada abaixo" (mesmo id do iOS).
+        val clippedDescription = stringResource(R.string.editor_recortada_camada_abaixo)
+        store.layers.forEach { l ->
+            if (l.clipToBelow) {
+                Box(Modifier.width(1.dp).height(1.dp).testTag("timeline.layer.${l.id}.clip")
+                    .semantics { contentDescription = l.name + ": " + clippedDescription })
+            }
+        }
         if (cachedFrames > 0) {
             val bufferDescription = stringResource(R.string.preview_buffer_timeline, cachedFrames)
             Box(Modifier.fillMaxWidth().height((metrics.rulerTicks / density.density).dp)

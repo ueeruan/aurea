@@ -4299,4 +4299,8 @@ untuk mengedit kurvanya.</string>
     <string name="batch_one_layer_selected">1 layer dipilih</string>
     <string name="batch_group_mask_a11y">Grup dan masker: layer teratas memotong yang lain</string>
     <string name="batch_group_exclude_a11y">Grup dan kecualikan: layer teratas melubangi yang lain</string>
+    <string name="editor_criar_mascara_recorte">Buat clipping mask</string>
+    <string name="editor_liberar_mascara_recorte">Lepas clipping mask</string>
+    <string name="editor_mascara_recorte_detalhe">Lapisan hanya tampil di dalam lapisan di bawahnya</string>
+    <string name="editor_recortada_camada_abaixo">Dipotong oleh lapisan di bawahnya</string>
 </resources>

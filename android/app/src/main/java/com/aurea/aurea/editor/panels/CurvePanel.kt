@@ -436,6 +436,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     // A curva que se desenha é a do MOTOR (a mesma conta que anima o projeto).
     val samples = remember(ease) { engineEaseSamples(ease) }
     val graphMode = store.curveGraphMode
+    val copiedMsg = stringResource(R.string.curve_copied)
     var menu by remember { mutableStateOf(false) }
     var savePrompt by remember { mutableStateOf(false) }
     var presetMenu by remember { mutableStateOf(false) }
@@ -520,9 +521,43 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             ) {
                 CupertinoIcon(CupertinoGlyph.ArrowRightArrowLeft, 20.dp, Color.White.copy(alpha = if (ease.supportsInversion) 1f else .35f))
             }
-            Spacer(Modifier.height(4.dp))
+            // Copiar e colar à mão (pedido da beta): sem abrir o menu.
+            Box(Modifier.size(44.dp).testTag("curve.copy").tocavel {
+                CurveClipboard.ease = ease
+                store.showToast(copiedMsg)
+            }, contentAlignment = Alignment.Center) {
+                CupertinoIcon(CupertinoGlyph.DocOnDoc, 18.dp, Color.White)
+            }
+            Box(Modifier.size(44.dp).testTag("curve.paste").tocavel(enabled = CurveClipboard.ease != null) {
+                CurveClipboard.ease?.let {
+                    store.beginGesture("colar curva")
+                    applyEase(store, layer, start, it)
+                    store.endGesture()
+                }
+            }, contentAlignment = Alignment.Center) {
+                CupertinoIcon(CupertinoGlyph.DocOnClipboard, 18.dp, Color.White.copy(alpha = if (CurveClipboard.ease != null) 1f else .35f))
+            }
             Box(Modifier.size(48.dp).tocavel { menu = true }, contentAlignment = Alignment.Center) {
                 CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, Color.White)
+                // Menu PEQUENO ao lado dos três pontos (antes: folha que cobria a tela).
+                CurveCompactMenu(menu, onDismiss = { menu = false }, items = listOf(
+                    stringResource(R.string.panel_curva) to { store.curveGraphMode = 0 },
+                    stringResource(R.string.particular_curve_value) to { store.curveGraphMode = 1 },
+                    stringResource(R.string.panel_velocidade) to { store.curveGraphMode = 2 },
+                    stringResource(if (expanded) R.string.editor_sair_tela_cheia else R.string.panel_expandir) to { if (expanded) collapse() else fullscreen = true },
+                    stringResource(R.string.panel_copiar_curva) to { CurveClipboard.ease = ease },
+                    stringResource(R.string.panel_colar_curva) to {
+                        CurveClipboard.ease?.let {
+                            store.beginGesture("colar curva")
+                            applyEase(store, layer, start, it)
+                            store.endGesture()
+                        }
+                    },
+                    stringResource(R.string.panel_curve_apply_property) to {
+                        if (!applyEaseToProperty(store, layer, start, ease)) store.showToast(needTwoMsg)
+                    },
+                    stringResource(R.string.panel_salvar_curva_como_preset) to { savePrompt = true },
+                ))
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -656,30 +691,20 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         )
     }
 
-    if (menu) {
-        AureaActionSheet(
-            title = stringResource(R.string.panel_curva),
-            actions = listOf(
-                SheetAction(stringResource(R.string.panel_curva)) { store.curveGraphMode = 0 },
-                SheetAction(stringResource(R.string.particular_curve_value)) { store.curveGraphMode = 1 },
-                SheetAction(stringResource(R.string.panel_velocidade)) { store.curveGraphMode = 2 },
-                SheetAction(stringResource(if (expanded) R.string.editor_sair_tela_cheia else R.string.panel_expandir)) { if (expanded) collapse() else fullscreen = true },
-                SheetAction(stringResource(R.string.panel_copiar_curva)) { CurveClipboard.ease = ease },
-                SheetAction(stringResource(R.string.panel_salvar_curva_como_preset)) { savePrompt = true },
-                SheetAction(stringResource(R.string.panel_colar_curva), enabled = CurveClipboard.ease != null) {
-                    CurveClipboard.ease?.let {
-                        store.beginGesture("colar curva")
-                        applyEase(store, layer, start, it)
-                        store.endGesture()
-                    }
-                },
-                // Todos os trechos da propriedade (e dos eixos do grupo): um desfazer.
-                SheetAction(stringResource(R.string.panel_curve_apply_property)) {
-                    if (!applyEaseToProperty(store, layer, start, ease)) store.showToast(needTwoMsg)
-                },
-            ),
-            onDismiss = { menu = false },
-        )
+}
+
+/** Menu pequeno que abre AO LADO do botão (texto 13 sp, largura do conteúdo). */
+@Composable
+private fun CurveCompactMenu(open: Boolean, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
+    androidx.compose.material3.DropdownMenu(
+        expanded = open, onDismissRequest = onDismiss,
+        offset = androidx.compose.ui.unit.DpOffset(44.dp, 0.dp),
+        modifier = Modifier.background(Color(0xF0292E3D)).testTag("curve.menu"),
+    ) {
+        items.forEach { (label, action) ->
+            Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = Color.White)),
+                modifier = Modifier.tocavel { onDismiss(); action() }.padding(horizontal = 14.dp, vertical = 9.dp))
+        }
     }
 }
 

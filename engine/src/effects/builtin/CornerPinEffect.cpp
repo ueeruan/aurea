@@ -33,7 +33,13 @@ public:
         std::array<Vec2,4> corners;for(int i=0;i<4;++i)corners[i]={e.f(i*2)*w/100,e.f(i*2+1)*h/100};
         tracking::Homography map,inv;const bool valid=tracking::quad_map(corners,map)&&map.inverse(inv);
         Rect region=input.region;
-        if(valid && e.f(8)<.5f) {
+        // Depois do Motion Tile a camada é uma PAREDE: o plano inteiro segue a
+        // mesma perspectiva (um piso de ladrilhos), em vez de sobrar só a caixa.
+        const bool wall=input.tiled && e.f(8)<.5f;
+        if(wall && e.placement && !e.placement->inScene3d) {
+            const Rect vis=visible_layer_rect(*e.placement);
+            if(vis.w>0 && vis.h>0) region={vis.x-margin-2,vis.y-margin-2,vis.w+2*margin+4,vis.h+2*margin+4};
+        } else if(valid && e.f(8)<.5f) {
             f32 x=corners[0].x,y=corners[0].y,r=x,b=y;
             for(auto p:corners){x=std::min(x,p.x);y=std::min(y,p.y);r=std::max(r,p.x);b=std::max(b,p.y);}
             region=spread_region({x,y,r-x,b-y},0,0,e.placement,margin);
@@ -45,7 +51,13 @@ public:
         u.p0={static_cast<f32>(inv.m[0]),static_cast<f32>(inv.m[1]),static_cast<f32>(inv.m[2]),0};
         u.p1={static_cast<f32>(inv.m[3]),static_cast<f32>(inv.m[4]),static_cast<f32>(inv.m[5]),0};
         u.p2={static_cast<f32>(inv.m[6]),static_cast<f32>(inv.m[7]),static_cast<f32>(inv.m[8]),valid?1.f:0.f};
-        u.p3={input.region.x,input.region.y,input.region.w,input.region.h};u.color={w,h,0,0};
+        // O lado do horizonte em que a caixa está (sinal de z no centro dela):
+        // na parede, o que passa do horizonte não existe.
+        const f32 cx=(corners[0].x+corners[1].x+corners[2].x+corners[3].x)*.25f;
+        const f32 cy=(corners[0].y+corners[1].y+corners[2].y+corners[3].y)*.25f;
+        const f64 zc=inv.m[6]*cx+inv.m[7]*cy+inv.m[8];
+        u.p3={input.region.x,input.region.y,input.region.w,input.region.h};
+        u.color={w,h,wall?1.f:0.f,zc<0?-1.f:1.f};
         out={ctx.texture("corner pin",ow,oh),region,ow,oh};
         if(ctx.fullscreen_pass("corner pin",PassStage::Effects,out.texture,ShaderId::effects_corner_pin_frag,
             {PassTexture{input.texture,{},CommonSampler::LinearClamp}},&u,sizeof(u))==kInvalidIndex)return Errc::PipelineCompileFailed;

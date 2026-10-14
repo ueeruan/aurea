@@ -73,9 +73,12 @@ struct ExportSettings {
     /// Dither de 1/2 LSB na conversão para 8 bits. Só os testes desligam
     /// (querem códigos exatos). Não persiste.
     bool dither = true;
-    /// Offline neural super-resolution. 0 = normal, 2/4 = neural output scale.
-    /// Session option: output dimensions remain the requested final quality.
+    /// Upscale na GPU (textureNicest, 0.1.7): 0 = normal; 2/4 = a composição é
+    /// renderizada em saída/escala e ampliada num passe antes do NV12. Opção da
+    /// sessão: as dimensões de saída continuam as pedidas.
     u32 aiUpscale = 0;
+    /// Refinamento temporal do upscale (TAA modo 4). Não persiste.
+    bool upscaleTemporal = true;
     /// Session export range. Does not shorten the project or its compositions.
     bool trimToContent = false;
     /// Qualidade da sessão (0 Baixa, 1 Normal, 2 Alta) para a taxa automática
@@ -86,6 +89,11 @@ struct ExportSettings {
     /// encoder de software. A tela só passa o nível que o motor sugeriu depois
     /// de o encoder travar. Não persiste.
     u32 safeMode = 0;
+    /// Decodificação compatível da mídia de origem (export/ExportWatchdog.hpp,
+    /// export_retry_advice): o decoder do aparelho travou na tentativa
+    /// anterior. Android = decoder de SOFTWARE do sistema; iOS = planos na CPU.
+    /// Só a sessão de export; não persiste.
+    bool softwareDecode = false;
 };
 
 /// Ajustes de interface persistidos com o projeto — zoom da timeline, escala

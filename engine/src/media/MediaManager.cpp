@@ -233,11 +233,12 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     auto* factory = factory_;
     auto ready = readyFn_;
     auto* context = readyCtx_;
-    pending->worker = std::thread([pending, factory, asset, decodeAsset, proxy, ready, context] {
-        pending->decoder = factory->open_video(decodeAsset, MediaPriority::Preview);
+    const MediaPriority openPriority = openPriority_.load(std::memory_order_relaxed);
+    pending->worker = std::thread([pending, factory, asset, decodeAsset, proxy, ready, context, openPriority] {
+        pending->decoder = factory->open_video(decodeAsset, openPriority);
         if (proxy) {
             pending->decoder = proxy_decoder(std::move(pending->decoder), proxy);
-            if (!pending->decoder) pending->decoder = factory->open_video(asset, MediaPriority::Preview);
+            if (!pending->decoder) pending->decoder = factory->open_video(asset, openPriority);
         }
         pending->ready.store(true, std::memory_order_release);
         if (ready) ready(context);
@@ -336,6 +337,19 @@ void MediaManager::close_layer(LayerId layer) {
     }
 }
 
+bool MediaManager::opening_in_flight() noexcept {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const Entry& entry : entries_)
+            if (entry.opening && !entry.opening->ready.load(std::memory_order_acquire)) return true;
+    }
+    std::lock_guard<std::mutex> lock(retireMutex_);
+    if (retiring_) return true;   // pode ser exatamente o join de um abridor preso
+    for (const Entry& entry : retired_)
+        if (entry.opening && !entry.opening->ready.load(std::memory_order_acquire)) return true;
+    return false;
+}
+
 void MediaManager::close_all() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -343,6 +357,18 @@ void MediaManager::close_all() {
         entries_.clear();
     }
     drain_retired();
+}
+
+bool MediaManager::close_all_for(u64 timeoutNs) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (Entry& entry : entries_) retire_locked(std::move(entry));
+        entries_.clear();
+    }
+    std::unique_lock<std::mutex> lock(retireMutex_);
+    return retireWake_.wait_for(lock, std::chrono::nanoseconds(timeoutNs), [this] {
+        return retired_.empty() && !retiring_ && !retireNotifying_;
+    });
 }
 
 void MediaManager::suspend_all() {

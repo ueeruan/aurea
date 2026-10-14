@@ -122,6 +122,7 @@ namespace effect_keys {
     inline constexpr const char* kCrossGlitch        = "aurea.glitch.cross";
     // Tempo (integrados ao Temporal Engine, não desenham na cadeia de pixels)
     inline constexpr const char* kPosterizeTime      = "aurea.time.posterize";
+    inline constexpr const char* kLowFps             = "aurea.time.low_fps";
     inline constexpr const char* kTimeWarpRgb        = "aurea.time.warp_rgb";
     inline constexpr const char* kTimeRemap          = "aurea.time.remap";
     // Controles de expressão (não desenham; ver ExpressionControls.cpp).
@@ -212,6 +213,57 @@ namespace effect_keys {
     inline constexpr const char* kDatamosh              = "aurea.glitch.datamosh";
     inline constexpr const char* kWipeFlux              = "aurea.transition.wipe_flux";
     inline constexpr const char* kWipePlasma            = "aurea.transition.wipe_plasma";
+
+    // --- Efeitos 3D (pedido de beta 12/10/2026; Object3DEffects.cpp) ---------
+    // Partes dos objetos 3D: lidos pelo renderer 3D (scene3d/PartEffects.cpp).
+    inline constexpr const char* kPart3DTransform       = "aurea.3d.part_transform";
+    inline constexpr const char* kPart3DHide            = "aurea.3d.part_hide";
+    inline constexpr const char* kPart3DTexture         = "aurea.3d.part_texture";
+    // Geometria na GPU, em qualquer camada.
+    inline constexpr const char* kShatter3D             = "aurea.3d.shatter";
+    inline constexpr const char* kStroke3D              = "aurea.3d.stroke";
+
+    // --- Tempo por optical flow (0.1.8; FlowTimeEffects.cpp) ----------------
+    // Declarativos: o renderer lê os parâmetros onde escolhe os quadros da
+    // fonte (o mesmo optical flow do Movimento suave). Só o vídeo; o som não muda.
+    inline constexpr const char* kFlowRetime            = "aurea.time.flow_retime";
+    inline constexpr const char* kFlowMotionBlur        = "aurea.time.flow_motion_blur";
+    // --- Pacote CC (comportamento dos efeitos "CC" dos editores de movimento) ---
+    // CCEffects.cpp, CCStylizeEffects.cpp e CCTransitions.cpp. Nomes exibidos
+    // genéricos; o nome "CC" fica só nas palavras de busca.
+    inline constexpr const char* kKaleidoscope         = "aurea.distort.kaleidoscope";
+    inline constexpr const char* kSphereWrap           = "aurea.distort.sphere_wrap";
+    inline constexpr const char* kCylinderWrap         = "aurea.distort.cylinder_wrap";
+    inline constexpr const char* kTwister              = "aurea.distort.twister";
+    inline constexpr const char* kFlowPinch            = "aurea.distort.flow_pinch";
+    inline constexpr const char* kGriddler             = "aurea.distort.griddler";
+    inline constexpr const char* kRepeatTile           = "aurea.stylize.repeat_tile";
+    inline constexpr const char* kSmear                = "aurea.distort.smear";
+    inline constexpr const char* kSplit                = "aurea.distort.split";
+    inline constexpr const char* kSlant                = "aurea.distort.slant";
+    inline constexpr const char* kTiler                = "aurea.stylize.tiler";
+    inline constexpr const char* kHexTile              = "aurea.stylize.hex_tile";
+    inline constexpr const char* kVectorBlur           = "aurea.blur.vector_blur";
+    inline constexpr const char* kLightBurst           = "aurea.light.light_burst";
+    inline constexpr const char* kStarField            = "aurea.stylize.star_field";
+    inline constexpr const char* kThresholdRgb         = "aurea.color.threshold_rgb";
+    inline constexpr const char* kColorOffset          = "aurea.color.color_offset";
+    inline constexpr const char* kScatter              = "aurea.stylize.scatter";
+    inline constexpr const char* kBlobby               = "aurea.stylize.blobby";
+    inline constexpr const char* kGlass                = "aurea.stylize.glass";
+    inline constexpr const char* kKernel               = "aurea.stylize.kernel";
+    inline constexpr const char* kSpotlight            = "aurea.light.spotlight";
+    inline constexpr const char* kDrizzle              = "aurea.distort.drizzle";
+    inline constexpr const char* kJaws                 = "aurea.transition.jaws";
+    inline constexpr const char* kScaleWipe            = "aurea.transition.scale_wipe";
+    inline constexpr const char* kRadialScaleWipe      = "aurea.transition.radial_scale_wipe";
+    inline constexpr const char* kBurnFilm             = "aurea.transition.burn_film";
+    inline constexpr const char* kBlockLoad            = "aurea.transition.block_load";
+    // --- 0.1.8 BETA 2 ---
+    /// Saber (Luz): núcleo + brilho de energia (SaberEffect.cpp).
+    inline constexpr const char* kSaber                = "aurea.light.saber";
+    /// Luma Dissolve (Transição): some/aparece pelo brilho (LumaDissolveEffect.cpp).
+    inline constexpr const char* kLumaDissolve         = "aurea.transition.luma_dissolve";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

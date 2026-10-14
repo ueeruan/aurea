@@ -587,6 +587,10 @@ class AureaEngine private constructor() {
     fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
     fun applyText3dPreset(layer: Long, preset: Int): Boolean = nativeApplyText3dPreset(nativeHandle, layer, preset)
 
+    /** Real Camera: andar (m/s, + frente, 0 parado) e profundidade (× do frente/trás medido). */
+    fun realCameraWalk(speed: Float, depth: Float): Boolean = nativeWork.run(false) { nativeRealCameraWalk(nativeHandle, speed, depth) }
+    private external fun nativeRealCameraWalk(handle: Long, speed: Float, depth: Float): Boolean
+
     /** Sombras do objeto 3D: projeta / recebe. */
     fun setModelShadows(layer: Long, cast: Boolean, receive: Boolean): Boolean =
         nativeSetModelShadows(nativeHandle, layer, cast, receive)
@@ -671,6 +675,13 @@ class AureaEngine private constructor() {
     fun importFont(path: String): String? = nativeWork.run(null) { nativeImportFont(nativeHandle, path) }
     fun importColorLut(layer: Long, effect: Int, path: String): Int = nativeWork.run(5) { nativeImportColorLut(nativeHandle, layer, effect, path) }
     fun colorLutName(layer: Long, effect: Int): String = nativeColorLutName(nativeHandle, layer, effect)
+    /** Efeito de parte 3D já apontando para a parte `part` (0 = a 1ª). −1 = não entrou. */
+    fun addPartEffect(layer: Long, type: Int, part: Int): Int = nativeAddPartEffect(nativeHandle, layer, type, part)
+    /** Imagem do "Trocar textura 3D" (arquivo já copiado para o app). */
+    fun setEffectImage(layer: Long, effect: Int, path: String): Boolean = nativeWork.run(false) { nativeSetEffectImage(nativeHandle, layer, effect, path) }
+    fun effectImageName(layer: Long, effect: Int): String = nativeEffectImageName(nativeHandle, layer, effect)
+    /** Nome de cada parte da camada 3D (vazio = sem nome no arquivo). */
+    fun modelPartNames(layer: Long): Array<String> = nativeModelPartNames(nativeHandle, layer) ?: emptyArray()
     fun setTextFont(layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean =
         nativeSetTextFont(nativeHandle, layer, family, weight, italic, path)
     fun textFont(layer: Long): String? = nativeTextFont(nativeHandle, layer)
@@ -860,6 +871,24 @@ class AureaEngine private constructor() {
     fun editTimeRemapKey(layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int =
         nativeEditTimeRemapKey(nativeHandle, layer, index, frame, value, interp)
     fun removeTimeRemapKey(layer: Long, index: Int): Boolean = nativeRemoveTimeRemapKey(nativeHandle, layer, index)
+    /** Gráfico de velocidade (`query_speed_curve`): cabeçalho de 8, amostras e chaves (tempo, ×, interpolação). */
+    fun querySpeedCurve(layer: Long, samples: Int, out: FloatArray): Int = nativeQuerySpeedCurve(nativeHandle, layer, samples, out)
+    /** Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar, 8 tirar. */
+    fun applySpeedCurve(layer: Long, preset: Int): Boolean = nativeApplySpeedCurve(nativeHandle, layer, preset)
+    fun editSpeedKey(layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int =
+        nativeEditSpeedKey(nativeHandle, layer, index, frame, speed, interp)
+    fun removeSpeedKey(layer: Long, index: Int): Boolean = nativeRemoveSpeedKey(nativeHandle, layer, index)
+    /** Câmeras do arquivo do modelo 3D (glTF/FBX); a importação já as põe na timeline. */
+    fun modelCameraCount(layer: Long): Int = nativeModelCameraCount(nativeHandle, layer)
+    /** Ossos posáveis do modelo (`query_model_bones`, BONE_FLOATS por osso); array curto devolve o tamanho pedido. */
+    fun queryModelBones(layer: Long, out: FloatArray?): Int = nativeQueryModelBones(nativeHandle, layer, out)
+    /** Dedo na cena 3D: gira o osso como trackball (px da composição; twist em graus em volta do olhar). */
+    fun dragBone(layer: Long, node: Int, dx: Float, dy: Float, twist: Float, continuing: Boolean): Boolean =
+        nativeDragBone(nativeHandle, layer, node, dx, dy, twist, continuing)
+    /** Keyframe do osso no cabeçote (node −1 = todos): 1 marcou, 0 tirou, −1 fora da camada. */
+    fun toggleBoneKey(layer: Long, node: Int): Int = nativeToggleBoneKey(nativeHandle, layer, node)
+    fun resetBonePose(layer: Long, node: Int): Boolean = nativeResetBonePose(nativeHandle, layer, node)
+    fun addModelCameras(layer: Long): Int = nativeAddModelCameras(nativeHandle, layer)
     /** Ao contrário: espelha a curva de tempo no clipe (liga o remapeamento se preciso). */
     fun reverseTimeRemap(layer: Long): Boolean = nativeReverseTimeRemap(nativeHandle, layer)
     fun setKeepPitch(layer: Long, on: Boolean): Boolean = nativeSetKeepPitch(nativeHandle, layer, on)
@@ -954,8 +983,8 @@ class AureaEngine private constructor() {
     private external fun nativeRealCameraStatus(handle: Long): LongArray
 
     fun addCamera(): Long = nativeAddCamera(nativeHandle)
-    /** Lente da câmera 3D (9 valores, ver `nativeQueryCameraLens`); null se a camada não é câmera. */
-    fun cameraLens(layer: Long): FloatArray? = FloatArray(9).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
+    /** Lente da câmera 3D (10 valores, ver `nativeQueryCameraLens`; [9] = afeta camadas abaixo); null se não é câmera. */
+    fun cameraLens(layer: Long): FloatArray? = FloatArray(10).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
     /** Pick Focus: distância no eixo ótico até o 3D sob o ponto (px da composição); < 0 = nada ali. */
     fun pickFocusDistance(layer: Long, compX: Float, compY: Float): Float = nativePickFocusDistance(nativeHandle, layer, compX, compY)
     /** LayerSetCameraParam: 0 mm, 1 DOF, 2 distância de foco, 3 f/, 4 desfoque ×. */
@@ -1041,6 +1070,7 @@ class AureaEngine private constructor() {
     /** Explicit recovery restores the frozen project and restarts at frame zero. */
     fun restartExport(recoveryPath: String, outputPath: String): Int =
         nativeWork.run(5) { nativeRestartExport(nativeHandle, recoveryPath, outputPath) }
+
 
     /**
      * Importa um glTF/GLB (arquivo no sandbox do app). Bloqueia: chamar fora da
@@ -1175,6 +1205,10 @@ class AureaEngine private constructor() {
     private external fun nativeImportFont(handle: Long, path: String): String?
     private external fun nativeImportColorLut(handle: Long, layer: Long, effect: Int, path: String): Int
     private external fun nativeColorLutName(handle: Long, layer: Long, effect: Int): String
+    private external fun nativeAddPartEffect(handle: Long, layer: Long, type: Int, part: Int): Int
+    private external fun nativeSetEffectImage(handle: Long, layer: Long, effect: Int, path: String): Boolean
+    private external fun nativeEffectImageName(handle: Long, layer: Long, effect: Int): String
+    private external fun nativeModelPartNames(handle: Long, layer: Long): Array<String>?
     private external fun nativeSetTextFont(handle: Long, layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean
     private external fun nativeSetTextStyle(handle: Long, layer: Long, v: FloatArray): Boolean
     private external fun nativeQueryTextStyle(handle: Long, layer: Long, out: FloatArray): Boolean
@@ -1268,6 +1302,16 @@ class AureaEngine private constructor() {
     private external fun nativeQueryTimeRemapCurrentSource(handle: Long, layer: Long): Double
     private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeQuerySpeedCurve(handle: Long, layer: Long, samples: Int, out: FloatArray): Int
+    private external fun nativeApplySpeedCurve(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeEditSpeedKey(handle: Long, layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int
+    private external fun nativeRemoveSpeedKey(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeModelCameraCount(handle: Long, layer: Long): Int
+    private external fun nativeQueryModelBones(handle: Long, layer: Long, out: FloatArray?): Int
+    private external fun nativeDragBone(handle: Long, layer: Long, node: Int, dx: Float, dy: Float, twist: Float, continuing: Boolean): Boolean
+    private external fun nativeToggleBoneKey(handle: Long, layer: Long, node: Int): Int
+    private external fun nativeResetBonePose(handle: Long, layer: Long, node: Int): Boolean
+    private external fun nativeAddModelCameras(handle: Long, layer: Long): Int
     private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
     private external fun nativeSetKeepPitch(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean

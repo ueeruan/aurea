@@ -127,6 +127,8 @@ struct EditorView: View {
             }
         }
         .overlay { if model.showAddLayer && !model.sceneEditor { ShellAddCategoryDialog() } }
+        // Gravar voz: o painel por cima da timeline, com o palco à vista (VoiceRecorder.swift).
+        .overlay { if shell.voiceRecorder { VoiceRecorderOverlay() } }
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
         .modifier(ModelTexturesPrompt(shell: shell))
@@ -285,6 +287,7 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .overlay { if !model.fullscreen && !model.rawPlayback { RigStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { MeshWarpStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { PuppetStageOverlay() } }
+                .overlay { if !model.fullscreen && !model.rawPlayback { SaberStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RotoPaintStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RealCameraStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }
@@ -484,7 +487,31 @@ private struct ShellStageBanner: View {
                     let color: Color = lines[i + 4] == 1 ? .yellow : lines[i + 4] == 2 ? .cyan : .gray.opacity(0.22)
                     context.stroke(line, with: .color(color), lineWidth: 1)
                 }
-                if TrackballOverlay.draw(&context, model: model, screen: screen) {
+                if model.rigPoseActive {
+                    // Pose do rig (RigPoseStage.kt): juntas e ossos no lugar do gizmo.
+                    let b = model.poseBones, f = AureaModel.boneFloats, chosen = model.poseBone
+                    let count = b.count / f
+                    for i in 0..<count {
+                        let parent = Int(b[i * f + 1])
+                        guard parent >= 0, parent < count, b[i * f + 9] > 0.5, b[parent * f + 9] > 0.5 else { continue }
+                        var line = Path()
+                        line.move(to: screen(b[parent * f + 7], b[parent * f + 8])); line.addLine(to: screen(b[i * f + 7], b[i * f + 8]))
+                        let on = Int32(b[i * f]) == chosen || Int32(b[parent * f]) == chosen
+                        context.stroke(line, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        context.stroke(line, with: .color(on ? AureaColors.accent : .white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    }
+                    for i in 0..<count where b[i * f + 9] > 0.5 {
+                        let c = screen(b[i * f + 7], b[i * f + 8])
+                        let on = Int32(b[i * f]) == chosen
+                        let r: CGFloat = on ? 7 : 4.5
+                        circle(&context, c, r + 1.5, StageInk.outlineUnder)
+                        circle(&context, c, r, on ? AureaColors.accent : .white)
+                        if b[i * f + 6] > 0.5 {
+                            context.stroke(Path(ellipseIn: CGRect(x: c.x - r - 4, y: c.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)),
+                                           with: .color(AureaColors.accent), lineWidth: 2)
+                        }
+                    }
+                } else if TrackballOverlay.draw(&context, model: model, screen: screen) {
                     // Ferramenta Girar: o trackball no lugar das setas.
                 } else if let selected = model.selectedLayer {
                     let g = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
@@ -551,6 +578,14 @@ private struct ShellStageBanner: View {
             let gizmo = model.engine.gizmo(selected.id, length: ShellStageGeometry.gizmoLength, localSpace: model.gizmoAxesLocal).map(\.floatValue)
             if let anchor = model.previewMarkerAnchor {
                 let p = screen(anchor.x, anchor.y)
+                if gizmo.count != 8 && !model.sceneEditor && model.selection.count == 1 && !selected.locked {
+                    // 2D: alças brancas de esticar (LayerResizeGeometry), por baixo das setas.
+                    for (i, h) in LayerResizeGeometry.handles(points).enumerated() {
+                        let r: CGFloat = shell.grabbedResizeHandle == i ? 7 : i < 4 ? 6 : 5
+                        circle(&context, h, r + 1.5, StageInk.outlineUnder); circle(&context, h, r, .white)
+                        context.stroke(Path(ellipseIn: CGRect(x: h.x - r, y: h.y - r, width: r * 2, height: r * 2)), with: .color(AureaColors.accent), lineWidth: 1.5)
+                    }
+                }
                 if gizmo.count != 8 {
                     // 2D: setas X/Y (Stage.kt drawAxisHandles), por baixo da mira.
                     let tips = ShellStageGeometry.axisHandles(p, size: size)
@@ -649,6 +684,7 @@ private struct ShellStageBanner: View {
 // =============================================================================
 private struct ContextSheet: View {
     @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var realCamera = RealCameraState.shared
     let metrics: EditorMetrics
 
     var body: some View {
@@ -660,7 +696,10 @@ private struct ContextSheet: View {
                 AureaColors.editorPanelHigh.frame(height: StageDim.sheetHandle)
             }
 
-            if model.showAddLayer {
+            if realCamera.painting(model) {
+                // Real Camera ligada: os controles saem da prévia e ficam aqui.
+                RealCameraPanelView()
+            } else if model.showAddLayer {
                 AddLayerSheet()
             } else if model.selection.count > 1 && model.panel != .aiVideo && model.panel != .captions {
                 BatchToolsView()
@@ -1204,7 +1243,8 @@ private struct TextPanelView: View {
     /// motor varre ao abrir), registrado no CoreText e no motor e aplicado à
     /// camada que estava escolhida quando o seletor abriu.
     private func importFont(_ url: URL, target: Int64, apply: Bool = true) {
-        guard ["ttf", "otf"].contains(url.pathExtension.lowercased()) else {
+        // 0.1.8: coleções (TTC/OTC) e WOFF também — o motor converte em TTF/OTF.
+        guard ["ttf", "otf", "ttc", "otc", "woff"].contains(url.pathExtension.lowercased()) else {
             model.toast = AureaText.t("msg_use_uma_fonte_ttf_ou_otf"); return
         }
         let scoped = url.startAccessingSecurityScopedResource()
@@ -1217,7 +1257,8 @@ private struct TextPanelView: View {
             try? FileManager.default.removeItem(at: destination)
             model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return
         }
-        FontImportPicker.registerWithCoreText(destination)
+        // O CoreText recebe o arquivo que o motor usa (WOFF/coleção viram TTF/OTF).
+        FontImportPicker.registerWithCoreText((font["path"] as? String).map { URL(fileURLWithPath: $0) } ?? destination)
         query = ""
         fonts = model.engine.availableFonts()
         if apply && model.primarySelection == target { chooseFont(font) }
@@ -1334,7 +1375,7 @@ private struct TextPanelView: View {
 enum FontImportPicker {
     private static var delegate: Delegate?
     static var types: [UTType] {
-        [UTType.font] + ["ttf", "otf"].compactMap { UTType(filenameExtension: $0) }
+        [UTType.font] + ["ttf", "otf", "ttc", "otc", "woff"].compactMap { UTType(filenameExtension: $0) }
     }
     static func presentMultiple(_ picked: @escaping ([URL]) -> Void) {
         let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
@@ -1458,7 +1499,8 @@ private struct TextContentEditor: View {
     }
     private var valid: Bool { !request.is3D || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var body: some View {
-        AureaBottomOverlay(modal: true, onDismiss: dismiss, fixedFooter: AnyView(actions)) {
+        AureaBottomOverlay(modal: true, onDismiss: dismiss, fixedFooter: AnyView(actions),
+                           accessibilityID: "text.content.sheet") {
             VStack(alignment: .leading, spacing: 12) {
                 Text(AureaText.t("sh_dock_edit_text")).font(.aurea(size: 18, weight: .semibold))
                 NativeTextInput(text: $content, selection: $selection, editing: $editing,
@@ -1472,15 +1514,20 @@ private struct TextContentEditor: View {
             }
             .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
             .foregroundStyle(AureaColors.text).tint(AureaColors.accent)
-        }.accessibilityIdentifier("text.content.sheet")
+        }
     }
     private var actions: some View {
         HStack(spacing: 12) {
-            Button(AureaText.t("common_cancel"), action: dismiss)
-                .frame(maxWidth: .infinity, minHeight: 44).accessibilityIdentifier("text.content.cancel")
-            Button(AureaText.t("editor_concluir")) {
+            Button(action: dismiss) {
+                Text(AureaText.t("common_cancel"))
+                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("text.content.cancel")
+            Button {
                 failed = !model.commitTextContent(request, content: content)
-            }.frame(maxWidth: .infinity, minHeight: 44).disabled(!valid).accessibilityIdentifier("text.content.done")
+            } label: {
+                Text(AureaText.t("editor_concluir"))
+                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).disabled(!valid).accessibilityIdentifier("text.content.done")
         }.font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.accent)
             .padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 12)
     }
@@ -1657,6 +1704,8 @@ private struct AddLayerSheet: View {
                         card("sh_add_ai_video", glyph: CupertinoGlyph.WandStars) { model.openPanel(.aiVideo) }
                     case 2:
                         card("editor_musica_ou_som", glyph: CupertinoGlyph.MusicNote, accent: true) { files(.audioFile) }
+                        card("voice_title", glyph: CupertinoGlyph.MicFill, color: AureaColors.danger) { openVoiceRecorder() }
+                            .accessibilityIdentifier("add.voice")
                         card("sh_add_video_sound", glyph: CupertinoGlyph.Film) { photos(.audioFromVideo) }
                         card("sh_add_marker_at_playhead", glyph: CupertinoGlyph.Bookmark) { close(); model.toggleMarkerAt(model.status.playhead) }
                     case 3:
@@ -1728,6 +1777,18 @@ private struct AddLayerSheet: View {
         }
     }
     private func close() { model.showAddLayer = false }
+    /// "Gravar voz": fecha o diálogo e abre o painel de gravação pela raiz do
+    /// editor (dentro de uma folha, depois que ela fecha).
+    private func openVoiceRecorder() {
+        close()
+        model.pause()
+        let shell = shell
+        if inSheet {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.voiceRecorder = true }
+        } else {
+            shell.voiceRecorder = true
+        }
+    }
     private func photos(_ kind: ShellAddPicker) { request(kind) }
     private func files(_ kind: ShellAddPicker) { request(kind) }
     /// Fecha o diálogo e pede o seletor à raiz do editor (que continua na tela
@@ -2062,8 +2123,13 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                     if model.selectedLayer?.kind == 9 {
                         Button { lights = true } label: { pill(CupertinoGlyph.Lightbulb, AureaText.t("pn_t3d_lighting")) }.buttonStyle(.plain)
                     }
+                    // Modelo com rig: posar os ossos e marcar keyframes (como no Blender).
+                    if model.selectedLayer?.kind == 10 && !model.poseBones.isEmpty && !model.rigPoseMode {
+                        Button { model.setRigPose(true) } label: { pill(CupertinoGlyph.PersonCropCircle, AureaText.t("rig_pose")) }.buttonStyle(.plain)
+                    }
                     Button { model.resetSceneView() } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("scene_recenter")) }.buttonStyle(.plain)
-                }.padding(.bottom, 12)
+                }.padding(.bottom, model.rigPoseMode ? 8 : 12)
+                if model.rigPoseMode && !model.poseBones.isEmpty { rigPoseBar }
             }
         }
         .frame(height: height)
@@ -2072,6 +2138,24 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         .sheet(isPresented: $lights) { SceneLightControls().environmentObject(model) }
         .sheet(isPresented: $materials) { Panel3DView().environmentObject(model) }
         .onChange(of: model.panel) { panel in if panel == .none { materials = false } }
+    }
+    /// Barra do modo de pose (RigPoseBar do SceneLayoutWorkspace.kt).
+    private var rigPoseBar: some View {
+        let chosen = model.poseBone >= 0
+        return VStack(spacing: 8) {
+            Text(AureaText.t(chosen ? "rig_pose_hint_bone" : "rig_pose_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
+                .multilineTextAlignment(.center).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(StageInk.floatingDark, in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal, 24)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    if chosen { Button { model.togglePoseKey(all: false) } label: { pill(CupertinoGlyph.SuitDiamond, AureaText.t("rig_key_bone")) }.buttonStyle(.plain) }
+                    Button { model.togglePoseKey(all: true) } label: { pill(CupertinoGlyph.SuitDiamond, AureaText.t("rig_key_all")) }.buttonStyle(.plain)
+                    if chosen { Button { model.resetPose(all: false) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_bone")) }.buttonStyle(.plain) }
+                    Button { model.resetPose(all: true) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_all")) }.buttonStyle(.plain)
+                    Button { model.setRigPose(false) } label: { pill(CupertinoGlyph.CheckmarkAlt, AureaText.t("rig_done")) }.buttonStyle(.plain)
+                }.padding(.horizontal, 12)
+            }
+        }.padding(.bottom, 12)
     }
     private func roundButton(_ glyph: Character, _ key: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {

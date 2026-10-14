@@ -583,6 +583,8 @@ private fun rememberEffectSearchIndex(entries: List<EffectCatalogEntry>): Map<In
                 val groupRes = effectGroupLabelRes(effectGroupOf(e))
                 languages.forEach { add(it.getString(groupRes)) }
                 add(categorySynonyms(e.category))
+                // Ladrilho / repetição de borda: "motion tile", "mosaico"... nos 7 idiomas.
+                languages.forEach { add(com.aurea.aurea.editor.panels.tileSearchTerms(e.typeId, it)) }
             }
             e.typeId to effectSearchDoc(names, extra)
         }

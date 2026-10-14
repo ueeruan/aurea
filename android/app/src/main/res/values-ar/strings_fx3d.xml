@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Efeitos 3D do pedido de beta de 12/10/2026 (Object3DEffects.cpp) e o painel 3D enxuto. -->
+    <string name="fx3d_name_part_transform">تحريك جزء ثلاثي الأبعاد</string>
+    <string name="fx3d_name_part_hide">إخفاء أجزاء ثلاثية الأبعاد</string>
+    <string name="fx3d_name_part_texture">تبديل خامة ثلاثية الأبعاد</string>
+    <string name="fx3d_name_shatter">3D Shatter</string>
+    <string name="fx3d_name_stroke">3D Stroke</string>
+    <string name="fx3d_desc_part_transform">يحرّك جزءًا واحدًا من الكائن ثلاثي الأبعاد ويديره ويغيّر حجمه، مع إطارات مفتاحية.</string>
+    <string name="fx3d_desc_part_hide">يخفي أجزاء الكائن ثلاثي الأبعاد أو يبهتها (من جزء إلى آخر).</string>
+    <string name="fx3d_desc_part_texture">يغطي جزءًا من الكائن ثلاثي الأبعاد (أو كل الأجزاء) بصورة من المعرض.</string>
+    <string name="fx3d_desc_shatter">يكسر الطبقة إلى قطع سميكة تنفجر في ثلاثة أبعاد.</string>
+    <string name="fx3d_desc_stroke">خط متحرك ثلاثي الأبعاد على أقنعة الطبقة أو على شكل جاهز.</string>
+    <string name="fx3d_env_background">الخلفية</string>
+    <string name="fx3d_env_floor">الأرضية</string>
+    <string name="fx3d_parts_hint">اختر الجزء ثم المس تأثيرًا: يُضاف موجّهًا إليه مباشرة. الإعدادات والإطارات المفتاحية في التأثيرات.</string>
+    <string name="fx3d_part_n">الجزء %1$d</string>
+    <string name="fx3d_image_pick">اختيار صورة</string>
+    <string name="fx3d_image_none">لا توجد صورة</string>
+    <string name="fx3d_effect_added">تمت إضافة التأثير — اضبطه في التأثيرات</string>
+    <string name="fx3d_add_failed">يعمل هذا التأثير فقط على كائن ثلاثي الأبعاد غير مقفل.</string>
+</resources>

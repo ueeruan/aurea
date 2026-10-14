@@ -129,6 +129,14 @@ public:
         p.add_bool("orient", "Orientar no caminho", true);
         p.add_bool("loop", "Repetir", false);
     }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        // O caminho só chega em `resolve_resources`, DEPOIS da pergunta de
+        // identidade no planejamento: sem as amostras a pose ainda não existe
+        // e o efeito saía da pilha sempre (Move Along Path nunca movia nada).
+        // Com o renderer presente, fica; sem guia, a matriz sai identidade.
+        if (!e.pathSamples) return e.resources == nullptr;
+        return MotionBehavior::is_identity(e);
+    }
     void resolve_resources(EffectEval& e) const noexcept override {
         if (!e.resources || !e.layer) return;
         f64 phase = finite_or(e.f(Progress), 0) / 100.;

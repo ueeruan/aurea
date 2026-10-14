@@ -288,7 +288,8 @@ std::shared_ptr<const AudioBlock> AudioBlockCache::decode_block(u64 key, i64 blo
         if (!slot) {
             slot = std::make_unique<Reader>();
             slot->assetRevision = revision;
-            if (factory_) slot->dec = factory_->open_audio(ref.path.c_str());
+            if (factory_) slot->dec = softwareDecode_.load(std::memory_order_relaxed)
+                ? factory_->open_audio_software(ref.path.c_str()) : factory_->open_audio(ref.path.c_str());
             if (slot->dec) slot->info = slot->dec->info();
             if (!slot->dec || slot->info.sampleRate == 0 || slot->info.sampleRate > 768000
                 || slot->info.channels == 0 || slot->info.channels > 32) {

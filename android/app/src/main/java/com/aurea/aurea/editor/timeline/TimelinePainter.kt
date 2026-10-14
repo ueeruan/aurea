@@ -366,7 +366,8 @@ internal class TimelinePainter(
         // Seleção de keyframes da timeline: quais instantes desta linha têm keyframe escolhido.
         val picked = if (keySel != null && keySel.on(r.id).isNotEmpty()) pickedInstants(r, keySel) else null
         val keysShown = KeyframeVisibility.visible(c.store.showAllKeyframes, r.track != null, selected)
-        drawRow(r, top + if (r.track == null) m.barTop else 0f, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked, keysShown, arrows)
+        val keysLocked = !KeyframeVisibility.editable(selected, c.store.keySelectMode, r.track != null)
+        drawRow(r, top + if (r.track == null) m.barTop else 0f, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked, keysShown, arrows, keysLocked)
     }
 
     /** Seta na borda: o clipe está para aquele lado (linha vazia parecia camada quebrada). */
@@ -390,6 +391,7 @@ internal class TimelinePainter(
         picked: BooleanArray?,
         keysShown: Boolean = true,
         arrows: Boolean = true,
+        keysLocked: Boolean = false,
     ) {
         if (r.track != null) {
             // Trilha BAIXA (16 dp): nome e losangos na mesma faixa, centrados;
@@ -403,7 +405,7 @@ internal class TimelinePainter(
                 val left = m.laneLabelLeft
                 drawText(label, alpha = if (r.track.group) 0.9f else 0.6f, topLeft = Offset(left, cy - label.size.height / 2f))
             }
-            drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps, picked)
+            lockedKeys(keysLocked, top, laneH, w) { drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps, picked) }
             return
         }
         val captionTrack = waveStore?.captionTracks?.firstOrNull { it.layer == r.id }
@@ -543,8 +545,17 @@ internal class TimelinePainter(
         }
         // "Keyframes: só as escolhidas" (menu da timeline): as outras linhas ficam limpas.
         if (keysShown) {
-            drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps, picked)
+            lockedKeys(keysLocked, top, m.row, w) { drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps, picked) }
         }
+    }
+
+    /** Losangos só de referência (camada não selecionada): a mesma figura, esmaecida numa camada de desenho. */
+    private inline fun DrawScope.lockedKeys(locked: Boolean, top: Float, height: Float, w: Float, block: DrawScope.() -> Unit) {
+        if (!locked) { block(); return }
+        val paint = androidx.compose.ui.graphics.Paint().apply { alpha = KeyframeVisibility.LOCKED_ALPHA }
+        val pad = m.diamond * 2f
+        drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, top - pad, w, top + height + pad), paint)
+        try { block() } finally { drawContext.canvas.restore() }
     }
 
     /**

@@ -530,6 +530,7 @@ public:
             return Errc::PipelineCompileFailed;
         }
         out = LayerImage{tex, region, w, h};
+        out.tiled = true;
         return OkStatus;
     }
 };
@@ -614,9 +615,20 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_pixel_encoder(registry);
     builtin::register_starglow(registry);
     builtin::register_pix_dither(registry);
+    builtin::register_color_quantize_effects(registry);
+    builtin::register_glow_scan_effect(registry);
     builtin::register_video_glitch(registry);
     builtin::register_displace_transform(registry);
     builtin::register_raster_extrude(registry);
+    builtin::register_object3d_effects(registry);
+    builtin::register_flow_time_effects(registry);
+    // Pacote CC (distorções, estilo e transições). No fim.
+    builtin::register_cc_distort_effects(registry);
+    builtin::register_cc_stylize_effects(registry);
+    builtin::register_cc_transitions(registry);
+    // Saber (Luz) e Luma Dissolve (Transição) — 0.1.8 BETA 2. No fim.
+    builtin::register_saber_effect(registry);
+    builtin::register_luma_dissolve_effect(registry);
 }
 
 } // namespace aurea

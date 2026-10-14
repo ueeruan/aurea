@@ -99,6 +99,11 @@ std::vector<AssetId> Project::unreferenced_assets() const {
                     const auto id = AssetId::unpack(effect.params[0].constant.ref);
                     if (id.valid()) used.push_back(id);
                 }
+                // A imagem do "Trocar textura 3D" (parâmetro 1).
+                if (effect.type == effect_type_id("aurea.3d.part_texture") && effect.params.size() > 1) {
+                    const auto id = AssetId::unpack(effect.params[1].constant.ref);
+                    if (id.valid()) used.push_back(id);
+                }
             }
             // TextData::font is a FontId in FontManager's separate handle table,
             // not an AssetId. Equal packed values must not retain unrelated media.

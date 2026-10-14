@@ -30,7 +30,7 @@
 
 namespace aurea::test {
 
-enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare, Scene3D };
+enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare, Scene3D, PanTexture, PanOcclusion };
 
 struct SyntheticConfig {
     u32 width = 64;
@@ -52,6 +52,11 @@ struct SyntheticConfig {
     /// `audioBeatStart` s — para testar a detecção de batidas.
     f64 audioBpm = 0.0;
     f64 audioBeatStart = 0.0;
+    /// Decoder preso DENTRO da plataforma ao fechar (MediaCodec ou glFinish
+    /// que não volta): os decoders criados com `*holdArm` ligado só terminam o
+    /// destrutor quando `*holdClose` desligar.
+    std::atomic<bool>* holdArm = nullptr;
+    std::atomic<bool>* holdClose = nullptr;
 };
 
 /// Centro do quadrado do padrão MovingSquare no quadro `i`.
@@ -101,6 +106,38 @@ inline bool scene3d_project(const std::array<f64, 3>& X, u32 i, u32 n, u32 w, u3
     u = f * x / z + 0.5 * w;
     v = f * y / z + 0.5 * h;
     return true;
+}
+
+/// Textura que desliza (qualidade do optical flow, 0.1.8): o valor exato em
+/// QUALQUER instante — inclusive entre dois quadros — para comparar o quadro
+/// intermediário com a verdade. Senos cruzados + manchas: tem detalhe em toda
+/// parte (o Lucas-Kanade precisa de gradiente) sem repetir perto.
+inline constexpr f64 kPanTextureVx = 5.25;   ///< px por quadro em x
+inline constexpr f64 kPanTextureVy = 1.75;   ///< px por quadro em y
+inline f64 pan_texture_value(f64 x, f64 y, f64 frame) {
+    const f64 u = x - kPanTextureVx * frame, v = y - kPanTextureVy * frame;
+    const f64 a = std::sin(u * 0.21) * std::cos(v * 0.17) + 0.6 * std::sin((u + 2.0 * v) * 0.083)
+                + 0.45 * std::cos(std::sqrt(std::fabs(u * u * 0.7 + v * v * 1.3)) * 0.31);
+    return std::clamp(128.0 + 52.0 * a, 16.0, 235.0);
+}
+
+/// Oclusão (o caso difícil do optical flow): o fundo texturizado anda para a
+/// esquerda (−3 px/quadro) e um disco com OUTRA textura passa por cima indo
+/// para a direita (+9, +2 px/quadro). Borda do disco = pixels que aparecem e
+/// somem entre dois quadros. Valor exato em qualquer instante.
+inline void pan_occlusion_disc(f64 frame, f64& cx, f64& cy) { cx = 40.0 + 9.0 * frame; cy = 40.0 + 2.0 * frame; }
+inline constexpr f64 kPanOcclusionRadius = 22.0;
+inline f64 pan_occlusion_value(f64 x, f64 y, f64 frame) {
+    f64 cx, cy;
+    pan_occlusion_disc(frame, cx, cy);
+    const f64 dx = x - cx, dy = y - cy;
+    const f64 r = std::sqrt(dx * dx + dy * dy);
+    const f64 u = x + 3.0 * frame, v = y;
+    const f64 bg = 128.0 + 48.0 * (std::sin(u * 0.19) * std::cos(v * 0.23) + 0.5 * std::sin((u - v) * 0.07));
+    const f64 fg = 128.0 + 60.0 * std::sin(dx * 0.17 + 0.4) * std::sin(dy * 0.15 + 1.1) + 18.0 * std::cos((dx - dy) * 0.09);
+    // Borda com 1 px de transição (como a câmera faria): sem serrilhado.
+    const f64 k = std::clamp(kPanOcclusionRadius + 0.5 - r, 0.0, 1.0);
+    return std::clamp(bg * (1.0 - k) + fg * k, 16.0, 235.0);
 }
 
 /// Quadrado rápido (optical flow): 8 px por quadro em x, dando a volta.
@@ -200,6 +237,7 @@ public:
 class SyntheticDecoder final : public VideoDecoderBackend {
 public:
     explicit SyntheticDecoder(const SyntheticConfig& c) : cfg_(c) {
+        held_ = c.holdArm && c.holdClose && c.holdArm->load();
         info_.codedWidth = c.width;
         info_.codedHeight = c.height;
         info_.fps = c.fps;
@@ -208,6 +246,10 @@ public:
         info_.rotation = c.rotation;
         std::snprintf(info_.codec, sizeof(info_.codec), "%s", "video/sintetico");
         std::snprintf(info_.decoderName, sizeof(info_.decoderName), "%s", "sintetico");
+    }
+
+    ~SyntheticDecoder() override {
+        while (held_ && cfg_.holdClose->load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     const VideoStreamInfo& info() const noexcept override { return info_; }
@@ -253,6 +295,7 @@ public:
     std::atomic<u32> delivered{0};
 
 private:
+    bool held_ = false;
     DecodedFrame* make_frame(u32 index) {
         auto* f = new SyntheticFrame();
         const u32 w = cfg_.width, h = cfg_.height;
@@ -303,6 +346,10 @@ private:
                 u8 Y = 0, Cb = 128, Cr = 128;
                 if (cfg_.pattern == SyntheticPattern::Scene3D) {
                     Y = static_cast<u8>(std::clamp(30.0f + 200.0f * scene[static_cast<usize>(yy) * w + xx], 16.0f, 235.0f));
+                } else if (cfg_.pattern == SyntheticPattern::PanOcclusion) {
+                    Y = static_cast<u8>(std::lround(pan_occlusion_value(static_cast<f64>(xx), static_cast<f64>(yy), static_cast<f64>(index % 16))));
+                } else if (cfg_.pattern == SyntheticPattern::PanTexture) {
+                    Y = static_cast<u8>(std::lround(pan_texture_value(static_cast<f64>(xx), static_cast<f64>(yy), static_cast<f64>(index))));
                 } else if (cfg_.pattern == SyntheticPattern::FrameGray) {
                     Y = frame_gray_code(index);
                 } else if (cfg_.pattern == SyntheticPattern::FastSquare) {

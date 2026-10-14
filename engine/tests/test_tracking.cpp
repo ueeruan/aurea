@@ -521,6 +521,67 @@ AUREA_TEST(Tracking, EngineTracksVideoAndPointsStayPinned) {
     e.shutdown();
 }
 
+// Auditoria de 12/10/2026: desfazer outra edição não apaga a análise (ela
+// não é passo de desfazer) e um "resolver de novo" cancelado não trava a
+// solução que já existia.
+AUREA_TEST(Tracking, UndoKeepsTheAnalysisAndCancelledResolveKeepsTheSolve) {
+    using namespace aurea::test;
+    SyntheticConfig cfg;
+    cfg.width = 640;
+    cfg.height = 360;
+    cfg.frameCount = 60;
+    cfg.pattern = SyntheticPattern::Scene3D;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 2;
+    ec.memoryBudgetBytes = 128ull << 20;
+    ec.disableAutosave = true;
+    ec.mediaFactory = &factory;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, "camera undo").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "cena";
+    auto layer = e.import_video(imp);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) { e.shutdown(); return; }
+    auto wait = [&] {
+        const auto t0 = std::chrono::steady_clock::now();
+        while (e.camera_track_status().state == 1 && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(120))
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    };
+    AUREA_CHECK(e.start_camera_track(*layer, 0));
+    wait();
+    AUREA_CHECK_EQ(e.camera_track_status().state, 2u);
+    auto video = [&] {
+        return e.project()->timeline().composition(e.project()->timeline().current())->layer(LayerId::unpack(*layer));
+    };
+    AUREA_CHECK(video() && video()->cameraTrack != nullptr);
+    // Outra edição (importar uma imagem) e desfazer: antes a análise sumia junto.
+    const std::vector<u8> rgba(8u * 8u * 4u, 128);
+    AUREA_CHECK(e.import_image(rgba.data(), 8, 8, "img").ok());
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.restore_camera_track(*layer));
+    AUREA_CHECK_EQ(e.camera_track_status().state, 2u);
+    AUREA_CHECK(video() && video()->cameraTrack != nullptr);
+    AUREA_CHECK(e.apply_camera_track(-1, {}, 0).ok());
+    // "Resolver de novo" cancelado: a solução anterior continua utilizável.
+    AUREA_CHECK(e.refine_camera_track(false, 0, 0));
+    e.cancel_camera_track();
+    wait();
+    const auto t0 = std::chrono::steady_clock::now();
+    while (e.camera_track_status().state != 2 && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(30))
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    AUREA_CHECK_EQ(e.camera_track_status().state, 2u);
+    AUREA_CHECK(e.restore_camera_track(*layer));
+    AUREA_CHECK_EQ(e.camera_track_status().state, 2u);
+    AUREA_CHECK(e.apply_camera_track(-1, {}, 0).ok());
+    e.shutdown();
+}
+
 AUREA_TEST(Tracking, BenchTracker1080p10s) {
     const char* v = std::getenv("AUREA_BENCH");
     if (!v || *v != '1') { std::printf("    (pulado: AUREA_BENCH=1 para medir)\n"); return; }

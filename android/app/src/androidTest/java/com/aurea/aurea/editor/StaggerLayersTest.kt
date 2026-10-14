@@ -49,8 +49,9 @@ class StaggerLayersTest {
         compose.runOnIdle { store.clearSelection() }
         compose.onNodeWithTag("addBar.Audio").assertIsDisplayed().performClick()
         val audio = compose.onNodeWithTag("editor.addPanel").fetchSemanticsNode().boundsInRoot
-        assertTrue("Audio must end below its single card row", audio.height / density <= 155f)
-        assertTrue("All cards and the close button must fit", audio.height / density >= 140f)
+        // Quatro fichas (música, Gravar voz, som de vídeo, marca): duas fileiras de 80 dp.
+        assertTrue("Audio must end below its two card rows", audio.height / density <= 243f)
+        assertTrue("All cards and the close button must fit", audio.height / density >= 228f)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.uiAutomation.executeShellCommand("screencap -p /sdcard/Download/aurea-compact-audio.png").use {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()

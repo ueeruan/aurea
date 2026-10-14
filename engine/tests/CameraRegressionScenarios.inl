@@ -69,6 +69,13 @@ struct Rig {
     }
     ~Rig() { e.shutdown(); }
     Composition* comp() { return e.project()->timeline().composition(e.project()->timeline().current()); }
+    /// Câmera como as versões guardadas aqui criavam: só afeta camadas 3D
+    /// (projeto anterior à v47 abre assim). Câmera nova liga "afeta camadas abaixo".
+    Result<u64> legacy_camera() {
+        auto id = e.add_camera();
+        if (id.ok()) if (Layer* l = comp()->layer(LayerId::unpack(*id))) l->camera.affectsLayersBelow = false;
+        return id;
+    }
     Layer* layer(u64 id) { return comp()->layer(LayerId::unpack(id)); }
     Image8 capture(i64 frame) {
         seek_frame(e, frame);
@@ -130,7 +137,7 @@ void set_parent(Rig& r, u64 child, u64 parent) {
 /// Câmera com dolly + órbita: X e Z andam, gira em Y. Os keyframes vão
 /// nos quadros ABSOLUTOS da composição (tempo local = absoluto − início).
 u64 animated_camera(Rig& r, i64 from = 0, i64 to = 90) {
-    const auto cam = r.e.add_camera();
+    const auto cam = r.legacy_camera();
     AUREA_CHECK(cam.ok());
     if (!cam.ok()) return 0;
     Layer* c = r.layer(*cam);
@@ -347,7 +354,7 @@ AUREA_TEST(CameraRegressionGpu, FlatMediaRespondsToNullCameraOnlyWhenIn3D) {
         plane->transform.rotation = Vec3{0, 0, 0};
         plane->transform.position.z = 0;
         plane->threeD = false;
-        const auto camera = r.e.add_camera();
+        const auto camera = r.legacy_camera();
         const auto null = r.e.add_null(true);
         AUREA_CHECK(camera.ok() && null.ok());
         if (!camera.ok() || !null.ok()) continue;
@@ -451,7 +458,7 @@ AUREA_TEST(CameraRegressionGpu, AcceptsLightsIsOptInPerLayer) {
     l->transform.scale = Vec3{0.8f, 0.8f, 1.0f};
     const Image8 noLight = r.capture(0);
     const auto light = r.e.add_light(1);
-    const auto cam = r.e.add_camera();
+    const auto cam = r.legacy_camera();
     AUREA_CHECK(light.ok() && cam.ok());
     AUREA_CHECK_EQ(r.e.query_layer_accepts_lights(img), 0);
     AUREA_CHECK_EQ(r.e.query_layer_accepts_lights(*light), -1);

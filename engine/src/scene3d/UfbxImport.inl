@@ -455,6 +455,40 @@ ImportResult import_ufbx_file(const std::string& path, const ImportOptions& opti
         for (usize m = 0; m < materialNode->materials.count; ++m)
             o.materials.push_back(materialNode->materials.data[m] ? static_cast<i32>(materialNode->materials.data[m]->typed_id) : -1);
         if (!n->parent) A.roots.push_back(static_cast<i32>(i));
+        // Câmera do arquivo (0.1.8): vira camada de câmera na timeline. Os
+        // eixos vêm de projection_axes (no FBX ela olha para +X por padrão;
+        // `front` é o OPOSTO de para onde ela olha).
+        if (const ufbx_camera* c = n->camera) {
+            auto axis = [](ufbx_coordinate_axis a) {
+                switch (a) {
+                    case UFBX_COORDINATE_AXIS_POSITIVE_X: return Vec3{1, 0, 0};
+                    case UFBX_COORDINATE_AXIS_NEGATIVE_X: return Vec3{-1, 0, 0};
+                    case UFBX_COORDINATE_AXIS_POSITIVE_Y: return Vec3{0, 1, 0};
+                    case UFBX_COORDINATE_AXIS_NEGATIVE_Y: return Vec3{0, -1, 0};
+                    case UFBX_COORDINATE_AXIS_POSITIVE_Z: return Vec3{0, 0, 1};
+                    case UFBX_COORDINATE_AXIS_NEGATIVE_Z: return Vec3{0, 0, -1};
+                    default: return Vec3{0, 0, 0};
+                }
+            };
+            CameraInfo info;
+            info.name = std::string(c->name.data, c->name.length);
+            info.perspective = c->projection_mode == UFBX_PROJECTION_MODE_PERSPECTIVE;
+            info.yfov = static_cast<f32>(c->field_of_view_deg.y) * 0.017453292519943295f;
+            info.aspect = static_cast<f32>(c->aspect_ratio);
+            info.znear = static_cast<f32>(c->near_plane);
+            info.zfar = static_cast<f32>(c->far_plane);
+            const Vec3 front = axis(c->projection_axes.front), up = axis(c->projection_axes.up);
+            if (front.length_sq() > 0.5f && up.length_sq() > 0.5f) {
+                info.forward = front * -1.0f;
+                info.up = up;
+            } else {
+                info.forward = Vec3{1, 0, 0};
+                info.up = Vec3{0, 1, 0};
+            }
+            if (!(info.yfov > 0.0f) || !std::isfinite(info.yfov)) info.yfov = 0.8f;
+            o.camera = static_cast<i32>(A.cameras.size());
+            A.cameras.push_back(std::move(info));
+        }
     }
 
     // --- Orçamento: contagens exatas da cena lida, antes de montar as malhas -------

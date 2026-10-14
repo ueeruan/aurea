@@ -280,7 +280,8 @@ internal class TimelineController(
         val x1 = xOf(s.end)
         return RowHit.hit(
             m, x, y, state.width.toFloat(), x0, x1, handlesOn(s), state.compact && isSelected(s.id),
-            keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)),
+            keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)) &&
+                KeyframeVisibility.editable(isSelected(s.id), store.keySelectMode, s.track != null),
             instants = s.instants,
             view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,
         )

@@ -1,16 +1,11 @@
 package com.aurea.aurea.editor.panels
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -52,7 +47,6 @@ import com.aurea.aurea.ui.ds.numeroPtBr
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.tocavel
-import kotlin.math.roundToInt
 
 /** Qual aba do painel 3D mostra a forma: Material (cor e imagem) ou Forma (partes). */
 internal enum class Shape3DPage { Material, Shape }
@@ -70,9 +64,6 @@ internal enum class Shape3DPage { Material, Shape }
 internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage = Shape3DPage.Material) {
     val store = env.store
     val part = store.shapePartOf(store.primary)
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        if (uri != null) store.setShapePartImage(store.shapePartOf(store.primary), uri)
-    }
     ShapeTitle(stringResource(Shape3DCatalog.names.getOrElse(info.kind) { R.string.shape3d_title }) + " · " + stringResource(R.string.shape3d_parts))
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ShapeChip(stringResource(R.string.shape3d_whole), on = part < 0, modifier = Modifier.testTag("shape3d.part.all")) { store.chooseShapePart(-1) }
@@ -102,32 +93,27 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
                 }, onDone = { store.endGesture() }))
             }
         }
-        // Imagem da galeria (no mapa de cor): na parte, ou em todas.
+        // A imagem da parte virou o efeito "Trocar textura 3D" (aba Partes). Uma
+        // imagem que o projeto já tinha continua: só dá para tirar daqui.
         val hasImage = if (part >= 0) info.images.getOrElse(part) { false } else info.images.any { it }
-        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.shape3d_image), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-            ShapeChip(stringResource(if (hasImage) R.string.shape3d_image_change else R.string.shape3d_image_pick), on = hasImage,
-                modifier = Modifier.testTag("shape3d.image")) {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            }
-            if (hasImage) {
-                Spacer(Modifier.width(6.dp))
-                ShapeChip(stringResource(R.string.shape3d_image_clear), on = false) { store.clearShapePartImage(part) }
+        if (hasImage) {
+            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.shape3d_image), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                ShapeChip(stringResource(R.string.shape3d_image_clear), on = false, modifier = Modifier.testTag("shape3d.image.clear")) { store.clearShapePartImage(part) }
             }
         }
-        if (part < 0) ShapeHint(stringResource(R.string.shape3d_whole_hint))
         Spacer(Modifier.height(14.dp))
         return
     }
     if (part < 0) {
-        ShapeHint(stringResource(R.string.shape3d_whole_hint))
         // Só o cubo (e as fatias dele) divide em partes.
         if (info.kind == 0) SplitCubeBox(store)
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(8.dp))
         return
     }
     val values = store.shapePartValues(part) ?: return
     val (animated, here) = store.shapePartKeyBits(part)
+    // Preserve existing part tracks alongside the part effects below.
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ShapeChip((if (here != 0) "◆ " else "◇ ") + stringResource(if (here != 0) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui),
             on = here != 0, modifier = Modifier.testTag("shape3d.key")) { store.toggleShapePartKey(part) }
@@ -152,7 +138,7 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
             enabled = store.detail?.locked != true, modifier = Modifier.testTag("shape3d.part.scale"))
     }
     ShapeHint(stringResource(R.string.shape3d_part_hint))
-    Spacer(Modifier.height(14.dp))
+    Spacer(Modifier.height(8.dp))
 }
 
 /**

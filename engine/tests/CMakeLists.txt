@@ -19,6 +19,7 @@ add_executable(aurea_tests
     test_regression_2134.cpp
     test_math.cpp
     test_real_camera.cpp
+    test_palette.cpp
     test_mesh_warp_keys.cpp
     test_animation.cpp
     test_core.cpp
@@ -82,6 +83,7 @@ add_executable(aurea_tests
     test_editing_tools.cpp
     test_export.cpp
     test_export_recovery.cpp
+    test_export_packet_log.cpp
     test_export_scheduler.cpp
     test_offline_frame_queue.cpp
     test_offline_audio.cpp

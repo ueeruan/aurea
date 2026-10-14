@@ -99,8 +99,8 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // Deve superar também os APKs 0.1.4 build 2174 já distribuídos.
-        versionCode = 2180
+        // Deve superar os builds 2181–2183 já distribuídos; nunca reduzir o código.
+        versionCode = 2184
         versionName = "0.1.8 BETA 3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

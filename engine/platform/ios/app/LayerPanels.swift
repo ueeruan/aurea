@@ -1,7 +1,7 @@
 import SwiftUI
 
 var extraTextPresetNames: [String] { [AureaText.t("ios_textpreset_x_bounce"), AureaText.t("ios_textpreset_x_soft_in"), AureaText.t("ios_textpreset_x_reveal"), AureaText.t("ios_textpreset_x_slide"),
-                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }
+                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5", "app_text_preset_explosion"].map { AureaText.t($0) }
 }
 import UIKit
 import UniformTypeIdentifiers
@@ -311,8 +311,10 @@ let builtinPresetNameKeys: [String: [String]] = [
                  "app_preset_anim_zoom_in", "app_preset_anim_pulse", "app_preset_anim_spin_in"],
     "curva": ["app_preset_curve_cubic", "app_preset_curve_strong_inout", "app_preset_curve_expo_out", "app_preset_curve_expo_in",
               "app_preset_curve_back_out", "app_preset_curve_back_in"],
+    // "" = fica o nome do arquivo (os de marca: "CC · Detail", "Omino · Diffusion").
     "efeitos": ["app_preset_fx_soft_blur", "app_preset_fx_focus_in", "app_preset_fx_neon_glow", "app_preset_fx_bw",
-                "app_preset_fx_strong_contrast", "app_preset_fx_sepia", "app_preset_fx_dream", "app_preset_fx_turbulence"],
+                "app_preset_fx_strong_contrast", "app_preset_fx_sepia", "app_preset_fx_dream", "app_preset_fx_turbulence",
+                "", "", "", "", "app_preset_fx_luma_in", "app_preset_fx_luma_out"],
     "legenda": ["app_preset_caption_viral", "app_preset_caption_karaoke", "app_preset_caption_subtle", "pack_text_4", "pack_text_5"],
 ]
 
@@ -372,7 +374,7 @@ extension PanelPresetEntry {
                     if let bytes = AureaJSONData(object, false), let json = String(data: bytes, encoding: .utf8) {
                         // Nome no idioma do app (o JSON fala pt-BR); sem recurso, o do arquivo.
                         let keys = builtinPresetNameKeys[kind.rawValue] ?? []
-                        let name = index < keys.count ? AureaText.t(keys[index]) : object["name"] as? String ?? ""
+                        let name = index < keys.count && !keys[index].isEmpty ? AureaText.t(keys[index]) : object["name"] as? String ?? ""
                         result.append(PanelPresetEntry(id: "b:\(kind.rawValue):\(index)", name: name.isEmpty ? AureaText.t("pn_preset_n", index + 1) : name, kind: kind, json: json))
                     }
                 }
@@ -1793,12 +1795,12 @@ private struct ShapeEditGlyph: View {
     }
 }
 
-// MaskPanel.kt: masks, path steps and track matte keep their original order.
+// MaskPanel.kt: máscaras numa tela só (três botões de criar sempre à vista,
+// chips das máscaras e, da escolhida, Caminho, Modo, Borda, Seguir objeto e
+// Apagar) e o recorte por outra camada na segunda aba.
 struct MaskPanel: View {
     @EnvironmentObject private var model: AureaModel
     @State private var tab = 0
-    @State private var step = 0
-    @State private var adding = false
     @State private var matte: Int64 = 0
     @State private var mode = 0
     private var id: Int64 { model.primarySelection ?? 0 }
@@ -1827,95 +1829,93 @@ struct MaskPanel: View {
                     }.accessibilityIdentifier("mask.scroll")
                 }
             }
-        }.foregroundStyle(AureaColors.text).onAppear {
-            load()
-            if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { step = 2 }
-        }
-            .onChange(of: id) { _ in adding = false; step = 0; load() }
+        }.foregroundStyle(AureaColors.text).onAppear { load() }
+            .onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
             .onChange(of: model.timelineFocus) { focus in
-                if focus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { tab = 0; step = 2 }
+                if focus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { tab = 0 }
             }
     }
     @ViewBuilder private var masksBody: some View {
+        Color.clear.frame(height: 6)
+        // Os três jeitos de criar uma máscara: sempre à vista, um toque cada.
+        HStack(spacing: 6) {
+            MaskShapeTool(kind: 0, label: AureaText.t("panel_desenhar_mao"), selected: model.maskDrawing && mask?.closed == false) { model.addMask(2) }
+                .accessibilityIdentifier("mask.add.draw")
+            MaskShapeTool(kind: 1, label: AureaText.t("panel_retangulo"), selected: false) { model.addMask(0) }
+                .accessibilityIdentifier("mask.add.rect")
+            MaskShapeTool(kind: 2, label: AureaText.t("panel_elipse"), selected: false) { model.addMask(1) }
+                .accessibilityIdentifier("mask.add.ellipse")
+        }
         if model.masks.isEmpty {
-            Color.clear.frame(height: 6)
+            Color.clear.frame(height: 10)
             hint("panel_mascara_mostra_so_parte_camada_escolha")
-            Color.clear.frame(height: 8)
-            addChoices
         } else {
+            Color.clear.frame(height: 4)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(model.masks.enumerated()), id: \.element.id) { entry in
                         NativePanelChip(AureaText.t(entry.element.closed ? "pn_mask_n" : "pn_mask_n_open", entry.offset + 1), selected: mask?.id == entry.element.id, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) {
-                            model.selectedMask = entry.element.id; model.selectedMaskPoint = nil; model.maskDrawing = !entry.element.closed; adding = false
+                            model.selectedMask = entry.element.id; model.selectedMaskPoint = nil; model.maskDrawing = !entry.element.closed
                         }
                     }
-                    NativePanelChip(AureaText.t(adding ? "panel_fechar" : "panel_adicionar_mascara"), selected: adding, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) { adding.toggle() }
                 }.frame(height: 44)
             }
-            if adding { addChoices }
-            else if let mask { maskSteps(mask) }
+            if let mask { maskEditor(mask) }
             else { hint("panel_escolha_mascara_acima_editar_palco") }
         }
     }
-    private var addChoices: some View {
-        VStack(spacing: 6) {
-            NativePanelAction("panel_desenhar_mao", detail: AureaText.t("panel_toque_palco_pontos_arraste_curvar")) { model.addMask(2); adding = false; step = 0 }
-            NativePanelAction("panel_retangulo", detail: AureaText.t("panel_retangulo_meio_camada_pronto_ajustar")) { model.addMask(0); adding = false; step = 0 }
-            NativePanelAction("panel_elipse", detail: AureaText.t("panel_elipse_meio_camada_pronta_ajustar")) { model.addMask(1); adding = false; step = 0 }
-        }
-    }
-    @ViewBuilder private func maskSteps(_ m: MaskItem) -> some View {
-        let labels = ["panel_1_caminho", "panel_2_modo", "panel_3_borda"] + (model.selectedLayer?.kind == 1 ? ["panel_4_rastrear"] : [])
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Array(labels.enumerated()), id: \.offset) { n, key in
-                    NativePanelChip(AureaText.t(key), selected: step == n, horizontal: 14, height: 36, radius: 9, fontSize: 12.5, bold: true) { step = n }
-                }
-            }.padding(.horizontal, 6).frame(height: 48)
-        }
-        switch min(step, labels.count - 1) {
-        case 0:
-            if model.maskDrawing {
-                hint("panel_toque_palco_pontos_arraste_curvar_toque")
-                Color.clear.frame(height: 8)
-                NativePanelAction("panel_fechar_caminho", detail: AureaText.plural("pn_mask_points_so_far", m.points.count / 6)) {
-                    if m.points.count >= 18 { model.setMaskPoints(m.points, closed: true); model.maskDrawing = false }
-                    else { model.toast = AureaText.t("msg_ponha_pelo_menos_3_pontos") }
-                }
-            } else {
-                hint("panel_arraste_pontos_palco_toque_num_ponto")
-                HStack(spacing: 8) {
-                    PropertyLabelChip(AureaText.t("panel_caminho"), expression: .none, keyframe: look, onTap: {})
-                    Text(m.keyCount == 0 ? AureaText.t("panel_parado_toque_trilho_animar") : AureaText.plural("pn_keyframes_edit_at_playhead", Int(m.keyCount)))
-                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(height: 48).aureaSelectedProperty(AureaText.t("panel_caminho"))
+    /// A máscara escolhida, tudo numa tela só, na ordem de uso.
+    @ViewBuilder private func maskEditor(_ m: MaskItem) -> some View {
+        title("panel_caminho")
+        if model.maskDrawing {
+            hint("panel_toque_palco_pontos_arraste_curvar_toque")
+            Color.clear.frame(height: 8)
+            NativePanelAction("panel_fechar_caminho", detail: AureaText.plural("pn_mask_points_so_far", m.points.count / 6)) {
+                if m.points.count >= 18 { model.setMaskPoints(m.points, closed: true); model.maskDrawing = false }
+                else { model.toast = AureaText.t("msg_ponha_pelo_menos_3_pontos") }
             }
+            // Sem caminho fechado ainda não há modo/borda para ajustar.
             Color.clear.frame(height: 10)
-            NativePanelAction("panel_apagar_mascara", danger: true) {
-                guard model.engine.removeMask(id, mask: m.id) else { return }
-                if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == m.id }) == true { model.timelineFocus = nil }
-                if model.curveProperty == 43 && model.curveEffect == m.id { model.curveSelectedTime = nil }
-                model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false; model.refreshModel(force: true)
-            }
-        case 1:
-            title("panel_como_esta_mascara_combina_outras")
+            deleteAction(m)
+        } else {
+            hint("panel_arraste_pontos_palco_toque_num_ponto")
+            HStack(spacing: 8) {
+                PropertyLabelChip(AureaText.t("panel_caminho"), expression: .none, keyframe: look, onTap: {})
+                Text(m.keyCount == 0 ? AureaText.t("panel_parado_toque_trilho_animar") : AureaText.plural("pn_keyframes_edit_at_playhead", Int(m.keyCount)))
+                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(height: 48).aureaSelectedProperty(AureaText.t("panel_caminho"))
+
+            title("panel_mask_mode")
             ChoiceChips(["panel_somar", "panel_subtrair", "panel_intersecao", "panel_diferenca", "panel_desligada"].map { AureaText.t($0) }, selected: Int(m.operation)) { update(m, operation: UInt32($0)) }
             NativePanelToggle(AureaText.t("panel_inverter_mostrar_lado_fora"), checked: m.inverted) { update(m, inverted: $0) }
-        case 2:
+
+            title("panel_mask_edge")
             maskRuler(m, param: 0, label: "panel_suavizar", value: m.feather, range: 0...500, unit: "px", reset: 0)
             maskRuler(m, param: 1, label: "panel_expandir", value: m.expansion, range: -500...500, unit: "px", reset: 0)
             maskRuler(m, param: 2, label: "panel_opacidade", value: m.opacity * 100, range: 0...100, unit: "%", reset: 100)
-        default:
-            if model.importingMedia { hint("panel_rastreando") }
-            else {
-                hint("panel_mascara_segue_esta_embaixo_dela_cabecote")
-                Color.clear.frame(height: 8)
-                NativePanelAction("panel_seguir_posicao", detail: AureaText.t("panel_objetos_so_andam_pela_tela")) { track(m.id, mode: 0) }
-                Color.clear.frame(height: 6)
-                NativePanelAction("panel_seguir_posicao_tamanho_giro", detail: AureaText.t("panel_objetos_aproximam_ou_giram")) { track(m.id, mode: 1) }
+
+            if model.selectedLayer?.kind == 1 {
+                title("panel_mask_follow")
+                if model.importingMedia { hint("panel_rastreando") }
+                else {
+                    hint("panel_mascara_segue_esta_embaixo_dela_cabecote")
+                    Color.clear.frame(height: 8)
+                    NativePanelAction("panel_seguir_posicao", detail: AureaText.t("panel_objetos_so_andam_pela_tela")) { track(m.id, mode: 0) }
+                    Color.clear.frame(height: 6)
+                    NativePanelAction("panel_seguir_posicao_tamanho_giro", detail: AureaText.t("panel_objetos_aproximam_ou_giram")) { track(m.id, mode: 1) }
+                }
             }
+            Color.clear.frame(height: 14)
+            deleteAction(m)
+        }
+    }
+    private func deleteAction(_ m: MaskItem) -> some View {
+        NativePanelAction("panel_apagar_mascara", danger: true) {
+            guard model.engine.removeMask(id, mask: m.id) else { return }
+            if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == m.id }) == true { model.timelineFocus = nil }
+            if model.curveProperty == 43 && model.curveEffect == m.id { model.curveSelectedTime = nil }
+            model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false; model.refreshModel(force: true)
         }
     }
     private func maskRuler(_ mask: MaskItem, param: UInt32, label: String, value: Float, range: ClosedRange<Float>, unit: String, reset: Float) -> some View {
@@ -1995,6 +1995,42 @@ struct MaskPanel: View {
     }
 }
 
+
+/// Botão grande de criar máscara: 0 desenhar, 1 retângulo, 2 elipse. Mesmo
+/// visual da ferramenta do Vetor e do `ToolTile` do Android (MaskPanel.kt).
+private struct MaskShapeTool: View {
+    let kind: Int
+    let label: String
+    let selected: Bool
+    let action: () -> Void
+    var body: some View {
+        let color = selected ? AureaColors.accent : AureaColors.text
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Canvas { context, size in draw(context, width: size.width, color: color) }.frame(width: 22, height: 22)
+                Text(label).font(.aurea(size: 10, weight: .semibold)).foregroundStyle(color).lineLimit(2).multilineTextAlignment(.center)
+            }.padding(.horizontal, 2).padding(.vertical, 6).frame(maxWidth: .infinity).frame(height: 60)
+                .background(selected ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                .overlay { if selected { RoundedRectangle(cornerRadius: 10).stroke(AureaColors.accent, lineWidth: 1.5) } }
+        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(label)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+    private func draw(_ ctx: GraphicsContext, width w: CGFloat, color: Color) {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: w * x, y: w * y) }
+        switch kind {
+        case 0:
+            var path = Path()
+            path.move(to: p(0.06, 0.82)); path.addCurve(to: p(0.94, 0.2), control1: p(0.22, 0.18), control2: p(0.62, 0.98))
+            ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            let r = w * 0.09
+            ctx.fill(Path(CGRect(x: w * 0.06 - r, y: w * 0.82 - r, width: r * 2, height: r * 2)), with: .color(color))
+            ctx.fill(Path(CGRect(x: w * 0.94 - r, y: w * 0.2 - r, width: r * 2, height: r * 2)), with: .color(color))
+        default:
+            let box = CGRect(x: w * 0.1, y: w * 0.2, width: w * 0.8, height: w * 0.6)
+            ctx.stroke(kind == 2 ? Path(ellipseIn: box) : Path(box), with: .color(color), lineWidth: 1.7)
+        }
+    }
+}
 
 struct CurvePanel: View {
     var body: some View { NativeCurvePanel() }

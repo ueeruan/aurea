@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.1.8 BETA 2: Saber e Luma Dissolve (nomes de efeito em inglês em todo idioma; descrição traduzida). -->
+    <string name="saber_desc">Goresan energi dengan inti putih membara dan cahaya lebar — di antara dua titik, mengikuti mask, atau di garis tepi teks. Preset lightsaber, neon, listrik, dan api.</string>
+    <string name="luma_dissolve_desc">Layer menghilang atau muncul berdasarkan kecerahan: bagian gelap lebih dulu, atau lewat noise, gradien, atau layer lain, dengan tepi berwarna opsional.</string>
+    <string name="fxp_saber_default">Bawaan</string>
+    <string name="fxp_saber_lightsaber">Lightsaber</string>
+    <string name="fxp_saber_neon">Neon</string>
+    <string name="fxp_saber_electric">Listrik</string>
+    <string name="fxp_saber_fire">Api</string>
+    <string name="fxp_saber_plasma">Plasma</string>
+    <string name="fxp_saber_energy">Energi</string>
+    <string name="fxp_saber_soft">Cahaya lembut</string>
+    <string name="fxp_saber_magic">Sihir</string>
+    <string name="app_preset_fx_luma_in">Luma Dissolve (masuk)</string>
+    <string name="app_preset_fx_luma_out">Luma Dissolve (keluar)</string>
+    <string name="saber_point_start">Awal saber</string>
+    <string name="saber_point_end">Akhir saber</string>
+    <string name="saber_points_hint">Seret untuk memindahkan titik saber</string>
+</resources>

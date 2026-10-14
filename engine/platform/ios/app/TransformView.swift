@@ -636,6 +636,9 @@ struct TransformView: View {
                         }
                     }.padding(.top, 2).padding(.bottom, 6)
                 }
+                blurToggle("camera_affects_below", hint: "camera_affects_below_hint", checked: lens.count > 9 && lens[9] >= 0.5) { enabled in
+                    beginGesture(); model.setCameraLens(7, value: enabled ? 1 : 0); endGesture()
+                }
                 blurToggle("lens_dof", hint: "lens_dof_hint", checked: dof) { enabled in
                     beginGesture(); model.setCameraLens(AureaModel.cameraLensDof, value: enabled ? 1 : 0); endGesture()
                 }

@@ -23,6 +23,10 @@ enum AureaSheetLayout {
         min(max(0, content), max(0, viewport - max(0, top) - max(0, bottom) - handle - footer))
     }
     static func textInputHeight(content: CGFloat) -> CGFloat { min(180, max(96, content)) }
+    static func scrollHeight(content: CGFloat?, maximum: CGFloat) -> CGFloat {
+        let limit = max(0, maximum)
+        return min(content ?? limit, limit)
+    }
 }
 
 private struct AureaSheetContentHeight: PreferenceKey {
@@ -37,7 +41,7 @@ private struct AureaSheetFooterHeight: PreferenceKey {
 private struct AureaSheetScroll<Content: View>: View {
     let maximumHeight: CGFloat
     @ViewBuilder let content: () -> Content
-    @State private var contentHeight: CGFloat = 1
+    @State private var contentHeight: CGFloat? = nil
     var body: some View {
         ScrollView(.vertical) {
             content().fixedSize(horizontal: false, vertical: true)
@@ -45,8 +49,12 @@ private struct AureaSheetScroll<Content: View>: View {
                     Color.clear.preference(key: AureaSheetContentHeight.self, value: geometry.size.height)
                 })
         }
-        .frame(height: min(contentHeight, max(0, maximumHeight)))
-        .onPreferenceChange(AureaSheetContentHeight.self) { contentHeight = max(0, $0) }
+        .frame(height: AureaSheetLayout.scrollHeight(content: contentHeight, maximum: maximumHeight))
+        .onPreferenceChange(AureaSheetContentHeight.self) {
+            // A default preference during mounting must not hide a real body.
+            guard $0.isFinite, $0 > 0 else { return }
+            contentHeight = $0
+        }
     }
 }
 
@@ -641,20 +649,26 @@ struct AureaBottomOverlay<Content: View>: View {
     let modal: Bool
     let onDismiss: () -> Void
     private let fixedFooter: AnyView?
+    private let accessibilityID: String
     private let content: () -> Content
     @State private var shown = false
     @State private var closing = false
     @State private var footerHeight: CGFloat = 0
     init(modal: Bool = false, onDismiss: @escaping () -> Void, fixedFooter: AnyView? = nil,
+         accessibilityID: String = "",
          @ViewBuilder content: @escaping () -> Content) {
         self.modal = modal; self.onDismiss = onDismiss; self.fixedFooter = fixedFooter; self.content = content
+        self.accessibilityID = accessibilityID
         // Reserve all current action rows before their first measured layout.
         _footerHeight = State(initialValue: fixedFooter == nil ? 0 : 80)
     }
     var body: some View {
         GeometryReader { geometry in
-            let top = max(0, geometry.safeAreaInsets.top) + 8
-            let bottom = max(0, geometry.safeAreaInsets.bottom)
+            // The proposed viewport already excludes the keyboard and unsafe
+            // container edges. Subtracting its reported keyboard inset again
+            // collapsed the scrolling body and lifted the footer twice.
+            let top: CGFloat = 8
+            let bottom: CGFloat = 0
             let handle: CGFloat = modal ? 21 : 0
             let bodyHeight = AureaSheetLayout.bodyHeight(content: .greatestFiniteMagnitude,
                 viewport: geometry.size.height, top: top, bottom: bottom, handle: handle, footer: footerHeight)
@@ -676,6 +690,8 @@ struct AureaBottomOverlay<Content: View>: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(accessibilityID)
                 .background(AureaColors.surface, in: AureaSheetTopShape(radius: modal ? 18 : 13.5))
                 .contentShape(Rectangle()).onTapGesture {}
                 .offset(y: shown ? 0 : geometry.size.height)

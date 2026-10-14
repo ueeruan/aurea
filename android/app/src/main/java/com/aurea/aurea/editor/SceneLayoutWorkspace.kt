@@ -133,9 +133,34 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                 if (selected?.kind == LayerType.Light.kind) {
                     ScenePillButton(CupertinoGlyph.Lightbulb, stringResource(R.string.pn_t3d_lighting)) { lights = true }
                 }
+                // Modelo com rig: posar os ossos e marcar keyframes (como no Blender).
+                if (selected?.kind == LayerType.Model3D.kind && store.poseBones != null && !store.rigPoseMode) {
+                    ScenePillButton(CupertinoGlyph.PersonCropCircle, stringResource(R.string.rig_pose)) { store.setRigPose(true) }
+                }
                 ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.scene_recenter)) { store.resetSceneView() }
             }
+            if (store.rigPoseMode && store.poseBones != null) RigPoseBar(store)
         }
+    }
+}
+
+/**
+ * Barra do modo de pose: dica, keyframe do osso / de todos, resetar e concluir.
+ * O anel na junta = keyframe no cabeçote (a mesma convenção das partes 3D).
+ */
+@Composable
+private fun RigPoseBar(store: EditorStore) {
+    val chosen = store.poseBone >= 0
+    Text(stringResource(if (chosen) R.string.rig_pose_hint_bone else R.string.rig_pose_hint), color = AureaColors.Text, fontSize = 12.sp,
+        textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp)
+            .background(ShellColors.FloatingDark, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp))
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (chosen) ScenePillButton(CupertinoGlyph.SuitDiamond, stringResource(R.string.rig_key_bone)) { store.togglePoseKey(false) }
+        ScenePillButton(CupertinoGlyph.SuitDiamond, stringResource(R.string.rig_key_all)) { store.togglePoseKey(true) }
+        if (chosen) ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_bone)) { store.resetPose(false) }
+        ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_all)) { store.resetPose(true) }
+        ScenePillButton(CupertinoGlyph.CheckmarkAlt, stringResource(R.string.rig_done)) { store.setRigPose(false) }
     }
 }
 

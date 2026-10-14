@@ -1,8 +1,10 @@
+#include "aurea/effects/Palette.hpp"
 #include "aurea/Engine.hpp"
 #include "aurea/tracking/RealCameraPreviewScope.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/PreviewViewport.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
+#include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/text/LocalWhisper.hpp"
 #include "aurea/audio/Beats.hpp"
 #include "aurea/tracking/PointTracker.hpp"
@@ -21,22 +23,24 @@
 #include "aurea/animation/KeyframeOptimize.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Trackball.hpp"
+#include "aurea/scene3d/Animation.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/ai/Upscaler.hpp"
 #include "aurea/ai/TemporalStabilizer.hpp"
+#include "aurea/export/UpscaleColor.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportRules.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
+#include "aurea/export/ExportPacketLog.hpp"
 #include "aurea/export/ExportSinkStartup.hpp"
 #include "aurea/export/OfflineFrameQueue.hpp"
 #include "aurea/export/OfflineFrameRenderer.hpp"
 #include "aurea/export/OfflineAudioSnapshot.hpp"
 #include "aurea/export/OfflineAudioBlockSource.hpp"
-#include "aurea/export/UpscaleColor.hpp"
 #include "aurea/effects/MeshWarp.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/RasterExtrude.hpp"
@@ -256,7 +260,7 @@ struct Engine::ExportContext {
     std::unique_ptr<Project> frozenProject;
     export_recovery::Package recovery;
     std::string recoveryPath;
-    std::unordered_map<u64, ImagePixels> frozenImages;
+    std::unordered_map<u64, std::shared_ptr<const ImagePixels>> frozenImages;
     std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> frozenModels;
     std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> frozenHdris;
     std::unordered_map<u64, std::shared_ptr<const CubeLut>> frozenLuts;
@@ -717,20 +721,62 @@ Status prepare_original_export_models(Project& project, CompositionId root,
             if (cancel.load(std::memory_order_acquire)) return Errc::Cancelled;
             const Asset* source = project.asset(AssetId::unpack(key));
             if (!source || source->model.importQuality != static_cast<u8>(scene3d::ModelQuality::Original)) continue;
+            // Forma e texto 3D são gerados pelo motor (a "fonte" é a receita, não
+            // um arquivo): o modelo da prévia JÁ é o Original. Antes eles caíam
+            // na regra dos arquivos e o export inteiro era recusado ("nao foi
+            // possivel restaurar a fonte Original deste formato 3D") — Project 8,
+            // vindo do iPhone com uma forma 3D cuja imagem não veio no pacote.
+            {
+                scene3d::Shape3DSpec shape;
+                scene3d::Text3DSpec text;
+                if (scene3d::decode_shape3d(source->sourcePath, shape) || scene3d::decode_text3d(source->sourcePath, text)) continue;
+            }
             const auto prior = models.find(key);
             if (prior != models.end() && prior->second) {
                 const auto& scene = *prior->second;
                 if (!scene.stats.texturesReduced && !scene.stats.texturesSkipped && scene.missingTextures.empty()
                     && scene.stats.sourceTriangles == scene.stats.triangles && model_texture_references_complete(scene)) continue;
             }
+            // A versão Original é uma MELHORIA da exportação, não condição para
+            // exportar. Quando ela não pode ser preparada (memória, formato não
+            // glTF, textura ausente), o export usa o MESMO modelo que a prévia
+            // mostra. Antes, qualquer um desses casos abortava o export inteiro
+            // com erro 9 ("memoria insuficiente para exportar o modelo com
+            // texturas Original") — ex.: um carro de 300 mil triângulos.
+            // 0.1.8: mesmo com a prévia sem alguma textura (FBX/OBJ trazido do
+            // app Arquivos sem a pasta de imagens, textura corrompida), o
+            // vídeo sai como a prévia mostra. Antes a exportação inteira era
+            // recusada e o iPhone só dizia "Não foi possível iniciar a
+            // exportação" (iPhone 16 com modelo 3D, 12/10/2026).
+            const bool havePreview = prior != models.end() && prior->second;
+            auto keepPreview = [&](const Status& why) -> bool {
+                if (!havePreview) {
+                    AUREA_LOG_WARN("export Original: %s recusado (sem modelo da previa): %.*s", source->name.c_str(),
+                        static_cast<int>(why.detail().size()), why.detail().empty() ? "" : why.detail().data());
+                    return false;
+                }
+                if (!prior->second->missingTextures.empty() || prior->second->stats.texturesSkipped
+                    || !model_texture_references_complete(*prior->second))
+                    AUREA_LOG_WARN("export Original: %s sai como a previa, sem %u textura(s) ausente(s) e %u pulada(s)",
+                        source->name.c_str(), static_cast<u32>(prior->second->missingTextures.size()),
+                        static_cast<u32>(prior->second->stats.texturesSkipped));
+                AUREA_LOG_WARN("export Original: %s exportado com o modelo da previa (%.*s)", source->name.c_str(),
+                    static_cast<int>(why.detail().size()), why.detail().empty() ? "" : why.detail().data());
+                return true;
+            };
             const auto dot = source->sourcePath.find_last_of('.');
             std::string extension = dot == std::string::npos ? std::string{} : source->sourcePath.substr(dot);
             for (char& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-            if (extension != ".glb" && extension != ".gltf")
-                return Status{Errc::NotSupported,
-                    "nao foi possivel restaurar a fonte Original deste formato 3D; exportacao interrompida"};
-            if (room < 4096) return Status{Errc::BudgetExceeded,
-                "memoria insuficiente para preparar as texturas Original da exportacao"};
+            if (extension != ".glb" && extension != ".gltf") {
+                const Status why{Errc::NotSupported, "nao foi possivel restaurar a fonte Original deste formato 3D"};
+                if (keepPreview(why)) continue;
+                return why;
+            }
+            if (room < 4096) {
+                const Status why{Errc::BudgetExceeded, "memoria insuficiente para preparar as texturas Original da exportacao"};
+                if (keepPreview(why)) continue;
+                return why;
+            }
             scene3d::ImportOptions options;
             options.maxTriangles = 0;
             options.simplifyError = 0;
@@ -747,23 +793,32 @@ Status prepare_original_export_models(Project& project, CompositionId root,
             if (!result.ok()) {
                 AUREA_LOG_WARN("export Original: modelo %s recusado: %s", source->name.c_str(), result.detail.c_str());
                 if (result.error == scene3d::ImportError::Cancelled) return Errc::Cancelled;
+                Status why;
                 if (result.error == scene3d::ImportError::TooHeavy || result.error == scene3d::ImportError::OutOfMemory)
-                    return Status{Errc::BudgetExceeded, "memoria insuficiente para exportar o modelo com texturas Original"};
-                if (result.error == scene3d::ImportError::UnsupportedFeature || result.error == scene3d::ImportError::UnsupportedCompression)
-                    return Status{Errc::NotSupported, "uma textura Original usa um formato que este motor nao suporta"};
-                return Status{Errc::AssetCorrupted, "fonte ou textura do modelo Original ausente ou invalida"};
+                    why = Status{Errc::BudgetExceeded, "memoria insuficiente para exportar o modelo com texturas Original"};
+                else if (result.error == scene3d::ImportError::UnsupportedFeature || result.error == scene3d::ImportError::UnsupportedCompression)
+                    why = Status{Errc::NotSupported, "uma textura Original usa um formato que este motor nao suporta"};
+                else
+                    why = Status{Errc::AssetCorrupted, "fonte ou textura do modelo Original ausente ou invalida"};
+                if (keepPreview(why)) continue;
+                return why;
             }
             const auto& full = *result.asset;
+            Status why;
             if (full.stats.texturesReduced)
-                return Status{Errc::NotSupported, "a GPU nao suporta a dimensao de uma textura Original deste modelo"};
-            if (full.stats.texturesSkipped || !full.missingTextures.empty() || !model_texture_references_complete(full))
-                return Status{Errc::AssetCorrupted, "modelo Original nao tem todas as texturas necessarias para exportar"};
-            if (full.stats.sourceTriangles != full.stats.triangles
+                why = Status{Errc::NotSupported, "a GPU nao suporta a dimensao de uma textura Original deste modelo"};
+            else if (full.stats.texturesSkipped || !full.missingTextures.empty() || !model_texture_references_complete(full))
+                why = Status{Errc::AssetCorrupted, "modelo Original nao tem todas as texturas necessarias para exportar"};
+            else if (full.stats.sourceTriangles != full.stats.triangles
                 || (source->model.sourceTriangles && source->model.sourceTriangles != full.stats.sourceTriangles))
-                return Status{Errc::AssetCorrupted, "a geometria Original do modelo difere da fonte do projeto"};
-            const u64 bytes = scene3d::scene_asset_memory_bytes(full);
-            if (bytes > room) return Status{Errc::BudgetExceeded,
-                "memoria insuficiente para manter o modelo Original durante a exportacao"};
+                why = Status{Errc::AssetCorrupted, "a geometria Original do modelo difere da fonte do projeto"};
+            const u64 bytes = why.ok() ? scene3d::scene_asset_memory_bytes(full) : 0;
+            if (why.ok() && bytes > room)
+                why = Status{Errc::BudgetExceeded, "memoria insuficiente para manter o modelo Original durante a exportacao"};
+            if (!why.ok()) {
+                if (keepPreview(why)) continue;
+                return why;
+            }
             // The preview model still belongs to models_ and is counted by the
             // source room. This new immutable export scene consumes additional,
             // measured CPU space; it never replaces the saved/editor asset.
@@ -809,12 +864,17 @@ ModelImportReport Engine::last_model_import() const noexcept {
     return lastModelImport_;
 }
 
+u64 Engine::process_budget_bytes() const noexcept {
+    u64 budget = config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes();
+    if (config_.memoryBudgetCapBytes && !config_.memoryBudgetBytes) budget = std::min(budget, config_.memoryBudgetCapBytes);
+    return DeviceCapabilities::process_budget_limit(budget);
+}
+
 void Engine::apply_memory_budgets() noexcept {
     renderer_.set_bounded_text_surface_enabled(config_.enableBoundedTextSurface);
     // Uma tabela só (kBudgetShare, em MemoryManager.hpp): cada consumidor com o
     // seu pedaço do orçamento medido do aparelho. Ver PHASE_8_REPORT §8B.
-    const u64 budget = DeviceCapabilities::process_budget_limit(
-        config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+    const u64 budget = process_budget_bytes();
     memory_.apply_budget_table(budget);
     // The rendered-frame category also contains flow/LUT/mask caches. Reserve
     // half for reusable intermediate render targets instead of retaining every
@@ -1704,7 +1764,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
             if ((a->video.width && px.width != a->video.width)
                 || (a->video.height && px.height != a->video.height)) { ++missing; continue; }
             if (px.rgba.capacity() + sizeof(px) > source_asset_room_locked()) { ++missing; continue; }
-            images_[key] = std::move(px);
+            images_[key] = std::make_shared<const ImagePixels>(std::move(px));
         }
         if (missing) AUREA_LOG_WARN("%u imagem(ns) do projeto nao puderam ser abertas", missing);
         missingTotal += missing;
@@ -2564,11 +2624,11 @@ bool Engine::query_light(u64 layerId, f32* values, u32 capacity) noexcept {
     return true;
 }
 
-bool Engine::query_camera_lens(u64 layerId, f32* values) noexcept {
+bool Engine::query_camera_lens(u64 layerId, f32* values, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     auto* comp = project_ ? current_composition() : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!layer || layer->kind != LayerKind::Camera || !values) return false;
+    if (!layer || layer->kind != LayerKind::Camera || !values || capacity < 9) return false;
     const FrameIndex local = layer->local_time(playback_.current());
     const CameraData& cam = layer->camera;
     // A MESMA conta da projeção: mm com keyframe manda; senão o FOV (parado
@@ -2588,6 +2648,7 @@ bool Engine::query_camera_lens(u64 layerId, f32* values) noexcept {
     for (u32 i = 0; i < 4; ++i) if (const Track* t = layer->tracks.find(props[i]); t && !t->keys.empty()) mask |= 1u << i;
     values[7] = static_cast<f32>(mask);
     values[8] = cam.active ? 1.0f : 0.0f;
+    if (capacity >= 10) values[9] = cam.affectsLayersBelow ? 1.0f : 0.0f;
     return true;
 }
 
@@ -2618,6 +2679,7 @@ Result<u64> Engine::add_camera() noexcept {
     if (!camera) return Status{Errc::OutOfMemory, "camada nao criada"};
     const auto fallback = scene3d::default_camera(comp->width(), comp->height());
     camera->threeD = true;
+    camera->camera.affectsLayersBelow = true;
     camera->start = FrameIndex{0};
     camera->end = comp->duration();
     camera->transform.position = fallback.position;
@@ -3511,14 +3573,42 @@ bool Engine::restore_camera_track(u64 layerId) noexcept {
     std::shared_ptr<const CameraTrackResult> saved;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
-        const Composition* comp = project_ ? current_composition() : nullptr;
-        const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-        if (!l || l->kind != LayerKind::Video || !l->cameraTrack) return false;
+        // Um desfazer/refazer acabou de ser enfileirado pela UI: aplica antes de ler.
+        drain_commands_locked();
+        Composition* comp = project_ ? current_composition() : nullptr;
+        Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!l || l->kind != LayerKind::Video) return false;
+        const bool sameJob = cameraTrack_ && cameraTrack_->layerId == layerId && cameraTrack_->session == projectSession_ &&
+                             cameraTrack_->composition == project_->timeline().current();
+        if (!l->cameraTrack && sameJob) {
+            // A análise terminada não é um passo de desfazer (não entra no
+            // histórico): desfazer outra edição restaurava a camada SEM ela e o
+            // painel voltava a "Analisar câmera". Volta a análise do trabalho,
+            // se o vídeo e o tempo ainda são os mesmos.
+            std::shared_ptr<const CameraTrackResult> kept;
+            { std::lock_guard<std::mutex> g(cameraTrack_->mutex); kept = cameraTrack_->result; }
+            if (kept && kept->solution.ok && l->source == cameraTrack_->source &&
+                kept->sourceSignature == tracking::source_signature(project_->asset(l->source)) &&
+                tracking::camera_timing_matches(*l, *kept, comp->fps())) {
+                l->cameraTrack = kept;
+                project_->mark_dirty();
+            }
+        }
+        if (!l->cameraTrack) return false;
         saved = l->cameraTrack;
         if (saved->sourceSignature != tracking::source_signature(project_->asset(l->source)) ||
             !tracking::camera_timing_matches(*l,*saved,comp->fps())) return false;
-        if (cameraTrack_ && cameraTrack_->layerId == layerId && cameraTrack_->session == projectSession_ &&
-            cameraTrack_->composition == project_->timeline().current() && cameraTrack_->result == saved) return true;
+        if (sameJob && cameraTrack_->result == saved) {
+            // O resultado é o mesmo (ex.: um "resolver de novo" cancelado ou que
+            // falhou não mexe na solução): o estado volta a ser o dela.
+            const u32 state = cameraTrack_->state.load();
+            if (state == 3u || state == 4u) {
+                std::lock_guard<std::mutex> g(cameraTrack_->mutex);
+                cameraTrack_->state.store(saved->solution.ok ? 2u : 3u);
+                cameraTrack_->message = saved->solution.failure;
+            }
+            return true;
+        }
     }
     // start_camera_track only returns cached data when key, mode and timing
     // match. Do not launch work on a stale cache from panel appearance.
@@ -3557,6 +3647,9 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
     AssetId source{};
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
+        // Um corte feito logo antes de "Analisar" ainda pode estar na fila:
+        // sem aplicar, a análise inteira terminava em "tempo mudou".
+        drain_commands_locked();
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
         if (!l || l->kind != LayerKind::Video) return false;
@@ -3682,6 +3775,9 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
             std::lock_guard<std::mutex> lock(modelMutex_);
             Composition* comp = project_ && projectSession_ == job->session ? project_->timeline().composition(job->composition) : nullptr;
             Layer* layer = comp ? comp->layer(LayerId::unpack(job->layerId)) : nullptr;
+            // Cancelado depois da última conferência: o projeto não muda (a UI
+            // já disse "cancelado, projeto intacto").
+            if (job->cancel.load()) return fail("cancelado");
             if (layer && layer->kind == LayerKind::Video && layer->source == job->source &&
                 res->sourceSignature == tracking::source_signature(project_->asset(layer->source)) &&
                 tracking::camera_timing_matches(*layer,*res,comp->fps())) {
@@ -3718,8 +3814,10 @@ bool Engine::refine_camera_track(bool removeSelected, u32 motion, f32 knownFov) 
         if(removeSelected)for(u32 id:rejected)if(id<next->tracks.pos.size())std::fill(next->tracks.pos[id].begin(),next->tracks.pos[id].end(),Vec2{NAN,NAN});
         tracking::SolveOptions opt;opt.mode=static_cast<tracking::TrackMode>(next->mode);opt.motion=motion;opt.knownFovDeg=knownFov;
         auto solution=tracking::solve_camera(next->tracks,opt,&job->cancel,&job->progress);
-        if(job->cancel.load()){job->state.store(4);return;}
-        if(!solution.ok){std::lock_guard<std::mutex> g(job->mutex);job->message=solution.failure;job->state.store(3);return;}
+        // A solução anterior continua na camada e no trabalho: cancelar ou
+        // falhar o "resolver de novo" não pode travar Criar câmera/âncoras.
+        if(job->cancel.load()){std::lock_guard<std::mutex> g(job->mutex);job->message="Re-solve cancelled; the previous solve is kept.";job->progress.store(1);job->state.store(2);return;}
+        if(!solution.ok){std::lock_guard<std::mutex> g(job->mutex);job->message="Re-solve failed ("+solution.failure+"); the previous solve is kept.";job->progress.store(1);job->state.store(2);return;}
         next->solution=std::move(solution);next->sceneCalibration=Mat4::identity();
         next->cacheKey^=0x9e3779b97f4a7c15ull;for(auto id:rejected)next->cacheKey=(next->cacheKey^id)*1099511628211ull;
         next->cacheKey^=static_cast<u64>(knownFov*10000)+motion;
@@ -3788,6 +3886,12 @@ Result<u64> Engine::apply_camera_track(i64 selectionFrame, Vec4 selectionRect, u
     if (!video) return Status{Errc::NotFound, "camada sumiu"};
     if (projectSession_ != job->session || project_->timeline().current() != job->composition)
         return Status{Errc::InvalidState, "a analise pertence a outra composicao"};
+    if (!video->cameraTrack && video->source == job->source && res->sourceSignature == tracking::source_signature(project_->asset(video->source))
+        && tracking::camera_timing_matches(*video, *res, comp->fps())) {
+        // Um desfazer tirou a análise da camada (ela não é passo de desfazer).
+        comp->layer(LayerId::unpack(job->layerId))->cameraTrack = res;
+        project_->mark_dirty();
+    }
     if (video->cameraTrack != res || video->source != job->source || video->duration().value != res->frames)
         return Status{Errc::InvalidState, "tempo do video mudou; reanalise o trecho"};
     for (u32 i = 0; i < res->frames; ++i) {
@@ -3798,11 +3902,9 @@ Result<u64> Engine::apply_camera_track(i64 selectionFrame, Vec4 selectionRect, u
     const Asset* source = project_->asset(video->source);
     if (!source || source->video.height == 0) return Status{Errc::InvalidState, "video sem dimensoes"};
     if(res->sourceSignature!=tracking::source_signature(source))return Status{Errc::InvalidState,"Source changed: analyse again"};
-    const Mat4 videoMatrix = layer_comp_matrix(*comp, *video, FrameIndex{job->start});
-    const f32 videoScale = std::hypot(videoMatrix.col[1].x, videoMatrix.col[1].y);
-    const f32 displayedHeight = source->video.height * videoScale;
-    if (displayedHeight < 1e-6f) return Status{Errc::InvalidArgument, "video sem escala"};
-    const f32 compositionFov = 2.0f * std::atan(static_cast<f32>(comp->height()) / displayedHeight * std::tan(s.fovY * 0.5f));
+    // O enquadramento do vídeo vem do transform 2D dele no renderer
+    // (trackingSourceSize). Um FOV "da composição" calculado aqui não era
+    // usado e recusava vídeo que entra com escala 0% no 1º quadro.
     std::vector<usize> selectedPoints;
     if (!job->selectedTracks.empty()) {
         usize point = 0;
@@ -5028,6 +5130,195 @@ bool Engine::remove_time_remap_key(u64 layerId, u32 index) noexcept {
     bump_model_revision_locked();
     l->timeRemap.keys.erase(l->timeRemap.keys.begin() + index);
     l->timeRemap.lastIndex = 0;
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+// --- Gráfico de velocidade (painel de velocidade, 0.1.8) --------------------
+// Três jeitos de mexer no tempo do clipe, no MESMO painel: velocidade
+// constante, curva de velocidade (chaves de VELOCIDADE: a barra não muda e a
+// fonte anda a integral) e remapeamento (a curva de tempo). O gráfico mostra a
+// velocidade nos três; os presets da curva gravam chaves suaves.
+namespace {
+/// Fonte percorrida de `lo` a `hi` (tempo local) com o tempo de AGORA, sem a
+/// curva de remapeamento (quadros da composição, sempre ≥ 0).
+f64 speed_source_span(const Layer& l) noexcept {
+    Layer probe = l;
+    probe.timeRemapEnabled = false;
+    const f64 span = std::fabs(probe.source_frame_f(static_cast<f64>(l.end.value)) - probe.source_frame_f(static_cast<f64>(l.start.value)));
+    return std::isfinite(span) ? span : 0.0;
+}
+
+/// Velocidade constante média equivalente à curva (o "tirar a curva").
+void flatten_speed_curve(Layer& l) noexcept {
+    const f64 dur = static_cast<f64>(std::max<i64>(1, l.end.value - l.start.value));
+    const f64 span = speed_source_span(l);
+    l.tracks.remove_if([](const Track& t) { return t.property == TrackProperty::Speed; });
+    l.speed = static_cast<f32>(std::clamp(span / dur, 0.05, 16.0));
+}
+} // namespace
+
+u32 Engine::query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    constexpr u32 kHeader = 8;
+    if (!l || !out || maxFloats < kHeader) return 0;
+    samples = std::min(samples, std::min<u32>(1024, maxFloats - kHeader));
+    const bool remap = l->timeRemapEnabled && !l->timeRemap.keys.empty();
+    const Track* st = l->speed_track();
+    const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
+    const FrameIndex now = playback_.current();
+    const f64 nowLocal = static_cast<f64>(l->local_time(now).value);
+    auto speed_at_local = [&](f64 local) -> f64 {
+        if (remap) {
+            // A inclinação da curva de tempo (quadros da fonte por quadro). Nas
+            // pontas, diferença de um lado só: fora do clipe a curva fica
+            // parada e a média com o lado de fora mostrava meia velocidade.
+            const f64 t = local - static_cast<f64>(l->offset.value) + static_cast<f64>(l->start.value);
+            const f64 first = static_cast<f64>(l->start.value), last = static_cast<f64>(std::max(l->start.value, l->end.value - 1));
+            const f64 a = std::clamp(t - 0.5, first, last), b = std::clamp(t + 0.5, first, last);
+            if (b - a < 1e-6) return 0.0;
+            const f64 v = std::fabs(l->source_frame_f(b) - l->source_frame_f(a)) / (b - a);
+            return std::isfinite(v) ? v : 0.0;
+        }
+        if (st) return Layer::speed_value(*st, local);
+        return l->speed;
+    };
+    out[0] = static_cast<f32>(samples);
+    out[1] = 0.0f;
+    out[2] = static_cast<f32>(lo);
+    out[3] = static_cast<f32>(hi);
+    out[4] = static_cast<f32>(nowLocal);
+    out[5] = remap ? 2.0f : st ? 1.0f : 0.0f;
+    out[6] = static_cast<f32>(speed_at_local(std::clamp(nowLocal, static_cast<f64>(lo), static_cast<f64>(hi))));
+    out[7] = static_cast<f32>(l->source_frame(now));
+    u32 w = kHeader;
+    const f64 span = static_cast<f64>(std::max<i64>(1, hi - lo));
+    for (u32 i = 0; i < samples; ++i) {
+        const f64 u = samples > 1 ? static_cast<f64>(i) / static_cast<f64>(samples - 1) : 0.0;
+        out[w++] = static_cast<f32>(speed_at_local(static_cast<f64>(lo) + u * span));
+    }
+    if (st && !remap) {
+        u32 k = 0;
+        for (const Keyframe& key : st->keys) {
+            if (w + 3 > maxFloats) break;
+            out[w++] = static_cast<f32>(key.time.value);
+            out[w++] = key.value;
+            out[w++] = static_cast<f32>(static_cast<u8>(key.interp));
+            ++k;
+        }
+        out[1] = static_cast<f32>(k);
+    }
+    return w;
+}
+
+bool Engine::apply_speed_curve(u64 layerId, u32 preset) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || preset > 8) return false;
+    const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
+    if (hi - lo < 2) return false;
+    if (preset == 7 && !l->speed_track()) return false;
+    if (preset == 8 && !l->speed_track()) return true;
+    history_.before_mutation(*comp, project_->timeline().current(),
+                             preset == 8 ? "tirar curva de velocidade" : preset == 7 ? "suavizar velocidade" : "curva de velocidade");
+    bump_model_revision_locked();
+    // A curva de velocidade e o remapeamento não valem juntos: quem escolhe a
+    // curva desliga a curva de tempo (que fica guardada).
+    if (preset == 8) {
+        flatten_speed_curve(*l);
+    } else if (preset == 7) {
+        l->timeRemapEnabled = false;
+        Track& t = l->tracks.get_or_create(TrackProperty::Speed);
+        for (Keyframe& k : t.keys) k.interp = Interpolation::EaseInOut;
+        t.lastIndex = 0;
+    } else {
+        const f64 source = speed_source_span(*l);
+        l->timeRemapEnabled = false;
+        struct P { f64 u, r; };
+        static const std::vector<P> kShapes[] = {
+            {{0.0, 1.0}, {1.0, 1.0}},                                                                  // plana
+            {{0.0, 1.0}, {0.25, 0.4}, {0.5, 2.0}, {0.75, 0.4}, {1.0, 1.0}},                           // montagem
+            {{0.0, 1.0}, {0.35, 1.0}, {0.45, 0.15}, {0.6, 0.15}, {0.7, 1.0}, {1.0, 1.0}},             // herói
+            {{0.0, 2.5}, {0.4, 2.5}, {0.48, 0.08}, {0.62, 0.08}, {0.7, 2.5}, {1.0, 2.5}},             // bala
+            {{0.0, 4.0}, {0.3, 1.0}, {1.0, 1.0}},                                                      // entrada rápida
+            {{0.0, 1.0}, {0.7, 1.0}, {1.0, 4.0}},                                                      // saída rápida
+            {{0.0, 1.0}, {0.3, 1.0}, {0.36, 5.0}, {0.44, 5.0}, {0.5, 1.0}, {1.0, 1.0}},               // pulo
+        };
+        Track shape;
+        shape.property = TrackProperty::Speed;
+        for (const P& p : kShapes[preset]) {
+            const FrameIndex at{lo + static_cast<i64>(std::llround(p.u * static_cast<f64>(hi - lo)))};
+            if (shape.find_exact(at) == kInvalidIndex) (void)shape.set(at, static_cast<f32>(p.r), Interpolation::EaseInOut);
+        }
+        // A mesma fonte de antes: escala as velocidades pela integral do desenho.
+        const f64 integral = Layer::speed_integral(shape, static_cast<f64>(hi)) - Layer::speed_integral(shape, static_cast<f64>(lo));
+        const f64 k = integral > 1e-6 && source > 0.0 ? source / integral : 1.0;
+        for (Keyframe& key : shape.keys) key.value = static_cast<f32>(std::clamp(static_cast<f64>(key.value) * k, 0.05, 16.0));
+        Track& t = l->tracks.get_or_create(TrackProperty::Speed);
+        t.keys = shape.keys;
+        t.lastIndex = 0;
+    }
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+i32 Engine::edit_speed_key(u64 layerId, i32 index, i64 localFrame, f32 speed, i32 interp) noexcept {
+    if (!std::isfinite(speed)) return -1;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->locked || interp > static_cast<i32>(kLastInterpolation)) return -1;
+    const i64 lo = l->local_time(l->start).value, hi = l->local_time(l->end).value;
+    Track* existing = l->tracks.find(TrackProperty::Speed);
+    if (index >= 0 && (!existing || static_cast<u32>(index) >= existing->keys.size())) return -1;
+    history_.before_mutation(*comp, project_->timeline().current(), index < 0 ? "ponto na velocidade" : "mover ponto da velocidade");
+    bump_model_revision_locked();
+    const f64 before = l->speed_track() ? Layer::speed_value(*l->speed_track(), static_cast<f64>(localFrame)) : static_cast<f64>(l->speed);
+    l->timeRemapEnabled = false;
+    Track& t = l->tracks.get_or_create(TrackProperty::Speed);
+    i32 at = index;
+    if (index < 0) {
+        const FrameIndex f{std::clamp(localFrame, lo, hi)};
+        if (const u32 found = t.find_exact(f); found != kInvalidIndex) return static_cast<i32>(found);
+        const u32 prev = t.find_before(f);
+        const Interpolation in = prev != kInvalidIndex ? t.keys[prev].interp : Interpolation::EaseInOut;
+        at = static_cast<i32>(t.set(f, static_cast<f32>(std::clamp(before, 0.05, 16.0)), interp >= 0 ? static_cast<Interpolation>(interp) : in));
+    } else {
+        Keyframe& k = t.keys[static_cast<u32>(index)];
+        const i64 minT = index > 0 ? t.keys[static_cast<u32>(index) - 1].time.value + 1 : std::min(lo, k.time.value);
+        const i64 maxT = static_cast<u32>(index) + 1 < t.keys.size() ? t.keys[static_cast<u32>(index) + 1].time.value - 1 : std::max(hi, k.time.value);
+        k.time = FrameIndex{std::clamp(localFrame, minT, std::max(minT, maxT))};
+        k.value = std::clamp(speed, 0.05f, 16.0f);
+        if (interp >= 0) k.interp = static_cast<Interpolation>(interp);
+    }
+    t.lastIndex = 0;
+    project_->mark_dirty();
+    request_render();
+    return at;
+}
+
+bool Engine::remove_speed_key(u64 layerId, u32 index) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Track* t = l ? l->tracks.find(TrackProperty::Speed) : nullptr;
+    if (!t || l->locked || index >= t->keys.size()) return false;
+    history_.before_mutation(*comp, project_->timeline().current(), "apagar ponto da velocidade");
+    bump_model_revision_locked();
+    if (t->keys.size() <= 1) {
+        flatten_speed_curve(*l);
+    } else {
+        t->keys.erase(t->keys.begin() + index);
+        t->lastIndex = 0;
+    }
     project_->mark_dirty();
     request_render();
     return true;
@@ -6865,6 +7156,8 @@ u32 Engine::paste_effects(const u64* ids, u32 count) noexcept {
                 !ensure_text3d_layout(*d).ok()) continue;
             // O layout das partes só serve em forma 3D (as partes já são nós próprios).
             if (e.type == effect_type_id(effect_keys::kShape3DLayout) && !is_shape3d_layer(*d)) continue;
+            // As partes só existem em camada 3D.
+            if (scene3d::is_part3d_effect(e.type) && d->kind != LayerKind::Model3D) continue;
             EffectInstance c = e;
             const u32 oldId = e.id;
             c.id = next++;
@@ -7697,7 +7990,11 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
         // still valid: no new source range is introduced by a shorter interval.
         const bool onlyShortening = &item == &edited &&
             ((operation == 0 && target >= start) || (operation == 1 && target <= end));
-        if (onlyShortening)
+        // Puxar a borda além da mídia (beta 0.1.6: "vai até 3 s, quero puxar
+        // até quanto quiser"): o trecho a mais segura o primeiro/último quadro
+        // — video_media_us já prende o instante na mídia, prévia e export.
+        const bool pastMedia = &item == &edited && (operation == 0 || operation == 1) && !extendOnly;
+        if (onlyShortening || pastMedia)
             return std::isfinite(item.source_frame(item.start)) &&
                    std::isfinite(item.source_frame(FrameIndex{item.end.value - 1}));
         if (!inside(item.source_frame(item.start)) || !inside(item.source_frame(FrameIndex{item.end.value - 1}))) return false;
@@ -8262,11 +8559,10 @@ Result<u64> Engine::add_shape(u32 preset) noexcept {
 }
 
 u64 Engine::source_asset_room_locked() const noexcept {
-    const u64 budget = DeviceCapabilities::process_budget_limit(
-        config_.memoryBudgetBytes ? config_.memoryBudgetBytes : caps_.memory_budget_bytes());
+    const u64 budget = process_budget_bytes();
     u64 room = std::min<u64>(budget / 3, 256ull << 20);
     auto consume = [&room](u64 bytes) { room -= std::min(room, bytes); };
-    for (const auto& [key, image] : images_) consume(image.rgba.capacity() + sizeof(image));
+    for (const auto& [key, image] : images_) if (image) consume(image->rgba.capacity() + sizeof(*image));
     for (const auto& [key, model] : models_) if (model) consume(scene3d::scene_asset_memory_bytes(*model));
     for (const auto& [key, hdri] : hdris_) if (hdri) consume(hdri->rgb.capacity() * sizeof(f32) + sizeof(*hdri));
     return room;
@@ -8300,7 +8596,7 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
     asset.video.height = height;
     const AssetId assetId = project_->add_asset(std::move(asset));
 
-    images_[assetId.pack()] = std::move(px);
+    images_[assetId.pack()] = std::make_shared<const ImagePixels>(std::move(px));
 
     const LayerId lid = comp->add_layer(LayerKind::Image, name ? std::string(name) : std::string());
     Layer* l = comp->layer(lid);
@@ -8459,6 +8755,131 @@ std::string Engine::resolve_asset_path(const std::string& stored) const {
     return stored;
 }
 
+/// Câmeras do arquivo (glTF/FBX) viram camadas de câmera na timeline (0.1.8):
+/// filhas do modelo (mover, girar ou escalar o modelo leva a câmera junto),
+/// com o movimento da animação do arquivo gravado em keyframes por quadro. A
+/// primeira nasce LIGADA só quando a composição ainda não tem câmera ativa;
+/// as outras nascem desligadas — o olho da timeline liga e desliga.
+/// Quem chama já abriu o passo de desfazer.
+u32 add_model_camera_layers(Composition& comp, LayerId modelId, const scene3d::SceneAsset& scene) noexcept {
+    const Layer* model = comp.layer(modelId);
+    if (!model || model->kind != LayerKind::Model3D) return 0;
+    std::vector<i32> nodes;
+    for (usize i = 0; i < scene.nodes.size() && nodes.size() < 4; ++i) {
+        const scene3d::Node& n = scene.nodes[i];
+        if (n.inScene && n.camera >= 0 && static_cast<usize>(n.camera) < scene.cameras.size()) nodes.push_back(static_cast<i32>(i));
+    }
+    if (nodes.empty()) return 0;
+    bool activeCamera = false;
+    for (u32 i = 0; i < comp.order().size(); ++i) {
+        const Layer* o = comp.layer(comp.order().at(i));
+        activeCamera |= o && o->kind == LayerKind::Camera && o->camera.active && o->visible;
+    }
+    const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+    const Model3DData md = model->model;
+    const FrameIndex start = model->start, end = model->end, offset = model->offset;
+    // O mesmo `layer_from_model` do Renderer: espaço do arquivo (Y para cima,
+    // metros) → espaço da camada (Y para baixo, px), centrado no pivô.
+    Mat4 flip;
+    flip.col[1] = Vec4{0, -1, 0, 0};
+    flip.col[2] = Vec4{0, 0, -1, 0};
+    const Mat4 layerFromModel = flip * Mat4::scale(Vec3{md.unitScale, md.unitScale, md.unitScale}) * Mat4::translation(-md.pivot);
+    const i32 clip = md.animationClip >= 0 && md.animationClip < static_cast<i32>(scene.animations.size()) ? md.animationClip : -1;
+    const i64 lo = start.value - start.value + offset.value;      // tempo local da entrada
+    const i64 hi = std::max(lo, end.value - start.value + offset.value);
+    const i64 step = std::max<i64>(1, (hi - lo + 1799) / 1800);   // até ~1800 chaves por eixo
+    scene3d::Pose pose;
+    scene3d::PoseWorkspace workspace;
+    u32 made = 0;
+    for (const i32 node : nodes) {
+        const scene3d::CameraInfo& info = scene.cameras[static_cast<usize>(scene.nodes[static_cast<usize>(node)].camera)];
+        // Quadro da câmera no espaço da camada do modelo: posição e a base
+        // do Aurea (x direita, y para BAIXO na imagem, z para onde olha).
+        auto sample = [&](i64 local, Vec3& position, Quat& rotation) {
+            f32 t = 0.0f;
+            if (clip >= 0) t = scene3d::clip_time(scene.animations[static_cast<usize>(clip)], static_cast<f64>(local) / fps * md.timeScale);
+            scene3d::evaluate_pose(scene, clip, t, pose, &workspace);
+            if (static_cast<usize>(node) >= pose.nodeWorld.size()) return false;
+            const Mat4 m = layerFromModel * pose.nodeWorld[static_cast<usize>(node)];
+            auto dir = [&](Vec3 v) { const Vec4 r = m * Vec4{v.x, v.y, v.z, 0.0f}; return Vec3{r.x, r.y, r.z}; };
+            const Vec3 forward = dir(info.forward).normalized();
+            const Vec3 up = dir(info.up);
+            if (forward.length_sq() < kEpsilon) return false;
+            Vec3 down = (up * -1.0f) - forward * (up * -1.0f).dot(forward);
+            if (down.length_sq() < kEpsilon) down = std::fabs(forward.y) < 0.9f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+            down = down.normalized();
+            const Vec3 right = down.cross(forward).normalized();
+            const f32 frame[9]{right.x, right.y, right.z, down.x, down.y, down.z, forward.x, forward.y, forward.z};
+            const trackball::detail::DQ q = trackball::detail::frame_quat(frame);
+            rotation = Quat{static_cast<f32>(q.x), static_cast<f32>(q.y), static_cast<f32>(q.z), static_cast<f32>(q.w)};
+            position = Vec3{m.col[3].x, m.col[3].y, m.col[3].z};
+            return true;
+        };
+        Vec3 p0;
+        Quat q0;
+        if (!sample(lo, p0, q0)) continue;
+        std::string name = !info.name.empty() ? info.name : scene.nodes[static_cast<usize>(node)].name;
+        if (name.empty()) name = "Camera";
+        const LayerId cid = comp.add_layer(LayerKind::Camera, name);
+        Layer* cam = comp.layer(cid);
+        if (!cam) break;
+        cam->threeD = true;
+        cam->camera.affectsLayersBelow = true;
+        cam->parent = modelId;
+        cam->start = start;
+        cam->end = end;
+        cam->offset = offset;
+        const f32 fov = info.perspective ? std::clamp(info.yfov / kDeg2Rad, 1.0f, 170.0f) : 30.0f;
+        cam->camera.fov = fov;
+        cam->camera.focalLength = camera_focal_from_fov(fov);
+        cam->camera.nearPlane = std::max(0.1f, info.znear * md.unitScale);
+        cam->camera.focusDistance = std::max(1.0f, p0.length());
+        cam->camera.active = true;
+        cam->visible = !activeCamera && made == 0;
+        cam->transform.anchor = Vec3{0, 0, 0};
+        cam->transform.scale = Vec3{1, 1, 1};
+        Vec3 euler = trackball::euler_deg_from_quat(q0, Vec3{0, 0, 0});
+        cam->transform.position = p0;
+        cam->transform.rotation = euler;
+        if (clip >= 0) {
+            // Movimento do arquivo: uma chave por quadro (linear) quando a
+            // câmera anda; parada, fica só o valor.
+            std::vector<std::pair<i64, Vec3>> positions{{lo, p0}}, rotations{{lo, euler}};
+            bool moves = false;
+            for (i64 local = lo + step; local <= hi; local += step) {
+                Vec3 p;
+                Quat q;
+                if (!sample(local, p, q)) break;
+                const Vec3 e = trackball::euler_deg_from_quat(q, rotations.back().second);
+                moves |= (p - p0).length() > 1e-3f || std::fabs(e.x - euler.x) + std::fabs(e.y - euler.y) + std::fabs(e.z - euler.z) > 1e-3f;
+                positions.emplace_back(local, p);
+                rotations.emplace_back(local, e);
+            }
+            if (moves) {
+                const TrackProperty pos[3]{TrackProperty::PositionX, TrackProperty::PositionY, TrackProperty::PositionZ};
+                const TrackProperty rot[3]{TrackProperty::RotationX, TrackProperty::RotationY, TrackProperty::RotationZ};
+                for (u32 axis = 0; axis < 3; ++axis) {
+                    Track& tp = cam->tracks.get_or_create(pos[axis]);
+                    Track& tr = cam->tracks.get_or_create(rot[axis]);
+                    for (usize k = 0; k < positions.size(); ++k) {
+                        const Vec3& p = positions[k].second;
+                        const Vec3& e = rotations[k].second;
+                        (void)tp.set(FrameIndex{positions[k].first}, axis == 0 ? p.x : axis == 1 ? p.y : p.z, Interpolation::Linear);
+                        (void)tr.set(FrameIndex{rotations[k].first}, axis == 0 ? e.x : axis == 1 ? e.y : e.z, Interpolation::Linear);
+                    }
+                }
+            }
+        }
+        ++made;
+    }
+    if (made) {
+        // Uma câmera ligada vale para a composição inteira: as outras câmeras
+        // ativas ficam como estavam (a de cima ligada manda).
+        AUREA_LOG_INFO("modelo 3D: %u camera(s) do arquivo na timeline", made);
+    }
+    return made;
+}
+
 Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProgress* progress,
                                  std::string* detail) noexcept {
     if (request.path.empty()) return Status{Errc::InvalidArgument, "caminho vazio"};
@@ -8558,6 +8979,8 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     l->model.pivot = scene->bounds.center();
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     l->transform.scale = Vec3{1.0f, 1.0f, 1.0f};
+    // Câmeras do arquivo na timeline (mesmo passo de desfazer da importação).
+    (void)add_model_camera_layers(*comp, lid, *scene);
     project_->mark_dirty();
     request_render();
     AUREA_LOG_INFO("modelo 3D importado: %s (%u triangulos, escala %.3f px/m)", scene->sourceName.c_str(),
@@ -8584,9 +9007,16 @@ std::vector<text::FontEntry> Engine::list_fonts() noexcept { return text::FontMa
 
 Result<text::FontEntry> Engine::import_font(const char* path) noexcept {
     if (!path || !*path) return Status{Errc::InvalidArgument, "caminho vazio"};
-    const text::FontEntry* e = text::FontManager::instance().add_file(path, true);
-    if (!e) return Status{Errc::UnsupportedFormat, "nao e uma fonte TTF/OTF legivel"};
-    return *e;
+    // TTF/OTF direto; WOFF e coleções TTC/OTC viram arquivos sfnt ao lado do
+    // original (todas as faces da coleção entram na lista; volta a primeira).
+    const std::vector<std::string> files = text::unpack_font_file(path);
+    const text::FontEntry* first = nullptr;
+    for (const std::string& file : files) {
+        const text::FontEntry* e = text::FontManager::instance().add_file(file, true);
+        if (e && !first) first = e;
+    }
+    if (!first) return Status{Errc::UnsupportedFormat, "nao e uma fonte TTF/OTF/TTC/WOFF legivel"};
+    return *first;
 }
 
 bool Engine::set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept {
@@ -9497,7 +9927,8 @@ Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept
         if (source_asset_room_locked() < 4096) return Errc::BudgetExceeded;
         // A stale panel snapshot must not merge the letters of a live effect.
         if (std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
-            return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(text::kTransformEffect) || effect.type == effect_type_id(effect_keys::kText3DLayout);
+            return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(text::kTransformEffect)
+                || effect.type == effect_type_id(effect_keys::kText3DLayout) || scene3d::is_part3d_effect(effect.type);
         }) || !l->text.animators.empty() || layeranim::has_units(*l)) edited.separateGlyphs = true;
     }
     const auto font = scene3d::text3d_font(edited);
@@ -9640,7 +10071,7 @@ std::shared_ptr<const scene3d::SceneAsset> Engine::model_lookup(void* self, Asse
 const ImagePixels* Engine::image_lookup(void* self, AssetId id) {
     Engine* e = static_cast<Engine*>(self);
     const auto it = e->images_.find(id.pack());
-    return it == e->images_.end() ? nullptr : &it->second;
+    return it == e->images_.end() ? nullptr : it->second.get();
 }
 
 // =============================================================================
@@ -9990,7 +10421,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
             && !refinePending_ && !refineNow_ && !lastIncomplete_
             && !offscreenReaders_.load(std::memory_order_acquire)
-            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold();
+            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold()
+            && !exportActive_.load(std::memory_order_acquire);
         previewIdle_.observe(idleEligible, idleKey, frameStart, force || !onlyIfChanged);
         const bool unchanged = !force && t.value == lastRenderedFrame_
             && !(lastIncomplete_ && mediaGen != lastMediaGen_);
@@ -10079,12 +10511,12 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         pendingPreviewRanges_.clear();
         if (previewBuffering_) {
             previewBufferTarget_ = preview_cache_target(comp->fps(), cacheCapacity,
-                comp->duration().value - previewBufferStart_, renderSpeed);
+                comp->duration().value - previewBufferStart_, renderSpeed, previewStuttered_);
             previewBufferReady_ = 0;
             while (previewBufferReady_ < previewBufferTarget_
                 && renderer_.preview_cached(FrameIndex{previewBufferStart_ + previewBufferReady_})) ++previewBufferReady_;
             const bool limited = !cacheCapacity || (previewBufferReady_ < previewBufferTarget_
-                && preview_buffer_expired(frameStart - previewBufferSince_, previewBufferReady_));
+                && preview_buffer_expired(frameStart - previewBufferSince_, previewBufferReady_, previewStuttered_));
             if (previewBufferReady_ >= previewBufferTarget_ || limited) {
                 previewBuffering_ = false;
                 playback_.play(frameStart);
@@ -10407,7 +10839,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             && !playing && !previewBuffering_ && playback_.mode() == PlaybackMode::Paused
             && !rawPlaybackLayer_.valid() && surfaceAttached_ && state() == EngineState::Ready
             && !offscreenReaders_.load(std::memory_order_acquire)
-            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold();
+            && !caps_.thermal().should_degrade() && memory_.pressure() < .85f && !preview_memory_hold()
+            && !exportActive_.load(std::memory_order_acquire);
         // Start the quiet interval after the first complete picture/refinement,
         // rather than polling an already-expired idle deadline on an incomplete one.
         previewIdle_.observe(eligible, current, monotonic_ns(), false);
@@ -11798,8 +12231,8 @@ u32 Engine::query_thumbnail(u64 layerId, i32 timelineFrame, u32 height, u8* out,
         const u64 key = l->source.pack();
         if (a->kind == AssetKind::Image) {
             const auto it = images_.find(key);
-            if (it == images_.end()) return 0;
-            if (!thumbs_.image(key, it->second.rgba.data(), it->second.width, it->second.height, height, img)) return 0;
+            if (it == images_.end() || !it->second) return 0;
+            if (!thumbs_.image(key, it->second->rgba.data(), it->second->width, it->second->height, height, img)) return 0;
         } else if (a->kind == AssetKind::Video) {
             const f64 fps = comp->fps() > 0.0 ? comp->fps() : 30.0;
             const f64 src = std::max(0.0, l->source_frame(FrameIndex{timelineFrame}));
@@ -12155,6 +12588,13 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id("aurea.distort.lens_gradient"), effect_type_id("aurea.stylize.pixel_encoder"),
             effect_type_id("aurea.glitch.video_glitch"), effect_type_id("aurea.stylize.pix_dither"),
             effect_type_id("aurea.distort.displace_transform"), effect_type_id("aurea.light.starglow"),
+            effect_type_id(effect_keys::kFlowRetime), effect_type_id(effect_keys::kFlowMotionBlur),
+            effect_type_id(effect_keys::kKaleidoscope), effect_type_id(effect_keys::kSphereWrap),
+            effect_type_id(effect_keys::kCylinderWrap), effect_type_id(effect_keys::kTwister),
+            effect_type_id(effect_keys::kGlass), effect_type_id(effect_keys::kLightBurst),
+            effect_type_id(effect_keys::kStarField), effect_type_id(effect_keys::kHexTile),
+            effect_type_id(effect_keys::kBurnFilm), effect_type_id(effect_keys::kJaws),
+            effect_type_id(effect_keys::kSaber), effect_type_id(effect_keys::kLumaDissolve),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);
@@ -12594,15 +13034,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->compFps = comp->fps();
         // Freeze with the established serializer; the editor document and its
         // historical file formats are never rewritten by export.
-        u64 imageBytes = 0;
         const u64 room = source_asset_room_locked();
-        const u64 limit = std::min<u64>(caps_.memory_budget_bytes() / 4, room);
-        for (const auto& [id, px] : images_) {
-            (void)id;
-            if (px.rgba.size() > limit - std::min(limit, imageBytes))
-                return Status{Errc::BudgetExceeded, "memoria insuficiente para o snapshot offline de imagens"};
-            imageBytes += px.rgba.size();
-        }
         ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Snapshot);
         SaveOptions save; save.writeThumbnail = false;
         if (const Status saved = ProjectSerializer::encode(*project_, save, frozenBytes); !saved.ok()) return saved;
@@ -12611,7 +13043,9 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->frozenModels = models_;
         ctx->frozenHdris = hdris_;
         ctx->frozenLuts = cubeLuts_;
-        ctx->frozenAssetBudget = room - imageBytes;
+        // Imported image pixels are immutable and retained by shared ownership.
+        // Freezing their map does not allocate a second full image copy.
+        ctx->frozenAssetBudget = room;
     }
     // The immutable bytes and retained originals are the entire export input.
     // Provider/codec/font I/O must not block read_status or the editor's model.
@@ -13309,7 +13743,7 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
     const Status result = c.offline->render(*c.frozenProject, c.recovery.composition, time, target,
         [](void* p, AssetId id) -> const ImagePixels* {
             const auto& ctx = *static_cast<ExportContext*>(p);
-            if (const auto it = ctx.frozenImages.find(id.pack()); it != ctx.frozenImages.end()) return &it->second;
+            if (const auto it = ctx.frozenImages.find(id.pack()); it != ctx.frozenImages.end()) return it->second.get();
             return nullptr;
         }, &c, settings, gpuFrame, c.preRenderMode ? &renderMutex_ : nullptr,
         c.preRenderMode ? &preRenderCancel_ : nullptr);
@@ -14483,6 +14917,10 @@ std::optional<std::pair<i64, i64>> preview_local_range(const Composition& comp, 
             if (!safe) return;
             const Effect* fx = registry.find(e.type);
             if (!fx || fx->effect_class() == EffectClass::Temporal) { safe = false; return; }
+            // Camada de ajuste com efeito que lê o PASSADO da composição abaixo
+            // (Datamosh, Glitch de vídeo, Low FPS): editar uma camada abaixo
+            // muda quadros DEPOIS do trecho dela.
+            if (l.adjustment && (fx->wants_history() || e.type == effect_type_id(effect_keys::kLowFps))) { safe = false; return; }
             if (const auto* specs = registry.params(e.type)) {
                 for (u32 p = 0; p < specs->count(); ++p)
                     if (specs->at(p).type == ParamType::LayerReference) { safe = false; return; }
@@ -14560,7 +14998,7 @@ bool command_valid(const Command& c) noexcept {
                               : p == 6 ? 179.f : p == 9 ? .1f : 1000000.f;
             return p <= 10 && finite(v) && v >= 0 && v <= maximum;
         }
-        case CommandType::LayerSetCameraParam: return c.shape_param.param < 5 && finite(c.shape_param.value);
+        case CommandType::LayerSetCameraParam: return (c.shape_param.param < 5 || c.shape_param.param == 7) && finite(c.shape_param.value);
         case CommandType::LayerLayoutTransform: return c.shape_param.param < 15 && finite(c.shape_param.value);
         case CommandType::ShapeSetFill:
         case CommandType::ShapeSetStroke:
@@ -14639,6 +15077,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         if (!layer || layer->locked || !is_shape3d_layer(*layer))
             return Status{Errc::InvalidArgument, "selecione uma forma 3D desbloqueada"};
     }
+    if (cmd.type == CommandType::EffectAdd && scene3d::is_part3d_effect(cmd.effect_add.effectType)) {
+        const Layer* layer = need_layer(cmd.effect_add.layer);
+        if (!layer || layer->locked || layer->kind != LayerKind::Model3D)
+            return Status{Errc::InvalidArgument, "selecione um objeto 3D desbloqueado"};
+    }
     // A lock protects timeline edits at the shared boundary, including queued
     // commands after a gesture has started. Reject before recording undo.
     if (cmd.type == CommandType::LayerDelete || cmd.type == CommandType::LayerSetTimeRange ||
@@ -14679,6 +15122,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         if (gpu_ && surfaceAttached_ && !rawPlaybackLayer_.valid() && comp
             && playback_.speed() > 0 && !caps_.thermal().severe() && memory_.pressure() < .85f) {
             playback_.pause(now);
+            // Engasgou desde o último Play (mais de 3 quadros perdidos)? Então
+            // a pré-render deste prepara bem mais antes de soltar.
+            const u32 dropped = frameScheduler_.dropped_total();
+            previewStuttered_ = dropped >= previewDroppedAtPlay_ && dropped - previewDroppedAtPlay_ > 3;
+            previewDroppedAtPlay_ = dropped;
             previewBuffering_ = true;
             previewBufferStart_ = playback_.current().value;
             previewBufferSince_ = now;
@@ -15123,6 +15571,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const f32 v = cmd.shape_param.value;
             const FrameIndex local = l->local_time(playback_.current());
             if (p == 1) { l->camera.dofEnabled = v >= 0.5f; return OkStatus; }
+            if (p == 7) { l->camera.affectsLayersBelow = v >= 0.5f; return OkStatus; }
             auto keyed = [&](TrackProperty property, f32 value, f32& field) -> Status {
                 Track* track = l->tracks.find(property);
                 if (track && track->has_expression()) return Status{Errc::InvalidState, "lente controlada por expressao"};
@@ -15465,6 +15914,16 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (type == effect_type_id(effect_keys::kText3DLayout)) {
                 const Status ready = ensure_text3d_layout(*l);
                 if (!ready.ok()) return ready;
+            }
+            if (scene3d::is_part3d_effect(type)) {
+                if (l->kind != LayerKind::Model3D) return Errc::InvalidArgument;
+                // Texto 3D: cada letra vira uma parte (o preparo do Text 3D Layout).
+                const Asset* source = project_->asset(l->model.scene);
+                scene3d::Text3DSpec spec;
+                if (source && scene3d::decode_text3d(source->sourcePath, spec)) {
+                    const Status ready = ensure_text3d_layout(*l);
+                    if (!ready.ok()) return ready;
+                }
             }
             EffectInstance e;
             e.id = l->alloc_effect_id();

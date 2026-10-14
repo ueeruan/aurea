@@ -290,7 +290,9 @@ struct Shape3DGlyph: View {
 enum Shape3DPanelPage { case material, shape }
 
 /// Seção "Partes" do painel 3D (Shape3DSection.kt): as fichas das partes nas
-/// duas abas — Material com a cor e a imagem; Forma com losango, reset e réguas.
+/// duas abas — Material com a cor; Partes com o reset (a parte anda no palco)
+/// e, sem parte, o "Dividir" do cubo. A imagem e a animação com números viraram
+/// os efeitos Trocar textura 3D e Animar parte 3D.
 struct Shape3DPanelSection: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var state = Shape3DState.shared
@@ -337,27 +339,25 @@ struct Shape3DPanelSection: View {
                             AureaColorSwatch(color: AureaColorSpace.color(shown)).frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6))
                         }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_cor"))
                     }.frame(height: 44)
+                    // A imagem da parte virou o efeito "Trocar textura 3D" (aba
+                    // Partes). Uma imagem que o projeto já tinha: só dá para tirar.
                     let hasImage = part >= 0 ? (part < info.images.count && info.images[part]) : info.images.contains(true)
-                    HStack(spacing: 6) {
-                        Text(AureaText.t("shape3d_image")).font(.aurea(size: 13))
-                        Spacer()
-                        chip(AureaText.t(hasImage ? "shape3d_image_change" : "shape3d_image_pick"), on: hasImage) { picking = true }
-                            .accessibilityIdentifier("shape3d.image")
-                        if hasImage {
+                    if hasImage {
+                        HStack(spacing: 6) {
+                            Text(AureaText.t("shape3d_image")).font(.aurea(size: 13))
+                            Spacer()
                             chip(AureaText.t("shape3d_image_clear"), on: false) {
                                 _ = model.engine.setShape3DPartStyle(layerId, part: Int32(part), color: nil, image: "")
                                 state.revision += 1
                                 model.refreshModel(force: true)
-                            }
-                        }
-                    }.frame(height: 44)
-                    if part < 0 { hint("shape3d_whole_hint") }
-                } else if part >= 0, let v = model.shapePartValues(layerId, part: part) {
-                    partControls(part, v)
-                } else {
-                    hint("shape3d_whole_hint")
+                            }.accessibilityIdentifier("shape3d.image.clear")
+                        }.frame(height: 44)
+                    }
+                } else if part >= 0 {
+                    partControls(part)
+                } else if info.kind == 0 {
                     // Só o cubo (e as fatias dele) divide em partes.
-                    if info.kind == 0 { splitControls() }
+                    splitControls()
                 }
             }
             .padding(.bottom, 14)
@@ -370,19 +370,15 @@ struct Shape3DPanelSection: View {
         }
     }
 
-    @ViewBuilder private func partControls(_ part: Int, _ v: [Float]) -> some View {
-        let animated = UInt32(v[9]), here = UInt32(v[10])
+    /// A parte anda no palco (gizmo); animar com números e keyframes é o
+    /// efeito "Animar parte 3D". Aqui só volta a parte ao lugar.
+    @ViewBuilder private func partControls(_ part: Int) -> some View {
         HStack(spacing: 6) {
-            chip((here != 0 ? "◆ " : "◇ ") + AureaText.t(here != 0 ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"), on: here != 0) {
-                if model.engine.toggleShape3DPartKey(layerId, part: Int32(part)) < 0 { model.toast = AureaText.t("shape3d_key_outside") }
-                state.revision += 1
-                model.refreshModel(force: true)
-            }.accessibilityIdentifier("shape3d.key")
             chip(AureaText.t("shape3d_reset"), on: false) {
                 _ = model.engine.resetShape3DPart(layerId, part: Int32(part))
                 state.revision += 1
                 model.refreshModel(force: true)
-            }
+            }.accessibilityIdentifier("shape3d.reset")
         }.padding(.vertical, 4)
         partVector(part, values: Array(v[0..<3]), base: 0, label: AureaText.t("fx_posicao"), step: 0.005,
                    range: -5...5, unit: "", decimals: 2, animated: animated, here: here)

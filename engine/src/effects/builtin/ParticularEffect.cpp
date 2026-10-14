@@ -46,8 +46,11 @@ struct ParticularUniforms {
     Vec4 camRight, camUp;                 // camRight.w = 1 liga o espaço 3D
     Mat4 previousParticleProjection;
     Mat4 layerFromComp;
+    Vec4 plexus;                          // distância (px; 0 = sem rede), espessura (px), opacidade, pontos
 };
-static_assert(sizeof(ParticularUniforms) == 512, "layout std140 do particular.vert");
+static_assert(sizeof(ParticularUniforms) == 528, "layout std140 do particular.vert");
+/// Teto de pontos ligados na rede: M(M−1)/2 pares × 6 vértices (300 → ~270 mil).
+constexpr u32 kMaxPlexusPoints = 300;
 
 Vec4 linear(Vec4 c) noexcept {
     return Vec4{Color::srgb_to_linear(std::clamp(c.x, 0.0f, 1.0f)), Color::srgb_to_linear(std::clamp(c.y, 0.0f, 1.0f)),
@@ -111,6 +114,12 @@ public:
         // (aí vale o obturador da composição).
         p.add_bool("motion_blur", "Desfoque de movimento", false);
         p.add_float("shutter_angle", "Ângulo do obturador", 180.0f, 0.0f, 720.0f, kAnim, "°");
+        // Rede (plexus): pontos ligados por linhas que somem com a distância.
+        p.add_bool("plexus", "Rede (plexus)", false);
+        p.add_float("plexus_distance", "Distância da rede", 180.0f, 5.0f, 3000.0f, kAnimPx, "px");
+        p.add_float("plexus_width", "Espessura da linha", 1.2f, 0.2f, 12.0f, kAnimPx, "px");
+        p.add_float("plexus_opacity", "Opacidade da rede", 70.0f, 0.0f, 100.0f, kAnimPct, "%");
+        p.add_int("plexus_points", "Pontos ligados", 150, 2, static_cast<i32>(kMaxPlexusPoints));
     }
 
     bool is_identity(const EffectEval&) const noexcept override { return false; }
@@ -173,7 +182,11 @@ public:
         const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
         const f32 now = static_cast<f32>(e.time_frames() / fps) + preRoll;
         const f32 span = std::max((lifeRandom + 1.0f) * lifeMs * 0.001f * 1.05f, 1e-3f);
-        const f32 grid = std::min(kMaxRate, kMaxSlots / span);
+        const bool plexus = e.b(kPlexus) && rate > 0.0f;
+        // Rede: todo slot dispara (grade = taxa) — os primeiros M slots são
+        // partículas vivas de verdade, não um sorteio esparso da grade.
+        const f32 grid = plexus ? std::clamp(rate, 1e-3f, std::min(kMaxRate, kMaxSlots / span))
+                                : std::min(kMaxRate, kMaxSlots / span);
         const u32 slots = static_cast<u32>(std::clamp(std::ceil(span * grid), 1.0f, kMaxSlots));
         const bool draw = rate > 0.0f && now >= 0.0f;
 
@@ -225,11 +238,20 @@ public:
             u.previousParticleProjection = e.placement->previousParticleProjection;
             u.layerFromComp = e.placement->particleLayerFromComp;
         }
+        u32 plexusVerts = 0;
+        if (plexus) {
+            const u32 points = std::min(slots, static_cast<u32>(std::clamp(e.e(kPlexusPoints), 2u, kMaxPlexusPoints)));
+            u.plexus = Vec4{std::clamp(finite_or(e.f(kPlexusDistance), 0.0f), 0.0f, 3000.0f),
+                            std::clamp(finite_or(e.f(kPlexusWidth), 1.0f), 0.2f, 12.0f) / texel,
+                            pct(e, kPlexusOpacity, 0.0f, 100.0f), static_cast<f32>(points)};
+            if (u.plexus.x > 0.0f) plexusVerts = points * (points - 1) / 2 * 6;
+            else u.plexus = Vec4{};
+        }
 
         const bool additive = e.b(kAddMode);
         const FGTexture sprites = ctx.texture("particular-particulas", w, h);
         if (ctx.geometry_pass("particular", PassStage::Effects, sprites, ShaderId::effects_particular_vert,
-                              ShaderId::effects_particular_frag, {}, &u, sizeof(u), draw ? slots * 6u : 0u, false,
+                              ShaderId::effects_particular_frag, {}, &u, sizeof(u), draw ? slots * 6u + plexusVerts : 0u, false,
                               true, additive ? BlendMode::Add : BlendMode::Normal) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }
@@ -307,6 +329,8 @@ const Preset& preset_table(u32 i) noexcept {
           {kTurbulenceSpeed, 25}, {kLife, 10000}, {kLifeRandom, 50}, {kSize, 8}, {kSizeRandom, 80}, {kSizeEnd, 100},
           {kOpacity, 50}, {kFadeIn, 15}, {kFadeOut, 30}, {kFeather, 100}, {kStretch, 0}, {kAddMode, 1}},
          {1.0f, 0.97f, 0.9f}, {1.0f, 0.97f, 0.9f}},
+        // 8 Rede (plexus): pontos poucos e lentos, ligados quando perto.
+        // (entra pelo fim da tabela; ver abaixo)
         // 7 Bokeh
         {{{kRate, 40}, {kPreRoll, 12000}, {kEmitterW, 160}, {kEmitterH, 160}, {kEmitterD, 240}, {kVelocity, 12},
           {kVelocityRandom, 100}, {kSpread, 180}, {kGravity, 0}, {kAirDrag, 0}, {kTurbulence, 25},
@@ -314,6 +338,13 @@ const Preset& preset_table(u32 i) noexcept {
           {kOpacity, 90}, {kFadeIn, 20}, {kFadeOut, 30}, {kFeather, 100}, {kStretch, 0}, {kColorRandom, 25},
           {kAddMode, 1}},
          {0.85f, 0.92f, 1.0f}, {1.0f, 0.95f, 0.85f}},
+        // 8 Rede (plexus)
+        {{{kRate, 12}, {kPreRoll, 20000}, {kEmitterW, 150}, {kEmitterH, 130}, {kEmitterD, 90}, {kVelocity, 22},
+          {kVelocityRandom, 80}, {kSpread, 180}, {kGravity, 0}, {kAirDrag, 0}, {kTurbulence, 45},
+          {kTurbulenceSpeed, 18}, {kLife, 14000}, {kLifeRandom, 10}, {kSize, 9}, {kSizeRandom, 45}, {kSizeEnd, 100},
+          {kOpacity, 100}, {kFadeIn, 8}, {kFadeOut, 8}, {kFeather, 70}, {kStretch, 0}, {kAddMode, 1},
+          {kPlexus, 1}, {kPlexusDistance, 230}, {kPlexusWidth, 1.3f}, {kPlexusOpacity, 65}, {kPlexusPoints, 200}},
+         {1, 1, 1}, {0.85f, 0.92f, 1.0f}},
     };
     return kPresets[std::min(i, kPresetCount - 1)];
 }

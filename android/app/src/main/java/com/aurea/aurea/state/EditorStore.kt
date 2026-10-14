@@ -192,6 +192,8 @@ internal fun humanErrorResource(code: Int): Int = when (code) {
     29 -> R.string.msg_o_arquivo_de_midia_esta_danificado
     30 -> R.string.msg_o_projeto_esta_danificado_e_nao
     31 -> R.string.msg_este_aparelho_nao_tem_codificador_para
+    // CodecHung: o codec do aparelho travou (antes saía como 9 = "memória").
+    33 -> R.string.msg_codec_do_aparelho_travou
     else -> R.string.msg_erro_inesperado_codigo
 }
 
@@ -430,7 +432,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 project.path?.let { path -> withContext(Dispatchers.IO) { engine.saveProject(path) } }
                 upscaleStage = UpscaleStage.Idle
                 exporter.start(title, w, h, media.fps.toDouble(),
-                    ExportOptions(shortSide = kotlin.math.min(w, h) * factor, aiUpscale = factor, trimToContent = true))
+                    // Encoder de celular vai até 4K: 4x de um 1080p (8K) sai em 2x (4K).
+                    run {
+                        val short = kotlin.math.min(w, h)
+                        val f = if (factor == 4 && short * 4 > 2160) 2 else factor
+                        ExportOptions(shortSide = short * f, aiUpscale = f, trimToContent = true)
+                    })
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -1065,6 +1072,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun onEnterForeground() {
         enqueueLifecycle { synchronized(lifecycleLock) { if (ready) engine.resume() } }
         if (ready) startStatusLoop()
+        // Um export que a suspensão parou continua do trecho salvo.
     }
 
     /**
@@ -1661,6 +1669,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        speedCurve = if (id != null && (detail?.kind == com.aurea.aurea.ui.theme.LayerType.Video.kind || detail?.kind == com.aurea.aurea.ui.theme.LayerType.Audio.kind)) {
+            val out = FloatArray(8 + SPEED_GRAPH_SAMPLES + 3 * 128)
+            val n = engine.querySpeedCurve(id, SPEED_GRAPH_SAMPLES, out)
+            same(speedCurve, if (n >= 8) out.copyOf(n) else null)
+        } else {
+            null
+        }
         // Receita pendente de OUTRA camada (a seleção mudou no meio do arrasto):
         // vai para a dona agora, antes de `text3d` passar a ser a da nova.
         if (text3dPending && text3dPendingLayer != 0L && text3dPendingLayer != id) {
@@ -1677,6 +1692,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         }
         refreshShape3d(id)
+        refreshRigPose(id)
         modelShadows = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
             val sh = FloatArray(2)
             if (engine.queryModelShadows(id, sh)) (sh[0] >= 0.5f) to (sh[1] >= 0.5f) else null
@@ -2118,6 +2134,66 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (info == null || id != shapePartLayer || shapePart >= info.partCount) shapePart = -1
     }
 
+    // --- Pose do rig 3D (0.1.8): só na Cena 3D, como o modo de pose do Blender --------
+    /** Ossos do modelo principal (`query_model_bones`, BONE_FLOATS por osso); nulo = sem rig. */
+    var poseBones by mutableStateOf<FloatArray?>(null)
+        private set
+    /** Modo de pose ligado (a Cena 3D desenha as juntas e o dedo gira o osso). */
+    var rigPoseMode by mutableStateOf(false)
+        private set
+    /** Nó do osso escolhido (−1 = nenhum: o dedo orbita a cena). */
+    var poseBone by mutableIntStateOf(-1)
+        private set
+    private var poseGestureSent = false
+
+    private fun refreshRigPose(id: Long?) {
+        val model = id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind
+        poseBones = if (model && id != null) {
+            val need = engine.queryModelBones(id, null)
+            if (need <= 0) null else {
+                val out = FloatArray(need)
+                val n = engine.queryModelBones(id, out)
+                val novo = if (n == need) out else null
+                if (novo != null && poseBones?.contentEquals(novo) == true) poseBones else novo
+            }
+        } else null
+        if (poseBones == null) { rigPoseMode = false; poseBone = -1 }
+    }
+
+    fun setRigPose(on: Boolean) {
+        rigPoseMode = on && poseBones != null
+        if (!rigPoseMode) poseBone = -1
+    }
+
+    fun choosePoseBone(node: Int) { poseBone = node }
+
+    /** Dedo na cena: gira o osso escolhido (px da composição; twist em graus). */
+    fun dragPoseBone(dx: Float, dy: Float, twist: Float) {
+        val id = primary ?: return
+        if (poseBone < 0) return
+        val continuing = gestureDepth > 0 && poseGestureSent
+        if (engine.dragBone(id, poseBone, dx, dy, twist, continuing) && gestureDepth > 0) poseGestureSent = true
+        refreshDetail()
+    }
+
+    fun endPoseGesture() { poseGestureSent = false }
+
+    /** Keyframe da pose no cabeçote: o osso escolhido, ou todos ([all]). */
+    fun togglePoseKey(all: Boolean) {
+        val id = primary ?: return
+        val node = if (all) -1 else poseBone
+        if (!all && node < 0) return
+        if (engine.toggleBoneKey(id, node) < 0) showToast(appText(R.string.shape3d_key_outside))
+        refreshNow()
+    }
+
+    fun resetPose(all: Boolean) {
+        val id = primary ?: return
+        engine.resetBonePose(id, if (all) -1 else poseBone)
+        thumbnails.unalias(id)
+        refreshNow()
+    }
+
     /** A parte escolhida vale só para ESTA camada (outra camada = a forma inteira). */
     fun shapePartOf(id: Long?): Int {
         // Lê os três estados SEMPRE (sem curto-circuito): quem desenha fica inscrito em todos.
@@ -2305,6 +2381,41 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
         }
     }
+
+    // --- Efeitos de parte 3D (beta 12/10/2026; Object3DEffects.cpp) -------------
+    /** Nome de cada parte da camada 3D escolhida (vazio = o arquivo não deu nome). */
+    fun modelPartNames(): List<String> = primary?.let { engine.modelPartNames(it).toList() } ?: emptyList()
+
+    /**
+     * Põe "Animar parte 3D", "Esconder partes 3D" ou "Trocar textura 3D" já
+     * apontando para a parte `part` (0 = a 1ª). O motor faz tudo num passo de
+     * desfazer; os ajustes e keyframes ficam no painel de Efeitos.
+     */
+    fun addPartEffect(key: String, part: Int): Boolean {
+        val id = primary ?: return false
+        val fx = engine.addPartEffect(id, com.aurea.aurea.editor.panels.effectTypeId(key), part.coerceAtLeast(0))
+        refreshNow()
+        if (fx < 0) { showToast(appText(R.string.fx3d_add_failed)); return false }
+        return true
+    }
+
+    /** A imagem do "Trocar textura 3D" (cópia reduzida em projetos/formas3d, como a imagem das partes). */
+    fun setEffectImage(uri: Uri, effect: Int) {
+        if (!acceptsImport()) return
+        val id = primary ?: return
+        busyMessage = appText(R.string.app_importing_image)
+        launchImport launch@{
+            val ok = withContext(Dispatchers.IO) {
+                val file = saveShapeImage(uri) ?: return@withContext false
+                engine.setEffectImage(id, effect, file.absolutePath)
+            }
+            busyMessage = null
+            if (!ok) errorMessage = appText(R.string.msg_nao_foi_possivel_importar_a_imagem)
+            refreshNow()
+        }
+    }
+
+    fun effectImageName(effect: Int): String = primary?.let { engine.effectImageName(it, effect) } ?: ""
 
     fun clearShapePartImage(part: Int) {
         val id = primary ?: return
@@ -3316,6 +3427,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    /**
+     * Ponto (X e Y) de efeito num comando só — o arrasto no palco (pontos do
+     * Saber). Dois `setEffectParam` seguidos releriam o vetor velho entre um e
+     * outro. Animado → um keyframe por eixo no playhead.
+     */
+    fun setEffectPoint(effectId: Int, param: EffectParam, x: Float, y: Float) {
+        if (!x.isFinite() || !y.isFinite()) return
+        val id = primary ?: return
+        val d = detail ?: return
+        val local = d.localFrame(playhead)
+        send {
+            if (param.animated) {
+                insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4, local, x)
+                insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4 + 1, local, y)
+            } else {
+                val v = param.value
+                setEffectVector(id, effectId, param.index, x, y, v.getOrElse(2) { 0f }, v.getOrElse(3) { 0f })
+            }
+        }
+        refreshNow()
+    }
+
     fun effectCurve(effect: Int, param: Int, channel: Int, samples: Boolean = false): FloatArray =
         primary?.let { engine.effectCurve(it, effect, param, channel, samples) } ?: FloatArray(0)
 
@@ -3714,6 +3847,55 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             refreshNow()
             select(id)
+        }
+    }
+
+    // --- Gravar voz ---------------------------------------------------------------
+    /**
+     * Arquivo novo para uma narração. Fica com os projetos
+     * (`filesDir/projetos/voz`), fora da limpeza de cache: é mídia do usuário,
+     * como o vídeo gerado pela IA, e o motor lê pelo caminho absoluto.
+     */
+    fun newVoiceRecordingFile(): File {
+        val dir = File(File(getApplication<Application>().filesDir, "projetos"), "voz").apply { mkdirs() }
+        return File(dir, "voz-${System.currentTimeMillis()}.m4a")
+    }
+
+    /**
+     * "Gravar voz": a narração vira camada de áudio pelo MESMO `importAudio`
+     * (desfazer, waveform e export de sempre), com o nome "Voz N". O motor põe
+     * a camada no cabeçote; como a timeline pode ter tocado junto durante a
+     * gravação, o cabeçote volta antes ao quadro onde ela começou — e a camada
+     * entra ali, num passo de desfazer só. Falhou: o arquivo sai (sem mídia órfã).
+     * `interrupted`: a gravação parou sozinha (ligação, app fora da tela) — o
+     * aviso final diz isso em vez do "adicionada".
+     */
+    fun importVoiceRecording(file: File, startFrame: Int, interrupted: Boolean = false) {
+        if (!file.isFile || file.length() == 0L) {
+            file.delete()
+            errorMessage = appText(R.string.voice_save_failed)
+            return
+        }
+        if (!acceptsImport()) {
+            file.delete()
+            return
+        }
+        if (playing) pause()
+        seek(startFrame)
+        val name = com.aurea.aurea.editor.VoiceTake.nextName(appText(R.string.voice_layer_prefix), layers.map { it.name })
+        busyMessage = appText(R.string.voice_saving)
+        launchImport launch@{
+            // A fila de comandos (pausa + seek) é drenada pelo `import_audio` antes de ler o cabeçote.
+            val id = withContext(Dispatchers.IO) { engine.importAudio(file.absolutePath, name) }
+            busyMessage = null
+            if (id < 0) {
+                file.delete()
+                errorMessage = appText(R.string.app_audio_import_failed, humanError((-id).toInt()))
+                return@launch
+            }
+            refreshNow()
+            select(id)
+            showToast(appText(if (interrupted) R.string.voice_interrupted else R.string.voice_saved))
         }
     }
 
@@ -4956,6 +5138,67 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return ok
     }
 
+    // --- Gráfico de velocidade (0.1.8) -----------------------------------------------
+    /**
+     * `query_speed_curve` da camada principal (vídeo/áudio): [0] amostras, [1] chaves,
+     * [2..3] início/fim locais, [4] cabeçote local, [5] modo (0 constante, 1 curva,
+     * 2 remapear), [6] velocidade no cabeçote, [7] quadro da fonte no cabeçote; depois
+     * as amostras e as chaves (tempo local, ×, interpolação).
+     */
+    var speedCurve by mutableStateOf<FloatArray?>(null)
+        private set
+
+    /** Abas do painel de velocidade: 0 constante, 1 curva de velocidade, 2 remapear tempo. */
+    fun setSpeedMode(mode: Int) {
+        val id = primary ?: return
+        val now = speedCurve?.getOrNull(5)?.toInt() ?: 0
+        if (mode == now) return
+        beginGesture("modo do tempo")
+        when (mode) {
+            0 -> {
+                if (detail?.timeRemap == true) engine.setTimeRemap(id, false)
+                engine.applySpeedCurve(id, 8)
+            }
+            1 -> {
+                if (detail?.timeRemap == true) engine.setTimeRemap(id, false)
+                if (detail?.speedAnimated != true) engine.applySpeedCurve(id, 0)
+            }
+            else -> engine.setTimeRemap(id, true)
+        }
+        endGesture()
+        thumbnails.unalias(id)   // o tempo do pedaço mudou: a tira dele é outra
+        refreshNow()
+    }
+
+    /** Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar. */
+    fun applySpeedCurve(preset: Int) {
+        val id = primary ?: return
+        if (engine.applySpeedCurve(id, preset)) thumbnails.unalias(id)
+        refreshNow()
+    }
+
+    /** Ponto novo na curva de velocidade (no valor que ela já tem). Devolve o índice. */
+    fun speedKeyInsert(localFrame: Int): Int {
+        val id = primary ?: return -1
+        val i = engine.editSpeedKey(id, -1, localFrame.toLong(), 0f, -1)
+        refreshNow()
+        return i
+    }
+
+    /** Arrasto no gráfico (dentro de `beginGesture`/`endGesture`). */
+    fun speedKeyMove(index: Int, localFrame: Int, speed: Float): Int {
+        val id = primary ?: return -1
+        val moved = engine.editSpeedKey(id, index, localFrame.toLong(), speed, -1)
+        refreshDetail()
+        return moved
+    }
+
+    fun speedKeyRemove(index: Int) {
+        val id = primary ?: return
+        if (engine.removeSpeedKey(id, index)) thumbnails.unalias(id)
+        refreshNow()
+    }
+
     // --- Fontes ---------------------------------------------------------------------------
     /** Uma fonte (arquivo) do aparelho ou importada. */
     data class FontItem(val family: String, val style: String, val weight: Int, val italic: Boolean, val path: String, val imported: Boolean)
@@ -5544,7 +5787,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         launchImport launch@{
             for (uri in uris.distinct()) {
                 val ext = (displayName(uri) ?: "fonte.ttf").substringAfterLast('.', "ttf").lowercase()
-                if (ext != "ttf" && ext != "otf") {
+                // 0.1.8: coleções (TTC/OTC) e WOFF também — o motor converte em TTF/OTF.
+                if (ext !in FONT_EXTENSIONS) {
                     errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf); continue
                 }
                 val line = withContext(Dispatchers.IO) {
@@ -5554,6 +5798,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val item = line?.let { parseFont(it) }
                 if (item == null) { errorMessage = appText(R.string.msg_nao_deu_para_ler_essa_fonte); continue }
                 fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
+                // Coleção: as outras faces também entraram no motor.
+                if (ext == "ttc" || ext == "otc") loadFonts()
                 // Importing a library must not repeatedly change the selected text.
                 if (uris.size == 1 && primary == targetLayer) {
                     if (forText3d) text3d?.let { setText3D(it.copy(fontPath = item.path)) }
@@ -5566,10 +5812,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun colorLutName(layer: Long, effect: Int): String = engine.colorLutName(layer, effect)
 
+    private val PALETTE_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".gpl", ".hex")
+
     fun importColorLut(uri: Uri, layer: Long, effect: Int) {
         if (!acceptsImport()) return
         val name = displayName(uri)?.substringAfterLast('/')?.substringAfterLast('\\') ?: "look.cube"
-        if (!name.endsWith(".cube", ignoreCase = true)) {
+        // Palettize: PNG/JPG, .gpl (GIMP) ou .hex (Lospec); o motor confere o efeito.
+        val palette = PALETTE_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) }
+        if (!palette && !name.endsWith(".cube", ignoreCase = true)) {
             errorMessage = appText(R.string.lut_invalid)
             return
         }
@@ -5599,8 +5849,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
             }
             refreshNow()
-            if (ok) showToast(appText(R.string.lut_imported))
-            else errorMessage = appText(R.string.lut_invalid)
+            if (ok) showToast(appText(if (palette) R.string.palette_imported else R.string.lut_imported))
+            else errorMessage = appText(if (palette) R.string.palette_invalid else R.string.lut_invalid)
         }
     }
 
@@ -6185,6 +6435,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         com.aurea.aurea.editor.RealCamera.positional = native[3] != 0L
     }
 
+    /** Andar da Real Camera: [direction] +1 frente, −1 trás, 0 parado (velocidade e profundidade do painel). */
+    fun realCameraWalk(direction: Int) {
+        if (destroyed) return
+        val cam = com.aurea.aurea.editor.RealCamera
+        engine.realCameraWalk(direction.coerceIn(-1, 1) * cam.walkSpeed, cam.depthScale)
+    }
+
     fun realCameraRecenter() {
         if (!destroyed) engine.realCameraRecenter()
         syncRealCameraStatus()
@@ -6582,7 +6839,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     val report = engine.lastModelImport()
                     val before = report.getOrElse(0) { 0L }
                     val after = report.getOrElse(1) { 0L }
+                    // Câmeras do arquivo já entraram na timeline (0.1.8): o olho da camada liga/desliga.
+                    val cameras = engine.modelCameraCount(id)
                     if (missing.isNotEmpty() && engine.modelFolder(id).isNotEmpty()) promptModelTextures(MissingModelTextures(id, missing))
+                    else if (cameras > 0) showToast(appText(R.string.model3d_cameras_added, cameras))
                     else if (quality != com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL && before > after) {
                         showToast(appText(R.string.model3d_optimized_toast, modelCount(before), modelCount(after)))
                     } else if (warnings.isNotEmpty()) showToast(
@@ -7466,8 +7726,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val CAMERA_LENS_FOCUS = 2
         const val CAMERA_LENS_APERTURE = 3
         const val CAMERA_LENS_BLUR = 4
+        /** A câmera afeta as camadas 2D abaixo dela (0/1). */
+        const val CAMERA_AFFECTS_BELOW = 7
         /** `ParticleParam::Count` do motor (contrato v21: 70 parâmetros). */
         const val PARTICLE_PARAM_COUNT = 70
+        /** Fontes aceitas na importação (o motor converte WOFF e coleções). */
+        val FONT_EXTENSIONS = setOf("ttf", "otf", "ttc", "otc", "woff")
+        /** Amostras do gráfico de velocidade (painel de velocidade). */
+        const val SPEED_GRAPH_SAMPLES = 96
         /** Id do "tipo" memória na tela Armazenamento. */
         const val MEMORY = "memoria"
         // ComponentCallbacks2.TRIM_MEMORY_* (valores do SDK).

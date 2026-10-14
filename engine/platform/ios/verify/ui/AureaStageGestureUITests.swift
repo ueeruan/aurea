@@ -139,7 +139,16 @@ import UIKit
     }
 
     func testMotionBlurTextExportCompletesAt1080p() throws {
-        try assertKeyflowTextExport("motion-blur-export")
+        try assertTextExport("motion-blur-export")
+    }
+    private func dismissTypingIntroductionIfNeeded() {
+        // A freshly provisioned simulator can show the system swipe-typing
+        // tutorial on its first keyboard. It is not part of the editor.
+        let introduction = app.otherElements["UIContinuousPathIntroductionView"].firstMatch
+        guard introduction.waitForExistence(timeout: 1) else { return }
+        let next = introduction.buttons["Continue"].firstMatch
+        XCTAssertTrue(next.waitForExistence(timeout: 3) && next.isHittable)
+        next.tap()
     }
     func testTextContentSheetKeepsActionsAboveKeyboardAndLongTextCompact() throws {
         let before = try launch("text-edit-2d")
@@ -148,6 +157,10 @@ import UIKit
         let cancel = app.buttons["text.content.cancel"].firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 8))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
+        dismissTypingIntroductionIfNeeded()
+        XCTAssertTrue(input.isHittable, "The text editor body must not collapse beneath its fixed actions")
+        XCTAssertEqual(app.buttons.matching(identifier: "text.content.done").count, 1)
+        XCTAssertEqual(app.buttons.matching(identifier: "text.content.cancel").count, 1)
         input.tap()
         input.typeText(String(repeating: "Aurea line\n", count: 32))
         func checkCompactEditor() {
@@ -177,6 +190,7 @@ import UIKit
         let cancel = app.buttons["text.content.cancel"].firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 8))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
+        dismissTypingIntroductionIfNeeded()
         // The existing add-text flow selects all initial content on focus.
         input.typeText(XCUIKeyboardKey.delete.rawValue)
         XCTAssertFalse(done.isEnabled, "The engine's nonempty 3D text contract is preserved")
@@ -184,11 +198,88 @@ import UIKit
         cancel.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: input)], timeout: 3), .completed)
     }
-    func testKeyflowPlainTextExportAt1080p() throws {
-        try assertKeyflowTextExport("keyflow-simple-text")
+    func testProjectV47ReopensFromHomeAndClearsScopedLoadErrors() throws {
+        let initial = try launch("project-roundtrip-v47")
+        let probe = try XCTUnwrap(initial.projectProbe)
+        XCTAssertEqual(probe.formatVersion, 47, "Exercise the real native writer, without rewriting its file header")
+        XCTAssertTrue(probe.missingRejected)
+        XCTAssertGreaterThan(probe.missingCode, 0)
+        XCTAssertFalse(probe.missingDetail.isEmpty)
+        XCTAssertTrue(probe.reopened && probe.successClearedError)
+        let title = try XCTUnwrap(initial.projectName)
+        let file = try XCTUnwrap(initial.projectFile)
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
+        _ = try awaitSnapshot("Selection cleared before leaving the project") { $0.selectionCount == 0 }
+        let projects = app.buttons["Projects"].firstMatch
+        XCTAssertTrue(projects.waitForExistence(timeout: 5) && projects.isHittable)
+        projects.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: stage)], timeout: 8), .completed)
+        let cardTitle = app.staticTexts[title].firstMatch
+        XCTAssertTrue(cardTitle.waitForExistence(timeout: 8) && cardTitle.isHittable, "The saved project must appear on Home")
+        cardTitle.tap()
+        XCTAssertTrue(stage.waitForExistence(timeout: 10), "Opening the actual Home card must enter the editor")
+        let reopened = try awaitSnapshot("Home opens the saved v47 project") {
+            $0.projectFile == file && $0.layerCount == initial.layerCount
+                && $0.compositionWidth == initial.compositionWidth && $0.compositionHeight == initial.compositionHeight
+        }
+        XCTAssertEqual(reopened.previewLastError, 0)
+        XCTAssertEqual(reopened.missingAssets, 0)
+        XCTAssertEqual(app.state, .runningForeground)
     }
-    func testKeyflowTextExportsConsecutivelyAtMultipleResolutions() throws {
-        let initial = try launch("keyflow-multiple-exports")
+
+    func testVoicePanelShowsItsBodyAndCancelsWithoutRequestingMicrophone() throws {
+        let initial = try launch("layer-dock")
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
+        let audio = app.buttons["aurea.add.category.2"].firstMatch
+        XCTAssertTrue(audio.waitForExistence(timeout: 5)); audio.tap()
+        let voice = app.buttons["add.voice"].firstMatch
+        XCTAssertTrue(voice.waitForExistence(timeout: 5) && voice.isHittable); voice.tap()
+        let panel = app.descendants(matching: .any)["voice.panel"].firstMatch
+        let cancel = app.buttons["voice.cancel"].firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(panel.frame.height, 100, "The restored tool must show its body, not only a close tab")
+        XCTAssertLessThanOrEqual(panel.frame.width, min(560, app.frame.width) + 1)
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5) && cancel.isHittable)
+        let permission = app.staticTexts["voice.permission.text"].firstMatch
+        let record = app.buttons["voice.record"].firstMatch
+        XCTAssertTrue(permission.exists || record.exists, "The microphone explanation or recording controls must be visible")
+        if permission.exists { XCTAssertTrue(permission.isHittable) }
+        else { XCTAssertTrue(record.isHittable && app.staticTexts["voice.timer"].firstMatch.exists) }
+        cancel.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: panel)], timeout: 5), .completed)
+        XCTAssertEqual(try snapshot().layerCount, initial.layerCount)
+    }
+
+    func testRasterExtrusionPanelEditsNativeDepthAndUndoes() throws {
+        _ = try launch("effects")
+        let search = app.buttons["effects.search"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5) && search.isHittable); search.tap()
+        let field = app.textFields["effects.search.field"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("3D Extrusion")
+        let result = app.buttons["effects.result.\(effectCardId("aurea.generate.raster_extrude"))"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 5) && result.isHittable); result.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)], timeout: 8), .completed)
+        let initial = try awaitSnapshot("The extrusion card adds its real native effect") { $0.effectCount == 1 && ($0.rasterDepth ?? -1) >= 0 }
+        let effect = try XCTUnwrap(initial.rasterEffectId)
+        let depth = try XCTUnwrap(initial.rasterDepth)
+        XCTAssertEqual(depth, 32, accuracy: 0.001)
+        let ruler = app.descendants(matching: .any)["effects.param.\(effect).0.0"].firstMatch
+        let stack = app.scrollViews["aurea.effects.stack"].firstMatch
+        XCTAssertTrue(stack.waitForExistence(timeout: 5))
+        XCTAssertTrue(ruler.waitForExistence(timeout: 5) && ruler.isHittable, "The tool body must contain an editable depth ruler")
+        XCTAssertGreaterThan(ruler.frame.height, 20)
+        ruler.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: ruler.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)))
+        _ = try awaitSnapshot("Dragging the visible ruler changes core depth") { abs(($0.rasterDepth ?? -1) - depth) > 1 }
+        try undo()
+        _ = try awaitSnapshot("One undo restores the depth edit and preserves the effect") { $0.effectCount == 1 && abs(($0.rasterDepth ?? -1) - depth) < 0.001 }
+    }
+
+    func testTextPlainTextExportAt1080p() throws {
+        try assertTextExport("simple-text-export")
+    }
+    func testTextTextExportsConsecutivelyAtMultipleResolutions() throws {
+        let initial = try launch("multiple-text-exports")
         XCTAssertEqual(initial.compositionWidth, 1920)
         XCTAssertEqual(initial.compositionHeight, 1080)
         let back = app.buttons["Back (clear the selection)"].firstMatch
@@ -202,10 +293,10 @@ import UIKit
             XCTAssertTrue(app.buttons["Export"].firstMatch.waitForExistence(timeout: 5))
         }
     }
-    func testKeyflowVideoWithTextExportsAt1080p() throws {
-        try assertKeyflowTextExport("keyflow-video-text-export")
+    func testTextVideoWithTextExportsAt1080p() throws {
+        try assertTextExport("video-text-export")
     }
-    private func assertKeyflowTextExport(_ scene: String) throws {
+    private func assertTextExport(_ scene: String) throws {
         let snapshot = try launch(scene)
         XCTAssertEqual(snapshot.compositionWidth, 1920)
         XCTAssertEqual(snapshot.compositionHeight, 1080)
@@ -1996,7 +2087,7 @@ import UIKit
     private func launch(_ scene: String) throws -> Snapshot {
         runID = UUID().uuidString
         app = XCUIApplication(bundleIdentifier: "com.aurea.aurea")
-        if ["motion-blur-export", "keyflow-simple-text", "keyflow-multiple-exports", "keyflow-video-text-export"].contains(scene) {
+        if ["motion-blur-export", "simple-text-export", "multiple-text-exports", "video-text-export"].contains(scene) {
             // Reproduce the measured device budget from the failed Metal run,
             // independently of the free RAM on this particular CI runner.
             app.launchArguments.append("--aurea-memory-budget-mb=163")
@@ -2004,8 +2095,8 @@ import UIKit
         app.launchEnvironment["AUREA_PARITY_SCENE"] = scene
         app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
         app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID
-        if ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
-        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene) ? 120 : 30
+        if ["video-move", "playback-stress", "clip-edit", "video-text-export"].contains(scene) { app.launchEnvironment["AUREA_PARITY_EXPORT"] = "1" }
+        let preparationTimeout: TimeInterval = ["video-move", "playback-stress", "clip-edit", "video-text-export"].contains(scene) ? 120 : 30
         app.launch()
         guard stage.waitForExistence(timeout: preparationTimeout) else {
             XCTFail("Read-only DEBUG preview probe is missing; inspect the app configuration and INTEGRATION.md")
@@ -2016,7 +2107,7 @@ import UIKit
         }
         XCTAssertTrue(state.coreStarted, state.coreError)
         if scene == "playback-stress" { XCTAssertGreaterThanOrEqual(state.layerCount, 3) }
-        else if scene == "keyflow-video-text-export" { XCTAssertEqual(state.layerCount, 2) }
+        else if scene == "video-text-export" { XCTAssertEqual(state.layerCount, 2) }
         else if scene == "timeline-reorder" { XCTAssertEqual(state.layerCount, 8) }
         else if scene == "manual-android-project" { XCTAssertEqual(state.layerCount, 14) }
         else if scene == "parent-new-null" { XCTAssertEqual(state.layerCount, 2) }
@@ -2150,6 +2241,11 @@ import UIKit
         let editMode: Bool
         let coreEditMode: Bool
         let effectCount: Int
+        let rasterEffectId: UInt32?
+        let rasterDepth: Double?
+        let projectName: String?
+        let projectFile: String?
+        let projectProbe: ProjectProbe?
         let clipTimeRemap: [Double]
         let textGlyphLayout: Bool
         let textSurfaceFinish: Int
@@ -2173,6 +2269,14 @@ import UIKit
         let shapeParams: [Double]
         let stageCorners: [Double]
         let stageGizmo: [Double]
+    }
+    private struct ProjectProbe: Decodable {
+        let formatVersion: Int
+        let missingRejected: Bool
+        let missingCode: Int
+        let missingDetail: String
+        let reopened: Bool
+        let successClearedError: Bool
     }
     private struct CurveKey: Decodable, Equatable {
         let property: Int

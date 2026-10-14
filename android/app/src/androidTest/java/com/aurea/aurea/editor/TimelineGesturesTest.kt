@@ -500,6 +500,58 @@ class TimelineGesturesTest {
      * NO keyframe e o ímã ligado; o arrasto pega na hora e um passo de 2 frames
      * fica (o cabeçote da origem não puxa de volta). Um desfazer devolve.
      */
+    /**
+     * Pedido do dono (12/10/2026), como no Alight Motion: o losango de uma camada
+     * NÃO selecionada é só referência — o arrasto que passa por ele rola/faz
+     * scrub e não move o keyframe. Tocar na camada a seleciona e o mesmo arrasto
+     * passa a mover o losango.
+     */
+    @Test fun unselectedLayerKeyframesAreReferenceOnlyUntilTheLayerIsTapped() {
+        launch(shape = true)
+        val id = store.layers.single().id
+        compose.runOnIdle {
+            store.select(id, openOptions = false)
+            store.showAllKeyframes = true
+            store.snapping = true
+            assertTrue(store.trimEnd(id, 90))
+        }
+        for (frame in listOf(0, 30)) {
+            compose.runOnIdle { store.seek(frame) }
+            compose.waitUntil(5000) { store.playhead == frame }
+            compose.runOnIdle { store.toggleTransformKeyframe(intArrayOf(0)) }
+            compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == frame } }
+        }
+        compose.runOnIdle { store.clearSelection() }
+        compose.waitForIdle()
+        val before = store.keyframes[id].orEmpty().map { "${it.property}:${it.time}" }.sorted()
+        val dpPerFrame = 80f / 30f
+        fun dragFromCenter() = timeline().performTouchInput {
+            val start = Offset(width / 2f, rowY())
+            down(start)
+            moveTo(start + Offset(12 * density, 0f))
+            moveTo(start + Offset(60 * dpPerFrame * density, 0f))
+            up()
+        }
+        // Camada não selecionada: o losango no centro (quadro 30) não pega o dedo.
+        dragFromCenter()
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertTrue("A camada nao deveria ser selecionada pelo arrasto", store.selection.isEmpty())
+            assertEquals(before, store.keyframes[id].orEmpty().map { "${it.property}:${it.time}" }.sorted())
+            store.seek(30)
+        }
+        compose.waitUntil(5000) { store.playhead == 30 }
+        // Selecionada (o toque na camada faz o mesmo), a edição dos losangos volta.
+        compose.runOnIdle { store.select(id, openOptions = false) }
+        compose.waitUntil(5000) { store.selection.contains(id) }
+        compose.runOnIdle { store.seek(30) }
+        compose.waitUntil(5000) { store.playhead == 30 }
+        dragFromCenter()
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 90 } }
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(5000) { store.keyframes[id].orEmpty().map { "${it.property}:${it.time}" }.sorted() == before }
+    }
+
     @Test fun keyframeDragGrabsFromTheWideTargetAndThePlayheadAtItsOriginDoesNotHoldIt() {
         launch()
         val id = store.layers.single().id

@@ -313,6 +313,7 @@ struct EffectsView: View {
                     else {
                         if effect.typeId == fxEffectTypeId("aurea.distort.mesh_warp") { MeshWarpCardTools(effectId: effect.effectId, selected: meshSelected, onSelect: { selected = nil }) }
                         if effect.typeId == fxEffectTypeId("aurea.distort.puppet") { PuppetCardTools(effectId: effect.effectId) }
+                        if effect.typeId == fxEffectTypeId("aurea.light.saber") { SaberCardTools(effectId: effect.effectId) }
                         if effect.typeId == fxEffectTypeId("aurea.key.rotobrush") {
                             PanelNotice(AureaText.t("roto_note"))
                             RotoPaintCardTools(effectId: effect.effectId,
@@ -473,7 +474,13 @@ struct EffectsView: View {
         case fxParamCurve:
             if let layer = model.primarySelection { ColorCurveEditor(layer: layer, effect: effect, param: param.index) }
         case fxParamTextureRef:
-            if let layer = model.primarySelection { CubeLutImportRow(layer: layer, effect: effect) }
+            if let layer = model.primarySelection {
+                if model.effects.first(where: { $0.effectId == effect })?.typeId == fxEffectTypeId("aurea.3d.part_texture") {
+                    PartTextureImageRow(layer: layer, effect: effect)
+                } else {
+                    CubeLutImportRow(layer: layer, effect: effect)
+                }
+            }
         case fxParamLayerRef:
             // Outra camada ("Camada de áudio"): o menu lista as camadas da
             // composição; o motor recebe o ÍNDICE da camada (−1 = nenhuma).
@@ -992,6 +999,35 @@ struct EffectsView: View {
     }
 }
 
+/// "Trocar textura 3D": a imagem da galeria que cobre a parte (par do Android,
+/// EffectsPanel.kt `PartTextureImageRow`).
+@MainActor
+private struct PartTextureImageRow: View {
+    let layer: Int64
+    let effect: UInt32
+    @EnvironmentObject private var model: AureaModel
+    @State private var picking = false
+    @State private var filename = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(AureaText.t("fxl_image") + " · " + (filename.isEmpty ? AureaText.t("fx3d_image_none") : filename))
+                .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
+            Button(AureaText.t(filename.isEmpty ? "fx3d_image_pick" : "shape3d_image_change")) { picking = true }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityIdentifier("effect.part_texture.pick")
+        }
+        .onAppear { filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .onChange(of: model.effects) { _ in filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .onChange(of: model.status.modelRevision) { _ in filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .sheet(isPresented: $picking) {
+            ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
+                picking = false
+                if let (url, _) = items.first { model.setEffectImage(layer, effect: effect, url: url) }
+            }
+        }
+    }
+}
+
 @MainActor
 private struct CubeLutImportRow: View {
     let layer: Int64
@@ -1001,13 +1037,18 @@ private struct CubeLutImportRow: View {
     @State private var lutPick: URL?
     @State private var busy = false
     @State private var filename = ""
+    private var palette: Bool { model.effects.first { $0.effectId == effect }?.typeId == fxEffectTypeId("aurea.color.palettize") }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !filename.isEmpty {
                 Text(filename).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
             }
-            Button(AureaText.t(busy ? "lut_importing" : "lut_import")) {
-                DocumentImportPicker.present(types: [UTType(filenameExtension: "cube") ?? .data, .data]) { urls in lutPick = urls?.first }
+            Button(AureaText.t(palette ? "palette_import" : busy ? "lut_importing" : "lut_import")) {
+                // O mesmo importador serve o LUT (.cube) e a paleta do Palettize.
+                let types: [UTType] = palette
+                    ? [.png, .jpeg, UTType(filenameExtension: "gpl") ?? .data, UTType(filenameExtension: "hex") ?? .data, .data]
+                    : [UTType(filenameExtension: "cube") ?? .data, .data]
+                DocumentImportPicker.present(types: types) { urls in lutPick = urls?.first }
             }
                 .frame(maxWidth: .infinity, minHeight: 44).disabled(busy)
                 .accessibilityIdentifier("effect.lut.import")
@@ -1017,7 +1058,8 @@ private struct CubeLutImportRow: View {
         .onChange(of: lutPick) { picked in
             guard let url = picked else { return }
             lutPick = nil
-            guard url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t("lut_invalid"); return }
+            let isPalette = ["png", "jpg", "jpeg", "gpl", "hex"].contains(url.pathExtension.lowercased())
+            guard isPalette || url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t(palette ? "palette_invalid" : "lut_invalid"); return }
             busy = true
             let engine = model.engine
             let targetLayer = layer, targetEffect = effect
@@ -1051,7 +1093,7 @@ private struct CubeLutImportRow: View {
                     busy = false
                     filename = engine.colorLutName(targetLayer, effect: targetEffect)
                     model.refreshModel(force: true)
-                    model.toast = AureaText.t(imported ? "lut_imported" : "lut_invalid")
+                    model.toast = AureaText.t(isPalette ? (imported ? "palette_imported" : "palette_invalid") : (imported ? "lut_imported" : "lut_invalid"))
                 }
             }
         }
@@ -1190,6 +1232,9 @@ struct FxPresetRow: View {
         case "impact": return AureaText.t("fxp_impact")
         case "handheld": return AureaText.t("fxp_handheld")
         case "glitch": return AureaText.t("fxp_glitch")
+        case "saber_default", "saber_lightsaber", "saber_neon", "saber_electric", "saber_fire",
+             "saber_plasma", "saber_energy", "saber_soft", "saber_magic":
+            return AureaText.t("fxp_" + pid)
         default: return fallback
         }
     }

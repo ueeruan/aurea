@@ -315,6 +315,8 @@ NS_SWIFT_NAME(AureaEngine)
     NS_SWIFT_NAME(realCameraSample(_:timestampNs:positional:sensitivity:inverted:));
 - (BOOL)realCameraHold NS_SWIFT_NAME(realCameraHold());
 - (BOOL)realCameraRecenter NS_SWIFT_NAME(realCameraRecenter());
+/// Andar (m/s, + frente, 0 parado) e profundidade (× do frente/trás medido).
+- (BOOL)realCameraWalk:(float)speed depth:(float)depth NS_SWIFT_NAME(realCameraWalk(_:depth:));
 - (void)realCameraStop NS_SWIFT_NAME(realCameraStop());
 /// active, recording, last native frame keyed, actual position tracking mode.
 - (NSArray<NSNumber*>*)realCameraStatus NS_SWIFT_NAME(realCameraStatus());
@@ -342,6 +344,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)newProjectWidth:(uint32_t)width height:(uint32_t)height fps:(double)fps title:(nullable NSString*)title
             backgroundR:(float)r g:(float)g b:(float)b a:(float)a;
 - (BOOL)loadProject:(NSString*)path;
+/// Failure belongs to this load request. Older BOOL callers remain supported.
+- (BOOL)loadProject:(NSString*)path error:(NSString* _Nullable* _Nullable)error
+         errorCode:(int32_t* _Nullable)errorCode NS_SWIFT_NAME(loadProject(_:error:code:));
 - (BOOL)saveProject:(NSString*)path;
 /// Flush UI commands before dispatching. Safe to execute on an IO queue.
 - (BOOL)autosaveProject;
@@ -554,7 +559,16 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setShape:(long long)layerId param:(uint32_t)param value:(float)value;
 - (void)setShape:(long long)layerId fillR:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)setShape:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a;
-- (void)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId;
+/// Começa a análise da câmera 3D. NO = não começou (outra análise rodando,
+/// camada que não é vídeo ou com menos de 10 quadros) — par do Android.
+- (BOOL)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId;
+/// Efeito de parte 3D já apontando para a parte `part` (0 = a 1ª). −1 = não entrou.
+- (int)addPartEffect:(uint32_t)type part:(uint32_t)part forLayer:(long long)layerId;
+/// Imagem do "Trocar textura 3D" (arquivo já copiado para o app).
+- (BOOL)setEffectImage:(NSString *)path effect:(uint32_t)effect forLayer:(long long)layerId;
+- (NSString *)effectImageName:(uint32_t)effect forLayer:(long long)layerId;
+/// Nome de cada parte da camada 3D (vazio = sem nome no arquivo).
+- (NSArray<NSString *> *)modelPartNames:(long long)layerId;
 - (void)setModelTransformInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
                           x:(float)x y:(float)y z:(float)z
                          sx:(float)sx sy:(float)sy sz:(float)sz
@@ -682,6 +696,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)freezeFrameForLayer:(long long)layerId frame:(int32_t)frame hold:(int32_t)holdFrames;
 /// Motivo legível da última importação que falhou ("" quando deu certo).
 @property (nonatomic, readonly, copy) NSString* lastImportError;
+/// Motivo da última recusa de `startExportTo:` (0.1.8): o código Errc e a frase
+/// do motor. Antes a recusa chegava vazia e o iPhone só dizia "Não foi possível
+/// iniciar a exportação".
 
 // --- Consultas --------------------------------------------------------------
 /// Uma linha por camada, da frente para o fundo (chaves AureaLayer*).
@@ -843,6 +860,21 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)editTimeRemap:(long long)layerId index:(int32_t)index time:(int64_t)time value:(float)value interpolation:(int32_t)interpolation;
 - (BOOL)setTimeRemapValue:(long long)layerId time:(int64_t)time value:(float)value;
 - (void)removeTimeRemap:(long long)layerId index:(uint32_t)index;
+/// Gráfico de velocidade (`query_speed_curve`): cabeçalho de 8, amostras e chaves (tempo, ×, interpolação).
+- (NSArray<NSNumber*>*)speedCurve:(long long)layerId samples:(uint32_t)samples;
+/// Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar, 8 tirar.
+- (BOOL)applySpeedCurve:(uint32_t)preset forLayer:(long long)layerId;
+- (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation;
+- (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index;
+/// Câmeras do arquivo do modelo 3D (glTF/FBX); a importação já as põe na timeline.
+- (uint32_t)modelCameraCount:(long long)layerId;
+/// Pose do rig 3D (0.1.8): ossos (10 floats por osso, ver Engine::query_model_bones),
+/// giro pelo dedo (trackball), keyframe (node −1 = todos) e reset.
+- (NSArray<NSNumber*>*)modelBones:(long long)layerId;
+- (BOOL)dragBone:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy twist:(float)twist continuing:(BOOL)continuing;
+- (int32_t)toggleBoneKey:(long long)layerId node:(int32_t)node;
+- (BOOL)resetBonePose:(long long)layerId node:(int32_t)node;
+- (uint32_t)addModelCameras:(long long)layerId;
 - (long long)addVector:(uint32_t)preset;
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;
 - (BOOL)editVectorGroup:(long long)layerId group:(uint32_t)group field:(uint32_t)field values:(NSArray<NSNumber*>*)values;

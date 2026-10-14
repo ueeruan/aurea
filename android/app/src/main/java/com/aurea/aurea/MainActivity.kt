@@ -264,24 +264,39 @@ private fun MainActivity.LanguageWelcome(content: @Composable () -> Unit) {
     }
 }
 
+/** Versão do texto de privacidade/termos aceito (o build em que mudou). */
+private const val CONSENT_VERSION = 2181
+
 @Composable
 private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
     val prefs = remember { getSharedPreferences("creator_welcome", Context.MODE_PRIVATE) }
     var consent by remember { mutableIntStateOf(prefs.getInt("consent_version", 0)) }
     var opened by remember { mutableIntStateOf(prefs.getInt("opened", 0)) }
     var error by remember { mutableStateOf(false) }
-    if (consent < 2125) {
+    // 0.1.7 BETA 3: privacidade + termos com o bonequinho, mostrados uma vez
+    // a todos (quem aceitou a versão 2125 vê o texto novo uma vez).
+    if (consent < CONSENT_VERSION) {
         BackHandler { finish() }
         MaterialTheme(colorScheme = darkColorScheme()) {
             Surface(Modifier.fillMaxSize()) {
                 Column(Modifier.safeDrawingPadding().padding(24.dp)) {
-                    Text(stringResource(R.string.consent_title), style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(16.dp))
-                    Text(stringResource(R.string.consent_body), Modifier.weight(1f).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodyLarge)
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                        com.aurea.aurea.home.PrivacyMascot(Modifier.align(androidx.compose.ui.Alignment.CenterHorizontally))
+                        Spacer(Modifier.height(16.dp))
+                        Text(stringResource(R.string.privacy_title), style = MaterialTheme.typography.headlineSmall)
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.privacy_body), style = MaterialTheme.typography.bodyLarge)
+                        Spacer(Modifier.height(24.dp))
+                        Text(stringResource(R.string.consent_title), style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.consent_body), style = MaterialTheme.typography.bodyLarge)
+                        Spacer(Modifier.height(12.dp))
+                        Text(stringResource(R.string.terms_liability), style = MaterialTheme.typography.bodyLarge)
+                    }
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = {
-                        prefs.edit().putInt("consent_version", 2125).apply()
-                        consent = 2125
+                        prefs.edit().putInt("consent_version", CONSENT_VERSION).apply()
+                        consent = CONSENT_VERSION
                     }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(stringResource(R.string.consent_accept)) }
                 }
             }

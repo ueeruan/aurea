@@ -12,4 +12,14 @@
     <string name="expfail_stuck">a exportação parou de avançar por minutos e foi interrompida; feche outros apps e tente de novo</string>
     <!-- Aviso durante o export refeito no modo de segurança (export/ExportWatchdog.hpp). -->
     <string name="app_export_safe_mode">O codificador de vídeo do aparelho travou: exportando de novo no modo compatível (H.264, pode demorar mais).</string>
+    <string name="app_export_paused">Exportação pausada: ela continua sozinha quando você voltar ao Aurea.</string>
+    <string name="app_export_resumed">Continuando a exportação de onde parou.</string>
+    <string name="app_export_resume_title">Exportação interrompida em %1$d%%</string>
+    <string name="app_export_resume_continue">Continuar exportação</string>
+    <string name="app_export_resume_discard">Descartar</string>
+    <!-- BETA 2: codec do aparelho travou (CodecHung), nova tentativa compatível, HEVC sem encoder. -->
+    <string name="expfail_codec_hung">o codificador de vídeo do aparelho travou; tente H.264 ou uma resolução menor</string>
+    <string name="app_export_codec_hung_retry">O codificador de vídeo do aparelho travou. Vamos tentar de novo no modo compatível.</string>
+    <string name="app_export_retry_compatible">Tentando de novo no modo compatível…</string>
+    <string name="app_export_hevc_to_h264">Este aparelho não tem codificador HEVC para este tamanho: exportando em H.264.</string>
 </resources>

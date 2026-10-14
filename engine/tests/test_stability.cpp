@@ -1426,8 +1426,9 @@ AUREA_TEST(Fuzz, EffectParametersWithWildValuesRenderOnGpu) {
             auto added=e.add_text("Aurea");AUREA_CHECK(added.ok());if(!added.ok())continue;
             targetLayer=*added;
         }
-        if(reg.at(t).type_id()==effect_type_id(effect_keys::kShape3DLayout)){
-            // O layout das partes só vale em forma 3D: recusado no vídeo, testado numa estrela.
+        if(reg.at(t).type_id()==effect_type_id(effect_keys::kShape3DLayout)||reg.at(t).type_id()==effect_type_id(effect_keys::kPart3DTransform)
+           ||reg.at(t).type_id()==effect_type_id(effect_keys::kPart3DHide)||reg.at(t).type_id()==effect_type_id(effect_keys::kPart3DTexture)){
+            // O layout e os efeitos de PARTE só valem em camada 3D: recusados no vídeo, testados numa estrela.
             AUREA_CHECK(!e.apply_command(effect_add(*layer,reg.at(t).type_id())).ok());
             auto added=e.add_shape3d(static_cast<u32>(scene3d::Shape3DKind::Star),"Estrela");AUREA_CHECK(added.ok());if(!added.ok())continue;
             targetLayer=*added;

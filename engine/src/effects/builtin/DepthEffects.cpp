@@ -58,6 +58,8 @@ public:
         if (!r.texture.valid()) { e.auxInfo.w = r.failed ? 1.0f : 0.0f; return; }
         e.aux = r.texture;
         e.auxInfo = Vec4{r.lo, r.hi, 1.0f, 0.0f};
+        e.auxMapX = r.mapX;
+        e.auxMapY = r.mapY;
     }
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
                  LayerImage& out) const override {
@@ -75,6 +77,13 @@ public:
             lh = static_cast<f32>(e.placement->layerHeight);
         }
         u.p3 = Vec4{lw, lh, 0.0f, 0.0f};
+        if (e.auxMapX.w > 0.0f && e.auxMapY.w > 0.0f) {
+            // Camada de ajuste: o mapa é da foto/vídeo abaixo — o ponto do
+            // quadro vai ao px dela (`color` = linhas, p3.zw = deslocamento).
+            u.p0.w = 1.0f;
+            u.color = Vec4{e.auxMapX.x, e.auxMapX.y, e.auxMapY.x, e.auxMapY.y};
+            u.p3 = Vec4{e.auxMapX.w, e.auxMapY.w, e.auxMapX.z, e.auxMapY.z};
+        }
         out = input;
         out.texture = ctx.texture("profundidade", input.width, input.height);
         // Sem mapa (camada sem foto/vídeo, rede indisponível, quadro ainda

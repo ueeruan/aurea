@@ -49,6 +49,10 @@ let keyboard = AureaSheetLayout.bodyHeight(content: 1200, viewport: 320, top: 8,
 check(keyboard < full && keyboard + 21 + 60 <= 320 - 8, "keyboard reduces body while retaining actions")
 check(AureaSheetLayout.bodyHeight(content: -1, viewport: 320, top: 8, bottom: 0) == 0, "negative content stays zero")
 check(AureaSheetLayout.bodyHeight(content: 900, viewport: 40, top: 8, bottom: 34, footer: 60) == 0, "actions consume very short viewport")
+check(AureaSheetLayout.scrollHeight(content: nil, maximum: 231) == 231, "unmeasured body has a visible first layout")
+check(AureaSheetLayout.scrollHeight(content: 149.3, maximum: 231) == 149.3, "measured editor stays compact")
+check(AureaSheetLayout.scrollHeight(content: 149.3, maximum: 76) == 76, "landscape scroll fits without hiding fixed actions")
+check(AureaSheetLayout.scrollHeight(content: 149.3, maximum: 0) == 0, "a genuinely exhausted viewport remains bounded")
 for content: CGFloat in [-1, 0, 20, 96, 150, 180, 3000] {
     let result = AureaSheetLayout.textInputHeight(content: content)
     check(result >= 96 && result <= 180, "text field remains compact and scrolls excess")
@@ -84,12 +88,14 @@ def main():
             all(token in text for token in ['autoFocus: true', 'selectAllOnFocus: request.selectAll', 'NSRange', 'model.commitTextContent(request, content: content)', '.disabled(!valid)']),
         'delayed dismissal belongs to the current text presentation':
             'model.textContentRequest?.presentationID == request.presentationID' in text,
-        'overlay uses viewport and safe insets without ignoring the keyboard':
-            'viewport: geometry.size.height' in overlay and 'geometry.safeAreaInsets.top' in overlay and 'geometry.safeAreaInsets.bottom' in overlay and 'ignoresSafeArea(.keyboard' not in overlay,
+        'overlay uses the keyboard-adjusted viewport without subtracting its insets twice':
+            'viewport: geometry.size.height' in overlay and 'geometry.safeAreaInsets' not in overlay and 'ignoresSafeArea(.keyboard' not in overlay,
         'overlay deducts measured fixed actions from scroll height':
             'footer: footerHeight' in overlay and 'AureaSheetFooterHeight.self' in overlay,
         'scroll keeps natural short content and limits long content':
-            'min(contentHeight, max(0, maximumHeight))' in scroll and '.fixedSize(horizontal: false, vertical: true)' in scroll,
+            'AureaSheetLayout.scrollHeight(content: contentHeight, maximum: maximumHeight)' in scroll and '.fixedSize(horizontal: false, vertical: true)' in scroll and 'guard $0.isFinite, $0 > 0' in scroll,
+        'text sheet identifies its card without replacing identifiers of child actions':
+            'accessibilityID: "text.content.sheet"' in text and '.accessibilityElement(children: .contain)' in overlay,
         'long action menus scroll with cancel after scroll':
             action.index('AureaSheetScroll(') < action.index('Text(AureaText.t("common_cancel"))') and 'footer: AureaDims.actionRowMinH' in action,
         'alerts scroll with confirmation outside body and width limited to viewport':

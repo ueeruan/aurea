@@ -48,16 +48,20 @@ inline u32 preview_cache_capacity(u32 width, u32 height, u64 budget, u32 bytesPe
     if (pixels > budget / bytesPerPixel) return 0;
     return static_cast<u32>(std::min<u64>(kPreviewCacheMaxFrames, budget / (pixels * bytesPerPixel)));
 }
-inline u32 preview_cache_target(f64 fps, u32 capacity, i64 remaining, f32 speed = 1.f) noexcept {
+/// `stuttered`: a reprodução anterior perdeu quadros (cena pesada). O próximo
+/// Play prepara ~0,75 s em vez de ~0,18 s — a pré-render passa a cobrir o
+/// trecho pesado em vez de engasgar de novo no mesmo ponto.
+inline u32 preview_cache_target(f64 fps, u32 capacity, i64 remaining, f32 speed = 1.f, bool stuttered = false) noexcept {
     if (!capacity || remaining <= 0) return 0;
     // Match the decoder's short look-ahead instead of blocking every Play for
     // half a second of expensive effects. Faster playback needs more frames.
     const f64 rate = std::clamp(std::isfinite(speed) ? std::abs(f64(speed)) : 1., .05, 16.);
     const auto startup = static_cast<u32>(std::clamp(std::ceil(
-        std::clamp(std::isfinite(fps) ? fps : 30., 1., 240.) * .18 * rate), 1., 30.));
+        std::clamp(std::isfinite(fps) ? fps : 30., 1., 240.) * (stuttered ? .75 : .18) * rate), 1., stuttered ? 90. : 30.));
     return static_cast<u32>(std::min<i64>(std::min(capacity, startup), remaining));
 }
-inline bool preview_buffer_expired(u64 elapsedNs, u32 ready) noexcept {
+inline bool preview_buffer_expired(u64 elapsedNs, u32 ready, bool stuttered = false) noexcept {
+    if (stuttered) return elapsedNs >= (ready ? 2'500'000'000ull : 3'000'000'000ull);
     // A partial usable buffer starts promptly; missing media/AI gets a finite
     // first-frame allowance. This never labels incomplete frames as cached.
     return elapsedNs >= (ready ? 350'000'000ull : 1'200'000'000ull);

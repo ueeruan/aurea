@@ -178,7 +178,7 @@ Result<u64> Engine::import_psd(const std::string& path, const char* name, bool* 
             l->source=project_->add_asset(std::move(asset));
             createdAssets.push_back(l->source);
             ImagePixels pixels; pixels.width=src.width; pixels.height=src.height; pixels.rgba=std::move(src.rgba);
-            images_[l->source.pack()]=std::move(pixels);
+            images_[l->source.pack()]=std::make_shared<const ImagePixels>(std::move(pixels));
             allocation_checkpoint();
             l->transform.anchor={src.width*.5f,src.height*.5f,0};
             l->transform.position={src.left+src.width*.5f,src.top+src.height*.5f,0};

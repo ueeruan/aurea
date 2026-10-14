@@ -12,14 +12,15 @@ import org.json.JSONArray
  * `text::text_preset_name` (o índice é o que vai para o motor).
  */
 internal val ExtraTextPresetNames = listOf("Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
-    "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa")
+    "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa", "Text Explosion")
 
 /** Nomes 0..7 de [ExtraTextPresetNames] no catálogo (o texto em pt acima é só referência). */
 internal val ExtraTextPresetLabels = listOf(R.string.app_text_preset_bounce, R.string.app_text_preset_soft_in, R.string.app_text_preset_reveal,
     R.string.app_text_preset_slide, R.string.app_text_preset_fast_in, R.string.app_text_preset_elastic, R.string.app_text_preset_word_jump,
     R.string.app_text_preset_smooth)
 
-internal val PackTextPresetLabels = listOf(R.string.pack_text_0, R.string.pack_text_1, R.string.pack_text_2, R.string.pack_text_3, R.string.pack_text_4, R.string.pack_text_5)
+internal val PackTextPresetLabels = listOf(R.string.pack_text_0, R.string.pack_text_1, R.string.pack_text_2, R.string.pack_text_3, R.string.pack_text_4, R.string.pack_text_5,
+    R.string.app_text_preset_explosion)
 
 internal val TextPresetNames = listOf(
     R.string.pn_pop, R.string.pn_textpreset_bounce, R.string.pn_textpreset_slide, R.string.panel_escala,
@@ -72,7 +73,7 @@ class BuiltinPresets(private val context: Context) {
     /** Nome no idioma ATUAL do app (o JSON fala pt-BR); sem recurso, o do arquivo. */
     fun of(kind: PresetKind): List<PresetEntry> = if (kind == PresetKind.Text) textEntries() else {
         val names = BuiltinPresetNames[kind].orEmpty()
-        byKind[kind].orEmpty().mapIndexed { i, e -> if (i < names.size) e.copy(name = AppText.get(context, names[i])) else e }
+        byKind[kind].orEmpty().mapIndexed { i, e -> if (i < names.size && names[i] != 0) e.copy(name = AppText.get(context, names[i])) else e }
     }
 }
 
@@ -86,9 +87,10 @@ internal val BuiltinPresetNames: Map<PresetKind, List<Int>> = mapOf(
         R.string.app_preset_anim_rise, R.string.app_preset_anim_zoom_in, R.string.app_preset_anim_pulse, R.string.app_preset_anim_spin_in),
     PresetKind.Curve to listOf(R.string.app_preset_curve_cubic, R.string.app_preset_curve_strong_inout, R.string.app_preset_curve_expo_out,
         R.string.app_preset_curve_expo_in, R.string.app_preset_curve_back_out, R.string.app_preset_curve_back_in),
+    // 0 = fica o nome do arquivo (os de marca: "CC · Detail", "Omino · Diffusion").
     PresetKind.Effects to listOf(R.string.app_preset_fx_soft_blur, R.string.app_preset_fx_focus_in, R.string.app_preset_fx_neon_glow,
         R.string.app_preset_fx_bw, R.string.app_preset_fx_strong_contrast, R.string.app_preset_fx_sepia, R.string.app_preset_fx_dream,
-        R.string.app_preset_fx_turbulence),
+        R.string.app_preset_fx_turbulence, 0, 0, 0, 0, R.string.app_preset_fx_luma_in, R.string.app_preset_fx_luma_out),
     PresetKind.Caption to listOf(R.string.app_preset_caption_viral, R.string.app_preset_caption_karaoke, R.string.app_preset_caption_subtle,
         R.string.pack_text_4, R.string.pack_text_5),
 )

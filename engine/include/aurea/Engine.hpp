@@ -70,6 +70,7 @@
 #include <unordered_map>
 #include <vector>
 
+namespace aurea { class OfflineFrameRenderer; }
 namespace aurea {
 class PreRenderCache;
 
@@ -210,11 +211,29 @@ struct EngineConfig {
     /// Watchdog do worker do encoder (export/ExportWatchdog.hpp): sem batida
     /// da plataforma por isto, o motor desiste do worker travado e conclui o
     /// export com falha (EncoderStalled) em vez de esperar o join para sempre.
-    /// 0 = 45 s. Os testes usam menos.
+    /// 0 = adaptativo por fase (export_worker_hang_limit_ns: preparação 20 s,
+    /// regime max(12 s, 8 × média por quadro), teto 45 s). Os testes usam menos.
     u32 exportWorkerHangMs = 0;
+    /// Verificação pós-export ESTRITA (ExportOutputValidation::strict): toda
+    /// divergência de PTS/duração/contagem/dimensão/áudio reprova o arquivo.
+    /// Os apps ficam no tolerante (padrão): divergência vira aviso no
+    /// diagnóstico e o arquivo é publicado; só reprova o que não abre, vazio,
+    /// sem vídeo ou sem nenhum quadro decodificável. Os testes de host que
+    /// guardam o export (retomável, registro de pacotes, PTS) ligam o estrito.
+    bool strictExportVerification = false;
     /// Opt-in integrity recovery. A checked, frozen export snapshot is
     /// persisted before codec open; version 1 restarts from frame zero.
     bool enableExportRecovery = false;
+    /// Export retomável (export/ExportPacketLog.hpp): os pacotes de vídeo vão
+    /// para `<saída>.aurea-pkt` e o MP4 é montado no fim. Um start_export com
+    /// a MESMA saída, o mesmo projeto e as mesmas configurações continua do
+    /// último GOP íntegro (o app fechou, a GPU caiu, o iOS suspendeu). Qualquer
+    /// diferença recomeça do zero. Desligado = MP4 direto (caminho antigo).
+    bool enableResumableExport = false;
+    /// NV12 do export com 4 bytes por fragmento (yuv_encode_packed.frag), 1/4
+    /// dos fragmentos. Sem dither, os mesmos bytes; com dither, raros pixels
+    /// diferem em 1 nível. DESLIGADO até ser medido no aparelho.
+    bool enablePackedYuvExport = false;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
 
@@ -243,6 +262,11 @@ struct EngineConfig {
     std::string documentsDirectory;
     u32   workerCount = 0;
     u64   memoryBudgetBytes = 0;
+    /// Teto do orçamento medido (0 = sem teto). Android: HyperOS/MIUI mata o
+    /// processo que passa de ~600 MB de memória de GPU ("GpuMemory OOM",
+    /// relatório de 12/10/2026 no meio de um export); o orçamento de ¼ da RAM
+    /// livre chegava a 1 GB num aparelho de 8 GB.
+    u64   memoryBudgetCapBytes = 0;
     bool  enableTelemetry = true;
     bool  disableAutosave = false;
     u32   autosaveJournalIntervalMs  = 3000;
@@ -526,6 +550,44 @@ public:
     [[nodiscard]] Result<text::FontEntry> import_font(const char* path) noexcept;
     [[nodiscard]] Status import_color_lut(u64 layer, u32 effect, const char* path) noexcept;
     [[nodiscard]] std::string color_lut_name(u64 layer, u32 effect) const noexcept;
+    /// "Trocar textura 3D": a imagem `path` (já copiada para a pasta do app;
+    /// decodificada pelo `imageLoader` da plataforma) vira o parâmetro Imagem
+    /// do efeito `effect` da camada. Um passo de desfazer; o projeto guarda o
+    /// caminho e a imagem volta ao reabrir, como as camadas de imagem.
+    [[nodiscard]] Status set_effect_image(u64 layer, u32 effect, const char* path) noexcept;
+    /// Nome do arquivo da imagem do efeito (vazio = nenhuma).
+    [[nodiscard]] std::string effect_image_name(u64 layer, u32 effect) const noexcept;
+    /// As PARTES da camada 3D na ordem dos efeitos de parte (Parte 1, 2...):
+    /// o nome de cada uma (vazio = o arquivo não deu nome). Vazio = não é 3D.
+    [[nodiscard]] std::vector<std::string> model_part_names(u64 layer) noexcept;
+    /// Câmeras do arquivo do modelo (glTF/FBX) — 0.1.8. A importação já as põe
+    /// na timeline (camadas de câmera filhas do modelo, com a animação do
+    /// arquivo em keyframes); `add_model_cameras` põe de novo (um passo de
+    /// desfazer) e devolve quantas entraram.
+    [[nodiscard]] u32 model_camera_count(u64 layer) noexcept;
+    // --- Pose do rig 3D (0.1.8) — scene3d/RigPose.hpp ----------------------
+    /// Ossos posáveis do modelo no cabeçote, kBoneFloats por osso: [0] nó,
+    /// [1] posição (na lista) do osso pai ou −1, [2..4] rotação da pose X/Y/Z °,
+    /// [5] canais com keyframe (bits), [6] key no cabeçote (0/1), [7..8] posição
+    /// na tela (px da composição, a vista da cena 3D quando ligada), [9] na
+    /// frente da câmera. Devolve os floats necessários (capacity 0 = medir).
+    static constexpr u32 kBoneFloats = 10;
+    u32 query_model_bones(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Dedo na cena: gira o osso como uma trackball (dx, dy em px da
+    /// composição; twist em graus em volta do olhar). Osso com keyframe grava
+    /// keyframe no cabeçote; sem, muda a pose parada. `continuing` = mesmo gesto.
+    bool drag_bone(u64 layerId, u32 node, f32 dxPx, f32 dyPx, f32 twistDeg, bool continuing) noexcept;
+    /// Marca/tira keyframe do osso no cabeçote (node < 0 = todos os ossos, como
+    /// o "inserir keyframe" do Blender). 1 marcou, 0 tirou, −1 fora da camada.
+    i32 toggle_bone_key(u64 layerId, i32 node) noexcept;
+    /// Volta o osso (node < 0 = todos) à pose do arquivo: apaga as trilhas.
+    bool reset_bone_pose(u64 layerId, i32 node) noexcept;
+    u32 add_model_cameras(u64 layer) noexcept;
+    /// Põe um efeito de PARTE (Animar parte 3D, Esconder partes 3D, Trocar
+    /// textura 3D) na camada 3D já apontando para a parte `part` (0 = a 1ª;
+    /// no Esconder, primeira = última = ela). Um passo de desfazer. Devolve
+    /// o id do efeito.
+    [[nodiscard]] Result<u32> add_part_effect(u64 layer, u32 effectType, u32 part) noexcept;
     /// Fonte da camada de texto: família/peso/itálico e, se importada, o arquivo.
     bool set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept;
     /// Estilo de parágrafo (18 floats): modo da caixa, largura, altura, fundo
@@ -766,6 +828,8 @@ public:
     [[nodiscard]] Status real_camera_sample(const f32* pose16, u64 timestampNs,
                                           bool positional, f32 sensitivity, bool inverted) noexcept;
     [[nodiscard]] Status real_camera_recenter() noexcept;
+    /// Andar (m/s, + frente) e profundidade (× do deslocamento frente/trás do AR).
+    [[nodiscard]] Status real_camera_walk(f32 metersPerSecond, f32 depthScale) noexcept;
     /// Tracking is lost: record the last valid virtual pose as a constant.
     [[nodiscard]] Status real_camera_hold() noexcept;
     void real_camera_stop() noexcept;
@@ -780,8 +844,10 @@ public:
     /// frame 36×24, altura 24 mm), [2] DOF ligado, [3] distância de foco (px do
     /// mundo), [4] abertura (f/), [5] força do desfoque (×), [6] px por metro
     /// da cena, [7] máscara de trilhas com keyframe (bit 0 mm, 1 foco,
-    /// 2 abertura, 3 desfoque), [8] câmera ativa. Falso = não é câmera.
-    [[nodiscard]] bool query_camera_lens(u64 layer, f32* values) noexcept;
+    /// 2 abertura, 3 desfoque), [8] câmera ativa. Capacity >= 10 also returns
+    /// [9] whether the camera projects visual layers below it (Timeline v47).
+    /// The default capacity preserves existing nine-value callers.
+    [[nodiscard]] bool query_camera_lens(u64 layer, f32* values, u32 capacity = 9) noexcept;
     /// Pick Focus: distância AO LONGO DO EIXO ÓTICO da câmera `layer` até a
     /// superfície 3D sob o ponto (px da composição), com o raio da câmera
     /// ativa (a que o palco mostra). Só mede; a UI grava com
@@ -828,6 +894,27 @@ public:
     /// easing de cada trecho espelhado — duas vezes volta exatamente ao que era.
     /// Com o remapeamento desligado, liga antes (curva = o tempo de agora).
     bool reverse_time_remap(u64 layerId) noexcept;
+    /// Gráfico de velocidade (painel de velocidade, 0.1.8). `out` = {nº de
+    /// amostras S, nº de chaves K, início e fim locais da camada, cabeçote
+    /// local, modo (0 constante, 1 curva de velocidade, 2 remapeamento),
+    /// velocidade no cabeçote (×), quadro da fonte no cabeçote (quadros da
+    /// composição)}; depois S velocidades (×) igualmente espaçadas do início
+    /// ao fim (no remapeamento, a inclinação da curva de tempo) e K×3 (tempo
+    /// local, velocidade, interpolação) das chaves de VELOCIDADE.
+    u32 query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats) noexcept;
+    /// Curva de velocidade pronta (desliga o remapeamento): chaves de
+    /// VELOCIDADE suaves com a MESMA quantidade de fonte que o clipe mostra
+    /// agora (a barra não muda). 0 plana, 1 montagem, 2 herói, 3 bala,
+    /// 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar as chaves que
+    /// existem, 8 tirar a curva (volta à velocidade constante média).
+    bool apply_speed_curve(u64 layerId, u32 preset) noexcept;
+    /// Chave de velocidade pelo gráfico: `index` < 0 insere em `localFrame`
+    /// com a velocidade que a curva já tem ali (nada muda até mover); senão
+    /// move (tempo preso entre as vizinhas) e muda a velocidade (×, 0,05…16).
+    /// `interp` < 0 mantém. Devolve o índice da chave, ou −1.
+    i32 edit_speed_key(u64 layerId, i32 index, i64 localFrame, f32 speed, i32 interp) noexcept;
+    /// Apaga uma chave de velocidade (a última que sobra vira velocidade constante).
+    bool remove_speed_key(u64 layerId, u32 index) noexcept;
     /// Manter o tom do áudio quando a fonte não anda a 1× (Layer::keepPitch).
     bool set_keep_pitch(u64 layerId, bool on) noexcept;
 
@@ -1185,6 +1272,10 @@ public:
     /// A bola de um material pronto do texto 3D (0..6, a mesma ordem de
     /// apply_text3d_material_preset). Não depende do projeto.
     bool text3d_preset_preview(u32 preset, u32 size, std::vector<u8>& outRgba) noexcept;
+    /// Aplica o material pronto do Texto 3D. Metal (Cromo, Ouro, Escovado, Metal
+    /// cinemático) numa cena sem estúdio nem HDRI liga o "Estúdio cromado": sem
+    /// ele o metal só refletia o degradê analítico e ficava chapado.
+    bool apply_text3d_preset(u64 layerId, u32 preset) noexcept;
 
     // --- Pré-composição ----------------------------------------------------------
     /// Move as camadas para uma composição nova (mesmo tamanho, taxa e
@@ -1762,6 +1853,9 @@ private:
     /// Divide o orçamento de memória pelas categorias. Chamado na subida e de
     /// novo quando a GPU real chega e muda o orçamento.
     void apply_memory_budgets() noexcept;
+    /// Orçamento do processo: o configurado, senão o medido, preso pelo teto
+    /// do aparelho (`memoryBudgetCapBytes`) e pelo espaço de endereços.
+    [[nodiscard]] u64 process_budget_bytes() const noexcept;
     /// Maior lado de textura aceito ao importar modelo 3D — e o MESMO ao
     /// reabrir, senão o quadro muda entre importar e reabrir o projeto.
     [[nodiscard]] u32 model_texture_cap() const noexcept;
@@ -1895,7 +1989,7 @@ private:
         u64 session = 0;
         std::unordered_map<u64, Asset> assets;
         std::unordered_map<u64, std::shared_ptr<const Composition>> compositions;
-        std::unordered_map<u64, ImagePixels> images;
+        std::unordered_map<u64, std::shared_ptr<const ImagePixels>> images;
         std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models;
         std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris;
         std::unordered_map<u64, std::shared_ptr<const CubeLut>> luts;
@@ -1926,7 +2020,12 @@ private:
         std::vector<LayerAnimator> layerAnimators;   ///< animadores de camada copiados
         std::vector<Track> layerAnimTracks;          ///< trilhas deles (effectIndex = posição na cópia)
     } clipboard_;
-    std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado
+    /// Por AssetId empacotado. Pixels IMUTÁVEIS e compartilhados: trocar uma
+    /// imagem cria outro objeto. O export (snapshot offline), o colar e a
+    /// recuperação seguram ponteiros, não cópias — copiar todas as fotos do
+    /// projeto na largada do export estourava o orçamento ("erro 9") em
+    /// projetos com muitas imagens.
+    std::unordered_map<u64, std::shared_ptr<const ImagePixels>> images_;
     /// Modelos 3D carregados, por AssetId. Um por asset, qualquer número de
     /// layers (ModelInstance) apontando para ele.
     std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models_;
@@ -1993,6 +2092,10 @@ private:
     i64 previewBufferStart_ = 0;
     u64 previewBufferSince_ = 0;
     u32 previewBufferReady_ = 0, previewBufferTarget_ = 0;
+    /// Quadros perdidos até o último Play e se a reprodução anterior engasgou
+    /// (a pré-render do próximo Play prepara mais quadros).
+    u32 previewDroppedAtPlay_ = 0;
+    bool previewStuttered_ = false;
     std::atomic<u32> previewBufferStatus_{0};
     u32  lastRenderedRevision_ = 0;           ///< modelRevision_ do último frame desenhado
     u32  incompleteRetries_ = 0;              ///< quadros seguidos com camada pendente

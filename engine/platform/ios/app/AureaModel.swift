@@ -405,8 +405,10 @@ final class AureaModel: ObservableObject {
             _ = saveProject(writeThumbnail: false)
             upscaleStage = .idle
             exportOptions = ExportOptions()
-            exportOptions.aiUpscale = factor
-            exportOptions.shortSide = min(w, h) * factor
+            // Encoder de celular vai até 4K: 4x de um 1080p (8K) sai em 2x (4K).
+            let effective = factor == 4 && min(w, h) * 4 > 2160 ? 2 : factor
+            exportOptions.aiUpscale = UInt32(effective)
+            exportOptions.shortSide = min(w, h) * UInt32(effective)
             exportOptions.trimToContent = true
             startExport()
             // O fim do export vira "pronto" para a tela (ela observa exportedURL).
@@ -821,6 +823,7 @@ final class AureaModel: ObservableObject {
             var faceProbe: [String: Any] = [:]
             var homeScrollProbe: [String: Any] = [:]
             var hdriProbe: [String: Any] = [:]
+            var projectProbe: [String: Any] = [:]
             if scene == "home-scroll", started {
                 homeScrollProbe = await prepareParityHomeScroll()
             } else if scene == "android-hdri", started {
@@ -856,27 +859,27 @@ final class AureaModel: ObservableObject {
                         panel = .dock; seek(toFrame: 0); setLooping(true); toggleRawPlayback()
                     }
                 }
-            } else if ["video-move", "playback-stress", "clip-edit", "keyflow-video-text-export"].contains(scene), started {
+            } else if ["video-move", "playback-stress", "clip-edit", "video-text-export"].contains(scene), started {
                 // Reuse the real H.264 export fixture, then import through the
                 // production decoder. The UI test operates only the visible dock.
                 _ = newProject(width: 1920, height: 1080, fps: 30, title: "Parity viewport")
                 exportProbe = await ParityExportProbe.run(engine: engine, documents: AureaPaths.documents)
                 if exportProbe["passed"] as? Bool == true,
                    let movie = exportProbe["movieFile"] as? String,
-                   newProject(width: scene == "keyflow-video-text-export" ? 1920 : 640,
-                              height: scene == "keyflow-video-text-export" ? 1080 : 360,
+                   newProject(width: scene == "video-text-export" ? 1920 : 640,
+                              height: scene == "video-text-export" ? 1080 : 360,
                               fps: 30, title: "Video dock move") {
                     let layer = engine.importVideo(AureaPaths.documents.appendingPathComponent(movie).path, name: "Dock move video")
                     if layer >= 0 {
                         if let compositionID = (engine.composition()?[AureaCompositionId] as? NSNumber)?.uint64Value {
-                            engine.setComposition(compositionID, duration: ["playback-stress", "keyflow-video-text-export"].contains(scene) ? 30 : 180)
+                            engine.setComposition(compositionID, duration: ["playback-stress", "video-text-export"].contains(scene) ? 30 : 180)
                         }
                         if scene == "clip-edit" {
                             engine.setLayer(layer, startFrame: 0, endFrame: 15, offsetFrames: 5, setOffset: true)
                         }
                         refreshModel(force: true); enterEditor(); select(layerId: layer, additive: false)
                         panel = .dock; seek(toFrame: scene == "video-move" ? 60 : 0)
-                        if scene == "keyflow-video-text-export" {
+                        if scene == "video-text-export" {
                             let text = engine.addText("AUREA VIDEO WITH TEXT")
                             if text >= 0 {
                                 engine.setLayer(text, startFrame: 0, endFrame: 30, offsetFrames: 0, setOffset: true)
@@ -936,7 +939,10 @@ final class AureaModel: ObservableObject {
                     }
                 }
             } else if scene != "home", started {
-                _ = newProject(width: 1920, height: 1080, fps: 30, title: "Project 1")
+                let fixtureTitle = scene == "project-roundtrip-v47"
+                    ? "V47 UI roundtrip " + String((ProcessInfo.processInfo.environment["AUREA_UI_TEST_RUN_ID"] ?? UUID().uuidString).prefix(8))
+                    : "Project 1"
+                _ = newProject(width: 1920, height: 1080, fps: 30, title: fixtureTitle)
                 if scene != "editor-empty" {
                     switch scene {
                     case "text-2d": addText(); textContentRequest = nil; panel = .text
@@ -1059,10 +1065,10 @@ final class AureaModel: ObservableObject {
                             engine.setLayerMotionBlurLength(1.25, forLayer: id)
                             refreshModel(force: true); transformTab = 5; panel = .transform
                         }
-                    case "motion-blur-export", "keyflow-simple-text", "keyflow-multiple-exports":
+                    case "motion-blur-export", "simple-text-export", "multiple-text-exports":
                         let id = engine.addText("AUREA MOTION BLUR")
                         if id >= 0 {
-                            let frames: Int32 = scene == "keyflow-multiple-exports" ? 12 : 60
+                            let frames: Int32 = scene == "multiple-text-exports" ? 12 : 60
                             if scene == "motion-blur-export" { _ = engine.applyTextPreset(id, preset: 11) }
                             engine.run {
                                 $0.setMotionBlur(scene == "motion-blur-export", forLayer: id)
@@ -1169,6 +1175,26 @@ final class AureaModel: ObservableObject {
                     if scene == "mask" { addMask(1); panel = .mask }
                 }
                 _ = saveProject(writeThumbnail: true)
+                if scene == "project-roundtrip-v47", let url = projectURL {
+                    // Read our own native writer's header. The UI test then
+                    // leaves the editor and reopens this actual file from Home.
+                    let bytes = (try? Data(contentsOf: url)) ?? Data()
+                    let version = bytes.count >= 8 ? Int(bytes[4]) | (Int(bytes[5]) << 8) : -1
+                    var loadError: NSString? = "stale fixture error"
+                    var loadCode: Int32 = -99
+                    let missing = url.deletingLastPathComponent().appendingPathComponent("missing-\(UUID().uuidString).aurea")
+                    let missingOpened = engine.loadProject(missing.path, error: &loadError, code: &loadCode)
+                    projectProbe = ["formatVersion": version,
+                        "missingRejected": !missingOpened,
+                        "missingCode": Int(loadCode),
+                        "missingDetail": loadError as String? ?? ""]
+                    loadError = "stale fixture error"; loadCode = -99
+                    let opened = engine.loadProject(url.path, error: &loadError, code: &loadCode)
+                    projectProbe["reopened"] = opened
+                    projectProbe["successClearedError"] = opened && loadError == nil && loadCode == 0
+                    refreshModel(force: true)
+                    if let id = layers.first?.id { select(layerId: id, additive: false) }
+                }
             }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             var frameWidth: UInt32 = 0, frameHeight: UInt32 = 0
@@ -1191,6 +1217,7 @@ final class AureaModel: ObservableObject {
                 "faceProbe": faceProbe,
                 "homeScrollProbe": homeScrollProbe,
                 "hdriProbe": hdriProbe,
+                "projectProbe": projectProbe,
                 "precompProbe": precompProbe, "precompDepth": engine.precompDepth,
                 "reopenedEditedProject": reopenedEditedProject,
                 "uiTestRunID": ProcessInfo.processInfo.environment["AUREA_UI_TEST_RUN_ID"] ?? ""]
@@ -1484,7 +1511,9 @@ final class AureaModel: ObservableObject {
         lifecycleQueue.async { [weak self] in
             lifecycleEngine.resume()
             lifecycleEngine.invalidate()
-            DispatchQueue.main.async { self?.refreshModel(force: true) }
+            DispatchQueue.main.async {
+                self?.refreshModel(force: true)
+            }
         }
     }
 
@@ -1817,6 +1846,10 @@ final class AureaModel: ObservableObject {
         if !NSDictionary(dictionary: nextDetail).isEqual(to: detail) { detail = nextDetail }
         let nextLens: [Float] = selectedLayer?.kind == 8 ? engine.cameraLens(layerId).map(\.floatValue) : []
         if nextLens != cameraLens { cameraLens = nextLens }
+        // Pose do rig 3D (0.1.8): ossos do modelo escolhido na Cena 3D.
+        let nextBones: [Float] = sceneEditor && selectedLayer?.kind == 10 ? engine.modelBones(layerId).map(\.floatValue) : []
+        if nextBones != poseBones { poseBones = nextBones }
+        if poseBones.isEmpty && (rigPoseMode || poseBone >= 0) { rigPoseMode = false; poseBone = -1 }
         if panel == .mask || panel == .vector { refreshMasks() }
         if let effectId = selectedEffectId {
             loadParams(layerId: layerId, effectId: effectId)
@@ -1944,6 +1977,14 @@ final class AureaModel: ObservableObject {
         engine.run { $0.togglePlayback() }
         status.playing = status.playing == 0 ? 1 : 0
         followPlayback(status.playing != 0)
+    }
+
+    /// Toca a partir do cabeçote (o "Gravar voz" narra com o vídeo andando).
+    func play() {
+        pendingPlayhead = nil
+        engine.run { $0.play() }
+        status.playing = 1
+        followPlayback(true)
     }
 
     /// Pause explicitly even if the last UI snapshot has not caught up yet.
@@ -2417,8 +2458,11 @@ final class AureaModel: ObservableObject {
         mediaCreationRequest = UUID()
         openingProject = true
         defer { openingProject = false }
-        guard engine.loadProject(project.url.path) else {
-            toast = AureaText.t("msg_nao_foi_possivel_abrir_o_projeto", "")
+        var loadError: NSString?
+        var loadCode: Int32 = 0
+        guard engine.loadProject(project.url.path, error: &loadError, code: &loadCode) else {
+            let reason = AureaEngineText.reason(loadError as String?, code: Int(loadCode))
+            toast = AureaText.t("msg_nao_foi_possivel_abrir_o_projeto", reason)
             return
         }
         projectURL = project.url
@@ -2756,6 +2800,44 @@ final class AureaModel: ObservableObject {
         }
     }
 
+    /// "Gravar voz" (VoiceRecorder.swift): a narração já nasceu em Media/, então
+    /// não há cópia — entra pelo MESMO `importAudio` (desfazer, waveform e export
+    /// de sempre), com o nome "Voz N". O motor põe a camada no cabeçote; como a
+    /// timeline pode ter tocado junto, o cabeçote volta antes ao quadro onde a
+    /// gravação começou (um passo de desfazer só). Falhou: o arquivo sai.
+    /// Par do Android: `EditorStore.importVoiceRecording`.
+    func importVoiceRecording(_ url: URL, atFrame frame: Int64, interrupted: Bool) {
+        guard started, !importingMedia else {
+            try? FileManager.default.removeItem(at: url)
+            toast = AureaText.t(importingMedia ? "ios_importing_media" : "voice_save_failed")
+            return
+        }
+        pause()
+        seek(toFrame: frame)
+        let name = VoiceTake.nextName(prefix: AureaText.t("voice_layer_prefix"), existing: layers.map(\.name))
+        operationMessage = AureaText.t("voice_saving")
+        importingMedia = true
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            // O `import_audio` drena a fila (pausa + seek) antes de ler o cabeçote.
+            let result = importer.importAudio(url.path, name: name)
+            let raw = result < 0 ? importer.lastImportError : ""
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if result < 0 {
+                    try? FileManager.default.removeItem(at: url)
+                    self.toast = raw.isEmpty ? AureaText.t("voice_save_failed") : AureaEngineText.sentence(raw, code: Int(-result))
+                    return
+                }
+                self.engine.selectLayers([NSNumber(value: result)]); self.selection = [result]
+                self.refreshModel(force: true)
+                _ = self.saveProject(writeThumbnail: false)
+                self.toast = AureaText.t(interrupted ? "voice_interrupted" : "voice_saved")
+            }
+        }
+    }
+
     /// HDRI que não entrou: o código do motor (Errc) vira a frase do motivo —
     /// a mesma tabela do EditorStore.hdriErrorText no Android.
     static func hdriFailure(code: Int64) -> String? {
@@ -2964,6 +3046,8 @@ final class AureaModel: ObservableObject {
             let result = self.runModelImport(importer, path: request.path, name: request.name, quality: quality)
             let failure = result < 0 ? Self.modelImportFailure(importer, code: result) : ""
             let missing = result < 0 ? [] : importer.modelMissingTextures(result)
+            // Câmeras do arquivo já entraram na timeline (0.1.8): o olho da camada liga/desliga.
+            let cameras = result < 0 ? 0 : importer.modelCameraCount(result)
             let report = importer.lastModelImport().map { $0.int64Value }
             if result < 0 { try? FileManager.default.removeItem(at: request.folder) }
             DispatchQueue.main.async {
@@ -2972,6 +3056,7 @@ final class AureaModel: ObservableObject {
                 self.engine.selectLayers([NSNumber(value: result)]); self.selection = [result]
                 self.refreshModel(force: true)
                 if !missing.isEmpty { self.promptModelTextures(layer: result, names: missing) }
+                else if cameras > 0 { self.toast = AureaText.t("model3d_cameras_added", Int(cameras)) }
                 else if quality != 0, report.count >= 2, report[0] > report[1] {
                     self.toast = AureaText.t("model3d_optimized_toast", Self.modelCount(report[0]), Self.modelCount(report[1]))
                 }
@@ -3457,6 +3542,12 @@ final class AureaModel: ObservableObject {
     }
 
     @Published var sceneEditor = false
+    /// Pose do rig 3D (0.1.8): ossos do modelo, modo de pose e o osso escolhido (nó; −1 = nenhum).
+    @Published var poseBones: [Float] = []
+    @Published var rigPoseMode = false
+    @Published var poseBone: Int32 = -1
+    /// O arrasto de osso em curso já abriu o passo de desfazer (o resto vai junto).
+    var poseGestureSent = false
     @Published var sceneYaw: Float = -30
     @Published var scenePitch: Float = 20
     @Published var sceneDistance: Float = 3
@@ -3599,6 +3690,8 @@ final class AureaModel: ObservableObject {
     static let cameraLensFocus: UInt32 = 2
     static let cameraLensAperture: UInt32 = 3
     static let cameraLensBlur: UInt32 = 4
+    /// A câmera afeta as camadas 2D abaixo dela (0/1).
+    static let cameraAffectsBelow: UInt32 = 7
 
     /// Trilha animável de um parâmetro da lente (`aurea::TrackProperty`; DOF ligado não anima).
     func cameraLensTrack(_ param: UInt32) -> UInt32? {
@@ -5348,6 +5441,46 @@ extension AureaModel {
     }
 
     /// Os 9 canais da parte no cabeçote (posição, rotação °, escala) + bits de keyframe.
+    // MARK: Pose do rig 3D (0.1.8) — RigPoseStage.kt
+    /// Floats por osso de `Engine::query_model_bones`.
+    static let boneFloats = 10
+    var rigPoseActive: Bool { sceneEditor && rigPoseMode && selection.count == 1 && !poseBones.isEmpty }
+    func setRigPose(_ on: Bool) {
+        rigPoseMode = on && !poseBones.isEmpty
+        if !rigPoseMode { poseBone = -1 }
+    }
+    func choosePoseBone(_ node: Int32) { poseBone = node }
+    /// Junta mais perto (px da composição) dentro de `reach`: o NÓ do osso, ou −1.
+    func pickPoseBone(_ point: SIMD2<Float>, reach: Float) -> Int32 {
+        var best = reach, hit: Int32 = -1
+        let f = Self.boneFloats
+        for i in 0..<(poseBones.count / f) where poseBones[i * f + 9] > 0.5 {
+            let d = hypot(point.x - poseBones[i * f + 7], point.y - poseBones[i * f + 8])
+            if d < best { best = d; hit = Int32(poseBones[i * f]) }
+        }
+        return hit
+    }
+    /// Dedo na cena: gira o osso escolhido (px da composição; twist em graus).
+    func dragPoseBone(dx: Float, dy: Float, twist: Float) {
+        guard let id = primarySelection, poseBone >= 0 else { return }
+        if engine.dragBone(id, node: poseBone, dx: dx, dy: dy, twist: twist, continuing: poseGestureSent) { poseGestureSent = true }
+        refreshSelectedLayer(refreshEffectStack: false)
+    }
+    func endPoseGesture() { poseGestureSent = false }
+    func togglePoseKey(all: Bool) {
+        guard let id = primarySelection else { return }
+        let node: Int32 = all ? -1 : poseBone
+        guard all || node >= 0 else { return }
+        if engine.toggleBoneKey(id, node: node) < 0 { toast = AureaText.t("shape3d_key_outside") }
+        refreshModel(force: true)
+    }
+    func resetPose(all: Bool) {
+        guard let id = primarySelection else { return }
+        _ = engine.resetBonePose(id, node: all ? -1 : poseBone)
+        unaliasThumbs(id)
+        refreshModel(force: true)
+    }
+
     func shapePartValues(_ id: Int64, part: Int) -> [Float]? {
         let p = engine.shape3DParts(id).map(\.floatValue)
         let o = part * Shape3DState.partFloats
@@ -5394,7 +5527,24 @@ extension AureaModel {
     /// Imagem da galeria na parte (−1 = a forma inteira): normalizada (EXIF,
     /// HEIC → JPEG/PNG, até 2048 px) e gravada em Documentos/formas3d — o
     /// projeto guarda o caminho relativo.
-    func setShapePartImage(_ id: Int64, part: Int, url: URL, textTexture: Bool = false) {
+    /// Efeito de parte 3D já apontando para a parte `part` (0 = a 1ª); par do
+    /// Android (EditorStore.addPartEffect). false = não entrou (avisa).
+    @discardableResult
+    func addPartEffect(_ key: String, part: Int) -> Bool {
+        guard let id = primarySelection else { return false }
+        commitPendingCommands()
+        let fx = engine.addPartEffect(fxEffectTypeId(key), part: UInt32(max(0, part)), forLayer: id)
+        refreshModel(force: true)
+        if fx < 0 { toast = AureaText.t("fx3d_add_failed"); return false }
+        return true
+    }
+
+    /// A imagem do "Trocar textura 3D": a mesma cópia reduzida da imagem das partes.
+    func setEffectImage(_ id: Int64, effect: UInt32, url: URL) {
+        setShapePartImage(id, part: 0, url: url, effect: effect)
+    }
+
+    func setShapePartImage(_ id: Int64, part: Int, url: URL, textTexture: Bool = false, effect: UInt32? = nil) {
         guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
         importingMedia = true
         operationMessage = AureaText.t("ios_importing_media")
@@ -5419,7 +5569,8 @@ extension AureaModel {
                 }
             }
             let ok = path.map { file in
-                textTexture ? engine.setText3D(forLayer: id, property: "texturePath", stringValue: file, numberValue: 0)
+                if let effect { return engine.setEffectImage(file, effect: effect, forLayer: id) }
+                return textTexture ? engine.setText3D(forLayer: id, property: "texturePath", stringValue: file, numberValue: 0)
                     : engine.setShape3DPartStyle(id, part: Int32(part), color: nil, image: file)
             } ?? false
             if !ok, let path { try? FileManager.default.removeItem(atPath: path) }

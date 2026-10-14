@@ -84,7 +84,8 @@ f32 clip_time(const Animation& clip, f64 layerSeconds) noexcept {
     return static_cast<f32>(t);
 }
 
-void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWorkspace* workspace) {
+void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWorkspace* workspace,
+                   const BoneOffset* offsets, usize offsetCount) {
     const usize n = asset.nodes.size();
     PoseWorkspace temporary;
     // A pathological hierarchy must not permanently inflate the next project's
@@ -123,6 +124,13 @@ void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWork
                 }
             }
         }
+    }
+    // Pose do usuário (rig posado na cena 3D): por cima da animação, no
+    // espaço local da junta — filhos e matrizes de junta acompanham.
+    for (usize i = 0; offsets && i < offsetCount; ++i) {
+        const i32 node = offsets[i].node;
+        if (node < 0 || node >= static_cast<i32>(n)) continue;
+        rot[static_cast<usize>(node)] = (rot[static_cast<usize>(node)] * offsets[i].rotation).normalized();
     }
     // Mundo: pais antes de filhos, a partir das raízes (mesma ordem do repouso).
     out.nodeWorld.assign(n, Mat4::identity());

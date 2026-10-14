@@ -640,7 +640,12 @@ enum ParityExportProbe {
                 let obj = documents.appendingPathComponent("astra-owned-triangle.obj")
                 try "o OwnedTriangle\nv -1 -1 0\nv 1 -1 0\nv 0 1 0\nf 1 2 3\n".write(to: obj, atomically: true, encoding: .utf8)
                 for (index, file) in ["DamagedHelmet.glb", "Fox.glb", "animated-character.fbx", obj.lastPathComponent].enumerated() {
-                    let layer = engine.importModel(documents.appendingPathComponent(file).path, name: "Offline imported \(file)")
+                    // This fixture stresses geometry, blur and frame delivery.
+                    // Original texture restoration exceeded the measured source
+                    // budget on the CI simulator; authored balanced quality is
+                    // explicit rather than silently weakening Original exports.
+                    let layer = engine.importModel(documents.appendingPathComponent(file).path,
+                                                   name: "Offline imported \(file)", quality: 1)
                     guard layer >= 0 else { throw Failure(message: "Offline \(file) import failed") }
                     engine.setLayer(layer, startFrame: 0, endFrame: Int32(frames), offsetFrames: 0, setOffset: true)
                     engine.setScale(forLayer: layer, x: 0.5, y: 0.5, z: 0.5)
@@ -671,9 +676,14 @@ enum ParityExportProbe {
             guard engine.saveProject(project.path) else { throw Failure(message: "Offline fixture commands did not drain") }
             var running = false
             do {
-                guard engine.startExport(to: movie.path, codec: .h264, height: UInt32(height), fps: 30,
-                                         bitrateMbps: 4, audioBitrateKbps: 128) else {
-                    throw Failure(message: "Offline \(name) export could not start")
+                let startup = engine.startExportChecked(to: movie.path, codec: .h264, height: UInt32(height), fps: 30,
+                    bitrateMbps: 4, audioBitrateKbps: 128, aiUpscale: 0, trimToContent: false, quality: 1, safeMode: 0)
+                guard startup == 0 else {
+                    throw Failure(message: "Offline \(name) export could not start (code \(startup))",
+                                  details: ["fixture": name, "startupCode": startup,
+                                            "modelImportQuality": heavy ? 1 : -1,
+                                            "exportDiagnosticsJSON": engine.exportDiagnostics(),
+                                            "perf": engine.perf()])
                 }
                 running = true
                 let deadline = ProcessInfo.processInfo.systemUptime + 1800
@@ -703,6 +713,7 @@ enum ParityExportProbe {
                 }
                 var result: [String: Any] = ["name": name, "passed": true, "exportProgress": progress,
                                            "decoded": decoded.dictionary, "movieFile": movie.lastPathComponent]
+                if heavy { result["modelImportQuality"] = ["value": 1, "name": "Balanced"] }
                 if !heavy {
                     result["decodedAudio"] = try await Task.detached(priority: .utility) {
                         try await decodeAudio(movie: movie, seconds: 120)

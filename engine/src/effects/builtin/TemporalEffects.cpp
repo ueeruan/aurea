@@ -19,6 +19,9 @@
 // =============================================================================
 #include "BuiltinEffects.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace aurea::builtin {
 namespace {
 
@@ -53,6 +56,72 @@ public:
         if (step <= 1.0) return localFrame;   // já é mais lento que o pedido
         const f64 v = static_cast<f64>(localFrame) / step;
         return static_cast<i64>((hold ? std::floor(v) : std::round(v)) * step);
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Low FPS: o Posterizar com cara de stop-motion. O RENDERER trava o tempo da
+// camada (o mesmo gancho do Posterizar, com o ritmo irregular); aqui só o
+// TREMIDO: um deslocamento e um giro sorteados por quadro segurado, como a
+// câmera na mão de uma animação quadro a quadro.
+// -----------------------------------------------------------------------------
+f32 low_fps_hash(i64 k, f32 seed) noexcept {
+    const f64 x = std::sin(static_cast<f64>(k) * 12.9898 + static_cast<f64>(seed) * 78.233) * 43758.5453;
+    return static_cast<f32>(x - std::floor(x));
+}
+class LowFps final : public Effect {
+public:
+    enum : u32 { kFrameRate = 0, kJitter, kJitterRotation, kIrregular, kSeed };
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kLowFps, "Low FPS", "Tempo", EffectClass::Neighborhood};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("frame_rate", "Quadros por segundo", 12.0f, 1.0f, 60.0f, kParamAnimatable, "fps");
+        p.add_float("jitter", "Tremido", 3.0f, 0.0f, 200.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("jitter_rotation", "Tremido do giro", 0.6f, 0.0f, 45.0f, kParamAnimatable, "°");
+        p.add_float("irregular", "Ritmo irregular", 25.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("seed", "Semente", 0.0f, 0.0f, 9999.0f, kParamAnimatable);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.f(kJitter) <= 0.001f && e.f(kJitterRotation) <= 0.001f;
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override { return std::max(0.f, e.f(kJitter)) + 2.f; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_affine_resample_frag, work));
+    }
+    /// O quadro segurado em que o instante (já travado pelo renderer) está.
+    static i64 held_index(f64 localFrame, f64 compFps, f32 targetFps) noexcept {
+        const f64 step = compFps / std::max<f64>(targetFps, 0.01);
+        return step > 1.0 ? static_cast<i64>(std::floor(localFrame / step + 1e-6)) : static_cast<i64>(std::floor(localFrame));
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin, LayerImage& out) const override {
+        const f64 fps = e.framesPerSecond > 0 ? e.framesPerSecond : 30.0;
+        const i64 k = held_index(e.time_frames(), fps, e.f(kFrameRate));
+        const f32 seed = e.f(kSeed);
+        const f32 jitter = std::max(0.f, e.f(kJitter));
+        const Vec2 t{(low_fps_hash(k, seed) * 2 - 1) * jitter, (low_fps_hash(k + 7919, seed) * 2 - 1) * jitter};
+        const f32 angle = (low_fps_hash(k + 104729, seed) * 2 - 1) * e.f(kJitterRotation) * kDeg2Rad;
+        const f32 w = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
+        const f32 h = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
+        const Vec2 c{w * .5f, h * .5f};
+        const Rect o = spread_region(input.region, jitter + 2, jitter + 2, e.placement, margin);
+        u32 ow = 0, oh = 0;
+        ctx.region_size(o, input.texel_scale_x(), ow, oh);
+        if (!ow || !oh) { out = input; return OkStatus; }
+        // uv de entrada = Rinv · (px da saída − centro − tremido) + centro, em uv da entrada.
+        const f32 cs = std::cos(angle), sn = std::sin(angle);
+        const Rect& i = input.region;
+        const f32 bx = o.x - c.x - t.x, by = o.y - c.y - t.y;
+        struct { Vec4 row0, row1, params; } u{};
+        u.row0 = {cs * o.w / i.w, sn * o.h / i.w, (cs * bx + sn * by + c.x - i.x) / i.w, 0};
+        u.row1 = {-sn * o.w / i.h, cs * o.h / i.h, (-sn * bx + cs * by + c.y - i.y) / i.h, 0};
+        u.params = {1, 0, 0, 0};
+        out = LayerImage{ctx.texture("low-fps", ow, oh), o, ow, oh};
+        if (ctx.fullscreen_pass("low-fps", PassStage::Effects, out.texture, ShaderId::effects_affine_resample_frag,
+                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}}, &u, sizeof(u)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        return OkStatus;
     }
 };
 
@@ -131,6 +200,7 @@ public:
 
 void register_temporal_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<PosterizeTime>());
+    (void)r.add(std::make_unique<LowFps>());
     (void)r.add(std::make_unique<TimeWarpRgb>());
     (void)r.add(std::make_unique<TimeRemapEffect>());
 }

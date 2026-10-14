@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Efeitos 3D do pedido de beta de 12/10/2026 (Object3DEffects.cpp) e o painel 3D enxuto. -->
+    <string name="fx3d_name_part_transform">Animar parte 3D</string>
+    <string name="fx3d_name_part_hide">Esconder partes 3D</string>
+    <string name="fx3d_name_part_texture">Trocar textura 3D</string>
+    <string name="fx3d_name_shatter">3D Shatter</string>
+    <string name="fx3d_name_stroke">3D Stroke</string>
+    <string name="fx3d_desc_part_transform">Move, gira e muda o tamanho de uma parte do objeto 3D, com keyframes.</string>
+    <string name="fx3d_desc_part_hide">Some ou esmaece partes do objeto 3D (de uma parte até outra).</string>
+    <string name="fx3d_desc_part_texture">Cobre uma parte do objeto 3D (ou todas) com uma imagem da galeria.</string>
+    <string name="fx3d_desc_shatter">Quebra a camada em pedaços com espessura que explodem em 3D.</string>
+    <string name="fx3d_desc_stroke">Traço animado em 3D ao longo das máscaras da camada ou de uma forma pronta.</string>
+    <string name="fx3d_env_background">Fundo</string>
+    <string name="fx3d_env_floor">Chão</string>
+    <string name="fx3d_parts_hint">Escolha a parte e toque num efeito: ele já entra apontando para ela. Os ajustes e keyframes ficam em Efeitos.</string>
+    <string name="fx3d_part_n">Parte %1$d</string>
+    <string name="fx3d_image_pick">Escolher imagem</string>
+    <string name="fx3d_image_none">Nenhuma imagem</string>
+    <string name="fx3d_effect_added">Efeito adicionado — ajuste em Efeitos</string>
+    <string name="fx3d_add_failed">Este efeito só funciona num objeto 3D desbloqueado.</string>
+</resources>

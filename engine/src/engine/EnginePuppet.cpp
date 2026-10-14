@@ -91,7 +91,7 @@ void Engine::puppet_layer_size(const Layer& l, f32& w, f32& h) const noexcept {
     const Asset* a = project_ ? project_->asset(l.source) : nullptr;
     if (l.kind == LayerKind::Image) {
         const auto it = images_.find(l.source.pack());
-        if (it != images_.end()) { w = static_cast<f32>(it->second.width); h = static_cast<f32>(it->second.height); }
+        if (it != images_.end() && it->second) { w = static_cast<f32>(it->second->width); h = static_cast<f32>(it->second->height); }
     } else if (l.kind == LayerKind::Video && a) {
         w = static_cast<f32>(a->video.width);
         h = static_cast<f32>(a->video.height);
@@ -130,8 +130,8 @@ bool Engine::puppet_capture_outline(const Composition& comp, const Layer& l, Fra
     }
     if (l.kind != LayerKind::Image) return false;
     const auto it = images_.find(l.source.pack());
-    if (it == images_.end()) return false;
-    const ImagePixels& px = it->second;
+    if (it == images_.end() || !it->second) return false;
+    const ImagePixels& px = *it->second;
     if (!px.width || !px.height || px.rgba.size() < static_cast<usize>(px.width) * px.height * 4) return false;
     // Cobertura 96×96: o maior alfa de 4×4 amostras por célula.
     constexpr u32 n = 96, sub = 4;

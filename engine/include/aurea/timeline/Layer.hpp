@@ -303,6 +303,9 @@ struct CameraData {
     bool dofEnabled = false;
     /// Força do desfoque: × o círculo de confusão da lente fina (1 = físico).
     f32 blurAmount = 1.0f;
+    /// Timeline v47: the active camera also projects visual 2D layers below it.
+    /// Older documents retain their original 3D-only camera behavior.
+    bool affectsLayersBelow = false;
 };
 
 /// LENTE: sensor full frame 36 × 24 mm. A projeção do Aurea é por FOV

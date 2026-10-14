@@ -45,4 +45,17 @@ class StaggerTest {
         assertTrue(KeyframeVisibility.visible(showAll = false, isPropertyLane = false, selected = true))
         assertTrue(KeyframeVisibility.visible(showAll = false, isPropertyLane = true, selected = false))
     }
+
+    @Test
+    fun onlyTheSelectedLayerEditsKeyframesTheRestAreReferenceOnly() {
+        // Visíveis em todas as camadas (padrão), mas só a selecionada pega o dedo.
+        assertTrue(KeyframeVisibility.visible(showAll = true, isPropertyLane = false, selected = false))
+        assertFalse(KeyframeVisibility.editable(selected = false, keySelectMode = false))
+        assertTrue(KeyframeVisibility.editable(selected = true, keySelectMode = false))
+        // "Escolher keyframes" é pedido explícito: alcança todas.
+        assertTrue(KeyframeVisibility.editable(selected = false, keySelectMode = true))
+        // Trilha de propriedade aberta pelo usuário: edição explícita.
+        assertTrue(KeyframeVisibility.editable(selected = false, keySelectMode = false, isPropertyLane = true))
+        assertTrue(KeyframeVisibility.LOCKED_ALPHA in 0.2f..0.5f)
+    }
 }

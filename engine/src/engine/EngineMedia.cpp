@@ -11,8 +11,13 @@
 // =============================================================================
 #include "aurea/Engine.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/effects/Palette.hpp"
+#include "aurea/scene3d/PartEffects.hpp"
+#include "aurea/scene3d/SceneAsset.hpp"
+#include "stb_image.h"   // a implementação mora no GltfImporter.cpp
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 
 namespace aurea {
@@ -21,7 +26,7 @@ std::shared_ptr<const CubeLut> Engine::cube_lookup(void* context, AssetId id) {
     if (auto it = engine.cubeLuts_.find(id.pack()); it != engine.cubeLuts_.end()) return it->second;
     const Asset* asset = engine.project_ ? engine.project_->asset(id) : nullptr;
     if (!asset || asset->kind != AssetKind::Lut) return {};
-    auto parsed = read_cube_lut(engine.resolve_asset_path(asset->sourcePath));
+    auto parsed = read_color_table(engine.resolve_asset_path(asset->sourcePath));
     auto data = parsed.ok() ? std::make_shared<const CubeLut>(std::move(*parsed)) : nullptr;
     if (engine.cubeLuts_.size() >= 8) engine.cubeLuts_.clear();
     engine.cubeLuts_[id.pack()] = data;
@@ -30,23 +35,35 @@ std::shared_ptr<const CubeLut> Engine::cube_lookup(void* context, AssetId id) {
 
 Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noexcept {
     if (!path || !*path) return Errc::InvalidArgument;
-    auto parsed = read_cube_lut(path);
+    // .cube = LUT do efeito LUT; PNG/JPG/.gpl/.hex = paleta do Palettize.
+    const bool palette = is_palette_path(path);
+    auto parsed = read_color_table(path);
     if (!parsed.ok()) return parsed.status();
+    const u32 type = effect_type_id(palette ? "aurea.color.palettize" : effect_keys::kCubeLut);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return Errc::InvalidState;
     auto effect = std::find_if(layer->effects.begin(), layer->effects.end(), [&](const EffectInstance& e) {
-        return e.id == effectId && e.type == effect_type_id(effect_keys::kCubeLut);
+        return e.id == effectId && e.type == type;
     });
-    if (effect == layer->effects.end() || effect->params.size() < 6) return Errc::NotFound;
-    history_.before_mutation(*comp, project_->timeline().current(), "importar LUT");
+    if (effect == layer->effects.end() || effect->params.size() < (palette ? 2u : 6u)) return Errc::NotFound;
+    history_.before_mutation(*comp, project_->timeline().current(), palette ? "importar paleta" : "importar LUT");
     Asset asset; asset.kind = AssetKind::Lut;
     asset.sourcePath = store_asset_path(path);
     asset.name = path;
     if (const usize slash = asset.name.find_last_of("/\\"); slash != std::string::npos) asset.name.erase(0, slash + 1);
     const AssetId id = project_->add_asset(std::move(asset));
+    if (palette) {
+        // Palettize: [0] paleta (5 = importada), [1] o arquivo.
+        effect->params[1].constant.ref = id.pack();
+        effect->params[0].constant = ParamValue::scalar(5.0f);
+        if (cubeLuts_.size() >= 8) cubeLuts_.clear();
+        cubeLuts_[id.pack()] = std::make_shared<const CubeLut>(std::move(*parsed));
+        bump_model_revision_locked();
+        project_->mark_dirty(); request_render(); return OkStatus;
+    }
     effect->params[0].constant.ref = id.pack();
     effect->params[2].constant = ParamValue::scalar(static_cast<f32>(parsed->size));
     effect->params[3].constant = ParamValue::scalar(static_cast<f32>(parsed->dimensions));
@@ -59,13 +76,162 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
     project_->mark_dirty(); request_render(); return OkStatus;
 }
 
+Status Engine::set_effect_image(u64 layerId, u32 effectId, const char* path) noexcept {
+    if (!path || !*path) return Errc::InvalidArgument;
+    // Decodifica fora do lock do modelo (um JPEG grande custa dezenas de ms).
+    ImagePixels px;
+    const std::string resolved = resolve_asset_path(path);
+    bool decoded = config_.imageLoader && config_.imageLoader(resolved.c_str(), px, config_.imageLoaderContext);
+    if (!decoded) {
+        // Sem decodificador da plataforma (testes no PC): PNG/JPEG pelo stb.
+        std::vector<u8> file;
+        if (std::FILE* f = std::fopen(resolved.c_str(), "rb")) {
+            std::fseek(f, 0, SEEK_END);
+            const long bytes = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (bytes > 0 && bytes < (256l << 20)) {
+                file.resize(static_cast<usize>(bytes));
+                if (std::fread(file.data(), 1, file.size(), f) != file.size()) file.clear();
+            }
+            std::fclose(f);
+        }
+        int w = 0, h = 0, n = 0;
+        if (stbi_uc* data = file.empty() ? nullptr
+                          : stbi_load_from_memory(file.data(), static_cast<int>(file.size()), &w, &h, &n, 4)) {
+            if (w > 0 && h > 0) {
+                px.width = static_cast<u32>(w);
+                px.height = static_cast<u32>(h);
+                try { px.rgba.assign(data, data + static_cast<usize>(w) * static_cast<usize>(h) * 4u); }
+                catch (const std::bad_alloc&) { px.rgba.clear(); }
+                decoded = !px.rgba.empty();
+            }
+            stbi_image_free(data);
+        }
+    }
+    if (!decoded || px.width == 0 || px.height == 0 || px.width > 16384 || px.height > 16384
+        || px.rgba.size() != static_cast<usize>(px.width) * px.height * 4u)
+        return Status{Errc::InvalidArgument, "imagem ilegivel"};
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->locked) return Errc::InvalidState;
+    auto effect = std::find_if(layer->effects.begin(), layer->effects.end(), [&](const EffectInstance& e) {
+        return e.id == effectId && e.type == effect_type_id(effect_keys::kPart3DTexture);
+    });
+    if (effect == layer->effects.end() || effect->params.size() < 2) return Errc::NotFound;
+    if (px.rgba.capacity() + sizeof(px) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    history_.before_mutation(*comp, project_->timeline().current(), "imagem da textura 3D");
+    Asset asset;
+    asset.kind = AssetKind::Image;
+    asset.sourcePath = store_asset_path(path);
+    asset.name = path;
+    if (const usize slash = asset.name.find_last_of("/\\"); slash != std::string::npos) asset.name.erase(0, slash + 1);
+    asset.originalFilename = asset.name;
+    asset.video.width = px.width;
+    asset.video.height = px.height;
+    const AssetId id = project_->add_asset(std::move(asset));
+    images_[id.pack()] = std::make_shared<const ImagePixels>(std::move(px));
+    effect->params[1].constant.ref = id.pack();
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return OkStatus;
+}
+
+std::string Engine::effect_image_name(u64 layerId, u32 effectId) const noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? project_->timeline().composition(project_->timeline().current()) : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer) return {};
+    for (const auto& e : layer->effects) {
+        if (e.id != effectId || e.type != effect_type_id(effect_keys::kPart3DTexture) || e.params.size() < 2) continue;
+        const Asset* asset = project_->asset(AssetId::unpack(e.params[1].constant.ref));
+        return asset ? asset->name : std::string{};
+    }
+    return {};
+}
+
+std::vector<std::string> Engine::model_part_names(u64 layerId) noexcept {
+    std::vector<std::string> names;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Model3D) return names;
+    const auto it = models_.find(layer->model.scene.pack());
+    if (it == models_.end() || !it->second) return names;
+    scene3d::part_names(*it->second, names);
+    return names;
+}
+
+/// Engine.cpp: câmeras do arquivo viram camadas (o passo de desfazer é de quem chama).
+u32 add_model_camera_layers(Composition& comp, LayerId modelId, const scene3d::SceneAsset& scene) noexcept;
+
+u32 Engine::model_camera_count(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Model3D) return 0;
+    const auto it = models_.find(layer->model.scene.pack());
+    if (it == models_.end() || !it->second) return 0;
+    u32 n = 0;
+    for (const auto& node : it->second->nodes)
+        n += node.inScene && node.camera >= 0 && static_cast<usize>(node.camera) < it->second->cameras.size() ? 1u : 0u;
+    return std::min(n, 4u);
+}
+
+u32 Engine::add_model_cameras(u64 layerId) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Model3D) return 0;
+    const auto it = models_.find(layer->model.scene.pack());
+    if (it == models_.end() || !it->second) return 0;
+    const std::shared_ptr<const scene3d::SceneAsset> scene = it->second;
+    history_.before_mutation(*comp, project_->timeline().current(), "cameras do modelo");
+    bump_model_revision_locked();
+    const u32 made = add_model_camera_layers(*comp, LayerId::unpack(layerId), *scene);
+    project_->mark_dirty();
+    request_render();
+    return made;
+}
+
+Result<u32> Engine::add_part_effect(u64 layerId, u32 effectType, u32 part) noexcept {
+    if (!scene3d::is_part3d_effect(effectType) || part >= scene3d::kPartEffectMaxParts) return Status{Errc::InvalidArgument, "efeito de parte invalido"};
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(layerId);
+    add.effect_add.effectType = effectType;
+    add.effect_add.index = kInvalidIndex;
+    if (const Status s = apply_command(add); !s.ok()) return s;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->effects.empty() || layer->effects.back().type != effectType) return Status{Errc::InvalidState, "efeito nao entrou"};
+    // Ainda o mesmo passo de desfazer do "pôr o efeito": desfazer tira tudo.
+    EffectInstance& fx = layer->effects.back();
+    const f32 oneBased = static_cast<f32>(part + 1);
+    if (!fx.params.empty()) fx.params[0].constant = ParamValue::scalar(oneBased);
+    if (effectType == effect_type_id(effect_keys::kPart3DHide) && fx.params.size() > 1) fx.params[1].constant = ParamValue::scalar(oneBased);
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return fx.id;
+}
+
 std::string Engine::color_lut_name(u64 layerId, u32 effectId) const noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     const Composition* comp = project_ ? project_->timeline().composition(project_->timeline().current()) : nullptr;
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer) return {};
-    for (const auto& e : layer->effects) if (e.id == effectId && e.type == effect_type_id(effect_keys::kCubeLut) && !e.params.empty()) {
-        const Asset* asset = project_->asset(AssetId::unpack(e.params[0].constant.ref));
+    const u32 palettize = effect_type_id("aurea.color.palettize");
+    for (const auto& e : layer->effects) if (e.id == effectId && (e.type == effect_type_id(effect_keys::kCubeLut) || e.type == palettize) && !e.params.empty()) {
+        const usize file = e.type == palettize ? 1 : 0;
+        if (e.params.size() <= file) return {};
+        const Asset* asset = project_->asset(AssetId::unpack(e.params[file].constant.ref));
         return asset ? asset->name : std::string{};
     }
     return {};
@@ -130,16 +296,16 @@ void clamp_to_source(Layer& l, i64 sourceFrames) {
 }
 
 /// Tamanho da mídia que a camada mostra agora (vídeo: o asset; imagem: pixels).
-bool current_media_size(const Project& project, const std::unordered_map<u64, ImagePixels>& images,
+bool current_media_size(const Project& project, const std::unordered_map<u64, std::shared_ptr<const ImagePixels>>& images,
                         const Layer& l, f32& w, f32& h) {
     if (const Asset* a = project.asset(l.source); a && a->video.width > 0 && a->video.height > 0) {
         w = static_cast<f32>(a->video.width);
         h = static_cast<f32>(a->video.height);
         return true;
     }
-    if (const auto it = images.find(l.source.pack()); it != images.end() && it->second.width > 0) {
-        w = static_cast<f32>(it->second.width);
-        h = static_cast<f32>(it->second.height);
+    if (const auto it = images.find(l.source.pack()); it != images.end() && it->second && it->second->width > 0) {
+        w = static_cast<f32>(it->second->width);
+        h = static_cast<f32>(it->second->height);
         return true;
     }
     return false;
@@ -252,7 +418,7 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
     asset.video.height = height;
     const AssetId assetId = project_->add_asset(std::move(asset));
 
-    images_[assetId.pack()] = std::move(px);
+    images_[assetId.pack()] = std::make_shared<const ImagePixels>(std::move(px));
 
     l = comp->layer(id);
     if (!l) return Status{Errc::InvalidState, "camada sumiu"};

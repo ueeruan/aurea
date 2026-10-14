@@ -8,6 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +29,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +71,10 @@ object RealCamera {
     var available by mutableStateOf(true)
     var lastFrame by mutableIntStateOf(-1)
     var positional by mutableStateOf(false)
+    /** Andar (botões de segurar): metros por segundo. */
+    var walkSpeed by mutableFloatStateOf(1f)
+    /** × do deslocamento frente/trás medido pelo AR. */
+    var depthScale by mutableFloatStateOf(1f)
     internal var tracking by mutableStateOf(RealCameraTracking.Rotation)
     internal var usesArCore by mutableStateOf(false)
 
@@ -95,6 +103,30 @@ private fun CamChip(label: String, tag: String, on: Boolean, enabled: Boolean = 
     ) {
         Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W600,
             color = if (on) AureaColors.OnAccent else if (enabled) AureaColors.Text else AureaColors.Disabled)))
+    }
+}
+
+/** Botão de segurar: [onHold] true ao apertar, false ao soltar (ou cancelar). */
+@Composable
+private fun WalkButton(label: String, tag: String, onHold: (Boolean) -> Unit) {
+    var held by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .heightIn(min = 34.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (held) AureaColors.Accent else AureaColors.Chip)
+            .testTag(tag)
+            .semantics { role = Role.Button; contentDescription = label }
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    held = true; onHold(true)
+                    try { tryAwaitRelease() } finally { held = false; onHold(false) }
+                })
+            }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.W600,
+            color = if (held) AureaColors.OnAccent else AureaColors.Text)))
     }
 }
 
@@ -138,14 +170,54 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
             delay(50L)
         }
     }
+    // Na prévia só a pílula (o painel inteiro cobria o palco — retorno de beta):
+    // status e Gravar/Parar, sempre à vista, também durante a gravação. Os
+    // controles completos ficam na área de painéis (RealCameraPanel).
+    val muted = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted))
+    Row(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(AureaColors.EditorPanelHigh.copy(alpha = 0.92f))
+            .border(1.dp, if (RealCamera.recording) AureaColors.Danger else ShellColors.AccentHalf, RoundedCornerShape(18.dp))
+            .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+            .testTag("realcam.bar"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CupertinoIcon(CupertinoGlyph.CameraFill, 13.dp, if (RealCamera.recording) AureaColors.Danger else AureaColors.Accent)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            if (RealCamera.recording) stringResource(R.string.real_camera_recording, RealCamera.lastFrame.coerceAtLeast(0))
+            else stringResource(R.string.real_camera_title),
+            maxLines = 1, style = muted,
+        )
+        Spacer(Modifier.width(8.dp))
+        CamChip(
+            stringResource(if (RealCamera.recording) R.string.real_camera_stop else R.string.real_camera_record),
+            "realcam.gravar", RealCamera.recording, enabled = RealCamera.recording || RealCamera.available,
+        ) {
+            store.realCameraRecord(!RealCamera.recording)
+        }
+    }
+}
+
+/** A Real Camera está ligada nesta tela (a área de painéis mostra os controles dela). */
+@Composable
+fun realCameraShowing(store: EditorStore): Boolean = RealCamera.session != null && realCameraActive(store)
+
+/**
+ * Os controles da Real Camera na ÁREA DE PAINÉIS (embaixo; à direita no
+ * largo), fora da prévia: recentrar, inverter, sensibilidade, andar, velocidade,
+ * profundidade e Concluir. O sensor continua com a pílula do palco.
+ */
+@Composable
+fun RealCameraPanel(store: EditorStore, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val muted = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted))
     Column(
         modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(AureaColors.EditorPanelHigh)
-            .border(1.dp, ShellColors.AccentHalf, RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-            .testTag("realcam.bar"),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .testTag("realcam.panel"),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CupertinoIcon(CupertinoGlyph.CameraFill, 13.dp, AureaColors.Accent)
@@ -155,7 +227,6 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
             Text(
                 when {
                     !RealCamera.available -> stringResource(R.string.real_camera_no_sensor)
-                    RealCamera.recording -> stringResource(R.string.real_camera_recording, RealCamera.lastFrame.coerceAtLeast(0))
                     else -> stringResource(when (RealCamera.tracking) {
                         RealCameraTracking.Position -> R.string.real_camera_tracking_position
                         RealCameraTracking.Limited -> R.string.real_camera_tracking_limited
@@ -164,28 +235,13 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
                         RealCameraTracking.Rotation -> R.string.real_camera_tracking_rotation
                     })
                 },
-                maxLines = 2, style = muted, modifier = Modifier.weight(1f),
+                maxLines = 2, style = muted, modifier = Modifier.weight(1f).testTag("realcam.tracking"),
             )
         }
-        Row(Modifier.padding(top = 6.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            CamChip(
-                stringResource(if (RealCamera.recording) R.string.real_camera_stop else R.string.real_camera_record),
-                "realcam.gravar", RealCamera.recording, enabled = RealCamera.recording || RealCamera.available,
-            ) {
-                store.realCameraRecord(!RealCamera.recording)
-            }
+        Row(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CamChip(stringResource(R.string.real_camera_recenter), "realcam.recentrar", false) { store.realCameraRecenter() }
             CamChip(stringResource(R.string.real_camera_invert), "realcam.inverter", RealCamera.inverted) { RealCamera.inverted = !RealCamera.inverted }
             CamChip(stringResource(R.string.real_camera_done), "realcam.concluir", false) { store.realCameraStop() }
-        }
-        if (RealCamera.recording) {
-            Text(stringResource(when (RealCamera.tracking) {
-                RealCameraTracking.Position -> R.string.real_camera_tracking_position
-                RealCameraTracking.Limited -> R.string.real_camera_tracking_limited
-                RealCameraTracking.Permission -> R.string.real_camera_camera_permission
-                RealCameraTracking.Failed -> R.string.real_camera_tracking_failed
-                RealCameraTracking.Rotation -> R.string.real_camera_tracking_rotation
-            }), style = muted, modifier = Modifier.testTag("realcam.tracking"))
         }
         if (RealCamera.tracking == RealCameraTracking.Permission) {
             Text(stringResource(R.string.real_camera_camera_permission_prompt), style = muted)
@@ -200,6 +256,36 @@ fun RealCameraBar(store: EditorStore, modifier: Modifier) {
             )
             Spacer(Modifier.width(6.dp))
             Text("${(RealCamera.sensitivity * 100).toInt()}%", style = muted)
+        }
+        // Andar em Z: segurar anda para frente/trás no rumo da câmera (sem AR também).
+        Row(Modifier.padding(top = 4.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.real_camera_walk), style = muted)
+            WalkButton(stringResource(R.string.real_camera_forward), "realcam.frente") { store.realCameraWalk(if (it) 1 else 0) }
+            WalkButton(stringResource(R.string.real_camera_back), "realcam.tras") { store.realCameraWalk(if (it) -1 else 0) }
+        }
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            val speed = stringResource(R.string.real_camera_walk_speed)
+            Text(speed, style = muted)
+            Spacer(Modifier.width(8.dp))
+            Slider(
+                value = RealCamera.walkSpeed, onValueChange = { RealCamera.walkSpeed = it }, valueRange = 0.2f..3f,
+                modifier = Modifier.weight(1f).heightIn(max = 28.dp).testTag("realcam.walkspeed").semantics { contentDescription = speed },
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(String.format(java.util.Locale.ROOT, "%.1f m/s", RealCamera.walkSpeed), style = muted)
+        }
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            val depth = stringResource(R.string.real_camera_depth)
+            Text(depth, style = muted)
+            Spacer(Modifier.width(8.dp))
+            Slider(
+                value = RealCamera.depthScale,
+                onValueChange = { RealCamera.depthScale = it; store.realCameraWalk(0) }, valueRange = 0.5f..5f,
+                modifier = Modifier.weight(1f).heightIn(max = 28.dp).testTag("realcam.depth").semantics { contentDescription = depth },
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(String.format(java.util.Locale.ROOT, "%.1f×", RealCamera.depthScale), style = muted)
         }
         if (RealCamera.usesArCore) {
             Text(stringResource(R.string.real_camera_arcore_privacy), style = muted, modifier = Modifier.padding(top = 4.dp))

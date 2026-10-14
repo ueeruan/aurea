@@ -78,6 +78,11 @@ private let FxMatrixLabels = [
 private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.stylize.pixel_encoder", FxEffectHuman(keywords: "pixel encoder pixel_encoder megakrunch ascii letras grunge", principal: [0, 1, 2, 3, 4])),
     ("aurea.stylize.pix_dither", FxEffectHuman(keywords: "pixdither pix dither pontilhado paleta atkinson bayer", principal: [0, 1, 2])),
+    ("aurea.time.low_fps", FxEffectHuman(keywords: "low fps stop motion travado quadros choppy tremido", principal: [0, 1, 3])),
+    ("aurea.light.glow_scan", FxEffectHuman(keywords: "glow scan varredura scanner faixa de luz brilho light sweep shine logo", principal: [0, 1, 5, 8])),
+    ("aurea.color.threshold", FxEffectHuman(keywords: "threshold limiar limite preto e branco duas cores 2 cores", principal: [0, 1])),
+    ("aurea.color.posterize", FxEffectHuman(keywords: "posterize posterizar niveis tons reduzir cores", principal: [0, 1])),
+    ("aurea.color.palettize", FxEffectHuman(keywords: "palettize paleta gameboy game boy nes pico-8 cga lospec gimp gpl hex retro pontilhado dither oklab", principal: [0, 2, 4])),
     ("aurea.glitch.video_glitch", FxEffectHuman(keywords: "bcc glitch video continuum blocos flicker tremor", principal: [0, 1, 2, 3, 55])),
     ("aurea.distort.displace_transform", FxEffectHuman(keywords: "displace displacer pro mapa escala rotacao aberracao", principal: [0, 1, 2, 3, 4], params: [1: FxParamHuman(label: "fx_deslocamento"), 2: FxParamHuman(label: "fx_escala")])),
     ("aurea.light.starglow", FxEffectHuman(keywords: "starglow trapcode estrela brilho star raios shimmer", principal: [0, 1, 2, 9, 15], params: [0: FxParamHuman(label: "fx_comprimento")])),
@@ -108,6 +113,81 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
     ("aurea.shape3d.layout", FxEffectHuman(keywords: "shape parts partes forma 3d rotation rotacao delay atraso spread espalhar explodir twist random aleatorio",
         principal: [0, 1, 2, 12, 13, 9, 4])),
+    // Efeitos 3D (beta 12/10/2026): partes do objeto 3D, Shatter e Stroke.
+    ("aurea.3d.part_transform", FxEffectHuman(name: "fx3d_name_part_transform",
+        keywords: "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca", principal: Array(0...7))),
+    ("aurea.3d.part_hide", FxEffectHuman(name: "fx3d_name_part_hide",
+        keywords: "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca", principal: Array(0...3))),
+    ("aurea.3d.part_texture", FxEffectHuman(name: "fx3d_name_part_texture",
+        keywords: "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria", principal: Array(0...3))),
+    ("aurea.3d.shatter", FxEffectHuman(name: "fx3d_name_shatter",
+        keywords: "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass", principal: [0, 1, 2, 4, 5, 3])),
+    ("aurea.3d.stroke", FxEffectHuman(name: "fx3d_name_stroke",
+        keywords: "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on", principal: [0, 1, 3, 4, 5, 9])),
+    // --- Pacote CC (CCEffects.cpp e irmãos): o nome "CC" fica só na busca ---
+    ("aurea.distort.kaleidoscope", FxEffectHuman(name: "cc_name_kaleidoscope",
+        keywords: "cc kaleida caleidoscopio kaleidoscope espelho mirror simetria symmetry mandala flor flower", principal: [2, 1, 0, 3, 4])),
+    ("aurea.distort.sphere_wrap", FxEffectHuman(name: "cc_name_sphere_wrap",
+        keywords: "cc sphere esfera sphere globo globe planeta planet bola ball 3d embrulhar wrap", principal: [0, 1, 3, 2, 4, 5])),
+    ("aurea.distort.cylinder_wrap", FxEffectHuman(name: "cc_name_cylinder_wrap",
+        keywords: "cc cylinder cilindro cylinder tubo tube lata can rolo roll 3d embrulhar wrap", principal: [0, 1, 3, 2, 4, 5])),
+    ("aurea.distort.twister", FxEffectHuman(name: "cc_name_twister",
+        keywords: "cc twister torcer twist fita ribbon girar espiral spiral virar flip", principal: [0, 1, 2, 3, 4])),
+    ("aurea.distort.flow_pinch", FxEffectHuman(name: "cc_name_flow_pinch",
+        keywords: "cc flo motion flow fluxo pinca pinch sugar suck buraco negro black hole liquify liquido", principal: [0, 1, 2, 3, 4])),
+    ("aurea.distort.griddler", FxEffectHuman(name: "cc_name_griddler",
+        keywords: "cc griddler grade grid ladrilhos tiles mosaico mosaic quadrados squares cartoes cards", principal: [2, 3, 0, 1, 4])),
+    ("aurea.stylize.repeat_tile", FxEffectHuman(name: "cc_name_repeat_tile",
+        keywords: "cc repetile repetir repeat ladrilho tile espelhar mirror expandir expand padrao pattern tijolos bricks", principal: [4, 0, 1, 2, 3, 6])),
+    ("aurea.distort.smear", FxEffectHuman(name: "cc_name_smear",
+        keywords: "cc smear borrar smear arrastar drag dedo finger liquify esticar stretch", principal: [0, 1, 2, 3])),
+    ("aurea.distort.split", FxEffectHuman(name: "cc_name_split",
+        keywords: "cc split 2 rasgar split abrir open corte cut fenda slit rachar crack rasgo tear", principal: [0, 1, 2, 3])),
+    ("aurea.distort.slant", FxEffectHuman(name: "cc_name_slant",
+        keywords: "cc slant inclinar slant italico italic cisalhar shear sombra projetada cast shadow", principal: [0, 1, 2, 3, 4])),
+    ("aurea.stylize.tiler", FxEffectHuman(name: "cc_name_tiler",
+        keywords: "cc tiler mosaico tiler copias copies repetir repeat grade grid", principal: [0, 1, 2])),
+    ("aurea.stylize.hex_tile", FxEffectHuman(name: "cc_name_hex_tile",
+        keywords: "cc hextile hexagono hexagon colmeia honeycomb ladrilho tile mosaico mosaic", principal: [2, 0, 1, 3, 4, 5])),
+    ("aurea.blur.vector_blur", FxEffectHuman(name: "cc_name_vector_blur",
+        keywords: "cc vector blur desfoque vetorial vector blur pinceladas brush strokes pintura painting", principal: [1, 0, 2, 3, 5, 4])),
+    ("aurea.light.light_burst", FxEffectHuman(name: "cc_name_light_burst",
+        keywords: "cc light burst explosao de luz light burst raios rays brilho glow zoom radial", principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.stylize.star_field", FxEffectHuman(name: "cc_name_star_field",
+        keywords: "cc star burst estrelas stars campo field pontos dots espaco space warp voar fly", principal: [1, 3, 4, 0, 2, 5])),
+    ("aurea.color.threshold_rgb", FxEffectHuman(name: "cc_name_threshold_rgb",
+        keywords: "cc threshold rgb limiar limite threshold canais channels pop art contraste", principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.color.color_offset", FxEffectHuman(name: "cc_name_color_offset",
+        keywords: "cc color offset deslocar cor color shift fase phase psicodelico psychedelic matiz hue", principal: [0, 1, 2, 3, 4])),
+    ("aurea.stylize.scatter", FxEffectHuman(name: "cc_name_scatter",
+        keywords: "cc scatterize espalhar scatter spray grao grain dispersar desintegrar poeira dust", principal: [0, 1, 2, 3, 4])),
+    ("aurea.stylize.blobby", FxEffectHuman(name: "cc_name_blobby",
+        keywords: "cc blobbylize bolhas blobs liquido liquid gosma goo derretido melt relevo", principal: [1, 2, 0, 3, 5, 6])),
+    ("aurea.stylize.glass", FxEffectHuman(name: "cc_name_glass",
+        keywords: "cc glass vidro glass relevo emboss refracao refraction bump transparente", principal: [1, 2, 3, 0, 4, 6])),
+    ("aurea.stylize.kernel", FxEffectHuman(name: "cc_name_kernel",
+        keywords: "cc kernel nucleo kernel convolucao convolution matriz matrix nitidez sharpen relevo emboss bordas edges", principal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 11])),
+    ("aurea.light.spotlight", FxEffectHuman(name: "cc_name_spotlight",
+        keywords: "cc spotlight holofote spotlight luz light palco stage cone foco focus lanterna", principal: [0, 1, 3, 6, 7, 4])),
+    ("aurea.distort.drizzle", FxEffectHuman(name: "cc_name_drizzle",
+        keywords: "cc drizzle garoa drizzle chuva rain gotas drops ondas ripples agua water poca puddle", principal: [0, 3, 4, 1, 2, 5])),
+    ("aurea.transition.jaws", FxEffectHuman(name: "cc_name_jaws",
+        keywords: "cc jaws mandibulas jaws dentes teeth transicao transition abrir open serra saw", principal: [0, 5, 1, 2, 3, 4])),
+    ("aurea.transition.scale_wipe", FxEffectHuman(name: "cc_name_scale_wipe",
+        keywords: "cc scale wipe esticar stretch varredura wipe riscos streaks transicao transition", principal: [0, 1, 2])),
+    ("aurea.transition.radial_scale_wipe", FxEffectHuman(name: "cc_name_radial_scale_wipe",
+        keywords: "cc radial scalewipe scale wipe varredura radial radial wipe furo hole escala scale transicao transition", principal: [0, 1, 2])),
+    ("aurea.transition.burn_film", FxEffectHuman(name: "cc_name_burn_film",
+        keywords: "cc burn film queimar burn filme film fogo fire brasa ember transicao transition", principal: [0, 1, 2])),
+    ("aurea.transition.block_load", FxEffectHuman(name: "cc_name_block_load",
+        keywords: "cc block load blocos blocks carregar loading pixel jpeg progressivo progressive transicao transition", principal: [0, 1, 2, 3])),
+    // --- 0.1.8 BETA 2: Saber (o plugin de sabre/neon) e Luma Dissolve ---
+    ("aurea.light.saber", FxEffectHuman(
+        keywords: "saber video copilot sabre de luz lightsaber neon energia energy brilho glow raio laser traco stroke contorno outline eletrico electric fogo fire plasma magia magic write on desenhar mascara mask texto",
+        principal: [6, 7, 8, 1, 2, 3, 4, 5, 11, 12, 31])),
+    ("aurea.transition.luma_dissolve", FxEffectHuman(
+        keywords: "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn",
+        principal: [0, 3, 1, 10, 2, 8, 9])),
     ("aurea.transform", FxEffectHuman(
         name: "fx_name_transform",
         keywords: "transform mover posicao escala girar rotacao opacidade",
@@ -676,6 +756,13 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             7: FxParamHuman(label: "fx3_expandir_saida"),
             8: FxParamHuman(label: "fx_mistura", decimals: 0),
         ])),
+    // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8).
+    ("aurea.time.flow_retime", FxEffectHuman(
+        keywords: "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave",
+        principal: [0, 1, 2, 3])),
+    ("aurea.time.flow_motion_blur", FxEffectHuman(
+        keywords: "rsmb reelsmart motion blur desfoque de movimento borrao vetores optical flow obturador shutter",
+        principal: [0, 1, 2])),
     ("aurea.time.remap", FxEffectHuman(
         name: "fx_name_time_remap",
         // O parâmetro Tempo É a curva de remapeamento da camada. O "Manter o tom
@@ -1293,6 +1380,32 @@ private let FxEnglishEffectNames: [UInt32: String] = Dictionary(uniqueKeysWithVa
 /// A ordem declarada do efeito; fora da tabela vai para o fim.
 func fxEffectNameRank(_ typeId: UInt32) -> Int { FxTableOrder[typeId] ?? Int.max }
 
+/// O Motion Tile e os efeitos com opção de LADRILHO / repetição de borda:
+/// buscar "motion tile", "mosaico", "tile", "ladrilho"... acha todos, nos 7
+/// idiomas ("fx_search_tile"). Mesma lista no Android (TileSearchEffects).
+let FxTileSearchEffects: Set<UInt32> = Set([
+    "aurea.stylize.motion_tile",
+    "aurea.distort.shake",
+    "aurea.distort.turbulence",
+    "aurea.distort.wave_warp",
+    "aurea.distort.warp",
+    "aurea.distort.flow_pinch",
+    "aurea.stylize.repeat_tile",
+    "aurea.stylize.tiler",
+    "aurea.stylize.hex_tile",
+    "aurea.distort.displace_transform",
+    "aurea.glitch.video_glitch",
+    "aurea.distort.lens_gradient",
+    "aurea.distort.displacement_map",
+    "aurea.transform.offset",
+    "aurea.repeat.grid",
+].map { fxEffectTypeId($0) })
+
+/// Os termos de ladrilho do efeito no idioma atual (vazio = não ladrilha).
+func fxTileSearchTerms(_ typeId: UInt32) -> String {
+    FxTileSearchEffects.contains(typeId) ? AureaText.t("fx_search_tile") : ""
+}
+
 /// O texto onde a busca procura: nome humano, nome do motor, categoria e os
 /// sinônimos da tabela.
 func fxEffectSearchText(_ typeId: UInt32, _ engineName: String, _ category: String) -> String {
@@ -1300,6 +1413,7 @@ func fxEffectSearchText(_ typeId: UInt32, _ engineName: String, _ category: Stri
         fxEffectDisplayName(typeId, engineName), engineName, category,
         (FxTableById[typeId]?.name).map { AureaText.t($0) } ?? "",
         FxTableById[typeId]?.keywords ?? "",
+        fxTileSearchTerms(typeId),
     ].joined(separator: " "))
 }
 
@@ -1562,6 +1676,11 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.color.brightness_contrast", "fx_desc_color_brightness_contrast")
     put("aurea.color.saturation", "fx_desc_color_saturation")
     put("aurea.color.tint", "fx_desc_color_tint")
+    put("aurea.color.threshold", "fx_desc_color_threshold")
+    put("aurea.color.posterize", "fx_desc_color_posterize")
+    put("aurea.color.palettize", "fx_desc_color_palettize")
+    put("aurea.light.glow_scan", "fx_desc_light_glow_scan")
+    put("aurea.time.low_fps", "fx_desc_time_low_fps", FxAllTargets, "low fps stop motion travado quadros choppy tremido")
     put("aurea.color.matrix", "fx_desc_color_matrix")
     put("aurea.color.levels", "fx_desc_color_levels")
     put("aurea.color.curves", "fx_desc_color_curves")
@@ -1600,6 +1719,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.glitch.signal", "fx_desc_glitch_signal")
     put("aurea.glitch.cross", "fx_desc_glitch_cross")
     put("aurea.time.posterize", "fx_desc_time_posterize", FxTimeTargets, "stop motion quadros taxa travada")
+    put("aurea.time.flow_retime", "fx_desc_time_flow_retime", [.video], "twixtor camera lenta slow motion optical flow quadros inventados")
+    put("aurea.time.flow_motion_blur", "fx_desc_time_flow_motion_blur", [.video], "rsmb reelsmart desfoque de movimento vetores borrao")
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
     put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")
     put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")
@@ -1660,6 +1781,43 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.stylize.ball_grid", "afx_desc_balls", FxVisualTargets, "bolas esferas balls spheres grade particulas explodir dispersar torcer cc ball cc ball action")
     put("aurea.transition.disintegrate", "afx_desc_disintegrate", FxVisualTargets, "desintegrar disintegrate particulas particles fragmentos poeira dust cinzas dissolver explodir transicao")
     put("aurea.shape3d.layout", "fx_desc_shape3d_layout", [.cena3D], "forma 3d shape partes parts girar espalhar explodir atraso aleatorio")
+    put("aurea.3d.part_transform", "fx3d_desc_part_transform", [.cena3D], "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca")
+    put("aurea.3d.part_hide", "fx3d_desc_part_hide", [.cena3D], "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca")
+    put("aurea.3d.part_texture", "fx3d_desc_part_texture", [.cena3D], "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria")
+    put("aurea.3d.shatter", "fx3d_desc_shatter", FxVisualTargets + [.cena3D], "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass")
+    put("aurea.3d.stroke", "fx3d_desc_stroke", FxVisualTargets + [.cena3D], "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on")
+    // --- Pacote CC ---
+    put("aurea.distort.kaleidoscope", "cc_desc_kaleidoscope", FxVisualTargets + [.cena3D], "cc kaleida caleidoscopio kaleidoscope espelho mirror simetria symmetry mandala flor flower")
+    put("aurea.distort.sphere_wrap", "cc_desc_sphere_wrap", FxVisualTargets + [.cena3D], "cc sphere esfera sphere globo globe planeta planet bola ball 3d embrulhar wrap")
+    put("aurea.distort.cylinder_wrap", "cc_desc_cylinder_wrap", FxVisualTargets + [.cena3D], "cc cylinder cilindro cylinder tubo tube lata can rolo roll 3d embrulhar wrap")
+    put("aurea.distort.twister", "cc_desc_twister", FxVisualTargets + [.cena3D], "cc twister torcer twist fita ribbon girar espiral spiral virar flip")
+    put("aurea.distort.flow_pinch", "cc_desc_flow_pinch", FxVisualTargets + [.cena3D], "cc flo motion flow fluxo pinca pinch sugar suck buraco negro black hole liquify liquido")
+    put("aurea.distort.griddler", "cc_desc_griddler", FxVisualTargets + [.cena3D], "cc griddler grade grid ladrilhos tiles mosaico mosaic quadrados squares cartoes cards")
+    put("aurea.stylize.repeat_tile", "cc_desc_repeat_tile", FxVisualTargets + [.cena3D], "cc repetile repetir repeat ladrilho tile espelhar mirror expandir expand padrao pattern tijolos bricks")
+    put("aurea.distort.smear", "cc_desc_smear", FxVisualTargets + [.cena3D], "cc smear borrar smear arrastar drag dedo finger liquify esticar stretch")
+    put("aurea.distort.split", "cc_desc_split", FxVisualTargets + [.cena3D], "cc split 2 rasgar split abrir open corte cut fenda slit rachar crack rasgo tear")
+    put("aurea.distort.slant", "cc_desc_slant", FxVisualTargets + [.cena3D], "cc slant inclinar slant italico italic cisalhar shear sombra projetada cast shadow")
+    put("aurea.stylize.tiler", "cc_desc_tiler", FxVisualTargets + [.cena3D], "cc tiler mosaico tiler copias copies repetir repeat grade grid")
+    put("aurea.stylize.hex_tile", "cc_desc_hex_tile", FxVisualTargets + [.cena3D], "cc hextile hexagono hexagon colmeia honeycomb ladrilho tile mosaico mosaic")
+    put("aurea.blur.vector_blur", "cc_desc_vector_blur", FxVisualTargets + [.cena3D], "cc vector blur desfoque vetorial vector blur pinceladas brush strokes pintura painting")
+    put("aurea.light.light_burst", "cc_desc_light_burst", FxVisualTargets + [.cena3D], "cc light burst explosao de luz light burst raios rays brilho glow zoom radial")
+    put("aurea.stylize.star_field", "cc_desc_star_field", FxVisualTargets + [.cena3D], "cc star burst estrelas stars campo field pontos dots espaco space warp voar fly")
+    put("aurea.color.threshold_rgb", "cc_desc_threshold_rgb", FxVisualTargets + [.cena3D], "cc threshold rgb limiar limite threshold canais channels pop art contraste")
+    put("aurea.color.color_offset", "cc_desc_color_offset", FxVisualTargets + [.cena3D], "cc color offset deslocar cor color shift fase phase psicodelico psychedelic matiz hue")
+    put("aurea.stylize.scatter", "cc_desc_scatter", FxVisualTargets + [.cena3D], "cc scatterize espalhar scatter spray grao grain dispersar desintegrar poeira dust")
+    put("aurea.stylize.blobby", "cc_desc_blobby", FxVisualTargets + [.cena3D], "cc blobbylize bolhas blobs liquido liquid gosma goo derretido melt relevo")
+    put("aurea.stylize.glass", "cc_desc_glass", FxVisualTargets + [.cena3D], "cc glass vidro glass relevo emboss refracao refraction bump transparente")
+    put("aurea.stylize.kernel", "cc_desc_kernel", FxVisualTargets + [.cena3D], "cc kernel nucleo kernel convolucao convolution matriz matrix nitidez sharpen relevo emboss bordas edges")
+    put("aurea.light.spotlight", "cc_desc_spotlight", FxVisualTargets + [.cena3D], "cc spotlight holofote spotlight luz light palco stage cone foco focus lanterna")
+    put("aurea.distort.drizzle", "cc_desc_drizzle", FxVisualTargets + [.cena3D], "cc drizzle garoa drizzle chuva rain gotas drops ondas ripples agua water poca puddle")
+    put("aurea.transition.jaws", "cc_desc_jaws", FxVisualTargets + [.cena3D], "cc jaws mandibulas jaws dentes teeth transicao transition abrir open serra saw")
+    put("aurea.transition.scale_wipe", "cc_desc_scale_wipe", FxVisualTargets + [.cena3D], "cc scale wipe esticar stretch varredura wipe riscos streaks transicao transition")
+    put("aurea.transition.radial_scale_wipe", "cc_desc_radial_scale_wipe", FxVisualTargets + [.cena3D], "cc radial scalewipe scale wipe varredura radial radial wipe furo hole escala scale transicao transition")
+    put("aurea.transition.burn_film", "cc_desc_burn_film", FxVisualTargets + [.cena3D], "cc burn film queimar burn filme film fogo fire brasa ember transicao transition")
+    put("aurea.transition.block_load", "cc_desc_block_load", FxVisualTargets + [.cena3D], "cc block load blocos blocks carregar loading pixel jpeg progressivo progressive transicao transition")
+    // --- 0.1.8 BETA 2 (também em camada de ajuste: vale para o que está abaixo) ---
+    put("aurea.light.saber", "saber_desc", FxVisualTargets + [.cena3D], "saber sabre lightsaber neon energia energy brilho glow laser eletrico electric fogo fire plasma световой меч неон नियॉन نيون")
+    put("aurea.transition.luma_dissolve", "luma_dissolve_desc", FxVisualTargets + [.cena3D], "luma dissolve dissolveluma dissolver luminancia luminance transicao transition fade disolver растворение विलय تلاشي")
     put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")
@@ -1749,6 +1907,7 @@ func fxCatalogHaystack(_ catalog: [EffectCatalogItem]) -> [UInt32: String] {
             FxTableById[entry.typeId]?.keywords ?? "",
             FxMetaTable[entry.typeId]?.keywords ?? "",
             fxEffectDescription(entry.typeId, entry.category),
+            fxTileSearchTerms(entry.typeId),
         ].joined(separator: " ")
         out[entry.typeId] = fxNormalizeSearch(text)
     }

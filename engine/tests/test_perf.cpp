@@ -299,6 +299,7 @@ struct Rig {
         ec.mediaFactory = factory;
         ec.exportSinkFactory = sink;
         ec.exportSinkContext = sinkCtx;
+        ec.strictExportVerification = true;   // guarda do host (os apps: tolerante)
         ec.workerCount = 4;
         ec.disableAutosave = true;
         ec.memoryBudgetBytes = 2048ull << 20;

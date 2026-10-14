@@ -76,6 +76,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.stylize.pixel_encoder", EffectHuman(keywords = "pixel encoder pixel_encoder megakrunch ascii letras grunge",
         principal = listOf(0, 1, 2, 3, 4)))
     put("aurea.stylize.pix_dither", EffectHuman(keywords = "pixdither pix dither pontilhado paleta atkinson bayer", principal = listOf(0, 1, 2)))
+    put("aurea.time.low_fps", EffectHuman(keywords = "low fps stop motion travado quadros choppy tremido", principal = listOf(0, 1, 3),
+        params = mapOf(0 to ParamHuman(suffix = " fps", decimals = 0), 1 to ParamHuman(decimals = 1), 3 to ParamHuman(decimals = 0))))
+    put("aurea.light.glow_scan", EffectHuman(keywords = "glow scan varredura scanner faixa de luz brilho light sweep shine logo",
+        principal = listOf(0, 1, 5, 8), params = mapOf(0 to ParamHuman(decimals = 0), 8 to ParamHuman(decimals = 0), 10 to ParamHuman(decimals = 0))))
+    put("aurea.color.threshold", EffectHuman(keywords = "threshold limiar limite preto e branco duas cores 2 cores", principal = listOf(0, 1),
+        params = mapOf(0 to ParamHuman(decimals = 0), 1 to ParamHuman(decimals = 0))))
+    put("aurea.color.posterize", EffectHuman(keywords = "posterize posterizar niveis tons reduzir cores", principal = listOf(0, 1),
+        params = mapOf(0 to ParamHuman(suffix = "", decimals = 0), 1 to ParamHuman(suffix = "", decimals = 2))))
+    put("aurea.color.palettize", EffectHuman(keywords = "palettize paleta gameboy game boy nes pico-8 cga lospec gimp gpl hex retro pontilhado dither oklab",
+        principal = listOf(0, 2, 4), params = mapOf(3 to ParamHuman(decimals = 0), 4 to ParamHuman(decimals = 0))))
     put("aurea.glitch.video_glitch", EffectHuman(keywords = "bcc glitch video continuum blocos flicker tremor", principal = listOf(0, 1, 2, 3, 55)))
     put("aurea.distort.displace_transform", EffectHuman(keywords = "displace displacer pro mapa escala rotacao aberracao", principal = listOf(0, 1, 2, 3, 4),
         params = mapOf(1 to ParamHuman(label = R.string.fx_deslocamento), 2 to ParamHuman(label = R.string.fx_escala))))
@@ -132,6 +142,81 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // Formas 3D: o mesmo layout, parte a parte (mesmos índices do Text 3D Layout).
     put("aurea.shape3d.layout", EffectHuman(keywords = "shape parts partes forma 3d rotation rotacao delay atraso spread espalhar explodir twist random aleatorio",
         principal = listOf(0, 1, 2, 12, 13, 9, 4)))
+    // Efeitos 3D (beta 12/10/2026): partes do objeto 3D, Shatter e Stroke.
+    put("aurea.3d.part_transform", EffectHuman(name = R.string.fx3d_name_part_transform,
+        keywords = "animar parte 3d animate part mover girar escala objeto modelo forma keyframe peca", principal = (0..7).toList()))
+    put("aurea.3d.part_hide", EffectHuman(name = R.string.fx3d_name_part_hide,
+        keywords = "esconder partes 3d hide parts sumir ocultar visibilidade objeto modelo forma peca", principal = (0..3).toList()))
+    put("aurea.3d.part_texture", EffectHuman(name = R.string.fx3d_name_part_texture,
+        keywords = "trocar textura 3d swap texture imagem image material parte objeto modelo forma galeria", principal = (0..3).toList()))
+    put("aurea.3d.shatter", EffectHuman(name = R.string.fx3d_name_shatter,
+        keywords = "3d shatter quebrar estilhacar explodir explosao pecas vidro cacos shatter break glass", principal = listOf(0, 1, 2, 4, 5, 3)))
+    put("aurea.3d.stroke", EffectHuman(name = R.string.fx3d_name_stroke,
+        keywords = "3d stroke traco linha contorno caminho mascara circulo espiral neon trapcode write on", principal = listOf(0, 1, 3, 4, 5, 9)))
+    // --- Pacote CC (CCEffects.cpp e irmãos): o nome "CC" fica só na busca ---
+    put("aurea.distort.kaleidoscope", EffectHuman(name = R.string.cc_name_kaleidoscope,
+        keywords = "cc kaleida caleidoscopio kaleidoscope espelho mirror simetria symmetry mandala flor flower", principal = listOf(2, 1, 0, 3, 4)))
+    put("aurea.distort.sphere_wrap", EffectHuman(name = R.string.cc_name_sphere_wrap,
+        keywords = "cc sphere esfera sphere globo globe planeta planet bola ball 3d embrulhar wrap", principal = listOf(0, 1, 3, 2, 4, 5)))
+    put("aurea.distort.cylinder_wrap", EffectHuman(name = R.string.cc_name_cylinder_wrap,
+        keywords = "cc cylinder cilindro cylinder tubo tube lata can rolo roll 3d embrulhar wrap", principal = listOf(0, 1, 3, 2, 4, 5)))
+    put("aurea.distort.twister", EffectHuman(name = R.string.cc_name_twister,
+        keywords = "cc twister torcer twist fita ribbon girar espiral spiral virar flip", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.distort.flow_pinch", EffectHuman(name = R.string.cc_name_flow_pinch,
+        keywords = "cc flo motion flow fluxo pinca pinch sugar suck buraco negro black hole liquify liquido", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.distort.griddler", EffectHuman(name = R.string.cc_name_griddler,
+        keywords = "cc griddler grade grid ladrilhos tiles mosaico mosaic quadrados squares cartoes cards", principal = listOf(2, 3, 0, 1, 4)))
+    put("aurea.stylize.repeat_tile", EffectHuman(name = R.string.cc_name_repeat_tile,
+        keywords = "cc repetile repetir repeat ladrilho tile espelhar mirror expandir expand padrao pattern tijolos bricks", principal = listOf(4, 0, 1, 2, 3, 6)))
+    put("aurea.distort.smear", EffectHuman(name = R.string.cc_name_smear,
+        keywords = "cc smear borrar smear arrastar drag dedo finger liquify esticar stretch", principal = listOf(0, 1, 2, 3)))
+    put("aurea.distort.split", EffectHuman(name = R.string.cc_name_split,
+        keywords = "cc split 2 rasgar split abrir open corte cut fenda slit rachar crack rasgo tear", principal = listOf(0, 1, 2, 3)))
+    put("aurea.distort.slant", EffectHuman(name = R.string.cc_name_slant,
+        keywords = "cc slant inclinar slant italico italic cisalhar shear sombra projetada cast shadow", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.stylize.tiler", EffectHuman(name = R.string.cc_name_tiler,
+        keywords = "cc tiler mosaico tiler copias copies repetir repeat grade grid", principal = listOf(0, 1, 2)))
+    put("aurea.stylize.hex_tile", EffectHuman(name = R.string.cc_name_hex_tile,
+        keywords = "cc hextile hexagono hexagon colmeia honeycomb ladrilho tile mosaico mosaic", principal = listOf(2, 0, 1, 3, 4, 5)))
+    put("aurea.blur.vector_blur", EffectHuman(name = R.string.cc_name_vector_blur,
+        keywords = "cc vector blur desfoque vetorial vector blur pinceladas brush strokes pintura painting", principal = listOf(1, 0, 2, 3, 5, 4)))
+    put("aurea.light.light_burst", EffectHuman(name = R.string.cc_name_light_burst,
+        keywords = "cc light burst explosao de luz light burst raios rays brilho glow zoom radial", principal = listOf(0, 1, 2, 3, 4, 5)))
+    put("aurea.stylize.star_field", EffectHuman(name = R.string.cc_name_star_field,
+        keywords = "cc star burst estrelas stars campo field pontos dots espaco space warp voar fly", principal = listOf(1, 3, 4, 0, 2, 5)))
+    put("aurea.color.threshold_rgb", EffectHuman(name = R.string.cc_name_threshold_rgb,
+        keywords = "cc threshold rgb limiar limite threshold canais channels pop art contraste", principal = listOf(0, 1, 2, 3, 4, 5)))
+    put("aurea.color.color_offset", EffectHuman(name = R.string.cc_name_color_offset,
+        keywords = "cc color offset deslocar cor color shift fase phase psicodelico psychedelic matiz hue", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.stylize.scatter", EffectHuman(name = R.string.cc_name_scatter,
+        keywords = "cc scatterize espalhar scatter spray grao grain dispersar desintegrar poeira dust", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.stylize.blobby", EffectHuman(name = R.string.cc_name_blobby,
+        keywords = "cc blobbylize bolhas blobs liquido liquid gosma goo derretido melt relevo", principal = listOf(1, 2, 0, 3, 5, 6)))
+    put("aurea.stylize.glass", EffectHuman(name = R.string.cc_name_glass,
+        keywords = "cc glass vidro glass relevo emboss refracao refraction bump transparente", principal = listOf(1, 2, 3, 0, 4, 6)))
+    put("aurea.stylize.kernel", EffectHuman(name = R.string.cc_name_kernel,
+        keywords = "cc kernel nucleo kernel convolucao convolution matriz matrix nitidez sharpen relevo emboss bordas edges", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 11)))
+    put("aurea.light.spotlight", EffectHuman(name = R.string.cc_name_spotlight,
+        keywords = "cc spotlight holofote spotlight luz light palco stage cone foco focus lanterna", principal = listOf(0, 1, 3, 6, 7, 4)))
+    put("aurea.distort.drizzle", EffectHuman(name = R.string.cc_name_drizzle,
+        keywords = "cc drizzle garoa drizzle chuva rain gotas drops ondas ripples agua water poca puddle", principal = listOf(0, 3, 4, 1, 2, 5)))
+    put("aurea.transition.jaws", EffectHuman(name = R.string.cc_name_jaws,
+        keywords = "cc jaws mandibulas jaws dentes teeth transicao transition abrir open serra saw", principal = listOf(0, 5, 1, 2, 3, 4)))
+    put("aurea.transition.scale_wipe", EffectHuman(name = R.string.cc_name_scale_wipe,
+        keywords = "cc scale wipe esticar stretch varredura wipe riscos streaks transicao transition", principal = listOf(0, 1, 2)))
+    put("aurea.transition.radial_scale_wipe", EffectHuman(name = R.string.cc_name_radial_scale_wipe,
+        keywords = "cc radial scalewipe scale wipe varredura radial radial wipe furo hole escala scale transicao transition", principal = listOf(0, 1, 2)))
+    put("aurea.transition.burn_film", EffectHuman(name = R.string.cc_name_burn_film,
+        keywords = "cc burn film queimar burn filme film fogo fire brasa ember transicao transition", principal = listOf(0, 1, 2)))
+    put("aurea.transition.block_load", EffectHuman(name = R.string.cc_name_block_load,
+        keywords = "cc block load blocos blocks carregar loading pixel jpeg progressivo progressive transicao transition", principal = listOf(0, 1, 2, 3)))
+    // --- 0.1.8 BETA 2: Saber (o plugin de sabre/neon) e Luma Dissolve ---
+    put("aurea.light.saber", EffectHuman(
+        keywords = "saber video copilot sabre de luz lightsaber neon energia energy brilho glow raio laser traco stroke contorno outline eletrico electric fogo fire plasma magia magic write on desenhar mascara mask texto",
+        principal = listOf(6, 7, 8, 1, 2, 3, 4, 5, 11, 12, 31)))
+    put("aurea.transition.luma_dissolve", EffectHuman(
+        keywords = "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn",
+        principal = listOf(0, 3, 1, 10, 2, 8, 9)))
     put("aurea.stylize.omino_diffusion", EffectHuman(
         name = R.string.fx_name_omino_diffusion, keywords = "omino omine diffusion difusao glitch paleta faixas",
         principal = listOf(0, 1, 2, 5, 6), params = mapOf(
@@ -867,6 +952,14 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
+    // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8). Nomes
+    // próprios; a busca acha pelos nomes dos plugins de mesmo propósito.
+    put("aurea.time.flow_retime", EffectHuman(
+        keywords = "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave",
+        principal = listOf(0, 1, 2, 3)))
+    put("aurea.time.flow_motion_blur", EffectHuman(
+        keywords = "rsmb reelsmart motion blur desfoque de movimento borrao vetores optical flow obturador shutter",
+        principal = listOf(0, 1, 2)))
     put(
         "aurea.time.remap",
         EffectHuman(
@@ -1496,10 +1589,39 @@ private val EnglishEffectNames = mapOf(
     "aurea.transition.block_dissolve" to "Block Dissolve",
 ).mapKeys { effectTypeId(it.key) }
 
+/**
+ * O Motion Tile e os efeitos com opção de LADRILHO / repetição de borda (tile,
+ * repetir, espelhar): buscar "motion tile", "mosaico", "tile", "ladrilho"...
+ * acha todos, nos 7 idiomas (`R.string.fx_search_tile`). Mesma lista no iOS
+ * (`FxTileSearchEffects`, EffectsHuman.swift).
+ */
+internal val TileSearchEffects: Set<Int> = listOf(
+    "aurea.stylize.motion_tile",
+    "aurea.distort.shake",
+    "aurea.distort.turbulence",
+    "aurea.distort.wave_warp",
+    "aurea.distort.warp",
+    "aurea.distort.flow_pinch",
+    "aurea.stylize.repeat_tile",
+    "aurea.stylize.tiler",
+    "aurea.stylize.hex_tile",
+    "aurea.distort.displace_transform",
+    "aurea.glitch.video_glitch",
+    "aurea.distort.lens_gradient",
+    "aurea.distort.displacement_map",
+    "aurea.transform.offset",
+    "aurea.repeat.grid",
+).map { effectTypeId(it) }.toSet()
+
+/** Os termos de ladrilho deste efeito no idioma de `res` (vazio = não ladrilha). */
+internal fun tileSearchTerms(typeId: Int, res: android.content.res.Resources): String =
+    if (typeId in TileSearchEffects) res.getString(R.string.fx_search_tile) else ""
+
 /** Texto onde a busca procura: nome humano, nome do motor, categoria e sinônimos. */
 @Composable
 internal fun effectSearchText(typeId: Int, engineName: String, category: String): String =
-    normalizeSearch(listOf(effectDisplayName(typeId, engineName), Table[typeId]?.name?.let { stringResource(it) }.orEmpty(), engineName, category, Table[typeId]?.keywords.orEmpty()).joinToString(" "))
+    normalizeSearch(listOf(effectDisplayName(typeId, engineName), Table[typeId]?.name?.let { stringResource(it) }.orEmpty(), engineName, category, Table[typeId]?.keywords.orEmpty(),
+        tileSearchTerms(typeId, LocalContext.current.resources)).joinToString(" "))
 
 /** Ícone da categoria (rótulo visual do cartão do navegador — não é prévia). */
 internal fun categoryGlyph(category: String): Char = when (normalizeSearch(category)) {

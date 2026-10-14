@@ -49,7 +49,7 @@ class MaskAnimationTest {
         compose.runOnIdle { store.addMaskPreset(0) }
         compose.waitUntil(5000) { store.masks?.masks?.size == 1 }
         val mask = checkNotNull(store.maskEdit)
-        compose.onNodeWithText(context.getString(R.string.panel_3_borda)).performClick()
+        // Tudo numa tela só: a borda está logo abaixo do caminho e do modo.
         compose.onNodeWithTag("mask.$mask.key.2").performScrollTo().performClick()
         compose.waitUntil(5000) { store.primaryKeys().any { it.property == TrackProperty.MASK_PARAM && it.paramIndex == 2 } }
         compose.runOnIdle { store.seek(30) }

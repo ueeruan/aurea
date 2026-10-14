@@ -25,6 +25,7 @@
 #import "AureaEngine.h"
 
 #import "AureaBridge.h"
+#import <VideoToolbox/VideoToolbox.h>
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
@@ -32,6 +33,7 @@
 #include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
+#include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/ui/BuiltinPropertySchema.hpp"
 
@@ -510,6 +512,11 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     return accepted;
 }
 
+- (BOOL)realCameraWalk:(float)speed depth:(float)depth {
+    auto* e = self.engine;
+    return e && e->real_camera_walk(speed, depth).ok();
+}
+
 - (BOOL)realCameraRecenter {
     auto* e = self.engine;
     const bool accepted = e && e->real_camera_recenter().ok();
@@ -784,8 +791,20 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 }
 
 - (BOOL)loadProject:(NSString*)path {
+    return [self loadProject:path error:nullptr errorCode:nullptr];
+}
+
+- (BOOL)loadProject:(NSString*)path error:(NSString**)error errorCode:(int32_t*)errorCode {
+    if (error) *error = nil;
+    if (errorCode) *errorCode = 0;
     auto* e = self.engine;
-    return e && e->load_project(to_std(path).c_str()).ok() ? YES : NO;
+    const aurea::Status status = e ? e->load_project(to_std(path).c_str())
+                                  : aurea::Status{aurea::Errc::InvalidState, "motor indisponivel"};
+    if (!status.ok()) {
+        if (errorCode) *errorCode = status.raw();
+        if (error) *error = to_ns(std::string(status.detail()));
+    }
+    return status.ok() ? YES : NO;
 }
 
 - (BOOL)saveProject:(NSString*)path {
@@ -1558,10 +1577,8 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return e->set_text3d(layerId, spec).ok();
 }
 - (BOOL)applyText3DPreset:(long long)layerId preset:(uint32_t)preset {
-    auto* e = self.engine; aurea::scene3d::Text3DSpec spec;
-    if (!e || !e->query_text3d(layerId, spec) ||
-        !aurea::scene3d::apply_text3d_material_preset(spec, preset)) return NO;
-    return e->set_text3d(layerId, spec).ok();
+    auto* e = self.engine;
+    return e && e->apply_text3d_preset(static_cast<aurea::u64>(layerId), preset);
 }
 - (NSArray<NSNumber*>*)text3DAnim:(long long)layerId {
     auto* e = self.engine;
@@ -1756,8 +1773,36 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     }
 }
 
-- (void)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId {
-    if (auto* e = self.engine) (void)e->start_camera_track(static_cast<aurea::u64>(layerId), mode);
+- (int)addPartEffect:(uint32_t)type part:(uint32_t)part forLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return -1;
+    const auto id = e->add_part_effect(static_cast<aurea::u64>(layerId), type, part);
+    return id.ok() ? static_cast<int>(*id) : -1;
+}
+
+- (BOOL)setEffectImage:(NSString *)path effect:(uint32_t)effect forLayer:(long long)layerId {
+    auto* e = self.engine;
+    return e && path && e->set_effect_image(static_cast<aurea::u64>(layerId), effect, path.UTF8String).ok();
+}
+
+- (NSString *)effectImageName:(uint32_t)effect forLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @"";
+    return [NSString stringWithUTF8String:e->effect_image_name(static_cast<aurea::u64>(layerId), effect).c_str()] ?: @"";
+}
+
+- (NSArray<NSString *> *)modelPartNames:(long long)layerId {
+    auto* e = self.engine;
+    NSMutableArray<NSString *>* out = [NSMutableArray array];
+    if (!e) return out;
+    for (const auto& name : e->model_part_names(static_cast<aurea::u64>(layerId)))
+        [out addObject:[NSString stringWithUTF8String:name.c_str()] ?: @""];
+    return out;
+}
+
+- (BOOL)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId {
+    auto* e = self.engine;
+    return e && e->start_camera_track(static_cast<aurea::u64>(layerId), mode);
 }
 
 - (void)setModelTransformInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
@@ -2167,9 +2212,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 // --- Lente da câmera 3D (ver Engine::query_camera_lens) ----------------------
 - (NSArray<NSNumber*>*)cameraLens:(long long)layer {
-    float values[9]{};
-    if (!self.engine || !self.engine->query_camera_lens(static_cast<aurea::u64>(layer), values)) return @[];
-    return floats_to_array(values, 9);
+    float values[10]{};
+    if (!self.engine || !self.engine->query_camera_lens(static_cast<aurea::u64>(layer), values, 10)) return @[];
+    return floats_to_array(values, 10);
 }
 - (float)pickFocusDistance:(long long)layer x:(float)x y:(float)y {
     if (!self.engine) return -1.f;
@@ -3063,6 +3108,46 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     auto* e = self.engine; return e ? e->edit_time_remap_key(layerId, index, time, value, interpolation) : -1;
 }
 - (void)removeTimeRemap:(long long)layerId index:(uint32_t)index { if (auto* e = self.engine) (void)e->remove_time_remap_key(layerId, index); }
+- (NSArray<NSNumber*>*)speedCurve:(long long)layerId samples:(uint32_t)samples {
+    auto* e = self.engine; if (!e) return @[];
+    const u32 n = std::min<u32>(samples, 1024);
+    std::vector<float> v(8 + n + 3 * 512);
+    const auto w = e->query_speed_curve(layerId, n, v.data(), static_cast<u32>(v.size()));
+    return floats_to_array(v.data(), w);
+}
+- (BOOL)applySpeedCurve:(uint32_t)preset forLayer:(long long)layerId {
+    auto* e = self.engine; return e && e->apply_speed_curve(static_cast<aurea::u64>(layerId), preset);
+}
+- (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation {
+    auto* e = self.engine; return e ? e->edit_speed_key(layerId, index, time, speed, interpolation) : -1;
+}
+- (NSArray<NSNumber*>*)modelBones:(long long)layerId {
+    auto* e = self.engine; if (!e) return @[];
+    const auto need = e->query_model_bones(static_cast<aurea::u64>(layerId), nullptr, 0);
+    if (!need) return @[];
+    std::vector<float> v(need);
+    const auto w = e->query_model_bones(static_cast<aurea::u64>(layerId), v.data(), need);
+    return floats_to_array(v.data(), w);
+}
+- (BOOL)dragBone:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy twist:(float)twist continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && node >= 0 && e->drag_bone(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(node), dx, dy, twist, continuing);
+}
+- (int32_t)toggleBoneKey:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; return e ? e->toggle_bone_key(static_cast<aurea::u64>(layerId), node) : -1;
+}
+- (BOOL)resetBonePose:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; return e && e->reset_bone_pose(static_cast<aurea::u64>(layerId), node);
+}
+- (uint32_t)modelCameraCount:(long long)layerId {
+    auto* e = self.engine; return e ? e->model_camera_count(static_cast<aurea::u64>(layerId)) : 0;
+}
+- (uint32_t)addModelCameras:(long long)layerId {
+    auto* e = self.engine; return e ? e->add_model_cameras(static_cast<aurea::u64>(layerId)) : 0;
+}
+- (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index {
+    auto* e = self.engine; return e && e->remove_speed_key(layerId, index);
+}
 - (long long)addVector:(uint32_t)preset {
     auto* e = self.engine; if (!e) return -1; const auto r = e->add_vector_layer(preset); return r.ok() ? static_cast<long long>(*r) : -1;
 }
@@ -3860,6 +3945,8 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 // =============================================================================
 // Export
 // =============================================================================
+
+
 - (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps {

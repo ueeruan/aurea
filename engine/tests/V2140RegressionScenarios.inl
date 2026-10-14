@@ -99,6 +99,13 @@ struct Rig {
     }
     ~Rig() { e.shutdown(); }
     Composition* comp() { return e.project()->timeline().composition(e.project()->timeline().current()); }
+    /// Câmera como as versões guardadas aqui criavam: só afeta camadas 3D
+    /// (projeto anterior à v47 abre assim). Câmera nova liga "afeta camadas abaixo".
+    Result<u64> legacy_camera() {
+        auto id = e.add_camera();
+        if (id.ok()) if (Layer* l = comp()->layer(LayerId::unpack(*id))) l->camera.affectsLayersBelow = false;
+        return id;
+    }
     Layer* layer(u64 id) { return comp()->layer(LayerId::unpack(id)); }
     u32 w = kW, h = kH;   ///< tamanho da composição do cenário
     Image8 capture(i64 frame) {
@@ -292,7 +299,7 @@ void rays(Rig& r, u64 layer) {
 
 /// Câmera com dolly + órbita: X e Z andam, gira em Y.
 u64 animated_camera(Rig& r, i64 from = 0, i64 to = 90) {
-    const auto cam = r.e.add_camera();
+    const auto cam = r.legacy_camera();
     AUREA_CHECK(cam.ok());
     if (!cam.ok()) return 0;
     Layer* c = r.layer(*cam);
@@ -426,7 +433,7 @@ void s_rig_null_chain(Rig& r) {
     key(r, txt, TrackProperty::Opacity, 30, 1.0f);
     particles(r);
     (void)flare(r);
-    const auto cam = r.e.add_camera();
+    const auto cam = r.legacy_camera();
     AUREA_CHECK(cam.ok());
     u64 nulls[4]{};
     for (u32 i = 0; i < 4; ++i) {
@@ -509,7 +516,7 @@ void rotx_sweep(Rig& r, u64 id, f32 z) {
 void s_null_z(Rig& r) { z_sweep(r, null_with_child(r)); }
 void s_null_rotx(Rig& r) { rotx_sweep(r, null_with_child(r), -1036.8f * kAt1080); }   // 0,8 da câmera
 void s_null_rotx_near(Rig& r) { rotx_sweep(r, null_with_child(r), 0.0f); }
-void s_null_rotx_cam(Rig& r) { rotx_sweep(r, null_with_child(r), -1036.8f * kAt1080); (void)r.e.add_camera(); }
+void s_null_rotx_cam(Rig& r) { rotx_sweep(r, null_with_child(r), -1036.8f * kAt1080); (void)r.legacy_camera(); }
 void s_text_z(Rig& r) { z_sweep(r, add_text(r, "PIVOT")); }
 void s_text_rotx(Rig& r) { rotx_sweep(r, add_text(r, "PIVOT"), -1036.8f * kAt1080); }
 void s_text_rotx_near(Rig& r) { rotx_sweep(r, add_text(r, "PIVOT"), 0.0f); }

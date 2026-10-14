@@ -1741,10 +1741,8 @@ AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, 
 
 AUREA_JNI jboolean AUREA_FN(nativeApplyText3dPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
     NativeContext* c = ctx_of(handle);
-    aurea::scene3d::Text3DSpec s;
-    if (!c || !c->engine.query_text3d(static_cast<u64>(layer), s) ||
-        !aurea::scene3d::apply_text3d_material_preset(s, static_cast<u32>(preset))) return JNI_FALSE;
-    return c->engine.set_text3d(static_cast<u64>(layer), s).ok() ? JNI_TRUE : JNI_FALSE;
+    if (!c || preset < 0) return JNI_FALSE;
+    return c->engine.apply_text3d_preset(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeSetText3dTexture)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring path) {
@@ -2155,6 +2153,41 @@ AUREA_JNI jstring AUREA_FN(nativeColorLutName)(JNIEnv* env, jclass, jlong handle
     NativeContext* c = ctx_of(handle);
     const auto name = c ? c->engine.color_lut_name(layer, effect) : std::string{};
     return env->NewStringUTF(name.c_str());
+}
+
+// --- Efeitos de parte 3D (Animar parte, Esconder partes, Trocar textura) -----
+AUREA_JNI jint AUREA_FN(nativeAddPartEffect)(JNIEnv*, jclass, jlong handle, jlong layer, jint type, jint part) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || part < 0) return -1;
+    const auto id = c->engine.add_part_effect(static_cast<u64>(layer), static_cast<u32>(type), static_cast<u32>(part));
+    return id.ok() ? static_cast<jint>(*id) : -1;
+}
+AUREA_JNI jboolean AUREA_FN(nativeSetEffectImage)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !path) return JNI_FALSE;
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    if (!p) return JNI_FALSE;
+    const bool ok = c->engine.set_effect_image(static_cast<u64>(layer), static_cast<u32>(effect), p).ok();
+    env->ReleaseStringUTFChars(path, p);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jstring AUREA_FN(nativeEffectImageName)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effect) {
+    NativeContext* c = ctx_of(handle);
+    const auto name = c ? c->engine.effect_image_name(static_cast<u64>(layer), static_cast<u32>(effect)) : std::string{};
+    return env->NewStringUTF(name.c_str());
+}
+AUREA_JNI jobjectArray AUREA_FN(nativeModelPartNames)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    const auto names = c ? c->engine.model_part_names(static_cast<u64>(layer)) : std::vector<std::string>{};
+    jclass stringClass = env->FindClass("java/lang/String");
+    jobjectArray out = env->NewObjectArray(static_cast<jsize>(names.size()), stringClass, nullptr);
+    if (!out) return nullptr;
+    for (jsize i = 0; i < static_cast<jsize>(names.size()); ++i) {
+        jstring s = env->NewStringUTF(names[static_cast<usize>(i)].c_str());
+        env->SetObjectArrayElement(out, i, s);
+        env->DeleteLocalRef(s);
+    }
+    return out;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeSetTextFont)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring family, jint weight,
@@ -3083,6 +3116,71 @@ AUREA_JNI jboolean AUREA_FN(nativeRemoveTimeRemapKey)(JNIEnv*, jclass, jlong han
     return c && index >= 0 && c->engine.remove_time_remap_key(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
 }
 
+AUREA_JNI jint AUREA_FN(nativeQueryModelBones)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    const u32 need = c->engine.query_model_bones(static_cast<u64>(layer), nullptr, 0);
+    if (!out || need == 0) return static_cast<jint>(need);
+    const jsize n = env->GetArrayLength(out);
+    if (static_cast<u32>(n) < need) return static_cast<jint>(need);
+    std::vector<f32> v(need);
+    const u32 w = c->engine.query_model_bones(static_cast<u64>(layer), v.data(), need);
+    if (w && w <= need) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(w), v.data());
+    return static_cast<jint>(w);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDragBone)(JNIEnv*, jclass, jlong handle, jlong layer, jint node, jfloat dx, jfloat dy,
+                                           jfloat twist, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && node >= 0 && c->engine.drag_bone(static_cast<u64>(layer), static_cast<u32>(node), dx, dy, twist, continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeToggleBoneKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint node) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.toggle_bone_key(static_cast<u64>(layer), node) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeResetBonePose)(JNIEnv*, jclass, jlong handle, jlong layer, jint node) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.reset_bone_pose(static_cast<u64>(layer), node) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeModelCameraCount)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.model_camera_count(static_cast<u64>(layer))) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativeAddModelCameras)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.add_model_cameras(static_cast<u64>(layer))) : 0;
+}
+
+AUREA_JNI jint AUREA_FN(nativeQuerySpeedCurve)(JNIEnv* env, jclass, jlong handle, jlong layer, jint samples, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || samples < 0) return 0;
+    const jsize n = env->GetArrayLength(out);
+    std::vector<f32> v(static_cast<usize>(n));
+    const u32 w = c->engine.query_speed_curve(static_cast<u64>(layer), static_cast<u32>(samples), v.data(), static_cast<u32>(n));
+    if (w) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(w), v.data());
+    return static_cast<jint>(w);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeApplySpeedCurve)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
+    NativeContext* c = ctx_of(handle);
+    return c && preset >= 0 && c->engine.apply_speed_curve(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeEditSpeedKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index, jlong frame, jfloat speed, jint interp) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.edit_speed_key(static_cast<u64>(layer), index, frame, speed, interp) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemoveSpeedKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint index) {
+    NativeContext* c = ctx_of(handle);
+    return c && index >= 0 && c->engine.remove_speed_key(static_cast<u64>(layer), static_cast<u32>(index)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeReverseTimeRemap)(JNIEnv*, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.reverse_time_remap(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
@@ -3336,6 +3434,10 @@ AUREA_JNI jboolean AUREA_FN(nativeRealCameraRecenter)(JNIEnv*, jobject, jlong ha
     auto* c = ctx_of(handle);
     return c && c->engine.real_camera_recenter().ok() ? JNI_TRUE : JNI_FALSE;
 }
+AUREA_JNI jboolean AUREA_FN(nativeRealCameraWalk)(JNIEnv*, jobject, jlong handle, jfloat speed, jfloat depth) {
+    auto* c = ctx_of(handle);
+    return c && c->engine.real_camera_walk(speed, depth).ok() ? JNI_TRUE : JNI_FALSE;
+}
 AUREA_JNI void AUREA_FN(nativeRealCameraStop)(JNIEnv*, jobject, jlong handle) {
     if (auto* c = ctx_of(handle)) c->engine.real_camera_stop();
 }
@@ -3356,12 +3458,12 @@ AUREA_JNI jlong AUREA_FN(nativeAddCamera)(JNIEnv*, jclass, jlong handle) {
 }
 
 // --- Lente da câmera 3D (ver Engine::query_camera_lens) ----------------------
-/// 9 valores: mm, FOV°, DOF, foco (px), f/, desfoque ×, px/m, máscara de
-/// trilhas com keyframe, câmera ativa. Falso = não é câmera.
+/// 10 valores: mm, FOV°, DOF, foco (px), f/, desfoque ×, px/m, máscara de
+/// trilhas com keyframe, câmera ativa, afeta camadas abaixo. Nine-value callers remain supported.
 AUREA_JNI jboolean AUREA_FN(nativeQueryCameraLens)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray output) {
-    auto* c = ctx_of(handle); f32 values[9]{};
-    if (!c || !output || env->GetArrayLength(output) < 9 || !c->engine.query_camera_lens(static_cast<u64>(layer), values)) return JNI_FALSE;
-    env->SetFloatArrayRegion(output, 0, 9, values); return JNI_TRUE;
+    auto* c = ctx_of(handle); f32 values[10]{};
+    if (!c || !output || env->GetArrayLength(output) < 9 || !c->engine.query_camera_lens(static_cast<u64>(layer), values, 10)) return JNI_FALSE;
+    env->SetFloatArrayRegion(output, 0, std::min<jsize>(10, env->GetArrayLength(output)), values); return JNI_TRUE;
 }
 /// Pick Focus: distância ao longo do eixo ótico até a superfície 3D sob o ponto
 /// (px da composição). < 0 = nada 3D ali. Só mede; a UI grava com o comando.

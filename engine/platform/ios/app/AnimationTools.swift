@@ -768,8 +768,23 @@ struct NativeCurvePanel: View {
                 else { model.toast = AureaText.t("pn_curve_symmetric") }
             }.disabled(!ease.supportsInversion)
                 .opacity(ease.supportsInversion ? 1 : 0.35)
-            Spacer().frame(height: 4)
-            RailMoreButton(active: false) { showMenu(segment) }
+            // Copiar e colar à mão (pedido da beta): sem abrir o menu.
+            glyphButton(CupertinoGlyph.DocOnDoc, size: 17, target: 40, label: AureaText.t("panel_copiar_curva")) {
+                CurveClipboard.ease = ease; model.toast = AureaText.t("curve_copied")
+            }.accessibilityIdentifier("curve.copy")
+            glyphButton(CupertinoGlyph.DocOnClipboard, size: 17, target: 40, label: AureaText.t("panel_colar_curva")) {
+                if let copied = CurveClipboard.ease { set(copied, to: segment.start, label: "colar curva") }
+            }.disabled(CurveClipboard.ease == nil).opacity(CurveClipboard.ease == nil ? 0.35 : 1)
+                .accessibilityIdentifier("curve.paste")
+            // Menu nativo pequeno ao lado dos três pontos (antes: folha que cobria a tela).
+            Menu {
+                ForEach(Array(menuActions(segment).enumerated()), id: \.offset) { _, action in
+                    Button(action.label, action: action.onClick).disabled(!action.enabled)
+                }
+            } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: AureaDims.iconLg, color: AureaColors.text)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }.accessibilityLabel(AureaText.t("panel_curva")).accessibilityIdentifier("curve.menu")
             Spacer().frame(height: 8)
         }.frame(width: 44).frame(maxHeight: .infinity).background(curveRailFill, ignoresSafeAreaEdges: [])
     }
@@ -873,7 +888,7 @@ struct NativeCurvePanel: View {
         model.seek(toFrame: frame)
         load()
     }
-    private func showMenu(_ segment: Segment) {
+    private func menuActions(_ segment: Segment) -> [SheetAction] {
         let value = ease
         let copied = CurveClipboard.ease
         let actions: [SheetAction] = [
@@ -897,7 +912,7 @@ struct NativeCurvePanel: View {
                 model.endGesture()
             }
         ]
-        model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_curva"), actions: actions)
+        return actions
     }
     /// Presets prontos (menu), salvar a curva e as curvas salvas numa fileira
     /// fina que rola: o painel não cresce.
@@ -1004,8 +1019,12 @@ struct ExpressionEditor: View {
 /// O dado é a MESMA curva da camada (prévia, exportação e som).
 struct TimeRemapEffectEditor: View {
     @EnvironmentObject private var model: AureaModel
-    let effectId: UInt32
+    /// O efeito antigo (projetos salvos com ele); na aba Remapear do painel de velocidade não há efeito.
+    var effectId: UInt32 = 0
+    var showInterpolation = true
     @State private var values: [Float] = []
+    /// Quadro da fonte no cabeçote (`query_speed_curve` [7]), em quadros da composição.
+    @State private var sourceFrame: Float = 0
     @State private var drag: Float?
     @State private var dragStart: Float?
     @State private var dragLocal: Int32?
@@ -1072,7 +1091,7 @@ struct TimeRemapEffectEditor: View {
                     Text(AureaText.t("remap_fora_clipe")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if isVideo {
+                if isVideo && showInterpolation {
                     Text(AureaText.t("remap_interpolacao")).font(.aurea(size: 13)).padding(.top, 6)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {

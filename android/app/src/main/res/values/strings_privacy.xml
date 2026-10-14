@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tela de entrada: privacidade + termos (0.1.7 BETA 3). -->
+<resources>
+    <string name="privacy_title">Prezamos pela sua privacidade</string>
+    <string name="privacy_body">Seus projetos, vídeos e fotos ficam no seu aparelho. Não vendemos seus dados e não enviamos seus vídeos para ninguém.\n\nSó sai do aparelho o necessário para o app funcionar:\n• o e-mail e a senha da sua conta, para você entrar;\n• relatórios de falha do app (sem seus vídeos), para corrigirmos erros;\n• o identificador de anúncios do Google, usado pelos anúncios;\n• o que você mesmo enviar para os recursos de IA online e para a comunidade.</string>
+    <string name="terms_liability">Você usa o Aurea por sua conta e risco. O Aurea é oferecido como está, em versão beta, sem garantias. Até onde a lei permite, o Aurea não se responsabiliza por perda de projetos ou arquivos, nem por danos causados pelo uso do app ou pelo conteúdo que você criar e publicar. Guarde cópias dos seus projetos importantes.</string>
+    <string name="privacy_mascot_desc">Bonequinho em pixel mandando um coração</string>
+</resources>

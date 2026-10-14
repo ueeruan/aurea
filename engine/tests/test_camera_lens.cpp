@@ -71,8 +71,8 @@ struct LensRig {
     ~LensRig() { if (ok) e.shutdown(); }
     Layer* camera() { return comp_of(e)->layer(LayerId::unpack(cam)); }
     std::vector<f32> query() {
-        std::vector<f32> v(9, 0.0f);
-        AUREA_CHECK(e.query_camera_lens(cam, v.data()));
+        std::vector<f32> v(10, 0.0f);
+        AUREA_CHECK(e.query_camera_lens(cam, v.data(), static_cast<u32>(v.size())));
         return v;
     }
     /// Deslocamento na tela (px) de um ponto 40 px à direita do centro do plano Z=0.
@@ -122,6 +122,42 @@ std::string write_lens_triangle() {
 }
 
 } // namespace
+
+AUREA_TEST(Scene3DLens, Timeline47CameraLayeringQueryCapacityUndoAndLayerOrder) {
+    LensRig rig;
+    AUREA_CHECK(rig.ok);
+    if (!rig.ok) return;
+    auto* comp = comp_of(rig.e);
+    const auto shapeId = comp->add_layer(LayerKind::Shape, "2D below camera");
+    const auto audioId = comp->add_layer(LayerKind::Audio, "audio stays 2D");
+    AUREA_CHECK(comp->reorder_layer(LayerId::unpack(rig.cam), comp->order().size() - 1));
+    AUREA_CHECK(rig.camera()->camera.affectsLayersBelow);
+    AUREA_CHECK(wants_layer_3d(*comp, *comp->layer(shapeId), FrameIndex{0}));
+    AUREA_CHECK(!wants_layer_3d(*comp, *comp->layer(audioId), FrameIndex{0}));
+    // A nine-value legacy caller must never be overwritten by the new slot.
+    f32 legacy[10]{}; legacy[9] = 12345.f;
+    AUREA_CHECK(rig.e.query_camera_lens(rig.cam, legacy));
+    AUREA_CHECK_EQ(legacy[9], 12345.f);
+    AUREA_CHECK(!rig.e.query_camera_lens(rig.cam, legacy, 8));
+    AUREA_CHECK(rig.e.query_camera_lens(rig.cam, legacy, 10));
+    AUREA_CHECK_EQ(legacy[9], 1.f);
+    AUREA_CHECK(lens(rig.e, rig.cam, 7, 0.f).ok());
+    AUREA_CHECK(!rig.camera()->camera.affectsLayersBelow);
+    AUREA_CHECK(!wants_layer_3d(*comp, *comp->layer(shapeId), FrameIndex{0}));
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(rig.e.apply_command(undo).ok());
+    comp = comp_of(rig.e);
+    AUREA_CHECK(rig.camera()->camera.affectsLayersBelow);
+    AUREA_CHECK(wants_layer_3d(*comp, *comp->layer(shapeId), FrameIndex{0}));
+    rig.camera()->visible = false;
+    AUREA_CHECK(!wants_layer_3d(*comp, *comp->layer(shapeId), FrameIndex{0}));
+    rig.camera()->visible = true; rig.camera()->camera.active = false;
+    AUREA_CHECK(!wants_layer_3d(*comp, *comp->layer(shapeId), FrameIndex{0}));
+    rig.camera()->camera.active = true;
+    AUREA_CHECK(!wants_layer_3d(*comp, *comp->layer(shapeId), comp->duration()));
+    AUREA_CHECK(comp->reorder_layer(shapeId, comp->order().size() - 1));
+    AUREA_CHECK(!wants_layer_3d(*comp, *comp->layer(shapeId), FrameIndex{0}));
+}
 
 AUREA_TEST(Scene3DLens, FovComesFromFocalLengthOnAFullFrameSensor) {
     // FOV = 2·atan(24 / 2f): a altura do sensor, porque a projeção é por FOV vertical.
@@ -312,4 +348,44 @@ AUREA_TEST(Scene3DLens, PickFocusMeasuresTheDistanceToTheTappedModel) {
     AUREA_CHECK(lens(rig.e, rig.cam, 2, deeper).ok());
     AUREA_CHECK_NEAR(rig.query()[3], deeper, 1e-3f);
     std::remove(mi.path.c_str());
+}
+
+// Comunidade (2026-10-11): a câmera 3D afeta as camadas 2D ABAIXO dela, sem
+// ligar o 3D em cada uma. Câmera nova liga; o parâmetro 7 desliga; camada
+// acima da câmera não muda; o valor sobrevive ao salvar e reabrir.
+AUREA_TEST(CameraLens, NewCameraAffects2DLayersBelowIt) {
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    Engine e;
+    AUREA_CHECK(e.initialize(ec).ok() && e.new_project(320, 180, 30.0, nullptr).ok());
+    std::vector<u8> rgba(16 * 16 * 4, 200);
+    const auto below = e.import_image(rgba.data(), 16, 16, "abaixo");
+    AUREA_CHECK(below.ok()); if (!below.ok()) return;
+    const auto cam = e.add_camera();
+    AUREA_CHECK(cam.ok()); if (!cam.ok()) return;
+    const auto above = e.import_image(rgba.data(), 16, 16, "acima");
+    AUREA_CHECK(above.ok()); if (!above.ok()) return;
+    Composition* comp = comp_of(e);
+    const Layer* lb = comp->layer(LayerId::unpack(*below));
+    const Layer* la = comp->layer(LayerId::unpack(*above));
+    AUREA_CHECK(lb && la && !lb->threeD && !la->threeD);
+    AUREA_CHECK(comp->layer(LayerId::unpack(*cam))->camera.affectsLayersBelow);
+    AUREA_CHECK(wants_layer_3d(*comp, *lb, FrameIndex{0}));
+    AUREA_CHECK(!wants_layer_3d(*comp, *la, FrameIndex{0}));
+    std::vector<f32> v(10, 0.0f);
+    AUREA_CHECK(e.query_camera_lens(*cam, v.data(), static_cast<u32>(v.size())));
+    AUREA_CHECK_EQ(v[9], 1.0f);
+    AUREA_CHECK(lens(e, *cam, 7, 0.0f).ok());
+    AUREA_CHECK(!wants_layer_3d(*comp, *lb, FrameIndex{0}));
+    AUREA_CHECK(lens(e, *cam, 7, 1.0f).ok());
+    const std::string file = "camera_afeta_abaixo.aurea";
+    AUREA_CHECK(e.save_project(file.c_str()).ok());
+    AUREA_CHECK(e.load_project(file.c_str()).ok());
+    comp = comp_of(e);
+    const Layer* reopened = comp->layer(LayerId::unpack(*cam));
+    AUREA_CHECK(reopened && reopened->camera.affectsLayersBelow);
+    e.shutdown();
+    std::remove(file.c_str());
+    std::remove((file + ".bak").c_str());
 }

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Efeitos 3D do pedido de beta de 12/10/2026 (Object3DEffects.cpp) e o painel 3D enxuto. -->
+    <string name="fx3d_name_part_transform">Анимация части 3D</string>
+    <string name="fx3d_name_part_hide">Скрыть части 3D</string>
+    <string name="fx3d_name_part_texture">Замена 3D-текстуры</string>
+    <string name="fx3d_name_shatter">3D Shatter</string>
+    <string name="fx3d_name_stroke">3D Stroke</string>
+    <string name="fx3d_desc_part_transform">Двигает, поворачивает и меняет размер одной части 3D-объекта, с ключевыми кадрами.</string>
+    <string name="fx3d_desc_part_hide">Скрывает или затемняет части 3D-объекта (от одной части до другой).</string>
+    <string name="fx3d_desc_part_texture">Накрывает одну часть 3D-объекта (или все) изображением из галереи.</string>
+    <string name="fx3d_desc_shatter">Разбивает слой на объёмные осколки, которые разлетаются в 3D.</string>
+    <string name="fx3d_desc_stroke">Анимированная 3D-обводка по маскам слоя или по готовой фигуре.</string>
+    <string name="fx3d_env_background">Фон</string>
+    <string name="fx3d_env_floor">Пол</string>
+    <string name="fx3d_parts_hint">Выберите часть и нажмите эффект: он добавится уже для неё. Настройки и ключевые кадры — в «Эффектах».</string>
+    <string name="fx3d_part_n">Часть %1$d</string>
+    <string name="fx3d_image_pick">Выбрать изображение</string>
+    <string name="fx3d_image_none">Нет изображения</string>
+    <string name="fx3d_effect_added">Эффект добавлен — настройте его в «Эффектах»</string>
+    <string name="fx3d_add_failed">Этот эффект работает только с незаблокированным 3D-объектом.</string>
+</resources>

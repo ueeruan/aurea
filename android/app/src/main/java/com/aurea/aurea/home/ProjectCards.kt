@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -34,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -82,8 +85,7 @@ internal fun ProjectListRow(entry: ProjectEntry, thumbs: HomeThumbnails, selecti
         }
         Column(Modifier.weight(1f)) {
             Text(entry.title, style = AureaType.TitleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(projectSpec(entry), style = AureaType.BodySmall, color = AureaColors.Muted,
-                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+            ProjectChips(entry, Modifier.padding(top = 6.dp))
         }
         val menuLabel = stringResource(R.string.home_menu_content)
         Box(Modifier.size(48.dp).semantics { contentDescription = menuLabel }
@@ -93,6 +95,43 @@ internal fun ProjectListRow(entry: ProjectEntry, thumbs: HomeThumbnails, selecti
     }
     Box(Modifier.fillMaxWidth().padding(start = 120.dp, end = AureaDims.Gutter).height(0.5.dp).background(AureaColors.Border))
 }
+
+/**
+ * Chips de metadados da linha (spec am-ui §6): fps, proporção, resolução e
+ * tamanho, cada um com o seu ícone. Quebram de linha quando a coluna é
+ * estreita; o leitor de tela lê os quatro de uma vez (`home.project.meta`).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProjectChips(entry: ProjectEntry, modifier: Modifier = Modifier) {
+    val chips = remember(entry) { projectChips(entry) }
+    FlowRow(
+        modifier.testTag("home.project.meta").semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (chip in chips) {
+            Row(
+                Modifier.clip(RoundedCornerShape(6.dp)).background(AureaColors.Surface)
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CupertinoIcon(chip.kind.glyph, 11.dp, AureaColors.Muted)
+                Spacer(Modifier.width(4.dp))
+                Text(chip.text, style = AureaType.BodySmall, color = AureaColors.Muted, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** Ícone de cada chip (o mesmo glifo no iOS). */
+private val ProjectChipKind.glyph: Char
+    get() = when (this) {
+        ProjectChipKind.Fps -> CupertinoGlyph.Speedometer
+        ProjectChipKind.Aspect -> CupertinoGlyph.Crop
+        ProjectChipKind.Resolution -> CupertinoGlyph.Tv
+        ProjectChipKind.Size -> CupertinoGlyph.Fullscreen
+    }
 
 /**
  * A saudação pela hora do aparelho (05–11 dia, 12–17 tarde, resto noite).

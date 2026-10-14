@@ -709,7 +709,7 @@
     <string name="panel_passagem">Passagem</string>
     <string name="panel_passar_tras_frente">Passar de trás para frente</string>
     <string name="panel_pela_forma">Pela forma</string>
-    <string name="panel_pela_forma_aparece_onde_outra_camada">Pela forma: aparece onde a outra camada existe. Pelo brilho: onde ela é clara.</string>
+    <string name="panel_pela_forma_aparece_onde_outra_camada">Ao escolher um modo, a camada logo abaixo desta é que recorta (dá para trocar no passo 2). Pela forma: aparece onde ela existe. Pelo brilho: onde ela é clara.</string>
     <string name="panel_pela_forma_invertido">Pela forma, invertido</string>
     <string name="panel_pelo_brilho">Pelo brilho</string>
     <string name="panel_pelo_brilho_invertido">Pelo brilho, invertido</string>
@@ -1330,7 +1330,7 @@
     <string name="pn_karaoke">Neon</string>
     <string name="pn_mask_n">Máscara %1$d</string>
     <string name="pn_mask_n_open">Máscara %1$d (aberta)</string>
-    <string name="pn_mask_pick_layer_below">Escolha a camada que será usada como máscara</string>
+    <string name="pn_mask_pick_layer_below">Não há camada abaixo desta. Escolha no passo 2 qual camada recorta.</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Karaokê</string>
     <string name="pn_preset_n">Preset %1$d</string>

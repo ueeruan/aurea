@@ -79,6 +79,44 @@ internal fun projectSpec(p: ProjectEntry): String {
     else "${aspect.label} · $fps fps"
 }
 
+/** O que um chip de metadados da linha do projeto mostra (o ícone sai daqui). */
+internal enum class ProjectChipKind { Fps, Aspect, Resolution, Size }
+
+internal data class ProjectChip(val kind: ProjectChipKind, val text: String)
+
+/**
+ * Os chips da linha do projeto na lista (spec am-ui §6, P2-8): fps,
+ * proporção, resolução e tamanho do quadro, todos do sidecar que a Home já
+ * lê (nada de rede). Sem medida gravada (sidecar antigo) só o fps aparece —
+ * um "16:9" inventado num chip parece dado. Proporção fora dos presets sai
+ * reduzida ("21:9", "2.39:1"), não arredondada para 16:9. Par do
+ * `homeProjectChips` do iOS.
+ */
+internal fun projectChips(p: ProjectEntry): List<ProjectChip> {
+    val fps = ProjectChip(ProjectChipKind.Fps, "${formatFps(p.fps)} fps")
+    if (p.width <= 0 || p.height <= 0) return listOf(fps)
+    return listOf(
+        fps,
+        ProjectChip(ProjectChipKind.Aspect, aspectLabel(p.width, p.height)),
+        ProjectChip(ProjectChipKind.Resolution, ProjectPresets.resolutionLabel(min(p.width, p.height))),
+        ProjectChip(ProjectChipKind.Size, "${p.width} × ${p.height}"),
+    )
+}
+
+/** "16:9" dos presets (< 0,01 de diferença); senão a razão reduzida, ou "x.xx:1". */
+internal fun aspectLabel(width: Int, height: Int): String {
+    val ratio = width.toFloat() / height
+    ProjectPresets.aspects.firstOrNull { abs(it.ratio - ratio) < 0.01f }?.let { return it.label }
+    var a = width
+    var b = height
+    while (b != 0) { val t = a % b; a = b; b = t }
+    val w = width / a
+    val h = height / a
+    if (w <= 99 && h <= 99) return "$w:$h"
+    return if (ratio >= 1f) String.format(Locale.ROOT, "%.2f:1", ratio)
+    else String.format(Locale.ROOT, "1:%.2f", 1f / ratio)
+}
+
 /** Razão para a moldura do placeholder (≤ 0 → 16:9, como na A.01). */
 internal fun projectRatio(p: ProjectEntry): Float =
     if (p.width > 0 && p.height > 0) p.width.toFloat() / p.height else 16f / 9f

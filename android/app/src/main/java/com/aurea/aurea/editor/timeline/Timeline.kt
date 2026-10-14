@@ -129,6 +129,12 @@ fun Timeline(
         snapshotFlow { Triple(store.project.path, store.project.durationFrames, state.width) }
             .collect { controller.autoFit() }
     }
+    // Camada adicionada: a fileira nova entra com fade (RowFade). A lista é a
+    // da composição aberta; o caminho separa um projeto do outro.
+    LaunchedEffect(controller) {
+        snapshotFlow { store.project.path to LongArray(store.layers.size) { store.layers[it].id } }
+            .collect { (path, ids) -> controller.noteLayers(path, ids, System.nanoTime()) }
+    }
 
     Box(modifier.testTag("editor.timeline").clipToBounds()) {
         Box(

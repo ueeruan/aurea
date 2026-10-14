@@ -48,7 +48,16 @@ internal class RowModel(
      * desenha, se toca e se edita é cada trecho de [segments].
      */
     val shared: Array<RowModel>? = null,
+    /**
+     * Instantes dos OUTROS parâmetros animados (fora do foco do painel), em
+     * frames da timeline: desenhados esmaecidos, sem toque ([KeyEmphasis]).
+     * Vazio sem painel focado — aí [instants] já tem todos.
+     */
+    val dimInstants: IntArray = NO_INSTANTS,
 ) {
+    /** Tem losango à vista, forte ou esmaecido (o trilho e o nome sobem). */
+    val hasKeys: Boolean get() = instants.isNotEmpty() || dimInstants.isNotEmpty()
+
     /** Os trechos desenhados e tocados nesta fileira: os da linha, ou só ela. */
     val segments: Array<RowModel> = shared ?: arrayOf(this)
 
@@ -82,6 +91,26 @@ internal class RowModel(
 
 internal fun focusedKeys(keys: List<KeyframeRow>, focus: List<TrackKey>): List<KeyframeRow> =
     keys.filter { key -> focus.any { it.property == key.property && it.effectIndex == key.effectIndex && it.paramIndex == key.paramIndex } }
+
+private val NO_INSTANTS = IntArray(0)
+
+/**
+ * A linha da camada principal com um painel focado: os losangos do parâmetro
+ * do painel fortes (os únicos que se tocam e arrastam, como antes) e os dos
+ * outros parâmetros animados esmaecidos. [allInstants] = os instantes da linha
+ * inteira (a do cache, já pronta).
+ */
+internal fun buildFocusedRow(l: LayerRow, all: List<KeyframeRow>, focus: List<TrackKey>, allInstants: IntArray): RowModel {
+    val strong = buildRow(l, focusedKeys(all, focus))
+    val dim = KeyEmphasis.dimmed(allInstants, strong.instants)
+    if (dim.isEmpty()) return strong
+    return RowModel(
+        id = strong.id, type = strong.type, start = strong.start, end = strong.end, offset = strong.offset,
+        visible = strong.visible, locked = strong.locked, magnetic = strong.magnetic, animated = strong.animated,
+        name = strong.name, label = strong.label, instants = strong.instants, keysAt = strong.keysAt,
+        line = strong.line, dimInstants = dim,
+    )
+}
 
 internal fun buildRows(layers: List<LayerRow>, keyframes: Map<Long, List<KeyframeRow>>): List<RowModel> =
     List(layers.size) { i -> buildRow(layers[i], keyframes[layers[i].id].orEmpty()) }

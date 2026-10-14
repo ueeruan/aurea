@@ -238,6 +238,72 @@ func homeProjectSpec(_ entry: HomeProjectEntry) -> String {
     return "\(aspect.label) · \(fps) fps"
 }
 
+/// O que um chip de metadados da linha do projeto mostra (o ícone sai daqui).
+enum HomeProjectChipKind: Equatable {
+    case fps, aspect, resolution, size
+    var glyph: Character {
+        switch self {
+        case .fps: return CupertinoGlyph.Speedometer
+        case .aspect: return CupertinoGlyph.Crop
+        case .resolution: return CupertinoGlyph.Tv
+        case .size: return CupertinoGlyph.Fullscreen
+        }
+    }
+}
+
+struct HomeProjectChip: Equatable {
+    let kind: HomeProjectChipKind
+    let text: String
+}
+
+/// Os chips da linha do projeto na lista (spec am-ui §6, P2-8): fps, proporção,
+/// resolução e tamanho do quadro, todos do sidecar que a Home já lê (nada de
+/// rede). Sem medida gravada só o fps aparece; proporção fora dos presets sai
+/// reduzida ("21:9", "2.39:1"). Par do `projectChips` do Android.
+func homeProjectChips(_ entry: HomeProjectEntry) -> [HomeProjectChip] {
+    let fps = HomeProjectChip(kind: .fps, text: "\(homeFormatFps(entry.fps)) fps")
+    guard entry.width > 0 && entry.height > 0 else { return [fps] }
+    return [
+        fps,
+        HomeProjectChip(kind: .aspect, text: homeAspectLabel(width: entry.width, height: entry.height)),
+        HomeProjectChip(kind: .resolution, text: ProjectPresets.resolutionLabel(min(entry.width, entry.height))),
+        HomeProjectChip(kind: .size, text: "\(entry.width) × \(entry.height)"),
+    ]
+}
+
+/// "16:9" dos presets (< 0,01 de diferença); senão a razão reduzida, ou "x.xx:1".
+func homeAspectLabel(width: Int, height: Int) -> String {
+    let ratio = CGFloat(width) / CGFloat(height)
+    if let preset = ProjectPresets.aspects.first(where: { abs($0.ratio - ratio) < 0.01 }) { return preset.label }
+    var a = width, b = height
+    while b != 0 { (a, b) = (b, a % b) }
+    let w = width / a, h = height / a
+    if w <= 99 && h <= 99 { return "\(w):\(h)" }
+    return ratio >= 1 ? String(format: "%.2f:1", locale: Locale(identifier: "en_US_POSIX"), Double(ratio))
+        : String(format: "1:%.2f", locale: Locale(identifier: "en_US_POSIX"), Double(1 / ratio))
+}
+
+/// Chips de metadados da linha (fps, proporção, resolução, tamanho), cada um
+/// com o seu ícone; quebram de linha quando a coluna é estreita. O leitor de
+/// tela lê os quatro de uma vez (`home.project.meta`, o mesmo id do Android).
+struct HomeProjectChips: View {
+    let entry: HomeProjectEntry
+    var body: some View {
+        AureaFlowLayout(hGap: 6, vGap: 4) {
+            ForEach(Array(homeProjectChips(entry).enumerated()), id: \.offset) { _, chip in
+                HStack(spacing: 4) {
+                    CupertinoGlyph.text(chip.kind.glyph, size: 11, color: AureaColors.muted)
+                    Text(chip.text).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home.project.meta")
+    }
+}
+
 /// Razão para a moldura do placeholder (≤ 0 → 16:9).
 func homeProjectRatio(_ entry: HomeProjectEntry) -> CGFloat {
     entry.width > 0 && entry.height > 0
@@ -581,7 +647,7 @@ struct HomeProjectRow: View {
                 }.frame(width: 84, height: 84).clipped().clipShape(RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(entry.title).font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.text).lineLimit(2)
-                    Text(homeProjectSpec(entry)).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).lineLimit(2)
+                    HomeProjectChips(entry: entry).padding(.top, 2)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 Button(action: selecting ? onMark : onMenu) {
                     CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 20, color: AureaColors.muted)
@@ -932,6 +998,8 @@ struct HomeProjectDialogs: View {
                 message: homeProjectSpec(entry),
                 actions: [
                     HomeSheetAction(AureaText.t("common_open")) { onOpen(entry) },
+                    // Começa a seleção de vários com este projeto marcado (spec am-ui P2-8).
+                    HomeSheetAction(AureaText.t("home_select"), tag: "home.project.select") { selection.insert(entry.id) },
                     HomeSheetAction(AureaText.t("common_duplicate")) {
                         duplicateHomeProject(entry)
                         library.refresh()
@@ -1019,11 +1087,14 @@ struct HomeSheetAction: Identifiable {
     let id = UUID()
     let label: String
     var destructive: Bool = false
+    /// Id de acessibilidade/teste (o mesmo `testTag` do Android); nil = sem.
+    var tag: String? = nil
     let action: () -> Void
 
-    init(_ label: String, destructive: Bool = false, action: @escaping () -> Void) {
+    init(_ label: String, destructive: Bool = false, tag: String? = nil, action: @escaping () -> Void) {
         self.label = label
         self.destructive = destructive
+        self.tag = tag
         self.action = action
     }
 }
@@ -1073,6 +1144,7 @@ struct HomeActionSheet: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier(item.tag ?? "")
                     }
                 }
                 .background(HomeColors.sheetFill, in: RoundedRectangle(cornerRadius: HomeDims.rMd))

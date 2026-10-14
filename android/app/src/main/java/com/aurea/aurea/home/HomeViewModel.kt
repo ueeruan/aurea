@@ -87,6 +87,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         selection = if (path in selection) selection - path else selection + path
     }
 
+    /**
+     * "Selecionar" no menu ⋯ do projeto: entra no modo de seleção já com ELE
+     * marcado (se o modo já está ligado, só soma; nunca desmarca).
+     */
+    fun startSelection(path: String) {
+        if (path !in selection) selection = selection + path
+    }
+
     fun selectAll(paths: Collection<String>) {
         selection = paths.toSet()
     }

@@ -276,6 +276,13 @@ struct TimelineRow {
     /// (ela mesma). Os campos desta fileira são só o resumo dela (pílula,
     /// altura); quem se desenha, se toca e se edita é cada trecho de `segments`.
     var shared: [TimelineRow]? = nil
+    /// Instantes dos OUTROS parâmetros animados (fora do foco do painel), em
+    /// frames da timeline: desenhados esmaecidos, sem toque (`KeyEmphasis`).
+    /// Vazio sem painel focado — aí `instants` já tem todos.
+    var dimInstants: [Int32] = []
+
+    /// Tem losango à vista, forte ou esmaecido (o trilho e o nome sobem).
+    var hasKeys: Bool { !instants.isEmpty || !dimInstants.isEmpty }
 
     /// Os trechos desenhados e tocados nesta fileira: os da linha, ou só ela.
     var segments: [TimelineRow] { shared ?? [self] }
@@ -515,11 +522,16 @@ enum TimelineRowOrder {
         }
         if focusedGeneration == generation && focusedID == id && focusedTracks == tracks { return focusedResult }
         focusedGeneration = generation; focusedID = id; focusedTracks = tracks
+        // Painel focado: na principal, o parâmetro dele forte (o único que se
+        // toca e arrasta) e os outros parâmetros animados esmaecidos (par do
+        // `buildFocusedRow` do Android; antes sumiam da barra).
         focusedResult = base.map { row in
             guard row.id == id, let layer = layers.first(where: { $0.id == id }) else { return row }
-            return buildTimelineRow(layer, (keys[id] ?? []).filter { key in
+            var strong = buildTimelineRow(layer, (keys[id] ?? []).filter { key in
                 tracks.contains { $0.property == Int(key.property) && $0.effect == key.effectIndex && $0.param == key.paramIndex }
             })
+            strong.dimInstants = KeyEmphasis.dimmed(row.instants, strong: strong.instants)
+            return strong
         }
         // Expanded rows also contain the base row, so a focus change invalidates them.
         expandedRevision = .max

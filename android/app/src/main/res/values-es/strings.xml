@@ -662,7 +662,7 @@ para editar la curva.</string>
     <string name="panel_passagem">Pasada</string>
     <string name="panel_passar_tras_frente">Pasar de atrás hacia adelante</string>
     <string name="panel_pela_forma">Por la forma</string>
-    <string name="panel_pela_forma_aparece_onde_outra_camada">Por la forma: aparece donde existe la otra capa. Por el brillo: donde es clara.</string>
+    <string name="panel_pela_forma_aparece_onde_outra_camada">Al elegir un modo, recorta la capa justo debajo de esta (puedes cambiarla en el paso 2). Por forma: aparece donde esa capa existe. Por brillo: donde es clara.</string>
     <string name="panel_pela_forma_invertido">Por la forma, invertido</string>
     <string name="panel_pelo_brilho">Por el brillo</string>
     <string name="panel_pelo_brilho_invertido">Por el brillo, invertido</string>
@@ -1772,7 +1772,7 @@ para editar la curva.</string>
     <string name="pn_karaoke">Neón</string>
     <string name="pn_mask_n">Máscara %1$d</string>
     <string name="pn_mask_n_open">Máscara %1$d (abierta)</string>
-    <string name="pn_mask_pick_layer_below">Elige la capa que se usará como máscara</string>
+    <string name="pn_mask_pick_layer_below">No hay ninguna capa debajo de esta. Elige en el paso 2 qué capa recorta.</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Karaoke</string>
     <string name="pn_preset_n">Preset %1$d</string>

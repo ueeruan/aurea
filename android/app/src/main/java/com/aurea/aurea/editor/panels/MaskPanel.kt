@@ -266,7 +266,10 @@ private fun TrackMatteTab(store: EditorStore) {
         if (value == 0) {
             store.setTrackMatte(0L, 0)
         } else {
-            // Sem camada escolhida: a logo acima na pilha (AE).
+            // Sem camada escolhida: a logo ABAIXO na pilha. `zIndex` 0 é a frente
+            // (`Engine::query_layers`), então o vizinho de trás é o de zIndex
+            // maior mais próximo. O motor (`set_track_matte`) usa a camada que a
+            // UI passar; os textos do painel dizem "abaixo" (P1-7).
             val target = if (matte != 0L) matte
             else candidates.filter { me != null && it.zIndex > me.zIndex }.minByOrNull { it.zIndex }?.id ?: 0L
             if (target == 0L) store.showToast(pickBelowMsg) else store.setTrackMatte(target, value)

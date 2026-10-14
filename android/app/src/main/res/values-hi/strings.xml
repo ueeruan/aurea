@@ -662,7 +662,7 @@
     <string name="panel_passagem">गुज़र</string>
     <string name="panel_passar_tras_frente">पीछे से आगे जाएँ</string>
     <string name="panel_pela_forma">आकृति से</string>
-    <string name="panel_pela_forma_aparece_onde_outra_camada">आकृति से: वहाँ दिखता है जहाँ दूसरी लेयर है। चमक से: जहाँ वह उजली है।</string>
+    <string name="panel_pela_forma_aparece_onde_outra_camada">मोड चुनने पर इसके ठीक नीचे वाली लेयर काटती है (चरण 2 में बदल सकते हैं)। आकार से: जहाँ वह लेयर है, वहाँ दिखता है। चमक से: जहाँ वह हल्की है।</string>
     <string name="panel_pela_forma_invertido">आकृति से, उलटा</string>
     <string name="panel_pelo_brilho">चमक से</string>
     <string name="panel_pelo_brilho_invertido">चमक से, उलटा</string>
@@ -1774,7 +1774,7 @@
     <string name="pn_karaoke">नियॉन</string>
     <string name="pn_mask_n">मास्क %1$d</string>
     <string name="pn_mask_n_open">मास्क %1$d (खुला)</string>
-    <string name="pn_mask_pick_layer_below">मास्क के रूप में इस्तेमाल होने वाली लेयर चुनें</string>
+    <string name="pn_mask_pick_layer_below">इसके नीचे कोई लेयर नहीं है। चरण 2 में चुनें कि कौन-सी लेयर काटेगी।</string>
     <string name="pn_ok">ठीक है</string>
     <string name="pn_pop">कराओके</string>
     <string name="pn_preset_n">प्रीसेट %1$d</string>

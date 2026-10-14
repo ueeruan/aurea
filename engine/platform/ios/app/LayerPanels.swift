@@ -1960,9 +1960,12 @@ struct MaskPanel: View {
             ChoiceChips(["panel_nao_recortar", "panel_pela_forma", "panel_pela_forma_invertido", "panel_pelo_brilho", "panel_pelo_brilho_invertido"].map { AureaText.t($0) }, selected: mode) { value in
                 if value == 0 { write(0, 0) }
                 else {
+                    // Sem camada escolhida: a logo ABAIXO na pilha (a lista vem com a
+                    // frente primeiro, `Engine::query_layers`). O motor usa a camada que
+                    // a UI passar; os textos do painel dizem "abaixo" (par do Android, P1-7).
                     let own = model.layers.firstIndex { $0.id == id } ?? 0
-                    let above = model.layers.dropFirst(own + 1).first { item in candidates.contains { $0.id == item.id } }
-                    let target = matte != 0 ? matte : (above?.id ?? 0)
+                    let below = model.layers.dropFirst(own + 1).first { item in candidates.contains { $0.id == item.id } }
+                    let target = matte != 0 ? matte : (below?.id ?? 0)
                     if target == 0 { model.toast = AureaText.t("pn_mask_pick_layer_below") } else { write(target, value) }
                 }
             }

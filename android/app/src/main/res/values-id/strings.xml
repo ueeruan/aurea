@@ -661,7 +661,7 @@ untuk mengedit kurvanya.</string>
     <string name="panel_passagem">Lintasan</string>
     <string name="panel_passar_tras_frente">Lewat dari belakang ke depan</string>
     <string name="panel_pela_forma">Berdasarkan bentuk</string>
-    <string name="panel_pela_forma_aparece_onde_outra_camada">Berdasarkan bentuk: muncul di tempat lapisan lain ada. Berdasarkan kecerahan: di tempat ia terang.</string>
+    <string name="panel_pela_forma_aparece_onde_outra_camada">Saat memilih mode, layer tepat di bawah layer ini yang memotong (bisa diganti di langkah 2). Berdasarkan bentuk: muncul di tempat layer itu ada. Berdasarkan kecerahan: di tempat yang terang.</string>
     <string name="panel_pela_forma_invertido">Berdasarkan bentuk, terbalik</string>
     <string name="panel_pelo_brilho">Berdasarkan kecerahan</string>
     <string name="panel_pelo_brilho_invertido">Berdasarkan kecerahan, terbalik</string>
@@ -1772,7 +1772,7 @@ untuk mengedit kurvanya.</string>
     <string name="pn_karaoke">Neon</string>
     <string name="pn_mask_n">Masker %1$d</string>
     <string name="pn_mask_n_open">Mask %1$d (terbuka)</string>
-    <string name="pn_mask_pick_layer_below">Pilih layer yang akan digunakan sebagai mask</string>
+    <string name="pn_mask_pick_layer_below">Tidak ada layer di bawah layer ini. Pilih layer pemotong di langkah 2.</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Karaoke</string>
     <string name="pn_preset_n">Preset %1$d</string>

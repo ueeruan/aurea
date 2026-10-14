@@ -684,7 +684,7 @@
     <string name="panel_passagem">مرور</string>
     <string name="panel_passar_tras_frente">المرور من الخلف إلى الأمام</string>
     <string name="panel_pela_forma">بالشكل</string>
-    <string name="panel_pela_forma_aparece_onde_outra_camada">بالشكل: يظهر حيث توجد الطبقة الأخرى. بالسطوع: حيث تكون مضيئة.</string>
+    <string name="panel_pela_forma_aparece_onde_outra_camada">عند اختيار وضع، تقصّ الطبقة التي تحت هذه مباشرةً (يمكنك تغييرها في الخطوة 2). حسب الشكل: يظهر حيث توجد تلك الطبقة. حسب السطوع: حيث تكون فاتحة.</string>
     <string name="panel_pela_forma_invertido">بالشكل، معكوس</string>
     <string name="panel_pelo_brilho">بالسطوع</string>
     <string name="panel_pelo_brilho_invertido">بالسطوع، معكوس</string>
@@ -1798,7 +1798,7 @@
     <string name="pn_karaoke">نيون</string>
     <string name="pn_mask_n">القناع %1$d</string>
     <string name="pn_mask_n_open">القناع %1$d (مفتوح)</string>
-    <string name="pn_mask_pick_layer_below">اختر الطبقة التي ستُستخدم كقناع</string>
+    <string name="pn_mask_pick_layer_below">لا توجد طبقة تحت هذه. اختر في الخطوة 2 الطبقة التي تقصّ.</string>
     <string name="pn_ok">حسنًا</string>
     <string name="pn_pop">كاريوكي</string>
     <string name="pn_preset_n">إعداد مسبق %1$d</string>

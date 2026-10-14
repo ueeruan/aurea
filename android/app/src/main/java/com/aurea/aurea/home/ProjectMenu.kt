@@ -86,6 +86,8 @@ internal fun ProjectDialogs(
             message = projectSpec(d.entry),
             actions = listOf(
                 SheetAction(stringResource(R.string.common_open)) { onOpen(d.entry) },
+                // Começa a seleção de vários com este projeto marcado (spec am-ui P2-8).
+                SheetAction(stringResource(R.string.home_select), tag = "home.project.select") { vm.startSelection(d.entry.path) },
                 SheetAction(stringResource(R.string.common_duplicate)) { store.duplicateProject(d.entry.path) },
                 SheetAction(stringResource(R.string.common_rename)) { state.current = ProjectDialog.Rename(d.entry) },
                 SheetAction(stringResource(R.string.project_file_export)) { state.current = ProjectDialog.ExportFile(d.entry) },

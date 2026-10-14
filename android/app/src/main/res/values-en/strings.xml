@@ -674,7 +674,7 @@ to edit the curve.</string>
     <string name="panel_passagem">Crossing</string>
     <string name="panel_passar_tras_frente">Pass from back to front</string>
     <string name="panel_pela_forma">By shape</string>
-    <string name="panel_pela_forma_aparece_onde_outra_camada">By shape: it appears where the other layer exists. By brightness: where it is bright.</string>
+    <string name="panel_pela_forma_aparece_onde_outra_camada">When you pick a mode, the layer right below this one does the cutting (you can change it in step 2). By shape: it shows where that layer exists. By brightness: where it is bright.</string>
     <string name="panel_pela_forma_invertido">By shape, inverted</string>
     <string name="panel_pelo_brilho">By brightness</string>
     <string name="panel_pelo_brilho_invertido">By brightness, inverted</string>
@@ -1295,7 +1295,7 @@ to edit the curve.</string>
     <string name="pn_karaoke">Neon</string>
     <string name="pn_mask_n">Mask %1$d</string>
     <string name="pn_mask_n_open">Mask %1$d (open)</string>
-    <string name="pn_mask_pick_layer_below">Choose the layer to use as the mask</string>
+    <string name="pn_mask_pick_layer_below">There is no layer below this one. Choose the cutting layer in step 2.</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Karaoke</string>
     <string name="pn_preset_n">Preset %1$d</string>

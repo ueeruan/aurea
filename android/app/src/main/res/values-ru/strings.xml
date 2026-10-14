@@ -664,7 +664,7 @@
     <string name="panel_passagem">Проход</string>
     <string name="panel_passar_tras_frente">Пройти сзади вперёд</string>
     <string name="panel_pela_forma">По форме</string>
-    <string name="panel_pela_forma_aparece_onde_outra_camada">По форме: появляется там, где есть другой слой. По яркости: где он светлый.</string>
+    <string name="panel_pela_forma_aparece_onde_outra_camada">При выборе режима обрезает слой прямо под этим (его можно сменить на шаге 2). По форме: видно там, где этот слой есть. По яркости: там, где он светлый.</string>
     <string name="panel_pela_forma_invertido">По форме, инвертировано</string>
     <string name="panel_pelo_brilho">По яркости</string>
     <string name="panel_pelo_brilho_invertido">По яркости, инвертировано</string>
@@ -1776,7 +1776,7 @@
     <string name="pn_karaoke">Неон</string>
     <string name="pn_mask_n">Маска %1$d</string>
     <string name="pn_mask_n_open">Маска %1$d (открытая)</string>
-    <string name="pn_mask_pick_layer_below">Выберите слой, который будет маской</string>
+    <string name="pn_mask_pick_layer_below">Под этим слоем нет других слоёв. Выберите на шаге 2, какой слой обрезает.</string>
     <string name="pn_ok">OK</string>
     <string name="pn_pop">Караоке</string>
     <string name="pn_preset_n">Пресет %1$d</string>

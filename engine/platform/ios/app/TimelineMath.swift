@@ -540,3 +540,72 @@ enum Reorder {
                                : rowsTop + CGFloat(target + 1) * rowHeight - scroll
     }
 }
+
+// =============================================================================
+// Acabamentos (TimelineEmphasis.kt)
+// =============================================================================
+/// Ênfase dos losangos na barra do clipe (spec am-ui §4.2, P1-6): com um painel
+/// editando um parâmetro, os losangos DELE ficam fortes e os dos outros
+/// parâmetros animados da camada esmaecidos — só de referência, sem toque nem
+/// arrasto. O losango sob o cabeçote acende na cor de destaque. Par do
+/// `KeyEmphasis` do Android.
+enum KeyEmphasis {
+    /// Opacidade dos losangos dos outros parâmetros (160/255, a da referência).
+    static let dimAlpha: Double = 160.0 / 255.0
+
+    /// Cor de um losango forte, da maior prioridade para a menor.
+    enum Tone: Equatable { case chosen, picked, playhead, off }
+
+    /// Instantes de `all` que o foco não marca (os dois ordenados, sem repetir).
+    static func dimmed(_ all: [Int32], strong: [Int32]) -> [Int32] {
+        if strong.isEmpty { return all }
+        let marked = Set(strong)
+        return all.filter { !marked.contains($0) }
+    }
+
+    /// Escolhido (âmbar) > na seleção da timeline (azul) > sob o cabeçote (destaque) > branco.
+    static func tone(chosen: Bool, picked: Bool, underPlayhead: Bool) -> Tone {
+        if chosen { return .chosen }
+        if picked { return .picked }
+        if underPlayhead { return .playhead }
+        return .off
+    }
+}
+
+/// Fileira nova surge com fade (spec am-ui §4.3: alfa 0→1 em 600 ms,
+/// Decelerate). "Nova" = camada que não estava na leitura anterior da MESMA
+/// composição; abrir projeto ou entrar num grupo (lista trocada inteira) não
+/// anima. Par do `RowFade` do Android.
+enum TimelineRowFade {
+    static let duration: Double = 0.6
+
+    /// Opacidade `elapsed` segundos depois de nascer: Decelerate(1) = 1 − (1 − t)².
+    static func alpha(_ elapsed: Double) -> Double {
+        if elapsed <= 0 { return 0 }
+        if elapsed >= duration { return 1 }
+        let t = elapsed / duration
+        return 1 - (1 - t) * (1 - t)
+    }
+
+    /// Camadas de `current` fora de `previous`. nil = primeira leitura: nada nasce;
+    /// nenhuma em comum com uma lista anterior não vazia = lista trocada: nada nasce;
+    /// lista anterior vazia e UMA camada agora = a primeira do projeto vazio.
+    static func born(previous: [Int64]?, current: [Int64]) -> [Int64] {
+        guard let previous, !current.isEmpty else { return [] }
+        if previous.isEmpty { return current.count == 1 ? current : [] }
+        let known = Set(previous)
+        let fresh = current.filter { !known.contains($0) }
+        return fresh.count == current.count ? [] : fresh
+    }
+}
+
+/// Rolagem vertical ao entrar e sair da fileira compacta (referência:
+/// `originalScrollY`): entrar guarda a da lista inteira e zera (o compacto tem
+/// uma fileira só); sair devolve a guardada, presa ao máximo de agora. O
+/// Android guarda a mesma rolagem no `TimelineState` (o compacto não a toca).
+enum TimelineCompactScroll {
+    static func transition(entering: Bool, current: CGFloat, saved: CGFloat?, maxScroll: CGFloat) -> (scroll: CGFloat, saved: CGFloat?) {
+        if entering { return (0, saved ?? current) }
+        return (min(max(0, saved ?? current), max(0, maxScroll)), nil)
+    }
+}

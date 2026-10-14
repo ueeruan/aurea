@@ -88,10 +88,12 @@ internal class TimelineController(
     val rows = derivedStateOf {
         val focus = store.timelineFocus
         val cached = rowCache.build(store.layers, store.keyframes)
+        // Painel focado: na principal, o parâmetro dele forte e os outros
+        // parâmetros animados esmaecidos (antes sumiam da barra).
         val perLayer = if (focus == null) cached else cached.map { row ->
             val layer = if (row.id == store.primary) store.layers.firstOrNull { it.id == row.id } else null
-            if (row.id != store.primary || layer == null) row else buildRow(layer,
-                focusedKeys(store.keyframes[row.id].orEmpty(), focus))
+            if (row.id != store.primary || layer == null) row else buildFocusedRow(layer,
+                store.keyframes[row.id].orEmpty(), focus, row.instants)
         }
         // Uma fileira por LINHA: refeita só quando as linhas por camada mudam.
         val base = if (sharedInput === perLayer) sharedResult else sharedRows(perLayer).also {
@@ -478,6 +480,43 @@ internal class TimelineController(
 
     /** Mais um quadro de desenho (fora da fase de desenho: escrever estado lido nela ali mesmo é frágil). */
     private var redrawPosted = false
+    // --- Fade das fileiras novas (RowFade) ------------------------------------------
+    private var fadeProject: String? = null
+    private var fadeKnown: LongArray? = null
+    /** Camada nascida → instante (System.nanoTime) em que apareceu. Vazio quase sempre. */
+    private val bornAt = HashMap<Long, Long>()
+
+    /** Nova leitura das camadas da composição aberta: as que nasceram começam o fade. */
+    fun noteLayers(project: String?, ids: LongArray, nowNanos: Long) {
+        val sorted = ids.copyOf().also { it.sort() }
+        val previous = if (project == fadeProject) fadeKnown else null
+        fadeProject = project
+        fadeKnown = sorted
+        for (id in RowFade.born(previous, sorted)) bornAt[id] = nowNanos
+        if (bornAt.isNotEmpty()) requestRedraw()
+    }
+
+    /**
+     * Opacidade da fileira [r] agora (1 = parada). A fileira só anima se TODOS os
+     * trechos dela são novos: um corte (o pedaço novo divide a linha velha) não pisca.
+     */
+    fun rowAlpha(r: RowModel, nowNanos: Long): Float {
+        if (bornAt.isEmpty()) return 1f
+        var oldest = Long.MAX_VALUE
+        for (s in r.segments) {
+            val born = bornAt[s.id] ?: return 1f
+            oldest = minOf(oldest, born)
+        }
+        return RowFade.alpha((nowNanos - oldest) / 1_000_000L)
+    }
+
+    /** Fim do quadro: tira quem já terminou e pede o próximo enquanto há fade. */
+    fun settleFades(nowNanos: Long) {
+        if (bornAt.isEmpty()) return
+        bornAt.values.removeAll { (nowNanos - it) / 1_000_000L >= RowFade.DURATION_MS }
+        if (bornAt.isNotEmpty()) requestRedraw()
+    }
+
     fun requestRedraw() {
         if (redrawPosted) return
         redrawPosted = true
@@ -1389,6 +1428,13 @@ internal class TimelineController(
         scrollJob = scope.launch {
             var last = 0f
             AnimationState(0f, -vy).animateDecay(decay) {
+                // Entrou no compacto no meio da inércia: a rolagem da lista fica
+                // guardada como estava (o compacto não tem o que rolar e o clamp
+                // dele a zeraria) e volta igual ao sair.
+                if (state.compact) {
+                    cancelAnimation()
+                    return@animateDecay
+                }
                 val before = state.scrollY
                 val after = clampScroll(before + (value - last))
                 last = value

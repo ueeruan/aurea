@@ -84,6 +84,14 @@ internal class TimelinePainter(
     private val tc = IntArray(4)
     /** Grupos de losangos visíveis de uma linha ([primeiro, último] por grupo), reusado. */
     private var groupBuf = IntArray(256)
+    /** Grupos dos losangos esmaecidos (outros parâmetros), separado do [groupBuf]. */
+    private var dimGroupBuf = IntArray(256)
+    /** Camada de desenho dos esmaecidos (160/255) e do fade de fileira nova. */
+    private val dimPaint = androidx.compose.ui.graphics.Paint().apply { alpha = KeyEmphasis.DIM_ALPHA }
+    private val fadePaint = androidx.compose.ui.graphics.Paint()
+    /** Relógio e cabeçote do quadro em pintura (lidos uma vez em [draw]). */
+    private var frameNanos = 0L
+    private var playheadFrame = Snap.NONE
     private var steps: RulerSteps? = null
     private var stepsPps = Float.NaN
     private var stepsFps = Float.NaN
@@ -189,6 +197,8 @@ internal class TimelinePainter(
         val n = c.rowCount(rows)
         st.redrawTick   // lido: as miniaturas que não couberam neste quadro pedem o próximo
         thumbs.beginFrame(THUMB_QUERIES_PER_FRAME)
+        frameNanos = System.nanoTime()
+        playheadFrame = store.playhead
 
         if (n > 0) {
             // A pílula da 1ª fileira começa 2 dp acima da barra.
@@ -201,6 +211,7 @@ internal class TimelinePainter(
         drawMarkers(store.markers, w, view, ppf, cx)
         drawTimecode(cx, store.playhead, fps)
         if (thumbs.starved) c.requestRedraw()
+        c.settleFades(frameNanos)
         // Uma origem temporal para clipes, losangos e fio, inclusive na seleção.
         val color = AureaColors.Playhead
         // Fio de 1 dp interrompido apenas na faixa do relógio.
@@ -257,37 +268,41 @@ internal class TimelinePainter(
                 // A linha que recebe o trecho no ar acende inteira.
                 drawRect(AureaColors.Accent.copy(alpha = 0.18f), Offset(m.headerColumn, top), Size(w - m.headerColumn, c.rowHeight(r)))
             }
+            // Fileira recém-criada: surge com fade (RowFade, 600 ms).
+            val fade = c.rowAlpha(r, frameNanos)
+            if (fade < 1f) beginFade(fade, top, c.rowHeight(r), w)
             if (segs.size == 1) {
                 // O trecho no ar sai da fileira dele (é desenhado sob o dedo).
                 if (segs[0].id != st.liftId) drawSegment(c, segs[0], top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = true)
-                continue
-            }
-            // FILEIRA COMPARTILHADA: cada trecho da linha no seu tempo, lado a
-            // lado. Os escolhidos por cima — contorno e alças passam por cima do
-            // vizinho encostado, que é onde o dedo os pega.
-            var onScreen = false
-            var offLeft = false
-            var offRight = false
-            for (s in segs) {
-                val x0 = TimeAxis.xOf(s.start.toDouble(), view, ppf, cx)
-                val x1 = TimeAxis.xOf(s.end.toDouble(), view, ppf, cx)
-                when {
-                    x1 >= -m.barRadius && x0 <= w + m.barRadius -> onScreen = true
-                    x0 > w -> offRight = true
-                    else -> offLeft = true
+            } else {
+                // FILEIRA COMPARTILHADA: cada trecho da linha no seu tempo, lado a
+                // lado. Os escolhidos por cima — contorno e alças passam por cima do
+                // vizinho encostado, que é onde o dedo os pega.
+                var onScreen = false
+                var offLeft = false
+                var offRight = false
+                for (s in segs) {
+                    val x0 = TimeAxis.xOf(s.start.toDouble(), view, ppf, cx)
+                    val x1 = TimeAxis.xOf(s.end.toDouble(), view, ppf, cx)
+                    when {
+                        x1 >= -m.barRadius && x0 <= w + m.barRadius -> onScreen = true
+                        x0 > w -> offRight = true
+                        else -> offLeft = true
+                    }
+                }
+                for (pass in 0..1) for (s in segs) {
+                    if (c.isSelected(s.id) != (pass == 1) || s.id == st.liftId) continue
+                    drawSegment(c, s, top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = false)
+                }
+                // Linha inteira fora da janela: UMA seta por lado (não uma por trecho).
+                // Legenda desenha os blocos dela e nunca teve seta.
+                if (!onScreen && c.store.captionTracks.none { t -> t.layer == segs[0].id }) {
+                    val color = AureaTimeline.tone(r.type).stripe.copy(alpha = if (r.visible) 0.9f else 0.45f)
+                    if (offRight) drawEdgeArrow(true, top, w, color)
+                    if (offLeft) drawEdgeArrow(false, top, w, color)
                 }
             }
-            for (pass in 0..1) for (s in segs) {
-                if (c.isSelected(s.id) != (pass == 1) || s.id == st.liftId) continue
-                drawSegment(c, s, top, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = false)
-            }
-            // Linha inteira fora da janela: UMA seta por lado (não uma por trecho).
-            // Legenda desenha os blocos dela e nunca teve seta.
-            if (!onScreen && c.store.captionTracks.none { t -> t.layer == segs[0].id }) {
-                val color = AureaTimeline.tone(r.type).stripe.copy(alpha = if (r.visible) 0.9f else 0.45f)
-                if (offRight) drawEdgeArrow(true, top, w, color)
-                if (offLeft) drawEdgeArrow(false, top, w, color)
-            }
+            if (fade < 1f) drawContext.canvas.restore()
         }
 
         // Pílulas por cima das barras (as barras passam por baixo): olho + miniatura do tipo.
@@ -298,15 +313,18 @@ internal class TimelinePainter(
             val rowTop = m.rowsTop + c.rowTop(i) - scroll + (preview?.offsets?.get(i) ?: 0f)
             if (rowTop + c.rowHeight(r) < m.rowsTop || rowTop > h) continue
             val track = r.track
+            val fade = c.rowAlpha(r, frameNanos)
+            if (fade < 1f) beginFade(fade, rowTop, c.rowHeight(r), w)
             if (track != null) {
                 drawLaneGutter(r, track, rowTop, c.rowHeight(r), c.openGroups.value)
-                continue
+            } else {
+                // A calha é da FILEIRA: no lote se algum trecho dela está no lote;
+                // aberta se as trilhas abertas são de um trecho dela.
+                var inBatch = false
+                if (multi) for (s in r.segments) if (c.isSelected(s.id)) inBatch = true
+                drawGutter(c, r, rowTop + m.barTop, inBatch, c.isExpanded(r), fps)
             }
-            // A calha é da FILEIRA: no lote se algum trecho dela está no lote;
-            // aberta se as trilhas abertas são de um trecho dela.
-            var inBatch = false
-            if (multi) for (s in r.segments) if (c.isSelected(s.id)) inBatch = true
-            drawGutter(c, r, rowTop + m.barTop, inBatch, c.isExpanded(r), fps)
+            if (fade < 1f) drawContext.canvas.restore()
         }
 
         // Trecho no ar (arrasto vertical de UM trecho): o traço de inserção entre
@@ -467,7 +485,7 @@ internal class TimelinePainter(
                 }) { drawRect(thumbShade, size = Size(1f, m.bar), alpha = alpha) }
             }
             // Trilho dos losangos só quando a linha tem keyframe à vista.
-            if (!m.referenceTrial && keysShown && r.instants.isNotEmpty()) {
+            if (!m.referenceTrial && keysShown && r.hasKeys) {
                 drawRect(TRACK_SHADE, Offset(left, top + m.trackTop), Size(right - left, m.track), alpha = alpha)
             }
             if (r.track == null && (r.type == LayerType.Audio || r.type == LayerType.Video)) drawWaveform(canvas, r, top, x0, x1, w, view, ppf, cx, tone, alpha)
@@ -549,6 +567,13 @@ internal class TimelinePainter(
         }
     }
 
+    /** Abre a camada de desenho do fade da fileira nova (fecha com `canvas.restore()`). */
+    private fun DrawScope.beginFade(alpha: Float, top: Float, height: Float, w: Float) {
+        fadePaint.alpha = alpha
+        val pad = m.pillInset + m.diamond * 2f
+        drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, top - pad, w, top + height + pad), fadePaint)
+    }
+
     /** Losangos só de referência (camada não selecionada): a mesma figura, esmaecida numa camada de desenho. */
     private inline fun DrawScope.lockedKeys(locked: Boolean, top: Float, height: Float, w: Float, block: DrawScope.() -> Unit) {
         if (!locked) { block(); return }
@@ -570,7 +595,7 @@ internal class TimelinePainter(
         val cr = RowHit.contentRight(m, x0, x1, w)
         if (cr <= cl) return
         // Sem losangos o conteúdo centra na barra; com eles, sobe para a faixa de cima.
-        val cy = if (m.referenceTrial || r.instants.isEmpty()) top + m.bar / 2f else top + m.trackTop / 2f
+        val cy = if (m.referenceTrial || !r.hasKeys) top + m.bar / 2f else top + m.trackTop / 2f
         val d = m.density
         val arrowInk = ARROW_TINT.copy(alpha = ARROW_TINT.alpha * alpha)
         if (compact) return drawCappedContent(r, cy, x0, x1, w, cr, arrowInk, alpha)
@@ -757,9 +782,11 @@ internal class TimelinePainter(
         r: RowModel, top: Float, w: Float, view: Double, ppf: Float, cx: Float,
         compact: Boolean, selFrame: Int, dragFrame: Int, fps: Float, picked: BooleanArray? = null,
     ) {
+        val cy = top + if (compact) m.diamondCyCompact else m.diamondCyNormal
+        // Primeiro os dos OUTROS parâmetros, esmaecidos (160/255) e por baixo.
+        if (r.dimInstants.isNotEmpty()) drawDimDiamonds(r.dimInstants, cy, w, view, ppf, cx)
         val inst = r.instants
         if (inst.isEmpty()) return
-        val cy = top + if (compact) m.diamondCyCompact else m.diamondCyNormal
         // Lista de desenho pronta (Keyframes.visibleGroups): só o que está na tela;
         // o buffer cabe o máximo de grupos da largura (grupos distam ≥ keyMergeGap).
         val need = 2 * ((w + 2f * m.keyTouchHalf) / m.keyMergeGap).toInt() + 8
@@ -773,10 +800,10 @@ internal class TimelinePainter(
             val on = Keyframes.groupHas(inst, i, j, selFrame)
             var inSelection = false
             if (picked != null) for (k in i..j) if (picked[k]) { inSelection = true; break }
-            val fill = if (on) AureaTimeline.KeyframeOn else if (inSelection) KEY_PICKED else KEY_OFF
             if (j == i) {
                 val dragging = inst[i] == dragFrame
                 if (dragging) dragX = kx
+                val fill = keyFill(KeyEmphasis.tone(on, inSelection, inst[i] == playheadFrame))
                 drawDiamond(kx, cy, fill, on, if (dragging) m.keyDragScale else 1f, inSelection)
             } else {
                 drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, if (inSelection) KEY_PICKED else KEY_OFF, inSelection)
@@ -784,7 +811,7 @@ internal class TimelinePainter(
                 // temporal da chave no cabeçote, escolhida ou sendo arrastada.
                 // Paint temporal boundaries first and the selected/dragged key
                 // last, so adjacent dense anchors cannot cover its diamond.
-                val focus = intArrayOf(r.start, r.end, waveStore?.playhead ?: Snap.NONE, selFrame, dragFrame)
+                val focus = intArrayOf(r.start, r.end, playheadFrame, selFrame, dragFrame)
                 for (f in focus.indices) {
                     val frame = focus[f]
                     if ((f + 1 until focus.size).any { focus[it] == frame } || !Keyframes.groupHas(inst, i, j, frame)) continue
@@ -794,12 +821,45 @@ internal class TimelinePainter(
                     val keyPicked = picked?.get(index) == true
                     val dragging = frame == dragFrame
                     if (dragging) dragX = keyX
-                    drawDiamond(keyX, cy, if (chosen) AureaTimeline.KeyframeOn else if (keyPicked) KEY_PICKED else KEY_OFF,
+                    drawDiamond(keyX, cy, keyFill(KeyEmphasis.tone(chosen, keyPicked, frame == playheadFrame)),
                         chosen, if (dragging) m.keyDragScale else 1f, keyPicked)
                 }
             }
         }
         if (!dragX.isNaN()) drawBalloon(dragX, cy, dragFrame, fps)
+    }
+
+    private fun keyFill(tone: KeyEmphasis.Tone): Color = when (tone) {
+        KeyEmphasis.Tone.CHOSEN -> AureaTimeline.KeyframeOn
+        KeyEmphasis.Tone.PICKED -> KEY_PICKED
+        // O losango sob o cabeçote: na cor de destaque do tema.
+        KeyEmphasis.Tone.PLAYHEAD -> AureaColors.Accent
+        KeyEmphasis.Tone.OFF -> KEY_OFF
+    }
+
+    /**
+     * Losangos dos outros parâmetros animados (painel focado noutro): a mesma
+     * figura branca, numa camada a 160/255. Sem escolha, seleção nem arrasto —
+     * só dizem "aqui também tem animação".
+     */
+    private fun DrawScope.drawDimDiamonds(inst: IntArray, cy: Float, w: Float, view: Double, ppf: Float, cx: Float) {
+        val need = 2 * ((w + 2f * m.keyTouchHalf) / m.keyMergeGap).toInt() + 8
+        if (dimGroupBuf.size < need) dimGroupBuf = IntArray(need)
+        val groups = Keyframes.visibleGroups(inst, view, ppf, cx, w, m.keyTouchHalf, m.keyMergeGap, dimGroupBuf)
+        if (groups == 0) return
+        val pad = m.diamond * 2f
+        drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, cy - pad, w, cy + pad), dimPaint)
+        try {
+            for (g in 0 until groups) {
+                val i = dimGroupBuf[2 * g]
+                val j = dimGroupBuf[2 * g + 1]
+                val kx = TimeAxis.xOf(inst[i].toDouble(), view, ppf, cx)
+                if (j == i) drawDiamond(kx, cy, KEY_OFF, false, 1f)
+                else drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, KEY_OFF)
+            }
+        } finally {
+            drawContext.canvas.restore()
+        }
     }
 
     private fun DrawScope.drawDiamond(x: Float, y: Float, fill: Color, on: Boolean, scale: Float, picked: Boolean = false) {

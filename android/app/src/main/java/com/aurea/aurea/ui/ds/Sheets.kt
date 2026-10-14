@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -99,6 +100,8 @@ data class SheetAction(
     val label: String,
     val destructive: Boolean = false,
     val enabled: Boolean = true,
+    /** Id de acessibilidade/teste (o mesmo `accessibilityIdentifier` do iOS); null = sem. */
+    val tag: String? = null,
     val onClick: () -> Unit,
 )
 
@@ -150,6 +153,7 @@ fun AureaActionSheet(
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 57.dp)
+                                .then(if (a.tag != null) Modifier.testTag(a.tag) else Modifier)
                                 .tocavel(enabled = a.enabled, shrink = 1f) {
                                     onDismiss()
                                     a.onClick()

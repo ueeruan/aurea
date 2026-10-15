@@ -774,7 +774,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveVectorFace(env: P
  */
 @Composable
 private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEnv, pivot: Boolean, depth: Boolean, axis: Int, onAxis: (Int) -> Unit) {
-    if (depth) {
+    // Posição usa sempre a almofada (também em 3D: Z fica na caixa ao lado);
+    // só o Pivô 3D continua na fileira XYZ com régua.
+    if (depth && pivot) {
         MoveVectorFace(env, pivot, axis, onAxis)
         return
     }
@@ -970,7 +972,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
     ) {
         CornerMarks(Modifier.fillMaxSize())
         if (!pivot) {
-            Box(Modifier.fillMaxWidth().padding(top = 10.dp, start = 16.dp, end = 16.dp), contentAlignment = Alignment.TopCenter) { fields() }
+            Box(Modifier.fillMaxWidth().padding(top = 10.dp, start = 16.dp, end = 16.dp), contentAlignment = Alignment.TopCenter) {
+                PositionFields(env, x, y, z, zActive = zMode, depth = depth, onDepthPick = { zPicked = !zPicked })
+            }
         }
         Text(
             hint,
@@ -999,6 +1003,60 @@ private fun androidx.compose.foundation.layout.ColumnScope.MoveFace(env: PanelEn
                 )
             }
         }
+    }
+}
+
+/**
+ * Campos da Posição dentro da almofada: X e Y numa caixa só (verde), Z numa
+ * caixa separada, uma casa decimal e o rótulo do eixo embaixo. O toque em X/Y
+ * digita; em Z escolhe a profundidade para o arrasto (camada 3D) ou digita (2D);
+ * segurar Z sempre digita.
+ */
+@Composable
+private fun PositionFields(env: PanelEnv, x: Float, y: Float, z: Float, zActive: Boolean, depth: Boolean, onDepthPick: () -> Unit) {
+    val store = env.store
+    val xLabel = stringResource(R.string.panel_posicao_x)
+    val yLabel = stringResource(R.string.panel_posicao_y)
+    val zLabel = stringResource(R.string.panel_profundidade_z)
+    val enabled = store.detail?.locked != true
+    fun keypad(label: String, value: Float, property: Int) = env.openKeypad(
+        KeypadRequest(label, value, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { store.setTransform(property, it) })
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.Center) {
+        Box {
+            Box(Modifier.matchParentSize().padding(bottom = 18.dp).clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip))
+            Row {
+                PositionAxis(numeroPtBr(x, 1), "X", xLabel, AureaColors.Accent, enabled, "transform.position.x",
+                    onTap = { keypad(xLabel, x, TrackProperty.POSITION_X) })
+                PositionAxis(numeroPtBr(y, 1), "Y", yLabel, AureaColors.Accent, enabled, "transform.position.y",
+                    onTap = { keypad(yLabel, y, TrackProperty.POSITION_Y) })
+            }
+        }
+        Spacer(Modifier.width(28.dp))
+        Box {
+            Box(Modifier.matchParentSize().padding(bottom = 18.dp).clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip))
+            PositionAxis(numeroPtBr(z, 1), "Z", zLabel, if (zActive) AureaColors.Accent else Color.White, enabled, "transform.position.z",
+                onLongPress = { keypad(zLabel, z, TrackProperty.POSITION_Z) },
+                onTap = { if (depth) onDepthPick() else keypad(zLabel, z, TrackProperty.POSITION_Z) })
+        }
+    }
+}
+
+@Composable
+private fun PositionAxis(text: String, axis: String, description: String, color: Color, enabled: Boolean, tag: String,
+                         onLongPress: (() -> Unit)? = null, onTap: () -> Unit) {
+    Column(
+        Modifier.width(76.dp).heightIn(min = 52.dp).testTag(tag)
+            .semantics(mergeDescendants = true) { contentDescription = "$description $text" }
+            .tocavel(enabled = enabled, shrink = 1f, onLongClick = onLongPress, onClick = onTap),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
+            Text(text, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600,
+                color = if (enabled) color else AureaColors.Muted,
+                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)))
+        }
+        Text(axis, modifier = Modifier.padding(top = 2.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.Muted)))
     }
 }
 

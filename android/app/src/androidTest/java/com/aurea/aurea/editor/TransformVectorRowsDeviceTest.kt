@@ -132,10 +132,15 @@ class TransformVectorRowsDeviceTest {
         initialize()
         compose.runOnIdle { store.setTransform(TrackProperty.POSITION_Z, 30f) }
         compose.waitUntil(10000) { store.detail?.position?.get(2) == 30f }
-        compose.onNodeWithTag("transform.position.axis.2").performClick()
-        assertFocusedRulerGeometry("transform.position")
+        // Posição 3D usa a almofada: o toque em Z escolhe a profundidade e o arrasto vertical a muda.
+        compose.onNodeWithTag("transform.position.z").performClick()
         val position = store.detail!!.position.toFloatArray()
-        scrub("transform.position.ruler")
+        compose.onNodeWithTag("transform.move.pad").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -48f), 16)
+            moveBy(Offset(0f, -12f), 16)
+            up()
+        }
         compose.waitUntil(10000) { store.detail!!.position[2] > position[2] + 10f }
         assertEquals(position[0], store.detail!!.position[0], .001f)
         assertEquals(position[1], store.detail!!.position[1], .001f)
@@ -185,14 +190,14 @@ class TransformVectorRowsDeviceTest {
         compose.runOnIdle { store.select(first) }
         compose.waitUntil(10000) { store.primary == first && store.detail != null }
         val firstX = store.detail!!.position[0]
-        compose.onNodeWithTag("transform.position.ruler").performTouchInput {
+        compose.onNodeWithTag("transform.move.pad").performTouchInput {
             down(center)
             moveBy(Offset(-48f, 0f), 16)
         }
-        compose.waitUntil(10000) { store.detail!!.position[0] > firstX + 10f }
+        compose.waitUntil(10000) { store.detail!!.position[0] < firstX - 10f }
         compose.runOnIdle { store.select(second) }
         compose.waitUntil(10000) { store.primary == second && store.detail != null }
-        compose.onNodeWithTag("transform.position.ruler").performTouchInput {
+        compose.onNodeWithTag("transform.move.pad").performTouchInput {
             moveBy(Offset(-24f, 0f), 16)
             up()
         }
@@ -215,7 +220,7 @@ class TransformVectorRowsDeviceTest {
         val secondPosition = store.detail!!.position.toFloatArray()
         compose.runOnIdle { store.select(first) }
         compose.waitUntil(10000) { store.primary == first && store.detail != null }
-        compose.onNodeWithTag("transform.position.axis.0").performClick()
+        compose.onNodeWithTag("transform.position.x").performClick()
         compose.onNodeWithText("9").performScrollTo().assertIsDisplayed().performClick()
         compose.runOnIdle { store.select(second) }
         compose.waitUntil(10000) { store.primary == second }

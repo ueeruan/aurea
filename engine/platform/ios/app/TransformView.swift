@@ -160,7 +160,9 @@ struct TransformView: View {
 
     // Fields are part of the touch pad for Position, above it for Pivot.
     @ViewBuilder private func moveFace(pivot: Bool) -> some View {
-        if threeD { spatialVectorFace(pivot: pivot) } else {
+        // Posição usa sempre a almofada (também em 3D: Z fica na caixa ao lado);
+        // só o Pivô 3D continua na fileira XYZ com régua.
+        if threeD && pivot { spatialVectorFace(pivot: pivot) } else {
         VStack(spacing: 0) {
             if expressionControlsTransform {
                 Text(AureaText.t("transform_expression_controlled"))
@@ -211,7 +213,7 @@ struct TransformView: View {
                     write([0: x, 1: y])
                 }.onEnded { _ in endGesture() })
                 .overlay(alignment: .top) {
-                    if !pivot { moveFields(pivot: false).padding(.top, 10).padding(.horizontal, 16) }
+                    if !pivot { positionFields.padding(.top, 10).padding(.horizontal, 16) }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     // Preciso (app antigo): o dedo anda 4× mais para o mesmo deslocamento.
@@ -261,6 +263,55 @@ struct TransformView: View {
                 }) { zPicked.toggle() }.padding(.leading, 14)
             } else { Spacer().frame(width: 14) }
         }.frame(maxWidth: .infinity)
+    }
+    /// Campos da Posição dentro da almofada: X e Y numa caixa só (verde), Z numa
+    /// caixa separada, uma casa decimal e o rótulo do eixo embaixo. O toque em X/Y
+    /// digita; em Z escolhe a profundidade para o arrasto (camada 3D) ou digita (2D);
+    /// segurar Z sempre digita.
+    private var positionFields: some View {
+        let locked = model.selectedLayer?.locked ?? false
+        let x = value(0), y = value(1), z = value(2)
+        return HStack(alignment: .top, spacing: 28) {
+            HStack(spacing: 0) {
+                positionAxis(number(x, decimals: 1), axis: "X", description: AureaText.t("panel_posicao_x"),
+                             color: AureaColors.accent, locked: locked, identifier: "transform.position.x") {
+                    keypad(AureaText.t("panel_posicao_x"), x, unit: "px", decimals: 1) { write([0: $0]) }
+                }
+                positionAxis(number(y, decimals: 1), axis: "Y", description: AureaText.t("panel_posicao_y"),
+                             color: AureaColors.accent, locked: locked, identifier: "transform.position.y") {
+                    keypad(AureaText.t("panel_posicao_y"), y, unit: "px", decimals: 1) { write([1: $0]) }
+                }
+            }.background(alignment: .top) {
+                RoundedRectangle(cornerRadius: 8).fill(AureaColors.chip).frame(height: 34)
+            }
+            positionAxis(number(z, decimals: 1), axis: "Z", description: AureaText.t("panel_profundidade_z"),
+                         color: zPicked && threeD ? AureaColors.accent : .white, locked: locked,
+                         identifier: "transform.position.z", onLongPress: {
+                keypad(AureaText.t("panel_profundidade_z"), z, unit: "px", decimals: 1) { write([2: $0]) }
+            }) {
+                if threeD { zPicked.toggle() }
+                else { keypad(AureaText.t("panel_profundidade_z"), z, unit: "px", decimals: 1) { write([2: $0]) } }
+            }.background(alignment: .top) {
+                RoundedRectangle(cornerRadius: 8).fill(AureaColors.chip).frame(height: 34)
+            }
+        }.frame(maxWidth: .infinity)
+    }
+    private func positionAxis(_ text: String, axis: String, description: String, color: Color, locked: Bool,
+                              identifier: String, onLongPress: (() -> Void)? = nil, onTap: @escaping () -> Void) -> some View {
+        VStack(spacing: 2) {
+            Text(text).font(.aurea(size: 15, weight: .semibold).monospacedDigit())
+                .foregroundStyle(locked ? AureaColors.muted : color).underline()
+                .lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 4).frame(width: 76, height: 34)
+            Text(axis).font(.aurea(size: 10)).foregroundStyle(AureaColors.muted)
+        }
+        .frame(width: 76, height: 52).contentShape(Rectangle())
+        .gesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in if !locked { onLongPress?() } }
+            .exclusively(before: TapGesture().onEnded { _ in if !locked { onTap() } }))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(description).accessibilityValue(text)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { if !locked { onTap() } }
+        .accessibilityIdentifier(identifier)
     }
     private func moveHint(pivot: Bool) -> String {
         AureaText.t(pivot ? "panel_deslize_ponto_giro_botao_centro_devolve"

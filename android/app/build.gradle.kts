@@ -99,9 +99,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // Deve superar os builds 2181–2183 já distribuídos; nunca reduzir o código.
-        versionCode = 2185
-        versionName = "0.1.9"
+        // Deve superar os builds 2181–2185 já distribuídos; nunca reduzir o código.
+        versionCode = 2186
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

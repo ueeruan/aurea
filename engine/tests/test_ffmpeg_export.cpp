@@ -396,6 +396,24 @@ AUREA_TEST(FFmpegExport, RejectsDiscontinuousVideoAudioAndWrongValidationCount) 
     if (!good(sink->finish())) return;
     AUREA_CHECK(!sink->validate_output(ExportOutputValidation{kWidth, kHeight, 2, 30, false}).ok());
 }
+/// Escada com som: o 1o degrau só reprova o 1o pacote no quadro 3, quando o
+/// som dos quadros 0..3 já entrou no contêiner (o caso do hardware por Surface,
+/// cujo 1o pacote sai alguns quadros depois). O som guardado no período de
+/// teste volta junto dos quadros: o arquivo sai inteiro no 2o degrau, com todos
+/// os quadros na ordem, relógio exato e som contínuo.
+AUREA_TEST(FFmpegExport, LadderFallbackAfterAudioKeepsEveryFrameAndContinuousSound) {
+    auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
+    if (!avcodec_find_encoder_by_name("prores_ks") || !avcodec_find_encoder_by_name("prores_aw")) {
+        std::printf("\n    sem dois encoders ProRes neste FFmpeg: escada de um degrau so\n");
+        return;
+    }
+    set_export_ladder_test_fault(3);
+    const bool exported = exportNumbered(*sink, output("ladder-audio-fallback"), 15, 30, true, ExportCodec::ProRes);
+    set_export_ladder_test_fault(0);
+    AUREA_CHECK(exported);
+    // O 2o degrau ficou: o 1o foi reprovado e trocado, sem erro.
+    AUREA_CHECK(std::strcmp(sink->encoder_info().name, "prores_aw") == 0);
+}
 AUREA_TEST(FFmpegExport, CancellationAbortsPartialFileAndAllowsNewSession) {
     auto sink = make_ffmpeg_export_sink(nullptr); AUREA_CHECK(sink != nullptr); if (!sink) return;
     std::atomic<bool> cancel{false}; sink->set_cancel_flag(&cancel);

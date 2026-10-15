@@ -4199,6 +4199,9 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 base.layerKey = pose->layerKey; base.motionBlur = pose->motionBlur; base.castShadows = pose->castShadows;
                 base.doubleSided = pose->doubleSided;
                 base.ownEnvironment = pose->ownEnvironment; base.environment = pose->environment;
+                // "Trocar textura 3D" fica na instância (não na pose): sem esta
+                // cópia os sub-quadros do desfoque saíam com o material original.
+                base.nodeTextures = pose->nodeTextures;
                 base.sharedPose = pose;
                 poses.push_back(std::move(pose));
             }

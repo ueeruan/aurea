@@ -155,6 +155,115 @@ AUREA_TEST(PreRenderIntegration, PendingUploadRetriesAfterTransientBeginFailure)
     }
 }
 
+// O dono: "o PreRender não está funcionando". Parado, a prévia mostrava o
+// cache (os testes acima); TOCANDO, cada quadro que o leitor ainda não tinha
+// descomprimido caía na composição inteira ao vivo. Um quadro 540p custa mais
+// que 33 ms para ler (ReadLatencyAt540pIsMeasured), então tocar nunca saía
+// do render ao vivo. Conta: apresentações sem upload do cache = render ao vivo.
+AUREA_TEST(PreRenderIntegration, PlaybackFromCompletedCacheNeverFallsBackToLiveComposition) {
+    using namespace prerender_integration;
+    Rig rig(true,960,540,60); rig.shape(.5f);
+    AUREA_CHECK(rig.start(1).ok()); const auto done=rig.wait(); AUREA_CHECK(done.complete && done.error==0);
+    std::atomic<u32> uploads{0};
+    rig.mock->beforeTextureUpload=[&](TextureHandle texture,const void*,u32){
+        if(is_cache_texture(rig.mock->texture_desc(texture)))++uploads;return OkStatus;};
+    int window=0; AUREA_CHECK(rig.engine.attach_surface(&window,960,540).ok());
+    for(u32 tick=0;tick<200 && !uploads.load();++tick){(void)rig.engine.render_frame(false);std::this_thread::sleep_for(std::chrono::milliseconds(2));}
+    AUREA_CHECK(uploads.load()>0);
+    const u32 presentsBefore=rig.mock->presents, uploadsBefore=uploads.load();
+    // O quadro parado já subiu para uma textura do cache: apresentá-lo de novo
+    // sem upload é reaproveitar o slot, não render ao vivo.
+    const i64 uploadedWhilePaused=rig.engine.read_status().playhead.value;
+    Command play; play.type=CommandType::PlaybackPlay; AUREA_CHECK(rig.engine.apply_command(play).ok());
+    const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(1500);
+    u32 live=0;
+    while(std::chrono::steady_clock::now()<until){
+        const u32 p0=rig.mock->presents, u0=uploads.load();
+        (void)rig.engine.render_frame(true);
+        const i64 at=rig.engine.read_status().playhead.value;
+        if(rig.mock->presents!=p0 && uploads.load()==u0 && at!=uploadedWhilePaused){
+            ++live; std::printf("    live composition presented at playhead=%lld\n",static_cast<long long>(at));
+        }
+        if(!rig.engine.read_status().playing && at>0)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    const u32 presents=rig.mock->presents-presentsBefore, cached=uploads.load()-uploadsBefore;
+    const i64 reached=rig.engine.read_status().playhead.value;
+    std::printf("    own playback from cache: playhead=%lld presents=%u cached=%u live=%u\n",
+        static_cast<long long>(reached),presents,cached,live);
+    AUREA_CHECK(rig.engine.query_prerender_progress().complete);
+    AUREA_CHECK_EQ(live,0u);
+    AUREA_CHECK(cached>0);
+    // Leitores paralelos com antecipação: a maior parte dos quadros que o
+    // relógio percorreu sai do cache (no host; o aparelho mede a dele).
+    AUREA_CHECK(i64(cached)*2>=reached);
+}
+
+// Segurar a imagem num miss não pode virar congelamento: leitor sem entregar
+// por mais de ~250 ms seguidos volta ao render ao vivo; cache invalidado
+// volta na hora. O mock diz que as texturas do cache nunca ficam livres
+// (wait_frame sem espera = Timeout), então nenhum quadro sai do cache.
+AUREA_TEST(PreRenderIntegration, StalledCacheDuringPlaybackFallsBackToLiveInsteadOfFreezing) {
+    using namespace prerender_integration;
+    Rig rig(true,960,540,300); rig.shape(.5f);
+    AUREA_CHECK(rig.start(1).ok()); const auto done=rig.wait(); AUREA_CHECK(done.complete && done.error==0);
+    std::atomic<u32> uploads{0};
+    rig.mock->beforeTextureUpload=[&](TextureHandle texture,const void*,u32){
+        if(is_cache_texture(rig.mock->texture_desc(texture)))++uploads;return OkStatus;};
+    int window=0; AUREA_CHECK(rig.engine.attach_surface(&window,960,540).ok());
+    for(u32 tick=0;tick<200 && !uploads.load();++tick){(void)rig.engine.render_frame(false);std::this_thread::sleep_for(std::chrono::milliseconds(2));}
+    AUREA_CHECK(uploads.load()>0);
+    Command play; play.type=CommandType::PlaybackPlay; AUREA_CHECK(rig.engine.apply_command(play).ok());
+    // Toca do cache até ele entregar alguns quadros.
+    const u32 warm=uploads.load();
+    for(u32 tick=0;tick<500 && uploads.load()<warm+5;++tick){(void)rig.engine.render_frame(true);std::this_thread::sleep_for(std::chrono::milliseconds(2));}
+    AUREA_CHECK(uploads.load()>=warm+5);
+    std::atomic<bool> stalled{true};
+    rig.mock->beforeWaitFrame=[&](u64,u64 timeout){ return stalled.load() && timeout==0 ? Status{Errc::Timeout} : OkStatus; };
+    // A espera começa no primeiro miss depois do último quadro do cache. Com
+    // a segunda textura ainda não criada, o motor pode entregar UM quadro a
+    // mais (cria o slot 1); a contagem parte do último upload.
+    auto lastCache=std::chrono::steady_clock::now();
+    const auto stallStart=lastCache;
+    const u32 uploadsAtStall=uploads.load();
+    f64 firstLiveMs=-1; u32 livePresents=0;
+    while(std::chrono::steady_clock::now()-stallStart<std::chrono::milliseconds(1200)){
+        const u32 p0=rig.mock->presents, u0=uploads.load();
+        (void)rig.engine.render_frame(true);
+        const auto now=std::chrono::steady_clock::now();
+        if(uploads.load()!=u0) lastCache=now;
+        else if(rig.mock->presents!=p0){
+            ++livePresents;
+            if(firstLiveMs<0) firstLiveMs=std::chrono::duration<f64,std::milli>(now-lastCache).count();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    std::printf("    own stalled cache: first live present %.1f ms after the last cache frame, live presents=%u cache uploads=%u playing=%d\n",
+        firstLiveMs,livePresents,uploads.load()-uploadsAtStall,rig.engine.read_status().playing?1:0);
+    AUREA_CHECK(uploads.load()-uploadsAtStall<=1);        // no máximo o slot novo; depois nada
+    AUREA_CHECK(firstLiveMs>=200);                        // segurou a imagem (não caiu ao vivo de cara)
+    AUREA_CHECK(firstLiveMs>=0 && firstLiveMs<600);       // mas não congelou
+    AUREA_CHECK(livePresents>5);                          // e seguiu tocando ao vivo
+    AUREA_CHECK(rig.engine.query_prerender_progress().complete); // o cache continua válido
+    // Leitor volta: o cache entrega de novo.
+    stalled=false;
+    const u32 recovered=uploads.load();
+    for(u32 tick=0;tick<500 && uploads.load()<recovered+3 && rig.engine.read_status().playing;++tick){
+        (void)rig.engine.render_frame(true);std::this_thread::sleep_for(std::chrono::milliseconds(2));}
+    AUREA_CHECK(uploads.load()>=recovered+3 || !rig.engine.read_status().playing);
+    // Cache invalidado tocando: ao vivo no próximo quadro, sem espera.
+    rig.engine.cancel_prerender();
+    const auto cancelAt=std::chrono::steady_clock::now();
+    const u32 p0=rig.mock->presents; f64 afterCancelMs=-1;
+    while(std::chrono::steady_clock::now()-cancelAt<std::chrono::milliseconds(300) && rig.engine.read_status().playing){
+        (void)rig.engine.render_frame(true);
+        if(rig.mock->presents!=p0){afterCancelMs=std::chrono::duration<f64,std::milli>(std::chrono::steady_clock::now()-cancelAt).count();break;}
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    std::printf("    own cancelled cache while playing: live present after %.1f ms\n",afterCancelMs);
+    AUREA_CHECK(afterCancelMs>=0 && afterCancelMs<100);
+}
+
 AUREA_TEST(PreRenderIntegration, CorruptDiskFrameReportsCorruptDataAndReturnsToOrdinaryComposition) {
     using namespace prerender_integration;
     Rig rig(true);rig.shape();AUREA_CHECK(rig.start(1).ok());AUREA_CHECK(rig.wait().complete);

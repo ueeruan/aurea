@@ -17,11 +17,16 @@ public:
         u32 width = 0, height = 0, fpsNumerator = 30, fpsDenominator = 1, renderVersion = 1;
         bool operator==(const Key&) const = default;
     };
+    /// Quadros prontos + em leitura + na fila, no máximo. A reprodução lê
+    /// vários à frente: um quadro 540p custa mais que um intervalo de 30 fps.
+    static constexpr u32 kMaxResidentFrames = 8;
     struct Limits {
         u64 diskBytes = 8ull << 30; // cumulative private namespace cap; hard-clamped
         u64 reserveFreeBytes = 256ull << 20;
         u64 memoryBytes = 16ull << 20;
-        u32 residentFrames = 2; // clamped to 1..2, including the active read
+        // Clamped to 1..kMaxResidentFrames and then to what memoryBytes holds
+        // (each frame is charged its pixels plus its decompression workspace).
+        u32 residentFrames = 2;
     };
     struct Stats {
         u64 token = 0, framesTotal = 0, framesWritten = 0, diskBytes = 0;
@@ -29,6 +34,7 @@ public:
         // excludes source span, caller's moved output and renderer/GPU memory.
         u64 residentBytes = 0, workingBytes = 0, peakOwnedBytes = 0;
         u32 pendingReads = 0, residentFrames = 0;
+        u32 residentLimit = 0; // the session's admitted read-ahead window
         bool complete = false;
         Errc lastError = Errc::Ok;
         char errorDetail[192]{}; // owned copy, never a worker's Status pointer
@@ -50,9 +56,16 @@ public:
     [[nodiscard]] Status write(u64 token, u64 frame, std::span<const u16> rgba,
                               const std::atomic<bool>* cancel = nullptr) noexcept;
     [[nodiscard]] Status finish(u64 token) noexcept;
-    // request/take do no I/O or waits. At most two reads can be outstanding.
+    // request/take do no I/O. Ready + queued + in-flight reads never exceed
+    // the session's admitted window (Stats::residentLimit, <= kMaxResidentFrames).
     // NotFound means not ready; Busy means retry on a later render tick.
     [[nodiscard]] Status request(u64 token, u64 frame) noexcept;
+    // Reprodução: mantém lidos os `count` quadros a partir de `frame` no
+    // sentido dado (dando a volta no fim com `wrap`), do mais perto ao mais
+    // longe, até a janela admitida. Prontos/pedidos fora da janela saem. Sem
+    // I/O nem espera (try_lock). Devolve quantos quadros SEGUIDOS a partir
+    // de `frame` já estão prontos para take().
+    [[nodiscard]] u32 prefetch(u64 token, u64 frame, i32 direction, u32 count, bool wrap = false) noexcept;
     [[nodiscard]] Status take(u64 token, u64 frame, std::vector<u16>& rgba) noexcept;
     // First invalidates the token atomically, with no lock/join/filesystem I/O.
     // Reader retires only this class's unique private directory after leases end.

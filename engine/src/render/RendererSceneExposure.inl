@@ -65,6 +65,9 @@ Status Renderer::render_bounded_scene_exposures(const FrameSnapshot& snap, const
             if (cancelled()) return Errc::Cancelled;
             FrameBegin frame;
             if (auto status = backend_->begin_offscreen_frame(frame); !status.ok()) return status;
+            // Mesmo motivo de render_staged_scene_targets: a textura trocada
+            // sobe antes da primeira amostra do obturador.
+            flush_uploads();
             const u64 started = monotonic_ns();
             pool_.begin_frame(*backend_, frame.frameNumber);
             graph_.reset(); arena_.reset();

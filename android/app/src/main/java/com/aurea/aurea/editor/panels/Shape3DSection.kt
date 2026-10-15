@@ -1,5 +1,8 @@
 package com.aurea.aurea.editor.panels
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -93,12 +96,20 @@ internal fun Shape3DSection(env: PanelEnv, info: Shape3DInfo, page: Shape3DPage 
                 }, onDone = { store.endGesture() }))
             }
         }
-        // A imagem da parte virou o efeito "Trocar textura 3D" (aba Partes). Uma
-        // imagem que o projeto já tinha continua: só dá para tirar daqui.
+        // Imagem no material da parte (ou de todas, "Tudo"): a textura de cor
+        // base da forma. Tinha saído na reorganização da aba 3D (relato 1.2.0:
+        // "material no longer shows add image"); o efeito "Trocar textura 3D"
+        // continua para trocar por parte com repetição/keyframes.
         val hasImage = if (part >= 0) info.images.getOrElse(part) { false } else info.images.any { it }
-        if (hasImage) {
-            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.shape3d_image), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            if (uri != null) store.setShapePartImage(part, uri)
+        }
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.shape3d_image), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            ShapeChip(stringResource(if (hasImage) R.string.shape3d_image_change else R.string.shape3d_image_pick), on = hasImage,
+                modifier = Modifier.testTag("shape3d.image.pick")) { imagePicker.launch(arrayOf("image/*")) }
+            if (hasImage) {
+                Spacer(Modifier.width(6.dp))
                 ShapeChip(stringResource(R.string.shape3d_image_clear), on = false, modifier = Modifier.testTag("shape3d.image.clear")) { store.clearShapePartImage(part) }
             }
         }

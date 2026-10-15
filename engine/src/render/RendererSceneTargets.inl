@@ -124,6 +124,11 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
             }
             FrameBegin frame;
             if (auto status = backend_->begin_offscreen_frame(frame); !status.ok()) return status;
+            // Texturas pedidas no prepare (imagem do "Trocar textura 3D", vídeo,
+            // LUT) sobem NESTE quadro, antes dos passes da cena. Sem isto a
+            // etapa lia a textura trocada ainda vazia (o flush do quadro
+            // principal vem depois) e a 1ª captura saía preta.
+            flush_uploads();
             const u64 recorded = monotonic_ns();
             pool_.begin_frame(*backend_, frame.frameNumber); graph_.reset(); arena_.reset();
             bool executed = false;

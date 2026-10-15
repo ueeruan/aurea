@@ -339,20 +339,25 @@ struct Shape3DPanelSection: View {
                             AureaColorSwatch(color: AureaColorSpace.color(shown)).frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 6))
                         }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_cor"))
                     }.frame(height: 44)
-                    // A imagem da parte virou o efeito "Trocar textura 3D" (aba
-                    // Partes). Uma imagem que o projeto já tinha: só dá para tirar.
+                    // Imagem no material da parte (ou de todas, "Tudo"): a textura
+                    // de cor base da forma. Tinha saído na reorganização da aba 3D
+                    // (relato 1.2.0: "material no longer shows add image"); o efeito
+                    // "Trocar textura 3D" continua para trocar por parte.
                     let hasImage = part >= 0 ? (part < info.images.count && info.images[part]) : info.images.contains(true)
-                    if hasImage {
-                        HStack(spacing: 6) {
-                            Text(AureaText.t("shape3d_image")).font(.aurea(size: 13))
-                            Spacer()
+                    HStack(spacing: 6) {
+                        Text(AureaText.t("shape3d_image")).font(.aurea(size: 13))
+                        Spacer()
+                        chip(AureaText.t(hasImage ? "shape3d_image_change" : "shape3d_image_pick"), on: hasImage) {
+                            picking = true
+                        }.accessibilityIdentifier("shape3d.image.pick")
+                        if hasImage {
                             chip(AureaText.t("shape3d_image_clear"), on: false) {
                                 _ = model.engine.setShape3DPartStyle(layerId, part: Int32(part), color: nil, image: "")
                                 state.revision += 1
                                 model.refreshModel(force: true)
                             }.accessibilityIdentifier("shape3d.image.clear")
-                        }.frame(height: 44)
-                    }
+                        }
+                    }.frame(height: 44)
                 } else if part >= 0, let values = model.shapePartValues(layerId, part: part) {
                     partControls(part, values)
                 } else if info.kind == 0 {

@@ -301,7 +301,9 @@ AUREA_TEST(PreRenderCache, CancelledOrDiskLimitedJobsCannotPublishPartialComplet
     }
 }
 
-AUREA_TEST(PreRenderCache, TwoFrameAsyncReadsAndCompressionWorkspaceStayBoundedAt540p) {
+// A janela de leitura cresce com o orçamento (antes: 2 quadros fixos, curto
+// demais para tocar a 30 fps) e nunca passa dele nem de kMaxResidentFrames.
+AUREA_TEST(PreRenderCache, ReadAheadWindowAndCompressionWorkspaceStayBoundedAt540p) {
     CacheFixture fixture; PreRenderCache::Limits limits; limits.residentFrames = 99;
     const auto token = fixture.begin(3, 1, limits, 960, 540); AUREA_CHECK(token.ok()); if (!token.ok()) return;
 #ifdef AUREA_PRERENDER_HEAP_PROBE
@@ -323,8 +325,9 @@ AUREA_TEST(PreRenderCache, TwoFrameAsyncReadsAndCompressionWorkspaceStayBoundedA
         const auto queued = fixture.cache.request(*token, iteration % 3);
         AUREA_CHECK(queued.ok() || queued.code() == Errc::Busy);
         const auto stats = fixture.cache.stats();
-        AUREA_CHECK(stats.residentFrames <= 2); AUREA_CHECK(stats.pendingReads <= 2);
-        AUREA_CHECK(stats.residentBytes <= u64(960) * 540 * 8 * 2);
+        AUREA_CHECK(stats.residentLimit >= 2); AUREA_CHECK(stats.residentLimit <= PreRenderCache::kMaxResidentFrames);
+        AUREA_CHECK(stats.residentFrames <= stats.residentLimit); AUREA_CHECK(stats.pendingReads <= stats.residentLimit);
+        AUREA_CHECK(stats.residentBytes <= u64(960) * 540 * 8 * stats.residentLimit);
         AUREA_CHECK(stats.residentBytes + stats.workingBytes <= limits.memoryBytes);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -355,6 +358,33 @@ AUREA_TEST(PreRenderCache, InvalidationCancelsChunkedWriterBeforeItsDirectoryIsR
     AUREA_CHECK(invalidationMs < 20);
     producer.join(); AUREA_CHECK_EQ(result.code(), Errc::Cancelled);
     AUREA_CHECK(!fixture.cache.stats().complete);
+}
+
+// Medição: quanto custa ler um quadro 540p do disco (pedido → pronto). A
+// reprodução a partir do cache só se sustenta se isto cabe num quadro de 30 fps.
+AUREA_TEST(PreRenderCache, ReadLatencyAt540pIsMeasured) {
+    CacheFixture fixture;
+    const auto token = fixture.begin(4, 1, {}, 960, 540); AUREA_CHECK(token.ok()); if (!token.ok()) return;
+    for (u64 frame = 0; frame < 4; ++frame) {
+        auto data = pixels(960, 540, frame);
+        if (frame >= 2) {
+            u32 noise = 0x9e3779b9u + u32(frame);
+            for (usize i = 0; i < data.size(); ++i) if (i % 4 != 3) {
+                noise ^= noise << 13; noise ^= noise >> 17; noise ^= noise << 5;
+                data[i] = static_cast<u16>(0x3000u | (noise & 0x3ffu));
+            }
+        }
+        AUREA_CHECK(fixture.cache.write(*token, frame, data).ok());
+    }
+    AUREA_CHECK(fixture.cache.finish(*token).ok());
+    for (u64 frame = 0; frame < 4; ++frame) {
+        std::vector<u16> out;
+        const auto t0 = std::chrono::steady_clock::now();
+        AUREA_CHECK(load(fixture.cache, *token, frame, out).ok());
+        const f64 ms = std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        std::printf("    540p read frame=%llu (%s) %.2f ms\n", static_cast<unsigned long long>(frame),
+            frame >= 2 ? "noisy" : "flat", ms);
+    }
 }
 
 AUREA_TEST(PreRenderCache, InvalidDimensionsOrderingAndMemoryBudgetAreExplicit) {

@@ -10502,11 +10502,40 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         lastMediaGen_ = mediaGen;
 
         rs = current_render_settings();
+        // Cache inválido/desligado (edição, troca de projeto, cena 3D): a prévia
+        // já é ao vivo; uma espera antiga não pode valer para o próximo cache.
+        if (!(preRenderComplete && surfaceAttached_ && !rs.rawPlayback && !rs.sceneEditor.enabled))
+            preRenderStallSinceNs_ = 0;
         if (preRenderComplete && surfaceAttached_ && !rs.rawPlayback && !rs.sceneEditor.enabled) {
             idleWarming = false;
+            // Um quadro 540p (ler + descomprimir) custa mais que um intervalo de
+            // 30 fps. Antes: pedia SÓ o quadro do relógio e, sem ele pronto,
+            // tocava a composição inteira ao vivo — o PreRender nunca valia no
+            // play. Agora: janela de leitura à frente (vários leitores), pré-
+            // carga antes de soltar o relógio e, tocando, segurar a imagem.
+            const i32 readDirection = previewBuffering_ ? (playback_.speed() < 0 ? -1 : 1)
+                                                        : (playback_.direction() < 0 ? -1 : 1);
+            const u64 cacheFrames = preRenderStats.framesTotal;
+            const bool inCache = t.value >= 0 && static_cast<u64>(t.value) < cacheFrames;
+            const u32 window = std::max(1u, preRenderStats.residentLimit);
+            const u32 readyRun = inCache ? preRenderCache_->prefetch(preRenderToken, static_cast<u64>(t.value),
+                readDirection, window, playback_.loop()) : 0;
             if (previewBuffering_) {
-                previewBuffering_ = false; playback_.play(frameStart);
-                sync_audio_locked(*comp); project_->timeline().play(); playing = true;
+                const u64 left = !inCache ? 0 : readDirection > 0 ? cacheFrames - static_cast<u64>(t.value)
+                                                                  : static_cast<u64>(t.value) + 1;
+                const u32 target = static_cast<u32>(std::min<u64>(window, playback_.loop() ? window : left));
+                // Teto de 1,5 s: um aparelho lento ainda toca (segurando quadros).
+                if (!inCache || readyRun >= target || frameStart - previewBufferSince_ > 1'500'000'000ull) {
+                    previewBuffering_ = false; playback_.play(frameStart);
+                    sync_audio_locked(*comp); project_->timeline().play(); playing = true;
+                    previewBufferStatus_.store(preview_buffer_status(readyRun, target, false));
+                } else {
+                    previewBufferStatus_.store(preview_buffer_status(readyRun, target, true));
+                    lastSkipped_ = true;
+                    nextFrameDueNs_ = frameStart + 4'000'000ull;
+                    forceRender_.store(true, std::memory_order_release);
+                    return OkStatus; // a imagem atual fica; o relógio ainda não andou
+                }
             }
             for (i32 i = 0; i < 2; ++i) {
                 const auto& slot = preRenderTextures_[i];
@@ -10514,8 +10543,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
                     preRenderSlot = i; break;
                 }
             }
-            if (preRenderSlot < 0 && t.value >= 0 && static_cast<u64>(t.value) < preRenderStats.framesTotal) {
-                (void)preRenderCache_->request(preRenderToken, static_cast<u64>(t.value));
+            if (preRenderSlot < 0 && inCache) {
+                preRenderReadPending = true; // até achar textura livre e quadro pronto
                 for (i32 i = 0; i < 2; ++i) {
                     auto& slot = preRenderTextures_[i];
                     if (slot.texture.valid() && !gpu_->wait_frame(slot.gpuFrame, 0).ok()) continue;
@@ -10555,9 +10584,25 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             if (preRenderSlot >= 0) {
                 rs.cachedComposition = preRenderTextures_[preRenderSlot].texture;
                 rs.previewCacheRevision = 0; preRendered = true;
-                const i64 next = t.value + (playback_.direction() < 0 ? -1 : 1);
-                if (next >= 0 && static_cast<u64>(next) < preRenderStats.framesTotal)
-                    (void)preRenderCache_->request(preRenderToken, static_cast<u64>(next));
+                preRenderReadPending = false; // a janela à frente já foi pedida pelo prefetch
+                preRenderStallSinceNs_ = 0;
+            } else if (playing && inCache && preRenderActive_.load(std::memory_order_acquire)
+                && lastRenderedFrame_ >= 0) {
+                // Tocando e o quadro ainda não saiu do leitor: a imagem atual
+                // fica (como o refill do vídeo). Montar a composição inteira ao
+                // vivo aqui custava mais que esperar o leitor e roubava a GPU.
+                // Limitado: leitor parado por mais de kPreRenderStallNs (disco
+                // lento, aparelho sem núcleo livre) volta ao render ao vivo —
+                // nunca congela. Um quadro entregue zera a contagem.
+                if (!preRenderStallSinceNs_) preRenderStallSinceNs_ = frameStart;
+                if (frameStart - preRenderStallSinceNs_ <= kPreRenderStallNs) {
+                    lastSkipped_ = true;
+                    nextFrameDueNs_ = frameStart + 4'000'000ull;
+                    forceRender_.store(true, std::memory_order_release);
+                    return OkStatus;
+                }
+            } else if (!playing) {
+                preRenderStallSinceNs_ = 0; // pausado/scrub: exato, sem segurar
             }
         }
         if (caps_.thermal().severe() || memory_.pressure() >= .85f || preview_memory_hold()) rs.previewCacheRevision = 0;
@@ -14713,10 +14758,24 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         if (preRenderCancel_.load(std::memory_order_acquire)) return Errc::Cancelled;
         PreRenderCache::Key key;
         { std::lock_guard state(preRenderStateMutex_); key = preRenderKey_; }
+        // Janela de leitura à frente medida pelo aparelho: cada quadro 540p
+        // custa ~4,3 MB (pixels + descompressão). Aparelho de até 4 GB: 4
+        // quadros (~19 MB); os outros: 8 (~37 MB). Nunca mais que 1/8 do
+        // orçamento do motor — o padrão antigo (16 MB) só cabia 3 quadros e
+        // a leitura não acompanhava 30 fps.
+        PreRenderCache::Limits limits;
+        {
+            const u64 frameBytes = static_cast<u64>(key.width) * key.height * 8 + (144ull << 10);
+            const u32 wanted = low_memory_device() ? 4u : PreRenderCache::kMaxResidentFrames;
+            const u64 cap = std::max<u64>(16ull << 20, caps_.memory_budget_bytes() / 8);
+            limits.residentFrames = wanted;
+            limits.memoryBytes = std::min<u64>(cap, frameBytes * wanted + (2ull << 20));
+            limits.memoryBytes = std::max<u64>(limits.memoryBytes, 16ull << 20);
+        }
         const u64 deadline = monotonic_ns() + 1'000'000'000ull;
         for (;;) {
             auto token = preRenderCache_->begin(config_.cacheDirectory, key, ctx->frames,
-                ctx->preRenderDirection, PreRenderCache::Limits{});
+                ctx->preRenderDirection, limits);
             if (token.ok()) { ctx->preRenderToken = *token; break; }
             if (token.status().code() != Errc::Busy || monotonic_ns() >= deadline) return token.status();
             if (preRenderCancel_.load(std::memory_order_acquire)) return Errc::Cancelled;

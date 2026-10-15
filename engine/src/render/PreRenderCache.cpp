@@ -200,6 +200,43 @@ Status disk_room(const fs::path& directory, u64 used, u64 extra, const PreRender
         return {Errc::StorageFull, "espaco livre insuficiente; PreRender preservou a reserva do aparelho"};
     return OkStatus;
 }
+// CRC de A||B a partir de crc(A), crc(B) e |B| (a álgebra GF(2) do zlib).
+// A leitura confere cada bloco e o quadro inteiro sem passar duas vezes nos
+// 4 MB descomprimidos de um quadro 540p.
+u32 gf2_times(const u32* matrix, u32 vector) {
+    u32 sum = 0;
+    for (; vector; vector >>= 1, ++matrix) if (vector & 1) sum ^= *matrix;
+    return sum;
+}
+void gf2_square(u32* square, const u32* matrix) { for (u32 n = 0; n < 32; ++n) square[n] = gf2_times(matrix, matrix[n]); }
+u32 crc32_combine(u32 first, u32 second, u64 secondBytes) {
+    if (!secondBytes) return first;
+    u32 even[32], odd[32];
+    odd[0] = 0xEDB88320u;
+    for (u32 n = 1, row = 1; n < 32; ++n, row <<= 1) odd[n] = row;
+    gf2_square(even, odd); gf2_square(odd, even);
+    do {
+        gf2_square(even, odd);
+        if (secondBytes & 1) first = gf2_times(even, first);
+        secondBytes >>= 1;
+        if (!secondBytes) break;
+        gf2_square(odd, even);
+        if (secondBytes & 1) first = gf2_times(odd, first);
+        secondBytes >>= 1;
+    } while (secondBytes);
+    return first ^ second;
+}
+// Espera curta e limitada pelo lock (os leitores só o seguram para mexer nas
+// filas, nunca durante I/O). Um try_lock seco no render fazia o quadro em
+// reprodução cair na composição ao vivo só porque um leitor estava publicando.
+bool brief_lock(std::unique_lock<std::mutex>& lock) {
+    for (u32 attempt = 0; attempt < 64; ++attempt) {
+        if (lock.try_lock()) return true;
+        std::this_thread::yield();
+    }
+    return false;
+}
+constexpr u64 kReadWorkspace = kChunk * 2 + 16384;
 } // namespace
 
 struct PreRenderCache::Impl {
@@ -215,7 +252,9 @@ struct PreRenderCache::Impl {
     struct Ready { u64 token = 0, frame = 0; std::vector<u16> pixels; Status result; };
     mutable std::mutex mutex;
     std::condition_variable wake;
-    std::thread worker;
+    // Leitores em paralelo: um quadro 540p (zlib + CRC) custa mais que um
+    // intervalo de 30 fps num só núcleo. O primeiro também limpa as pastas.
+    std::vector<std::thread> workers;
     std::atomic<u64> token{0}, generation{0};
     std::atomic_flag writing = ATOMIC_FLAG_INIT;
     std::shared_ptr<Session> active;
@@ -224,14 +263,24 @@ struct PreRenderCache::Impl {
     std::deque<std::shared_ptr<Session>> garbage;
     bool stopping = false;
     u64 resident = 0, working = 0, peak = 0;
-    u32 reading = 0, cleaning = 0;
-    u64 readingToken = 0, readingFrame = 0;
+    u32 cleaning = 0;
+    std::vector<std::pair<u64, u64>> inflight; // token, frame being read
     bool cleanupFailed = false;
-    Impl() { worker = std::thread([this] { run(); }); }
+    Impl() {
+        const u32 hw = std::thread::hardware_concurrency();
+        const u32 count = std::clamp<u32>(hw ? hw / 2 : 2, 2, 3);
+        inflight.reserve(count);
+        for (u32 i = 0; i < count; ++i) workers.emplace_back([this, i] { run(i == 0); });
+    }
     ~Impl() {
         generation.fetch_add(1, std::memory_order_acq_rel); token.store(0, std::memory_order_release);
         { std::lock_guard lock(mutex); stopping = true; }
-        wake.notify_all(); if (worker.joinable()) worker.join();
+        wake.notify_all();
+        for (auto& w : workers) if (w.joinable()) w.join();
+    }
+    bool in_flight(u64 t, u64 frame) const {
+        for (const auto& [ft, ff] : inflight) if (ft == t && ff == frame) return true;
+        return false;
     }
     bool valid(u64 t) const { return t && generation.load(std::memory_order_acquire) == t && token.load(std::memory_order_acquire) == t; }
     void error(Session& session, Status result) {
@@ -317,30 +366,37 @@ struct PreRenderCache::Impl {
             if (stbi_zlib_decode_buffer(reinterpret_cast<char*>(destination), static_cast<int>(raw),
                     reinterpret_cast<const char*>(compressed.data()), static_cast<int>(encoded)) != static_cast<int>(raw))
                 return {Errc::CorruptData, "bloco PreRender nao pode ser descomprimido"};
-            if (crc32_update(0, destination, raw) != get32(block + 8)) return Errc::ChecksumMismatch;
-            crc = crc32_update(crc, destination, raw); offset += raw;
+            const u32 blockCrc = crc32_update(0, destination, raw);
+            if (blockCrc != get32(block + 8)) return Errc::ChecksumMismatch;
+            crc = n ? crc32_combine(crc, blockCrc, raw) : blockCrc; offset += raw;
         }
         if (crc != get32(header.data() + 56) || std::fgetc(file.value) != EOF) return Errc::ChecksumMismatch;
         return valid(session.token) ? OkStatus : Status{Errc::Cancelled};
     }
-    void run() {
+    void run(bool cleaner) {
         for (;;) {
-            Read job; std::shared_ptr<Session> disposable; u64 charge = 0;
+            Read job; std::shared_ptr<Session> disposable; u64 charge = 0; bool idle = false;
             {
                 std::unique_lock lock(mutex);
                 wake.wait_for(lock, std::chrono::milliseconds(10), [&] {
-                    return stopping || !requests.empty() || (active && !valid(active->token)) || !garbage.empty();
+                    return stopping || !requests.empty() || (active && !valid(active->token)) || (cleaner && !garbage.empty());
                 });
                 retire_locked();
-                if (!garbage.empty() && garbage.front().use_count() == 1
+                // Só o primeiro leitor apaga pastas: uma remoção por vez.
+                if (cleaner && !garbage.empty() && garbage.front().use_count() == 1
                     && std::chrono::steady_clock::now() >= garbage.front()->cleanupRetry) {
                     disposable = std::move(garbage.front()); garbage.pop_front(); ++cleaning;
                 } else if (!requests.empty()) {
-                    job = std::move(requests.front()); requests.pop_front();
-                    charge = job.session->frameBytes + kChunk * 2 + 16384;
-                    if (!charge_locked(charge, *job.session)) { error(*job.session, Errc::BudgetExceeded); job = {}; }
-                    else { ++reading; readingToken = job.session->token; readingFrame = job.frame; }
-                } else if (stopping && !active && garbage.empty() && !working && !cleaning) break;
+                    const u64 need = requests.front().session->frameBytes + kReadWorkspace;
+                    // Sem espaço no orçamento: o pedido espera um quadro pronto
+                    // sair (take/prefetch). Não é erro — antes marcava a sessão
+                    // com BudgetExceeded e o PreRender inteiro caía.
+                    if (charge_locked(need, *requests.front().session)) {
+                        job = std::move(requests.front()); requests.pop_front(); charge = need;
+                        inflight.emplace_back(job.session->token, job.frame);
+                    } else idle = true;
+                } else if (stopping && (!cleaner || (!active && garbage.empty() && !working && !cleaning))) break;
+                else idle = true;
             }
             if (disposable) {
                 // Only an exact unique child created by begin. Never delete the
@@ -367,15 +423,18 @@ struct PreRenderCache::Impl {
             } else if (job.session) {
                 Ready result; result.token = job.session->token; result.frame = job.frame;
                 result.result = read(*job.session, job.frame, result.pixels);
-                std::lock_guard lock(mutex); --reading; readingToken = 0;
+                std::lock_guard lock(mutex);
+                if (const auto it = std::find(inflight.begin(), inflight.end(), std::pair<u64, u64>{job.session->token, job.frame});
+                    it != inflight.end()) inflight.erase(it);
                 if (valid(job.session->token) && active == job.session) {
                     if (!result.result.ok()) { error(*job.session, result.result); std::vector<u16>{}.swap(result.pixels); }
                     resident += result.pixels.capacity() * sizeof(u16);
                     ready.push_back(std::move(result));
                 } else std::vector<u16>{}.swap(result.pixels);
                 working -= charge; peak = std::max(peak, resident + working);
-            } else {
-                // In-flight producer lease: do not busy-spin or delete its folder.
+                wake.notify_all();
+            } else if (idle) {
+                // In-flight producer lease / read budget full: do not busy-spin.
                 std::unique_lock lock(mutex); wake.wait_for(lock, std::chrono::milliseconds(5));
             }
         }
@@ -393,8 +452,10 @@ Result<u64> PreRenderCache::begin(const std::string& root, Key key, u64 frames, 
         || bytes + kScratch + kChunk * 2 + 16384 > limits.memoryBytes) return Status{Errc::BudgetExceeded};
     limits.diskBytes = std::min(limits.diskBytes, kMaxDisk);
     limits.reserveFreeBytes = std::max(limits.reserveFreeBytes, kMinReserve);
-    limits.residentFrames = std::clamp(limits.residentFrames, 1u, 2u);
-    while (limits.residentFrames > 1 && bytes * limits.residentFrames + kScratch + kChunk * 2 + 16384 > limits.memoryBytes)
+    // Cada quadro da janela custa os pixels e, enquanto é lido, o espaço de
+    // descompressão; o gravador (kScratch) pode estar ativo ao mesmo tempo.
+    limits.residentFrames = std::clamp(limits.residentFrames, 1u, kMaxResidentFrames);
+    while (limits.residentFrames > 1 && (bytes + kReadWorkspace) * limits.residentFrames + kScratch > limits.memoryBytes)
         --limits.residentFrames;
     if (impl_->writing.test_and_set(std::memory_order_acquire)) return Status{Errc::Busy};
     struct Writer { Impl& impl; ~Writer() { impl.writing.clear(std::memory_order_release); impl.wake.notify_all(); } } writer{*impl_};
@@ -514,7 +575,7 @@ Status PreRenderCache::finish(u64 token) noexcept {
 }
 Status PreRenderCache::request(u64 token, u64 frame) noexcept {
     if (!impl_->valid(token)) return Errc::Cancelled;
-    std::unique_lock lock(impl_->mutex, std::try_to_lock); if (!lock) return Errc::Busy;
+    std::unique_lock lock(impl_->mutex, std::defer_lock); if (!brief_lock(lock)) return Errc::Busy;
     const auto& session = impl_->active;
     if (!session || !impl_->valid(token) || session->token != token) return Errc::Cancelled;
     if (frame >= session->total) return Errc::OutOfRange;
@@ -522,16 +583,71 @@ Status PreRenderCache::request(u64 token, u64 frame) noexcept {
     if (!written) return Errc::NotFound;
     for (const auto& ready : impl_->ready) if (ready.token == token && ready.frame == frame) return OkStatus;
     for (const auto& job : impl_->requests) if (job.session == session && job.frame == frame) return OkStatus;
-    if (impl_->reading && impl_->readingToken == token && impl_->readingFrame == frame) return OkStatus;
-    while (!impl_->ready.empty() && impl_->requests.size() + impl_->ready.size() + impl_->reading >= session->limits.residentFrames) {
+    if (impl_->in_flight(token, frame)) return OkStatus;
+    const auto occupied = [&] { return impl_->requests.size() + impl_->ready.size() + impl_->inflight.size(); };
+    while (!impl_->ready.empty() && occupied() >= session->limits.residentFrames) {
         impl_->resident -= impl_->ready.front().pixels.capacity() * sizeof(u16); impl_->ready.pop_front();
     }
-    if (impl_->requests.size() + impl_->ready.size() + impl_->reading >= session->limits.residentFrames) return Errc::Busy;
+    if (occupied() >= session->limits.residentFrames) return Errc::Busy;
     impl_->requests.push_back({session, frame}); impl_->wake.notify_all(); return OkStatus;
+}
+u32 PreRenderCache::prefetch(u64 token, u64 frame, i32 direction, u32 count, bool wrap) noexcept {
+    if (!impl_->valid(token)) return 0;
+    std::unique_lock lock(impl_->mutex, std::defer_lock); if (!brief_lock(lock)) return 0;
+    Impl& im = *impl_;
+    const auto session = im.active;
+    if (!session || !im.valid(token) || session->token != token || frame >= session->total) return 0;
+    const u64 total = session->total;
+    const u32 limit = session->limits.residentFrames;
+    const u32 wanted = static_cast<u32>(std::min<u64>({u64(std::max(count, 1u)), u64(limit), total}));
+    // A janela: do quadro pedido em diante, no sentido do relógio.
+    std::array<u64, kMaxResidentFrames> window{}; u32 size = 0;
+    const i64 step = direction < 0 ? -1 : 1;
+    i64 at = static_cast<i64>(frame);
+    for (u32 k = 0; k < wanted; ++k) {
+        if (at < 0 || static_cast<u64>(at) >= total) {
+            if (!wrap) break;
+            at = at < 0 ? static_cast<i64>(total) - 1 : 0;
+        }
+        const u64 f = static_cast<u64>(at);
+        const bool written = session->direction > 0 ? f < session->written : f >= total - session->written;
+        if (!written) break;
+        window[size++] = f; at += step;
+    }
+    const auto position = [&](u64 f) -> u32 { for (u32 i = 0; i < size; ++i) if (window[i] == f) return i; return kMaxResidentFrames; };
+    // Fora da janela (o relógio já passou, seek, sentido trocado): sai.
+    for (auto it = im.ready.begin(); it != im.ready.end();) {
+        if (it->token != token || position(it->frame) == kMaxResidentFrames) {
+            im.resident -= it->pixels.capacity() * sizeof(u16); it = im.ready.erase(it);
+        } else ++it;
+    }
+    std::erase_if(im.requests, [&](const Impl::Read& job) { return job.session != session || position(job.frame) == kMaxResidentFrames; });
+    bool queued = false;
+    for (u32 i = 0; i < size; ++i) {
+        const u64 f = window[i];
+        bool have = im.in_flight(token, f);
+        for (const auto& r : im.ready) if (!have && r.frame == f) have = true;
+        for (const auto& job : im.requests) if (!have && job.frame == f) have = true;
+        if (have) continue;
+        if (im.requests.size() + im.ready.size() + im.inflight.size() >= limit) break;
+        im.requests.push_back({session, f}); queued = true;
+    }
+    // O mais perto do relógio é lido primeiro.
+    std::stable_sort(im.requests.begin(), im.requests.end(),
+        [&](const Impl::Read& a, const Impl::Read& b) { return position(a.frame) < position(b.frame); });
+    if (queued) im.wake.notify_all();
+    u32 run = 0;
+    for (u32 i = 0; i < size; ++i) {
+        bool ok = false;
+        for (const auto& r : im.ready) if (r.frame == window[i] && r.result.ok()) { ok = true; break; }
+        if (!ok) break;
+        ++run;
+    }
+    return run;
 }
 Status PreRenderCache::take(u64 token, u64 frame, std::vector<u16>& rgba) noexcept {
     if (!impl_->valid(token)) return Errc::Cancelled;
-    std::unique_lock lock(impl_->mutex, std::try_to_lock); if (!lock) return Errc::Busy;
+    std::unique_lock lock(impl_->mutex, std::defer_lock); if (!brief_lock(lock)) return Errc::Busy;
     if (!impl_->valid(token)) return Errc::Cancelled;
     for (auto it = impl_->ready.begin(); it != impl_->ready.end(); ++it) if (it->token == token && it->frame == frame) {
         const Status result = it->result;
@@ -546,12 +662,15 @@ void PreRenderCache::invalidate() noexcept {
 }
 bool PreRenderCache::matches(u64 token, const Key& key) const noexcept {
     if (!impl_->valid(token)) return false;
-    std::unique_lock lock(impl_->mutex, std::try_to_lock);
-    return lock && impl_->valid(token) && impl_->active && impl_->active->token == token && impl_->active->key == key;
+    std::unique_lock lock(impl_->mutex, std::defer_lock);
+    return brief_lock(lock) && impl_->valid(token) && impl_->active && impl_->active->token == token && impl_->active->key == key;
 }
 PreRenderCache::Stats PreRenderCache::stats() const noexcept {
     Stats result;
-    std::unique_lock lock(impl_->mutex, std::try_to_lock); if (!lock) { result.lastError = Errc::Busy; return result; }
+    // Lock normal: os leitores só seguram o mutex para mexer nas filas, nunca
+    // durante I/O. Devolver Busy aqui fazia a prévia achar o cache incompleto
+    // e montar a composição ao vivo só porque um leitor publicava um quadro.
+    std::lock_guard lock(impl_->mutex);
     if (!impl_->active || !impl_->valid(impl_->active->token)) {
         if (impl_->cleanupFailed) { result.lastError = Errc::IoError;
             std::snprintf(result.errorDetail, sizeof(result.errorDetail), "%s", "nao foi possivel remover o cache PreRender anterior"); }
@@ -560,8 +679,10 @@ PreRenderCache::Stats PreRenderCache::stats() const noexcept {
     const auto& session = *impl_->active;
     result.token = session.token; result.framesTotal = session.total; result.framesWritten = session.written;
     result.diskBytes = session.bytes; result.residentBytes = impl_->resident; result.workingBytes = impl_->working;
-    result.peakOwnedBytes = impl_->peak; result.pendingReads = static_cast<u32>(impl_->requests.size()) + impl_->reading;
-    result.residentFrames = static_cast<u32>(impl_->ready.size()) + impl_->reading;
+    const u32 reading = static_cast<u32>(impl_->inflight.size());
+    result.peakOwnedBytes = impl_->peak; result.pendingReads = static_cast<u32>(impl_->requests.size()) + reading;
+    result.residentFrames = static_cast<u32>(impl_->ready.size()) + reading;
+    result.residentLimit = session.limits.residentFrames;
     result.complete = session.complete; result.lastError = session.error;
     std::memcpy(result.errorDetail, session.detail, sizeof(result.errorDetail)); return result;
 }

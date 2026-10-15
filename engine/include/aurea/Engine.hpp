@@ -2223,6 +2223,11 @@ private:
     };
     std::array<PreRenderGpuSlot, 2> preRenderTextures_{};
     std::vector<u16> preRenderUpload_;
+    /// renderMutex_: início da sequência de quadros que o leitor do PreRender
+    /// não entregou TOCANDO (0 = entregando). Passado kPreRenderStallNs, a
+    /// prévia volta ao render ao vivo em vez de congelar a imagem.
+    u64 preRenderStallSinceNs_ = 0;
+    static constexpr u64 kPreRenderStallNs = 250'000'000ull;
     [[nodiscard]] Status initialize_offline_export(ExportContext& ctx) noexcept;
     [[nodiscard]] Status prepare_export_resources(ExportContext& ctx) noexcept;
     void release_offline_export(ExportContext& ctx, bool retainReadbacks = false) noexcept;

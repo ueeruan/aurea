@@ -7341,12 +7341,32 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const f32 dither = offscreen->encodeDither ? 1.0f : 0.0f;
         const YuvUniforms uy{Vec4{0.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
         const YuvUniforms uc{Vec4{1.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
-        const u32 py = ctx.fullscreen_pass("export-y", PassStage::Output, yTex, yuvShader,
-                                           {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &uy, sizeof(uy));
-        const u32 pc = ctx.fullscreen_pass("export-cbcr", PassStage::Output, uvTex, yuvShader,
-                                           {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &uc, sizeof(uc));
-        if (py != kInvalidIndex) graph_.mark_side_effect(py);
-        if (pc != kInvalidIndex) graph_.mark_side_effect(pc);
+        // surface-direct confirmado no 1o pacote: só o R'G'B' (sem NV12 nem readback).
+        const bool nv12 = !(offscreen->rgbOnly && offscreen->rgb.valid());
+        if (nv12) {
+            const u32 py = ctx.fullscreen_pass("export-y", PassStage::Output, yTex, yuvShader,
+                                               {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &uy, sizeof(uy));
+            const u32 pc = ctx.fullscreen_pass("export-cbcr", PassStage::Output, uvTex, yuvShader,
+                                               {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &uc, sizeof(uc));
+            if (py != kInvalidIndex) graph_.mark_side_effect(py);
+            if (pc != kInvalidIndex) graph_.mark_side_effect(pc);
+        }
+        if (offscreen->rgb.valid()) {
+            // surface-direct: o MESMO R'G'B' de 8 bits que o NV12 codifica, num
+            // alvo com memória de AHardwareBuffer que a Surface do encoder lê.
+            const TextureDesc have = backend_->texture_desc(offscreen->rgb);
+            if (have.width == ow && have.height == oh) {
+                TextureDesc rd;
+                rd.width = ow; rd.height = oh;
+                rd.format = SurfaceFormat::RGBA8;
+                rd.sampled = true; rd.renderTarget = true;
+                const FGTexture rgbTex = graph_.import_texture("export-rgb", offscreen->rgb, rd);
+                const YuvUniforms ur{Vec4{0.0f, dither, 0, 0}, Vec4{0.2126f, 0.0722f, 0, 0}};
+                const u32 pr = ctx.fullscreen_pass("export-rgb", PassStage::Output, rgbTex, ShaderId::export_rgb_encode_frag,
+                    {PassTexture{yuvSource, {}, CommonSampler::NearestClamp}}, &ur, sizeof(ur));
+                if (pr != kInvalidIndex) graph_.mark_side_effect(pr);
+            }
+        }
         graph_.set_output(comp, ResourceState::ShaderRead);
     } else {
         graph_.set_output(comp, ResourceState::ShaderRead);
@@ -7416,7 +7436,8 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         if (!segmented) graph_.execute(*fb.commands, settings.gpuTimers);
         // Export: os planos NV12 vão para os buffers de leitura no mesmo frame.
         if (offscreen && offscreen->yReadback.valid() && offscreen->uvReadback.valid()
-            && offscreen->yPlane.valid() && offscreen->uvPlane.valid()) {
+            && offscreen->yPlane.valid() && offscreen->uvPlane.valid()
+            && !(offscreen->rgbOnly && offscreen->rgb.valid())) {
             fb.commands->end_render_pass();
             fb.commands->copy_texture_to_buffer(offscreen->yPlane, offscreen->yReadback);
             fb.commands->copy_texture_to_buffer(offscreen->uvPlane, offscreen->uvReadback);

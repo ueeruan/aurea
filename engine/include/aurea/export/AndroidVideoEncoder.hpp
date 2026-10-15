@@ -61,6 +61,10 @@ struct Request {
     bool simulateStall = false;
     /// Teste: a thread da Surface "trava no driver" (eglSwapBuffers que não volta).
     bool simulateHang = false;
+    /// Degrau surface-direct (só com Input::Surface): cada quadro chega como um
+    /// AHardwareBuffer R'G'B' (set_direct_buffer), importado como EGLImage e
+    /// desenhado na Surface — sem os planos NV12.
+    bool direct = false;
     /// Batida do export (ExportWatchdog.hpp) durante as esperas com prazo.
     std::atomic<u64>* heartbeat = nullptr;
 };
@@ -104,6 +108,9 @@ public:
     [[nodiscard]] u32 max_in_flight() const noexcept;
     /// "surface:c2.x.avc.encoder" / "buffer:c2.x.avc.encoder:0x15".
     [[nodiscard]] const char* describe() const noexcept;
+    /// surface-direct: o AHardwareBuffer do PRÓXIMO send (o alimentador faz o
+    /// próprio acquire e o segura até fechar).
+    void set_direct_buffer(void* buffer) noexcept;
     /// Solta tudo. Um encoder travado no stop é abandonado depois de um prazo
     /// (thread própria) — o export segue no próximo degrau.
     void close() noexcept;
@@ -133,6 +140,7 @@ public:
     [[nodiscard]] const std::vector<u8>& codec_config() const noexcept { return empty_; }
     [[nodiscard]] u32 max_in_flight() const noexcept { return 0; }
     [[nodiscard]] const char* describe() const noexcept { return ""; }
+    void set_direct_buffer(void*) noexcept {}
     void close() noexcept {}
 private:
     std::vector<u8> empty_;

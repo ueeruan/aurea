@@ -234,6 +234,12 @@ struct EngineConfig {
     /// dos fragmentos. Sem dither, os mesmos bytes; com dither, raros pixels
     /// diferem em 1 nível. DESLIGADO até ser medido no aparelho.
     bool enablePackedYuvExport = false;
+    /// Export direto na Surface do encoder (Android, degrau surface-direct da
+    /// escada): a composição sai em R'G'B' num AHardwareBuffer que a Surface
+    /// recebe sem readback. DESLIGADO até ser validado em aparelho
+    /// (docs/architecture/EXPORT_SURFACE_DIRETO_2026-10-15.md); no Android
+    /// também liga com `adb shell setprop debug.aurea.enc.direct 1`.
+    bool enableDirectSurfaceExport = false;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
 

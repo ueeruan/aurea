@@ -1756,6 +1756,103 @@ Result<ExternalTexture> Backend::import_external_image(const ExternalImageDesc& 
 #endif
 }
 
+// =============================================================================
+// Export direto (surface-direct): alvo de render com memória de AHardwareBuffer
+// =============================================================================
+Result<TextureHandle> Backend::create_shared_render_target(u32 width, u32 height, void** nativeBuffer) noexcept {
+    if (nativeBuffer) *nativeBuffer = nullptr;
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    if (!recordingStatus_.ok()) return recordingStatus_;
+    if (!hasAhb_) return Status{Errc::UnsupportedFeature, "aparelho sem importacao de AHardwareBuffer"};
+    if (!device_ || !nativeBuffer || !width || !height) return Status{Errc::InvalidArgument, "alvo compartilhado invalido"};
+    AHardwareBuffer_Desc ad{};
+    ad.width = width;
+    ad.height = height;
+    ad.layers = 1;
+    ad.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+    ad.usage = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+    AHardwareBuffer* ahb = nullptr;
+    if (AHardwareBuffer_allocate(&ad, &ahb) != 0 || !ahb)
+        return Status{Errc::OutOfDeviceMemory, "AHardwareBuffer do export nao foi alocado"};
+    VkAndroidHardwareBufferFormatPropertiesANDROID fmt{VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID};
+    VkAndroidHardwareBufferPropertiesANDROID props{VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID};
+    props.pNext = &fmt;
+    if (const Status s = check(deviceFunctions_.vkGetAndroidHardwareBufferPropertiesANDROID(device_, ahb, &props),
+                               "vkGetAndroidHardwareBufferPropertiesANDROID(export)"); !s.ok()) {
+        AHardwareBuffer_release(ahb);
+        return s;
+    }
+    if (fmt.format != VK_FORMAT_R8G8B8A8_UNORM) {
+        AHardwareBuffer_release(ahb);
+        return Status{Errc::UnsupportedFormat, "AHardwareBuffer RGBA8 sem formato Vulkan equivalente"};
+    }
+    Texture t;
+    t.desc.width = width;
+    t.desc.height = height;
+    t.desc.format = SurfaceFormat::RGBA8;
+    t.desc.sampled = true;
+    t.desc.renderTarget = true;
+    t.desc.debugName = "export-rgb-direto";
+    t.format = VK_FORMAT_R8G8B8A8_UNORM;
+    VkExternalMemoryImageCreateInfo extMem{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO};
+    extMem.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
+    VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.pNext = &extMem;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = t.format;
+    ii.extent = {width, height, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    Status made = check(deviceFunctions_.vkCreateImage(device_, &ii, nullptr, &t.image), "vkCreateImage(export ahb)");
+    if (made.ok()) {
+        VkImportAndroidHardwareBufferInfoANDROID imp{VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID};
+        imp.buffer = ahb;
+        VkMemoryDedicatedAllocateInfo dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO};
+        dedicated.image = t.image;
+        imp.pNext = &dedicated;
+        VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        ai.pNext = &imp;
+        ai.allocationSize = props.allocationSize;
+        ai.memoryTypeIndex = 0;
+        while (ai.memoryTypeIndex < 32 && !(props.memoryTypeBits & (1u << ai.memoryTypeIndex))) ++ai.memoryTypeIndex;
+        made = ai.memoryTypeIndex < 32
+            ? check(deviceFunctions_.vkAllocateMemory(device_, &ai, nullptr, &t.importedMemory), "vkAllocateMemory(export ahb)")
+            : Status{Errc::UnsupportedFeature, "AHardwareBuffer do export sem tipo de memoria"};
+    }
+    if (made.ok())
+        made = check(deviceFunctions_.vkBindImageMemory(device_, t.image, t.importedMemory, 0), "vkBindImageMemory(export ahb)");
+    if (made.ok()) {
+        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vi.image = t.image;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vi.format = t.format;
+        vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        made = check(deviceFunctions_.vkCreateImageView(device_, &vi, nullptr, &t.view), "vkCreateImageView(export ahb)");
+    }
+    if (!made.ok()) {
+        if (t.view) deviceFunctions_.vkDestroyImageView(device_, t.view, nullptr);
+        if (t.importedMemory) deviceFunctions_.vkFreeMemory(device_, t.importedMemory, nullptr);
+        if (t.image) deviceFunctions_.vkDestroyImage(device_, t.image, nullptr);
+        AHardwareBuffer_release(ahb);
+        return made;
+    }
+    // A textura é a dona da referência: destroy_texture_now a solta depois do
+    // fence. O alimentador GLES do encoder segura a própria (acquire).
+    t.nativeBuffer = ahb;
+    t.lastUsedFrame = frameNumber_;
+    *nativeBuffer = ahb;
+    return TextureHandle{textures_.add(std::move(t))};
+#else
+    (void)width; (void)height;
+    return Status{Errc::NotSupported, "alvo compartilhado com o encoder so no Android"};
+#endif
+}
+
 void Backend::release_external_image(TextureHandle imported) noexcept { destroy_texture(imported); }
 
 u32 Backend::trim_external_images() noexcept {

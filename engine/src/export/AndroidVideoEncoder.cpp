@@ -9,6 +9,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <android/hardware_buffer.h>
 #include <android/native_window.h>
 #include <dlfcn.h>
 #include <jni.h>
@@ -111,6 +113,17 @@ constexpr const char* kFragment =
     "    float G = (Y - kr * R - kb * B) / kg;\n"
     "    gl_FragColor = vec4(clamp(vec3(R, G, B), 0.0, 1.0), 1.0);\n"
     "}\n";
+// surface-direct: o quadro já vem em R'G'B' de 8 bits (export/rgb_encode.frag),
+// do mesmo tamanho da Surface; amostra 1:1, sem filtro.
+constexpr const char* kDirectFragment =
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+    "precision highp float;\n"
+    "#else\n"
+    "precision mediump float;\n"
+    "#endif\n"
+    "varying vec2 v_uv;\n"
+    "uniform sampler2D u_rgb;\n"
+    "void main() { gl_FragColor = vec4(texture2D(u_rgb, v_uv).rgb, 1.0); }\n";
 
 // MediaFormat: padrão/faixa/curva a partir das etiquetas do arquivo (H.273).
 i32 color_standard(u8 matrix) noexcept {
@@ -292,6 +305,18 @@ struct SurfaceFeeder {
     PFNEGLPRESENTATIONTIMEANDROIDPROC presentation = nullptr;
     GLuint program = 0, texY = 0, texC = 0;
     GLint position = -1, matrix = -1, samplerY = -1, samplerC = -1;
+    // surface-direct: cada AHardwareBuffer do anel do motor vira um EGLImage
+    // (uma vez; o anel tem até 4 slots) com referência própria até o teardown.
+    bool direct = false;
+    void* directBuffer = nullptr;      ///< o buffer do quadro atual (copiado pelo chamador)
+    GLuint directProgram = 0;
+    GLint directPosition = -1, directSampler = -1;
+    struct DirectImage { AHardwareBuffer* buffer = nullptr; EGLImageKHR image = EGL_NO_IMAGE_KHR; GLuint texture = 0; };
+    std::vector<DirectImage> images;
+    PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC nativeClient = nullptr;
+    PFNEGLCREATEIMAGEKHRPROC createImage = nullptr;
+    PFNEGLDESTROYIMAGEKHRPROC destroyImage = nullptr;
+    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC imageTarget = nullptr;
 
     Status fail(Errc code, const char* format, ...) noexcept __attribute__((format(printf, 3, 4))) {
         va_list args;
@@ -399,11 +424,103 @@ struct SurfaceFeeder {
         const GLenum error = glGetError();
         if (!program || !texY || !texC || error != GL_NO_ERROR)
             return fail(Errc::EncoderUnavailable, "GLES nao preparou a conversao da Surface (0x%x)", error);
+        if (direct) return init_direct();
+        return OkStatus;
+    }
+
+    /// surface-direct: EGLImage de AHardwareBuffer → textura → quad. Sem as
+    /// extensões, o degrau falha na abertura e a escada segue no surface NV12.
+    Status init_direct() noexcept {
+        const char* extensions = eglQueryString(display, EGL_EXTENSIONS);
+        const char* gl = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+        if (!extensions || !std::strstr(extensions, "EGL_ANDROID_image_native_buffer") ||
+            !std::strstr(extensions, "EGL_KHR_image_base") || !gl || !std::strstr(gl, "GL_OES_EGL_image"))
+            return fail(Errc::NotSupported, "EGL/GLES sem EGLImage de AHardwareBuffer");
+        nativeClient = reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(eglGetProcAddress("eglGetNativeClientBufferANDROID"));
+        createImage = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(eglGetProcAddress("eglCreateImageKHR"));
+        destroyImage = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(eglGetProcAddress("eglDestroyImageKHR"));
+        imageTarget = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+        if (!nativeClient || !createImage || !destroyImage || !imageTarget)
+            return fail(Errc::NotSupported, "EGL sem as funcoes de EGLImage de AHardwareBuffer");
+        const GLuint vs = compile(GL_VERTEX_SHADER, kVertex);
+        const GLuint fs = compile(GL_FRAGMENT_SHADER, kDirectFragment);
+        if (vs && fs) {
+            directProgram = glCreateProgram();
+            glAttachShader(directProgram, vs);
+            glAttachShader(directProgram, fs);
+            glBindAttribLocation(directProgram, 0, "a_pos");
+            glLinkProgram(directProgram);
+            GLint linked = 0;
+            glGetProgramiv(directProgram, GL_LINK_STATUS, &linked);
+            if (!linked) { glDeleteProgram(directProgram); directProgram = 0; }
+        }
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        if (!directProgram) return fail(Errc::EncoderUnavailable, "GLES nao compilou o desenho direto da Surface");
+        directPosition = glGetAttribLocation(directProgram, "a_pos");
+        directSampler = glGetUniformLocation(directProgram, "u_rgb");
+        return OkStatus;
+    }
+
+    /// A textura GLES do buffer do anel (importada uma vez, com referência própria).
+    GLuint direct_texture(AHardwareBuffer* buffer) noexcept {
+        for (const DirectImage& image : images) if (image.buffer == buffer) return image.texture;
+        if (images.size() >= 8) return 0;   // o anel do motor tem até 4 slots
+        AHardwareBuffer_Desc desc{};
+        AHardwareBuffer_describe(buffer, &desc);
+        if (desc.width != width || desc.height != height) return 0;
+        const EGLClientBuffer client = nativeClient(buffer);
+        if (!client) return 0;
+        const EGLint attributes[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE};
+        const EGLImageKHR image = createImage(display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID, client, attributes);
+        if (image == EGL_NO_IMAGE_KHR) return 0;
+        GLuint texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        imageTarget(GL_TEXTURE_2D, static_cast<GLeglImageOES>(image));
+        if (glGetError() != GL_NO_ERROR) {
+            glDeleteTextures(1, &texture);
+            destroyImage(display, image);
+            return 0;
+        }
+        AHardwareBuffer_acquire(buffer);
+        try { images.push_back(DirectImage{buffer, image, texture}); }
+        catch (...) { glDeleteTextures(1, &texture); destroyImage(display, image); AHardwareBuffer_release(buffer); return 0; }
+        return texture;
+    }
+
+    Status frame_direct() noexcept {
+        auto* buffer = static_cast<AHardwareBuffer*>(directBuffer);
+        if (!buffer) return fail(Errc::NotSupported, "quadro sem AHardwareBuffer para a Surface direta");
+        const GLuint texture = direct_texture(buffer);
+        if (!texture) return fail(Errc::EncodeFailed, "AHardwareBuffer do export nao virou EGLImage");
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glUseProgram(directProgram);
+        glUniform1i(directSampler, 0);
+        static const GLfloat triangle[] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glVertexAttribPointer(static_cast<GLuint>(directPosition), 2, GL_FLOAT, GL_FALSE, 0, triangle);
+        glEnableVertexAttribArray(static_cast<GLuint>(directPosition));
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        const GLenum error = glGetError();
+        if (error != GL_NO_ERROR) return fail(Errc::EncodeFailed, "GLES falhou ao desenhar o quadro direto (0x%x)", error);
+        presentation(display, surface, static_cast<EGLnsecsANDROID>(ptsUs) * 1000);
+        if (!eglSwapBuffers(display, surface))
+            return fail(Errc::EncodeFailed, "Surface do encoder recusou o quadro direto (0x%x)", eglGetError());
+        // O motor reusa o slot (e o AHardwareBuffer) assim que este quadro
+        // volta: a leitura do GLES tem de ter terminado (prazo do alimentador).
+        glFinish();
         return OkStatus;
     }
 
     Status frame() noexcept {
         if (simulateHang) std::this_thread::sleep_for(std::chrono::seconds(30));
+        if (direct) return frame_direct();
         const u32 w = width, h = height;
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glActiveTexture(GL_TEXTURE0);
@@ -436,15 +553,23 @@ struct SurfaceFeeder {
             if (context != EGL_NO_CONTEXT && surface != EGL_NO_SURFACE &&
                 eglMakeCurrent(display, surface, surface, context)) {
                 if (program) glDeleteProgram(program);
+                if (directProgram) glDeleteProgram(directProgram);
                 const GLuint textures[2] = {texY, texC};
                 glDeleteTextures(2, textures);
+                for (const DirectImage& image : images) glDeleteTextures(1, &image.texture);
             }
+            for (const DirectImage& image : images)
+                if (destroyImage && image.image != EGL_NO_IMAGE_KHR) destroyImage(display, image.image);
             eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
             if (surface != EGL_NO_SURFACE) eglDestroySurface(display, surface);
             if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
             eglReleaseThread();
         }
-        program = texY = texC = 0;
+        // A referência própria de cada buffer do anel sai depois do contexto.
+        for (const DirectImage& image : images) if (image.buffer) AHardwareBuffer_release(image.buffer);
+        images.clear();
+        directBuffer = nullptr;
+        program = texY = texC = directProgram = 0;
         surface = EGL_NO_SURFACE;
         context = EGL_NO_CONTEXT;
         display = EGL_NO_DISPLAY;
@@ -505,6 +630,7 @@ struct Encoder::Impl {
     std::shared_ptr<SurfaceFeeder> feeder;
     std::thread feederThread;
     bool feederHung = false;
+    void* directBuffer = nullptr;      ///< surface-direct: AHardwareBuffer do próximo send (do motor)
 
     Status fail(Errc code, const char* format, ...) noexcept __attribute__((format(printf, 3, 4))) {
         va_list args;
@@ -552,7 +678,9 @@ struct Encoder::Impl {
             feeder->kb = m == 5 || m == 6 ? 0.114f : m == 9 || m == 10 ? 0.0593f : 0.0722f;
             feeder->fullRange = request.color.fullRange;
             feeder->simulateHang = request.simulateHang;
-            feeder->pixels.resize(static_cast<usize>(request.width) * request.height * 3 / 2);
+            feeder->direct = request.direct;
+            // Direto: o quadro chega no AHardwareBuffer; os planos NV12 não são copiados.
+            if (!request.direct) feeder->pixels.resize(static_cast<usize>(request.width) * request.height * 3 / 2);
             feederThread = std::thread(&SurfaceFeeder::run, feeder);
         } catch (...) {
             if (feeder && feeder->window) { ANativeWindow_release(feeder->window); feeder->window = nullptr; }
@@ -669,7 +797,7 @@ struct Encoder::Impl {
                 }
             if (!colorFormat) return fail(Errc::UnsupportedFormat, "encoder %s sem formato YUV 4:2:0 de 8 bits", info.name);
         }
-        if (surfaceInput) std::snprintf(description, sizeof(description), "surface:%s", info.name);
+        if (surfaceInput) std::snprintf(description, sizeof(description), "%s:%s", r.direct ? "surface-direct" : "surface", info.name);
         else std::snprintf(description, sizeof(description), "buffer:%s:0x%x", info.name, static_cast<unsigned>(colorFormat));
         codec = AMediaCodec_createCodecByName(info.name);
         if (!codec) return fail(Errc::EncoderUnavailable, "MediaCodec nao criou %s", info.name);
@@ -714,6 +842,17 @@ struct Encoder::Impl {
 
     Status send_surface(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 ptsUs, u64 timeoutNs) noexcept {
         if (!feeder || feederHung) return fail(Errc::Timeout, "Surface do encoder travada antes");
+        if (request.direct) {
+            // surface-direct: o R'G'B' já está no AHardwareBuffer do slot (o
+            // motor esperou o fence); os planos NV12 não passam pelo GLES.
+            {
+                std::lock_guard lock(feeder->mutex);
+                feeder->directBuffer = directBuffer;
+                feeder->ptsUs = ptsUs;
+            }
+            directBuffer = nullptr;
+            return call(SurfaceFeeder::Job::Frame, timeoutNs);
+        }
         {
             // Os planos chegam na memória mapeada do readback do Vulkan: nunca
             // vão direto a outra API (no emulador, gfxstream, o upload GLES a
@@ -918,6 +1057,8 @@ u32 Encoder::max_in_flight() const noexcept {
 }
 
 const char* Encoder::describe() const noexcept { return impl_ ? impl_->description : ""; }
+
+void Encoder::set_direct_buffer(void* buffer) noexcept { if (impl_) impl_->directBuffer = buffer; }
 
 void Encoder::close() noexcept { if (impl_) impl_->close(); }
 

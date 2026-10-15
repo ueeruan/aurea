@@ -126,6 +126,12 @@ public:
     void set_diagnostics(std::shared_ptr<ExportDiagnostics> diagnostics) noexcept override {
         if (!retirementRequested_) state_->sink->set_diagnostics(std::move(diagnostics));
     }
+    void set_direct_surface_frame(void* nativeBuffer) noexcept override {
+        if (!retirementRequested_) state_->sink->set_direct_surface_frame(nativeBuffer);
+    }
+    bool direct_surface_confirmed() const noexcept override {
+        return !retirementRequested_ && state_->sink->direct_surface_confirmed();
+    }
     Status open(const char*, const VideoStreamConfig&, const AudioStreamConfig*) noexcept override {
         return Status{Errc::InvalidState, "encoder ja foi aberto pelo gate de exportacao"};
     }

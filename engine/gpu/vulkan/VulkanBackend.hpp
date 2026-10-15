@@ -454,6 +454,8 @@ public:
     [[nodiscard]] Status read_texture(TextureHandle src, void* outData, u32 bytesPerRow) noexcept override;
 
     [[nodiscard]] Result<ExternalTexture> import_external_image(const ExternalImageDesc& img) noexcept override;
+    [[nodiscard]] Result<TextureHandle> create_shared_render_target(u32 width, u32 height,
+                                                                    void** nativeBuffer) noexcept override;
     void release_external_image(TextureHandle imported) noexcept override;
     u32 trim_external_images() noexcept override;
     void begin_external_image_scope() noexcept override { ++externalImageScopes_; }

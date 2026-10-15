@@ -88,6 +88,12 @@ public:
     std::function<Status(TextureHandle, void*, u32)> beforeReadTexture;
     std::function<void(const void*, u32)> beforeSetUniforms;
     std::function<Result<ExternalTexture>(const ExternalImageDesc&)> beforeImportExternalImage;
+    // surface-direct (ExportDirectSurface.inl): alvo R'G'B' "com AHardwareBuffer".
+    bool sharedTargetsSupported = false;
+    u32 sharedTargetsCreated = 0;
+    std::vector<u64> sharedTargetIds;
+    std::vector<void*> sharedBuffers;
+    std::atomic<u32> bufferCopies{0};   ///< copy_texture_to_buffer (readback NV12 do export)
     std::function<void(void (*)(void*), void*)> beforeDeferUntilGpuDone;
     std::function<u32()> beforeTrimExternalImages;
     std::function<GpuMemoryStats()> queryMemoryStats;
@@ -265,6 +271,22 @@ public:
         return beforeImportExternalImage ? beforeImportExternalImage(desc) : Result<ExternalTexture>{Status{Errc::NotSupported}};
     }
     void release_external_image(TextureHandle) noexcept override {}
+    Result<TextureHandle> create_shared_render_target(u32 width, u32 height, void** nativeBuffer) noexcept override {
+        if (nativeBuffer) *nativeBuffer = nullptr;
+        if (!sharedTargetsSupported || !nativeBuffer) return Status{Errc::NotSupported, "mock sem alvo compartilhado"};
+        TextureDesc d;
+        d.width = width; d.height = height;
+        d.format = SurfaceFormat::RGBA8;
+        d.sampled = true; d.renderTarget = true;
+        textures.push_back(d);
+        textureAlive.push_back(true);
+        ++texturesCreated; ++sharedTargetsCreated;
+        sharedTargetIds.push_back(textures.size());
+        // Endereço único e estável no papel do AHardwareBuffer (nunca lido).
+        sharedBuffers.push_back(reinterpret_cast<void*>(static_cast<uintptr_t>(0x1000 + textures.size() * 16)));
+        *nativeBuffer = sharedBuffers.back();
+        return TextureHandle{textures.size()};
+    }
     u32 trim_external_images() noexcept override {
         return beforeTrimExternalImages ? beforeTrimExternalImages() : 0;
     }
@@ -333,7 +355,7 @@ public:
     void draw_indexed(u32, u32, u32, i32, u32) noexcept override { events.push_back({Event::Draw}); }
     void dispatch(u32, u32, u32) noexcept override {}
     void copy_texture(TextureHandle, TextureHandle) noexcept override {}
-    void copy_texture_to_buffer(TextureHandle, BufferHandle) noexcept override {}
+    void copy_texture_to_buffer(TextureHandle, BufferHandle) noexcept override { ++bufferCopies; }
     void begin_timer(const char* l) noexcept override {
         Event e{Event::Timer};
         e.label = l;

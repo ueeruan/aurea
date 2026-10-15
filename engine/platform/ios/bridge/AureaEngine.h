@@ -1061,6 +1061,11 @@ NS_SWIFT_NAME(AureaEngine)
 /// Nil means no strict neighbor, so transport leaves the playhead unchanged.
 - (nullable NSNumber*)timelineNavigation:(long long)layerId compositionFrame:(long long)compositionFrame direction:(int32_t)direction NS_SWIFT_NAME(timelineNavigation(_:compositionFrame:direction:));
 - (BOOL)seekTimelineEvent:(long long)compositionFrame NS_SWIFT_NAME(seekTimelineEvent(_:));
+/// O degrau do encoder de vídeo que o último export usou (escada do motor,
+/// FFmpegExportSink: "videotoolbox:…", "videotoolbox-i420:…", "software:…",
+/// com os que falharam antes), para o log e o diagnóstico do relato de bug.
+/// Vazio = nenhum export neste processo. Mesmo texto do Android.
++ (NSString*)lastExportEncoderPath;
 - (void)cancelExport;
 /// Explicitly restores the checked export snapshot, then restarts from zero.
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;

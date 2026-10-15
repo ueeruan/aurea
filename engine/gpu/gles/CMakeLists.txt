@@ -65,9 +65,15 @@ foreach(_shader IN LISTS _shader_inputs)
     list(APPEND _essl_files "${_essl}")
 endforeach()
 set(_blob "${CMAKE_CURRENT_BINARY_DIR}/GlesShaderBlobs.cpp")
+# Lista em arquivo de resposta: na linha de comando ela passa de 32 767
+# caracteres (limite do CreateProcess) num worktree de caminho longo.
+# file(GENERATE) só regrava quando a lista muda.
+set(_essl_list "${CMAKE_CURRENT_BINARY_DIR}/GlesShaderBlobs.rsp")
+list(JOIN _essl_files "\n" _essl_lines)
+file(GENERATE OUTPUT "${_essl_list}" CONTENT "${_essl_lines}\n")
 add_custom_command(OUTPUT "${_blob}"
-    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/gles-shaders/embed.py" --output "${_blob}" ${_essl_files}
-    DEPENDS ${_essl_files} "${PROJECT_SOURCE_DIR}/tools/gles-shaders/embed.py" VERBATIM)
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/gles-shaders/embed.py" --output "${_blob}" "@${_essl_list}"
+    DEPENDS ${_essl_files} "${_essl_list}" "${PROJECT_SOURCE_DIR}/tools/gles-shaders/embed.py" VERBATIM)
 add_library(aurea_gles STATIC GlesDevice.cpp GlesResources.cpp GlesCommands.cpp "${_blob}")
 target_include_directories(aurea_gles PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(aurea_gles PUBLIC aurea_core EGL GLESv3)

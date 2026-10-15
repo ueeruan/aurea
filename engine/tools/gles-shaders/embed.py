@@ -3,7 +3,9 @@ import argparse
 import re
 from pathlib import Path
 
-parser = argparse.ArgumentParser()
+# "@lista": um caminho por linha. A lista de shaders passa do limite de
+# 32 767 caracteres do CreateProcess no Windows em worktrees de caminho longo.
+parser = argparse.ArgumentParser(fromfile_prefix_chars="@")
 parser.add_argument("--output", type=Path, required=True)
 parser.add_argument("inputs", type=Path, nargs="+")
 args = parser.parse_args()

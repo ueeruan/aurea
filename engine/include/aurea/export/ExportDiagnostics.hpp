@@ -62,6 +62,19 @@ public:
     void result(i32 code) noexcept {
         std::lock_guard lock(mutex_); if (!state_.ended) { state_.result = code; state_.hasResult = true; }
     }
+    /// Degrau da escada de encoders (FFmpegExportSink): o que está em uso e os
+    /// que falharam antes ("surface:c2.x abrindo | falhas: ..."). ASCII seguro.
+    void encoder_path(const char* text) noexcept {
+        std::lock_guard lock(mutex_);
+        if (state_.ended) return;
+        usize n = 0;
+        if (text) for (; text[n] && n + 1 < sizeof(state_.path); ++n) {
+            const unsigned char c = static_cast<unsigned char>(text[n]);
+            // Sem aspas, barra invertida nem controle: o texto entra cru no JSON.
+            state_.path[n] = c >= 0x20 && c < 0x7f && c != '"' && c != '\\' ? static_cast<char>(c) : '_';
+        }
+        state_.path[n] = '\0';
+    }
     [[nodiscard]] std::string json() const noexcept {
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
         try {
@@ -83,7 +96,7 @@ public:
                 "\"width\":%u,\"height\":%u,\"fpsNumerator\":%llu,\"fpsDenominator\":1000000,\"bitrate\":%u,\"requestedProfile\":%u,\"safeMode\":%u,"
                 "\"rendered\":%llu,\"submitted\":%llu,\"videoPackets\":%llu,\"audioPackets\":%llu,"
                 "\"inputAgain\":%llu,\"outputAgain\":%llu,\"firstInputMs\":%lld,\"firstPacketMs\":%lld,"
-                "\"hasResult\":%s,\"result\":%d,\"negotiatedColor\":null}",
+                "\"hasResult\":%s,\"result\":%d,\"negotiatedColor\":null,\"encoderPath\":\"%s\"}",
                 static_cast<unsigned long long>(start_), ms(now, start_), name(snapshot.lanes[0].stage), ms(now, snapshot.lanes[0].since),
                 name(snapshot.lanes[1].stage), ms(now, snapshot.lanes[1].since),
                 name(snapshot.lanes[2].stage), ms(now, snapshot.lanes[2].since),
@@ -97,7 +110,7 @@ public:
                 static_cast<unsigned long long>(counts[4]), static_cast<unsigned long long>(counts[5]),
                 input ? static_cast<long long>(ms(input, start_)) : -1ll,
                 packet ? static_cast<long long>(ms(packet, start_)) : -1ll,
-                snapshot.hasResult ? "true" : "false", snapshot.result);
+                snapshot.hasResult ? "true" : "false", snapshot.result, snapshot.path);
             return written > 0 && written < static_cast<int>(sizeof(buffer)) ? std::string(buffer, written) : "{}";
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
         } catch (...) { return "{}"; }
@@ -109,6 +122,7 @@ private:
         std::array<Phase, 3> lanes{};
         Format format{};
         char codec[96]{}, backend[48]{};
+        char path[320]{};   ///< encoderPath: degrau da escada em uso + falhas
         u32 candidates = 0;
         u32 codedWidth = 0, codedHeight = 0;
         i32 result = 0;

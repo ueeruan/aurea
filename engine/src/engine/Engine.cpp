@@ -14278,6 +14278,7 @@ void Engine::export_encoder_main() noexcept {
     }
     u32 sinceLog = 0;
     u64 logWrite = 0, logRead = 0, logRender = 0, logDecode = 0;
+    ExportSink::Acceleration lastAcceleration = ExportSink::Acceleration::Unknown;
     for (;;) {
         u32 si = 0;
         for (;;) {
@@ -14371,13 +14372,18 @@ void Engine::export_encoder_main() noexcept {
         }
         ctx.qCv.notify_all();
         if (!s.ok()) return;
-        if (i == 0) {
-            // O sink pode trocar de encoder no primeiro quadro (buffer de
-            // entrada inútil no de hardware → software): o aviso acompanha.
+        {
+            // O sink pode trocar de encoder até sair o primeiro pacote (escada
+            // Surface → ByteBuffer → legado → software: recusa, partida travada
+            // ou 1º quadro reprovado), alguns quadros depois do início. O aviso
+            // de software acompanha o degrau que ficou (0.1.8 BETA 2, 0a4b94e9).
             const ExportSink::EncoderInfo enc = ctx.sink->encoder_info();
-            if (enc.acceleration == ExportSink::Acceleration::Software) {
-                std::lock_guard<std::mutex> pl(ctx.mutex);
-                ctx.progress.flags = (ctx.progress.flags & ~kExportHardwareEncoder) | kExportSoftwareEncoder;
+            if (i == 0 || enc.acceleration != lastAcceleration) {
+                lastAcceleration = enc.acceleration;
+                if (enc.acceleration == ExportSink::Acceleration::Software) {
+                    std::lock_guard<std::mutex> pl(ctx.mutex);
+                    ctx.progress.flags = (ctx.progress.flags & ~kExportHardwareEncoder) | kExportSoftwareEncoder;
+                }
             }
         }
 

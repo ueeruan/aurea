@@ -54,6 +54,18 @@ struct VideoStreamConfig {
     /// finish closes the temporary file; independent validation must
     /// succeed before the startup gate atomically replaces the destination.
     bool validateBeforePublish = false;
+    /// Validação feita dentro de `finish` (sem validateBeforePublish): estrita
+    /// ou tolerante (ExportOutputValidation::strict).
+    bool strictValidation = true;
+    /// Registro de pacotes (export/ExportPacketLog.hpp) dentro do sink. Nulo =
+    /// MP4 direto, o caminho da 1.2.0 (o motor ainda não liga este modo).
+    const char* packetLogPath = nullptr;
+    /// Retomada pelo registro do sink: quadros 0..resumeFrame−1 já gravados.
+    u32 resumeFrame = 0;
+    /// Identidade gravada no registro (um registro de outro export nunca continua).
+    u64 sessionKey = 0;
+    /// Quadros do export inteiro (vai para o registro).
+    u32 totalFrames = 0;
 };
 
 struct AudioStreamConfig {
@@ -103,9 +115,22 @@ public:
     /// Fecha os fluxos (EOS), esvazia os encoders e finaliza o contêiner.
     [[nodiscard]] virtual Status finish() noexcept = 0;
 
+    /// Registro de pacotes do sink (só com `packetLogPath`): EOS do vídeo e
+    /// registro fechado; depois `begin_assembly`, o áudio e `finish`.
+    [[nodiscard]] virtual Status end_video() noexcept { return Status{Errc::NotSupported, "sink sem registro de pacotes"}; }
+    [[nodiscard]] virtual Status begin_assembly(const AudioStreamConfig* audio) noexcept {
+        (void)audio;
+        return Status{Errc::NotSupported, "sink sem registro de pacotes"};
+    }
+    [[nodiscard]] virtual Status replay_spilled_audio() noexcept {
+        return Status{Errc::NotSupported, "sink sem registro de pacotes"};
+    }
+
     [[nodiscard]] virtual Status validate_output(const ExportOutputValidation&) noexcept {
         return Status{Errc::NotSupported, "plataforma sem validacao independente de exportacao"};
     }
+    /// Avisos da última validação tolerante ("" = nenhum).
+    [[nodiscard]] virtual const char* validation_warnings() const noexcept { return ""; }
 
     /// Cancelamento: solta tudo e apaga o arquivo parcial.
     virtual void abort() noexcept = 0;

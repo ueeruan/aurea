@@ -65,7 +65,8 @@ class KeyflowExportDeviceTest {
             "result=${progress.result} frames=${progress.framesDone}/${progress.framesTotal} flags=${progress.flags} ${progress.message}")
         assertEquals(progress.message, 0, progress.result)
         assertEquals(frames, progress.framesDone)
-        assertEquals("V2 must be disabled in this comparison build", 0, (progress.flags ushr 8) and 15)
+        // Bits 8..11 = ExportPhase do motor (OfflineFrameQueue.hpp); 6 = Completed.
+        assertEquals("Export must finish in the Completed phase", 6, (progress.flags ushr 8) and 15)
         assertFalse(progress.frameFallback)
         assertTrue(output.length() > 1000)
         val reader = MediaMetadataRetriever()

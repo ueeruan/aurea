@@ -1825,8 +1825,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea 1.2.0 (2186) • 15/10/2026\n\n• PreRender: a reprodução agora sai do cache sem travar, lendo quadros à frente, e usa menos memória em celulares com 4 GB de RAM.\n• 3D: \"Trocar textura 3D\" volta a aparecer no objeto, inclusive com motion blur e dentro de uma cena 3D com outras camadas.\n• 3D: a aba Material voltou a ter Escolher, Trocar e Tirar imagem.
-• Posição: X e Y numa caixa só e Z ao lado, dentro da área de arrasto, com uma casa decimal; também em camadas 3D.</string>
+    <string name="release_notes_body">Aurea 1.2.0 (2186) • 15/10/2026\n\n• PreRender: a reprodução agora sai do cache sem travar, lendo quadros à frente, e usa menos memória em celulares com 4 GB de RAM.\n• 3D: \"Trocar textura 3D\" volta a aparecer no objeto, inclusive com motion blur e dentro de uma cena 3D com outras camadas.\n• 3D: a aba Material voltou a ter Escolher, Trocar e Tirar imagem.\n• Posição: X e Y numa caixa só e Z ao lado, dentro da área de arrasto, com uma casa decimal; também em camadas 3D.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>

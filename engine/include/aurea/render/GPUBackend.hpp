@@ -721,6 +721,17 @@ public:
     /// destruction, GPU fence ownership, or tracked memory accounting.
     virtual void begin_external_image_scope() noexcept {}
     virtual void end_external_image_scope() noexcept {}
+    /// Export direto na Surface do encoder (Android, degrau surface-direct):
+    /// alvo RGBA8 UNORM com a memória de um AHardwareBuffer novo. `nativeBuffer`
+    /// recebe o buffer; a textura é a dona da referência (quem o usar em outra
+    /// API faz o próprio acquire). Sem suporte = NotSupported e o export segue
+    /// no caminho NV12 de sempre.
+    [[nodiscard]] virtual Result<TextureHandle> create_shared_render_target(u32 width, u32 height,
+                                                                            void** nativeBuffer) noexcept {
+        (void)width; (void)height;
+        if (nativeBuffer) *nativeBuffer = nullptr;
+        return Status{Errc::NotSupported, "backend sem alvo compartilhado com o encoder"};
+    }
 
     /// Executa `fn(ctx)` quando a GPU concluir o frame que está sendo gravado
     /// agora. É como a camada de mídia devolve o buffer ao decoder no momento

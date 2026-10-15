@@ -126,6 +126,10 @@ struct BenchCapture {
     u32 heartbeatPulses = 0;
     std::atomic<u64>* beat = nullptr;    ///< o que o motor entregou em set_heartbeat
     u32 writes = 0;
+    // surface-direct: o buffer R'G'B' que o motor entregou em cada write_video,
+    // e a partir de qual escrita o "sink" diz ter confirmado o degrau.
+    std::vector<void*> directFrames;
+    u32 confirmDirectAfter = 0;
 };
 
 /// FNV-1a em palavras de 64 bits (o de byte a byte custaria ~3 ms por quadro
@@ -147,6 +151,10 @@ public:
     explicit BenchSink(BenchCapture* c) : c_(c), destroyed_(c->sinkDestroyed) {}
     void set_heartbeat(std::atomic<u64>* beatNs) noexcept override { c_->beat = beatNs; }
     void set_cancel_flag(const std::atomic<bool>* flag) noexcept override { cancellation_ = flag; }
+    void set_direct_surface_frame(void* buffer) noexcept override { pendingDirect_ = buffer; }
+    bool direct_surface_confirmed() const noexcept override {
+        return c_->confirmDirectAfter && c_->writes >= c_->confirmDirectAfter;
+    }
     /// Preso na "plataforma": não bate, só volta quando o teste soltar. Ao
     /// voltar não toca em mais nada da captura (o motor já desistiu dele).
     Status hang(Status result = Status{Errc::Timeout}) noexcept {
@@ -191,6 +199,8 @@ public:
     }
     Status write_video(const u8* y, u32 yStride, const u8* uv, u32 uvStride, i64 ptsUs) noexcept override {
         if (c_->writeEntered) c_->writeEntered->store(true, std::memory_order_release);
+        c_->directFrames.push_back(pendingDirect_);
+        pendingDirect_ = nullptr;
         if (c_->allowWrite) {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
             while (!c_->allowWrite->load(std::memory_order_acquire)) {
@@ -280,6 +290,7 @@ private:
     std::atomic<bool>* destroyed_ = nullptr; // session-owned test flag, unaffected by another retry
     const std::atomic<bool>* cancellation_ = nullptr; // bound per sink, never shared with a retry
     std::string outputPath_;
+    void* pendingDirect_ = nullptr;   ///< set_direct_surface_frame do próximo write_video
 };
 
 std::unique_ptr<ExportSink> make_bench_sink(void* user) {
@@ -307,6 +318,9 @@ ProcMem proc_mem() {
 // -----------------------------------------------------------------------------
 // Cenários
 // -----------------------------------------------------------------------------
+/// ExportDirectSurface.inl: EngineConfig::enableDirectSurfaceExport dos próximos Rig.
+bool gRigDirectSurface = false;
+
 struct Rig {
     SyntheticFactory factory;
     BenchCapture cap;
@@ -338,6 +352,7 @@ struct Rig {
         ec.exportSinkContext = nativeSink ? nullptr : &cap;
         ec.exportPipelineDepth = depth;
         ec.exportExecutionProfile = profile;
+        ec.enableDirectSurfaceExport = gRigDirectSurface;
         ec.disableAutosave = true;
         ec.workerCount = 2;
         // Tabela de codecs como a de um aparelho com decode/encode 4K de
@@ -2877,3 +2892,4 @@ AUREA_TEST(ExportWatchdogRules, StreamEndsWithoutEosOnlyWhenEverythingCameOut) {
 #include "ExportTransferDeadline.inl"
 #include "ExportDiagnosticsTiming.inl"
 #include "ExportDiagnosticsProbe.inl"
+#include "ExportDirectSurface.inl"

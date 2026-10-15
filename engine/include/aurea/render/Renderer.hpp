@@ -478,6 +478,13 @@ struct OffscreenTarget {
     TextureHandle upscaleHistory{};
     bool upscaleTemporal = false;
     bool upscaleHistoryValid = false;
+    /// surface-direct (Android): se válido, a composição também sai em
+    /// R'G'B' de 8 bits neste alvo RGBA8 (memória de AHardwareBuffer), do
+    /// mesmo tamanho dos planos NV12, que continuam sendo gerados.
+    TextureHandle rgb{};
+    /// surface-direct confirmado (1o pacote conferido): pula os passes NV12 e
+    /// o readback; só o `rgb` é escrito.
+    bool rgbOnly = false;
 
     /// Teste do passe de SAÍDA sem swapchain: quando válido, a composição
     /// (`texture`) ainda é composta, e depois vai para este alvo UNORM pelo

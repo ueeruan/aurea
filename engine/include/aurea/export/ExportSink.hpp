@@ -51,6 +51,10 @@ struct VideoStreamConfig {
     /// Abrir diretamente o codec FFmpeg por software, preservando formato,
     /// resolução e relógio do fluxo solicitado.
     bool preferSoftware = false;
+    /// O motor vai entregar, junto de cada quadro NV12, o mesmo quadro em
+    /// R'G'B' num AHardwareBuffer (set_direct_surface_frame): a escada do
+    /// Android tenta o degrau surface-direct antes do surface.
+    bool directSurface = false;
     /// finish closes the temporary file; independent validation must
     /// succeed before the startup gate atomically replaces the destination.
     bool validateBeforePublish = false;
@@ -91,6 +95,15 @@ public:
     virtual void set_heartbeat(std::atomic<u64>* beatNs) noexcept { (void)beatNs; }
 
     virtual void set_diagnostics(std::shared_ptr<ExportDiagnostics> diagnostics) noexcept { (void)diagnostics; }
+
+    /// surface-direct: o AHardwareBuffer com o R'G'B' do PRÓXIMO write_video
+    /// (nulo = não há). Pertence ao motor; vale até a GPU reusar o slot, ou
+    /// seja, só durante essa chamada.
+    virtual void set_direct_surface_frame(void* nativeBuffer) noexcept { (void)nativeBuffer; }
+    /// surface-direct passou no 1o pacote: o motor pode parar de gerar os
+    /// planos NV12 e o readback. Chamado na thread do encoder, depois de um
+    /// write_video.
+    [[nodiscard]] virtual bool direct_surface_confirmed() const noexcept { return false; }
 
     /// Abre o arquivo e configura os encoders. `audio` nulo = vídeo sem som.
     [[nodiscard]] virtual Status open(const char* outputPath, const VideoStreamConfig& video,

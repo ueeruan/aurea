@@ -310,6 +310,8 @@ public:
         diagnostics_ = std::move(diagnostics);
     }
     EncoderInfo encoder_info() const noexcept override { return encoder_; }
+    void set_direct_surface_frame(void* nativeBuffer) noexcept override { directFrame_ = nativeBuffer; }
+    bool direct_surface_confirmed() const noexcept override { return directConfirmed_; }
 
     Status open(const char* output, const VideoStreamConfig& video,
                 const AudioStreamConfig* audio) noexcept override;
@@ -393,7 +395,9 @@ private:
     // próximo quando não abre OU quando o 1o pacote não chega/não confere
     // ("liberdade condicional"): os quadros entregues até o 1o pacote ficam
     // guardados e o próximo degrau os recebe de novo — sem erro na tela.
-    enum class Rung : u8 { Surface, Buffer, Legacy, VideoToolbox, VideoToolboxPlanar, Software, PlatformSoftware };
+    // SurfaceDirect (Android, desligado por padrão): o R'G'B' do quadro vem
+    // num AHardwareBuffer do motor e vai para a Surface sem o NV12 da CPU.
+    enum class Rung : u8 { Surface, Buffer, Legacy, VideoToolbox, VideoToolboxPlanar, Software, PlatformSoftware, SurfaceDirect };
     /// `pixel`: formato do caminho FFmpeg/MediaCodec que o encoder ACEITOU no
     /// isFormatSupported (NV12 ou I420; NONE = o padrão do try_video).
     struct RungEntry { Rung kind = Rung::Software; bool hardware = false; char codec[128]{};
@@ -414,6 +418,8 @@ private:
     bool probation_ = false;                 ///< quadros guardados; falha aqui = próximo degrau
     bool firstPacketPending_ = false;        ///< o 1o pacote ainda confere/abre o registro
     bool audioUnretained_ = false;           ///< entrou som no contêiner que não está em retained_ (sem troca)
+    void* directFrame_ = nullptr;            ///< surface-direct: AHardwareBuffer do write_video atual (do motor)
+    bool directConfirmed_ = false;           ///< surface-direct passou no 1o pacote
     u32 testFaultAt_ = 0;                    ///< set_export_ladder_test_fault: o 1o degrau reprova neste quadro
     u32 maxRetained_ = 8;
     char rungName_[192]{};
@@ -515,6 +521,7 @@ void FFmpegSink::close_video() noexcept {
     sws_freeContext(scale_); scale_ = nullptr;
     if (native_) native_->close();
     nativeActive_ = nativeEos_ = false;
+    directConfirmed_ = false;
     extradata_.clear();
 }
 
@@ -790,6 +797,7 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
 void FFmpegSink::describe_rung(const RungEntry& rung, char* out, usize capacity) const noexcept {
     const char* kind = "software";
     switch (rung.kind) {
+        case Rung::SurfaceDirect: kind = "surface-direct"; break;
         case Rung::Surface: kind = "surface"; break;
         case Rung::Buffer: kind = "buffer"; break;
         case Rung::Legacy: kind = "legacy"; break;
@@ -812,7 +820,7 @@ void FFmpegSink::build_rungs() noexcept {
         std::snprintf(entry.codec, sizeof(entry.codec), "%s", codec);
         char key[192];
         describe_rung(entry, key, sizeof(key));
-        if ((kind == Rung::Surface || kind == Rung::Buffer) && rung_failed_before(key)) {
+        if ((kind == Rung::SurfaceDirect || kind == Rung::Surface || kind == Rung::Buffer) && rung_failed_before(key)) {
             AUREA_LOG_INFO("export: degrau %s falhou antes neste processo; pulado", key);
             return;
         }
@@ -831,6 +839,11 @@ void FFmpegSink::build_rungs() noexcept {
             // A Surface recebe R'G'B' de 8 bits (SDR); proxy HDR vai pelo buffer.
             const u8 t = video_.color.transfer;
             const bool sdr = t == 1 || t == 6 || t == 14 || t == 15;
+            // surface-direct só quando o motor entrega o AHardwareBuffer
+            // (VideoStreamConfig::directSurface); falhou = surface NV12 a seguir.
+            if (video_.directSurface && deviceCodec_.surface && sdr &&
+                !avenc::debug_flag("debug.aurea.enc.skip", "surface-direct"))
+                add(Rung::SurfaceDirect, deviceCodec_.name, deviceCodec_.hardware);
             if (deviceCodec_.surface && sdr && !avenc::debug_flag("debug.aurea.enc.skip", "surface"))
                 add(Rung::Surface, deviceCodec_.name, deviceCodec_.hardware);
             if (!avenc::debug_flag("debug.aurea.enc.skip", "buffer"))
@@ -926,12 +939,14 @@ Status FFmpegSink::open_rung(const RungEntry& rung) noexcept {
     const bool hevc = video_.codec == ExportCodec::HEVC;
     Status opened = OkStatus;
     switch (rung.kind) {
+    case Rung::SurfaceDirect:
     case Rung::Surface:
     case Rung::Buffer: {
 #if defined(__ANDROID__)
         namespace avenc = android_video;
-        const bool surface = rung.kind == Rung::Surface;
-        const char* tag = surface ? "surface" : "buffer";
+        const bool direct = rung.kind == Rung::SurfaceDirect;
+        const bool surface = direct || rung.kind == Rung::Surface;
+        const char* tag = direct ? "surface-direct" : surface ? "surface" : "buffer";
         char flag[32];
         std::snprintf(flag, sizeof(flag), "%s-open", tag);
         if (avenc::debug_flag("debug.aurea.enc.fail", flag))
@@ -949,6 +964,7 @@ Status FFmpegSink::open_rung(const RungEntry& rung) noexcept {
         request.baseline = video_.profile == 1;
         request.color = video_.color;
         request.input = surface ? avenc::Input::Surface : avenc::Input::Buffer;
+        request.direct = direct;
         std::snprintf(flag, sizeof(flag), "%s-stall", tag);
         request.simulateStall = avenc::debug_flag("debug.aurea.enc.fail", flag);
         request.heartbeat = heartbeat_;
@@ -1045,7 +1061,8 @@ void FFmpegSink::note_failure(const char* why) noexcept {
     const usize used = std::strlen(attempts_);
     if (used + 8 < sizeof(attempts_))
         std::snprintf(attempts_ + used, sizeof(attempts_) - used, "%s%s=%.60s", used ? "; " : "", rungName_, why);
-    if (rung_ < rungs_.size() && (rungs_[rung_].kind == Rung::Surface || rungs_[rung_].kind == Rung::Buffer) && !cancelled()) {
+    if (rung_ < rungs_.size() && (rungs_[rung_].kind == Rung::SurfaceDirect || rungs_[rung_].kind == Rung::Surface ||
+                                  rungs_[rung_].kind == Rung::Buffer) && !cancelled()) {
         char key[192];
         describe_rung(rungs_[rung_], key, sizeof(key));
         remember_failed_rung(key);
@@ -1240,8 +1257,10 @@ Status FFmpegSink::first_packet() noexcept {
     const bool legacy = rung_ < rungs_.size() && rungs_[rung_].kind == Rung::Legacy;
     if (nativeActive_ || legacy) {
 #if defined(__ANDROID__)
-        const bool surface = rung_ < rungs_.size() && rungs_[rung_].kind == Rung::Surface;
-        if (nativeActive_ && android_video::debug_flag("debug.aurea.enc.fail", surface ? "surface-verify" : "buffer-verify"))
+        const Rung kind = rung_ < rungs_.size() ? rungs_[rung_].kind : Rung::Buffer;
+        const char* verify = kind == Rung::SurfaceDirect ? "surface-direct-verify"
+                           : kind == Rung::Surface ? "surface-verify" : "buffer-verify";
+        if (nativeActive_ && android_video::debug_flag("debug.aurea.enc.fail", verify))
             return error(Errc::CorruptData, "verificacao do 1o quadro reprovada (simulada, debug.aurea.enc.fail)");
 #endif
         if (const Status verified = verify_first_frame(); !verified.ok()) return verified;
@@ -1257,6 +1276,8 @@ Status FFmpegSink::first_packet() noexcept {
         videoStream_->codecpar->extradata_size = static_cast<int>(extradata_.size());
     }
     probation_ = firstPacketPending_ = false;
+    // surface-direct confirmado: o motor pode parar de gerar o NV12 e o readback.
+    directConfirmed_ = rung_ < rungs_.size() && rungs_[rung_].kind == Rung::SurfaceDirect;
     AUREA_LOG_INFO("export: encoder de video %s confirmado no 1o pacote", rungName_);
     publish_path("ok");
     return OkStatus;
@@ -1399,6 +1420,12 @@ Status FFmpegSink::send_native(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 u
     u64 started = monotonic_ns();
     for (;;) {
         if (cancelled()) return error(Errc::Cancelled, "encoder do aparelho cancelado");
+        if (rung_ < rungs_.size() && rungs_[rung_].kind == Rung::SurfaceDirect) {
+            // Sem o buffer do motor (alvo direto indisponível) o degrau cai
+            // para o surface NV12 com os quadros guardados.
+            if (!directFrame_) return error(Errc::NotSupported, "quadro sem AHardwareBuffer para a Surface direta");
+            native_->set_direct_buffer(directFrame_);
+        }
         const Status sent = native_->send(y, ys, uv, uvs, us, stall_ns());
         beat();
         if (sent.ok()) return OkStatus;
@@ -1679,6 +1706,7 @@ Status FFmpegSink::write_video_with_fallback(const u8* y, u32 ys, const u8* uv, 
     if (!result.ok() && probation_) result = fallback(result);
     if (result.ok()) ++completedVideoWrites_;
     if (!probation_ && !retained_.empty()) std::vector<Retained>().swap(retained_);
+    directFrame_ = nullptr;   // vale só para esta chamada (o motor reusa o slot)
     return result;
 }
 

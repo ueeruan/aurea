@@ -36,6 +36,7 @@
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
 #include "aurea/export/ExportPacketLog.hpp"
+#include "aurea/export/AndroidVideoEncoder.hpp"
 #include "aurea/export/ExportSinkStartup.hpp"
 #include "aurea/export/OfflineFrameQueue.hpp"
 #include "aurea/export/OfflineFrameRenderer.hpp"
@@ -278,6 +279,7 @@ struct Engine::ExportContext {
     f64 compFps = 30.0;
     u32 frames = 0;
     bool dither = true;
+    bool directSurface = false;        ///< surface-direct pedido (VideoStreamConfig::directSurface)
     TextureHandle comp{}, y{}, uv{};
     // Áudio: o MESMO mixer do preview, com um cache próprio que decodifica
     // na hora (o export não disputa decoder com o preview).
@@ -297,6 +299,8 @@ struct Engine::ExportContext {
         const u8* uvPtr = nullptr;
         u32 frame = 0;                 ///< índice de saída
         u64 gpuFrame = 0;              ///< frame do backend que escreveu o slot
+        TextureHandle rgb{};           ///< surface-direct: R'G'B' em AHardwareBuffer (vazio = desligado)
+        void* rgbBuffer = nullptr;     ///< o AHardwareBuffer de `rgb` (a textura é a dona)
     };
     std::vector<Slot> slots;
     u32 depth = 1;                     ///< slots em circulação (sem calor)
@@ -352,6 +356,9 @@ struct Engine::ExportContext {
     // desiste dele em vez de esperar para sempre e o contexto vaza de propósito.
     std::atomic<u64> encoderBeatNs{0};
     std::atomic<bool> encoderBusy{false};      ///< fora da fila (sink, mix, IA)
+    /// surface-direct confirmado pelo sink (1o pacote conferido): o produtor
+    /// para de gerar o NV12 e o readback. Só o worker do encoder escreve.
+    std::atomic<bool> directConfirmed{false};
     std::atomic<u32> encoderPhase{0};          ///< ExportWorkerPhase
     u64 workerHangNs = kExportWorkerHangNs;
     bool encoderExited = false;                ///< qMutex: o worker saiu (arquivo fechado ou abortado)
@@ -13282,6 +13289,11 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // CBR só quando pedido; o padrão é VBR com pico limitado no encoder.
     vc.rateMode = settings.rateMode == 0 ? 0u : 1u;
     vc.keyframeIntervalFrames = settings.keyframeIntervalFrames;
+    // surface-direct (EXPORT_SURFACE_DIRETO_2026-10-15.md): desligado por
+    // padrão; no Android também por debug.aurea.enc.direct=1 (CI/aparelho).
+    ctx->directSurface = vc.directSurface = (config_.enableDirectSurfaceExport ||
+            android_video::debug_flag("debug.aurea.enc.direct", nullptr)) &&
+        !settings.aiUpscale && gpu_ && gpu_->capabilities().externalMemoryHardwareBuffer;
     if (ctx->diagnostics) ctx->diagnostics->format({vc.width, vc.height, vc.bitrateBps,
         vc.profile, ctx->safeMode, vc.fps});
     // Com som na timeline, o arquivo leva AAC; sem, só vídeo (uma trilha de
@@ -13514,6 +13526,24 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         if (ctx->slots.empty()) {
             ctx->sink->abort();
             return readbackFailure.ok() ? Status{Errc::InvalidState, "nenhum buffer de leitura GPU disponivel"} : readbackFailure;
+        }
+        // surface-direct: um alvo R'G'B' com AHardwareBuffer por slot (o anel
+        // é o próprio conjunto de slots). Faltou um = nenhum: os quadros chegam
+        // sem buffer e o sink cai no degrau surface NV12, sem mudar nada.
+        if (ctx->directSurface) {
+            for (auto& slot : ctx->slots) {
+                void* native = nullptr;
+                auto rgb = gpu_->create_shared_render_target(ctx->width, ctx->height, &native);
+                if (rgb.ok() && native) { slot.rgb = *rgb; slot.rgbBuffer = native; continue; }
+                if (rgb.ok()) gpu_->destroy_texture(*rgb);
+                AUREA_LOG_WARN("export: alvo direto da Surface indisponivel (%d); segue no NV12",
+                               rgb.ok() ? 0 : rgb.status().raw());
+                for (auto& undo : ctx->slots) {
+                    if (undo.rgb.valid()) gpu_->destroy_texture(undo.rgb);
+                    undo.rgb = {}; undo.rgbBuffer = nullptr;
+                }
+                break;
+            }
         }
         ctx->depth = static_cast<u32>(ctx->slots.size());
         (void)ctx->scheduler.configure(ctx->frames, ctx->fps, ctx->compFps, ctx->depth,
@@ -13809,8 +13839,12 @@ void Engine::release_offline_export(ExportContext& ctx, bool retainReadbacks) no
         else if (ctx.offline) ctx.offline->retire_gpu_after_done();
         if (gpu_ && !lostDevice) {
             gpu_->destroy_texture(ctx.comp); gpu_->destroy_texture(ctx.y); gpu_->destroy_texture(ctx.uv);
+            // surface-direct: o alimentador GLES do encoder segura a própria
+            // referência de cada AHardwareBuffer; a do motor sai com o fence.
+            for (auto& slot : ctx.slots) if (slot.rgb.valid()) gpu_->destroy_texture(slot.rgb);
         }
         ctx.comp = {}; ctx.y = {}; ctx.uv = {};
+        for (auto& slot : ctx.slots) { slot.rgb = {}; slot.rgbBuffer = nullptr; }
         // Record completed retirement, never a proof to use later against a
         // shared backend. Preview can now advance while CPU sources close.
         ctx.gpuResourcesRetired = true;
@@ -14025,6 +14059,10 @@ void Engine::export_thread_main() noexcept {
         slot.frame = i;
         target.yReadback = slot.y;
         target.uvReadback = slot.uv;
+        target.rgb = slot.rgb;
+        // Depois do 1o pacote conferido o sink não usa mais o NV12 (sem
+        // período de teste, sem troca de degrau): só o R'G'B' é renderizado.
+        target.rgbOnly = slot.rgb.valid() && ctx.directConfirmed.load(std::memory_order_acquire);
         // Tempo de SAÍDA → quadro da composição (fps diferentes se encontram
         // pelo instante, não pelo índice).
         const auto plan = ctx.scheduler.frame(i);
@@ -14337,7 +14375,12 @@ void Engine::export_encoder_main() noexcept {
                     neuralOutput.get() + static_cast<usize>(ctx.outputWidth) * ctx.outputHeight, ctx.outputWidth, pts);
             }
         } else {
+            // surface-direct: o R'G'B' do mesmo quadro (o fence já foi esperado).
+            ctx.sink->set_direct_surface_frame(slot.rgbBuffer);
             s = ctx.sink->write_video(slot.yPtr, ctx.width, slot.uvPtr, ctx.width, pts);
+            if (s.ok() && slot.rgbBuffer && !ctx.directConfirmed.load(std::memory_order_relaxed) &&
+                ctx.sink->direct_surface_confirmed())
+                ctx.directConfirmed.store(true, std::memory_order_release);
         }
         ctx.beat();
         const u64 w1 = monotonic_ns();

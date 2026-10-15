@@ -20,5 +20,10 @@ namespace aurea {
 usize last_export_encoder_path(char* out, usize capacity) noexcept;
 /// Usado pelo sink; público só para a ponte de testes.
 void set_last_export_encoder_path(const char* text) noexcept;
+/// Só testes: a PRÓXIMA sessão do sink faz o 1o degrau segurar a confirmação
+/// do 1o pacote até o quadro `frame` e então reprová-lo (CorruptData), como um
+/// encoder de hardware cujo 1o pacote chega depois de o som já ter entrado.
+/// Vale uma vez; 0 desliga.
+void set_export_ladder_test_fault(u32 frame) noexcept;
 
 } // namespace aurea

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cerrno>
 #include <climits>
@@ -20,6 +21,13 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+namespace aurea {
+namespace {
+std::atomic<u32> ladderTestFault{0};   ///< set_export_ladder_test_fault (só testes)
+} // namespace
+void set_export_ladder_test_fault(u32 frame) noexcept { ladderTestFault.store(frame, std::memory_order_release); }
+} // namespace aurea
 
 #if defined(AUREA_HAS_FFMPEG) && AUREA_HAS_FFMPEG
 extern "C" {
@@ -390,7 +398,11 @@ private:
     /// isFormatSupported (NV12 ou I420; NONE = o padrão do try_video).
     struct RungEntry { Rung kind = Rung::Software; bool hardware = false; char codec[128]{};
                        AVPixelFormat pixel = AV_PIX_FMT_NONE; };
-    struct Retained { std::vector<u8> y, uv; i64 pts = 0, duration = 0; bool timed = false; };
+    /// `pcm`: o som que o motor mandou DEPOIS deste quadro (s16 intercalado).
+    /// Na troca de degrau ele volta junto, na mesma ordem: com som, a escada
+    /// ainda troca depois do 1o quadro (o 1o pacote do hardware vem alguns
+    /// quadros depois).
+    struct Retained { std::vector<u8> y, uv; std::vector<i16> pcm; i64 pts = 0, duration = 0; bool timed = false; };
     std::vector<RungEntry> rungs_;
     usize rung_ = 0, reopenFrom_ = 0;
     std::unique_ptr<android_video::Encoder> native_;
@@ -401,6 +413,8 @@ private:
     std::vector<Retained> retained_;
     bool probation_ = false;                 ///< quadros guardados; falha aqui = próximo degrau
     bool firstPacketPending_ = false;        ///< o 1o pacote ainda confere/abre o registro
+    bool audioUnretained_ = false;           ///< entrou som no contêiner que não está em retained_ (sem troca)
+    u32 testFaultAt_ = 0;                    ///< set_export_ladder_test_fault: o 1o degrau reprova neste quadro
     u32 maxRetained_ = 8;
     char rungName_[192]{};
     char attempts_[384]{};                   ///< degraus que falharam nesta sessão (diagnóstico)
@@ -475,6 +489,7 @@ private:
     u64 stall_ns() const noexcept { return probation_ ? startupStallNs : codecStallNs; }
     Status mux(AVPacket*, AVRational from, AVStream*) noexcept;
     Status append_audio(const i16* pcm, int samples) noexcept;
+    Status write_audio_direct(const i16* pcm, u32 frames) noexcept;
     Status encode_audio(bool final) noexcept;
     Status flush_resampler() noexcept;
     Status decode_validate(const ExportOutputValidation& expected) noexcept;
@@ -569,6 +584,7 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     completedVideoWrites_ = 0;
     lastVideoPts_ = AV_NOPTS_VALUE; lastVideoEnd_ = 0;
     audioInputSamples_ = audioConvertedSamples_ = audioSubmittedSamples_ = 0;
+    audioUnretained_ = false;
     pendingHead_ = pendingCount_ = 0; lastError_ = OkStatus;
     const u64 frameBytes = static_cast<u64>(video.width) * video.height * 3 / 2;
     maxRetained_ = static_cast<u32>(std::clamp<u64>(probationBytes / std::max<u64>(frameBytes, 1), 3, 8));
@@ -606,6 +622,7 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     if (!firstRung) {
         build_rungs();
         attempts_[0] = '\0';
+        testFaultAt_ = ladderTestFault.exchange(0, std::memory_order_acq_rel);
     }
     if (const Status status = open_video(firstRung); !status.ok()) return status;
     if (logMode_) return open_log();
@@ -1061,8 +1078,10 @@ void FFmpegSink::reset_video_clock() noexcept {
 
 bool FFmpegSink::fallback_allowed(Status status) const noexcept {
     if (!probation_ || cancelled() || rung_ + 1 >= rungs_.size()) return false;
-    // Contêiner direto: trocar o encoder reabre o arquivo; só sem áudio gravado.
-    if (!logMode_ && audioInputSamples_) return false;
+    // Contêiner direto: trocar o encoder reabre o arquivo. O som entregue no
+    // período de teste está guardado com os quadros e volta junto; só som que
+    // não pôde ser guardado (antes do 1o quadro, sem memória) impede a troca.
+    if (!logMode_ && audioUnretained_) return false;
     switch (status.code()) {
         case Errc::EncodeFailed: case Errc::EncoderUnavailable: case Errc::UnsupportedFormat:
         case Errc::UnsupportedCodec: case Errc::Timeout: case Errc::CorruptData: case Errc::DecodeFailed:
@@ -1152,6 +1171,15 @@ Status FFmpegSink::resubmit_retained() noexcept {
             if (probation_)
                 for (usize j = i + 1; j < frames.size(); ++j) retained_.push_back(std::move(frames[j]));
             return written;
+        }
+        // O som que veio depois deste quadro, na mesma ordem do motor.
+        if (!frame->pcm.empty() && hasAudio_ && audio_.channels) {
+            const u32 samples = static_cast<u32>(frame->pcm.size() / audio_.channels);
+            if (const Status sound = write_audio_direct(frame->pcm.data(), samples); !sound.ok()) {
+                if (probation_)
+                    for (usize j = i + 1; j < frames.size(); ++j) retained_.push_back(std::move(frames[j]));
+                return sound;
+            }
         }
     }
     return OkStatus;
@@ -1538,6 +1566,16 @@ Status FFmpegSink::video_packet(AVRational from) noexcept {
         if (filtered >= 0) filtered = av_bsf_receive_packet(videoCrop_, packet_);
         if (filtered < 0) return error(Errc::EncodeFailed, "aplicar dimensoes HEVC FFmpeg ao frame", filtered);
     }
+    // Teste (set_export_ladder_test_fault): o 1o degrau não confirma o 1o
+    // pacote até o quadro pedido e então o reprova — o som desses quadros já
+    // entrou no contêiner, como num encoder de hardware que demora a sair.
+    if (firstPacketPending_ && testFaultAt_ && rung_ == 0) {
+        if (videoFrames_ > testFaultAt_) {
+            testFaultAt_ = 0;
+            return error(Errc::CorruptData, "1o quadro reprovado (falha simulada de teste)");
+        }
+        return mux(packet_, from, videoStream_);
+    }
     // 1o pacote do degrau: confere o quadro e abre o registro com os
     // parâmetros deste encoder. Falha aqui ainda troca de degrau.
     if (firstPacketPending_)
@@ -1830,7 +1868,24 @@ Status FFmpegSink::write_audio(const i16* pcm, u32 frames, i64 pts) noexcept {
             av_inv_q(rate_), static_cast<AVRounding>(AV_ROUND_UP | AV_ROUND_PASS_MINMAX));
         if (const Status status = mux_logged_video(static_cast<u64>(std::clamp<i64>(until, 0, static_cast<i64>(videoFrames_))));
             !status.ok()) return status;
+    } else if (probation_ && frames) {
+        // Período de teste do degrau: o som vai junto do último quadro guardado
+        // e volta com ele se o encoder for trocado. Sem quadro guardado ou sem
+        // memória, esta sessão não troca mais de degrau (o som já está no MP4).
+        bool kept = false;
+        if (!retained_.empty()) {
+            try {
+                auto& keep = retained_.back().pcm;
+                keep.insert(keep.end(), pcm, pcm + static_cast<usize>(frames) * audio_.channels);
+                kept = true;
+            } catch (...) {}
+        }
+        if (!kept) audioUnretained_ = true;
     }
+    return write_audio_direct(pcm, frames);
+}
+
+Status FFmpegSink::write_audio_direct(const i16* pcm, u32 frames) noexcept {
     u32 consumed = 0;
     while (consumed < frames) {
         if (cancelled()) return error(Errc::Cancelled, "conversao de audio FFmpeg cancelada");

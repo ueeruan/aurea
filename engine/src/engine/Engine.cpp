@@ -1,5 +1,6 @@
 #include "aurea/effects/Palette.hpp"
 #include "aurea/Engine.hpp"
+#include "aurea/media/ImageResample.hpp"
 #include "aurea/tracking/RealCameraPreviewScope.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/PreviewViewport.hpp"
@@ -1745,6 +1746,8 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         u32 missing = 0;
         for (const auto& [key, src] : pending) {
             std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+            bool oriented = false;
+            u32 savedW = 0, savedH = 0;
             {
                 std::lock_guard<std::mutex> lock(modelMutex_);
                 if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
@@ -1752,6 +1755,8 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
                 if (!a || a->sourcePath != src) continue;
                 const u64 pixels = static_cast<u64>(a->video.width) * a->video.height;
                 if (a->video.width > 65536 || a->video.height > 65536 || pixels > source_asset_room_locked() / 4) { ++missing; continue; }
+                oriented = a->profile.profile == image::kDisplayOriented;
+                savedW = a->video.width; savedH = a->video.height;
             }
             ImagePixels px;
             const auto resolved=resolve_asset_path(src);
@@ -1760,6 +1765,19 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
                 || px.rgba.size() != static_cast<u64>(px.width) * px.height * 4) {
                 ++missing;
                 continue;
+            }
+            // Asset importado com a correção: a plataforma devolve a foto crua
+            // no tamanho canônico; gira pelo EXIF e reduz até o tamanho GRAVADO
+            // (a foto pode ter entrado reduzida para caber no espaço do projeto).
+            if (oriented && savedW && savedH
+                && !(px.orientation <= 1 && px.width == savedW && px.height == savedH)) {   // já pronta: sem cópia
+                std::vector<u8> shown;
+                bool ok = false;
+                try { ok = image::reopen_pixels(px.rgba.data(), px.width, px.height, px.orientation, savedW, savedH, shown); }
+                catch (const std::bad_alloc&) { ok = false; }
+                if (!ok) { ++missing; continue; }
+                px.rgba = std::move(shown);
+                px.width = savedW; px.height = savedH; px.orientation = 1;
             }
             std::lock_guard<std::mutex> lock(modelMutex_);
             if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
@@ -8632,21 +8650,27 @@ u64 Engine::source_asset_room_locked() const noexcept {
 }
 
 Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const char* name,
-                                 const char* sourcePath) noexcept {
+                                 const char* sourcePath, u8 orientation) noexcept {
     if (!rgba || width == 0 || height == 0) return Status{Errc::InvalidArgument, "imagem vazia"};
     if (width > 65536 || height > 65536) return Status{Errc::BudgetExceeded, "imagem grande demais"};
-    const u64 bytes = static_cast<u64>(width) * height * 4;
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
     drain_commands_locked();
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
-    if (bytes + sizeof(ImagePixels) > source_asset_room_locked())
-        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
-    ImagePixels px; px.width = width; px.height = height;
-    try { px.rgba.assign(rgba, rgba + static_cast<usize>(bytes)); }
-    catch (const std::bad_alloc&) { return Status{Errc::OutOfMemory}; }
+    // Gira pelo EXIF e reduz o que não precisa ficar residente (teto por foto
+    // e espaço que sobra). Antes a foto inteira ou nada: a 5ª foto de celular
+    // estourava os 256 MB e o import falhava (relato SM-A566B, 2182).
+    ImagePixels px;
+    try {
+        const Errc fit = image::prepare_pixels(rgba, width, height, orientation, comp->width(), comp->height(),
+                                               source_asset_room_locked(), sizeof(ImagePixels), px.width, px.height, px.rgba);
+        if (fit == Errc::BudgetExceeded) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+        if (fit != Errc::Ok) return Status{fit, "imagem vazia"};
+    } catch (const std::bad_alloc&) { return Status{Errc::OutOfMemory}; }
+    width = px.width;
+    height = px.height;
     history_.before_mutation(*comp, project_->timeline().current(), "importar imagem");
     bump_model_revision_locked();
 
@@ -8657,6 +8681,7 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
     asset.originalFilename = asset.name;
     asset.video.width = width;    // tamanho da mídia: detalhe da camada, hit-test do palco
     asset.video.height = height;
+    asset.profile.profile = image::kDisplayOriented;   // reabrir gira/reduz igual
     const AssetId assetId = project_->add_asset(std::move(asset));
 
     images_[assetId.pack()] = std::make_shared<const ImagePixels>(std::move(px));

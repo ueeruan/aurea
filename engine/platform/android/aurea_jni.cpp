@@ -112,7 +112,8 @@ Result<std::string> preserve_export_asset(const std::string& source, const std::
 }
 
 /// Pede à plataforma os pixels de uma imagem do projeto (reabrir projeto).
-/// Resposta: 8 bytes (largura, altura em u32 little-endian) + RGBA8 reto.
+/// Resposta: 12 bytes (largura, altura, orientação EXIF 1..8 em u32
+/// little-endian) + RGBA8 reto CRU (quem gira é o motor, ImageResample.hpp).
 bool load_image(const char* source, ImagePixels& out, void*) {
     if (!g_vm || !g_engineClass || !g_decodeImage) return false;
     JNIEnv* env = nullptr;
@@ -132,19 +133,22 @@ bool load_image(const char* source, ImagePixels& out, void*) {
         }
         if (arr) {
             const jsize n = env->GetArrayLength(arr);
-            if (n > 8) {
-                u8 header[8];
-                env->GetByteArrayRegion(arr, 0, 8, reinterpret_cast<jbyte*>(header));
-                const u32 w = header[0] | (header[1] << 8) | (header[2] << 16) | (static_cast<u32>(header[3]) << 24);
-                const u32 h = header[4] | (header[5] << 8) | (header[6] << 16) | (static_cast<u32>(header[7]) << 24);
+            if (n > 12) {
+                u8 header[12];
+                env->GetByteArrayRegion(arr, 0, 12, reinterpret_cast<jbyte*>(header));
+                const auto le32 = [&](int at) {
+                    return header[at] | (header[at + 1] << 8) | (header[at + 2] << 16) | (static_cast<u32>(header[at + 3]) << 24);
+                };
+                const u32 w = le32(0), h = le32(4), orientation = le32(8);
                 // Em u64: no armeabi-v7a o usize é de 32 bits e w*h*4 daria a volta.
                 const u64 bytes64 = static_cast<u64>(w) * h * 4;
                 const usize bytes = static_cast<usize>(bytes64);
-                if (w && h && bytes64 + 8 == static_cast<u64>(n)) {
+                if (w && h && bytes64 + 12 == static_cast<u64>(n)) {
                     out.width = w;
                     out.height = h;
+                    out.orientation = orientation >= 1 && orientation <= 8 ? static_cast<u8>(orientation) : u8{1};
                     out.rgba.resize(bytes);
-                    env->GetByteArrayRegion(arr, 8, static_cast<jsize>(bytes), reinterpret_cast<jbyte*>(out.rgba.data()));
+                    env->GetByteArrayRegion(arr, 12, static_cast<jsize>(bytes), reinterpret_cast<jbyte*>(out.rgba.data()));
                     ok = true;
                 }
             }
@@ -2280,7 +2284,7 @@ AUREA_JNI jlong AUREA_FN(nativeReplaceLayerVideo)(JNIEnv* env, jclass, jlong han
 }
 
 AUREA_JNI jlong AUREA_FN(nativeReplaceLayerImage)(JNIEnv* env, jclass, jlong handle, jlong layer, jobject rgba, jint width,
-                                                  jint height, jstring name, jstring source) {
+                                                  jint height, jstring name, jstring source, jint orientation) {
     NativeContext* c = ctx_of(handle);
     if (!c || width <= 0 || height <= 0) return -static_cast<jlong>(Errc::InvalidArgument);
     const auto* pixels = pod_buffer<const u8>(env, rgba, static_cast<jlong>(width) * height * 4);
@@ -2288,7 +2292,8 @@ AUREA_JNI jlong AUREA_FN(nativeReplaceLayerImage)(JNIEnv* env, jclass, jlong han
     const std::string n = to_string(env, name);
     const std::string src = to_string(env, source);
     const Result<u64> r = c->engine.replace_layer_image(static_cast<u64>(layer), pixels, static_cast<u32>(width),
-                                                        static_cast<u32>(height), n.c_str(), src.c_str());
+                                                        static_cast<u32>(height), n.c_str(), src.c_str(),
+                                                        orientation >= 1 && orientation <= 8 ? static_cast<u8>(orientation) : u8{1});
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
 }
@@ -3548,7 +3553,7 @@ AUREA_JNI jlong AUREA_FN(nativeExtractAudio)(JNIEnv*, jclass, jlong handle, jlon
 }
 
 AUREA_JNI jlong AUREA_FN(nativeImportImage)(JNIEnv* env, jclass, jlong handle, jobject rgba, jint width,
-                                            jint height, jstring name, jstring source) {
+                                            jint height, jstring name, jstring source, jint orientation) {
     NativeContext* c = ctx_of(handle);
     if (!c || width <= 0 || height <= 0) return -static_cast<jlong>(Errc::InvalidArgument);
     const jlong bytes = static_cast<jlong>(width) * height * 4;
@@ -3557,7 +3562,8 @@ AUREA_JNI jlong AUREA_FN(nativeImportImage)(JNIEnv* env, jclass, jlong handle, j
     const std::string n = to_string(env, name);
     const std::string src = to_string(env, source);
     const Result<u64> r = c->engine.import_image(pixels, static_cast<u32>(width), static_cast<u32>(height), n.c_str(),
-                                                 src.empty() ? nullptr : src.c_str());
+                                                 src.empty() ? nullptr : src.c_str(),
+                                                 orientation >= 1 && orientation <= 8 ? static_cast<u8>(orientation) : u8{1});
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
 }

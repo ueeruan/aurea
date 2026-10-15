@@ -451,7 +451,7 @@ public:
     /// curto que o trecho encurta o fim. Um passo de desfazer. Devolve o id.
     [[nodiscard]] Result<u64> replace_layer_video(u64 layerId, const VideoImport& request) noexcept;
     [[nodiscard]] Result<u64> replace_layer_image(u64 layerId, const u8* rgba, u32 width, u32 height,
-                                                  const char* name, const char* sourcePath) noexcept;
+                                                  const char* name, const char* sourcePath, u8 orientation = 1) noexcept;
     /// Arquivo de origem da camada de vídeo, áudio ou imagem (caminho legível
     /// neste aparelho ou URI). Vazio = sem arquivo. É o "Informações da mídia".
     [[nodiscard]] std::string layer_source_path(u64 layerId) noexcept;
@@ -1464,8 +1464,13 @@ public:
     /// Imagem já decodificada pela plataforma (RGBA8 sRGB, alfa reto).
     /// `sourcePath` (URI/caminho) fica no projeto: ao reabrir, o motor pede a
     /// imagem de novo ao `imageLoader`. Sem origem, a imagem só vive na sessão.
+    /// `orientation` = EXIF 1..8 dos pixels CRUS: o motor gira, limita a foto a
+    /// 4× a área da composição e, se ainda não couber no espaço de imagens do
+    /// projeto, reduz (mesma proporção, nunca abaixo de image::kShrinkFloorSide)
+    /// em vez de recusar (ImageResample.hpp).
     [[nodiscard]] Result<u64> import_image(const u8* rgba, u32 width, u32 height,
-                                           const char* name, const char* sourcePath = nullptr) noexcept;
+                                           const char* name, const char* sourcePath = nullptr,
+                                           u8 orientation = 1) noexcept;
     /// Importa um modelo 3D e cria a layer no topo, enquadrada. O parse roda
     /// na thread de quem chama (a plataforma chama fora da UI); o modelo só
     /// trava no fim, para criar asset e layer. Falha = erro específico

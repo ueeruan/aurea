@@ -58,6 +58,12 @@ struct ImagePixels {
     u32 width = 0;
     u32 height = 0;
     std::vector<u8> rgba;
+    /// Saída do `imageLoader`: a orientação EXIF do arquivo (1..8; 1 = normal).
+    /// Os pixels vêm CRUS; quem gira é o motor (image::reopen_pixels), e só
+    /// nos assets importados depois da correção (Asset::profile.profile ==
+    /// image::kDisplayOriented). Projetos antigos reabrem com os pixels crus de
+    /// sempre: a geometria gravada é essa.
+    u8 orientation = 1;
 };
 
 /// Origem da imagem de uma layer neste frame.

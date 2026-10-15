@@ -1457,6 +1457,11 @@ bool ios_load_image(const char* sourcePath, ImagePixels& out, void* ctx) {
         NSDictionary* props = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(src, 0, nullptr));
         const double sourceW = [props[(id)kCGImagePropertyPixelWidth] doubleValue];
         const double sourceH = [props[(id)kCGImagePropertyPixelHeight] doubleValue];
+        // Orientação EXIF 1..8: os pixels saem CRUS (a miniatura abaixo é sem
+        // kCGImageSourceCreateThumbnailWithTransform) e quem gira é o motor
+        // (ImageResample.hpp), igual ao Android. Antes o retrato entrava deitado.
+        const int exifOrientation = [props[(id)kCGImagePropertyOrientation] intValue];
+        out.orientation = exifOrientation >= 1 && exifOrientation <= 8 ? (u8)exifOrientation : (u8)1;
         if (!std::isfinite(sourceW) || !std::isfinite(sourceH) || sourceW < 1 || sourceH < 1
             || sourceW > UINT32_MAX || sourceH > UINT32_MAX) { CFRelease(src); return false; }
         // Match Android's canonical power-of-two sampling and 4096-pixel cap.

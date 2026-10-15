@@ -12,6 +12,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/effects/Palette.hpp"
+#include "aurea/media/ImageResample.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/scene3d/SceneAsset.hpp"
 #include "stb_image.h"   // a implementação mora no GltfImporter.cpp
@@ -385,10 +386,9 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
 }
 
 Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, u32 height,
-                                        const char* name, const char* sourcePath) noexcept {
+                                        const char* name, const char* sourcePath, u8 orientation) noexcept {
     if (!rgba || width == 0 || height == 0) return Status{Errc::InvalidArgument, "imagem vazia"};
     if (width > 65536 || height > 65536) return Status{Errc::BudgetExceeded, "imagem grande demais"};
-    const u64 bytes = static_cast<u64>(width) * height * 4;
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
@@ -399,11 +399,16 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
     if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Image)) {
         return Status{Errc::NotFound, "camada de video ou imagem nao encontrada"};
     }
-    if (bytes + sizeof(ImagePixels) > source_asset_room_locked())
-        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
-    ImagePixels px; px.width = width; px.height = height;
-    try { px.rgba.assign(rgba, rgba + static_cast<usize>(bytes)); }
-    catch (const std::bad_alloc&) { return Status{Errc::OutOfMemory}; }
+    // Mesma regra do import_image: gira pelo EXIF e reduz em vez de recusar.
+    ImagePixels px;
+    try {
+        const Errc fit = image::prepare_pixels(rgba, width, height, orientation, comp->width(), comp->height(),
+                                               source_asset_room_locked(), sizeof(ImagePixels), px.width, px.height, px.rgba);
+        if (fit == Errc::BudgetExceeded) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+        if (fit != Errc::Ok) return Status{fit, "imagem vazia"};
+    } catch (const std::bad_alloc&) { return Status{Errc::OutOfMemory}; }
+    width = px.width;
+    height = px.height;
     history_.before_mutation(*comp, project_->timeline().current(), "substituir midia");
     bump_model_revision_locked();
 
@@ -416,6 +421,7 @@ Result<u64> Engine::replace_layer_image(u64 layerId, const u8* rgba, u32 width, 
     asset.originalFilename = asset.name;
     asset.video.width = width;
     asset.video.height = height;
+    asset.profile.profile = image::kDisplayOriented;   // reabrir gira/reduz igual
     const AssetId assetId = project_->add_asset(std::move(asset));
 
     images_[assetId.pack()] = std::make_shared<const ImagePixels>(std::move(px));

@@ -2024,7 +2024,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     const std::string display = to_std(name);
     const aurea::Result<aurea::u64> r = e->import_image(pixels.rgba.data(), pixels.width, pixels.height,
                                                         display.empty() ? source.c_str() : display.c_str(),
-                                                        source.c_str());
+                                                        source.c_str(), pixels.orientation);
     if (!r.ok()) {
         _lastImportError = to_ns(std::string(r.status().message()));
         return -static_cast<long long>(r.status().code());
@@ -2948,7 +2948,8 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     const std::string display = to_std(name);
     const aurea::Result<aurea::u64> r = e->replace_layer_image(static_cast<aurea::u64>(layerId), pixels.rgba.data(),
                                                                pixels.width, pixels.height,
-                                                               display.empty() ? source.c_str() : display.c_str(), source.c_str());
+                                                               display.empty() ? source.c_str() : display.c_str(), source.c_str(),
+                                                               pixels.orientation);
     if (!r.ok()) {
         _lastImportError = to_ns(std::string(r.status().message()));
         return -static_cast<long long>(r.status().code());

@@ -79,27 +79,43 @@ class AureaEngine private constructor() {
         /**
          * Chamado pelo motor ao reabrir um projeto com imagens: decodifica a
          * origem (URI `content://` ou caminho) em RGBA8 com alfa reto. Resposta:
-         * 8 bytes (largura, altura em u32 little-endian) + pixels; null se falhar.
+         * 12 bytes (largura, altura, orientação EXIF em u32 little-endian) +
+         * pixels CRUS (quem gira é o motor); null se falhar.
          */
         @JvmStatic
         fun decodeImage(source: String): ByteArray? {
             val ctx = appContext ?: return null
             // Caminho solto (mídia restaurada de um arquivo do projeto) vira file://.
             val uri = if (source.startsWith("/")) Uri.fromFile(java.io.File(source)) else Uri.parse(source)
+            val orientation = exifOrientation(ctx, uri)
             val bmp = decodeBitmapRgba(ctx, uri) ?: return null
             return try {
                 val w = bmp.width
                 val h = bmp.height
-                val out = ByteArray(8 + w * h * 4)
-                val header = java.nio.ByteBuffer.wrap(out, 0, 8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-                header.putInt(w).putInt(h)
-                bmp.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(out, 8, w * h * 4))
+                val out = ByteArray(12 + w * h * 4)
+                val header = java.nio.ByteBuffer.wrap(out, 0, 12).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                header.putInt(w).putInt(h).putInt(orientation)
+                bmp.copyPixelsToBuffer(java.nio.ByteBuffer.wrap(out, 12, w * h * 4))
                 out
             } catch (_: Exception) {
                 null
             } catch (_: OutOfMemoryError) {
                 null
             } finally { bmp.recycle() }
+        }
+
+        /**
+         * Orientação EXIF 1..8 do arquivo (1 = normal ou sem EXIF). O
+         * BitmapFactory entrega os pixels crus; sem isto o retrato do celular
+         * entrava deitado. PNG/WebP/HEIF sem EXIF dão 1.
+         */
+        fun exifOrientation(ctx: Context, uri: Uri): Int = try {
+            ctx.contentResolver.openInputStream(uri)?.use {
+                android.media.ExifInterface(it).getAttributeInt(
+                    android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)
+            }?.takeIf { it in 1..8 } ?: 1
+        } catch (_: Throwable) {
+            1
         }
 
         /** Stable straight-alpha asset dimensions; reject if temporary copies cannot fit safely. */
@@ -114,8 +130,16 @@ class AureaEngine private constructor() {
                     inSampleSize = sample
                     inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                     inPremultiplied = false
+                    // O motor quer sRGB: sem isto uma foto Display P3 / Adobe RGB
+                    // (ICC) chegava com os números do outro espaço e desbotava.
+                    inPreferredColorSpace = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
                 }
-                cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
+                val decoded = cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
+                // HEIF 10 bits (RGBA_1010102), PNG 16 bits/HDR (RGBA_F16) ou
+                // HARDWARE ignoram o pedido de ARGB_8888 em alguns aparelhos: o
+                // copyPixelsToBuffer de w*h*4 estourava ou entregava cor errada.
+                if (decoded == null || decoded.config == android.graphics.Bitmap.Config.ARGB_8888) decoded
+                else decoded.copy(android.graphics.Bitmap.Config.ARGB_8888, false).also { decoded.recycle() }
             }
         } catch (e: Throwable) {
             android.util.Log.w("AureaEngine", "decodeBitmapRgba falhou: ${e.javaClass.simpleName}")
@@ -715,8 +739,9 @@ class AureaEngine private constructor() {
     fun replaceLayerVideo(layer: Long, source: String, name: String): Long =
         nativeWork.run(-5L) { nativeReplaceLayerVideo(nativeHandle, layer, source, name) }
     /** "Substituir mídia" por uma foto (RGBA8 em buffer direto, como [importImage]). */
-    fun replaceLayerImage(layer: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String): Long =
-        nativeWork.run(-5L) { nativeReplaceLayerImage(nativeHandle, layer, rgba, width, height, name, source) }
+    fun replaceLayerImage(layer: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
+                          orientation: Int = 1): Long =
+        nativeWork.run(-5L) { nativeReplaceLayerImage(nativeHandle, layer, rgba, width, height, name, source, orientation) }
     /** Arquivo de origem da camada de vídeo, áudio ou imagem (caminho ou URI); null = nenhum. */
     fun layerSourcePath(layer: Long): String? = nativeWork.run(null) { nativeLayerSourcePath(nativeHandle, layer) }
     /** Mídias de um `.aurea` fechado: 4 strings por mídia (gravado, legível, nome, tipo). null = não abre. */
@@ -1021,9 +1046,13 @@ class AureaEngine private constructor() {
     fun queryWaveform(layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: ByteBuffer): Int =
         nativeWork.run(0) { nativeQueryWaveform(nativeHandle, layer, startFrame, framesPerBucket, count, out) }
 
-    /** RGBA8 sRGB (alfa reto) num buffer direto de `width * height * 4` bytes. */
-    fun importImage(rgba: ByteBuffer, width: Int, height: Int, name: String, source: String): Long =
-        nativeWork.run(-5L) { nativeImportImage(nativeHandle, rgba, width, height, name, source) }
+    /**
+     * RGBA8 sRGB (alfa reto) num buffer direto de `width * height * 4` bytes.
+     * [orientation] = EXIF 1..8 dos pixels CRUS: o motor gira e reduz o que não
+     * couber (ImageResample.hpp) em vez de recusar a foto.
+     */
+    fun importImage(rgba: ByteBuffer, width: Int, height: Int, name: String, source: String, orientation: Int = 1): Long =
+        nativeWork.run(-5L) { nativeImportImage(nativeHandle, rgba, width, height, name, source, orientation) }
 
     fun newProject(width: Int, height: Int, fps: Float, title: String): Boolean =
         newProject(width, height, fps.toDouble(), title, null)
@@ -1238,7 +1267,7 @@ class AureaEngine private constructor() {
     private external fun nativeLayerMediaPath(handle: Long, layer: Long): String?
     private external fun nativeReplaceLayerVideo(handle: Long, layer: Long, source: String, name: String): Long
     private external fun nativeReplaceLayerImage(
-        handle: Long, layer: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
+        handle: Long, layer: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String, orientation: Int,
     ): Long
     private external fun nativeLayerSourcePath(handle: Long, layer: Long): String?
     private external fun nativeProjectFileMedia(handle: Long, path: String): Array<String>?
@@ -1471,7 +1500,7 @@ class AureaEngine private constructor() {
         handle: Long, layer: Long, startFrame: Double, framesPerBucket: Double, count: Int, out: ByteBuffer,
     ): Int
     private external fun nativeImportImage(
-        handle: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String,
+        handle: Long, rgba: ByteBuffer, width: Int, height: Int, name: String, source: String, orientation: Int,
     ): Long
     private external fun nativeNewProject(handle: Long, width: Int, height: Int, fps: Double, title: String, background: FloatArray?): Boolean
     private external fun nativeLoadProject(handle: Long, path: String): Int

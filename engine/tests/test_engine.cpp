@@ -46,6 +46,7 @@ EngineConfig headless_config() {
 #include "ContentBounds.inl"
 #include "PropertyCoverageTests.inl"
 #include "ShapePuppetControls.inl"
+#include "PhotoImport.inl"
 
 AUREA_TEST(TextOutline, NonTextTargetPreservesAnchorAnimationAndProjectState) {
     Engine e;

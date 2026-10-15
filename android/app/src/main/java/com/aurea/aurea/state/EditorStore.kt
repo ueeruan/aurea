@@ -3816,11 +3816,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                             val name = display.ifEmpty { appText(if (video) R.string.target_video else R.string.target_image) }
                             if (video) engine.importVideo(uri.toString(), name)
                             else {
+                                val orientation = AureaEngine.exifOrientation(app, uri)
                                 val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -1L
                                 try {
                                     val buf = directBuffer(bmp.width * bmp.height * 4)
                                     bmp.copyPixelsToBuffer(buf); buf.rewind()
-                                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString())
+                                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString(), orientation)
                                 } finally { bmp.recycle() }
                             }
                         }
@@ -7173,12 +7174,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         busyMessage = appText(R.string.app_importing_image)
         launchImport launch@{
             val id = withContext(Dispatchers.IO) {
+                val orientation = AureaEngine.exifOrientation(getApplication(), uri)
                 val bmp = AureaEngine.decodeBitmapRgba(getApplication(), uri) ?: return@withContext -1L
                 try {
                     val buf = directBuffer(bmp.width * bmp.height * 4)
                     bmp.copyPixelsToBuffer(buf)
                     buf.rewind()
-                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString())
+                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString(), orientation)
                 } finally { bmp.recycle() }
             }
             busyMessage = null
@@ -7208,12 +7210,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 if (mime.startsWith("video/")) {
                     engine.replaceLayerVideo(layer, uri.toString(), name)
                 } else {
+                    val orientation = AureaEngine.exifOrientation(app, uri)
                     val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -ERRC_UNSUPPORTED_FORMAT
                     try {
                         val buf = directBuffer(bmp.width * bmp.height * 4)
                         bmp.copyPixelsToBuffer(buf)
                         buf.rewind()
-                        engine.replaceLayerImage(layer, buf, bmp.width, bmp.height, name, uri.toString())
+                        engine.replaceLayerImage(layer, buf, bmp.width, bmp.height, name, uri.toString(), orientation)
                     } finally { bmp.recycle() }
                 }
             }

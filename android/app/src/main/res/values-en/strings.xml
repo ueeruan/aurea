@@ -4383,4 +4383,10 @@ to edit the curve.</string>
     <string name="editor_liberar_mascara_recorte">Release clipping mask</string>
     <string name="editor_mascara_recorte_detalhe">The layer only shows inside the layer below</string>
     <string name="editor_recortada_camada_abaixo">Clipped by the layer below</string>
+    <string name="fxl_slice_direction">Slice Direction</string>
+    <string name="fxl_slice_number">Slice Number</string>
+    <string name="fxl_frame_offset">Frame Offset</string>
+    <string name="fxl_interpolate_frames">Interpolate Frames</string>
+    <string name="fx_name_time_slice">TimeSlice</string>
+    <string name="fx_desc_time_slice">Splits the layer into slices, and each slice shows a different moment of the video. A spinning object turns into a helix.</string>
 </resources>

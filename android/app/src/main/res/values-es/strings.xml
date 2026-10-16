@@ -4336,4 +4336,10 @@ para editar la curva.</string>
     <string name="editor_liberar_mascara_recorte">Liberar máscara de recorte</string>
     <string name="editor_mascara_recorte_detalhe">La capa solo aparece dentro de la capa de abajo</string>
     <string name="editor_recortada_camada_abaixo">Recortada por la capa de abajo</string>
+    <string name="fxl_slice_direction">Dirección de las franjas</string>
+    <string name="fxl_slice_number">Número de franjas</string>
+    <string name="fxl_frame_offset">Desplazamiento de fotogramas</string>
+    <string name="fxl_interpolate_frames">Interpolar fotogramas</string>
+    <string name="fx_name_time_slice">TimeSlice</string>
+    <string name="fx_desc_time_slice">Divide la capa en franjas, y cada franja muestra un instante distinto del video. Un objeto que gira se convierte en una hélice.</string>
 </resources>

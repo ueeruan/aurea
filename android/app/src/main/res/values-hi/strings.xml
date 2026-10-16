@@ -4332,4 +4332,10 @@
     <string name="editor_liberar_mascara_recorte">क्लिपिंग मास्क हटाएँ</string>
     <string name="editor_mascara_recorte_detalhe">लेयर केवल नीचे वाली लेयर के अंदर दिखती है</string>
     <string name="editor_recortada_camada_abaixo">नीचे वाली लेयर से क्लिप की गई</string>
+    <string name="fxl_slice_direction">पट्टियों की दिशा</string>
+    <string name="fxl_slice_number">पट्टियों की संख्या</string>
+    <string name="fxl_frame_offset">फ़्रेम ऑफ़सेट</string>
+    <string name="fxl_interpolate_frames">फ़्रेम इंटरपोलेट करें</string>
+    <string name="fx_name_time_slice">TimeSlice</string>
+    <string name="fx_desc_time_slice">लेयर को पट्टियों में बाँटता है, और हर पट्टी वीडियो का अलग पल दिखाती है। घूमती चीज़ सर्पिल बन जाती है।</string>
 </resources>

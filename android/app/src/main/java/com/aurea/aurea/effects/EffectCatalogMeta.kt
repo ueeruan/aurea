@@ -175,6 +175,11 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem),
         "rgb no tempo canais separados atraso de cor",
     ))
+    put("aurea.time.slice", EffectMeta(
+        R.string.fx_desc_time_slice,
+        listOf(EffectTarget.Video, EffectTarget.PreComposicao),
+        "timeslice fatias faixas tempo slit scan helice",
+    ))
     put("aurea.time.motion_detect", EffectMeta(
         R.string.fx_desc_time_motion_detect,
         listOf(EffectTarget.Video),

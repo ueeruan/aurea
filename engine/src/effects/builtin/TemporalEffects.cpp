@@ -154,6 +154,38 @@ public:
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
 
+// -----------------------------------------------------------------------------
+// TimeSlice (fatias no tempo)
+//
+// A imagem vira N faixas paralelas; cada faixa mostra a camada num instante
+// diferente. A faixa i (0..N−1, na direção escolhida) fica em
+//     t + deslocamento + (−N/2 + i·N/(N−1))
+// quadros — com 12 faixas, de t−6 a t+6, como a referência descreve. Sem
+// interpolar, o instante é arredondado para o quadro mais próximo; ligado, os
+// dois quadros vizinhos são misturados pelo peso da fração.
+//
+// Como o RGB no tempo, ele é DECLARATIVO: quem busca os instantes e desenha
+// cada faixa é o renderer (o mesmo acúmulo temporal do Eco, com o recorte da
+// faixa no shader composite/time_slice.frag).
+// -----------------------------------------------------------------------------
+class TimeSlice final : public Effect {
+public:
+    enum : u32 { kDirection = 0, kSlices, kOffset, kInterpolate };
+    static constexpr u32 kMaxSlices = 32;
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kTimeSlice, "TimeSlice", "Tempo", EffectClass::Temporal};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_angle("direction", "Direção das faixas", 90.0f);
+        p.add_int("slices", "Número de faixas", 12, 1, static_cast<i32>(kMaxSlices));
+        p.add_float("frame_offset", "Deslocamento de quadros", 0.0f, -600.0f, 600.0f, kParamAnimatable);
+        p.add_bool("interpolate", "Interpolar quadros", false);
+    }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
 } // namespace
 
 // -----------------------------------------------------------------------------
@@ -203,6 +235,7 @@ void register_temporal_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<LowFps>());
     (void)r.add(std::make_unique<TimeWarpRgb>());
     (void)r.add(std::make_unique<TimeRemapEffect>());
+    (void)r.add(std::make_unique<TimeSlice>());
 }
 
 

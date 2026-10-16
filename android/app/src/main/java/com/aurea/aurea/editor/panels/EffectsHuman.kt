@@ -853,6 +853,20 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         ),
     )
     put(
+        "aurea.time.slice",
+        EffectHuman(
+            name = R.string.fx_name_time_slice,
+            keywords = "timeslice time slice fatias faixas tempo slit scan helice instantes",
+            principal = listOf(0, 1, 2, 3),
+            params = mapOf(
+                0 to ParamHuman(label = R.string.fxl_slice_direction, suffix = "°", decimals = 0),
+                1 to ParamHuman(label = R.string.fxl_slice_number, decimals = 0),
+                2 to ParamHuman(label = R.string.fxl_frame_offset, suffix = "quadros", decimals = 1),
+                3 to ParamHuman(label = R.string.fxl_interpolate_frames),
+            ),
+        ),
+    )
+    put(
         "aurea.time.motion_detect",
         EffectHuman(
             name = R.string.fx_name_time_motion_detect,

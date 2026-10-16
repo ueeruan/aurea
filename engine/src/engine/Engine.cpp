@@ -300,6 +300,7 @@ struct Engine::ExportContext {
         const u8* uvPtr = nullptr;
         u32 frame = 0;                 ///< índice de saída
         u64 gpuFrame = 0;              ///< frame do backend que escreveu o slot
+        u64 submitNs = 0;              ///< início do render deste quadro (teto adaptativo do motion blur)
         TextureHandle rgb{};           ///< surface-direct: R'G'B' em AHardwareBuffer (vazio = desligado)
         void* rgbBuffer = nullptr;     ///< o AHardwareBuffer de `rgb` (a textura é a dona)
     };
@@ -970,6 +971,7 @@ void Engine::shutdown() noexcept {
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
         if (++gpuGeneration_ == 0) ++gpuGeneration_;
+        apply_pending_surface_locked(false);   // soltura adiada antes de derrubar a GPU
         if (gpu_) {
             gpu_->wait_idle();
             renderer_.shutdown();
@@ -1079,9 +1081,22 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     // do cache de render fica para o estágio 4. wait_idle roda as destruições
     // adiadas e devolve ao driver (vkFreeMemory) os blocos que ficaram vazios —
     // o LMKD da Samsung conta a memória da GPU (dmabuf/mali), não o pool.
+    // vivo 1938 / V2026 (2185, ANR com LOW_MEMORY): o início do export segura
+    // renderMutex_ dentro do driver Vulkan (compilação de pipeline, segundos);
+    // o aviso de memória esperava esse mutex na thread "aurea-ciclo", que
+    // segura o lifecycleLock do Kotlin, e o surfaceDestroyed da main ficava
+    // atrás dela → ANR e "Preparando" sem fim. Com export ativo, a etapa de
+    // GPU só roda se o mutex estiver livre AGORA; o export libera os próprios
+    // caches (prepare_export_resources) e o próximo aviso tenta de novo.
+    auto lockRender = [this](std::unique_lock<std::mutex>& rl) noexcept {
+        if (!exportActive_.load(std::memory_order_acquire)) { rl.lock(); return true; }
+        if (rl.try_lock()) return true;
+        AUREA_LOG_INFO("memoria: export segura a GPU; etapa de GPU do aviso adiada");
+        return false;
+    };
     if (previewRelease && st < static_cast<u8>(TrimStage::OldRenderCache)) {
-        std::lock_guard<std::mutex> rl(renderMutex_);
-        if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
+        std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+        if (lockRender(rl) && gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
             cancel_preview_graph_locked();
             const GpuMemoryStats before = gpu_->memory_stats();
             const u32 frames = renderer_.release_preview_cache();
@@ -1107,8 +1122,8 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     // encoder slots belong to ExportContext, not the renderer cache/pool.
     // Skipping this during export ignored pressure precisely at its peak.
     if (st >= static_cast<u8>(TrimStage::OldRenderCache)) {
-        std::lock_guard<std::mutex> rl(renderMutex_);
-        if (gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
+        std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+        if (lockRender(rl) && gpu_ && renderer_.ready() && poll_export_gpu_locked().ok()) {
             cancel_preview_graph_locked();
             gpu_->wait_idle();   // fora do caminho quente: é um aviso do sistema
             const GpuMemoryStats beforeStats = gpu_->memory_stats();
@@ -1165,8 +1180,50 @@ void Engine::invalidate() noexcept {
     request_render();
 }
 
+void Engine::apply_pending_surface_locked(bool allowAttach) noexcept {
+    if (!surfaceOpPending_.exchange(false, std::memory_order_acq_rel)) return;
+    PendingSurfaceAttach attach;
+    {
+        std::lock_guard<std::mutex> pl(surfacePendingMutex_);
+        attach = pendingAttach_;
+        pendingAttach_ = {};
+    }
+    if (surfaceDetachPending_.exchange(false, std::memory_order_acq_rel) && surface_.nativeWindow) {
+        if (gpu_) gpu_->detach_surface();
+        surface_.nativeWindow = nullptr;
+        AUREA_LOG_INFO("superficie: soltura adiada pelo export aplicada");
+    }
+    if (!attach.valid || !allowAttach || !gpu_) return;
+    surface_.nativeWindow = attach.window;
+    surface_.width = attach.width;
+    surface_.height = attach.height;
+    surface_.vsync = true;
+    const Status s = gpu_->attach_surface(surface_);
+    surfaceAttached_ = s.ok();
+    if (!s.ok()) {
+        surface_.nativeWindow = nullptr;
+        AUREA_LOG_WARN("superficie: anexo adiado pelo export recusado: %s", s.message().data());
+        return;
+    }
+    forceRender_.store(true, std::memory_order_release);
+}
+
 Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcept {
-    std::lock_guard<std::mutex> rl(renderMutex_);
+    std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+    // vivo 1938 (2185): o start do export segura renderMutex_ dentro do driver
+    // Vulkan por dezenas de segundos; a main não pode esperar (ANR).
+    if (exportActive_.load(std::memory_order_acquire) && !rl.try_lock()) {
+        if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
+        {
+            std::lock_guard<std::mutex> pl(surfacePendingMutex_);
+            pendingAttach_ = PendingSurfaceAttach{nativeWindow, width, height, true};
+        }
+        surfaceOpPending_.store(true, std::memory_order_release);
+        AUREA_LOG_INFO("superficie: export segura a GPU; anexo adiado");
+        return OkStatus;
+    }
+    if (!rl.owns_lock()) rl.lock();
+    apply_pending_surface_locked(false);
     cancel_preview_graph_locked();
     if (!gpu_) return Status{Errc::NotSupported, "sem backend grafico"};
     if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
@@ -1187,7 +1244,24 @@ Status Engine::attach_surface(void* nativeWindow, u32 width, u32 height) noexcep
 }
 
 void Engine::detach_surface() noexcept {
-    std::lock_guard<std::mutex> rl(renderMutex_);
+    std::unique_lock<std::mutex> rl(renderMutex_, std::defer_lock);
+    if (exportActive_.load(std::memory_order_acquire) && !rl.try_lock()) {
+        // A prévia está estacionada durante o export (não apresenta). O
+        // VkSurfaceKHR/EGLSurface guarda a própria referência da janela; a
+        // thread de render solta a superfície quando o export larga a GPU.
+        surfaceAttached_ = false;
+        pendingSurfaceSize_.store(0, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> pl(surfacePendingMutex_);
+            pendingAttach_ = {};   // a janela de um anexo ainda não aplicado morre agora
+        }
+        surfaceDetachPending_.store(true, std::memory_order_release);
+        surfaceOpPending_.store(true, std::memory_order_release);
+        AUREA_LOG_INFO("superficie: export segura a GPU; soltura adiada");
+        return;
+    }
+    if (!rl.owns_lock()) rl.lock();
+    apply_pending_surface_locked(false);
     cancel_preview_graph_locked();
     surfaceAttached_ = false;
     pendingSurfaceSize_.store(0, std::memory_order_release);
@@ -1333,6 +1407,10 @@ void Engine::render_thread_main() noexcept {
             wakeFlag_ = false;
         }
         if (!renderRunning_) break;
+        if (surfaceOpPending_.load(std::memory_order_acquire) && !exportActive_.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> rl(renderMutex_);
+            apply_pending_surface_locked();
+        }
         if (!surfaceAttached_ || state_ == EngineState::Suspended) continue;
         if (refineNow_) {
             forceRender_.store(true, std::memory_order_release);
@@ -14045,6 +14123,22 @@ void Engine::export_thread_main() noexcept {
 
     // Quadros submetidos à GPU e ainda não entregues ao encoder, em ordem.
     std::deque<u32> inflight;
+    // Motion blur 3D (beta 2185, maioria dos celulares): o export amostrava a
+    // cena a cada 0,5 px do rastro, até 128 renders completos por quadro. Os
+    // degraus de custo existiam no Renderer, mas ninguém os acionava: cada
+    // quadro levava segundos de GPU e o export parecia travado ou o driver
+    // resetava a GPU. O celular começa com teto e o tempo real de cada quadro
+    // ajusta: quadro pesado corta amostras (e depois sombra/MSAA); trecho leve
+    // devolve amostras até o teto inicial. Resolução e fps não mudam.
+#if defined(__ANDROID__) || defined(__APPLE__)
+    constexpr u32 kMobileBlurCap = 16;
+#else
+    constexpr u32 kMobileBlurCap = 0;
+#endif
+    constexpr u64 kHeavyFrameNs = 1'500'000'000ull, kLightFrameNs = 250'000'000ull;
+    constexpr u32 kLightFramesToRaise = 30;
+    u32 lightFrames = 0;
+    if (ctx.offline && !ctx.preRenderMode) ctx.offline->compositor().set_export_blur_cap(kMobileBlurCap);
     auto cancelled = [&] { return ctx.cancelRequested.load(std::memory_order_acquire); };
     // Espera a GPU terminar o quadro mais antigo em voo e o passa ao encoder.
     auto deliver_oldest = [&]() -> Status {
@@ -14070,6 +14164,30 @@ void Engine::export_thread_main() noexcept {
         }
         ctx.readNs.fetch_add(monotonic_ns() - r0, std::memory_order_relaxed);
         if (ctx.diagnostics) ctx.diagnostics->event(ExportDiagnostics::Counter::Rendered);
+        if (slot.submitNs && ctx.offline) {
+            const u64 took = monotonic_ns() - slot.submitNs;
+            Renderer& compositor = ctx.offline->compositor();
+            const u32 cap = compositor.export_blur_cap();
+            if (took > kHeavyFrameNs) {
+                lightFrames = 0;
+                if (cap == 0 || cap > 2) {
+                    const u32 lowered = compositor.lower_export_blur_cap();
+                    AUREA_LOG_WARN("export: quadro %u levou %llu ms; motion blur limitado a %u amostras",
+                                   slot.frame, static_cast<unsigned long long>(took / 1'000'000ull), lowered);
+                } else {
+                    const u32 step = compositor.raise_export_gpu_step();
+                    AUREA_LOG_WARN("export: quadro %u levou %llu ms; custo 3D reduzido (degrau %u)",
+                                   slot.frame, static_cast<unsigned long long>(took / 1'000'000ull), step);
+                }
+            } else if (took < kLightFrameNs && cap && (kMobileBlurCap == 0 || cap < kMobileBlurCap)) {
+                if (++lightFrames >= kLightFramesToRaise) {
+                    lightFrames = 0;
+                    AUREA_LOG_INFO("export: trecho leve; motion blur volta a %u amostras", compositor.raise_export_blur_cap());
+                }
+            } else {
+                lightFrames = 0;
+            }
+        }
         inflight.pop_front();
         return ctx.queue->publish(si, slot.frame);
     };
@@ -14144,6 +14262,7 @@ void Engine::export_thread_main() noexcept {
             i, static_cast<long long>(plan->ptsUs), static_cast<unsigned long long>(monotonic_ns()),
             static_cast<unsigned long long>(monotonic_ns() - renderStarted), result.raw());
         if (!result.ok()) break;
+        slot.submitNs = renderStarted;
         inflight.push_back(si);
     }
     // Fim da timeline: entrega o que ainda está na GPU.

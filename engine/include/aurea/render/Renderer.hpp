@@ -239,7 +239,13 @@ struct RenderLayer {
     /// `time`: instante da composição da amostra; `nested`: a pré-composição
     /// renderizada nesse instante (~0u = a mesma fonte da camada). Eco numa
     /// pré-composição precisa do CONTEÚDO de antes, não só da posição de antes.
-    struct TemporalSample { Mat4 m; f32 weight = 1.0f; Vec3 mask{0, 0, 0}; f64 time = 0.0; u32 nested = ~0u; };
+    /// TimeSlice: `slice` = (dx, dy, índice, número de faixas) — w = 0 fora do
+    /// TimeSlice. Em vídeo, `sourceUs` é o instante da fonte da faixa e
+    /// `frame` o quadro decodificado dele (vazio = já está no cache da GPU).
+    struct TemporalSample {
+        Mat4 m; f32 weight = 1.0f; Vec3 mask{0, 0, 0}; f64 time = 0.0; u32 nested = ~0u;
+        Vec4 slice{0, 0, 0, 0}; i64 sourceUs = -1; FrameRef frame;
+    };
     std::vector<TemporalSample> temporal;
     /// Camada 2D no espaço 3D que vive dentro de um grupo de cena (desenhada
     /// com profundidade pelo grupo, não na composição): índice do grupo, ou −1.
@@ -367,6 +373,7 @@ struct FrameSnapshot {
             layer.source.frameB.reset();
             layer.source.historyFrame.reset();
             for (auto& channel : layer.source.channel) channel.frame.reset();
+            for (auto& sample : layer.temporal) sample.frame.reset();
         }
         for (auto& child : nested) if (child) child->release_video_frames();
     }
@@ -654,6 +661,8 @@ public:
         if (exportBlurCap_) exportBlurCap_ = exportBlurCap_ >= 32u ? 0u : exportBlurCap_ * 2u;
         return exportBlurCap_;
     }
+    /// Teto inicial do export (celular): 0 = sem teto.
+    void set_export_blur_cap(u32 cap) noexcept { exportBlurCap_ = cap >= 2 ? cap : 0u; }
     u32 lower_export_blur_cap() noexcept {
         exportBlurCap_ = exportBlurCap_ ? std::max(2u, exportBlurCap_ / 2) : 64u;
         return exportBlurCap_;
@@ -930,6 +939,22 @@ private:
     EffectTypeId posterizeType_ = 0, echoType_ = 0, rgbTimeType_ = 0, lowFpsType_ = 0;
     EffectTypeId motionDetectType_ = 0;   ///< Detectar movimento: a fonte em t − atraso
     EffectTypeId datamoshType_ = 0;       ///< Datamosh: a fonte presa por "Quadros segurados"
+    EffectTypeId timeSliceType_ = 0;      ///< TimeSlice: uma faixa por instante
+    /// TimeSlice em vídeo: o quadro de cada faixa já convertido, por (camada,
+    /// instante da fonte). O decoder segura poucos quadros ao mesmo tempo; as
+    /// faixas precisam de até 64. De um quadro para o seguinte quase todas se
+    /// repetem, então em regime só um quadro novo é decodificado por quadro.
+    struct SliceTexture {
+        u64 layer = 0; i64 us = 0; TextureHandle tex{}; u32 w = 0, h = 0; u64 lastFrame = 0;
+        FGTexture fg{}; u64 fgFrame = ~0ull;   ///< importada neste quadro do grafo
+        u64 created = 0;                        ///< quadro em que a conversão foi gravada
+    };
+    std::vector<SliceTexture> sliceCache_;
+    mutable std::mutex sliceMutex_;
+    u64 sliceGraphFrame_ = ~0ull;   ///< quadro do grafo que gravou as faixas mais novas
+    u64 sliceSalt_ = 0;             ///< planos de CPU próprios para a conversão de uma faixa
+    [[nodiscard]] bool has_slice_texture(u64 layer, i64 us) const noexcept;
+    void release_slice_cache(bool destroy) noexcept;
     ShaderLibrary shaders_;
     scene3d::SceneRenderer scene3d_;
     scene3d::PoseWorkspace poseWorkspace_;

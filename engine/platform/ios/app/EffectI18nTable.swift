@@ -441,6 +441,10 @@ enum EffectI18nTable {
     aurea.time.warp_rgb|5|clamp|fx_prender_nas_pontas|
     aurea.time.remap|0|time|fx_tempo|
     aurea.time.remap|1|interpolation|fx_interpolacao_do_tempo|fxo_linear,fxo_smooth,fxo_hold,fxo_ease_in,fxo_ease_out
+    aurea.time.slice|0|direction|fxl_slice_direction|
+    aurea.time.slice|1|slices|fxl_slice_number|
+    aurea.time.slice|2|frame_offset|fxl_frame_offset|
+    aurea.time.slice|3|interpolate|fxl_interpolate_frames|
     aurea.transition.linear_wipe|0|completion|fx_conclusao|
     aurea.transition.linear_wipe|1|angle|fxl_start_angle|
     aurea.transition.linear_wipe|2|feather|fxl_softness|

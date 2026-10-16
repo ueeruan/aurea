@@ -4326,4 +4326,10 @@ untuk mengedit kurvanya.</string>
     <string name="editor_liberar_mascara_recorte">Lepas clipping mask</string>
     <string name="editor_mascara_recorte_detalhe">Lapisan hanya tampil di dalam lapisan di bawahnya</string>
     <string name="editor_recortada_camada_abaixo">Dipotong oleh lapisan di bawahnya</string>
+    <string name="fxl_slice_direction">Arah irisan</string>
+    <string name="fxl_slice_number">Jumlah irisan</string>
+    <string name="fxl_frame_offset">Geser frame</string>
+    <string name="fxl_interpolate_frames">Interpolasi frame</string>
+    <string name="fx_name_time_slice">TimeSlice</string>
+    <string name="fx_desc_time_slice">Membagi layer menjadi irisan, dan setiap irisan menampilkan momen video yang berbeda. Objek yang berputar menjadi heliks.</string>
 </resources>

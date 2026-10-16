@@ -124,6 +124,7 @@ namespace effect_keys {
     inline constexpr const char* kPosterizeTime      = "aurea.time.posterize";
     inline constexpr const char* kLowFps             = "aurea.time.low_fps";
     inline constexpr const char* kTimeWarpRgb        = "aurea.time.warp_rgb";
+    inline constexpr const char* kTimeSlice          = "aurea.time.slice";
     inline constexpr const char* kTimeRemap          = "aurea.time.remap";
     // Controles de expressão (não desenham; ver ExpressionControls.cpp).
     inline constexpr const char* kSliderControl      = "aurea.control.slider";

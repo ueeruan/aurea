@@ -972,6 +972,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     rgbTimeType_ = effects.find_key(effect_keys::kTimeWarpRgb);
     motionDetectType_ = effects.find_key(effect_keys::kMotionDetect);
     datamoshType_ = effects.find_key(effect_keys::kDatamosh);
+    timeSliceType_ = effects.find_key(effect_keys::kTimeSlice);
     if (const Status s = shaders_.initialize(backend); !s.ok()) {
         shaders_.shutdown();
         backend_ = nullptr;
@@ -1155,6 +1156,7 @@ void Renderer::forget_device() noexcept {
     particleFrameBuf_ = BufferHandle{};
     framesInFlight_.clear();
     planar_.clear();
+    release_slice_cache(false);   // dispositivo perdido: os handles não valem mais
     flowCache_.clear();
     heavyStats_.flowCacheBytes = 0;
     images_.clear();
@@ -1214,6 +1216,7 @@ void Renderer::release_project_resources_impl(bool gpuDone) noexcept {
     heavyStats_.flowCacheBytes = 0;
     for (auto& [k, m] : maskCache_) for (TextureHandle& t : m.tex) if (t.valid()) backend_->destroy_texture(t);
     maskCache_.clear();
+    release_slice_cache(true);
     planar_.clear();
     images_.clear();
     luts_.clear();
@@ -3380,6 +3383,43 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // camada não precisa de amostras de matriz.
             rl.temporal.clear();
         }
+        // TIMESLICE: N faixas, cada uma num instante. Só vídeo e pré-composição
+        // têm conteúdo que muda no tempo; o desenho recorta cada amostra na
+        // faixa dela (composite/time_slice.frag). Manda sobre Eco e RGB no tempo.
+        if (effects_ && timeSliceType_ && !wants_3d(comp, *l, time)
+            && (rl.source.kind == LayerSource::Kind::Video || rl.source.kind == LayerSource::Kind::Nested)) {
+            const ParameterRegistry* sp = effects_->params(timeSliceType_);
+            for (const EffectInstance& inst : l->effects) {
+                if (!inst.enabled || inst.type != timeSliceType_ || !sp || sp->count() < 4) continue;
+                const f32 dir = evaluate_param(l->tracks, inst, 0, sp->at(0), local).v[0];
+                const i32 n = std::clamp(evaluate_param(l->tracks, inst, 1, sp->at(1), local).as_int(), 1, 32);
+                const f32 off = evaluate_param(l->tracks, inst, 2, sp->at(2), local).v[0];
+                const bool interp = evaluate_param(l->tracks, inst, 3, sp->at(3), local).as_bool();
+                const f32 rad = (std::isfinite(dir) ? dir : 90.0f) * kDeg2Rad;
+                const f64 base = static_cast<f64>(time.value) + (std::isfinite(off) ? static_cast<f64>(off) : 0.0);
+                rl.temporal.clear();
+                rl.blurMatrices.clear();
+                rgbOn = false;
+                for (i32 s = 0; s < n; ++s) {
+                    const f64 rel = n > 1 ? -0.5 * n + static_cast<f64>(s) * n / (n - 1) : 0.0;
+                    const f64 at = base + rel;
+                    const Vec4 slice{std::cos(rad), std::sin(rad), static_cast<f32>(s), static_cast<f32>(n)};
+                    const f64 lo = std::floor(at + 1e-6), frac = at - lo;
+                    if (interp && frac > 1e-3 && frac < 1.0 - 1e-3) {
+                        RenderLayer::TemporalSample a{m, static_cast<f32>(1.0 - frac), Vec3{0, 0, 0}, lo};
+                        RenderLayer::TemporalSample b{m, static_cast<f32>(frac), Vec3{0, 0, 0}, lo + 1.0};
+                        a.slice = slice; b.slice = slice;
+                        rl.temporal.push_back(std::move(a));
+                        rl.temporal.push_back(std::move(b));
+                    } else {
+                        RenderLayer::TemporalSample a{m, 1.0f, Vec3{0, 0, 0}, std::floor(at + 0.5)};
+                        a.slice = slice;
+                        rl.temporal.push_back(std::move(a));
+                    }
+                }
+                break;   // um TimeSlice por camada
+            }
+        }
         // DETECTAR MOVIMENTO: o atraso (quadros) do primeiro efeito ligado. A
         // fonte nesse instante é buscada no bloco de vídeo (o decoder); a
         // comparação acontece na cadeia de efeitos (EffectGraph::build).
@@ -3838,6 +3878,47 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (!rl.source.channel[c].frame || !ex) ++out.missingVideoFrames;
                     }
                     rl.source.channelCount = 3;
+                }
+                // TIMESLICE em vídeo: o quadro da fonte de cada faixa. O decoder
+                // segura poucos quadros; o que já virou textura (sliceCache_)
+                // não é pedido de novo. Um pedido por prepare, como o RGB no
+                // tempo: o próximo prepare avança para a próxima faixa que falta.
+                //   frame + sourceUs >= 0 → quadro exato novo: converter e guardar
+                //   frame + sourceUs <  0 → aproximado: só a prévia, não guarda
+                //   sem frame             → já está no cache da GPU
+                if (!rl.temporal.empty() && rl.temporal.front().slice.w > 0.0f) {
+                    bool requestedMissing = !exact;
+                    const u64 sliceKey = rl.id.pack();
+                    for (RenderLayer::TemporalSample& sample : rl.temporal) {
+                        f64 us = l->source_frame(FrameIndex{static_cast<i64>(std::llround(sample.time))}) * 1e6 / fps;
+                        if (const f64 srcFps = streamInfo.fps; srcFps > 0.0 && !streamInfo.preciseFrameTiming)
+                            us = std::llround(std::floor(us * srcFps / 1e6 + 1e-3) * 1e6 / srcFps);
+                        us = std::max(us, 0.0);
+                        if (streamInfo.durationUs > 0)
+                            us = std::min(us, static_cast<f64>(last_source_timestamp(streamInfo, src->frame_duration_us())));
+                        const i64 sliceUs = static_cast<i64>(std::llround(us));
+                        sample.sourceUs = sliceUs;
+                        sample.frame.reset();
+                        if (has_slice_texture(sliceKey, sliceUs)) continue;
+                        bool ex = false;
+                        FrameRef f = src->frame_for(sliceUs, &ex);
+                        if (f && ex) { sample.frame = std::move(f); continue; }
+                        // Faixa que falta NÃO conta como quadro de vídeo faltando:
+                        // o decoder não segura todas ao mesmo tempo, e o export só
+                        // renderiza quando nada falta. O desenho marca o quadro
+                        // como incompleto; o render guarda as faixas que já
+                        // chegaram e o export tenta de novo até fechar todas.
+                        // A prévia mostra a aproximada enquanto isso.
+                        if (f && !settings.finalQuality) { sample.frame = std::move(f); sample.sourceUs = -1; }
+                        if (!requestedMissing) {
+                            req.targetUs = sliceUs;
+                            req.mode = DecodeMode::Still;
+                            req.direction = 0;
+                            req.retainPreroll = true;
+                            requestedMissing = true;
+                            if (requiredCount < 8) requiredTimes[requiredCount++] = sliceUs;
+                        }
+                    }
                 }
                 // DETECTAR MOVIMENTO: a mesma fonte `motionDelay` quadros da
                 // timeline ANTES (no começo do clipe, presa ao primeiro quadro:
@@ -4685,7 +4766,11 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
     // pareceria funcionar (dois canais "certos" por coincidência) e estaria
     // errado no único canal que ele existe para mudar.
     u64 salt = 0;
-    if (f == layer.source.frameB.get()) {
+    if (sliceSalt_) {
+        // TimeSlice: cada faixa convertida no mesmo quadro tem planos próprios
+        // (o upload de uma não pode sobrescrever o da outra antes do passe).
+        salt = sliceSalt_;
+    } else if (f == layer.source.frameB.get()) {
         salt = 0x8000000000000000ull;
     } else if (f == layer.source.historyFrame.get() && f != layer.source.frame.get()) {
         salt = 0x4000000000000000ull;   // Detectar movimento: o quadro anterior, textura própria
@@ -6249,6 +6334,176 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         if (i < snap.plans.size() && snap.plans[i].hasFold) {
             draw.compFromLayer = draw.compFromLayer * snap.plans[i].foldMatrix;
             draw.opacity *= snap.plans[i].foldOpacity;
+        }
+        // TIMESLICE: uma faixa por amostra, cada uma com a imagem do SEU
+        // instante (máscaras e efeitos da camada aplicados a cada uma),
+        // recortada no shader (composite/time_slice.frag) e somada num alvo do
+        // tamanho da composição. Sem interpolar, cada pixel recebe uma amostra
+        // de peso 1; com interpolar, duas cujos pesos somam 1.
+        if (!layer.temporal.empty() && layer.temporal.front().slice.w > 0.0f
+            && (layer.source.kind == LayerSource::Kind::Video || layer.source.kind == LayerSource::Kind::Nested)) {
+            auto pSlice = shaders_.pipeline(PipelineKey::graphics(
+                ShaderId::composite_layer_vert, ShaderId::composite_time_slice_frag, kWorkFormat, true, BlendMode::Add));
+            const u32 k = static_cast<u32>(layer.temporal.size());
+            FGTexture* perSample = pSlice.ok() ? arena_.alloc_array<FGTexture>(k) : nullptr;
+            if (!perSample) { mark_incomplete(__FILE__, __LINE__); return true; }
+            const bool video = layer.source.kind == LayerSource::Kind::Video;
+            const u64 sliceKey = layer.id.pack();
+            const u32 maxTexSlice = std::min<u32>(backend_->capabilities().maxTexture2D, 8192);
+            u32 sw = std::max(1u, static_cast<u32>(std::ceil(static_cast<f32>(layer.source.width) * layer.texelScale)));
+            u32 sh = std::max(1u, static_cast<u32>(std::ceil(static_cast<f32>(layer.source.height) * layer.texelScale)));
+            if (sw > maxTexSlice || sh > maxTexSlice) {
+                const f32 r = static_cast<f32>(maxTexSlice) / static_cast<f32>(std::max(sw, sh));
+                sw = std::max(1u, static_cast<u32>(static_cast<f32>(sw) * r));
+                sh = std::max(1u, static_cast<u32>(static_cast<f32>(sh) * r));
+            }
+            TextureDesc sd;
+            sd.width = sw; sd.height = sh; sd.format = kWorkFormat;
+            sd.sampled = true; sd.renderTarget = true; sd.debugName = "timeslice-faixa";
+            for (u32 s = 0; s < k; ++s) {
+                perSample[s] = draw.texture;
+                const RenderLayer::TemporalSample& sample = layer.temporal[s];
+                FGTexture image{};
+                if (video) {
+                    bool convert = false;
+                    if (sample.frame && sample.sourceUs >= 0) {
+                        // Quadro exato novo: vira textura persistente da faixa.
+                        std::lock_guard<std::mutex> sl(sliceMutex_);
+                        SliceTexture* entry = nullptr;
+                        for (SliceTexture& e : sliceCache_) if (e.layer == sliceKey && e.us == sample.sourceUs) entry = &e;
+                        if (entry && (entry->w != sw || entry->h != sh)) {
+                            backend_->destroy_texture(entry->tex);
+                            *entry = SliceTexture{};
+                            entry->layer = sliceKey; entry->us = sample.sourceUs;
+                        }
+                        if (!entry) {
+                            sliceCache_.push_back(SliceTexture{});
+                            entry = &sliceCache_.back();
+                            entry->layer = sliceKey; entry->us = sample.sourceUs;
+                        }
+                        if (!entry->tex.valid()) {
+                            auto t = backend_->create_texture(sd);
+                            if (t.ok()) { entry->tex = *t; entry->w = sw; entry->h = sh; }
+                        }
+                        if (entry->tex.valid()) {
+                            entry->lastFrame = frameNumber;
+                            if (entry->fgFrame == frameNumber) image = entry->fg;   // mesma faixa duas vezes
+                            else {
+                                image = graph_.import_texture("timeslice-faixa", entry->tex, sd);
+                                entry->fg = image; entry->fgFrame = frameNumber;
+                                entry->created = frameNumber;
+                                sliceGraphFrame_ = frameNumber;
+                                convert = true;
+                            }
+                        }
+                    } else if (sample.frame) {
+                        // Aproximado (prévia): transitório, nunca guardado.
+                        image = graph_.create_texture("timeslice-aproximada", sd);
+                        convert = true;
+                    } else {
+                        // Já convertida antes: só importa.
+                        std::lock_guard<std::mutex> sl(sliceMutex_);
+                        for (SliceTexture& e : sliceCache_) {
+                            if (e.layer != sliceKey || e.us != sample.sourceUs || !e.tex.valid()) continue;
+                            if (e.w != sw || e.h != sh) {
+                                // Densidade mudou (prévia ↔ zoom): refazer pelo decoder.
+                                backend_->destroy_texture(e.tex);
+                                e.tex = TextureHandle{};
+                                break;
+                            }
+                            e.lastFrame = frameNumber;
+                            if (e.fgFrame != frameNumber) {
+                                e.fg = graph_.import_texture("timeslice-faixa", e.tex, sd);
+                                e.fgFrame = frameNumber;
+                            }
+                            image = e.fg;
+                            break;
+                        }
+                    }
+                    if (convert) {
+                        sliceSalt_ = 0x511CE00000ull + s;
+                        const bool built = build_video_source(layer, i, sw, sh, image, frameNumber, sample.frame.get());
+                        sliceSalt_ = 0;
+                        if (!built) { image = FGTexture{}; }
+                        else if (sample.frame->hardwareBuffer) framesInFlight_.push_back(sample.frame);
+                    }
+                    if (!image.valid()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                } else {
+                    const u32 n = sample.nested;
+                    if (n == ~0u || n == layer.source.nestedIndex) continue;
+                    const FrameSnapshot* other = currentSnap_ && n < currentSnap_->nested.size() ? currentSnap_->nested[n].get() : nullptr;
+                    if (!other || !other->target.valid()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                    image = other->target;
+                }
+                LayerImage sampleImg = raw;
+                sampleImg.texture = image;
+                if (video) { sampleImg.width = sw; sampleImg.height = sh; }
+                apply_masks(layer, sampleImg, frameNumber);
+                LayerImage sampleFin = sampleImg;
+                if (hasEffects) (void)EffectGraph::build(snap.plans[i], ctx, sampleImg, sampleFin);
+                perSample[s] = sampleFin.texture;
+            }
+            // Orçamento das faixas guardadas: 384 MB; saem primeiro as que este
+            // quadro não usou (refeitas pelo decoder se voltarem a ser pedidas).
+            {
+                std::lock_guard<std::mutex> sl(sliceMutex_);
+                u64 bytes = 0;
+                for (const SliceTexture& e : sliceCache_) if (e.tex.valid()) bytes += static_cast<u64>(e.w) * e.h * 8u;
+                while (bytes > (384ull << 20)) {
+                    auto oldest = sliceCache_.end();
+                    for (auto it = sliceCache_.begin(); it != sliceCache_.end(); ++it)
+                        if (it->tex.valid() && it->lastFrame < frameNumber && (oldest == sliceCache_.end() || it->lastFrame < oldest->lastFrame)) oldest = it;
+                    if (oldest == sliceCache_.end()) break;
+                    bytes -= std::min<u64>(bytes, static_cast<u64>(oldest->w) * oldest->h * 8u);
+                    backend_->destroy_texture(oldest->tex);
+                    sliceCache_.erase(oldest);
+                }
+                sliceCache_.erase(std::remove_if(sliceCache_.begin(), sliceCache_.end(),
+                    [](const SliceTexture& e) { return !e.tex.valid(); }), sliceCache_.end());
+            }
+            const Mat4 fold = (i < snap.plans.size() && snap.plans[i].hasFold) ? snap.plans[i].foldMatrix : Mat4::identity();
+            // Eixo das faixas em uv da região: a projeção do retângulo inteiro
+            // na direção pedida (px) cobre exatamente [0, 1].
+            const Vec4 dir = layer.temporal.front().slice;
+            const f32 rw = std::max(1e-3f, draw.region.w), rh = std::max(1e-3f, draw.region.h);
+            const f32 denom = std::max(1e-6f, rw * std::fabs(dir.x) + rh * std::fabs(dir.y));
+            const Vec2 axis{rw * dir.x / denom, rh * dir.y / denom};
+            TextureDesc accDesc = compDesc;
+            accDesc.transferSrc = false;
+            const FGTexture acc = graph_.create_texture("timeslice", accDesc);
+            struct SlicePush { Mat4 clipFromLayer; Vec4 region; Vec4 uvRect; Vec4 params; Vec4 slice; };
+            static_assert(sizeof(SlicePush) <= binding::kPushConstantBytes, "push constants do time_slice.frag");
+            struct Cap {
+                const RenderLayer* layer; Mat4 fold; u32 k; PipelineHandle p; u64 sampler; Rect region;
+                f32 w, h; const FGTexture* perSample; Vec2 axis;
+            } cap{&layer, fold, k, *pSlice, draw.sampler, draw.region, compW, compH, perSample, axis};
+            const u32 pass = graph_.add_raster_pass("timeslice", PassStage::Composite, acc, LoadOp::Clear,
+                                                    Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+                const Mat4 clip = clip_from_comp(cap.w, cap.h);
+                pc.cmds.bind_pipeline(cap.p);
+                for (u32 s = 0; s < cap.k; ++s) {
+                    const auto& sample = cap.layer->temporal[s];
+                    pc.cmds.bind_texture(0, pc.texture(cap.perSample[s]), SamplerHandle{cap.sampler});
+                    SlicePush push;
+                    push.clipFromLayer = clip * (sample.m * cap.fold);
+                    push.region = Vec4{cap.region.x, cap.region.y, cap.region.w, cap.region.h};
+                    push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                    push.params = Vec4{sample.weight, 0, 0, 0};
+                    push.slice = Vec4{cap.axis.x, cap.axis.y, sample.slice.z, sample.slice.w};
+                    pc.cmds.push_constants(&push, sizeof(push));
+                    pc.cmds.draw(6);
+                }
+            });
+            for (u32 s = 0; s < k; ++s) {
+                bool seen = false;
+                for (u32 r = 0; r < s && !seen; ++r) seen = perSample[r] == perSample[s];
+                if (!seen) graph_.read(pass, perSample[s]);
+            }
+            draw.texture = acc;
+            draw.region = Rect{0, 0, compW, compH};
+            draw.compFromLayer = Mat4::identity();
+            draw.sampler = shaders_.sampler(CommonSampler::LinearClamp).id;
+            return true;
         }
         if (!layer.blurMatrices.empty() || !layer.temporal.empty()) {
             // Acumula as amostras no tempo (pré-multiplicadas, com peso, soma
@@ -7870,10 +8125,32 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     return OkStatus;
 }
 
+bool Renderer::has_slice_texture(u64 layer, i64 us) const noexcept {
+    std::lock_guard<std::mutex> sl(sliceMutex_);
+    for (const SliceTexture& s : sliceCache_) if (s.layer == layer && s.us == us && s.tex.valid()) return true;
+    return false;
+}
+
+void Renderer::release_slice_cache(bool destroy) noexcept {
+    std::lock_guard<std::mutex> sl(sliceMutex_);
+    if (destroy && backend_) for (SliceTexture& s : sliceCache_) if (s.tex.valid()) backend_->destroy_texture(s.tex);
+    sliceCache_.clear();
+}
+
 void Renderer::collect_resources(u64 frameNumber) noexcept {
     // Recursos persistentes de layers que sumiram. Checado a cada 2 s — não
     // há pressa, e varrer mapas a cada frame é custo sem ganho.
     if (frameNumber % 120 != 0) return;
+    {
+        // TimeSlice: faixas de instantes que não aparecem há 4 s.
+        std::lock_guard<std::mutex> sl(sliceMutex_);
+        for (auto it = sliceCache_.begin(); it != sliceCache_.end();) {
+            if (frameNumber > it->lastFrame + 240) {
+                if (it->tex.valid()) backend_->destroy_texture(it->tex);
+                it = sliceCache_.erase(it);
+            } else ++it;
+        }
+    }
     scene3d_.collect(frameNumber);
     // Aurea Particular: pontos/malhas de fontes e buffers de camadas que sumiram.
     particleStatics_.collect(frameNumber);
@@ -8009,6 +8286,16 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
         if (!unused(it->second.lastFrame)) { ++it; continue; }
         if (it->second.texture.valid()) { backend_->destroy_texture(it->second.texture); ++n; }
         it = sceneImages_.erase(it);
+    }
+    {
+        // Pressão de memória: faixas do TimeSlice fora do quadro atual saem
+        // (refeitas pelo decoder quando voltarem a ser pedidas).
+        std::lock_guard<std::mutex> sl(sliceMutex_);
+        for (auto it = sliceCache_.begin(); it != sliceCache_.end();) {
+            if (!unused(it->lastFrame)) { ++it; continue; }
+            if (it->tex.valid()) { backend_->destroy_texture(it->tex); ++n; }
+            it = sliceCache_.erase(it);
+        }
     }
     for (auto it = planar_.begin(); it != planar_.end();) {
         if (!unused(it->second.lastFrame)) { ++it; continue; }

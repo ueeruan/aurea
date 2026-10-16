@@ -537,6 +537,10 @@ aurea.time.remap	1	interpolation	1	fxo_smooth
 aurea.time.remap	1	interpolation	2	fxo_hold
 aurea.time.remap	1	interpolation	3	fxo_ease_in
 aurea.time.remap	1	interpolation	4	fxo_ease_out
+aurea.time.slice	0	direction	-1	fxl_slice_direction
+aurea.time.slice	1	slices	-1	fxl_slice_number
+aurea.time.slice	2	frame_offset	-1	fxl_frame_offset
+aurea.time.slice	3	interpolate	-1	fxl_interpolate_frames
 aurea.transition.linear_wipe	0	completion	-1	fx_conclusao
 aurea.transition.linear_wipe	1	angle	-1	fxl_start_angle
 aurea.transition.linear_wipe	2	feather	-1	fxl_softness

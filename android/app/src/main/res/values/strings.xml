@@ -4416,4 +4416,10 @@
     <string name="editor_liberar_mascara_recorte">Liberar máscara de recorte</string>
     <string name="editor_mascara_recorte_detalhe">A camada só aparece dentro da camada abaixo</string>
     <string name="editor_recortada_camada_abaixo">Recortada pela camada abaixo</string>
+    <string name="fxl_slice_direction">Direção das faixas</string>
+    <string name="fxl_slice_number">Número de faixas</string>
+    <string name="fxl_frame_offset">Deslocamento de quadros</string>
+    <string name="fxl_interpolate_frames">Interpolar quadros</string>
+    <string name="fx_name_time_slice">TimeSlice</string>
+    <string name="fx_desc_time_slice">Divide a camada em faixas, e cada faixa mostra um instante diferente do vídeo. Um objeto que gira vira uma hélice.</string>
 </resources>

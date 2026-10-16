@@ -873,6 +873,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     // Ciclo de vida do motor
     // =========================================================================
+    /**
+     * Guarda ready/pendingSurface/surfaceOwner e a ordem init × attach/detach.
+     * A main entra aqui nos callbacks do SurfaceHolder: NUNCA segure este lock
+     * durante trabalho nativo longo (trim, suspend, PreRender, rastreio, export).
+     */
     private val lifecycleLock = Any()
     private val lifecycleThread = Executors.newSingleThreadExecutor { r -> Thread(r, "aurea-ciclo") }
     @Volatile private var ready = false
@@ -1131,7 +1136,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 Log.i(TAG, "gravacao ao sair (suspende=$suspendAfter): codigo $code, ${(System.nanoTime() - t0) / 1_000_000} ms fora da main")
                 if (code != 0) main.post { if (!destroyed) errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code)) }
             }
-            if (suspendAfter) synchronized(lifecycleLock) { if (ready) engine.suspend() }
+            // suspend junta a thread do export: fora do lifecycleLock, senão o
+            // surfaceDestroyed do onStop espera o export terminar na main.
+            if (suspendAfter && ready) engine.suspend()
         }
     }
 
@@ -1188,11 +1195,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             level >= TRIM_RUNNING_LOW -> thumbnails.trimTo(0.5f)
         }
         enqueueLifecycle {
-            synchronized(lifecycleLock) {
-                if (!ready) return@synchronized
-                val freed = engine.trimMemory(level)
-                if (freed > 0) android.util.Log.i("Aurea", "onTrimMemory($level): motor liberou ${freed / 1024} KB")
-            }
+            // Sem lifecycleLock: o trim espera a GPU (e o export) e a main
+            // trava nesse lock em surfaceDestroyed/surfaceChanged (ANR vivo 1938,
+            // build 2185). A fila serial e o NativeWorkGate já mantêm o motor vivo.
+            if (!ready) return@enqueueLifecycle
+            val freed = engine.trimMemory(level)
+            if (freed > 0) android.util.Log.i("Aurea", "onTrimMemory($level): motor liberou ${freed / 1024} KB")
         }
     }
 
@@ -3569,11 +3577,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         enqueueLifecycle {
             var code = 5
             try {
-                synchronized(lifecycleLock) {
-                    if (ready && !request.get()) {
-                        code = engine.startPreRender(normalized)
-                        if (request.get()) engine.cancelPreRender()
-                    }
+                // Fora do lifecycleLock: preparar o PreRender espera o render e
+                // a main não pode ficar presa atrás disso (ANR vivo 1938).
+                if (ready && !request.get()) {
+                    code = engine.startPreRender(normalized)
+                    if (request.get()) engine.cancelPreRender()
                 }
             } catch (failure: Exception) {
                 Log.w(TAG, "PreRender startup failed", failure)
@@ -4776,7 +4784,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         maskTracking = true
         showToast(appText(R.string.msg_rastreando_a_mascara))
         enqueueLifecycle {
-            val r = synchronized(lifecycleLock) { if (ready) engine.trackMask(id, mask, mode) else -1 }
+            // Rastreio longo: fora do lifecycleLock (a main o usa nos callbacks de superfície).
+            val r = if (ready) engine.trackMask(id, mask, mode) else -1
             trackHandler.post {
                 if (destroyed) return@post
                 maskTracking = false
@@ -6295,7 +6304,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val bpm = DoubleArray(1)
             var result = -ERRC_IO.toLong()
             try {
-                result = synchronized(lifecycleLock) { if (ready) engine.detectBeats(id, bpm) else -1L }
+                // Análise longa: fora do lifecycleLock (a main o usa nos callbacks de superfície).
+                result = if (ready) engine.detectBeats(id, bpm) else -1L
             } catch (failure: Exception) {
                 Log.w(TAG, "beat analysis failed", failure)
             } catch (failure: OutOfMemoryError) {

@@ -70,6 +70,19 @@ void Renderer::cancel_preview_graph() noexcept {
         else if (raw) raw->release();
     }
     framesInFlight_.clear();
+    // TimeSlice: faixas convertidas neste grafo nunca rodaram na GPU. Ficar no
+    // cache seria mostrar uma faixa vazia; saem e o decoder as refaz.
+    if (sliceGraphFrame_ != ~0ull) {
+        std::lock_guard<std::mutex> sl(sliceMutex_);
+        for (SliceTexture& e : sliceCache_) {
+            if (e.created != sliceGraphFrame_ || !e.tex.valid()) continue;
+            if (backend_) backend_->destroy_texture(e.tex);
+            e.tex = TextureHandle{};
+        }
+        sliceCache_.erase(std::remove_if(sliceCache_.begin(), sliceCache_.end(),
+            [](const SliceTexture& e) { return !e.tex.valid(); }), sliceCache_.end());
+        sliceGraphFrame_ = ~0ull;
+    }
     if (pending.snapshot) pending.snapshot->release_video_frames();
     release_preview_graph_scope();
 }

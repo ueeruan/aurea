@@ -347,6 +347,11 @@ public:
     // --- Superfície (Android: SurfaceView → ANativeWindow) -------------------
     /// Chamadas da thread da UI. `detach_surface` só volta depois que a GPU
     /// parou de usar a janela — o Android destrói a superfície logo depois.
+    /// Durante o export, se a GPU estiver presa no start (driver compilando),
+    /// anexar/soltar NÃO espera: a operação fica pendente e a thread de render
+    /// a aplica quando o export larga a GPU (vivo 1938, ANR no 2185). O
+    /// VkSurfaceKHR/EGLSurface segura a própria referência da janela, então o
+    /// chamador pode soltar a dele já.
     [[nodiscard]] Status attach_surface(void* nativeWindow, u32 width, u32 height) noexcept;
     void detach_surface() noexcept;
     [[nodiscard]] Status resize_surface(u32 width, u32 height) noexcept;
@@ -2149,6 +2154,13 @@ private:
 
     SurfaceDesc surface_{};
     std::atomic<u64> pendingSurfaceSize_{0}; ///< UI publishes; render applies between frames
+    /// attach/detach adiados porque o export segurava renderMutex_ (ver attach_surface).
+    struct PendingSurfaceAttach { void* window = nullptr; u32 width = 0, height = 0; bool valid = false; };
+    std::mutex surfacePendingMutex_;
+    PendingSurfaceAttach pendingAttach_{};           ///< surfacePendingMutex_
+    std::atomic<bool> surfaceDetachPending_{false};
+    std::atomic<bool> surfaceOpPending_{false};
+    void apply_pending_surface_locked(bool allowAttach = true) noexcept;    ///< renderMutex_
 
     // --- Métricas ---------------------------------------------------------------
     mutable std::mutex perfMutex_;

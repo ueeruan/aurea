@@ -4344,4 +4344,10 @@
     <string name="editor_liberar_mascara_recorte">Отменить обтравочную маску</string>
     <string name="editor_mascara_recorte_detalhe">Слой виден только внутри слоя ниже</string>
     <string name="editor_recortada_camada_abaixo">Обрезан слоем ниже</string>
+    <string name="fxl_slice_direction">Направление полос</string>
+    <string name="fxl_slice_number">Число полос</string>
+    <string name="fxl_frame_offset">Сдвиг кадров</string>
+    <string name="fxl_interpolate_frames">Интерполяция кадров</string>
+    <string name="fx_name_time_slice">TimeSlice</string>
+    <string name="fx_desc_time_slice">Делит слой на полосы, и каждая полоса показывает другой момент видео. Вращающийся объект превращается в спираль.</string>
 </resources>

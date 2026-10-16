@@ -99,8 +99,8 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // Deve superar os builds 2181–2186 já distribuídos; nunca reduzir o código.
-        versionCode = 2187
+        // Deve superar os builds 2181–2187 já distribuídos; nunca reduzir o código.
+        versionCode = 2188
         versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -139,6 +139,11 @@ android {
                 )
                 if (aureaFFmpegRoot != null) {
                     arguments += "-DAUREA_FFMPEG_ANDROID_ROOT=$aureaFFmpegRoot"
+                }
+                // Compilador ESSL do host já pronto (opcional): evita reconfigurar
+                // engine/build/shader-compilers quando o cache dele é de outra pasta.
+                providers.gradleProperty("aureaGlesCompiler").orNull?.let {
+                    arguments += "-DAUREA_GLES_COMPILER=$it"
                 }
             }
         }

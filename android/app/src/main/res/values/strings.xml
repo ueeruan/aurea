@@ -1825,7 +1825,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea 0.2.0 (2187) • 15/10/2026\n\n• PreRender: a reprodução agora sai do cache sem travar, lendo quadros à frente, e usa menos memória em celulares com 4 GB de RAM.\n• 3D: \"Trocar textura 3D\" volta a aparecer no objeto, inclusive com motion blur e dentro de uma cena 3D com outras camadas.\n• 3D: a aba Material voltou a ter Escolher, Trocar e Tirar imagem.\n• Posição: X e Y numa caixa só e Z ao lado, dentro da área de arrasto, com uma casa decimal; também em camadas 3D.\n• Exportação: se o codificador do celular falhar no início, o Aurea troca sozinho para outro sem refazer o vídeo e sem perder o som.</string>
+    <string name="release_notes_body">Aurea 0.2.1 (2189) • 16/10/2026\n\n• Motion blur 3D: a exportação agora sai igual à prévia, com o rastro liso em vez de cópias separadas.\n• Luma Dissolve: 17 padrões novos (orgânico, poeira de pixels, chamas, manchas de tinta, camuflagem, grade hexagonal, estilhaços e outros), com rotação e detalhe do padrão.\n• Partículas 3D: \"Superfície da rede\" preenche com faces transparentes o espaço entre os pontos ligados, com opacidade e quantidade de pontos ajustáveis.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -4422,4 +4422,24 @@
     <string name="fxl_interpolate_frames">Interpolar quadros</string>
     <string name="fx_name_time_slice">TimeSlice</string>
     <string name="fx_desc_time_slice">Divide a camada em faixas, e cada faixa mostra um instante diferente do vídeo. Um objeto que gira vira uma hélice.</string>
+    <string name="fxl_network_surface">Superfície da rede</string>
+    <string name="fxl_surface_opacity">Opacidade da superfície</string>
+    <string name="fxl_surface_points">Pontos da superfície</string>
+    <string name="fxo_organic">Orgânico</string>
+    <string name="fxo_pixel_dust">Poeira de pixels</string>
+    <string name="fxo_coarse_grain">Grão grosso</string>
+    <string name="fxo_square_blocks">Blocos quadrados</string>
+    <string name="fxo_crosshatch_grid">Grade cruzada</string>
+    <string name="fxo_flames">Chamas</string>
+    <string name="fxo_ink_blots">Manchas de tinta</string>
+    <string name="fxo_camouflage">Camuflagem</string>
+    <string name="fxo_hexagonal_grid">Grade hexagonal</string>
+    <string name="fxo_halftone_rings">Meio-tom / anéis</string>
+    <string name="fxo_topographic">Topográfico</string>
+    <string name="fxo_rough_edge">Borda áspera</string>
+    <string name="fxo_splatter">Respingos</string>
+    <string name="fxo_polka_dots">Bolinhas</string>
+    <string name="fxo_shards">Estilhaços</string>
+    <string name="fxl_pattern_rotation">Rotação do padrão</string>
+    <string name="fxl_pattern_detail">Detalhe do padrão</string>
 </resources>

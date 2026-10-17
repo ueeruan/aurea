@@ -38,6 +38,8 @@ enum Param : u32 {
     kMotionBlur, kShutterAngle,
     // Rede (plexus): linhas entre partículas próximas.
     kPlexus, kPlexusDistance, kPlexusWidth, kPlexusOpacity, kPlexusPoints,
+    // Superfície da rede (0.2.1): faces transparentes entre trios ligados.
+    kPlexusSurface, kPlexusSurfaceOpacity, kPlexusSurfacePoints,
     kParamCount,
 };
 

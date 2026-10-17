@@ -45,6 +45,8 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     // Rede (plexus): distância máxima (px; 0 = desligada), espessura (px),
     // opacidade, pontos ligados (os primeiros M slots).
     vec4 plexus;
+    // Superfície da rede: ligada (0/1), opacidade, pontos S (os primeiros S slots).
+    vec4 plexusSurface;
 } p;
 
 layout(location = 0) out vec2 v_corner;   // -1..1 no quadrado da partícula
@@ -194,13 +196,48 @@ void plexus_vertex(int vid) {
     gl_Position = vec4((at - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0, 0.5, 1.0);
 }
 
+// Um trio (i, j, k), i > j > k, por 3 vértices: a face transparente entre os
+// três centros quando os três pares estão ligados (distância < máxima). Índice
+// do trio pelo sistema combinatório: t = C(i,3) + C(j,2) + k.
+float choose3(float n) { return n * (n - 1.0) * (n - 2.0) / 6.0; }
+void surface_vertex(int vid) {
+    const float tri = float(vid / 3);
+    float i = floor(pow(6.0 * tri, 1.0 / 3.0)) + 1.0;
+    for (int n = 0; n < 3 && choose3(i) > tri; ++n) i -= 1.0;
+    for (int n = 0; n < 3 && choose3(i + 1.0) <= tri; ++n) i += 1.0;
+    const float rem = tri - choose3(i);
+    float j = floor((1.0 + sqrt(1.0 + 8.0 * rem)) * 0.5);
+    if (j * (j - 1.0) * 0.5 > rem) j -= 1.0;
+    if ((j + 1.0) * j * 0.5 <= rem) j += 1.0;
+    const float k = rem - j * (j - 1.0) * 0.5;
+    vec3 a, b, c; vec4 ca, cb, cc;
+    if (!particle_center(i, a, ca) || !particle_center(j, b, cb) || !particle_center(k, c, cc)) { cull(); return; }
+    const float far = max(distance(a, b), max(distance(b, c), distance(a, c)));
+    if (far >= p.plexus.x) { cull(); return; }
+    vec2 sa, sb, sc;
+    if (!project_center(a, sa) || !project_center(b, sb) || !project_center(c, sc)) { cull(); return; }
+    const int corner = vid % 3;
+    const vec2 at = corner == 0 ? sa : (corner == 1 ? sb : sc);
+    const vec4 col = corner == 0 ? ca : (corner == 1 ? cb : cc);
+    // Some com o MAIOR lado: faces grandes ficam mais fracas, como as linhas.
+    const float fade = 1.0 - far / max(p.plexus.x, 1e-3);
+    v_color = vec4(col.rgb, min(ca.a, min(cb.a, cc.a)) * fade * clamp(p.plexusSurface.y, 0.0, 1.0));
+    v_corner = vec2(0.0);   // miolo: o frag não recorta o disco
+    v_feather = 0.0;
+    gl_Position = vec4((at - p.region.xy) / max(p.region.zw, vec2(1e-4)) * 2.0 - 1.0, 0.5, 1.0);
+}
+
 void main() {
     const vec2 corners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0),
                                     vec2(-1.0, 1.0), vec2(1.0, -1.0), vec2(1.0, 1.0));
-    // Rede: os primeiros vértices são as linhas (por baixo dos pontos).
+    // Superfície primeiro (por baixo de tudo), depois as linhas, depois os pontos.
+    const float sp = p.plexusSurface.z;
+    const int surfaceVerts = (p.plexus.x > 0.0 && p.plexusSurface.x > 0.5) ? int(choose3(sp) + 0.5) * 3 : 0;
+    if (gl_VertexIndex < surfaceVerts) { surface_vertex(gl_VertexIndex); return; }
+    const int lineVid = gl_VertexIndex - surfaceVerts;
     const int plexusVerts = p.plexus.x > 0.0 ? int(p.plexus.w * (p.plexus.w - 1.0) * 0.5 + 0.5) * 6 : 0;
-    if (gl_VertexIndex < plexusVerts) { plexus_vertex(gl_VertexIndex); return; }
-    const int vid = gl_VertexIndex - plexusVerts;
+    if (lineVid < plexusVerts) { plexus_vertex(lineVid); return; }
+    const int vid = lineVid - plexusVerts;
     const float slot = float(vid / 6);
     const vec2 corner = corners[vid % 6];
 

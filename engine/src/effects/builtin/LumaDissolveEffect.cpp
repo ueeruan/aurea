@@ -27,8 +27,12 @@ using namespace cc;
 class LumaDissolve final : public Effect {
 public:
     enum : u32 { kProgress = 0, kSoftness, kInvert, kMap, kMapLayer, kNoiseScale, kSeed, kAngle,
-                 kEdgeWidth, kEdgeColor, kMode, kCenter };
-    enum : u32 { kMapLuma = 0, kMapNoise, kMapLinear, kMapRadial, kMapLayerLuma };
+                 kEdgeWidth, kEdgeColor, kMode, kCenter, kPatternRotation, kPatternDetail };
+    // 0.2.1: 17 padrões gerados (5..21), escritos do zero no shader. A
+    // escala é a "Escala do ruído", a semente é a mesma; rotação e detalhe
+    // são do padrão.
+    enum : u32 { kMapLuma = 0, kMapNoise, kMapLinear, kMapRadial, kMapLayerLuma, kMapFirstPattern,
+                 kMapLastPattern = kMapFirstPattern + 16, kMapCount };
     enum : u32 { kVanish = 0, kAppear };
 
     const EffectInfo& info() const noexcept override {
@@ -37,12 +41,17 @@ public:
     }
 
     void declare_parameters(ParameterRegistry& p) const override {
-        static const char* const kMaps[] = {"Luminância da camada", "Ruído", "Gradiente linear", "Gradiente radial", "Outra camada"};
+        static const char* const kMaps[] = {"Luminância da camada", "Ruído", "Gradiente linear", "Gradiente radial", "Outra camada",
+                                            "Orgânico", "Poeira de pixels", "Linhas de varredura", "Grão grosso",
+                                            "Blocos quadrados", "Grade cruzada", "Chamas", "Manchas de tinta", "Camuflagem",
+                                            "Grade hexagonal", "Faixas horizontais", "Meio-tom / anéis", "Topográfico",
+                                            "Borda áspera", "Respingos", "Bolinhas", "Estilhaços"};
+        static_assert(sizeof(kMaps) / sizeof(kMaps[0]) == kMapCount);
         static const char* const kModes[] = {"Sumir", "Aparecer"};
         p.add_float("progress", "Progresso", 50.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_float("softness", "Suavidade da borda", 10.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_bool("invert", "Inverter", false);
-        p.add_enum("map", "Mapa", kMaps, 5, kMapLuma);
+        p.add_enum("map", "Mapa", kMaps, kMapCount, kMapLuma);
         p.add_layer_ref("map_layer", "Camada do mapa");
         p.add_float("noise_scale", "Escala do ruído", 60.0f, 2.0f, 500.0f, kAnimPx, "px");
         p.typed_range(1.0f, 10000.0f);
@@ -53,6 +62,8 @@ public:
         p.add_enum("mode", "Modo", kModes, 2, kVanish);
         p.add_point2("center", "Centro do gradiente", Vec2{0.5f, 0.5f}, -1.0f, 2.0f, kAnimRel);
         p.typed_range(-10.0f, 10.0f);
+        p.add_angle("pattern_rotation", "Rotação do padrão", 0.0f);
+        p.add_float("pattern_detail", "Detalhe do padrão", 50.0f, 0.0f, 100.0f, kAnimPct, "%");
     }
 
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
@@ -78,7 +89,7 @@ public:
     bool is_identity(const EffectEval& e) const noexcept override { return !(vanish(e) > 0.0f); }
 
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& in, f32, LayerImage& out) const override {
-        u32 kind = std::min<u32>(e.e(kMap), kMapLayerLuma);
+        u32 kind = std::min<u32>(e.e(kMap), kMapLastPattern);
         const u64 ref = kind == kMapLayerLuma ? e.value(kMapLayer).ref : 0;
         const LayerImage* map = ref ? ctx.layer_input(ref) : nullptr;
         // "Outra camada" sem camada escolhida (ou fora do tempo dela): o
@@ -115,6 +126,10 @@ public:
             u.p4.z = map->region.x;
             u.p4.w = map->region.y;
             u.p5 = Vec4{std::max(map->region.w, 1e-3f), std::max(map->region.h, 1e-3f), 1.0f, 0.0f};
+        } else if (kind >= kMapFirstPattern) {
+            // Padrões: p4.zw (livres sem mapa) = rotação (rad), detalhe 0..1.
+            u.p4.z = finite_or(e.f(kPatternRotation), 0.0f) * kDeg;
+            u.p4.w = clampf(e.f(kPatternDetail), 0.0f, 100.0f, 50.0f) / 100.0f;
         }
         u.p5.w = progress >= 1.0f ? 1.0f : 0.0f;
         u.color = premultiplied_linear(e.color(kEdgeColor));

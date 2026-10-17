@@ -454,3 +454,46 @@ AUREA_TEST(LumaDissolveGpu, AdjustmentLayerDissolvesWhatIsBelow) {
     const auto gone = s.render();
     AUREA_CHECK(gone.v(108, 32).w < 0.01f);
 }
+
+// 0.2.1: os 17 padrões gerados do Luma Dissolve (mapas 5..21). Cada um tem de
+// dissolver em PARTE em 50% (nem tudo, nem nada), ser determinístico, mudar
+// com a semente e a rotação, e ser diferente dos outros.
+AUREA_TEST(LumaDissolveGpu, SeventeenPatternsDissolvePartiallyAndDiffer) {
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 64);
+    s.comp->set_transparent_background(true);
+    const auto layer = s.image(uniform_image(128, 64, 255, 255, 255), 64, 32);
+    auto& fx = s.add_effect(layer, effect_keys::kLumaDissolve);
+    fx_set(fx, "progress", 50);
+    fx_set(fx, "softness", 0);
+    fx_set(fx, "noise_scale", 20);
+    std::vector<FloatImage> shots;
+    for (u32 kind = 5; kind <= 21; ++kind) {
+        fx_set(fx, "map", static_cast<f32>(kind));
+        const auto a = s.render(), b = s.render();
+        AUREA_CHECK(sl_finite(a) && sl_diff(a, b) < 1e-6f);
+        u32 kept = 0;
+        for (u32 y = 0; y < a.height; ++y) for (u32 x = 0; x < a.width; ++x) kept += a.v(x, y).w > 0.5f ? 1u : 0u;
+        const f32 frac = static_cast<f32>(kept) / static_cast<f32>(a.width * a.height);
+        std::printf("    padrao %u: fica %.3f\n", kind, frac);
+        AUREA_CHECK(frac > 0.02f && frac < 0.98f);
+        saber_png(("luma_dissolve_padrao_" + std::to_string(kind)).c_str(), a);
+        shots.push_back(a);
+    }
+    for (usize i = 0; i < shots.size(); ++i)
+        for (usize j = i + 1; j < shots.size(); ++j) AUREA_CHECK(sl_diff(shots[i], shots[j]) > 0.1f);
+    // Semente e rotação mexem no padrão.
+    fx_set(fx, "map", 9);
+    const auto base = s.render();
+    fx_set(fx, "seed", 7);
+    AUREA_CHECK(sl_diff(s.render(), base) > 0.1f);
+    fx_set(fx, "seed", 0);
+    fx_set(fx, "pattern_rotation", 30);
+    AUREA_CHECK(sl_diff(s.render(), base) > 0.1f);
+    // 0% continua a camada exata e 100% continua vazia.
+    fx_set(fx, "progress", 100);
+    const auto gone = s.render();
+    f32 alpha = 0;
+    for (u32 y = 0; y < gone.height; ++y) for (u32 x = 0; x < gone.width; ++x) alpha += gone.v(x, y).w;
+    AUREA_CHECK(alpha < 1e-4f);
+}

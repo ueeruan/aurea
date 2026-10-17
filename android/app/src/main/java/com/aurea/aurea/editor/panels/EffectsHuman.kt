@@ -215,8 +215,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "saber video copilot sabre de luz lightsaber neon energia energy brilho glow raio laser traco stroke contorno outline eletrico electric fogo fire plasma magia magic write on desenhar mascara mask texto",
         principal = listOf(6, 7, 8, 1, 2, 3, 4, 5, 11, 12, 31)))
     put("aurea.transition.luma_dissolve", EffectHuman(
-        keywords = "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn",
-        principal = listOf(0, 3, 1, 10, 2, 8, 9)))
+        keywords = "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn padrao pattern pixel grao grain blocos blocks hexagonal halftone camuflagem camo chamas flame tinta ink respingos splatter bolinhas polkadot estilhacos shards",
+        principal = listOf(0, 3, 1, 10, 2, 8, 9, 5, 12, 13)))
     put("aurea.stylize.omino_diffusion", EffectHuman(
         name = R.string.fx_name_omino_diffusion, keywords = "omino omine diffusion difusao glitch paleta faixas",
         principal = listOf(0, 1, 2, 5, 6), params = mapOf(

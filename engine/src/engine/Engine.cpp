@@ -14127,14 +14127,15 @@ void Engine::export_thread_main() noexcept {
     // cena a cada 0,5 px do rastro, até 128 renders completos por quadro. Os
     // degraus de custo existiam no Renderer, mas ninguém os acionava: cada
     // quadro levava segundos de GPU e o export parecia travado ou o driver
-    // resetava a GPU. O celular começa com teto e o tempo real de cada quadro
-    // ajusta: quadro pesado corta amostras (e depois sombra/MSAA); trecho leve
-    // devolve amostras até o teto inicial. Resolução e fps não mudam.
-#if defined(__ANDROID__) || defined(__APPLE__)
-    constexpr u32 kMobileBlurCap = 16;
-#else
+    // resetava a GPU. O tempo real de cada quadro ajusta: quadro pesado corta
+    // amostras (e depois sombra/MSAA); trecho leve as devolve. Resolução e fps
+    // não mudam.
+    // 0.2.1: sem teto inicial. O teto fixo de 16 no celular fazia o arquivo
+    // sair com menos amostras que a prévia (rastro em cópias separadas onde a
+    // prévia era lisa). Agora o export começa igual à prévia e só reduz se um
+    // quadro passar de 1,5 s — e nunca abaixo das amostras escolhidas
+    // (Renderer::capped_shutter_samples).
     constexpr u32 kMobileBlurCap = 0;
-#endif
     constexpr u64 kHeavyFrameNs = 1'500'000'000ull, kLightFrameNs = 250'000'000ull;
     constexpr u32 kLightFramesToRaise = 30;
     u32 lightFrames = 0;

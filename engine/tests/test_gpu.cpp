@@ -12423,6 +12423,64 @@ AUREA_TEST(Gpu, ParticularLayerRotationIsThreeDimensional) {
     AUREA_CHECK(shot(0, 90, 30).rgba == turnedY.rgba);
 }
 
+// 0.2.1: superfície da rede (plexus) — faces transparentes entre trios de
+// partículas ligadas. Ligada, desenha mais (as faces cobrem área entre as
+// linhas), é determinística e desligada volta ao quadro só com linhas.
+AUREA_TEST(Gpu, ParticularPlexusSurfaceFillsBetweenConnectedPoints) {
+    AUREA_REQUIRE_GPU();
+    auto shot = [](bool surface, f32 opacity) {
+        Scene3DRig rig(320, 180);
+        auto id = rig.e.add_particles(particular::kPresetBase + 8);   // rede
+        AUREA_CHECK(id.ok());
+        if (!id.ok()) return Image8{};
+        Layer* l = current_comp(rig.e)->layer(LayerId::unpack(*id));
+        if (l->effects.empty() || l->effects[0].params.size() <= particular::kPlexusSurfacePoints) {
+            AUREA_CHECK(false);
+            return Image8{};
+        }
+        EffectInstance& fx = l->effects[0];
+        fx.params[particular::kPlexusSurface].constant = ParamValue::boolean(surface);
+        fx.params[particular::kPlexusSurfaceOpacity].constant = ParamValue::scalar(opacity);
+        // Cena que não satura: mistura normal, linhas fracas, poucos pontos.
+        fx.params[particular::kAddMode].constant = ParamValue::boolean(false);
+        fx.params[particular::kPlexusOpacity].constant = ParamValue::scalar(40.0f);
+        fx.params[particular::kPlexusPoints].constant = ParamValue::scalar(40.0f);
+        fx.params[particular::kPlexusSurfacePoints].constant = ParamValue::scalar(40.0f);
+        fx.params[particular::kPlexusDistance].constant = ParamValue::scalar(160.0f);
+        fx.params[particular::kSize].constant = ParamValue::scalar(4.0f);
+        fx.params[particular::kColor].constant = ParamValue::color(0.2f, 0.8f, 1.0f, 1.0f);
+        fx.params[particular::kColorEnd].constant = ParamValue::color(0.2f, 0.8f, 1.0f, 1.0f);
+        seek_frame(rig.e, 30);
+        return rig.capture(320);
+    };
+    const Image8 lines = shot(false, 30.0f);
+    const Image8 faces = shot(true, 30.0f);
+    auto light = [](const Image8& img) {
+        f64 sum = 0;
+        for (usize i = 0; i + 2 < img.rgba.size(); i += 4) sum += img.rgba[i] + img.rgba[i + 1] + img.rgba[i + 2];
+        return static_cast<f32>(sum / std::max<f64>(1.0, img.rgba.size() / 4 * 765.0));
+    };
+    // Pixels que as faces mudaram (fração do quadro).
+    u32 changed = 0;
+    for (usize i = 0; i + 2 < lines.rgba.size() && i + 2 < faces.rgba.size(); i += 4) {
+        const int d = std::abs(lines.rgba[i] - faces.rgba[i]) + std::abs(lines.rgba[i + 1] - faces.rgba[i + 1])
+                    + std::abs(lines.rgba[i + 2] - faces.rgba[i + 2]);
+        changed += d > 6 ? 1u : 0u;
+    }
+    const f32 c0 = light(lines), c1 = light(faces);
+    const f32 area = static_cast<f32>(changed) / static_cast<f32>(std::max<usize>(1, lines.rgba.size() / 4));
+    std::printf("    plexus superficie: brilho so linhas %.4f, com faces %.4f, area mudada %.4f\n", c0, c1, area);
+    AUREA_CHECK(c0 > 0.0005f && c0 < 0.9f);              // a cena de referência não está estourada
+    AUREA_CHECK(c1 < 0.95f);                             // as faces não estouram para branco
+    AUREA_CHECK(area > 0.01f);                           // as faces cobrem área entre as linhas
+    AUREA_CHECK(shot(true, 30.0f).rgba == faces.rgba);   // determinístico
+    AUREA_CHECK(shot(true, 0.0f).rgba == lines.rgba);    // opacidade 0 = sem faces
+    if (const char* dir = std::getenv("AUREA_FX_DUMP"); dir && *dir) {
+        (void)write_png(std::string(dir) + "/plexus_linhas.png", lines);
+        (void)write_png(std::string(dir) + "/plexus_superficie.png", faces);
+    }
+}
+
 // Particular com desfoque de movimento por partícula (o do app antigo): cada
 // faísca vira um rastro na direção do movimento, do tamanho do trajeto no
 // obturador, mais fraco na mesma proporção. Fechado como o resto: o mesmo

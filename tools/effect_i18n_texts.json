@@ -4807,5 +4807,165 @@
   "hi": "बाहरी चमक",
   "id": "Cahaya luar",
   "ar": "التوهج الخارجي"
+ },
+ "Superfície da rede": {
+  "ar": "سطح الشبكة",
+  "en": "Network surface",
+  "es": "Superficie de la red",
+  "hi": "नेटवर्क सतह",
+  "id": "Permukaan jaringan",
+  "ru": "Поверхность сети"
+ },
+ "Opacidade da superfície": {
+  "ar": "عتامة السطح",
+  "en": "Surface opacity",
+  "es": "Opacidad de la superficie",
+  "hi": "सतह अपारदर्शिता",
+  "id": "Opasitas permukaan",
+  "ru": "Непрозрачность поверхности"
+ },
+ "Pontos da superfície": {
+  "ar": "نقاط السطح",
+  "en": "Surface points",
+  "es": "Puntos de la superficie",
+  "hi": "सतह बिंदु",
+  "id": "Titik permukaan",
+  "ru": "Точки поверхности"
+ },
+ "Orgânico": {
+  "ar": "عضوي",
+  "en": "Organic",
+  "es": "Orgánico",
+  "hi": "जैविक",
+  "id": "Organik",
+  "ru": "Органический"
+ },
+ "Poeira de pixels": {
+  "ar": "غبار البكسل",
+  "en": "Pixel dust",
+  "es": "Polvo de píxeles",
+  "hi": "पिक्सेल धूल",
+  "id": "Debu piksel",
+  "ru": "Пиксельная пыль"
+ },
+ "Grão grosso": {
+  "ar": "حبيبات خشنة",
+  "en": "Coarse grain",
+  "es": "Grano grueso",
+  "hi": "मोटा ग्रेन",
+  "id": "Butiran kasar",
+  "ru": "Крупное зерно"
+ },
+ "Blocos quadrados": {
+  "ar": "كتل مربعة",
+  "en": "Square blocks",
+  "es": "Bloques cuadrados",
+  "hi": "वर्गाकार ब्लॉक",
+  "id": "Blok persegi",
+  "ru": "Квадратные блоки"
+ },
+ "Grade cruzada": {
+  "ar": "شبكة متقاطعة",
+  "en": "Crosshatch grid",
+  "es": "Rejilla cruzada",
+  "hi": "क्रॉसहैच ग्रिड",
+  "id": "Kisi silang",
+  "ru": "Перекрёстная сетка"
+ },
+ "Chamas": {
+  "ar": "لهب",
+  "en": "Flames",
+  "es": "Llamas",
+  "hi": "लपटें",
+  "id": "Api",
+  "ru": "Пламя"
+ },
+ "Manchas de tinta": {
+  "ar": "بقع الحبر",
+  "en": "Ink blots",
+  "es": "Manchas de tinta",
+  "hi": "स्याही के धब्बे",
+  "id": "Noda tinta",
+  "ru": "Чернильные пятна"
+ },
+ "Camuflagem": {
+  "ar": "تمويه",
+  "en": "Camouflage",
+  "es": "Camuflaje",
+  "hi": "छलावरण",
+  "id": "Kamuflase",
+  "ru": "Камуфляж"
+ },
+ "Grade hexagonal": {
+  "ar": "شبكة سداسية",
+  "en": "Hexagonal grid",
+  "es": "Rejilla hexagonal",
+  "hi": "षट्कोणीय ग्रिड",
+  "id": "Kisi heksagonal",
+  "ru": "Шестиугольная сетка"
+ },
+ "Meio-tom / anéis": {
+  "ar": "نصف تون / حلقات",
+  "en": "Halftone / rings",
+  "es": "Semitono / anillos",
+  "hi": "हाफ़टोन / छल्ले",
+  "id": "Halftone / cincin",
+  "ru": "Полутон / кольца"
+ },
+ "Topográfico": {
+  "ar": "طبوغرافي",
+  "en": "Topographic",
+  "es": "Topográfico",
+  "hi": "स्थलाकृतिक",
+  "id": "Topografis",
+  "ru": "Топографический"
+ },
+ "Borda áspera": {
+  "ar": "حافة خشنة",
+  "en": "Rough edge",
+  "es": "Borde áspero",
+  "hi": "खुरदरा किनारा",
+  "id": "Tepi kasar",
+  "ru": "Грубый край"
+ },
+ "Respingos": {
+  "ar": "رذاذ",
+  "en": "Splatter",
+  "es": "Salpicaduras",
+  "hi": "छींटे",
+  "id": "Cipratan",
+  "ru": "Брызги"
+ },
+ "Bolinhas": {
+  "ar": "نقاط دائرية",
+  "en": "Polka dots",
+  "es": "Lunares",
+  "hi": "पोल्का डॉट्स",
+  "id": "Polkadot",
+  "ru": "Горошек"
+ },
+ "Estilhaços": {
+  "ar": "شظايا",
+  "en": "Shards",
+  "es": "Fragmentos",
+  "hi": "टुकड़े",
+  "id": "Pecahan",
+  "ru": "Осколки"
+ },
+ "Rotação do padrão": {
+  "ar": "دوران النمط",
+  "en": "Pattern rotation",
+  "es": "Rotación del patrón",
+  "hi": "पैटर्न घुमाव",
+  "id": "Rotasi pola",
+  "ru": "Поворот узора"
+ },
+ "Detalhe do padrão": {
+  "ar": "تفاصيل النمط",
+  "en": "Pattern detail",
+  "es": "Detalle del patrón",
+  "hi": "पैटर्न विवरण",
+  "id": "Detail pola",
+  "ru": "Детализация узора"
  }
 }

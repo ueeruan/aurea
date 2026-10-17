@@ -1153,7 +1153,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea 0.2.0 (2187) • 15/10/2026\n\n• PreRender: la reproducción ahora sale de la caché sin tirones, leyendo fotogramas por adelantado, y usa menos memoria en teléfonos con 4 GB de RAM.\n• 3D: \"Cambiar textura 3D\" vuelve a verse en el objeto, también con motion blur y dentro de una escena 3D con otras capas.\n• 3D: la pestaña Material vuelve a tener Elegir, Cambiar y Quitar imagen.\n• Posición: X e Y en una sola caja y Z al lado, dentro del área de arrastre, con un decimal; también en capas 3D.\n• Exportación: si el codificador del teléfono falla al inicio, Aurea cambia solo a otro sin rehacer el video ni perder el sonido.</string>
+    <string name="release_notes_body">Aurea 0.2.1 (2189) • 16/10/2026\n\n• Motion blur 3D: la exportación ahora sale igual que la vista previa, con la estela lisa en lugar de copias separadas.\n• Luma Dissolve: 17 patrones nuevos (orgánico, polvo de píxeles, llamas, manchas de tinta, camuflaje, cuadrícula hexagonal, fragmentos y más), con rotación y detalle del patrón.\n• Partículas 3D: \"Superficie de la red\" rellena con caras transparentes el espacio entre los puntos conectados, con opacidad y cantidad de puntos ajustables.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -4342,4 +4342,24 @@ para editar la curva.</string>
     <string name="fxl_interpolate_frames">Interpolar fotogramas</string>
     <string name="fx_name_time_slice">TimeSlice</string>
     <string name="fx_desc_time_slice">Divide la capa en franjas, y cada franja muestra un instante distinto del video. Un objeto que gira se convierte en una hélice.</string>
+    <string name="fxl_network_surface">Superficie de la red</string>
+    <string name="fxl_surface_opacity">Opacidad de la superficie</string>
+    <string name="fxl_surface_points">Puntos de la superficie</string>
+    <string name="fxo_organic">Orgánico</string>
+    <string name="fxo_pixel_dust">Polvo de píxeles</string>
+    <string name="fxo_coarse_grain">Grano grueso</string>
+    <string name="fxo_square_blocks">Bloques cuadrados</string>
+    <string name="fxo_crosshatch_grid">Rejilla cruzada</string>
+    <string name="fxo_flames">Llamas</string>
+    <string name="fxo_ink_blots">Manchas de tinta</string>
+    <string name="fxo_camouflage">Camuflaje</string>
+    <string name="fxo_hexagonal_grid">Rejilla hexagonal</string>
+    <string name="fxo_halftone_rings">Semitono / anillos</string>
+    <string name="fxo_topographic">Topográfico</string>
+    <string name="fxo_rough_edge">Borde áspero</string>
+    <string name="fxo_splatter">Salpicaduras</string>
+    <string name="fxo_polka_dots">Lunares</string>
+    <string name="fxo_shards">Fragmentos</string>
+    <string name="fxl_pattern_rotation">Rotación del patrón</string>
+    <string name="fxl_pattern_detail">Detalle del patrón</string>
 </resources>

@@ -1092,6 +1092,9 @@ enum EffectI18nTable {
     aurea.generate.particular|42|plexus_width|fxl_plexus_width|
     aurea.generate.particular|43|plexus_opacity|fxl_plexus_opacity|
     aurea.generate.particular|44|plexus_points|fxl_plexus_points|
+    aurea.generate.particular|45|plexus_surface|fxl_network_surface|
+    aurea.generate.particular|46|plexus_surface_opacity|fxl_surface_opacity|
+    aurea.generate.particular|47|plexus_surface_points|fxl_surface_points|
     aurea.shape3d.layout|0|rotation_x|fxl_part_rotation_x|
     aurea.shape3d.layout|1|rotation_y|fxl_part_rotation_y|
     aurea.shape3d.layout|2|rotation_z|fxl_part_rotation_z|
@@ -1896,7 +1899,7 @@ enum EffectI18nTable {
     aurea.transition.luma_dissolve|0|progress|fx_progresso|
     aurea.transition.luma_dissolve|1|softness|fx_suavidade_borda|
     aurea.transition.luma_dissolve|2|invert|fx_inverter|
-    aurea.transition.luma_dissolve|3|map|fxl_map|fxo_layer_luminance,fx_ruido,fxo_linear_gradient,fxo_radial_gradient,fxo_another_layer
+    aurea.transition.luma_dissolve|3|map|fxl_map|fxo_layer_luminance,fx_ruido,fxo_linear_gradient,fxo_radial_gradient,fxo_another_layer,fxo_organic,fxo_pixel_dust,fxl_scanlines,fxo_coarse_grain,fxo_square_blocks,fxo_crosshatch_grid,fxo_flames,fxo_ink_blots,fxo_camouflage,fxo_hexagonal_grid,fxo_horizontal_bands,fxo_halftone_rings,fxo_topographic,fxo_rough_edge,fxo_splatter,fxo_polka_dots,fxo_shards
     aurea.transition.luma_dissolve|4|map_layer|fx3_camada_mapa|
     aurea.transition.luma_dissolve|5|noise_scale|fxl_noise_scale|
     aurea.transition.luma_dissolve|6|seed|fxl_noise_seed|
@@ -1905,6 +1908,8 @@ enum EffectI18nTable {
     aurea.transition.luma_dissolve|9|edge_color|fxl_edge_color|
     aurea.transition.luma_dissolve|10|mode|fxl_mode|fxl_fade_out,fxo_appear
     aurea.transition.luma_dissolve|11|center|fxl_gradient_center|
+    aurea.transition.luma_dissolve|12|pattern_rotation|fxl_pattern_rotation|
+    aurea.transition.luma_dissolve|13|pattern_detail|fxl_pattern_detail|
     """
 
     /// "typeId#índice" → dica do parâmetro.

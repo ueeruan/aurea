@@ -1178,7 +1178,21 @@ private:
     /// shutter_sample_count com o teto de amostras do export em GPU fraca.
     [[nodiscard]] u32 capped_shutter_samples(const MotionBlurSettings& settings, bool finalQuality, f32 quality,
             f64 pathPixels, bool changing = false, u32 resourceLimit = ShutterPlan::kHardLimit) const noexcept {
-        if (exportBlurCap_ >= 2) resourceLimit = std::min(resourceLimit, exportBlurCap_);
+        // 0.2.1 (beta 0.2.0: "na prévia o motion blur 3D está normal, no
+        // export sai outro"): o teto adaptativo do celular cortava o rastro
+        // para 16 amostras (e até 2), enquanto a prévia usa uma amostra a
+        // cada ~0,75 px da PRÉVIA (≈1,5 px do export, a prévia é meia
+        // resolução). Rastro longo virava cópias separadas no arquivo. O teto
+        // agora só tira o excesso acima da densidade da prévia, e nunca desce
+        // abaixo das amostras escolhidas pela pessoa.
+        if (exportBlurCap_ >= 2) {
+            const u32 ceiling = std::clamp(settings.adaptiveLimit, 2u, ShutterPlan::kHardLimit);
+            const u32 chosen = std::min(ceiling, std::clamp(settings.samples, 2u, 64u));
+            const f64 previewDensity = std::isfinite(pathPixels)
+                ? std::ceil(std::max(0.0, pathPixels) / 1.5) + 1.0 : static_cast<f64>(ceiling);
+            const u32 floor = std::max(chosen, static_cast<u32>(std::min<f64>(previewDensity, ceiling)));
+            resourceLimit = std::min(resourceLimit, std::max(exportBlurCap_, floor));
+        }
         return shutter_sample_count(settings, finalQuality, quality, pathPixels, changing, resourceLimit);
     }
     void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }

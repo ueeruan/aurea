@@ -186,8 +186,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         keywords: "saber video copilot sabre de luz lightsaber neon energia energy brilho glow raio laser traco stroke contorno outline eletrico electric fogo fire plasma magia magic write on desenhar mascara mask texto",
         principal: [6, 7, 8, 1, 2, 3, 4, 5, 11, 12, 31])),
     ("aurea.transition.luma_dissolve", FxEffectHuman(
-        keywords: "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn",
-        principal: [0, 3, 1, 10, 2, 8, 9])),
+        keywords: "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn padrao pattern pixel grao grain blocos blocks hexagonal halftone camuflagem camo chamas flame tinta ink respingos splatter bolinhas polkadot estilhacos shards",
+        principal: [0, 3, 1, 10, 2, 8, 9, 5, 12, 13])),
     ("aurea.transform", FxEffectHuman(
         name: "fx_name_transform",
         keywords: "transform mover posicao escala girar rotacao opacidade",

@@ -100,8 +100,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2187 já distribuídos; nunca reduzir o código.
-        versionCode = 2188
-        versionName = "0.2.0"
+        versionCode = 2189
+        versionName = "0.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

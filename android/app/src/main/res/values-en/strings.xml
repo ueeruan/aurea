@@ -1792,7 +1792,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea 0.2.0 (2187) • 2026-10-15\n\n• PreRender: playback now plays from the cache without stutter, reading frames ahead, and uses less memory on phones with 4 GB of RAM.\n• 3D: \"Swap 3D texture\" shows on the object again, including with motion blur and inside a 3D scene with other layers.\n• 3D: the Material tab has Choose, Replace and Remove image again.\n• Position: X and Y in one box with Z beside it, inside the drag area, with one decimal; also on 3D layers.\n• Export: if the phone encoder fails at the start, Aurea switches to another one by itself without redoing the video or losing the sound.</string>
+    <string name="release_notes_body">Aurea 0.2.1 (2189) • 2026-10-16\n\n• 3D motion blur: the export now matches the preview, with a smooth trail instead of separate copies.\n• Luma Dissolve: 17 new patterns (organic, pixel dust, flames, ink blots, camouflage, hexagonal grid, shards and more), with pattern rotation and detail.\n• 3D Particles: \"Network surface\" fills the space between connected points with transparent faces, with adjustable opacity and number of points.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -4389,4 +4389,24 @@ to edit the curve.</string>
     <string name="fxl_interpolate_frames">Interpolate Frames</string>
     <string name="fx_name_time_slice">TimeSlice</string>
     <string name="fx_desc_time_slice">Splits the layer into slices, and each slice shows a different moment of the video. A spinning object turns into a helix.</string>
+    <string name="fxl_network_surface">Network surface</string>
+    <string name="fxl_surface_opacity">Surface opacity</string>
+    <string name="fxl_surface_points">Surface points</string>
+    <string name="fxo_organic">Organic</string>
+    <string name="fxo_pixel_dust">Pixel dust</string>
+    <string name="fxo_coarse_grain">Coarse grain</string>
+    <string name="fxo_square_blocks">Square blocks</string>
+    <string name="fxo_crosshatch_grid">Crosshatch grid</string>
+    <string name="fxo_flames">Flames</string>
+    <string name="fxo_ink_blots">Ink blots</string>
+    <string name="fxo_camouflage">Camouflage</string>
+    <string name="fxo_hexagonal_grid">Hexagonal grid</string>
+    <string name="fxo_halftone_rings">Halftone / rings</string>
+    <string name="fxo_topographic">Topographic</string>
+    <string name="fxo_rough_edge">Rough edge</string>
+    <string name="fxo_splatter">Splatter</string>
+    <string name="fxo_polka_dots">Polka dots</string>
+    <string name="fxo_shards">Shards</string>
+    <string name="fxl_pattern_rotation">Pattern rotation</string>
+    <string name="fxl_pattern_detail">Pattern detail</string>
 </resources>

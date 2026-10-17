@@ -47,10 +47,13 @@ struct ParticularUniforms {
     Mat4 previousParticleProjection;
     Mat4 layerFromComp;
     Vec4 plexus;                          // distância (px; 0 = sem rede), espessura (px), opacidade, pontos
+    Vec4 plexusSurface;                   // ligada (0/1), opacidade, pontos S, -
 };
-static_assert(sizeof(ParticularUniforms) == 528, "layout std140 do particular.vert");
+static_assert(sizeof(ParticularUniforms) == 544, "layout std140 do particular.vert");
 /// Teto de pontos ligados na rede: M(M−1)/2 pares × 6 vértices (300 → ~270 mil).
 constexpr u32 kMaxPlexusPoints = 300;
+/// Teto da superfície: S(S−1)(S−2)/6 trios × 3 vértices (80 → ~246 mil).
+constexpr u32 kMaxSurfacePoints = 80;
 
 Vec4 linear(Vec4 c) noexcept {
     return Vec4{Color::srgb_to_linear(std::clamp(c.x, 0.0f, 1.0f)), Color::srgb_to_linear(std::clamp(c.y, 0.0f, 1.0f)),
@@ -120,6 +123,11 @@ public:
         p.add_float("plexus_width", "Espessura da linha", 1.2f, 0.2f, 12.0f, kAnimPx, "px");
         p.add_float("plexus_opacity", "Opacidade da rede", 70.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_int("plexus_points", "Pontos ligados", 150, 2, static_cast<i32>(kMaxPlexusPoints));
+        // Superfície da rede: um triângulo transparente em cada trio de pontos
+        // ligados entre si (as faces da malha do plexus).
+        p.add_bool("plexus_surface", "Superfície da rede", false);
+        p.add_float("plexus_surface_opacity", "Opacidade da superfície", 25.0f, 0.0f, 100.0f, kAnimPct, "%");
+        p.add_int("plexus_surface_points", "Pontos da superfície", 40, 3, static_cast<i32>(kMaxSurfacePoints));
     }
 
     bool is_identity(const EffectEval&) const noexcept override { return false; }
@@ -247,11 +255,21 @@ public:
             if (u.plexus.x > 0.0f) plexusVerts = points * (points - 1) / 2 * 6;
             else u.plexus = Vec4{};
         }
+        u32 surfaceVerts = 0;
+        if (plexusVerts && e.b(kPlexusSurface)) {
+            const f32 opacity = pct(e, kPlexusSurfaceOpacity, 0.0f, 100.0f);
+            const u32 sp = std::min(static_cast<u32>(u.plexus.w),
+                                    static_cast<u32>(std::clamp(e.e(kPlexusSurfacePoints), 3u, kMaxSurfacePoints)));
+            if (opacity > 0.0f && sp >= 3) {
+                u.plexusSurface = Vec4{1.0f, opacity, static_cast<f32>(sp), 0.0f};
+                surfaceVerts = sp * (sp - 1) * (sp - 2) / 6 * 3;
+            }
+        }
 
         const bool additive = e.b(kAddMode);
         const FGTexture sprites = ctx.texture("particular-particulas", w, h);
         if (ctx.geometry_pass("particular", PassStage::Effects, sprites, ShaderId::effects_particular_vert,
-                              ShaderId::effects_particular_frag, {}, &u, sizeof(u), draw ? slots * 6u + plexusVerts : 0u, false,
+                              ShaderId::effects_particular_frag, {}, &u, sizeof(u), draw ? slots * 6u + plexusVerts + surfaceVerts : 0u, false,
                               true, additive ? BlendMode::Add : BlendMode::Normal) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }

@@ -108,6 +108,19 @@ struct PeriodicPlane {
     Vec4 box{}, tile{}, flags{}, mips{}, window{};
     u32 count = 0;
 };
+/// Inversa de UM instante (camada → composição) para o plano periódico: leva
+/// a direção do raio à coordenada da camada, e é daqui que o shader tira onde
+/// a parede está naquele instante. `build_scene_plane` grava a do quadro;
+/// o desfoque de movimento regrava a de cada amostra do obturador com a matriz
+/// daquele instante — sem isso as K amostras desenham a parede na MESMA pose e
+/// a média sai igual ao quadro sem desfoque (o motion blur "não faz nada" com
+/// Motion Tile). Escreve só `inverseX/Y/W`; `box`, `tile`, `flags`, `mips`,
+/// `window` e `textures` ficam como estão. Devolve false, sem tocar em `out`,
+/// quando a homografia é degenerada (plano de perfil, determinante ~0): aí o
+/// chamador mantém a inversa anterior.
+[[nodiscard]] bool periodic_inverse(const Mat4& compFromLayer, u32 compWidth, u32 compHeight,
+                                    PeriodicPlane& out) noexcept;
+
 [[nodiscard]] bool build_scene_plane(EffectBuildContext& ctx, const EffectEval& eval,
                                     const LayerImage& input, PeriodicPlane& out) noexcept;
 

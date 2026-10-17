@@ -27,6 +27,9 @@ struct TransformView: View {
                              "material:rounded.Opacity", "material:rounded.FilterCenterFocus", "material:rounded.BlurOn", "sparkles"]
     private var id: Int64 { model.primarySelection ?? 0 }
     private var animatedMask: UInt32 { (model.detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0 }
+    /// Keyframes da propriedade no quadro do cabeçote (a edição em cima de um
+    /// deles edita aquele keyframe, com ou sem Auto-Key).
+    private var keyHereMask: UInt32 { (model.detail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0 }
     private var keyMask: UInt32 { (model.detail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0 }
     private var timeFlags: UInt32 { (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0 }
     private var uses3D: Bool {
@@ -871,11 +874,12 @@ struct TransformView: View {
         let grouped = threeD && properties[0] < 12 && properties.allSatisfy { $0 >= base && $0 < base + 3 }
         let group: [UInt32] = grouped && model.autoKeyTransforms ? [base, base + 1, base + 2] : properties
         let keyed = group.contains { animatedMask & (1 << $0) != 0 }
+        let keyHere = group.contains { keyHereMask & (1 << $0) != 0 }
         let snapshot = group.map { ($0, changes[$0] ?? value($0)) }, local = model.localPlayhead
         model.mutate { core in
             if !gestureOpen { core.beginUndoGroup() }
             // Auto-Key + trilha animada grava keyframe também na cena 3D (regra do modelo).
-            if model.transformLayout(animated: keyed) {
+            if model.transformLayout(animated: keyed, keyHere: keyHere) {
                 for (property, amount) in snapshot { core.layoutTransform(id, property: property, value: amount) }
             } else if keyed {
                 for (property, amount) in snapshot { core.insertKeyframe(forLayer: id, property: property, time: local, value: amount) }

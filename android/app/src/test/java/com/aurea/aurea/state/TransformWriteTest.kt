@@ -62,4 +62,14 @@ class TransformWriteTest {
             assertEquals("scene=$scene animated=$animated", TransformWrite.Layout, transformWrite(scene, autoKey = false, animated = animated))
         }
     }
+
+    /** Beta 0.2.1: "adicionei dois keyframes, mexi em um e nada mudou" com o Auto-Key desligado. */
+    @Test fun editingOnAKeyframeChangesThatKeyframeEvenWithAutoKeyOff() {
+        for (scene in listOf(true, false)) for (autoKey in listOf(true, false)) {
+            assertEquals("scene=$scene autoKey=$autoKey", TransformWrite.Keyframe,
+                transformWrite(scene, autoKey = autoKey, animated = true, keyHere = true))
+        }
+        // Trilha sem chave: o cabeçote nunca está "em cima" de um keyframe.
+        assertEquals(TransformWrite.Layout, transformWrite(sceneEditor = false, autoKey = false, animated = false, keyHere = true))
+    }
 }

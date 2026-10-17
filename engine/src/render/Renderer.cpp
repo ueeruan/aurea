@@ -3886,8 +3886,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 //   frame + sourceUs >= 0 → quadro exato novo: converter e guardar
                 //   frame + sourceUs <  0 → aproximado: só a prévia, não guarda
                 //   sem frame             → já está no cache da GPU
+                // TOCANDO, nenhuma faixa vira pedido: o pedido Still trocava o
+                // alvo do decoder a cada quadro (a faixa mais antiga que faltava
+                // fica ATRÁS do playhead: seek ao keyframe), o pedido do quadro
+                // atual voltava no prepare seguinte, cortava o decode da faixa
+                // (descartada no caminho) e o seguinte pedia de novo — o decoder
+                // vivia de seek e a prévia congelava. Tocando, as faixas entram
+                // quando passam pela janela do playback (as de trás já viraram
+                // textura quando estavam à frente); a que ainda não chegou sai
+                // aproximada. Parado, o render seguinte busca o resto.
                 if (!rl.temporal.empty() && rl.temporal.front().slice.w > 0.0f) {
-                    bool requestedMissing = !exact;
+                    bool requestedMissing = !exact || (settings.previewPlaying && !settings.finalQuality);
                     const u64 sliceKey = rl.id.pack();
                     for (RenderLayer::TemporalSample& sample : rl.temporal) {
                         f64 us = l->source_frame(FrameIndex{static_cast<i64>(std::llround(sample.time))}) * 1e6 / fps;
@@ -3908,7 +3917,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         // renderiza quando nada falta. O desenho marca o quadro
                         // como incompleto; o render guarda as faixas que já
                         // chegaram e o export tenta de novo até fechar todas.
-                        // A prévia mostra a aproximada enquanto isso.
+                        // A prévia mostra a aproximada enquanto isso (parada, o
+                        // quadro também fica incompleto: ver finish_render).
                         if (f && !settings.finalQuality) { sample.frame = std::move(f); sample.sourceUs = -1; }
                         if (!requestedMissing) {
                             req.targetUs = sliceUs;
@@ -5159,6 +5169,18 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                         if (bm.empty()) continue;
                         const usize si = std::min<usize>(bm.size() - 1, static_cast<usize>(s) * bm.size() / k);
                         p.clipFromLayer = clipComp * bm[si];
+                        // A PAREDE PERIÓDICA DO MOTION TILE não é desenhada com
+                        // `clipFromLayer`: o quad cobre o quadro inteiro e cada
+                        // raio é resolvido pela INVERSA (NDC → camada) gravada
+                        // no plano. Essa inversa era a do instante do quadro, e
+                        // todas as amostras do obturador desenhavam a parede na
+                        // MESMA pose — a média saía igual ao quadro sem desfoque
+                        // ("com Motion Tile o motion blur não funciona"). Regrava
+                        // com a matriz da amostra, o mesmo produto que o desfoque
+                        // 2D usa para mover a camada.
+                        if (p.periodic.count)
+                            (void)motion_tile::periodic_inverse(bm[si], currentSnap_->compWidth,
+                                                               currentSnap_->compHeight, p.periodic);
                         const Vec4 c = p.clipFromLayer * Vec4{p.region.x + p.region.z * 0.5f, p.region.y + p.region.w * 0.5f, p.extrusion.count?p.extrusion.params.x*.5f:0.f, 1};
                         p.viewDepth = c.w;
                     }
@@ -6397,27 +6419,43 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                             }
                         }
                     } else if (sample.frame) {
-                        // Aproximado (prévia): transitório, nunca guardado.
+                        // Aproximado (prévia): transitório, nunca guardado. O
+                        // quadro não entra no cache da prévia como pronto e,
+                        // parado, fica incompleto (finish_render).
                         image = graph_.create_texture("timeslice-aproximada", sd);
                         convert = true;
+                        sliceApprox_ = true;
                     } else {
                         // Já convertida antes: só importa.
-                        std::lock_guard<std::mutex> sl(sliceMutex_);
-                        for (SliceTexture& e : sliceCache_) {
-                            if (e.layer != sliceKey || e.us != sample.sourceUs || !e.tex.valid()) continue;
-                            if (e.w != sw || e.h != sh) {
-                                // Densidade mudou (prévia ↔ zoom): refazer pelo decoder.
-                                backend_->destroy_texture(e.tex);
-                                e.tex = TextureHandle{};
+                        bool resample = false;
+                        {
+                            std::lock_guard<std::mutex> sl(sliceMutex_);
+                            for (SliceTexture& e : sliceCache_) {
+                                if (e.layer != sliceKey || e.us != sample.sourceUs || !e.tex.valid()) continue;
+                                e.lastFrame = frameNumber;
+                                if (e.fgFrame != frameNumber) {
+                                    TextureDesc ed = sd;
+                                    ed.width = e.w; ed.height = e.h;
+                                    e.fg = graph_.import_texture("timeslice-faixa", e.tex, ed);
+                                    e.fgFrame = frameNumber;
+                                }
+                                image = e.fg;
+                                resample = e.w != sw || e.h != sh;
                                 break;
                             }
-                            e.lastFrame = frameNumber;
-                            if (e.fgFrame != frameNumber) {
-                                e.fg = graph_.import_texture("timeslice-faixa", e.tex, sd);
-                                e.fgFrame = frameNumber;
-                            }
-                            image = e.fg;
-                            break;
+                        }
+                        if (resample) {
+                            // Densidade mudou (AUTO, refino parado, zoom): a faixa
+                            // guardada é o instante CERTO noutra resolução. Destruir
+                            // e pedir ao decoder fazia o refino e o render seguinte
+                            // (na densidade de antes) desfazerem um ao outro sem
+                            // fim; reamostrar para o tamanho pedido basta.
+                            const FGTexture stored = image;
+                            const Vec4 copyMap{1.0f, 1.0f, 0.0f, 0.0f};
+                            image = graph_.create_texture("timeslice-reamostrada", sd);
+                            if (ctx.fullscreen_pass("timeslice-reamostrada", PassStage::Decode, image, ShaderId::common_copy_frag,
+                                    {PassTexture{stored, {}, CommonSampler::LinearClamp}}, &copyMap, sizeof(copyMap)) == kInvalidIndex)
+                                image = FGTexture{};
                         }
                     }
                     if (convert) {
@@ -7194,6 +7232,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     const u64 effectsBypassedBefore = EffectGraph::bypassed_total();
     scene3d_.reset_incomplete();
     videoSourceFailed_ = false;
+    sliceApprox_ = false;
     videoUploadMs_ = 0;
     heavyScale_ = settings.finalQuality ? 1.0f : settings.heavyScale;
     heavyStats_.lastParticleSlots = heavyStats_.lastParticleLayers = 0;
@@ -7723,6 +7762,13 @@ Status Renderer::finish_render(FrameSnapshot& snap, const RenderSettings& settin
         failedGraphFrame_ = backend_->last_submitted_frame();
     if (!endStatus.ok()) for (auto& target : completion.targets)
         if (target.texture.valid()) target.pendingFrame = completion.frame.frameNumber;
+    // TimeSlice com faixa aproximada: parado (e no scrub, no preparo do buffer,
+    // na captura), o quadro fica INCOMPLETO — o render seguinte pede a próxima
+    // faixa ao decoder. Antes ele saía "pronto": o Engine não redesenhava
+    // quando a faixa chegava, a prévia parada ficava com as aproximadas e o
+    // play começava sem as faixas de trás. Tocando, passa sem redesenho a cada
+    // quadro decodificado. Nos dois casos não entra no cache como pronto.
+    if (sliceApprox_ && !settings.previewPlaying) mark_incomplete(__FILE__, __LINE__);
     if (!incomplete_ && scene3d_.incomplete()) {
         incompleteFile_ = scene3d_.incomplete_file(); incompleteLine_ = scene3d_.incomplete_line();
     } else if (!incomplete_ && EffectGraph::bypassed_total() != completion.effectsBefore) {
@@ -7731,7 +7777,7 @@ Status Renderer::finish_render(FrameSnapshot& snap, const RenderSettings& settin
     incomplete_ = incomplete_ || scene3d_.incomplete()
         || EffectGraph::bypassed_total() != completion.effectsBefore;
     if (completion.cached) completion.cached->complete = result.ok() && endStatus.ok() && !incomplete_
-        && !snap.missingVideoFrames && !snap.staleVideoFrames
+        && !sliceApprox_ && !snap.missingVideoFrames && !snap.staleVideoFrames
         && EffectGraph::bypassed_total() == completion.effectsBefore
         && !scene3d_.incomplete()
         && (snap.scenes.empty() || !environment_pending());

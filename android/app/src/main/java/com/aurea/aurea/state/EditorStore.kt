@@ -899,6 +899,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var systemMem: android.app.ActivityManager.MemoryInfo? = null
     private val vsyncNs: Long by lazy { (1e9f / displayRefreshRate().coerceAtLeast(30f)).toLong() }
     private var scrubbing = false
+    /** Último passo do dedo no scrub (nanoTime). Scrub parado se fecha sozinho. */
+    private var lastScrubStepNs = 0L
     private var pendingPlayhead: Int? = null
     private var pendingPlayheadUntil = 0L
 
@@ -1427,6 +1429,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun updateIdle() {
         val loop = statusLoop ?: return
+        // Scrub abandonado (gesto cancelado, tela trocada): o motor fecha o
+        // dele sozinho, mas a flag daqui prendia a releitura do estado e o
+        // cabeçote da timeline ("a timeline congela o preview"). Fecha PARADO,
+        // como o motor: o dedo pode só estar parado na régua.
+        if (scrubbing && System.nanoTime() - lastScrubStepNs > 1_500_000_000L) { scrubEnd(); pause() }
         val sig = statusSignature()
         val busy = status.playing || status.previewBufferStatus and Int.MIN_VALUE != 0 || scrubbing || gestureDepth > 0 || hudVisible || sig != lastSignature
         lastSignature = sig
@@ -3160,7 +3167,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (values.size != 3 || values.any { !it.isFinite() }) return
         val d = (if (id == primary) detail else detailOf(id)) ?: return
         group("scale XYZ") {
-            when (transformWrite(sceneEditor, autoKeyTransforms, (3..5).any { d.isAnimated(it) })) {
+            when (transformWrite(sceneEditor, autoKeyTransforms, (3..5).any { d.isAnimated(it) },
+                keyHere = (3..5).any { d.hasKeyAtPlayhead(it) })) {
                 TransformWrite.Keyframe -> (0..2).forEach { gestureKeyframe(id, 3 + it, values[it], gestureKeyFlags(wholeGroup = true)) }
                 TransformWrite.Layout -> (0..2).forEach { layoutTransform(id, 3 + it, values[it]) }
                 TransformWrite.Static -> setScale(id, values[0], values[1], values[2])
@@ -3180,8 +3188,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         for ((base, values) in listOf(TrackProperty.ANCHOR_X to anchor, TrackProperty.POSITION_X to position)) {
             if (keyTransformGroup(id, d, (0..2).associate { base + it to values[it] })) continue
             val animated = (0..2).any { d.isAnimated(base + it) }
+            val keyHere = (0..2).any { d.hasKeyAtPlayhead(base + it) }
             send {
-                when (transformWrite(sceneEditor, autoKeyTransforms, animated)) {
+                when (transformWrite(sceneEditor, autoKeyTransforms, animated, keyHere)) {
                     // Como `setScale3`: o vetor inteiro no cabeçote (Z incluso).
                     TransformWrite.Keyframe -> (0..2).forEach { gestureKeyframe(id, base + it, values[it], gestureKeyFlags(wholeGroup = true)) }
                     TransformWrite.Layout -> (0..2).forEach { layoutTransform(id, base + it, values[it]) }
@@ -3200,7 +3209,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = if (id == primary) detail else detailOf(id)
         if (d != null && keyTransformGroup(id, d, mapOf(property to value))) return
         // Trilha animada com Auto-Key marca keyframe TAMBÉM na cena 3D (ver `transformWrite`).
-        if (property in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, d?.isAnimated(property) == true) == TransformWrite.Layout) {
+        if (property in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, d?.isAnimated(property) == true,
+                d?.hasKeyAtPlayhead(property) == true) == TransformWrite.Layout) {
             send { layoutTransform(id, property, value) }; refreshNow(); return
         }
         d ?: return
@@ -3240,7 +3250,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = if (id == primary) detail else detailOf(id)
         if (d != null && keyTransformGroup(id, d, mapOf(pa to va, pb to vb))) return
         val animated = d?.isAnimated(pa) == true || d?.isAnimated(pb) == true
-        if (pa in 0..14 && pb in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, animated) == TransformWrite.Layout) {
+        val keyHere = d?.hasKeyAtPlayhead(pa) == true || d?.hasKeyAtPlayhead(pb) == true
+        if (pa in 0..14 && pb in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, animated, keyHere) == TransformWrite.Layout) {
             send { layoutTransform(id, pa, va); layoutTransform(id, pb, vb) }
             refreshNow(); return
         }
@@ -3626,6 +3637,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Scrub: o playhead da UI segue o dedo; o decoder coalesce os pedidos. */
     fun scrubStart(frame: Int) {
         scrubbing = true
+        lastScrubStepNs = System.nanoTime()
         val f = clampFrame(frame)
         send { scrubBegin(); scrub(frameToNs(f)) }
         playhead = f
@@ -3633,6 +3645,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun scrubTo(frame: Int) {
         val f = clampFrame(frame)
+        lastScrubStepNs = System.nanoTime()
         if (f == playhead) return
         send { scrub(frameToNs(f)) }
         playhead = f
@@ -4254,7 +4267,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 if (kotlin.math.abs(out[axis] - current[axis]) < .00001f) continue
                 val property = base + axis
                 // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote.
-                if (transformWrite(sceneEditor, autoKeyTransforms, d.isAnimated(property)) == TransformWrite.Keyframe) {
+                if (transformWrite(sceneEditor, autoKeyTransforms, d.isAnimated(property),
+                        d.hasKeyAtPlayhead(property)) == TransformWrite.Keyframe) {
                     gestureKeyframe(id, property, out[axis], gestureKeyFlags(wholeGroup = false))
                 } else layoutTransform(id, property, out[axis])
             }

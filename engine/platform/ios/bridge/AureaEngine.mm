@@ -883,7 +883,12 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 // Comandos (bloco)
 // =============================================================================
 - (void)beginBatch {
-    _batch.clear();
+    // Pendente NÃO se perde: entra no motor antes de abrir o bloco. `clear()`
+    // descartava em silêncio tudo o que a UI mandou sem `flush` — os controles
+    // de texto (tamanho, cor, alinhamento, cor e largura do contorno) iam para
+    // o lixo no próximo `beginBatch` de um `mutate`/gesto e a tela ficava
+    // "sem resposta" (relato do beta). `submit` já esvazia o bloco.
+    [self flush];
 }
 
 - (NSInteger)flush {
@@ -1709,6 +1714,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         c->text_size.layer = layer_of(layerId);
         c->text_size.size = size;
     }
+    [self flush];
 }
 
 - (void)setText:(long long)layerId colorR:(float)r g:(float)g b:(float)b a:(float)a {
@@ -1716,6 +1722,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         c->text_color.layer = layer_of(layerId);
         c->text_color.r = r; c->text_color.g = g; c->text_color.b = b; c->text_color.a = a;
     }
+    [self flush];
 }
 
 - (void)setText:(long long)layerId alignment:(uint32_t)alignment {
@@ -1723,6 +1730,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         c->text_align.layer = layer_of(layerId);
         c->text_align.alignment = alignment;
     }
+    [self flush];
 }
 
 - (void)setText:(long long)layerId strokeWidth:(float)width {
@@ -1730,6 +1738,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         c->text_stroke_width.layer = layer_of(layerId);
         c->text_stroke_width.width = width;
     }
+    [self flush];
 }
 
 - (NSInteger)addTextAnimator:(long long)layerId props:(uint32_t)props {
@@ -2662,6 +2671,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
         c->text_color.layer = layer_of(layerId);
         c->text_color.r = r; c->text_color.g = g; c->text_color.b = b; c->text_color.a = a;
     }
+    [self flush];
 }
 
 - (void)setLayer:(long long)layerId audioSolo:(BOOL)solo {

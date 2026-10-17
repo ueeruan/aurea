@@ -680,3 +680,54 @@ AUREA_TEST(Gpu, MotionTilePeriodicMinificationIntegratesTheUnmirroredTileSeam) {
         AUREA_CHECK(error < .03);
     }
 }
+
+// MOTION BLUR COM MOTION TILE (relato: "se tiver motion tile, o motion blur
+// não funfa"). Um Motion Tile terminal num plano 3D não é rasterizado como
+// parede: o quad cobre o quadro inteiro e cada raio é resolvido pela inversa
+// (NDC → camada) gravada no plano periódico. Enquanto o obturador reusava a
+// inversa do instante do quadro, as K amostras desenhavam a parede na MESMA
+// pose e a média saía idêntica ao quadro sem desfoque.
+AUREA_TEST(Gpu, MotionTileOnAPlaneStillSmearsOnTheShutter) {
+    AUREA_REQUIRE_GPU();
+    Scene scene(320, 180);
+    const auto id = scene.image(reference_image(96, 54), 100, 90);
+    auto* layer = scene.comp->layer(id);
+    layer->threeD = true;
+    // 20 px por quadro, como o teste 2D do desfoque.
+    Track& px = layer->tracks.get_or_create(TrackProperty::PositionX);
+    px.set(layer->local_time(FrameIndex{0}), 100.f);
+    px.set(layer->local_time(FrameIndex{10}), 300.f);
+    auto& tile = scene.add_effect(id, effect_keys::kMotionTile);
+    tile.params[motion_tile::kTileWidth].constant.v[0] = 40;
+    tile.params[motion_tile::kTileHeight].constant.v[0] = 40;
+    tile.params[motion_tile::kMirror].constant = ParamValue::boolean(true);
+    auto& mb = scene.comp->motion_blur();
+    mb.enabled = true; mb.samples = 16; mb.previewSamples = 16;
+    mb.shutterAngle = 360; mb.shutterPhase = -90; mb.adaptiveLimit = 128;
+    const FrameIndex at{5};
+    const FloatImage sharp = scene.render(at);
+    layer->motionBlur = true;
+    const FloatImage blurred = scene.render(at);
+    f32 worst = 0; u32 changed = 0; f64 energySharp = 0, energyBlurred = 0;
+    for (usize i = 0; i < sharp.px.size(); ++i) {
+        worst = std::max(worst, std::fabs(sharp.px[i] - blurred.px[i]));
+        if (i % 4 < 3) { energySharp += sharp.px[i]; energyBlurred += blurred.px[i]; }
+    }
+    for (usize i = 0; i + 3 < sharp.px.size(); i += 4) {
+        bool diff = false;
+        for (u32 k = 0; k < 3; ++k) diff |= std::fabs(sharp.px[i + k] - blurred.px[i + k]) > .004f;
+        changed += diff ? 1u : 0u;
+    }
+    std::printf("    plano com Motion Tile: %u pixels mudam, máximo %.4f, energia %.3f\n",
+                changed, worst, energyBlurred / std::max(1e-6, energySharp));
+    AUREA_CHECK(worst > .05f);           // a parede anda dentro do obturador
+    AUREA_CHECK(changed > 300u);
+    AUREA_CHECK(energyBlurred / std::max(1e-6, energySharp) > .7);
+    AUREA_CHECK(energyBlurred / std::max(1e-6, energySharp) < 1.3);
+    // Desligado, nada muda: o desfoque não é um filtro fixo na imagem.
+    layer->motionBlur = false;
+    const FloatImage again = scene.render(at);
+    f32 repeat = 0;
+    for (usize i = 0; i < sharp.px.size(); ++i) repeat = std::max(repeat, std::fabs(sharp.px[i] - again.px[i]));
+    AUREA_CHECK(repeat < .002f);
+}

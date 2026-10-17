@@ -392,6 +392,10 @@ struct RenderSettings {
     u64 previewCacheComposition = 0;
     bool previewCacheOnly = false; // prepare a future frame without presenting it
     bool rawPlayback = false;
+    /// Prévia TOCANDO (o relógio do playback anda). Parado, no scrub, no preparo
+    /// do buffer antes do play e no export: false. O TimeSlice em vídeo não
+    /// tira o decoder do fluxo do playback para buscar faixas enquanto toca.
+    bool previewPlaying = false;
     /// Opt-in completed540p composition. Default leaves ordinary preview/export
     /// unchanged; presentation still applies the normal zoom/color/checkerboard.
     TextureHandle cachedComposition{};
@@ -953,6 +957,7 @@ private:
     mutable std::mutex sliceMutex_;
     u64 sliceGraphFrame_ = ~0ull;   ///< quadro do grafo que gravou as faixas mais novas
     u64 sliceSalt_ = 0;             ///< planos de CPU próprios para a conversão de uma faixa
+    bool sliceApprox_ = false;      ///< este quadro desenhou faixa aproximada (o instante ainda não chegou)
     [[nodiscard]] bool has_slice_texture(u64 layer, i64 us) const noexcept;
     void release_slice_cache(bool destroy) noexcept;
     ShaderLibrary shaders_;

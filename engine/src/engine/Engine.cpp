@@ -9778,6 +9778,11 @@ bool Engine::apply_text_preset(u64 layerId, u32 preset) noexcept {
         for (u32 i = 0; i < l->text.animators.size(); ++i) {
             Track& amount = l->tracks.get_or_create(TrackProperty::TextAnimParam, i, text::kSelAmount);
             if (amount.expression) continue; // Juan expressions gate localTime themselves.
+            // O preset que anima a PRÓPRIA quantidade (Text Explosion: 100 → 0
+            // no obturador) manda nela. Cravar "100 Hold" em `s` por cima
+            // segurava o valor até o fim e soltava tudo de uma vez: a explosão
+            // aparecia parada ("Text Explosion não funciona").
+            if (amount.driven()) continue;
             (void)amount.set(l->local_time(l->start), 0.0f, Interpolation::Hold);
             (void)amount.set(FrameIndex{s}, 100.0f, Interpolation::Hold);
         }
@@ -10774,6 +10779,9 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
                               : playback_.mode() == PlaybackMode::Scrubbing ? DecodeMode::Scrub
                                                                             : DecodeMode::Still;
         const i32 decodeDirection = buffering ? (playback_.speed() < 0 ? -1 : 1) : playback_.direction();
+        // Parado o decoder também anda em Playback (buffering acima): só aqui
+        // se sabe se o relógio anda. Tocando, o TimeSlice não pede faixas.
+        rs.previewPlaying = playing;
         if (cachedPreview && !rs.rawPlayback) {
             snapshot_ = FrameSnapshot{};
             snapshot_.compWidth = comp->width(); snapshot_.compHeight = comp->height(); snapshot_.time = t;
@@ -14916,9 +14924,35 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         ctx->frozenAssetBudget = source_asset_room_locked();
         ctx->audioCache = std::make_unique<audio::AudioBlockCache>(config_.mediaFactory, 16ull << 20, false);
     }
-    if (const Status frozen = export_recovery::capture_snapshot(std::move(frozenBytes), frozenComposition, freezeSettings,
-            [this](const std::string& path) { return resolve_asset_path(path); },
-            ctx->frozenProject, ctx->recovery, false); !frozen.ok()) return frozen;
+    // A MESMA resolução de fontes do vídeo. `add_path` recusa qualquer coisa
+    // que não seja um arquivo — e a mídia vinda do seletor do Android é
+    // `content://`, não um caminho. O vídeo passava pelo resolvedor da
+    // plataforma (que copia a fonte para Documents) e exportava; o GIF, o PNG
+    // e a sequência não, e recusavam QUALQUER projeto com mídia do seletor
+    // antes de desenhar um quadro ("export de imagem falha"; a cópia com mídia
+    // embutida funcionava porque o arquivo já estava no app).
+    Status sourceStatus;
+    std::unordered_map<std::string, std::string> preparedPaths;
+    const Status frozen = export_recovery::capture_snapshot(std::move(frozenBytes), frozenComposition, freezeSettings,
+        [&](const std::string& path) {
+            if (ctx->cancelRequested.load(std::memory_order_acquire)) {
+                sourceStatus = Errc::Cancelled; return std::string{};
+            }
+            if (const auto found = preparedPaths.find(path); found != preparedPaths.end()) return found->second;
+            std::string resolved = resolve_asset_path(path);
+            if (config_.exportAssetPathResolver) {
+                auto persistent = config_.exportAssetPathResolver(resolved, config_.documentsDirectory,
+                                                                 &ctx->cancelRequested);
+                if (!persistent.ok()) { sourceStatus = persistent.status(); return std::string{}; }
+                resolved = std::move(*persistent);
+            }
+            preparedPaths.emplace(path, resolved);
+            return resolved;
+        }, ctx->frozenProject, ctx->recovery, false);
+    // A causa da fonte (cancelado, cópia recusada) vem antes do erro genérico
+    // que o `add_path` devolve quando o caminho chega vazio.
+    if (!sourceStatus.ok()) return sourceStatus;
+    if (!frozen.ok()) return frozen;
     if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
     if (settings.format == ImageExportFormat::Gif && ctx->frames > kGifMaxFrames)
         return Status{Errc::NotSupported, "GIF longo demais: use um trecho menor ou menos quadros por segundo"};

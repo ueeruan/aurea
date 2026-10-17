@@ -220,6 +220,22 @@ bool upgrade_legacy_layout(Layer& layer, EffectInstance& fx) noexcept {
     return true;
 }
 
+bool periodic_inverse(const Mat4& m, u32 compWidth, u32 compHeight, PeriodicPlane& out) noexcept {
+    if (!compWidth || !compHeight) return false;
+    // Invert the plane homography in double precision. Coordinates are NDC,
+    // so fragment interpolation never subtracts a huge finite tile-wall box.
+    const f64 sx=2./compWidth, sy=2./compHeight;
+    const f64 a=sx*m.col[0].x-m.col[0].w,b=sx*m.col[1].x-m.col[1].w,c=sx*m.col[3].x-m.col[3].w;
+    const f64 d=sy*m.col[0].y-m.col[0].w,f=sy*m.col[1].y-m.col[1].w,g=sy*m.col[3].y-m.col[3].w;
+    const f64 h=m.col[0].w,i=m.col[1].w,j=m.col[3].w;
+    const f64 determinant=a*(f*j-g*i)-b*(d*j-g*h)+c*(d*i-f*h);
+    if (!std::isfinite(determinant)||std::fabs(determinant)<1e-15) return false;
+    out.inverseX={static_cast<f32>((f*j-g*i)/determinant),static_cast<f32>((c*i-b*j)/determinant),static_cast<f32>((b*g-c*f)/determinant),0};
+    out.inverseY={static_cast<f32>((g*h-d*j)/determinant),static_cast<f32>((a*j-c*h)/determinant),static_cast<f32>((c*d-a*g)/determinant),0};
+    out.inverseW={static_cast<f32>((d*i-f*h)/determinant),static_cast<f32>((b*h-a*i)/determinant),static_cast<f32>((a*f-b*d)/determinant),0};
+    return true;
+}
+
 bool build_scene_plane(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input,
                        PeriodicPlane& out) noexcept {
     out = {};
@@ -234,18 +250,7 @@ bool build_scene_plane(EffectBuildContext& ctx, const EffectEval& e, const Layer
         if (overlap.w > .5f && overlap.h > .5f) box = overlap;
     }
     if (!(box.w>0 && box.h>0)) return false;
-    // Invert the plane homography in double precision. Coordinates are NDC,
-    // so fragment interpolation never subtracts a huge finite tile-wall box.
-    const Mat4& m=pl.compFromLayer;
-    const f64 sx=2./pl.compWidth, sy=2./pl.compHeight;
-    const f64 a=sx*m.col[0].x-m.col[0].w,b=sx*m.col[1].x-m.col[1].w,c=sx*m.col[3].x-m.col[3].w;
-    const f64 d=sy*m.col[0].y-m.col[0].w,f=sy*m.col[1].y-m.col[1].w,g=sy*m.col[3].y-m.col[3].w;
-    const f64 h=m.col[0].w,i=m.col[1].w,j=m.col[3].w;
-    const f64 determinant=a*(f*j-g*i)-b*(d*j-g*h)+c*(d*i-f*h);
-    if (!std::isfinite(determinant)||std::fabs(determinant)<1e-15) return false;
-    out.inverseX={static_cast<f32>((f*j-g*i)/determinant),static_cast<f32>((c*i-b*j)/determinant),static_cast<f32>((b*g-c*f)/determinant),0};
-    out.inverseY={static_cast<f32>((g*h-d*j)/determinant),static_cast<f32>((a*j-c*h)/determinant),static_cast<f32>((c*d-a*g)/determinant),0};
-    out.inverseW={static_cast<f32>((d*i-f*h)/determinant),static_cast<f32>((b*h-a*i)/determinant),static_cast<f32>((a*f-b*d)/determinant),0};
+    if (!periodic_inverse(pl.compFromLayer, pl.compWidth, pl.compHeight, out)) return false;
     out.box={box.x,box.y,box.w,box.h};
     out.tile={std::max(p.tileX,1e-4f),std::max(p.tileY,1e-4f),p.centerX,p.centerY};
     out.flags={p.mirror?1.f:0.f,p.phaseTurns,p.horizontalPhase?1.f:0.f,p.legacyClamp?1.f:0.f};

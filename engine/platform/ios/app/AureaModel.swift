@@ -558,10 +558,14 @@ final class AureaModel: ObservableObject {
     @Published var showAllKeyframes: Bool = true
     @Published var autoKeyTransforms = true
     /// Como um gesto de transform escreve no motor (a MESMA regra do Android,
-    /// `transformWrite`): Auto-Key desligado desloca a animação inteira; na
-    /// cena 3D só a trilha PARADA é deslocada — a animada grava keyframe no
-    /// cabeçote, como fora dela. Antes a cena nunca marcava keyframe nenhum.
-    func transformLayout(animated: Bool) -> Bool { !autoKeyTransforms || (sceneEditor && !animated) }
+    /// `transformWrite`): trilha animada grava keyframe no cabeçote; na cena 3D
+    /// só a trilha PARADA é deslocada. Auto-Key desligado desloca a animação
+    /// inteira — MENOS em cima de um keyframe (`keyHere`), onde a edição é
+    /// daquele keyframe: sem isso, ajustar no keyframe movia as duas chaves
+    /// juntas e o desenho continuava parado (relato do beta).
+    func transformLayout(animated: Bool, keyHere: Bool = false) -> Bool {
+        animated ? !(autoKeyTransforms || keyHere) : (!autoKeyTransforms || sceneEditor)
+    }
     @Published var freehandPoints: [Float] = []
     @Published var actionSheet: ActionSheetRequest?
     @Published var numericKeypad: KeypadRequest?
@@ -2388,9 +2392,10 @@ final class AureaModel: ObservableObject {
         guard let id = primarySelection, value.isFinite, !(selectedLayer?.locked ?? false) else { return }
         if let d = engine.layerDetail(id), keyTransformGroup(id, detail: d, changes: [property: value]) { return }
         let mask = (detail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let keyMask = (detail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0
         let keyed = property < 32 && mask & (1 << property) != 0
         // Trilha animada com Auto-Key marca keyframe TAMBÉM na cena 3D (como no Android).
-        if property < 15 && transformLayout(animated: keyed) {
+        if property < 15 && transformLayout(animated: keyed, keyHere: property < 32 && keyMask & (1 << property) != 0) {
             mutate { $0.layoutTransform(id, property: property, value: value) }
             refreshModel(force: true); return
         }
@@ -3704,13 +3709,17 @@ final class AureaModel: ObservableObject {
         let changes = Dictionary(uniqueKeysWithValues: (0..<3).map { (base + UInt32($0), next[$0]) })
         if keyTransformGroup(id, detail: layerDetail, changes: changes) { return }
         let animated = (layerDetail["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let keyMask = (layerDetail["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0
         // Submission is asynchronous: three scalar setters would each read
         // the same old XYZ and overwrite the preceding axis command.
         mutate { core in
             for axis in 0...2 where abs(next[axis] - previous[axis]) >= 0.00001 {
                 let property = base + UInt32(axis)
-                // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote.
-                if autoKeyTransforms && animated & (UInt32(1) << property) != 0 {
+                // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote —
+                // e em cima de um keyframe grava nele mesmo com o Auto-Key desligado (`transformWrite`).
+                let isAnimated = animated & (UInt32(1) << property) != 0
+                let isKeyHere = keyMask & (UInt32(1) << property) != 0
+                if isAnimated && (autoKeyTransforms || isKeyHere) {
                     core.gestureKeyframe(forLayer: id, property: property, value: next[axis], wholeGroup: false)
                 } else { core.layoutTransform(id, property: property, value: next[axis]) }
             }
@@ -4915,12 +4924,14 @@ final class AureaModel: ObservableObject {
         guard anchor.count == 3, position.count == 3, (anchor + position).allSatisfy(\.isFinite),
               let d = engine.layerDetail(layer) else { return }
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let keyMask = (d["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0
         for (base, values) in [(UInt32(9), anchor), (UInt32(0), position)] {
             let changes = Dictionary(uniqueKeysWithValues: (0..<3).map { (base + UInt32($0), values[$0]) })
             if keyTransformGroup(layer, detail: d, changes: changes) { continue }
             let keyed = (0..<3).contains { animated & (UInt32(1) << (base + UInt32($0))) != 0 }
+            let here = (0..<3).contains { keyMask & (UInt32(1) << (base + UInt32($0))) != 0 }
             mutate { core in
-                if transformLayout(animated: keyed) {
+                if transformLayout(animated: keyed, keyHere: here) {
                     for axis in 0..<3 { core.layoutTransform(layer, property: base + UInt32(axis), value: values[axis]) }
                 } else if keyed {
                     for axis in 0..<3 { core.gestureKeyframe(forLayer: layer, property: base + UInt32(axis), value: values[axis], wholeGroup: true) }
@@ -4938,7 +4949,9 @@ final class AureaModel: ObservableObject {
         guard value.isFinite, let d = engine.layerDetail(layer) else { return }
         if keyTransformGroup(layer, detail: d, changes: [property: value]) { return }
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
-        if property < 15 && transformLayout(animated: property < 32 && animated & (1 << property) != 0) {
+        let keyMask = (d["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0
+        if property < 15 && transformLayout(animated: property < 32 && animated & (1 << property) != 0,
+                                            keyHere: property < 32 && keyMask & (1 << property) != 0) {
             mutate { $0.layoutTransform(layer, property: property, value: value) }
             refreshSelectedLayer(); return
         }
@@ -4985,8 +4998,10 @@ final class AureaModel: ObservableObject {
         guard va.isFinite, vb.isFinite, let d = engine.layerDetail(layer) else { return }
         if keyTransformGroup(layer, detail: d, changes: [pa: va, pb: vb]) { return }
         let animated = (d["animatedMask"] as? NSNumber)?.uint32Value ?? 0
+        let keyMask = (d["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0
         let isAnimated = (pa < 32 && animated & (1 << pa) != 0) || (pb < 32 && animated & (1 << pb) != 0)
-        if pa < 15 && pb < 15 && transformLayout(animated: isAnimated) {
+        let keyHere = (pa < 32 && keyMask & (1 << pa) != 0) || (pb < 32 && keyMask & (1 << pb) != 0)
+        if pa < 15 && pb < 15 && transformLayout(animated: isAnimated, keyHere: keyHere) {
             mutate { $0.layoutTransform(layer, property: pa, value: va); $0.layoutTransform(layer, property: pb, value: vb) }
             refreshSelectedLayer(); return
         }

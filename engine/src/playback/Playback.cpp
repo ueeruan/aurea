@@ -145,6 +145,24 @@ void PlaybackController::set_speed(f32 speed, u64 nowNs) noexcept {
 }
 
 FrameIndex PlaybackController::update(u64 nowNs) noexcept {
+    // SCRUB ABANDONADO: quem abre o scrub é a UI (dedo na régua, pinça,
+    // auto-rolagem na borda). Se ela sumir no meio — gesto cancelado, painel
+    // trocado, app em segundo plano, surface recriada — o "fim do scrub" nunca
+    // chega e o modo ficava Scrubbing para sempre: o preview deixava de aquecer
+    // e de decodificar como parado, e a timeline (que se considera "ocupada"
+    // durante o scrub) parava de reler o estado do motor. Era o
+    // "a timeline congela o preview" nas duas plataformas. Parado há mais de
+    // kScrubAbandonNs, o scrub se fecha sozinho, PARADO: o dedo pode só estar
+    // parado na régua, e voltar a tocar debaixo dele seria pior que o
+    // congelamento. O próximo passo do dedo reabre o scrub (`scrub`).
+    if (mode_ == PlaybackMode::Scrubbing) {
+        if (nowNs > lastScrubNs_ && nowNs - lastScrubNs_ > kScrubAbandonNs) {
+            wasPlayingBeforeScrub_ = false;
+            end_scrub(nowNs);
+        } else {
+            return current_;
+        }
+    }
     if (mode_ != PlaybackMode::Playing) return current_;
 
     i64 ns = clock_.media_ns(nowNs);

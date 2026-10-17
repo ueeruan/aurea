@@ -569,3 +569,37 @@ AUREA_TEST(Timeline, TimeRemapIsAnEffectOverTheLayerCurve) {
     AUREA_CHECK(l2 && l2->timeRemap.keys.empty());
     std::remove(path.c_str());
 }
+
+// -----------------------------------------------------------------------------
+// Scrub abandonado
+// -----------------------------------------------------------------------------
+
+AUREA_TEST(Timeline, AbandonedScrubClosesPausedAfterTheTimeout) {
+    // A UI abre o scrub e pode sumir antes do "fim do scrub" (gesto cancelado,
+    // painel trocado, app em segundo plano). O modo ficava Scrubbing para sempre.
+    // Fecha sozinho depois de kScrubAbandonNs sem passo do dedo — e PARADO,
+    // mesmo que tocasse antes: o dedo pode só estar parado na régua.
+    PlaybackController p;
+    p.configure(30.0, FrameIndex{300});
+    p.play(0);
+    p.begin_scrub(1'000'000'000ull);
+    p.scrub(FrameIndex{40}, 1'100'000'000ull);
+    // Dentro do prazo continua no scrub, no quadro do dedo.
+    AUREA_CHECK_EQ(p.update(2'000'000'000ull).value, static_cast<i64>(40));
+    AUREA_CHECK(p.mode() == PlaybackMode::Scrubbing);
+    // Passado o prazo: parado no mesmo quadro, sem voltar a tocar.
+    AUREA_CHECK_EQ(p.update(2'700'000'000ull).value, static_cast<i64>(40));
+    AUREA_CHECK(p.mode() == PlaybackMode::Paused);
+    AUREA_CHECK_EQ(p.update(3'700'000'000ull).value, static_cast<i64>(40));
+    // O próximo passo do dedo reabre o scrub.
+    p.scrub(FrameIndex{55}, 3'800'000'000ull);
+    AUREA_CHECK(p.mode() == PlaybackMode::Scrubbing);
+    AUREA_CHECK_EQ(p.current().value, static_cast<i64>(55));
+    // O fim normal do scrub, em tempo, segue voltando a tocar quando tocava.
+    p.end_scrub(3'900'000'000ull);
+    p.play(4'000'000'000ull);
+    p.begin_scrub(4'100'000'000ull);
+    p.scrub(FrameIndex{60}, 4'200'000'000ull);
+    p.end_scrub(4'300'000'000ull);
+    AUREA_CHECK(p.playing());
+}

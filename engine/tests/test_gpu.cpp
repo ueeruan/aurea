@@ -8325,6 +8325,145 @@ AUREA_TEST(Gpu, TimeWarpRgbReadsEachChannelFromItsOwnInstant) {
 }
 
 // -----------------------------------------------------------------------------
+// TimeSlice em vídeo (0.2.1: "TimeSlice congela o preview no iOS e Android").
+// Doze faixas, de t−6 a t+6, cada uma num quadro do MESMO decoder.
+//   Parado: o quadro só sai pronto com TODAS as faixas no instante certo. As
+//   aproximadas saíam "prontas", o Engine não redesenhava quando a faixa
+//   chegava e o play começava sem as faixas de trás.
+//   Tocando: nenhuma faixa tira o decoder do playback. O pedido Still da faixa
+//   de trás virava seek a cada quadro e o decoder não andava (prévia parada).
+//   Densidade (AUTO, refino parado): a faixa guardada é reamostrada; refazer
+//   pelo decoder fazia o refino e o render seguinte se desfazerem sem fim.
+// -----------------------------------------------------------------------------
+namespace {
+struct SliceFrame { FloatImage img; bool incomplete = true; bool exactVideo = false; };
+
+/// Um prepare + render como a prévia: parado o Engine também pede Playback
+/// (o buffer do decoder), tocando idem — só `previewPlaying` muda.
+SliceFrame time_slice_frame(Scene& s, FrameIndex t, bool playing, bool finalQuality = false, u32 den = 1) {
+    Gpu& g = gpu();
+    static u64 frame = 700000;
+    RenderSettings rs;
+    rs.previewDenominator = den;
+    rs.dither = false;
+    rs.gpuTimers = false;
+    rs.finalQuality = finalQuality;
+    rs.previewPlaying = playing;
+    FrameSnapshot snap;
+    (void)g.renderer.take_incomplete();
+    g.renderer.prepare(*s.comp, s.project, t, &s.media, &Scene::lookup, &s, rs, ++frame, 1,
+                       DecodeMode::Playback, 1.0f, snap);
+    SliceFrame out;
+    out.exactVideo = snap.missingVideoFrames == 0 && snap.staleVideoFrames == 0;
+    const u32 w = std::max(1u, s.comp->width() / den), h = std::max(1u, s.comp->height() / den);
+    OffscreenTarget off{g.target(w, h), w, h};
+    FrameStats stats;
+    RenderTimings timings;
+    const Status rendered = g.renderer.render(snap, rs, &off, stats, timings);
+    AUREA_CHECK_MSG(rendered.ok(), "render do TimeSlice falhou");
+    out.incomplete = g.renderer.take_incomplete() || !rendered.ok();
+    g.backend.wait_idle();
+    std::vector<u16> half(static_cast<usize>(w) * h * 4);
+    AUREA_CHECK(g.backend.read_texture(off.texture, half.data(), w * 8).ok());
+    out.img.width = w;
+    out.img.height = h;
+    out.img.px.resize(half.size());
+    for (usize i = 0; i < half.size(); ++i) out.img.px[i] = half_to_float(half[i]);
+    return out;
+}
+
+/// Vídeo 96×24 em cinza por quadro (o nível diz QUAL quadro), GOP de 30, com
+/// TimeSlice de 12 faixas lado a lado em x.
+LayerId time_slice_scene(Scene& s, u32 decodeCostUs = 0) {
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 24;
+    cfg.frameCount = 120;
+    cfg.gop = 30;
+    cfg.decodeCostUs = decodeCostUs;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    const LayerId id = s.video(cfg, 48.0f, 12.0f);
+    EffectInstance& e = s.add_effect(id, effect_keys::kTimeSlice);
+    e.params[0].constant = ParamValue::scalar(0.0f);    // direção: faixas ao longo de x
+    e.params[1].constant = ParamValue::scalar(12.0f);   // faixas
+    return id;
+}
+
+/// Parado em `t` até o renderer dizer pronto (vídeo exato, nada incompleto).
+bool time_slice_settle(Scene& s, FrameIndex t, SliceFrame& out, bool finalQuality = false, u32 den = 1) {
+    for (int i = 0; i < 600; ++i) {
+        out = time_slice_frame(s, t, false, finalQuality, den);
+        if (out.exactVideo && !out.incomplete) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
+}
+} // namespace
+
+AUREA_TEST(Gpu, TimeSlicePausedPreviewWaitsForEveryExactSlice) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 24, 30.0);
+    (void)time_slice_scene(s);
+    const FrameIndex t{45};   // faixas de 39 a 51: a de 39 pede seek ao keyframe 30
+    SliceFrame paused;
+    AUREA_CHECK_MSG(time_slice_settle(s, t, paused), "a prévia parada nunca fechou as faixas");
+
+    // Referência: o export (espera cada faixa exata), sem as faixas guardadas.
+    gpu().renderer.release_project_resources();
+    SliceFrame exported;
+    AUREA_CHECK(time_slice_settle(s, t, exported, true));
+    const f32 left = exported.img.at(1, 12)[0], right = exported.img.at(94, 12)[0];
+    AUREA_CHECK_MSG(std::fabs(left - right) > 0.02f, "as pontas deviam mostrar instantes diferentes");
+    // "Pronto" na prévia parada tem de ser o quadro do export, não aproximadas.
+    AUREA_CHECK_EQ(paused.img.px.size(), exported.img.px.size());
+    AUREA_CHECK_MSG(max_abs_diff(paused.img, exported.img) < 0.01f,
+                    "parado e pronto, o TimeSlice devia ter todas as faixas exatas");
+}
+
+AUREA_TEST(Gpu, TimeSlicePlaybackNeverPullsTheDecoderBack) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 24, 30.0);
+    (void)time_slice_scene(s, 500);
+    SliceFrame paused;
+    AUREA_CHECK(time_slice_settle(s, FrameIndex{40}, paused));
+    SyntheticDecoder* decoder = s.factory->last.load();
+    AUREA_CHECK(decoder != nullptr);
+    if (!decoder) return;
+    const u32 seeksBefore = decoder->seeks.load();
+    u32 exactFrames = 0;
+    for (i64 f = 41; f <= 80; ++f) {
+        const SliceFrame playing = time_slice_frame(s, FrameIndex{f}, true);
+        if (playing.exactVideo) ++exactFrames;
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    }
+    const u32 seeks = decoder->seeks.load() - seeksBefore;
+    if (seeks > 1) std::printf("\n    seeks tocando: %u", seeks);
+    AUREA_CHECK_MSG(seeks <= 1, "tocando, faixa nenhuma pode levar o decoder para trás (seek a cada quadro)");
+    AUREA_CHECK_MSG(exactFrames >= 30, "tocando, o quadro do playhead devia chegar exato");
+}
+
+AUREA_TEST(Gpu, TimeSliceDensityChangeResamplesStoredSlices) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 24, 30.0);
+    (void)time_slice_scene(s);
+    const FrameIndex t{45};
+    SliceFrame half;
+    AUREA_CHECK(time_slice_settle(s, t, half, false, 2));
+    // Refino parado (densidade inteira) e o render seguinte (meia, de novo):
+    // as faixas guardadas servem nos dois, prontos já no primeiro render.
+    const SliceFrame fine = time_slice_frame(s, t, false, false, 1);
+    AUREA_CHECK_MSG(fine.exactVideo && !fine.incomplete, "o refino não pode jogar fora as faixas guardadas");
+    const SliceFrame back = time_slice_frame(s, t, false, false, 2);
+    AUREA_CHECK_MSG(back.exactVideo && !back.incomplete, "voltar à densidade de antes não pode refazer as faixas");
+    AUREA_CHECK(max_abs_diff(back.img, half.img) < 0.01f);
+    gpu().renderer.release_project_resources();
+    SliceFrame exported;
+    AUREA_CHECK(time_slice_settle(s, t, exported, true));
+    // Cinza uniforme por faixa: a reamostrada é o mesmo instante do export.
+    AUREA_CHECK(max_abs_diff(fine.img, exported.img) < 0.01f);
+}
+
+// -----------------------------------------------------------------------------
 // Detectar movimento: a diferença entre o quadro e a MESMA fonte N quadros
 // antes. Referência calculada dos próprios quadros sem efeito (mesma
 // decodificação), na conta do shader: |agora − antes| em valores de tela.

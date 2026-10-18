@@ -276,7 +276,8 @@ private struct ModelOptimizePrompt: ViewModifier {
 // =============================================================================
 // O palco: o preview do motor e os gestos
 // =============================================================================
-@MainActor private struct PreviewStage: View {
+/// Interno (não privado): a interface de Edição usa o mesmo palco.
+@MainActor struct PreviewStage: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     let height: CGFloat

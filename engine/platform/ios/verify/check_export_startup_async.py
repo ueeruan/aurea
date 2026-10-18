@@ -119,6 +119,7 @@ final class Native: @unchecked Sendable {
     func setProgress(_ value: [String: Any]) { lock.lock(); progress = value; lock.unlock() }
     func exportProgress() -> [String: Any] { lock.lock(); defer { lock.unlock() }; return progress }
     func exportDiagnostics() -> String { "{}" }
+    func exportDuration(_ trimToContent: Bool) -> Int64 { 300 }
     func begin(kind: UInt32?, safeMode: UInt32, fps: Double, height: UInt32) -> Int32 {
         lock.lock()
         let index = recorded.count
@@ -162,6 +163,10 @@ final class Native: @unchecked Sendable {
     var exportTimer: Timer?
     var exportStartup: ExportStartupRequest?
     var exportWatch = ExportStallWatch()
+    // 0.2.4 (C5): o watchdog do "Preparando" e a recusa acima de 3 h.
+    var preparingTimer: Timer?
+    var preparingWatch = ExportStallWatch()
+    var compositionFps: Double = 30
     var polls = 0, published = 0
     func followPlayback(_ playing: Bool) {}
     func releaseInterfaceCaches() {}
@@ -173,6 +178,7 @@ final class Native: @unchecked Sendable {
     STARTUP_PROGRESS
     IMAGE_FPS
     CANCEL
+    PREPWATCH
     WATCH
     FAILURE
     POLL
@@ -290,6 +296,13 @@ final class Native: @unchecked Sendable {
         "STARTUP_PROGRESS": startup_progress.replace("private static", "static", 1),
         "IMAGE_FPS": block("private func imageExportFps(").replace("private func", "func", 1),
         "CANCEL": cancel,
+        "PREPWATCH": "\n".join([
+            source[source.index("    static let exportMaxSeconds"):source.index("\n", source.index("    static let exportMaxSeconds"))],
+            block("func plannedExportSeconds("),
+            block("private func startPreparingWatch(").replace("private func", "func", 1),
+            block("private func stopPreparingWatch()").replace("private func", "func", 1),
+            block("private func abandonPreparingExport(").replace("private func", "func", 1),
+        ]),
         "WATCH": block("struct ExportStallWatch {"),
         "FAILURE": block("static func exportFailureReason("),
         "POLL": poll.replace("private func", "func", 1),

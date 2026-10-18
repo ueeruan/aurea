@@ -828,7 +828,7 @@ struct FxAnimatedFrames: View {
 
     var body: some View {
         GeometryReader { geometry in
-            TimelineView(.periodic(from: .now, by: EffectPreviewStore.sequenceFrameSeconds)) { context in
+            SwiftUI.TimelineView(.periodic(from: .now, by: EffectPreviewStore.sequenceFrameSeconds)) { context in
                 let index = playing && frames.count > 1
                     ? Int(context.date.timeIntervalSinceReferenceDate / EffectPreviewStore.sequenceFrameSeconds) % frames.count
                     : 0
